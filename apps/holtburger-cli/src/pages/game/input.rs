@@ -1,4 +1,6 @@
 mod commands;
+mod corpse;
+mod recall;
 
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::ConfirmationType;
@@ -237,8 +239,8 @@ impl GameState {
                         return result;
                     }
                     self.chat_input.record_history_submission(&command);
-                    if command.starts_with('/') {
-                        return self.handle_slash_command(&command);
+                    if command.trim_start().starts_with(['/', '@']) {
+                        return self.handle_prefixed_command(&command);
                     }
                     if let Some(emote) = command.strip_prefix(':') {
                         result.actions.push(
@@ -477,9 +479,10 @@ impl GameState {
 
         let mut result = UpdateResult::new();
         if let Some(accepted) = accepted {
-            result
-                .commands
-                .push(ClientCommand::RespondToConfirmation { accepted });
+            result.commands.push(ClientCommand::RespondToConfirmation {
+                request_id: confirmation.request_id,
+                accepted,
+            });
             if accepted && confirmation.confirmation_type == ConfirmationType::Fellowship {
                 self.mark_fellowship_invite_accepted();
             }
@@ -653,8 +656,6 @@ mod tests {
             target_guid: Guid(0x60000001),
         });
         state.data.combat_mode = CombatMode::Melee;
-        state.data.combat_runtime.issue_state =
-            crate::pages::game::combat::CombatIssueState::InFlight;
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -663,13 +664,9 @@ mod tests {
             result
                 .commands
                 .iter()
-                .any(|command| matches!(command, ClientCommand::CancelAttack))
+                .any(|command| matches!(command, ClientCommand::StopCombatEngagement { .. }))
         );
         assert_eq!(state.view.active_interaction, None);
-        assert_ne!(
-            state.data.combat_runtime.issue_state,
-            crate::pages::game::combat::CombatIssueState::InFlight
-        );
     }
 
     #[test]
@@ -700,6 +697,7 @@ mod tests {
         state.view.focused_pane = FocusedPane::Input;
         state.chat_input.input.set_text("/options list");
         state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 42,
             text: "Proceed with crafting?".to_string(),
@@ -711,7 +709,10 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::RespondToConfirmation { accepted: true }
+                ClientCommand::RespondToConfirmation {
+                    request_id: 1,
+                    accepted: true
+                }
             )
         }));
         assert!(result.actions.is_empty());
@@ -856,6 +857,7 @@ mod tests {
         });
         state.data.combat_mode = CombatMode::Melee;
         state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 99,
             text: "Proceed with crafting?".to_string(),
@@ -867,7 +869,10 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::RespondToConfirmation { accepted: false }
+                ClientCommand::RespondToConfirmation {
+                    request_id: 1,
+                    accepted: false
+                }
             )
         }));
         assert!(state.view.active_interaction.is_some());
@@ -880,6 +885,7 @@ mod tests {
         state.view.focused_pane = FocusedPane::Input;
         state.chat_input.input.set_text("hello");
         state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 123,
             text: "Proceed with crafting?".to_string(),

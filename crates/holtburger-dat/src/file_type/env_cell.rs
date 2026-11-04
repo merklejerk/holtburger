@@ -9,6 +9,7 @@ use binrw::{
 #[bw(little)]
 pub struct CellPortal {
     pub flags: u16,
+    pub polygon_id: u16,
     pub other_cell_id: u16,
     pub other_portal_id: u16,
 }
@@ -67,7 +68,7 @@ impl EnvCell {
         }
 
         let mut static_objects = Vec::new();
-        if (flags & 0x01) != 0 {
+        if (flags & 0x02) != 0 {
             // HasStaticObjs
             let num_objs = u32::read_le(reader)?;
             for _ in 0..num_objs {
@@ -76,7 +77,7 @@ impl EnvCell {
         }
 
         let mut restriction_obj = None;
-        if (flags & 0x02) != 0 {
+        if (flags & 0x08) != 0 {
             // HasRestrictionObj
             restriction_obj = Some(u32::read_le(reader)?);
         }
@@ -137,14 +138,14 @@ impl EnvCell {
             vis.write_le(writer)?;
         }
 
-        if (self.flags & 0x01) != 0 {
+        if (self.flags & 0x02) != 0 {
             (self.static_objects.len() as u32).write_le(writer)?;
             for obj in &self.static_objects {
                 obj.write_le(writer)?;
             }
         }
 
-        if let Some(res) = self.restriction_obj.filter(|_| (self.flags & 0x02) != 0) {
+        if let Some(res) = self.restriction_obj.filter(|_| (self.flags & 0x08) != 0) {
             res.write_le(writer)?;
         }
 
@@ -192,5 +193,40 @@ mod tests {
         let unpacked = EnvCell::unpack(&mut reader).unwrap();
         assert_eq!(unpacked.surfaces.len(), 0);
         assert_eq!(unpacked.environment_id, 0x0D01);
+    }
+
+    #[test]
+    fn env_cell_portal_includes_polygon_id() {
+        let cell = EnvCell {
+            id: 0x01000001,
+            flags: 0,
+            cell_id: 0x01000001,
+            surfaces: vec![],
+            environment_id: 0x0D01,
+            cell_structure: 1,
+            position: Frame::default(),
+            portals: vec![CellPortal {
+                flags: 1,
+                polygon_id: 2,
+                other_cell_id: 3,
+                other_portal_id: 4,
+            }],
+            visible_cells: vec![5],
+            static_objects: vec![],
+            restriction_obj: None,
+        };
+
+        let mut data = Vec::new();
+        let mut writer = Cursor::new(&mut data);
+        cell.pack(&mut writer).unwrap();
+
+        let mut reader = Cursor::new(data);
+        let unpacked = EnvCell::unpack(&mut reader).unwrap();
+
+        assert_eq!(unpacked.portals.len(), 1);
+        assert_eq!(unpacked.portals[0].polygon_id, 2);
+        assert_eq!(unpacked.portals[0].other_cell_id, 3);
+        assert_eq!(unpacked.portals[0].other_portal_id, 4);
+        assert_eq!(unpacked.visible_cells, vec![5]);
     }
 }

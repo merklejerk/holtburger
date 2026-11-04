@@ -145,11 +145,62 @@ impl ProtocolPack for FellowshipUpdateRequestActionData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+/// Explicit fellowship enrollment policy; ACE reads a 32-bit boolean.
+pub struct FellowshipChangeOpennessActionData {
+    /// Whether non-leaders may recruit.
+    pub open: bool,
+}
+
+impl ProtocolUnpack for FellowshipChangeOpennessActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+
+        let open = u32::from_le_bytes(data[*offset..*offset + 4].try_into().ok()?) != 0;
+        *offset += 4;
+        Some(Self { open })
+    }
+}
+
+impl ProtocolPack for FellowshipChangeOpennessActionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&u32::from(self.open).to_le_bytes());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::messages::game_action::{GameAction, GameActionMessage};
     use crate::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn openness_and_disband_use_explicit_boolean_payloads() {
+        for (enabled, suffix) in [(false, "00000000"), (true, "01000000")] {
+            let openness = GameActionMessage {
+                sequence: 0x01020304,
+                action: GameAction::FellowshipChangeOpenness(Box::new(
+                    FellowshipChangeOpennessActionData { open: enabled },
+                )),
+            };
+            assert_pack_unpack_parity(
+                &hex::decode(format!("0403020191020000{suffix}")).unwrap(),
+                &openness,
+            );
+            let quit = GameActionMessage {
+                sequence: 0x01020304,
+                action: GameAction::FellowshipQuit(Box::new(FellowshipQuitActionData {
+                    disband: enabled,
+                })),
+            };
+            assert_pack_unpack_parity(
+                &hex::decode(format!("04030201A3000000{suffix}")).unwrap(),
+                &quit,
+            );
+        }
+    }
 
     #[test]
     fn test_fellowship_create_fixture() {

@@ -1,0 +1,2074 @@
+//! Client-only host composition.
+
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use holtburger_common::CharacterOption;
+use holtburger_core::ClientCommand;
+use holtburger_core::client::inventory_storage::{InventoryInsertion, InventoryPlacementPolicy};
+use holtburger_core::client::types::{ChatChannelDestination, ChatTellTarget};
+use serde::Deserialize;
+
+use crate::client_host::run_client_task;
+use crate::client_projection::client_exit_requested;
+use crate::host_event_sink::ClientEventSink;
+use crate::host_mode::ClientLaunchConfiguration;
+use crate::protocol::{HostResponse, ProtocolError, application_error};
+use crate::shared_host_content::SharedHostContent;
+
+/// Explicit requested mode excludes the unknown observation used during character hydration.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RequestedCombatMode {
+    Peace,
+    Melee,
+    Missile,
+    Magic,
+}
+
+impl From<RequestedCombatMode> for holtburger_protocol::messages::combat::CombatMode {
+    fn from(mode: RequestedCombatMode) -> Self {
+        match mode {
+            RequestedCombatMode::Peace => Self::NonCombat,
+            RequestedCombatMode::Melee => Self::Melee,
+            RequestedCombatMode::Missile => Self::Missile,
+            RequestedCombatMode::Magic => Self::Magic,
+        }
+    }
+}
+
+/// Typed chat intent; command spelling and destination selection remain frontend-owned.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ClientChatRequest {
+    Speech {
+        message: String,
+    },
+    Tell {
+        target: ChatTellTarget,
+        message: String,
+    },
+    Channel {
+        channel: ChatChannelDestination,
+        message: String,
+    },
+    Emote {
+        message: String,
+    },
+    /// Catalog alias; core owns motion and broadcast phrase resolution.
+    SoulEmote {
+        token: String,
+        /// Optional caller identity for local motion admission and completion results.
+        #[serde(default, rename = "requestId")]
+        request_id: Option<u32>,
+    },
+}
+
+impl ClientChatRequest {
+    /// Validate the independently callable host boundary before enqueueing a core command.
+    fn into_command(self) -> Result<ClientCommand> {
+        let message = match &self {
+            Self::Speech { message }
+            | Self::Tell { message, .. }
+            | Self::Channel { message, .. }
+            | Self::Emote { message } => message,
+            Self::SoulEmote { token, .. } => token,
+        };
+        ensure!(
+            !message.trim().is_empty(),
+            "Chat message must contain visible text."
+        );
+        Ok(match self {
+            Self::Speech { message } => ClientCommand::Talk(message),
+            Self::Tell { target, message } => {
+                match &target {
+                    ChatTellTarget::Player { name } => ensure!(
+                        !name.trim().is_empty(),
+                        "Tell recipient name must contain visible text."
+                    ),
+                    ChatTellTarget::Npc { guid, name } => {
+                        ensure!(
+                            guid.is_static_object() || guid.is_dynamic_object(),
+                            "NPC tell target must be a creature entity ID."
+                        );
+                        ensure!(
+                            !name.trim().is_empty(),
+                            "NPC tell target label must contain visible text."
+                        );
+                    }
+                }
+                ClientCommand::Tell { target, message }
+            }
+            Self::Channel { channel, message } => {
+                ClientCommand::ChannelMessage { channel, message }
+            }
+            Self::Emote { message } => ClientCommand::Emote(message),
+            Self::SoulEmote { token, request_id } => ClientCommand::SoulEmote { token, request_id },
+        })
+    }
+}
+
+/// Canonical scene map-plane coordinates (X east, Z south), without an invented height.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClientMapPosition {
+    pub x: f32,
+    pub z: f32,
+}
+
+impl ClientMapPosition {
+    /// Validate and convert the authored horizontal domain at its owning adapter boundary.
+    fn destination(self) -> Result<holtburger_common::position::WorldPosition> {
+        let mut position =
+            crate::placed_motion_presentation::scene_point_to_pose([self.x, 0.0, self.z])?;
+        // Block 0000 with the converter's owner selector is also Guid::NULL. Seed a terrain
+        // selector so normalization can derive a valid cell even at the southwest origin.
+        position.landblock_id.0 |= 1;
+        Ok(position.normalize_outdoor_cell())
+    }
+}
+
+/// Strict renderer-owned camera identity reused by camera-ray commands.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientCameraIdentityRequest {
+    pub camera_generation: u64,
+    pub player_guid: holtburger_common::Guid,
+    pub entity_generation: u64,
+}
+
+impl From<ClientCameraIdentityRequest> for holtburger_core::ClientCameraIdentity {
+    fn from(identity: ClientCameraIdentityRequest) -> Self {
+        Self {
+            camera_generation: identity.camera_generation,
+            player_guid: identity.player_guid,
+            entity_generation: identity.entity_generation,
+        }
+    }
+}
+
+/// Strict renderer camera-ray request; authority and launch facts are intentionally absent.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientPreciseJumpAimRequest {
+    pub camera: ClientCameraIdentityRequest,
+    pub sequence: u64,
+    pub anchor: holtburger_common::Guid,
+    pub start: [f32; 3],
+    pub direction: [f32; 3],
+    pub maximum_distance: f32,
+    pub previous_cell: Option<holtburger_common::Guid>,
+    /// User-selected normalized jump power.
+    pub power: f32,
+}
+
+/// Strict selection ray; its one-landblock maximum remains world-owned.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientEntitySelectionQueryRequest {
+    pub camera: ClientCameraIdentityRequest,
+    pub sequence: u64,
+    pub anchor: holtburger_common::Guid,
+    pub start: [f32; 3],
+    pub direction: [f32; 3],
+    pub previous_cell: Option<holtburger_common::Guid>,
+}
+
+impl ClientEntitySelectionQueryRequest {
+    fn into_core(self) -> Result<holtburger_core::EntitySelectionQueryRequest> {
+        let finite = |vector: [f32; 3]| vector.into_iter().all(f32::is_finite);
+        ensure!(
+            finite(self.start),
+            "entity-selection ray start must be finite"
+        );
+        ensure!(
+            finite(self.direction),
+            "entity-selection ray direction must be finite"
+        );
+        Ok(holtburger_core::EntitySelectionQueryRequest {
+            camera: self.camera.into(),
+            sequence: holtburger_core::EntitySelectionQuerySequence(self.sequence),
+            anchor: self.anchor,
+            start: holtburger_common::Vector3::new(self.start[0], self.start[1], self.start[2]),
+            direction: holtburger_common::Vector3::new(
+                self.direction[0],
+                self.direction[1],
+                self.direction[2],
+            ),
+            previous_cell: self.previous_cell,
+        })
+    }
+}
+
+impl ClientPreciseJumpAimRequest {
+    fn into_core(self) -> Result<holtburger_core::PreciseJumpAimRequest> {
+        let finite = |vector: [f32; 3]| vector.into_iter().all(f32::is_finite);
+        ensure!(finite(self.start), "precise-jump ray start must be finite");
+        ensure!(
+            finite(self.direction),
+            "precise-jump ray direction must be finite"
+        );
+        ensure!(
+            self.maximum_distance.is_finite() && self.maximum_distance >= 0.0,
+            "precise-jump ray distance must be finite and non-negative"
+        );
+        Ok(holtburger_core::PreciseJumpAimRequest {
+            camera: self.camera.into(),
+            sequence: holtburger_core::PreciseJumpAimSequence(self.sequence),
+            power: holtburger_core::JumpExtent::new(self.power).map_err(|_| {
+                anyhow::anyhow!("precise-jump power must be finite and within 0.001 to 1")
+            })?,
+            anchor: self.anchor,
+            start: holtburger_common::Vector3::new(self.start[0], self.start[1], self.start[2]),
+            direction: holtburger_common::Vector3::new(
+                self.direction[0],
+                self.direction[1],
+                self.direction[2],
+            ),
+            maximum_distance: self.maximum_distance,
+            previous_cell: self.previous_cell,
+        })
+    }
+}
+
+/// Strict click-time target and power, independent of preview work.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientPreciseJumpCommitRequest {
+    pub sequence: u64,
+    pub camera: ClientCameraIdentityRequest,
+    pub target: super::client_projection::ClientPreciseJumpTargetWire,
+    pub power: f32,
+}
+
+impl ClientPreciseJumpCommitRequest {
+    fn into_core(self) -> Result<holtburger_core::PreciseJumpCommitRequest> {
+        ensure!(
+            self.target.point.into_iter().all(f32::is_finite),
+            "precise-jump target point must be finite"
+        );
+        ensure!(
+            self.target.normal.into_iter().all(f32::is_finite),
+            "precise-jump target normal must be finite"
+        );
+        ensure!(
+            self.target.anchor.0 & 0xffff == 0xffff,
+            "precise-jump target anchor must be normalized"
+        );
+        let [x, y, z] = self.target.point;
+        let [nx, ny, nz] = self.target.normal;
+        Ok(holtburger_core::PreciseJumpCommitRequest {
+            sequence: holtburger_core::PreciseJumpActionSequence(self.sequence),
+            camera: self.camera.into(),
+            target: holtburger_core::PreciseJumpTargetView {
+                anchor: self.target.anchor,
+                point: holtburger_common::Vector3::new(x, y, z),
+                normal: holtburger_common::Vector3::new(nx, ny, nz),
+                committed_cell: self.target.committed_cell,
+            },
+            power: holtburger_core::JumpExtent::new(self.power).map_err(|_| {
+                anyhow::anyhow!("precise-jump power must be finite and within 0.001 to 1")
+            })?,
+        })
+    }
+}
+
+/// Strict ordered cancellation edge.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientPreciseJumpCancelRequest {
+    pub sequence: u64,
+}
+
+/// Strict renderer attack controls; protocol enums stop at the host boundary.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ClientAttackProfileRequest {
+    Melee {
+        height: ClientAttackHeightRequest,
+        power: f32,
+    },
+    Missile {
+        height: ClientAttackHeightRequest,
+        accuracy: f32,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientAttackHeightRequest {
+    Low,
+    Medium,
+    High,
+}
+
+impl From<ClientAttackHeightRequest> for holtburger_protocol::messages::combat::AttackHeight {
+    fn from(value: ClientAttackHeightRequest) -> Self {
+        match value {
+            ClientAttackHeightRequest::Low => Self::Low,
+            ClientAttackHeightRequest::Medium => Self::Medium,
+            ClientAttackHeightRequest::High => Self::High,
+        }
+    }
+}
+
+impl ClientAttackProfileRequest {
+    fn into_core(self) -> Result<holtburger_core::ClientAttackProfile> {
+        let value = match self {
+            Self::Melee { height, power } => {
+                ensure!(power.is_finite(), "melee power must be finite");
+                holtburger_core::ClientAttackProfile::Melee {
+                    height: height.into(),
+                    power,
+                }
+            }
+            Self::Missile { height, accuracy } => {
+                ensure!(accuracy.is_finite(), "missile accuracy must be finite");
+                holtburger_core::ClientAttackProfile::Missile {
+                    height: height.into(),
+                    accuracy,
+                }
+            }
+        };
+        Ok(value.normalized())
+    }
+}
+
+/// JSON uses JavaScript's exact integer range; the shared controller only owns durations.
+fn deserialize_auto_merge_policy<'de, D>(
+    deserializer: D,
+) -> std::result::Result<holtburger_core::client::container_auto_merge::AutoMergePolicy, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let policy =
+        holtburger_core::client::container_auto_merge::AutoMergePolicy::deserialize(deserializer)?;
+    const SAFE_MILLISECONDS: std::ops::RangeInclusive<u64> = 1..=((1_u64 << 53) - 1);
+    if !SAFE_MILLISECONDS.contains(&policy.step_timeout_ms)
+        || !SAFE_MILLISECONDS.contains(&policy.operation_timeout_ms)
+    {
+        return Err(serde::de::Error::custom(
+            "Auto-merge timeouts must be positive safe integer milliseconds",
+        ));
+    }
+    Ok(policy)
+}
+
+/// Commands accepted only by the client authority.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case")]
+pub enum ClientHostCommand {
+    /// Submit a semantic barber preview, Apply, or cancellation to the shared owner.
+    RequestClientBarber {
+        request: holtburger_core::client::barber::BarberRequest,
+    },
+    /// Submit reusable equipment bindings, with one peace prerequisite if required.
+    ApplyClientEquipmentSet {
+        bindings: Vec<super::client_projection::ClientEquipmentBindingWire>,
+    },
+    /// Request authoritative examination facts for one selected entity.
+    ExamineClientEntity {
+        guid: holtburger_common::Guid,
+    },
+    /// Request one missing page for the character that opened the reader.
+    ReadClientBookPage {
+        /// Character identity checked by core before sending.
+        player: holtburger_common::Guid,
+        /// Book containing the page.
+        book: holtburger_common::Guid,
+        /// Zero-based page identity from the full response.
+        #[serde(rename = "pageIndex")]
+        page_index: u32,
+    },
+    /// Select a title for the captured character; eligibility remains server-owned.
+    SetClientCharacterTitle {
+        /// Character identity admitted by core.
+        character: holtburger_common::Guid,
+        /// Numeric selection, independent of local content resolution.
+        #[serde(rename = "titleId")]
+        title_id: u32,
+    },
+    /// Read-only spell examination against current character facts.
+    QueryClientSpellInspection {
+        query: holtburger_core::client::spell_inspection::SpellInspectionQuery,
+    },
+    /// Evaluate a current batch of character advancement intents.
+    EvaluateClientProgression {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        intents: Vec<holtburger_world::progression::ProgressionIntent>,
+    },
+    /// Submit one exact core quote through its character-scoped guard.
+    SubmitClientProgression {
+        quote: holtburger_core::ClientProgressionQuote,
+    },
+    /// Query compatibility without executing item use.
+    QueryClientItemUseTarget {
+        query: holtburger_core::client::item_use::ItemUseTargetQuery,
+    },
+    /// Read-only salvage tool discovery and ordered batch evaluation.
+    PreviewClientSalvage {
+        request: holtburger_core::client::salvage::SalvagePreviewRequest,
+    },
+    /// Revalidate reviewed sources before dispatching one salvage action.
+    SubmitClientSalvage {
+        request: holtburger_core::client::salvage::SalvageSubmitRequest,
+    },
+    /// Execute only while the supplied semantic use consequence still matches.
+    SubmitClientItemUse {
+        request: holtburger_core::client::item_use::ItemUseRequest,
+    },
+    /// Equip an owned item using shared side preference and replacement planning.
+    EquipClientItem {
+        guid: holtburger_common::Guid,
+        /// Prefer the off hand when supported, or the right side for paired jewelry.
+        alternate: bool,
+    },
+    /// Consolidate direct carried contents using the application's explicit timeout policy.
+    AutoMergeClientContainer {
+        /// Player root or real carried pack identity.
+        container: holtburger_common::Guid,
+        /// Finite budgets snapshotted by the browser at invocation.
+        #[serde(deserialize_with = "deserialize_auto_merge_policy")]
+        policy: holtburger_core::client::container_auto_merge::AutoMergePolicy,
+    },
+    /// Execute a semantic inventory gesture against the latest authoritative world.
+    SubmitClientInventory {
+        intent: holtburger_core::client::inventory_plan::InventoryIntent,
+    },
+    /// Close only the named confirmed external root through shared coordination.
+    CloseClientContainer {
+        guid: holtburger_common::Guid,
+    },
+    /// Shared, mutation-free evaluation of an inventory target.
+    PreviewClientInventory {
+        request: holtburger_core::client::inventory_plan::InventoryPreviewRequest,
+    },
+    /// Evaluate a candidate vendor draft using shared world semantics.
+    PreviewClientVendor {
+        request: holtburger_core::client::vendor_transaction::VendorTradeRequest,
+    },
+    /// Submit one sell-then-buy execution to core.
+    SubmitClientVendor {
+        request: holtburger_core::client::vendor_transaction::VendorTradeRequest,
+    },
+    /// Submit a guarded P2P negotiation command through the shared client path.
+    SubmitClientTrade {
+        request: holtburger_core::client::trade::TradeRequest,
+    },
+    /// Private Electron-main launch command; renderers never receive this inventory entry.
+    StartClient {
+        startup: ClientLaunchConfiguration,
+    },
+    /// Toggle peace and the current equipment-derived stance in core.
+    ToggleClientCombatMode,
+    /// Silent posture request; shared core establishes peace before resting.
+    SetClientRestPosture {
+        /// Gameplay resting target; social aliases are not accepted here.
+        posture: holtburger_world::motion::RestPosture,
+    },
+    /// Cancel an uncompleted peace prerequisite without changing combat mode.
+    CancelClientRestPosture,
+    /// Explicit stance request for app-owned workflows; independent of toggle timing.
+    SetClientCombatMode {
+        /// Explicit family captured by the frontend; unknown hydration state is not an intent.
+        mode: RequestedCombatMode,
+    },
+    /// Change one server-saved option exposed by Gameplay settings.
+    SetClientGameplayOption {
+        option: crate::client_gameplay::ClientGameplayOption,
+        enabled: bool,
+    },
+    /// Change one server-backed appearance preference exposed by the client UI.
+    SetClientAppearanceOption {
+        option: ClientAppearanceOption,
+        enabled: bool,
+    },
+    /// Submit a spellbook cast with caller-owned recipient intent.
+    CastClientSpell {
+        #[serde(rename = "spellId")]
+        spell_id: u32,
+        aim: holtburger_core::client::types::SpellCastAim,
+    },
+    BeginClientCombatEngagement {
+        #[serde(rename = "intentSequence")]
+        intent_sequence: u64,
+        target: holtburger_common::Guid,
+        profile: ClientAttackProfileRequest,
+    },
+    UpdateClientCombatProfile {
+        profile: ClientAttackProfileRequest,
+    },
+    StopClientCombatEngagement {
+        #[serde(rename = "intentSequence")]
+        intent_sequence: u64,
+    },
+    RequestClientCurrentState,
+    /// Refresh the active character/account effective home.
+    RefreshClientHousing,
+    /// Submit reviewed implicit-home administration.
+    SubmitClientHousingManagement {
+        request: holtburger_core::client::housing_management::HousingManagementRequest,
+    },
+    /// Read named permissions after effective-home initialization.
+    QueryClientHousingAccess,
+    /// Search available areas of a supported housing type.
+    SearchClientHousing {
+        #[serde(rename = "houseType")]
+        house_type: u32,
+    },
+    /// Quote or edit a requirement-row draft without sending BuyHouse/RentHouse.
+    PreviewClientHousingPayment {
+        request: holtburger_core::client::housing_payment::HousingPreviewRequest,
+    },
+    /// Submit the housing profile and consumption accepted in confirmation.
+    SubmitClientHousingPayment {
+        request: holtburger_core::client::housing_execution::HousingPaymentRequest,
+    },
+    SelectClientCharacter {
+        guid: holtburger_common::Guid,
+    },
+    /// Semantic build validated through shared creation rules before sending.
+    CreateClientCharacter {
+        draft: crate::character_creation::CharacterCreationDraft,
+    },
+    /// Delete a character at its current server roster slot.
+    DeleteClientCharacter {
+        slot: u32,
+    },
+    /// Restore a character still inside the server's recovery window.
+    RestoreClientCharacter {
+        guid: holtburger_common::Guid,
+    },
+    ReplaceClientDrive {
+        request: crate::client_host::ClientDriveRequest,
+    },
+    QueueClientCharacterMotionEvent {
+        request: crate::client_host::ClientCharacterMotionEventRequest,
+    },
+    /// Replace the server health subscription; null GUID cancels it.
+    QueryClientEntityHealth {
+        guid: holtburger_common::Guid,
+    },
+    /// Answer exactly the confirmation occurrence displayed by the renderer.
+    RespondToClientConfirmation {
+        request_id: String,
+        accepted: bool,
+    },
+    /// Allegiance intents delegate to shared command/read coordination.
+    SubmitClientAllegiance {
+        action: crate::client_allegiance::ClientAllegianceAction,
+    },
+    /// Ignore intents delegate to focused shared command behavior.
+    SubmitClientSquelch {
+        action: crate::client_squelch::ClientSquelchAction,
+    },
+    /// Journal mutations use server-confirmed shared command behavior.
+    SubmitClientContracts {
+        /// App-owned removal intent; queueing does not change membership.
+        action: crate::client_contracts::ClientContractsAction,
+    },
+    /// Friends mutations use the focused shared command behavior.
+    SubmitClientFriends {
+        action: crate::client_friends::ClientFriendsAction,
+    },
+    /// Party management delegates to reusable core commands.
+    SubmitClientParty {
+        action: crate::client_party::ClientPartyAction,
+    },
+    /// Presentation demand controls fellowship update delivery.
+    SetClientPartyUpdates {
+        enabled: bool,
+    },
+    /// Standard recall attempt; ACE validates binding and temporary blockers.
+    RecallClient {
+        destination: holtburger_core::client::recall::RecallDestination,
+    },
+    /// Read saved or session-observed death locations on demand.
+    QueryClientDeathLocations {
+        /// Which core-owned historical facts to return.
+        query: holtburger_core::client::corpse::DeathLocationQuery,
+    },
+    /// Manage received corpse permissions; grammar and help are frontend-owned.
+    ManageClientCorpseConsent {
+        /// Incoming list operation, distinct from granting access to somebody else.
+        action: holtburger_core::client::corpse::CorpseConsentAction,
+    },
+    /// Grant or revoke permission for a captured player name.
+    SetClientCorpsePermission {
+        /// Name captured when the frontend command or selected-player action runs.
+        #[serde(rename = "playerName")]
+        player_name: String,
+        /// True grants access; false revokes it. This is intent, not known server state.
+        granted: bool,
+    },
+    /// Change only whether this character accepts incoming corpse permits.
+    SetClientCorpseConsent {
+        /// Requested value for AcceptCorpseLootingPermissions only.
+        enabled: bool,
+    },
+    /// Frontend has already confirmed the user's intent.
+    KillClientCharacter,
+    SendClientChat {
+        request: ClientChatRequest,
+    },
+    /// Canonical horizontal map point; ACE owns destination height.
+    TeleportClientToMapPosition {
+        position: ClientMapPosition,
+    },
+    StartClientCamera {
+        request: holtburger_core::ClientCameraStartRequest,
+    },
+    /// Local-player entity obstruction override.
+    SetClientEntityCollisionDisabled {
+        disabled: bool,
+    },
+    SetClientCameraIntent {
+        request: holtburger_core::ClientCameraIntentRequest,
+    },
+    SetClientCameraClearance {
+        request: holtburger_core::ClientCameraClearanceRequest,
+    },
+    SetClientPreciseJumpAim {
+        request: ClientPreciseJumpAimRequest,
+    },
+    QueryClientEntitySelectionCandidates {
+        request: ClientEntitySelectionQueryRequest,
+    },
+    CommitClientPreciseJump {
+        request: ClientPreciseJumpCommitRequest,
+    },
+    CancelClientPreciseJump {
+        request: ClientPreciseJumpCancelRequest,
+    },
+    /// Renderer acknowledgement after the matching destination has been installed and revealed.
+    AcknowledgeClientWorldReveal {
+        /// Renderer wire contracts use camelCase; keep the inline enum field explicit.
+        #[serde(rename = "worldGeneration")]
+        world_generation: u64,
+    },
+    StopClientCamera {
+        request: holtburger_core::ClientCameraIdentity,
+    },
+    /// Graceful character logout, preserving the login session.
+    LogoutClient,
+    DisconnectClient,
+}
+
+/// Exact wire names owned by the client dispatcher.
+pub const CLIENT_COMMAND_NAMES: &[&str] = &[
+    "examine_client_entity",
+    "read_client_book_page",
+    "close_client_container",
+    "preview_client_inventory",
+    "preview_client_vendor",
+    "submit_client_vendor",
+    "submit_client_trade",
+    "request_client_barber",
+    "submit_client_inventory",
+    "auto_merge_client_container",
+    "equip_client_item",
+    "apply_client_equipment_set",
+    "preview_client_salvage",
+    "submit_client_salvage",
+    "submit_client_item_use",
+    "query_client_item_use_target",
+    "query_client_spell_inspection",
+    "evaluate_client_progression",
+    "submit_client_progression",
+    "set_client_character_title",
+    "start_client",
+    "request_client_current_state",
+    "refresh_client_housing",
+    "query_client_housing_access",
+    "search_client_housing",
+    "preview_client_housing_payment",
+    "submit_client_housing_payment",
+    "submit_client_housing_management",
+    "select_client_character",
+    "create_client_character",
+    "delete_client_character",
+    "restore_client_character",
+    "replace_client_drive",
+    "queue_client_character_motion_event",
+    "submit_client_party",
+    "submit_client_friends",
+    "submit_client_contracts",
+    "submit_client_squelch",
+    "submit_client_allegiance",
+    "set_client_party_updates",
+    "query_client_death_locations",
+    "manage_client_corpse_consent",
+    "set_client_corpse_permission",
+    "set_client_corpse_consent",
+    "kill_client_character",
+    "send_client_chat",
+    "recall_client",
+    "teleport_client_to_map_position",
+    "toggle_client_combat_mode",
+    "set_client_combat_mode",
+    "set_client_rest_posture",
+    "cancel_client_rest_posture",
+    "set_client_appearance_option",
+    "set_client_gameplay_option",
+    "cast_client_spell",
+    "begin_client_combat_engagement",
+    "update_client_combat_profile",
+    "stop_client_combat_engagement",
+    "query_client_entity_health",
+    "respond_to_client_confirmation",
+    "start_client_camera",
+    "set_client_camera_intent",
+    "set_client_camera_clearance",
+    "set_client_entity_collision_disabled",
+    "set_client_precise_jump_aim",
+    "query_client_entity_selection_candidates",
+    "commit_client_precise_jump",
+    "cancel_client_precise_jump",
+    "acknowledge_client_world_reveal",
+    "stop_client_camera",
+    "logout_client",
+    "disconnect_client",
+];
+
+/// Appearance options intentionally exposed by the 3D client host boundary.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientAppearanceOption {
+    Helmet,
+    Cloak,
+}
+
+impl From<ClientAppearanceOption> for CharacterOption {
+    fn from(option: ClientAppearanceOption) -> Self {
+        match option {
+            ClientAppearanceOption::Helmet => CharacterOption::ShowYourHelmOrHeadGear,
+            ClientAppearanceOption::Cloak => CharacterOption::ShowYourCloak,
+        }
+    }
+}
+
+struct ClientHostState {
+    started: bool,
+    accepting: bool,
+    command_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientCommand>>,
+    /// Direct orbit/projection endpoint, independent of the world command queue.
+    camera_input: Option<holtburger_core::ClientCameraInputHandle>,
+    task: Option<tokio::task::JoinHandle<()>>,
+    shutdown_requested: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Client composition root. Its supervisor owns authority and forwarding for one launch.
+pub struct ClientHostRuntime {
+    /// Static-content discovery and reusable content service shared with Explorer.
+    pub content: SharedHostContent,
+    event_sink: Arc<dyn ClientEventSink>,
+    state: tokio::sync::Mutex<ClientHostState>,
+    /// Retained cancellation permit also covers disconnect before socket construction finishes.
+    stop_startup: tokio::sync::Notify,
+}
+
+impl ClientHostRuntime {
+    /// Composes the client shell without constructing any Explorer authority or scheduler.
+    pub fn from_content(content: SharedHostContent, event_sink: Arc<dyn ClientEventSink>) -> Self {
+        Self {
+            content,
+            event_sink,
+            stop_startup: tokio::sync::Notify::new(),
+            state: tokio::sync::Mutex::new(ClientHostState {
+                started: false,
+                accepting: true,
+                command_tx: None,
+                camera_input: None,
+                task: None,
+                shutdown_requested: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            }),
+        }
+    }
+
+    /// Connects and starts the one private client attempt. A second launch is rejected rather than
+    /// replacing a potentially active task.
+    pub async fn start(&self, startup: ClientLaunchConfiguration) -> Result<()> {
+        let shutdown_requested = {
+            let mut state = self.state.lock().await;
+            if state.started {
+                bail!("client startup has already been supplied");
+            }
+            if !state.accepting {
+                bail!("client startup is unavailable after session retirement");
+            }
+            state.started = true;
+            Arc::clone(&state.shutdown_requested)
+        };
+
+        let bootstrap = match self
+            .content
+            .failures
+            .required(self.content.client_world_bootstrap())
+        {
+            Ok(bootstrap) => bootstrap,
+            Err(error) => {
+                let _ = self.event_sink.publish_client_event(client_exit_requested(
+                    holtburger_core::ClientExitCause::StartupFailure,
+                    format!("{error:#}"),
+                ));
+                return Err(error);
+            }
+        };
+
+        let physical_source = Arc::new(
+            crate::reporting_content_source::ReportingContentSource::new(
+                holtburger_core::ContentClientPhysicsSource::new(
+                    Arc::clone(&self.content.service),
+                    Arc::clone(&self.content.repository),
+                ),
+                self.content.failures.clone(),
+            ),
+        );
+        let mut builder = holtburger_core::ClientRuntimeBuilder::new(startup.account.clone())
+            .inventory_placement(InventoryPlacementPolicy {
+                automatic: InventoryInsertion::Prepend,
+                split_after_source: true,
+            })
+            .server(startup.host.clone(), startup.port)
+            .world_bootstrap(bootstrap)
+            .barber_source(Arc::new(
+                holtburger_core::client::barber::ContentClientBarberSource::new(Arc::clone(
+                    &self.content.repository,
+                )),
+            ))
+            .require_external_world_reveal()
+            .physical_movement_source(physical_source.clone(), physical_source.clone())
+            .dynamic_script_source(Arc::new(
+                crate::reporting_content_source::ReportingContentSource::new(
+                    holtburger_core::ContentClientDynamicScriptSource::new(Arc::clone(
+                        &self.content.service,
+                    )),
+                    self.content.failures.clone(),
+                ),
+            ))
+            .selection_envelope_source(Arc::new(
+                crate::reporting_content_source::ReportingContentSource::new(
+                    holtburger_core::ContentClientSelectionEnvelopeSource::new(Arc::clone(
+                        &self.content.service,
+                    )),
+                    self.content.failures.clone(),
+                ),
+            ));
+        if let Some(distance) = startup.melee_max_chase_distance {
+            builder = builder.combat_tuning(holtburger_core::ClientCombatTuning::new(distance)?);
+        }
+        let connection = tokio::select! {
+            result = builder.connect() => result,
+            () = self.stop_startup.notified() => {
+                self.event_sink.publish_client_event(client_exit_requested(
+                    holtburger_core::ClientExitCause::ExplicitDisconnect,
+                    "Disconnected during startup.",
+                ))?;
+                bail!("Client startup was cancelled.");
+            }
+        };
+        let mut client = match connection {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = self.event_sink.publish_client_event(client_exit_requested(
+                    holtburger_core::ClientExitCause::StartupFailure,
+                    format!("{error:#}"),
+                ));
+                return Err(error);
+            }
+        };
+
+        // Subscribe before either startup command is queued so no status, snapshot, or login
+        // transition can be lost between core construction and task publication.
+        let events = client.subscribe_client_view_events();
+        let camera_input = client.camera_input_handle();
+        let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
+        client.set_command_rx(command_rx);
+        {
+            let mut state = self.state.lock().await;
+            if !state.accepting {
+                self.event_sink.publish_client_event(client_exit_requested(
+                    holtburger_core::ClientExitCause::ExplicitDisconnect,
+                    "Disconnected during startup.",
+                ))?;
+                bail!("Client startup was cancelled.");
+            }
+            // Construct the authority future only after the last startup suspension point.
+            // Holding it across the lock wait embeds the full client loop in startup state.
+            let supervisor = run_client_task(
+                client,
+                events,
+                command_tx.clone(),
+                Arc::clone(&self.event_sink),
+                shutdown_requested,
+            );
+            state.task = Some(tokio::spawn(async move {
+                if let Err(error) = supervisor.await {
+                    log::error!("client supervisor stopped: {error:#}");
+                }
+            }));
+            state.command_tx = Some(command_tx.clone());
+            state.camera_input = Some(camera_input);
+        }
+
+        command_tx
+            .send(ClientCommand::RequestCurrentApplicationState)
+            .map_err(|_| anyhow::anyhow!("client task stopped before current-state request"))?;
+        // Move, rather than clone, the password into the one login command. No host state retains
+        // the credential after this send succeeds.
+        command_tx
+            .send(ClientCommand::Login(startup.password))
+            .map_err(|_| anyhow::anyhow!("client task stopped before login request"))?;
+        Ok(())
+    }
+
+    async fn send_command(&self, command: ClientCommand) -> Result<()> {
+        let state = self.state.lock().await;
+        if !state.accepting {
+            bail!("client host is shutting down");
+        }
+        let sender = state
+            .command_tx
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("client has not been started"))?;
+        sender
+            .send(command)
+            .map_err(|_| anyhow::anyhow!("client task is no longer accepting commands"))
+    }
+
+    pub async fn request_current_state(&self) -> Result<()> {
+        self.send_command(ClientCommand::RequestCurrentApplicationState)
+            .await
+    }
+
+    pub async fn select_character(&self, guid: holtburger_common::Guid) -> Result<()> {
+        self.send_command(ClientCommand::SelectCharacter(guid))
+            .await
+    }
+
+    pub async fn replace_drive(
+        &self,
+        request: crate::client_host::ClientDriveRequest,
+    ) -> Result<()> {
+        if let crate::client_host::ClientDriveRequest::RotateFacing { delta_radians } = &request {
+            anyhow::ensure!(
+                delta_radians.is_finite(),
+                "Facing displacement must be finite."
+            );
+        }
+        self.send_command(ClientCommand::DriveSelf(request.into_intent()))
+            .await
+    }
+
+    pub async fn queue_character_motion_event(
+        &self,
+        request: crate::client_host::ClientCharacterMotionEventRequest,
+    ) -> Result<()> {
+        self.send_command(ClientCommand::ControlCharacter(request.into_event()?))
+            .await
+    }
+
+    async fn camera_input(&self) -> Result<holtburger_core::ClientCameraInputHandle> {
+        let state = self.state.lock().await;
+        if !state.accepting {
+            bail!("client host is shutting down");
+        }
+        state
+            .camera_input
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("client has not been started"))
+    }
+
+    pub async fn start_camera(
+        &self,
+        request: holtburger_core::ClientCameraStartRequest,
+    ) -> Result<()> {
+        self.send_command(ClientCommand::StartClientCamera(request))
+            .await
+            .map(|_| ())
+    }
+
+    pub async fn set_camera_intent(
+        &self,
+        request: holtburger_core::ClientCameraIntentRequest,
+    ) -> Result<()> {
+        self.camera_input().await?.set_intent(request).map(|_| ())
+    }
+
+    pub async fn set_camera_clearance(
+        &self,
+        request: holtburger_core::ClientCameraClearanceRequest,
+    ) -> Result<()> {
+        self.camera_input()
+            .await?
+            .set_clearance(request)
+            .map(|_| ())
+    }
+
+    pub async fn acknowledge_world_reveal(&self, world_generation: u64) -> Result<()> {
+        self.send_command(ClientCommand::AcknowledgeClientWorldReveal { world_generation })
+            .await
+    }
+
+    pub async fn set_precise_jump_aim(&self, request: ClientPreciseJumpAimRequest) -> Result<()> {
+        self.send_command(ClientCommand::SetPreciseJumpAim(request.into_core()?))
+            .await
+    }
+
+    pub async fn query_entity_selection_candidates(
+        &self,
+        request: ClientEntitySelectionQueryRequest,
+    ) -> Result<()> {
+        self.send_command(ClientCommand::QueryEntitySelectionCandidates(
+            request.into_core()?,
+        ))
+        .await
+    }
+
+    pub async fn commit_precise_jump(&self, request: ClientPreciseJumpCommitRequest) -> Result<()> {
+        self.send_command(ClientCommand::CommitPreciseJump(request.into_core()?))
+            .await
+    }
+
+    pub async fn cancel_precise_jump(&self, request: ClientPreciseJumpCancelRequest) -> Result<()> {
+        self.send_command(ClientCommand::CancelPreciseJump(
+            holtburger_core::PreciseJumpCancelRequest {
+                sequence: holtburger_core::PreciseJumpActionSequence(request.sequence),
+            },
+        ))
+        .await
+    }
+
+    pub async fn stop_camera(&self, identity: holtburger_core::ClientCameraIdentity) -> Result<()> {
+        self.send_command(ClientCommand::StopClientCamera(identity))
+            .await
+            .map(|_| ())
+    }
+
+    pub async fn disconnect(&self) -> Result<()> {
+        self.retire(false).await
+    }
+
+    /// Enqueue one validated chat intent; this does not acknowledge server delivery.
+    pub async fn send_chat(&self, request: ClientChatRequest) -> Result<()> {
+        self.send_command(request.into_command()?).await
+    }
+
+    /// Application shutdown shares bounded authority retirement with explicit disconnect.
+    pub async fn shutdown(&self) {
+        if let Err(error) = self.retire(true).await {
+            log::error!("client shutdown failed: {error:#}");
+        }
+    }
+
+    async fn retire(&self, host_shutdown: bool) -> Result<()> {
+        let (sender, task) = {
+            let mut state = self.state.lock().await;
+            state.accepting = false;
+            state
+                .shutdown_requested
+                .store(host_shutdown, std::sync::atomic::Ordering::Release);
+            state.camera_input = None;
+            (state.command_tx.take(), state.task.take())
+        };
+        self.stop_startup.notify_one();
+        if let Some(sender) = sender {
+            // A closed channel already means the authority finished; still join its forwarder.
+            let _ = sender.send(ClientCommand::Disconnect);
+        }
+        if let Some(mut task) = task {
+            match tokio::time::timeout(std::time::Duration::from_secs(2), &mut task).await {
+                Ok(result) => result?,
+                Err(_) => {
+                    task.abort();
+                    match task.await {
+                        Err(error) if error.is_cancelled() => {}
+                        result => result?,
+                    }
+                    self.event_sink.publish_client_event(client_exit_requested(
+                        if host_shutdown {
+                            holtburger_core::ClientExitCause::HostShutdown
+                        } else {
+                            holtburger_core::ClientExitCause::ExplicitDisconnect
+                        },
+                        "Disconnected; local session stopped after the shutdown deadline.",
+                    ))?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Dispatches one client-only command against the client authority.
+pub async fn dispatch_client(
+    runtime: &ClientHostRuntime,
+    command: ClientHostCommand,
+) -> Result<HostResponse, ProtocolError> {
+    use ClientHostCommand::*;
+
+    match command {
+        CreateClientCharacter { draft } => {
+            let catalog = Arc::new(
+                runtime
+                    .content
+                    .repository
+                    .read_character_gen_catalog()
+                    .map_err(application_error)?,
+            );
+            let request = draft.build_request(catalog).map_err(application_error)?;
+            runtime
+                .send_command(ClientCommand::CreateCharacter(Box::new(request)))
+                .await
+                .map(|()| HostResponse::Unit)
+                .map_err(application_error)
+        }
+        DeleteClientCharacter { slot } => runtime
+            .send_command(ClientCommand::DeleteCharacter { slot })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        RestoreClientCharacter { guid } => runtime
+            .send_command(ClientCommand::RestoreCharacter(guid))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        QueryClientHousingAccess => runtime
+            .send_command(ClientCommand::QueryHousingAccess)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SearchClientHousing { house_type } => runtime
+            .send_command(ClientCommand::SearchHousing { house_type })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientHousingManagement { request } => runtime
+            .send_command(ClientCommand::SubmitHousingManagement(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        RefreshClientHousing => runtime
+            .send_command(ClientCommand::RefreshHousing)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        StartClient { startup } => runtime
+            .start(startup)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        CastClientSpell { spell_id, aim } => runtime
+            .send_command(ClientCommand::CastSpell { spell_id, aim })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        BeginClientCombatEngagement {
+            target,
+            profile,
+            intent_sequence,
+        } => {
+            let profile = profile.into_core().map_err(application_error)?;
+            runtime
+                .send_command(ClientCommand::BeginCombatEngagement {
+                    target,
+                    profile,
+                    intent_sequence,
+                })
+                .await
+                .map(|()| HostResponse::Unit)
+                .map_err(application_error)
+        }
+        UpdateClientCombatProfile { profile } => {
+            let profile = profile.into_core().map_err(application_error)?;
+            runtime
+                .send_command(ClientCommand::UpdateCombatProfile(profile))
+                .await
+                .map(|()| HostResponse::Unit)
+                .map_err(application_error)
+        }
+        StopClientCombatEngagement { intent_sequence } => runtime
+            .send_command(ClientCommand::StopCombatEngagement { intent_sequence })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        ToggleClientCombatMode => runtime
+            .send_command(ClientCommand::ToggleCombatMode)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientRestPosture { posture } => runtime
+            .send_command(ClientCommand::SetRestPosture(posture))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        CancelClientRestPosture => runtime
+            .send_command(ClientCommand::CancelRestPosture)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientCombatMode { mode } => runtime
+            .send_command(ClientCommand::SetCombatMode(mode.into()))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientCharacterTitle {
+            character,
+            title_id,
+        } => runtime
+            .send_command(ClientCommand::SetCharacterTitle {
+                character,
+                title_id,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientGameplayOption { option, enabled } => runtime
+            .send_command(ClientCommand::SetCharacterOption {
+                option: option.into(),
+                value: enabled,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientAppearanceOption { option, enabled } => runtime
+            .send_command(ClientCommand::SetCharacterOption {
+                option: option.into(),
+                value: enabled,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        ExamineClientEntity { guid } => runtime
+            .send_command(ClientCommand::Identify(guid))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        ReadClientBookPage {
+            player,
+            book,
+            page_index,
+        } => runtime
+            .send_command(ClientCommand::ReadBookPage {
+                player,
+                book,
+                page_index,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        RequestClientCurrentState => runtime
+            .request_current_state()
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SelectClientCharacter { guid } => runtime
+            .select_character(guid)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        ReplaceClientDrive { request } => runtime
+            .replace_drive(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        QueueClientCharacterMotionEvent { request } => runtime
+            .queue_character_motion_event(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        QueryClientSpellInspection { query } => runtime
+            .send_command(ClientCommand::QuerySpellInspection(query))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        EvaluateClientProgression {
+            request_id,
+            intents,
+        } => runtime
+            .send_command(ClientCommand::EvaluateProgression {
+                request_id,
+                intents,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientProgression { quote } => runtime
+            .send_command(ClientCommand::SubmitProgression(quote))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        QueryClientItemUseTarget { query } => runtime
+            .send_command(ClientCommand::QueryItemUseTarget(query))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        PreviewClientSalvage { request } => runtime
+            .send_command(ClientCommand::PreviewSalvage(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientSalvage { request } => runtime
+            .send_command(ClientCommand::SubmitSalvage(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientItemUse { request } => runtime
+            .send_command(ClientCommand::SubmitItemUse(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        EquipClientItem { guid, alternate } => runtime
+            .send_command(ClientCommand::GetAndWield {
+                item: guid,
+                slot: Some(holtburger_core::client::types::TargetSlot::PreferredSide { alternate }),
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        ApplyClientEquipmentSet { bindings } => runtime
+            .send_command(ClientCommand::ApplyEquipmentSet(
+                bindings
+                    .into_iter()
+                    .map(
+                        |binding| holtburger_core::client::equipment_set::EquipmentBinding {
+                            item: binding.item,
+                            target: holtburger_common::properties::EquipMask::from_bits_retain(
+                                binding.target,
+                            ),
+                        },
+                    )
+                    .collect(),
+            ))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        CloseClientContainer { guid } => runtime
+            .send_command(ClientCommand::CloseContainer(guid))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        AutoMergeClientContainer { container, policy } => runtime
+            .send_command(ClientCommand::AutoMergeContainer { container, policy })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientInventory { intent } => runtime
+            .send_command(ClientCommand::SubmitInventory(intent))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        PreviewClientHousingPayment { request } => runtime
+            .send_command(ClientCommand::PreviewHousingPayment(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientHousingPayment { request } => runtime
+            .send_command(ClientCommand::SubmitHousingPayment(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        PreviewClientVendor { request } => runtime
+            .send_command(ClientCommand::PreviewVendorTrade(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientTrade { request } => runtime
+            .send_command(ClientCommand::Trade(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        RequestClientBarber { request } => runtime
+            .send_command(ClientCommand::Barber(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientVendor { request } => runtime
+            .send_command(ClientCommand::VendorTrade(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        PreviewClientInventory { request } => runtime
+            .send_command(ClientCommand::PreviewInventory(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        QueryClientEntityHealth { guid } => runtime
+            .send_command(ClientCommand::QueryHealth(guid))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        RespondToClientConfirmation {
+            request_id,
+            accepted,
+        } => {
+            let request_id = request_id.parse::<u64>().map_err(application_error)?;
+            runtime
+                .send_command(ClientCommand::RespondToConfirmation {
+                    request_id,
+                    accepted,
+                })
+                .await
+                .map(|()| HostResponse::Unit)
+                .map_err(application_error)
+        }
+        SubmitClientAllegiance { action } => runtime
+            .send_command(action.into())
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientSquelch { action } => runtime
+            .send_command(action.into())
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientContracts { action } => runtime
+            .send_command(action.into())
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientFriends { action } => runtime
+            .send_command(action.into())
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientParty { action } => runtime
+            .send_command(action.into())
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientPartyUpdates { enabled } => runtime
+            .send_command(ClientCommand::SetFellowshipUpdatesSubscribed { enabled })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        RecallClient { destination } => runtime
+            .send_command(ClientCommand::Recall(destination))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        QueryClientDeathLocations { query } => runtime
+            .send_command(ClientCommand::QueryDeathLocations(query))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        ManageClientCorpseConsent { action } => runtime
+            .send_command(ClientCommand::ManageCorpseConsent(action))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientCorpsePermission {
+            player_name,
+            granted,
+        } => runtime
+            .send_command(if granted {
+                ClientCommand::AddPlayerPermission { player_name }
+            } else {
+                ClientCommand::RemovePlayerPermission { player_name }
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientCorpseConsent { enabled } => runtime
+            .send_command(ClientCommand::SetCharacterOption {
+                option: holtburger_common::CharacterOption::AcceptCorpseLootingPermissions,
+                value: enabled,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        KillClientCharacter => runtime
+            .send_command(ClientCommand::Suicide)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SendClientChat { request } => runtime
+            .send_chat(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        TeleportClientToMapPosition { position } => {
+            let destination = position.destination().map_err(application_error)?;
+            runtime
+                .send_command(ClientCommand::TeleportToMapPosition(destination))
+                .await
+                .map(|()| HostResponse::Unit)
+                .map_err(application_error)
+        }
+        StartClientCamera { request } => runtime
+            .start_camera(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientCameraIntent { request } => runtime
+            .set_camera_intent(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientEntityCollisionDisabled { disabled } => runtime
+            .send_command(ClientCommand::SetEntityCollisionDisabled(disabled))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientCameraClearance { request } => runtime
+            .set_camera_clearance(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientPreciseJumpAim { request } => runtime
+            .set_precise_jump_aim(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        QueryClientEntitySelectionCandidates { request } => runtime
+            .query_entity_selection_candidates(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        CommitClientPreciseJump { request } => runtime
+            .commit_precise_jump(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        CancelClientPreciseJump { request } => runtime
+            .cancel_precise_jump(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        AcknowledgeClientWorldReveal { world_generation } => runtime
+            .acknowledge_world_reveal(world_generation)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        StopClientCamera { request } => runtime
+            .stop_camera(request)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        LogoutClient => runtime
+            .send_command(ClientCommand::Logout)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        DisconnectClient => runtime
+            .disconnect()
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_protocol::messages::combat::CombatMode;
+
+    #[test]
+    fn explicit_stance_requests_preserve_the_requested_family_and_reject_unknown() {
+        for (spelling, expected) in [
+            ("peace", CombatMode::NonCombat),
+            ("melee", CombatMode::Melee),
+            ("missile", CombatMode::Missile),
+            ("magic", CombatMode::Magic),
+        ] {
+            let request: RequestedCombatMode =
+                serde_json::from_value(serde_json::json!(spelling)).unwrap();
+            assert_eq!(CombatMode::from(request), expected);
+        }
+        assert!(
+            serde_json::from_value::<RequestedCombatMode>(serde_json::json!("unknown")).is_err()
+        );
+    }
+
+    #[test]
+    fn posture_host_requests_decode_gameplay_targets_and_reject_social_aliases() {
+        use holtburger_world::motion::RestPosture;
+        for (name, expected) in [
+            ("standing", RestPosture::Standing),
+            ("crouching", RestPosture::Crouching),
+            ("sitting", RestPosture::Sitting),
+            ("lying", RestPosture::Lying),
+        ] {
+            let request: ClientHostCommand = serde_json::from_value(
+                serde_json::json!({ "command": "set_client_rest_posture", "posture": name }),
+            )
+            .unwrap();
+            assert!(
+                matches!(request, ClientHostCommand::SetClientRestPosture { posture } if posture == expected)
+            );
+        }
+        assert!(
+            serde_json::from_value::<ClientHostCommand>(
+                serde_json::json!({ "command": "set_client_rest_posture", "posture": "kneel" })
+            )
+            .is_err()
+        );
+    }
+
+    /// No publication is valid when launch is rejected before construction.
+    struct UnexpectedEvents;
+
+    impl ClientEventSink for UnexpectedEvents {
+        fn publish_client_event(
+            &self,
+            _event: crate::client_projection::ClientHostEvent,
+        ) -> Result<()> {
+            panic!("retired startup published an event");
+        }
+    }
+
+    #[tokio::test]
+    async fn disconnect_before_startup_permanently_closes_launch_admission() {
+        let content = SharedHostContent::from_repository(Arc::new(
+            holtburger_content::ContentRepository::from_mounts(Vec::new()),
+        ))
+        .unwrap();
+        let runtime = ClientHostRuntime::from_content(content, Arc::new(UnexpectedEvents));
+        runtime.disconnect().await.unwrap();
+        let error = runtime
+            .start(ClientLaunchConfiguration {
+                host: "127.0.0.1".into(),
+                port: 0,
+                account: "retired-startup-test".into(),
+                password: String::new(),
+                melee_max_chase_distance: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "client startup is unavailable after session retirement"
+        );
+        let state = runtime.state.lock().await;
+        assert!(!state.accepting);
+        assert!(!state.started);
+        assert!(state.task.is_none());
+    }
+
+    #[test]
+    fn soul_emote_request_preserves_alias_for_core_resolution() {
+        let request: ClientChatRequest = serde_json::from_value(serde_json::json!({
+            "kind": "soul-emote", "token": "Wave"
+        }))
+        .unwrap();
+        assert!(
+            matches!(request.into_command().unwrap(), ClientCommand::SoulEmote { token, request_id: None } if token == "Wave")
+        );
+        let empty = ClientChatRequest::SoulEmote {
+            token: " ".into(),
+            request_id: None,
+        };
+        assert!(empty.into_command().is_err());
+        assert!(
+            serde_json::from_value::<ClientChatRequest>(serde_json::json!({
+                "kind": "soul-emote", "message": "waves."
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn chat_requests_preserve_target_kind_and_reject_invalid_payloads_before_enqueue() {
+        let request: ClientChatRequest = serde_json::from_value(serde_json::json!({
+            "kind": "tell", "target": { "kind": "npc", "guid": 0x8000_0001_u32, "name": "Professor" }, "message": "level 1"
+        })).unwrap();
+        assert!(
+            matches!(request.into_command().unwrap(), ClientCommand::Tell {
+            target: ChatTellTarget::Npc { guid: holtburger_common::Guid(0x8000_0001), .. }, message
+        } if message == "level 1")
+        );
+        for payload in [
+            serde_json::json!({ "kind": "speech", "message": "   " }),
+            serde_json::json!({ "kind": "tell", "target": { "kind": "player", "name": " " }, "message": "hello" }),
+            serde_json::json!({ "kind": "tell", "target": { "kind": "npc", "guid": 0, "name": "Professor" }, "message": "level 1" }),
+            serde_json::json!({ "kind": "tell", "target": { "kind": "npc", "guid": 0x5000_0001_u32, "name": "Player" }, "message": "hello" }),
+        ] {
+            let parsed: ClientChatRequest = serde_json::from_value(payload).unwrap();
+            assert!(parsed.into_command().is_err());
+        }
+        for payload in [
+            serde_json::json!({ "kind": "channel", "channel": "fellowship-broadcast", "message": "hello" }),
+            serde_json::json!({ "kind": "tell", "target": { "kind": "player", "name": "Player", "guid": 42 }, "message": "hello" }),
+        ] {
+            assert!(serde_json::from_value::<ClientChatRequest>(payload).is_err());
+        }
+    }
+
+    #[test]
+    fn recall_command_decodes_the_frontend_destination_identity() {
+        let command = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "recall_client", "destination": "allegiance-hometown"
+        }))
+        .unwrap();
+        assert!(matches!(
+            command,
+            ClientHostCommand::RecallClient {
+                destination: holtburger_core::client::recall::RecallDestination::AllegianceHometown
+            }
+        ));
+        assert!(CLIENT_COMMAND_NAMES.contains(&"recall_client"));
+        assert!(
+            serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+                "command": "recall_client", "destination": "somewhere"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn housing_information_commands_decode_frontend_payloads() {
+        let access = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "query_client_housing_access"
+        }))
+        .unwrap();
+        assert!(matches!(
+            access,
+            ClientHostCommand::QueryClientHousingAccess
+        ));
+        let search = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "search_client_housing", "houseType": 4
+        }))
+        .unwrap();
+        assert!(matches!(
+            search,
+            ClientHostCommand::SearchClientHousing { house_type: 4 }
+        ));
+    }
+
+    #[test]
+    fn death_commands_decode_frontend_names_and_typed_actions() {
+        let permission = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "set_client_corpse_permission", "playerName": "Best Friend", "granted": false,
+        })).unwrap();
+        assert!(
+            matches!(permission, ClientHostCommand::SetClientCorpsePermission { player_name, granted: false } if player_name == "Best Friend")
+        );
+        let remove = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "manage_client_corpse_consent", "action": { "kind": "remove", "playerName": "Best Friend" },
+        })).unwrap();
+        assert!(
+            matches!(remove, ClientHostCommand::ManageClientCorpseConsent { action: holtburger_core::client::corpse::CorpseConsentAction::Remove { player_name } } if player_name == "Best Friend")
+        );
+        let query = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "query_client_death_locations", "query": "last-outdoor",
+        }))
+        .unwrap();
+        assert!(matches!(
+            query,
+            ClientHostCommand::QueryClientDeathLocations {
+                query: holtburger_core::client::corpse::DeathLocationQuery::LastOutdoor
+            }
+        ));
+        for command in ["set_client_corpse_consent", "kill_client_character"] {
+            let mut payload = serde_json::json!({ "command": command });
+            if command == "set_client_corpse_consent" {
+                payload["enabled"] = false.into();
+            }
+            assert!(serde_json::from_value::<ClientHostCommand>(payload).is_ok());
+        }
+    }
+
+    #[test]
+    fn appearance_command_accepts_only_the_two_exposed_options() {
+        for option in ["helmet", "cloak"] {
+            assert!(
+                serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+                    "command": "set_client_appearance_option",
+                    "option": option,
+                    "enabled": true,
+                }))
+                .is_ok()
+            );
+        }
+        assert!(
+            serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+                "command": "set_client_appearance_option",
+                "option": "auto-repeat-attacks",
+                "enabled": true,
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn character_title_command_requires_character_and_numeric_title() {
+        let command = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "set_client_character_title", "character": 1, "titleId": 999,
+        }))
+        .unwrap();
+        assert!(matches!(
+            command,
+            ClientHostCommand::SetClientCharacterTitle {
+                character: holtburger_common::Guid(1),
+                title_id: 999
+            }
+        ));
+        for invalid in [
+            serde_json::json!({ "command": "set_client_character_title", "titleId": 1 }),
+            serde_json::json!({ "command": "set_client_character_title", "character": 1, "titleId": -1 }),
+        ] {
+            assert!(serde_json::from_value::<ClientHostCommand>(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn examine_entity_command_requires_a_u32_guid() {
+        let command = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "examine_client_entity",
+            "guid": 0x6000_0042_u32,
+        }))
+        .expect("valid examine command");
+        assert!(matches!(
+            command,
+            ClientHostCommand::ExamineClientEntity {
+                guid: holtburger_common::Guid(0x6000_0042)
+            }
+        ));
+
+        assert!(
+            serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+                "command": "examine_client_entity",
+                "guid": -1,
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+                "command": "examine_client_entity",
+                "entity": 0x6000_0042_u32,
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn book_page_request_uses_the_browser_field_name() {
+        let command = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "read_client_book_page",
+            "player": 0x5000_0001_u32,
+            "book": 0x6000_0042_u32,
+            "pageIndex": 2,
+        }))
+        .expect("valid page request");
+        assert!(matches!(
+            command,
+            ClientHostCommand::ReadClientBookPage {
+                player: holtburger_common::Guid(0x5000_0001),
+                book: holtburger_common::Guid(0x6000_0042),
+                page_index: 2,
+            }
+        ));
+    }
+
+    fn aim_json() -> serde_json::Value {
+        serde_json::json!({
+            "camera": {
+                "cameraGeneration": 2,
+                "playerGuid": 0x5000_0001_u32,
+                "entityGeneration": 7
+            },
+            "sequence": 9,
+            "power":0.5,
+            "anchor": 0xda55_ffff_u32,
+            "start": [10.0, 20.0, 4.0],
+            "direction": [0.0, 1.0, 0.0],
+            "maximumDistance": 80.0,
+            "previousCell": null
+        })
+    }
+
+    #[test]
+    fn precise_jump_aim_rejects_unknown_and_non_finite_renderer_fields() {
+        let mut unknown = aim_json();
+        unknown["extent"] = serde_json::json!(1.0);
+        assert!(serde_json::from_value::<ClientPreciseJumpAimRequest>(unknown).is_err());
+
+        let mut nested_unknown = aim_json();
+        nested_unknown["camera"]["velocity"] = serde_json::json!([1, 2, 3]);
+        assert!(serde_json::from_value::<ClientPreciseJumpAimRequest>(nested_unknown).is_err());
+
+        let mut non_finite = serde_json::from_value::<ClientPreciseJumpAimRequest>(aim_json())
+            .expect("finite strict aim request");
+        non_finite.start[0] = f32::NAN;
+        assert!(non_finite.into_core().is_err());
+    }
+
+    #[test]
+    fn precise_jump_power_accepts_retail_bounds_and_rejects_subminimum_values() {
+        for power in [
+            holtburger_core::JumpExtent::MINIMUM.get(),
+            holtburger_core::JumpExtent::MAXIMUM.get(),
+        ] {
+            let mut request =
+                serde_json::from_value::<ClientPreciseJumpAimRequest>(aim_json()).unwrap();
+            request.power = power;
+            assert_eq!(request.into_core().unwrap().power.get(), power);
+        }
+        for power in [
+            0.0,
+            holtburger_core::JumpExtent::MINIMUM.get() / 2.0,
+            -1.0,
+            1.01,
+            f32::NAN,
+            f32::INFINITY,
+        ] {
+            let mut request =
+                serde_json::from_value::<ClientPreciseJumpAimRequest>(aim_json()).unwrap();
+            request.power = power;
+            assert!(request.into_core().is_err());
+        }
+    }
+
+    fn commit_json() -> serde_json::Value {
+        serde_json::json!({
+            "sequence": 3,
+            "camera": aim_json()["camera"],
+            "power": 0.5,
+            "target": { "anchor": 0xda55ffff_u32, "point": [10, 20, 4], "normal": [0, 0, 1], "committedCell": null }
+        })
+    }
+
+    #[test]
+    fn precise_jump_commit_captures_choice_and_validates_wire_values() {
+        let request =
+            serde_json::from_value::<ClientPreciseJumpCommitRequest>(commit_json()).unwrap();
+        let core = request.into_core().unwrap();
+        assert_eq!(core.power.get(), request.power);
+        assert_eq!(
+            core.target.point,
+            holtburger_common::Vector3::new(10.0, 20.0, 4.0)
+        );
+        for power in [f32::NAN, f32::INFINITY, 0.0, 1.01] {
+            assert!(
+                ClientPreciseJumpCommitRequest { power, ..request }
+                    .into_core()
+                    .is_err()
+            );
+        }
+        let mut invalid_point = request;
+        invalid_point.target.point[0] = f32::NAN;
+        assert!(invalid_point.into_core().is_err());
+        let mut invalid_normal = request;
+        invalid_normal.target.normal[0] = f32::INFINITY;
+        assert!(invalid_normal.into_core().is_err());
+        let mut invalid_anchor = request;
+        invalid_anchor.target.anchor = holtburger_common::Guid(1);
+        assert!(invalid_anchor.into_core().is_err());
+        let mut unknown = commit_json();
+        unknown["velocity"] = serde_json::json!([1, 2, 3]);
+        assert!(serde_json::from_value::<ClientPreciseJumpCommitRequest>(unknown).is_err());
+        assert!(
+            serde_json::from_value::<ClientPreciseJumpCancelRequest>(serde_json::json!({
+                "sequence": 4, "velocity": [1, 2, 3]
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn entity_selection_query_rejects_distance_override_and_non_finite_vectors() {
+        let mut value = aim_json();
+        value.as_object_mut().unwrap().remove("maximumDistance");
+        value.as_object_mut().unwrap().remove("power");
+        let request = serde_json::from_value::<ClientEntitySelectionQueryRequest>(value.clone())
+            .expect("selection request should share the strict camera ray fields");
+        assert!(request.into_core().is_ok());
+
+        value["maximumDistance"] = serde_json::json!(192.0);
+        assert!(serde_json::from_value::<ClientEntitySelectionQueryRequest>(value).is_err());
+
+        let mut request = serde_json::from_value::<ClientEntitySelectionQueryRequest>({
+            let mut value = aim_json();
+            value.as_object_mut().unwrap().remove("maximumDistance");
+            value.as_object_mut().unwrap().remove("power");
+            value
+        })
+        .unwrap();
+        request.direction[2] = f32::INFINITY;
+        assert!(request.into_core().is_err());
+    }
+}
+
+#[cfg(test)]
+mod map_position_tests {
+    use super::ClientMapPosition;
+    use holtburger_common::position::{MAX_OUTDOOR_LANDBLOCK_AXIS, METERS_PER_LANDBLOCK};
+
+    #[test]
+    fn converts_scene_axes_and_derives_cells_across_a_landblock_seam() {
+        let position = ClientMapPosition {
+            x: METERS_PER_LANDBLOCK + 30.0,
+            z: -50.0,
+        }
+        .destination()
+        .unwrap();
+        assert_eq!(position.landblock_coords(), (1, 0));
+        assert_eq!(position.landblock_id.0 & 0xffff, 11);
+        assert_eq!(position.coords.x, 30.0);
+        assert_eq!(position.coords.y, 50.0);
+        assert_eq!(position.coords.z, 0.0);
+        let origin = ClientMapPosition { x: 0.0, z: 0.0 }.destination().unwrap();
+        assert_eq!(origin.landblock_id.0, 1);
+    }
+
+    #[test]
+    fn rejects_non_finite_and_exclusive_outer_edges() {
+        let extent = (f32::from(MAX_OUTDOOR_LANDBLOCK_AXIS) + 1.0) * METERS_PER_LANDBLOCK;
+        for position in [
+            ClientMapPosition {
+                x: f32::NAN,
+                z: 0.0,
+            },
+            ClientMapPosition {
+                x: 0.0,
+                z: f32::INFINITY,
+            },
+            ClientMapPosition { x: -1.0, z: 0.0 },
+            ClientMapPosition { x: 0.0, z: 1.0 },
+            ClientMapPosition { x: extent, z: 0.0 },
+            ClientMapPosition { x: 0.0, z: -extent },
+        ] {
+            assert!(position.destination().is_err());
+        }
+        assert!(
+            ClientMapPosition {
+                x: extent - 1.0,
+                z: -extent + 1.0
+            }
+            .destination()
+            .is_ok()
+        );
+    }
+}
+
+#[cfg(test)]
+mod auto_merge_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_auto_merge_policy_decodes_without_an_implicit_default() {
+        let payload = serde_json::json!({
+            "command": "auto_merge_client_container", "container": 7,
+            "policy": { "stepTimeoutMs": 250, "operationTimeoutMs": 800 }
+        });
+        let command: ClientHostCommand = serde_json::from_value(payload.clone()).unwrap();
+        assert!(
+            matches!(command, ClientHostCommand::AutoMergeClientContainer { container: holtburger_common::Guid(7), policy } if policy.step_timeout_ms == 250 && policy.operation_timeout_ms == 800)
+        );
+        assert!(CLIENT_COMMAND_NAMES.contains(&"auto_merge_client_container"));
+        for invalid in [
+            serde_json::json!({}),
+            serde_json::json!({"stepTimeoutMs": -1, "operationTimeoutMs": 800}),
+            serde_json::json!({"stepTimeoutMs": 1.5, "operationTimeoutMs": 800}),
+            serde_json::json!({"stepTimeoutMs": 0, "operationTimeoutMs": 800}),
+            serde_json::json!({"stepTimeoutMs": 250, "operationTimeoutMs": 0}),
+            serde_json::json!({"stepTimeoutMs": (1_u64 << 53), "operationTimeoutMs": 800}),
+            serde_json::json!({"stepTimeoutMs": 250, "operationTimeoutMs": (1_u64 << 53)}),
+        ] {
+            let mut payload = payload.clone();
+            payload["policy"] = invalid;
+            assert!(serde_json::from_value::<ClientHostCommand>(payload).is_err());
+        }
+    }
+}

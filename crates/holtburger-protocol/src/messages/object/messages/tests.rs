@@ -126,10 +126,12 @@ fn test_object_description_data_parity_complex() {
         mtable_id: Some(0x09000001),
         stable_id: Some(0x20000001),
         csetup_id: Some(0x02001111),
-        parent_id: Some(Guid(0x20000001)),
-        parent_loc: Some(1),
+        parent: Some(PhysicsDescParent {
+            id: Guid(0x20000001),
+            location_id: 1,
+        }),
         obj_scale: Some(1.5),
-        default_script_id: Some(0x0F000001),
+        default_script_cue: Some(0x0F00_0001),
         default_script_intensity: Some(0.5),
         sequences: [0, 0, 0, 0, 0, 0, 0, 0, 9],
         ..ObjectDescriptionData::default()
@@ -190,8 +192,9 @@ fn test_update_property_float_unpack() {
 fn test_object_delete_fixture() {
     let expected = ObjectDeleteData {
         guid: Guid(0x50000001),
+        instance_sequence: 0x1234,
     };
-    let data = hex::decode("01000050").unwrap();
+    let data = hex::decode("0100005034120000").unwrap();
     assert_pack_unpack_parity(&data, &expected);
 }
 

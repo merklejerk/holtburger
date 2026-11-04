@@ -1,0 +1,179 @@
+import { collectEmitterInfoIds } from "./behavior-dependencies";
+import { isContentFailure } from "../../host/host-command-result";
+import type {
+	DecodedPhysicsScript,
+	DecodedPhysicsScriptRecord,
+} from "../../assets/decode-physics-script-record";
+import type { PhysicsScriptSource } from "../../assets/physics-script-source";
+import type { DatAssetId } from "../game-types";
+import {
+	PreparedAssetRepository,
+	type PreparedAssetHandle,
+} from "./prepared-asset-repository";
+
+/** Assets one script references directly, discovered once during preparation. */
+interface PhysicsScriptDependencies {
+	/** `CallPES` targets. These edges may be cyclic and are preserved, not pruned. */
+	readonly scriptIds: readonly DatAssetId[];
+	/** 0x32 `ParticleEmitterInfo` DIDs named by `CreateParticle`. */
+	readonly emitterInfoIds: readonly DatAssetId[];
+	/** 0x0A `Wave` DIDs named directly by `SoundTweaked`. */
+	readonly soundIds: readonly DatAssetId[];
+}
+
+/** Immutable prepared physics script shared independently from per-entity clock state. */
+export interface PreparedPhysicsScript {
+	readonly id: DatAssetId;
+	/** Interval at which a self-`CallPES` repeats, with no drift. */
+	readonly lengthSeconds: number;
+	/** Records in execution order: by time, ties broken by authored order. */
+	readonly records: readonly DecodedPhysicsScriptRecord[];
+	readonly dependencies: PhysicsScriptDependencies;
+}
+
+type PreparedPhysicsScriptHandle = PreparedAssetHandle<PreparedPhysicsScript>;
+
+/**
+ * Every script reachable from one root, held together and released as one unit.
+ *
+ * Activation needs the whole closure staged before the first record runs, because a `CallPES`
+ * reached mid-playback must not trigger a load at frame time.
+ */
+export interface PreparedPhysicsScriptClosure {
+	readonly rootId: DatAssetId;
+	/** Every reachable script keyed by id, including the root. */
+	readonly scripts: ReadonlyMap<DatAssetId, PreparedPhysicsScript>;
+	release(): void;
+}
+
+/** Shares immutable physics-script transfer/preparation over the common asset lifecycle. */
+export class PhysicsScriptRepository extends PreparedAssetRepository<
+	DecodedPhysicsScript,
+	PreparedPhysicsScript
+> {
+	constructor(source: PhysicsScriptSource) {
+		super({
+			retention: "session",
+			destroySource: () => source.destroy(),
+			label: "PhysicsScript",
+			load: (scriptId) => source.loadPhysicsScript(scriptId),
+			prepare: preparePhysicsScript,
+		});
+	}
+
+	/** Omit a complete unavailable effect graph; never execute an arbitrary partial script graph. */
+	async acquireOptionalClosure(
+		rootId: DatAssetId,
+	): Promise<PreparedPhysicsScriptClosure | null> {
+		try {
+			return await this.acquireClosure(rootId);
+		} catch (cause) {
+			if (!isContentFailure(cause)) throw cause;
+			this.reportContentFailure(
+				`closure:${rootId}`,
+				new Error(`Physics script ${rootId} unavailable; effect omitted.`, {
+					cause,
+				}),
+			);
+			return null;
+		}
+	}
+
+	/**
+	 * Acquire a root script and everything its `CallPES` edges reach.
+	 *
+	 * Traversal terminates on a visited set, so the shipped cyclic graphs — self-calls and mutual
+	 * two-script cycles alike — prepare finitely. The cyclic *runtime* edges survive untouched in
+	 * each script's records; only the traversal is acyclic.
+	 *
+	 * Acquisition is all-or-nothing: a failure anywhere releases every handle taken so far, so a
+	 * partially staged closure can never reach activation.
+	 */
+	async acquireClosure(
+		rootId: DatAssetId,
+	): Promise<PreparedPhysicsScriptClosure> {
+		const handles = new Map<DatAssetId, PreparedPhysicsScriptHandle>();
+		const releaseAll = () => {
+			for (const handle of handles.values()) handle.release();
+			handles.clear();
+		};
+		try {
+			let pending = [rootId];
+			while (pending.length > 0) {
+				// Each frontier loads concurrently; recording it before following edges closes cycles.
+				const acquired = await this.acquireAll(pending);
+				for (const [id, handle] of acquired) handles.set(id, handle);
+				pending = [
+					...new Set(
+						[...acquired.values()].flatMap(
+							(handle) => handle.asset.dependencies.scriptIds,
+						),
+					),
+				].filter((id) => !handles.has(id));
+			}
+		} catch (cause) {
+			releaseAll();
+			throw new Error(
+				`Physics script closure for ${rootId} could not stage its dependencies.`,
+				{ cause },
+			);
+		}
+
+		const scripts = new Map<DatAssetId, PreparedPhysicsScript>(
+			[...handles].map(([scriptId, handle]) => [scriptId, handle.asset]),
+		);
+		let released = false;
+		return {
+			release: () => {
+				if (released)
+					throw new Error(
+						`Physics script closure for ${rootId} released twice.`,
+					);
+				released = true;
+				releaseAll();
+			},
+			rootId,
+			scripts,
+		};
+	}
+}
+
+function preparePhysicsScript(
+	decoded: DecodedPhysicsScript,
+	expectedId: DatAssetId,
+): PreparedPhysicsScript {
+	if (decoded.id.toLowerCase() !== expectedId.toLowerCase()) {
+		throw new Error(
+			`Physics script source returned ${decoded.id} for ${expectedId}.`,
+		);
+	}
+	return {
+		dependencies: collectDependencies(decoded.records),
+		id: decoded.id,
+		lengthSeconds: decoded.lengthSeconds,
+		records: decoded.records,
+	};
+}
+
+/**
+ * Derive one command sequence's direct asset references from its own records.
+ *
+ * Deliberately derived rather than transported: a separate dependency list in the manifest could
+ * disagree with the records it describes, and there is exactly one right answer.
+ */
+function collectDependencies(
+	records: readonly DecodedPhysicsScriptRecord[],
+): PhysicsScriptDependencies {
+	const scriptIds = new Set<DatAssetId>();
+	const soundIds = new Set<DatAssetId>();
+	for (const record of records) {
+		if (record.kind === "call-pes") scriptIds.add(record.scriptId);
+		if (record.kind === "sound" || record.kind === "sound-tweaked")
+			soundIds.add(record.soundId);
+	}
+	return {
+		emitterInfoIds: collectEmitterInfoIds(records),
+		scriptIds: [...scriptIds],
+		soundIds: [...soundIds],
+	};
+}

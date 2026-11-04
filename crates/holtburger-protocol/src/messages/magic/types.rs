@@ -15,7 +15,7 @@ pub struct Enchantment {
     pub has_spell_set_id: u16,
     /// Relative power; higher power wins ties in the same category.
     pub power_level: u32,
-    /// World time when the effect became active.
+    /// Start offset relative to the receiver's current time when this sample arrives.
     pub start_time: f64,
     /// Total lifetime of the enchantment in seconds.
     pub duration: f64,
@@ -128,21 +128,6 @@ impl ProtocolPack for Enchantment {
         if let Some(spell_set_id) = self.spell_set_id {
             writer.write_u32::<LittleEndian>(spell_set_id).unwrap();
         }
-    }
-}
-
-impl Enchantment {
-    pub fn is_better_than(&self, other: &Self) -> bool {
-        matches!(self.compare_priority(other), std::cmp::Ordering::Greater)
-    }
-
-    pub fn compare_priority(&self, other: &Self) -> std::cmp::Ordering {
-        if self.power_level != other.power_level {
-            return self.power_level.cmp(&other.power_level);
-        }
-        self.start_time
-            .partial_cmp(&other.start_time)
-            .unwrap_or(std::cmp::Ordering::Equal)
     }
 }
 

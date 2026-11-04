@@ -1,0 +1,1852 @@
+//! Shared dynamic-entity definitions, content preparation, and state reconciliation decisions.
+
+use std::collections::BTreeSet;
+use std::f32::consts::TAU;
+use std::io::Cursor;
+use std::sync::Arc;
+use std::time::Instant;
+
+use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::{PhysicsState, RadarBehavior, WeenieType};
+use holtburger_common::{Guid, Placement, Quaternion, Vector3};
+use holtburger_content::{
+    ColliderScale, CollisionShape, ContentRepository, MaterialAppearanceInput,
+    resolve_gfx_obj_collision_shape, resolve_setup_volume_collision_shapes,
+};
+use holtburger_dat::file_type::setup_model::{AnimationFrame, AnimationHookPayload};
+use holtburger_dat::file_type::{
+    Animation, AnimationPartChange, GfxObj, ObjDesc, PhysicsScript, SetupModel, SubPalette,
+    TextureMapChange,
+};
+use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
+use holtburger_world::{
+    CollisionReportOutcome, DynamicBodyCollisionDefinition, DynamicBodyKinematics,
+    DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState,
+    EntityAppearance, EntityPhysicsSetupFacts, EntityPlacement, PhysicalBodyParticipation,
+    PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome, PhysicalBodyResponsePolicy,
+    PhysicalBodyState, PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction,
+    PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart,
+    PreparedEntityTargetGeometry, RuntimeSpatialBodyView, SpatialBody, SpatialBodyId,
+    SpatialMembership, SpatialScene, resolve_effective_entity_physics_state,
+};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::physical_body_definition::{
+    SetupPhysicalShapeError, resolve_setup_physical_spheres, setup_movement_definition,
+};
+
+pub use holtburger_world::entity_classification::{
+    DynamicEntityMapBlipCategory, DynamicEntityPresentationClass,
+    explorer_dynamic_entity_map_blip_category, explorer_dynamic_entity_presentation_class,
+    semantic_dynamic_entity_map_blip_category, semantic_dynamic_entity_presentation_class,
+};
+
+/// Stable game identity owned by either a client or Explorer registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DynamicEntityIdentity {
+    /// Live instance identity allocated by the producer composition.
+    pub guid: Guid,
+    /// Static ACE template identity used to prepare the instance.
+    pub wcid: u32,
+    /// Producer-resolved display name.
+    pub name: String,
+    /// Authoritative weenie type consumed by presentation and collision policy.
+    pub weenie_type: WeenieType,
+}
+
+/// Immutable content identities required by presentation and behavior resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityContent {
+    /// SetupModel identity that owns parts, volumes, and default behavior.
+    pub setup_did: u32,
+    /// Effective MotionTable identity that owns this entity's authored motion.
+    ///
+    /// The producer resolves a directly authored table before this projection and otherwise
+    /// uses the default installed by the setup model, matching retail object defaults
+    /// initialization. Absence therefore means neither source provides a table.
+    pub motion_table_did: Option<u32>,
+    /// Optional SoundTable identity used by presentation effects.
+    pub sound_table_did: Option<u32>,
+    /// Optional PhysicsEffectTable identity used by presentation effects.
+    pub physics_effect_table_did: Option<u32>,
+}
+
+/// Explicit producer-supplied live facts at entity creation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DynamicEntityInitialState {
+    /// Initial canonical world pose chosen by the producer.
+    pub pose: WorldPosition,
+    /// Initial world-space linear velocity.
+    pub velocity: Vector3,
+    /// Initial world-space linear acceleration.
+    pub acceleration: Vector3,
+    /// Initial world-space angular velocity.
+    pub omega: Vector3,
+    /// Producer clock instant used to initialize sampling state.
+    pub created_at: Instant,
+}
+
+/// Overhead-map facts resolved at the producer boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntityRadarFacts {
+    /// Semantic marker category resolved independently from authored color.
+    pub category: DynamicEntityMapBlipCategory,
+    /// Authored `PropertyInt::ShowableOnRadar` (133).
+    pub behavior: Option<holtburger_common::properties::RadarBehavior>,
+    /// Authored `PropertyFloat::ObviousRadarRange` (104) in metres.
+    pub obvious_range: Option<f32>,
+}
+
+impl DynamicEntityRadarFacts {
+    /// Types authored radar visibility properties for frontend consumption.
+    ///
+    /// Radar facts are cosmetic map presentation, so unusable values are omitted rather than
+    /// failing the entity. Drops are logged because they indicate content outside the domains
+    /// described by ACE and retail.
+    pub fn from_authored(
+        context: impl std::fmt::Display,
+        category: DynamicEntityMapBlipCategory,
+        behavior: Option<i32>,
+        obvious_range: Option<f64>,
+    ) -> Self {
+        Self {
+            category,
+            behavior: behavior.and_then(|value| {
+                let typed = u8::try_from(value).ok().and_then(RadarBehavior::from_repr);
+                if typed.is_none() {
+                    log::warn!(
+                        "{context} showable-on-radar {value} is outside RadarBehavior; ignoring"
+                    );
+                }
+                typed
+            }),
+            obvious_range: obvious_range.and_then(|value| {
+                let typed = value as f32;
+                if !typed.is_finite() || typed < 0.0 {
+                    log::warn!(
+                        "{context} obvious radar range {value} is not a usable distance; ignoring"
+                    );
+                    return None;
+                }
+                Some(typed)
+            }),
+        }
+    }
+}
+
+/// Constructor input whose scalar domains have not yet been validated.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicEntityDefinitionInput {
+    /// Producer-owned instance and template identity.
+    pub identity: DynamicEntityIdentity,
+    /// Optional raw authored level retained for frontend display validation.
+    pub level: Option<i32>,
+    /// Immutable DAT content identities.
+    pub content: DynamicEntityContent,
+    /// Lossless ordered material and part substitutions.
+    pub appearance: EntityAppearance,
+    /// Mutually exclusive initial world motion or parent-owned attachment.
+    pub placement: EntityPlacement<DynamicEntityInitialState>,
+    /// Uniform root scale before scalar validation.
+    pub object_scale: f32,
+    /// Optional authored friction; absence selects the ACE default.
+    pub friction: Option<f32>,
+    /// Optional authored elasticity; absence selects the ACE default.
+    pub elasticity: Option<f32>,
+    /// Current whole-object translucency before unit-interval validation.
+    pub translucency: f32,
+    /// Optional authored linear speed cap retained for behavior integration.
+    pub maximum_velocity: Option<f32>,
+    /// Optional authored rotation speed retained for behavior integration.
+    pub rotation_speed: Option<f32>,
+    /// Producer-resolved radar presentation facts consumed by overhead-map blips.
+    pub radar: DynamicEntityRadarFacts,
+    /// Setup-resolved body height at this entity's scale before scalar validation.
+    pub body_height: f32,
+    /// Fully resolved semantic state and state-derived decisions.
+    pub physics: EffectiveEntityPhysicsState,
+}
+
+/// Immutable definition facts sufficient to prepare physical geometry and response policy.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicEntityPhysicalPreparationInput {
+    /// Gameplay character identity; animation activity and physics scheduling are unrelated.
+    pub is_contact_character: bool,
+    /// Weenie class identity retained in preparation errors.
+    pub wcid: u32,
+    /// Setup resource owning movement and target geometry.
+    pub setup_did: u32,
+    /// Effective motion table captured with asynchronous preparation facts.
+    pub motion_table_did: Option<u32>,
+    /// Lossless part substitutions that may replace target BSP geometry.
+    pub appearance: EntityAppearance,
+    /// Optional authored friction; absence selects the ACE default.
+    pub friction: Option<f32>,
+    /// Optional authored elasticity; absence selects the ACE default.
+    pub elasticity: Option<f32>,
+    /// Effective semantic physics decisions consumed while deriving local physical demand.
+    pub physics: EffectiveEntityPhysicsState,
+    /// Requested setup pose; unknown or absent asset keys resolve to Default.
+    pub placement_frame: u32,
+}
+
+/// Validated source-neutral entity definition shared by both producer compositions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicEntityDefinition {
+    /// Producer-owned instance and template identity.
+    pub identity: DynamicEntityIdentity,
+    /// Optional raw authored level retained for frontend display validation.
+    pub level: Option<i32>,
+    /// Immutable DAT content identities.
+    pub content: DynamicEntityContent,
+    /// Lossless ordered material and part substitutions.
+    pub appearance: EntityAppearance,
+    /// Validated initial world motion or parent-owned attachment.
+    pub placement: EntityPlacement<DynamicEntityInitialState>,
+    /// Validated uniform root scale.
+    pub object_scale: f32,
+    /// Validated effective friction coefficient.
+    pub friction: PhysicalFriction,
+    /// Validated authored elasticity retained across `Inelastic` changes.
+    pub elasticity: PhysicalElasticity,
+    /// Validated current whole-object translucency in the inclusive unit interval.
+    pub translucency: f32,
+    /// Validated optional linear speed cap for later behavior integration.
+    pub maximum_velocity: Option<f32>,
+    /// Validated optional rotation speed for later behavior integration.
+    pub rotation_speed: Option<f32>,
+    /// Producer-resolved radar presentation facts consumed by overhead-map blips.
+    pub radar: DynamicEntityRadarFacts,
+    /// Authored body height at this entity's scale; zero for the 3.4% of templates declaring
+    /// none.
+    ///
+    /// The same fact retail keeps on the part array. Retained here rather than re-read from the
+    /// setup because the possession camera pivot needs it long after content resolution has
+    /// finished.
+    pub body_height: f32,
+    /// Fully resolved semantic state and state-derived decisions.
+    pub physics: EffectiveEntityPhysicsState,
+}
+
+/// Invalid producer facts rejected before either registry or scene is mutated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum DynamicEntityDefinitionError {
+    #[error("dynamic-entity object scale must be finite and positive")]
+    InvalidObjectScale,
+    #[error("dynamic-entity initial pose and vectors must be finite")]
+    InvalidInitialState,
+    #[error("dynamic-entity friction must be finite and between zero and one")]
+    InvalidFriction,
+    #[error("dynamic-entity elasticity must be finite")]
+    InvalidElasticity,
+    #[error("dynamic-entity translucency must be finite and between zero and one")]
+    InvalidTranslucency,
+    #[error("dynamic-entity maximum velocity must be finite and non-negative")]
+    InvalidMaximumVelocity,
+    #[error("dynamic-entity rotation speed must be finite and non-negative")]
+    InvalidRotationSpeed,
+    #[error("dynamic-entity body height must be finite and non-negative")]
+    InvalidBodyHeight,
+}
+
+/// Fully resolved one-shot launch consequences shared by producer compositions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DynamicEntityLaunchPlan {
+    /// Finite live vectors plus the resulting align-path response policy.
+    pub kinematics: DynamicBodyKinematics,
+    /// Complete semantic state after ACE's rotation-speed align-path override.
+    pub physics: EffectiveEntityPhysicsState,
+}
+
+/// A launch request that cannot be resolved from immutable definition facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum DynamicEntityLaunchError {
+    #[error("dynamic-entity launch direction must be finite and nonzero")]
+    InvalidDirection,
+    #[error("dynamic-entity launch requires catalog maximum velocity")]
+    MissingMaximumVelocity,
+    #[error("dynamic-entity launch requires positive catalog maximum velocity")]
+    ZeroMaximumVelocity,
+}
+
+impl DynamicEntityDefinition {
+    /// Validates all source scalar domains and resolves ACE coefficient defaults once.
+    pub fn prepare(
+        input: DynamicEntityDefinitionInput,
+    ) -> Result<Self, DynamicEntityDefinitionError> {
+        if !input.object_scale.is_finite() || input.object_scale <= 0.0 {
+            return Err(DynamicEntityDefinitionError::InvalidObjectScale);
+        }
+        if let EntityPlacement::World(initial) = input.placement
+            && (!world_position_is_finite(initial.pose)
+                || !vector_is_finite(initial.velocity)
+                || !vector_is_finite(initial.acceleration)
+                || !vector_is_finite(initial.omega))
+        {
+            return Err(DynamicEntityDefinitionError::InvalidInitialState);
+        }
+        let friction = input
+            .friction
+            .map(PhysicalFriction::new)
+            .transpose()
+            .map_err(|_| DynamicEntityDefinitionError::InvalidFriction)?
+            .unwrap_or(PhysicalFriction::DEFAULT);
+        let elasticity = input
+            .elasticity
+            .map(PhysicalElasticity::new)
+            .transpose()
+            .map_err(|_| DynamicEntityDefinitionError::InvalidElasticity)?
+            .unwrap_or(PhysicalElasticity::DEFAULT);
+        if !input.translucency.is_finite() || !(0.0..=1.0).contains(&input.translucency) {
+            return Err(DynamicEntityDefinitionError::InvalidTranslucency);
+        }
+        validate_non_negative_optional(
+            input.maximum_velocity,
+            DynamicEntityDefinitionError::InvalidMaximumVelocity,
+        )?;
+        validate_non_negative_optional(
+            input.rotation_speed,
+            DynamicEntityDefinitionError::InvalidRotationSpeed,
+        )?;
+        // Zero is authored content meaning "declares no height"; negative or non-finite is a
+        // resolution bug on our side, so it fails rather than reaching a consumer.
+        if !input.body_height.is_finite() || input.body_height < 0.0 {
+            return Err(DynamicEntityDefinitionError::InvalidBodyHeight);
+        }
+
+        Ok(Self {
+            identity: input.identity,
+            level: input.level,
+            content: input.content,
+            appearance: input.appearance,
+            placement: input.placement,
+            object_scale: input.object_scale,
+            friction,
+            elasticity,
+            translucency: input.translucency,
+            maximum_velocity: input.maximum_velocity,
+            rotation_speed: input.rotation_speed,
+            radar: input.radar,
+            body_height: input.body_height,
+            physics: input.physics,
+        })
+    }
+}
+
+/// Resolves explicit direction against catalog speed and ACE's authored spin convention.
+///
+/// ACE assigns projectile omega on world X as `2π * RotationSpeed` and clears `AlignPath` when
+/// that value is nonzero (`SpellProjectile.Setup` and `Creature.SetProjectilePhysicsState`).
+pub fn resolve_dynamic_entity_launch(
+    definition: &DynamicEntityDefinition,
+    direction: Vector3,
+) -> Result<DynamicEntityLaunchPlan, DynamicEntityLaunchError> {
+    if !direction.x.is_finite() || !direction.y.is_finite() || !direction.z.is_finite() {
+        return Err(DynamicEntityLaunchError::InvalidDirection);
+    }
+    let direction_length = direction.length();
+    if !direction_length.is_finite() || direction_length <= f32::EPSILON {
+        return Err(DynamicEntityLaunchError::InvalidDirection);
+    }
+    let maximum_velocity = definition
+        .maximum_velocity
+        .ok_or(DynamicEntityLaunchError::MissingMaximumVelocity)?;
+    if maximum_velocity <= f32::EPSILON {
+        return Err(DynamicEntityLaunchError::ZeroMaximumVelocity);
+    }
+    let rotation_speed = definition.rotation_speed.unwrap_or(0.0);
+    let omega = if rotation_speed > f32::EPSILON {
+        Vector3::new(TAU * rotation_speed, 0.0, 0.0)
+    } else {
+        Vector3::zero()
+    };
+    let semantic = if rotation_speed > f32::EPSILON {
+        definition.physics.semantic & !PhysicsState::ALIGN_PATH
+    } else {
+        definition.physics.semantic
+    };
+    let physics = resolve_effective_entity_physics_state(semantic);
+    let kinematics = DynamicBodyKinematics::new(
+        direction / direction_length * maximum_velocity,
+        Vector3::zero(),
+        omega,
+        physics.response.align_path,
+    )
+    .expect("validated launch facts must produce finite kinematics");
+    Ok(DynamicEntityLaunchPlan {
+        kinematics,
+        physics,
+    })
+}
+
+/// Physical preparation rejection with enough identity to explain the exact source failure.
+#[derive(Debug, Error)]
+pub enum DynamicEntityPhysicalPreparationError {
+    #[error("invalid position-free physical definition: {0}")]
+    Definition(#[from] DynamicEntityDefinitionError),
+    #[error(
+        "WCID {wcid} cannot be locally simulated with physics state 0x{state:08X}: unsupported bits 0x{unsupported_bits:08X}, unknown bits 0x{unknown_bits:08X}"
+    )]
+    UnsupportedPhysicsState {
+        wcid: u32,
+        state: u32,
+        unsupported_bits: u32,
+        unknown_bits: u32,
+    },
+    #[error("WCID {wcid} setup 0x{setup_did:08X} has invalid movement geometry: {source}")]
+    MovementGeometry {
+        wcid: u32,
+        setup_did: u32,
+        #[source]
+        source: SetupPhysicalShapeError,
+    },
+    #[error(
+        "WCID {wcid} setup 0x{setup_did:08X} physics script 0x{script_did:08X} contains unsupported collision-mutating hook {hook_type}"
+    )]
+    CollisionMutatingScript {
+        wcid: u32,
+        setup_did: u32,
+        script_did: u32,
+        hook_type: u32,
+    },
+    #[error(
+        "WCID {wcid} setup 0x{setup_did:08X} appearance references missing part index {part_index}"
+    )]
+    InvalidAppearancePart {
+        wcid: u32,
+        setup_did: u32,
+        part_index: usize,
+    },
+    #[error("could not prepare WCID {wcid} content resource 0x{resource_did:08X}: {source}")]
+    Content {
+        wcid: u32,
+        resource_did: u32,
+        #[source]
+        source: anyhow::Error,
+    },
+}
+
+/// Setup-derived facts needed before the complete effective state and body policy can be frozen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DynamicEntitySetupPreparation {
+    /// Setup/Gfx-derived replacements for state-owned behavior and target-branch bits.
+    pub physics: EntityPhysicsSetupFacts,
+    /// Validated movement spheres used for placement even when the entity remains pose-only.
+    pub movement_spheres: PhysicalSphereSet,
+    /// Authored unit-scale setup height; zero where the setup declares none.
+    pub body_height: f32,
+}
+
+/// Failure to apply a shared body operation to the supplied canonical scene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum DynamicEntityBodyOperationError {
+    #[error("dynamic entity body {body_id:?} is already registered")]
+    AlreadyRegistered { body_id: SpatialBodyId },
+    #[error("dynamic entity body {body_id:?} is not registered")]
+    NotRegistered { body_id: SpatialBodyId },
+    #[error("dynamic entity body {body_id:?} has no physical participation")]
+    NotPhysical { body_id: SpatialBodyId },
+}
+
+/// Complete body facts returned after an install or physical-state replacement commits.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicEntityBodyCommitOutcome {
+    /// Canonical body view read after the scene mutation committed.
+    pub body: RuntimeSpatialBodyView,
+    /// Physical participation after the commit.
+    pub participation: PhysicalBodyParticipation,
+    /// Exact participation/reconfiguration change applied by the scene.
+    pub physical_change: PhysicalBodyReconfigurationOutcome,
+}
+
+/// Complete body facts returned after removal commits.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicEntityBodyRemovalOutcome {
+    /// Final canonical body view that was removed.
+    pub body: RuntimeSpatialBodyView,
+    /// Physical participation immediately before removal.
+    pub participation: PhysicalBodyParticipation,
+    /// Balanced forced ends for every report lifetime involving the retired body.
+    pub collision_reports: Vec<CollisionReportOutcome>,
+}
+
+/// Exact old/new body facts returned after a complete same-identity replacement commits.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicEntityBodyReplacementOutcome {
+    /// Final body facts retired from the previous instance generation.
+    pub removed: DynamicEntityBodyRemovalOutcome,
+    /// Canonical body facts installed for the successor generation.
+    pub installed: DynamicEntityBodyCommitOutcome,
+}
+
+/// Source-neutral semantic/body join consumed by focused frontend projection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicEntityProjectionInput {
+    /// Current semantic identity copied from the producer definition.
+    pub identity: DynamicEntityIdentity,
+    /// Optional raw authored level retained for frontend display validation.
+    pub level: Option<i32>,
+    /// Immutable presentation content identities.
+    pub content: DynamicEntityContent,
+    /// Ordered presentation appearance substitutions.
+    pub appearance: EntityAppearance,
+    /// Uniform root presentation scale.
+    pub object_scale: f32,
+    /// Validated current whole-object translucency in the inclusive unit interval.
+    pub translucency: f32,
+    /// Current complete semantic physics state.
+    pub physics: EffectiveEntityPhysicsState,
+    /// Producer-resolved radar presentation facts consumed by overhead-map blips.
+    pub radar: DynamicEntityRadarFacts,
+    /// Mutually exclusive current solver state or parent-owned attachment.
+    pub placement: EntityPlacement<DynamicEntityWorldProjection>,
+}
+
+/// Frontend-reconstructible source-domain membership accepted with one world placement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicEntitySpatialMembership {
+    /// Whether the accepted body geometry reaches any outdoor land cell.
+    pub reaches_outdoors: bool,
+    /// Deduplicated EnvCells reached by the accepted body geometry.
+    pub reached_env_cell_ids: Vec<Guid>,
+}
+
+impl From<&SpatialMembership> for DynamicEntitySpatialMembership {
+    fn from(membership: &SpatialMembership) -> Self {
+        Self {
+            reaches_outdoors: membership.reaches_outdoors(),
+            reached_env_cell_ids: membership.reached_env_cells().to_vec(),
+        }
+    }
+}
+
+/// Complete solver-owned world arm used by dynamic-entity projection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicEntityWorldProjection {
+    /// Current canonical body view.
+    pub body: RuntimeSpatialBodyView,
+    /// Complete source-domain membership accepted atomically with `body.runtime_pose`.
+    pub spatial_membership: DynamicEntitySpatialMembership,
+    /// Current local physical participation derived from the body.
+    pub participation: PhysicalBodyParticipation,
+}
+
+/// Registers one canonical pose body, then optionally installs its prepared physical definition.
+///
+/// The operation rejects duplicate identity before mutation. The returned view is read from the
+/// committed scene rather than reconstructed from the request.
+pub fn install_dynamic_entity_body(
+    scene: &mut SpatialScene,
+    definition: &DynamicEntityDefinition,
+    initial: DynamicEntityInitialState,
+    physical: Option<DynamicPhysicalBodyConfiguration>,
+) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
+    let body_id = SpatialBodyId::Entity(definition.identity.guid);
+    if scene.body(body_id).is_some() {
+        return Err(DynamicEntityBodyOperationError::AlreadyRegistered { body_id });
+    }
+    let (body, physical_change) = build_dynamic_entity_body(definition, initial, physical);
+    scene.register_body(body);
+    committed_body_outcome(scene, body_id, physical_change)
+}
+
+/// Applies one complete optional physical configuration and returns only committed scene facts.
+pub fn set_dynamic_entity_physical_configuration(
+    scene: &mut SpatialScene,
+    body_id: SpatialBodyId,
+    replacement: Option<DynamicPhysicalBodyConfiguration>,
+) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
+    let pose = scene
+        .body(body_id)
+        .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?
+        .pose;
+    let initial_cell = pose.is_indoors().then_some(pose.landblock_id);
+    let physical_change = scene
+        .set_dynamic_physical_body(
+            body_id,
+            replacement,
+            PhysicalCollisionFilter::ALL,
+            initial_cell,
+        )
+        .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
+    committed_body_outcome(scene, body_id, physical_change)
+}
+
+/// Removes one canonical body and returns the exact final facts that were retired.
+pub fn remove_dynamic_entity_body(
+    scene: &mut SpatialScene,
+    body_id: SpatialBodyId,
+) -> Result<DynamicEntityBodyRemovalOutcome, DynamicEntityBodyOperationError> {
+    let (removed, collision_reports) = scene
+        .remove_body_with_collision_reports(body_id)
+        .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
+    Ok(DynamicEntityBodyRemovalOutcome {
+        body: removed.runtime_view(),
+        participation: participation(removed.physical.is_some()),
+        collision_reports,
+    })
+}
+
+/// Replaces one same-identity body atomically from the caller's point of view.
+///
+/// The complete successor is constructed before the one scene replacement. Semantic publication
+/// remains producer-owned and occurs only after this operation returns success.
+pub fn replace_dynamic_entity_body(
+    scene: &mut SpatialScene,
+    definition: &DynamicEntityDefinition,
+    initial: DynamicEntityInitialState,
+    physical: Option<DynamicPhysicalBodyConfiguration>,
+) -> Result<DynamicEntityBodyReplacementOutcome, DynamicEntityBodyOperationError> {
+    let body_id = SpatialBodyId::Entity(definition.identity.guid);
+    if scene.body(body_id).is_none() {
+        return Err(DynamicEntityBodyOperationError::NotRegistered { body_id });
+    }
+    let (successor, physical_change) = build_dynamic_entity_body(definition, initial, physical);
+    let collision_reports = scene.force_end_collision_reports_for_body(body_id);
+    let removed_body = scene
+        .register_body(successor)
+        .expect("prevalidated same-identity replacement lost its previous body");
+    let removed = DynamicEntityBodyRemovalOutcome {
+        body: removed_body.runtime_view(),
+        participation: participation(removed_body.physical.is_some()),
+        collision_reports,
+    };
+    let installed = committed_body_outcome(scene, body_id, physical_change)?;
+    Ok(DynamicEntityBodyReplacementOutcome { removed, installed })
+}
+
+fn build_dynamic_entity_body(
+    definition: &DynamicEntityDefinition,
+    initial: DynamicEntityInitialState,
+    physical: Option<DynamicPhysicalBodyConfiguration>,
+) -> (SpatialBody, PhysicalBodyReconfigurationOutcome) {
+    let body_id = SpatialBodyId::Entity(definition.identity.guid);
+    let mut body = SpatialBody::new(body_id, initial.pose, initial.created_at);
+    body.retained = holtburger_world::RetainedBodyKinematics {
+        velocity: initial.velocity,
+        acceleration: initial.acceleration,
+        omega: initial.omega,
+    };
+    let physical_change = if let Some(physical) = physical {
+        let initial_cell = initial
+            .pose
+            .is_indoors()
+            .then_some(initial.pose.landblock_id);
+        body.physical = Some(PhysicalBodyState::new_dynamic(
+            physical,
+            PhysicalCollisionFilter::ALL,
+            initial_cell,
+        ));
+        PhysicalBodyReconfigurationOutcome {
+            before: PhysicalBodyParticipation::PoseOnly,
+            after: PhysicalBodyParticipation::Physical,
+            change: PhysicalBodyReconfiguration::Installed,
+            response_memory_preserved: false,
+            collision_reports: Vec::new(),
+        }
+    } else {
+        PhysicalBodyReconfigurationOutcome {
+            before: PhysicalBodyParticipation::PoseOnly,
+            after: PhysicalBodyParticipation::PoseOnly,
+            change: PhysicalBodyReconfiguration::Unchanged,
+            response_memory_preserved: false,
+            collision_reports: Vec::new(),
+        }
+    };
+    (body, physical_change)
+}
+
+/// Joins immutable semantic facts with the scene's current committed body view.
+pub fn dynamic_entity_projection_input(
+    definition: &DynamicEntityDefinition,
+    scene: &SpatialScene,
+) -> Result<DynamicEntityProjectionInput, DynamicEntityBodyOperationError> {
+    if let EntityPlacement::Attached(attachment) = definition.placement {
+        return Ok(projection_input(
+            definition,
+            EntityPlacement::Attached(attachment),
+        ));
+    }
+    let body_id = SpatialBodyId::Entity(definition.identity.guid);
+    let body = scene
+        .body(body_id)
+        .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
+    dynamic_entity_projection_input_from_body(definition, body)
+}
+
+/// Joins immutable semantic facts with one already-captured canonical body.
+///
+/// Collection adapters use this form while holding their producer generation stable, avoiding a
+/// second simulation lock acquisition merely to restate the body that just committed.
+pub fn dynamic_entity_projection_input_from_body(
+    definition: &DynamicEntityDefinition,
+    body: &SpatialBody,
+) -> Result<DynamicEntityProjectionInput, DynamicEntityBodyOperationError> {
+    let body_id = SpatialBodyId::Entity(definition.identity.guid);
+    if body.id != body_id {
+        return Err(DynamicEntityBodyOperationError::NotRegistered { body_id });
+    }
+    Ok(projection_input(
+        definition,
+        EntityPlacement::World(DynamicEntityWorldProjection {
+            body: body.runtime_view(),
+            spatial_membership: DynamicEntitySpatialMembership::from(&body.spatial_membership()),
+            participation: participation(body.physical.is_some()),
+        }),
+    ))
+}
+
+fn projection_input(
+    definition: &DynamicEntityDefinition,
+    placement: EntityPlacement<DynamicEntityWorldProjection>,
+) -> DynamicEntityProjectionInput {
+    DynamicEntityProjectionInput {
+        identity: definition.identity.clone(),
+        level: definition.level,
+        content: definition.content,
+        appearance: definition.appearance.clone(),
+        object_scale: definition.object_scale,
+        translucency: definition.translucency,
+        physics: definition.physics,
+        radar: definition.radar,
+        placement,
+    }
+}
+
+fn committed_body_outcome(
+    scene: &SpatialScene,
+    body_id: SpatialBodyId,
+    physical_change: PhysicalBodyReconfigurationOutcome,
+) -> Result<DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError> {
+    let body = scene
+        .body(body_id)
+        .ok_or(DynamicEntityBodyOperationError::NotRegistered { body_id })?;
+    Ok(DynamicEntityBodyCommitOutcome {
+        body: body.runtime_view(),
+        participation: participation(body.physical.is_some()),
+        physical_change,
+    })
+}
+
+const fn participation(physical: bool) -> PhysicalBodyParticipation {
+    if physical {
+        PhysicalBodyParticipation::Physical
+    } else {
+        PhysicalBodyParticipation::PoseOnly
+    }
+}
+
+/// Resolves complete solver facts without mutating a registry or [`holtburger_world::SpatialScene`].
+pub fn prepare_dynamic_entity_physics(
+    definition: &DynamicEntityDefinition,
+    content: &ContentRepository,
+    cache: &holtburger_content::ContentDecodeCache,
+) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
+    prepare_dynamic_entity_physical_facts(
+        DynamicEntityPhysicalFacts {
+            is_contact_character: matches!(
+                definition.identity.weenie_type,
+                WeenieType::Creature
+                    | WeenieType::Cow
+                    | WeenieType::AI
+                    | WeenieType::Pet
+                    | WeenieType::CombatPet
+            ),
+            wcid: definition.identity.wcid,
+            setup_did: definition.content.setup_did,
+            motion_table_did: definition.content.motion_table_did,
+            appearance: &definition.appearance,
+            placement_frame: match &definition.placement {
+                EntityPlacement::World(_) => Placement::Resting as u32,
+                EntityPlacement::Attached(attachment) => attachment.placement as u32,
+            },
+            friction: definition.friction,
+            elasticity: definition.elasticity,
+            physics: definition.physics,
+        },
+        content,
+        cache,
+    )
+}
+
+/// Resolves complete solver facts from a position-free immutable definition contract.
+pub fn prepare_dynamic_entity_physical_definition(
+    input: DynamicEntityPhysicalPreparationInput,
+    content: &ContentRepository,
+    cache: &holtburger_content::ContentDecodeCache,
+) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
+    let friction = input
+        .friction
+        .map(PhysicalFriction::new)
+        .transpose()
+        .map_err(|_| DynamicEntityDefinitionError::InvalidFriction)?
+        .unwrap_or(PhysicalFriction::DEFAULT);
+    let elasticity = input
+        .elasticity
+        .map(PhysicalElasticity::new)
+        .transpose()
+        .map_err(|_| DynamicEntityDefinitionError::InvalidElasticity)?
+        .unwrap_or(PhysicalElasticity::DEFAULT);
+    prepare_dynamic_entity_physical_facts(
+        DynamicEntityPhysicalFacts {
+            is_contact_character: input.is_contact_character,
+            wcid: input.wcid,
+            setup_did: input.setup_did,
+            motion_table_did: input.motion_table_did,
+            appearance: &input.appearance,
+            placement_frame: input.placement_frame,
+            friction,
+            elasticity,
+            physics: input.physics,
+        },
+        content,
+        cache,
+    )
+}
+
+struct DynamicEntityPhysicalFacts<'a> {
+    is_contact_character: bool,
+    wcid: u32,
+    setup_did: u32,
+    motion_table_did: Option<u32>,
+    appearance: &'a EntityAppearance,
+    placement_frame: u32,
+    friction: PhysicalFriction,
+    elasticity: PhysicalElasticity,
+    physics: EffectiveEntityPhysicsState,
+}
+
+fn prepare_dynamic_entity_physical_facts(
+    facts: DynamicEntityPhysicalFacts<'_>,
+    content: &ContentRepository,
+    cache: &holtburger_content::ContentDecodeCache,
+) -> Result<DynamicPhysicalBodyDefinition, DynamicEntityPhysicalPreparationError> {
+    let DynamicEntityPhysicalFacts {
+        is_contact_character,
+        wcid,
+        setup_did,
+        motion_table_did,
+        appearance,
+        placement_frame,
+        friction,
+        elasticity,
+        physics,
+    } = facts;
+    if !physics.supports_local_simulation() {
+        return Err(
+            DynamicEntityPhysicalPreparationError::UnsupportedPhysicsState {
+                wcid,
+                state: physics.semantic.bits(),
+                unsupported_bits: physics.unsupported_local_simulation.bits(),
+                unknown_bits: physics.unknown_bits,
+            },
+        );
+    }
+
+    let setup = read_setup(content, wcid, setup_did)?;
+    let setup_preparation = prepare_setup(wcid, setup_did, &setup, content)?;
+    let movement_spheres = setup_preparation.movement_spheres;
+    let response_policy = PhysicalBodyResponsePolicy {
+        restitution: if physics.response.inelastic {
+            PhysicalRestitution::Inelastic
+        } else {
+            PhysicalRestitution::Elastic(elasticity)
+        },
+        friction,
+        surface_motion: PhysicalSurfaceMotion::Stable,
+        align_path: physics.response.align_path,
+    };
+    let movement = setup_movement_definition(&setup, movement_spheres, physics, response_policy)
+        .map_err(
+            |source| DynamicEntityPhysicalPreparationError::MovementGeometry {
+                wcid,
+                setup_did,
+                source,
+            },
+        )?;
+    let mut target_geometry = prepare_target_geometry(
+        wcid,
+        setup_did,
+        appearance,
+        placement_frame,
+        &setup,
+        setup_preparation.physics.has_physics_bsp,
+        content,
+    )?;
+
+    target_geometry.collision_animations =
+        holtburger_content::collision_pose::CollisionPoseLibrary::prepare(
+            content,
+            cache,
+            motion_table_did.or(setup.default_motion_table),
+            setup.default_animation,
+            &target_geometry
+                .physics_bsp_parts
+                .iter()
+                .map(|part| part.part_index)
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|source| DynamicEntityPhysicalPreparationError::Content {
+            wcid,
+            resource_did: setup_did,
+            source,
+        })?;
+
+    Ok(DynamicPhysicalBodyDefinition {
+        movement,
+        response_policy,
+        entity_collision: DynamicBodyCollisionDefinition {
+            player_collision: None,
+            contact_response: if is_contact_character {
+                holtburger_world::EntityContactResponse::Character(physics.integration_eligibility)
+            } else {
+                holtburger_world::EntityContactResponse::Obstacle
+            },
+            target_geometry: Arc::new(target_geometry),
+            dynamic_collision: physics.dynamic_collision,
+            reporting: physics.reporting,
+            uses_physics_bsp: physics.uses_physics_bsp,
+            elasticity,
+            default_animation_available: setup.default_animation.is_some(),
+            default_script_available: setup.default_script_did.is_some(),
+        },
+    })
+}
+
+/// Resolves setup-owned state bits and movement geometry before local demand is applied.
+///
+/// Pose-only realization still needs the movement sphere to resolve its authoritative EnvCell, but
+/// it does not prepare target collision geometry or validate default physics-script stability.
+pub fn prepare_dynamic_entity_setup(
+    wcid: u32,
+    setup_did: u32,
+    content: &ContentRepository,
+) -> Result<DynamicEntitySetupPreparation, DynamicEntityPhysicalPreparationError> {
+    let setup = read_setup(content, wcid, setup_did)?;
+    prepare_setup(wcid, setup_did, &setup, content)
+}
+
+fn prepare_setup(
+    wcid: u32,
+    setup_did: u32,
+    setup: &SetupModel,
+    content: &ContentRepository,
+) -> Result<DynamicEntitySetupPreparation, DynamicEntityPhysicalPreparationError> {
+    let movement_spheres = resolve_setup_physical_spheres(setup, 1.0).map_err(|source| {
+        DynamicEntityPhysicalPreparationError::MovementGeometry {
+            wcid,
+            setup_did,
+            source,
+        }
+    })?;
+    let mut has_physics_bsp = false;
+    for gfx_obj_did in &setup.parts {
+        has_physics_bsp |= read_gfx_shape(content, wcid, *gfx_obj_did)?.is_some();
+    }
+    Ok(DynamicEntitySetupPreparation {
+        physics: EntityPhysicsSetupFacts {
+            has_physics_bsp,
+            has_default_animation: setup.default_animation.is_some(),
+            has_default_script: setup.default_script_did.is_some(),
+        },
+        movement_spheres,
+        body_height: setup.height,
+    })
+}
+
+/// Converts the shared semantic appearance into the existing content resolver's DAT-shaped input.
+pub fn material_appearance_input(appearance: &EntityAppearance) -> MaterialAppearanceInput {
+    let is_empty = appearance.palette_did.is_none()
+        && appearance.sub_palettes.is_empty()
+        && appearance.texture_changes.is_empty()
+        && appearance.part_changes.is_empty();
+    MaterialAppearanceInput {
+        obj_desc: (!is_empty).then(|| entity_obj_desc(appearance)),
+    }
+}
+
+/// Lossless DAT-shaped substitutions for both material resolution and barber interpretation.
+pub(crate) fn entity_obj_desc(appearance: &EntityAppearance) -> ObjDesc {
+    ObjDesc {
+        palette_id: appearance.palette_did,
+        sub_palettes: appearance
+            .sub_palettes
+            .iter()
+            .map(|range| SubPalette {
+                sub_id: range.palette_did,
+                offset: range.offset,
+                num_colors: range.color_count,
+            })
+            .collect(),
+        texture_changes: appearance
+            .texture_changes
+            .iter()
+            .map(|change| TextureMapChange {
+                part_index: change.part_index,
+                old_texture: change.old_texture_did,
+                new_texture: change.new_texture_did,
+            })
+            .collect(),
+        anim_part_changes: appearance
+            .part_changes
+            .iter()
+            .map(|change| AnimationPartChange {
+                part_index: change.part_index,
+                part_id: change.gfx_obj_did,
+            })
+            .collect(),
+    }
+}
+
+fn prepare_target_geometry(
+    wcid: u32,
+    setup_did: u32,
+    appearance: &EntityAppearance,
+    placement_frame: u32,
+    setup: &SetupModel,
+    cached_bsp_branch: bool,
+    content: &ContentRepository,
+) -> Result<PreparedEntityTargetGeometry, DynamicEntityPhysicalPreparationError> {
+    validate_default_script_collision_support(wcid, setup_did, setup.default_script_did, content)?;
+
+    let mut effective_part_dids = setup.parts.clone();
+    for change in &appearance.part_changes {
+        let part_index = usize::from(change.part_index);
+        let Some(part_did) = effective_part_dids.get_mut(part_index) else {
+            return Err(
+                DynamicEntityPhysicalPreparationError::InvalidAppearancePart {
+                    wcid,
+                    setup_did,
+                    part_index,
+                },
+            );
+        };
+        *part_did = change.gfx_obj_did;
+    }
+
+    let default_animation = setup
+        .default_animation
+        .map(|animation_did| read_animation(content, wcid, animation_did))
+        .transpose()?;
+    let mut effective_bsp_shapes = Vec::new();
+    if cached_bsp_branch {
+        for (part_index, gfx_obj_did) in effective_part_dids.iter().copied().enumerate() {
+            if let Some(shape) = read_gfx_shape(content, wcid, gfx_obj_did)? {
+                effective_bsp_shapes.push((part_index, gfx_obj_did, shape));
+            }
+        }
+    }
+
+    validate_setup_part_arrays(wcid, setup_did, setup)?;
+    let frames = stable_part_frames(setup, default_animation.as_ref(), placement_frame);
+    if let Some(frames) = frames
+        && frames.frames.len() != setup.parts.len()
+    {
+        return Err(DynamicEntityPhysicalPreparationError::Content {
+            wcid,
+            resource_did: setup_did,
+            source: anyhow::anyhow!(
+                "selected part frame has {} frames for {} setup parts",
+                frames.frames.len(),
+                setup.parts.len()
+            ),
+        });
+    }
+    let whole_scale = ColliderScale::uniform(1.0).map_err(|source| {
+        DynamicEntityPhysicalPreparationError::Content {
+            wcid,
+            resource_did: setup_did,
+            source,
+        }
+    })?;
+    let physics_bsp_parts = effective_bsp_shapes
+        .into_iter()
+        .map(|(part_index, gfx_obj_did, shape)| {
+            let (local_origin, local_orientation) =
+                frames.map_or((Vector3::zero(), Quaternion::identity()), |frames| {
+                    let frame = &frames.frames[part_index];
+                    (frame.origin, frame.orientation)
+                });
+            let part_scale = setup
+                .default_scale
+                .get(part_index)
+                .copied()
+                .unwrap_or(Vector3::new(1.0, 1.0, 1.0));
+            let scale = ColliderScale::from_components(part_scale).map_err(|source| {
+                DynamicEntityPhysicalPreparationError::Content {
+                    wcid,
+                    resource_did: setup_did,
+                    source,
+                }
+            })?;
+            Ok(PreparedEntityBspPart {
+                part_index,
+                gfx_obj_did,
+                local_origin,
+                local_orientation,
+                scale,
+                shape,
+            })
+        })
+        .collect::<Result<Vec<_>, DynamicEntityPhysicalPreparationError>>()?;
+    let fallback_shapes =
+        resolve_setup_volume_collision_shapes(setup_did, setup).map_err(|source| {
+            DynamicEntityPhysicalPreparationError::Content {
+                wcid,
+                resource_did: setup_did,
+                source,
+            }
+        })?;
+
+    Ok(PreparedEntityTargetGeometry {
+        setup_radius: setup.radius,
+        setup_height: setup.height,
+        collision_animations: Default::default(),
+        physics_bsp_parts,
+        fallback_setup_did: setup_did,
+        fallback_shapes,
+        fallback_scale: whole_scale,
+    })
+}
+
+fn validate_setup_part_arrays(
+    wcid: u32,
+    setup_did: u32,
+    setup: &SetupModel,
+) -> Result<(), DynamicEntityPhysicalPreparationError> {
+    if !setup.default_scale.is_empty() && setup.default_scale.len() != setup.parts.len() {
+        return Err(DynamicEntityPhysicalPreparationError::Content {
+            wcid,
+            resource_did: setup_did,
+            source: anyhow::anyhow!(
+                "SetupModel has {} default scales for {} parts",
+                setup.default_scale.len(),
+                setup.parts.len()
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn stable_part_frames<'a>(
+    setup: &'a SetupModel,
+    default_animation: Option<&'a Animation>,
+    placement_frame: u32,
+) -> Option<&'a AnimationFrame> {
+    default_animation
+        .and_then(|animation| animation.part_frames.first())
+        .or_else(|| {
+            Placement::from_key(placement_frame)
+                .and_then(|placement| setup.placement_frames.get(&placement))
+                .or_else(|| setup.placement_frames.get(&Placement::Default))
+                .map(|placement| &placement.anim_frame)
+        })
+}
+
+fn validate_default_script_collision_support(
+    wcid: u32,
+    setup_did: u32,
+    root_script_did: Option<u32>,
+    content: &ContentRepository,
+) -> Result<(), DynamicEntityPhysicalPreparationError> {
+    let Some(root_script_did) = root_script_did else {
+        return Ok(());
+    };
+    let mut pending = BTreeSet::from([root_script_did]);
+    let mut visited = BTreeSet::new();
+    while let Some(script_did) = pending.pop_first() {
+        if !visited.insert(script_did) {
+            continue;
+        }
+        let script = read_physics_script(content, wcid, script_did)?;
+        for record in &script.records {
+            if unsupported_collision_hook(record.hook.hook_type) {
+                return Err(
+                    DynamicEntityPhysicalPreparationError::CollisionMutatingScript {
+                        wcid,
+                        setup_did,
+                        script_did,
+                        hook_type: record.hook.hook_type,
+                    },
+                );
+            }
+            if let AnimationHookPayload::CallPes(call) = &record.hook.payload {
+                pending.insert(call.script_id);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn unsupported_collision_hook(hook_type: u32) -> bool {
+    // Whole-object Scale is supported: this preparation retains unit geometry, and the world
+    // applies effective scale at installation and on later script updates. Scale does not replace
+    // that geometry. Producers remain responsible for executing the script's scale timeline.
+    // ReplaceObject, Ethereal, SetOmega, and CreateBlockingParticle still mutate unsupported
+    // collision identity, filtering, transforms, or blockers. Unknown hooks fail closed.
+    matches!(hook_type, 5 | 6 | 22 | 26) || hook_type > 26
+}
+
+fn read_setup(
+    content: &ContentRepository,
+    wcid: u32,
+    setup_did: u32,
+) -> Result<SetupModel, DynamicEntityPhysicalPreparationError> {
+    let resource = read_resource(content, wcid, setup_did)?;
+    SetupModel::unpack(&mut Cursor::new(resource.bytes)).map_err(|source| {
+        DynamicEntityPhysicalPreparationError::Content {
+            wcid,
+            resource_did: setup_did,
+            source: source.into(),
+        }
+    })
+}
+
+fn read_gfx_shape(
+    content: &ContentRepository,
+    wcid: u32,
+    gfx_obj_did: u32,
+) -> Result<Option<Arc<CollisionShape>>, DynamicEntityPhysicalPreparationError> {
+    let resource = read_resource(content, wcid, gfx_obj_did)?;
+    let gfx_obj = GfxObj::unpack(&mut Cursor::new(resource.bytes)).map_err(|source| {
+        DynamicEntityPhysicalPreparationError::Content {
+            wcid,
+            resource_did: gfx_obj_did,
+            source: source.into(),
+        }
+    })?;
+    resolve_gfx_obj_collision_shape(gfx_obj_did, &gfx_obj).map_err(|source| {
+        DynamicEntityPhysicalPreparationError::Content {
+            wcid,
+            resource_did: gfx_obj_did,
+            source,
+        }
+    })
+}
+
+fn read_animation(
+    content: &ContentRepository,
+    wcid: u32,
+    animation_did: u32,
+) -> Result<Animation, DynamicEntityPhysicalPreparationError> {
+    let resource = read_resource(content, wcid, animation_did)?;
+    Animation::read(&mut Cursor::new(resource.bytes)).map_err(|source| {
+        DynamicEntityPhysicalPreparationError::Content {
+            wcid,
+            resource_did: animation_did,
+            source: source.into(),
+        }
+    })
+}
+
+fn read_physics_script(
+    content: &ContentRepository,
+    wcid: u32,
+    script_did: u32,
+) -> Result<PhysicsScript, DynamicEntityPhysicalPreparationError> {
+    let resource = read_resource(content, wcid, script_did)?;
+    PhysicsScript::read(&mut Cursor::new(resource.bytes)).map_err(|source| {
+        DynamicEntityPhysicalPreparationError::Content {
+            wcid,
+            resource_did: script_did,
+            source: source.into(),
+        }
+    })
+}
+
+fn read_resource(
+    content: &ContentRepository,
+    wcid: u32,
+    resource_did: u32,
+) -> Result<holtburger_content::repository::RepositoryResource, DynamicEntityPhysicalPreparationError>
+{
+    content
+        .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, resource_did))
+        .map_err(|source| DynamicEntityPhysicalPreparationError::Content {
+            wcid,
+            resource_did,
+            source,
+        })
+}
+
+fn validate_non_negative_optional(
+    value: Option<f32>,
+    error: DynamicEntityDefinitionError,
+) -> Result<(), DynamicEntityDefinitionError> {
+    if value.is_some_and(|value| !value.is_finite() || value < 0.0) {
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn vector_is_finite(vector: Vector3) -> bool {
+    vector.x.is_finite() && vector.y.is_finite() && vector.z.is_finite()
+}
+
+fn quaternion_is_finite(rotation: Quaternion) -> bool {
+    rotation.w.is_finite()
+        && rotation.x.is_finite()
+        && rotation.y.is_finite()
+        && rotation.z.is_finite()
+}
+
+fn world_position_is_finite(position: WorldPosition) -> bool {
+    vector_is_finite(position.coords) && quaternion_is_finite(position.rotation)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::physical_body_definition::retail_grounded_body_with_policy;
+    use holtburger_common::properties::PhysicsState;
+    use holtburger_content::{
+        CollisionBall, LandblockColliders, LandblockCollisionAsset, TerrainCollisionSurface,
+    };
+    use holtburger_world::EdgeProtection;
+    use holtburger_world::{
+        DynamicBodyCollisionDefinition, EntityCollisionParticipation, EntityPartChange,
+        EntitySubPalette, EntityTextureChange, GroundedBodyActuation, LocalIntegrationDemand,
+        LocalPhysicalDemand, LocalTargetDemand, PhysicalBodyActuation, PhysicalSphereSet,
+        resolve_effective_entity_physics_state,
+    };
+
+    #[test]
+    fn stable_geometry_uses_requested_placement_with_default_fallback_and_animation_precedence() {
+        use holtburger_dat::file_type::animation::AnimationFlags;
+        use holtburger_dat::file_type::setup_model::PlacementType;
+        use holtburger_dat::graphics::Frame;
+        let frame = |x| AnimationFrame {
+            frames: vec![Frame {
+                origin: Vector3::new(x, 0.0, 0.0),
+                ..Default::default()
+            }],
+            hooks: Vec::new(),
+        };
+        let sphere = holtburger_common::Sphere {
+            center: Vector3::new(0.0, 0.0, 0.0),
+            radius: 1.0,
+        };
+        let setup = SetupModel {
+            id: 0x02000001,
+            flags: 0,
+            parts: vec![0x01000001],
+            parent_index: Vec::new(),
+            default_scale: Vec::new(),
+            holding_locations: Default::default(),
+            connection_points: Default::default(),
+            placement_frames: [
+                (
+                    Placement::Default,
+                    PlacementType {
+                        anim_frame: frame(2.0),
+                    },
+                ),
+                (
+                    Placement::Resting,
+                    PlacementType {
+                        anim_frame: frame(7.0),
+                    },
+                ),
+            ]
+            .into(),
+            cyl_spheres: Vec::new(),
+            spheres: Vec::new(),
+            height: 1.0,
+            radius: 1.0,
+            step_up: 0.0,
+            step_down: 0.0,
+            sorting_sphere: sphere,
+            selection_sphere: sphere,
+            lights: Vec::new(),
+            default_animation: None,
+            default_script_did: None,
+            default_motion_table: None,
+            default_sound_table: None,
+            default_script_table: None,
+        };
+        let animation = Animation {
+            id: 0x03000001,
+            flags: AnimationFlags::empty(),
+            num_parts: 1,
+            num_frames: 1,
+            pos_frames: Vec::new(),
+            part_frames: vec![frame(11.0)],
+        };
+        for (requested, expected) in [(0, 2.0), (Placement::Resting as u32, 7.0), (u32::MAX, 2.0)] {
+            assert_eq!(
+                stable_part_frames(&setup, None, requested).unwrap().frames[0]
+                    .origin
+                    .x,
+                expected
+            );
+            assert_eq!(
+                stable_part_frames(&setup, Some(&animation), requested)
+                    .unwrap()
+                    .frames[0]
+                    .origin
+                    .x,
+                11.0
+            );
+        }
+    }
+
+    #[test]
+    fn authored_radar_facts_type_in_domain_values() {
+        let facts = DynamicEntityRadarFacts::from_authored(
+            "test",
+            DynamicEntityMapBlipCategory::Other,
+            Some(2),
+            Some(10.0),
+        );
+
+        assert_eq!(facts.category, DynamicEntityMapBlipCategory::Other);
+        assert_eq!(facts.behavior, Some(RadarBehavior::ShowMovement));
+        assert_eq!(facts.obvious_range, Some(10.0));
+    }
+
+    #[test]
+    fn unusable_radar_visibility_values_do_not_discard_the_category() {
+        let facts = DynamicEntityRadarFacts::from_authored(
+            "test",
+            DynamicEntityMapBlipCategory::Portal,
+            Some(99),
+            Some(f64::NAN),
+        );
+
+        assert_eq!(facts.category, DynamicEntityMapBlipCategory::Portal);
+        assert_eq!(facts.behavior, None);
+        assert_eq!(facts.obvious_range, None);
+    }
+
+    fn definition_input() -> DynamicEntityDefinitionInput {
+        DynamicEntityDefinitionInput {
+            identity: DynamicEntityIdentity {
+                guid: Guid(0x7000_0001),
+                wcid: 1,
+                name: "Clay".to_owned(),
+                weenie_type: WeenieType::Creature,
+            },
+            level: None,
+            content: DynamicEntityContent {
+                motion_table_did: None,
+                setup_did: 0x0200_0001,
+                sound_table_did: None,
+                physics_effect_table_did: None,
+            },
+            appearance: EntityAppearance::default(),
+            placement: EntityPlacement::World(DynamicEntityInitialState {
+                pose: WorldPosition::default(),
+                velocity: Vector3::zero(),
+                acceleration: Vector3::zero(),
+                omega: Vector3::zero(),
+                created_at: Instant::now(),
+            }),
+            object_scale: 1.0,
+            friction: None,
+            elasticity: None,
+            translucency: 0.0,
+            maximum_velocity: None,
+            rotation_speed: None,
+            radar: DynamicEntityRadarFacts::default(),
+            body_height: 2.05,
+            physics: resolve_effective_entity_physics_state(PhysicsState::GRAVITY),
+        }
+    }
+
+    fn world_initial(definition: &DynamicEntityDefinition) -> DynamicEntityInitialState {
+        *definition
+            .placement
+            .world()
+            .expect("test definition must own world placement")
+    }
+
+    #[test]
+    fn definition_resolves_defaults_and_rejects_each_invalid_scalar_domain() {
+        let definition = DynamicEntityDefinition::prepare(definition_input()).unwrap();
+        assert_eq!(definition.friction, PhysicalFriction::DEFAULT);
+        assert_eq!(definition.elasticity, PhysicalElasticity::DEFAULT);
+        assert_eq!(definition.translucency, 0.0);
+
+        let mut input = definition_input();
+        input.object_scale = 0.0;
+        assert_eq!(
+            DynamicEntityDefinition::prepare(input),
+            Err(DynamicEntityDefinitionError::InvalidObjectScale)
+        );
+
+        for translucency in [f32::NAN, f32::INFINITY, -0.01, 1.01] {
+            let mut input = definition_input();
+            input.translucency = translucency;
+            assert_eq!(
+                DynamicEntityDefinition::prepare(input),
+                Err(DynamicEntityDefinitionError::InvalidTranslucency)
+            );
+        }
+
+        let mut input = definition_input();
+        input.translucency = 1.0;
+        assert_eq!(
+            DynamicEntityDefinition::prepare(input)
+                .expect("the inclusive upper translucency bound is valid")
+                .translucency,
+            1.0
+        );
+
+        let mut input = definition_input();
+        input.maximum_velocity = Some(f32::NAN);
+        assert_eq!(
+            DynamicEntityDefinition::prepare(input),
+            Err(DynamicEntityDefinitionError::InvalidMaximumVelocity)
+        );
+    }
+
+    #[test]
+    fn launch_uses_catalog_speed_and_ace_world_x_spin_policy() {
+        let mut input = definition_input();
+        input.maximum_velocity = Some(15.0);
+        input.rotation_speed = Some(2.0);
+        input.physics = resolve_effective_entity_physics_state(
+            PhysicsState::GRAVITY | PhysicsState::ALIGN_PATH,
+        );
+        let definition = DynamicEntityDefinition::prepare(input).unwrap();
+
+        let launch =
+            resolve_dynamic_entity_launch(&definition, Vector3::new(3.0, 4.0, 0.0)).unwrap();
+
+        assert_eq!(launch.kinematics.velocity(), Vector3::new(9.0, 12.0, 0.0));
+        assert_eq!(launch.kinematics.acceleration(), Vector3::zero());
+        assert_eq!(launch.kinematics.omega(), Vector3::new(2.0 * TAU, 0.0, 0.0));
+        assert!(!launch.kinematics.align_path());
+        assert!(!launch.physics.semantic.contains(PhysicsState::ALIGN_PATH));
+    }
+
+    #[test]
+    fn launch_rejects_only_invalid_direction_or_unusable_catalog_speed() {
+        let definition = DynamicEntityDefinition::prepare(definition_input()).unwrap();
+        assert_eq!(
+            resolve_dynamic_entity_launch(&definition, Vector3::new(1.0, 0.0, 0.0)),
+            Err(DynamicEntityLaunchError::MissingMaximumVelocity)
+        );
+
+        let mut input = definition_input();
+        input.maximum_velocity = Some(0.0);
+        let zero_speed = DynamicEntityDefinition::prepare(input).unwrap();
+        assert_eq!(
+            resolve_dynamic_entity_launch(&zero_speed, Vector3::new(1.0, 0.0, 0.0)),
+            Err(DynamicEntityLaunchError::ZeroMaximumVelocity)
+        );
+
+        let mut input = definition_input();
+        input.maximum_velocity = Some(15.0);
+        let launchable = DynamicEntityDefinition::prepare(input).unwrap();
+        for direction in [
+            Vector3::zero(),
+            Vector3::new(f32::NAN, 0.0, 0.0),
+            Vector3::new(f32::INFINITY, 0.0, 0.0),
+        ] {
+            assert_eq!(
+                resolve_dynamic_entity_launch(&launchable, direction),
+                Err(DynamicEntityLaunchError::InvalidDirection)
+            );
+        }
+    }
+
+    #[test]
+    fn appearance_adapter_preserves_order_identities_and_zero_noop_ranges() {
+        let appearance = EntityAppearance {
+            palette_did: Some(0x0400_0001),
+            sub_palettes: vec![EntitySubPalette {
+                palette_did: 0x0400_0002,
+                offset: 24,
+                color_count: 0,
+            }],
+            texture_changes: vec![EntityTextureChange {
+                part_index: 3,
+                old_texture_did: 0x0500_0001,
+                new_texture_did: 0x0500_0002,
+            }],
+            part_changes: vec![EntityPartChange {
+                part_index: 4,
+                gfx_obj_did: 0x0100_0001,
+            }],
+        };
+
+        let input = material_appearance_input(&appearance);
+        let obj_desc = input.obj_desc.unwrap();
+        assert_eq!(obj_desc.palette_id, appearance.palette_did);
+        assert_eq!(obj_desc.sub_palettes[0].num_colors, 0);
+        assert_eq!(obj_desc.texture_changes[0].part_index, 3);
+        assert_eq!(obj_desc.anim_part_changes[0].part_index, 4);
+    }
+
+    #[test]
+    fn collision_script_classifier_is_explicit_and_fails_closed_for_unknown_hooks() {
+        assert!(unsupported_collision_hook(5));
+        assert!(!unsupported_collision_hook(12));
+        assert!(!unsupported_collision_hook(13));
+        assert!(!unsupported_collision_hook(19));
+        assert!(unsupported_collision_hook(99));
+    }
+
+    fn prepared_physics() -> DynamicPhysicalBodyDefinition {
+        let spheres = PhysicalSphereSet::new(
+            holtburger_common::Sphere {
+                center: Vector3::new(0.0, 0.0, 0.5),
+                radius: 0.5,
+            },
+            None,
+        )
+        .unwrap();
+        let profile = retail_grounded_body_with_policy(
+            spheres,
+            EdgeProtection::Creature,
+            -9.8,
+            PhysicalBodyResponsePolicy {
+                restitution: PhysicalRestitution::Elastic(PhysicalElasticity::DEFAULT),
+                friction: PhysicalFriction::DEFAULT,
+                surface_motion: PhysicalSurfaceMotion::Stable,
+                align_path: false,
+            },
+        )
+        .unwrap();
+        DynamicPhysicalBodyDefinition {
+            movement: profile.definition,
+            response_policy: profile.response_policy,
+            entity_collision: DynamicBodyCollisionDefinition {
+                player_collision: None,
+                contact_response: holtburger_world::EntityContactResponse::Character(
+                    holtburger_world::EntityIntegrationEligibility::Eligible,
+                ),
+                target_geometry: Arc::new(PreparedEntityTargetGeometry {
+                    setup_radius: 0.5,
+                    setup_height: 1.0,
+                    collision_animations: Default::default(),
+                    physics_bsp_parts: Vec::new(),
+                    fallback_setup_did: 0x0200_0001,
+                    fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
+                        center: Vector3::new(0.0, 0.0, 0.5),
+                        radius: 0.5,
+                    }))],
+                    fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+                }),
+                dynamic_collision: holtburger_world::EntityDynamicCollisionPolicy {
+                    is_static: false,
+                    target: EntityCollisionParticipation::Solid,
+                    mover_accepts_response: true,
+                    accepts_peer_reports: true,
+                    missile: false,
+                    path_clipped: false,
+                },
+                reporting: holtburger_world::EntityCollisionReportPolicy {
+                    enabled: true,
+                    as_environment: false,
+                },
+                uses_physics_bsp: false,
+                elasticity: PhysicalElasticity::DEFAULT,
+                default_animation_available: false,
+                default_script_available: false,
+            },
+        }
+    }
+
+    fn configured_physics() -> DynamicPhysicalBodyConfiguration {
+        DynamicPhysicalBodyConfiguration::new(
+            prepared_physics(),
+            LocalPhysicalDemand {
+                target: LocalTargetDemand::Retained,
+                integration: LocalIntegrationDemand::Eligible,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn body_operations_return_committed_facts_and_leave_duplicate_install_untouched() {
+        let mut input = definition_input();
+        input.placement.world_mut().unwrap().acceleration = Vector3::new(0.0, 0.0, -9.8);
+        let definition = DynamicEntityDefinition::prepare(input).unwrap();
+        let body_id = SpatialBodyId::Entity(definition.identity.guid);
+        let mut scene = SpatialScene::new();
+
+        let initial = world_initial(&definition);
+        let installed =
+            install_dynamic_entity_body(&mut scene, &definition, initial, None).unwrap();
+        assert_eq!(installed.body.acceleration, initial.acceleration);
+        assert_eq!(installed.participation, PhysicalBodyParticipation::PoseOnly);
+        assert_eq!(
+            install_dynamic_entity_body(&mut scene, &definition, initial, None),
+            Err(DynamicEntityBodyOperationError::AlreadyRegistered { body_id })
+        );
+        assert_eq!(
+            scene.body(body_id).unwrap().retained.acceleration,
+            initial.acceleration
+        );
+        let projection = dynamic_entity_projection_input(&definition, &scene).unwrap();
+        assert_eq!(projection.identity, definition.identity);
+        let projected_world = projection.placement.world().unwrap();
+        assert_eq!(projected_world.body, installed.body);
+        assert_eq!(
+            projected_world.participation,
+            PhysicalBodyParticipation::PoseOnly
+        );
+
+        let enabled = set_dynamic_entity_physical_configuration(
+            &mut scene,
+            body_id,
+            Some(configured_physics()),
+        )
+        .unwrap();
+        assert_eq!(enabled.participation, PhysicalBodyParticipation::Physical);
+        assert_eq!(
+            enabled.physical_change.change,
+            PhysicalBodyReconfiguration::Installed
+        );
+
+        let removed = remove_dynamic_entity_body(&mut scene, body_id).unwrap();
+        assert_eq!(removed.participation, PhysicalBodyParticipation::Physical);
+        assert!(scene.body(body_id).is_none());
+    }
+
+    #[test]
+    fn complete_body_replacement_retires_and_installs_the_same_identity_once() {
+        let first = DynamicEntityDefinition::prepare(definition_input()).unwrap();
+        let mut replacement_input = definition_input();
+        replacement_input.placement.world_mut().unwrap().pose.coords = Vector3::new(4.0, 5.0, 6.0);
+        replacement_input.placement.world_mut().unwrap().velocity = Vector3::new(1.0, 2.0, 3.0);
+        let replacement = DynamicEntityDefinition::prepare(replacement_input).unwrap();
+        let body_id = SpatialBodyId::Entity(first.identity.guid);
+        let mut scene = SpatialScene::new();
+        install_dynamic_entity_body(
+            &mut scene,
+            &first,
+            world_initial(&first),
+            Some(configured_physics()),
+        )
+        .unwrap();
+
+        let replacement_initial = world_initial(&replacement);
+        let outcome =
+            replace_dynamic_entity_body(&mut scene, &replacement, replacement_initial, None)
+                .unwrap();
+
+        assert_eq!(
+            outcome.removed.participation,
+            PhysicalBodyParticipation::Physical
+        );
+        assert_eq!(
+            outcome.installed.participation,
+            PhysicalBodyParticipation::PoseOnly
+        );
+        assert_eq!(
+            outcome.installed.body.runtime_pose,
+            replacement_initial.pose
+        );
+        assert_eq!(
+            scene.body(body_id).unwrap().retained.velocity,
+            replacement_initial.velocity
+        );
+    }
+
+    #[test]
+    fn same_identity_replacement_returns_balanced_ends_for_both_report_directions() {
+        let created_at = Instant::now();
+        let mut first_input = definition_input();
+        first_input.placement.world_mut().unwrap().created_at = created_at;
+        first_input.placement.world_mut().unwrap().pose = WorldPosition {
+            landblock_id: Guid(0xda55_0020),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+        let first = DynamicEntityDefinition::prepare(first_input).unwrap();
+        let mut peer_input = definition_input();
+        peer_input.identity.guid = Guid(0x7000_0002);
+        peer_input.placement = first.placement;
+        let peer = DynamicEntityDefinition::prepare(peer_input).unwrap();
+        let first_id = SpatialBodyId::Entity(first.identity.guid);
+        let peer_id = SpatialBodyId::Entity(peer.identity.guid);
+        let mut scene = SpatialScene::new();
+        install_dynamic_entity_body(
+            &mut scene,
+            &first,
+            world_initial(&first),
+            Some(configured_physics()),
+        )
+        .unwrap();
+        install_dynamic_entity_body(
+            &mut scene,
+            &peer,
+            world_initial(&peer),
+            Some(configured_physics()),
+        )
+        .unwrap();
+
+        let mut collision = holtburger_world::CollisionScene::new();
+        for x in 0xd9_u32..=0xdb {
+            for y in 0x54_u32..=0x56 {
+                collision
+                    .insert(LandblockCollisionAsset {
+                        landblock_id: (x << 24) | (y << 16) | 0xffff,
+                        terrain: TerrainCollisionSurface::empty(),
+                        static_geometry: LandblockColliders::default(),
+                    })
+                    .unwrap();
+            }
+        }
+        let touched_at = created_at + std::time::Duration::from_millis(100);
+        let collection = scene
+            .advance_dynamic_entity_collection(&collision, 0.1, touched_at, |_| {
+                Ok(holtburger_world::PhysicalBodyInput::referenced(
+                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                    holtburger_world::PhysicalReferenceInput::body(None),
+                    true,
+                ))
+            })
+            .unwrap();
+        assert!(collection.coverage_rejections.is_empty());
+        let started = collection.collision_reports;
+        assert_eq!(started.len(), 2);
+
+        let mut despawn_scene = scene.clone();
+        let despawned = remove_dynamic_entity_body(&mut despawn_scene, first_id).unwrap();
+        assert_eq!(despawned.collision_reports.len(), 2);
+        assert!(despawn_scene.body(first_id).is_none());
+
+        let mut replacement_input = definition_input();
+        replacement_input.placement.world_mut().unwrap().created_at = touched_at;
+        replacement_input.placement.world_mut().unwrap().pose = WorldPosition {
+            landblock_id: Guid(0xda55_0020),
+            coords: Vector3::new(10.0, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let replacement = DynamicEntityDefinition::prepare(replacement_input).unwrap();
+        let replaced = replace_dynamic_entity_body(
+            &mut scene,
+            &replacement,
+            world_initial(&replacement),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(replaced.removed.collision_reports.len(), 2);
+        assert!(replaced.removed.collision_reports.iter().any(|report| {
+            report.contact.recipient == first_id
+                && matches!(
+                    report.contact.source,
+                    holtburger_world::CollisionReportSource::DynamicBody { peer, .. }
+                        if peer == peer_id
+                )
+        }));
+        assert!(replaced.removed.collision_reports.iter().any(|report| {
+            report.contact.recipient == peer_id
+                && matches!(
+                    report.contact.source,
+                    holtburger_world::CollisionReportSource::DynamicBody { peer, .. }
+                        if peer == first_id
+                )
+        }));
+    }
+}

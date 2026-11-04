@@ -1,0 +1,267 @@
+import { describe, expect, it } from "vitest";
+import { resolve } from "node:path";
+import {
+	electronApplicationArguments,
+	parseClientLaunchArguments,
+} from "./client-launch";
+
+describe("Electron application arguments", () => {
+	it("removes the development app path and leading Electron switches", () => {
+		expect(
+			electronApplicationArguments(
+				[
+					"/electron",
+					"--remote-debugging-port=0",
+					"/app",
+					"client",
+					"--account=ash",
+				],
+				true,
+				"/app",
+			),
+		).toEqual(["client", "--account=ash"]);
+		expect(
+			electronApplicationArguments(
+				["/holtburger-3d", "client", "--account=ash"],
+				false,
+				"/app",
+			),
+		).toEqual(["client", "--account=ash"]);
+		expect(() =>
+			electronApplicationArguments(["/electron", "client"], true, "/app"),
+		).toThrow("development application path is missing");
+	});
+});
+
+describe("parseClientLaunchArguments", () => {
+	it("consumes the update opt-out with or without a direct connection", () => {
+		expect(parseClientLaunchArguments([]).noUpdates).toBe(false);
+		for (const connection of [[], ["--account=ash"]]) {
+			expect(
+				parseClientLaunchArguments([...connection, "--no-updates", "--debug"]),
+			).toMatchObject({ noUpdates: true, rendererArguments: ["--debug"] });
+		}
+		expect(parseClientLaunchArguments(["--no-updates"]).startup).toBeNull();
+		expect(() => parseClientLaunchArguments(["--no-updates=false"])).toThrow(
+			"--no-updates does not accept a value",
+		);
+		expect(() =>
+			parseClientLaunchArguments(["--no-updates", "--no-updates"]),
+		).toThrow("more than once");
+	});
+	it("requires an account for launcher-free sessions and consumes the flag as native policy", () => {
+		expect(
+			parseClientLaunchArguments(["--no-launcher", "--account=ash"]),
+		).toMatchObject({
+			noLauncher: true,
+			startup: { account: "ash" },
+			rendererArguments: [],
+		});
+		expect(parseClientLaunchArguments([]).noLauncher).toBe(false);
+		expect(() => parseClientLaunchArguments(["--no-launcher"])).toThrow(
+			"--no-launcher requires --account",
+		);
+		expect(() =>
+			parseClientLaunchArguments(["--account=ash", "--no-launcher=false"]),
+		).toThrow("does not accept a value");
+		expect(() =>
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--no-launcher",
+				"--no-launcher",
+			]),
+		).toThrow("more than once");
+	});
+	it("keeps cache bypass in the launch contract and rejects values or duplicates", () => {
+		expect(
+			parseClientLaunchArguments(["--account=ash", "--ignore-world-map-cache"]),
+		).toMatchObject({ ignoreWorldMapCache: true, rendererArguments: [] });
+		expect(() =>
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--ignore-world-map-cache=true",
+			]),
+		).toThrow("does not accept a value");
+		expect(() =>
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--ignore-world-map-cache",
+				"--ignore-world-map-cache",
+			]),
+		).toThrow("more than once");
+	});
+
+	it("resolves direct-launch settings paths from Electron's working directory", () => {
+		const settingsFile = resolve("settings.json");
+		expect(
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--settings-file",
+				settingsFile,
+			]),
+		).toMatchObject({ settingsFile, rendererArguments: [] });
+		expect(
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--settings-file=relative.json",
+			]),
+		).toMatchObject({ settingsFile: resolve("relative.json") });
+		expect(() =>
+			parseClientLaunchArguments(["--account=ash", "--settings-file="]),
+		).toThrow("cannot be empty");
+	});
+	it("resolves a server endpoint and keeps only non-credential args for the entry", () => {
+		expect(
+			parseClientLaunchArguments([
+				"--server",
+				"world.example:9001",
+				"--account=ash",
+				"--password",
+				"secret",
+				"--query=landblock=0x7fffff",
+			]),
+		).toEqual({
+			startup: {
+				contentPath: null,
+				host: "world.example",
+				port: 9001,
+				account: "ash",
+				password: "secret",
+			},
+			noLauncher: false,
+			noUpdates: false,
+			ignorePersistedConfig: false,
+			ignoreWorldMapCache: false,
+			settingsFile: null,
+			rendererArguments: ["--query=landblock=0x7fffff"],
+		});
+	});
+
+	it("uses explicit host and port when server is absent", () => {
+		expect(
+			parseClientLaunchArguments([
+				"--host",
+				"localhost",
+				"--port",
+				"9010",
+				"--account",
+				"ash",
+			]),
+		).toEqual({
+			startup: {
+				contentPath: null,
+				host: "localhost",
+				port: 9010,
+				account: "ash",
+				password: "",
+			},
+			noLauncher: false,
+			noUpdates: false,
+			ignorePersistedConfig: false,
+			ignoreWorldMapCache: false,
+			settingsFile: null,
+			rendererArguments: [],
+		});
+	});
+
+	it("gives server precedence over separate host and port", () => {
+		expect(
+			parseClientLaunchArguments([
+				"--server=world.example",
+				"--host=ignored.example",
+				"--port=9010",
+				"--account=ash",
+			]),
+		).toMatchObject({ startup: { host: "world.example", port: 9010 } });
+	});
+
+	it("rejects missing accounts and malformed embedded ports", () => {
+		expect(parseClientLaunchArguments([]).startup).toBeNull();
+		expect(
+			parseClientLaunchArguments([
+				"--ignore-config",
+				"--settings-file=game.json",
+			]).startup,
+		).toBeNull();
+		expect(() => parseClientLaunchArguments(["--host=localhost"])).toThrow(
+			/requires --account/,
+		);
+		expect(() =>
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--server=world.example:nope",
+			]),
+		).toThrow(/invalid port/);
+	});
+
+	it("rejects duplicate launch flags before startup", () => {
+		expect(() =>
+			parseClientLaunchArguments(["--account=ash", "--account=other"]),
+		).toThrow(/specified more than once/);
+	});
+
+	it("accepts a finite positive melee chase override", () => {
+		expect(
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--melee-max-chase-distance=24.5",
+			]),
+		).toMatchObject({ startup: { meleeMaxChaseDistance: 24.5 } });
+		for (const invalid of ["0", "-1", "nope", "Infinity"]) {
+			expect(() =>
+				parseClientLaunchArguments([
+					"--account=ash",
+					`--melee-max-chase-distance=${invalid}`,
+				]),
+			).toThrow(/finite positive/);
+		}
+	});
+
+	it("accepts the bare config bypass and rejects values", () => {
+		expect(
+			parseClientLaunchArguments(["--account=ash", "--ignore-config"]),
+		).toMatchObject({ ignorePersistedConfig: true });
+		expect(() =>
+			parseClientLaunchArguments(["--account=ash", "--ignore-config=true"]),
+		).toThrow(/does not accept a value/);
+	});
+
+	it("maps every one-character client option to its canonical field", () => {
+		expect(
+			parseClientLaunchArguments([
+				"-h",
+				"localhost",
+				"-p=9010",
+				"-a",
+				"ash",
+				"-P=secret",
+				"-i",
+			]),
+		).toEqual({
+			startup: {
+				contentPath: null,
+				host: "localhost",
+				port: 9010,
+				account: "ash",
+				password: "secret",
+			},
+			ignorePersistedConfig: true,
+			ignoreWorldMapCache: false,
+			noLauncher: false,
+			noUpdates: false,
+			settingsFile: null,
+			rendererArguments: [],
+		});
+		expect(
+			parseClientLaunchArguments(["-s", "world.example:9001", "-a", "ash"]),
+		).toMatchObject({
+			startup: { host: "world.example", port: 9001 },
+		});
+	});
+
+	it("detects duplicates across long and abbreviated spellings", () => {
+		expect(() =>
+			parseClientLaunchArguments(["--account=ash", "-a", "other"]),
+		).toThrow(/specified more than once/);
+	});
+});

@@ -1,0 +1,279 @@
+import type { DatAssetId } from "../game/game-types";
+import {
+	HostCommandError,
+	isContentFailure,
+} from "../host/host-command-result";
+import type { AudioDevice, AudioVoice } from "../game/systems/audio-system";
+
+/** Gain change below which a re-target is dropped; far under the smoothing ramp's own resolution. */
+const GAIN_EPSILON = 1e-4;
+/** Pan change below which a re-target is dropped. */
+const PAN_EPSILON = 1e-3;
+
+/**
+ * RETAIL QUIRK: the far channel is attenuated by at most 15 dB, and the near channel is never
+ * attenuated at all. Retail play clamps pan to ±15 and hands DirectSound `SetPan(100 × pan)` —
+ * hundredths-of-a-dB units that turn one channel down and leave the other alone. "Correcting"
+ * this to an equal-power panner drops every centred sound (every ambient bed, everything
+ * inside the flat radius) by 3 dB in both ears and silences the far ear completely at full
+ * pan; the entire shipped mix was tuned against full-both-channels playback and audibly thins
+ * without it.
+ */
+const MAXIMUM_PAN_SHADOW_DECIBELS = 15;
+
+/** The far channel's gain under retail's pan law; the near channel is always 1. */
+function panShadowGain(pan: number): number {
+	return 10 ** ((-MAXIMUM_PAN_SHADOW_DECIBELS * Math.abs(pan)) / 20);
+}
+
+/** Loads one authored sound's decoder-ready bytes and its media type. */
+export interface AudioAssetSource {
+	loadAudio(soundId: DatAssetId): Promise<ArrayBuffer>;
+	destroy(): void;
+}
+
+/**
+ * Web Audio adapter for authored one-shot sounds.
+ *
+ * Deliberately thin: it owns decoding, buffer reuse, and voice construction, and knows nothing
+ * about probability, attenuation, or voice budgets — those are game semantics that live in
+ * `AudioSystem`.
+ *
+ * A sound whose buffer has not decoded yet is **refused, not queued**. Refusal is a signal rather
+ * than a failure: `AudioSystem` warms the sound and replays it once, within a bound it owns, so the
+ * decision about how late is too late stays with game policy rather than with the adapter.
+ *
+ * Live placement updates go through `setTargetAtTime` rather than writing `AudioParam.value`: a
+ * direct per-frame assignment steps the signal once per frame and zippers audibly. The smoothing
+ * constant is injected because it is a tuning judgement, not an adapter detail.
+ *
+ * Panning follows retail's single-channel-attenuation law rather than an equal-power panner (see
+ * MAXIMUM_PAN_SHADOW_DECIBELS). Stereo-authored buffers are mixed down by the channel fan-out,
+ * matching how retail's mono hook and ambient waves actually shipped.
+ */
+export class WebAudioDevice implements AudioDevice {
+	readonly #context: BaseAudioContext;
+	readonly #source: AudioAssetSource;
+	/** Shared final gain; it never participates in spatial placement or voice admission. */
+	readonly #output: GainNode;
+	readonly #placementSmoothingSeconds: number;
+	readonly #loudnessCurveExponent: number;
+	readonly #buffers = new Map<DatAssetId, AudioBuffer>();
+	/** Decoder-ready payload sizes retained alongside the corresponding Web Audio buffers. */
+	readonly #bufferSourceBytes = new Map<DatAssetId, number>();
+	/** Concurrent callers share decoder completion, not just an in-flight marker. */
+	readonly #pending = new Map<DatAssetId, Promise<void>>();
+	/** Failed buffers stay rejected until explicit retry; repeated hooks never start decoder storms. */
+	readonly #failures = new Map<DatAssetId, unknown>();
+	#destroyed = false;
+	/** Initial mix is installed synchronously before any voice can produce output. */
+	#hasStartedPlayback = false;
+
+	constructor(
+		context: BaseAudioContext,
+		source: AudioAssetSource,
+		placementSmoothingSeconds: number,
+		loudnessCurveExponent: number,
+	) {
+		if (!(placementSmoothingSeconds > 0)) {
+			throw new Error("Placement smoothing must be a positive duration.");
+		}
+		if (!(loudnessCurveExponent > 0)) {
+			throw new Error("Loudness curve exponent must be positive.");
+		}
+		this.#context = context;
+		this.#source = source;
+		this.#output = context.createGain();
+		this.#output.gain.value = 1;
+		this.#output.connect(context.destination);
+		this.#placementSmoothingSeconds = placementSmoothingSeconds;
+		this.#loudnessCurveExponent = loudnessCurveExponent;
+	}
+
+	/**
+	 * Presentation loudness contour over the retail-linear gain (see the tuning constant).
+	 *
+	 * Applied at the last moment before the param write, so game policy — the audibility floor,
+	 * diagnostics, steal decisions — all reason in unshaped retail gain.
+	 */
+	#shapeGain(gain: number): number {
+		return gain ** this.#loudnessCurveExponent;
+	}
+
+	/** Change overall loudness after per-voice shaping; zero silences without stopping playback. */
+	setOutputVolume(volume: number): void {
+		if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+			throw new Error("Output volume must be finite and within [0, 1].");
+		}
+		if (this.#destroyed) return;
+		const gain = this.#output.gain;
+		if (!this.#hasStartedPlayback) {
+			gain.value = volume;
+			return;
+		}
+		const now = this.#context.currentTime;
+		// A finite ramp avoids clicks and reaches exact silence when muted.
+		gain.cancelAndHoldAtTime(now);
+		gain.linearRampToValueAtTime(volume, now + this.#placementSmoothingSeconds);
+	}
+
+	playOneShot(
+		soundId: DatAssetId,
+		gain: number,
+		pan: number,
+	): AudioVoice | null {
+		if (this.#destroyed) return null;
+		const buffer = this.#buffers.get(soundId);
+		if (!buffer) return null;
+		const source = this.#context.createBufferSource();
+		source.buffer = buffer;
+		const gainNode = this.#context.createGain();
+		gainNode.gain.value = this.#shapeGain(gain);
+		// Retail's pan law needs independent channel gains (see MAXIMUM_PAN_SHADOW_DECIBELS), which
+		// no StereoPannerNode can express: voice gain fans out to a left and a right gain, merged
+		// into the two output channels.
+		const leftGain = this.#context.createGain();
+		const rightGain = this.#context.createGain();
+		const shadow = panShadowGain(pan);
+		leftGain.gain.value = pan > 0 ? shadow : 1;
+		rightGain.gain.value = pan < 0 ? shadow : 1;
+		const merger = this.#context.createChannelMerger(2);
+		source.connect(gainNode);
+		gainNode.connect(leftGain);
+		gainNode.connect(rightGain);
+		leftGain.connect(merger, 0, 0);
+		rightGain.connect(merger, 0, 1);
+		merger.connect(this.#output);
+		let finished = false;
+		// Web Audio reports the exact end, including a stop we requested, so the voice needs no
+		// duration bookkeeping to know it is done.
+		source.onended = () => {
+			finished = true;
+			source.disconnect();
+		};
+		this.#hasStartedPlayback = true;
+		source.start();
+		let stopped = false;
+		let lastGain = gain;
+		let lastPan = pan;
+		return {
+			get finished() {
+				return finished;
+			},
+			setPlacement: (nextGain: number, nextPan: number) => {
+				// A voice that ended or was stopped keeps its nodes only until GC; steering it is a
+				// harmless no-op rather than an error, since the system sweeps lazily.
+				if (finished || stopped) return;
+				// Skip sub-audible re-targets: the system steers every voice every frame, and a
+				// stationary listener would otherwise append thousands of no-op automation events
+				// per second to the cross-thread param timelines. The ramp already converges, so
+				// dropping a repeat is inaudible by construction.
+				if (
+					Math.abs(nextGain - lastGain) < GAIN_EPSILON &&
+					Math.abs(nextPan - lastPan) < PAN_EPSILON
+				) {
+					return;
+				}
+				lastGain = nextGain;
+				lastPan = nextPan;
+				const now = this.#context.currentTime;
+				const smoothing = this.#placementSmoothingSeconds;
+				const nextShadow = panShadowGain(nextPan);
+				gainNode.gain.setTargetAtTime(
+					this.#shapeGain(nextGain),
+					now,
+					smoothing,
+				);
+				leftGain.gain.setTargetAtTime(
+					nextPan > 0 ? nextShadow : 1,
+					now,
+					smoothing,
+				);
+				rightGain.gain.setTargetAtTime(
+					nextPan < 0 ? nextShadow : 1,
+					now,
+					smoothing,
+				);
+			},
+			stop: () => {
+				if (stopped) return;
+				stopped = true;
+				// A voice that already ended throws on stop; ending twice is not an error here.
+				try {
+					source.stop();
+				} catch {
+					// Already finished.
+				}
+				source.disconnect();
+			},
+		};
+	}
+
+	/** Decode one sound, resolving exactly when `playOneShot` will accept it. */
+	prepare(soundId: DatAssetId): Promise<void> {
+		if (this.#destroyed || this.#buffers.has(soundId)) return Promise.resolve();
+		if (this.#failures.has(soundId))
+			return Promise.reject(this.#failures.get(soundId));
+		const pending = this.#pending.get(soundId);
+		if (pending !== undefined) return pending;
+		const preparation = this.#decode(soundId)
+			.catch((cause: unknown) => {
+				if (!this.#destroyed && isContentFailure(cause))
+					this.#failures.set(soundId, cause);
+				throw cause;
+			})
+			.finally(() => this.#pending.delete(soundId));
+		this.#pending.set(soundId, preparation);
+		return preparation;
+	}
+
+	/** The presentation retry owner may retry source failures without replacing live voices. */
+	retryFailed(): void {
+		this.#failures.clear();
+	}
+
+	getPreparedSourceBytes(soundId: DatAssetId): number | null {
+		return this.#bufferSourceBytes.get(soundId) ?? null;
+	}
+
+	destroy(): void {
+		if (this.#destroyed) return;
+		this.#destroyed = true;
+		this.#output.disconnect();
+		this.#buffers.clear();
+		this.#bufferSourceBytes.clear();
+		this.#pending.clear();
+		this.#failures.clear();
+		this.#source.destroy();
+	}
+
+	async #decode(soundId: DatAssetId): Promise<void> {
+		const bytes = await this.#source.loadAudio(soundId);
+		// decodeAudioData transfers its input buffer, so measure before it is detached.
+		const sourceByteLength = bytes.byteLength;
+		let buffer: AudioBuffer;
+		try {
+			buffer = await this.#context.decodeAudioData(bytes);
+		} catch (cause) {
+			// EncodingError is the browser decoder's source rejection; unexpected device errors stay operational.
+			if (!(cause instanceof DOMException) || cause.name !== "EncodingError")
+				throw cause;
+			throw new HostCommandError(
+				{
+					code: "audio_decode_failed",
+					message: `Audio ${soundId} could not decode: ${cause.message}`,
+					resource: {
+						kind: "invalid",
+						namespace: "eor/portal",
+						file_id: Number(soundId),
+					},
+				},
+				{ cause },
+			);
+		}
+		if (!this.#destroyed) {
+			this.#buffers.set(soundId, buffer);
+			this.#bufferSourceBytes.set(soundId, sourceByteLength);
+		}
+	}
+}

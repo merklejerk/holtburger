@@ -1,8 +1,10 @@
 use crate::hydration::{WorldObjectPropertiesHydrationExt, decode_vendor_item_supply};
 use crate::identify::{self, IdentifyTarget};
+use crate::inspection::InspectionSupplement;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    HasProperties, HasPropertiesMut, PropertyUpdate, WorldObjectProperties,
+    HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PropertyUpdate, WorldObjectExt,
+    WorldObjectProperties,
 };
 use holtburger_protocol::messages::object::events::IdentifyObjectResponseEventData;
 use holtburger_protocol::messages::object::types::{
@@ -10,17 +12,32 @@ use holtburger_protocol::messages::object::types::{
 };
 use serde::{Deserialize, Serialize};
 
+mod commerce;
+pub use commerce::{VendorQuoteError, VendorSaleRejection, VendorValueLimits};
+mod draft;
+pub use draft::{
+    VendorCurrencyQuote, VendorDraft, VendorDraftQuote, VendorLineQuote, VendorPurchase,
+};
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CoreVendorItem {
     pub guid: Guid,
     pub wcid: u32,
+    /// Purchasable supply for a draft; retail permits one zero-count non-stackable offer.
     pub vendor_supply: Option<u32>,
     pub properties: WorldObjectProperties,
+    /// Server public classification retained for the same inspection semantics as live entities.
+    pub public_flags: ObjectDescriptionFlag,
+    /// Public average consumed by inspection without inventing raw appraisal totals.
+    pub public_workmanship: Option<f32>,
     pub armor_profile: Option<ArmorProfile>,
     pub creature_profile: Option<CreatureProfile>,
     pub weapon_profile: Option<WeaponProfile>,
     pub hook_profile: Option<HookProfile>,
     pub armor_levels: Option<ArmorLevels>,
+    /// Facts retained from the latest successful appraisal as one replaceable snapshot.
+    #[serde(default)]
+    pub inspection_supplement: Option<InspectionSupplement>,
     pub spell_book: Vec<u32>,
     pub armor_highlight: Option<u16>,
     pub armor_color: Option<u16>,
@@ -48,17 +65,27 @@ impl CoreVendorItem {
     ) -> Self {
         let mut properties = WorldObjectProperties::default();
         properties.hydrate_from_vendor_item(item);
+        let vendor_supply = match decode_vendor_item_supply(item.packed_stack_size) {
+            // RETAIL QUIRK:: retail queues one zero-count non-stackable, then removes the
+            // offer. Treating zero as sold out blocks authored offers: a live vendor census
+            // found all 89 offers non-stackable with zero counts (2026-10-28).
+            Some(0) if !properties.is_stackable() => Some(1),
+            supply => supply,
+        };
 
         Self {
             guid: item.description.guid,
             wcid: item.description.wcid,
-            vendor_supply: decode_vendor_item_supply(item.packed_stack_size),
+            vendor_supply,
             properties,
+            public_flags: item.description.obj_desc_flags,
+            public_workmanship: item.description.workmanship,
             armor_profile: None,
             creature_profile: None,
             weapon_profile: None,
             hook_profile: None,
             armor_levels: None,
+            inspection_supplement: None,
             spell_book: Vec::new(),
             armor_highlight: None,
             armor_color: None,
@@ -82,6 +109,7 @@ impl CoreVendorItem {
                 weapon_profile: &mut self.weapon_profile,
                 hook_profile: &mut self.hook_profile,
                 armor_levels: &mut self.armor_levels,
+                inspection_supplement: &mut self.inspection_supplement,
                 spell_book: &mut self.spell_book,
                 armor_highlight: &mut self.armor_highlight,
                 armor_color: &mut self.armor_color,
@@ -102,6 +130,8 @@ pub struct VendorState {
     pub buy_multiplier: f32,
     pub sell_multiplier: f32,
     pub merchandise_item_types: u32,
+    /// Retail's inclusive per-unit acceptance bounds, consumed by sale eligibility.
+    pub value_limits: VendorValueLimits,
     pub alternate_currency_wcid: u32,
     pub alternate_currency_amount: u32,
     pub alternate_currency_name: String,

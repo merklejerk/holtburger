@@ -175,11 +175,11 @@ pub enum GameOpcode {
     /// S2C: Set object state.
     /// Updates the visual/functional state of an object (e.g., door opening).
     SetState = 0xF74B,
-    // /// S2C: Play a script by ID.
+    // /// S2C: Play a 0x33 PhysicsScript directly by DID. Retail supports this separate message,
+    // /// but ACE does not emit it.
     // PlayScriptId = 0xF754,
-    /// S2C: Play a visual effect.
-    /// Triggers a particle system, overlay, or other visual script.
-    PlayEffect = 0xF755,
+    /// S2C: Resolve and play a PhysicsScript by `PlayScript` cue and intensity.
+    PlayScript = 0xF755,
 
     // --- Game Logic & Flow ---
     /// S2C: Wrapper for various game events.
@@ -188,8 +188,14 @@ pub enum GameOpcode {
     /// C2S: Wrapper for various game actions.
     /// High-level container for client-initiated actions such as using items, talking, or moving.
     GameAction = 0xF7B1,
-    // /// S2C: Admin environs (legacy admin tool).
-    // AdminEnvirons = 0xEA60,
+    // /// S2C: Environment override. Payload is one `u32EnvironChangeType`: 0x00 clears, ///
+    // 0x01-0x06 select fog presets (red, blue, white, green, black, black2), and 0x65+ select
+    // /// ambient sounds. Server-side it is landblock-scoped rather than per-player scripting
+    // (ACE's /// `LandblockManager.SetGlobalFogColor` plus `Landblock.SendCurrentEnviron`), so
+    // world state /// can hold it per landblock. Client-side it is the sole writer of retail
+    // landscape override * /// and is what makes areas such /// as the graveyard near `0x482E`
+    // render a distinct sky. Decoding it also requires the /// frontend override seam noted on
+    // `ResolvedSceneEnvironment`. AdminEnvirons = 0xEA60,
 
     // --- Data Download (DDD) ---
     /// S2C: Data download interrogation.
@@ -209,12 +215,12 @@ pub enum GameOpcode {
     // DddBeginPullDdd = 0xF7E8,
     // /// S2C/C2S: DDD iteration data.
     // DddIterationData = 0xF7E9,
-    // /// S2C: End DDD process.
-    // DddEndDdd = 0xF7EA,
+    /// S2C/C2S: End DAT synchronization; no payload follows the opcode.
+    DddEndDdd = 0xF7EA,
 
     // --- Server & Account Status ---
     // /// S2C: Account has been banned.
-    // AccountBanned = 0xF7C1,
+    AccountBanned = 0xF7C1,
     /// S2C: Kick player from server.
     /// Sent when the account is logged out or banned.
     AccountBoot = 0xF7DC,
@@ -247,8 +253,8 @@ pub enum GameActionOpcode {
     // SetAfkMessage = 0x0010,
     /// C2S: Send chat message.
     Talk = 0x0015,
-    // /// C2S: Send direct message (similar to TELL).
-    // TalkDirect = 0x0032,
+    /// C2S: Send direct text to a creature by entity ID (including NPC dialogue).
+    TalkDirect = 0x0032,
     /// C2S: Send direct message/tell.
     Tell = 0x005D,
     // /// C2S: Add a custom chat channel.
@@ -269,10 +275,10 @@ pub enum GameActionOpcode {
     // QueryMotd = 0x0255,
     // /// C2S: Clear the current Message of the Day (MOTD).
     // ClearMotd = 0x0256,
-    // /// C2S: Mute/squelch a specific character.
-    // ModifyCharacterSquelch = 0x0058,
-    // /// C2S: Mute/squelch an entire account.
-    // ModifyAccountSquelch = 0x0059,
+    /// C2S: Mute/squelch a specific character.
+    ModifyCharacterSquelch = 0x0058,
+    /// C2S: Mute/squelch an entire account.
+    ModifyAccountSquelch = 0x0059,
     // /// C2S: Mute/squelch a global chat channel.
     // ModifyGlobalSquelch = 0x005B,
     /// C2S: Perform a character emote.
@@ -378,8 +384,8 @@ pub enum GameActionOpcode {
     // QueryPluginListResponse = 0x02AF,
     // /// C2S: Response to an admin plugin detail query.
     // QueryPluginResponse = 0x02B2,
-    // /// C2S: Finalize character changes in a barber session.
-    // FinishBarber = 0x0311,
+    /// C2S: Finalize character changes in a barber session.
+    FinishBarber = 0x0311,
     /// C2S: Change state (e.g. sit, stand).
     MoveToState = 0xF61C,
     /// C2S: Perform a jump.
@@ -421,12 +427,12 @@ pub enum GameActionOpcode {
     SwearAllegiance = 0x001D,
     /// C2S: Break allegiance from a patron/vassal.
     BreakAllegiance = 0x001E,
-    // /// C2S: Request an update of allegiance information.
-    // AllegianceUpdateRequest = 0x001F,
-    // /// C2S: Add a player to the friends list.
-    // AddFriend = 0x0018,
-    // /// C2S: Remove a player from the friends list.
-    // RemoveFriend = 0x0017,
+    /// C2S: Request an update of allegiance information.
+    AllegianceUpdateRequest = 0x001F,
+    /// C2S: Add a player to the friends list.
+    AddFriend = 0x0018,
+    /// C2S: Remove a player from the friends list.
+    RemoveFriend = 0x0017,
     // /// C2S: Query detailed allegiance hierarchy and status.
     // AllegianceInfoRequest = 0x027B,
     // /// C2S: Query the name of an allegiance member.
@@ -467,10 +473,10 @@ pub enum GameActionOpcode {
     // ListAllegianceOfficers = 0x02A6,
     // /// C2S: Remove all officers from their positions.
     // ClearAllegianceOfficers = 0x02A7,
-    // /// C2S: Recall the character to their allegiance hometown.
-    // RecallAllegianceHometown = 0x02AB,
-    // /// C2S: Select an active character title.
-    // TitleSet = 0x002C,
+    /// C2S: Recall the character to their allegiance hometown.
+    RecallAllegianceHometown = 0x02AB,
+    /// C2S: Select an active character title.
+    TitleSet = 0x002C,
     /// C2S: Query the current health of a selected creature or player.
     /// Also updates the server-side selected target used for follow-up health heartbeats.
     QueryHealth = 0x01BF,
@@ -487,58 +493,58 @@ pub enum GameActionOpcode {
     FellowshipUpdateRequest = 0x00A6,
     /// C2S: Designate a new fellowship leader.
     FellowshipAssignNewLeader = 0x0290,
-    // /// C2S: Toggle the fellowship's open/closed enrollment status.
-    // FellowshipChangeOpenness = 0x0291,
+    /// C2S: Set whether non-leaders may recruit into the fellowship.
+    FellowshipChangeOpenness = 0x0291,
 
     // --- Housing ---
-    // /// C2S: Purchase a selected house.
-    // BuyHouse = 0x021C,
-    // /// C2S: Query detailed information about a house.
-    // HouseQuery = 0x021E,
-    // /// C2S: Evict oneself from currently owned house.
-    // AbandonHouse = 0x021F,
-    // /// C2S: Pay the weekly rent for the house.
-    // RentHouse = 0x0221,
-    // /// C2S: Add a player to the house's permanent guest list.
-    // AddPermanentGuest = 0x0245,
-    // /// C2S: Remove a player from the permanent guest list.
-    // RemovePermanentGuest = 0x0246,
-    // /// C2S: Toggle "Open House" mode (allows anyone to enter).
-    // SetOpenHouseStatus = 0x0247,
-    // /// C2S: Update entry/storage permissions for house items.
-    // ChangeStoragePermission = 0x0249,
-    // /// C2S: Forcibly remove a specific guest from the house.
-    // BootSpecificHouseGuest = 0x024A,
-    // /// C2S: Revoke storage permissions from all players.
-    // RemoveAllStoragePermission = 0x024C,
-    // /// C2S: Request the full list of guests currently in the house.
-    // RequestFullGuestList = 0x024D,
-    // /// C2S: Query the owner/lord of a house.
-    // QueryLord = 0x0258,
-    // /// C2S: Grant storage permissions to every guest.
-    // AddAllStoragePermission = 0x025C,
-    // /// C2S: Clear the entire permanent guest list.
-    // RemoveAllPermanentGuests = 0x025E,
-    // /// C2S: Forcibly remove all guests from the house.
-    // BootEveryone = 0x025F,
-    // /// C2S: Toggle the visibility of housing decor hooks.
-    // SetHooksVisibility = 0x0266,
-    // /// C2S: Grant/revoke house entry based on allegiance rank.
-    // ModifyAllegianceGuestPermission = 0x0267,
-    // /// C2S: Grant/revoke storage access based on allegiance rank.
-    // ModifyAllegianceStoragePermission = 0x0268,
-    // /// C2S: Request a list of houses currently available for purchase.
-    // ListAvailableHouses = 0x0270,
+    /// C2S: Purchase a selected house.
+    BuyHouse = 0x021C,
+    /// C2S: Query the character/account's effective home.
+    HouseQuery = 0x021E,
+    /// C2S: Abandon the directly owning character's home.
+    AbandonHouse = 0x021F,
+    /// C2S: Contribute physical items toward house maintenance.
+    RentHouse = 0x0221,
+    /// C2S: Add a player to the house's permanent guest list.
+    AddPermanentGuest = 0x0245,
+    /// C2S: Remove a player from the permanent guest list.
+    RemovePermanentGuest = 0x0246,
+    /// C2S: Set public entry permission (open permits anyone to enter).
+    SetOpenHouseStatus = 0x0247,
+    /// C2S: Update entry/storage permissions for house items.
+    ChangeStoragePermission = 0x0249,
+    /// C2S: Forcibly remove a specific guest from the house.
+    BootSpecificHouseGuest = 0x024A,
+    /// C2S: Revoke storage permissions from all players.
+    RemoveAllStoragePermission = 0x024C,
+    /// C2S: Request named housing access records.
+    RequestFullGuestList = 0x024D,
+    /// C2S: Grant storage permissions to every guest.
+    AddAllStoragePermission = 0x025C,
+    /// C2S: Clear the entire permanent guest list.
+    RemoveAllPermanentGuests = 0x025E,
+    /// C2S: Forcibly remove all guests from the house.
+    BootEveryone = 0x025F,
+    /// C2S: Show or hide empty housing hooks.
+    SetHooksVisibility = 0x0266,
+    /// C2S: Grant/revoke entry to the owning character's allegiance.
+    ModifyAllegianceGuestPermission = 0x0267,
+    /// C2S: Grant/revoke storage access to the owning character's allegiance.
+    ModifyAllegianceStoragePermission = 0x0268,
+    /// C2S: Request a list of houses currently available for purchase.
+    ListAvailableHouses = 0x0270,
 
     // --- Movement (Extra) ---
     /// C2S: Teleport to a PK-Lite arena.
     TeleToPklArena = 0x0026,
-    // /// C2S: Teleport to a PK arena.
-    // TeleToPkArena = 0x0027,
+    /// C2S: Teleport to a PK arena.
+    TeleToPkArena = 0x0027,
     /// C2S: Teleport to the character's attuned Lifestone.
     TeleToLifestone = 0x0063,
-    // /// C2S: Special advocate-only teleport command.
-    // AdvocateTeleport = 0x00D6,
+    /// C2S: Privileged map teleport; ACE accepts admin, arch, or PSR characters.
+    AdvocateTeleport = 0x00D6,
+    /// C2S: Teleport to the character or account house.
+    TeleToHouse = 0x0262,
     /// C2S: Teleport to the allegiance mansion or villa.
     TeleToMansion = 0x0278,
     /// C2S: Teleport to the Marketplace.
@@ -553,12 +559,12 @@ pub enum GameActionOpcode {
     // StopMovementCommand = 0xF661,
 
     // --- Miscellaneous & Permissions ---
-    // /// C2S: Clear the list of players with corpse-looting consent.
-    // ClearPlayerConsentList = 0x0216,
-    // /// C2S: Request the current corpse-looting consent list.
-    // DisplayPlayerConsentList = 0x0217,
-    // /// C2S: Revoke corpse-looting consent from a player.
-    // RemoveFromPlayerConsentList = 0x0218,
+    /// C2S: Clear received corpse-looting permissions.
+    ClearPlayerConsentList = 0x0216,
+    /// C2S: Request received corpse-looting permissions.
+    DisplayPlayerConsentList = 0x0217,
+    /// C2S: Remove a received corpse-looting permission.
+    RemoveFromPlayerConsentList = 0x0218,
     // /// C2S: Add a specific interaction permission for a player.
     // AddPlayerPermission = 0x0219,
     // /// C2S: Revoke a specific interaction permission from a player.
@@ -573,8 +579,8 @@ pub enum GameActionOpcode {
     // ChessMovePass = 0x026D,
     // /// C2S: Propose or accept a chess stalemate.
     // ChessStalemate = 0x026E,
-    // /// C2S: Forfeit an active quest contract.
-    // AbandonContract = 0x0316,
+    /// C2S: Remove a quest contract from the journal.
+    AbandonContract = 0x0316,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Hash)]
@@ -684,26 +690,26 @@ pub enum GameEventOpcode {
     CommunicationTransientString = 0x02EB,
     // /// S2C: Triggers a character emote action.
     // Emote = 0x01E2,
-    // /// S2C: Synchronizes the client's squelch (ignore) list.
-    // SetSquelchDb = 0x01F4,
+    /// S2C: Replace the character-owned ignore database.
+    SetSquelchDb = 0x01F4,
     /// S2C: Configures the Turbine-specific chat channels.
     SetTurbineChatChannels = 0x0295,
 
     // --- Allegiance & Social ---
-    // /// S2C: Allegiance update operation was aborted.
-    // AllegianceUpdateAborted = 0x0003,
-    // /// S2C: Update to allegiance data (vassals, patrons).
-    // AllegianceUpdate = 0x0020,
-    // /// S2C: Full update of the player's friends list.
-    // FriendsListUpdate = 0x0021,
-    // /// S2C: Detailed information about a character title.
-    // CharacterTitle = 0x0029,
-    // /// S2C: Update to the current active title.
-    // UpdateTitle = 0x002B,
-    // /// S2C: Confirms that an allegiance data update is finished.
-    // AllegianceAllegianceUpdateDone = 0x01C8,
-    // /// S2C: Notifies the player that an allegiance member has logged in.
-    // AllegianceLoginNotification = 0x027A,
+    /// S2C: Allegiance update operation was aborted.
+    AllegianceUpdateAborted = 0x0003,
+    /// S2C: Update to allegiance data (vassals, patrons).
+    AllegianceUpdate = 0x0020,
+    /// S2C: Full replacement or incremental update of the player's friends list.
+    FriendsListUpdate = 0x0021,
+    /// S2C: Initial selected title and earned-title registry.
+    CharacterTitle = 0x0029,
+    /// S2C: Grant a title and optionally select it.
+    UpdateTitle = 0x002B,
+    /// S2C: Confirms that an allegiance data update is finished.
+    AllegianceAllegianceUpdateDone = 0x01C8,
+    /// S2C: Notifies the player that an allegiance member has logged in.
+    AllegianceLoginNotification = 0x027A,
     // /// S2C: Detailed response to an allegiance information request.
     // AllegianceInfoResponse = 0x027C,
 
@@ -727,8 +733,8 @@ pub enum GameEventOpcode {
     // BookDeletePageResponse = 0x00B7,
     /// S2C: Returns specific page data for a book.
     BookPageDataResponse = 0x00B8,
-    // /// S2C: Result of a salvaging operation.
-    // SalvageOperationsResult = 0x02B4,
+    /// S2C: Optional salvage yields and unsuitable sources, grouped by skill.
+    SalvageOperationsResult = 0x02B4,
 
     // --- Combat & Stats ---
     /// S2C: Notification that the current attack sequence is finished.
@@ -765,26 +771,22 @@ pub enum GameEventOpcode {
     // MiscPortalstormSubsided = 0x02CC,
 
     // --- Housing ---
-    // /// S2C: Returns detailed profile and description of a house.
-    // HouseProfile = 0x021D,
-    // /// S2C: Detailed data for a specific house.
-    // HouseData = 0x0225,
-    // /// S2C: Updates the ownership and status of a house.
-    // HouseStatus = 0x0226,
-    // /// S2C: Updates the remaining rent time for a property.
-    // UpdateRentTime = 0x0227,
-    // /// S2C: Confirms a rent payment was processed.
-    // UpdateRentPayment = 0x0228,
-    // /// S2C: Updates the guest and banning restrictions for a house.
-    // HouseUpdateRestrictions = 0x0248,
-    // /// S2C: Updates House Accessibility Rules (HAR) such as guest lists.
-    // UpdateHar = 0x0257,
-    // /// S2C: Response containing extended data for a house.
-    // HouseDataResponse = 0x022F,
-    // /// S2C: Notification of a house-related transaction (purchase/sale).
-    // HouseTransaction = 0x0259,
-    // /// S2C: Returns a list of currently available houses for purchase.
-    // AvailableHouses = 0x0271,
+    /// S2C: Returns detailed profile and description of a house.
+    HouseProfile = 0x021D,
+    /// S2C: Retained effective-home facts without an owner or house identity.
+    HouseData = 0x0225,
+    /// S2C: Housing status/error code; source meaning determines home absence.
+    HouseStatus = 0x0226,
+    /// S2C: Replaces the effective home's maintenance period start timestamp.
+    UpdateRentTime = 0x0227,
+    /// S2C: Replaces maintenance progress; does not correlate a submitted payment.
+    UpdateRentPayment = 0x0228,
+    /// S2C: Updates House Accessibility Rules (HAR) such as guest lists.
+    UpdateHar = 0x0257,
+    /// S2C: Notification of a house-related transaction (purchase/sale).
+    HouseTransaction = 0x0259,
+    /// S2C: Returns a list of currently available houses for purchase.
+    AvailableHouses = 0x0271,
 
     // --- Fellowship (Extra) ---
     /// S2C: Notifies that a member has quit the fellowship.
@@ -816,15 +818,13 @@ pub enum GameEventOpcode {
     // AdminQueryPluginResponse = 0x02B3,
 
     // --- Contract Tracker ---
-    // /// S2C: Sends the full contract tracker table defined by the server.
-    // SendClientContractTrackerTable = 0x0314,
-    // /// S2C: Updates specific contract tracker progress data.
-    // SendClientContractTracker = 0x0315,
-
+    /// S2C: Sends the full contract tracker table defined by the server.
+    SendClientContractTrackerTable = 0x0314,
+    /// S2C: Updates specific contract tracker progress data.
+    SendClientContractTracker = 0x0315,
     // --- Miscellaneous ---
-    // /// S2C: Opens the character barber (customization) UI.
-    // StartBarber = 0x0075,
-
+    /// S2C: Opens the character barber (customization) UI.
+    StartBarber = 0x0075,
     // --- Unused ---
     // /// This is a "ghost" opcode—defined in headers but not implemented or used in ACE.
     // ItemAppraiseDone = 0x01CB,

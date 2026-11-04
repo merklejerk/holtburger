@@ -1,0 +1,18 @@
+<svg
+	xmlns="http://www.w3.org/2000/svg"
+	viewBox="0 0 24 24"
+	aria-hidden="true"
+	style="
+		display: block;
+		width: 100%;
+		height: 100%;
+		fill: none;
+		stroke: currentColor;
+		stroke-width: 1.7;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+	"
+>
+	<path d="M6 18C4 11 10 3 21 3c0 11-8 17-15 15Z" />
+	<path d="M3 21 17 7M10 14H6M14 10V6" />
+</svg>

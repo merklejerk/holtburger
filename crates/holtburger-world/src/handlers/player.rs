@@ -1,5 +1,4 @@
 use crate::WorldEvent;
-use crate::context::{WorldContext, WorldContextExt};
 use crate::entity::EntityMotionSnapshot;
 use crate::player::mutations::{SkillUpdateParams, VitalUpdateParams};
 use crate::spatial::RuntimeBodyResetCause;
@@ -12,7 +11,7 @@ pub(crate) fn handle_message(
     events: &mut Vec<WorldEvent>,
 ) -> bool {
     match message {
-        GameMessage::ObjectCreate(data) => {
+        GameMessage::ObjectCreate(data) | GameMessage::UpdateObject(data) => {
             if data.public_weenie_desc.guid == state.player.guid
                 && state.player.guid != holtburger_common::Guid::NULL
             {
@@ -21,7 +20,7 @@ pub(crate) fn handle_message(
                 }
 
                 if let Some(current_style) = EntityMotionSnapshot::from_object_description(data)
-                    .and_then(|snapshot| snapshot.current_style)
+                    .and_then(|(snapshot, _)| snapshot.current_style)
                 {
                     state
                         .player
@@ -33,13 +32,17 @@ pub(crate) fn handle_message(
         GameMessage::UpdatePosition(data) => {
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
+                let known_teleport_sequence = state.player.teleport_sequence;
+                let known_force_position_sequence = state.player.force_position_sequence;
                 let accepted = state.player.apply_position_from_server(&data.pos, events);
                 if accepted {
                     events.push(WorldEvent::SelfUpdatePosition {
+                        position: data.pos.pos,
+                        known_teleport_sequence,
+                        known_force_position_sequence,
                         teleport_sequence: data.pos.teleport_sequence,
                         force_position_sequence: data.pos.force_position_sequence,
                     });
-                    events.extend(state.set_player_position(data.pos.pos));
                 }
                 return true;
             }
@@ -49,26 +52,19 @@ pub(crate) fn handle_message(
         GameMessage::VectorUpdate(data) => {
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
-                state.player.update_vector_sequence(data.instance_sequence);
-                events.extend(state.set_player_vector(data.velocity, data.omega));
+                if !state
+                    .player
+                    .admit_server_vector_sequences(data.instance_sequence, data.vector_sequence)
+                {
+                    return true;
+                }
+                events.extend(state.record_player_server_vectors(data.velocity, data.omega));
                 return true;
             }
             false
         }
-        GameMessage::UpdateMotion(data) => {
-            if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
-            {
-                let accepted = state.player.apply_self_update_motion(data);
-                if accepted && !data.is_autonomous {
-                    events.push(WorldEvent::SelfServerControlledMotion(Box::new(
-                        (**data).clone(),
-                    )));
-                }
-                return !data.is_autonomous && !accepted;
-            }
-            false
-        }
         GameMessage::PlayerTeleport(data) => {
+            state.close_world_container();
             state.player.set_teleport_sequence(data.teleport_sequence);
             events
                 .extend(state.suspend_runtime_bodies(RuntimeBodyResetCause::TeleportOrWorldReset));
@@ -114,6 +110,8 @@ pub(crate) fn handle_message(
                 xp,
                 ..
             } = &**data;
+            let augmentations = state.player_skill_augmentations();
+            let vitae = state.player_vitae();
             state.player.update_skill(
                 SkillUpdateParams {
                     skill_id: *skill,
@@ -122,7 +120,11 @@ pub(crate) fn handle_message(
                     init: *init,
                     xp: *xp,
                     xp_table: &state.xp_table,
-                    skill_table: &state.skill_table,
+                    calculation: crate::player::stats_calc::SkillCalculationContext {
+                        table: &state.skill_table,
+                        augmentations,
+                        vitae,
+                    },
                 },
                 events,
             );
@@ -138,6 +140,8 @@ pub(crate) fn handle_message(
                 xp,
                 ..
             } = &**data;
+            let augmentations = state.player_skill_augmentations();
+            let vitae = state.player_vitae();
             state.player.update_skill(
                 SkillUpdateParams {
                     skill_id: *skill,
@@ -146,7 +150,11 @@ pub(crate) fn handle_message(
                     init: *init,
                     xp: *xp,
                     xp_table: &state.xp_table,
-                    skill_table: &state.skill_table,
+                    calculation: crate::player::stats_calc::SkillCalculationContext {
+                        table: &state.skill_table,
+                        augmentations,
+                        vitae,
+                    },
                 },
                 events,
             );
@@ -170,6 +178,7 @@ pub(crate) fn handle_message(
                     current: *current,
                     xp: *xp,
                     xp_table: &state.xp_table,
+                    secondary_attribute_table: &state.secondary_attribute_table,
                 },
                 events,
             );
@@ -193,6 +202,7 @@ pub(crate) fn handle_message(
                     current: *current,
                     xp: *xp,
                     xp_table: &state.xp_table,
+                    secondary_attribute_table: &state.secondary_attribute_table,
                 },
                 events,
             );
@@ -203,10 +213,6 @@ pub(crate) fn handle_message(
             let UpdateVitalCurrent { vital, current, .. } = &**data;
             state.player.update_vital_current(*vital, *current, events);
             true
-        }
-        GameMessage::InventoryRemoveObject(data) => {
-            state.player.remove_from_inventory(data.object_guid);
-            false
         }
         GameMessage::GameEvent(_) => false,
         _ => false,
@@ -219,15 +225,49 @@ pub(crate) fn handle_event(
     events: &mut Vec<WorldEvent>,
 ) -> bool {
     match &event.event {
+        GameEvent::CharacterTitle(data) => {
+            if event.target == state.player.guid
+                && state.player.guid != holtburger_common::Guid::NULL
+            {
+                state.player.character_titles = Some(data.title_ids.iter().copied().collect());
+                events.push(state.set_player_character_title(data.selected_id));
+                events.push(WorldEvent::PlayerTitlesUpdated);
+            }
+            true
+        }
+        GameEvent::UpdateTitle(data) => {
+            if event.target == state.player.guid
+                && state.player.guid != holtburger_common::Guid::NULL
+            {
+                // A grant before the initial table does not claim a complete registry.
+                if let Some(titles) = &mut state.player.character_titles {
+                    titles.insert(data.title_id);
+                }
+                if data.set_as_display {
+                    events.push(state.set_player_character_title(data.title_id));
+                }
+                events.push(WorldEvent::PlayerTitlesUpdated);
+            }
+            true
+        }
         GameEvent::PlayerDescription(data) => {
+            if data.guid != state.player.guid {
+                state.close_world_container();
+            }
             state.player.hydrate_from_player_description(
                 data,
                 &state.xp_table,
                 &state.skill_table,
+                &state.secondary_attribute_table,
                 events,
             );
+            // The entity's properties carry augmentation inputs. Install them before the
+            // first derived-stat publication so the initial sheet matches later refreshes.
+            state.apply_player_description_world_state(data);
             state.emit_player_derived_stats(events);
-            false
+            state.emit_player_info(events);
+            state.emit_level_info(events);
+            true
         }
         GameEvent::MagicUpdateEnchantment(data) => {
             let handled = state
@@ -312,24 +352,6 @@ pub(crate) fn handle_event(
         }
         GameEvent::UpdateHealth(data) => {
             state.update_health_fraction(data.target, data.health, events)
-        }
-        GameEvent::InventoryPutObjInContainer(data) => {
-            if state.get_player_guid() == Some(data.container_guid)
-                || state.is_in_player_inventory(data.container_guid)
-            {
-                state.player.add_to_inventory(data.item_guid);
-            }
-            false
-        }
-        GameEvent::InventoryPutObjectIn3D(data) => {
-            state.player.remove_from_inventory(data.object_guid);
-            false
-        }
-        GameEvent::WieldObject(data) => {
-            if event.target == state.player.guid {
-                state.player.wield_item(data.object_guid, data.equip_mask);
-            }
-            false
         }
         _ => false,
     }

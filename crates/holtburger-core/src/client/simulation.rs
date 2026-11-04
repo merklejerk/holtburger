@@ -1,313 +1,973 @@
-use super::movement::{MovementSystem, ServerControlledProjection};
-use anyhow::Result;
+use super::movement::{LocalNavigationInput, MovementSystem, PendingJumpAttempt};
+use super::movement_types::ClientMovementPolicy;
+use super::runtime_profile::RuntimePhaseProfile;
+use crate::SimulationSceneSnapshot;
+use crate::client::character_jump::{
+    CharacterJumpReadiness, CharacterJumpRejection, ResolvedJump, resolve_character_jump,
+};
+use crate::client::character_kinematics::retail_jump_kinematics;
+use crate::client::types::{
+    ClientCharacterMotionFeedback, ClientCharacterMotionOutcome, ClientCharacterMotionRejection,
+};
+use crate::client::{
+    PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection,
+};
+use anyhow::{Context, Result};
+use holtburger_common::Quaternion;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::WorldObjectExt;
-use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_common::{Guid, RigidTransform, Vector3};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
-use holtburger_world::{
-    ContactState, SolveBodyInput, SolvedBodyKinematics, SpatialBodyId, SpatialSolveBatch,
-    SpatialSolveRequest, WorldEvent, WorldState,
+use holtburger_world::entity::EntityMotionDirective;
+use holtburger_world::motion::{
+    LocomotionPresentationSource, ServerDirectedMotionState, begin_server_directed_motion,
 };
-use std::sync::Arc;
+use holtburger_world::state::SelfJumpCapabilities;
+use holtburger_world::{
+    AuthoredBodyMotionTick, BodyProjectionResolver, ContactState, DynamicBodyKinematics,
+    GroundedBodyActuation, GroundedLaunch, LocalDriveControl, PhysicalBodyActuation,
+    PhysicalBodyDefinition, PhysicalBodyState, SolveBodyInput, SpatialBodyId, WorldEvent,
+    WorldState, admit_physical_duration, advance_body_kinematics,
+};
+use holtburger_world::{PlacedMotionPath, SpatialBody};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 const ACTIVE_SOLVE_RADIUS_M: f32 = 96.0;
 
-fn calculate_arrival_position(
-    source: &WorldPosition,
-    target_pos: &Vector3,
-    distance: f32,
-) -> Vector3 {
-    let to_player = source.coords - *target_pos;
-    if to_player.length_squared() > 1e-6 {
-        *target_pos + (to_player.normalize() * distance)
-    } else {
-        let mut fallback = *target_pos;
-        fallback.x += distance;
-        fallback
-    }
+/// One fixed-tick client simulation product, including an optional committed local jump.
+#[derive(Debug)]
+pub(super) struct ClientSimulationTick {
+    /// World mutations emitted by ordinary physical and pose-only advancement.
+    pub events: Vec<WorldEvent>,
+    /// A relative manual turn changed accepted facing and requires immediate position publication.
+    pub relative_facing_changed: bool,
+    /// Committed local collision scripts consumed by core's common entity-cue dispatcher.
+    pub collision_script_cues: Vec<crate::ClientDynamicScriptCue>,
+    /// Explicit placement consequences consumed by dynamic publication.
+    pub body_motions: HashMap<Guid, ClientBodyMotion>,
+    /// Jump packet facts present only after the local physical launch committed.
+    pub committed_jump: Option<CommittedPlayerJump>,
+    /// Release outcome emitted only after the physical transaction accepts or rejects it.
+    pub character_motion_feedback: Option<ClientCharacterMotionFeedback>,
+    /// Precise-jump result emitted only after the shared physical launch transaction resolves.
+    pub precise_jump_feedback: Option<PreciseJumpTransactionFeedback>,
 }
 
-fn approximate_move_to_object_projection_target(
-    source: &WorldPosition,
-    target_pos: &Vector3,
-    distance_to_object: f32,
-    target_use_radius: Option<f32>,
-) -> Vector3 {
-    let conservative_center_distance = distance_to_object + target_use_radius.unwrap_or(0.0);
-    calculate_arrival_position(source, target_pos, conservative_center_distance.max(0.0))
+/// Placement provenance retained until publication; physical motion always carries its route.
+#[derive(Debug)]
+pub(super) enum ClientBodyMotion {
+    /// Accepted physical geometry, including intermediate placement boundaries.
+    Physical(PlacedMotionPath),
+    /// Endpoint projection without a fully traversed physical path.
+    PoseOnly,
+    /// Discontinuous placement, with no interpolated transit.
+    CorrectionSnap,
 }
 
-#[derive(Debug, Default)]
-pub(super) struct ClientSimulationSystem {
-    tracked_body_ids: Vec<SpatialBodyId>,
+/// Local-player contributions admitted once for the current physical interval.
+struct LocalPlayerPhysicalInput {
+    /// Selected authored root motion, independent from controller-owned velocity.
+    authored_offset: Option<RigidTransform>,
+    /// Relative manual yaw composed with the physical reference after choosing linear input.
+    facing_rotation: Option<Quaternion>,
+    /// One-shot resolved grounded release, never replayed on later intervals.
+    launch: Option<GroundedLaunch>,
 }
 
-impl ClientSimulationSystem {
-    pub(super) fn new() -> Self {
-        Self::default()
-    }
+/// Physical advancement and its immediate client consequences.
+struct PhysicalSimulationTick {
+    /// World changes emitted after scene publication.
+    events: Vec<WorldEvent>,
+    /// Generation-bound default scripts resolved from the scene's committed callback starts.
+    collision_script_cues: Vec<crate::ClientDynamicScriptCue>,
+    /// Complete per-entity placement consequences.
+    body_motions: HashMap<Guid, ClientBodyMotion>,
+    /// Whether the local pending launch was accepted.
+    jump_committed: bool,
+}
 
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn track_body(&mut self, body_id: SpatialBodyId) {
-        if body_id.authoritative_guid() != Some(Guid::NULL)
-            && !self.tracked_body_ids.contains(&body_id)
-        {
-            self.tracked_body_ids.push(body_id);
-        }
-    }
+/// Release facts retained across the local-physics-to-network transaction boundary.
+#[derive(Debug)]
+pub(super) struct CommittedPlayerJump {
+    /// One resolution whose world velocity drove physics and whose local velocity drives the wire.
+    pub resolved: ResolvedJump,
+    /// Exact pre-integration release position used by retail `JumpPack`.
+    pub position: WorldPosition,
+    pub instance_sequence: u16,
+    pub server_control_sequence: u16,
+    pub teleport_sequence: u16,
+    pub force_position_sequence: u16,
+}
 
-    pub(super) fn untrack_body(&mut self, body_id: SpatialBodyId) {
-        self.tracked_body_ids.retain(|tracked| *tracked != body_id);
-    }
+struct PreparedPlayerJump {
+    sequence: crate::client::character_motion::CharacterMotionSequence,
+    committed: CommittedPlayerJump,
+    launch: GroundedLaunch,
+}
 
-    pub(super) fn tick(
-        &mut self,
-        now: Instant,
-        dt: Duration,
-        world: &mut WorldState,
-        movement: &mut MovementSystem,
-    ) -> Vec<WorldEvent> {
-        if dt.is_zero() {
-            return Vec::new();
-        }
+struct PreparedPrecisePlayerJump {
+    sequence: crate::client::PreciseJumpActionSequence,
+    committed: CommittedPlayerJump,
+}
 
-        let Some(request) = self.build_solve_request(now, dt, world, movement) else {
-            return Vec::new();
-        };
+/// Pose-only projection inputs retained for diagnostic and remote dead-reckoning consumers.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ClientProjectionRequest {
+    pub bodies: Vec<SolveBodyInput>,
+}
 
-        let physics = Arc::clone(world.scene.physics());
-        let solved = physics.solve(&request, &mut world.scene);
-        self.apply_solve_batch(world, solved)
-    }
+#[cfg(test)]
+pub(super) fn tick(
+    now: Instant,
+    dt: Duration,
+    world: &mut WorldState,
+    movement: &mut MovementSystem,
+    collision: Option<&SimulationSceneSnapshot>,
+) -> Result<ClientSimulationTick> {
+    tick_with_precise_jump(now, dt, world, movement, collision, None)
+}
 
-    pub(super) fn build_solve_request(
-        &self,
-        _now: Instant,
-        dt: Duration,
-        world: &WorldState,
-        movement: &MovementSystem,
-    ) -> Option<SpatialSolveRequest> {
-        let local_body = movement.current_local_solve_body_input(world).or_else(|| {
-            (world.player.guid != Guid::NULL)
-                .then_some(SpatialBodyId::LocalPlayer(world.player.guid))
-                .and_then(|body_id| world.resolve_body_projection_input(body_id))
+pub(super) fn tick_with_precise_jump(
+    now: Instant,
+    dt: Duration,
+    world: &mut WorldState,
+    movement: &mut MovementSystem,
+    collision: Option<&SimulationSceneSnapshot>,
+    precise_jump: Option<super::precise_jump_runtime::PreparedPreciseJumpCommit>,
+) -> Result<ClientSimulationTick> {
+    let mut profile = RuntimePhaseProfile::begin("simulation");
+    let elapsed = dt;
+    // Admit time before advancing authored cursors or applying their one-shot physics
+    // effects. Discarded catch-up must not become input for a shorter physical solve.
+    let dt = admit_physical_duration(dt);
+    if dt.is_zero() {
+        return Ok(ClientSimulationTick {
+            events: Vec::new(),
+            collision_script_cues: Vec::new(),
+            body_motions: HashMap::new(),
+            relative_facing_changed: false,
+            committed_jump: None,
+            character_motion_feedback: None,
+            precise_jump_feedback: None,
         });
-        let local_pose = local_body.map(|body| body.pose);
-        let nearby_tracked = local_pose.map(|pose| {
+    }
+
+    world.retain_locomotion(collision.is_some());
+
+    // Authored playback advances once per tick, before any basis is read from it. A held local
+    // drive advances its world-owned cursor explicitly below; excluding it here prevents that
+    // same cursor from first advancing from a stale authoritative snapshot.
+    let local_guid = world.player.guid;
+    // Authoritative death retires manual playback priority. The world advances its animation
+    // while the existing death projection rules suppress physical root actuation.
+    let local_dead = world
+        .player_entity()
+        .and_then(|entity| entity.network_motion.snapshot())
+        .is_some_and(|snapshot| snapshot.indicates_death_motion());
+    let excluded = (!local_dead
+        && (movement.drives_local_authored_playback_this_tick()
+            || world.has_authored_motion_actions(local_guid)
+            || world.has_local_authored_motion(local_guid)
+            || world.has_manual_locomotion(local_guid)
+            || world.has_pending_motion_gesture(local_guid)))
+    .then_some(local_guid)
+    .filter(|guid| !guid.is_null());
+    let mut authored_ticks = world.advance_authored_motion_except(dt, excluded);
+    let authored_tick =
+        if !local_dead && (collision.is_some() || world.has_local_authored_motion(local_guid)) {
+            movement.advance_local_authored_motion(world, dt)?
+        } else {
+            None
+        };
+    let authored_offset = authored_tick.as_ref().map(|tick| tick.offset);
+    // Mouse yaw shares the root-motion integration path. Rewriting the pose before this solve
+    // would reset physical support and break the boom camera's preceding target endpoint.
+    let facing_delta = if collision.is_some() {
+        movement.take_relative_facing_delta()
+    } else {
+        0.0
+    };
+    let facing_start = (facing_delta != 0.0 && !local_dead)
+        .then(|| world.local_player_runtime_pose())
+        .flatten();
+    let facing_rotation = if facing_start.is_some() {
+        world
+            .scene
+            .wake_dynamic_body(SpatialBodyId::LocalPlayer(local_guid));
+        Some(
+            Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), -facing_delta)
+                .context("relative facing displacement must produce a finite rotation")?,
+        )
+    } else {
+        None
+    };
+    if let Some(tick) = authored_tick {
+        authored_ticks.push(AuthoredBodyMotionTick {
+            guid: local_guid,
+            tick,
+        });
+    }
+    let mut events = world.apply_authored_motion_physics(&authored_ticks)?;
+    profile.checkpoint("authored_motion");
+    if let Some(collision) = collision {
+        world.publish_authored_collision_poses(&collision.scene)?;
+    }
+    profile.checkpoint("authored_collision_poses");
+    let pending_jump = movement
+        .take_pending_jump_attempt()
+        .map(|pending| prepare_player_jump(world, pending));
+    let precise_jump = precise_jump.map(|pending| {
+        prepare_precise_player_jump(
+            world,
+            pending,
+            now,
+            pending_jump.as_ref().is_some_and(Result::is_ok),
+        )
+    });
+    let mut committed_jump = None;
+    let mut body_motions = HashMap::new();
+    let mut collision_script_cues = Vec::new();
+    let mut character_motion_feedback = pending_jump
+        .as_ref()
+        .and_then(|result| result.as_ref().err().copied());
+    let mut precise_jump_feedback = precise_jump
+        .as_ref()
+        .and_then(|result| result.as_ref().err().copied());
+    if let Some(Ok(jump)) = precise_jump {
+        precise_jump_feedback = Some(PreciseJumpTransactionFeedback {
+            sequence: jump.sequence,
+            outcome: PreciseJumpTransactionOutcome::Committed,
+        });
+        committed_jump = Some(jump.committed);
+    }
+    profile.checkpoint("jump_preparation");
+    let navigation_sticky_target =
+        if movement.movement_policy() == ClientMovementPolicy::Navigation && !local_dead {
+            world.prepare_position_only_sticky_target(local_guid)
+        } else {
+            None
+        };
+    if let Some(collision) = collision {
+        let prepared_jump = pending_jump
+            .as_ref()
+            .and_then(|result| result.as_ref().ok());
+        let physical_tick = tick_physical_entities(
+            now,
+            dt,
+            world,
+            movement,
+            collision,
+            LocalPlayerPhysicalInput {
+                authored_offset,
+                facing_rotation,
+                launch: prepared_jump.map(|jump| jump.launch),
+            },
+        )?;
+        events.extend(physical_tick.events);
+        collision_script_cues = physical_tick.collision_script_cues;
+        body_motions = physical_tick.body_motions;
+        let jump_committed = physical_tick.jump_committed;
+        if let Some(Ok(jump)) = pending_jump {
+            if jump_committed {
+                character_motion_feedback = Some(ClientCharacterMotionFeedback {
+                    sequence: jump.sequence,
+                    outcome: ClientCharacterMotionOutcome::JumpCommitted,
+                });
+                committed_jump = Some(jump.committed);
+            } else {
+                character_motion_feedback = Some(rejected_release(
+                    jump.sequence,
+                    ClientCharacterMotionRejection::LaunchRejected,
+                ));
+            }
+        }
+    } else if let Some(Ok(jump)) = pending_jump {
+        character_motion_feedback = Some(rejected_release(
+            jump.sequence,
+            ClientCharacterMotionRejection::CollisionUnavailable,
+        ));
+    }
+    profile.checkpoint("physical_contacts");
+    if local_dead {
+        movement.reset_navigation_progress();
+    }
+    if movement.movement_policy() == ClientMovementPolicy::Navigation
+        && !local_dead
+        && let Some(collision) = collision
+    {
+        let previous = world.local_player_runtime_pose();
+        events.extend(movement.advance_navigation(
+            world,
+            &collision.scene,
+            LocalNavigationInput {
+                admitted_fraction: dt.as_secs_f32() / elapsed.as_secs_f32(),
+                interval: dt,
+                facing_rotation,
+                authored_offset,
+                sticky_target: navigation_sticky_target,
+            },
+        )?);
+        if world.local_player_runtime_pose() != previous {
+            body_motions.insert(local_guid, ClientBodyMotion::PoseOnly);
+        }
+    }
+    events.extend(tick_pose_only_remote_entities(
+        dt,
+        world,
+        collision.is_some(),
+        movement.movement_policy(),
+        &mut body_motions,
+    )?);
+    profile.checkpoint("pose_only_projection");
+    profile.finish(format_args!(
+        "elapsed_ms={:.3} admitted_ms={:.3} entities={} advanced_bodies={}",
+        elapsed.as_secs_f64() * 1_000.0,
+        dt.as_secs_f64() * 1_000.0,
+        world.entities.len(),
+        body_motions.len(),
+    ));
+    let relative_facing_changed = facing_start.is_some_and(|start| {
+        world
+            .local_player_runtime_pose()
+            .is_some_and(|end| end.rotation != start.rotation)
+    });
+    Ok(ClientSimulationTick {
+        relative_facing_changed,
+        events,
+        collision_script_cues,
+        body_motions,
+        committed_jump,
+        character_motion_feedback,
+        precise_jump_feedback,
+    })
+}
+
+/// Current player facts admitted by the same eligibility rules for either jump input path.
+struct PlayerJumpContext<'a> {
+    /// Current jump height and burden used by launch conversion.
+    capabilities: SelfJumpCapabilities,
+    /// Supported physical actor supplying release pose and retained motion.
+    body: &'a SpatialBody,
+    /// Admitted grounded-body definition and response policy used by precise release.
+    physical: &'a PhysicalBodyState,
+}
+
+fn player_jump_context(
+    world: &WorldState,
+) -> Result<PlayerJumpContext<'_>, ClientCharacterMotionRejection> {
+    let capabilities = world
+        .resolve_self_jump_capabilities()
+        .map_err(|_| ClientCharacterMotionRejection::CapabilityUnavailable)?;
+    if capabilities.is_overburdened() {
+        return Err(ClientCharacterMotionRejection::Overburdened);
+    }
+    let body = world
+        .scene
+        .body(SpatialBodyId::LocalPlayer(world.player.guid))
+        .ok_or(ClientCharacterMotionRejection::BodyUnavailable)?;
+    let physical = body
+        .physical
+        .as_ref()
+        .ok_or(ClientCharacterMotionRejection::BodyUnavailable)?;
+    if !matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. }) {
+        return Err(ClientCharacterMotionRejection::BodyUnavailable);
+    }
+    match body.contact {
+        ContactState::Grounded => Ok(PlayerJumpContext {
+            capabilities,
+            body,
+            physical,
+        }),
+        ContactState::Airborne => Err(ClientCharacterMotionRejection::Airborne),
+        ContactState::Sliding | ContactState::Unknown => {
+            Err(ClientCharacterMotionRejection::Unsupported)
+        }
+    }
+}
+
+fn prepare_precise_player_jump(
+    world: &mut WorldState,
+    pending: super::precise_jump_runtime::PreparedPreciseJumpCommit,
+    now: Instant,
+    ordinary_selected: bool,
+) -> Result<PreparedPrecisePlayerJump, PreciseJumpTransactionFeedback> {
+    let sequence = pending.sequence();
+    let context = player_jump_context(world).map_err(|reason| {
+        rejected_precise_release(
+            sequence,
+            match reason {
+                ClientCharacterMotionRejection::Airborne => {
+                    PreciseJumpTransactionRejection::Airborne
+                }
+                ClientCharacterMotionRejection::Unsupported => {
+                    PreciseJumpTransactionRejection::Unsupported
+                }
+                ClientCharacterMotionRejection::Overburdened => {
+                    PreciseJumpTransactionRejection::Overburdened
+                }
+                _ => PreciseJumpTransactionRejection::LaunchRejected,
+            },
+        )
+    })?;
+    let (sequence, resolved) = pending.resolve_at_release(context.body, &context.capabilities)?;
+    let reject =
+        || rejected_precise_release(sequence, PreciseJumpTransactionRejection::LaunchRejected);
+    if ordinary_selected {
+        return Err(reject());
+    }
+    let position = context.body.pose;
+    let body_id = context.body.id;
+    let body = context.body;
+    let physical = context.physical;
+    let kinematics = DynamicBodyKinematics::new(
+        resolved.world_velocity(),
+        body.retained.acceleration,
+        body.retained.omega,
+        physical.response_policy.align_path,
+    )
+    .ok_or_else(reject)?;
+    world
+        .scene
+        .apply_dynamic_body_kinematics(body_id, kinematics, now)
+        .ok_or_else(reject)?;
+    Ok(PreparedPrecisePlayerJump {
+        sequence,
+        committed: CommittedPlayerJump {
+            resolved,
+            position,
+            instance_sequence: world.player.instance_sequence,
+            server_control_sequence: world.player.server_control_sequence,
+            teleport_sequence: world.player.teleport_sequence,
+            force_position_sequence: world.player.force_position_sequence,
+        },
+    })
+}
+
+fn prepare_player_jump(
+    world: &WorldState,
+    pending: PendingJumpAttempt,
+) -> Result<PreparedPlayerJump, ClientCharacterMotionFeedback> {
+    let reject = |reason| rejected_release(pending.sequence, reason);
+    let context = player_jump_context(world).map_err(reject)?;
+    let capabilities = context.capabilities;
+    let body = context.body;
+    let kinematics = retail_jump_kinematics(
+        capabilities.run_rate_scalar,
+        capabilities.full_extent_jump_height,
+    )
+    .map_err(|_| reject(ClientCharacterMotionRejection::CapabilityUnavailable))?;
+    let position = body.pose;
+    let resolved = resolve_character_jump(
+        kinematics,
+        pending.attempt,
+        position.rotation.to_heading(),
+        CharacterJumpReadiness::Supported,
+    )
+    .map_err(|error| {
+        reject(match error {
+            CharacterJumpRejection::Airborne => ClientCharacterMotionRejection::Airborne,
+            CharacterJumpRejection::Unsupported => ClientCharacterMotionRejection::Unsupported,
+            CharacterJumpRejection::InvalidHeading
+            | CharacterJumpRejection::InvalidTurnRate
+            | CharacterJumpRejection::InvalidRunRate => {
+                ClientCharacterMotionRejection::LaunchRejected
+            }
+        })
+    })?;
+    let launch = GroundedLaunch::new(resolved.world_velocity())
+        .map_err(|_| reject(ClientCharacterMotionRejection::LaunchRejected))?;
+    Ok(PreparedPlayerJump {
+        sequence: pending.sequence,
+        committed: CommittedPlayerJump {
+            resolved,
+            position,
+            instance_sequence: world.player.instance_sequence,
+            server_control_sequence: world.player.server_control_sequence,
+            teleport_sequence: world.player.teleport_sequence,
+            force_position_sequence: world.player.force_position_sequence,
+        },
+        launch,
+    })
+}
+
+fn rejected_release(
+    sequence: crate::client::character_motion::CharacterMotionSequence,
+    rejection: ClientCharacterMotionRejection,
+) -> ClientCharacterMotionFeedback {
+    ClientCharacterMotionFeedback {
+        sequence,
+        outcome: ClientCharacterMotionOutcome::Rejected(rejection),
+    }
+}
+
+fn rejected_precise_release(
+    sequence: crate::client::PreciseJumpActionSequence,
+    rejection: PreciseJumpTransactionRejection,
+) -> PreciseJumpTransactionFeedback {
+    PreciseJumpTransactionFeedback {
+        sequence,
+        outcome: PreciseJumpTransactionOutcome::Rejected(rejection),
+    }
+}
+
+/// Builds pose-only projection inputs directly from authoritative scene membership.
+///
+/// The returned values are consumed by the client projection lane, never by a collision callback.
+/// Local-player collision uses the transaction path in [`tick`].
+pub(super) fn build_projection_request(world: &WorldState) -> Option<ClientProjectionRequest> {
+    let local_pose = world.local_player_runtime_pose();
+    let candidates = local_pose.map_or_else(
+        || world.entities.iter().map(|entity| entity.guid).collect(),
+        |pose| {
             world
                 .scene
                 .get_entities_in_range(&pose, ACTIVE_SOLVE_RADIUS_M)
+        },
+    );
+    let mut bodies = Vec::<SolveBodyInput>::new();
+
+    for guid in candidates {
+        if guid == Guid::NULL || guid == world.player.guid {
+            continue;
+        }
+        let body_id = SpatialBodyId::Entity(guid);
+
+        let Some(input) = world.resolve_body_projection_input(body_id) else {
+            continue;
+        };
+
+        if !input.has_motion()
+            && !world
+                .scene
+                .body(body_id)
+                .is_some_and(|body| body.has_pose_reconciliation_work())
+        {
+            continue;
+        }
+
+        bodies.push(input);
+    }
+
+    if bodies.is_empty() {
+        return None;
+    }
+
+    Some(ClientProjectionRequest { bodies })
+}
+
+/// Advances every prepared authoritative body against one immutable tick-start population.
+/// This is the architectural seam that makes peer response directional without giving the
+/// local player or server-authored remotes a privileged collision path.
+fn tick_physical_entities(
+    now: Instant,
+    dt: Duration,
+    world: &mut WorldState,
+    movement: &mut MovementSystem,
+    collision: &SimulationSceneSnapshot,
+    local: LocalPlayerPhysicalInput,
+) -> Result<PhysicalSimulationTick> {
+    let local_body_id = SpatialBodyId::LocalPlayer(world.player.guid);
+    // Settled bodies are normally absent from the collection schedule. A one-shot launch is fresh
+    // integration work, so wake it before the scheduler takes its active-body snapshot.
+    if local.launch.is_some() {
+        world.scene.wake_dynamic_body(local_body_id);
+    }
+    let local_drive = movement.current_local_drive_control(world, dt);
+    let local_character = world
+        .scene
+        .body(local_body_id)
+        .and_then(|body| body.physical.as_ref())
+        .is_some_and(|physical| {
+            matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. })
         });
-        let mut bodies = Vec::<SolveBodyInput>::new();
-
-        if let Some(body) = local_body {
-            bodies.push(body);
-        }
-
-        for body_id in self.tracked_body_ids.iter().copied() {
-            if bodies.iter().any(|body| body.body_id == body_id) {
-                continue;
-            }
-
-            if nearby_tracked.as_ref().is_some_and(|guids| {
-                body_id
-                    .authoritative_guid()
-                    .is_some_and(|guid| !guids.contains(&guid))
-            }) {
-                continue;
-            }
-
-            let Some(input) = world.resolve_body_projection_input(body_id) else {
-                continue;
-            };
-
-            if input.basis.is_none() {
-                continue;
-            }
-
-            bodies.push(input);
-        }
-
-        if bodies.is_empty() {
-            return None;
-        }
-
-        Some(SpatialSolveRequest {
-            dt,
-            bodies,
-            local_drive: movement.current_local_drive_control(world, dt),
-        })
+    let local_locomotion = if local_character {
+        movement.client_directed_locomotion_order(world)?
+    } else {
+        None
+    };
+    // Observed/client-directed presentation retires with its source. Manual locomotion has a
+    // separate pre-solve owner and must survive through stop transitions and idle gestures.
+    if local_locomotion.is_none() && !world.has_manual_locomotion(world.player.guid) {
+        world.motion_runtimes.clear_locomotion(world.player.guid);
     }
-
-    fn apply_solve_batch(
-        &mut self,
-        world: &mut WorldState,
-        solved: SpatialSolveBatch,
-    ) -> Vec<WorldEvent> {
-        let mut events = Vec::new();
-
-        for body in solved.solved {
-            events.extend(world.apply_solved_body_kinematics(&body));
-        }
-
-        for event in solved.events {
-            events.extend(world.apply_spatial_body_event(&event));
-        }
-
-        events
-    }
-
-    pub(super) async fn handle_server_controlled_movement(
-        &mut self,
-        data: MovementEventData,
-        movement: &mut MovementSystem,
-        world: &mut WorldState,
-        session: &mut Session,
-    ) -> Result<Vec<WorldEvent>> {
-        log::info!(
-            ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",
-            data.movement_type,
-            data.server_control_sequence
-        );
-        movement.note_server_controlled_movement_started();
-
-        match &data.data {
-            MovementTypeData::MoveToObject(mto) => {
-                let Some(current_pos) = world.local_player_runtime_pose() else {
-                    return Ok(Vec::new());
-                };
-
-                let target_use_radius = world
-                    .get_visible_entity(mto.target)
-                    .and_then(|target| target.use_radius())
-                    .map(|radius| radius as f32);
-                let mut target_pose = current_pos;
-                target_pose.landblock_id = mto.origin.cell_id;
-                target_pose.coords = approximate_move_to_object_projection_target(
-                    &current_pos,
-                    &mto.origin.position,
-                    mto.params.distance_to_object,
-                    target_use_radius,
-                );
-                target_pose.rotation = if mto.params.desired_heading.abs() <= 1e-6 {
-                    Quaternion::from_heading(target_pose.coords.heading_to(&mto.origin.position))
-                } else {
-                    Quaternion::from_heading(mto.params.desired_heading)
-                };
-
-                movement.set_server_controlled_projection(ServerControlledProjection {
-                    target_pose,
-                    speed_mps: (mto.run_rate * mto.params.speed.max(0.1)).max(0.1),
-                });
-                movement.arm_autonomous_position_heartbeat_schedule(Instant::now(), world);
-                return Ok(Vec::new());
-            }
-            MovementTypeData::Invalid(_) => {
-                movement.clear_server_controlled_projection();
-            }
-            _ => {
-                movement.clear_server_controlled_projection();
-            }
-        }
-
-        let Some(solved) = self.build_server_controlled_result(&data, world) else {
-            return Ok(Vec::new());
-        };
-
-        let world_events = world.apply_solved_body_kinematics(&solved);
-        let now = Instant::now();
-        if should_send_immediate_server_controlled_sync(&data) {
-            movement
-                .send_autonomous_position_sync(
-                    now,
-                    world,
-                    session,
-                    super::movement_types::MovementPacketMetadata::default(),
+    let sticky_targets = world.prepare_sticky_body_targets();
+    let projection = BodyProjectionResolver::new(&world.entities, &world.motion_runtimes);
+    let entities = &world.entities;
+    let motion_runtimes = &world.motion_runtimes;
+    let collection = world.scene.advance_dynamic_entity_collection(
+        collision.scene.as_ref(),
+        dt.as_secs_f32(),
+        now,
+        |body| {
+            let guid = body.id.authoritative_guid().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "client physical body {:?} has no authoritative entity",
+                    body.id
                 )
-                .await?;
-        } else {
-            movement.arm_autonomous_position_heartbeat_schedule(now, world);
+            })?;
+            let entity = entities.get(guid).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "client physical body {:?} outlived its authoritative entity",
+                    body.id
+                )
+            })?;
+            let definition = body
+                .physical
+                .as_ref()
+                .ok_or_else(|| {
+                    anyhow::anyhow!("sampled body {:?} lost its physical definition", body.id)
+                })?
+                .definition;
+            let remote_sample = if body.id == local_body_id {
+                None
+            } else {
+                projection.remote_motion_sample(guid)
+            };
+            let authored_offset = if body.id == local_body_id {
+                // Explicit free-flight control already owns actual travel; its reference must
+                // use the same source rather than an unrelated authored locomotion offset.
+                if matches!(definition, PhysicalBodyDefinition::FreeSphere { .. })
+                    && local_drive.is_some()
+                {
+                    None
+                } else {
+                    local.authored_offset
+                }
+            } else {
+                remote_sample.and_then(|sample| sample.offset)
+            };
+            let object_scale = entity.scale.effective();
+            let actuation = if body.id == local_body_id {
+                local_player_actuation(
+                    body,
+                    definition,
+                    dt,
+                    authored_offset,
+                    local_drive,
+                    local.launch,
+                )?
+            } else {
+                remote_entity_actuation(body, definition)?
+            };
+            // Select linear actuation from its original owner before adding manual yaw.
+            // A rotation-only reference must not replace a client-directed velocity drive.
+            let authored_offset = match local.facing_rotation {
+                Some(rotation) if body.id == local_body_id => {
+                    let yaw = RigidTransform {
+                        translation: Vector3::zero(),
+                        rotation,
+                    };
+                    Some(match authored_offset {
+                        Some(offset) => yaw.combine(&offset),
+                        None => yaw,
+                    })
+                }
+                _ => authored_offset,
+            };
+            let authored_offset = authored_offset.map(|offset| {
+                if matches!(definition, PhysicalBodyDefinition::Grounded { .. }) {
+                    holtburger_world::gate_authored_offset(offset, body.contact, object_scale)
+                } else {
+                    RigidTransform {
+                        translation: offset.translation * object_scale,
+                        ..offset
+                    }
+                }
+            });
+            let input = holtburger_world::PhysicalBodyInput::referenced(
+                actuation,
+                match sticky_targets.get(&guid) {
+                    Some(target)
+                        if body.id != local_body_id
+                            || (local.launch.is_none()
+                                && !motion_runtimes
+                                    .get(guid)
+                                    .is_some_and(|runtime| runtime.manual_displacement())) =>
+                    {
+                        holtburger_world::PhysicalReferenceInput::Sticky(*target)
+                    }
+                    _ => match remote_sample {
+                        Some(sample) => holtburger_world::PhysicalReferenceInput::remote(
+                            authored_offset,
+                            sample.rotation,
+                        ),
+                        None => holtburger_world::PhysicalReferenceInput::body(authored_offset),
+                    },
+                },
+                !entity.physics.is_authoritative_projectile(),
+            );
+            let sticky_target = motion_runtimes
+                .get(guid)
+                .and_then(|runtime| runtime.sticky_target());
+            Ok(if sticky_target.is_some() {
+                input.require_matching_recovery_reference()
+            } else {
+                input
+            })
+        },
+    )?;
+    let mut events = Vec::new();
+    let mut jump_committed = false;
+    let mut body_motions = HashMap::new();
+    // Reporting remains a scene-owned collision lifecycle. Coverage is orthogonal: preserve
+    // accepted prefixes and client locomotion policy; residency refresh retries missing owners.
+    let holtburger_world::DynamicEntityCollectionTick {
+        outcomes,
+        collision_reports,
+        coverage_rejections: _,
+    } = collection;
+    let collision_script_cues =
+        super::entity_cues::collision_script_cues(world, &collision_reports)?;
+    for outcome in outcomes {
+        let guid = outcome
+            .body_id()
+            .authoritative_guid()
+            .context("published collection body has no entity")?;
+        let update = match outcome {
+            holtburger_world::DynamicEntityBodyOutcome::Integrated(update) => update,
+            holtburger_world::DynamicEntityBodyOutcome::FixedPlacement(body_id) => {
+                events.push(WorldEvent::RuntimeBodyAdvanced {
+                    body_id,
+                    kind: holtburger_world::RuntimeBodyAdvanceKind::CorrectionSnap,
+                });
+                body_motions.insert(guid, ClientBodyMotion::CorrectionSnap);
+                continue;
+            }
+            holtburger_world::DynamicEntityBodyOutcome::RecoveredPlacement(body_id) => {
+                events.extend(world.apply_recovered_body(body_id)?);
+                body_motions.insert(guid, ClientBodyMotion::CorrectionSnap);
+                continue;
+            }
+        };
+        let body_id = update.body_id;
+        if body_id == local_body_id && update.launch_admitted {
+            jump_committed = true;
         }
+        events.extend(world.apply_integrated_body(&update)?);
+        let post_solve_contact = update.current_contact;
+        if update.previous_contact != post_solve_contact {
+            if body_id == SpatialBodyId::LocalPlayer(world.player.guid)
+                && (movement.drives_local_authored_playback_this_tick()
+                    || world.has_manual_locomotion(world.player.guid))
+            {
+                movement.advance_local_authored_motion(world, Duration::ZERO)?;
+            } else if let Some(guid) = body_id.authoritative_guid() {
+                world.reconcile_authored_motion_support(guid, post_solve_contact);
+            }
+        }
+        if update.is_character {
+            let presentation = if body_id == local_body_id {
+                movement.character_presentation(post_solve_contact)
+            } else {
+                holtburger_world::motion::CharacterMotionPresentation::resolve(
+                    post_solve_contact,
+                    false,
+                    false,
+                )
+            };
+            let source = if body_id == local_body_id {
+                local_locomotion.map(LocomotionPresentationSource::Command)
+            } else {
+                Some(LocomotionPresentationSource::Observed(
+                    update.supported_motion,
+                ))
+            };
+            if let Some(source) = source {
+                world.present_character_locomotion(body_id, source, presentation, dt)?;
+            }
+        }
+        body_motions.insert(guid, ClientBodyMotion::Physical(update.path));
+    }
+    Ok(PhysicalSimulationTick {
+        events,
+        collision_script_cues,
+        jump_committed,
+        body_motions,
+    })
+}
 
-        Ok(world_events)
+fn remote_entity_actuation(
+    body: &holtburger_world::SpatialBody,
+    definition: PhysicalBodyDefinition,
+) -> Result<PhysicalBodyActuation> {
+    match definition {
+        PhysicalBodyDefinition::FixedPosition { .. } => Ok(PhysicalBodyActuation::FixedPosition {
+            translation: Vector3::zero(),
+            rotation: body.pose.rotation,
+        }),
+        PhysicalBodyDefinition::FreeSphere { .. } => {
+            Ok(PhysicalBodyActuation::free_flight(body.retained.velocity)?)
+        }
+        PhysicalBodyDefinition::Grounded { .. } => {
+            // Authored travel is retained once in PhysicalBodyInput and consumed by the admitted tick.
+            // Support preparation handles outward observer velocity; positive world Z alone also
+            // describes uphill walking and must not be promoted to a controller launch.
+            Ok(PhysicalBodyActuation::Grounded(
+                GroundedBodyActuation::coast(),
+            ))
+        }
+    }
+}
+
+/// Resolves local control after the caller has admitted nonzero time and captured the definition.
+fn local_player_actuation(
+    body: &holtburger_world::SpatialBody,
+    definition: PhysicalBodyDefinition,
+    dt: Duration,
+    authored_offset: Option<RigidTransform>,
+    local_drive: Option<LocalDriveControl>,
+    launch: Option<GroundedLaunch>,
+) -> Result<PhysicalBodyActuation> {
+    let dt_secs = dt.as_secs_f32();
+    Ok(match definition {
+        PhysicalBodyDefinition::FixedPosition { .. } => PhysicalBodyActuation::FixedPosition {
+            translation: Vector3::zero(),
+            rotation: body.pose.rotation,
+        },
+        PhysicalBodyDefinition::FreeSphere { .. } => {
+            let kinematic_velocity = local_drive
+                .map(|control| control.desired_world_delta / dt_secs)
+                .unwrap_or_else(Vector3::zero);
+            PhysicalBodyActuation::free_flight_with_kinematic_velocity(
+                body.retained.velocity,
+                kinematic_velocity,
+            )?
+        }
+        PhysicalBodyDefinition::Grounded { .. } => {
+            let mut grounded = if authored_offset.is_some() {
+                GroundedBodyActuation::coast()
+            } else if let Some(control) = local_drive {
+                let planar_velocity = control.desired_world_delta / dt_secs;
+                let mut grounded =
+                    if control.force_grounded || body.contact != ContactState::Airborne {
+                        GroundedBodyActuation::drive(Vector3::new(
+                            planar_velocity.x,
+                            planar_velocity.y,
+                            0.0,
+                        ))?
+                    } else {
+                        GroundedBodyActuation::coast()
+                    };
+                if let Some(heading) = control.desired_heading {
+                    grounded = grounded.with_control_heading(heading)?;
+                }
+                grounded
+            } else {
+                GroundedBodyActuation::coast()
+            };
+            if let Some(launch) = launch {
+                grounded = grounded.with_launch(launch);
+            }
+            PhysicalBodyActuation::Grounded(grounded)
+        }
+    })
+}
+
+fn tick_pose_only_remote_entities(
+    dt: Duration,
+    world: &mut WorldState,
+    collision_enabled: bool,
+    policy: ClientMovementPolicy,
+    body_motions: &mut HashMap<Guid, ClientBodyMotion>,
+) -> Result<Vec<WorldEvent>> {
+    let Some(request) = build_projection_request(world) else {
+        return Ok(Vec::new());
+    };
+    let mut events = Vec::new();
+    for input in request.bodies {
+        let physical = world
+            .scene
+            .body(input.body_id)
+            .is_some_and(|body| body.physical.is_some());
+        // Content preparation is asynchronous. Until its movement geometry is known, a
+        // physical candidate cannot safely fall back to unconstrained dead reckoning.
+        let awaiting_physics = !physical
+            && (collision_enabled || policy == ClientMovementPolicy::Navigation)
+            && matches!(input.body_id, SpatialBodyId::Entity(guid)
+                if super::collision::remote_body_requires_physics(world, guid, policy));
+        if physical || awaiting_physics {
+            continue;
+        }
+        let solved = advance_body_kinematics(&input, dt);
+        let Some((solved, kind)) = world
+            .scene
+            .reconcile_pose_only_body_kinematics(solved, dt.as_secs_f32())
+        else {
+            continue;
+        };
+        let applied = world.apply_pose_only_body_tick(&solved, kind);
+        if !applied.is_empty() {
+            let guid = solved
+                .body_id
+                .authoritative_guid()
+                .context("pose-only body has no entity")?;
+            body_motions.insert(
+                guid,
+                match kind {
+                    holtburger_world::RuntimeBodyAdvanceKind::Integrated => {
+                        ClientBodyMotion::PoseOnly
+                    }
+                    holtburger_world::RuntimeBodyAdvanceKind::CorrectionSnap => {
+                        ClientBodyMotion::CorrectionSnap
+                    }
+                },
+            );
+        }
+        events.extend(applied);
+    }
+    Ok(events)
+}
+
+pub(super) async fn handle_server_controlled_movement(
+    data: &MovementEventData,
+    movement: &mut MovementSystem,
+    world: &mut WorldState,
+    _session: &mut Session,
+) -> Result<Vec<WorldEvent>> {
+    log::info!(
+        ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",
+        data.movement_type,
+        data.server_control_sequence
+    );
+    let motion = build_server_controlled_motion(data, world);
+    if EntityMotionDirective::from_movement_event(data).is_none()
+        && world.permits_gesture_locomotion(world.player.guid)
+    {
+        movement.admit_server_gesture(Instant::now(), world);
+    } else {
+        movement.admit_server_controlled_motion(motion, Instant::now(), world);
+    }
+    Ok(Vec::new())
+}
+
+fn build_server_controlled_motion(
+    data: &MovementEventData,
+    world: &WorldState,
+) -> Option<ServerDirectedMotionState> {
+    let guid = world.player.guid;
+    if guid == Guid::NULL {
+        return None;
     }
 
-    fn build_server_controlled_result(
-        &self,
-        data: &MovementEventData,
-        world: &WorldState,
-    ) -> Option<SolvedBodyKinematics> {
-        let guid = world.player.guid;
-        if guid == Guid::NULL {
-            return None;
-        }
-
-        let current_pos = world.local_player_runtime_pose()?;
-        let mut next_pos = current_pos;
-
-        match &data.data {
-            MovementTypeData::MoveToObject(mto) => {
-                next_pos.landblock_id = mto.origin.cell_id;
-
-                let arrival_dist = mto.params.distance_to_object;
-
-                if (current_pos.landblock_id >> 16) == (mto.origin.cell_id >> 16) {
-                    next_pos.coords = calculate_arrival_position(
-                        &current_pos,
-                        &mto.origin.position,
-                        arrival_dist,
-                    );
-
-                    if mto.params.desired_heading.abs() <= 1e-6 {
-                        next_pos.rotation = Quaternion::from_heading(
-                            next_pos.coords.heading_to(&mto.origin.position),
-                        );
-                    } else {
-                        next_pos.rotation = Quaternion::from_heading(mto.params.desired_heading);
-                    }
-                } else {
-                    next_pos.coords = mto.origin.position;
-                    next_pos.coords.x += arrival_dist;
-                }
-            }
-            MovementTypeData::MoveToPosition(mtp) => {
-                next_pos.landblock_id = mtp.origin.cell_id;
-                next_pos.coords = mtp.origin.position;
-
-                if mtp.params.desired_heading.abs() > 1e-6 {
-                    next_pos.rotation = Quaternion::from_heading(mtp.params.desired_heading);
-                } else {
-                    next_pos.rotation = Quaternion::from_heading(
-                        current_pos.coords.heading_to(&mtp.origin.position),
-                    );
-                }
-            }
-            MovementTypeData::TurnToHeading(tth) => {
-                next_pos.rotation = Quaternion::from_heading(tth.params.desired_heading);
-            }
-            MovementTypeData::TurnToObject(tto) => {
-                if tto.desired_heading.abs() > 1e-6 {
-                    next_pos.rotation = Quaternion::from_heading(tto.desired_heading);
-                } else if let Some(target) = world.get_visible_entity(tto.target)
-                    && target.position.landblock_id == next_pos.landblock_id
-                {
-                    next_pos.rotation = Quaternion::from_heading(
-                        next_pos.coords.heading_to(&target.position.coords),
-                    );
-                }
-            }
-            _ => {}
-        }
-
-        let distance = if next_pos.landblock_id == Guid::NULL {
-            0.0
-        } else {
-            current_pos.distance_to(&next_pos)
-        };
-
+    let current_pos = world.local_player_runtime_pose()?;
+    let directive = EntityMotionDirective::from_movement_event(data)?;
+    let object_target = directive
+        .target_guid()
+        .and_then(|target| world.server_directed_target(guid, target));
+    let target_pose = match directive {
+        EntityMotionDirective::MoveToPosition { target, .. } => Some(target.world_position()),
+        EntityMotionDirective::MoveToObject {
+            fallback_target, ..
+        } => Some(
+            object_target.map_or_else(|| fallback_target.world_position(), |target| target.pose),
+        ),
+        EntityMotionDirective::TurnToHeading { .. }
+        | EntityMotionDirective::TurnToObject { .. } => None,
+    };
+    if let Some(target_pose) = target_pose {
+        let distance = current_pos.distance_to(&target_pose);
         if distance > AUTO_MOVE_DISTANCE_LIMIT {
             log::warn!(
                 "Aborting auto-move: target is {:.2}m away (limit {}m)",
@@ -316,26 +976,15 @@ impl ClientSimulationSystem {
             );
             return None;
         }
-
-        let (_, velocity, omega) = world.local_player_runtime_kinematics().unwrap_or((
-            next_pos,
-            Vector3::zero(),
-            Vector3::zero(),
-        ));
-
-        Some(SolvedBodyKinematics {
-            body_id: SpatialBodyId::LocalPlayer(guid),
-            pose: next_pos,
-            velocity,
-            omega,
-            contact: ContactState::Unknown,
-            projection_state: Some(
-                holtburger_world::SelfPlayerDriveProjectionState::ServerControlled,
-            ),
-        })
     }
+    Some(begin_server_directed_motion(
+        directive,
+        current_pos,
+        object_target,
+    ))
 }
 
+#[cfg(test)]
 fn should_send_immediate_server_controlled_sync(data: &MovementEventData) -> bool {
     !matches!(data.data, MovementTypeData::Invalid(_))
 }
@@ -344,32 +993,90 @@ fn should_send_immediate_server_controlled_sync(data: &MovementEventData) -> boo
 mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
-    use holtburger_protocol::messages::motion::{
-        MoveToObject, MoveToParameters, MoveToPosition, Origin,
+    use holtburger_common::properties::{
+        PhysicsState, PropertyDataId, WorldObjectPropertyAccessorsMut as _,
     };
+    use holtburger_protocol::messages::motion::{MoveToParameters, MoveToPosition, Origin};
     use holtburger_protocol::messages::{
         MotionStance, MovementEventData, MovementType, MovementTypeData,
     };
     use holtburger_world::{SpatialBodyEvent, entity::Entity};
 
-    fn make_world_position(x: f32, y: f32, heading: f32) -> WorldPosition {
-        WorldPosition {
-            landblock_id: Guid(0x1234_0000),
-            coords: Vector3::new(x, y, 0.0),
-            rotation: Quaternion::from_heading(heading),
-        }
-    }
-
-    fn synthetic_player_world(start: WorldPosition) -> (WorldState, Guid) {
+    #[test]
+    fn stalled_tick_discards_catch_up_before_projection_and_does_not_replay_it() {
         let mut world = WorldState::synthetic();
-        let player_guid = Guid(0x5000_0001);
-        world.seed_local_player_entity(player_guid, "Player", start);
-        (world, player_guid)
+        let mut movement = MovementSystem::new();
+        let now = Instant::now();
+        let guid = Guid(0x7000_0043);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1234_0002),
+            coords: Vector3::new(12.0, 12.0, 24.0),
+            rotation: Quaternion::identity(),
+        };
+        let speed = 3.0;
+        let mut entity = Entity::new(guid, "Fixture".to_owned(), pose);
+        entity.velocity = Vector3::new(speed, 0.0, 0.0);
+        world.add_entity(entity);
+        let body_id = SpatialBodyId::Entity(guid);
+        let stalled = Duration::from_secs(2);
+        tick(now, stalled, &mut world, &mut movement, None).unwrap();
+        let after_stall = world.scene.body(body_id).unwrap().pose.coords;
+        let admitted = holtburger_world::MOBILE_CONTACT_TICK_SECONDS;
+        assert!((after_stall.x - pose.coords.x - speed * admitted).abs() < 0.0001);
+        let ordinary = Duration::from_millis(30);
+        tick(now + ordinary, ordinary, &mut world, &mut movement, None).unwrap();
+        let after_next = world.scene.body(body_id).unwrap().pose.coords;
+        assert!((after_next.x - after_stall.x - speed * ordinary.as_secs_f32()).abs() < 0.0001);
     }
 
     #[test]
-    fn apply_solve_batch_applies_spatial_events() {
-        let mut simulation = ClientSimulationSystem::new();
+    fn physical_candidate_waits_for_geometry_before_projecting_server_velocity() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x7000_0042);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1234_0002),
+            coords: Vector3::new(12.0, 12.0, 24.0),
+            rotation: Quaternion::identity(),
+        };
+        let mut entity = Entity::new(guid, "Fixture".to_owned(), pose);
+        entity.wcid = Some(850);
+        entity
+            .properties
+            .set_did_prop(PropertyDataId::Setup, Guid(0x0200_048a));
+        entity
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                PhysicsState::GRAVITY,
+            ));
+        entity.velocity = Vector3::new(0.0, 0.0, -1.0);
+        world.add_entity(entity);
+        let body_id = SpatialBodyId::Entity(guid);
+        let dt = Duration::from_millis(30);
+
+        tick_pose_only_remote_entities(
+            dt,
+            &mut world,
+            true,
+            ClientMovementPolicy::Physical,
+            &mut HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(world.scene.body(body_id).unwrap().pose, pose);
+
+        // Clients without collision preparation retain their explicit pose-only simulation.
+        tick_pose_only_remote_entities(
+            dt,
+            &mut world,
+            false,
+            ClientMovementPolicy::Physical,
+            &mut HashMap::new(),
+        )
+        .unwrap();
+        assert!(world.scene.body(body_id).unwrap().pose.coords.z < pose.coords.z);
+    }
+
+    #[test]
+    fn applying_spatial_events_keeps_world_semantics() {
         let mut world = WorldState::synthetic();
         let player_guid = Guid(0x5000_0001);
         let remote_guid = Guid(0x5000_0002);
@@ -386,24 +1093,18 @@ mod tests {
         world.seed_local_player_entity(player_guid, "Player", player_pose);
         world.add_entity(Entity::new(remote_guid, "Remote".to_string(), player_pose));
 
-        let events = simulation.apply_solve_batch(
-            &mut world,
-            SpatialSolveBatch {
-                solved: Vec::new(),
-                events: vec![
-                    SpatialBodyEvent::ContactChanged {
-                        body_id: SpatialBodyId::LocalPlayer(player_guid),
-                        contact: ContactState::Grounded,
-                    },
-                    SpatialBodyEvent::ForcedReposition {
-                        body_id: SpatialBodyId::Entity(remote_guid),
-                        pose: remote_pose,
-                    },
-                ],
-            },
+        let mut events = world.apply_spatial_body_event(&SpatialBodyEvent::ContactChanged {
+            body_id: SpatialBodyId::LocalPlayer(player_guid),
+            contact: ContactState::Grounded,
+        });
+        events.extend(
+            world.apply_spatial_body_event(&SpatialBodyEvent::ForcedReposition {
+                body_id: SpatialBodyId::Entity(remote_guid),
+                pose: remote_pose,
+            }),
         );
 
-        assert_eq!(world.player.last_server_grounded, Some(true));
+        assert_eq!(world.player.last_runtime_walkable, Some(true));
         assert_eq!(
             world
                 .scene
@@ -421,109 +1122,6 @@ mod tests {
             WorldEvent::ForcedReposition { guid, pos, sequence }
                 if *guid == remote_guid && *pos == remote_pose && *sequence == 0
         )));
-    }
-
-    #[test]
-    fn move_to_position_without_desired_heading_uses_current_pose_for_facing() {
-        let simulation = ClientSimulationSystem::new();
-        let start = make_world_position(10.0, 20.0, 1.25);
-        let destination = make_world_position(32.0, 48.0, 0.0);
-        let (world, player_guid) = synthetic_player_world(start);
-
-        let solved = simulation
-            .build_server_controlled_result(
-                &MovementEventData {
-                    guid: player_guid,
-                    object_instance_sequence: 7,
-                    movement_sequence: 20,
-                    server_control_sequence: 10,
-                    is_autonomous: false,
-                    movement_type: MovementType::MoveToPosition,
-                    motion_flags: 0,
-                    current_style: MotionStance::SwordCombat.interpreted(),
-                    data: MovementTypeData::MoveToPosition(MoveToPosition {
-                        origin: Origin {
-                            cell_id: destination.landblock_id,
-                            position: destination.coords,
-                        },
-                        params: MoveToParameters {
-                            desired_heading: 0.0,
-                            ..Default::default()
-                        },
-                        run_rate: 1.0,
-                    }),
-                },
-                &world,
-            )
-            .expect("server-controlled move should resolve");
-
-        assert_eq!(solved.pose.landblock_id, destination.landblock_id);
-        assert_eq!(solved.pose.coords, destination.coords);
-        assert!(
-            (solved.pose.rotation.to_heading() - start.coords.heading_to(&destination.coords))
-                .abs()
-                < 1e-5
-        );
-    }
-
-    #[test]
-    fn move_to_object_without_desired_heading_uses_current_pose_for_arrival_and_facing() {
-        let simulation = ClientSimulationSystem::new();
-        let start = make_world_position(10.0, 20.0, 1.25);
-        let target = make_world_position(13.0, 24.0, 0.0);
-        let arrival_distance = 2.0;
-        let expected_coords = calculate_arrival_position(&start, &target.coords, arrival_distance);
-        let (world, player_guid) = synthetic_player_world(start);
-
-        let solved = simulation
-            .build_server_controlled_result(
-                &MovementEventData {
-                    guid: player_guid,
-                    object_instance_sequence: 7,
-                    movement_sequence: 20,
-                    server_control_sequence: 10,
-                    is_autonomous: false,
-                    movement_type: MovementType::MoveToObject,
-                    motion_flags: 0,
-                    current_style: MotionStance::SwordCombat.interpreted(),
-                    data: MovementTypeData::MoveToObject(MoveToObject {
-                        target: Guid(0x5000_00AA),
-                        origin: Origin {
-                            cell_id: target.landblock_id,
-                            position: target.coords,
-                        },
-                        params: MoveToParameters {
-                            desired_heading: 0.0,
-                            distance_to_object: arrival_distance,
-                            ..Default::default()
-                        },
-                        run_rate: 1.0,
-                    }),
-                },
-                &world,
-            )
-            .expect("server-controlled move should resolve");
-
-        assert_eq!(solved.pose.landblock_id, target.landblock_id);
-        assert_eq!(solved.pose.coords, expected_coords);
-        assert!(
-            (solved.pose.rotation.to_heading() - expected_coords.heading_to(&target.coords)).abs()
-                < 1e-5
-        );
-    }
-
-    #[test]
-    fn move_to_object_projection_target_adds_target_use_radius() {
-        let start = make_world_position(10.0, 20.0, 0.0);
-        let target = make_world_position(13.0, 24.0, 0.0);
-
-        let projected =
-            approximate_move_to_object_projection_target(&start, &target.coords, 0.6, Some(0.5));
-
-        assert_eq!(
-            projected,
-            calculate_arrival_position(&start, &target.coords, 1.1)
-        );
     }
 
     #[test]

@@ -1,0 +1,238 @@
+<script module lang="ts">
+	/** The startup intro is shared across all pregame mounts in this document. */
+	let wordmarkIntroConsumed = false;
+</script>
+
+<script lang="ts">
+	import type { Snippet } from "svelte";
+	import PortalLogo from "../../../../assets/branding/portal.svg?component";
+	import { APP_BUILD_LABEL } from "../app/app-build";
+	import AppUpdateIndicator from "../app/AppUpdateIndicator.svelte";
+	import { uiScale } from "../app/ui-scale";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import "./client-pregame.css";
+	import "../app/themes/holtburger-pregame.css";
+
+	interface Props {
+		/** Loading foregrounds the wordmark; character selection keeps corner branding. */
+		readonly branding: "hero" | "corner";
+		/** Prepend the portal unless the page already features it in its content. */
+		readonly showPortalLogo: boolean;
+		/** Ready world scenery remains visible beneath the foreground composition. */
+		readonly backdrop: boolean;
+		/** Page-owned status fits beside corner branding without changing the content area. */
+		readonly headerAside?: Snippet;
+		/** Optional page action after focused controls have had first refusal. */
+		readonly onDefaultKeydown?: (event: KeyboardEvent) => void;
+		/** The active page owns its controls, status, and recovery actions. */
+		readonly children: Snippet;
+		/** Page-owned peripheral actions or metadata, kept outside the foreground content. */
+		readonly footer: Snippet;
+		/** Optional page-owned controls grouped with the build information. */
+		readonly footerAside?: Snippet;
+	}
+	const {
+		branding,
+		showPortalLogo,
+		backdrop,
+		headerAside,
+		onDefaultKeydown,
+		children,
+		footer,
+		footerAside,
+	}: Props = $props();
+	const { keyboard } = useAppInputPolicy();
+
+	/** Measure the loaded font so every letter starts at the wordmark's center. */
+	function revealWordmark(node: HTMLSpanElement) {
+		if (wordmarkIntroConsumed) return;
+		// Consume before font loading or reduced-motion checks so remounts cannot replay it.
+		wordmarkIntroConsumed = true;
+		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+		let disposed = false;
+		const animations: Animation[] = [];
+		node.style.opacity = "0";
+		void document.fonts.ready.then(() => {
+			if (disposed) return;
+			const bounds = node.getBoundingClientRect();
+			const center = bounds.left + bounds.width / 2;
+			for (const letter of node.querySelectorAll<HTMLSpanElement>(
+				".hero-letter",
+			)) {
+				const bounds = letter.getBoundingClientRect();
+				// Bounds are displayed pixels; CSS transforms consume local UI units.
+				const offset =
+					(center - (bounds.left + bounds.width / 2)) / uiScale(node);
+				animations.push(
+					letter.animate(
+						[
+							{ transform: `translateX(${offset}px)`, opacity: 0 },
+							{ transform: "translateX(0)", opacity: 1 },
+						],
+						{ duration: 2000, easing: "cubic-bezier(0.16, 1, 0.3, 1)" },
+					),
+				);
+			}
+			node.style.removeProperty("opacity");
+		});
+		return {
+			destroy() {
+				disposed = true;
+				for (const animation of animations) animation.cancel();
+			},
+		};
+	}
+</script>
+
+<div class="pregame-viewport">
+	<main
+		class="client-pregame-screen ui-theme"
+		class:with-backdrop={backdrop}
+		class:hero-brand={branding === "hero"}
+		aria-label="Holtburger client"
+		use:keyboard.nativePage={(event) => onDefaultKeydown?.(event)}
+	>
+		<div class="pregame-header" class:with-aside={headerAside !== undefined}>
+			<header class="pregame-brand">
+				{#if showPortalLogo}
+					<span class="pregame-logo" aria-hidden="true"><PortalLogo /></span>
+				{/if}
+				{#if branding === "hero"}
+					<span role="img" aria-label="Holtburger" use:revealWordmark>
+						{#each [..."Holtburger"] as letter, index (index)}<span
+								class="hero-letter"
+								aria-hidden="true">{letter}</span
+							>{/each}
+					</span>
+				{:else}
+					<span>Holtburger</span>
+				{/if}
+			</header>
+			{#if headerAside}
+				<div class="pregame-header-aside">{@render headerAside()}</div>
+			{/if}
+		</div>
+		<div class="pregame-content">{@render children()}</div>
+		<footer class="pregame-footer">
+			{@render footer()}
+			<div class="pregame-build">
+				<span aria-label="Build information">{APP_BUILD_LABEL}</span>
+				<AppUpdateIndicator />
+				{#if footerAside}{@render footerAside()}{/if}
+			</div>
+		</footer>
+	</main>
+</div>
+
+<style>
+	@layer components {
+		.hero-letter {
+			display: inline-block;
+		}
+		.pregame-viewport {
+			height: var(--ui-viewport-height);
+			container: pregame-viewport / size;
+		}
+		.client-pregame-screen {
+			position: relative;
+			display: grid;
+			grid-template-rows: auto minmax(0, 1fr) auto;
+			gap: clamp(16px, calc(var(--ui-viewport-height) * 0.03), 32px);
+			/* A definite height bounds percentage-sized previews and reserves the footer row. */
+			height: 100%;
+			min-height: 0;
+			overflow: clip;
+			padding: clamp(20px, calc(var(--ui-viewport-width) * 0.04), 64px);
+			padding-bottom: 12px;
+		}
+		.client-pregame-screen.hero-brand {
+			grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+			gap: 24px;
+		}
+		.hero-brand .pregame-footer {
+			grid-row: 4;
+		}
+		.hero-brand .pregame-brand {
+			align-self: end;
+			justify-self: center;
+			text-align: center;
+		}
+		.hero-brand .pregame-content {
+			align-self: start;
+		}
+		.pregame-header {
+			/* Without page status, branding remains a direct participant in the screen grid. */
+			display: contents;
+		}
+		.pregame-header.with-aside {
+			display: flex;
+			align-items: stretch;
+			justify-content: space-between;
+			gap: 24px;
+		}
+		.with-aside .pregame-brand {
+			flex: none;
+		}
+		.pregame-header-aside {
+			/* Branding owns header height; status must scroll inside that allocation. */
+			contain: size;
+			display: grid;
+			min-height: 0;
+			min-width: 0;
+			max-width: 50%;
+			flex: 0 1 50ch;
+		}
+		.pregame-brand {
+			position: relative;
+			z-index: 1;
+			display: flex;
+			align-items: center;
+			gap: 0.3em;
+			width: fit-content;
+			padding-bottom: 16px;
+		}
+		.pregame-logo {
+			flex: none;
+			width: 1.12em;
+			height: 1.4em;
+		}
+		.pregame-logo > :global(svg) {
+			display: block;
+			width: 100%;
+			height: 100%;
+		}
+		.pregame-content {
+			display: grid;
+			grid-template-rows: minmax(0, 1fr);
+			min-width: 0;
+			min-height: 0;
+			/* Pages own scrolling; their decorative fades may paint beyond this grid. */
+		}
+		.pregame-footer {
+			/* Page fades extend beyond the content grid; keep footer controls above them. */
+			z-index: 1;
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 24px;
+			min-width: 0;
+			padding-top: 12px;
+		}
+		.pregame-build {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			min-width: 0;
+			margin-left: auto;
+			text-align: right;
+			overflow-wrap: anywhere;
+		}
+		@container pregame-viewport (max-width: 850px) {
+			/* Stacked pages scroll as one area, with the footer remaining in place. */
+			.pregame-content {
+				grid-template-rows: auto;
+				overflow: hidden auto;
+			}
+		}
+	}
+</style>

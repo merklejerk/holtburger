@@ -68,6 +68,11 @@ impl ProtocolPack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameMessage::AccountBanned(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::AccountBanned as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameMessage::AccountBoot(data) => {
                 buf.write_u32::<LittleEndian>(GameOpcode::AccountBoot as u32)
                     .unwrap();
@@ -247,8 +252,8 @@ impl ProtocolPack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::PlayEffect(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::PlayEffect as u32)
+            GameMessage::PlayScript(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PlayScript as u32)
                     .unwrap();
                 data.pack(buf);
             }
@@ -344,6 +349,10 @@ impl ProtocolPack for GameMessage {
             }
             GameMessage::DddInterrogation => {
                 buf.write_u32::<LittleEndian>(GameOpcode::DddInterrogation as u32)
+                    .unwrap();
+            }
+            GameMessage::DddEndDdd => {
+                buf.write_u32::<LittleEndian>(GameOpcode::DddEndDdd as u32)
                     .unwrap();
             }
             GameMessage::Unknown(opcode, data) => {

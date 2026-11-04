@@ -1,168 +1,110 @@
 use super::*;
-use binrw::BinRead;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use crate::entity::Entity;
-use crate::state::liveness::EntityUpsertKind;
+use crate::attachment::PhysicsAttachment;
+use crate::entity::{
+    Entity, EntityMotionAdmission, EntityMotionDirective, EntityMotionSnapshot,
+    EntityMoveToParameters, EntityNetworkMotion, OrderedMotionPosition, OrderedMotionScalar,
+};
+use crate::state::liveness::EntityCreateDisposition;
 use crate::{
-    ContactState, RuntimeBodyResetCause, SolveProjectionBasis, SolvedBodyKinematics,
-    SpatialBodyEvent, SpatialBodyId, SpatialSampleMode, WorldBootstrap,
+    ContactState, RuntimeBodyResetCause, SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId,
+    SpatialSampleMode, WorldBootstrap,
 };
 
+use crate::motion::{
+    AuthoredCollisionPose, MotionContact, MotionOrder, ServerDirectedMotionResolution,
+    begin_server_directed_motion, resolve_server_directed_motion,
+};
+use crate::state::motion_resolution::test_support::{
+    FIXTURE_STAND_COMMAND, FixtureCycle, explicit_motion_catalog,
+};
 use crate::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    PhysicsState, PropertyBool, PropertyInt, PropertyInt64, WorldObjectExt as _,
+    PhysicsState, PropertyBool, PropertyFloat, PropertyInt, PropertyInt64, WorldObjectExt as _,
     WorldObjectProperties, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
-use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
-use holtburger_content::SoulEmoteCatalog;
+use holtburger_common::{
+    CharacterOption, CharacterOptions1, CharacterOptions2, ParentLocation, Placement, Quaternion,
+};
+use holtburger_content::collision_pose::CollisionPoseLibrary;
+use holtburger_content::{
+    ColliderScale, CollisionBall, CollisionShape, MotionHook, MotionHookDirection,
+    MotionHookEffect, MotionSequenceCatalog,
+};
 use holtburger_dat::file_type::{
-    MotionCommandKinematics, MotionKinematics, MotionKinematicsTable, MotionTable, SkillTable,
-    SpellTable, XpTable,
+    Animation, MotionTable, SkillTable, SpellTable, XpTable,
+    animation::AnimationFlags,
+    setup_model::AnimationFrame,
+    skill_table::{SkillBase, SkillFormula},
+    spell_table::SpellBase,
 };
-use holtburger_dat::{
-    DatFileType, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE, HbaReader, HbaWriter,
-};
+use holtburger_dat::graphics::Frame;
+use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::movement::{
     InterpretedMotionCommand, InterpretedMotionState, MotionStance, MovementStateFlags,
 };
-use holtburger_protocol::messages::object::events::UpdateHealthEventData;
+use holtburger_protocol::messages::object::events::{
+    IdentifyObjectResponseEventData, IdentifyResponseFlags, UpdateHealthEventData,
+};
+use holtburger_protocol::messages::object::messages::description::{
+    ObjDescEventData, PhysicsChildData, PhysicsDescParent,
+};
+use holtburger_protocol::messages::object::types::{ModelChange, ModelData};
 use holtburger_protocol::messages::{
     BookDataResponseEventData, BookPageData, BookPageDataResponseEventData, FellowUpdateType,
     FellowshipFullUpdateEventData, FellowshipMemberData, FellowshipQuitEventData,
     FellowshipUpdateFellowEventData, GameMessage, PlayerTeleportData,
 };
 use holtburger_protocol::traits::ProtocolPack;
-use tempfile::tempdir;
 
-fn repo_assets_hba_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
-}
-
-fn test_motion_kinematics_bytes() -> Vec<u8> {
-    let mut bytes = std::io::Cursor::new(Vec::new());
-    MotionKinematics::new()
-        .write(&mut bytes)
-        .expect("test motion kinematics asset should write");
-    bytes.into_inner()
-}
-
-fn write_micro_portal_hba(path: &Path) -> bool {
-    let source_path = repo_assets_hba_path();
-    if !source_path.is_file() {
-        eprintln!(
-            "skipping assets fixture test; missing repo-local {}",
-            source_path.display()
-        );
-        return false;
-    }
-    let source = match HbaReader::open(&source_path) {
-        Ok(source) => source,
-        Err(error) => panic!(
-            "repo-local {} must be a valid HBA v2 fixture for this test: {}",
-            source_path.display(),
-            error
-        ),
-    };
-
-    let mut writer = HbaWriter::new();
-    writer.set_compression(false);
-
-    for id in [SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID] {
-        let data = source
-            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, id)
-            .unwrap_or_else(|_| panic!("repo assets.hba should contain eor/portal:0x{id:08X}"));
-        writer
-            .add(
-                EOR_PORTAL_NAMESPACE,
-                id,
-                DatFileType::from_id(id) as u32,
-                data,
-            )
-            .expect("micro table should be added to test HBA");
-    }
-
-    writer
-        .add(
-            HOLTBURGER_CORE_NAMESPACE,
-            MotionKinematics::FILE_ID,
-            DatFileType::MotionKinematics as u32,
-            test_motion_kinematics_bytes(),
-        )
-        .expect("motion kinematics table should be added to test HBA");
-
-    writer
-        .write(path)
-        .expect("micro portal.hba should be written");
-
-    true
-}
-
-fn motion_kinematics_asset_with_table(
+fn motion_catalog_with_table(
     motion_table_id: u32,
     default_style: u32,
     walk_velocity: Option<Vector3>,
     run_velocity: Option<Vector3>,
     turn_left_omega: Option<Vector3>,
     turn_right_omega: Option<Vector3>,
-) -> MotionKinematics {
-    let mut asset = MotionKinematics::new();
-    let mut table = MotionKinematicsTable::new(motion_table_id, default_style);
-
-    if let Some(velocity) = walk_velocity {
-        table.insert_cycle_kinematics(
-            default_style,
-            MotionTable::WALK_FORWARD_COMMAND,
-            MotionCommandKinematics {
-                velocity: Some(velocity),
-                omega: None,
-            },
-        );
-    }
-
-    if let Some(velocity) = run_velocity {
-        table.insert_cycle_kinematics(
-            default_style,
-            MotionTable::RUN_FORWARD_COMMAND,
-            MotionCommandKinematics {
-                velocity: Some(velocity),
-                omega: None,
-            },
-        );
-    }
-
-    if let Some(omega) = turn_left_omega {
-        table.insert_cycle_kinematics(
-            default_style,
-            MotionTable::TURN_LEFT_COMMAND,
-            MotionCommandKinematics {
-                velocity: None,
-                omega: Some(omega),
-            },
-        );
-    }
-
-    if let Some(omega) = turn_right_omega {
-        table.insert_cycle_kinematics(
-            default_style,
-            MotionTable::TURN_RIGHT_COMMAND,
-            MotionCommandKinematics {
-                velocity: None,
-                omega: Some(omega),
-            },
-        );
-    }
-
-    asset.motion_tables.insert(motion_table_id, table);
-    asset
+) -> MotionSequenceCatalog {
+    motion_catalog_with_setup_defaults(
+        motion_table_id,
+        default_style,
+        walk_velocity,
+        run_velocity,
+        turn_left_omega,
+        turn_right_omega,
+        [],
+    )
 }
 
-fn test_motion_kinematics_asset(motion_table_id: u32) -> MotionKinematics {
-    motion_kinematics_asset_with_table(
+fn motion_catalog_with_setup_defaults(
+    motion_table_id: u32,
+    default_style: u32,
+    walk_velocity: Option<Vector3>,
+    run_velocity: Option<Vector3>,
+    turn_left_omega: Option<Vector3>,
+    turn_right_omega: Option<Vector3>,
+    setup_defaults: impl IntoIterator<Item = (u32, u32)>,
+) -> MotionSequenceCatalog {
+    let cycles = [
+        walk_velocity
+            .map(|velocity| FixtureCycle::moving(MotionTable::WALK_FORWARD_COMMAND, velocity)),
+        run_velocity
+            .map(|velocity| FixtureCycle::moving(MotionTable::RUN_FORWARD_COMMAND, velocity)),
+        turn_left_omega.map(|omega| FixtureCycle::turning(MotionTable::TURN_LEFT_COMMAND, omega)),
+        turn_right_omega.map(|omega| FixtureCycle::turning(MotionTable::TURN_RIGHT_COMMAND, omega)),
+    ]
+    .into_iter()
+    .flatten();
+
+    explicit_motion_catalog(motion_table_id, default_style, cycles, setup_defaults)
+}
+
+fn test_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
+    motion_catalog_with_table(
         motion_table_id,
         MotionStance::NonCombat as u32,
         Some(Vector3::new(1.0, 0.0, 0.0)),
@@ -170,6 +112,10 @@ fn test_motion_kinematics_asset(motion_table_id: u32) -> MotionKinematics {
         Some(Vector3::new(0.0, 0.0, -1.5)),
         Some(Vector3::new(0.0, 0.0, 1.5)),
     )
+}
+
+fn ordered_motion_scalar(value: f32) -> OrderedMotionScalar {
+    OrderedMotionScalar::from_f32(value).expect("fixture scalar must be finite")
 }
 
 fn seed_player_run_skill(world: &mut WorldState, run_skill: u32) {
@@ -186,6 +132,7 @@ fn seed_player_run_skill(world: &mut WorldState, run_skill: u32) {
             training: TrainingLevel::Trained,
             trained_cost: 0,
             specialized_cost: 0,
+            breakdown: Default::default(),
         },
     );
 }
@@ -196,7 +143,7 @@ fn resolve_player_motion_table_profile_prefers_direct_motion_table_property() {
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0001);
-    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
     state.player.guid = player_guid;
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
@@ -209,6 +156,11 @@ fn resolve_player_motion_table_profile_prefers_direct_motion_table_property() {
         Guid(0x0200_0010),
     );
     state.entities.insert(player);
+
+    assert_eq!(
+        state.effective_motion_table_id_for_guid(player_guid),
+        Some(motion_table_id)
+    );
 
     let resolved = state
         .resolve_player_motion_table_profile()
@@ -234,11 +186,15 @@ fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0002);
-    let mut motion_kinematics = test_motion_kinematics_asset(motion_table_id);
-    motion_kinematics
-        .setup_model_defaults
-        .insert(setup_model_id, motion_table_id);
-    state.set_motion_kinematics(motion_kinematics);
+    state.set_motion_sequences(motion_catalog_with_setup_defaults(
+        motion_table_id,
+        MotionStance::NonCombat as u32,
+        Some(Vector3::new(1.0, 0.0, 0.0)),
+        Some(Vector3::new(2.5, 0.0, 0.0)),
+        Some(Vector3::new(0.0, 0.0, -1.5)),
+        Some(Vector3::new(0.0, 0.0, 1.5)),
+        [(setup_model_id, motion_table_id)],
+    ));
     state.player.guid = player_guid;
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
@@ -247,6 +203,11 @@ fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
         Guid(setup_model_id),
     );
     state.entities.insert(player);
+
+    assert_eq!(
+        state.effective_motion_table_id_for_guid(player_guid),
+        Some(motion_table_id)
+    );
 
     let resolved = state
         .resolve_player_motion_table_profile()
@@ -269,12 +230,12 @@ fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
 }
 
 #[test]
-fn resolve_player_motion_table_profile_reads_run_speed_from_required_motion_kinematics_asset() {
+fn resolve_player_motion_table_profile_reads_run_speed_from_the_motion_contract() {
     let motion_table_id = 0x0900_0023;
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0004);
-    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
     state.player.guid = player_guid;
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
@@ -330,7 +291,7 @@ fn resolve_self_movement_capabilities_combines_run_rate_and_motion_table_kinemat
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0100);
-    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
     state.player.guid = player_guid;
     seed_player_run_skill(&mut state, 800);
 
@@ -392,7 +353,7 @@ fn resolve_self_movement_capabilities_reports_missing_required_kinematics() {
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0101);
-    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+    state.set_motion_sequences(motion_catalog_with_table(
         motion_table_id,
         MotionStance::NonCombat as u32,
         Some(Vector3::new(1.0, 0.0, 0.0)),
@@ -432,7 +393,7 @@ fn resolve_self_movement_capabilities_falls_back_when_walk_velocity_is_missing()
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0102);
-    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+    state.set_motion_sequences(motion_catalog_with_table(
         motion_table_id,
         MotionStance::NonCombat as u32,
         None,
@@ -463,7 +424,7 @@ fn resolve_self_movement_capabilities_derives_left_turn_from_right_turn_omega() 
     let motion_table_id: u32 = 0x0900_0024;
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0103);
-    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+    state.set_motion_sequences(motion_catalog_with_table(
         motion_table_id,
         MotionStance::NonCombat as u32,
         Some(Vector3::new(1.0, 0.0, 0.0)),
@@ -506,31 +467,33 @@ fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_up
     };
 
     let mut state = WorldState::synthetic();
-    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
 
     let mut entity = Entity::new(guid, "Remote".to_string(), pose);
     entity.properties.set_did_prop(
         holtburger_common::properties::PropertyDataId::MotionTable,
         Guid(motion_table_id),
     );
-    entity.motion_snapshot = Some(crate::entity::EntityMotionSnapshot {
+    entity.network_motion = EntityNetworkMotion::Initialized(crate::entity::EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
         sidestep_command: None,
         turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
-        forward_speed: crate::entity::OrderedMotionSpeed::from_f32(3.5),
+        forward_speed: crate::entity::OrderedMotionScalar::from_f32(3.5),
         sidestep_speed: None,
-        turn_speed: crate::entity::OrderedMotionSpeed::from_f32(0.75),
+        turn_speed: crate::entity::OrderedMotionScalar::from_f32(0.75),
         directive: None,
     });
     state.entities.insert(entity);
 
-    state.scene.reconcile_authoritative_body(
+    state.scene.apply_authoritative_body_effect(
         SpatialBodyId::Entity(guid),
-        pose,
-        Vector3::zero(),
-        Vector3::zero(),
-        crate::AuthoritativeBodySync::Snapshot,
+        crate::AuthoritativePoseEffect::Initialize { pose },
+        crate::AuthoritativeBodyVectors {
+            velocity: Vector3::zero(),
+            acceleration: Vector3::zero(),
+            omega: Vector3::zero(),
+        },
         Instant::now(),
     );
     assert!(
@@ -539,23 +502,28 @@ fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_up
             .apply_runtime_body_contact(SpatialBodyId::Entity(guid), ContactState::Grounded)
     );
 
+    // Playback is advanced once per tick before any basis is read from it.
+    state.advance_authored_motion(std::time::Duration::from_secs_f32(0.5));
+
     let input = state
         .resolve_body_projection_input(SpatialBodyId::Entity(guid))
         .expect("guid-backed remote body should resolve projection input");
 
     assert_eq!(input.contact, ContactState::Grounded);
-    assert!(matches!(
-        input.basis,
-        Some(SolveProjectionBasis::GroundedMotion {
-            desired_local_velocity,
-            desired_local_omega,
-        }) if desired_local_velocity == Vector3::new(3.5, 0.0, 0.0)
-            && desired_local_omega == Vector3::new(0.0, 0.0, 0.75)
-    ));
+    let offset = input
+        .authored_offset
+        .expect("a grounded body performing a motion should expose its authored offset");
+    // The fixture puts turn commands in cycles, so retail's substate branch claims the turn and it
+    // displaces the run: the surviving contribution is the turn's omega at its ordered speed.
+    assert_eq!(offset.translation, Vector3::zero());
+    assert!(
+        offset.rotation.to_heading().abs() > 1e-4,
+        "the authored offset carries the turn as a rotation, not as an angular velocity"
+    );
 }
 
 #[test]
-fn resolve_body_projection_input_falls_back_to_velocity_for_airborne_body() {
+fn resolve_body_projection_input_retains_physical_vectors_for_airborne_body() {
     let guid = Guid(0x7000_0101);
     let pose = WorldPosition {
         landblock_id: Guid(0x1234_0000),
@@ -567,7 +535,7 @@ fn resolve_body_projection_input_falls_back_to_velocity_for_airborne_body() {
     let mut entity = Entity::new(guid, "Remote".to_string(), pose);
     entity.velocity = Vector3::new(0.0, 0.0, 4.0);
     entity.omega = Vector3::new(0.0, 0.0, 0.5);
-    entity.motion_snapshot = Some(crate::entity::EntityMotionSnapshot {
+    entity.network_motion = EntityNetworkMotion::Initialized(crate::entity::EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
         sidestep_command: None,
@@ -579,12 +547,14 @@ fn resolve_body_projection_input_falls_back_to_velocity_for_airborne_body() {
     });
     state.entities.insert(entity);
 
-    state.scene.reconcile_authoritative_body(
+    state.scene.apply_authoritative_body_effect(
         SpatialBodyId::Entity(guid),
-        pose,
-        Vector3::new(0.0, 0.0, 4.0),
-        Vector3::new(0.0, 0.0, 0.5),
-        crate::AuthoritativeBodySync::Snapshot,
+        crate::AuthoritativePoseEffect::Initialize { pose },
+        crate::AuthoritativeBodyVectors {
+            velocity: Vector3::new(0.0, 0.0, 4.0),
+            acceleration: Vector3::zero(),
+            omega: Vector3::new(0.0, 0.0, 0.5),
+        },
         Instant::now(),
     );
     assert!(
@@ -597,16 +567,13 @@ fn resolve_body_projection_input_falls_back_to_velocity_for_airborne_body() {
         .resolve_body_projection_input(SpatialBodyId::Entity(guid))
         .expect("airborne guid-backed body should resolve projection input");
 
-    assert!(matches!(
-        input.basis,
-        Some(SolveProjectionBasis::Velocity { velocity, omega })
-            if velocity == Vector3::new(0.0, 0.0, 4.0)
-                && omega == Vector3::new(0.0, 0.0, 0.5)
-    ));
+    assert_eq!(input.authored_offset, None);
+    assert_eq!(input.retained.velocity, Vector3::new(0.0, 0.0, 4.0));
+    assert_eq!(input.retained.omega, Vector3::new(0.0, 0.0, 0.5));
 }
 
 #[test]
-fn test_set_player_vector_updates_authoritative_player_entity() {
+fn player_server_vector_sample_updates_entity_without_creating_runtime_body() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
@@ -617,7 +584,7 @@ fn test_set_player_vector_updates_authoritative_player_entity() {
 
     let new_vel = Vector3::new(1.0, 2.0, 3.0);
     let new_omega = Vector3::new(0.0, 0.0, 4.0);
-    let events = state.set_player_vector(new_vel, new_omega);
+    let events = state.record_player_server_vectors(new_vel, new_omega);
 
     assert_eq!(state.entities.get(player_guid).unwrap().velocity, new_vel);
     assert_eq!(state.entities.get(player_guid).unwrap().omega, new_omega);
@@ -626,6 +593,12 @@ fn test_set_player_vector_updates_authoritative_player_entity() {
         WorldEvent::EntityVectorUpdated { guid, velocity, omega }
             if *guid == player_guid && *velocity == new_vel && *omega == new_omega
     )));
+    assert!(
+        state
+            .scene
+            .body(SpatialBodyId::LocalPlayer(player_guid))
+            .is_none()
+    );
 }
 
 #[test]
@@ -674,8 +647,11 @@ fn solved_remote_runtime_body_only_emits_runtime_body_change() {
             coords: Vector3::new(5.0, 6.0, 4.0),
             ..pose
         },
-        velocity: Vector3::new(1.0, 0.0, 0.0),
-        omega: Vector3::zero(),
+        accepted_motion: crate::AcceptedBodyMotion {
+            velocity: Vector3::new(1.0, 0.0, 0.0),
+            omega: Vector3::zero(),
+        },
+        retained: crate::RetainedBodyKinematics::default(),
         contact: ContactState::Grounded,
         projection_state: None,
     });
@@ -715,8 +691,11 @@ fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
     let runtime_events = state.apply_solved_body_kinematics(&SolvedBodyKinematics {
         body_id: SpatialBodyId::LocalPlayer(player_guid),
         pose: runtime_pose,
-        velocity: Vector3::new(1.0, 0.0, 0.0),
-        omega: Vector3::new(0.0, 0.0, 0.5),
+        accepted_motion: crate::AcceptedBodyMotion {
+            velocity: Vector3::new(1.0, 0.0, 0.0),
+            omega: Vector3::new(0.0, 0.0, 0.5),
+        },
+        retained: crate::RetainedBodyKinematics::default(),
         contact: ContactState::Grounded,
         projection_state: Some(crate::SelfPlayerDriveProjectionState::LocalGroundedDirectDrive),
     });
@@ -733,7 +712,7 @@ fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
         .body(SpatialBodyId::LocalPlayer(player_guid))
         .expect("local player runtime body should exist");
     assert_eq!(body.pose, runtime_pose);
-    assert_eq!(body.authoritative_pose, Some(authoritative_update));
+    assert_eq!(body.authoritative_pose(), Some(authoritative_update));
     assert_eq!(body.sampling.mode, SpatialSampleMode::SimulatingMotionState);
 }
 
@@ -852,8 +831,11 @@ fn apply_solved_body_kinematics_updates_local_runtime_body_and_grounded_state() 
             coords: Vector3::new(10.0, 20.0, 30.0),
             rotation: holtburger_common::math::Quaternion::identity(),
         },
-        velocity: Vector3::new(1.0, 2.0, 3.0),
-        omega: Vector3::new(0.0, 0.0, 4.0),
+        accepted_motion: crate::AcceptedBodyMotion {
+            velocity: Vector3::new(1.0, 2.0, 3.0),
+            omega: Vector3::new(0.0, 0.0, 4.0),
+        },
+        retained: crate::RetainedBodyKinematics::default(),
         contact: ContactState::Grounded,
         projection_state: None,
     };
@@ -873,9 +855,8 @@ fn apply_solved_body_kinematics_updates_local_runtime_body_and_grounded_state() 
         .body(SpatialBodyId::LocalPlayer(player_guid))
         .expect("local player runtime body should exist");
     assert_eq!(runtime_body.pose, solved.pose);
-    assert_eq!(runtime_body.velocity, solved.velocity);
-    assert_eq!(runtime_body.omega, solved.omega);
-    assert_eq!(state.player.last_server_grounded, Some(true));
+    assert_eq!(runtime_body.accepted_motion, solved.accepted_motion);
+    assert_eq!(state.player.last_runtime_walkable, Some(true));
     assert!(events.iter().any(|event| matches!(
         event,
         WorldEvent::RuntimeBodyChanged {
@@ -890,14 +871,14 @@ fn apply_solved_body_kinematics_updates_local_runtime_body_and_grounded_state() 
 }
 
 #[test]
-fn apply_solved_body_kinematics_preserves_player_grounded_cache_when_contact_unknown() {
+fn unknown_runtime_contact_preserves_packet_contact_fallback() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     let start_pos = WorldPosition::default();
 
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", start_pos);
-    state.player.last_server_grounded = Some(true);
+    state.player.last_server_contact = Some(true);
 
     let solved = SolvedBodyKinematics {
         body_id: SpatialBodyId::LocalPlayer(player_guid),
@@ -905,15 +886,16 @@ fn apply_solved_body_kinematics_preserves_player_grounded_cache_when_contact_unk
             coords: Vector3::new(1.0, 2.0, 3.0),
             ..start_pos
         },
-        velocity: Vector3::zero(),
-        omega: Vector3::zero(),
+        accepted_motion: crate::AcceptedBodyMotion::default(),
+        retained: crate::RetainedBodyKinematics::default(),
         contact: ContactState::Unknown,
         projection_state: None,
     };
 
     let events = state.apply_solved_body_kinematics(&solved);
 
-    assert_eq!(state.player.last_server_grounded, Some(true));
+    assert_eq!(state.player.last_server_contact, Some(true));
+    assert_eq!(state.player.last_runtime_walkable, None);
     assert!(
         !events
             .iter()
@@ -960,6 +942,13 @@ fn apply_spatial_body_event_emits_runtime_body_changed_for_remote_contact() {
 
 #[test]
 fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
+    let motion_table_id = 0x0900_0040;
+    let motion_snapshot = crate::entity::EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+        forward_speed: crate::entity::OrderedMotionScalar::from_f32(1.0),
+        ..Default::default()
+    };
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0201);
     let position = WorldPosition {
@@ -970,6 +959,26 @@ fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
 
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", position);
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
+    let player = state
+        .entities
+        .get_mut(player_guid)
+        .expect("seeded player should exist");
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    player.network_motion = EntityNetworkMotion::Initialized(motion_snapshot);
+    state.advance_authored_motion(std::time::Duration::from_millis(30));
+    assert_eq!(state.motion_runtimes.len(), 1);
+    assert_eq!(
+        state
+            .motion_runtimes
+            .state(player_guid)
+            .expect("running player should own authored playback")
+            .substate,
+        crate::motion::MotionCommand::RUN_FORWARD
+    );
 
     let events = state.handle_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
         teleport_sequence: 7,
@@ -995,6 +1004,186 @@ fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
             .mode,
         SpatialSampleMode::Suspended
     );
+    let reset_snapshot = state
+        .entities
+        .get(player_guid)
+        .and_then(|entity| entity.network_motion.snapshot())
+        .expect("teleport should retain an idle stance snapshot");
+    assert_eq!(reset_snapshot.current_style, Some(MotionStance::NonCombat));
+    assert_eq!(reset_snapshot.motion_command(), None);
+    assert_eq!(state.motion_runtimes.len(), 1);
+    assert_eq!(
+        state
+            .motion_runtimes
+            .state(player_guid)
+            .expect("teleport should rebuild idle authored playback")
+            .substate,
+        crate::motion::MotionCommand(FIXTURE_STAND_COMMAND)
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMotionUpdated { guid, motion }
+            if *guid == player_guid
+                && motion.snapshot().is_some_and(|snapshot| snapshot.motion_command().is_none())
+    )));
+}
+
+#[test]
+fn remote_creature_directive_uses_shared_authored_root_and_retires_to_default() {
+    let motion_table_id = 0x0900_0041;
+    let guid = Guid(0x5000_0241);
+    let mut target = WorldPosition {
+        landblock_id: Guid(0x1234_0001),
+        coords: Vector3::new(20.0, 0.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    let mut start = WorldPosition {
+        coords: Vector3::zero(),
+        ..target
+    };
+    start.rotation = Quaternion::from_heading(start.heading_to(&target));
+    target.rotation = start.rotation;
+
+    let mut state = WorldState::synthetic();
+    state.set_motion_sequences(test_motion_catalog(motion_table_id));
+    let mut creature = Entity::new(guid, "Drudge".to_string(), start);
+    creature.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    creature.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        directive: Some(EntityMotionDirective::MoveToPosition {
+            admission: EntityMotionAdmission {
+                object_instance_sequence: 1,
+                movement_sequence: 2,
+                server_control_sequence: 3,
+                is_autonomous: false,
+            },
+            target: OrderedMotionPosition {
+                cell_id: target.landblock_id,
+                x: ordered_motion_scalar(target.coords.x),
+                y: ordered_motion_scalar(target.coords.y),
+                z: ordered_motion_scalar(target.coords.z),
+            },
+            params: EntityMoveToParameters {
+                flags: 0x0000_0203,
+                distance_to_object: ordered_motion_scalar(1.0),
+                min_distance: ordered_motion_scalar(0.0),
+                fail_distance: ordered_motion_scalar(100.0),
+                speed: ordered_motion_scalar(1.0),
+                walk_run_threshold: ordered_motion_scalar(5.0),
+                desired_heading_degrees: ordered_motion_scalar(0.0),
+            },
+            run_rate: ordered_motion_scalar(1.25),
+        }),
+        ..EntityMotionSnapshot::default()
+    });
+    state.add_entity(creature);
+    let body_id = SpatialBodyId::Entity(guid);
+    assert!(
+        state
+            .scene
+            .apply_runtime_body_contact(body_id, ContactState::Grounded)
+    );
+
+    state.advance_authored_motion(Duration::from_millis(100));
+
+    assert_eq!(
+        state.motion_runtimes.state(guid).unwrap().substate,
+        crate::motion::MotionCommand::RUN_FORWARD,
+    );
+    let authored = state
+        .resolve_body_projection_input(body_id)
+        .and_then(|input| input.authored_offset)
+        .expect("active creature directive should contribute authored root motion");
+    assert!(authored.translation.x > 0.0);
+
+    assert!(state.scene.apply_runtime_body_pose(
+        body_id,
+        target,
+        SpatialSampleMode::SimulatingMotionState,
+    ));
+    state.advance_authored_motion(Duration::from_millis(100));
+
+    assert_eq!(
+        state.motion_runtimes.state(guid).unwrap().substate,
+        crate::motion::MotionCommand(FIXTURE_STAND_COMMAND),
+    );
+    // Displacement after completion must not restart the same retained directive.
+    assert!(state.scene.apply_runtime_body_pose(
+        body_id,
+        start,
+        SpatialSampleMode::SimulatingMotionState,
+    ));
+    state.advance_authored_motion(Duration::from_millis(100));
+    assert_eq!(
+        state.motion_runtimes.state(guid).unwrap().substate,
+        crate::motion::MotionCommand(FIXTURE_STAND_COMMAND)
+    );
+
+    // Rebinding content changes playback, not the lifetime of an admitted entity command.
+    let rebound_table_id = motion_table_id + 1;
+    state.set_motion_sequences(test_motion_catalog(rebound_table_id));
+    state
+        .entities
+        .get_mut(guid)
+        .unwrap()
+        .properties
+        .set_did_prop(
+            holtburger_common::properties::PropertyDataId::MotionTable,
+            Guid(rebound_table_id),
+        );
+    state.advance_authored_motion(Duration::from_millis(100));
+    assert_eq!(
+        state.motion_runtimes.state(guid).unwrap().substate,
+        crate::motion::MotionCommand(FIXTURE_STAND_COMMAND)
+    );
+
+    // A fresh wire identity must start the command again from that same pose.
+    let entity = state.entities.get_mut(guid).unwrap();
+    let EntityNetworkMotion::Initialized(snapshot) = &mut entity.network_motion else {
+        panic!("fixture has an initialized motion snapshot");
+    };
+    let Some(EntityMotionDirective::MoveToPosition { admission, .. }) = &mut snapshot.directive
+    else {
+        panic!("fixture has a MoveTo directive");
+    };
+    admission.movement_sequence += 1;
+    state.advance_authored_motion(Duration::from_millis(100));
+    assert_eq!(
+        state.motion_runtimes.state(guid).unwrap().substate,
+        crate::motion::MotionCommand::RUN_FORWARD
+    );
+}
+
+#[test]
+fn player_contained_object_readiness_requires_the_recursive_authority_closure() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0301);
+    let container_guid = Guid(0x6000_0301);
+    let item_guid = Guid(0x6000_0302);
+    state.player.guid = player_guid;
+    state.seed_local_player_entity(player_guid, "Player", WorldPosition::default());
+
+    let mut container = Entity::new(container_guid, "Pack".to_string(), WorldPosition::default());
+    container.set_container_id(Some(player_guid));
+    state.add_entity(container);
+    state
+        .storage
+        .announce_container(container_guid, state.player.guid);
+    state.storage.announce_container(item_guid, container_guid);
+
+    assert!(!state.all_player_contained_objects_exist());
+
+    let mut item = Entity::new(item_guid, "Item".to_string(), WorldPosition::default());
+    item.set_container_id(Some(container_guid));
+    state.add_entity(item);
+    assert!(state.all_player_contained_objects_exist());
+
+    // A declared ancestor whose description is missing also blocks readiness.
+    state.entities.remove(container_guid);
+    assert!(!state.all_player_contained_objects_exist());
 }
 
 #[test]
@@ -1049,54 +1238,111 @@ fn test_empty_world_uses_synthetic_reference_data() {
     assert_eq!(state.xp_table.character_level_xp_list, vec![0]);
     assert!(state.skill_table.skill_base_hash.is_empty());
     assert!(state.spell_catalog.spells.is_empty());
-    assert!(state.soul_emote_catalog.tokens.is_empty());
+    assert!(state.soul_emote_catalog.tokens().is_empty());
 }
 
 #[test]
-fn test_micro_portal_bundle_supports_runtime_table_lookups() {
-    let dir = tempdir().expect("tempdir should be created");
-    let portal_path = dir.path().join("bundle.hba");
-    if !write_micro_portal_hba(&portal_path) {
-        return;
-    }
+fn derived_skill_refresh_reads_current_player_augmentation_properties() {
+    let mut state = WorldState::synthetic();
+    state.seed_local_player_entity(Guid(0x5000_0001), "Player", WorldPosition::default());
+    state.player.skill_bases.insert(
+        SkillType::HeavyWeapons,
+        crate::player::SkillBase { ranks: 10, init: 0 },
+    );
+    state.player.skills.insert(
+        SkillType::HeavyWeapons,
+        Skill {
+            skill_type: SkillType::HeavyWeapons,
+            ranks: 10,
+            init: 0,
+            spent_xp: 0,
+            next_rank_xp: None,
+            base: 10,
+            current: 10,
+            training: TrainingLevel::Trained,
+            trained_cost: 0,
+            specialized_cost: 0,
+            breakdown: Default::default(),
+        },
+    );
 
-    let archive = HbaReader::open(&portal_path).expect("micro portal.hba should open");
-    let skill_table = SkillTable::read(&mut std::io::Cursor::new(
-        archive
-            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, SkillTable::FILE_ID)
-            .expect("micro bundle should contain skill table"),
-    ))
-    .expect("skill table should parse");
-    let spell_table = SpellTable::read(&mut std::io::Cursor::new(
-        archive
-            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, SpellTable::FILE_ID)
-            .expect("micro bundle should contain spell table"),
-    ))
-    .expect("spell table should parse");
-    let xp_table = XpTable::read(&mut std::io::Cursor::new(
-        archive
-            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, XpTable::FILE_ID)
-            .expect("micro bundle should contain XP table"),
-    ))
-    .expect("XP table should parse");
-    let motion_kinematics = MotionKinematics::read(&mut std::io::Cursor::new(
-        archive
-            .get_file_in_namespace(HOLTBURGER_CORE_NAMESPACE, MotionKinematics::FILE_ID)
-            .expect("micro bundle should contain motion kinematics"),
-    ))
-    .expect("motion kinematics should parse");
+    let mut events = Vec::new();
+    state.emit_player_derived_stats(&mut events);
+    assert_eq!(state.player.skills[&SkillType::HeavyWeapons].base, 10);
 
-    let mut state = WorldState::new(Arc::new(WorldBootstrap::new(
-        skill_table,
-        spell_table,
-        xp_table,
-        motion_kinematics,
-        SoulEmoteCatalog::default(),
+    state
+        .player_entity_mut()
+        .unwrap()
+        .properties
+        .set_int_prop(PropertyInt::AugmentationSkilledMelee, 2);
+    state.emit_player_derived_stats(&mut events);
+    let skill = &state.player.skills[&SkillType::HeavyWeapons];
+    assert_eq!((skill.base, skill.current), (30, 30));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::DerivedStatsUpdated(stats)
+            if stats.skills.iter().any(|skill| skill.skill_type == SkillType::HeavyWeapons && skill.base == 30)
     )));
+}
 
-    assert!(!state.skill_table.skill_base_hash.is_empty());
-    assert!(!state.xp_table.character_level_xp_list.is_empty());
-    assert!(!state.spell_catalog.spells.is_empty());
+#[test]
+fn bootstrap_reference_tables_drive_player_and_spell_lookups() {
+    const SPELL_ID: u32 = 7;
+    const SPELL_NAME: &str = "Fixture spell";
+    const TRAINED_COST: i32 = 4;
+    const SPECIALIZED_COST: i32 = 8;
+    let skill_id = SkillType::HeavyWeapons as u32;
+    let mut bootstrap = WorldBootstrap::synthetic();
+    bootstrap.xp_table = Arc::new(XpTable {
+        level_count: 2,
+        character_level_xp_list: vec![0, 0, 100],
+        ..XpTable::default()
+    });
+    bootstrap.spell_table = Arc::new(SpellTable {
+        id: SpellTable::FILE_ID,
+        spells: [(
+            SPELL_ID,
+            SpellBase {
+                name: SPELL_NAME.into(),
+                description: "Authored description".into(),
+                base_mana: 10,
+                ..SpellBase::default()
+            },
+        )]
+        .into(),
+        spell_sets: Default::default(),
+    });
+    bootstrap.skill_table = Arc::new(SkillTable {
+        id: SkillTable::FILE_ID,
+        skill_base_hash: [(
+            skill_id,
+            SkillBase {
+                description: "Fixture skill".into(),
+                _align1: (),
+                name: "Heavy weapons".into(),
+                _align2: (),
+                icon_id: 0,
+                trained_cost: TRAINED_COST,
+                specialized_cost: SPECIALIZED_COST,
+                category: 0,
+                chargen_use: 0,
+                min_level: 0,
+                formula: SkillFormula {
+                    w: 0,
+                    x: 0,
+                    y: 0,
+                    z: 1,
+                    attr1: 0,
+                    attr2: 0,
+                },
+                upper_bound: 0.0,
+                lower_bound: 0.0,
+                learn_mod: 0.0,
+            },
+        )]
+        .into(),
+    });
+    let mut state = WorldState::new(Arc::new(bootstrap));
 
     let player_guid = Guid(0x5000_0101);
     state.seed_local_player_entity(player_guid, "Player", WorldPosition::default());
@@ -1125,47 +1371,20 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
     assert_eq!(level_info.available_luminance, 42);
     assert!(level_info.xp_for_next_level > 0);
 
-    let (spell_id, expected_name) = state
-        .spell_catalog
-        .spells
-        .iter()
-        .find(|(_, info)| {
-            !info.name.is_empty()
-                && (!info.description.is_empty() || info.base_mana > 0 || info.power > 0)
-        })
-        .map(|(id, info)| (*id, info.name.clone()))
-        .expect("micro spell catalog should expose at least one detailed spell");
-
     let resolved_name = state
-        .resolve_spell_name(spell_id)
-        .expect("spell name should resolve from the micro bundle");
+        .resolve_spell_name(SPELL_ID)
+        .expect("spell name should resolve from bootstrap");
     let resolved_info = state
-        .resolve_spell_info(spell_id)
-        .expect("spell details should resolve from the micro bundle");
+        .resolve_spell_info(SPELL_ID)
+        .expect("spell details should resolve from bootstrap");
 
-    assert_eq!(resolved_name, expected_name);
-    assert_eq!(resolved_info.name, expected_name);
+    assert_eq!(resolved_name, SPELL_NAME);
+    assert_eq!(resolved_info.name, SPELL_NAME);
     assert!(
         !resolved_info.description.is_empty()
             || resolved_info.base_mana > 0
             || resolved_info.power > 0
     );
-
-    let (skill_id, expected_costs) = state
-        .skill_table
-        .skill_base_hash
-        .iter()
-        .find_map(|(id, base)| {
-            crate::stats::SkillType::from_repr(*id)
-                .filter(|_| base.trained_cost > 0 || base.specialized_cost > 0)
-                .map(|skill| {
-                    (
-                        skill as u32,
-                        (base.trained_cost as u32, base.specialized_cost as u32),
-                    )
-                })
-        })
-        .expect("micro skill table should expose a trainable skill");
 
     let mut events = Vec::new();
     state.player.update_skill(
@@ -1176,7 +1395,11 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
             init: 10,
             xp: 0,
             xp_table: &state.xp_table,
-            skill_table: &state.skill_table,
+            calculation: crate::player::stats_calc::SkillCalculationContext {
+                table: &state.skill_table,
+                augmentations: state.player_skill_augmentations(),
+                vitae: state.player_vitae(),
+            },
         },
         &mut events,
     );
@@ -1191,76 +1414,9 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
 
     assert_eq!(
         (updated_skill.trained_cost, updated_skill.specialized_cost),
-        expected_costs
+        (TRAINED_COST as u32, SPECIALIZED_COST as u32)
     );
     assert!(updated_skill.trained_cost > 0 || updated_skill.specialized_cost > 0);
-}
-
-#[test]
-fn repo_portal_bundle_supports_default_player_motion_table_profile() {
-    let portal_path = repo_assets_hba_path();
-    if !portal_path.is_file() {
-        eprintln!(
-            "skipping motion-table integration probe; missing repo-local {}",
-            portal_path.display()
-        );
-        return;
-    }
-
-    let provider = match HbaReader::open(&portal_path) {
-        Ok(provider) => Arc::new(provider),
-        Err(error) => {
-            eprintln!(
-                "skipping motion-table integration probe; repo-local {} is not an HBA v2 fixture yet: {}",
-                portal_path.display(),
-                error
-            );
-            return;
-        }
-    };
-    let mut state = WorldState::synthetic();
-    let player_guid = Guid(0x5000_0200);
-    let motion_kinematics_bytes = match provider
-        .get_file_in_namespace(HOLTBURGER_CORE_NAMESPACE, MotionKinematics::FILE_ID)
-    {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            eprintln!(
-                "skipping motion-table integration probe; repo-local {} does not yet contain holtburger/core motion kinematics",
-                portal_path.display()
-            );
-            return;
-        }
-    };
-    state.set_motion_kinematics(
-        MotionKinematics::read(&mut std::io::Cursor::new(motion_kinematics_bytes))
-            .expect("repo motion kinematics asset should parse"),
-    );
-    state.player.guid = player_guid;
-
-    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
-    player.properties.set_did_prop(
-        holtburger_common::properties::PropertyDataId::MotionTable,
-        Guid(0x0900_0001),
-    );
-    state.entities.insert(player);
-
-    let resolved = state.resolve_player_motion_table_profile();
-    match resolved {
-        Ok(profile) => {
-            eprintln!(
-                "resolved repo motion-table profile: run={:?} walk={:?} turn_right={:?}",
-                profile.movement_profile.run_forward,
-                profile.movement_profile.walk_forward,
-                profile.movement_profile.turn_right,
-            );
-        }
-        Err(error) => {
-            panic!(
-                "repo assets bundle failed to resolve eor/portal motion table 0x09000001: {error}"
-            )
-        }
-    }
 }
 
 #[test]
@@ -1278,7 +1434,7 @@ fn test_tick_does_not_integrate_player_velocity() {
     player_entity.velocity = Vector3::new(3.0, 4.0, 0.0);
     state.add_entity(player_entity);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(events.is_empty());
     assert_eq!(state.player_position(), Some(player_pos));
@@ -1307,14 +1463,14 @@ fn test_tick_does_not_require_runtime_resource_access() {
     player_entity.velocity = Vector3::new(1.0, 0.0, 0.0);
     state.add_entity(player_entity);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(events.is_empty());
     assert_eq!(state.player_position(), Some(player_pos));
 }
 
 #[test]
-fn test_player_autonomous_sync_updates_authoritative_player_entity() {
+fn player_autonomous_sync_defers_pose_to_core_authority_adapter() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
@@ -1345,13 +1501,14 @@ fn test_player_autonomous_sync_updates_authoritative_player_entity() {
             teleport_sequence: 30,
             force_position_sequence: 40,
             server_control_sequence: 20,
+            ..
         }
     )));
 
-    assert_eq!(state.player_position(), Some(sync_data.position));
+    assert_eq!(state.player_position(), Some(initial_pos));
     assert_eq!(
         state.entities.get(player_guid).unwrap().position,
-        sync_data.position
+        initial_pos
     );
     assert_eq!(state.player.instance_sequence, 10);
     assert_eq!(state.player.server_control_sequence, 20);
@@ -1399,18 +1556,22 @@ fn test_stale_player_autonomous_sync_is_ignored() {
 }
 
 #[test]
-fn test_remote_update_position_emits_forced_reposition_when_force_sequence_advances() {
+fn remote_force_position_sequence_has_no_independent_reconciliation_meaning() {
     let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0001);
     let guid = Guid(0x6000_0001);
     let initial_pos = WorldPosition {
         landblock_id: Guid(0x01000000),
         coords: Vector3::new(1.0, 2.0, 3.0),
         rotation: holtburger_common::math::Quaternion::identity(),
     };
+    state.player.guid = player_guid;
+    state.seed_local_player_entity(player_guid, "Player", initial_pos);
     let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
     entity.sequences[4] = 30;
     entity.sequences[6] = 40;
-    state.entities.insert(entity);
+    let instance_sequence = entity.instance_sequence();
+    state.add_entity(entity);
 
     let msg = GameMessage::UpdatePosition(Box::new(UpdatePositionData {
         guid,
@@ -1420,10 +1581,11 @@ fn test_remote_update_position_emits_forced_reposition_when_force_sequence_advan
                 coords: Vector3::new(10.0, 20.0, 0.5),
                 rotation: holtburger_common::math::Quaternion::identity(),
             },
-            instance_sequence: 8,
+            instance_sequence,
             position_sequence: 9,
             teleport_sequence: 30,
             force_position_sequence: 41,
+            flags: UpdatePositionFlag::HAS_CONTACT,
             ..PositionPack::default()
         },
     }));
@@ -1431,18 +1593,20 @@ fn test_remote_update_position_emits_forced_reposition_when_force_sequence_advan
     let events = state.handle_message(&msg);
 
     assert_eq!(state.entities.get(guid).unwrap().position.coords.x, 10.0);
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::ForcedReposition {
-            guid: event_guid,
-            pos,
-            sequence: 41,
-        } if *event_guid == guid && (pos.coords.x - 10.0).abs() < 1e-5
-    )));
+    assert_eq!(state.entities.get(guid).unwrap().sequences[6], 40);
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::ForcedReposition { .. }))
+    );
+    assert_eq!(
+        state.scene.body(SpatialBodyId::Entity(guid)).unwrap().pose,
+        initial_pos
+    );
 }
 
 #[test]
-fn test_stale_remote_update_position_is_ignored_when_force_sequence_regresses() {
+fn remote_force_position_regression_does_not_reject_a_newer_contacted_position() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0002);
     let guid = Guid(0x6000_0002);
@@ -1457,6 +1621,7 @@ fn test_stale_remote_update_position_is_ignored_when_force_sequence_regresses() 
     let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
     entity.sequences[4] = 30;
     entity.sequences[6] = 40;
+    let instance_sequence = entity.instance_sequence();
     state.add_entity(entity);
 
     let msg = GameMessage::UpdatePosition(Box::new(UpdatePositionData {
@@ -1467,18 +1632,23 @@ fn test_stale_remote_update_position_is_ignored_when_force_sequence_regresses() 
                 coords: Vector3::new(40.0, 50.0, 60.0),
                 rotation: holtburger_common::math::Quaternion::identity(),
             },
-            instance_sequence: 8,
+            instance_sequence,
             position_sequence: 9,
             teleport_sequence: 30,
             force_position_sequence: 39,
+            flags: UpdatePositionFlag::HAS_CONTACT,
             ..PositionPack::default()
         },
     }));
 
     let events = state.handle_message(&msg);
 
-    assert!(events.is_empty());
-    assert_eq!(state.entities.get(guid).unwrap().position, initial_pos);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMoved { guid: event_guid, .. } if *event_guid == guid
+    )));
+    assert_ne!(state.entities.get(guid).unwrap().position, initial_pos);
+    assert_eq!(state.entities.get(guid).unwrap().sequences[6], 40);
 
     let nearby: std::collections::HashSet<_> = state
         .get_nearby_world_entities()
@@ -1531,7 +1701,7 @@ fn test_remote_autonomous_position_emits_forced_reposition_even_without_sequence
 }
 
 #[test]
-fn test_update_health_updates_target_entity_fraction_and_emits_replace() {
+fn health_responses_publish_even_when_reselection_returns_unchanged_health() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
     state.add_entity(Entity::new(
@@ -1540,31 +1710,41 @@ fn test_update_health_updates_target_entity_fraction_and_emits_replace() {
         WorldPosition::default(),
     ));
 
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: guid,
-        sequence: 1,
-        event: GameEvent::UpdateHealth(Box::new(UpdateHealthEventData {
+    // Each query starts a fresh frontend subscription, even if the cached world value is unchanged.
+    for (sequence, health) in (1..).zip([0.5, 0.5, 0.25, 0.0, 0.0]) {
+        let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: guid,
-            health: 0.5,
-        })),
-    }));
+            sequence,
+            event: GameEvent::UpdateHealth(Box::new(UpdateHealthEventData {
+                target: guid,
+                health,
+            })),
+        }));
+        let events = state.handle_message(&msg);
 
-    let events = state.handle_message(&msg);
-
-    assert_eq!(
-        state
-            .entities
-            .get(guid)
-            .and_then(|entity| entity.health_fraction),
-        Some(0.5)
-    );
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::EntityHealthUpdated {
-            guid: event_guid,
-            health_fraction,
-        } if *event_guid == guid && *health_fraction == 0.5
-    )));
+        assert_eq!(
+            state
+                .entities
+                .get(guid)
+                .and_then(|entity| entity.health_fraction),
+            Some(health)
+        );
+        let health_updates: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                WorldEvent::EntityHealthUpdated {
+                    guid,
+                    health_fraction,
+                } => Some((*guid, *health_fraction)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            health_updates,
+            vec![(guid, health)],
+            "health response {sequence} must reach consumers"
+        );
+    }
 }
 
 #[test]
@@ -1624,7 +1804,7 @@ fn test_fellowship_full_update_populates_world_state_and_emits_projection() {
         Some(fellowship)
             if fellowship.name == "Raid Bus"
                 && fellowship.members.len() == 2
-                && fellowship.leader_guid == Guid(0x5000_0001)
+                && fellowship.leader_guid == Some(Guid(0x5000_0001))
     ));
     assert!(events.iter().any(|event| matches!(
         event,
@@ -1692,7 +1872,7 @@ fn test_fellowship_quit_for_local_player_clears_state() {
     state.player.guid = player_guid;
     state.fellowship = Some(FellowshipState {
         name: "Raid Bus".to_string(),
-        leader_guid: player_guid,
+        leader_guid: Some(player_guid),
         share_xp: true,
         even_share: false,
         open: true,
@@ -1736,7 +1916,7 @@ fn test_fellowship_quit_for_local_player_clears_state() {
 }
 
 #[test]
-fn test_fellowship_quit_for_leader_reassigns_remaining_leader() {
+fn test_fellowship_quit_for_leader_waits_for_server_successor() {
     let mut state = WorldState::synthetic();
     let leader_guid = Guid(0x5000_0001);
     let member_guid = Guid(0x5000_0002);
@@ -1744,7 +1924,7 @@ fn test_fellowship_quit_for_leader_reassigns_remaining_leader() {
     state.player.guid = Guid(0x5000_00FF);
     state.fellowship = Some(FellowshipState {
         name: "Raid Bus".to_string(),
-        leader_guid,
+        leader_guid: Some(leader_guid),
         share_xp: true,
         even_share: false,
         open: true,
@@ -1796,12 +1976,46 @@ fn test_fellowship_quit_for_leader_reassigns_remaining_leader() {
     let fellowship = state.fellowship.as_ref().expect("fellowship should remain");
     assert_eq!(fellowship.members.len(), 1);
     assert_eq!(fellowship.members[0].guid, member_guid);
-    assert_eq!(fellowship.leader_guid, member_guid);
+    assert_eq!(fellowship.leader_guid, None);
     assert!(events.iter().any(|event| matches!(
         event,
         WorldEvent::FellowshipStateUpdated(Some(fellowship))
-            if fellowship.leader_guid == member_guid && fellowship.members.len() == 1
+            if fellowship.leader_guid.is_none() && fellowship.members.len() == 1
     )));
+
+    let replacement = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: state.player.guid,
+        sequence: 2,
+        event: GameEvent::FellowshipFullUpdate(Box::new(FellowshipFullUpdateEventData {
+            fellows: vec![FellowshipMemberData {
+                guid: member_guid,
+                name: "Bravo".to_string(),
+                level: 18,
+                cached_cp: 0,
+                cached_luminance: 0,
+                max_health: 220,
+                max_stamina: 160,
+                max_mana: 140,
+                current_health: 215,
+                current_stamina: 150,
+                current_mana: 130,
+                share_loot: 1,
+            }],
+            fellowship_name: "Raid Bus".to_string(),
+            leader_guid: member_guid,
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: false,
+            departed_members: Vec::new(),
+            fellowship_locks: Vec::new(),
+        })),
+    }));
+    state.handle_message(&replacement);
+    assert_eq!(
+        state.fellowship.as_ref().unwrap().leader_guid,
+        Some(member_guid)
+    );
 }
 
 #[test]
@@ -1810,7 +2024,7 @@ fn test_fellowship_update_fellow_for_new_remote_member_emits_join_activity() {
     state.player.guid = Guid(0x5000_0001);
     state.fellowship = Some(FellowshipState {
         name: "Raid Bus".to_string(),
-        leader_guid: Guid(0x5000_0001),
+        leader_guid: Some(Guid(0x5000_0001)),
         share_xp: true,
         even_share: false,
         open: true,
@@ -2012,7 +2226,7 @@ fn test_inventory_put_obj_in_container() {
         item_guid,
         container_guid,
         slot: 0,
-        container_type: 0,
+        container_type: holtburger_common::properties::InventoryEntryKind::Item,
     };
     let event = GameEvent::InventoryPutObjInContainer(Box::new(data));
     let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
@@ -2102,7 +2316,7 @@ fn test_inventory_put_obj_in_container_emits_entity_moved_when_item_leaves_world
         item_guid,
         container_guid,
         slot: 0,
-        container_type: 0,
+        container_type: holtburger_common::properties::InventoryEntryKind::Item,
     };
     let event = GameEvent::InventoryPutObjInContainer(Box::new(data));
     let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
@@ -2197,12 +2411,12 @@ fn test_inventory_remove_object() {
     assert!(
         state
             .entity_lifecycle_state(obj_guid)
-            .is_some_and(|state| state.explicit_delete_requested)
+            .is_some_and(|state| state.delete_request.is_some())
     );
     assert!(
         !events
             .iter()
-            .any(|e| matches!(e, WorldEvent::EntityDespawned(guid) if *guid == obj_guid))
+            .any(|e| matches!(e, WorldEvent::EntityDespawned { guid, .. } if *guid == obj_guid))
     );
 }
 
@@ -2214,6 +2428,11 @@ fn test_player_description_initialization() {
     let bootstrap_pos = WorldPosition {
         landblock_id: Guid(0x12340000),
         coords: Vector3::new(12.0, 34.0, 56.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let saved_death = WorldPosition {
+        landblock_id: Guid(0x56780001),
+        coords: Vector3::new(42.0, 24.0, 9.0),
         rotation: holtburger_common::math::Quaternion::identity(),
     };
     let options1 =
@@ -2234,7 +2453,7 @@ fn test_player_description_initialization() {
         wee_type: 1,
         pos: Some(bootstrap_pos),
         properties,
-        positions: std::collections::BTreeMap::new(),
+        positions: [(PositionType::LastOutsideDeath as u32, saved_death)].into(),
         attributes: std::collections::BTreeMap::new(),
         skills: std::collections::BTreeMap::new(),
         enchantments: Vec::new(),
@@ -2252,7 +2471,7 @@ fn test_player_description_initialization() {
     };
 
     let event = GameEvent::PlayerDescription(Box::new(data));
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+    let mut msg = GameMessage::GameEvent(Box::new(GameEventMessage {
         target: player_guid,
         sequence: 1,
         event,
@@ -2260,11 +2479,17 @@ fn test_player_description_initialization() {
 
     let events = state.handle_message(&msg);
 
+    assert_eq!(
+        state
+            .player
+            .local_position_overlay(PositionType::LastOutsideDeath),
+        Some(saved_death),
+    );
     assert_eq!(state.player.guid, player_guid);
     assert_eq!(state.player_name(), player_name);
     assert_eq!(state.player_position(), Some(bootstrap_pos));
-    assert_eq!(state.player.options1, options1);
-    assert_eq!(state.player.options2, options2);
+    assert_eq!(state.player.character_options.options1, options1);
+    assert_eq!(state.player.character_options.options2, options2);
     assert_eq!(state.player.hotbar_spells, hotbar_spells);
     assert_eq!(state.player.desired_comps, desired_comps);
     assert_eq!(state.player.spellbook_filters, spellbook_filters);
@@ -2306,6 +2531,57 @@ fn test_player_description_initialization() {
             .player
             .character_option_enabled(CharacterOption::ListenToTradeChat)
     );
+    let replacement = WorldPosition {
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        ..saved_death
+    };
+    state.handle_message(&GameMessage::PrivateUpdatePosition(Box::new(
+        PrivateUpdatePositionData {
+            sequence: 1,
+            position_type: PositionType::LastOutsideDeath,
+            pos: replacement,
+        },
+    )));
+    assert_eq!(
+        state
+            .player
+            .local_position_overlay(PositionType::LastOutsideDeath),
+        Some(replacement)
+    );
+    assert_eq!(state.player_position(), Some(bootstrap_pos));
+
+    let GameMessage::GameEvent(envelope) = &mut msg else {
+        unreachable!()
+    };
+    let GameEvent::PlayerDescription(description) = &mut envelope.event else {
+        unreachable!()
+    };
+    description.positions.clear();
+    state.handle_message(&msg);
+    assert_eq!(
+        state
+            .player
+            .local_position_overlay(PositionType::LastOutsideDeath),
+        None
+    );
+
+    state
+        .player
+        .set_local_position_overlay(PositionType::LastOutsideDeath, saved_death);
+    let GameMessage::GameEvent(envelope) = &mut msg else {
+        unreachable!()
+    };
+    let GameEvent::PlayerDescription(description) = &mut envelope.event else {
+        unreachable!()
+    };
+    description.guid = Guid(player_guid.0 + 1);
+    state.handle_message(&msg);
+    assert_eq!(
+        state
+            .player
+            .local_position_overlay(PositionType::LastOutsideDeath),
+        None
+    );
 }
 
 #[test]
@@ -2327,7 +2603,7 @@ fn test_parent_event_does_not_null_player_landblock() {
         location: 1,
         placement: 1,
         parent_instance_sequence: 0,
-        child_position_sequence: 0,
+        child_position_sequence: 1,
     }));
 
     state.handle_message(&msg);
@@ -2419,6 +2695,120 @@ fn test_object_create_reuses_upsert_path_and_clears_explicit_delete() {
     assert!(state.entity_lifecycle_state(guid).is_none());
 }
 
+fn visual_model(part_index: u8, gfx_obj_did: u32) -> ModelData {
+    ModelData {
+        model_changes: vec![ModelChange {
+            index: part_index,
+            animation_id: gfx_obj_did,
+        }],
+        ..ModelData::default()
+    }
+}
+
+#[test]
+fn object_visual_description_requires_equal_instance_and_wrap_newer_visual_sequence() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x9000_0101);
+    let mut entity = Entity::new(guid, "Target".to_owned(), WorldPosition::default());
+    entity.sequences[7] = u16::MAX - 1;
+    entity.sequences[8] = 4;
+    state.entities.insert(entity);
+
+    let events = state.handle_message(&GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
+        guid,
+        model_data: visual_model(2, 0x0100_0020),
+        instance_sequence: 4,
+        visual_desc_sequence: 1,
+    })));
+    assert!(matches!(
+        events.as_slice(),
+        [WorldEvent::EntityAppearanceUpdated { guid: updated }] if *updated == guid
+    ));
+    assert_eq!(
+        state
+            .entities
+            .get(guid)
+            .unwrap()
+            .visual_description_sequence(),
+        1
+    );
+    assert_eq!(
+        state.entities.get(guid).unwrap().appearance.part_changes[0].part_index,
+        2
+    );
+
+    let stale = state.handle_message(&GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
+        guid,
+        model_data: visual_model(3, 0x0100_0030),
+        instance_sequence: 4,
+        visual_desc_sequence: u16::MAX,
+    })));
+    assert!(stale.is_empty());
+    assert_eq!(
+        state.entities.get(guid).unwrap().appearance.part_changes[0].part_index,
+        2
+    );
+}
+
+#[test]
+fn future_object_visual_description_joins_matching_create_before_publication() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x9000_0102);
+    let mut current = Entity::new(guid, "Current".to_owned(), WorldPosition::default());
+    current.sequences[8] = 4;
+    state.entities.insert(current);
+
+    assert!(
+        state
+            .handle_message(&GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
+                guid,
+                model_data: visual_model(3, 0x0100_0030),
+                instance_sequence: 5,
+                visual_desc_sequence: 8,
+            })))
+            .is_empty()
+    );
+
+    let mut create = ObjectDescriptionData::with_guid(guid);
+    create.public_weenie_desc.name = Some("Replacement".to_owned());
+    create.sequences[7] = 7;
+    create.sequences[8] = 5;
+    let events = state.handle_message(&GameMessage::ObjectCreate(Box::new(create)));
+    let Some(WorldEvent::EntityReplaced(replacement)) = events.first() else {
+        panic!("matching create should replace the existing entity");
+    };
+    assert_eq!(replacement.visual_description_sequence(), 8);
+    assert_eq!(replacement.appearance.part_changes[0].part_index, 3);
+    assert!(state.entity_lifecycle_state(guid).is_none());
+}
+
+#[test]
+fn stale_instance_visual_description_cannot_modify_current_entity() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x9000_0103);
+    let mut entity = Entity::new(guid, "Current".to_owned(), WorldPosition::default());
+    entity.sequences[7] = 10;
+    entity.sequences[8] = 5;
+    state.entities.insert(entity);
+
+    let events = state.handle_message(&GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
+        guid,
+        model_data: visual_model(4, 0x0100_0040),
+        instance_sequence: 4,
+        visual_desc_sequence: 11,
+    })));
+    assert!(events.is_empty());
+    assert!(
+        state
+            .entities
+            .get(guid)
+            .unwrap()
+            .appearance
+            .part_changes
+            .is_empty()
+    );
+}
+
 #[test]
 fn test_self_object_create_bootstraps_player_position() {
     let mut state = WorldState::synthetic();
@@ -2429,6 +2819,8 @@ fn test_self_object_create_bootstraps_player_position() {
         coords: Vector3::new(1.0, 2.0, 3.0),
         rotation: holtburger_common::math::Quaternion::identity(),
     };
+    let mut private_properties = WorldObjectProperties::default();
+    private_properties.set_int_prop(PropertyInt::CoinValue, 12345);
     let player_description = GameMessage::GameEvent(Box::new(GameEventMessage {
         target: player_guid,
         sequence: 1,
@@ -2438,7 +2830,7 @@ fn test_self_object_create_bootstraps_player_position() {
             name: "Player".to_string(),
             wee_type: 1,
             pos: Some(initial_pos),
-            properties: WorldObjectProperties::default(),
+            properties: private_properties,
             positions: std::collections::BTreeMap::new(),
             attributes: std::collections::BTreeMap::new(),
             skills: std::collections::BTreeMap::new(),
@@ -2490,7 +2882,8 @@ fn test_self_object_create_bootstraps_player_position() {
         .entities
         .get(player_guid)
         .unwrap()
-        .motion_snapshot
+        .network_motion
+        .snapshot()
         .expect("self object create should hydrate motion snapshot from spawn movement data");
     assert_eq!(motion_snapshot.current_style, Some(MotionStance::NonCombat));
     assert_eq!(
@@ -2503,6 +2896,39 @@ fn test_self_object_create_bootstraps_player_position() {
     );
     assert!(state.entity_lifecycle_state(player_guid).is_none());
     assert!(!events.is_empty());
+    assert_eq!(
+        state.player_int_property(PropertyInt::CoinValue),
+        Some(12345)
+    );
+    // A private update after login must survive another public recreation, including zero.
+    let update = GameMessage::PrivateUpdatePropertyInt(Box::new(
+        holtburger_protocol::messages::object::messages::properties::UpdatePropertyInt {
+            sequence: 1,
+            guid: Guid::NULL,
+            property: PropertyInt::CoinValue as u32,
+            value: 0,
+        },
+    ));
+    state.handle_message(&update);
+    state.handle_message(&msg);
+    assert_eq!(state.player_int_property(PropertyInt::CoinValue), Some(0));
+    // Public-only values must still disappear when omitted by a replacement description.
+    state
+        .player_entity_mut()
+        .unwrap()
+        .set_int_prop(PropertyInt::StackSize, 7);
+    state.handle_message(&msg);
+    assert_eq!(state.player_int_property(PropertyInt::StackSize), None);
+    // A fresh login baseline cannot inherit private values from the old one.
+    let mut fresh_description = player_description;
+    if let GameMessage::GameEvent(event) = &mut fresh_description
+        && let GameEvent::PlayerDescription(data) = &mut event.event
+    {
+        data.properties.ints.0.remove(&PropertyInt::CoinValue);
+    }
+    state.handle_message(&fresh_description);
+    state.handle_message(&msg);
+    assert_eq!(state.player_int_property(PropertyInt::CoinValue), None);
 }
 
 fn spawn_invalid_motion_data(
@@ -2535,29 +2961,109 @@ fn spawn_invalid_motion_data(
 #[test]
 fn test_object_delete_marks_explicit_delete_without_inline_despawn() {
     let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x50000002);
     let guid = Guid(0x90000002);
+    let mut entity = Entity::new(guid, "DeleteMe".to_string(), WorldPosition::default());
+    entity.set_container_id(Some(player_guid));
+    state.player.guid = player_guid;
+    state.entities.insert(entity);
+    state.storage.announce_container(guid, player_guid);
+    assert!(state.storage.owned_by(guid, state.player.guid));
 
-    state.entities.insert(Entity::new(
+    let msg = GameMessage::ObjectDelete(Box::new(ObjectDeleteData {
         guid,
-        "DeleteMe".to_string(),
-        WorldPosition::default(),
-    ));
-
-    let msg = GameMessage::ObjectDelete(Box::new(ObjectDeleteData { guid }));
+        instance_sequence: 0,
+    }));
 
     let events = state.handle_message(&msg);
 
     assert!(state.entities.get(guid).is_some());
+    assert!(!state.storage.owned_by(guid, state.player.guid));
     assert!(
         state
             .entity_lifecycle_state(guid)
-            .is_some_and(|state| state.explicit_delete_requested)
+            .is_some_and(|state| state.delete_request.is_some())
     );
-    assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(target) if *target == guid))
-    );
+    assert!(!events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid: target, .. } if *target == guid)
+    ));
+}
+
+#[test]
+fn test_stale_object_delete_does_not_retire_newer_instance() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x50000012);
+    let guid = Guid(0x90000012);
+    let position = WorldPosition::default();
+    let mut entity = Entity::new(guid, "Newer".to_string(), position);
+    entity.apply_remote_position_sample(position, 10, 0, 0);
+    entity.set_container_id(Some(player_guid));
+    state.player.guid = player_guid;
+    state.add_entity(entity);
+    state.storage.announce_container(guid, player_guid);
+    assert!(state.storage.owned_by(guid, state.player.guid));
+
+    let events = state.handle_message(&GameMessage::ObjectDelete(Box::new(ObjectDeleteData {
+        guid,
+        instance_sequence: 9,
+    })));
+
+    assert!(events.is_empty());
+    assert!(state.is_entity_client_visible(guid));
+    assert!(state.storage.owned_by(guid, state.player.guid));
+    assert!(state.entity_lifecycle_state(guid).is_none());
+}
+
+#[test]
+fn test_future_object_delete_waits_for_matching_instance() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x90000013);
+    let position = WorldPosition::default();
+    let mut current = Entity::new(guid, "Current".to_string(), position);
+    current.apply_remote_position_sample(position, 10, 0, 0);
+    state.add_entity(current);
+
+    let _ = state.handle_message(&GameMessage::ObjectDelete(Box::new(ObjectDeleteData {
+        guid,
+        instance_sequence: 11,
+    })));
+    assert!(state.is_entity_client_visible(guid));
+
+    let mut matching = Entity::new(guid, "Matching".to_string(), position);
+    matching.apply_remote_position_sample(position, 11, 0, 0);
+    let create_disposition = state.upsert_entity_from_create(matching, &mut Vec::new());
+
+    assert_eq!(create_disposition, EntityCreateDisposition::DeleteRequested);
+    assert!(!state.is_entity_client_visible(guid));
+    let events = state.tick(None);
+    assert!(state.entities.get(guid).is_none());
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityDespawned {
+            guid: event_guid,
+            generation: 11,
+        } if *event_guid == guid
+    )));
+}
+
+#[test]
+fn test_newer_create_supersedes_queued_object_delete() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x90000014);
+    let position = WorldPosition::default();
+
+    let _ = state.handle_message(&GameMessage::ObjectDelete(Box::new(ObjectDeleteData {
+        guid,
+        instance_sequence: u16::MAX,
+    })));
+    let mut replacement = Entity::new(guid, "Wrapped".to_string(), position);
+    replacement.apply_remote_position_sample(position, 0, 0, 0);
+    let create_disposition = state.upsert_entity_from_create(replacement, &mut Vec::new());
+
+    assert_eq!(create_disposition, EntityCreateDisposition::Active);
+    assert!(state.is_entity_client_visible(guid));
+    assert!(state.entity_lifecycle_state(guid).is_none());
+    assert!(state.tick(None).is_empty());
 }
 
 #[test]
@@ -2576,7 +3082,7 @@ fn test_container_iid_update_tracks_player_inventory_and_clears_deadline() {
     let mut item = Entity::new(guid, "Item".to_string(), WorldPosition::default());
     item.position.landblock_id = Guid::NULL;
     state.entities.insert(item);
-    state.set_entity_prune_deadline(guid, state.current_server_time() - 1.0);
+    state.request_unretained_entity_prune(guid, state.current_server_time() - 1.0);
 
     let msg = GameMessage::PublicUpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceId {
         sequence: 0,
@@ -2587,7 +3093,7 @@ fn test_container_iid_update_tracks_player_inventory_and_clears_deadline() {
 
     let _ = state.handle_message(&msg);
 
-    assert!(state.player.inventory.contains(&guid));
+    assert!(state.storage.owned_by(guid, state.player.guid));
     assert!(state.entity_lifecycle_state(guid).is_none());
     assert_eq!(
         state.entities.get(guid).unwrap().position.landblock_id,
@@ -2611,7 +3117,8 @@ fn test_pickup_event_marks_unretained_entity_for_sweep() {
 
     let msg = GameMessage::PickupEvent(Box::new(PickupEventData {
         guid,
-        success: true,
+        instance_sequence: 0,
+        position_sequence: 1,
     }));
 
     let events = state.handle_message(&msg);
@@ -2624,7 +3131,7 @@ fn test_pickup_event_marks_unretained_entity_for_sweep() {
     assert!(
         state
             .entity_lifecycle_state(guid)
-            .is_some_and(|state| state.explicit_delete_requested)
+            .is_some_and(|state| state.delete_request.is_some())
     );
     assert!(events.iter().any(|event| matches!(
         event,
@@ -2664,14 +3171,14 @@ fn test_retention_snapshot_reflects_lifecycle_metadata() {
     state.mark_trade_preview(guid);
     state.mark_container_preview(guid);
     state.mark_entity_explicit_delete(guid);
-    state.set_entity_prune_deadline(guid, 5.0);
+    state.request_unretained_entity_prune(guid, 5.0);
 
     let snapshot = state.retention_snapshot(guid, 10.0).unwrap();
     assert!(!snapshot.in_world);
     assert!(snapshot.trade_preview);
     assert!(snapshot.container_preview);
-    assert!(snapshot.explicit_delete_requested);
-    assert!(snapshot.prune_deadline_expired);
+    assert!(snapshot.current_instance_delete_requested);
+    assert!(snapshot.prune_request_expired);
 }
 
 #[test]
@@ -2705,9 +3212,9 @@ fn test_upsert_entity_from_create_replaces_in_place() {
     events.clear();
 
     let replacement = Entity::new(guid, "Replacement".to_string(), WorldPosition::default());
-    let outcome = state.upsert_entity_from_create(replacement, &mut events);
+    let create_disposition = state.upsert_entity_from_create(replacement, &mut events);
 
-    assert!(matches!(outcome, EntityUpsertKind::Replaced));
+    assert_eq!(create_disposition, EntityCreateDisposition::Active);
     assert!(matches!(
         events.first(),
         Some(WorldEvent::EntityReplaced(_))
@@ -2740,15 +3247,15 @@ fn test_add_entity_seeds_remote_body_sidecar() {
         .scene
         .body(SpatialBodyId::Entity(guid))
         .expect("remote entity body should be seeded");
-    assert_eq!(body.authoritative_pose, Some(position));
+    assert_eq!(body.authoritative_pose(), Some(position));
     assert_eq!(body.pose, position);
-    assert_eq!(body.velocity, Vector3::new(1.0, 2.0, 0.0));
-    assert_eq!(body.omega, Vector3::new(0.0, 0.0, 0.5));
+    assert_eq!(body.retained.velocity, Vector3::new(1.0, 2.0, 0.0));
+    assert_eq!(body.retained.omega, Vector3::new(0.0, 0.0, 0.5));
     assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
 }
 
 #[test]
-fn test_player_authoritative_updates_seed_local_player_body() {
+fn player_confirmation_and_server_vectors_preserve_local_runtime_kinematics() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0100);
     let initial_pos = WorldPosition {
@@ -2765,22 +3272,195 @@ fn test_player_authoritative_updates_seed_local_player_body() {
         rotation: holtburger_common::math::Quaternion::identity(),
     };
 
+    let body_id = SpatialBodyId::LocalPlayer(player_guid);
+    let local_velocity = Vector3::new(1.0, 2.0, 3.0);
+    let local_omega = Vector3::new(0.0, 0.0, 0.5);
+    assert!(state.scene.apply_authoritative_body_vectors(
+        body_id,
+        crate::AuthoritativeBodyVectors {
+            velocity: local_velocity,
+            acceleration: Vector3::zero(),
+            omega: local_omega,
+        },
+        Instant::now(),
+    ));
+
     state.set_player_position(moved);
-    state.set_player_vector(Vector3::new(4.0, 5.0, 0.0), Vector3::new(0.0, 0.0, 2.0));
+    let events = state
+        .record_player_server_vectors(Vector3::new(4.0, 5.0, 0.0), Vector3::new(0.0, 0.0, 2.0));
 
     let body = state
         .scene
-        .body(SpatialBodyId::LocalPlayer(player_guid))
+        .body(body_id)
         .expect("local player body should be reconciled from authoritative entity state");
-    assert_eq!(body.authoritative_pose, Some(moved));
-    assert_eq!(body.pose, moved);
-    assert_eq!(body.velocity, Vector3::new(4.0, 5.0, 0.0));
-    assert_eq!(body.omega, Vector3::new(0.0, 0.0, 2.0));
+    assert_eq!(body.authoritative_pose(), Some(moved));
+    assert_eq!(body.pose, initial_pos);
+    assert_eq!(body.retained.velocity, local_velocity);
+    assert_eq!(body.retained.omega, local_omega);
     assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        WorldEvent::RuntimeBodyChanged { body_id: changed } if *changed == body_id
+    )));
 }
 
 #[test]
-fn test_remote_position_reset_suspends_body_sampling() {
+fn contacted_near_remote_position_preserves_runtime_pose_then_interpolates_on_tick() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x6200_0010);
+    let remote_guid = Guid(0x6200_0011);
+    let pose = |x| WorldPosition {
+        landblock_id: Guid(0x0100_0001),
+        coords: Vector3::new(x, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.guid = player_guid;
+    state.seed_local_player_entity(player_guid, "Player", pose(0.0));
+    state.add_entity(Entity::new(remote_guid, "Remote".to_owned(), pose(8.0)));
+
+    let accepted = state.apply_entity_position_pack(
+        remote_guid,
+        &PositionPack {
+            pos: pose(10.0),
+            position_sequence: 1,
+            flags: UpdatePositionFlag::HAS_CONTACT,
+            ..PositionPack::default()
+        },
+        &mut Vec::new(),
+    );
+    assert!(accepted);
+    let body_id = SpatialBodyId::Entity(remote_guid);
+    let body = state.scene.body(body_id).expect("remote body");
+    assert_eq!(body.pose, pose(8.0));
+    assert_eq!(body.authoritative_pose(), Some(pose(10.0)));
+    assert_eq!(body.contact, ContactState::Unknown);
+
+    let ordinary = SolvedBodyKinematics {
+        body_id,
+        pose: pose(8.0),
+        accepted_motion: crate::AcceptedBodyMotion::default(),
+        retained: crate::RetainedBodyKinematics::default(),
+        contact: ContactState::Unknown,
+        projection_state: None,
+    };
+    let (solved, kind) = state
+        .scene
+        .reconcile_pose_only_body_kinematics(ordinary, 0.03)
+        .expect("remote body remains registered");
+    assert_eq!(kind, crate::RuntimeBodyAdvanceKind::Integrated);
+    assert!(solved.pose.coords.x > 8.0);
+    assert!(solved.pose.coords.x < 10.0);
+}
+
+#[test]
+fn remote_position_requires_a_strictly_newer_position_sequence() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x6200_0012);
+    let initial = WorldPosition {
+        landblock_id: Guid(0x0100_0001),
+        ..WorldPosition::default()
+    };
+    state.add_entity(Entity::new(guid, "Remote".to_owned(), initial));
+
+    assert!(!state.apply_entity_position_pack(
+        guid,
+        &PositionPack {
+            pos: WorldPosition {
+                coords: Vector3::new(5.0, 0.0, 0.0),
+                ..initial
+            },
+            position_sequence: 0,
+            flags: UpdatePositionFlag::HAS_CONTACT,
+            ..PositionPack::default()
+        },
+        &mut Vec::new(),
+    ));
+    assert_eq!(state.entities.get(guid).unwrap().position, initial);
+    assert_eq!(
+        state.scene.body(SpatialBodyId::Entity(guid)).unwrap().pose,
+        initial
+    );
+}
+
+#[test]
+fn remote_position_at_retail_distance_boundary_schedules_tick_snap() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x6200_0013);
+    let remote_guid = Guid(0x6200_0014);
+    let pose = |x| WorldPosition {
+        landblock_id: Guid(0x0100_0001),
+        coords: Vector3::new(x, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.guid = player_guid;
+    state.seed_local_player_entity(player_guid, "Player", pose(0.0));
+    state.add_entity(Entity::new(remote_guid, "Remote".to_owned(), pose(96.0)));
+    assert!(state.apply_entity_position_pack(
+        remote_guid,
+        &PositionPack {
+            pos: pose(100.0),
+            position_sequence: 1,
+            flags: UpdatePositionFlag::HAS_CONTACT,
+            ..PositionPack::default()
+        },
+        &mut Vec::new(),
+    ));
+
+    let body_id = SpatialBodyId::Entity(remote_guid);
+    assert_eq!(state.scene.body(body_id).unwrap().pose, pose(96.0));
+    let ordinary = SolvedBodyKinematics {
+        body_id,
+        pose: pose(96.0),
+        accepted_motion: crate::AcceptedBodyMotion::default(),
+        retained: crate::RetainedBodyKinematics::default(),
+        contact: ContactState::Sliding,
+        projection_state: None,
+    };
+    let (solved, kind) = state
+        .scene
+        .reconcile_pose_only_body_kinematics(ordinary, 0.03)
+        .expect("remote body remains registered");
+    assert_eq!(kind, crate::RuntimeBodyAdvanceKind::CorrectionSnap);
+    assert_eq!(solved.pose, pose(100.0));
+}
+
+#[test]
+fn valid_remote_position_recovers_a_missing_runtime_cell() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x6200_0015);
+    state.add_entity(Entity::new(
+        guid,
+        "Remote".to_owned(),
+        WorldPosition::default(),
+    ));
+    let recovered = WorldPosition {
+        landblock_id: Guid(0x0100_0001),
+        coords: Vector3::new(5.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let mut events = Vec::new();
+    assert!(state.apply_entity_position_pack(
+        guid,
+        &PositionPack {
+            pos: recovered,
+            position_sequence: 1,
+            flags: UpdatePositionFlag::HAS_CONTACT,
+            ..PositionPack::default()
+        },
+        &mut events,
+    ));
+    assert_eq!(
+        state.scene.body(SpatialBodyId::Entity(guid)).unwrap().pose,
+        recovered
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::ForcedReposition { guid: event_guid, .. } if *event_guid == guid
+    )));
+}
+
+#[test]
+fn newer_remote_teleport_resets_and_suspends_body_sampling() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x6200_0002);
     let initial_pos = WorldPosition {
@@ -2803,7 +3483,7 @@ fn test_remote_position_reset_suspends_body_sampling() {
             },
             instance_sequence: 2,
             position_sequence: 3,
-            teleport_sequence: 30,
+            teleport_sequence: 31,
             force_position_sequence: 41,
             ..PositionPack::default()
         },
@@ -2817,14 +3497,61 @@ fn test_remote_position_reset_suspends_body_sampling() {
         .expect("remote body should remain present after correction");
     assert_eq!(body.pose.coords, Vector3::new(10.0, 20.0, 30.0));
     assert_eq!(
-        body.authoritative_pose.map(|pose| pose.coords),
+        body.authoritative_pose().map(|pose| pose.coords),
         Some(Vector3::new(10.0, 20.0, 30.0))
     );
     assert_eq!(body.sampling.mode, SpatialSampleMode::Suspended);
 }
 
 #[test]
-fn test_remote_position_pack_updates_and_clears_linear_velocity() {
+fn rejected_remote_position_does_not_replace_observation_or_correction_authority() {
+    use crate::state::attachment_lifecycle::DeferredPlacementMessage;
+    use holtburger_protocol::messages::UpdatePositionData;
+
+    for (instance_sequence, position_sequence, teleport_sequence) in
+        [(0, 0, 0), (0, 1, u16::MAX), (u16::MAX, 1, 0), (1, 1, 0)]
+    {
+        let mut state = WorldState::synthetic();
+        let guid = Guid(0x6200_0006);
+        let initial = WorldPosition {
+            landblock_id: Guid(0x0100_0001),
+            rotation: holtburger_common::Quaternion::identity(),
+            ..WorldPosition::default()
+        };
+        state.add_entity(Entity::new(guid, "Remote".into(), initial));
+        let before = state
+            .scene
+            .body(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .clone();
+        state.receive_placement_message(
+            DeferredPlacementMessage::Position(UpdatePositionData {
+                guid,
+                pos: PositionPack {
+                    pos: WorldPosition {
+                        coords: Vector3::new(10.0, 0.0, 0.0),
+                        ..initial
+                    },
+                    instance_sequence,
+                    position_sequence,
+                    teleport_sequence,
+                    ..PositionPack::default()
+                },
+            }),
+            &mut Vec::new(),
+        );
+        let entity = state.entities.get(guid).unwrap();
+        assert_eq!(entity.position, initial);
+        assert_eq!(entity.position_sequence(), 0);
+        assert_eq!(
+            state.scene.body(SpatialBodyId::Entity(guid)).unwrap(),
+            &before
+        );
+    }
+}
+
+#[test]
+fn non_contact_remote_position_retains_observation_without_changing_simulation() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x6200_0005);
     let initial_pos = WorldPosition {
@@ -2846,7 +3573,7 @@ fn test_remote_position_pack_updates_and_clears_linear_velocity() {
                 rotation: holtburger_common::math::Quaternion::identity(),
             },
             velocity: Some(Vector3::new(-1.327_315_8, 5.460_433_5, -18.468_733)),
-            instance_sequence: 88,
+            instance_sequence: 0,
             position_sequence: 285,
             teleport_sequence: 0,
             force_position_sequence: 0,
@@ -2857,23 +3584,19 @@ fn test_remote_position_pack_updates_and_clears_linear_velocity() {
     );
 
     assert!(applied);
+    let entity = state.entities.get(guid).expect("entity should exist");
     assert_eq!(
-        state
-            .entities
-            .get(guid)
-            .expect("entity should exist")
-            .velocity,
-        Vector3::new(-1.327_315_8, 5.460_433_5, -18.468_733)
+        entity.position.coords,
+        Vector3::new(9.745_981, -58.954_994, 0.004_999_995)
     );
-    assert!(falling_events.iter().any(|event| matches!(
-        event,
-        WorldEvent::EntityVectorUpdated {
-            guid: event_guid,
-            velocity,
-            ..
-        } if *event_guid == guid
-            && *velocity == Vector3::new(-1.327_315_8, 5.460_433_5, -18.468_733)
-    )));
+    let body = state.scene.body(SpatialBodyId::Entity(guid)).unwrap();
+    assert_eq!(body.authoritative_pose(), Some(entity.position));
+    assert_eq!(body.pose, initial_pos);
+    assert_eq!(body.retained.velocity, Vector3::new(0.0, 0.0, 20.046_688));
+    assert_eq!(body.correction_pose(), None);
+    assert_eq!(entity.velocity, Vector3::new(0.0, 0.0, 20.046_688));
+    assert_eq!(entity.sequences[0], 285);
+    assert!(falling_events.is_empty());
 
     let mut grounded_events = Vec::new();
     let applied = state.apply_entity_position_pack(
@@ -2884,11 +3607,11 @@ fn test_remote_position_pack_updates_and_clears_linear_velocity() {
                 coords: Vector3::new(9.745_981, -58.954_994, 0.004_999_995),
                 rotation: holtburger_common::math::Quaternion::identity(),
             },
-            instance_sequence: 88,
+            instance_sequence: 0,
             position_sequence: 286,
             teleport_sequence: 0,
             force_position_sequence: 0,
-            flags: UpdatePositionFlag::IS_GROUNDED,
+            flags: UpdatePositionFlag::HAS_CONTACT,
             ..PositionPack::default()
         },
         &mut grounded_events,
@@ -2907,7 +3630,41 @@ fn test_remote_position_pack_updates_and_clears_linear_velocity() {
         .scene
         .body(SpatialBodyId::Entity(guid))
         .expect("remote body should remain present after grounded snap");
-    assert_eq!(body.velocity, Vector3::zero());
+    assert_eq!(body.retained.velocity, Vector3::zero());
+    assert_eq!(body.nominal.velocity, Vector3::zero());
+    assert_eq!(
+        body.correction_pose(),
+        Some(state.entities.get(guid).unwrap().position)
+    );
+    // A repeated contact sample must clear locally evolved nominal velocity even when the
+    // cached server velocity is already zero; value inequality is not packet freshness.
+    state
+        .scene
+        .body_mut(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .nominal
+        .velocity = Vector3::new(1.0, 0.0, 0.0);
+    let contacted_pose = state.entities.get(guid).unwrap().position;
+    assert!(state.apply_entity_position_pack(
+        guid,
+        &PositionPack {
+            pos: contacted_pose,
+            instance_sequence: 0,
+            position_sequence: 287,
+            flags: UpdatePositionFlag::HAS_CONTACT,
+            ..PositionPack::default()
+        },
+        &mut Vec::new()
+    ));
+    assert_eq!(
+        state
+            .scene
+            .body(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .nominal
+            .velocity,
+        Vector3::zero()
+    );
     assert!(grounded_events.iter().any(|event| matches!(
         event,
         WorldEvent::EntityVectorUpdated {
@@ -2975,14 +3732,12 @@ fn test_tick_sweeps_explicit_delete_without_movement() {
     ));
     state.mark_entity_explicit_delete(target_guid);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(target_guid).is_none());
-    assert!(
-        events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
-        )
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == target_guid)
+    ));
 }
 
 #[test]
@@ -3001,16 +3756,14 @@ fn test_tick_sweeps_expired_deadline_without_movement() {
     let mut target = Entity::new(target_guid, "Target".to_string(), WorldPosition::default());
     target.position.landblock_id = Guid::NULL;
     state.entities.insert(target);
-    state.set_entity_prune_deadline(target_guid, state.current_server_time() - 1.0);
+    state.request_unretained_entity_prune(target_guid, state.current_server_time() - 1.0);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(target_guid).is_none());
-    assert!(
-        events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
-        )
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == target_guid)
+    ));
 }
 
 #[test]
@@ -3037,7 +3790,7 @@ fn apply_set_state_updates_local_player_instance_sequence_and_entity_physics_sta
         .player_entity()
         .expect("local player entity should exist");
     assert_eq!(
-        player_entity.physics_state,
+        player_entity.physics.effective().semantic,
         PhysicsState::REPORT_COLLISIONS | PhysicsState::IGNORE_COLLISIONS
     );
     assert_eq!(
@@ -3062,6 +3815,548 @@ fn apply_set_state_updates_local_player_instance_sequence_and_entity_physics_sta
     ));
 }
 
+fn set_state_dynamic_definition() -> crate::DynamicPhysicalBodyConfiguration {
+    let movement = crate::PhysicalBodyDefinition::free_sphere(
+        crate::PhysicalSphereSet::new(
+            holtburger_common::Sphere {
+                center: Vector3::zero(),
+                radius: 0.5,
+            },
+            None,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let response_policy = crate::PhysicalBodyResponsePolicy {
+        restitution: crate::PhysicalRestitution::Elastic(crate::PhysicalElasticity::DEFAULT),
+        friction: crate::PhysicalFriction::DEFAULT,
+        surface_motion: crate::PhysicalSurfaceMotion::Stable,
+        align_path: false,
+    };
+    let definition = crate::DynamicPhysicalBodyDefinition {
+        movement,
+        response_policy,
+        entity_collision: crate::DynamicBodyCollisionDefinition {
+            player_collision: None,
+            contact_response: crate::spatial::EntityContactResponse::Character(
+                crate::EntityIntegrationEligibility::Eligible,
+            ),
+            target_geometry: Arc::new(crate::PreparedEntityTargetGeometry {
+                setup_radius: 0.5,
+                setup_height: 1.0,
+                collision_animations: Default::default(),
+                physics_bsp_parts: Vec::new(),
+                fallback_setup_did: 0x0200_0001,
+                fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                }))],
+                fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+            }),
+            dynamic_collision: crate::EntityDynamicCollisionPolicy {
+                is_static: false,
+                target: crate::EntityCollisionParticipation::Solid,
+                mover_accepts_response: true,
+                accepts_peer_reports: true,
+                missile: false,
+                path_clipped: false,
+            },
+            reporting: crate::EntityCollisionReportPolicy {
+                enabled: false,
+                as_environment: false,
+            },
+            uses_physics_bsp: false,
+            elasticity: crate::PhysicalElasticity::DEFAULT,
+            default_animation_available: false,
+            default_script_available: false,
+        },
+    };
+    crate::DynamicPhysicalBodyConfiguration::new(
+        definition,
+        crate::LocalPhysicalDemand {
+            target: crate::LocalTargetDemand::Retained,
+            integration: crate::LocalIntegrationDemand::Eligible,
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn script_scale_is_absolute_and_updates_the_installed_unit_body() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x7000_0100);
+    let mut entity = Entity::new(
+        guid,
+        "Scaled".to_owned(),
+        WorldPosition {
+            landblock_id: Guid(0xda55_0020),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        },
+    );
+    entity.set_property(PropertyUpdate::Float(
+        holtburger_common::properties::PropertyFloat::DefaultScale,
+        2.0,
+    ));
+    state.add_entity(entity);
+    let unit = set_state_dynamic_definition();
+    let scaled = crate::DynamicPhysicalBodyConfiguration::with_object_scale(
+        unit.definition().clone(),
+        unit.demand(),
+        2.0,
+    )
+    .unwrap();
+    state
+        .scene
+        .set_dynamic_physical_body(
+            SpatialBodyId::Entity(guid),
+            Some(scaled),
+            crate::PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+
+    assert!(
+        state
+            .apply_entity_script_scale(guid, 3.0, 0.0, 1.0)
+            .unwrap()
+            .effective_changed
+    );
+    assert_eq!(state.entities.get(guid).unwrap().scale.effective(), 3.0);
+    let physical = state
+        .scene
+        .body(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .physical
+        .as_ref()
+        .unwrap();
+    assert_eq!(physical.definition.spheres().primary().radius, 1.5);
+    let dynamic = physical.dynamic.as_ref().unwrap();
+    assert_eq!(dynamic.unit_movement.spheres().primary().radius, 0.5);
+    assert_eq!(dynamic.object_scale, 3.0);
+
+    let started = state
+        .apply_entity_script_scale(guid, 4.0, 2.0, 2.0)
+        .unwrap();
+    assert!(!started.effective_changed);
+    assert!(started.ramp_active);
+    let advanced = state.advance_entity_script_scale(guid, 3.0).unwrap();
+    assert!(advanced.effective_changed);
+    assert!(advanced.ramp_active);
+    assert_eq!(state.entities.get(guid).unwrap().scale.effective(), 3.5);
+    let physical = state
+        .scene
+        .body(SpatialBodyId::Entity(guid))
+        .unwrap()
+        .physical
+        .as_ref()
+        .unwrap();
+    assert_eq!(physical.definition.spheres().primary().radius, 1.75);
+    assert_eq!(physical.dynamic.as_ref().unwrap().object_scale, 3.5);
+}
+
+fn authored_ethereal_tick(guid: Guid, ethereal: bool) -> AuthoredBodyMotionTick {
+    let mut tick = crate::motion::SequenceTick::identity();
+    tick.hooks.push(crate::motion::FiredMotionHook {
+        animation_id: 0x0300_0559,
+        hook: MotionHook {
+            frame: 1,
+            direction: if ethereal {
+                MotionHookDirection::Forward
+            } else {
+                MotionHookDirection::Backward
+            },
+            effect: MotionHookEffect::Ethereal { ethereal },
+        },
+    });
+    AuthoredBodyMotionTick { guid, tick }
+}
+
+#[test]
+fn solidification_uses_published_part_pose_and_preserves_it_through_retry() {
+    let mut state = WorldState::synthetic();
+    let door = Guid(0x7000_0101);
+    let peer = Guid(0x7000_0102);
+    let pose = WorldPosition {
+        landblock_id: Guid(0xda55_0020),
+        coords: Vector3::new(96.0, 96.0, 1.0),
+        rotation: Quaternion::identity(),
+    };
+    state.add_entity(Entity::new(door, "Door".to_owned(), pose));
+    state.add_entity(Entity::new(
+        peer,
+        "Peer".to_owned(),
+        WorldPosition {
+            coords: pose.coords + Vector3::new(0.75, 0.0, 0.0),
+            ..pose
+        },
+    ));
+    state.entities.get_mut(door).unwrap().physics.reconcile(
+        crate::resolve_effective_entity_physics_state(PhysicsState::HAS_PHYSICS_BSP),
+    );
+    let base = set_state_dynamic_definition();
+    let mut definition = base.definition().clone();
+    let mut geometry = (*definition.entity_collision.target_geometry).clone();
+    // A round part isolates authored placement from mesh-specific contact behavior.
+    geometry.physics_bsp_parts = vec![crate::PreparedEntityBspPart {
+        part_index: 0,
+        gfx_obj_did: 0x0100_0001,
+        local_origin: Vector3::zero(),
+        local_orientation: Quaternion::identity(),
+        scale: ColliderScale::uniform(1.0).unwrap(),
+        shape: geometry.fallback_shapes[0].clone(),
+    }];
+    let animation_id = 0x0300_0001;
+    geometry.collision_animations = CollisionPoseLibrary::project(
+        [Arc::new(Animation {
+            id: animation_id,
+            flags: AnimationFlags::empty(),
+            num_parts: 1,
+            num_frames: 2,
+            pos_frames: Vec::new(),
+            part_frames: [10.0, 0.0]
+                .into_iter()
+                .map(|x| AnimationFrame {
+                    frames: vec![Frame {
+                        origin: Vector3::new(x, 0.0, 0.0),
+                        orientation: Quaternion::identity(),
+                    }],
+                    hooks: Vec::new(),
+                })
+                .collect(),
+        })],
+        &[0],
+    )
+    .unwrap();
+    definition.entity_collision.target_geometry = Arc::new(geometry);
+    definition.entity_collision.uses_physics_bsp = true;
+    let config = crate::DynamicPhysicalBodyConfiguration::new(definition, base.demand())
+        .unwrap()
+        .with_collision_pose(
+            AuthoredCollisionPose::Animation {
+                animation_id,
+                frame: 0,
+            },
+            None,
+        )
+        .unwrap();
+    for (guid, config) in [(door, config), (peer, base)] {
+        state
+            .scene
+            .set_dynamic_physical_body(
+                SpatialBodyId::Entity(guid),
+                Some(config),
+                crate::PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+    }
+    let mut collision = crate::CollisionScene::new();
+    collision
+        .insert(holtburger_content::LandblockCollisionAsset {
+            landblock_id: 0xda55_ffff,
+            terrain: holtburger_content::TerrainCollisionSurface::empty(),
+            static_geometry: holtburger_content::LandblockColliders::default(),
+        })
+        .unwrap();
+
+    // Multiple hooks in one tick observe the previously published part, away from the peer.
+    let mut tick = authored_ethereal_tick(door, true);
+    tick.tick
+        .hooks
+        .extend(authored_ethereal_tick(door, false).tick.hooks);
+    state.apply_authored_motion_physics(&[tick]).unwrap();
+    assert!(
+        !state
+            .entities
+            .get(door)
+            .unwrap()
+            .physics
+            .has_pending_solidification()
+    );
+    assert!(
+        !state
+            .scene
+            .dynamic_body_overlaps_peer(SpatialBodyId::Entity(door))
+            .unwrap()
+    );
+
+    state
+        .scene
+        .publish_collision_pose(
+            SpatialBodyId::Entity(door),
+            AuthoredCollisionPose::Animation {
+                animation_id,
+                frame: 1,
+            },
+            &collision,
+        )
+        .unwrap();
+    assert!(
+        state
+            .scene
+            .dynamic_body_overlaps_peer(SpatialBodyId::Entity(door))
+            .unwrap()
+    );
+    state
+        .apply_authored_motion_physics(&[
+            authored_ethereal_tick(door, true),
+            authored_ethereal_tick(door, false),
+        ])
+        .unwrap();
+    assert!(
+        state
+            .entities
+            .get(door)
+            .unwrap()
+            .physics
+            .has_pending_solidification()
+    );
+    assert!(
+        state
+            .scene
+            .dynamic_body_overlaps_peer(SpatialBodyId::Entity(door))
+            .unwrap()
+    );
+
+    state.scene.apply_runtime_body_pose(
+        SpatialBodyId::Entity(peer),
+        WorldPosition {
+            coords: pose.coords + Vector3::new(3.0, 0.0, 0.0),
+            ..pose
+        },
+        SpatialSampleMode::AuthoritativeOnly,
+    );
+    state.apply_authored_motion_physics(&[]).unwrap();
+    let physics = state.entities.get(door).unwrap().physics;
+    assert!(!physics.has_pending_solidification());
+    assert!(
+        !physics
+            .effective()
+            .semantic
+            .contains(PhysicsState::ETHEREAL)
+    );
+}
+
+#[test]
+fn authored_ethereal_hook_blocks_solidification_until_the_peer_clears() {
+    let mut state = WorldState::synthetic();
+    let door_guid = Guid(0x7000_0101);
+    let peer_guid = Guid(0x7000_0102);
+    let door_pose = WorldPosition {
+        landblock_id: Guid(0xDA55_0020),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    let peer_pose = WorldPosition {
+        coords: Vector3::new(0.75, 0.0, 0.0),
+        ..door_pose
+    };
+    state.add_entity(Entity::new(door_guid, "Door".to_owned(), door_pose));
+    state.add_entity(Entity::new(peer_guid, "Peer".to_owned(), peer_pose));
+    for guid in [door_guid, peer_guid] {
+        state
+            .scene
+            .set_dynamic_physical_body(
+                SpatialBodyId::Entity(guid),
+                Some(set_state_dynamic_definition()),
+                crate::PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+    }
+
+    state
+        .apply_authored_motion_physics(&[authored_ethereal_tick(door_guid, true)])
+        .unwrap();
+    assert!(
+        state
+            .entities
+            .get(door_guid)
+            .unwrap()
+            .physics
+            .effective()
+            .semantic
+            .contains(PhysicsState::ETHEREAL)
+    );
+
+    state
+        .apply_authored_motion_physics(&[authored_ethereal_tick(door_guid, false)])
+        .unwrap();
+    assert!(
+        state
+            .entities
+            .get(door_guid)
+            .unwrap()
+            .physics
+            .has_pending_solidification()
+    );
+
+    assert!(state.scene.apply_runtime_body_pose(
+        SpatialBodyId::Entity(peer_guid),
+        WorldPosition {
+            coords: Vector3::new(2.0, 0.0, 0.0),
+            ..peer_pose
+        },
+        SpatialSampleMode::AuthoritativeOnly,
+    ));
+    state.apply_authored_motion_physics(&[]).unwrap();
+    let door_physics = state.entities.get(door_guid).unwrap().physics;
+    assert!(!door_physics.has_pending_solidification());
+    assert!(
+        !door_physics
+            .effective()
+            .semantic
+            .contains(PhysicsState::ETHEREAL)
+    );
+    assert!(door_physics.authoritative().semantic.is_empty());
+}
+
+#[test]
+fn admitted_set_state_reconciles_authored_prediction_and_runtime_body_policy() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x7000_0103);
+    let pose = WorldPosition {
+        landblock_id: Guid(0xDA55_0020),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    state.add_entity(Entity::new(guid, "Door".to_owned(), pose));
+    let body_id = SpatialBodyId::Entity(guid);
+    state
+        .scene
+        .set_dynamic_physical_body(
+            body_id,
+            Some(set_state_dynamic_definition()),
+            crate::PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    state
+        .apply_authored_motion_physics(&[authored_ethereal_tick(guid, true)])
+        .unwrap();
+    assert_eq!(
+        state
+            .entities
+            .get(guid)
+            .unwrap()
+            .physics
+            .authored_transition(),
+        crate::entity_physics::AuthoredEtherealTransition::Predicted { ethereal: true }
+    );
+
+    let mut events = Vec::new();
+    assert!(state.apply_set_state_update(
+        &SetStateData {
+            guid,
+            physics_state: PhysicsState::NONE,
+            instance_sequence: 0,
+            state_sequence: 1,
+        },
+        &mut events,
+    ));
+
+    let physics = state.entities.get(guid).unwrap().physics;
+    assert_eq!(
+        physics.authored_transition(),
+        crate::entity_physics::AuthoredEtherealTransition::Reconciled
+    );
+    assert_eq!(physics.effective().semantic, PhysicsState::NONE);
+    assert_eq!(
+        state
+            .scene
+            .body(body_id)
+            .unwrap()
+            .physical
+            .as_ref()
+            .unwrap()
+            .dynamic
+            .as_ref()
+            .unwrap()
+            .collision
+            .dynamic_collision
+            .target,
+        crate::EntityCollisionParticipation::Solid
+    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::RuntimeBodyChanged { body_id: changed } if *changed == body_id)
+    ));
+}
+
+#[test]
+fn set_state_updates_semantic_truth_without_inferring_client_physical_policy() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x7000_0001);
+    let pose = WorldPosition {
+        landblock_id: Guid(0xDA55_0020),
+        coords: Vector3::new(96.0, 96.0, 20.0),
+        rotation: Quaternion::identity(),
+    };
+    state.add_entity(Entity::new(guid, "Remote".to_owned(), pose));
+    let body_id = SpatialBodyId::Entity(guid);
+    state
+        .scene
+        .set_dynamic_physical_body(
+            body_id,
+            Some(set_state_dynamic_definition()),
+            crate::PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+
+    let mut frozen_events = Vec::new();
+    assert!(state.apply_set_state_update(
+        &SetStateData {
+            guid,
+            physics_state: PhysicsState::FROZEN,
+            instance_sequence: 0,
+            state_sequence: 1,
+        },
+        &mut frozen_events,
+    ));
+    assert_eq!(
+        state
+            .entities
+            .get(guid)
+            .unwrap()
+            .physics
+            .effective()
+            .semantic,
+        PhysicsState::FROZEN
+    );
+    assert!(state.scene.body(body_id).unwrap().physical.is_some());
+    assert!(matches!(
+        frozen_events.last(),
+        Some(WorldEvent::EntityStateUpdated { .. })
+    ));
+
+    let mut unsupported_events = Vec::new();
+    assert!(state.apply_set_state_update(
+        &SetStateData {
+            guid,
+            physics_state: PhysicsState::PUSHABLE,
+            instance_sequence: 0,
+            state_sequence: 2,
+        },
+        &mut unsupported_events,
+    ));
+    assert!(state.scene.body(body_id).unwrap().physical.is_some());
+    assert_eq!(
+        state
+            .entities
+            .get(guid)
+            .unwrap()
+            .physics
+            .effective()
+            .semantic,
+        PhysicsState::PUSHABLE
+    );
+    assert!(matches!(
+        unsupported_events.last(),
+        Some(WorldEvent::EntityStateUpdated { .. })
+    ));
+}
+
 #[test]
 fn test_tick_does_not_sweep_unexpired_deadline() {
     let mut state = WorldState::synthetic();
@@ -3078,9 +4373,9 @@ fn test_tick_does_not_sweep_unexpired_deadline() {
     let mut target = Entity::new(target_guid, "Target".to_string(), WorldPosition::default());
     target.position.landblock_id = Guid::NULL;
     state.entities.insert(target);
-    state.set_entity_prune_deadline(target_guid, state.current_server_time() + 60.0);
+    state.request_unretained_entity_prune(target_guid, state.current_server_time() + 60.0);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(target_guid).is_some());
     assert!(events.is_empty());
@@ -3098,18 +4393,16 @@ fn test_tick_runs_sweep_without_player_guid() {
     ));
     state.mark_entity_explicit_delete(guid);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(guid).is_none());
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(target) if *target == guid))
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid: target, .. } if *target == guid)
+    ));
 }
 
 #[test]
-fn test_stationary_tick_starts_visibility_prune_deadline() {
+fn test_stationary_tick_starts_visibility_prune_request() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000130);
     let player_pos = WorldPosition {
@@ -3133,10 +4426,10 @@ fn test_stationary_tick_starts_visibility_prune_deadline() {
     let target_guid = Guid(0x60000130);
     state.add_entity(Entity::new(target_guid, "Distant".to_string(), far_pos));
 
-    let events = state.tick();
+    let events = state.tick(None);
     let deadline = state
         .entity_lifecycle_state(target_guid)
-        .and_then(|lifecycle| lifecycle.prune_deadline)
+        .and_then(|lifecycle| lifecycle.prune_request.map(|request| request.deadline))
         .expect("expected a destruction deadline to be assigned");
 
     assert!(events.is_empty());
@@ -3169,10 +4462,10 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
     let target_guid = Guid(0x60000131);
     state.add_entity(Entity::new(target_guid, "Distant".to_string(), far_pos));
 
-    let _ = state.tick();
+    let _ = state.tick(None);
     let deadline = state
         .entity_lifecycle_state(target_guid)
-        .and_then(|lifecycle| lifecycle.prune_deadline)
+        .and_then(|lifecycle| lifecycle.prune_request.map(|request| request.deadline))
         .expect("expected a destruction deadline to be assigned");
 
     state.server_time = Some(ServerTimeSync {
@@ -3180,18 +4473,16 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
         local_time: Instant::now(),
     });
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(target_guid).is_none());
-    assert!(
-        events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
-        )
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == target_guid)
+    ));
 }
 
 #[test]
-fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
+fn test_reentry_before_timeout_clears_visibility_prune_request() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000132);
     let player_pos = WorldPosition {
@@ -3215,11 +4506,11 @@ fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
     let target_guid = Guid(0x60000132);
     state.add_entity(Entity::new(target_guid, "Traveler".to_string(), far_pos));
 
-    let _ = state.tick();
+    let _ = state.tick(None);
     assert!(
         state
             .entity_lifecycle_state(target_guid)
-            .and_then(|lifecycle| lifecycle.prune_deadline)
+            .and_then(|lifecycle| lifecycle.prune_request.map(|request| request.deadline))
             .is_some()
     );
 
@@ -3235,55 +4526,13 @@ fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
         player_pos,
         &mut events,
     );
-    let tick_events = state.tick();
+    let tick_events = state.tick(None);
 
     assert!(state.entities.get(target_guid).is_some());
     assert!(state.entity_lifecycle_state(target_guid).is_none());
-    assert!(
-        !tick_events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
-        )
-    );
-}
-
-#[test]
-fn test_indoor_player_keeps_nearby_outdoor_entity_visible_under_conservative_heuristic() {
-    let mut state = WorldState::synthetic();
-    let player_guid = Guid(0x50000132);
-    let player_pos = WorldPosition {
-        landblock_id: Guid(0x0A0A0100),
-        coords: Vector3::new(96.0, 96.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-    let nearby_outdoor_pos = WorldPosition {
-        landblock_id: Guid(0x0A0AFFFF),
-        coords: Vector3::new(100.0, 100.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
-    state.player.guid = player_guid;
-    state.seed_local_player_entity(player_guid, "Player", player_pos);
-
-    let target_guid = Guid(0x60000136);
-    state.add_entity(Entity::new(
-        target_guid,
-        "SeenOutside-ish".to_string(),
-        nearby_outdoor_pos,
+    assert!(!tick_events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == target_guid)
     ));
-
-    let events = state.tick();
-
-    assert!(events.is_empty());
-    assert!(state.entities.get(target_guid).is_some());
-    assert!(
-        state
-            .entity_lifecycle_state(target_guid)
-            .is_none_or(|lifecycle| lifecycle.prune_deadline.is_none())
-    );
 }
 
 #[test]
@@ -3345,7 +4594,9 @@ fn test_add_to_trade_marks_preview_only_for_non_authoritative_entities() {
         "Owned".to_string(),
         WorldPosition::default(),
     ));
-    state.player.add_to_inventory(owned_guid);
+    state
+        .storage
+        .announce_container(owned_guid, state.player.guid);
 
     state.add_trade_item(0x02, preview_guid, &mut Vec::new());
     state.add_trade_item(0x01, owned_guid, &mut Vec::new());
@@ -3394,15 +4645,13 @@ fn test_reset_trade_sweeps_preview_only_entities() {
 
     let deadline = state
         .entity_lifecycle_state(preview_guid)
-        .and_then(|state| state.prune_deadline)
+        .and_then(|state| state.prune_request.map(|request| request.deadline))
         .expect("expected immediate prune eligibility after trade reset");
 
     assert!(state.entities.get(preview_guid).is_some());
-    assert!(
-        !events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
+    assert!(!events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
+    ));
     assert!(
         state
             .trade
@@ -3415,53 +4664,32 @@ fn test_reset_trade_sweeps_preview_only_entities() {
         local_time: Instant::now(),
     });
 
-    let tick_events = state.tick();
+    let tick_events = state.tick(None);
     assert!(state.entities.get(preview_guid).is_none());
-    assert!(
-        tick_events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
+    assert!(tick_events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
+    ));
 }
 
 #[test]
-fn test_clear_trade_acceptance_does_not_sweep_preview_entities() {
+fn clear_trade_acceptance_resets_offers_and_releases_previews() {
     let mut state = WorldState::synthetic();
-    let player_guid = Guid(0x50000142);
-    let preview_guid = Guid(0x60000143);
-
-    state.player.guid = player_guid;
-    state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
-
-    let mut preview_entity = Entity::new(
-        preview_guid,
-        "Preview".to_string(),
-        WorldPosition::default(),
-    );
-    preview_entity.position.landblock_id = Guid::NULL;
-    state.entities.insert(preview_entity);
-    state.mark_trade_preview(preview_guid);
-
-    if let Some(trade) = state.trade.as_mut() {
-        trade.self_side.items.push(preview_guid);
-        trade.self_side.accepted = true;
-        trade.partner_side.accepted = true;
-    }
-
-    let mut events = Vec::new();
-    state.clear_trade_acceptance(&mut events);
-
-    assert!(state.entities.get(preview_guid).is_some());
+    state.player.guid = Guid(0x50000142);
+    let item = Guid(0x60000143);
+    state.register_trade(state.player.guid, Guid(0x5000BEEF), &mut Vec::new());
+    state.add_trade_item(2, item, &mut Vec::new());
+    let events = state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: state.player.guid,
+        sequence: 1,
+        event: GameEvent::ClearTradeAcceptance,
+    })));
+    let trade = state.trade.as_ref().unwrap();
+    assert!(trade.self_side.items.is_empty());
+    assert!(trade.partner_side.items.is_empty());
     assert!(
-        state
-            .entity_lifecycle_state(preview_guid)
+        !state
+            .entity_lifecycle_state(item)
             .is_some_and(|state| state.trade_preview)
-    );
-    assert!(
-        state
-            .trade
-            .as_ref()
-            .is_some_and(|trade| trade.self_side.items == vec![preview_guid])
     );
     assert!(
         events
@@ -3502,7 +4730,7 @@ fn test_close_trade_sweeps_preview_only_entities() {
 
     let deadline = state
         .entity_lifecycle_state(preview_guid)
-        .and_then(|state| state.prune_deadline)
+        .and_then(|state| state.prune_request.map(|request| request.deadline))
         .expect("expected preview-only trade entity to become sweep-eligible");
 
     assert!(state.trade.is_none());
@@ -3512,24 +4740,20 @@ fn test_close_trade_sweeps_preview_only_entities() {
             .iter()
             .any(|event| matches!(event, WorldEvent::TradeStateUpdated(None)))
     );
-    assert!(
-        !events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
+    assert!(!events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
+    ));
 
     state.server_time = Some(ServerTimeSync {
         server_time: deadline + 1.0,
         local_time: Instant::now(),
     });
 
-    let tick_events = state.tick();
+    let tick_events = state.tick(None);
     assert!(state.entities.get(preview_guid).is_none());
-    assert!(
-        tick_events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
+    assert!(tick_events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
+    ));
 }
 
 #[test]
@@ -3560,7 +4784,9 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
     owned_entity.position.landblock_id = Guid::NULL;
     state.entities.insert(owned_entity);
     state.mark_trade_preview(owned_guid);
-    state.player.add_to_inventory(owned_guid);
+    state
+        .storage
+        .announce_container(owned_guid, state.player.guid);
 
     if let Some(trade) = state.trade.as_mut() {
         trade.self_side.items.push(owned_guid);
@@ -3574,7 +4800,7 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
 
     let deadline = state
         .entity_lifecycle_state(preview_guid)
-        .and_then(|state| state.prune_deadline)
+        .and_then(|state| state.prune_request.map(|request| request.deadline))
         .expect("expected preview-only trade entity to become sweep-eligible");
 
     assert!(state.entities.get(preview_guid).is_some());
@@ -3584,401 +4810,20 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
             .entity_lifecycle_state(owned_guid)
             .is_some_and(|state| state.trade_preview)
     );
-    assert!(
-        !events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: deadline + 1.0,
-        local_time: Instant::now(),
-    });
-
-    let tick_events = state.tick();
-    assert!(state.entities.get(preview_guid).is_none());
-    assert!(
-        tick_events.iter().any(
-            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
-        )
-    );
-}
-
-#[test]
-fn test_view_contents_ignores_unknown_guid_without_synthesizing_entity() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x70000150);
-    let item_guid = Guid(0x60000150);
-
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::ViewContents(Box::new(ViewContentsEventData {
-            container: container_guid,
-            items: vec![ViewContentsEventItem {
-                guid: item_guid,
-                container_type: 0,
-            }],
-        })),
-    }));
-
-    let events = state.handle_message(&msg);
-
-    assert!(state.open_containers.contains(&container_guid));
-    assert!(state.entities.get(item_guid).is_none());
-    assert!(state.entity_lifecycle_state(item_guid).is_none());
-    assert!(events.iter().any(
-        |event| matches!(event, WorldEvent::ContainerOpened(guid) if *guid == container_guid)
-    ));
     assert!(!events.iter().any(
-        |event| matches!(event, WorldEvent::EntitySpawned(entity) if entity.guid == item_guid)
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
     ));
-}
-
-#[test]
-fn test_view_contents_marks_existing_entity_as_container_preview() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x70000157);
-    let item_guid = Guid(0x60000157);
-
-    state.entities.insert(Entity::new(
-        item_guid,
-        "Known Item".to_string(),
-        WorldPosition::default(),
-    ));
-
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::ViewContents(Box::new(ViewContentsEventData {
-            container: container_guid,
-            items: vec![ViewContentsEventItem {
-                guid: item_guid,
-                container_type: 0,
-            }],
-        })),
-    }));
-
-    let events = state.handle_message(&msg);
-
-    assert!(state.open_containers.contains(&container_guid));
-    assert_eq!(
-        state
-            .entities
-            .get(item_guid)
-            .and_then(|entity| entity.container_id()),
-        Some(container_guid)
-    );
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .is_some_and(|state| state.container_preview)
-    );
-    assert!(events.iter().any(
-        |event| matches!(event, WorldEvent::ContainerOpened(guid) if *guid == container_guid)
-    ));
-}
-
-#[test]
-fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x70000151);
-    let item_guid = Guid(0x60000151);
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
-    state.open_containers.insert(container_guid);
-
-    let mut entity = Entity::new(
-        item_guid,
-        "PreviewItem".to_string(),
-        WorldPosition::default(),
-    );
-    entity.set_container_id(Some(container_guid));
-    entity.position.landblock_id = Guid::NULL;
-    state.entities.insert(entity);
-    state.mark_container_preview(item_guid);
-
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
-            container_guid,
-        })),
-    }));
-
-    let events = state.handle_message(&msg);
-    let deadline = state
-        .entity_lifecycle_state(item_guid)
-        .and_then(|state| state.prune_deadline)
-        .expect("expected preview-only container entity to become sweep-eligible");
-
-    assert!(!state.open_containers.contains(&container_guid));
-    assert!(state.entities.get(item_guid).is_some());
-    assert_eq!(
-        state
-            .entities
-            .get(item_guid)
-            .and_then(|entity| entity.container_id()),
-        None
-    );
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .is_some_and(|state| state.prune_deadline.is_some())
-    );
-    assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
-    );
 
     state.server_time = Some(ServerTimeSync {
         server_time: deadline + 1.0,
         local_time: Instant::now(),
     });
 
-    let tick_events = state.tick();
-    assert!(state.entities.get(item_guid).is_none());
-    assert!(
-        tick_events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
-    );
-}
-
-#[test]
-fn test_reopening_container_does_not_reactivate_stale_preview_contents() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x70000158);
-    let old_item_guid = Guid(0x60000159);
-    let new_item_guid = Guid(0x6000015A);
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
-    state.open_containers.insert(container_guid);
-
-    let mut old_item = Entity::new(
-        old_item_guid,
-        "Old Preview Item".to_string(),
-        WorldPosition::default(),
-    );
-    old_item.position.landblock_id = Guid::NULL;
-    old_item.set_container_id(Some(container_guid));
-    state.entities.insert(old_item);
-    state.mark_container_preview(old_item_guid);
-
-    let close_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
-            container_guid,
-        })),
-    }));
-
-    let _ = state.handle_message(&close_msg);
-
-    assert_eq!(
-        state
-            .entities
-            .get(old_item_guid)
-            .and_then(|entity| entity.container_id()),
-        None
-    );
-
-    state.entities.insert(Entity::new(
-        new_item_guid,
-        "New Preview Item".to_string(),
-        WorldPosition::default(),
+    let tick_events = state.tick(None);
+    assert!(state.entities.get(preview_guid).is_none());
+    assert!(tick_events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
     ));
-
-    let reopen_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::ViewContents(Box::new(ViewContentsEventData {
-            container: container_guid,
-            items: vec![ViewContentsEventItem {
-                guid: new_item_guid,
-                container_type: 0,
-            }],
-        })),
-    }));
-
-    let _ = state.handle_message(&reopen_msg);
-
-    assert_eq!(
-        state
-            .entities
-            .get(old_item_guid)
-            .and_then(|entity| entity.container_id()),
-        None
-    );
-    assert!(
-        !state
-            .entity_lifecycle_state(old_item_guid)
-            .is_some_and(|state| state.container_preview)
-    );
-    assert_eq!(
-        state
-            .entities
-            .get(new_item_guid)
-            .and_then(|entity| entity.container_id()),
-        Some(container_guid)
-    );
-    assert!(
-        state
-            .entity_lifecycle_state(new_item_guid)
-            .is_some_and(|state| state.container_preview)
-    );
-}
-
-#[test]
-fn test_late_container_item_arrival_is_marked_preview_and_pruned_on_close() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x7000015B);
-    let item_guid = Guid(0x6000015B);
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
-    state.open_containers.insert(container_guid);
-
-    state.entities.insert(Entity::new(
-        item_guid,
-        "Late Chest Item".to_string(),
-        WorldPosition::default(),
-    ));
-
-    let update_msg =
-        GameMessage::PublicUpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceId {
-            sequence: 0,
-            guid: item_guid,
-            property: PropertyInstanceId::Container as u32,
-            value: container_guid,
-        }));
-
-    let _ = state.handle_message(&update_msg);
-
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .is_some_and(|state| state.container_preview)
-    );
-
-    let close_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
-            container_guid,
-        })),
-    }));
-
-    let _ = state.handle_message(&close_msg);
-
-    assert_eq!(
-        state
-            .entities
-            .get(item_guid)
-            .and_then(|entity| entity.container_id()),
-        None
-    );
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .and_then(|state| state.prune_deadline)
-            .is_some()
-    );
-}
-
-#[test]
-fn test_closed_container_update_preserves_preview_provenance_and_prune_deadline() {
-    let mut state = WorldState::synthetic();
-    let container_guid = Guid(0x7000015C);
-    let item_guid = Guid(0x6000015C);
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
-
-    let mut item = Entity::new(
-        item_guid,
-        "Late Closed Chest Item".to_string(),
-        WorldPosition::default(),
-    );
-    item.position.landblock_id = Guid::NULL;
-    item.set_container_id(Some(container_guid));
-    state.entities.insert(item);
-    state.mark_container_preview(item_guid);
-    state.set_entity_prune_deadline(item_guid, 125.0);
-
-    let update_msg =
-        GameMessage::PublicUpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceId {
-            sequence: 0,
-            guid: item_guid,
-            property: PropertyInstanceId::Container as u32,
-            value: container_guid,
-        }));
-
-    let _ = state.handle_message(&update_msg);
-
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .is_some_and(|state| state.container_preview)
-    );
-    assert!(
-        state
-            .entity_lifecycle_state(item_guid)
-            .and_then(|state| state.prune_deadline)
-            .is_some()
-    );
-}
-
-#[test]
-fn test_close_ground_container_preserves_entity_with_other_retention() {
-    let mut state = WorldState::synthetic();
-    let player_guid = Guid(0x50000153);
-    let container_guid = Guid(0x70000153);
-    let item_guid = Guid(0x60000153);
-
-    state.player.guid = player_guid;
-    state.open_containers.insert(container_guid);
-
-    let mut entity = Entity::new(
-        item_guid,
-        "RetainedItem".to_string(),
-        WorldPosition::default(),
-    );
-    entity.set_container_id(Some(container_guid));
-    entity.position.landblock_id = Guid::NULL;
-    state.entities.insert(entity);
-    state.mark_container_preview(item_guid);
-    state.player.add_to_inventory(item_guid);
-
-    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: Guid::NULL,
-        sequence: 0,
-        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
-            container_guid,
-        })),
-    }));
-
-    let events = state.handle_message(&msg);
-
-    assert!(state.entities.get(item_guid).is_some());
-    assert!(state.entity_lifecycle_state(item_guid).is_none());
-    assert!(state.player.inventory.contains(&item_guid));
-    assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
-    );
 }
 
 #[test]
@@ -4011,7 +4856,9 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
     inventory_entity.position.landblock_id = Guid::NULL;
     inventory_entity.set_container_id(Some(player_guid));
     state.add_entity(inventory_entity);
-    state.player.add_to_inventory(inventory_guid);
+    state
+        .storage
+        .announce_container(inventory_guid, state.player.guid);
 
     let mut equipped_entity = Entity::new(
         equipped_guid,
@@ -4022,8 +4869,8 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
     equipped_entity.set_wielder_id(Some(player_guid));
     state.add_entity(equipped_entity);
     state
-        .player
-        .wield_item(equipped_guid, EquipMask::MELEE_WEAPON);
+        .storage
+        .equip(equipped_guid, player_guid, Some(EquipMask::MELEE_WEAPON));
 
     let mut preview_entity = Entity::new(
         preview_guid,
@@ -4033,10 +4880,13 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
     preview_entity.position.landblock_id = Guid::NULL;
     preview_entity.set_container_id(Some(container_guid));
     state.add_entity(preview_entity);
-    state.open_containers.insert(container_guid);
+    state
+        .storage
+        .announce_container(preview_guid, container_guid);
+    state.confirm_world_container(container_guid);
     state.mark_container_preview(preview_guid);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(events.is_empty());
     assert!(state.entities.get(inventory_guid).is_some());
@@ -4045,17 +4895,17 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
     assert!(
         state
             .entity_lifecycle_state(inventory_guid)
-            .is_none_or(|state| state.prune_deadline.is_none())
+            .is_none_or(|state| state.prune_request.is_none())
     );
     assert!(
         state
             .entity_lifecycle_state(equipped_guid)
-            .is_none_or(|state| state.prune_deadline.is_none())
+            .is_none_or(|state| state.prune_request.is_none())
     );
     assert!(
         state
             .entity_lifecycle_state(preview_guid)
-            .is_some_and(|state| state.prune_deadline.is_none() && state.container_preview)
+            .is_some_and(|state| state.prune_request.is_none() && state.container_preview)
     );
 }
 
@@ -4096,10 +4946,11 @@ fn test_book_data_response_updates_entity_book_state() {
 
     assert!(matches!(
         events.first(),
-        Some(WorldEvent::EntityBookUpdated {
+        Some(WorldEvent::EntityBookOpened {
             guid: event_guid,
             book,
-        }) if *event_guid == guid && book.inscription.as_deref() == Some("Signed and sealed")
+            name,
+        }) if *event_guid == guid && name == "Book" && book.inscription.as_deref() == Some("Signed and sealed")
     ));
 
     let entity = state.entities.get(guid).expect("entity should still exist");
@@ -4211,18 +5062,16 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
     assert!(
         state
             .entity_lifecycle_state(item_guid)
-            .and_then(|state| state.prune_deadline)
+            .and_then(|state| state.prune_request.map(|request| request.deadline))
             .is_some()
     );
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(item_guid).is_none());
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
-    );
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == item_guid)
+    ));
 }
 
 #[test]
@@ -4252,7 +5101,7 @@ fn test_orphaned_wielded_item_is_not_retained() {
     assert!(
         state
             .entity_lifecycle_state(item_guid)
-            .and_then(|state| state.prune_deadline)
+            .and_then(|state| state.prune_request.map(|request| request.deadline))
             .is_some()
     );
 }
@@ -4290,16 +5139,1269 @@ fn test_remove_entity_marks_contained_dependents_for_prune() {
     assert!(
         state
             .entity_lifecycle_state(item_guid)
-            .and_then(|state| state.prune_deadline)
+            .and_then(|state| state.prune_request.map(|request| request.deadline))
             .is_some()
     );
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(item_guid).is_none());
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == item_guid)
+    ));
+}
+
+#[test]
+fn parent_event_waits_for_parent_before_applying_the_typed_attachment() {
+    let mut state = WorldState::synthetic();
+    let item_guid = Guid(0x8000_0001);
+    state.entities.insert(Entity::new(
+        item_guid,
+        "Sword".to_string(),
+        WorldPosition {
+            landblock_id: Guid(0xDA55_001C),
+            coords: Vector3::new(1.0, 2.0, 3.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        },
+    ));
+
+    state.handle_message(&GameMessage::ParentEvent(Box::new(ParentEventData {
+        parent_guid: Guid(0x5000_0001),
+        child_guid: item_guid,
+        location: ParentLocation::LeftWeapon as u32,
+        placement: Placement::RightHandNonCombat as u32,
+        parent_instance_sequence: 0,
+        child_position_sequence: 1,
+    })));
+
+    assert_eq!(state.entities.get(item_guid).unwrap().attachment(), None);
+    assert_eq!(
+        state.entities.get(item_guid).unwrap().position_sequence(),
+        0
+    );
+    state.add_entity(placed_entity(
+        Guid(0x5000_0001),
+        "Wielder",
+        0xDA55_001C,
+        10.0,
+    ));
+    state.tick(None);
+    assert_eq!(
+        state.entities.get(item_guid).unwrap().position_sequence(),
+        1
+    );
+
+    assert_eq!(
+        state.entities.get(item_guid).unwrap().attachment(),
+        Some(PhysicsAttachment {
+            parent: Guid(0x5000_0001),
+            location: ParentLocation::LeftWeapon,
+            placement: Placement::RightHandNonCombat,
+        })
+    );
+}
+
+#[test]
+fn parent_event_naming_an_unknown_location_leaves_the_entity_unattached() {
+    let mut state = WorldState::synthetic();
+    let item_guid = Guid(0x8000_0001);
+    state.entities.insert(Entity::new(
+        item_guid,
+        "Sword".to_string(),
+        WorldPosition {
+            landblock_id: Guid(0xDA55_001C),
+            coords: Vector3::new(1.0, 2.0, 3.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        },
+    ));
+
+    // Resolve the parent prerequisite so this test reaches attach-point validation.
+    state.add_entity(placed_entity(
+        Guid(0x5000_0001),
+        "Wielder",
+        0xDA55_001C,
+        10.0,
+    ));
+
+    let events = state.handle_message(&GameMessage::ParentEvent(Box::new(ParentEventData {
+        parent_guid: Guid(0x5000_0001),
+        child_guid: item_guid,
+        location: 42,
+        placement: Placement::Default as u32,
+        parent_instance_sequence: 0,
+        child_position_sequence: 1,
+    })));
+
+    assert!(events.is_empty());
+    assert_eq!(state.entities.get(item_guid).unwrap().attachment(), None);
+    assert_eq!(
+        state.entities.get(item_guid).unwrap().position.landblock_id,
+        Guid(0xDA55_001C)
+    );
+}
+
+/// Position an entity somewhere unambiguous so delegation is visible.
+fn placed_entity(guid: Guid, name: &str, landblock: u32, x: f32) -> Entity {
+    Entity::new(
+        guid,
+        name.to_string(),
+        WorldPosition {
+            landblock_id: Guid(landblock),
+            coords: Vector3::new(x, 0.0, 0.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        },
+    )
+}
+
+fn parent_event(parent: Guid, child: Guid, location: u32, placement: u32) -> GameMessage {
+    GameMessage::ParentEvent(Box::new(ParentEventData {
+        parent_guid: parent,
+        child_guid: child,
+        location,
+        placement,
+        parent_instance_sequence: 0,
+        child_position_sequence: if parent == Guid::NULL { 2 } else { 1 },
+    }))
+}
+
+#[test]
+fn attaching_delegates_the_child_position_instead_of_erasing_it() {
+    let mut state = WorldState::synthetic();
+    let wielder = Guid(0x5000_0001);
+    let item = Guid(0x8000_0001);
+    state.add_entity(placed_entity(wielder, "Wielder", 0xDA55_001C, 10.0));
+    state.add_entity(placed_entity(item, "Sword", 0xDA55_001D, 99.0));
+
+    state.handle_message(&parent_event(
+        wielder,
+        item,
+        ParentLocation::RightHand as u32,
+        Placement::RightHandCombat as u32,
+    ));
+
+    let attached = state.entities.get(item).unwrap();
+    assert_eq!(attached.attachment().unwrap().parent, wielder);
+    assert_eq!(
+        attached.position,
+        state.entities.get(wielder).unwrap().position
+    );
+    assert!(
+        state
+            .scene
+            .get_in_landblock(Guid(0xDA55_001C))
+            .is_some_and(|set| set.contains(&item)),
+        "an attached item stays in the world beside its wielder"
+    );
+}
+
+#[test]
+fn detaching_leaves_the_entity_where_its_parent_left_it() {
+    let mut state = WorldState::synthetic();
+    let wielder = Guid(0x5000_0001);
+    let item = Guid(0x8000_0001);
+    state.add_entity(placed_entity(wielder, "Wielder", 0xDA55_001C, 10.0));
+    state.add_entity(placed_entity(item, "Sword", 0xDA55_001D, 99.0));
+
+    state.handle_message(&parent_event(
+        wielder,
+        item,
+        ParentLocation::RightHand as u32,
+        Placement::RightHandCombat as u32,
+    ));
+    state.handle_message(&parent_event(Guid::NULL, item, 0, 0));
+
+    let detached = state.entities.get(item).unwrap();
+    assert_eq!(detached.attachment(), None);
+    assert_eq!(detached.position.landblock_id, Guid(0xDA55_001C));
+}
+
+#[test]
+fn a_parent_announcing_an_unarrived_child_attaches_it_on_arrival() {
+    let mut state = WorldState::synthetic();
+    let wielder = Guid(0x5000_0001);
+    let item = Guid(0x8000_0001);
+
+    let mut wielder_data = ObjectDescriptionData::with_guid(wielder);
+    wielder_data.pos = Some(WorldPosition {
+        landblock_id: Guid(0xDA55_001C),
+        coords: Vector3::new(10.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    });
+    wielder_data.children = Some(vec![PhysicsChildData {
+        guid: item,
+        location_id: ParentLocation::LeftWeapon as u32,
+    }]);
+    state.handle_message(&GameMessage::ObjectCreate(Box::new(wielder_data)));
+
+    assert!(state.attachments.announcements.contains_key(&item));
+
+    let mut item_data = ObjectDescriptionData::with_guid(item);
+    item_data.animation_frame = Some(Placement::RightHandNonCombat as u32);
+    state.handle_message(&GameMessage::ObjectCreate(Box::new(item_data)));
+
+    assert_eq!(
+        state.entities.get(item).unwrap().attachment(),
+        Some(PhysicsAttachment {
+            parent: wielder,
+            location: ParentLocation::LeftWeapon,
+            placement: Placement::RightHandNonCombat,
+        })
+    );
+    assert_eq!(
+        state.entities.get(item).unwrap().position.landblock_id,
+        Guid(0xDA55_001C)
+    );
+    assert!(state.attachments.announcements.is_empty());
+}
+
+#[test]
+fn a_child_that_arrives_first_is_delegated_once_its_parent_exists() {
+    let mut state = WorldState::synthetic();
+    let wielder = Guid(0x5000_0001);
+    let item = Guid(0x8000_0001);
+
+    let mut item_data = ObjectDescriptionData::with_guid(item);
+    item_data.pos = Some(WorldPosition {
+        landblock_id: Guid(0xDA55_001D),
+        coords: Vector3::new(99.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    });
+    item_data.parent = Some(PhysicsDescParent {
+        id: wielder,
+        location_id: ParentLocation::LeftWeapon as u32,
+    });
+    item_data.animation_frame = Some(Placement::RightHandNonCombat as u32);
+    state.handle_message(&GameMessage::ObjectCreate(Box::new(item_data)));
+
+    // Nothing to delegate from yet, so the child keeps the position it reported.
+    assert_eq!(
+        state.entities.get(item).unwrap().position.landblock_id,
+        Guid(0xDA55_001D)
+    );
+
+    let mut wielder_data = ObjectDescriptionData::with_guid(wielder);
+    wielder_data.pos = Some(WorldPosition {
+        landblock_id: Guid(0xDA55_001C),
+        coords: Vector3::new(10.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    });
+    wielder_data.children = Some(vec![PhysicsChildData {
+        guid: item,
+        location_id: ParentLocation::LeftWeapon as u32,
+    }]);
+    state.handle_message(&GameMessage::ObjectCreate(Box::new(wielder_data)));
+
+    let attached = state.entities.get(item).unwrap();
+    assert_eq!(
+        attached.attachment(),
+        Some(PhysicsAttachment {
+            parent: wielder,
+            location: ParentLocation::LeftWeapon,
+            placement: Placement::RightHandNonCombat,
+        }),
+        "the child's own description remains the authority on its pose"
+    );
+    assert_eq!(attached.position.landblock_id, Guid(0xDA55_001C));
+}
+
+#[test]
+fn removing_a_parent_detaches_children_and_drops_its_pending_links() {
+    let mut state = WorldState::synthetic();
+    let wielder = Guid(0x5000_0001);
+    let item = Guid(0x8000_0001);
+    let unarrived = Guid(0x8000_0002);
+    state.add_entity(placed_entity(wielder, "Wielder", 0xDA55_001C, 10.0));
+    state.add_entity(placed_entity(item, "Sword", 0xDA55_001D, 99.0));
+
+    state.handle_message(&parent_event(
+        wielder,
+        item,
+        ParentLocation::RightHand as u32,
+        Placement::RightHandCombat as u32,
+    ));
+    state.attachments.announcements.insert(
+        unarrived,
+        crate::state::attachment_lifecycle::AnnouncedAttachment {
+            parent: wielder,
+            location: ParentLocation::Shield,
+            deadline: state.current_server_time() + super::liveness::ACE_DESTRUCTION_TIMEOUT_SECS,
+        },
+    );
+
+    state.remove_entity(wielder);
+
+    assert_eq!(state.entities.get(item).unwrap().attachment(), None);
+    assert!(state.attachments.announcements.is_empty());
+}
+
+#[test]
+fn an_attachment_whose_parent_is_gone_does_not_retain_the_child() {
+    let mut state = WorldState::synthetic();
+    let item = Guid(0x8000_0001);
+    let mut orphan = placed_entity(item, "Sword", 0xDA55_001D, 99.0);
+    orphan.set_attachment(Some(PhysicsAttachment {
+        parent: Guid(0x5000_0009),
+        location: ParentLocation::RightHand,
+        placement: Placement::RightHandCombat,
+    }));
+    orphan.position.landblock_id = Guid::NULL;
+    state.add_entity(orphan);
+
+    let retention = state
+        .retention_snapshot(item, state.current_server_time())
+        .expect("entity exists");
+
+    assert!(!retention.has_parent_owner);
+}
+
+#[test]
+fn sticky_preparation_samples_scaled_setup_clearance_heading_and_target_loss() {
+    let mut world = WorldState::synthetic();
+    let actor = Guid(0x7000_0201);
+    let target = Guid(0x7000_0202);
+    let actor_radius = 0.8;
+    let target_radius = 1.1;
+    let actor_scale = 2.0;
+    let target_scale = 3.0;
+    for (guid, x, radius, scale) in [
+        (actor, 10.0, actor_radius, actor_scale),
+        (target, 20.0, target_radius, target_scale),
+    ] {
+        world.add_entity(Entity::new(
+            guid,
+            "Sticky fixture".into(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0100),
+                coords: Vector3::new(x, 10.0, 0.0),
+                rotation: Quaternion::from_heading(0.7),
+            },
+        ));
+        let base = set_state_dynamic_definition();
+        let mut definition = base.definition().clone();
+        definition.movement = crate::PhysicalBodyDefinition::grounded(
+            definition.movement.spheres(),
+            crate::GroundedConfig {
+                gravity: -9.8,
+                walkable_normal_z: crate::spatial::RETAIL_WALKABLE_NORMAL_Z,
+                landing_normal_z: crate::spatial::RETAIL_LANDING_NORMAL_Z,
+                airborne_step_down_height: crate::spatial::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
+                step_up_height: 0.6,
+                step_down_height: 1.5,
+                edge_protection: crate::EdgeProtection::Creature,
+                minimum_stair_rise: 0.0005,
+            },
+        )
+        .unwrap();
+        Arc::make_mut(&mut definition.entity_collision.target_geometry).setup_radius = radius;
+        world
+            .scene
+            .set_dynamic_physical_body(
+                SpatialBodyId::Entity(guid),
+                Some(
+                    crate::DynamicPhysicalBodyConfiguration::with_object_scale(
+                        definition,
+                        base.demand(),
+                        scale,
+                    )
+                    .unwrap(),
+                ),
+                crate::PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        world
+            .scene
+            .body_mut(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .contact = ContactState::Grounded;
+    }
+    let catalog = test_motion_catalog(0x0900_0001);
+    let table = catalog.table(0x0900_0001).unwrap();
+    world
+        .motion_runtimes
+        .admit_sticky_target(table, actor, Some(target), Instant::now());
+    world.motion_runtimes.drive(
+        table,
+        actor,
+        crate::motion::MotionOrder::default(),
+        crate::spatial::MOBILE_CONTACT_TICK_SECONDS,
+    );
+    let samples = world.prepare_sticky_body_targets();
+    let sample = samples.get(&actor).unwrap();
+    assert!(
+        (sample.clearance
+            - (actor_radius * actor_scale
+                + target_radius * target_scale
+                + super::motion_resolution::STICKY_TARGET_CLEARANCE_M))
+            .abs()
+            < 1e-5
+    );
+    let actor_pose = world.scene.body_for_guid(actor).unwrap().pose;
+    assert_eq!(sample.heading, actor_pose.heading_to(&sample.position));
+    // Airborne movement keeps its existing source, without cancelling a still-live command.
+    world
+        .scene
+        .body_mut(SpatialBodyId::Entity(actor))
+        .unwrap()
+        .contact = ContactState::Airborne;
+    assert!(world.prepare_sticky_body_targets().is_empty());
+    assert_eq!(
+        world.motion_runtimes.get(actor).unwrap().sticky_target(),
+        Some(target)
+    );
+    world
+        .scene
+        .body_mut(SpatialBodyId::Entity(actor))
+        .unwrap()
+        .contact = ContactState::Grounded;
+    // Height alone supplies no facing direction. Test the producer, not a prefilled heading.
+    let target_body = world.scene.body_mut(SpatialBodyId::Entity(target)).unwrap();
+    target_body.pose.coords = actor_pose.coords + Vector3::new(0.0, 0.0, 5.0);
+    assert_eq!(
+        world.prepare_sticky_body_targets()[&actor].heading,
+        actor_pose.rotation.to_heading()
+    );
+    world.scene.remove_body(SpatialBodyId::Entity(target));
+    assert!(world.prepare_sticky_body_targets().is_empty());
+    assert_eq!(
+        world.motion_runtimes.get(actor).unwrap().sticky_target(),
+        None
+    );
+}
+
+#[test]
+fn position_only_sticky_waits_for_dimensions_and_retires_missing_targets() {
+    use holtburger_common::properties::PropertyDataId;
+    use holtburger_content::{SetupDimensionCatalog, SetupDimensions};
+    let mut world = WorldState::synthetic();
+    let actor = Guid(0x5000_0001);
+    let target = Guid(0x7000_0001);
+    let setup = 0x0200_0001;
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1234_0100),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    world.seed_local_player_entity(actor, "Player", pose);
+    world.add_entity(Entity::new(
+        target,
+        "Target".into(),
+        WorldPosition {
+            coords: Vector3::new(0.0, 0.0, 2.0),
+            ..pose
+        },
+    ));
+    for guid in [actor, target] {
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .properties
+            .set_did_prop(PropertyDataId::Setup, Guid(setup));
+    }
+    let catalog = test_motion_catalog(0x0900_0001);
+    let table = catalog.table(0x0900_0001).unwrap();
+    world
+        .motion_runtimes
+        .admit_sticky_target(table, actor, Some(target), Instant::now());
+    world.motion_runtimes.drive(
+        table,
+        actor,
+        crate::motion::MotionOrder::default(),
+        crate::MOBILE_CONTACT_TICK_SECONDS,
+    );
+    assert!(world.prepare_position_only_sticky_target(actor).is_none());
+    assert_eq!(
+        world.motion_runtimes.get(actor).unwrap().sticky_target(),
+        Some(target)
+    );
+    let radius = 0.25;
+    world.setup_dimensions = Arc::new(SetupDimensionCatalog::new([(
+        setup,
+        SetupDimensions {
+            radius,
+            height: 1.0,
+        },
+    )]));
+    world
+        .entities
+        .get_mut(actor)
+        .unwrap()
+        .scale
+        .reconcile(2.0)
+        .unwrap();
+    let sample = world.prepare_position_only_sticky_target(actor).unwrap();
+    assert_eq!(
+        sample.clearance,
+        radius * 2.0 + radius + super::motion_resolution::STICKY_TARGET_CLEARANCE_M
+    );
+    assert_eq!(sample.heading, pose.rotation.to_heading());
+    assert!(world.prepare_sticky_body_targets().is_empty());
+    assert!(world.scene.body_for_guid(actor).unwrap().physical.is_none());
+    world.scene.remove_body(SpatialBodyId::Entity(target));
+    assert!(world.prepare_position_only_sticky_target(actor).is_none());
+    assert_eq!(
+        world.motion_runtimes.get(actor).unwrap().sticky_target(),
+        None
+    );
+}
+
+#[test]
+fn pk_messages_refresh_installed_identity_without_changing_body_state() {
+    use holtburger_common::properties::ObjectDescriptionFlag as Flags;
+    use holtburger_protocol::messages::object::messages::properties::UpdatePropertyInt;
+    for local in [false, true] {
+        let mut state = WorldState::synthetic();
+        let guid = Guid(0x5000_0101);
+        if local {
+            state.player.guid = guid;
+        }
+        let mut entity = Entity::new(
+            guid,
+            "Player".into(),
+            WorldPosition {
+                landblock_id: Guid(0xda55_0020),
+                coords: Vector3::new(90.0, 96.0, 1.0),
+                rotation: Quaternion::identity(),
+            },
+        );
+        entity.flags = Flags::PLAYER;
+        state.add_entity(entity);
+        let id = state.runtime_body_id_for_guid(guid).unwrap();
+        state
+            .scene
+            .set_dynamic_physical_body(
+                id,
+                Some(set_state_dynamic_definition()),
+                crate::PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        state.synchronize_entity_contact_status(guid);
+        let before = state.scene.body(id).unwrap().clone();
+        for (sequence, value, flags) in [
+            (1, 4, Flags::PLAYER | Flags::PLAYER_KILLER),
+            (2, 0x40, Flags::PLAYER | Flags::PK_LITE_STATUS),
+            (3, 1, Flags::PLAYER),
+        ] {
+            let message = if local {
+                GameMessage::PrivateUpdatePropertyInt(Box::new(UpdatePropertyInt {
+                    sequence,
+                    guid: Guid::NULL,
+                    property: PropertyInt::PlayerKillerStatus as u32,
+                    value,
+                }))
+            } else {
+                GameMessage::PublicUpdatePropertyInt(Box::new(UpdatePropertyInt {
+                    sequence,
+                    guid,
+                    property: PropertyInt::PlayerKillerStatus as u32,
+                    value,
+                }))
+            };
+            state.handle_message(&message);
+            let mut expected = before.clone();
+            let expected_dynamic = expected
+                .physical
+                .as_mut()
+                .unwrap()
+                .dynamic
+                .as_mut()
+                .unwrap();
+            expected_dynamic.collision.player_collision =
+                crate::PlayerCollisionStatus::from_description(flags);
+            assert_eq!(state.scene.body(id).unwrap(), &expected);
+            assert!(Arc::ptr_eq(
+                &before
+                    .physical
+                    .as_ref()
+                    .unwrap()
+                    .dynamic
+                    .as_ref()
+                    .unwrap()
+                    .collision
+                    .target_geometry,
+                &state
+                    .scene
+                    .body(id)
+                    .unwrap()
+                    .physical
+                    .as_ref()
+                    .unwrap()
+                    .dynamic
+                    .as_ref()
+                    .unwrap()
+                    .collision
+                    .target_geometry,
+            ));
+            let refreshed = state
+                .scene
+                .body(id)
+                .unwrap()
+                .physical
+                .as_ref()
+                .unwrap()
+                .dynamic_configuration_for_state(
+                    crate::resolve_effective_entity_physics_state(PhysicsState::ETHEREAL),
+                    set_state_dynamic_definition().demand(),
+                )
+                .unwrap();
+            assert_eq!(
+                refreshed.definition().entity_collision.player_collision,
+                crate::PlayerCollisionStatus::from_description(flags)
+            );
+        }
+    }
+}
+
+#[test]
+fn update_object_recreates_description_and_can_introduce_an_unknown_object() {
+    use holtburger_common::properties::ObjectDescriptionFlag as Flags;
+    for local in [false, true] {
+        let mut state = WorldState::synthetic();
+        let guid = Guid(0x5000_0102);
+        if local {
+            state.player.guid = guid;
+        }
+        let mut description = ObjectDescriptionData::with_guid(guid);
+        description.public_weenie_desc.obj_desc_flags = Flags::PLAYER | Flags::PLAYER_KILLER;
+        description.public_weenie_desc.name = Some("First".into());
+        let events =
+            state.handle_message(&GameMessage::UpdateObject(Box::new(description.clone())));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::EntitySpawned(_)))
+        );
+        state
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_property(PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, 0x40));
+        description.public_weenie_desc.obj_desc_flags = Flags::PLAYER;
+        description.public_weenie_desc.name = Some("Refreshed".into());
+        let events = state.handle_message(&GameMessage::UpdateObject(Box::new(description)));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::EntityReplaced(_)))
+        );
+        let entity = state.entities.get(guid).unwrap();
+        assert_eq!(entity.flags, Flags::PLAYER);
+        assert_eq!(entity.name(), "Refreshed");
+        assert_eq!(
+            entity
+                .properties
+                .get_int_prop(PropertyInt::PlayerKillerStatus),
+            None
+        );
+    }
+}
+
+#[test]
+fn login_combat_mode_defaults_to_peace_without_overriding_explicit_server_modes() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(1);
+    state.seed_local_player_entity(guid, "Player", WorldPosition::default());
+    assert_eq!(state.player_int_property(PropertyInt::CombatMode), None);
+    assert_eq!(state.player_combat_mode(), CombatMode::NonCombat);
+
+    for mode in [
+        CombatMode::Melee,
+        CombatMode::Missile,
+        CombatMode::Magic,
+        CombatMode::NonCombat,
+        CombatMode::Undef,
+    ] {
+        state
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, mode as i32);
+        assert_eq!(state.player_combat_mode(), mode);
+    }
+}
+
+#[test]
+fn use_range_and_directed_approach_share_scaled_body_distance_and_pending_geometry() {
+    let mut world = WorldState::synthetic();
+    let actor = Guid(0x5000_0201);
+    let target = Guid(0x8000_0202);
+    world.player.guid = actor;
+    let pose = WorldPosition {
+        landblock_id: Guid(0xda55_0020),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    world.add_entity(Entity::new(actor, "Actor".into(), pose));
+    world.add_entity(Entity::new(
+        target,
+        "Chest".into(),
+        WorldPosition {
+            coords: Vector3::new(2.0, 0.0, 0.0),
+            ..pose
+        },
+    ));
+    world.confirm_world_container(target);
+    let scalar = |value| OrderedMotionScalar::from_f32(value).unwrap();
+    let directive = EntityMotionDirective::MoveToObject {
+        admission: EntityMotionAdmission {
+            object_instance_sequence: 1,
+            movement_sequence: 1,
+            server_control_sequence: 1,
+            is_autonomous: false,
+        },
+        target,
+        fallback_target: OrderedMotionPosition {
+            cell_id: pose.landblock_id,
+            x: scalar(2.0),
+            y: scalar(0.0),
+            z: scalar(0.0),
+        },
+        params: EntityMoveToParameters {
+            flags: 0x601, // CanWalk | MoveTowards | UseSpheres.
+            distance_to_object: scalar(0.75),
+            min_distance: scalar(0.0),
+            fail_distance: scalar(100.0),
+            speed: scalar(1.0),
+            walk_run_threshold: scalar(5.0),
+            desired_heading_degrees: scalar(0.0),
+        },
+        run_rate: scalar(1.0),
+    };
+    let state =
+        begin_server_directed_motion(directive, pose, world.server_directed_target(actor, target));
+    let resolve = |world: &WorldState| {
+        resolve_server_directed_motion(
+            state,
+            MotionOrder::default(),
+            pose,
+            crate::motion::DirectedMotionSupport::Physical(MotionContact::RequiresSupport(
+                ContactState::Grounded,
+            )),
+            world.server_directed_target(actor, target),
+        )
+    };
+    assert_eq!(world.within_use_radius(actor, target), None);
+    let ServerDirectedMotionResolution::Active(waiting) = resolve(&world) else {
+        panic!("pending geometry must preserve the object approach");
+    };
+    assert_eq!(waiting.order, MotionOrder::default());
+    let configuration = set_state_dynamic_definition();
+    for guid in [actor, target] {
+        world
+            .scene
+            .set_dynamic_physical_body(
+                world.authoritative_body_id_for_guid(guid).unwrap(),
+                Some(configuration.clone()),
+                crate::PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+    }
+    // Two half-metre radii leave a metre of separation, beyond ACE's absent-property default.
+    assert_eq!(world.within_use_radius(actor, target), Some(false));
+    assert!(matches!(
+        resolve(&world),
+        ServerDirectedMotionResolution::Active(_)
+    ));
+    world
+        .apply_entity_script_scale(target, 2.0, 0.0, 1.0)
+        .unwrap();
+    assert_eq!(world.within_use_radius(actor, target), Some(true));
+    assert_eq!(
+        resolve(&world),
+        ServerDirectedMotionResolution::Complete {
+            sticky_target: None
+        }
+    );
+    // An authored radius replaces the protocol default, including a zero radius.
+    world
+        .entities
+        .get_mut(target)
+        .unwrap()
+        .properties
+        .floats
+        .insert(PropertyFloat::UseRadius, 0.0);
+    assert_eq!(world.within_use_radius(actor, target), Some(false));
+    world
+        .entities
+        .get_mut(target)
+        .unwrap()
+        .properties
+        .floats
+        .insert(PropertyFloat::UseRadius, 1.0);
+    assert_eq!(world.within_use_radius(actor, target), Some(true));
+    // Semantic/server placement can lag simulation; it must not replace the canonical body pose.
+    world.entities.get_mut(target).unwrap().position.coords.x = 100.0;
+    assert_eq!(world.within_use_radius(actor, target), Some(true));
+    assert_eq!(
+        resolve(&world),
+        ServerDirectedMotionResolution::Complete {
+            sticky_target: None
+        }
+    );
+    world
+        .scene
+        .set_dynamic_physical_body(
+            SpatialBodyId::Entity(target),
+            None,
+            crate::PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    assert_eq!(world.within_use_radius(actor, target), None);
+    assert_eq!(world.world_container().root(), Some(target));
+}
+
+fn identify_response_message(data: IdentifyObjectResponseEventData) -> GameMessage {
+    GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid(0x50000001),
+        sequence: 1,
+        event: GameEvent::IdentifyObjectResponse(Box::new(data)),
+    }))
+}
+
+#[test]
+fn successful_identify_merges_before_publishing_ready_inspection() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x60001001);
+    world.entities.insert(Entity::new(
+        guid,
+        "Appraised Item".to_string(),
+        WorldPosition::default(),
+    ));
+    let mut response = IdentifyObjectResponseEventData {
+        object_guid: guid,
+        flags: IdentifyResponseFlags::INT_STATS_TABLE,
+        success: true,
+        ..Default::default()
+    };
+    response.properties.ints.insert(PropertyInt::Value, 321);
+
+    let events = world.handle_message(&identify_response_message(response));
+    let identified_index = events
+        .iter()
+        .position(|event| matches!(event, WorldEvent::EntityIdentified(_)))
+        .expect("entity mutation publication");
+    let inspection_index = events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                WorldEvent::ObjectInspectionResult(crate::inspection::ObjectInspectionResult {
+                    outcome: crate::inspection::ObjectInspectionOutcome::Ready { .. },
+                    ..
+                })
+            )
+        })
+        .expect("ready inspection publication");
+
+    assert!(identified_index < inspection_index);
+    assert_eq!(
+        world
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.get_int_prop(PropertyInt::Value)),
+        Some(321)
+    );
+}
+
+#[test]
+fn invalid_item_progression_publishes_an_unavailable_appraisal_without_losing_identification() {
+    use crate::inspection::{ObjectInspectionOutcome, ObjectInspectionResult};
+    use holtburger_common::properties::PropertyInt64;
+    for (style, base, total, failure) in [
+        (3, 100, 0, "unsupported item XP style: 3"),
+        (1, 100, -1, "negative accumulated item XP: -1"),
+        (2, i64::MAX, i64::MAX, "item XP threshold exceeds"),
+    ] {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x60001001);
+        world
+            .entities
+            .insert(Entity::new(guid, "Cloak".into(), WorldPosition::default()));
+        let mut response = IdentifyObjectResponseEventData {
+            object_guid: guid,
+            success: true,
+            flags: IdentifyResponseFlags::INT_STATS_TABLE
+                | IdentifyResponseFlags::INT64_STATS_TABLE,
+            ..Default::default()
+        };
+        response
+            .properties
+            .set_int_prop(PropertyInt::ItemXpStyle, style);
+        response
+            .properties
+            .set_int_prop(PropertyInt::ItemMaxLevel, 5);
+        response
+            .properties
+            .set_int64_prop(PropertyInt64::ItemBaseXp, base);
+        response
+            .properties
+            .set_int64_prop(PropertyInt64::ItemTotalXp, total);
+        let events = world.handle_message(&identify_response_message(response));
+        assert!(events.iter().any(
+            |event| matches!(event, WorldEvent::EntityIdentified(entity) if entity.guid == guid)
+        ));
+        assert!(events.iter().any(|event| matches!(event,
+            WorldEvent::ObjectInspectionResult(ObjectInspectionResult { guid: result_guid, outcome: ObjectInspectionOutcome::Unavailable { reason } })
+                if *result_guid == guid && reason.contains(failure)
+        )));
+    }
+}
+
+#[test]
+fn rejected_identify_does_not_merge_partial_properties() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x60001002);
+    let mut entity = Entity::new(guid, "Rejected Item".to_string(), WorldPosition::default());
+    entity.set_int_prop(PropertyInt::Value, 1);
+    world.entities.insert(entity);
+    let mut response = IdentifyObjectResponseEventData {
+        object_guid: guid,
+        flags: IdentifyResponseFlags::INT_STATS_TABLE,
+        success: false,
+        ..Default::default()
+    };
+    response.properties.ints.insert(PropertyInt::Value, 999);
+
+    let events = world.handle_message(&identify_response_message(response));
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::ObjectInspectionResult(crate::inspection::ObjectInspectionResult {
+            outcome: crate::inspection::ObjectInspectionOutcome::Rejected,
+            ..
+        })
+    )));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::EntityIdentified(_)))
+    );
+    assert_eq!(
+        world
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.get_int_prop(PropertyInt::Value)),
+        Some(1)
+    );
+}
+
+#[test]
+fn unresolved_identify_publishes_missing() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x60001003);
+    let response = IdentifyObjectResponseEventData {
+        object_guid: guid,
+        success: true,
+        ..Default::default()
+    };
+
+    let events = world.handle_message(&identify_response_message(response));
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::ObjectInspectionResult(crate::inspection::ObjectInspectionResult {
+            guid: result_guid,
+            outcome: crate::inspection::ObjectInspectionOutcome::Missing,
+        }) if *result_guid == guid
+    )));
+}
+
+#[test]
+fn successful_vendor_identify_uses_the_shared_ready_shape() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x60001004);
+    let mut item = crate::vendor::CoreVendorItem {
+        guid,
+        wcid: 123,
+        ..Default::default()
+    };
+    item.properties.strings.insert(
+        holtburger_common::properties::PropertyString::Name,
+        "Vendor Item".to_string(),
+    );
+    world.vendor = Some(crate::vendor::VendorState {
+        vendor_guid: Guid(0x70001000),
+        items: vec![item],
+        buy_multiplier: 1.0,
+        sell_multiplier: 1.0,
+        merchandise_item_types: 0,
+        value_limits: Default::default(),
+        alternate_currency_wcid: 0,
+        alternate_currency_amount: 0,
+        alternate_currency_name: String::new(),
+    });
+    let response = IdentifyObjectResponseEventData {
+        object_guid: guid,
+        success: true,
+        ..Default::default()
+    };
+
+    let events = world.handle_message(&identify_response_message(response));
+
+    assert!(
+        events.iter().any(
+            |event| matches!(event, WorldEvent::VendorItemIdentified(item) if item.guid == guid)
+        )
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::ObjectInspectionResult(crate::inspection::ObjectInspectionResult {
+            guid: result_guid,
+            outcome: crate::inspection::ObjectInspectionOutcome::Ready { .. },
+        }) if *result_guid == guid
+    )));
+
+    let mut unsupported = IdentifyObjectResponseEventData {
+        object_guid: guid,
+        success: true,
+        flags: IdentifyResponseFlags::INT_STATS_TABLE | IdentifyResponseFlags::INT64_STATS_TABLE,
+        ..Default::default()
+    };
+    unsupported
+        .properties
+        .set_int_prop(PropertyInt::ItemXpStyle, 3);
+    unsupported
+        .properties
+        .set_int_prop(PropertyInt::ItemMaxLevel, 5);
+    unsupported.properties.set_int64_prop(
+        holtburger_common::properties::PropertyInt64::ItemBaseXp,
+        100,
+    );
+    let events = world.handle_message(&identify_response_message(unsupported));
+    assert!(events.iter().any(|event| matches!(event,
+        WorldEvent::ObjectInspectionResult(crate::inspection::ObjectInspectionResult {
+            outcome: crate::inspection::ObjectInspectionOutcome::Unavailable { reason }, ..
+        }) if reason.contains("unsupported item XP style: 3")
+    )));
+}
+
+#[test]
+fn trade_withdrawal_preserves_partner_acceptance_and_offer_revision() {
+    let mut world = WorldState::synthetic();
+    let player = Guid(0x5000_0001);
+    let partner = Guid(0x5000_0002);
+    world.player.guid = player;
+    world.register_trade(player, partner, &mut Vec::new());
+    world.add_trade_item(1, Guid(0x8000_0001), &mut Vec::new());
+    world.add_trade_item(2, Guid(0x8000_0002), &mut Vec::new());
+    let offered = world.trade.clone().unwrap();
+    world.accept_trade(player, &mut Vec::new());
+    world.accept_trade(partner, &mut Vec::new());
+    world.decline_trade(player, &mut Vec::new());
+    let trade = world.trade.as_ref().unwrap();
+    assert!(!trade.self_side.accepted);
+    assert!(trade.partner_side.accepted);
+    assert_eq!(trade.self_side.items, offered.self_side.items);
+    assert_eq!(trade.partner_side.items, offered.partner_side.items);
+    assert_eq!(trade.revision, offered.revision);
+}
+
+#[test]
+fn trade_additions_are_idempotent_and_reset_invalidates_even_an_empty_offer() {
+    let mut world = WorldState::synthetic();
+    let player = Guid(0x5000_0001);
+    let partner = Guid(0x5000_0002);
+    let item = Guid(0x8000_0001);
+    world.player.guid = player;
+    world.register_trade(player, partner, &mut Vec::new());
+    world.add_trade_item(1, item, &mut Vec::new());
+    let revision = world.trade.as_ref().unwrap().revision;
+    world.accept_trade(player, &mut Vec::new());
+    world.add_trade_item(1, item, &mut Vec::new());
+    let trade = world.trade.as_ref().unwrap();
+    assert_eq!(trade.self_side.items, vec![item]);
+    assert_eq!(trade.revision, revision);
+    assert!(trade.self_side.accepted);
+    world.add_trade_item(2, Guid(0x8000_0002), &mut Vec::new());
+    assert!(!world.trade.as_ref().unwrap().self_side.accepted);
+    world.reset_trade(&mut Vec::new());
+    let empty_revision = world.trade.as_ref().unwrap().revision;
+    world.reset_trade(&mut Vec::new());
+    assert!(world.trade.as_ref().unwrap().revision > empty_revision);
+    world.close_trade(&mut Vec::new());
+    world.register_trade(player, partner, &mut Vec::new());
+    assert!(world.trade.as_ref().unwrap().revision > empty_revision);
+}
+
+#[test]
+fn trade_preview_baseline_retains_pending_and_nonspatial_offer_identities() {
+    use crate::entity_facts::EntityDescription;
+    use holtburger_common::properties::ItemType;
+    let mut world = WorldState::synthetic();
+    let player = Guid(0x5000_0001);
+    let item = Guid(0x8000_0001);
+    world.player.guid = player;
+    world.register_trade(player, Guid(0x5000_0002), &mut Vec::new());
+    world.add_trade_item(2, item, &mut Vec::new());
+    assert!(world.client_entity_guids().contains(&item));
+    assert!(matches!(
+        world
+            .client_entity_facts(item)
+            .unwrap()
+            .unwrap()
+            .description,
+        EntityDescription::Pending
+    ));
+    let mut entity = Entity::new(item, "Partner's sword".into(), WorldPosition::default());
+    entity.set_int_prop(PropertyInt::ItemType, ItemType::MELEE_WEAPON.bits() as i32);
+    world.entities.insert(entity);
+    let facts = world.client_entity_facts(item).unwrap().unwrap();
+    assert!(matches!(facts.description, EntityDescription::Known { .. }));
+    assert!(!facts.owned_by_player);
+    assert!(!facts.can_offer_trade);
+}
+
+#[test]
+fn character_titles_replace_grant_and_select_through_private_retention() {
+    use holtburger_protocol::messages::{CharacterTitleEventData, UpdateTitleEventData};
+    let mut state = WorldState::synthetic();
+    let player = Guid(1);
+    state.seed_local_player_entity(player, "Player", WorldPosition::default());
+    assert!(state.player.character_titles.is_none());
+    let mut events = Vec::new();
+    let mut apply = |state: &mut WorldState, event| {
+        events.extend(
+            state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+                target: player,
+                sequence: 1,
+                event,
+            }))),
+        );
+    };
+    apply(
+        &mut state,
+        GameEvent::CharacterTitle(Box::new(CharacterTitleEventData {
+            version: 1,
+            selected_id: 42,
+            title_ids: vec![42, 42, 999],
+        })),
+    );
+    assert_eq!(
+        state
+            .player
+            .character_titles
+            .as_ref()
+            .unwrap()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        vec![42, 999]
+    );
+    apply(
+        &mut state,
+        GameEvent::UpdateTitle(Box::new(UpdateTitleEventData {
+            title_id: 1000,
+            set_as_display: false,
+        })),
+    );
+    assert_eq!(
+        state.player_int_property(PropertyInt::CharacterTitleId),
+        Some(42)
+    );
+    apply(
+        &mut state,
+        GameEvent::UpdateTitle(Box::new(UpdateTitleEventData {
+            title_id: 1000,
+            set_as_display: true,
+        })),
+    );
+    apply(
+        &mut state,
+        GameEvent::UpdateTitle(Box::new(UpdateTitleEventData {
+            title_id: 1000,
+            set_as_display: true,
+        })),
+    );
+    assert_eq!(state.player.character_titles.as_ref().unwrap().len(), 3);
+    assert_eq!(
+        state.player_int_property(PropertyInt::CharacterTitleId),
+        Some(1000)
+    );
+    // Recreate the public object with no title; the private title survives.
+    state.handle_message(&GameMessage::ObjectCreate(Box::new(
+        ObjectDescriptionData::with_guid(player),
+    )));
+    assert_eq!(
+        state.player_int_property(PropertyInt::CharacterTitleId),
+        Some(1000)
+    );
+    apply(
+        &mut state,
+        GameEvent::CharacterTitle(Box::new(CharacterTitleEventData {
+            version: 1,
+            selected_id: 0,
+            title_ids: vec![],
+        })),
+    );
+    assert!(state.player.character_titles.as_ref().unwrap().is_empty());
+    assert_eq!(
+        state.player_int_property(PropertyInt::CharacterTitleId),
+        Some(0)
+    );
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
+            .any(|event| matches!(event, WorldEvent::PlayerTitlesUpdated))
     );
+}
+
+#[test]
+fn character_titles_reset_with_description_and_ignore_other_characters() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(1);
+    let mut description = PlayerDescriptionEventData {
+        guid: player_guid,
+        sequence: 1,
+        name: "Player".to_string(),
+        wee_type: 1,
+        pos: Some(WorldPosition::default()),
+        properties: WorldObjectProperties::default(),
+        positions: std::collections::BTreeMap::new(),
+        attributes: std::collections::BTreeMap::new(),
+        skills: std::collections::BTreeMap::new(),
+        enchantments: Vec::new(),
+        spells: std::collections::BTreeMap::new(),
+        has_health: true,
+        options1: CharacterOptions1::empty(),
+        options2: CharacterOptions2::empty(),
+        shortcuts: Vec::new(),
+        hotbar_spells: Vec::new(),
+        desired_comps: Vec::new(),
+        spellbook_filters: 0,
+        gameplay_options: Vec::new(),
+        inventory: Vec::new(),
+        equipped_objects: Vec::new(),
+    };
+    state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: player_guid,
+        sequence: 1,
+        event: GameEvent::PlayerDescription(Box::new(description.clone())),
+    })));
+    for next_character in [player_guid, Guid(2)] {
+        state.player.character_titles = Some([42].into_iter().collect());
+        description.guid = next_character;
+        state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: next_character,
+            sequence: 2,
+            event: GameEvent::PlayerDescription(Box::new(description.clone())),
+        })));
+        assert!(state.player.character_titles.is_none());
+    }
+    let events = state.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid(99),
+        sequence: 3,
+        event: GameEvent::CharacterTitle(Box::new(
+            holtburger_protocol::messages::CharacterTitleEventData {
+                version: 1,
+                selected_id: 999,
+                title_ids: vec![999],
+            },
+        )),
+    })));
+    assert!(state.player.character_titles.is_none());
+    assert!(events.is_empty());
 }

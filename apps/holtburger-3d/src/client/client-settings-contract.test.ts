@@ -1,0 +1,451 @@
+import { describe, expect, it } from "vitest";
+import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
+import {
+	clientAudioSettingsSchema,
+	clientGraphicsSettingsSchema,
+	clientUiSettingsSchema,
+	clientCharacterSettingsSchema,
+	clientUserSettingsSchema,
+} from "./client-settings-contract";
+import {
+	CLIENT_AUDIO_DEFAULTS,
+	createDefaultClientCharacterSettings,
+	createDefaultClientUserSettings,
+} from "./client-settings-defaults";
+import { hudTrayOrientation, rotateHudTray } from "./client-hud-tray-layout";
+import {
+	createClientInputDefaults,
+	createClientKeyboardDefaults,
+	clientInputSettingsSchema,
+	clientKeyboardSettingsEqual,
+} from "./client-input-settings";
+
+import {
+	CLIENT_VITAL_WARNING_PERCENT,
+	CLIENT_GRAPHICS_RANGES,
+	CLIENT_VITAL_WARNING_THRESHOLDS,
+	CLIENT_DEFAULT_THEME_ID,
+	CLIENT_TEXT_SCALE,
+	CLIENT_UI_SCALE,
+} from "./client-settings-values";
+
+const viewport = { width: 1440, height: 900 };
+
+describe("current client settings values", () => {
+	it("loads older UI profiles with FPS hidden and preserves explicit visibility", () => {
+		const ui = createDefaultClientUserSettings(viewport, 0, "windows").ui;
+		const { showFps, ...older } = ui;
+		expect(clientUiSettingsSchema.parse(older)).toEqual({ ...older, showFps });
+		for (const enabled of [true, false]) {
+			expect(
+				clientUiSettingsSchema.parse({ ...older, showFps: enabled }).showFps,
+			).toBe(enabled);
+		}
+		expect(
+			clientUiSettingsSchema.safeParse({ ...older, showFps: "true" }).success,
+		).toBe(false);
+	});
+
+	it("enables help for older UI profiles and preserves explicit choices", () => {
+		const { showHelpLabels, ...older } = createDefaultClientUserSettings(
+			viewport,
+			0,
+			"windows",
+		).ui;
+		expect(showHelpLabels).toBe(true);
+		expect(clientUiSettingsSchema.parse(older).showHelpLabels).toBe(true);
+		for (const enabled of [true, false]) {
+			expect(
+				clientUiSettingsSchema.parse({ ...older, showHelpLabels: enabled })
+					.showHelpLabels,
+			).toBe(enabled);
+		}
+		expect(
+			clientUiSettingsSchema.safeParse({ ...older, showHelpLabels: "true" })
+				.success,
+		).toBe(false);
+	});
+
+	it("adds warning thresholds to older UI profiles while preserving font choices", () => {
+		const fonts = { body: "serif", heading: "sans", mono: "mono" } as const;
+		// An explicit Base choice must survive the change in absence defaults.
+		expect(
+			clientUiSettingsSchema.parse({ fonts, themeId: null }).themeId,
+		).toBeNull();
+		expect(clientUiSettingsSchema.parse({ fonts })).toEqual({
+			themeId: CLIENT_DEFAULT_THEME_ID,
+			showFps: false,
+			showHelpLabels: true,
+			useUnlockHelper: true,
+			fonts,
+			textScale: CLIENT_TEXT_SCALE.initial,
+			uiScale: CLIENT_UI_SCALE.initial,
+			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
+		});
+	});
+	it("preserves older UI choices when adding text scaling and rejects invalid explicit scales", () => {
+		const older = {
+			fonts: { body: "serif", heading: "mono", mono: "sans" },
+			vitalWarningThresholds: { health: 35, stamina: 15, mana: 25 },
+		};
+		expect(clientUiSettingsSchema.parse(older)).toEqual({
+			themeId: CLIENT_DEFAULT_THEME_ID,
+			showFps: false,
+			showHelpLabels: true,
+			useUnlockHelper: true,
+			...older,
+			textScale: CLIENT_TEXT_SCALE.initial,
+			uiScale: CLIENT_UI_SCALE.initial,
+		});
+		for (const textScale of [
+			CLIENT_TEXT_SCALE.minimum,
+			1.375,
+			CLIENT_TEXT_SCALE.maximum,
+		]) {
+			expect(clientUiSettingsSchema.parse({ ...older, textScale })).toEqual({
+				themeId: CLIENT_DEFAULT_THEME_ID,
+				showFps: false,
+				showHelpLabels: true,
+				useUnlockHelper: true,
+				...older,
+				textScale,
+				uiScale: CLIENT_UI_SCALE.initial,
+			});
+		}
+		for (const textScale of [
+			CLIENT_TEXT_SCALE.minimum - 0.01,
+			CLIENT_TEXT_SCALE.maximum + 0.01,
+			NaN,
+			Infinity,
+			null,
+			"1.5",
+		]) {
+			expect(
+				clientUiSettingsSchema.safeParse({ ...older, textScale }).success,
+			).toBe(false);
+		}
+	});
+	it("evolves text-scaled profiles and validates the overall UI scale", () => {
+		const older = {
+			fonts: { body: "serif", heading: "theme", mono: "mono" },
+			textScale: CLIENT_TEXT_SCALE.maximum,
+		};
+		const evolved = clientUiSettingsSchema.parse(older);
+		expect(evolved.uiScale).toBe(CLIENT_UI_SCALE.initial);
+		for (const uiScale of [
+			CLIENT_UI_SCALE.minimum,
+			1.375,
+			CLIENT_UI_SCALE.maximum,
+		]) {
+			expect(clientUiSettingsSchema.parse({ ...older, uiScale })).toEqual({
+				...evolved,
+				uiScale,
+			});
+		}
+		for (const uiScale of [
+			CLIENT_UI_SCALE.minimum - 0.01,
+			CLIENT_UI_SCALE.maximum + 0.01,
+			NaN,
+			Infinity,
+			null,
+			"1.5",
+		]) {
+			expect(
+				clientUiSettingsSchema.safeParse({ ...older, uiScale }).success,
+			).toBe(false);
+		}
+	});
+
+	it.each(["health", "stamina", "mana"] as const)(
+		"validates and preserves the %s threshold",
+		(kind) => {
+			const fonts = { body: "theme", heading: "theme", mono: "theme" } as const;
+			for (const value of [
+				CLIENT_VITAL_WARNING_PERCENT.minimum - 1,
+				CLIENT_VITAL_WARNING_PERCENT.maximum + 1,
+				12.5,
+				NaN,
+				Infinity,
+			]) {
+				expect(
+					clientUiSettingsSchema.safeParse({
+						fonts,
+						vitalWarningThresholds: {
+							...CLIENT_VITAL_WARNING_THRESHOLDS,
+							[kind]: value,
+						},
+					}).success,
+				).toBe(false);
+			}
+			const vitalWarningThresholds = { health: 35, stamina: 15, mana: 25 };
+			expect(
+				clientUiSettingsSchema.parse({ fonts, vitalWarningThresholds })
+					.vitalWarningThresholds,
+			).toEqual(vitalWarningThresholds);
+		},
+	);
+	it("loads saved keyboard maps while preserving current remapped controls", () => {
+		const current = createDefaultClientUserSettings(
+			viewport,
+			8,
+			"windows",
+		).input;
+		const examine = [{ key: "F8" }];
+		const forward = [{ key: "i" }];
+		const saved = {
+			...current,
+			character: { ...current.character, forward },
+			client: {
+				...current.client,
+				examine,
+				preciseJumpPowerUp: [{ key: "]" }],
+				preciseJumpPowerDown: [{ key: "[" }],
+			},
+		};
+		const loaded = clientInputSettingsSchema.parse(saved);
+		expect(loaded.client).toEqual({ ...current.client, examine });
+		expect(loaded.character).toEqual({ ...current.character, forward });
+	});
+
+	it("uses the declared initial audio mix", () => {
+		expect(
+			createDefaultClientUserSettings(viewport, 8, "windows").audio,
+		).toEqual(CLIENT_AUDIO_DEFAULTS);
+	});
+	it.each(["masterVolume", "effectVolume", "ambientVolume"] as const)(
+		"validates %s independently",
+		(key) => {
+			for (const invalid of [NaN, Infinity, -0.01, 1.01]) {
+				expect(() =>
+					clientAudioSettingsSchema.parse({
+						...CLIENT_AUDIO_DEFAULTS,
+						[key]: invalid,
+					}),
+				).toThrow();
+			}
+			expect(
+				clientAudioSettingsSchema.parse({ ...CLIENT_AUDIO_DEFAULTS, [key]: 0 })[
+					key
+				],
+			).toBe(0);
+		},
+	);
+	it("validates complete runtime user and character settings", () => {
+		const user = createDefaultClientUserSettings(viewport, 8, "windows");
+		const character = createDefaultClientCharacterSettings();
+		expect(clientUserSettingsSchema.parse(user)).toEqual(user);
+		expect(clientCharacterSettingsSchema.parse(character)).toEqual(character);
+	});
+
+	it("keeps the status tray orientation invariant", () => {
+		const user = createDefaultClientUserSettings(viewport, 8, "windows");
+		const rotated = rotateHudTray(user.hudLayout.statusTray);
+		expect(hudTrayOrientation(rotated)).not.toBe(
+			hudTrayOrientation(user.hudLayout.statusTray),
+		);
+		expect(
+			clientUserSettingsSchema.parse({
+				...user,
+				hudLayout: { ...user.hudLayout, statusTray: rotated },
+			}).hudLayout.statusTray,
+		).toEqual(rotated);
+		expect(() =>
+			clientUserSettingsSchema.parse({
+				...user,
+				hudLayout: {
+					...user.hudLayout,
+					statusTray: {
+						...user.hudLayout.statusTray,
+						preferredWidth: user.hudLayout.statusTray.preferredHeight,
+					},
+				},
+			}),
+		).toThrow("status tray needs positive dimensions");
+	});
+
+	it("rejects unknown fields and invalid fixed collections", () => {
+		const user = createDefaultClientUserSettings(viewport, 8, "windows");
+		const character = createDefaultClientCharacterSettings();
+		expect(() =>
+			clientUserSettingsSchema.parse({ ...user, extra: true }),
+		).toThrow();
+		expect(() =>
+			clientUserSettingsSchema.parse({
+				...user,
+				chatFilters: ["combat", "chat"],
+			}),
+		).toThrow();
+		expect(() =>
+			clientCharacterSettingsSchema.parse({
+				...character,
+				actionBars: [character.actionBars[0], character.actionBars[0]],
+			}),
+		).toThrow("action bar identities must be unique");
+		expect(() =>
+			clientCharacterSettingsSchema.parse({
+				...character,
+				spellBarBindings: {
+					tabs: character.spellBarBindings.tabs.slice(0, 9),
+				},
+			}),
+		).toThrow();
+	});
+
+	it("normalizes spell tabs while preserving occupied overflow cells", () => {
+		const character = createDefaultClientCharacterSettings();
+		const tabs = [...character.spellBarBindings.tabs];
+		tabs[0] = [...SPELL_BAR_INDICES.map(() => 1), 2, null, null];
+		const parsed = clientCharacterSettingsSchema.parse({
+			...character,
+			spellBarBindings: { tabs },
+		});
+		expect(parsed.spellBarBindings.tabs[0]).toEqual([
+			...SPELL_BAR_INDICES.map(() => 1),
+			2,
+			null,
+		]);
+	});
+});
+
+it("preserves keyboard preferences and round-trips mouse settings", () => {
+	const defaults = createClientKeyboardDefaults("windows");
+	const keyboard = {
+		...defaults,
+		character: {
+			...defaults.character,
+			forward: [{ key: "F8" }],
+		},
+	};
+	const migrated = clientInputSettingsSchema.parse(keyboard);
+	expect(migrated).toEqual({
+		...createClientInputDefaults("windows"),
+		...keyboard,
+	});
+	expect(clientInputSettingsSchema.parse({ ...keyboard, mouse: {} })).toEqual(
+		migrated,
+	);
+	expect(migrated.character.forward).toEqual(keyboard.character.forward);
+	const changed = {
+		...migrated,
+		mouseMovement: false,
+		invertCameraHorizontal: true,
+		invertCameraVertical: true,
+		invertSteeringHorizontal: true,
+		invertSteeringVertical: true,
+	};
+	expect(
+		clientInputSettingsSchema.parse(JSON.parse(JSON.stringify(changed))),
+	).toEqual(changed);
+	expect(() =>
+		clientInputSettingsSchema.parse({
+			...changed,
+			mouseMovement: "yes",
+		}),
+	).toThrow();
+});
+
+it.each([
+	"targetOnlyInView",
+	"smartTabHostileOnly",
+	"invertCameraHorizontal",
+	"invertCameraVertical",
+	"invertSteeringHorizontal",
+	"invertSteeringVertical",
+])("rejects non-boolean %s", (field) => {
+	expect(() =>
+		clientInputSettingsSchema.parse({
+			...createClientInputDefaults("windows"),
+			[field]: "yes",
+		}),
+	).toThrow();
+});
+
+it("preserves physical key ownership for acquisition and mouse edits but detects binding changes", () => {
+	const defaults = createClientInputDefaults("windows");
+	const changed = {
+		...defaults,
+		targetOnlyInView: !defaults.targetOnlyInView,
+		smartTabHostileOnly: !defaults.smartTabHostileOnly,
+		mouseMovement: !defaults.mouseMovement,
+		invertCameraHorizontal: !defaults.invertCameraHorizontal,
+		invertCameraVertical: !defaults.invertCameraVertical,
+		invertSteeringHorizontal: !defaults.invertSteeringHorizontal,
+		invertSteeringVertical: !defaults.invertSteeringVertical,
+	};
+	expect(clientKeyboardSettingsEqual(defaults, changed)).toBe(true);
+	const rebound = {
+		...changed,
+		character: { ...changed.character, forward: [{ key: "F8" }] },
+	};
+	expect(clientKeyboardSettingsEqual(defaults, rebound)).toBe(false);
+});
+
+it("does not treat settings normalization as a keyboard edit", () => {
+	expect(
+		clientKeyboardSettingsEqual(
+			createClientInputDefaults("windows"),
+			clientInputSettingsSchema.parse(createClientInputDefaults("windows")),
+		),
+	).toBe(true);
+});
+
+it.each(["targetOnlyInView", "smartTabHostileOnly"] as const)(
+	"restores missing %s and preserves its explicit value independently",
+	(preference) => {
+		const initial = clientInputSettingsSchema.parse(
+			createClientKeyboardDefaults("windows"),
+		);
+		expect(initial[preference]).toBe(
+			createClientInputDefaults("windows")[preference],
+		);
+		for (const enabled of [false, true]) {
+			const changed = { ...initial, [preference]: enabled };
+			expect(
+				clientInputSettingsSchema.parse(JSON.parse(JSON.stringify(changed))),
+			).toEqual(changed);
+		}
+	},
+);
+
+describe("dungeon ambient settings", () => {
+	it("fills older graphics profiles and preserves saved ambient choices", () => {
+		const { sealedInteriorAmbientLevel, ...older } =
+			createDefaultClientUserSettings(viewport, 0, "windows").graphics;
+		expect(clientGraphicsSettingsSchema.parse(older)).toEqual({
+			...older,
+			sealedInteriorAmbientLevel,
+		});
+		const { minimum, maximum } =
+			CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel;
+		for (const level of [minimum, (minimum + maximum) / 2, maximum]) {
+			expect(
+				clientGraphicsSettingsSchema.parse({
+					...older,
+					sealedInteriorAmbientLevel: level,
+				}).sealedInteriorAmbientLevel,
+			).toBe(level);
+		}
+	});
+
+	it.each([
+		CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.minimum -
+			CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.step,
+		CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.maximum +
+			CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.step,
+		NaN,
+		Infinity,
+		"0.5",
+	])("rejects invalid ambient level %s", (level) => {
+		const graphics = createDefaultClientUserSettings(
+			viewport,
+			0,
+			"windows",
+		).graphics;
+		expect(
+			clientGraphicsSettingsSchema.safeParse({
+				...graphics,
+				sealedInteriorAmbientLevel: level,
+			}).success,
+		).toBe(false);
+	});
+});

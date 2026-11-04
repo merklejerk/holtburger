@@ -1,21 +1,31 @@
 use super::*;
-use crate::utils::format_action_result_message;
 use holtburger_core::ActionResultReason;
 use holtburger_core::client::types::CombatFeedback;
+use holtburger_core::errors::format_action_result_message;
 use holtburger_core::errors::is_actually_weenie_error;
 
 pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> UpdateResult {
     match action {
+        AppAction::Suicide => UpdateResult::commands(vec![ClientCommand::Suicide]),
         AppAction::Emote { message } => UpdateResult::commands(vec![ClientCommand::Emote(message)]),
-        AppAction::SoulEmote { token } => {
-            UpdateResult::commands(vec![ClientCommand::SoulEmote(token)])
-        }
+        AppAction::SoulEmote { token } => UpdateResult::commands(vec![ClientCommand::SoulEmote {
+            token,
+            request_id: None,
+        }]),
         _ => UpdateResult::new(),
     }
 }
 
 pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
     match event {
+        ClientViewEvent::DeathLocations(result)
+            if Some(result.character) == state.data.player_guid =>
+        {
+            for line in death_location_lines(&result.locations) {
+                state.chat.log(ChatMessageTags::system(), line);
+            }
+        }
+
         ClientViewEvent::CombatFeedback(CombatFeedback::PlayerKilled {
             death_message,
             victim_id,
@@ -84,6 +94,31 @@ fn resolve_player_killed_message(
     resolved_message
 }
 
+fn death_location_lines(
+    locations: &holtburger_core::client::corpse::DeathLocations,
+) -> Vec<String> {
+    use holtburger_core::client::corpse::DeathLocations;
+    fn location(position: Option<holtburger_common::position::WorldPosition>) -> String {
+        match position {
+            None => "Position unavailable".into(),
+            Some(p) if p.is_indoors() => format!(
+                "Indoors cell 0x{:08X}, position ({:.1}, {:.1}, {:.1})",
+                p.landblock_id.0, p.coords.x, p.coords.y, p.coords.z
+            ),
+            Some(p) => format!("({})", p.to_world_coords()),
+        }
+    }
+    match locations {
+        DeathLocations::LastOutdoor { position } => vec![match position {
+            Some(p) => format!("Last outdoor death: {}. This saved location does not confirm a corpse remains.", location(Some(*p))),
+            None => "No saved last outdoor death location.".into(),
+        }],
+        DeathLocations::Recent { positions } if positions.is_empty() => vec!["No deaths observed this session.".into()],
+        DeathLocations::Recent { positions } => std::iter::once("Recent deaths, newest first: approximate position samples may be stale or reflect a later position; corpses/items are unconfirmed.".into())
+            .chain(positions.iter().enumerate().map(|(i, p)| format!("{}. {}", i + 1, location(*p)))).collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,7 +156,7 @@ mod tests {
 
         assert!(matches!(
             result.commands.as_slice(),
-            [ClientCommand::SoulEmote(token)] if token == "wave"
+            [ClientCommand::SoulEmote { token, request_id: None }] if token == "wave"
         ));
     }
 

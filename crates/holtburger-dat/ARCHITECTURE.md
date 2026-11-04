@@ -22,17 +22,14 @@ The crate exposes two primary resource backends plus one runtime-facing composit
 Contains distinct semantic parsers for the actual internal file blobs unpacked from DATs or HBA entries. Because the underlying data is a heterogeneous mix of object binaries, these parsers categorize it:
 - **`gfx_obj`**: 3D model data, vertex placements, and polygonal UV mappings.
 - **`landblock`**: Contains terrain data, topological maps, and geographic cell linkages.
-- **`motion_table` / `setup_model` / `animation`**: Retail motion sources used by tooling to derive runtime locomotion semantics.
-- **`motion_kinematics`**: Holtburger-derived runtime asset containing precomputed grounded locomotion rates and setup-model fallback mappings.
+- **`motion_table` / `setup_model` / `animation`**: Retail motion sources. These are the canonical motion representation; `holtburger-content` projects them into the runtime `MotionSequence` contract. `Animation::prune_to_simulation_facts` is the reduction small archive profiles apply.
 - **`skill_table` / `spell_table` / `xp_table`**: Required gameplay tables loaded directly from namespaced resources.
 
 ### 3. Layered Resource Resolution
 The layered resolver lets runtime code compose multiple mixed-namespace sources and prefer higher-fidelity resources for a full `ResourceKey`.
 
-This is the seam used by `holtburger-core` and `holtburger-world` to hard-require assets such as:
-
-- `eor/portal` gameplay tables
-- `holtburger/core:MotionKinematics`
+This is the seam used by `holtburger-core` and `holtburger-world` to hard-require `eor/portal`
+gameplay tables.
 
 Runtime code should use typed or namespaced resolver APIs rather than reaching into retail DATs directly.
 
@@ -48,8 +45,8 @@ sequenceDiagram
     participant Resolver as LayeredResourceResolver
     participant Hba as HBA Bundle
 
-    Core->>Resolver: get_file_for<MotionKinematics>()
-    Resolver->>Hba: Resolve holtburger/core:4D4F544B
+    Core->>Resolver: get_file_for<SkillTable>()
+    Resolver->>Hba: Resolve eor/portal:0E000004
     Hba->>Resolver: Return blob bytes
     Resolver->>Core: Return typed runtime asset bytes
 ```
@@ -63,7 +60,7 @@ For tooling, the flow is similar except the source backend is usually `DatDataba
 ## 🛠️ Developer Onboarding
 
 ### Validating Asset Queries
-New parsers and derived assets should be validated against ACE or ACViewer ground truth. Retail DAT fixtures remain valuable for parser tests, while runtime-facing assets should also be validated through HBA-backed integration tests where possible.
+New parsers and derived assets should preserve established format behavior. Parser fixtures and runtime HBA fixtures used by committed tests must be checked in; optional machine-local reference validation is described in `local/AGENTS.md`.
 
 ## Dependencies
 - **`holtburger-common`**: Shared math and data types used in parsed outputs.

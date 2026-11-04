@@ -63,7 +63,7 @@ HB.onEvent((event) => {
 });
 ```
 
-The repo includes a larger example in [scripts/fighter.js](../../scripts/fighter.js).
+The repo includes a larger example in [assets/scripts/fighter.js](../../assets/scripts/fighter.js).
 
 ## HTTP Requests
 

@@ -16,7 +16,8 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 byteorder = { workspace = true }
 socket2 = { workspace = true }
+futures = { workspace = true }
 
 [dev-dependencies]
 hex.workspace = true
-tokio = { workspace = true, features = ["full", "macros"] }
+tokio = { workspace = true, features = ["full", "macros", "test-util"] }

@@ -4,12 +4,13 @@ use crate::pages::game::ViewState;
 use crate::types::InspectTarget;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
+    EnchantmentTypeFlags, PropertyDataId, PropertyFloat, PropertyInt, WorldObjectExt,
+    WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::SpatialEntitySample;
 use holtburger_world::context::WorldContextExt;
-use holtburger_world::inspect::InspectableObject;
+use holtburger_world::inspection::InspectionSource;
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
 use ratatui::text::Line;
@@ -42,7 +43,7 @@ pub fn get_debug_info(
             else {
                 return lines;
             };
-            let object = InspectableObject::from_vendor_item(v);
+            let object = InspectionSource::from_vendor_item(v);
             lines.push(Line::from(format!("ITEM: {}", v.name())));
             push_object_debug_info(data, &mut lines, &object, spell_lookup);
         }
@@ -62,11 +63,12 @@ pub fn get_debug_info(
                 class
             )));
 
-            if let Some(parent_id) = e.physics_parent_id {
-                let parent_name = name_lookup(parent_id).unwrap_or_else(|| "Unknown".to_string());
+            if let Some(attachment) = e.attachment() {
+                let parent_name =
+                    name_lookup(attachment.parent).unwrap_or_else(|| "Unknown".to_string());
                 lines.push(Line::from(format!(
-                    "Phys Parent: {:08X} ({})",
-                    parent_id, parent_name
+                    "Attached To: {:08X} ({}) at {}",
+                    attachment.parent, parent_name, attachment.location
                 )));
             }
 
@@ -89,7 +91,10 @@ pub fn get_debug_info(
 
             lines.push(Line::from(format!("WCID:   {:?}", e.wcid)));
             lines.push(Line::from(format!("GfxID:  {:?}", e.gfx_id)));
-            lines.push(Line::from(format!("IconID: {:?}", e.icon_id)));
+            lines.push(Line::from(format!(
+                "IconID: {:?}",
+                e.get_data_prop(PropertyDataId::Icon)
+            )));
             lines.push(Line::from(format!("Vel:    {:?}", e.velocity)));
             lines.push(Line::from(format!("Accel:  {:?}", e.acceleration)));
             lines.push(Line::from(format!("Omega:  {:?}", e.omega)));
@@ -113,9 +118,9 @@ pub fn get_debug_info(
 
             lines.push(Line::from(format!(
                 "Phys:   {:08X}",
-                e.physics_state.bits()
+                e.physics.effective().semantic.bits()
             )));
-            for (name, _) in e.physics_state.iter_names() {
+            for (name, _) in e.physics.effective().semantic.iter_names() {
                 lines.push(Line::from(format!("  [X] {}", name)));
             }
 
@@ -169,7 +174,7 @@ pub fn get_debug_info(
                 || e.item_value() > 0
                 || e.usable().is_some()
                 || e.use_radius().is_some()
-                || e.workmanship().is_some()
+                || e.display_workmanship().is_some()
                 || e.burden().is_some()
                 || e.target_type().is_some()
                 || e.ui_effects().is_some()
@@ -218,7 +223,7 @@ pub fn get_debug_info(
                 if let Some(v) = e.use_radius() {
                     lines.push(Line::from(format!("  UseRadius: {:.2}", v)));
                 }
-                if let Some(v) = e.workmanship() {
+                if let Some(v) = e.display_workmanship() {
                     lines.push(Line::from(format!("  Work:      {:.2}", v)));
                 }
                 if let Some(v) = e.burden() {
@@ -289,8 +294,8 @@ pub fn get_debug_info(
                 || e.stable_id().is_some()
                 || e.petable_id().is_some()
                 || e.csetup_id().is_some()
-                || e.physics_parent_id.is_some()
-                || e.default_script_id().is_some()
+                || e.attachment().is_some()
+                || e.default_script_cue().is_some()
                 || e.autonomous_movement
             {
                 lines.push(Line::from("-- Technical Data --"));
@@ -306,10 +311,13 @@ pub fn get_debug_info(
                 if let Some(v) = e.csetup_id() {
                     lines.push(Line::from(format!("  CSetup:    0x{:08X}", v.0)));
                 }
-                if let Some(v) = e.physics_parent_id {
-                    lines.push(Line::from(format!("  PhysParentId: 0x{:08X}", v.0)));
+                if let Some(attachment) = e.attachment() {
+                    lines.push(Line::from(format!(
+                        "  Attachment: 0x{:08X} {} / {}",
+                        attachment.parent.0, attachment.location, attachment.placement
+                    )));
                 }
-                if let Some(v) = e.default_script_id() {
+                if let Some(v) = e.default_script_cue() {
                     lines.push(Line::from(format!(
                         "  DefScript: {} ({:.2})",
                         v,
@@ -607,7 +615,7 @@ pub fn get_debug_info(
 fn push_object_debug_info(
     data: &GameData,
     lines: &mut Vec<Line<'static>>,
-    object: &InspectableObject<'_>,
+    object: &InspectionSource<'_>,
     spell_lookup: Option<&SpellCatalog>,
 ) {
     let player_storage = (Some(object.guid) == data.player_guid)
@@ -625,7 +633,7 @@ fn push_object_debug_info(
         || object.item_value() > 0
         || object.usable().is_some()
         || object.use_radius().is_some()
-        || object.workmanship().is_some()
+        || object.display_workmanship.is_some()
         || object.burden().is_some()
         || object.target_type().is_some()
         || object.ui_effects().is_some()
@@ -674,7 +682,7 @@ fn push_object_debug_info(
         if let Some(v) = object.use_radius() {
             lines.push(Line::from(format!("  UseRadius: {:.2}", v)));
         }
-        if let Some(v) = object.workmanship() {
+        if let Some(v) = object.display_workmanship {
             lines.push(Line::from(format!("  Work:      {:.2}", v)));
         }
         if let Some(v) = object.burden() {

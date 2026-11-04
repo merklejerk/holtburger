@@ -1,0 +1,693 @@
+//! Turning a motion command into an installed sequence.
+//!
+//! A port of retail's `CMotionTable` selection (mirrored by ACE
+//! `MotionTable.GetObjectSequence`). The shape is retail's because the rules are: which link
+//! plays between two states, when modifiers are cleared, when a speed change reuses the running
+//! clips instead of restarting them, and which motion a stop falls back to.
+//!
+//! Selection is a free function over caller-owned state, not a service. Nothing is cached, and
+//! the same inputs always produce the same outcome.
+
+use holtburger_common::Vector3;
+use holtburger_content::{MotionSequence, MotionSequenceTable};
+
+use super::rates::MotionRow;
+use super::sequence::{MotionSequenceRuntime, SequenceNode, SubstateSelection};
+use super::state::{MotionCommand, MotionState};
+
+/// Smallest speed multiplier treated as nonzero, matching retail's physics epsilon.
+const SPEED_EPSILON: f32 = 0.000_2;
+
+/// What a selection did.
+///
+/// Retail returns one boolean for the first two, which loses the distinction a command surface
+/// needs: issuing a command that is already running is a success that changed nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotionSelectionOutcome {
+    /// The sequence and state now play the requested motion.
+    Selected,
+    /// The state already satisfies the request; nothing changed.
+    AlreadyActive,
+    /// The table does not model this motion from the current state.
+    ///
+    /// This is not an error. An entity performing a command its table has no entry for simply has
+    /// no authored motion, and the caller falls through to whatever other authority it has.
+    Unmodelled,
+}
+
+/// Native admission and chosen row for local physical rate resolution. A prohibited route
+/// must never be treated as missing content by the compatibility fallback.
+#[derive(Clone, Copy)]
+pub(super) enum NativeSelection<'a> {
+    /// Accepted native row; consumed directly by mean-rate resolution.
+    Selected(MotionRow<'a>),
+    /// Reissuing an established default while a modifier owns the substate is a no-op.
+    AlreadyActive,
+    /// No authored route for the requested command.
+    Missing,
+    /// Content exists, but the current state prevents selection.
+    Prohibited,
+}
+
+impl NativeSelection<'_> {
+    pub(super) fn outcome(self) -> MotionSelectionOutcome {
+        match self {
+            Self::Selected(_) => MotionSelectionOutcome::Selected,
+            Self::AlreadyActive => MotionSelectionOutcome::AlreadyActive,
+            Self::Missing | Self::Prohibited => MotionSelectionOutcome::Unmodelled,
+        }
+    }
+}
+
+/// Result of installing one transient action into the ordinary sequence runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionSelectionOutcome {
+    /// Action clips were installed and own an exact completion boundary.
+    Selected,
+    /// The table modelled the route but authored no clips, so completion is immediate.
+    CompletedWithoutClips,
+    /// The current style/substate has no retail route to this action.
+    Unmodelled,
+}
+
+impl MotionSelectionOutcome {
+    pub fn changed(self) -> bool {
+        matches!(self, Self::Selected)
+    }
+
+    pub fn is_modelled(self) -> bool {
+        !matches!(self, Self::Unmodelled)
+    }
+}
+
+/// Puts the body into its table's default style and substate.
+pub fn set_default_state(
+    table: &MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+) -> MotionSelectionOutcome {
+    let Some(default_substate) = table.style_default(table.default_style) else {
+        return MotionSelectionOutcome::Unmodelled;
+    };
+    let Some(cycle) = table.cycle(table.default_style, default_substate) else {
+        return MotionSelectionOutcome::Unmodelled;
+    };
+
+    state.clear_modifiers();
+    state.style = MotionCommand(table.default_style);
+    state.substate = MotionCommand(default_substate);
+    state.substate_mod = 1.0;
+
+    sequence.clear_physics();
+    sequence.clear_animations();
+    add_motion(sequence, Some(cycle), 1.0);
+
+    MotionSelectionOutcome::Selected
+}
+
+/// Selects one motion command at a speed multiplier.
+pub fn select_motion(
+    table: &MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    command: MotionCommand,
+    speed_mod: f32,
+) -> MotionSelectionOutcome {
+    select_native(table, state, sequence, command, speed_mod).outcome()
+}
+
+/// Selects once and exposes the native admission decision to the physical owner.
+pub(super) fn select_native<'a>(
+    table: &'a MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    command: MotionCommand,
+    speed_mod: f32,
+) -> NativeSelection<'a> {
+    select(table, state, sequence, command, speed_mod, false)
+}
+
+/// Installs retail's action route while preserving the current substate as the return cycle.
+pub fn select_action(
+    table: &MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    command: MotionCommand,
+    speed_mod: f32,
+) -> ActionSelectionOutcome {
+    if !command.is_action() || state.style.raw() == 0 || state.substate.raw() == 0 {
+        return ActionSelectionOutcome::Unmodelled;
+    }
+    let Some(return_cycle) = table.cycle(state.style.raw(), state.substate.raw()) else {
+        return ActionSelectionOutcome::Unmodelled;
+    };
+
+    let direct = get_link(
+        table,
+        state.style.raw(),
+        state.substate.raw(),
+        state.substate_mod,
+        command.raw(),
+        speed_mod,
+    );
+    let fallback = if direct.is_none() {
+        let Some(default_substate) = table.style_default(state.style.raw()) else {
+            return ActionSelectionOutcome::Unmodelled;
+        };
+        let Some(exit) = get_link(
+            table,
+            state.style.raw(),
+            state.substate.raw(),
+            state.substate_mod,
+            default_substate,
+            1.0,
+        ) else {
+            return ActionSelectionOutcome::Unmodelled;
+        };
+        let Some(action) = get_link(
+            table,
+            state.style.raw(),
+            default_substate,
+            1.0,
+            command.raw(),
+            speed_mod,
+        ) else {
+            return ActionSelectionOutcome::Unmodelled;
+        };
+        let return_link = get_link(
+            table,
+            state.style.raw(),
+            default_substate,
+            1.0,
+            state.substate.raw(),
+            state.substate_mod,
+        );
+        Some((exit, action, return_link))
+    } else {
+        None
+    };
+
+    sequence.clear_physics();
+    sequence.remove_cyclic_clips();
+    let action_start = sequence.clip_count();
+    if let Some(direct) = direct {
+        add_motion(sequence, Some(direct), speed_mod);
+    } else {
+        let (exit, action, return_link) =
+            fallback.expect("a missing direct action route must have a validated fallback");
+        add_motion(sequence, Some(exit), 1.0);
+        add_motion(sequence, Some(action), speed_mod);
+        add_motion(sequence, return_link, 1.0);
+    }
+    let action_end = sequence.clip_count();
+    add_motion(sequence, Some(return_cycle), state.substate_mod);
+    re_modify(table, state, sequence);
+    if action_end == action_start {
+        ActionSelectionOutcome::CompletedWithoutClips
+    } else {
+        sequence.mark_action_range(action_start, action_end);
+        ActionSelectionOutcome::Selected
+    }
+}
+
+/// Stops one motion, returning the body to its style's default substate.
+///
+/// A substate stop re-selects the style default; a modifier stop removes that modifier's
+/// contribution. Anything else is not stoppable and reports as unmodelled.
+pub fn stop_motion(
+    table: &MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    command: MotionCommand,
+) -> MotionSelectionOutcome {
+    if command.is_substate() && state.substate == command {
+        let Some(default_substate) = table.style_default(state.style.raw()) else {
+            return MotionSelectionOutcome::Unmodelled;
+        };
+        select(
+            table,
+            state,
+            sequence,
+            MotionCommand(default_substate),
+            1.0,
+            true,
+        );
+        return MotionSelectionOutcome::Selected;
+    }
+
+    if !command.is_modifier() {
+        return MotionSelectionOutcome::Unmodelled;
+    }
+
+    let Some(active) = state
+        .modifiers()
+        .iter()
+        .find(|modifier| modifier.command == command)
+        .copied()
+    else {
+        return MotionSelectionOutcome::Unmodelled;
+    };
+    let Some(modifier) = lookup_modifier(table, state, command) else {
+        return MotionSelectionOutcome::Unmodelled;
+    };
+
+    subtract_motion(sequence, modifier, active.speed_mod);
+    state.remove_modifier(command);
+    MotionSelectionOutcome::Selected
+}
+
+/// Stops every modifier and then the substate, retail's `StopObjectCompletely`.
+pub fn stop_completely(
+    table: &MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+) -> MotionSelectionOutcome {
+    let mut outcome = MotionSelectionOutcome::Unmodelled;
+
+    while let Some(modifier) = state.modifiers().first().copied() {
+        if stop_motion(table, state, sequence, modifier.command).changed() {
+            outcome = MotionSelectionOutcome::Selected;
+        } else {
+            // The modifier is unstoppable through the table; drop it rather than spin.
+            state.remove_modifier(modifier.command);
+        }
+    }
+
+    if stop_motion(table, state, sequence, state.substate).changed() {
+        MotionSelectionOutcome::Selected
+    } else {
+        outcome
+    }
+}
+
+fn select<'a>(
+    table: &'a MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    command: MotionCommand,
+    speed_mod: f32,
+    stop_modifiers: bool,
+) -> NativeSelection<'a> {
+    if state.style.raw() == 0 || state.substate.raw() == 0 {
+        return NativeSelection::Prohibited;
+    }
+    let style_default = table.style_default(state.style.raw());
+    if Some(command.raw()) == style_default && !stop_modifiers && state.substate.is_modifier() {
+        return NativeSelection::AlreadyActive;
+    }
+    if command.is_style() {
+        return select_style(table, state, sequence, command, speed_mod, style_default);
+    }
+    let substate = if command.is_substate() {
+        select_substate(table, state, sequence, command, speed_mod)
+    } else {
+        NativeSelection::Missing
+    };
+    if substate.outcome().is_modelled() || !command.is_modifier() {
+        return substate;
+    }
+    let modifier = select_modifier(table, state, sequence, command, speed_mod);
+    // A dual-class command cannot turn a refused native cycle into permission to borrow.
+    if matches!(substate, NativeSelection::Prohibited)
+        && matches!(modifier, NativeSelection::Missing)
+    {
+        substate
+    } else {
+        modifier
+    }
+}
+
+/// Changing stance: play out of the current substate, through the style transition, and into the
+/// new style's default substate.
+fn select_style<'a>(
+    table: &'a MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    command: MotionCommand,
+    speed_mod: f32,
+    source_style_default: Option<u32>,
+) -> NativeSelection<'a> {
+    if state.style == command {
+        return NativeSelection::AlreadyActive;
+    }
+    let Some(source_style_default) = source_style_default.filter(|default| *default != 0) else {
+        return NativeSelection::Missing;
+    };
+    let Some(destination_style_default) = table
+        .style_default(command.raw())
+        .filter(|default| *default != 0)
+    else {
+        return NativeSelection::Missing;
+    };
+
+    // Leaving whatever substate is running for the style's default one.
+    let exit = (source_style_default != state.substate.raw())
+        .then(|| {
+            get_link(
+                table,
+                state.style.raw(),
+                state.substate.raw(),
+                state.substate_mod,
+                source_style_default,
+                speed_mod,
+            )
+        })
+        .flatten();
+
+    let Some(cycle) = table.cycle(command.raw(), destination_style_default) else {
+        return NativeSelection::Missing;
+    };
+    if cycle.clears_modifiers {
+        state.clear_modifiers();
+    }
+
+    let mut link = get_link(
+        table,
+        state.style.raw(),
+        source_style_default,
+        state.substate_mod,
+        command.raw(),
+        speed_mod,
+    );
+    let mut through_default_style = None;
+    if link.is_none() && state.style != command {
+        // No direct transition between these styles, so route through the table's default style.
+        link = get_link(
+            table,
+            state.style.raw(),
+            source_style_default,
+            1.0,
+            table.default_style,
+            1.0,
+        );
+        through_default_style =
+            table
+                .style_default(table.default_style)
+                .and_then(|default_substate| {
+                    get_link(
+                        table,
+                        table.default_style,
+                        default_substate,
+                        1.0,
+                        command.raw(),
+                        1.0,
+                    )
+                });
+    }
+
+    sequence.clear_physics();
+    sequence.remove_cyclic_clips();
+    sequence.forget_substate_selections();
+    add_motion(sequence, exit, speed_mod);
+    add_motion(sequence, link, speed_mod);
+    add_motion(sequence, through_default_style, speed_mod);
+    add_motion(sequence, Some(cycle), speed_mod);
+
+    state.substate = MotionCommand(destination_style_default);
+    state.style = command;
+    state.substate_mod = speed_mod;
+    re_modify(table, state, sequence);
+
+    NativeSelection::Selected(MotionRow::Cycle(cycle))
+}
+
+/// Changing what the body is doing within its stance: walking, running, turning, standing.
+fn select_substate<'a>(
+    table: &'a MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    command: MotionCommand,
+    speed_mod: f32,
+) -> NativeSelection<'a> {
+    let Some(cycle) = table
+        .cycle(state.style.raw(), command.raw())
+        .or_else(|| table.cycle(table.default_style, command.raw()))
+    else {
+        return NativeSelection::Missing;
+    };
+    if !is_allowed(table, state, command, cycle) {
+        return NativeSelection::Prohibited;
+    }
+
+    // Same motion at a new speed in the same direction: rescale the running clips instead of
+    // restarting them, so a walk-to-run change does not snap the cursor back to frame zero.
+    if command == state.substate
+        && sequence.has_clips()
+        && speed_mod.is_sign_negative() == state.substate_mod.is_sign_negative()
+    {
+        change_cycle_speed(sequence, state.substate_mod, speed_mod);
+        subtract_motion(sequence, cycle, state.substate_mod);
+        combine_motion(sequence, cycle, speed_mod);
+        state.substate_mod = speed_mod;
+        return NativeSelection::Selected(MotionRow::Cycle(cycle));
+    }
+
+    if cycle.clears_modifiers {
+        state.clear_modifiers();
+    }
+
+    // A command carrying both substate and modifier bits layers over another active substate, but
+    // becomes the primary cycle when content permits it from the current state. The rebuilt
+    // sequence clears prior physics below, so retire the old role from semantic state before
+    // reinstalling the remaining modifiers. Otherwise one command contributes its physics twice.
+    state.remove_modifier(command);
+
+    let style_default = table.style_default(state.style.raw());
+    let mut link = get_link(
+        table,
+        state.style.raw(),
+        state.substate.raw(),
+        state.substate_mod,
+        command.raw(),
+        speed_mod,
+    );
+    let mut through_default = None;
+    if link.is_none() || speed_mod.is_sign_negative() != state.substate_mod.is_sign_negative() {
+        // Either no direct transition, or the direction reverses. Both route through the style's
+        // default substate, which every style is guaranteed to have a link to.
+        let default_substate = style_default.unwrap_or(0);
+        link = get_link(
+            table,
+            state.style.raw(),
+            state.substate.raw(),
+            state.substate_mod,
+            default_substate,
+            1.0,
+        );
+        through_default = get_link(
+            table,
+            state.style.raw(),
+            default_substate,
+            1.0,
+            command.raw(),
+            speed_mod,
+        );
+    }
+
+    sequence.clear_physics();
+    sequence.remove_cyclic_clips();
+    let selection = SubstateSelection {
+        style: state.style,
+        target: command,
+    };
+    let appended_from = sequence.clip_count();
+
+    if through_default.is_some() {
+        add_substate_motion(sequence, link, state.substate_mod, selection);
+        add_substate_motion(sequence, through_default, speed_mod, selection);
+    } else {
+        // Leaving a reversed substate for a forward one plays the single transition backwards.
+        let mut link_speed = speed_mod;
+        if state.substate_mod < 0.0 && speed_mod > 0.0 {
+            link_speed *= -1.0;
+        }
+        add_substate_motion(sequence, link, link_speed, selection);
+    }
+
+    add_substate_motion(sequence, Some(cycle), speed_mod, selection);
+    sequence.collapse_redundant_substate_suffix(selection, appended_from);
+
+    // A modifier that was promoted to substate keeps running as a modifier once displaced.
+    if state.substate != command
+        && state.substate.is_modifier()
+        && style_default != Some(command.raw())
+    {
+        state.add_modifier_unchecked(state.substate, state.substate_mod);
+    }
+
+    state.substate_mod = speed_mod;
+    state.substate = command;
+    re_modify(table, state, sequence);
+
+    NativeSelection::Selected(MotionRow::Cycle(cycle))
+}
+
+/// Layering an additive motion on top of whatever the body is already doing.
+pub(super) fn select_modifier<'a>(
+    table: &'a MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    command: MotionCommand,
+    speed_mod: f32,
+) -> NativeSelection<'a> {
+    // A substate that clears modifiers cannot accept one.
+    let Some(cycle) = table.cycle(state.style.raw(), state.substate.raw()) else {
+        return NativeSelection::Prohibited;
+    };
+    if cycle.clears_modifiers {
+        return NativeSelection::Prohibited;
+    }
+    let Some(modifier) = lookup_modifier(table, state, command) else {
+        return NativeSelection::Missing;
+    };
+
+    if !state.add_modifier(command, speed_mod) {
+        stop_motion(table, state, sequence, command);
+        if !state.add_modifier(command, speed_mod) {
+            return NativeSelection::Prohibited;
+        }
+    }
+    combine_motion(sequence, modifier, speed_mod);
+    NativeSelection::Selected(MotionRow::Modifier(modifier))
+}
+
+/// Modifiers are looked up under the current style first and then unstyled, so a table can define
+/// one modifier that applies in every stance.
+fn lookup_modifier<'table>(
+    table: &'table MotionSequenceTable,
+    state: &MotionState,
+    command: MotionCommand,
+) -> Option<&'table MotionSequence> {
+    table
+        .modifier(state.style.raw(), command.raw())
+        .or_else(|| table.modifier(0, command.raw()))
+}
+
+/// Retail motion-table is allowed.
+///
+/// A motion flagged as requiring the default substate can only start from it, or from itself.
+fn is_allowed(
+    table: &MotionSequenceTable,
+    state: &MotionState,
+    command: MotionCommand,
+    cycle: &MotionSequence,
+) -> bool {
+    if !cycle.requires_default_substate || command == state.substate {
+        return true;
+    }
+    table.style_default(state.style.raw()) == Some(state.substate.raw())
+}
+
+/// Retail motion-table link query (ACE `MotionTable.get_link`).
+///
+/// Playing backwards swaps which end of the transition is the key, because the same clip is
+/// being traversed in the other direction.
+fn get_link(
+    table: &MotionSequenceTable,
+    style: u32,
+    substate: u32,
+    substate_speed: f32,
+    motion: u32,
+    speed: f32,
+) -> Option<&MotionSequence> {
+    if speed < 0.0 || substate_speed < 0.0 {
+        if let Some(reversed) = table.link(style, motion, substate) {
+            return Some(reversed);
+        }
+        let default_motion = table.style_default(style)?;
+        return table.link(style, substate, default_motion);
+    }
+
+    table
+        .link(style, substate, motion)
+        .or_else(|| table.link(style, 0, motion))
+}
+
+/// Installs one motion's clips and replaces the sequence's motion-data velocity and omega.
+///
+/// Retail *assigns* rather than accumulating here, so the last motion installed owns the explicit
+/// vectors; only modifiers combine and subtract.
+fn add_motion(sequence: &mut MotionSequenceRuntime, motion: Option<&MotionSequence>, speed: f32) {
+    install_motion(sequence, motion, speed, None);
+}
+
+/// Installs one motion with the same-style substate selection that owns its live clips.
+fn add_substate_motion(
+    sequence: &mut MotionSequenceRuntime,
+    motion: Option<&MotionSequence>,
+    speed: f32,
+    selection: SubstateSelection,
+) {
+    install_motion(sequence, motion, speed, Some(selection));
+}
+
+fn install_motion(
+    sequence: &mut MotionSequenceRuntime,
+    motion: Option<&MotionSequence>,
+    speed: f32,
+    substate_selection: Option<SubstateSelection>,
+) {
+    let Some(motion) = motion else {
+        return;
+    };
+    sequence.set_physics(
+        motion.velocity.unwrap_or_else(Vector3::zero) * speed,
+        motion.omega.unwrap_or_else(Vector3::zero) * speed,
+    );
+    for clip in &motion.clips {
+        let node = SequenceNode::install(clip, speed);
+        if let Some(selection) = substate_selection {
+            sequence.append_for_substate(node, selection);
+        } else {
+            sequence.append(node);
+        }
+    }
+}
+
+fn combine_motion(sequence: &mut MotionSequenceRuntime, motion: &MotionSequence, speed: f32) {
+    sequence.combine_physics(
+        motion.velocity.unwrap_or_else(Vector3::zero) * speed,
+        motion.omega.unwrap_or_else(Vector3::zero) * speed,
+    );
+}
+
+fn subtract_motion(sequence: &mut MotionSequenceRuntime, motion: &MotionSequence, speed: f32) {
+    sequence.subtract_physics(
+        motion.velocity.unwrap_or_else(Vector3::zero) * speed,
+        motion.omega.unwrap_or_else(Vector3::zero) * speed,
+    );
+}
+
+/// Rescales the looping clips when the same substate is re-issued at a new speed.
+fn change_cycle_speed(sequence: &mut MotionSequenceRuntime, substate_mod: f32, speed_mod: f32) {
+    if substate_mod.abs() > SPEED_EPSILON {
+        sequence.multiply_cyclic_framerate(speed_mod / substate_mod);
+    } else if speed_mod.abs() < SPEED_EPSILON {
+        sequence.multiply_cyclic_framerate(0.0);
+    }
+}
+
+/// Re-installs the active modifiers onto a sequence that was just rebuilt.
+///
+/// Selecting a substate clears the sequence, which drops every modifier's contribution with it.
+/// Retail replays them from the state so the rebuilt sequence carries them again.
+///
+/// RETAIL DIVERGENCE: retail iterates a snapshot while repeatedly popping and re-selecting the
+/// live list's head (retail modifier replay, ACE `MotionTable.re_modify` matches). With N
+/// modifiers that installs the head N times and none of the rest. We preserve the semantic list
+/// and combine every active modifier's physics exactly once. This makes simultaneous sidestep
+/// and turn independent of list order; correcting retail changes stacked modifier velocity or
+/// omega after a stance or substate rebuild. The archive contains 1,222 turn/sidestep modifier
+/// records, and interpreted movement can activate sidestep and turn together, so the defect is
+/// reachable through the normal control surface rather than dead code.
+fn re_modify(
+    table: &MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+) {
+    for modifier in state.modifiers() {
+        if let Some(motion) = lookup_modifier(table, state, modifier.command) {
+            combine_motion(sequence, motion, modifier.speed_mod);
+        }
+    }
+}

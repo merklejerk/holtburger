@@ -401,7 +401,7 @@ pub enum AppEvent {
     Tick(f64),
     KeyPress(KeyEvent), // key
     Mouse(MouseEvent),  // mouse
-    ReceivedViewEvent(ClientViewEvent),
+    ReceivedViewEvent(Box<ClientViewEvent>),
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -555,13 +555,14 @@ impl Page {
 
 #[derive(Debug, Clone)]
 pub enum AppAction {
+    /// Dispatch only after the local death confirmation is accepted.
+    Suicide,
     Nothing,
     TransitionToGame {
         guid: Guid,
         name: String,
         account: String,
     },
-    SendCharacterEnterWorld,
     EnterSelectedCharacter,
     RestoreSelectedCharacter,
     SubmitCharacterCreation,
@@ -685,13 +686,9 @@ pub enum AppAction {
     SetCombatMode {
         on: bool,
     },
-    LevelUpStat {
-        stat: StatType,
-        amount: u32,
-    },
-    TrainSkill {
-        skill: SkillType,
-        amount: u32,
+    /// Submit the exact shared progression quote shown by the character tab.
+    SubmitProgression {
+        quote: holtburger_core::ClientProgressionQuote,
     },
     // TODO: Move to AppUiAction if purely client-side.
     ViewDetails {

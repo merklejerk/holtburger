@@ -1,0 +1,509 @@
+<script lang="ts">
+	import { presentClientBurden } from "./client-burden-presentation";
+	import BurdenIcon from "../assets/icons/burden.svg?component";
+	import { bindContentsActivation } from "./client-contents-activation";
+	import type { ClientItemInteractions } from "./client-item-interactions";
+	import { onMount } from "svelte";
+	import PopupMenu from "../app/PopupMenu.svelte";
+	import { startUiIconDisplay } from "../app/ui-icon-display";
+	import ClientQuantityDialog from "./ClientQuantityDialog.svelte";
+	import {
+		ClientInventorySplit,
+		isSplittableInventoryItem,
+		type InventorySplitRequest,
+		type InventorySplitStart,
+	} from "./client-inventory-split";
+
+	import ClientContentsView from "./ClientContentsView.svelte";
+	import type { ClientTradeState } from "./client-trade-state";
+	import type { ClientSalvageState } from "./client-salvage-state";
+	import type { ClientVendorState } from "./client-vendor-state";
+
+	import UiIcon from "../app/UiIcon.svelte";
+	import InventoryCurrencyOverlay from "./InventoryCurrencyOverlay.svelte";
+	import InventoryEquipmentStrip from "./InventoryEquipmentStrip.svelte";
+	import type { UiIconDisplay } from "../app/ui-icon-repository";
+
+	import type {
+		ClientInventoryState,
+		ClientInventoryView,
+	} from "./client-inventory-state";
+	import ClientContentsSortButton from "./ClientContentsSortButton.svelte";
+	import ClientHudIcon from "./ClientHudIcon.svelte";
+	import { presentClientBinding } from "./client-binding-catalog";
+	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
+	import type { InputPlatform } from "../lib/input/input-platform";
+	import { CLIENT_TUNING } from "./client-tuning";
+	import type {
+		ClientAppearanceOption,
+		ClientAppearanceOptions,
+	} from "./client-host-contract";
+
+	interface Props {
+		/** Capture current confirmed equipment into an independent HUD draft. */
+		readonly onSaveLoadout: () => void;
+		/** Accepted bindings and platform vocabulary keep stack hints current after remapping. */
+		readonly input: ClientKeyboardConfiguration;
+		readonly displayPlatform: InputPlatform;
+		/** Stable session owner; the parent keys this component by that lifetime. */
+		readonly inventory: ClientInventoryState;
+		/** Visible vendor identity gates the world's sale verdict without owning acceptance rules. */
+		readonly vendor: ClientVendorState | null;
+		/** Open workflow admission reuses the same owners as drag/drop. */
+		readonly trade: ClientTradeState | null;
+		readonly salvage: ClientSalvageState | null;
+		/** Shared source activation and target acquisition. */
+		readonly interactions: ClientItemInteractions;
+		readonly selectedGuid: number | null;
+		readonly onSelectItem: (guid: number) => void;
+		/** Optional request from another HUD surface, consumed after the panel owner mounts. */
+		readonly requestedSplit: InventorySplitStart | null;
+		/** Retire the exact handoff after this mounted panel accepts it. */
+		readonly onRequestedSplitConsumed: (request: InventorySplitStart) => void;
+		readonly appearanceOptions: ClientAppearanceOptions | null;
+		readonly onAppearanceOptionChange: (
+			option: ClientAppearanceOption,
+			enabled: boolean,
+		) => Promise<void>;
+	}
+	const {
+		onSaveLoadout,
+		input,
+		displayPlatform,
+		inventory,
+		vendor,
+		trade,
+		salvage,
+		interactions,
+		selectedGuid,
+		onSelectItem,
+		requestedSplit,
+		onRequestedSplitConsumed,
+		appearanceOptions,
+		onAppearanceOptionChange,
+	}: Props = $props();
+	const splitActionHint = $derived(
+		input.client.splitStack.length > 0
+			? `${presentClientBinding(input, { kind: "client", action: "splitStack" }, displayPlatform).description} to split`
+			: null,
+	);
+	let view = $state<ClientInventoryView | null>(null);
+	/** One sampled set keeps markup free of live workflow reads. */
+	let workflowDimmed = $state<ReadonlySet<number>>(new Set());
+	/** Row hover is local UI state; compatible locations come from sampled world facts. */
+	let hoveredEquipmentSlot = $state<number | null>(null);
+	/** Submission state prevents repeated writes while one option request is in flight. */
+	let appearanceOptionPending = $state(false);
+	/** Identity is resolved against each sampled view so removed or changed items cannot leave stale hints. */
+	let hoveredInventoryGuid = $state<number | null>(null);
+	let displays = $state<ReadonlyMap<string, UiIconDisplay>>(new Map());
+	/** Footer artwork follows the same bounded display sampling as the inventory cells. */
+	const pyrealDisplay = $derived(displays.get(inventory.pyrealIconKey));
+	const sections = $derived(view?.sections ?? []);
+	const capacities = $derived<ClientInventoryView["capacities"]>(
+		view?.capacities ?? new Map(),
+	);
+	const packSlots = $derived(view?.packSlots ?? []);
+	const pending = $derived(view?.pending ?? true);
+	const hoveredEquipLocations = $derived.by<number | null | undefined>(() => {
+		if (hoveredInventoryGuid === null) return undefined;
+		for (const section of sections) {
+			const hovered = [
+				...section.items,
+				...section.packs,
+				...section.unslotted,
+			].find((item) => item.guid === hoveredInventoryGuid);
+			if (hovered === undefined) continue;
+			return hovered.description.kind === "known"
+				? hovered.description.equipLocations
+				: undefined;
+		}
+		return undefined;
+	});
+	$effect(() => {
+		// Removing a hovered cell does not reliably dispatch pointerleave.
+		if (
+			hoveredInventoryGuid !== null &&
+			view !== null &&
+			hoveredEquipLocations === undefined
+		)
+			hoveredInventoryGuid = null;
+	});
+	const sortMode = $derived(view?.sortMode ?? "native");
+	const rootDescription = $derived(sections[0]?.container.description);
+	const pyreals = $derived(
+		rootDescription?.kind === "known" ? rootDescription.pyrealBalance : null,
+	);
+	const pyrealText = $derived(
+		pending || pyreals === null ? "…" : pyreals.toLocaleString(),
+	);
+	const burden = $derived(
+		!pending && rootDescription?.kind === "known"
+			? rootDescription.burden
+			: null,
+	);
+	const burdenPresentation = $derived(presentClientBurden(burden));
+	const burdenText = $derived(burdenPresentation.percent);
+	/** Cold transient intent; core execution survives panel closure. */
+	let containerMenu = $state<{
+		container: number;
+		anchor: { x: number; y: number };
+	} | null>(null);
+	$effect(() => {
+		if (
+			containerMenu !== null &&
+			(view === null ||
+				view.pending ||
+				!inventory.canAutoMergeContainer(containerMenu.container))
+		)
+			containerMenu = null;
+	});
+	function openContainerMenu(event: MouseEvent, container: number): void {
+		event.preventDefault();
+		event.stopPropagation();
+		containerMenu = inventory.canAutoMergeContainer(container)
+			? { container, anchor: { x: event.clientX, y: event.clientY } }
+			: null;
+	}
+	/** PopupMenu dismisses before dispatch; capture identity while the menu is still present. */
+	function autoMergeSelection(container: number): () => void {
+		return () => inventory.requestAutoMergeContainer(container);
+	}
+
+	let panel: HTMLDivElement;
+
+	let sampleNow: (() => void) | null = null;
+	/** Cold dialog state only; execution remains owned by core. */
+	let splitRequest = $state<InventorySplitRequest | null>(null);
+	let splitOwner = $state<ClientInventorySplit | null>(null);
+
+	$effect(() => {
+		const owner = splitOwner;
+		const request = requestedSplit;
+		if (owner === null || request === null) return;
+		owner.begin(request.item, request.source);
+		onRequestedSplitConsumed(request);
+	});
+
+	$effect(() => {
+		splitOwner?.cancelForSelection(selectedGuid);
+	});
+
+	onMount(() =>
+		bindContentsActivation(
+			panel,
+			".item-grid-cell[data-item-guid]:not(:disabled)",
+			interactions,
+			() => selectedGuid,
+			onSelectItem,
+			(guid) => interactions.use(guid, false),
+		),
+	);
+	onMount(() => {
+		const split = new ClientInventorySplit(panel, inventory, (request) => {
+			splitRequest = request;
+		});
+		splitOwner = split;
+		const display = startUiIconDisplay({
+			repository: inventory.icons,
+			intervalMs: CLIENT_TUNING.inventory.displayIntervalMs,
+			read: () => {
+				const items = inventory.readItems().items;
+				const next = inventory.read();
+				workflowDimmed = new Set(
+					[...items.values()]
+						.filter(
+							(item) =>
+								vendor?.inventoryItemUnavailable(item.guid) === true ||
+								trade?.inventoryItemUnavailable(item.guid) === true ||
+								(salvage?.visible === true && !salvage.canQueue(item.guid)),
+						)
+						.map((item) => item.guid),
+				);
+				return next;
+			},
+			keys: (next) => [
+				...next.iconKeys.values(),
+				...next.currencies.map((row) => row.iconKey),
+				inventory.pyrealIconKey,
+			],
+			publish: (next, images) => {
+				view = next;
+				displays = images;
+			},
+		});
+		const unsubscribeArrivals = inventory.subscribeArrivals(() =>
+			display.refresh(),
+		);
+		sampleNow = display.refresh;
+		return () => {
+			unsubscribeArrivals();
+			split.destroy();
+			splitOwner = null;
+			sampleNow = null;
+			display.destroy();
+		};
+	});
+
+	function iconFor(guid: number): UiIconDisplay | undefined {
+		const key = view?.iconKeys.get(guid);
+		return key === undefined ? undefined : displays.get(key);
+	}
+	function selectItem(guid: number): boolean {
+		const targeting = interactions.snapshot();
+		if (targeting.kind === "acquiring") {
+			interactions.target(guid, targeting.generation);
+			return false;
+		}
+		onSelectItem(guid);
+		return true;
+	}
+	async function toggleAppearanceOption(
+		option: ClientAppearanceOption,
+	): Promise<void> {
+		if (appearanceOptionPending || appearanceOptions === null) return;
+		const enabled = !(option === "helmet"
+			? appearanceOptions.showHelmet
+			: appearanceOptions.showCloak);
+		appearanceOptionPending = true;
+		try {
+			await onAppearanceOptionChange(option, enabled);
+		} finally {
+			appearanceOptionPending = false;
+		}
+	}
+</script>
+
+<div
+	bind:this={panel}
+	class="client-inventory"
+	aria-label="Inventory contents"
+	aria-busy={pending}
+>
+	<div class="inventory-layout" inert={splitRequest !== null}>
+		<aside class="inventory-equipment-strip" aria-label="Equipped items">
+			<div class="inventory-equipment-body">
+				<InventoryEquipmentStrip
+					{capacities}
+					equipment={view?.equipment ?? { rows: [], pending: true }}
+					{pending}
+					{iconFor}
+					{selectedGuid}
+					{onSelectItem}
+					{hoveredEquipLocations}
+					onHoverSlot={(mask) => {
+						hoveredEquipmentSlot = mask;
+					}}
+				/>
+			</div>
+			<div
+				class="inventory-equipment-toolbar"
+				role="group"
+				aria-label="Equipment tools"
+			>
+				<button
+					type="button"
+					class="inventory-tool ui-hud-button ui-icon-button"
+					aria-label="Toggle helmet visibility"
+					aria-pressed={appearanceOptions?.showHelmet ?? false}
+					disabled={appearanceOptions === null || appearanceOptionPending}
+					title={appearanceOptions === null
+						? "Helmet visibility unavailable"
+						: `Helmet ${appearanceOptions.showHelmet ? "visible" : "hidden"}`}
+					onclick={() => void toggleAppearanceOption("helmet")}
+				>
+					<ClientHudIcon name="helmet" />
+				</button>
+				<button
+					type="button"
+					class="inventory-tool ui-hud-button ui-icon-button"
+					aria-label="Toggle cloak visibility"
+					aria-pressed={appearanceOptions?.showCloak ?? false}
+					disabled={appearanceOptions === null || appearanceOptionPending}
+					title={appearanceOptions === null
+						? "Cloak visibility unavailable"
+						: `Cloak ${appearanceOptions.showCloak ? "visible" : "hidden"}`}
+					onclick={() => void toggleAppearanceOption("cloak")}
+				>
+					<ClientHudIcon name="cloak" />
+				</button>
+				<button
+					type="button"
+					class="inventory-tool ui-hud-button ui-icon-button"
+					aria-label="Create loadout"
+					title="Create loadout"
+					disabled={pending || view?.equipment.pending !== false}
+					onclick={onSaveLoadout}
+				>
+					<ClientHudIcon name="loadout" />
+				</button>
+			</div>
+		</aside>
+		<ClientContentsView
+			arrivals={inventory}
+			{sections}
+			onContainerContextMenu={openContainerMenu}
+			packs={packSlots}
+			{pending}
+			orientation="vertical"
+			{selectedGuid}
+			{capacities}
+			{iconFor}
+			onHoverItem={(guid) => {
+				hoveredInventoryGuid = guid;
+			}}
+			onSelectItem={selectItem}
+			rootLabel="Main Pack"
+			quantityActionHint={(item) =>
+				!pending && isSplittableInventoryItem(item) ? splitActionHint : null}
+			dimItem={(item) =>
+				!pending &&
+				(workflowDimmed.has(item.guid) ||
+					(hoveredEquipmentSlot !== null &&
+						!(
+							item.description.kind === "known" &&
+							item.description.equipLocations !== null &&
+							(item.description.equipLocations & hoveredEquipmentSlot) !== 0
+						)))}
+		>
+			{#snippet footer()}
+				<div class="inventory-bottom-bar" aria-label="Inventory summary">
+					<InventoryCurrencyOverlay
+						label={`Total pyreals: ${pyrealText}`}
+						rows={view?.currencies ?? []}
+						pending={view?.currenciesPending ?? true}
+						{displays}
+					>
+						<span class="inventory-currency-icon"
+							><UiIcon display={pyrealDisplay} /></span
+						>
+						<span>{pyrealText}</span>
+					</InventoryCurrencyOverlay>
+					<span
+						class="inventory-burden"
+						role="img"
+						aria-label={`Burden: ${burden === null ? "Loading" : burdenText}`}
+						title="Burden"
+						data-level={burdenPresentation.level}
+					>
+						<BurdenIcon />
+						<span>{burdenText}</span>
+					</span>
+					<ClientContentsSortButton
+						mode={sortMode}
+						label="inventory"
+						onclick={() => {
+							inventory.cycleSort();
+							sampleNow?.();
+						}}
+					/>
+				</div>
+			{/snippet}
+		</ClientContentsView>
+	</div>
+	{#if splitRequest !== null}
+		<ClientQuantityDialog
+			request={splitRequest}
+			onSubmit={(amount) => splitOwner?.submit(amount)}
+			onCancel={() => splitOwner?.close()}
+		/>
+	{/if}
+</div>
+
+{#if containerMenu !== null}
+	<PopupMenu
+		anchor={containerMenu.anchor}
+		label="Bag actions"
+		items={[{ action: "auto-merge", label: "Auto-merge", disabled: false }]}
+		onselect={autoMergeSelection(containerMenu.container)}
+		onclose={() => {
+			containerMenu = null;
+		}}
+	/>
+{/if}
+
+<style>
+	@layer components {
+		.inventory-layout {
+			display: contents;
+		}
+		.client-inventory {
+			position: relative;
+			display: grid;
+			grid-template-rows: minmax(0, 1fr);
+			grid-template-columns: auto minmax(0, 1fr);
+			height: 100%;
+			min-height: 0;
+			overflow: hidden;
+		}
+		.inventory-bottom-bar {
+			display: flex;
+			/* Large balances must still fit when the window or theme leaves less room. */
+			flex-wrap: wrap;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
+			padding: 4px var(--ui-inventory-padding);
+			white-space: nowrap;
+		}
+		.inventory-burden {
+			display: inline-flex;
+			align-items: center;
+			gap: 3px;
+			color: var(--ui-inventory-burden-normal-color);
+		}
+		.inventory-burden[data-level="burdened"] {
+			color: var(--ui-inventory-burden-warning-color);
+		}
+		.inventory-burden[data-level="overburdened"] {
+			color: var(--ui-inventory-burden-danger-color);
+		}
+		.inventory-currency-icon {
+			container: inventory-pyreal-icon / inline-size;
+			width: var(--ui-inventory-pyreal-icon-size);
+			height: var(--ui-inventory-pyreal-icon-size);
+			flex: none;
+		}
+		.inventory-currency-icon :global(.ui-icon) {
+			--ui-icon-rendering: var(--ui-inventory-pyreal-icon-upsample-filter);
+		}
+		/* Currency artwork has a 32px native extent; this compares CSS display sizes. */
+		@container inventory-pyreal-icon (width < 32px) {
+			.inventory-currency-icon :global(.ui-icon) {
+				--ui-icon-rendering: var(--ui-inventory-pyreal-icon-downsample-filter);
+			}
+		}
+		.inventory-equipment-strip {
+			grid-column: 1;
+			grid-row: 1 / -1;
+			display: grid;
+			grid-template-rows: minmax(0, 1fr) auto;
+			min-height: 0;
+			border-right: var(--ui-inventory-divider);
+		}
+		.inventory-equipment-body {
+			min-height: 0;
+			overflow: hidden;
+		}
+		.inventory-equipment-toolbar {
+			display: grid;
+			grid-template-columns: repeat(2, 24px);
+			justify-content: center;
+			gap: 8px;
+			padding: 4px var(--ui-inventory-padding);
+			border-top: var(--ui-inventory-divider);
+		}
+		.inventory-tool {
+			width: 24px;
+			height: 24px;
+			padding: 2px;
+		}
+		.inventory-tool :global(svg) {
+			width: 20px;
+			height: 20px;
+		}
+		.inventory-tool[aria-pressed="true"] :global(svg) {
+			filter: drop-shadow(0 0 2px var(--ui-color-active));
+		}
+	}
+</style>

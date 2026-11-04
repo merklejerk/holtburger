@@ -1,0 +1,265 @@
+import type { LandblockOwnerId } from "../game-types";
+import {
+	getLandblockCoordinates,
+	isOutdoorLandblock,
+	normalizeLandblockOwner,
+} from "../landblocks.js";
+import type { ResolvedSceneInterestTarget } from "./scene-target";
+import type { SceneInterestRadii } from "./types";
+
+export enum LandblockLayerKind {
+	Terrain = "terrain",
+	Buildings = "buildings",
+	Objects = "objects",
+	Generated = "generated",
+	EnvCells = "env-cells",
+}
+
+/** Outdoor static layers realized through the common geometry and atlas path. */
+export type OutdoorStaticLayerKind =
+	| LandblockLayerKind.Buildings
+	| LandblockLayerKind.Objects
+	| LandblockLayerKind.Generated;
+
+/** Every non-terrain layer whose visual resources are revision-realized. */
+export type StaticLayerKind =
+	OutdoorStaticLayerKind | LandblockLayerKind.EnvCells;
+
+/** Narrow a landblock layer to the shared outdoor-static realization domain. */
+export function isOutdoorStaticLayer(
+	layer: LandblockLayerKind,
+): layer is OutdoorStaticLayerKind {
+	return (
+		layer === LandblockLayerKind.Buildings ||
+		layer === LandblockLayerKind.Objects ||
+		layer === LandblockLayerKind.Generated
+	);
+}
+
+/** Read-only layer demand keyed by normalized landblock owner. */
+export type SceneInterestMap = ReadonlyMap<
+	LandblockOwnerId,
+	ReadonlySet<LandblockLayerKind>
+>;
+
+/** One landblock of render residency beyond each layer's nominal acquisition radius. */
+const RENDER_SCENE_INTEREST_EXIT_MARGIN = 1;
+
+export interface LandblockIdLayer {
+	readonly id: LandblockOwnerId;
+	readonly layer: LandblockLayerKind;
+}
+
+/** Group layer requests by their one shared cumulative-content acquisition identity. */
+export function groupLandblockLayers(
+	layers: ReadonlySet<LandblockIdLayer>,
+): ReadonlyMap<LandblockOwnerId, LandblockIdLayer[]> {
+	const grouped = new Map<LandblockOwnerId, LandblockIdLayer[]>();
+	for (const layer of layers) {
+		const group = grouped.get(layer.id);
+		if (group) group.push(layer);
+		else grouped.set(layer.id, [layer]);
+	}
+	return grouped;
+}
+
+export interface SceneInterestDiff {
+	newLayers: Set<LandblockIdLayer>;
+	evictedLayers: Set<LandblockIdLayer>;
+}
+
+/** Explicit frontend request for static content after target policy resolution. */
+export interface SceneInterestRequest {
+	/** Profile-resolved target whose policy selects outdoor or dungeon demand. */
+	readonly target: ResolvedSceneInterestTarget;
+	/** Complete enabled-layer and radius policy for this request. */
+	readonly radii: SceneInterestRadii;
+	/** Owners allowed to receive EnvCells from ambient outdoor-radius demand. */
+	readonly ambientOutdoorEnvCellOwners: ReadonlySet<LandblockOwnerId>;
+}
+
+/** Reject a scene-interest radius configuration that cannot produce coherent layers. */
+export function validateSceneInterestRadiiOrThrow(
+	cfg: SceneInterestRadii,
+): void {
+	const optionalRadii = [
+		cfg.buildingRadius,
+		cfg.explicitObjectRadius,
+		cfg.generatedObjectRadius,
+		cfg.envCellRadius,
+	];
+	if (
+		!isValidRadius(cfg.terrainRadius) ||
+		optionalRadii.some(
+			(radius) =>
+				radius !== null &&
+				(!isValidRadius(radius) || radius > cfg.terrainRadius),
+		)
+	) {
+		throw new Error("Invalid scene config.");
+	}
+}
+
+/** Derive every static layer required by an outdoor landblock window. */
+export function computeOutdoorSceneInterest(
+	landblockId: LandblockOwnerId,
+	config: SceneInterestRadii,
+	ambientOutdoorEnvCellOwners: ReadonlySet<LandblockOwnerId>,
+): SceneInterestMap {
+	const anchor = getLandblockCoordinates(landblockId);
+	const suffix = landblockIdSuffix(landblockId);
+	const interest = new Map<LandblockOwnerId, Set<LandblockLayerKind>>();
+	for (
+		let y = anchor.y - config.terrainRadius;
+		y <= anchor.y + config.terrainRadius;
+		y += 1
+	) {
+		for (
+			let x = anchor.x - config.terrainRadius;
+			x <= anchor.x + config.terrainRadius;
+			x += 1
+		) {
+			if (!isOutdoorLandblock(x, y)) continue;
+			const distance = Math.max(Math.abs(x - anchor.x), Math.abs(y - anchor.y));
+			const layers = new Set<LandblockLayerKind>([LandblockLayerKind.Terrain]);
+			if (config.buildingRadius !== null && distance <= config.buildingRadius)
+				layers.add(LandblockLayerKind.Buildings);
+			if (
+				config.explicitObjectRadius !== null &&
+				distance <= config.explicitObjectRadius
+			)
+				layers.add(LandblockLayerKind.Objects);
+			if (
+				config.generatedObjectRadius !== null &&
+				distance <= config.generatedObjectRadius
+			)
+				layers.add(LandblockLayerKind.Generated);
+			const owner = createLandblockId(x, y, suffix);
+			if (
+				config.envCellRadius !== null &&
+				distance <= config.envCellRadius &&
+				ambientOutdoorEnvCellOwners.has(owner)
+			)
+				layers.add(LandblockLayerKind.EnvCells);
+			interest.set(owner, layers);
+		}
+	}
+	return interest;
+}
+
+/** Return the configured nominal radius for a layer, or null when that layer is disabled. */
+function sceneInterestEntryRadius(
+	layer: LandblockLayerKind,
+	config: SceneInterestRadii,
+): number | null {
+	switch (layer) {
+		case LandblockLayerKind.Terrain:
+			return config.terrainRadius;
+		case LandblockLayerKind.Buildings:
+			return config.buildingRadius;
+		case LandblockLayerKind.Objects:
+			return config.explicitObjectRadius;
+		case LandblockLayerKind.Generated:
+			return config.generatedObjectRadius;
+		case LandblockLayerKind.EnvCells:
+			return config.envCellRadius;
+	}
+}
+
+/**
+ * Retain only previously acquired layers that remain inside their exit radius.
+ *
+ * This is a spatial Schmitt trigger: the nominal map acquires at radius R, while prior effective
+ * memberships leave at R + the fixed margin. It never preloads the outer ring.
+ */
+export function retainSceneInterestWithinExitMargin(
+	nominal: SceneInterestMap,
+	previous: SceneInterestMap,
+	anchorId: LandblockOwnerId,
+	config: SceneInterestRadii,
+): SceneInterestMap {
+	const anchor = getLandblockCoordinates(normalizeLandblockOwner(anchorId));
+	const effective = new Map<LandblockOwnerId, Set<LandblockLayerKind>>(
+		[...nominal].map(([owner, layers]) => [owner, new Set(layers)]),
+	);
+
+	for (const [owner, layers] of previous) {
+		const coordinates = getLandblockCoordinates(owner);
+		const distance = Math.max(
+			Math.abs(coordinates.x - anchor.x),
+			Math.abs(coordinates.y - anchor.y),
+		);
+		for (const layer of layers) {
+			const entryRadius = sceneInterestEntryRadius(layer, config);
+			if (
+				entryRadius === null ||
+				distance > entryRadius + RENDER_SCENE_INTEREST_EXIT_MARGIN
+			)
+				continue;
+			const retained = effective.get(owner);
+			if (retained) retained.add(layer);
+			else effective.set(owner, new Set([layer]));
+		}
+	}
+
+	return effective;
+}
+
+/** Derive the one EnvCells layer required by a dungeon owner. */
+export function computeDungeonSceneInterest(
+	landblockId: LandblockOwnerId,
+): SceneInterestMap {
+	const owner = normalizeLandblockOwner(landblockId);
+	return new Map([[owner, new Set([LandblockLayerKind.EnvCells])]]);
+}
+
+export function diffSceneInterest(
+	from: SceneInterestMap,
+	to: SceneInterestMap,
+): SceneInterestDiff {
+	return {
+		newLayers: subtractSceneInterest(to, from),
+		evictedLayers: subtractSceneInterest(from, to),
+	};
+}
+
+function subtractSceneInterest(
+	source: SceneInterestMap,
+	other: SceneInterestMap,
+): Set<LandblockIdLayer> {
+	const difference: LandblockIdLayer[] = [];
+
+	for (const [id, layers] of source) {
+		const otherLayers = other.get(id);
+		for (const layer of layers) {
+			if (!otherLayers?.has(layer)) {
+				difference.push({ id, layer });
+			}
+		}
+	}
+
+	return new Set(difference);
+}
+
+function isValidRadius(radius: number): boolean {
+	return Number.isInteger(radius) && radius >= 0;
+}
+
+function landblockIdSuffix(landblockId: LandblockOwnerId): string {
+	const match = /^(?:0x)?[0-9a-fA-F]{4}([0-9a-fA-F]{4})$/.exec(landblockId);
+	if (!match) throw new Error(`Invalid landblock id ${landblockId}.`);
+	const suffix = match[1];
+	if (suffix === undefined)
+		throw new Error(`Invalid landblock id ${landblockId}.`);
+	return suffix;
+}
+
+function createLandblockId(
+	x: number,
+	y: number,
+	suffix: string,
+): LandblockOwnerId {
+	return normalizeLandblockOwner(
+		`0x${x.toString(16).padStart(2, "0")}${y.toString(16).padStart(2, "0")}${suffix}`,
+	);
+}

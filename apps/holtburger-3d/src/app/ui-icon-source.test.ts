@@ -1,0 +1,198 @@
+import { UiIconRepository, type UiIconServices } from "./ui-icon-repository";
+import { encode } from "@msgpack/msgpack";
+import { describe, expect, it, vi } from "vitest";
+import {
+	decodeUiIcons,
+	prepareUiIcons,
+	MAX_ICON_FRAME_BYTES,
+	MAX_ICON_BATCH,
+	type UiIconRequest,
+} from "./ui-icon-source";
+
+// Synthetic transparent 32x32 PNG; no runtime game assets are required.
+const png = Uint8Array.from(
+	atob(
+		"iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAGklEQVR4nO3BAQEAAACCIP+vbkhAAQAAAO8GECAAARlDNO4AAAAASUVORK5CYII=",
+	),
+	(c) => c.charCodeAt(0),
+);
+const request: UiIconRequest = {
+	key: "first",
+	spec: {
+		kind: "item",
+		base: 0x06000001,
+		itemType: 4,
+		overlay: null,
+		underlay: null,
+		uiEffects: 0,
+	},
+};
+const ready = { key: request.key, kind: "ready", image: png };
+const issue = {
+	layer: "overlay",
+	code: "missing-asset",
+	assetId: 0x06000002,
+	detail: "Missing declared overlay",
+};
+
+/** Header-only fixture: browser image decoding, rather than this boundary, validates PNG payloads. */
+function pngHeader(width: number, height: number): Uint8Array {
+	const bytes = png.slice();
+	const header = new DataView(bytes.buffer);
+	header.setUint32(16, width);
+	header.setUint32(20, height);
+	return bytes;
+}
+
+describe("UI icon host source", () => {
+	it.each([20, 25, 64])(
+		"accepts native standalone PNG header extent %i",
+		(size) => {
+			const base: UiIconRequest = {
+				...request,
+				spec: { kind: "base", base: 1 },
+			};
+			const result = { ...ready, image: pngHeader(size, size) };
+			expect(decodeUiIcons(encode([result]), [base])).toEqual([result]);
+		},
+	);
+	it.each([
+		[0, 25],
+		[25, 0],
+		[MAX_ICON_FRAME_BYTES / 4 + 1, 1],
+	])(
+		"rejects invalid standalone PNG header extents %i x %i",
+		(width, height) => {
+			const base: UiIconRequest = {
+				...request,
+				spec: { kind: "base", base: 1 },
+			};
+			expect(() =>
+				decodeUiIcons(encode([{ ...ready, image: pngHeader(width, height) }]), [
+					base,
+				]),
+			).toThrow("decoded pixel budget");
+		},
+	);
+	it("retains the fixed canvas contract for composed inventory artwork", () => {
+		expect(() =>
+			decodeUiIcons(encode([{ ...ready, image: pngHeader(25, 25) }]), [
+				request,
+			]),
+		).toThrow("native inventory canvas extent");
+	});
+
+	it("round-trips ready, degraded and failed entries while preserving diagnostics", async () => {
+		const results = [
+			ready,
+			{ ...ready, key: "second", kind: "degraded", issues: [issue] },
+			{ key: "third", kind: "failed", issues: [issue] },
+		];
+		const requests = results.map(({ key }) => ({ ...request, key }));
+		const invoke = vi.fn().mockResolvedValue(encode(results));
+		expect(await prepareUiIcons({ invoke }, requests)).toEqual(results);
+		expect(invoke).toHaveBeenCalledWith("prepare_ui_icons", {
+			request: { icons: requests },
+		});
+	});
+	it.each([
+		[ready, ready],
+		[{ ...ready, key: "unexpected" }],
+		[],
+		[{ key: "first", kind: "failed", issues: [] }],
+		[{ ...ready, image: new Uint8Array([1, 2, 3]) }],
+	])("rejects malformed or incomplete batches", (...results) => {
+		expect(() => decodeUiIcons(encode(results), [request])).toThrow();
+	});
+	it("rejects a batch omitting a requested key", () => {
+		expect(() =>
+			decodeUiIcons(encode([ready]), [request, { ...request, key: "second" }]),
+		).toThrow("omitted");
+	});
+	it("rejects oversized transport and propagates command rejection", async () => {
+		expect(() =>
+			decodeUiIcons(new Uint8Array(MAX_ICON_FRAME_BYTES + 1), [request]),
+		).toThrow("byte limit");
+		const error = new Error("host unavailable");
+		await expect(
+			prepareUiIcons({ invoke: vi.fn().mockRejectedValue(error) }, [request]),
+		).rejects.toBe(error);
+	});
+});
+
+describe("host failures through retained icon ownership", () => {
+	it.each([
+		"rejection",
+		"nonbinary",
+		"decode",
+		"duplicate",
+		"missing",
+		"unexpected",
+	] as const)(
+		"settles %s failures and continues the next batch without retrying retained failures",
+		async (fault) => {
+			let calls = 0;
+			const services: UiIconServices = {
+				prepare: (requests) =>
+					prepareUiIcons(
+						{
+							invoke: async () => {
+								calls++;
+								const results = requests.map(({ key }) => ({ ...ready, key }));
+								if (calls !== 1) return encode(results);
+								switch (fault) {
+									case "rejection":
+										throw new Error("Injected host rejection");
+									case "nonbinary":
+										return "invalid response";
+									case "decode":
+										return new Uint8Array([0xc1]);
+									case "duplicate":
+										return encode(results.map(() => results[0]));
+									case "missing":
+										return encode(results.slice(1));
+									case "unexpected":
+										return encode(
+											results.map((result) => ({
+												...result,
+												key: "unexpected",
+											})),
+										);
+								}
+							},
+						},
+						requests,
+					),
+				createImage: vi.fn(async () => "blob:surviving-batch"),
+				revokeImage: vi.fn(),
+				report: vi.fn(),
+			};
+			const repository = new UiIconRepository(services);
+			const owner = repository.createOwner("persistent");
+			const specs = Array.from({ length: MAX_ICON_BATCH + 1 }, (_, index) => ({
+				kind: "item" as const,
+				base: index + 1,
+				itemType: 4,
+				overlay: null,
+				underlay: null,
+				uiEffects: 0,
+			}));
+			const keys = specs.map((spec) => repository.retain(owner, spec));
+			await vi.waitFor(() => {
+				expect(keys.map((key) => repository.read(key).kind)).toEqual([
+					...Array.from({ length: MAX_ICON_BATCH }, () => "failed"),
+					"ready",
+				]);
+			});
+			specs.forEach((spec) => repository.retain(owner, spec));
+			await Promise.resolve();
+			expect(calls).toBe(2);
+			expect(services.createImage).toHaveBeenCalledTimes(1);
+			expect(services.report).toHaveBeenCalledTimes(MAX_ICON_BATCH);
+			repository.dispose();
+			expect(services.revokeImage).toHaveBeenCalledExactlyOnceWith(
+				"blob:surviving-batch",
+			);
+		},
+	);
+});

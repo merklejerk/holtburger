@@ -1,15 +1,20 @@
+use super::collision::{ClientBodyPolicy, ClientSpatialSources};
+use super::movement_types::ClientMovementPolicy;
+use super::navigation_body::NavigationBodySource;
 use anyhow::{Context, Result, anyhow};
-use holtburger_content::ContentRepository;
-use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
+use holtburger_content::{ContentRepository, SceneContentSource, SetupContentSource};
+use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, SpellTable, XpTable};
 use holtburger_session::Session;
-use holtburger_world::{BasicSpatialPhysics, SpatialPhysics, WorldBootstrap, WorldState};
+use holtburger_world::{WorldBootstrap, WorldState};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::broadcast;
 
 use super::{
-    ClientRuntime, ClientState, TurbineChatState, character_selection::CharacterSelectionState,
-    movement::MovementSystem, simulation::ClientSimulationSystem,
+    ClientRuntime, ClientState, PublishedCharacterMotionCapabilities, TurbineChatState,
+    character_selection::CharacterSelectionState, combat_tuning::ClientCombatTuning,
+    movement::MovementSystem,
 };
 
 #[derive(Clone)]
@@ -20,22 +25,53 @@ struct ServerEndpoint {
 
 #[derive(Clone)]
 pub struct ClientRuntimeBuilder {
+    barber_source: Option<Arc<dyn super::barber::ClientBarberSource>>,
     account_name: String,
     server_endpoint: Option<ServerEndpoint>,
     world_bootstrap: Option<Arc<WorldBootstrap>>,
-    spatial_physics: Option<Arc<dyn SpatialPhysics>>,
+    spatial_sources: Option<ClientSpatialSources>,
+    dynamic_script_source: Option<Arc<dyn super::dynamic_script::ClientDynamicScriptSource>>,
+    selection_envelope_source:
+        Option<Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>>,
+    combat_tuning: ClientCombatTuning,
+    /// Placement selected by this frontend; default clients retain append behavior.
+    inventory_placement: super::inventory_storage::InventoryPlacementPolicy,
+    /// Whether an external 3D presentation must acknowledge the first pure-destination frame.
+    /// Non-rendering clients retain the immediate adapter default.
+    requires_external_world_reveal: bool,
     message_dump_dir: Option<PathBuf>,
 }
 
 impl ClientRuntimeBuilder {
     pub fn new(account_name: impl Into<String>) -> Self {
         Self {
+            barber_source: None,
             account_name: account_name.into(),
             server_endpoint: None,
             world_bootstrap: None,
-            spatial_physics: None,
+            spatial_sources: None,
+            dynamic_script_source: None,
+            selection_envelope_source: None,
+            combat_tuning: ClientCombatTuning::default(),
+            inventory_placement: Default::default(),
+            requires_external_world_reveal: false,
             message_dump_dir: None,
         }
+    }
+
+    /// Choose automatic inventory insertion and split placement for this frontend.
+    pub fn inventory_placement(
+        mut self,
+        policy: super::inventory_storage::InventoryPlacementPolicy,
+    ) -> Self {
+        self.inventory_placement = policy;
+        self
+    }
+
+    /// Inject barber-only content preparation without eagerly loading its assets at startup.
+    pub fn barber_source(mut self, source: Arc<dyn super::barber::ClientBarberSource>) -> Self {
+        self.barber_source = Some(source);
+        self
     }
 
     pub fn server(mut self, host: impl Into<String>, port: u16) -> Self {
@@ -55,32 +91,100 @@ impl ClientRuntimeBuilder {
         let skill_table = content
             .read_asset::<SkillTable>("skill table")
             .context("failed to load skill table for client runtime")?;
+        let secondary_attribute_table = content
+            .read_asset::<SecondaryAttributeTable>("secondary attribute table")
+            .context("failed to load secondary attribute table for client runtime")?;
         let spell_table = content
             .read_asset::<SpellTable>("spell table")
             .context("failed to load spell table for client runtime")?;
         let xp_table = content
             .read_asset::<XpTable>("XP table")
             .context("failed to load XP table for client runtime")?;
-        let motion_kinematics = content
-            .read_asset::<MotionKinematics>("motion kinematics table")
-            .context("failed to load motion kinematics table for client runtime")?;
+        let character_titles = content
+            .read_character_title_catalog()
+            .context("failed to load character-title catalog for client runtime")?;
+        let contracts = content
+            .read_contract_catalog()
+            .context("failed to load contract catalog for client runtime")?;
+        let motion_reference = content
+            .read_motion_reference_data()
+            .context("failed to build the motion contract for client runtime")?;
         let soul_emote_catalog = content
             .read_soul_emote_catalog()
             .context("failed to load soul emote catalog for client runtime")?;
 
-        self.world_bootstrap = Some(Arc::new(WorldBootstrap::new(
-            skill_table,
-            spell_table,
-            xp_table,
-            motion_kinematics,
-            soul_emote_catalog,
-        )));
+        self.world_bootstrap = Some(Arc::new(WorldBootstrap {
+            skill_table: Arc::new(skill_table),
+            secondary_attribute_table: Arc::new(secondary_attribute_table),
+            spell_table: Arc::new(spell_table),
+            xp_table: Arc::new(xp_table),
+            character_titles: Arc::new(character_titles),
+            contracts: Arc::new(contracts),
+            motion_sequences: Arc::new(motion_reference.motion_sequences),
+            setup_dimensions: Arc::new(motion_reference.setup_dimensions),
+            soul_emote_catalog: Arc::new(soul_emote_catalog),
+        }));
 
         Ok(())
     }
 
-    pub fn spatial_physics(mut self, physics: Arc<dyn SpatialPhysics>) -> Self {
-        self.spatial_physics = Some(physics);
+    /// Selects physical body behavior with independently supplied environment geometry.
+    pub fn physical_movement_source(
+        mut self,
+        scenes: Arc<dyn SceneContentSource>,
+        source: Arc<dyn super::collision::ClientBodySource>,
+    ) -> Self {
+        self.spatial_sources = Some(ClientSpatialSources {
+            scenes,
+            bodies: ClientBodyPolicy::Physical(source),
+        });
+        self
+    }
+
+    /// Selects point-validated local motion and reduced remote bodies.
+    /// Environment geometry is supplied independently of this behavior.
+    /// The frontend independently supplies bootstrap facts and chooses its static-data provider.
+    pub fn navigation_movement_source(
+        mut self,
+        scenes: Arc<dyn SceneContentSource>,
+        content: Arc<dyn SetupContentSource>,
+    ) -> Self {
+        self.spatial_sources = Some(ClientSpatialSources {
+            scenes,
+            bodies: ClientBodyPolicy::Navigation(Arc::new(NavigationBodySource::new(content))),
+        });
+        self
+    }
+
+    /// Injects immutable content preparation for core-owned object-state script timelines.
+    pub fn dynamic_script_source(
+        mut self,
+        source: Arc<dyn super::dynamic_script::ClientDynamicScriptSource>,
+    ) -> Self {
+        self.dynamic_script_source = Some(source);
+        self
+    }
+
+    /// Injects immutable geometry preparation for host-owned selection broad phase.
+    pub fn selection_envelope_source(
+        mut self,
+        source: Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>,
+    ) -> Self {
+        self.selection_envelope_source = Some(source);
+        self
+    }
+
+    /// Replaces the shared targeted-combat policy for this client composition.
+    pub fn combat_tuning(mut self, tuning: ClientCombatTuning) -> Self {
+        self.combat_tuning = tuning;
+        self
+    }
+
+    /// Requires a presentation adapter to acknowledge the first pure-destination frame before
+    /// core sends ACE's `LoginComplete` action. Desktop 3D mode enables this; the TUI keeps the
+    /// immediate non-rendering adapter.
+    pub fn require_external_world_reveal(mut self) -> Self {
+        self.requires_external_world_reveal = true;
         self
     }
 
@@ -110,17 +214,32 @@ impl ClientRuntimeBuilder {
         })?;
 
         let target = tokio::net::lookup_host(format!("{}:{}", endpoint.host, endpoint.port))
-            .await?
+            .await
+            .map_err(|error| super::ConnectionFailure {
+                state: None,
+                cause: super::ConnectionFailureCause::Local {
+                    operation: super::ConnectionOperation::ResolveAddress,
+                    diagnostic: error.to_string(),
+                },
+            })?
             .next()
-            .ok_or_else(|| {
-                anyhow!(
-                    "Could not resolve server address: {}:{}",
-                    endpoint.host,
-                    endpoint.port
-                )
+            .ok_or_else(|| super::ConnectionFailure {
+                state: None,
+                cause: super::ConnectionFailureCause::Local {
+                    operation: super::ConnectionOperation::ResolveAddress,
+                    diagnostic: format!("No addresses for {}:{}", endpoint.host, endpoint.port),
+                },
             })?;
 
-        let session = Session::new(target).await?;
+        let session = Session::new(target)
+            .await
+            .map_err(|error| super::ConnectionFailure {
+                state: None,
+                cause: super::ConnectionFailureCause::Local {
+                    operation: super::ConnectionOperation::OpenSocket,
+                    diagnostic: format!("{error:#}"),
+                },
+            })?;
 
         self.finish(session)
     }
@@ -131,28 +250,93 @@ impl ClientRuntimeBuilder {
         self.finish(session)
     }
 
+    /// Builds an isolated diagnostic client whose outgoing packets use an in-memory transport.
+    #[cfg(feature = "runtime-fixture")]
+    pub(super) fn build_fixture_client(self) -> Result<ClientRuntime> {
+        self.finish(Session::new_test())
+    }
+
     fn finish(self, session: Session) -> Result<ClientRuntime> {
         let world_bootstrap = self.world_bootstrap.ok_or_else(|| {
             anyhow!("ClientRuntimeBuilder requires world bootstrap before connect()")
         })?;
-        let spatial_physics = self
-            .spatial_physics
-            .unwrap_or_else(|| Arc::new(BasicSpatialPhysics));
-
         let (client_view_event_tx, _) = broadcast::channel(4096);
 
+        let movement_policy = self
+            .spatial_sources
+            .as_ref()
+            .map_or(ClientMovementPolicy::Physical, |sources| {
+                sources.bodies.movement_policy()
+            });
         Ok(ClientRuntime {
+            barber: super::barber::BarberRuntime::new(self.barber_source),
+            inventory_placement: self.inventory_placement,
+            #[cfg(feature = "runtime-fixture")]
+            runtime_fixture: None,
             session,
-            world: WorldState::new_with_spatial_physics(world_bootstrap, spatial_physics),
+            world: WorldState::new(world_bootstrap),
+            event_ordering: None,
+            connection: Default::default(),
+            progression: Default::default(),
             active_confirmation: None,
+            housing_query_deadline: None,
+            allegiance_query_deadline: None,
+            housing_opening: None,
+            housing_queries: Default::default(),
+            entity_facts: super::entity_facts::EntityFactsPublication::default(),
+            player_visual: super::player_visual::PlayerVisualPublication::default(),
+            projectile_appraisal: None,
             active_busy_operation: None,
+            lock_use: None,
+            closing_containers: Default::default(),
+            opened_corpses: Default::default(),
+            recent_deaths: Default::default(),
+            equipment_operation: None,
+            equipment_set: Default::default(),
+            pending_rest_posture: None,
+            published_social_motion_ready: false,
+            pending_combat_mode: None,
+            trade_additions: Default::default(),
+            inventory_operation: None,
             state: ClientState::Connected,
+            published_map_teleport_capability: false,
+            published_recall_destinations: Vec::new(),
+            authenticating: false,
+            world_generation: 0,
+            world_name: None,
+            described_character: None,
+            spell_inspection: super::spell_inspection::SpellInspectionState::default(),
+            exit_outcome: None,
             client_view_event_tx,
+            dynamic_entity_time_origin: Instant::now(),
+            published_character_motion_capabilities:
+                PublishedCharacterMotionCapabilities::Unpublished,
             command_rx: None,
             message_dump_dir: self.message_dump_dir,
             message_counter: 0,
-            movement: MovementSystem::new(),
-            simulation: ClientSimulationSystem::new(),
+            movement: MovementSystem::with_policy(movement_policy),
+            combat_engagement: Default::default(),
+            combat_attribution: Default::default(),
+            combat_tuning: self.combat_tuning,
+            combat_approach_drive_active: false,
+            melee_approach_state: None,
+            collision_coordinator: self.spatial_sources.map(|sources| {
+                super::collision::ClientCollisionCoordinator::with_policy(
+                    sources.scenes,
+                    sources.bodies,
+                )
+            }),
+            dynamic_script_coordinator: self
+                .dynamic_script_source
+                .map(super::dynamic_script::ClientDynamicScriptCoordinator::new),
+            entity_cue_inbox: super::entity_cues::ClientEntityCueInbox::default(),
+            selection_envelope_coordinator: self
+                .selection_envelope_source
+                .map(super::selection_envelope::ClientSelectionEnvelopeCoordinator::new),
+            requires_external_world_reveal: self.requires_external_world_reveal,
+            activation: None,
+            camera: super::camera_service::ClientCameraService::new()?,
+            precise_jump: super::precise_jump_runtime::PreciseJumpRuntime::new(),
             character_selection: CharacterSelectionState::new(self.account_name),
             turbine_chat: TurbineChatState::default(),
         })
@@ -164,17 +348,64 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
     let (client_view_event_tx, _) = broadcast::channel(4096);
 
     let mut client = ClientRuntime {
+        barber: super::barber::BarberRuntime::new(None),
+        inventory_placement: Default::default(),
+        #[cfg(feature = "runtime-fixture")]
+        runtime_fixture: None,
         session: Session::new_test(),
-        world: WorldState::synthetic_with_spatial_physics(Arc::new(BasicSpatialPhysics)),
+        world: WorldState::synthetic(),
+        event_ordering: None,
+        connection: Default::default(),
+        progression: Default::default(),
         active_confirmation: None,
+        housing_query_deadline: None,
+        allegiance_query_deadline: None,
+        housing_opening: None,
+        housing_queries: Default::default(),
+        entity_facts: super::entity_facts::EntityFactsPublication::default(),
+        player_visual: super::player_visual::PlayerVisualPublication::default(),
+        projectile_appraisal: None,
         active_busy_operation: None,
+        lock_use: None,
+        closing_containers: Default::default(),
+        opened_corpses: Default::default(),
+        recent_deaths: Default::default(),
+        equipment_operation: None,
+        equipment_set: Default::default(),
+        pending_rest_posture: None,
+        published_social_motion_ready: false,
+        pending_combat_mode: None,
+        trade_additions: Default::default(),
+        inventory_operation: None,
         state: ClientState::Connected,
+        published_map_teleport_capability: false,
+        published_recall_destinations: Vec::new(),
+        authenticating: false,
+        world_generation: 0,
+        world_name: None,
+        described_character: None,
+        spell_inspection: super::spell_inspection::SpellInspectionState::default(),
+        exit_outcome: None,
         client_view_event_tx,
+        dynamic_entity_time_origin: Instant::now(),
+        published_character_motion_capabilities: PublishedCharacterMotionCapabilities::Unpublished,
         command_rx: None,
         message_dump_dir: None,
         message_counter: 0,
         movement: MovementSystem::new(),
-        simulation: ClientSimulationSystem::new(),
+        combat_engagement: Default::default(),
+        combat_attribution: Default::default(),
+        combat_tuning: ClientCombatTuning::default(),
+        combat_approach_drive_active: false,
+        melee_approach_state: None,
+        collision_coordinator: None,
+        dynamic_script_coordinator: None,
+        entity_cue_inbox: super::entity_cues::ClientEntityCueInbox::default(),
+        selection_envelope_coordinator: None,
+        requires_external_world_reveal: false,
+        activation: None,
+        camera: super::camera_service::ClientCameraService::new().expect("test camera profile"),
+        precise_jump: super::precise_jump_runtime::PreciseJumpRuntime::new(),
         character_selection: CharacterSelectionState::new("test".to_string()),
         turbine_chat: TurbineChatState::default(),
     };
@@ -185,73 +416,61 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_common::{Guid, Vector3};
     use holtburger_content::ContentRepository;
     use holtburger_dat::file_type::{
-        ChatPoseTable, MotionKinematics, SkillTable, SpellTable, XpTable,
+        ChatPoseTable, EnumMapper, MotionTable, SecondaryAttributeTable, SkillTable, SpellTable,
+        StringTable, XpTable,
     };
     use holtburger_dat::{
-        DatFileType, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE, HbaReader, HbaWriter,
+        DatFileType, EOR_LANGUAGE_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter,
         ResourceSource,
     };
-    use holtburger_world::{
-        ContactState, SolveBodyInput, SolvedBodyKinematics, SpatialScene, SpatialSolveBatch,
-        SpatialSolveRequest,
-    };
-    use std::path::{Path, PathBuf};
-    use std::time::Duration;
+    use std::path::Path;
     use tempfile::tempdir;
 
-    #[derive(Debug, Default)]
-    struct MarkerSpatialPhysics;
+    const TEST_MOTION_TABLE_ID: u32 = 0x0900_0001;
+    const TEST_ANIMATION_ID: u32 = 0x0300_0003;
+    const TEST_STYLE: u32 = 0x8000_003D;
 
-    impl SpatialPhysics for MarkerSpatialPhysics {
-        fn solve(
-            &self,
-            request: &SpatialSolveRequest,
-            _scene: &mut SpatialScene,
-        ) -> SpatialSolveBatch {
-            SpatialSolveBatch {
-                solved: request
-                    .bodies
-                    .iter()
-                    .map(|body| {
-                        let (velocity, omega) = match body.basis {
-                            Some(holtburger_world::SolveProjectionBasis::Velocity {
-                                velocity,
-                                omega,
-                            }) => (velocity, omega),
-                            Some(holtburger_world::SolveProjectionBasis::GroundedMotion {
-                                ..
-                            })
-                            | None => (Vector3::zero(), Vector3::zero()),
-                        };
+    /// One motion table holding a single walk cycle that plays the whole test animation.
+    fn test_motion_table_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&TEST_MOTION_TABLE_ID.to_le_bytes());
+        bytes.extend_from_slice(&TEST_STYLE.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // style defaults
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // cycles
+        bytes.extend_from_slice(
+            &MotionTable::cycle_key(TEST_STYLE, MotionTable::WALK_FORWARD_COMMAND).to_le_bytes(),
+        );
+        bytes.push(1); // one clip
+        bytes.push(0); // bitfield
+        bytes.push(0); // flags: no explicit velocity or omega
+        bytes.push(0); // pad to the four-byte boundary the decoder aligns to
+        bytes.extend_from_slice(&TEST_ANIMATION_ID.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes()); // low frame
+        bytes.extend_from_slice(&(-1i32).to_le_bytes()); // open-ended high frame
+        bytes.extend_from_slice(&30.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // modifiers
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // links
+        bytes
+    }
 
-                        SolvedBodyKinematics {
-                            body_id: body.body_id,
-                            pose: body.pose,
-                            velocity,
-                            omega,
-                            contact: ContactState::Grounded,
-                            projection_state: None,
-                        }
-                    })
-                    .collect(),
-                events: Default::default(),
+    /// Two frames of authored root translation and no part frames, matching a pruned record.
+    fn test_animation_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&TEST_ANIMATION_ID.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes()); // POS_FRAMES
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // no parts
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        for _ in 0..2 {
+            for value in [0.0f32, 0.5, 0.0, 1.0, 0.0, 0.0, 0.0] {
+                bytes.extend_from_slice(&value.to_le_bytes());
             }
         }
-    }
-
-    fn repo_assets_hba_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
-    }
-
-    fn test_motion_kinematics_bytes() -> Vec<u8> {
-        let mut bytes = std::io::Cursor::new(Vec::new());
-        MotionKinematics::new()
-            .write(&mut bytes)
-            .expect("test motion kinematics asset should write");
-        bytes.into_inner()
+        for _ in 0..2 {
+            bytes.extend_from_slice(&0u32.to_le_bytes()); // no hooks
+        }
+        bytes
     }
 
     fn test_chat_pose_table_bytes() -> Vec<u8> {
@@ -269,6 +488,17 @@ mod tests {
         bytes
     }
 
+    fn test_secondary_attribute_table_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&SecondaryAttributeTable::FILE_ID.to_le_bytes());
+        for (attribute, divisor) in [(2_u32, 2_u32), (2, 1), (6, 1)] {
+            for field in [0, 1, 0, divisor, attribute, 0] {
+                bytes.extend_from_slice(&field.to_le_bytes());
+            }
+        }
+        bytes
+    }
+
     fn push_pstring_aligned(buf: &mut Vec<u8>, value: &str) {
         let bytes = value.as_bytes();
         buf.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
@@ -278,32 +508,25 @@ mod tests {
         }
     }
 
-    fn write_hba(path: &Path, ids: &[u32]) -> bool {
-        let source_path = repo_assets_hba_path();
-        if !source_path.is_file() {
-            eprintln!(
-                "skipping core builder fixture test; missing repo-local {}",
-                source_path.display()
-            );
-            return false;
-        }
-
-        let source = match HbaReader::open(&source_path) {
-            Ok(source) => source,
-            Err(error) => panic!(
-                "core builder fixture test requires repo-local {} to be a valid HBA v2 fixture: {}",
-                source_path.display(),
-                error
-            ),
-        };
-
+    fn write_hba(path: &Path, ids: &[u32]) {
         let mut writer = HbaWriter::new();
         writer.set_compression(false);
 
         for id in ids {
-            let data = source
-                .get_file_in_namespace(EOR_PORTAL_NAMESPACE, *id)
-                .unwrap_or_else(|_| panic!("repo assets.hba should contain eor/portal:0x{id:08X}"));
+            let mut data = id.to_le_bytes().to_vec();
+            match *id {
+                SkillTable::FILE_ID => data.extend_from_slice(&[0; 4]),
+                SpellTable::FILE_ID => data.extend_from_slice(&[0; 8]),
+                XpTable::FILE_ID => {
+                    data.extend_from_slice(&[0; 20]);
+                    for value in [10u32, 20, 30, 40] {
+                        data.extend_from_slice(&value.to_le_bytes());
+                    }
+                    data.extend_from_slice(&50u64.to_le_bytes());
+                    data.extend_from_slice(&60u32.to_le_bytes());
+                }
+                _ => panic!("unsupported synthetic bootstrap asset {id:#010x}"),
+            }
             writer
                 .add(
                     EOR_PORTAL_NAMESPACE,
@@ -314,14 +537,31 @@ mod tests {
                 .expect("test HBA entry should be added");
         }
 
-        writer
-            .add(
-                HOLTBURGER_CORE_NAMESPACE,
-                MotionKinematics::FILE_ID,
-                DatFileType::MotionKinematics as u32,
-                test_motion_kinematics_bytes(),
-            )
-            .expect("motion kinematics test HBA entry should be added");
+        for (namespace, id) in [
+            (EOR_PORTAL_NAMESPACE, EnumMapper::FILE_ID),
+            (EOR_LANGUAGE_NAMESPACE, StringTable::FILE_ID),
+        ] {
+            let mut data = id.to_le_bytes().to_vec();
+            data.extend_from_slice(&0u32.to_le_bytes());
+            data.extend_from_slice(&[0, 0]); // metadata byte and compressed empty count
+            writer
+                .add(namespace, id, DatFileType::from_id(id) as u32, data)
+                .expect("character-title content test HBA entry should be added");
+        }
+
+        for (file_id, data) in [
+            (TEST_MOTION_TABLE_ID, test_motion_table_bytes()),
+            (TEST_ANIMATION_ID, test_animation_bytes()),
+        ] {
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    file_id,
+                    DatFileType::from_id(file_id) as u32,
+                    data,
+                )
+                .expect("motion content test HBA entry should be added");
+        }
 
         writer
             .add(
@@ -332,9 +572,29 @@ mod tests {
             )
             .expect("chat pose table test HBA entry should be added");
 
-        writer.write(path).expect("test HBA should be written");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                SecondaryAttributeTable::FILE_ID,
+                DatFileType::from_id(SecondaryAttributeTable::FILE_ID) as u32,
+                test_secondary_attribute_table_bytes(),
+            )
+            .expect("secondary attribute table test HBA entry should be added");
 
-        true
+        let mut contracts = holtburger_dat::file_type::ContractTable::FILE_ID
+            .to_le_bytes()
+            .to_vec();
+        contracts.extend_from_slice(&[0, 0, 32, 0]);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                holtburger_dat::file_type::ContractTable::FILE_ID,
+                DatFileType::Table as u32,
+                contracts,
+            )
+            .expect("contract fixture should be added");
+
+        writer.write(path).expect("test HBA should be written");
     }
 
     fn mounted_archive(archive: Arc<HbaReader>) -> Arc<dyn ResourceSource> {
@@ -367,15 +627,15 @@ mod tests {
     fn runtime_builder_load_assets_reads_bootstrap_from_repository() {
         let dir = tempdir().expect("tempdir should be created");
         let bundle_path = dir.path().join("bundle.hba");
-        if !write_hba(
+        write_hba(
             &bundle_path,
             &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
-        ) {
-            return;
-        }
+        );
 
-        let archive = Arc::new(HbaReader::open(&bundle_path).expect("test HBA should open"));
-        let repository = ContentRepository::from_mounts(vec![mounted_archive(archive)]);
+        // The motion contract is built from the repository's resource index, which only an
+        // archive-backed repository populates.
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("test repository should mount");
         let mut builder = ClientRuntimeBuilder::new("test").server("127.0.0.1", 9000);
 
         builder
@@ -386,19 +646,30 @@ mod tests {
             .build_with_session(Session::new_test())
             .expect("runtime builder should build after loading assets");
 
-        assert!(!client.world.skill_table.skill_base_hash.is_empty());
-        assert!(!client.world.spell_catalog.spells.is_empty());
+        assert_eq!(client.world.skill_table.id, SkillTable::FILE_ID);
+        assert_eq!(client.world.xp_table.attribute_xp_list, vec![10]);
+        assert_eq!(client.world.xp_table.character_level_xp_list, vec![50]);
         assert!(client.world.soul_emote_catalog.is_known_token("wave"));
-        assert_eq!(client.world.motion_kinematics.id, MotionKinematics::FILE_ID);
+        let walk = client
+            .world
+            .motion_sequences
+            .table(TEST_MOTION_TABLE_ID)
+            .expect("motion contract should carry the bundled table")
+            .cycle(TEST_STYLE, MotionTable::WALK_FORWARD_COMMAND)
+            .expect("motion contract should carry the bundled walk cycle");
+        assert_eq!(walk.clips.len(), 1);
+        assert_eq!(walk.clips[0].animation.id, TEST_ANIMATION_ID);
+        assert_eq!(
+            walk.clips[0].high_frame, 1,
+            "the open-ended window resolves"
+        );
     }
 
     #[test]
     fn runtime_builder_load_assets_fails_when_repository_is_missing_required_asset() {
         let dir = tempdir().expect("tempdir should be created");
         let bundle_path = dir.path().join("bundle.hba");
-        if !write_hba(&bundle_path, &[SpellTable::FILE_ID, XpTable::FILE_ID]) {
-            return;
-        }
+        write_hba(&bundle_path, &[SpellTable::FILE_ID, XpTable::FILE_ID]);
 
         let archive = Arc::new(HbaReader::open(&bundle_path).expect("test HBA should open"));
         let repository = ContentRepository::from_mounts(vec![mounted_archive(archive)]);
@@ -408,33 +679,5 @@ mod tests {
             .expect_err("runtime builder should fail when a required asset is missing");
 
         assert!(error.to_string().contains("skill table"));
-    }
-
-    #[test]
-    fn runtime_builder_injects_custom_spatial_physics() {
-        let client = ClientRuntimeBuilder::new("test")
-            .server("127.0.0.1", 9000)
-            .world_bootstrap(Arc::new(WorldBootstrap::synthetic()))
-            .spatial_physics(Arc::new(MarkerSpatialPhysics))
-            .build_with_session(Session::new_test())
-            .expect("runtime builder should accept custom spatial physics");
-
-        let request = SpatialSolveRequest {
-            dt: Duration::from_millis(30),
-            bodies: vec![SolveBodyInput::velocity(
-                holtburger_world::SpatialBodyId::Entity(Guid(0x5000_0001)),
-                Default::default(),
-                holtburger_world::ContactState::Unknown,
-                Vector3::zero(),
-                Vector3::zero(),
-            )],
-            local_drive: None,
-        };
-        let mut scene = SpatialScene::new_with_physics(Arc::clone(client.world.scene.physics()));
-
-        let batch = Arc::clone(client.world.scene.physics()).solve(&request, &mut scene);
-
-        assert_eq!(batch.solved.len(), 1);
-        assert_eq!(batch.solved[0].contact, ContactState::Grounded);
     }
 }

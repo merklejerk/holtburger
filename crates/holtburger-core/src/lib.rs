@@ -1,16 +1,158 @@
 pub mod character_gen;
 pub mod client;
+pub mod content_assets;
+pub mod dynamic_entity;
+pub mod dynamic_entity_view;
+pub mod dynamic_scripts;
 pub mod errors;
+pub mod kinematic_boom;
+pub mod physical_body_definition;
+pub mod placed_motion;
+pub mod simulation_scene;
 pub mod soul_emote_motion;
 
 pub use character_gen::{
     CharacterGenBuild, CharacterGenBuilder, CharacterGenPolicy, CharacterGenValidationError,
 };
+pub use client::character_axes::{
+    AdjustedCharacterAxes, AdjustedForwardAxis, CharacterAxisAdjustmentError,
+    adjust_character_axes, adjust_character_axes_for_run_rate, motion_order_for_drive,
+};
+pub use client::character_jump::{
+    CharacterJumpReadiness, CharacterJumpRejection, ResolvedJump, resolve_character_jump,
+    retail_jump_charge_profile,
+};
+pub use client::character_kinematics::{
+    CharacterJumpKinematics, CharacterKinematicsError, CharacterMovementKinematics,
+    retail_jump_kinematics,
+};
+pub use client::character_motion::{
+    CharacterMotionController, CharacterMotionEvent, CharacterMotionEventResult,
+    CharacterMotionReadiness, CharacterMotionRejection, CharacterMotionSequence, JumpAttempt,
+    JumpChargeProfile, JumpExtent, JumpExtentError, SequencedCharacterMotionEvent,
+};
+pub use client::collision::{
+    CLIENT_COLLISION_OWNER_RADIUS, ClientBodyReadiness, ClientBodySource,
+    ClientCollisionCoordinator, ClientEntityBodyFacts, ClientEntityBodyFactsError,
+    ClientPlayerIdentity, ContentClientPhysicsSource, client_entity_body_facts,
+    client_player_body_facts,
+};
+pub use client::combat_feedback::combat_feedback_message;
+pub use client::combat_tuning::{
+    ClientCombatTuning, ClientCombatTuningError, DEFAULT_MELEE_MAX_CHASE_DISTANCE,
+};
+pub use client::connection_failure::{
+    CharacterErrorCode, ClientExitOutcome, ConnectionFailure, ConnectionFailureCause,
+    ConnectionOperation,
+};
+pub use client::dynamic_script::{
+    ClientDynamicScriptFacts, ClientDynamicScriptSource, ContentClientDynamicScriptSource,
+    PreparedClientDynamicScript,
+};
+pub use client::entity_facts::{ClientEntityDelta, ClientEntitySnapshot};
+pub use client::precise_jump::{
+    PreciseJumpCandidateRejection, PreciseJumpLaunchCandidate, PreciseJumpWorldDisplacement,
+    PreciseJumpWorldDisplacementError, SelectedPreciseJumpLaunch, resolve_selected_precise_jump,
+};
+pub use client::precise_jump_prediction::{
+    PRECISE_JUMP_FIXED_TICK, PreciseJumpFlight, PreciseJumpFlightOutcome, PreciseJumpFlightRequest,
+    PreciseJumpFlightSegment, PreciseJumpPredictionControl, PreciseJumpPredictionError,
+    PreciseJumpPredictionIncompleteReason, PreciseJumpTarget, PreciseJumpTargetError,
+    PreciseJumpTrajectory, PreciseJumpTrajectoryPlacement, predict_selected_precise_jump,
+};
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
+pub use client::selection_envelope::{
+    ClientSelectionEnvelopeProfile, ClientSelectionEnvelopeSource,
+    ContentClientSelectionEnvelopeSource,
+};
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
-    BusyOperationResult, ClientCommand, ClientState, ClientViewEvent, PlayerCharacterOptions,
+    BusyOperationResult, ClientApplicationSnapshot, ClientAttackProfile,
+    ClientCharacterMotionCapabilities, ClientCharacterMotionFeedback, ClientCharacterMotionOutcome,
+    ClientCharacterMotionRejection, ClientCharacterSummary, ClientCombatControlState,
+    ClientCombatEngagement, ClientCombatRefillEstimate, ClientCombatStatus, ClientCommand,
+    ClientDynamicScriptCue, ClientDynamicSoundCue, ClientExitCause, ClientLifecycleState,
+    ClientPresentationDiscontinuityKind, ClientState, ClientViewEvent, ClientWorldActivationCause,
     RetryState,
 };
+pub use client::{
+    ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,
+    ClientCameraDiagnostics, ClientCameraFailureReason, ClientCameraIdentity,
+    ClientCameraInputHandle, ClientCameraIntentRequest, ClientCameraReseedReason,
+    ClientCameraStartReceipt, ClientCameraStartRequest, ClientCameraTargetSphereRole,
+    ClientCameraTick, ClientCameraUpdateReceipt, PreciseJumpActionSequence, PreciseJumpAimRequest,
+    PreciseJumpAimSequence, PreciseJumpCancelRequest, PreciseJumpCommitRequest,
+    PreciseJumpEvaluation, PreciseJumpEvaluationStatus, PreciseJumpLaunchView,
+    PreciseJumpPreviewCurve, PreciseJumpProgress, PreciseJumpResolvedLaunch, PreciseJumpTargetView,
+    PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection,
+};
+pub use client::{
+    ClientCharacterSheet, ClientCharacterSkill, ClientCharacterTitle,
+    ClientCharacterTitleSelection, ClientProgressionEvaluation, ClientProgressionFeedback,
+    ClientProgressionQuote, ClientProgressionRejection, ClientProgressionUnavailable,
+};
 pub use client::{ClientRuntime, ClientRuntimeBuilder};
+pub use client::{
+    EntitySelectionQueryOutcome, EntitySelectionQueryRequest, EntitySelectionQueryResult,
+    EntitySelectionQuerySequence, EntitySelectionQueryUnavailable,
+};
+pub use content_assets::{
+    ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
+    SetupAppearanceRequest, SurfaceTexturePixelsRequest,
+};
+pub use dynamic_entity::{
+    DynamicEntityBodyCommitOutcome, DynamicEntityBodyOperationError,
+    DynamicEntityBodyRemovalOutcome, DynamicEntityBodyReplacementOutcome, DynamicEntityContent,
+    DynamicEntityDefinition, DynamicEntityDefinitionError, DynamicEntityDefinitionInput,
+    DynamicEntityIdentity, DynamicEntityInitialState, DynamicEntityLaunchError,
+    DynamicEntityLaunchPlan, DynamicEntityMapBlipCategory, DynamicEntityPhysicalPreparationError,
+    DynamicEntityPhysicalPreparationInput, DynamicEntityPresentationClass,
+    DynamicEntityProjectionInput, DynamicEntityRadarFacts, DynamicEntitySetupPreparation,
+    DynamicEntitySpatialMembership, DynamicEntityWorldProjection, dynamic_entity_projection_input,
+    dynamic_entity_projection_input_from_body, explorer_dynamic_entity_map_blip_category,
+    explorer_dynamic_entity_presentation_class, install_dynamic_entity_body,
+    material_appearance_input, prepare_dynamic_entity_physical_definition,
+    prepare_dynamic_entity_physics, prepare_dynamic_entity_setup, remove_dynamic_entity_body,
+    replace_dynamic_entity_body, resolve_dynamic_entity_launch,
+    semantic_dynamic_entity_map_blip_category, semantic_dynamic_entity_presentation_class,
+    set_dynamic_entity_physical_configuration,
+};
+pub use dynamic_entity_view::{
+    DynamicEntityAdvance, DynamicEntityClip, DynamicEntityClipCompletion, DynamicEntityContactView,
+    DynamicEntityDisplayView, DynamicEntityEvent, DynamicEntityHostTime, DynamicEntityIdentityView,
+    DynamicEntityMotion, DynamicEntityMotionActivity, DynamicEntityMotionLayer,
+    DynamicEntityPathLeg, DynamicEntityPathPoint, DynamicEntityPhysicsView,
+    DynamicEntityPlacedPath, DynamicEntityPlacementAdvanceKind, DynamicEntityPlacementView,
+    DynamicEntityPresentationView, DynamicEntitySampleModeView, DynamicEntitySnapshot,
+    DynamicEntityTickBatch, DynamicEntityView, DynamicEntityViewSource,
+    PhysicalBodyParticipationView, dynamic_entity_display_view, project_dynamic_entity_view,
+};
+pub use dynamic_scripts::{
+    DueDynamicScriptCommand, DynamicScriptActivation, DynamicScriptCommand,
+    DynamicScriptController, DynamicScriptError, DynamicScriptTarget,
+    PreparedDynamicScriptTimeline, PreparedScriptRecord, prepare_dynamic_script_timeline,
+};
+pub use holtburger_content::LandblockCollisionAsset;
+pub use holtburger_world::player::PlayerCharacterOptions;
+pub use kinematic_boom::{
+    KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomCollisionProof,
+    KinematicBoomController, KinematicBoomDiagnostics, KinematicBoomFailureReason,
+    KinematicBoomInputError, KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPathLeg,
+    KinematicBoomPathPoint, KinematicBoomPlacedPath, KinematicBoomPlacement, KinematicBoomProfile,
+    KinematicBoomProfileDefinition, KinematicBoomProfileError, KinematicBoomReseedReason,
+    KinematicBoomTargetSample, KinematicBoomTargetSeed, KinematicBoomUpdateAcceptance,
+    KinematicBoomWorldPoint, resolve_camera_pivot_offset, serialize_kinematic_boom_path,
+    standard_kinematic_boom_profile, stationary_kinematic_boom_path,
+};
+pub use physical_body_definition::{
+    RETAIL_DUMMY_MOTION_SPHERE, ResolvedBodyProfile, SetupPhysicalShapeError,
+    physical_fly_viewer_profile, resolve_setup_physical_spheres, retail_grounded_body,
+    retail_grounded_body_with_policy, retail_player_grounded_profile,
+};
+pub use simulation_scene::{
+    SimulationSceneBatchCompletion, SimulationSceneInterest, SimulationSceneOwnerAvailability,
+    SimulationSceneOwnerOutcome, SimulationSceneOwnerRequest, SimulationScenePublication,
+    SimulationSceneRequest, SimulationSceneResidency, SimulationSceneResidencyError,
+    SimulationSceneSnapshot, StagedSimulationScenePublication,
+};
 pub use soul_emote_motion::motion_command_for_soul_emote_pose;

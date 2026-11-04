@@ -1,0 +1,287 @@
+import {
+	acFrameTransform,
+	sceneVec3,
+	type SceneVec3,
+} from "../../assets/ac-frame";
+import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
+import type { DatAssetId, EnvCellId, LandblockOwnerId } from "../game-types";
+import {
+	OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	createLandblockWorldOrigin,
+} from "../landblocks";
+import { Vec3 } from "../math/types";
+import type { ResolvedObjectBehavior } from "../resolution/landblock-layer";
+import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
+import type {
+	DynamicEntityAdvance,
+	DynamicEntityView,
+	DynamicEntityWorldPlacement,
+} from "./dynamic-entity-feed";
+import type {
+	SceneResidency,
+	SceneScope,
+	SceneSpatialPlacement,
+} from "../scene";
+
+/** Runtime realization state of one accepted entity level. */
+export type DynamicEntityRealizationDisposition =
+	"installed" | "deferred" | "unavailable";
+
+/** Per-entity realization result produced at an explicit population/readiness boundary. */
+export type DynamicEntityRealizationResults = ReadonlyMap<
+	number,
+	DynamicEntityRealizationDisposition
+>;
+
+/** Build the generation-qualified identity shared by runtime ownership and renderer policy. */
+export function dynamicEntityPresentationIdentity(
+	guid: number,
+	generation: number,
+): string {
+	return `dynamic-entity:${formatGuid(guid)}/${generation}`;
+}
+
+/** Join one host-projected live entity with its separately resolved immutable visual closure. */
+export function adaptDynamicEntityPresentation(
+	entity: DynamicEntityView,
+	visual: DecodedStaticPresentation,
+	placement = dynamicEntityPlacement(entity),
+): PlacedDynamicPresentationSource {
+	const expectedSetupId = datAssetId(entity.presentation.content.setupDid);
+	if (visual.setupId?.toLowerCase() !== expectedSetupId) {
+		throw new Error(
+			`Dynamic entity ${formatGuid(entity.identity.guid)} visual resolved ${visual.setupId ?? "no setup"}, expected ${expectedSetupId}.`,
+		);
+	}
+	return {
+		placement,
+		playback: { kind: "source-owned" },
+		initialPresentationState: {
+			cloaked: entity.physics.cloaked,
+			hidden: entity.physics.hidden,
+			lighting: entity.physics.lighting,
+			noDraw: entity.physics.noDraw,
+			translucency: entity.physics.translucency,
+		},
+		source: {
+			entityClass: entity.presentation.entityClass,
+			nameplate: { ...entity.display, indicators: [], strikeThrough: false },
+			behavior: {
+				...withPhysicsScriptTableOverride(
+					visual.behavior,
+					entity.presentation.content.physicsEffectTableDid === null
+						? null
+						: datAssetId(entity.presentation.content.physicsEffectTableDid),
+				),
+				// The entity names the table it animates from; the setup's own default already
+				// resolved host-side, so an absent id here means the entity has no motion at all.
+				motionTableId:
+					entity.presentation.content.motionTableDid === null
+						? null
+						: datAssetId(entity.presentation.content.motionTableDid),
+				soundTableId:
+					entity.presentation.content.soundTableDid === null
+						? visual.behavior.soundTableId
+						: datAssetId(entity.presentation.content.soundTableDid),
+			},
+			identity: dynamicEntityPresentationIdentity(
+				entity.identity.guid,
+				entity.generation,
+			),
+			localBounds: visual.localBounds,
+			presentation: visual.presentation,
+			placementFrame: entity.presentation.placementFrame,
+			scale: new Vec3(
+				entity.presentation.objectScale,
+				entity.presentation.objectScale,
+				entity.presentation.objectScale,
+			),
+			setupId: expectedSetupId,
+		},
+	};
+}
+
+/** Apply an entity table override without breaking the closed setup-behavior classification. */
+function withPhysicsScriptTableOverride(
+	behavior: ResolvedObjectBehavior,
+	override: DatAssetId | null,
+): ResolvedObjectBehavior {
+	if (override === null) return behavior;
+	if (behavior.kind === "none") {
+		return {
+			...behavior,
+			kind: "script-only",
+			physicsScriptTableId: override,
+		};
+	}
+	if (behavior.kind === "animation-only") {
+		return {
+			...behavior,
+			kind: "animation-and-script",
+			physicsScriptTableId: override,
+		};
+	}
+	return { ...behavior, physicsScriptTableId: override };
+}
+
+/** Accepted root origin in canonical scene space; no EnvCell topology or mesh is required. */
+export function dynamicEntityWorldOrigin(
+	placement: DynamicEntityWorldPlacement,
+): SceneVec3 {
+	const { pose } = placement;
+	const origin = createLandblockWorldOrigin(
+		landblockCoordinates(pose.landblockId),
+	);
+	// Same AC Z-up to scene Y-up conversion as acFrameTransform, without building a matrix.
+	return sceneVec3(
+		new Vec3(origin.x + pose.coords.x, pose.coords.z, origin.z - pose.coords.y),
+	);
+}
+
+/** Convert one host-accepted AC pose without re-resolving portal residency in the frontend. */
+export function dynamicEntityPlacement(
+	entity: DynamicEntityView,
+): SceneSpatialPlacement {
+	if (entity.placement.kind !== "world") {
+		throw new Error(
+			`Attached dynamic entity ${formatGuid(entity.identity.guid)} has no world placement.`,
+		);
+	}
+	return dynamicEntityPlacementFromPoint(entity.placement);
+}
+
+/** Resident owner/cell identity shared by scene admission and encounter membership. */
+export function dynamicEntityResidency(
+	point: Pick<DynamicEntityWorldPlacement, "pose">,
+): SceneResidency {
+	const cellId = point.pose.landblockId >>> 0;
+	return {
+		landblockId: datAssetId(
+			(cellId & 0xffff_0000) | 0xffff,
+		) as LandblockOwnerId,
+		envCellId:
+			(cellId & 0xffff) >= 0x0100 ? (datAssetId(cellId) as EnvCellId) : null,
+	};
+}
+
+/** Convert one host-authored root point without re-deriving its plural spatial membership. */
+export function dynamicEntityPlacementFromPoint(
+	point: DynamicEntityWorldPlacement | DynamicEntityAdvance["path"]["initial"],
+): SceneSpatialPlacement {
+	const { pose, spatialMembership } = point;
+	return {
+		...dynamicEntityResidency(point),
+		localTransform: acFrameTransform(
+			{
+				origin: [pose.coords.x, pose.coords.y, pose.coords.z],
+				orientation: [
+					pose.rotation.w,
+					pose.rotation.x,
+					pose.rotation.y,
+					pose.rotation.z,
+				],
+			},
+			[1, 1, 1],
+		),
+		spatialMembership: {
+			scopes: spatialMembershipScopes(spatialMembership),
+		},
+	};
+}
+
+/** Interpolate one placement-stable half-open path leg in its starting residency. */
+export function interpolateDynamicEntityPlacement(
+	start: DynamicEntityAdvance["path"]["initial"],
+	end: DynamicEntityAdvance["path"]["initial"],
+	fraction: number,
+): SceneSpatialPlacement {
+	const startPlacement = dynamicEntityPlacementFromPoint(start);
+	const startOwner = landblockCoordinates(start.pose.landblockId);
+	const endOwner = landblockCoordinates(end.pose.landblockId);
+	const startWorldX =
+		startOwner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + start.pose.coords.x;
+	const startWorldY =
+		startOwner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + start.pose.coords.y;
+	const endWorldX =
+		endOwner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.pose.coords.x;
+	const endWorldY =
+		endOwner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.pose.coords.y;
+	const rotation = interpolateQuaternion(
+		start.pose.rotation,
+		end.pose.rotation,
+		fraction,
+	);
+	return {
+		envCellId: startPlacement.envCellId,
+		landblockId: startPlacement.landblockId,
+		localTransform: acFrameTransform(
+			{
+				origin: [
+					start.pose.coords.x + (endWorldX - startWorldX) * fraction,
+					start.pose.coords.y + (endWorldY - startWorldY) * fraction,
+					start.pose.coords.z +
+						(end.pose.coords.z - start.pose.coords.z) * fraction,
+				],
+				orientation: [rotation.w, rotation.x, rotation.y, rotation.z],
+			},
+			[1, 1, 1],
+		),
+		spatialMembership: startPlacement.spatialMembership,
+	};
+}
+
+function spatialMembershipScopes(
+	membership: DynamicEntityWorldPlacement["spatialMembership"],
+): readonly SceneScope[] {
+	const scopes: SceneScope[] = membership.reachesOutdoors
+		? [{ kind: "outdoor" }]
+		: [];
+	for (const rawEnvCellId of membership.reachedEnvCellIds) {
+		const envCellId = rawEnvCellId >>> 0;
+		if ((envCellId & 0xffff) < 0x0100) {
+			throw new Error(
+				`Dynamic spatial membership contains non-EnvCell 0x${envCellId.toString(16).padStart(8, "0")}.`,
+			);
+		}
+		scopes.push({
+			envCellId: datAssetId(envCellId) as EnvCellId,
+			kind: "env-cell",
+			landblockId: datAssetId(
+				(envCellId & 0xffff_0000) | 0xffff,
+			) as LandblockOwnerId,
+		});
+	}
+	return scopes;
+}
+
+function landblockCoordinates(cellId: number): { x: number; y: number } {
+	return { x: (cellId >>> 24) & 0xff, y: (cellId >>> 16) & 0xff };
+}
+
+function interpolateQuaternion(
+	start: DynamicEntityWorldPlacement["pose"]["rotation"],
+	end: DynamicEntityWorldPlacement["pose"]["rotation"],
+	fraction: number,
+): DynamicEntityWorldPlacement["pose"]["rotation"] {
+	const dot =
+		start.w * end.w + start.x * end.x + start.y * end.y + start.z * end.z;
+	const sign = dot < 0 ? -1 : 1;
+	const w = start.w + (end.w * sign - start.w) * fraction;
+	const x = start.x + (end.x * sign - start.x) * fraction;
+	const y = start.y + (end.y * sign - start.y) * fraction;
+	const z = start.z + (end.z * sign - start.z) * fraction;
+	const length = Math.hypot(w, x, y, z);
+	if (!Number.isFinite(length) || length <= Number.EPSILON) {
+		throw new Error("Dynamic-entity path produced an invalid rotation.");
+	}
+	return { w: w / length, x: x / length, y: y / length, z: z / length };
+}
+
+/** The feed carries dat ids as numbers; every asset repository keys on the canonical hex form. */
+export function datAssetId(value: number): DatAssetId {
+	return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function formatGuid(value: number): string {
+	return datAssetId(value);
+}

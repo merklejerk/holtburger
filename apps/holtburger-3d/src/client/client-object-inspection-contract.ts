@@ -1,0 +1,660 @@
+import { itemCooldownDefinitionSchema } from "./client-item-cooldowns-contract";
+import { z } from "zod";
+import {
+	clientIconAppearanceSchema,
+	lockToolFactsSchema,
+} from "./client-entity-mirror";
+
+const u32 = z.number().int().nonnegative().max(0xffff_ffff);
+const i32 = z.number().int().min(-0x8000_0000).max(0x7fff_ffff);
+const finiteNumber = z.number().finite();
+const enchantmentPolaritySchema = z.enum(["beneficial", "harmful"]).nullable();
+const enchantedValueSchema = <T extends z.ZodTypeAny>(value: T) =>
+	z
+		.object({
+			effective: value,
+			unbuffed: value.nullable(),
+			enchantment: enchantmentPolaritySchema,
+		})
+		.strict();
+
+/** Frontend examination intent; the host maps it to the existing identify command. */
+export const objectInspectionTargetSchema = z.object({ guid: u32 }).strict();
+
+/**
+ * Name of a Rust semantic enum whose complete vocabulary is owned by shared game data.
+ *
+ * These names are deliberately open so a newer host can surface an explicit unknown label rather
+ * than making the entire inspection unreadable. Object and discriminant shapes remain strict.
+ */
+const semanticEnumName = z.string().trim().min(1);
+
+const capacitySchema = z
+	.object({ items: u32.nullable(), containers: u32.nullable() })
+	.strict();
+const itemStatusSchema = z
+	.object({
+		bonded: z.enum(["destroy", "slippery", "normal", "bonded"]).nullable(),
+		attuned: z.enum(["Normal", "Attuned", "Sticky"]).nullable(),
+		retained: z.boolean().nullable(),
+		isOpen: z.boolean().nullable(),
+		isLocked: z.boolean().nullable(),
+		sellable: z.boolean().nullable(),
+		ivoryable: z.boolean().nullable(),
+		dyeable: z.boolean().nullable(),
+		unenchantable: z.boolean().nullable(),
+	})
+	.strict();
+const countSchema = z.object({ current: u32.nullable(), max: u32 }).strict();
+const vitalRangeSchema = z.object({ current: u32, max: u32 }).strict();
+const armorCoverageValueSchema = z
+	.object({ level: u32, enchantable: z.boolean() })
+	.strict();
+const protectionsSchema = z
+	.object({
+		slashing: enchantedValueSchema(finiteNumber),
+		piercing: enchantedValueSchema(finiteNumber),
+		bludgeoning: enchantedValueSchema(finiteNumber),
+		fire: enchantedValueSchema(finiteNumber),
+		cold: enchantedValueSchema(finiteNumber),
+		acid: enchantedValueSchema(finiteNumber),
+		lightning: enchantedValueSchema(finiteNumber),
+		nether: enchantedValueSchema(finiteNumber),
+	})
+	.strict();
+const bonusSchema = z
+	.object({
+		kind: z.enum([
+			"attack",
+			"defense",
+			"missileDefense",
+			"magicDefense",
+			"elementalDamage",
+			"manaConversion",
+			"criticalFrequency",
+		]),
+		value: enchantedValueSchema(finiteNumber),
+	})
+	.strict();
+
+const ownerRequirementSchema = z
+	.object({
+		type: z.literal("owner"),
+		data: z.object({ name: z.string().nullable() }).strict(),
+	})
+	.strict();
+const wieldRequirementSchema = z.discriminatedUnion("type", [
+	z
+		.object({
+			type: z.enum(["skill", "raw-skill"]),
+			data: z.object({ skill: semanticEnumName, difficulty: i32 }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.enum(["attribute", "raw-attribute"]),
+			data: z
+				.object({
+					attribute: z.enum([
+						"undef",
+						"strength",
+						"endurance",
+						"quickness",
+						"coordination",
+						"focus",
+						"self",
+					]),
+					difficulty: i32,
+				})
+				.strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.enum(["vital", "raw-vital"]),
+			data: z
+				.object({
+					vital: z.enum([
+						"undef",
+						"max-health",
+						"health",
+						"max-stamina",
+						"stamina",
+						"max-mana",
+						"mana",
+					]),
+					difficulty: i32,
+				})
+				.strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("level"),
+			data: z.object({ level: i32 }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("training"),
+			data: z
+				.object({
+					skill: semanticEnumName,
+					level: z.enum(["inactive", "untrained", "trained", "specialized"]),
+				})
+				.strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("int-stat"),
+			data: z.object({ property: semanticEnumName, value: i32 }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("bool-stat"),
+			data: z
+				.object({ property: semanticEnumName, value: z.boolean() })
+				.strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("creature-type"),
+			data: z.object({ creatureType: semanticEnumName }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("heritage"),
+			data: z
+				.object({
+					heritage: z.enum([
+						"invalid",
+						"aluvian",
+						"gharundim",
+						"sho",
+						"viamontian",
+						"shadowbound",
+						"gearknight",
+						"tumerok",
+						"lugian",
+						"empyrean",
+						"penumbraen",
+						"undead",
+						"olthoi",
+						"olthoi-acid",
+					]),
+				})
+				.strict(),
+		})
+		.strict(),
+	ownerRequirementSchema,
+]);
+
+const unitEffectTypes = [
+	"armor-cleaving",
+	"slash-cleaving",
+	"pierce-cleaving",
+	"bludgeon-cleaving",
+	"acid-cleaving",
+	"cold-cleaving",
+	"electric-cleaving",
+	"fire-cleaving",
+	"nether-cleaving",
+	"magic-absorption",
+	"multistrike",
+] as const;
+const effectSchema = z.discriminatedUnion("type", [
+	z.object({ type: z.enum(unitEffectTypes) }).strict(),
+	z
+		.object({
+			type: z.enum(["biting-strike", "crushing-blow"]),
+			data: finiteNumber,
+		})
+		.strict(),
+	z.object({ type: z.literal("cleaving"), data: i32 }).strict(),
+	z
+		.object({
+			type: z.literal("slayer"),
+			data: z
+				.object({ creatureType: semanticEnumName, bonus: finiteNumber })
+				.strict(),
+		})
+		.strict(),
+]);
+
+// Activation constraints keep threshold-only and training-only evidence explicit.
+const skillActivationRequirementSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("minimum"), minimum: i32 }).strict(),
+	z
+		.object({
+			kind: z.literal("training"),
+			training: z.enum(["trained", "specialized"]),
+			minimum: i32.nullable(),
+		})
+		.strict(),
+]);
+
+const useRequirementSchema = z.discriminatedUnion("type", [
+	z
+		.object({
+			type: z.literal("skill"),
+			data: z
+				.object({
+					skill: semanticEnumName,
+					requirement: skillActivationRequirementSchema,
+				})
+				.strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("level"),
+			data: z.object({ level: i32 }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("attribute"),
+			data: z.object({ attribute: semanticEnumName, minimum: i32 }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("vital"),
+			data: z.object({ vital: semanticEnumName, minimum: i32 }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("heritage"),
+			data: z.object({ heritage: semanticEnumName }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("allegiance-rank"),
+			data: z.object({ rank: i32 }).strict(),
+		})
+		.strict(),
+	ownerRequirementSchema,
+]);
+const gearRatingSchema = z
+	.object({
+		kind: z.enum([
+			"damage",
+			"damage-resistance",
+			"critical",
+			"critical-resistance",
+			"critical-damage",
+			"critical-damage-resistance",
+			"healing-boost",
+			"nether-resistance",
+			"life-resistance",
+			"max-health",
+			"player-killer-damage",
+			"player-killer-damage-resistance",
+			"overpower",
+			"overpower-resistance",
+		]),
+		value: i32,
+	})
+	.strict();
+
+const itemXpSchema = z
+	.string()
+	.regex(/^(0|[1-9]\d*)$/)
+	.refine((value) => BigInt(value) <= 0xffff_ffff_ffff_ffffn);
+
+const itemInspectionSchema = z
+	.object({
+		progression: z
+			.object({
+				level: u32,
+				maxLevel: u32,
+				totalXp: itemXpSchema,
+				advancement: z.discriminatedUnion("kind", [
+					z
+						.object({
+							kind: z.literal("advancing"),
+							levelStartXp: itemXpSchema,
+							nextLevelXp: itemXpSchema,
+						})
+						.strict(),
+					z
+						.object({
+							kind: z.literal("maximum"),
+							maxLevelXp: itemXpSchema,
+						})
+						.strict(),
+				]),
+			})
+			.strict()
+			.nullable(),
+		artwork: clientIconAppearanceSchema
+			.unwrap()
+			.extend({ itemType: u32 })
+			.strict()
+			.readonly(),
+		value: u32.nullable(),
+		burden: u32.nullable(),
+		capacity: capacitySchema,
+		material: z
+			.object({ materialType: semanticEnumName, workmanship: finiteNumber })
+			.strict()
+			.nullable(),
+		tinkering: z.object({ count: i32 }).strict().nullable(),
+		spellcraft: i32.nullable(),
+		mana: z
+			.object({
+				kind: z.enum(["mana", "charge"]),
+				current: i32,
+				max: i32.nullable(),
+				secondsLeft: finiteNumber.nullable(),
+			})
+			.strict()
+			.nullable(),
+		status: itemStatusSchema,
+		lockTool: lockToolFactsSchema.nullable(),
+		lockpicking: z
+			.object({
+				difficulty: i32.nullable(),
+				successPercent: i32.nullable(),
+			})
+			.strict()
+			.nullable(),
+		stack: countSchema.nullable(),
+		uses: countSchema.nullable(),
+		/** Static reuse definition; live countdown comes from the player registry. */
+		cooldown: itemCooldownDefinitionSchema.nullable(),
+		armor: enchantedValueSchema(i32).nullable(),
+		weapon: z
+			.object({
+				damage: enchantedValueSchema(
+					z.object({ min: finiteNumber, max: finiteNumber }).strict(),
+				),
+				damageType: u32,
+				weaponSkill: semanticEnumName.nullable(),
+				speed: enchantedValueSchema(u32).nullable(),
+				weaponType: semanticEnumName.nullable(),
+			})
+			.strict()
+			.nullable(),
+		protections: protectionsSchema.nullable(),
+		bonuses: z.array(bonusSchema),
+		wieldRequirements: z.array(wieldRequirementSchema),
+		useRequirements: z.array(useRequirementSchema),
+		equipmentSet: z
+			.object({ id: i32, name: z.string().nullable() })
+			.strict()
+			.nullable(),
+		gearRatings: z.array(gearRatingSchema),
+		portalLevels: z
+			.object({
+				minimum: i32.nullable(),
+				maximum: z
+					.discriminatedUnion("kind", [
+						z.object({ kind: z.literal("unlimited") }).strict(),
+						z.object({ kind: z.literal("level"), level: i32 }).strict(),
+					])
+					.nullable(),
+			})
+			.strict()
+			.nullable(),
+		lifetime: z
+			.object({
+				lifespanSeconds: i32.nullable(),
+				remaining: z
+					.discriminatedUnion("kind", [
+						z.object({ kind: z.literal("expired") }).strict(),
+						z.object({ kind: z.literal("remaining"), seconds: u32 }).strict(),
+					])
+					.nullable(),
+			})
+			.strict()
+			.nullable(),
+		manaStone: z
+			.object({
+				efficiency: finiteNumber.nullable(),
+				destructionChance: finiteNumber.nullable(),
+			})
+			.strict()
+			.nullable(),
+		gems: z
+			.object({ count: i32, material: semanticEnumName })
+			.strict()
+			.nullable(),
+		attribution: z
+			.object({
+				craftsman: z.string().nullable(),
+				tinker: z.string().nullable(),
+				imbuer: z.string().nullable(),
+				plating: z.string().nullable(),
+			})
+			.strict()
+			.nullable(),
+		inscription: z
+			.object({ text: z.string(), scribe: z.string().nullable() })
+			.strict()
+			.nullable(),
+		imbuedEffects: u32,
+		effects: z.array(effectSchema),
+		/** Server-authored portal destination display text, absent when undisclosed. */
+		portalDestination: z.string().nullable(),
+		/** Prohibitions from the latest appraisal; null means undisclosed. */
+		portalRestrictions: z
+			.array(
+				z.enum([
+					"no-player-killers",
+					"no-lite-player-killers",
+					"no-non-player-killers",
+					"no-recall-or-tie",
+					"no-summon",
+				]),
+			)
+			.nullable(),
+		useText: z.string().nullable(),
+		/** World-classified on-use behavior; healing-kit modifiers are distinct from flat restoration. */
+		useEffect: z
+			.discriminatedUnion("kind", [
+				z
+					.object({
+						kind: z.literal("vital-change"),
+						vital: z.enum(["Health", "Stamina", "Mana"]),
+						amount: i32,
+					})
+					.strict(),
+				z
+					.object({
+						kind: z.literal("healing-kit"),
+						skillBonus: i32.nullable(),
+						restorationMultiplier: finiteNumber.nullable(),
+					})
+					.strict(),
+			])
+			.nullable(),
+		spells: z.array(
+			z
+				.object({
+					id: u32,
+					role: z.enum(["item", "on-use", "active-enchantment", "triggered"]),
+				})
+				.strict(),
+		),
+	})
+	.strict();
+
+const creatureInspectionSchema = z
+	.object({
+		identity: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("creature"),
+					lineage: z.string().nullable(),
+				})
+				.strict(),
+			z
+				.object({
+					kind: z.literal("character"),
+					lineage: z.string().nullable(),
+					role: z.string().nullable(),
+					playerKillerStatus: z.enum([
+						"non-player-killer",
+						"player-killer-lite",
+						"player-killer",
+					]),
+				})
+				.strict(),
+		]),
+		health: enchantedValueSchema(vitalRangeSchema),
+		attributesAndVitals: z
+			.object({
+				attributes: z
+					.object({
+						strength: enchantedValueSchema(u32),
+						endurance: enchantedValueSchema(u32),
+						coordination: enchantedValueSchema(u32),
+						quickness: enchantedValueSchema(u32),
+						focus: enchantedValueSchema(u32),
+						selfAttr: enchantedValueSchema(u32),
+					})
+					.strict(),
+				stamina: enchantedValueSchema(vitalRangeSchema),
+				mana: enchantedValueSchema(vitalRangeSchema),
+			})
+			.strict()
+			.nullable(),
+		armorCoverage: z
+			.object({
+				head: armorCoverageValueSchema,
+				chest: armorCoverageValueSchema,
+				abdomen: armorCoverageValueSchema,
+				upperArm: armorCoverageValueSchema,
+				lowerArm: armorCoverageValueSchema,
+				hand: armorCoverageValueSchema,
+				upperLeg: armorCoverageValueSchema,
+				lowerLeg: armorCoverageValueSchema,
+				foot: armorCoverageValueSchema,
+			})
+			.strict()
+			.nullable(),
+		ratings: z
+			.object({
+				damageRating: i32.nullable(),
+				damageResistanceRating: i32.nullable(),
+				criticalRating: i32.nullable(),
+				criticalDamageRating: i32.nullable(),
+				criticalResistanceRating: i32.nullable(),
+				criticalDamageResistanceRating: i32.nullable(),
+				playerKillerDamageRating: i32.nullable(),
+				playerKillerDamageResistanceRating: i32.nullable(),
+				overpowerChancePercent: i32.nullable(),
+				overpowerResistancePercent: i32.nullable(),
+				healingBoostRating: i32.nullable(),
+				netherResistanceRating: i32.nullable(),
+				damageOverTimeResistanceRating: i32.nullable(),
+				lifeMagicResistanceRating: i32.nullable(),
+			})
+			.strict()
+			.nullable(),
+		maxHealthBonus: i32.nullable(),
+		characterDetails: z
+			.object({
+				allegianceRank: z
+					.object({ rank: i32, title: z.string().nullable() })
+					.strict()
+					.nullable(),
+				allegianceName: z.string().nullable(),
+				patron: z.string().nullable(),
+				monarch: z.string().nullable(),
+				allegianceFollowers: i32.nullable(),
+				fellowship: z.string().nullable(),
+				arrivedInDereth: z.string().nullable(),
+				ageSeconds: i32.nullable(),
+				deaths: i32.nullable(),
+				titlesEarned: i32.nullable(),
+				chessRank: i32.nullable(),
+				fishingSkill: i32.nullable(),
+				enlightenment: i32.nullable(),
+			})
+			.strict()
+			.nullable(),
+	})
+	.strict();
+
+const objectInspectionSchema = z
+	.object({
+		guid: u32,
+		name: z.string(),
+		description: z.string().nullable(),
+		level: u32.nullable(),
+		details: z.discriminatedUnion("kind", [
+			z
+				.object({ kind: z.literal("item"), details: itemInspectionSchema })
+				.strict(),
+			z
+				.object({
+					kind: z.literal("creature"),
+					details: creatureInspectionSchema,
+				})
+				.strict(),
+		]),
+	})
+	.strict();
+
+/** One authoritative identify-response outcome, correlated only by the protocol's target GUID. */
+const objectInspectionResultSchema = z
+	.object({
+		guid: u32,
+		outcome: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("ready"),
+					inspection: objectInspectionSchema,
+				})
+				.strict(),
+			z.object({ kind: z.literal("rejected") }).strict(),
+			z.object({ kind: z.literal("missing") }).strict(),
+			z
+				.object({ kind: z.literal("unavailable"), reason: z.string().min(1) })
+				.strict(),
+		]),
+	})
+	.strict();
+
+type DeepReadonly<T> = T extends readonly (infer Item)[]
+	? readonly DeepReadonly<Item>[]
+	: T extends object
+		? { readonly [Key in keyof T]: DeepReadonly<T[Key]> }
+		: T;
+
+export type ObjectInspectionResult = DeepReadonly<
+	z.infer<typeof objectInspectionResultSchema>
+>;
+export type ObjectInspection = Extract<
+	ObjectInspectionResult["outcome"],
+	{ kind: "ready" }
+>["inspection"];
+/** Item-specific immutable inspection payload selected by the shared world layer. */
+export type ItemInspection = Extract<
+	ObjectInspection["details"],
+	{ kind: "item" }
+>["details"];
+/** Creature-specific immutable inspection payload selected by the shared world layer. */
+export type CreatureInspection = Extract<
+	ObjectInspection["details"],
+	{ kind: "creature" }
+>["details"];
+/** Character-only identity variant used by player-specific inspection presentation. */
+export type CharacterIdentity = Extract<
+	CreatureInspection["identity"],
+	{ kind: "character" }
+>;
+
+export function decodeObjectInspectionResult(
+	value: unknown,
+): ObjectInspectionResult {
+	return objectInspectionResultSchema.parse(value);
+}

@@ -1,0 +1,342 @@
+import type { ClientMouseConfiguration } from "../lib/input/input-contract";
+import type { ViewportInputGate } from "../lib/input/viewport-input-gate";
+import type { ClientForwardSource } from "./client-input-arbiter";
+import {
+	advanceClientViewportPointerGesture,
+	beginClientViewportPointerGesture,
+	type ClientViewportCameraController,
+	type ClientViewportPointerGesture,
+} from "./client-viewport-pointer-gesture";
+
+/** Semantic mouse movement port composed by the client app. */
+export interface ClientMouseMovementInput {
+	/** Physical forward sources enter the ordinary client arbiter. */
+	readonly onForward: (
+		source: Exclude<ClientForwardSource, "keyboard">,
+		down: boolean,
+	) => void;
+	/** Signed AC yaw displacement; the host owns the current heading. */
+	readonly onTurn: (deltaRadians: number) => void;
+	/** Drop queued steering on cancellation, independently of ordinary button release. */
+	readonly onCancelTurn: () => void;
+	/** Surface pointer-lock refusal through the app's existing notice owner. */
+	readonly onError: (message: string) => void;
+}
+
+interface ClientViewportMouseOptions {
+	/** DOM surface that can start world gestures; releases are observed on its window. */
+	readonly canvas: HTMLCanvasElement;
+	/** Shared admission and cancellation boundary. */
+	readonly gate: ViewportInputGate;
+	/** Cold policy read at event time, without reconstructing the owner. */
+	readonly input: () => ClientMouseConfiguration;
+	/** Current presentation camera, absent while presentation is unavailable. */
+	readonly camera: () => ClientViewportCameraController | null;
+	/** Precise targeting retains click activation and suppresses forward in the arbiter. */
+	readonly precise: () => boolean;
+	/** Existing tuning, converted to AC yaw before it crosses the host boundary. */
+	readonly yawRadiansPerPixel: number;
+	/** App-owned semantic movement and dispatch cancellation. */
+	readonly movement: ClientMouseMovementInput;
+	/** The second accepted click requests interaction using the browser click sequence. */
+	readonly onSelect: (x: number, y: number, interact: boolean) => void;
+	readonly onExamine: (x: number, y: number) => void;
+	readonly onJump: () => void;
+	/** Maintain unlocked cursor/precise aim without publishing hot Svelte state. */
+	readonly onPosition: (x: number, y: number, aiming: boolean) => void;
+}
+
+const LEFT = 1;
+const RIGHT = 2;
+const MIDDLE = 4;
+
+/** Sole client viewport mouse owner: clicks, orbit, held movement, lock, and cancellation. */
+export class ClientViewportMouseController {
+	readonly #options: ClientViewportMouseOptions;
+	readonly #document: Document;
+	readonly #window: Window;
+	readonly #detachGate: () => void;
+	#buttons = 0;
+	#middleForward = false;
+	#bothForward = false;
+	#mode: "orbit" | "steer" | null = null;
+	#motion: ClientViewportPointerGesture | null = null;
+	#click: {
+		readonly button: number;
+		/** One release action; dragging or cancellation discards the entire candidate. */
+		readonly kind: "select" | "interact" | "examine" | "jump";
+	} | null = null;
+	/** Only a completed ordinary selection can begin a double-click activation. */
+	#selectionClickAccepted = false;
+	#lockGeneration = 0;
+	/** Pending acquisition is distinct from held capture so a queued old unlock cannot cancel a new request. */
+	#lockState: "idle" | "pending" | "held" = "idle";
+
+	constructor(options: ClientViewportMouseOptions) {
+		this.#options = options;
+		this.#document = options.canvas.ownerDocument;
+		const view = this.#document.defaultView;
+		if (view === null)
+			throw new Error("Viewport mouse input requires a mounted document.");
+		this.#window = view;
+		// Mouse edges report every button, including chord changes emitted as pointermove.
+		view.addEventListener("mousedown", this.#down);
+		view.addEventListener("mousemove", this.#move);
+		view.addEventListener("mouseup", this.#up);
+		options.canvas.addEventListener("pointercancel", this.cancel);
+		options.canvas.addEventListener("auxclick", this.#preventMiddleDefault);
+		this.#document.addEventListener("pointerlockchange", this.#lockChanged);
+		this.#detachGate = options.gate.attach(this.cancel);
+	}
+
+	/** Selection hover and precise aim yield while a mouse movement gesture owns the cursor. */
+	get active(): boolean {
+		return this.#buttons !== 0;
+	}
+
+	readonly #preventMiddleDefault = (event: MouseEvent): void => {
+		if (event.button === 1) event.preventDefault();
+	};
+
+	readonly #down = (event: MouseEvent): void => {
+		if (!this.#options.gate.allowed) return;
+		if (!this.active && event.target !== this.#options.canvas) return;
+		if (event.button < 0 || event.button > 2) return;
+		const mask =
+			event.button === 0 ? LEFT : event.button === 1 ? MIDDLE : RIGHT;
+		if ((this.#buttons & mask) !== 0) return;
+		const wasActive = this.active;
+		if (!wasActive) this.#motion = beginClientViewportPointerGesture();
+		this.#buttons |= mask;
+		event.preventDefault();
+		this.#click =
+			wasActive || event.button === 1
+				? null
+				: {
+						button: event.button,
+						kind:
+							event.button === 2
+								? "examine"
+								: this.#options.precise()
+									? "jump"
+									: event.detail === 2 && this.#selectionClickAccepted
+										? "interact"
+										: "select",
+					};
+		this.#selectionClickAccepted = false;
+		this.#update();
+	};
+
+	#update(): void {
+		// Pointer unlock can leave Chromium's :active latched; cursor feedback follows owned buttons.
+		this.#options.canvas.toggleAttribute("data-mouse-active", this.active);
+		const movementEnabled = this.#options.input().mouseMovement;
+		const middle = movementEnabled && (this.#buttons & MIDDLE) !== 0;
+		const both =
+			movementEnabled && (this.#buttons & (LEFT | RIGHT)) === (LEFT | RIGHT);
+		const startedForward =
+			(middle && !this.#middleForward) || (both && !this.#bothForward);
+		if (middle || both) this.#click = null;
+		if (middle !== this.#middleForward) {
+			this.#middleForward = middle;
+			this.#options.movement.onForward("middle-button", middle);
+		}
+		if (both !== this.#bothForward) {
+			this.#bothForward = both;
+			this.#options.movement.onForward("both-buttons", both);
+		}
+		const mode =
+			movementEnabled && (this.#buttons & (MIDDLE | RIGHT)) !== 0
+				? "steer"
+				: (this.#buttons & LEFT) !== 0
+					? "orbit"
+					: null;
+		// A lone right press retains examine until dragging; movement chords commit immediately.
+		if (
+			mode === "steer" &&
+			(startedForward || (mode !== this.#mode && this.#click === null))
+		)
+			this.#options.camera()?.followRear(performance.now());
+		if (mode === this.#mode) return;
+		const wasCameraGesture = this.#mode !== null;
+		this.#mode = mode;
+		if (mode === null) {
+			this.#motion = null;
+			this.#unlock();
+			return;
+		}
+		if (!wasCameraGesture || this.#motion === null)
+			this.#motion = beginClientViewportPointerGesture();
+		// Acquire on the button edge, before motion, and retain capture across steer/orbit handoffs.
+		this.#requestLock();
+	}
+
+	readonly #move = (event: MouseEvent): void => {
+		if (!this.#options.gate.allowed) return;
+		const locked = this.#document.pointerLockElement === this.#options.canvas;
+		if (!this.active) return;
+		// Missing releases cannot resurrect a held source on a later movement sample.
+		if ((this.#buttons & event.buttons) !== this.#buttons) {
+			this.#buttons &= event.buttons;
+			this.#click = null;
+			this.#update();
+		}
+		if (this.#mode !== null && !locked) {
+			// Unlocked events may include cursor restoration. Camera motion starts only after acquisition.
+			if (this.#motion !== null) this.#requestLock();
+			return;
+		}
+		this.#advanceMotion(event);
+	};
+
+	#advanceMotion(event: MouseEvent): void {
+		const motion = this.#motion;
+		if (motion === null) return;
+		const advance = advanceClientViewportPointerGesture(
+			motion,
+			event.movementX,
+			event.movementY,
+		);
+		this.#motion = advance.gesture;
+		this.#options.onPosition(
+			event.clientX,
+			event.clientY,
+			advance.gesture.kind === "dragging" && this.#mode === "orbit",
+		);
+		if (advance.dragDelta === null) return;
+		if (this.#mode === "steer" && this.#click?.kind === "examine")
+			this.#options.camera()?.followRear(performance.now());
+		this.#click = null;
+		if (this.#mode === "steer") {
+			this.#steer(advance.dragDelta.x, advance.dragDelta.y);
+		} else if (this.#mode === "orbit") {
+			const input = this.#options.input();
+			// CameraLook subtracts horizontal deltas; browser-right must increase look yaw.
+			this.#options
+				.camera()
+				?.orbit(
+					advance.dragDelta.x * (input.invertCameraHorizontal ? 1 : -1),
+					advance.dragDelta.y * (input.invertCameraVertical ? 1 : -1),
+					performance.now(),
+				);
+		}
+	}
+
+	#steer(deltaX: number, deltaY: number): void {
+		const input = this.#options.input();
+		if (deltaX !== 0)
+			this.#options.movement.onTurn(
+				deltaX *
+					this.#options.yawRadiansPerPixel *
+					(input.invertSteeringHorizontal ? -1 : 1),
+			);
+		if (deltaY !== 0)
+			this.#options
+				.camera()
+				?.pitch(deltaY * (input.invertSteeringVertical ? 1 : -1));
+	}
+
+	readonly #up = (event: MouseEvent): void => {
+		if (!this.active) return;
+		// Button coordinates can be stale after pointer unlock. Only movement events rotate.
+		const click = this.#click;
+		this.#buttons &= event.buttons;
+		this.#click = null;
+		this.#update();
+		if (click?.button !== event.button || !this.#options.gate.allowed) return;
+		if (click.kind === "examine")
+			this.#options.onExamine(event.clientX, event.clientY);
+		else if (click.kind === "jump") this.#options.onJump();
+		else {
+			this.#selectionClickAccepted = click.kind === "select";
+			this.#options.onSelect(
+				event.clientX,
+				event.clientY,
+				click.kind === "interact",
+			);
+		}
+	};
+
+	#requestLock(): void {
+		if (
+			this.#lockState !== "idle" ||
+			this.#document.pointerLockElement === this.#options.canvas
+		)
+			return;
+		const generation = this.#lockGeneration;
+		this.#lockState = "pending";
+		this.#options.canvas
+			.requestPointerLock()
+			.then(() => {
+				if (generation !== this.#lockGeneration) {
+					this.#lockState = "idle";
+					if (this.#document.pointerLockElement === this.#options.canvas)
+						this.#document.exitPointerLock();
+				}
+			})
+			.catch((error: unknown) => {
+				if (generation !== this.#lockGeneration) return;
+				this.#endCapture();
+				this.#options.movement.onError(
+					`Mouse camera controls could not capture the pointer: ${String(error)}`,
+				);
+			})
+			.finally(() => {
+				if (this.#lockState === "pending") this.#lockState = "idle";
+			});
+	}
+
+	readonly #lockChanged = (): void => {
+		if (this.#document.pointerLockElement === this.#options.canvas) {
+			this.#lockState = "held";
+			return;
+		}
+		if (this.#lockState === "held") this.#endCapture();
+	};
+
+	#unlock(): void {
+		this.#lockGeneration += 1;
+		if (this.#lockState === "held") this.#lockState = "idle";
+		if (this.#document.pointerLockElement === this.#options.canvas)
+			this.#document.exitPointerLock();
+	}
+
+	/** Retire capture and queued yaw while the physical forward buttons remain held.
+	 * Clearing motion prevents re-locking until a fresh camera hold starts.
+	 */
+	#endCapture(): void {
+		this.#motion = null;
+		this.#click = null;
+		this.#unlock();
+		this.#options.movement.onCancelTurn();
+	}
+
+	/** Cancel physical sources and pending clicks without manufacturing a jump release. */
+	readonly cancel = (): void => {
+		this.#selectionClickAccepted = false;
+		this.#buttons = 0;
+		this.#options.canvas.removeAttribute("data-mouse-active");
+		this.#mode = null;
+		if (this.#middleForward)
+			this.#options.movement.onForward("middle-button", false);
+		if (this.#bothForward)
+			this.#options.movement.onForward("both-buttons", false);
+		this.#middleForward = false;
+		this.#bothForward = false;
+		this.#endCapture();
+	};
+
+	/** Release every listener and the shared viewport cancellation registration. */
+	destroy(): void {
+		this.#detachGate();
+		this.#window.removeEventListener("mousedown", this.#down);
+		this.#window.removeEventListener("mousemove", this.#move);
+		this.#window.removeEventListener("mouseup", this.#up);
+		this.#options.canvas.removeEventListener("pointercancel", this.cancel);
+		this.#options.canvas.removeEventListener(
+			"auxclick",
+			this.#preventMiddleDefault,
+		);
+		this.#document.removeEventListener("pointerlockchange", this.#lockChanged);
+	}
+}

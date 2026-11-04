@@ -33,8 +33,12 @@ pub enum GameMessage {
     TurbineChat(Box<TurbineChatMessageData>),
     DddInterrogation,
     DddInterrogationResponse(Box<DddInterrogationResponseData>),
+    /// Payload-free DAT synchronization end marker (0xF7EA).
+    DddEndDdd,
     CharacterError(Box<CharacterErrorData>),
     AccountBoot(Box<BootAccountData>),
+    /// Server ban notice with duration bits and an optional explanation.
+    AccountBanned(Box<AccountBannedData>),
     CharacterLogOff, // 0xF653
     GameAction(Box<GameActionMessage>),
     GameEvent(Box<GameEventMessage>),
@@ -91,7 +95,7 @@ pub enum GameMessage {
     SetStackSize(Box<SetStackSizeData>),
     SetState(Box<SetStateData>),
     PlaySound(Box<PlaySoundData>),
-    PlayEffect(Box<PlayEffectData>),
+    PlayScript(Box<PlayScriptData>),
 
     Unknown(u32, Vec<u8>),
 }

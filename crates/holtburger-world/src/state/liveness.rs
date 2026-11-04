@@ -1,30 +1,86 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::sequence::is_newer_u16;
+use holtburger_protocol::messages::object::messages::description::ObjDescEventData;
+use holtburger_protocol::messages::object::types::ModelData;
 
+use super::attachment_lifecycle::ScenePlacementScope;
+use super::pose_orientation::recover_pose_orientation;
+use super::visibility::{EntityVisibility, VisibilitySnapshot};
+use crate::CollisionScene;
 use crate::WorldEvent;
-use crate::context::WorldContextExt;
+use crate::context::{WorldContext, WorldContextExt};
 use crate::entity::Entity;
 use crate::state::WorldState;
 
-const ACE_DESTRUCTION_TIMEOUT_SECS: f64 = 25.0;
-const CONSERVATIVE_VISIBILITY_DISTANCE_M: f32 = 384.0;
+pub(crate) const ACE_DESTRUCTION_TIMEOUT_SECS: f64 = 25.0;
+/// Cleanup authority stays paired with its deadline so visibility cannot cancel other cleanup.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct EntityPruneRequest {
+    /// Why local retention may expire; server deletion remains a separate authority.
+    pub reason: EntityPruneReason,
+    /// Server-clock deadline, preserving the existing shared time domain.
+    pub deadline: f64,
+}
+
+/// Local cleanup decisions have distinct cancellation contracts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntityPruneReason {
+    /// Continuous, proven exclusion from the observer's authored visibility.
+    Visibility,
+    /// Unretained preview, transfer, or dependent description ready for cleanup.
+    Unretained,
+}
+
+/// Server request that can retire every current incarnation or one exact instance sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntityDeleteRequest {
+    /// Non-generation-scoped removal produced by inventory and ownership transitions.
+    Unconditional,
+    /// Network deletion that applies only to the named server object incarnation.
+    Instance(u16),
+}
+
+impl EntityDeleteRequest {
+    fn applies_to(self, instance_sequence: u16) -> bool {
+        match self {
+            Self::Unconditional => true,
+            Self::Instance(sequence) => sequence == instance_sequence,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct EntityLifecycleState {
-    pub explicit_delete_requested: bool,
-    pub prune_deadline: Option<f64>,
+    /// Pending deletion authority, including future instance deletes queued like retail SmartBox.
+    pub delete_request: Option<EntityDeleteRequest>,
+    /// Local expiration authority and its deadline, independent of explicit server deletion.
+    pub prune_request: Option<EntityPruneRequest>,
     pub trade_preview: bool,
     pub container_preview: bool,
+    /// Dispatched transfers awaiting an item-scoped result; retains this item and its subtree.
+    pub inventory_transfer_requests: u32,
+    /// Complete appearance for a not-yet-materialized future object incarnation.
+    pub pending_visual_description: Option<PendingVisualDescription>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PendingVisualDescription {
+    pub instance_sequence: u16,
+    pub visual_description_sequence: u16,
+    pub model_data: ModelData,
 }
 
 impl EntityLifecycleState {
     fn is_empty(&self) -> bool {
-        !self.explicit_delete_requested
-            && self.prune_deadline.is_none()
+        self.delete_request.is_none()
+            && self.prune_request.is_none()
             && !self.trade_preview
             && !self.container_preview
+            && self.inventory_transfer_requests == 0
+            && self.pending_visual_description.is_none()
     }
 }
 
@@ -61,10 +117,24 @@ impl EntityLifecycleStore {
     }
 }
 
+/// Delete disposition after applying one authoritative object description.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EntityUpsertKind {
-    Inserted,
-    Replaced,
+pub(crate) enum EntityCreateDisposition {
+    /// The description is newer than any queued delete or has no queued delete.
+    Active,
+    /// A previously queued delete names the description's exact instance sequence.
+    DeleteRequested,
+}
+
+/// Retail SmartBox disposition for an instance-sequenced object deletion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EntityInstanceDeleteDisposition {
+    /// The request names the currently materialized incarnation.
+    Applied,
+    /// The request names a future incarnation or arrived before its object description.
+    Queued,
+    /// The request names an incarnation older than the currently materialized one.
+    Stale,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,8 +148,12 @@ pub(crate) struct EntityRetentionSnapshot {
     pub has_parent_owner: bool,
     pub trade_preview: bool,
     pub container_preview: bool,
-    pub explicit_delete_requested: bool,
-    pub prune_deadline_expired: bool,
+    /// Description retention only; never grants ownership, access, or semantic admission.
+    pub inventory_transfer_pending: bool,
+    /// Whether current deletion authority applies to this entity's exact incarnation.
+    pub current_instance_delete_requested: bool,
+    /// Whether the current local cleanup authority has reached its deadline.
+    pub prune_request_expired: bool,
 }
 
 impl EntityRetentionSnapshot {
@@ -88,7 +162,8 @@ impl EntityRetentionSnapshot {
     }
 
     pub fn has_nonworld_retention(self) -> bool {
-        self.held_by_player
+        self.inventory_transfer_pending
+            || self.held_by_player
             || self.equipped_by_player
             || self.inside_open_container
             || self.has_container_owner
@@ -108,83 +183,117 @@ impl EntityRetentionSnapshot {
     }
 
     pub fn is_retained(self) -> bool {
-        self.has_authoritative_retention() || self.has_preview_retention()
+        self.has_authoritative_retention()
+            || self.has_preview_retention()
+            || self.inventory_transfer_pending
     }
 }
 
 impl WorldState {
-    fn current_visible_world_guids(&self) -> HashSet<Guid> {
-        if self.player.guid == Guid::NULL {
-            return HashSet::new();
+    /// Applies or queues one complete visual description under retail's two sequence domains.
+    pub(crate) fn apply_object_visual_description(
+        &mut self,
+        data: &ObjDescEventData,
+        events: &mut Vec<WorldEvent>,
+    ) {
+        let Some(entity) = self.entities.get_mut(data.guid) else {
+            self.entity_lifecycle
+                .get_or_default_mut(data.guid)
+                .pending_visual_description = Some(PendingVisualDescription::from(data));
+            return;
+        };
+        let current_instance = entity.instance_sequence();
+        if data.instance_sequence == current_instance {
+            if is_newer_u16(
+                data.visual_desc_sequence,
+                entity.visual_description_sequence(),
+            ) {
+                entity.apply_visual_description(&data.model_data, data.visual_desc_sequence);
+                events.push(WorldEvent::EntityAppearanceUpdated { guid: data.guid });
+            }
+            return;
+        }
+        if !is_newer_u16(data.instance_sequence, current_instance) {
+            return;
         }
 
-        let Some(player_landblock) = self.player_landblock() else {
-            return HashSet::new();
-        };
-
-        let nearby_guids = self.scene.get_nearby_entities(player_landblock);
-
-        self.entities
-            .iter()
-            .filter(|entity| entity.guid != self.player.guid)
-            .filter(|entity| entity.position.landblock_id != Guid::NULL)
-            .filter(|entity| self.is_entity_world_participant(entity.guid))
-            .filter(|entity| self.is_conservatively_visible_world_entity(entity, &nearby_guids))
-            .map(|entity| entity.guid)
-            .collect()
+        let incoming = PendingVisualDescription::from(data);
+        let state = self.entity_lifecycle.get_or_default_mut(data.guid);
+        let replace = state
+            .pending_visual_description
+            .as_ref()
+            .is_none_or(|pending| {
+                is_newer_u16(incoming.instance_sequence, pending.instance_sequence)
+                    || (incoming.instance_sequence == pending.instance_sequence
+                        && is_newer_u16(
+                            incoming.visual_description_sequence,
+                            pending.visual_description_sequence,
+                        ))
+            });
+        if replace {
+            state.pending_visual_description = Some(incoming);
+        }
     }
 
-    // TODO: Replace this conservative approximation with ACE-parity cell visibility.
-    // ACE decides visibility from the current ObjCell, not just from landblock adjacency.
-    // Proper parity here requires consulting cell.dat envcell records so we can:
-    // 1. detect whether the player's current cell is an EnvCell,
-    // 2. read SeenOutside for that cell,
-    // 3. union the current envcell with its VisibleCells,
-    // 4. merge outdoor landblock-neighborhood visibility only for SeenOutside envcells.
-    // Until we wire that up, prefer retaining too much over pruning too aggressively.
-    fn is_conservatively_visible_world_entity(
-        &self,
-        entity: &Entity,
-        nearby_guids: &HashSet<Guid>,
-    ) -> bool {
-        nearby_guids.contains(&entity.guid)
-            || self.player_position().is_some_and(|position| {
-                position.distance_to(&entity.position) <= CONSERVATIVE_VISIBILITY_DISTANCE_M
-            })
-    }
-
-    fn maintain_visibility_prune_deadlines(&mut self, now: f64) {
-        let visible_guids = self.current_visible_world_guids();
-        let world_entity_guids: Vec<_> = self
+    fn maintain_entity_prune_requests(&mut self, now: f64, visibility: &VisibilitySnapshot) {
+        let candidates: Vec<_> = self
             .entities
             .iter()
             .filter(|entity| entity.guid != self.player.guid)
-            .filter(|entity| entity.position.landblock_id != Guid::NULL)
-            .map(|entity| entity.guid)
+            .filter(|entity| {
+                entity.position.landblock_id != Guid::NULL
+                    || entity.placement_intent != crate::EntityPlacementIntent::Independent
+            })
+            .map(|entity| (entity.guid, entity.position))
             .collect();
-
-        for guid in world_entity_guids {
-            if visible_guids.contains(&guid) {
-                self.clear_entity_prune_deadline(guid);
-                continue;
-            }
-
-            let Some(snapshot) = self.retention_snapshot(guid, now) else {
+        for (guid, position) in candidates {
+            let Some(retention) = self.retention_snapshot(guid, now) else {
                 continue;
             };
-
-            if snapshot.explicit_delete_requested || snapshot.has_nonworld_retention() {
-                self.clear_entity_prune_deadline(guid);
+            if retention.current_instance_delete_requested || retention.has_nonworld_retention() {
+                self.clear_entity_prune_request(guid);
                 continue;
             }
-
+            let reason = if retention.in_world {
+                self.clear_entity_prune_reason(guid, EntityPruneReason::Unretained);
+                if visibility.get(guid, position) != EntityVisibility::Outside {
+                    self.clear_entity_prune_reason(guid, EntityPruneReason::Visibility);
+                    continue;
+                }
+                EntityPruneReason::Visibility
+            } else {
+                // An unresolved attachment has no world visibility to classify. Its description
+                // gets the existing grace period to acquire a parent, independent of room data.
+                self.clear_entity_prune_reason(guid, EntityPruneReason::Visibility);
+                EntityPruneReason::Unretained
+            };
             if self
                 .entity_lifecycle_state(guid)
-                .and_then(|state| state.prune_deadline)
+                .and_then(|state| state.prune_request)
                 .is_none()
             {
-                self.set_entity_prune_deadline(guid, now + ACE_DESTRUCTION_TIMEOUT_SECS);
+                let request = EntityPruneRequest {
+                    reason,
+                    deadline: now + ACE_DESTRUCTION_TIMEOUT_SECS,
+                };
+                self.entity_lifecycle.get_or_default_mut(guid).prune_request = Some(request);
             }
+        }
+    }
+
+    /// Invalidate uncertain visibility evidence before sweeping even an already due request.
+    fn invalidate_unavailable_visibility(&mut self, visibility: &VisibilitySnapshot) {
+        let guids: Vec<_> = self
+            .entity_lifecycle
+            .tracked_guids()
+            .filter(|guid| {
+                self.entities.get(*guid).is_some_and(|entity| {
+                    visibility.get(*guid, entity.position) == EntityVisibility::Unavailable
+                })
+            })
+            .collect();
+        for guid in guids {
+            self.clear_entity_prune_reason(guid, EntityPruneReason::Visibility);
         }
     }
 
@@ -199,29 +308,108 @@ impl WorldState {
     }
 
     pub(crate) fn mark_entity_explicit_delete(&mut self, guid: Guid) {
+        // Accepted deletion retires storage immediately, before deferred scene eviction.
+        self.retire_entity_storage(guid);
         self.entity_lifecycle
             .get_or_default_mut(guid)
-            .explicit_delete_requested = true;
+            .delete_request = Some(EntityDeleteRequest::Unconditional);
+        self.entities.record_mutation(guid);
     }
 
-    pub(crate) fn clear_entity_explicit_delete(&mut self, guid: Guid) {
+    /// Applies SmartBox's three-way instance-timestamp disposition: exact deletes apply, future
+    /// deletes queue, and stale deletes cannot retire a later instance.
+    pub(crate) fn request_entity_instance_delete(
+        &mut self,
+        guid: Guid,
+        instance_sequence: u16,
+    ) -> EntityInstanceDeleteDisposition {
+        let current_sequence = self.entities.get(guid).map(Entity::instance_sequence);
+        let disposition = match current_sequence {
+            Some(current) if current == instance_sequence => {
+                EntityInstanceDeleteDisposition::Applied
+            }
+            Some(current) if is_newer_u16(instance_sequence, current) => {
+                EntityInstanceDeleteDisposition::Queued
+            }
+            Some(_) => EntityInstanceDeleteDisposition::Stale,
+            None => EntityInstanceDeleteDisposition::Queued,
+        };
+        if disposition == EntityInstanceDeleteDisposition::Stale {
+            return disposition;
+        }
+
+        let state = self.entity_lifecycle.get_or_default_mut(guid);
+        match state.delete_request {
+            Some(EntityDeleteRequest::Unconditional) => {}
+            Some(EntityDeleteRequest::Instance(pending))
+                if disposition == EntityInstanceDeleteDisposition::Applied
+                    || is_newer_u16(instance_sequence, pending) =>
+            {
+                state.delete_request = Some(EntityDeleteRequest::Instance(instance_sequence));
+            }
+            None => {
+                state.delete_request = Some(EntityDeleteRequest::Instance(instance_sequence));
+            }
+            Some(EntityDeleteRequest::Instance(_)) => {}
+        }
+        if disposition == EntityInstanceDeleteDisposition::Applied {
+            self.retire_entity_storage(guid);
+        }
+        self.entities.record_mutation(guid);
+        disposition
+    }
+
+    /// Reconciles a create against a queued delete without letting stale delete traffic win.
+    fn reconcile_entity_delete_after_create(&mut self, guid: Guid) -> bool {
+        let Some(instance_sequence) = self.entities.get(guid).map(Entity::instance_sequence) else {
+            return false;
+        };
+        let mut applies_to_instance = false;
         if let Some(state) = self.entity_lifecycle.by_guid.get_mut(&guid) {
-            state.explicit_delete_requested = false;
+            applies_to_instance = matches!(
+                state.delete_request,
+                Some(EntityDeleteRequest::Instance(pending)) if pending == instance_sequence
+            );
+            let clear = match state.delete_request {
+                None => false,
+                Some(EntityDeleteRequest::Unconditional) => true,
+                Some(EntityDeleteRequest::Instance(pending)) => {
+                    is_newer_u16(instance_sequence, pending)
+                }
+            };
+            if clear {
+                state.delete_request = None;
+            }
+        }
+        self.entity_lifecycle.compact(guid);
+        if applies_to_instance {
+            self.retire_entity_storage(guid);
+        }
+        applies_to_instance
+    }
+
+    pub(crate) fn request_unretained_entity_prune(&mut self, guid: Guid, deadline: f64) {
+        self.entity_lifecycle.get_or_default_mut(guid).prune_request = Some(EntityPruneRequest {
+            reason: EntityPruneReason::Unretained,
+            deadline,
+        });
+    }
+
+    pub(crate) fn clear_entity_prune_request(&mut self, guid: Guid) {
+        if let Some(state) = self.entity_lifecycle.by_guid.get_mut(&guid) {
+            state.prune_request = None;
         }
         self.entity_lifecycle.compact(guid);
     }
 
-    pub(crate) fn set_entity_prune_deadline(&mut self, guid: Guid, deadline: f64) {
-        self.entity_lifecycle
-            .get_or_default_mut(guid)
-            .prune_deadline = Some(deadline);
-    }
-
-    pub(crate) fn clear_entity_prune_deadline(&mut self, guid: Guid) {
-        if let Some(state) = self.entity_lifecycle.by_guid.get_mut(&guid) {
-            state.prune_deadline = None;
+    fn clear_entity_prune_reason(&mut self, guid: Guid, reason: EntityPruneReason) {
+        if self
+            .entity_lifecycle_state(guid)
+            .and_then(|state| state.prune_request)
+            .is_some_and(|request| request.reason == reason)
+        {
+            self.clear_entity_prune_request(guid);
         }
-        self.entity_lifecycle.compact(guid);
     }
 
     pub(crate) fn mark_trade_preview(&mut self, guid: Guid) {
@@ -248,6 +436,72 @@ impl WorldState {
         self.entity_lifecycle.compact(guid);
     }
 
+    /// Preserve a known item involved in external storage until its dispatched move resolves.
+    /// ACE pickup completion sends containment, not a replacement item description.
+    pub fn retain_inventory_transfer(&mut self, guid: Guid) {
+        self.entity_lifecycle
+            .get_or_default_mut(guid)
+            .inventory_transfer_requests += 1;
+    }
+
+    /// Release one request after success, rejection, or failed send. Other requests still retain it.
+    pub fn finish_inventory_transfer(&mut self, guid: Guid) {
+        let Some(state) = self.entity_lifecycle.by_guid.get_mut(&guid) else {
+            return;
+        };
+        if state.inventory_transfer_requests == 0 {
+            return;
+        }
+        state.inventory_transfer_requests -= 1;
+        if state.inventory_transfer_requests != 0 {
+            return;
+        }
+        self.prune_finished_inventory_transfer(guid);
+    }
+
+    fn prune_finished_inventory_transfer(&mut self, guid: Guid) {
+        self.entity_lifecycle.compact(guid);
+        let contents: Vec<_> = std::iter::once(guid)
+            .chain(self.storage.owned_items(guid))
+            .collect();
+        self.mark_container_preview_entities_for_prune(&contents);
+    }
+
+    /// Character/session teardown abandons requests that can no longer complete here.
+    pub fn clear_inventory_transfers(&mut self) {
+        let pending: Vec<_> = self
+            .entity_lifecycle
+            .by_guid
+            .iter()
+            .filter_map(|(&guid, state)| (state.inventory_transfer_requests != 0).then_some(guid))
+            .collect();
+        for guid in pending {
+            self.entity_lifecycle
+                .get_or_default_mut(guid)
+                .inventory_transfer_requests = 0;
+            self.prune_finished_inventory_transfer(guid);
+        }
+    }
+
+    fn has_pending_inventory_transfer(&self, guid: Guid) -> bool {
+        let mut current = Some(guid);
+        while let Some(guid) = current {
+            if self
+                .entity_lifecycle
+                .get(guid)
+                .is_some_and(|state| state.inventory_transfer_requests != 0)
+            {
+                return true;
+            }
+            // Follow accepted storage links; no separate request-owned containment graph.
+            current = self
+                .storage
+                .location(guid)
+                .map(|location| location.parent());
+        }
+        false
+    }
+
     pub(crate) fn retention_snapshot(
         &self,
         guid: Guid,
@@ -255,28 +509,29 @@ impl WorldState {
     ) -> Option<EntityRetentionSnapshot> {
         let entity = self.entities.get(guid)?;
         let container_id = entity.container_id();
-        let open_container =
-            container_id.is_some_and(|container| self.open_containers.contains(&container));
+        let open_container = self.is_world_container_content(guid);
         let lifecycle = self.entity_lifecycle.get(guid);
         let container_preview = lifecycle.is_some_and(|state| state.container_preview);
 
+        let in_world = self.is_entity_world_participant(guid);
+
         Some(EntityRetentionSnapshot {
-            in_world: entity.position.landblock_id != Guid::NULL,
+            in_world,
             held_by_player: self.is_in_player_inventory(guid),
             equipped_by_player: self.is_equipped_item(guid),
             inside_open_container: open_container,
             has_container_owner: container_id.is_some() && (!container_preview || open_container),
-            has_wielder_owner: entity
-                .wielder_id()
-                .is_some_and(|wielder| self.entities.get(wielder).is_some()),
-            has_parent_owner: entity.physics_parent_id.is_some(),
+            has_wielder_owner: entity.wielder_id().is_some_and(|wielder| {
+                self.entities.get(wielder).is_some() && (entity.attachment().is_none() || in_world)
+            }),
+            has_parent_owner: entity.attachment().is_some_and(|_| in_world),
             trade_preview: lifecycle.is_some_and(|state| state.trade_preview),
             container_preview,
-            explicit_delete_requested: lifecycle
-                .is_some_and(|state| state.explicit_delete_requested),
-            prune_deadline_expired: lifecycle
-                .and_then(|state| state.prune_deadline)
-                .is_some_and(|deadline| deadline <= now),
+            inventory_transfer_pending: self.has_pending_inventory_transfer(guid),
+            current_instance_delete_requested: self.current_instance_delete_requested(guid),
+            prune_request_expired: lifecycle
+                .and_then(|state| state.prune_request)
+                .is_some_and(|request| request.deadline <= now),
         })
     }
 
@@ -285,8 +540,10 @@ impl WorldState {
         guid: Guid,
     ) -> Option<EntityRetentionSnapshot> {
         let snapshot = self.retention_snapshot(guid, self.current_server_time())?;
-        if snapshot.is_retained() {
-            self.clear_entity_prune_deadline(guid);
+        if snapshot.has_nonworld_retention() {
+            self.clear_entity_prune_request(guid);
+        } else if snapshot.is_retained() {
+            self.clear_entity_prune_reason(guid, EntityPruneReason::Unretained);
         }
         Some(snapshot)
     }
@@ -296,7 +553,7 @@ impl WorldState {
             return false;
         };
 
-        if snapshot.explicit_delete_requested {
+        if snapshot.current_instance_delete_requested {
             return true;
         }
 
@@ -304,7 +561,7 @@ impl WorldState {
             return false;
         }
 
-        snapshot.prune_deadline_expired
+        snapshot.prune_request_expired
     }
 
     pub(crate) fn sweep_entity(
@@ -317,11 +574,14 @@ impl WorldState {
             return false;
         }
 
-        if self.remove_entity(guid).is_some() {
+        if let Some(removed) = self.remove_entity(guid) {
             if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
                 events.push(WorldEvent::RuntimeBodyRemoved { body_id });
             }
-            events.push(WorldEvent::EntityDespawned(guid));
+            events.push(WorldEvent::EntityDespawned {
+                guid,
+                generation: u64::from(removed.instance_sequence()),
+            });
             true
         } else {
             self.entity_lifecycle.clear(guid);
@@ -337,26 +597,43 @@ impl WorldState {
     }
 
     pub fn is_entity_client_visible(&self, guid: Guid) -> bool {
-        self.entities.get(guid).is_some()
-            && !self
-                .entity_lifecycle
-                .get(guid)
-                .is_some_and(|state| state.explicit_delete_requested)
+        self.entities
+            .get(guid)
+            .is_some_and(|entity| !self.instance_delete_applies(entity))
+    }
+
+    pub(super) fn current_instance_delete_requested(&self, guid: Guid) -> bool {
+        self.entities
+            .get(guid)
+            .is_some_and(|entity| self.instance_delete_applies(entity))
+    }
+
+    /// Test deletion against the retained incarnation already borrowed by the caller.
+    /// Placement and visible-entity queries must not repeat identity lookups to inspect its sequence.
+    pub(super) fn instance_delete_applies(&self, entity: &Entity) -> bool {
+        self.entity_lifecycle.get(entity.guid).is_some_and(|state| {
+            state
+                .delete_request
+                .is_some_and(|request| request.applies_to(entity.instance_sequence()))
+        })
     }
 
     pub fn is_entity_world_participant(&self, guid: Guid) -> bool {
-        self.get_visible_entity(guid)
-            .is_some_and(|entity| entity.position.landblock_id != Guid::NULL)
+        matches!(
+            self.resolve_scene_placement(guid),
+            Ok(crate::ResolvedScenePlacement::Independent
+                | crate::ResolvedScenePlacement::Attached { .. })
+        )
     }
 
     pub fn get_visible_entity(&self, guid: Guid) -> Option<&Entity> {
         self.entities
-            .get_filtered(guid, |entity| self.is_entity_client_visible(entity.guid))
+            .get_filtered(guid, |entity| !self.instance_delete_applies(entity))
     }
 
     pub fn iter_visible_entities(&self) -> impl Iterator<Item = &Entity> + '_ {
         self.entities
-            .iter_filtered(move |entity| self.is_entity_client_visible(entity.guid))
+            .iter_filtered(move |entity| !self.instance_delete_applies(entity))
     }
 
     pub fn get_nearby_world_entities(&self) -> Vec<Entity> {
@@ -376,32 +653,55 @@ impl WorldState {
             .collect()
     }
 
-    pub fn tick(&mut self) -> Vec<WorldEvent> {
+    /// Advances lifecycle cleanup using explicit static scene coverage; absence never proves exclusion.
+    pub fn tick(&mut self, collision: Option<&CollisionScene>) -> Vec<WorldEvent> {
+        self.seed_scene_placements();
         let mut events = Vec::new();
         let now = self.current_server_time();
+        let visibility = VisibilitySnapshot::capture(self, collision);
+        self.invalidate_unavailable_visibility(&visibility);
         self.sweep_eviction_queue(now, &mut events);
-        self.maintain_visibility_prune_deadlines(now);
+        self.prepare_deferred_scene_placements(&mut events);
+        self.reconcile_scene_placements(&mut events, ScenePlacementScope::All);
+        self.maintain_entity_prune_requests(now, &visibility);
 
         events
     }
 
     pub(crate) fn upsert_entity_from_create(
         &mut self,
-        entity: Entity,
+        mut entity: Entity,
         events: &mut Vec<WorldEvent>,
-    ) -> EntityUpsertKind {
+    ) -> EntityCreateDisposition {
         let guid = entity.guid;
-        let preserve_container_preview = entity
-            .container_id()
-            .is_some_and(|container| self.open_containers.contains(&container))
-            || self
-                .entities
-                .get(guid)
-                .and_then(|existing| existing.container_id())
-                .is_some_and(|container| self.open_containers.contains(&container));
+        if entity.position.landblock_id != Guid::NULL {
+            entity.position = recover_pose_orientation(
+                guid,
+                entity.position,
+                self.entities
+                    .get(guid)
+                    .map(|current| current.position.rotation),
+            );
+        }
+        self.reconcile_pending_visual_description_for_create(&mut entity);
+        // A public object description does not replace the local player's private qualities.
+        if guid == self.player.guid
+            && let Some(current) = self.entities.get(guid)
+        {
+            self.player
+                .property_retention
+                .retain_into(&current.properties, &mut entity.properties);
+        }
 
-        self.clear_entity_explicit_delete(guid);
-        self.clear_entity_prune_deadline(guid);
+        let preserve_container_preview = self
+            .entity_lifecycle
+            .get(guid)
+            .is_some_and(|state| state.container_preview)
+            || self.is_world_container_content(guid);
+
+        if !preserve_container_preview || self.is_world_container_content(guid) {
+            self.clear_entity_prune_request(guid);
+        }
         if !self.trade_contains_item(guid) {
             self.clear_trade_preview(guid);
         }
@@ -409,26 +709,62 @@ impl WorldState {
             self.clear_container_preview(guid);
         }
 
-        if let Some(old_lb) = self
-            .entities
-            .get(guid)
-            .map(|existing| existing.position.landblock_id)
-        {
+        if self.entities.get(guid).is_some() {
             self.entities.insert(entity.clone());
-            self.scene.update_entity(guid, old_lb, entity.position);
-            self.reconcile_authoritative_body(
+            self.initialize_authoritative_body(
                 guid,
                 entity.position,
                 entity.velocity,
                 entity.omega,
-                crate::spatial::AuthoritativeBodySync::Snapshot,
             );
             events.push(WorldEvent::EntityReplaced(Box::new(entity)));
-            EntityUpsertKind::Replaced
         } else {
             self.add_entity(entity.clone());
             events.push(WorldEvent::EntitySpawned(Box::new(entity)));
-            EntityUpsertKind::Inserted
+        }
+        if self.reconcile_entity_delete_after_create(guid) {
+            EntityCreateDisposition::DeleteRequested
+        } else {
+            let snapshot = self
+                .entities
+                .get(guid)
+                .and_then(|entity| entity.network_motion.snapshot());
+            self.reset_authored_motion(guid, snapshot);
+            EntityCreateDisposition::Active
+        }
+    }
+
+    fn reconcile_pending_visual_description_for_create(&mut self, entity: &mut Entity) {
+        let Some(state) = self.entity_lifecycle.by_guid.get_mut(&entity.guid) else {
+            return;
+        };
+        let Some(pending) = state.pending_visual_description.as_ref() else {
+            return;
+        };
+        if pending.instance_sequence == entity.instance_sequence() {
+            if is_newer_u16(
+                pending.visual_description_sequence,
+                entity.visual_description_sequence(),
+            ) {
+                entity.apply_visual_description(
+                    &pending.model_data,
+                    pending.visual_description_sequence,
+                );
+            }
+            state.pending_visual_description = None;
+        } else if is_newer_u16(entity.instance_sequence(), pending.instance_sequence) {
+            state.pending_visual_description = None;
+        }
+        self.entity_lifecycle.compact(entity.guid);
+    }
+}
+
+impl From<&ObjDescEventData> for PendingVisualDescription {
+    fn from(data: &ObjDescEventData) -> Self {
+        Self {
+            instance_sequence: data.instance_sequence,
+            visual_description_sequence: data.visual_desc_sequence,
+            model_data: data.model_data.clone(),
         }
     }
 }

@@ -1,5 +1,4 @@
 use holtburger_common::Guid;
-use holtburger_common::position::WorldPosition;
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{ActiveCharacterConfirmation, BusyOperationKind};
@@ -17,13 +16,11 @@ use crate::navigation::{
     NavigationUpdate, ResolvedNavigationTarget, TuiNavigation,
 };
 use crate::pages::game::GameData;
-use crate::pages::game::combat::{CombatDriveEffect, CombatDriveInput, CombatDriveRuntime};
 use crate::pages::game::layout::LayoutMode;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::panels::logopolis::LogopolisState;
-use crate::pages::game::weapon_swap::{WeaponSwapInput, WeaponSwapState};
 use crate::state::{EventContext, QueuedScriptStartup, TickContext};
 use crate::types::{
     AppAction, AppNotification, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
@@ -41,7 +38,7 @@ pub struct GameState {
     pub dashboard: DashboardState,
     pub view: ViewState,
     pub(crate) script: GameScriptState,
-    runtime: GameRuntimeState,
+    runtime: GamePageRuntimeState,
     pub(super) render_state: GameRenderState,
     pub chat: ChatState,
     pub chat_input: ChatInputState,
@@ -122,7 +119,7 @@ impl GameState {
             dashboard: DashboardState::default(),
             view: ViewState::default(),
             script: GameScriptState::default(),
-            runtime: GameRuntimeState::default(),
+            runtime: GamePageRuntimeState::default(),
             render_state: GameRenderState::default(),
             chat: ChatState::new(None),
             chat_input: ChatInputState::default(),
@@ -173,39 +170,6 @@ impl GameState {
         self.sync_script_host_for_tick(ctx.server_time, elapsed, &mut result);
         self.drain_notifications(ctx.server_time, &mut result);
         result
-    }
-
-    pub(crate) fn clear_combat_drive(&mut self) {
-        self.runtime.combat_drive = None;
-    }
-
-    pub(crate) fn handle_combat_drive(
-        &mut self,
-        input: CombatDriveInput,
-    ) -> Option<CombatDriveEffect> {
-        let effect = self
-            .runtime
-            .combat_drive
-            .get_or_insert_with(CombatDriveRuntime::default)
-            .handle(&input);
-
-        if let (CombatDriveInput::Tick { now, .. }, Some(CombatDriveEffect::Attack(_))) =
-            (input, effect)
-        {
-            self.data.combat_runtime.note_attack_attempt(now);
-        }
-
-        effect
-    }
-
-    pub(crate) fn combat_target_position_for_drive(
-        &self,
-        target_guid: Guid,
-    ) -> Option<WorldPosition> {
-        self.runtime.navigation.automation_target_position(
-            self.data.runtime_player_position(),
-            self.data.runtime_position_for_guid(target_guid),
-        )
     }
 
     fn drain_notifications(
@@ -306,6 +270,8 @@ pub struct ViewState {
     pub context_scroll_offset: usize,
     /// What information should be displayed in the context panel.
     pub context_view: ContextView,
+    /// Latest cold appraisal result retained only for the active context presentation.
+    pub object_inspection: Option<holtburger_world::inspection::ObjectInspectionResult>,
     /// Current vendor state (inventory and multipliers) - note: pseudo-client state.
     pub vendor: Option<holtburger_world::vendor::VendorState>,
     /// State of current interaction like vendor transactions.
@@ -321,12 +287,12 @@ pub struct ViewState {
 }
 
 #[derive(Clone, Default)]
-struct GameRuntimeState {
+struct GamePageRuntimeState {
+    /// At most one appraisal request or scheduled refresh for the visible Assess pane.
+    inspection_refresh: Option<domains::object_interaction::InspectionRefresh>,
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
     navigation: TuiNavigation,
-    combat_drive: Option<CombatDriveRuntime>,
-    weapon_swap: WeaponSwapState,
     inventory_notifications: InventoryNotificationState,
     logopolis: Option<LogopolisState>,
 }
@@ -351,6 +317,7 @@ impl Default for ViewState {
             previous_focused_pane: FocusedPane::Dashboard,
             context_scroll_offset: 0,
             context_view: ContextView::Default,
+            object_inspection: None,
             vendor: None,
             active_interaction: None,
             salvaging: None,

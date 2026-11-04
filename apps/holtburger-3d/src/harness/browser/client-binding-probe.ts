@@ -1,0 +1,354 @@
+import equal from "fast-deep-equal";
+import { createClientInputDefaults } from "../../client/client-input-settings";
+import { formatInputBindings } from "../../lib/input/input-presentation";
+import { mount, tick, unmount } from "svelte";
+import ClientBindingProbe from "./ClientBindingProbe.svelte";
+import type { ClientInputConfiguration } from "../../lib/input/input-contract";
+import type { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
+
+/** Compose the real Settings editor with accepted settings, HUD shortcut presentation, and a feature owner. */
+export async function probeClientBindings(options: {
+	readonly context: Map<unknown, unknown>;
+	readonly keyboard: KeyboardInputPolicy;
+	readonly initial: ClientInputConfiguration;
+	readonly accept: (
+		input: ClientInputConfiguration,
+	) => ClientInputConfiguration;
+	readonly interact: () => void;
+	readonly submissions: () => number;
+}) {
+	const platformDefaults = await probePlatformDefaults(options.context);
+	const target = document.createElement("div");
+	target.className = "ui-theme";
+	document.body.append(target);
+	let acceptedInput = options.initial;
+	const component = mount(ClientBindingProbe, {
+		target,
+		context: options.context,
+		props: {
+			platform: "windows",
+			initial: options.initial,
+			accept: (input) => {
+				acceptedInput = options.accept(input);
+				return acceptedInput;
+			},
+			interact: options.interact,
+		},
+	});
+	const require = (condition: unknown, message: string) => {
+		if (!condition) throw new Error(message);
+	};
+	const click = (label: string) => clickBindingControl(target, label);
+	const press = (
+		key: string,
+		code: string,
+		modifiers: {
+			shiftKey?: boolean;
+			ctrlKey?: boolean;
+			altKey?: boolean;
+			metaKey?: boolean;
+		} = {},
+	) => {
+		const active = document.activeElement ?? document.body;
+		active.dispatchEvent(
+			new KeyboardEvent("keydown", {
+				key,
+				code,
+				...modifiers,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+		active.dispatchEvent(
+			new KeyboardEvent("keyup", {
+				key,
+				code,
+				...modifiers,
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+	};
+	try {
+		await tick();
+		for (const preference of [
+			"targetOnlyInView",
+			"smartTabHostileOnly",
+		] as const) {
+			const checkbox = target.querySelector<HTMLInputElement>(
+				`input[name="${preference}"]`,
+			);
+			if (checkbox === null) throw new Error(`Missing ${preference} setting.`);
+			const before = acceptedInput[preference];
+			checkbox.click();
+			await tick();
+			require(acceptedInput[preference] === !before &&
+				checkbox.checked ===
+					!before, `${preference} did not publish the accepted preference.`);
+			checkbox.click();
+			await tick();
+			require(acceptedInput[preference] === before &&
+				checkbox.checked ===
+					before, `${preference} did not restore the accepted preference.`);
+		}
+		const original = target.querySelector<HTMLButtonElement>(
+			'button[aria-label="Trade"]',
+		)?.title;
+		// Removing each old alternative proves replacement instead of simply adding another shortcut.
+		const interactRow = () =>
+			Array.from(target.querySelectorAll<HTMLElement>(".binding-row")).find(
+				(row) =>
+					row.querySelector(".binding-label")?.textContent === "Interact",
+			);
+		while (interactRow()?.querySelector(".binding-key") !== null) {
+			const row = interactRow();
+			if (row === undefined) throw new Error("Missing Interact editor row");
+			const binding = row.querySelector<HTMLButtonElement>(".binding-key");
+			if (binding === null) break;
+			binding.click();
+			await tick();
+		}
+		await click("Add key for Interact");
+		press("e", "KeyE");
+		await tick();
+		require(target
+			.querySelector('[role="alert"]')
+			?.textContent?.includes(
+				"Examine",
+			), "Capture must identify the real Examine conflict");
+		await click("Replace");
+		require(interactRow()?.querySelector("kbd")?.textContent ===
+			"e", "Settings pill did not publish the accepted key");
+		require(target.querySelector<HTMLButtonElement>(
+			'button[aria-label="Trade"]',
+		)?.title === "Trade (e)", "Direct HUD title did not update");
+		options.keyboard.returnToGame();
+		const before = options.submissions();
+		for (const binding of options.initial.client.interact) {
+			press(
+				binding.key ?? binding.code,
+				binding.code ?? `Key${binding.key.toUpperCase()}`,
+				{
+					shiftKey: Boolean(binding.shift),
+					ctrlKey: Boolean(binding.ctrl),
+					altKey: Boolean(binding.alt),
+					metaKey: Boolean(binding.meta),
+				},
+			);
+		}
+		await tick();
+		require(options.submissions() ===
+			before, "Old interaction key still dispatched");
+		press("e", "KeyE");
+		await tick();
+		require(options.submissions() ===
+			before + 1, "New key did not reach the item interaction owner");
+		await click("Toggle extra action");
+		await click("Selected entity actions");
+		require(target
+			.querySelector<HTMLButtonElement>('[role="menuitem"]')
+			?.textContent?.trim() ===
+			"Trade (e)", "Popup label disagreed with direct HUD shortcut");
+		await click("Selected entity actions");
+		await click("Add key for Interact");
+		press("e", "KeyE");
+		await tick();
+		require(interactRow()?.querySelectorAll("kbd").length === 1 &&
+			target.querySelector("dialog") ===
+				null, "Repeated capture should deduplicate the existing alternative");
+		await click("Restore default keys for Interact");
+		require(target.querySelector<HTMLButtonElement>(
+			'button[aria-label="Examine"]',
+		)?.title ===
+			"Examine (Unbound)", "Conflict replacement must remove the old Examine alternative");
+		await click("Restore default input settings");
+		require(target.querySelector<HTMLButtonElement>(
+			'button[aria-label="Examine"]',
+		)?.title ===
+			`Examine (${formatInputBindings(createClientInputDefaults("windows").client.examine, "windows")})`, "Restore-all did not update the HUD");
+		const splitRow = Array.from(
+			target.querySelectorAll<HTMLElement>(".binding-row"),
+		).find(
+			(row) =>
+				row.querySelector(".binding-label")?.textContent === "Split stack",
+		);
+		const splitKey = splitRow?.querySelector<HTMLButtonElement>(".binding-key");
+		if (splitKey === undefined || splitKey === null)
+			throw new Error("Missing split-stack default binding");
+		splitKey.click();
+		await tick();
+		await click("Add key for Split stack");
+		press("F9", "F9");
+		await tick();
+		await click("Selected entity actions");
+		require(Array.from(target.querySelectorAll('[role="menuitem"]')).some(
+			(item) => item.textContent?.trim() === "Split stack (F9)",
+		), "Split-stack menu hint did not update after remapping");
+		await click("Selected entity actions");
+		await click("Restore default keys for Split stack");
+		const movementBefore = target.querySelector(
+			".binding-group .binding-row",
+		)?.textContent;
+		const powerRow = Array.from(target.querySelectorAll(".binding-row")).find(
+			(row) =>
+				row.querySelector(".binding-label")?.textContent ===
+				"Increase jump power (precise mode)",
+		);
+		const powerKey = powerRow?.querySelector<HTMLButtonElement>(".binding-key");
+		if (!powerKey) throw new Error("Missing power binding row");
+		powerKey.click();
+		await tick();
+		await click("Add key for Increase jump power (precise mode)");
+		press("i", "KeyI");
+		await tick();
+		require(target.querySelector(".jump-power-keys kbd")?.textContent ===
+			"I", "Power keycap did not follow remapping");
+		require(target.querySelector(".binding-group .binding-row")?.textContent ===
+			movementBefore, "Power remapping changed movement");
+		await click("Restore default keys for Increase jump power (precise mode)");
+		require(target.querySelector(".jump-power-keys kbd")?.textContent ===
+			formatInputBindings(
+				createClientInputDefaults("windows").preciseJump.increasePower,
+				"windows",
+			).toUpperCase(), "Power default did not restore its keycap");
+		const historyLabel = "Interact with chat history (hold)";
+		const historyRow = Array.from(target.querySelectorAll(".binding-row")).find(
+			(row) =>
+				row.querySelector(".binding-label")?.textContent === historyLabel,
+		);
+		const historyKey =
+			historyRow?.querySelector<HTMLButtonElement>(".binding-key");
+		if (!historyKey) throw new Error("Missing held-history binding row");
+		historyKey.click();
+		await tick();
+		await click(`Add key for ${historyLabel}`);
+		press("F11", "F11");
+		await tick();
+		options.keyboard.returnToGame();
+		press("Control", "ControlLeft", { ctrlKey: true });
+		await tick();
+		require(document.querySelector(".chat-panel.interactive") ===
+			null, "Old Ctrl binding still activated history after remapping");
+		document.body.dispatchEvent(
+			new KeyboardEvent("keydown", {
+				key: "F11",
+				code: "F11",
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+		await tick();
+		require(document.querySelector(".chat-panel.interactive") !==
+			null, "Remapped key did not enable production chat history");
+		document.body.dispatchEvent(
+			new KeyboardEvent("keyup", {
+				key: "F11",
+				code: "F11",
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+		await tick();
+		require(document.querySelector(".chat-panel.interactive") ===
+			null, "Releasing the remapped key did not end history interaction");
+		await click(`Restore default keys for ${historyLabel}`);
+		return {
+			passed: true,
+			platformDefaults,
+			original,
+			remapped: "Trade (e)",
+			oldKeyStopped: true,
+			splitStackRemapped: true,
+			precisePowerRemapped: true,
+			heldHistoryRemapped: true,
+			featureSubmissions: options.submissions() - before,
+		};
+	} finally {
+		await unmount(component);
+		target.remove();
+	}
+}
+
+/** Exercise both reset paths through the real settings panel with deterministic platform facts. */
+async function probePlatformDefaults(context: Map<unknown, unknown>) {
+	const evidence = [];
+	for (const platform of ["mac", "windows"] as const) {
+		const defaults = createClientInputDefaults(platform);
+		let accepted: ClientInputConfiguration = {
+			...defaults,
+			client: {
+				...defaults.client,
+				holdChatHistory: [{ key: "F12" }],
+				examine: [{ key: "F8" }],
+			},
+		};
+		const target = document.createElement("div");
+		document.body.append(target);
+		const component = mount(ClientBindingProbe, {
+			target,
+			context,
+			props: {
+				platform,
+				initial: accepted,
+				accept: (input) => {
+					accepted = input;
+					return input;
+				},
+				interact: () => {},
+			},
+		});
+		try {
+			await tick();
+			const click = (label: string) => clickBindingControl(target, label);
+			const verifyHistory = () => {
+				if (
+					!equal(
+						accepted.client.holdChatHistory,
+						defaults.client.holdChatHistory,
+					)
+				)
+					throw new Error(
+						`${platform} reset disagreed with startup history defaults`,
+					);
+			};
+			await click("Restore default keys for Interact with chat history (hold)");
+			verifyHistory();
+			if (accepted.client.examine[0]?.key !== "F8")
+				throw new Error("Per-binding reset changed another binding");
+			await click("Restore default input settings");
+			verifyHistory();
+			if (!equal(accepted, defaults))
+				throw new Error(
+					`${platform} complete reset disagreed with startup defaults`,
+				);
+			evidence.push({
+				platform,
+				holdChatHistory: accepted.client.holdChatHistory,
+				singleReset: true,
+				completeReset: true,
+			});
+		} finally {
+			await unmount(component);
+			target.remove();
+		}
+	}
+	return evidence;
+}
+
+/** Click the same accessible settings action and wait for its accepted state to render. */
+async function clickBindingControl(
+	target: HTMLElement,
+	label: string,
+): Promise<void> {
+	const button = Array.from(
+		target.querySelectorAll<HTMLButtonElement>("button"),
+	).find(
+		(candidate) =>
+			candidate.getAttribute("aria-label") === label ||
+			candidate.textContent?.trim() === label,
+	);
+	if (button === undefined)
+		throw new Error(`Missing binding probe button ${label}`);
+	button.click();
+	await tick();
+}

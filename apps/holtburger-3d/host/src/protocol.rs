@@ -1,0 +1,1762 @@
+//! Versioned, bounded MessagePack protocol for the Electron sidecar.
+
+use std::io;
+use std::sync::{Arc, mpsc};
+use std::thread;
+use std::time::Instant;
+
+use anyhow::Context;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+use crate::client_runtime::{CLIENT_COMMAND_NAMES, ClientHostCommand, dispatch_client};
+use crate::explorer_entity_delivery::ExplorerFixedTickEnvelope;
+use crate::explorer_entity_runtime::PossessionEventOutcome;
+use crate::explorer_host::{EXPLORER_COMMAND_NAMES, ExplorerHostCommand, dispatch_explorer};
+use crate::host_event_sink::{ClientEventSink, ExplorerEventSink};
+use crate::host_physical_fly_runtime::{PhysicalFlyFailure, PhysicalFlyMotionPath};
+use crate::runtime::{HostMode, HostRuntime};
+use crate::shared_host_content::{
+    SHARED_CONTENT_COMMAND_NAMES, SharedContentCommand, dispatch_shared_content,
+};
+
+/// Current sidecar protocol version.
+pub const PROTOCOL_VERSION: u16 = 3;
+/// Maximum encoded MessagePack payload, excluding the four-byte length prefix.
+pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+/// Bounded writer queue. Producers block at capacity; no event is silently discarded.
+pub const WRITER_QUEUE_CAPACITY: usize = 256;
+
+/// Opt-in host projection, queue backpressure, encoding, and pipe-write timing logs.
+pub(crate) const EVENT_PROFILE_TARGET: &str = "holtburger_3d_host::event_profile";
+
+/// A closed command set composed from the shared, Explorer, and client inventories.
+#[derive(Debug, Clone)]
+pub enum HostCommand {
+    Shared(SharedContentCommand),
+    Explorer(ExplorerHostCommand),
+    Client(ClientHostCommand),
+}
+
+impl HostCommand {
+    /// Returns the mode required by a command. `None` denotes shared content/status capability.
+    pub fn required_mode(&self) -> Option<HostMode> {
+        match self {
+            Self::Shared(_) => None,
+            Self::Explorer(_) => Some(HostMode::Explorer),
+            Self::Client(_) => Some(HostMode::Client),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for HostCommand {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        let value = Value::deserialize(deserializer)?;
+        let command = value
+            .get("command")
+            .and_then(Value::as_str)
+            .ok_or_else(|| D::Error::custom("host command is missing its string command field"))?;
+        if SHARED_CONTENT_COMMAND_NAMES.contains(&command) {
+            return serde_json::from_value(value)
+                .map(HostCommand::Shared)
+                .map_err(D::Error::custom);
+        }
+        if EXPLORER_COMMAND_NAMES.contains(&command) {
+            return serde_json::from_value(value)
+                .map(HostCommand::Explorer)
+                .map_err(D::Error::custom);
+        }
+        if CLIENT_COMMAND_NAMES.contains(&command) {
+            return serde_json::from_value(value)
+                .map(HostCommand::Client)
+                .map_err(D::Error::custom);
+        }
+        Err(D::Error::custom(format!(
+            "unknown host command {command:?}"
+        )))
+    }
+}
+
+/// Events emitted by host-owned simulation and command publication.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "event", content = "payload", rename_all = "kebab-case")]
+pub enum HostEvent {
+    ClientBarberUpdated(holtburger_core::client::barber::BarberSnapshot),
+    ClientBarberPreview(holtburger_core::client::barber::BarberPreviewResult),
+    ClientCharacterSheetUpdated(Option<Box<crate::client_projection::ClientCharacterSheetWire>>),
+    ClientProgressionEvaluated {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        evaluations: Vec<holtburger_core::ClientProgressionEvaluation>,
+    },
+    ClientProgressionFeedback(holtburger_core::ClientProgressionFeedback),
+    ExplorerDynamicEntity(holtburger_core::DynamicEntityEvent),
+    // The infrequent full snapshot is boxed so ordinary protocol frames do not
+    // reserve space for all of its collections.
+    ClientCurrentState(Box<crate::client_projection::ClientCurrentState>),
+    /// Marks the cached application state stale until the replacement arrives.
+    ClientStateResyncing(()),
+    /// Semantic entity records, independent of dynamic renderer events.
+    ClientEntityFactsChanged(holtburger_core::ClientEntityDelta),
+    ClientEntityCollisionDisabled(bool),
+    /// Cold permission edge owned by core.
+    ClientMapTeleportCapabilityChanged(bool),
+    /// Replacement standard recall choices derived by core.
+    ClientRecallDestinationsChanged(Vec<holtburger_core::client::recall::RecallDestination>),
+    /// Shared transport rates, reliability, and health for client HUD consumers.
+    ClientConnectionUpdated(holtburger_core::client::connection::ConnectionSample),
+    ClientLifecycleChanged(crate::client_projection::ClientLifecycleWire),
+    /// Retained creation/management progress, also recovered in current-state snapshots.
+    ClientCharacterManagementChanged(holtburger_core::client::types::CharacterManagementState),
+    /// Complete gameplay visual, also present in recovery snapshots.
+    ClientPlayerVisualCaptureChanged(
+        Option<holtburger_core::client::player_visual::PlayerVisualCapture>,
+    ),
+    ClientCharacterMotionCapabilitiesUpdated(
+        Option<crate::client_projection::ClientCharacterMotionCapabilitiesWire>,
+    ),
+    ClientCharacterMotionFeedback(crate::client_projection::ClientCharacterMotionFeedbackWire),
+    ClientServerControlledMotion(()),
+    ClientPreciseJumpEvaluation(crate::client_projection::ClientPreciseJumpEvaluationWire),
+    ClientPreciseJumpTransactionFeedback(
+        crate::client_projection::ClientPreciseJumpTransactionFeedbackWire,
+    ),
+    ClientSpellInspectionContext(holtburger_core::client::spell_inspection::SpellInspectionContext),
+    ClientSpellInspectionResult(holtburger_core::client::spell_inspection::SpellInspectionResult),
+    ClientObjectInspectionResult(holtburger_world::inspection::ObjectInspectionResult),
+    ClientBookOpened(crate::client_projection::ClientBookOpenedWire),
+    ClientBookUpdated(crate::client_projection::ClientBookWire),
+    ClientObjectPreviewResult(holtburger_core::client::object_preview::ObjectPreviewResult),
+    ClientDeathLocations(holtburger_core::client::corpse::DeathLocationResult),
+    ClientSalvagePreview(holtburger_core::client::salvage::SalvagePreviewResult),
+    ClientSalvageResult(holtburger_core::client::salvage::SalvageSubmitResult),
+    ClientItemUseResult(holtburger_core::client::item_use::ItemUseResult),
+    ClientItemUseFinished(holtburger_core::client::item_use::ItemUseFinished),
+    ClientLockFeedback(holtburger_core::client::lock_feedback::LockFeedback),
+    ClientLockedTarget {
+        /// Original guarded direct-use receipt identity.
+        sequence: u32,
+        target: holtburger_common::Guid,
+        name: String,
+    },
+    ClientItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
+    ClientInventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
+    ClientHousingUpdated(Box<holtburger_core::client::housing::HousingSnapshot>),
+    ClientHousingCrystalReceived(holtburger_core::client::housing::HousingCrystalView),
+    ClientVendorApproached(crate::client_vendor::ClientVendorSnapshot),
+    ClientVendorSnapshot(Option<crate::client_vendor::ClientVendorSnapshot>),
+    ClientTradeSnapshot(holtburger_core::client::trade::TradeSnapshot),
+    ClientVendorPreview(holtburger_core::client::vendor_transaction::VendorPreviewResult),
+    ClientHousingPaymentPreview(holtburger_core::client::housing_payment::HousingPreviewResult),
+    ClientHousingPaymentFinished(holtburger_core::client::housing_execution::HousingPaymentResult),
+    ClientHousingManagementFinished(
+        holtburger_core::client::housing_management::HousingManagementResult,
+    ),
+    ClientVendorResult(holtburger_core::client::vendor_transaction::VendorTradeResult),
+    ClientVendorPhase(holtburger_core::client::vendor_transaction::VendorTradePhase),
+    ClientEntitySelectionQueryResult(
+        crate::client_projection::ClientEntitySelectionQueryResultWire,
+    ),
+    ClientLocalPlayerEstablished {
+        #[serde(rename = "playerGuid")]
+        player_guid: holtburger_common::Guid,
+    },
+    ClientServerTimeUpdated {
+        time: f64,
+    },
+    ClientWorldNameUpdated {
+        name: String,
+    },
+    ClientPlayerEntered {
+        #[serde(rename = "playerGuid")]
+        player_guid: holtburger_common::Guid,
+        name: String,
+    },
+    /// Entity identity and its latest server-reported health fraction.
+    ClientEntityHealthUpdated {
+        guid: holtburger_common::Guid,
+        #[serde(rename = "healthFraction")]
+        health_fraction: f32,
+    },
+    /// Shared readiness for social command admission.
+    ClientSocialMotionReadyUpdated {
+        ready: bool,
+    },
+    ClientLocalMotionFeedback {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        #[serde(rename = "worldGeneration")]
+        world_generation: u64,
+        outcome: holtburger_world::motion::LocalMotionOutcome,
+    },
+    ClientCombatModeUpdated {
+        mode: crate::client_projection::ClientCombatMode,
+    },
+    ClientCombatStatusUpdated(crate::client_projection::ClientCombatStatusWire),
+    /// Non-self recipient of the pending spell operation, or null after retirement.
+    ClientSpellCastTargetUpdated {
+        target: Option<holtburger_common::Guid>,
+    },
+    ClientPlayerSpellsUpdated {
+        #[serde(rename = "spellIds")]
+        spell_ids: Vec<u32>,
+    },
+    ClientPlayerEnchantmentsUpdated(holtburger_world::enchantments::ResolvedEnchantments),
+    ClientCharacterPreferencesUpdated {
+        appearance: crate::client_projection::ClientAppearanceOptions,
+        gameplay: crate::client_gameplay::ClientGameplayPreferences,
+        party: crate::client_party::ClientPartyPreferences,
+        friends: crate::client_friends::ClientFriendsPreferences,
+        allegiance: crate::client_allegiance::ClientAllegiancePreferences,
+    },
+    /// Partial allegiance publication.
+    ClientAllegianceUpdated {
+        allegiance: crate::client_allegiance::ClientAllegianceSnapshot,
+    },
+    /// Current character-owned ignore projection.
+    ClientSquelchUpdated {
+        squelch: Option<crate::client_squelch::ClientSquelchSnapshot>,
+    },
+    /// Resolved journal facts following a server tracker change.
+    ClientContractsUpdated {
+        /// None outside character lifetime; an empty snapshot is an active empty journal.
+        contracts: Option<holtburger_world::state::contracts::ContractsSnapshot>,
+    },
+    /// Transient live membership change; never included in current-state recovery.
+    ClientContractMembershipChanged(holtburger_world::state::contracts::ContractMembershipChange),
+    /// Current friend list projection.
+    ClientFriendsUpdated {
+        friends: Option<crate::client_friends::ClientFriendsSnapshot>,
+    },
+    ClientPartyUpdated {
+        party: Option<crate::client_party::ClientPartySnapshot>,
+    },
+    ClientPlayerVitalsUpdated {
+        vitals: Vec<crate::client_projection::ClientVitalWire>,
+    },
+    /// Brief server notice; text is preserved verbatim.
+    ClientTransientString {
+        message: String,
+    },
+    /// Explicitly dismissible server message.
+    ClientPopupString {
+        message: String,
+    },
+    /// Current server question or its cancellation.
+    ClientConfirmationUpdated {
+        confirmation: Option<crate::client_projection::ClientConfirmation>,
+    },
+    ClientActionFeedback(crate::client_projection::ClientActionFeedback),
+    ClientChatMessage(crate::client_projection::ClientChatMessageWire),
+    /// Structured confirmed combat feedback for transient visual effects.
+    ClientCombatOutcome(crate::client_projection::ClientCombatOutcomeWire),
+    ClientDynamicEntity(holtburger_core::DynamicEntityEvent),
+    /// Server positional effect with source and world generation.
+    ClientDynamicSoundCue(holtburger_core::ClientDynamicSoundCue),
+    ClientDynamicScriptCue(holtburger_core::ClientDynamicScriptCue),
+    ClientCamera(holtburger_core::ClientCameraTick),
+    /// One physics interval, published atomically for coherent character/camera playback.
+    ClientPresentationTick {
+        /// Entity paths and levels accepted in this physics interval.
+        dynamic: Option<holtburger_core::DynamicEntityTickBatch>,
+        /// Camera path solved against that same interval, when registered and ready.
+        camera: Option<holtburger_core::ClientCameraTick>,
+    },
+    ClientCameraStarted(holtburger_core::ClientCameraStartReceipt),
+    ClientPresentationDiscontinuity(crate::client_projection::ClientPresentationDiscontinuity),
+    ClientExitRequested(crate::client_projection::ClientExitRequested),
+    ExplorerFixedTick(ExplorerFixedTickEnvelope),
+    ExplorerPossessionEventOutcomes(Vec<PossessionEventOutcome>),
+    ExplorerPhysicalFlyMotion(PhysicalFlyMotionPath),
+    ExplorerPhysicalFlyFailure(PhysicalFlyFailure),
+}
+
+/// Successful command payload. Binary responses use MessagePack's native bin type.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum HostResponse {
+    Unit,
+    Json(Value),
+    Binary(#[serde(with = "serde_bytes")] Vec<u8>),
+}
+
+/// Structured application/protocol failure returned without flattening to a shell string.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtocolError {
+    pub code: String,
+    pub message: String,
+    /// Typed source rejection; absent for transport, projection, and programming failures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<crate::content_failure::ResourceRequestFailure>,
+}
+
+/// One framed wire message.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProtocolFrame {
+    Handshake {
+        protocol_version: u16,
+        host_name: String,
+        host_version: String,
+        host_mode: HostMode,
+        /// Canonical selected installation identity for native preferences.
+        content_location: std::path::PathBuf,
+    },
+    /// Terminal content initialization failure, valid before the handshake.
+    StartupFailed {
+        protocol_version: u16,
+        failure: crate::content_failure::ContentFailure,
+    },
+    /// A necessary runtime load failed; native code records recovery independently of UI.
+    ContentFailed {
+        failure: crate::content_failure::ContentFailure,
+    },
+    Response {
+        id: u64,
+        result: Result<HostResponse, ProtocolError>,
+    },
+    Event {
+        event: HostEvent,
+    },
+    ShutdownAck {
+        id: u64,
+    },
+    Rejected {
+        error: ProtocolError,
+    },
+}
+
+/// Frames accepted from Electron. Outbound-only payloads are intentionally not deserializable.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InboundFrame {
+    HandshakeAck { protocol_version: u16 },
+    Request { id: u64, command: HostCommand },
+    Shutdown { id: u64 },
+}
+
+/// Errors raised while framing or decoding a protocol payload.
+#[derive(Debug, thiserror::Error)]
+pub enum FrameError {
+    #[error("protocol input ended before a complete frame")]
+    UnexpectedEof,
+    #[error(
+        "protocol frame announced {announced} bytes, exceeding the {MAX_FRAME_BYTES}-byte limit"
+    )]
+    Oversize { announced: usize },
+    #[error("protocol frame length does not fit in memory: {0}")]
+    Length(#[from] std::num::TryFromIntError),
+    #[error("protocol MessagePack encoding failed: {0}")]
+    Encode(#[from] rmp_serde::encode::Error),
+    #[error("protocol MessagePack decoding failed: {0}")]
+    Decode(#[from] rmp_serde::decode::Error),
+    #[error("protocol I/O failed: {0}")]
+    Io(#[from] io::Error),
+}
+
+/// Encodes one frame with a little-endian u32 length prefix.
+pub fn encode_frame(frame: &ProtocolFrame) -> Result<Vec<u8>, FrameError> {
+    let payload = rmp_serde::to_vec_named(frame)?;
+    validate_payload_length(payload.len())?;
+    let length = u32::try_from(payload.len())?;
+    let mut framed = Vec::with_capacity(4 + payload.len());
+    framed.extend(length.to_le_bytes());
+    framed.extend(payload);
+    Ok(framed)
+}
+
+/// Writes one complete frame to a synchronous stream.
+pub fn write_frame<W: io::Write>(writer: &mut W, frame: &ProtocolFrame) -> Result<(), FrameError> {
+    let started =
+        log::log_enabled!(target: EVENT_PROFILE_TARGET, log::Level::Debug).then(Instant::now);
+    let encoded = encode_frame(frame)?;
+    let encoding = started.map(|started| (started, Instant::now()));
+    writer.write_all(&encoded)?;
+    writer.flush()?;
+    if let Some((started, encoded_at)) = encoding {
+        let finished = Instant::now();
+        log::debug!(
+            target: EVENT_PROFILE_TARGET,
+            "scope=frame_write bytes={} encode_ms={:.3} write_ms={:.3}",
+            encoded.len(),
+            encoded_at.duration_since(started).as_secs_f64() * 1_000.0,
+            finished.duration_since(encoded_at).as_secs_f64() * 1_000.0,
+        );
+    }
+    Ok(())
+}
+
+/// Reads one complete frame from a synchronous stream.
+pub fn read_frame<R: io::Read>(reader: &mut R) -> Result<Option<InboundFrame>, FrameError> {
+    let mut length_bytes = [0_u8; 4];
+    match reader.read(&mut length_bytes[..1])? {
+        0 => return Ok(None),
+        1 => {}
+        _ => unreachable!("a one-byte read cannot return more than one byte"),
+    }
+    reader.read_exact(&mut length_bytes[1..])?;
+    let length = usize::try_from(u32::from_le_bytes(length_bytes))?;
+    validate_payload_length(length)?;
+    let mut payload = vec![0_u8; length];
+    reader.read_exact(&mut payload)?;
+    Ok(Some(rmp_serde::from_slice(&payload)?))
+}
+
+/// Reads one complete frame from an asynchronous stream.
+pub async fn read_frame_async<R: AsyncRead + Unpin>(
+    reader: &mut R,
+) -> Result<Option<InboundFrame>, FrameError> {
+    let mut length_bytes = [0_u8; 4];
+    match reader.read(&mut length_bytes[..1]).await? {
+        0 => return Ok(None),
+        1 => {}
+        _ => unreachable!("a one-byte read cannot return more than one byte"),
+    }
+    reader.read_exact(&mut length_bytes[1..]).await?;
+    let length = usize::try_from(u32::from_le_bytes(length_bytes))?;
+    validate_payload_length(length)?;
+    let mut payload = vec![0_u8; length];
+    reader.read_exact(&mut payload).await?;
+    Ok(Some(rmp_serde::from_slice(&payload)?))
+}
+
+/// Writes one complete frame to an asynchronous stream.
+pub async fn write_frame_async<W: AsyncWrite + Unpin>(
+    writer: &mut W,
+    frame: &ProtocolFrame,
+) -> Result<(), FrameError> {
+    writer.write_all(&encode_frame(frame)?).await?;
+    writer.flush().await?;
+    Ok(())
+}
+
+fn validate_payload_length(length: usize) -> Result<(), FrameError> {
+    if length > MAX_FRAME_BYTES {
+        return Err(FrameError::Oversize { announced: length });
+    }
+    Ok(())
+}
+
+pub(crate) fn application_error(error: impl std::fmt::Display) -> ProtocolError {
+    ProtocolError {
+        code: "application_error".to_string(),
+        message: error.to_string(),
+        resource: None,
+    }
+}
+
+pub(crate) fn encode_json<T: Serialize>(value: T) -> Result<HostResponse, ProtocolError> {
+    serde_json::to_value(value)
+        .map(HostResponse::Json)
+        .map_err(application_error)
+}
+
+/// Dispatches one typed command against the selected host composition.
+pub async fn dispatch(
+    runtime: &HostRuntime,
+    command: HostCommand,
+) -> Result<HostResponse, ProtocolError> {
+    match command {
+        HostCommand::Shared(command) => dispatch_shared_content(runtime, command).await,
+        HostCommand::Explorer(command) => {
+            if runtime.mode() != HostMode::Explorer {
+                return Err(mode_command_error(runtime.mode(), HostMode::Explorer));
+            }
+            dispatch_explorer(runtime.explorer().map_err(application_error)?, command).await
+        }
+        HostCommand::Client(command) => {
+            if runtime.mode() != HostMode::Client {
+                return Err(mode_command_error(runtime.mode(), HostMode::Client));
+            }
+            dispatch_client(runtime.client().map_err(application_error)?, command).await
+        }
+    }
+}
+
+fn mode_command_error(actual: HostMode, required: HostMode) -> ProtocolError {
+    ProtocolError {
+        code: "mode_command_unavailable".to_string(),
+        message: format!(
+            "command is unavailable in {} mode; it requires {} mode",
+            actual.as_str(),
+            required.as_str(),
+        ),
+        resource: None,
+    }
+}
+
+/// MessagePack event sink used by the stdio process.
+pub struct StdioEventSink {
+    sender: mpsc::SyncSender<ProtocolFrame>,
+}
+
+impl StdioEventSink {
+    /// Creates a bounded sink that blocks producers when Electron is not draining output.
+    pub fn new(sender: mpsc::SyncSender<ProtocolFrame>) -> Self {
+        Self { sender }
+    }
+
+    fn send(&self, event: HostEvent) -> anyhow::Result<()> {
+        self.sender
+            .send(ProtocolFrame::Event { event })
+            .context("sidecar writer stopped while publishing host event")
+    }
+}
+
+impl ClientEventSink for StdioEventSink {
+    fn publish_client_event(
+        &self,
+        event: crate::client_projection::ClientHostEvent,
+    ) -> anyhow::Result<()> {
+        let event = match event {
+            crate::client_projection::ClientHostEvent::CombatFeedback { chat, outcome } => {
+                self.send(HostEvent::ClientChatMessage(chat))?;
+                return self.send(HostEvent::ClientCombatOutcome(outcome));
+            }
+            crate::client_projection::ClientHostEvent::HousingManagementFinished(result) => {
+                HostEvent::ClientHousingManagementFinished(result)
+            }
+            crate::client_projection::ClientHostEvent::HousingUpdated(housing) => {
+                HostEvent::ClientHousingUpdated(Box::new(housing))
+            }
+            crate::client_projection::ClientHostEvent::HousingCrystalReceived(crystal) => {
+                HostEvent::ClientHousingCrystalReceived(crystal)
+            }
+            crate::client_projection::ClientHostEvent::BookOpened(book) => {
+                HostEvent::ClientBookOpened(book)
+            }
+            crate::client_projection::ClientHostEvent::BookUpdated(book) => {
+                HostEvent::ClientBookUpdated(book)
+            }
+            crate::client_projection::ClientHostEvent::DeathLocations(result) => {
+                HostEvent::ClientDeathLocations(result)
+            }
+            crate::client_projection::ClientHostEvent::ObjectInspectionResult(result) => {
+                HostEvent::ClientObjectInspectionResult(result)
+            }
+            crate::client_projection::ClientHostEvent::ObjectPreviewResult(result) => {
+                HostEvent::ClientObjectPreviewResult(result)
+            }
+            crate::client_projection::ClientHostEvent::EntityCollisionDisabled(disabled) => {
+                HostEvent::ClientEntityCollisionDisabled(disabled)
+            }
+            crate::client_projection::ClientHostEvent::RecallDestinationsChanged(destinations) => {
+                HostEvent::ClientRecallDestinationsChanged(destinations)
+            }
+            crate::client_projection::ClientHostEvent::MapTeleportCapabilityChanged(allowed) => {
+                HostEvent::ClientMapTeleportCapabilityChanged(allowed)
+            }
+            crate::client_projection::ClientHostEvent::CurrentState(state) => {
+                HostEvent::ClientCurrentState(state)
+            }
+            crate::client_projection::ClientHostEvent::ConnectionUpdated(sample) => {
+                HostEvent::ClientConnectionUpdated(sample)
+            }
+            crate::client_projection::ClientHostEvent::LifecycleChanged(lifecycle) => {
+                HostEvent::ClientLifecycleChanged(lifecycle)
+            }
+            crate::client_projection::ClientHostEvent::CharacterManagementChanged(state) => {
+                HostEvent::ClientCharacterManagementChanged(state)
+            }
+            crate::client_projection::ClientHostEvent::PlayerVisualCaptureChanged(capture) => {
+                HostEvent::ClientPlayerVisualCaptureChanged(capture)
+            }
+            crate::client_projection::ClientHostEvent::CharacterMotionCapabilitiesUpdated(
+                capabilities,
+            ) => HostEvent::ClientCharacterMotionCapabilitiesUpdated(capabilities),
+            crate::client_projection::ClientHostEvent::CharacterMotionFeedback(feedback) => {
+                HostEvent::ClientCharacterMotionFeedback(feedback)
+            }
+            crate::client_projection::ClientHostEvent::ServerControlledMotion => {
+                HostEvent::ClientServerControlledMotion(())
+            }
+            crate::client_projection::ClientHostEvent::PreciseJumpEvaluation(evaluation) => {
+                HostEvent::ClientPreciseJumpEvaluation(evaluation)
+            }
+            crate::client_projection::ClientHostEvent::PreciseJumpTransactionFeedback(feedback) => {
+                HostEvent::ClientPreciseJumpTransactionFeedback(feedback)
+            }
+            crate::client_projection::ClientHostEvent::SpellInspectionContext(context) => {
+                HostEvent::ClientSpellInspectionContext(context)
+            }
+            crate::client_projection::ClientHostEvent::SpellInspectionResult(result) => {
+                HostEvent::ClientSpellInspectionResult(result)
+            }
+            crate::client_projection::ClientHostEvent::ItemUseTargetResult(result) => {
+                HostEvent::ClientItemUseTargetResult(result)
+            }
+            crate::client_projection::ClientHostEvent::SalvagePreview(result) => {
+                HostEvent::ClientSalvagePreview(result)
+            }
+            crate::client_projection::ClientHostEvent::SalvageResult(result) => {
+                HostEvent::ClientSalvageResult(result)
+            }
+            crate::client_projection::ClientHostEvent::ItemUseResult(result) => {
+                HostEvent::ClientItemUseResult(result)
+            }
+            crate::client_projection::ClientHostEvent::LockFeedback(feedback) => {
+                HostEvent::ClientLockFeedback(feedback)
+            }
+            crate::client_projection::ClientHostEvent::ItemUseFinished(result) => {
+                HostEvent::ClientItemUseFinished(result)
+            }
+            crate::client_projection::ClientHostEvent::LockedTarget {
+                target,
+                name,
+                sequence,
+            } => HostEvent::ClientLockedTarget {
+                target,
+                name,
+                sequence,
+            },
+            crate::client_projection::ClientHostEvent::TradeSnapshot(snapshot) => {
+                HostEvent::ClientTradeSnapshot(snapshot)
+            }
+            crate::client_projection::ClientHostEvent::BarberUpdated(snapshot) => {
+                HostEvent::ClientBarberUpdated(snapshot)
+            }
+            crate::client_projection::ClientHostEvent::BarberPreview(result) => {
+                HostEvent::ClientBarberPreview(result)
+            }
+            crate::client_projection::ClientHostEvent::VendorApproached(snapshot) => {
+                HostEvent::ClientVendorApproached(snapshot)
+            }
+            crate::client_projection::ClientHostEvent::VendorSnapshot(snapshot) => {
+                HostEvent::ClientVendorSnapshot(snapshot)
+            }
+            crate::client_projection::ClientHostEvent::VendorPreview(result) => {
+                HostEvent::ClientVendorPreview(result)
+            }
+            crate::client_projection::ClientHostEvent::HousingPaymentPreview(result) => {
+                HostEvent::ClientHousingPaymentPreview(result)
+            }
+            crate::client_projection::ClientHostEvent::HousingPaymentFinished(result) => {
+                HostEvent::ClientHousingPaymentFinished(result)
+            }
+            crate::client_projection::ClientHostEvent::VendorResult(result) => {
+                HostEvent::ClientVendorResult(result)
+            }
+            crate::client_projection::ClientHostEvent::VendorPhase(phase) => {
+                HostEvent::ClientVendorPhase(phase)
+            }
+            crate::client_projection::ClientHostEvent::InventoryPreview(result) => {
+                HostEvent::ClientInventoryPreview(result)
+            }
+            crate::client_projection::ClientHostEvent::EntitySelectionQueryResult(result) => {
+                HostEvent::ClientEntitySelectionQueryResult(result)
+            }
+            crate::client_projection::ClientHostEvent::LocalPlayerEstablished { player_guid } => {
+                HostEvent::ClientLocalPlayerEstablished { player_guid }
+            }
+            crate::client_projection::ClientHostEvent::ServerTimeUpdated { time } => {
+                HostEvent::ClientServerTimeUpdated { time }
+            }
+            crate::client_projection::ClientHostEvent::WorldNameUpdated { name } => {
+                HostEvent::ClientWorldNameUpdated { name }
+            }
+            crate::client_projection::ClientHostEvent::PlayerEntered { player_guid, name } => {
+                HostEvent::ClientPlayerEntered { player_guid, name }
+            }
+            crate::client_projection::ClientHostEvent::EntityHealthUpdated {
+                guid,
+                health_fraction,
+            } => HostEvent::ClientEntityHealthUpdated {
+                guid,
+                health_fraction,
+            },
+            crate::client_projection::ClientHostEvent::SocialMotionReadyUpdated { ready } => {
+                HostEvent::ClientSocialMotionReadyUpdated { ready }
+            }
+            crate::client_projection::ClientHostEvent::LocalMotionFeedback {
+                request_id,
+                world_generation,
+                outcome,
+            } => HostEvent::ClientLocalMotionFeedback {
+                request_id,
+                world_generation,
+                outcome,
+            },
+            crate::client_projection::ClientHostEvent::CombatModeUpdated { mode } => {
+                HostEvent::ClientCombatModeUpdated { mode }
+            }
+            crate::client_projection::ClientHostEvent::SpellCastTargetUpdated { target } => {
+                HostEvent::ClientSpellCastTargetUpdated { target }
+            }
+            crate::client_projection::ClientHostEvent::CombatStatusUpdated(status) => {
+                HostEvent::ClientCombatStatusUpdated(status)
+            }
+            crate::client_projection::ClientHostEvent::PlayerSpellsUpdated { spell_ids } => {
+                HostEvent::ClientPlayerSpellsUpdated { spell_ids }
+            }
+            crate::client_projection::ClientHostEvent::PlayerEnchantmentsUpdated(resolved) => {
+                HostEvent::ClientPlayerEnchantmentsUpdated(resolved)
+            }
+            crate::client_projection::ClientHostEvent::CharacterPreferencesUpdated {
+                appearance,
+                gameplay,
+                party,
+                friends,
+                allegiance,
+            } => HostEvent::ClientCharacterPreferencesUpdated {
+                appearance,
+                gameplay,
+                party,
+                friends,
+                allegiance,
+            },
+            crate::client_projection::ClientHostEvent::AllegianceUpdated { allegiance } => {
+                HostEvent::ClientAllegianceUpdated { allegiance }
+            }
+            crate::client_projection::ClientHostEvent::SquelchUpdated { squelch } => {
+                HostEvent::ClientSquelchUpdated { squelch }
+            }
+            crate::client_projection::ClientHostEvent::ContractsUpdated { contracts } => {
+                HostEvent::ClientContractsUpdated { contracts }
+            }
+            crate::client_projection::ClientHostEvent::ContractMembershipChanged(change) => {
+                HostEvent::ClientContractMembershipChanged(change)
+            }
+            crate::client_projection::ClientHostEvent::FriendsUpdated { friends } => {
+                HostEvent::ClientFriendsUpdated { friends }
+            }
+            crate::client_projection::ClientHostEvent::PartyUpdated { party } => {
+                HostEvent::ClientPartyUpdated { party }
+            }
+            crate::client_projection::ClientHostEvent::PlayerVitalsUpdated { vitals } => {
+                HostEvent::ClientPlayerVitalsUpdated { vitals }
+            }
+            crate::client_projection::ClientHostEvent::CharacterSheetUpdated(sheet) => {
+                HostEvent::ClientCharacterSheetUpdated(sheet)
+            }
+            crate::client_projection::ClientHostEvent::ProgressionEvaluated {
+                request_id,
+                evaluations,
+            } => HostEvent::ClientProgressionEvaluated {
+                request_id,
+                evaluations,
+            },
+            crate::client_projection::ClientHostEvent::ProgressionFeedback(feedback) => {
+                HostEvent::ClientProgressionFeedback(feedback)
+            }
+            crate::client_projection::ClientHostEvent::TransientString { message } => {
+                HostEvent::ClientTransientString { message }
+            }
+            crate::client_projection::ClientHostEvent::PopupString { message } => {
+                HostEvent::ClientPopupString { message }
+            }
+            crate::client_projection::ClientHostEvent::ConfirmationUpdated { confirmation } => {
+                HostEvent::ClientConfirmationUpdated { confirmation }
+            }
+            crate::client_projection::ClientHostEvent::ActionFeedback(feedback) => {
+                HostEvent::ClientActionFeedback(feedback)
+            }
+            crate::client_projection::ClientHostEvent::ChatMessage(message) => {
+                HostEvent::ClientChatMessage(message)
+            }
+            crate::client_projection::ClientHostEvent::StateResyncing => {
+                HostEvent::ClientStateResyncing(())
+            }
+            crate::client_projection::ClientHostEvent::EntityFactsChanged(delta) => {
+                HostEvent::ClientEntityFactsChanged(delta)
+            }
+            crate::client_projection::ClientHostEvent::DynamicEntity(event) => {
+                HostEvent::ClientDynamicEntity(event)
+            }
+            crate::client_projection::ClientHostEvent::DynamicSoundCue(cue) => {
+                HostEvent::ClientDynamicSoundCue(cue)
+            }
+            crate::client_projection::ClientHostEvent::DynamicScriptCue(cue) => {
+                HostEvent::ClientDynamicScriptCue(cue)
+            }
+            crate::client_projection::ClientHostEvent::PresentationTick { dynamic, camera } => {
+                HostEvent::ClientPresentationTick { dynamic, camera }
+            }
+            crate::client_projection::ClientHostEvent::Camera(tick) => {
+                HostEvent::ClientCamera(tick)
+            }
+            crate::client_projection::ClientHostEvent::CameraStarted(receipt) => {
+                HostEvent::ClientCameraStarted(receipt)
+            }
+            crate::client_projection::ClientHostEvent::PresentationDiscontinuity(discontinuity) => {
+                HostEvent::ClientPresentationDiscontinuity(discontinuity)
+            }
+            crate::client_projection::ClientHostEvent::ExitRequested(exit) => {
+                HostEvent::ClientExitRequested(exit)
+            }
+        };
+        self.send(event)
+    }
+}
+
+impl ExplorerEventSink for StdioEventSink {
+    fn publish_dynamic_entity(
+        &self,
+        event: holtburger_core::DynamicEntityEvent,
+    ) -> anyhow::Result<()> {
+        self.send(HostEvent::ExplorerDynamicEntity(event))
+    }
+
+    fn publish_fixed_tick(&self, envelope: ExplorerFixedTickEnvelope) -> anyhow::Result<()> {
+        self.send(HostEvent::ExplorerFixedTick(envelope))
+    }
+
+    fn publish_possession_outcomes(
+        &self,
+        outcomes: Vec<PossessionEventOutcome>,
+    ) -> anyhow::Result<()> {
+        self.send(HostEvent::ExplorerPossessionEventOutcomes(outcomes))
+    }
+
+    fn publish_physical_fly_motion(&self, path: PhysicalFlyMotionPath) -> anyhow::Result<()> {
+        self.send(HostEvent::ExplorerPhysicalFlyMotion(path))
+    }
+
+    fn publish_physical_fly_failure(&self, failure: PhysicalFlyFailure) -> anyhow::Result<()> {
+        self.send(HostEvent::ExplorerPhysicalFlyFailure(failure))
+    }
+}
+
+/// Stops cooperative blocking preparation on every transport exit, including error returns.
+struct MapStopGuard(Arc<crate::world_map::WorldMapService>);
+impl Drop for MapStopGuard {
+    fn drop(&mut self) {
+        self.0.stop();
+    }
+}
+
+/// Runs the framed sidecar protocol over stdin/stdout.
+pub async fn run_stdio(launch: crate::host_mode::HostLaunch) -> anyhow::Result<()> {
+    let mode = launch.mode;
+    let (sender, receiver) = mpsc::sync_channel(WRITER_QUEUE_CAPACITY);
+    let writer_thread = thread::spawn(move || -> anyhow::Result<()> {
+        let stdout = io::stdout();
+        let mut stdout = io::BufWriter::new(stdout.lock());
+        for frame in receiver {
+            write_frame(&mut stdout, &frame).context("sidecar stdout writer failed")?;
+        }
+        Ok(())
+    });
+    let event_sink = Arc::new(StdioEventSink::new(sender.clone()));
+    let initialize = || -> anyhow::Result<_> {
+        let selection = crate::content_selection::resolve(launch.content)?;
+        let mut content = crate::shared_host_content::SharedHostContent::from_repository(
+            Arc::new(selection.repository),
+        )?;
+        content.failures = crate::content_failure::ContentFailureReporter::Stdio(sender.clone());
+        let runtime = HostRuntime::from_content(
+            mode,
+            content,
+            Arc::clone(&event_sink) as Arc<dyn ClientEventSink>,
+            Arc::clone(&event_sink) as Arc<dyn ExplorerEventSink>,
+        )?;
+        Ok((Arc::new(runtime), selection.location))
+    };
+    let (runtime, content_location) = match initialize() {
+        Ok(initialized) => initialized,
+        Err(error) => {
+            if let Some(frame) =
+                crate::content_failure::ContentFailureReporter::startup_frame(&error)
+            {
+                sender
+                    .send(frame)
+                    .context("sidecar writer stopped before startup failure")?;
+            }
+            // Dropping every sender and joining guarantees the terminal diagnostic is flushed.
+            drop(event_sink);
+            drop(sender);
+            writer_thread
+                .join()
+                .map_err(|_| anyhow::anyhow!("sidecar writer thread panicked"))??;
+            return Err(error);
+        }
+    };
+    drop(event_sink);
+    let _map_stop = MapStopGuard(Arc::clone(&runtime.content().world_map));
+    sender
+        .send(ProtocolFrame::Handshake {
+            protocol_version: PROTOCOL_VERSION,
+            host_name: "holtburger-3d-host".to_string(),
+            host_version: env!("CARGO_PKG_VERSION").to_string(),
+            host_mode: mode,
+            content_location,
+        })
+        .context("sidecar writer stopped before handshake")?;
+
+    let mut stdin = tokio::io::stdin();
+    let Some(first) = read_frame_async(&mut stdin).await? else {
+        drop(runtime);
+        drop(sender);
+        writer_thread
+            .join()
+            .map_err(|_| anyhow::anyhow!("sidecar writer thread panicked"))??;
+        return Ok(());
+    };
+    match first {
+        InboundFrame::HandshakeAck { protocol_version } if protocol_version == PROTOCOL_VERSION => {
+        }
+        InboundFrame::HandshakeAck { protocol_version } => {
+            sender
+                .send(ProtocolFrame::Rejected {
+                    error: ProtocolError {
+                        code: "incompatible_protocol".to_string(),
+                        message: format!(
+                            "host protocol {PROTOCOL_VERSION} cannot communicate with {protocol_version}"
+                        ),
+                        resource: None,
+                    },
+                })
+                .ok();
+            drop(sender);
+            drop(runtime);
+            writer_thread
+                .join()
+                .map_err(|_| anyhow::anyhow!("sidecar writer thread panicked"))??;
+            return Ok(());
+        }
+        _ => {
+            sender
+                .send(ProtocolFrame::Rejected {
+                    error: ProtocolError {
+                        code: "handshake_required".to_string(),
+                        message: "the first frame must acknowledge the host handshake".to_string(),
+                        resource: None,
+                    },
+                })
+                .ok();
+            drop(sender);
+            drop(runtime);
+            writer_thread
+                .join()
+                .map_err(|_| anyhow::anyhow!("sidecar writer thread panicked"))??;
+            return Ok(());
+        }
+    }
+
+    let mut pending = tokio::task::JoinSet::new();
+    let shutdown_id = loop {
+        let Some(frame) = read_frame_async(&mut stdin).await? else {
+            break None;
+        };
+        match frame {
+            InboundFrame::Request { id, command } => {
+                let runtime = Arc::clone(&runtime);
+                let sender = sender.clone();
+                pending.spawn(async move {
+                    let result = dispatch(&runtime, command).await;
+                    sender
+                        .send(ProtocolFrame::Response { id, result })
+                        .context("sidecar writer stopped while publishing response")
+                });
+            }
+            InboundFrame::Shutdown { id } => {
+                break Some(id);
+            }
+            other => {
+                sender
+                    .send(ProtocolFrame::Rejected {
+                        error: ProtocolError {
+                            code: "unexpected_frame".to_string(),
+                            message: format!("frame {other:?} is not valid after handshake"),
+                            resource: None,
+                        },
+                    })
+                    .context("sidecar writer stopped while rejecting frame")?;
+            }
+        }
+        // Completed joins are consumed continuously so a long-lived host retains only active work.
+        while let Some(result) = pending.try_join_next() {
+            result??;
+        }
+    };
+    runtime.content().world_map.stop();
+    while let Some(result) = pending.join_next().await {
+        result??;
+    }
+    if let Some(id) = shutdown_id {
+        sender
+            .send(ProtocolFrame::ShutdownAck { id })
+            .context("sidecar writer stopped while acknowledging shutdown")?;
+    }
+    runtime.shutdown().await;
+    drop(runtime);
+    drop(sender);
+    writer_thread
+        .join()
+        .map_err(|_| anyhow::anyhow!("sidecar writer thread panicked"))??;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn lock_feedback_and_use_receipts_reach_the_host_wire_with_identity() {
+        use holtburger_core::client::item_use::{ItemUseCompletion, ItemUseFinished};
+        use holtburger_core::{ActionResultReason, ActionResultSource, ClientViewEvent};
+        use holtburger_protocol::errors::WeenieError;
+        let (sender, receiver) = mpsc::sync_channel(2);
+        let sink = StdioEventSink::new(sender);
+        for event in [
+            ClientViewEvent::ActionResult {
+                source: ActionResultSource::Client,
+                reason: ActionResultReason::Locked {
+                    target: holtburger_common::Guid(9),
+                    name: "Chest".into(),
+                    sequence: 41,
+                },
+            },
+            ClientViewEvent::ItemUseFinished(ItemUseFinished {
+                sequence: 42,
+                outcome: ItemUseCompletion::Completed {
+                    error: WeenieError::KeyDoesntFitThisLock,
+                    message: "The key does not fit.".into(),
+                },
+            }),
+        ] {
+            sink.publish_client_event(
+                crate::client_projection::project_client_event(event).unwrap(),
+            )
+            .unwrap();
+        }
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("expected lock event")
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "event": "client-locked-target", "payload": { "target": 9, "name": "Chest", "sequence": 41 }
+            })
+        );
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("expected use receipt")
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "event": "client-item-use-finished", "payload": { "sequence": 42, "outcome": {
+                    "kind": "completed", "error": "KeyDoesntFitThisLock", "message": "The key does not fit."
+                }}
+            })
+        );
+    }
+
+    #[test]
+    fn local_motion_feedback_preserves_correlation_on_the_wire() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let sink = StdioEventSink::new(sender);
+        sink.publish_client_event(
+            crate::client_projection::ClientHostEvent::LocalMotionFeedback {
+                request_id: 17,
+                world_generation: 3,
+                outcome: holtburger_world::motion::LocalMotionOutcome::Completed,
+            },
+        )
+        .unwrap();
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("expected motion feedback");
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "event": "client-local-motion-feedback", "payload": { "requestId": 17, "worldGeneration": 3, "outcome": "completed" }
+            })
+        );
+    }
+
+    #[test]
+    fn target_lock_feedback_reaches_the_wire_without_request_attribution() {
+        use holtburger_core::client::lock_feedback::{LockFeedback, LockFeedbackOutcome};
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let sink = StdioEventSink::new(sender);
+        let event = holtburger_core::ClientViewEvent::LockFeedback(LockFeedback {
+            target: holtburger_common::Guid(9),
+            generation: 2,
+            world_generation: 3,
+            outcome: LockFeedbackOutcome::Failed,
+        });
+        sink.publish_client_event(crate::client_projection::project_client_event(event).unwrap())
+            .unwrap();
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("expected target lock feedback")
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "event": "client-lock-feedback", "payload": {
+                    "target": 9, "generation": 2, "worldGeneration": 3, "outcome": "failed"
+                }
+            })
+        );
+    }
+
+    use super::*;
+    use crate::host_mode::ClientLaunchConfiguration;
+    use holtburger_common::properties::EquipMask;
+    use holtburger_core::client::connection::{
+        ConnectionHealth, ConnectionQuality, ConnectionReliability, ConnectionSample,
+    };
+    use std::io::Cursor;
+
+    #[test]
+    fn fragmented_and_coalesced_frames_round_trip() {
+        let first_payload = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "handshake_ack",
+            "protocol_version": PROTOCOL_VERSION,
+        }))
+        .unwrap();
+        let second_payload = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "shutdown",
+            "id": 7,
+        }))
+        .unwrap();
+        let first = framed_payload(first_payload);
+        let second = framed_payload(second_payload);
+        let mut bytes = first.clone();
+        bytes.extend(second);
+        let mut reader = Cursor::new(bytes);
+        assert!(matches!(
+            read_frame(&mut reader).unwrap(),
+            Some(InboundFrame::HandshakeAck { .. })
+        ));
+        assert!(matches!(
+            read_frame(&mut reader).unwrap(),
+            Some(InboundFrame::Shutdown { id: 7 })
+        ));
+    }
+
+    #[test]
+    fn binary_response_uses_messagepack_bin_without_json_number_expansion() {
+        let encoded = encode_frame(&ProtocolFrame::Response {
+            id: 7,
+            result: Ok(HostResponse::Binary(vec![0, 1, 255, 254])),
+        })
+        .unwrap();
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", rename_all = "snake_case")]
+        enum DecodedFrame {
+            Response {
+                id: u64,
+                result: Result<DecodedResponse, ProtocolError>,
+            },
+        }
+        #[derive(Deserialize)]
+        #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+        enum DecodedResponse {
+            Binary(#[serde(with = "serde_bytes")] Vec<u8>),
+        }
+        let decoded: DecodedFrame = rmp_serde::from_slice(&encoded[4..]).unwrap();
+        assert!(matches!(
+            decoded,
+            DecodedFrame::Response {
+                id: 7,
+                result: Ok(DecodedResponse::Binary(payload))
+            } if payload == vec![0, 1, 255, 254]
+        ));
+    }
+
+    #[test]
+    fn combat_projection_publishes_chat_then_confirmed_outcome_with_producer_identity() {
+        use holtburger_core::client::types::{
+            CombatFeedback, CombatOutcomeAttribution, CombatOutcomeContext,
+        };
+        let projected = crate::client_projection::project_client_event(
+            holtburger_core::ClientViewEvent::CombatFeedback(
+                CombatFeedback::EvasionAttackerNotification {
+                    context: CombatOutcomeContext {
+                        world_generation: 17,
+                        attribution: CombatOutcomeAttribution::Attributed {
+                            target: holtburger_common::Guid(42),
+                        },
+                    },
+                    defender_name: "Drudge".into(),
+                },
+            ),
+        )
+        .unwrap();
+        let (sender, receiver) = mpsc::sync_channel(2);
+        StdioEventSink::new(sender)
+            .publish_client_event(projected)
+            .unwrap();
+        let ProtocolFrame::Event {
+            event: HostEvent::ClientChatMessage(_),
+        } = receiver.recv().unwrap()
+        else {
+            panic!("chat must be published first");
+        };
+        let ProtocolFrame::Event {
+            event: HostEvent::ClientCombatOutcome(outcome),
+        } = receiver.recv().unwrap()
+        else {
+            panic!("structured outcome must be published second");
+        };
+        assert_eq!(
+            serde_json::to_value(outcome).unwrap(),
+            serde_json::json!({
+                "worldGeneration": 17,
+                "attribution": { "kind": "attributed", "target": 42 },
+                "outcome": { "kind": "evaded" },
+            })
+        );
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn server_text_projection_preserves_chat_and_publishes_one_typed_companion() {
+        use holtburger_core::client::types::{
+            CombatOutcomeAttribution, CombatOutcomeContext, ServerTextCombatOutcome,
+            ServerTextCombatOutcomeKind,
+        };
+        for (message, kind) in [
+            (
+                "You burn Drudge for 0 points with Flame.",
+                ServerTextCombatOutcomeKind::Damage {
+                    amount: 0,
+                    critical_hit: false,
+                },
+            ),
+            (
+                "Critical hit! You burn Drudge for 37 points with Flame.",
+                ServerTextCombatOutcomeKind::Damage {
+                    amount: 37,
+                    critical_hit: true,
+                },
+            ),
+            (
+                "Drudge resists your spell",
+                ServerTextCombatOutcomeKind::Resisted,
+            ),
+        ] {
+            let projected = crate::client_projection::project_client_event(
+                holtburger_core::ClientViewEvent::ServerMessage {
+                    message: message.into(),
+                    chat_type: holtburger_protocol::messages::ChatMessageType::Magic.into(),
+                    combat_outcome: Some(ServerTextCombatOutcome {
+                        context: CombatOutcomeContext {
+                            world_generation: 17,
+                            attribution: CombatOutcomeAttribution::Unplaced,
+                        },
+                        kind,
+                    }),
+                },
+            )
+            .unwrap();
+            let (sender, receiver) = mpsc::sync_channel(2);
+            StdioEventSink::new(sender)
+                .publish_client_event(projected)
+                .unwrap();
+            let ProtocolFrame::Event {
+                event: HostEvent::ClientChatMessage(chat),
+            } = receiver.recv().unwrap()
+            else {
+                panic!("original chat first");
+            };
+            assert!(
+                matches!(chat, crate::client_projection::ClientChatMessageWire::Server {
+                    message: original,
+                    category: crate::client_projection::ClientChatCategoryWire::Known(crate::client_projection::ClientChatKnownCategoryWire::Magic),
+                } if original == message)
+            );
+            let ProtocolFrame::Event {
+                event: HostEvent::ClientCombatOutcome(outcome),
+            } = receiver.recv().unwrap()
+            else {
+                panic!("one outcome second");
+            };
+            let expected = match kind {
+                ServerTextCombatOutcomeKind::Damage {
+                    amount,
+                    critical_hit,
+                } => {
+                    serde_json::json!({ "kind": "damage", "amount": amount, "criticalHit": critical_hit })
+                }
+                ServerTextCombatOutcomeKind::Resisted => serde_json::json!({ "kind": "resisted" }),
+            };
+            assert_eq!(
+                serde_json::to_value(outcome).unwrap(),
+                serde_json::json!({ "worldGeneration": 17, "attribution": { "kind": "unplaced" }, "outcome": expected })
+            );
+            assert!(receiver.try_recv().is_err());
+        }
+    }
+
+    #[test]
+    fn connection_projection_and_stdio_encoding_preserve_reliability_and_sample_age() {
+        let sample = ConnectionSample {
+            quality: ConnectionQuality::Fair,
+            reliability: ConnectionReliability {
+                receive_repair_share: Some(0.05),
+                send_repair_share: None,
+                receive_gap: false,
+            },
+            health: ConnectionHealth::Connected,
+            sample_age_seconds: 3.0,
+            receive_age_seconds: 0.25,
+            receive_bytes_per_second: 120.0,
+            send_bytes_per_second: 60.0,
+        };
+        let projected = crate::client_projection::project_client_event(
+            holtburger_core::ClientViewEvent::ConnectionUpdated(sample),
+        )
+        .unwrap();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        StdioEventSink::new(sender)
+            .publish_client_event(projected)
+            .unwrap();
+        let encoded = encode_frame(&receiver.recv().unwrap()).unwrap();
+        let decoded: Value = rmp_serde::from_slice(&encoded[4..]).unwrap();
+        assert_eq!(
+            decoded,
+            serde_json::json!({
+                "kind": "event",
+                "event": {
+                    "event": "client-connection-updated",
+                    "payload": {
+                        "quality": "fair",
+                        "reliability": {
+                            "receiveRepairShare": 0.05,
+                            "sendRepairShare": null,
+                            "receiveGap": false,
+                        },
+                        "health": "connected",
+                        "sampleAgeSeconds": 3.0,
+                        "receiveAgeSeconds": 0.25,
+                        "receiveBytesPerSecond": 120.0,
+                        "sendBytesPerSecond": 60.0,
+                    },
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn event_content_has_exactly_one_payload_layer() {
+        let encoded = encode_frame(&ProtocolFrame::Event {
+            event: HostEvent::ExplorerPhysicalFlyFailure(PhysicalFlyFailure {
+                session: 7,
+                message: "stopped".to_string(),
+            }),
+        })
+        .unwrap();
+        let decoded: Value = rmp_serde::from_slice(&encoded[4..]).unwrap();
+        assert_eq!(
+            decoded,
+            serde_json::json!({
+                "kind": "event",
+                "event": {
+                    "event": "explorer-physical-fly-failure",
+                    "payload": {
+                        "session": 7,
+                        "message": "stopped",
+                    },
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn encoded_local_player_event_retains_authority_identity() {
+        let encoded = encode_frame(&ProtocolFrame::Event {
+            event: HostEvent::ClientLocalPlayerEstablished {
+                player_guid: holtburger_common::Guid(0x5000_0008),
+            },
+        })
+        .unwrap();
+        let decoded: Value = rmp_serde::from_slice(&encoded[4..]).unwrap();
+        assert_eq!(
+            decoded,
+            serde_json::json!({
+                "kind": "event",
+                "event": {
+                    "event": "client-local-player-established",
+                    "payload": {
+                        "playerGuid": 0x5000_0008u64,
+                    },
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn encoded_dynamic_script_cue_has_the_browser_contract_name_and_shape() {
+        let encoded = encode_frame(&ProtocolFrame::Event {
+            event: HostEvent::ClientDynamicScriptCue(holtburger_core::ClientDynamicScriptCue {
+                guid: holtburger_common::Guid(0x5000_0008),
+                generation: 17,
+                cue: 7,
+                intensity: 0.625,
+            }),
+        })
+        .unwrap();
+        let decoded: Value = rmp_serde::from_slice(&encoded[4..]).unwrap();
+        assert_eq!(
+            decoded,
+            serde_json::json!({
+                "kind": "event",
+                "event": {
+                    "event": "client-dynamic-script-cue",
+                    "payload": {
+                        "guid": 0x5000_0008u64,
+                        "generation": 17,
+                        "cue": 7,
+                        "intensity": 0.625,
+                    },
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn exact_frame_limit_is_accepted_and_one_byte_over_is_rejected() {
+        assert!(validate_payload_length(MAX_FRAME_BYTES).is_ok());
+        assert!(matches!(
+            validate_payload_length(MAX_FRAME_BYTES + 1),
+            Err(FrameError::Oversize { announced }) if announced == MAX_FRAME_BYTES + 1
+        ));
+    }
+
+    #[test]
+    fn command_inventory_declares_shared_and_mode_specific_capabilities() {
+        assert_eq!(
+            HostCommand::Shared(SharedContentCommand::HostStatus).required_mode(),
+            None,
+            "status is available through both mode roots"
+        );
+        assert_eq!(
+            HostCommand::Shared(SharedContentCommand::LoadSkySource).required_mode(),
+            None,
+            "static content is available through both mode roots"
+        );
+        assert_eq!(
+            HostCommand::Explorer(ExplorerHostCommand::ExplorerCatalogCapability).required_mode(),
+            Some(HostMode::Explorer)
+        );
+        assert_eq!(
+            HostCommand::Client(ClientHostCommand::StartClient {
+                startup: ClientLaunchConfiguration {
+                    host: "127.0.0.1".to_string(),
+                    port: 9000,
+                    account: "test".to_string(),
+                    password: "secret".to_string(),
+                    melee_max_chase_distance: None,
+                },
+            })
+            .required_mode(),
+            Some(HostMode::Client)
+        );
+        assert_eq!(
+            HostCommand::Client(ClientHostCommand::RequestClientCurrentState).required_mode(),
+            Some(HostMode::Client)
+        );
+        assert_eq!(
+            HostCommand::Client(ClientHostCommand::SelectClientCharacter {
+                guid: holtburger_common::Guid(7),
+            })
+            .required_mode(),
+            Some(HostMode::Client)
+        );
+        assert_eq!(
+            HostCommand::Client(ClientHostCommand::DisconnectClient).required_mode(),
+            Some(HostMode::Client)
+        );
+    }
+
+    #[test]
+    fn guarded_item_use_decodes_semantic_expectation_without_confirmation_state() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 1,
+            "command": { "command": "submit_client_item_use", "request": {
+                "sequence": 7, "player": 1, "sourceOwned": true,
+                "intent": { "kind": "targeted", "source": 2, "target": 3 },
+                "expected": { "kind": "destroy-item", "target": 3, "amount": 1 }
+            } }
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command: HostCommand::Client(ClientHostCommand::SubmitClientItemUse { request }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("guarded item use did not decode");
+        };
+        assert_eq!(request.sequence, 7);
+        assert!(request.source_owned);
+        assert_eq!(
+            request.expected,
+            holtburger_world::item_use::ItemUseConsequence::DestroyItem {
+                target: holtburger_common::Guid(3),
+                amount: 1
+            }
+        );
+    }
+
+    #[test]
+    fn spell_cast_aim_decodes_through_the_messagepack_command_router() {
+        for (aim, expected) in [
+            (
+                serde_json::json!({"kind": "normal", "selection": 7}),
+                holtburger_core::client::types::SpellCastAim::Normal {
+                    selection: Some(holtburger_common::Guid(7)),
+                },
+            ),
+            (
+                serde_json::json!({"kind": "untargeted"}),
+                holtburger_core::client::types::SpellCastAim::Untargeted,
+            ),
+        ] {
+            let request = rmp_serde::to_vec_named(&serde_json::json!({
+                "kind": "request", "id": 1,
+                "command": { "command": "cast_client_spell", "spellId": 42, "aim": aim }
+            }))
+            .unwrap();
+            let mut reader = Cursor::new(framed_payload(request));
+            let Some(InboundFrame::Request {
+                command: HostCommand::Client(ClientHostCommand::CastClientSpell { spell_id, aim }),
+                ..
+            }) = read_frame(&mut reader).unwrap()
+            else {
+                panic!("spell cast did not decode");
+            };
+            assert_eq!(spell_id, 42);
+            assert_eq!(aim, expected);
+        }
+    }
+
+    #[test]
+    fn spell_inspection_decodes_through_the_messagepack_command_router() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 1,
+            "command": { "command": "query_client_spell_inspection", "query": { "sequence": 7, "spellId": 42 } }
+        })).unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command: HostCommand::Client(ClientHostCommand::QueryClientSpellInspection { query }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("spell inspection query did not decode");
+        };
+        assert_eq!((query.sequence, query.spell_id), (7, 42));
+    }
+
+    #[test]
+    fn component_dictionary_decodes_through_the_messagepack_command_router() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 2,
+            "command": { "command": "load_spell_components" }
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        assert!(matches!(
+            read_frame(&mut reader).unwrap(),
+            Some(InboundFrame::Request {
+                command: HostCommand::Shared(
+                    crate::shared_host_content::SharedContentCommand::LoadSpellComponents
+                ),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn combine_target_query_decodes_as_a_read_only_client_command() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 1,
+            "command": { "command": "query_client_item_use_target", "query": { "sequence": 7, "source": 2, "target": 3 } }
+        })).unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command: HostCommand::Client(ClientHostCommand::QueryClientItemUseTarget { query }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("target query did not decode");
+        };
+        assert_eq!((query.sequence, query.source.0, query.target.0), (7, 2, 3));
+    }
+
+    #[test]
+    fn equipment_identity_decodes_through_the_client_command_boundary() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request",
+            "id": 1,
+            "command": { "command": "equip_client_item", "guid": 91, "alternate": true },
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command:
+                HostCommand::Client(ClientHostCommand::EquipClientItem {
+                    guid,
+                    alternate: true,
+                }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("equipment request did not decode into the client command");
+        };
+        assert_eq!(guid, holtburger_common::Guid(91));
+    }
+
+    #[test]
+    fn equipment_set_decodes_numeric_bindings_without_frontend_metadata() {
+        let target = EquipMask::FINGER_WEAR_LEFT.bits();
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 1,
+            "command": { "command": "apply_client_equipment_set", "bindings": [{ "item": 91, "target": target }, { "item": null, "target": target }] },
+        })).unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command: HostCommand::Client(ClientHostCommand::ApplyClientEquipmentSet { bindings }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("Equipment set did not decode");
+        };
+        assert_eq!(bindings.len(), 2);
+        assert!(bindings[1].item.is_none());
+        assert_eq!(
+            (bindings[0].item, bindings[0].target),
+            (Some(holtburger_common::Guid(91)), target)
+        );
+    }
+
+    #[test]
+    fn messagepack_requests_decode_into_their_mode_owned_inventory() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request",
+            "id": 1,
+            "command": { "command": "request_client_current_state" },
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let Some(InboundFrame::Request {
+            command: HostCommand::Client(ClientHostCommand::RequestClientCurrentState),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("client request did not decode into the client inventory");
+        };
+
+        let reveal = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request",
+            "id": 2,
+            "command": {
+                "command": "acknowledge_client_world_reveal",
+                "worldGeneration": 7,
+            },
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(reveal));
+        let Some(InboundFrame::Request {
+            command:
+                HostCommand::Client(ClientHostCommand::AcknowledgeClientWorldReveal {
+                    world_generation: 7,
+                }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("client reveal acknowledgement did not preserve its world generation");
+        };
+
+        let chat = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request",
+            "id": 3,
+            "command": {
+                "command": "send_client_chat",
+                "request": { "kind": "speech", "message": "Hello world" },
+            },
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(chat));
+        let Some(InboundFrame::Request {
+            command:
+                HostCommand::Client(ClientHostCommand::SendClientChat {
+                    request: crate::client_runtime::ClientChatRequest::Speech { message },
+                }),
+            ..
+        }) = read_frame(&mut reader).unwrap()
+        else {
+            panic!("client chat did not decode into the client inventory");
+        };
+        assert_eq!(message, "Hello world");
+    }
+
+    #[test]
+    fn health_subscription_decodes_entity_and_cancellation_identities() {
+        for guid in [7, 0] {
+            let decoded: HostCommand = serde_json::from_value(
+                serde_json::json!({ "command": "query_client_entity_health", "guid": guid }),
+            )
+            .unwrap();
+            let HostCommand::Client(ClientHostCommand::QueryClientEntityHealth { guid: decoded }) =
+                decoded
+            else {
+                panic!("health subscription did not decode");
+            };
+            assert_eq!(decoded.0, guid);
+        }
+    }
+
+    #[test]
+    fn world_map_commands_decode_the_frontend_request_contract() {
+        let open: HostCommand = serde_json::from_value(
+            serde_json::json!({"command":"open_world_map","request":{"intent":"retry"}}),
+        )
+        .unwrap();
+        assert!(matches!(
+            open,
+            HostCommand::Shared(SharedContentCommand::OpenWorldMap {
+                request: crate::world_map::OpenWorldMapRequest {
+                    intent: crate::world_map::OpenWorldMapIntent::Retry
+                }
+            })
+        ));
+        let read: HostCommand = serde_json::from_value(serde_json::json!({"command":"read_world_map_tiles","request":{"receiptId":"receipt","nextTile":3}})).unwrap();
+        let HostCommand::Shared(SharedContentCommand::ReadWorldMapTiles { request }) = read else {
+            panic!("image request decoded into the wrong owner");
+        };
+        assert_eq!(request.receipt_id, "receipt");
+        assert_eq!(request.next_tile, 3);
+    }
+
+    #[test]
+    fn unknown_command_diagnostic_names_the_command() {
+        let request = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request",
+            "id": 1,
+            "command": { "command": "future_command" },
+        }))
+        .unwrap();
+        let mut reader = Cursor::new(framed_payload(request));
+        let error = read_frame(&mut reader).expect_err("unknown commands must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("unknown host command \"future_command\"")
+        );
+    }
+
+    #[test]
+    fn malformed_and_truncated_input_fails_loudly() {
+        let mut truncated = Cursor::new(vec![4, 0, 0]);
+        assert!(matches!(read_frame(&mut truncated), Err(FrameError::Io(_))));
+        let mut malformed = Cursor::new(vec![1, 0, 0, 0, 0xc1]);
+        assert!(matches!(
+            read_frame(&mut malformed),
+            Err(FrameError::Decode(_))
+        ));
+    }
+
+    fn framed_payload(payload: Vec<u8>) -> Vec<u8> {
+        let mut framed = Vec::with_capacity(4 + payload.len());
+        framed.extend(u32::try_from(payload.len()).unwrap().to_le_bytes());
+        framed.extend(payload);
+        framed
+    }
+}

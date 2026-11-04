@@ -1,0 +1,3 @@
+#!/bin/sh
+# Preserve the app's CLI contract while using Flatpak's nested Chromium sandbox.
+exec zypak-wrapper /app/lib/holtburger/h3d/holtburger-3d "$@"

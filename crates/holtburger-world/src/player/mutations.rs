@@ -15,7 +15,7 @@ pub struct SkillUpdateParams<'a> {
     pub init: u32,
     pub xp: u32,
     pub xp_table: &'a holtburger_dat::file_type::XpTable,
-    pub skill_table: &'a holtburger_dat::file_type::SkillTable,
+    pub calculation: super::stats_calc::SkillCalculationContext<'a>,
 }
 
 pub struct VitalUpdateParams<'a> {
@@ -25,6 +25,7 @@ pub struct VitalUpdateParams<'a> {
     pub current: u32,
     pub xp: u32,
     pub xp_table: &'a holtburger_dat::file_type::XpTable,
+    pub secondary_attribute_table: &'a holtburger_dat::file_type::SecondaryAttributeTable,
 }
 
 impl PlayerState {
@@ -46,9 +47,8 @@ impl PlayerState {
     ) {
         if let Some(attr_type) = stats::AttributeType::from_repr(attr_id) {
             let base = start + ranks;
-            let mult = self.get_attribute_multiplier(attr_type);
-            let add = self.get_attribute_additive(attr_type);
-            let current = ((base as f32 * mult) + add).round() as u32;
+            let breakdown = self.evaluate_attribute(attr_type, base);
+            let current = breakdown.finalization.result;
 
             let attr_obj = stats::Attribute {
                 attr_type,
@@ -58,6 +58,7 @@ impl PlayerState {
                 next_rank_xp: xp_table.get_next_attribute_rank_xp(ranks),
                 base,
                 current,
+                breakdown,
             };
 
             self.attributes.insert(attr_type, attr_obj.clone());
@@ -74,7 +75,7 @@ impl PlayerState {
             init,
             xp,
             xp_table,
-            skill_table,
+            calculation,
         } = params;
 
         if let Some(skill_type) = stats::SkillType::from_repr(skill_id) {
@@ -88,10 +89,11 @@ impl PlayerState {
             self.skill_bases
                 .insert(skill_type, SkillBase { ranks, init });
 
-            let base_val = self.derive_skill_value(skill_type, ranks, init, false);
-            let current_val = self.derive_skill_value(skill_type, ranks, init, true);
+            let (base_val, current_val, breakdown) =
+                self.evaluate_skill(skill_type, ranks, init, training, calculation);
 
-            let (trained_cost, specialized_cost) = skill_table
+            let (trained_cost, specialized_cost) = calculation
+                .table
                 .skill_base_hash
                 .get(&(skill_type as u32))
                 .map(|b| (b.trained_cost as u32, b.specialized_cost as u32))
@@ -109,6 +111,7 @@ impl PlayerState {
                 training,
                 trained_cost,
                 specialized_cost,
+                breakdown,
             };
 
             self.skills.insert(skill_type, skill_obj.clone());
@@ -125,14 +128,15 @@ impl PlayerState {
             current,
             xp,
             xp_table,
+            secondary_attribute_table,
         } = params;
 
         if let Some(vital_type) = stats::VitalType::from_id(vital_id) {
             self.vital_bases
                 .insert(vital_type, VitalBase { ranks, start });
 
-            let base = self.calculate_vital_base(vital_type);
-            let buffed_max = self.calculate_vital_current(vital_type);
+            let (base, buffed_max, breakdown) =
+                self.evaluate_vital(vital_type, secondary_attribute_table);
             let final_base = if base == 0 { current } else { base };
 
             let vital_obj = stats::Vital {
@@ -144,6 +148,7 @@ impl PlayerState {
                 base: final_base,
                 buffed_max,
                 current,
+                breakdown,
             };
             self.vitals.insert(vital_type, vital_obj.clone());
             events.push(WorldEvent::VitalUpdated(vital_obj));
@@ -165,28 +170,18 @@ impl PlayerState {
         }
     }
 
-    /// Updates the player entity's authoritative position sequencing and cached grounded
-    /// state, then emits grounded or forced-reposition events when those outcomes change.
+    /// Updates the player entity's authoritative sequencing and packet-contact fallback.
     pub fn update_position_from_server(
         &mut self,
         pos_pack: &PositionPack,
         events: &mut Vec<WorldEvent>,
     ) {
         let old_forced_seq = self.force_position_sequence;
-        let old_grounded = self.last_server_grounded;
-
         self.instance_sequence = pos_pack.instance_sequence;
         self.position_sequence = pos_pack.position_sequence;
         self.teleport_sequence = pos_pack.teleport_sequence;
         self.force_position_sequence = pos_pack.force_position_sequence;
-        let is_grounded = pos_pack.flags.contains(UpdatePositionFlag::IS_GROUNDED);
-        self.last_server_grounded = Some(is_grounded);
-
-        if old_grounded != Some(is_grounded) {
-            events.push(WorldEvent::PlayerGroundedUpdated {
-                grounded: is_grounded,
-            });
-        }
+        self.last_server_contact = Some(pos_pack.flags.contains(UpdatePositionFlag::HAS_CONTACT));
 
         if is_newer_u16(self.force_position_sequence, old_forced_seq) {
             events.push(WorldEvent::ForcedReposition {
@@ -289,8 +284,22 @@ impl PlayerState {
         }
     }
 
-    pub fn update_vector_sequence(&mut self, instance_sequence: u16) {
-        self.instance_sequence = instance_sequence;
+    /// Admits a vector packet for the current object instance and advances its independent
+    /// freshness sequence. Retail performs these checks before deciding whether vectors may
+    /// mutate the local physics object.
+    pub fn admit_server_vector_sequences(
+        &mut self,
+        instance_sequence: u16,
+        vector_sequence: u16,
+    ) -> bool {
+        if instance_sequence != self.instance_sequence
+            || !is_newer_u16(vector_sequence, self.vector_sequence)
+        {
+            return false;
+        }
+
+        self.vector_sequence = vector_sequence;
+        true
     }
 
     pub fn set_teleport_sequence(&mut self, teleport_sequence: u16) {
@@ -302,14 +311,28 @@ impl PlayerState {
         data: &PlayerDescriptionEventData,
         xp_table: &holtburger_dat::file_type::XpTable,
         skill_table: &holtburger_dat::file_type::SkillTable,
+        secondary_attribute_table: &holtburger_dat::file_type::SecondaryAttributeTable,
         _events: &mut Vec<WorldEvent>,
     ) {
+        // PlayerDescription begins a new registry baseline even for the same GUID.
+        self.character_titles = None;
         self.guid = data.guid;
-        self.enchantments = data.enchantments.clone();
+        // A description replaces the character baseline, including absent saved positions.
+        self.local_position_overlays.clear();
+        for (&key, &position) in &data.positions {
+            if let Some(position_type) = PositionType::from_repr(key)
+                && position_type != PositionType::Location
+            {
+                self.set_local_position_overlay(position_type, position);
+            }
+        }
+        self.enchantments.replace(&data.enchantments);
 
         self.spells = data.spells.clone();
-        self.options1 = data.options1;
-        self.options2 = data.options2;
+        self.character_options = super::PlayerCharacterOptions {
+            options1: data.options1,
+            options2: data.options2,
+        };
         self.hotbar_spells = data.hotbar_spells.clone();
         self.desired_comps = data.desired_comps.clone();
         self.spellbook_filters = data.spellbook_filters;
@@ -335,6 +358,7 @@ impl PlayerState {
                         next_rank_xp: xp_table.get_next_attribute_rank_xp(ranks),
                         base,
                         current: base,
+                        breakdown: Default::default(),
                     };
                     self.attributes.insert(attr_type, attr_obj);
                 }
@@ -349,7 +373,7 @@ impl PlayerState {
                 self.vital_bases
                     .insert(vital_type, VitalBase { ranks, start });
 
-                let base = self.calculate_vital_base(vital_type);
+                let base = self.calculate_vital_base(vital_type, secondary_attribute_table);
                 let current = attr.current.unwrap_or(0);
                 let final_base = if base == 0 { current } else { base };
 
@@ -362,6 +386,7 @@ impl PlayerState {
                     base: final_base,
                     buffed_max: final_base,
                     current,
+                    breakdown: Default::default(),
                 };
                 self.vitals.insert(vital_type, vital);
             }
@@ -382,7 +407,18 @@ impl PlayerState {
                     },
                 );
 
-                let base_val = self.derive_skill_value(skill_type, skill.ranks, skill.init, false);
+                let base_val = self.derive_skill_value(
+                    skill_type,
+                    skill.ranks,
+                    skill.init,
+                    training,
+                    false,
+                    super::stats_calc::SkillCalculationContext {
+                        table: skill_table,
+                        augmentations: super::stats_calc::SkillAugmentations::default(),
+                        vitae: 1.0,
+                    },
+                );
 
                 let (trained_cost, specialized_cost) = skill_table
                     .skill_base_hash
@@ -404,20 +440,9 @@ impl PlayerState {
                     training,
                     trained_cost,
                     specialized_cost,
+                    breakdown: Default::default(),
                 };
                 self.skills.insert(skill_type, skill_obj);
-            }
-        }
-
-        self.inventory.clear();
-        for (item_guid, _) in &data.inventory {
-            self.add_to_inventory(*item_guid);
-        }
-
-        self.equipment.clear();
-        for (item_guid, slot, _) in &data.equipped_objects {
-            if let Some(mask) = EquipMask::from_bits(*slot) {
-                self.wield_item(*item_guid, mask);
             }
         }
     }
@@ -432,15 +457,7 @@ impl PlayerState {
             return false;
         }
 
-        if let Some(existing) = self
-            .enchantments
-            .iter_mut()
-            .find(|e| e.spell_id == enchantment.spell_id && e.layer == enchantment.layer)
-        {
-            *existing = enchantment;
-        } else {
-            self.enchantments.push(enchantment);
-        }
+        self.enchantments.upsert(enchantment);
 
         self.emit_enchantments_updated(events);
         true
@@ -457,15 +474,7 @@ impl PlayerState {
         }
 
         for enchantment in enchantments {
-            if let Some(existing) = self
-                .enchantments
-                .iter_mut()
-                .find(|e| e.spell_id == enchantment.spell_id && e.layer == enchantment.layer)
-            {
-                *existing = *enchantment;
-            } else {
-                self.enchantments.push(*enchantment);
-            }
+            self.enchantments.upsert(*enchantment);
         }
 
         self.emit_enchantments_updated(events);
@@ -520,6 +529,12 @@ impl PlayerState {
 
         self.enchantments.retain(|e| {
             let flags = EnchantmentTypeFlags::from_bits_truncate(e.stat_mod_type);
+            // ACE EnchantmentManager.cs:358-377 and retail preserve cooldowns and permanent
+            // item effects during either death purge.
+            let is_cooldown = crate::enchantments::EnchantmentKind::from_wire(e).is_none();
+            if is_cooldown || e.duration == -1.0 {
+                return true;
+            }
             if keep_bad {
                 flags.contains(EnchantmentTypeFlags::BENEFICIAL)
                     || flags.contains(EnchantmentTypeFlags::VITAE)
@@ -551,7 +566,7 @@ impl PlayerState {
 
     fn emit_enchantments_updated(&mut self, events: &mut Vec<WorldEvent>) {
         events.push(WorldEvent::PlayerEnchantmentsUpdated {
-            enchantments: self.enchantments.clone(),
+            enchantments: self.enchantments.wire(),
         });
     }
 }

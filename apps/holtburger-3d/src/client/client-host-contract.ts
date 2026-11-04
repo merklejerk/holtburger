@@ -1,0 +1,1386 @@
+import { clientExitCauseSchema as exitCauseSchema } from "./client-exit-contract.js";
+export {
+	decodeClientExitRequested,
+	type ClientExitRequested,
+} from "./client-exit-contract.js";
+import { gameplayPreferencesSchema } from "./client-gameplay-options-contract";
+import { playerVisualCaptureSchema } from "./client-object-preview-contract";
+import { contractsSnapshotSchema } from "./client-contracts-contract";
+import {
+	allegianceSnapshotSchema,
+	allegiancePreferencesSchema,
+} from "./client-allegiance-contract";
+import { squelchSnapshotSchema } from "./client-squelch-contract";
+import {
+	friendsSnapshotSchema,
+	friendsPreferencesSchema,
+} from "./client-friends-contract";
+import { housingSnapshotSchema } from "./client-housing-contract";
+import { tradeSnapshotSchema } from "./client-trade-contract";
+import { barberSnapshotSchema } from "./client-barber-contract";
+import { z } from "zod";
+import {
+	partySnapshotSchema,
+	partyPreferencesSchema,
+} from "./client-party-contract";
+
+import { resolvedEnchantmentsSchema } from "./client-enchantments-contract";
+import { characterSheetSchema } from "./client-character-sheet-contract";
+import { clientEntitySnapshotSchema } from "./client-entity-mirror";
+import {
+	decodeDynamicEntitySnapshot,
+	decodeDynamicEntityTickBatch,
+	type DynamicEntityTickBatch,
+	type DynamicEntitySnapshot,
+} from "../lib/game/runtime/dynamic-entity-feed";
+import {
+	landblockVector3,
+	type LandblockVector3,
+} from "../lib/assets/ac-frame";
+
+/** Inclusive retail jump-power floor, matching core JumpExtent::MINIMUM. */
+export const MINIMUM_JUMP_POWER = 0.001;
+
+/** Canonical map-plane point: X east, Z south; ACE supplies the missing height. */
+export const clientMapPositionSchema = z
+	.object({
+		x: z.number().finite(),
+		z: z.number().finite(),
+	})
+	.strict();
+export type ClientMapPosition = z.infer<typeof clientMapPositionSchema>;
+
+/** Core-owned cold admission; consumers do not interpret character permission flags. */
+export const mapTeleportCapabilitySchema = z.boolean();
+
+/** Stable core recall identities; this list describes the wire contract, not eligibility. */
+export const recallDestinationSchema = z.enum([
+	"lifestone",
+	"marketplace",
+	"house",
+	"allegiance-housing",
+	"allegiance-hometown",
+	"pk-arena",
+	"pk-lite-arena",
+]);
+export type RecallDestination = z.infer<typeof recallDestinationSchema>;
+export const recallDestinationsSchema = z.array(recallDestinationSchema);
+
+/** Server-confirmed stance consumed by the shortcut dock. */
+const combatModeSchema = z.enum([
+	"unknown",
+	"peace",
+	"melee",
+	"missile",
+	"magic",
+]);
+export type ClientCombatMode = z.infer<typeof combatModeSchema>;
+
+export const clientAttackProfileSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.literal("melee"),
+			height: z.enum(["low", "medium", "high"]),
+			power: z.number().finite().min(0).max(1),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("missile"),
+			height: z.enum(["low", "medium", "high"]),
+			accuracy: z.number().finite().min(0).max(1),
+		})
+		.strict(),
+]);
+export type ClientAttackProfile = z.infer<typeof clientAttackProfileSchema>;
+
+const combatStatusSchema = z
+	.object({
+		/** Highest processed begin/stop sequence; superseded requests cannot change intent. Zero is initial. */
+		processedIntentSequence: z.number().int().nonnegative().safe(),
+		desired: z
+			.object({
+				target: z.number().int().nonnegative().max(0xffff_ffff),
+				profile: clientAttackProfileSchema,
+			})
+			.strict()
+			.nullable(),
+		state: z.enum([
+			"idle",
+			"charging",
+			"waiting-for-readiness",
+			"active",
+			"retiring",
+		]),
+		refill: z
+			.object({
+				elapsedMs: z.number().int().nonnegative(),
+				durationMs: z.number().int().nonnegative(),
+			})
+			.strict()
+			.nullable(),
+	})
+	.strict();
+export type ClientCombatStatus = z.infer<typeof combatStatusSchema>;
+
+export function decodeClientCombatStatus(value: unknown): ClientCombatStatus {
+	return combatStatusSchema.parse(value);
+}
+
+export function decodeClientCombatMode(value: unknown): {
+	mode: ClientCombatMode;
+} {
+	return z.object({ mode: combatModeSchema }).strict().parse(value);
+}
+
+const guid = z.number().int().nonnegative().max(0xffff_ffff);
+/** Replacement for the core-resolved non-self recipient of the pending spell operation. */
+export const spellCastTargetSchema = z
+	.object({ target: guid.positive().nullable() })
+	.strict();
+
+const finiteNumber = z.number().finite();
+
+/** Server-authored text shared by notice and popup payloads, preserved verbatim. */
+const serverTextSchema = z.object({ message: z.string() }).strict();
+export type ClientServerText = z.infer<typeof serverTextSchema>;
+
+export function decodeClientServerText(value: unknown): ClientServerText {
+	return serverTextSchema.parse(value);
+}
+
+const actionFeedbackSchema = z
+	.object({
+		/** Human-readable result, formatted by the host using shared game-message semantics. */
+		message: z.string().trim().min(1),
+		/** Progress yields to warnings; status and warning results replace previous feedback. */
+		tone: z.enum(["progress", "status", "warning"]),
+		/** Original equipment requests; the app retains saved item names for warnings. */
+		equipment: z
+			.array(z.object({ item: guid.nullable(), target: guid }).strict())
+			.optional(),
+	})
+	.strict();
+
+/** Ephemeral action feedback without protocol types or frontend timer identity. */
+export type ClientActionFeedback = z.infer<typeof actionFeedbackSchema>;
+
+export function decodeClientActionFeedback(
+	value: unknown,
+): ClientActionFeedback {
+	return actionFeedbackSchema.parse(value);
+}
+
+const entityHealthSchema = z
+	.object({
+		/** Entity whose health changed; the server does not echo selection revisions. */
+		guid,
+		/** Latest health fraction reported by the server. */
+		healthFraction: finiteNumber,
+	})
+	.strict();
+
+/** Health update forwarded independently of the renderer's selected identity. */
+export type ClientEntityHealth = z.infer<typeof entityHealthSchema>;
+
+export function decodeClientEntityHealth(value: unknown): ClientEntityHealth {
+	return entityHealthSchema.parse(value);
+}
+
+const vitalSchema = z
+	.object({
+		kind: z.enum(["health", "stamina", "mana"]),
+		current: z.number().int().nonnegative(),
+		maximum: z.number().int().nonnegative(),
+	})
+	.strict();
+
+const chatChannelSchema = z.enum([
+	"fellowship",
+	"fellowship-broadcast",
+	"allegiance",
+	"allegiance-broadcast",
+	"vassals",
+	"patron",
+	"monarch",
+	"co-vassals",
+	"general",
+	"trade",
+	"lfg",
+	"roleplay",
+	"society",
+	"society-celestial-hand",
+	"society-eldrytch-web",
+	"society-radiant-blood",
+	"olthoi",
+	"unknown",
+]);
+const chatSpeakerKindSchema = z.enum(["player", "non-player", "unknown"]);
+
+/** Player names and NPC entity identities have different server routes. */
+const clientChatTellTargetSchema = z.discriminatedUnion("kind", [
+	z
+		.object({ kind: z.literal("player"), name: z.string().trim().min(1) })
+		.strict(),
+	z
+		.object({
+			kind: z.literal("npc"),
+			guid: guid.refine(
+				(value) => value !== 0,
+				"NPC target ID must be nonzero",
+			),
+			name: z.string().min(1),
+		})
+		.strict(),
+]);
+const chatKnownCategorySchema = z.enum([
+	"broadcast",
+	"all-channels",
+	"speech",
+	"tell",
+	"outgoing-tell",
+	"system",
+	"combat",
+	"magic",
+	"channel",
+	"channel-send",
+	"social",
+	"social-send",
+	"emote",
+	"advancement",
+	"abuse",
+	"help",
+	"appraisal",
+	"spellcasting",
+	"allegiance",
+	"fellowship",
+	"world-broadcast",
+	"combat-enemy",
+	"combat-self",
+	"recall",
+	"craft",
+	"salvaging",
+	"admin-tell",
+]);
+const chatCategorySchema = z.union([
+	chatKnownCategorySchema,
+	z.object({ raw: guid }).strict(),
+]);
+/** Sendable destinations exclude receive-only notifications, society subrooms, and unknown IDs. */
+export const clientChatDestinationSchema = z.enum([
+	"fellowship",
+	"allegiance",
+	"allegiance-broadcast",
+	"vassals",
+	"patron",
+	"monarch",
+	"co-vassals",
+	"general",
+	"trade",
+	"lfg",
+	"roleplay",
+	"society",
+	"olthoi",
+]);
+const chatBodySchema = z
+	.string()
+	.refine(
+		(message) => message.trim().length > 0,
+		"Chat message must contain visible text.",
+	);
+/** One explicit submission shared by picker, command resolver, and host adapter. */
+export const clientChatRequestSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("speech"), message: chatBodySchema }).strict(),
+	z
+		.object({
+			kind: z.literal("tell"),
+			target: clientChatTellTargetSchema,
+			message: chatBodySchema,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("channel"),
+			channel: clientChatDestinationSchema,
+			message: chatBodySchema,
+		})
+		.strict(),
+	z.object({ kind: z.literal("emote"), message: chatBodySchema }).strict(),
+	z
+		.object({
+			kind: z.literal("soul-emote"),
+			token: z.string().trim().min(1),
+			requestId: z.number().int().nonnegative().max(0xffff_ffff).optional(),
+		})
+		.strict(),
+]);
+const chatSpeakerFields = {
+	sender: z.string(),
+	speakerKind: chatSpeakerKindSchema,
+	message: z.string(),
+};
+const chatMessageSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("error"), message: z.string() }).strict(),
+	z
+		.object({
+			kind: z.literal("speech"),
+			category: chatCategorySchema,
+			...chatSpeakerFields,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("tell"),
+			category: chatCategorySchema,
+			target: clientChatTellTargetSchema.nullable(),
+			...chatSpeakerFields,
+		})
+		.strict(),
+	z
+		.object({ kind: z.enum(["emote", "soul-emote"]), ...chatSpeakerFields })
+		.strict(),
+	z
+		.object({
+			kind: z.literal("channel"),
+			channel: chatChannelSchema,
+			origin: z.discriminatedUnion("kind", [
+				z.object({ kind: z.literal("legacy"), channelId: guid }).strict(),
+				z
+					.object({ kind: z.literal("turbine"), roomId: guid, typeId: guid })
+					.strict(),
+			]),
+			...chatSpeakerFields,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("server"),
+			category: chatCategorySchema,
+			message: z.string(),
+		})
+		.strict(),
+	z.object({ kind: z.literal("system"), message: z.string() }).strict(),
+	z
+		.object({
+			kind: z.literal("combat"),
+			message: z.string(),
+			emphasized: z.boolean(),
+			/** Host-proven defender evasion; never inferred from formatted prose. */
+			selfEvasion: z.boolean(),
+		})
+		.strict(),
+]);
+
+const characterSchema = z
+	.object({
+		guid,
+		name: z.string(),
+		slot: z.number().int().nonnegative(),
+		deleteTime: z.number().int().nonnegative(),
+	})
+	.strict();
+
+const worldActivationCauseSchema = z.enum(["initial-entry", "teleport"]);
+
+const lifecycleSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("connecting") }).strict(),
+	z.object({ kind: z.literal("authenticating") }).strict(),
+	z
+		.object({
+			kind: z.literal("character-selection"),
+			rejection: z.string().nullable(),
+			maxSlots: z.number().int().nonnegative(),
+			characters: z.array(characterSchema),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("entering-world"),
+			characterGuid: guid,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("portal-space"),
+			worldGeneration: z.number().int().nonnegative(),
+			cause: worldActivationCauseSchema,
+		})
+		.strict(),
+	z.object({ kind: z.literal("in-world") }).strict(),
+	z.object({ kind: z.literal("logging-out") }).strict(),
+	z
+		.object({
+			kind: z.literal("exiting"),
+			cause: exitCauseSchema,
+		})
+		.strict(),
+]);
+
+const clientCharacterMotionCapabilitiesSchema = z
+	.object({
+		fullChargeDurationMs: finiteNumber.positive(),
+	})
+	.strict();
+
+const clientCharacterMotionRejectionSchema = z.enum([
+	"charge-not-active",
+	"airborne",
+	"unsupported",
+	"overburdened",
+	"capability-unavailable",
+	"body-unavailable",
+	"collision-unavailable",
+	"launch-rejected",
+]);
+
+const clientCharacterMotionOutcomeSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("charge-accepted") }).strict(),
+	z.object({ kind: z.literal("charge-continues") }).strict(),
+	z.object({ kind: z.literal("jump-committed") }).strict(),
+	z.object({ kind: z.literal("reset") }).strict(),
+	z
+		.object({
+			kind: z.literal("rejected"),
+			reason: clientCharacterMotionRejectionSchema,
+		})
+		.strict(),
+]);
+
+const clientCharacterMotionFeedbackSchema = z
+	.object({
+		sequence: z.number().int().nonnegative().safe(),
+		outcome: clientCharacterMotionOutcomeSchema,
+	})
+	.strict();
+
+/** Opaque core receipt plus the host-formatted question. */
+const confirmationSchema = z
+	.object({
+		requestId: z
+			.string()
+			.regex(/^[1-9][0-9]*$/)
+			.refine((value) => BigInt(value) <= 0xffff_ffff_ffff_ffffn),
+		text: z.string(),
+	})
+	.strict();
+export type ClientConfirmation = z.infer<typeof confirmationSchema>;
+const confirmationUpdatedSchema = z
+	.object({ confirmation: confirmationSchema.nullable() })
+	.strict();
+export function decodeClientConfirmationUpdated(value: unknown): {
+	readonly confirmation: ClientConfirmation | null;
+} {
+	return confirmationUpdatedSchema.parse(value);
+}
+
+/** Complete known membership; the initial snapshot separately permits pending (null). */
+const knownSpellIdsSchema = z
+	.array(z.number().int().positive().max(0xffff_ffff))
+	.refine(
+		(ids) => new Set(ids).size === ids.length,
+		"Duplicate known spell identity.",
+	);
+export function decodeClientSpells(value: unknown): number[] {
+	return z.object({ spellIds: knownSpellIdsSchema }).strict().parse(value)
+		.spellIds;
+}
+
+const clientAppearanceOptionsSchema = z
+	.object({ showHelmet: z.boolean(), showCloak: z.boolean() })
+	.strict();
+export type ClientAppearanceOptions = z.infer<
+	typeof clientAppearanceOptionsSchema
+>;
+export type ClientAppearanceOption = "helmet" | "cloak";
+const characterPreferencesSchema = z
+	.object({
+		appearance: clientAppearanceOptionsSchema,
+		gameplay: gameplayPreferencesSchema,
+		party: partyPreferencesSchema,
+		friends: friendsPreferencesSchema,
+		allegiance: allegiancePreferencesSchema,
+	})
+	.strict();
+export function decodeClientCharacterPreferences(value: unknown) {
+	return characterPreferencesSchema.parse(value);
+}
+
+/** Shared owner-produced rates, repair evidence, and connection classifications. */
+export const connectionSampleSchema = z
+	.object({
+		quality: z.enum(["good", "fair", "poor", "unavailable"]),
+		reliability: z
+			.object({
+				receiveRepairShare: finiteNumber.min(0).max(1).nullable(),
+				sendRepairShare: finiteNumber.min(0).max(1).nullable(),
+				receiveGap: z.boolean(),
+			})
+			.strict(),
+		health: z.enum(["connected", "waiting", "disconnected"]),
+		sampleAgeSeconds: finiteNumber.nonnegative(),
+		receiveAgeSeconds: finiteNumber.nonnegative(),
+		receiveBytesPerSecond: finiteNumber.nonnegative(),
+		sendBytesPerSecond: finiteNumber.nonnegative(),
+	})
+	.strict();
+export type ClientConnectionSample = z.infer<typeof connectionSampleSchema>;
+
+/** Recoverable character-management level; no invented server request identifier. */
+export const characterManagementSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("idle") }).strict(),
+	z.object({ kind: z.literal("creating"), name: z.string() }).strict(),
+	z.object({ kind: z.literal("deleting") }).strict(),
+	z.object({ kind: z.literal("restoring"), guid }).strict(),
+	z.object({ kind: z.literal("created"), guid, name: z.string() }).strict(),
+	z
+		.object({
+			kind: z.literal("rejected"),
+			operation: z.enum(["create", "delete", "restore"]),
+			message: z.string(),
+		})
+		.strict(),
+	z.object({ kind: z.literal("uncertain"), message: z.string() }).strict(),
+]);
+export type CharacterManagementState = z.infer<
+	typeof characterManagementSchema
+>;
+
+const currentStateSchema = z
+	.object({
+		characterManagement: characterManagementSchema,
+		playerVisualCapture: playerVisualCaptureSchema.nullable(),
+		housing: housingSnapshotSchema,
+		canTeleportFromMap: z.boolean(),
+		recallDestinations: recallDestinationsSchema,
+		connection: connectionSampleSchema.nullable(),
+		entityCollisionDisabled: z.boolean(),
+		lifecycle: lifecycleSchema,
+		localPlayerGuid: guid.nullable(),
+		serverTime: finiteNumber.nullable(),
+		worldGeneration: z.number().int().nonnegative(),
+		worldName: z.string().nullable(),
+		playerName: z.string().nullable(),
+		knownSpells: knownSpellIdsSchema.nullable(),
+		enchantments: resolvedEnchantmentsSchema.nullable(),
+		appearanceOptions: clientAppearanceOptionsSchema.nullable(),
+		gameplayPreferences: gameplayPreferencesSchema.nullable(),
+		party: partySnapshotSchema.nullable(),
+		partyPreferences: partyPreferencesSchema.nullable(),
+		friends: friendsSnapshotSchema.nullable(),
+		contracts: contractsSnapshotSchema.nullable(),
+		squelch: squelchSnapshotSchema.nullable(),
+		allegiance: allegianceSnapshotSchema,
+		allegiancePreferences: allegiancePreferencesSchema.nullable(),
+		friendsPreferences: friendsPreferencesSchema.nullable(),
+		combatMode: combatModeSchema,
+		socialMotionReady: z.boolean(),
+		combat: combatStatusSchema,
+		spellCastTarget: spellCastTargetSchema.shape.target,
+		vitals: z.array(vitalSchema),
+		characterSheet: characterSheetSchema.nullable(),
+		trade: tradeSnapshotSchema,
+		barber: barberSnapshotSchema,
+		characterMotion: clientCharacterMotionCapabilitiesSchema.nullable(),
+		activeConfirmation: confirmationSchema.nullable(),
+		dynamic: z.unknown(),
+		entities: clientEntitySnapshotSchema,
+	})
+	.strict();
+
+const presentationDiscontinuitySchema = z
+	.object({
+		worldGeneration: z.number().int().nonnegative(),
+		kind: z.enum(["forced-reposition", "reset"]),
+	})
+	.strict();
+
+const localPlayerEstablishedSchema = z.object({ playerGuid: guid }).strict();
+const playerEnteredSchema = z
+	.object({ playerGuid: guid, name: z.string() })
+	.strict();
+
+/** Ephemeral effect cue, admitted by core to an exact source and world lifetime. */
+const dynamicSoundCueSchema = z
+	.object({
+		guid,
+		generation: z.number().int().nonnegative(),
+		worldGeneration: z.number().int().nonnegative(),
+		soundId: guid,
+		volume: finiteNumber.nonnegative(),
+	})
+	.strict();
+export type ClientDynamicSoundCue = z.infer<typeof dynamicSoundCueSchema>;
+export function decodeClientDynamicSoundCue(
+	value: unknown,
+): ClientDynamicSoundCue {
+	return dynamicSoundCueSchema.parse(value);
+}
+
+const dynamicScriptCueSchema = z
+	.object({
+		guid,
+		generation: z.number().int().nonnegative(),
+		cue: z.number().int().nonnegative(),
+		intensity: finiteNumber,
+	})
+	.strict();
+
+const clientDriveSnapshotSchema = z
+	.object({
+		gait: z.enum(["walk", "run"]),
+		longitudinal: z.enum(["forward", "backward"]).nullable(),
+		lateral: z.enum(["left", "right"]).nullable(),
+		turning: z.enum(["left", "right"]).nullable(),
+	})
+	.strict();
+
+const clientDriveRequestSchema = z.discriminatedUnion("kind", [
+	z
+		.object({ kind: z.literal("rotate-facing"), deltaRadians: finiteNumber })
+		.strict(),
+	z
+		.object({
+			kind: z.enum(["acquire", "synchronize"]),
+			drive: clientDriveSnapshotSchema,
+		})
+		.strict(),
+	z.object({ kind: z.literal("release") }).strict(),
+]);
+
+const clientCharacterMotionEventRequestSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.literal("begin-jump"),
+			sequence: z.number().int().nonnegative().safe(),
+			drive: clientDriveSnapshotSchema,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("release-jump"),
+			sequence: z.number().int().nonnegative().safe(),
+			drive: clientDriveSnapshotSchema,
+			extent: finiteNumber.min(MINIMUM_JUMP_POWER).max(1),
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("reset"),
+			sequence: z.number().int().nonnegative().safe(),
+		})
+		.strict(),
+]);
+
+const cameraIdentitySchema = z
+	.object({
+		cameraGeneration: z.number().int().positive().safe(),
+		playerGuid: guid,
+		entityGeneration: z.number().int().nonnegative().safe(),
+	})
+	.strict();
+const cameraPointSchema = z
+	.object({
+		landblockId: guid,
+		coords: z
+			.object({ x: finiteNumber, y: finiteNumber, z: finiteNumber })
+			.strict(),
+	})
+	.strict();
+const cameraPathPointSchema = z
+	.object({ position: cameraPointSchema, visualPivot: cameraPointSchema })
+	.strict();
+const cameraPathSchema = z
+	.object({
+		initial: cameraPathPointSchema,
+		legs: z
+			.array(
+				z
+					.object({
+						endFraction: finiteNumber,
+						end: cameraPathPointSchema,
+					})
+					.strict(),
+			)
+			.nonempty(),
+	})
+	.strict();
+const cameraClearanceSchema = z
+	.object({
+		projectionRevision: z.number().int().positive().safe(),
+		radius: finiteNumber.positive(),
+	})
+	.strict();
+const cameraCollisionProofSchema = z.discriminatedUnion("status", [
+	z.object({ status: z.literal("covered") }).strict(),
+	z.object({ status: z.literal("uncovered"), owner: guid }).strict(),
+]);
+const cameraDiagnosticsSchema = z
+	.object({
+		collisionProof: cameraCollisionProofSchema,
+		controlLegs: z.number().int().nonnegative().safe(),
+		clearanceSweeps: z.number().int().nonnegative().safe(),
+		continuitySweeps: z.number().int().nonnegative().safe(),
+		contactPasses: z.number().int().nonnegative().safe(),
+	})
+	.strict();
+const cameraFailureReasonSchema = z.enum([
+	"clearance-sweep",
+	"free-sphere-query",
+	"target-contract",
+	"controller-input",
+	"path-projection",
+]);
+const cameraConvergenceSchema = z.enum(["converging", "settled"]);
+const cameraTickSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.literal("advanced"),
+			...cameraIdentitySchema.shape,
+			sequence: z.number().int().positive().safe(),
+			durationMs: finiteNumber.positive(),
+			targetSphereRole: z.enum(["primary", "upper-constraint"]),
+			clearance: cameraClearanceSchema,
+			desiredReach: finiteNumber.nonnegative(),
+			renderedReach: finiteNumber.nonnegative(),
+			path: cameraPathSchema,
+			diagnostics: cameraDiagnosticsSchema,
+			convergence: cameraConvergenceSchema,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("reseeded"),
+			...cameraIdentitySchema.shape,
+			sequence: z.number().int().positive().safe(),
+			durationMs: finiteNumber.positive(),
+			targetSphereRole: z.enum(["primary", "upper-constraint"]),
+			clearance: cameraClearanceSchema,
+			desiredReach: finiteNumber.nonnegative(),
+			renderedReach: finiteNumber.nonnegative(),
+			path: cameraPathSchema,
+			reason: z.enum([
+				"initial-placement",
+				"placed-path",
+				"placement-recovery",
+				"obstructed-path",
+			]),
+			diagnostics: cameraDiagnosticsSchema,
+			convergence: cameraConvergenceSchema,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("held"),
+			...cameraIdentitySchema.shape,
+			sequence: z.number().int().positive().safe(),
+			durationMs: finiteNumber.positive(),
+			targetSphereRole: z.enum(["primary", "upper-constraint"]),
+			clearance: cameraClearanceSchema,
+			desiredReach: finiteNumber.nonnegative(),
+			renderedReach: finiteNumber.nonnegative(),
+			path: cameraPathSchema,
+			reason: cameraFailureReasonSchema,
+			diagnostics: cameraDiagnosticsSchema,
+			convergence: cameraConvergenceSchema,
+		})
+		.strict(),
+	z
+		.object({
+			kind: z.literal("fallback"),
+			...cameraIdentitySchema.shape,
+			sequence: z.number().int().positive().safe(),
+			durationMs: finiteNumber.positive(),
+			targetSphereRole: z.enum(["primary", "upper-constraint"]),
+			desiredReach: finiteNumber.nonnegative(),
+			path: cameraPathSchema,
+			reason: cameraFailureReasonSchema,
+			diagnostics: cameraDiagnosticsSchema,
+			convergence: cameraConvergenceSchema,
+		})
+		.strict(),
+]);
+const cameraStartedSchema = cameraIdentitySchema.extend({}).strict();
+const vector3TupleSchema = z.tuple([finiteNumber, finiteNumber, finiteNumber]);
+const preciseJumpTargetSchema = z
+	.object({
+		anchor: guid,
+		point: vector3TupleSchema.transform(landblockVector3),
+		normal: vector3TupleSchema,
+		committedCell: guid.nullable(),
+	})
+	.strict();
+const preciseJumpTrajectoryPlacementSchema = z
+	.object({
+		startFraction: finiteNumber.min(0).max(1),
+		endFraction: finiteNumber.min(0).max(1),
+		committedCell: guid.nullable(),
+	})
+	.strict()
+	.refine(
+		(placement) => placement.endFraction > placement.startFraction,
+		"Trajectory placement must span a positive time interval.",
+	);
+const preciseJumpTrajectorySchema = z
+	.object({
+		anchor: guid,
+		origin: vector3TupleSchema.transform(landblockVector3),
+		velocity: vector3TupleSchema,
+		acceleration: vector3TupleSchema,
+		durationSeconds: finiteNumber.positive(),
+		placements: z.array(preciseJumpTrajectoryPlacementSchema).nonempty(),
+	})
+	.strict()
+	.superRefine((trajectory, context) => {
+		if (trajectory.placements[0]?.startFraction !== 0) {
+			context.addIssue({
+				code: "custom",
+				message: "Trajectory placements must begin at zero.",
+				path: ["placements", 0, "startFraction"],
+			});
+		}
+		for (let index = 1; index < trajectory.placements.length; index += 1) {
+			if (
+				trajectory.placements[index - 1]?.endFraction !==
+				trajectory.placements[index]?.startFraction
+			) {
+				context.addIssue({
+					code: "custom",
+					message: "Trajectory placements must form a gap-free partition.",
+					path: ["placements", index, "startFraction"],
+				});
+			}
+		}
+		if (trajectory.placements.at(-1)?.endFraction !== 1) {
+			context.addIssue({
+				code: "custom",
+				message: "Trajectory placements must end at one.",
+				path: ["placements", trajectory.placements.length - 1, "endFraction"],
+			});
+		}
+	});
+const preciseJumpLaunchSchema = z
+	.object({
+		target: preciseJumpTargetSchema,
+		power: finiteNumber.min(MINIMUM_JUMP_POWER).max(1),
+		preview: z
+			.object({
+				kind: z.enum(["desired", "below-height"]),
+				curve: preciseJumpTrajectorySchema,
+			})
+			.strict(),
+	})
+	.strict();
+const preciseJumpFlightSegmentSchema = z
+	.object({
+		start: vector3TupleSchema.transform(landblockVector3),
+		end: vector3TupleSchema.transform(landblockVector3),
+		committedCell: guid.nullable(),
+	})
+	.strict();
+const preciseJumpIncompleteReasonSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.enum([
+				"cancelled",
+				"session-changed",
+				"body-unavailable",
+				"body-definition-changed",
+				"flight-horizon-exhausted",
+			]),
+		})
+		.strict(),
+	z.object({ kind: z.literal("collision-unavailable"), owner: guid }).strict(),
+	z.object({ kind: z.literal("env-cell-unavailable"), cell: guid }).strict(),
+]);
+const preciseJumpFlightSchema = z
+	.object({
+		anchor: guid,
+		segments: z.array(preciseJumpFlightSegmentSchema),
+		outcome: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("landed"),
+					contactPoint: vector3TupleSchema.transform(landblockVector3),
+					normal: vector3TupleSchema,
+					committedCell: guid.nullable(),
+					matchesTarget: z.boolean(),
+				})
+				.strict(),
+			z
+				.object({
+					kind: z.literal("incomplete"),
+					reason: preciseJumpIncompleteReasonSchema,
+				})
+				.strict(),
+		]),
+	})
+	.strict();
+const preciseJumpEvaluationCommonShape = {
+	phase: z.literal("completed"),
+
+	camera: cameraIdentitySchema,
+	sequence: z.number().int().nonnegative().safe(),
+} as const;
+const preciseJumpCompletedEvaluationSchema = z.discriminatedUnion("status", [
+	z
+		.object({
+			...preciseJumpEvaluationCommonShape,
+			status: z.literal("predicted"),
+			launch: preciseJumpLaunchSchema,
+			flight: preciseJumpFlightSchema,
+		})
+		.strict(),
+	z
+		.object({
+			...preciseJumpEvaluationCommonShape,
+			status: z.literal("prediction-failed"),
+			launch: preciseJumpLaunchSchema,
+		})
+		.strict(),
+	...(["no-surface", "unproven", "invalid-aim", "solver-failed"] as const).map(
+		(status) =>
+			z
+				.object({
+					...preciseJumpEvaluationCommonShape,
+					status: z.literal(status),
+				})
+				.strict(),
+	),
+]);
+const preciseJumpLaunchResolvedSchema = z
+	.object({
+		phase: z.literal("launch-resolved"),
+
+		camera: cameraIdentitySchema,
+		sequence: z.number().int().nonnegative().safe(),
+		launch: preciseJumpLaunchSchema,
+	})
+	.strict();
+const preciseJumpEvaluationSchema = z.union([
+	preciseJumpLaunchResolvedSchema,
+	preciseJumpCompletedEvaluationSchema,
+]);
+
+const preciseJumpTransactionRejectionSchema = z.enum([
+	"stale-action",
+	"commit-pending",
+	"session-changed",
+	"launch-rejected",
+	"airborne",
+	"unsupported",
+	"overburdened",
+]);
+const preciseJumpTransactionFeedbackSchema = z
+	.object({
+		sequence: z.number().int().nonnegative().safe(),
+		outcome: z.discriminatedUnion("kind", [
+			z.object({ kind: z.literal("cancelled") }).strict(),
+			z.object({ kind: z.literal("committed") }).strict(),
+			z
+				.object({
+					kind: z.literal("rejected"),
+					reason: preciseJumpTransactionRejectionSchema,
+				})
+				.strict(),
+		]),
+	})
+	.strict();
+const preciseJumpAimRequestSchema = z
+	.object({
+		camera: cameraIdentitySchema,
+		power: finiteNumber.min(MINIMUM_JUMP_POWER).max(1),
+		sequence: z.number().int().nonnegative().safe(),
+		anchor: guid,
+		start: vector3TupleSchema,
+		direction: vector3TupleSchema,
+		maximumDistance: finiteNumber.nonnegative(),
+		previousCell: guid.nullable(),
+	})
+	.strict();
+const preciseJumpCommitRequestSchema = z
+	.object({
+		sequence: z.number().int().nonnegative().safe(),
+		camera: cameraIdentitySchema,
+		target: preciseJumpTargetSchema,
+		power: finiteNumber.min(MINIMUM_JUMP_POWER).max(1),
+	})
+	.strict();
+const preciseJumpCancelRequestSchema = z
+	.object({ sequence: z.number().int().nonnegative().safe() })
+	.strict();
+const entitySelectionQueryRequestSchema = z
+	.object({
+		camera: cameraIdentitySchema,
+		sequence: z.number().int().nonnegative().safe(),
+		anchor: guid,
+		start: vector3TupleSchema,
+		direction: vector3TupleSchema,
+		previousCell: guid.nullable(),
+	})
+	.strict();
+const entitySelectionQueryResultSchema = z.union([
+	z
+		.object({
+			status: z.literal("available"),
+			sequence: z.number().int().nonnegative().safe(),
+			staticLimitDistance: finiteNumber.nonnegative(),
+			candidateGuids: z.array(guid),
+		})
+		.strict(),
+	z
+		.object({
+			status: z.literal("unavailable"),
+			sequence: z.number().int().nonnegative().safe(),
+			reason: z.literal("stale-camera"),
+		})
+		.strict(),
+	z
+		.object({
+			status: z.literal("unavailable"),
+			sequence: z.number().int().nonnegative().safe(),
+			reason: z.literal("collision-coordinator-unavailable"),
+		})
+		.strict(),
+	z
+		.object({
+			status: z.literal("unavailable"),
+			sequence: z.number().int().nonnegative().safe(),
+			reason: z.literal("missing-collision-owner"),
+			missingCollisionOwner: guid,
+		})
+		.strict(),
+]);
+
+export type ClientLifecycle = z.infer<typeof lifecycleSchema>;
+export type ClientCurrentState = Omit<
+	z.infer<typeof currentStateSchema>,
+	"dynamic"
+> & {
+	dynamic: DynamicEntitySnapshot;
+};
+export type ClientPresentationDiscontinuity = z.infer<
+	typeof presentationDiscontinuitySchema
+>;
+export type ClientLocalPlayerEstablished = z.infer<
+	typeof localPlayerEstablishedSchema
+>;
+export type ClientVital = z.infer<typeof vitalSchema>;
+export type ClientChatChannel = z.infer<typeof chatChannelSchema>;
+export type ClientChatCategory = z.infer<typeof chatCategorySchema>;
+export type ClientChatTellTarget = z.infer<typeof clientChatTellTargetSchema>;
+export type ClientChatDestination = z.infer<typeof clientChatDestinationSchema>;
+export type ClientChatRequest = z.infer<typeof clientChatRequestSchema>;
+export type ClientChatMessage = z.infer<typeof chatMessageSchema>;
+export type ClientPlayerEntered = z.infer<typeof playerEnteredSchema>;
+export type ClientDynamicScriptCue = z.infer<typeof dynamicScriptCueSchema>;
+export type ClientDriveRequest = z.infer<typeof clientDriveRequestSchema>;
+export type ClientCharacterMotionEventRequest = z.infer<
+	typeof clientCharacterMotionEventRequestSchema
+>;
+export type ClientCharacterMotionCapabilities = z.infer<
+	typeof clientCharacterMotionCapabilitiesSchema
+>;
+export type ClientCharacterMotionFeedback = z.infer<
+	typeof clientCharacterMotionFeedbackSchema
+>;
+export type ClientCharacterMotionRejection = z.infer<
+	typeof clientCharacterMotionRejectionSchema
+>;
+export type ClientCameraIdentity = z.infer<typeof cameraIdentitySchema>;
+export type ClientCameraTick = z.infer<typeof cameraTickSchema>;
+export type ClientCameraStartReceipt = z.infer<typeof cameraStartedSchema>;
+export type ClientPreciseJumpTrajectory = z.infer<
+	typeof preciseJumpTrajectorySchema
+>;
+export type ClientPreciseJumpLaunch = z.infer<typeof preciseJumpLaunchSchema>;
+export type ClientPreciseJumpEvaluation = z.infer<
+	typeof preciseJumpCompletedEvaluationSchema
+>;
+export type ClientPreciseJumpProgress = z.infer<
+	typeof preciseJumpEvaluationSchema
+>;
+export type ClientPreciseJumpTransactionFeedback = z.infer<
+	typeof preciseJumpTransactionFeedbackSchema
+>;
+export type ClientPreciseJumpCommitRequest = z.infer<
+	typeof preciseJumpCommitRequestSchema
+>;
+export type ClientPreciseJumpCancelRequest = z.infer<
+	typeof preciseJumpCancelRequestSchema
+>;
+export type ClientEntitySelectionQueryResult = z.infer<
+	typeof entitySelectionQueryResultSchema
+>;
+
+/** Complete renderer-authored registration for one authority-owned camera generation. */
+export interface ClientCameraStartRequest {
+	readonly playerGuid: number;
+	readonly entityGeneration: number;
+	readonly initialReach: number;
+	readonly minimumReach: number;
+	readonly maximumReach: number;
+	readonly inputSequence: number;
+	readonly viewDirection: readonly [number, number, number];
+	readonly cumulativeZoomDisplacement: number;
+	readonly projectionRevision: number;
+	readonly clearanceRadius: number;
+}
+
+/** Latest-wins semantic camera input targeted to one accepted generation. */
+export interface ClientCameraIntentRequest extends ClientCameraIdentity {
+	readonly inputSequence: number;
+	readonly viewDirection: readonly [number, number, number];
+	readonly cumulativeZoomDisplacement: number;
+}
+
+/** Latest-wins projection-clearance facts targeted to one accepted generation. */
+export interface ClientCameraClearanceRequest extends ClientCameraIdentity {
+	readonly projectionRevision: number;
+	readonly clearanceRadius: number;
+}
+
+/** One replaceable camera ray; launch and capability facts never enter this request. */
+export interface ClientPreciseJumpAimRequest {
+	readonly camera: ClientCameraIdentity;
+	readonly sequence: number;
+	readonly power: number;
+	readonly anchor: number;
+	readonly start: LandblockVector3;
+	readonly direction: readonly [number, number, number];
+	readonly maximumDistance: number;
+	readonly previousCell: number | null;
+}
+
+/** One correlated selection ray; authority owns its fixed maximum distance. */
+export interface ClientEntitySelectionQueryRequest {
+	readonly camera: ClientCameraIdentity;
+	readonly sequence: number;
+	readonly anchor: number;
+	readonly start: LandblockVector3;
+	readonly direction: readonly [number, number, number];
+	readonly previousCell: number | null;
+}
+
+/** Validates the runtime acknowledgement of the local entity collision override. */
+export function decodeClientEntityCollisionDisabled(value: unknown): boolean {
+	return z.boolean().parse(value);
+}
+
+/** Strictly validates the atomic client replacement level before mutable UI observes it. */
+export function decodeClientCurrentState(value: unknown): ClientCurrentState {
+	const parsed = currentStateSchema.parse(value);
+	return {
+		...parsed,
+		dynamic: decodeDynamicEntitySnapshot(parsed.dynamic),
+	};
+}
+
+/** Strictly validates one lifecycle event from the sidecar. */
+export function decodeClientLifecycle(value: unknown): ClientLifecycle {
+	return lifecycleSchema.parse(value);
+}
+
+/** Strictly validates the server-established local-player identity edge. */
+export function decodeClientLocalPlayerEstablished(
+	value: unknown,
+): ClientLocalPlayerEstablished {
+	return localPlayerEstablishedSchema.parse(value);
+}
+
+/** Strictly validates one synchronized server-time event. */
+export function decodeClientServerTime(value: unknown): { time: number } {
+	return z.object({ time: finiteNumber }).strict().parse(value);
+}
+
+export function decodeClientWorldName(value: unknown): { name: string } {
+	return z.object({ name: z.string() }).strict().parse(value);
+}
+
+export function decodeClientPlayerEntered(value: unknown): ClientPlayerEntered {
+	return playerEnteredSchema.parse(value);
+}
+
+/** Strictly validates one transient script cue bound to an exact entity generation. */
+export function decodeClientDynamicScriptCue(
+	value: unknown,
+): ClientDynamicScriptCue {
+	return dynamicScriptCueSchema.parse(value);
+}
+
+export function decodeClientVitals(value: unknown): { vitals: ClientVital[] } {
+	return z
+		.object({ vitals: z.array(vitalSchema) })
+		.strict()
+		.parse(value);
+}
+
+export function decodeClientChatMessage(value: unknown): ClientChatMessage {
+	return chatMessageSchema.parse(value);
+}
+
+/** Strictly validates one non-portal interpolation/camera discontinuity edge. */
+export function decodeClientPresentationDiscontinuity(
+	value: unknown,
+): ClientPresentationDiscontinuity {
+	return presentationDiscontinuitySchema.parse(value);
+}
+
+/** Strictly validates manual drive or relative facing before it crosses the host boundary. */
+export function decodeClientDriveRequest(value: unknown): ClientDriveRequest {
+	return clientDriveRequestSchema.parse(value);
+}
+
+/** Strictly validates one ordered character-motion edge before it crosses the host boundary. */
+export function decodeClientCharacterMotionEventRequest(
+	value: unknown,
+): ClientCharacterMotionEventRequest {
+	return clientCharacterMotionEventRequestSchema.parse(value);
+}
+
+export function decodeClientCharacterMotionCapabilities(
+	value: unknown,
+): ClientCharacterMotionCapabilities | null {
+	return clientCharacterMotionCapabilitiesSchema.nullable().parse(value);
+}
+
+export function decodeClientCharacterMotionFeedback(
+	value: unknown,
+): ClientCharacterMotionFeedback {
+	return clientCharacterMotionFeedbackSchema.parse(value);
+}
+
+/** Strictly validates one client camera generation receipt. */
+export function decodeClientCameraStartReceipt(
+	value: unknown,
+): ClientCameraStartReceipt {
+	return cameraStartedSchema.parse(value);
+}
+
+/** Strictly validates one client camera tick with explicit projection-proof state. */
+export function decodeClientCameraTick(value: unknown): ClientCameraTick {
+	return cameraTickSchema.parse(value);
+}
+
+export function decodeClientPreciseJumpAimRequest(
+	value: unknown,
+): ClientPreciseJumpAimRequest {
+	const parsed = preciseJumpAimRequestSchema.parse(value);
+	return { ...parsed, start: landblockVector3(parsed.start) };
+}
+
+export function decodeClientPreciseJumpCommitRequest(
+	value: unknown,
+): ClientPreciseJumpCommitRequest {
+	return preciseJumpCommitRequestSchema.parse(value);
+}
+
+export function decodeClientPreciseJumpCancelRequest(
+	value: unknown,
+): ClientPreciseJumpCancelRequest {
+	return preciseJumpCancelRequestSchema.parse(value);
+}
+
+export function decodeClientPreciseJumpEvaluation(
+	value: unknown,
+): ClientPreciseJumpProgress {
+	return preciseJumpEvaluationSchema.parse(value);
+}
+
+export function decodeClientPreciseJumpTransactionFeedback(
+	value: unknown,
+): ClientPreciseJumpTransactionFeedback {
+	return preciseJumpTransactionFeedbackSchema.parse(value);
+}
+
+export function decodeClientEntitySelectionQueryRequest(
+	value: unknown,
+): ClientEntitySelectionQueryRequest {
+	const parsed = entitySelectionQueryRequestSchema.parse(value);
+	return { ...parsed, start: landblockVector3(parsed.start) };
+}
+
+export function decodeClientEntitySelectionQueryResult(
+	value: unknown,
+): ClientEntitySelectionQueryResult {
+	return entitySelectionQueryResultSchema.parse(value);
+}
+
+/** One atomic physics publication; both paths use the receiver's single playback instant. */
+export interface ClientPresentationTick {
+	/** Accepted entity paths for this interval; absent when entity placement is unchanged. */
+	readonly dynamic: DynamicEntityTickBatch | null;
+	/** Camera result for the same interval; absent before registration or scene readiness. */
+	readonly camera: ClientCameraTick | null;
+}
+
+const clientPresentationTickSchema = z
+	.object({ dynamic: z.unknown(), camera: cameraTickSchema.nullable() })
+	.strict();
+
+/** Validate both halves before either presentation consumer observes the interval. */
+export function decodeClientPresentationTick(
+	value: unknown,
+): ClientPresentationTick {
+	const wire = clientPresentationTickSchema.parse(value);
+	const dynamic =
+		wire.dynamic === null ? null : decodeDynamicEntityTickBatch(wire.dynamic);
+	// Correction-only entity batches snap at the interval boundary and carry no playback time.
+	if (
+		dynamic !== null &&
+		dynamic.durationMs > 0 &&
+		wire.camera !== null &&
+		dynamic.durationMs !== wire.camera.durationMs
+	)
+		throw new Error(
+			"Character and camera paths must cover the same physics interval.",
+		);
+	return { dynamic, camera: wire.camera };
+}
+
+/** Narrow, confirmed combat feedback; identity uncertainty is explicit on the wire. */
+const combatOutcomeSchema = z
+	.object({
+		worldGeneration: z.number().int().nonnegative().safe(),
+		attribution: z.discriminatedUnion("kind", [
+			z.object({ kind: z.literal("attributed"), target: guid }).strict(),
+			z.object({ kind: z.literal("unplaced") }).strict(),
+		]),
+		outcome: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("damage"),
+					amount: guid,
+					criticalHit: z.boolean(),
+				})
+				.strict(),
+			z.object({ kind: z.literal("evaded") }).strict(),
+			z.object({ kind: z.literal("resisted") }).strict(),
+		]),
+	})
+	.strict();
+export type ClientCombatOutcome = z.infer<typeof combatOutcomeSchema>;
+export function decodeClientCombatOutcome(value: unknown): ClientCombatOutcome {
+	return combatOutcomeSchema.parse(value);
+}
+
+/** Request-scoped local playback outcome, independent of rendered animation activity. */
+export const localMotionFeedbackSchema = z
+	.object({
+		requestId: z.number().int().nonnegative().max(0xffff_ffff),
+		worldGeneration: z.number().int().nonnegative(),
+		outcome: z.enum([
+			"accepted",
+			"completed",
+			"cancelled",
+			"superseded",
+			"unsupported",
+			"refused",
+		]),
+	})
+	.strict();
+export type ClientLocalMotionFeedback = z.infer<
+	typeof localMotionFeedbackSchema
+>;
+export const socialMotionReadySchema = z
+	.object({ ready: z.boolean() })
+	.strict();

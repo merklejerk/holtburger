@@ -1,0 +1,340 @@
+import type { CombatEffectsTuning } from "../lib/game/systems/combat-effects-system";
+import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning.js";
+import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings.js";
+import { hexRgba } from "../lib/frontend-color.js";
+import type { FrameSettings } from "../lib/game/renderer/renderer";
+import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning-contract";
+import type {
+	ClientPortalTransitionTuning,
+	ClientTuning,
+} from "./client-tuning-contract";
+import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout.js";
+
+/** Horizontal proximity suppresses unstable compass bearings without clearing navigation intent. */
+export const CLIENT_WAYPOINT_NEAR_RADIUS_METERS = 25;
+
+/** Nearby display cadence and encounter noise suppression; no scene-rate reactive publication. */
+export const CLIENT_NEARBY_TUNING = {
+	displayIntervalMs: 250,
+	absenceGraceMs: 5_000,
+	notificationBatchMs: 150,
+} as const;
+
+/** Decorative loading copy; real connection progress and failures remain lifecycle-owned. */
+export const CLIENT_LOADING_TUNING = {
+	/** Playful lines cycled beneath the loading hero. Keep at least one entry. */
+	quips: [
+		"Convincing the portal to hold still…",
+		"Untangling the ley lines…",
+		"Polishing the lifestones…",
+		"Negotiating with gravity…",
+		"Putting the world right-side up…",
+		"Checking the portal’s forwarding address…",
+		"Teaching the trees to stand still…",
+		"Looking for the other sock…",
+	],
+	/** Minimum time without a real loading update before playful copy may appear. */
+	quipIdleDelayMs: 5_000,
+	/** Display time per playful line after the real-update idle delay has elapsed. */
+	quipIntervalMs: 5_000,
+} as const satisfies {
+	readonly quips: readonly [string, ...string[]];
+	readonly quipIdleDelayMs: number;
+	readonly quipIntervalMs: number;
+};
+
+/** Local builder geometry; no new persisted HUD preference section. */
+export const CLIENT_LOADOUT_BUILDER_TUNING = {
+	width: 380,
+	height: 420,
+	minimumWidth: 280,
+	minimumHeight: 260,
+} as const;
+
+/** Floating combat text policy; values are intentionally editable without changing tests. */
+export const CLIENT_COMBAT_EFFECTS_TUNING = {
+	maximumActive: 32,
+	lifetimeMs: 1_000,
+	popMs: 220,
+	fadeMs: 300,
+	popScale: 1.25,
+	criticalPopScale: 1.65,
+	worldRise: 0.8,
+	screenRise: 48,
+	spreadPixels: 18,
+	font: "sans-serif",
+	fontSize: 28,
+	outlineWidth: 2,
+	criticalOutlineWidth: 3.5,
+	criticalLabelScale: 0.48,
+	criticalLabelGap: 4,
+	colors: {
+		damage: [1, 1, 1],
+		avoidance: [0.65, 0.7, 0.75],
+		critical: [1, 0.72, 0.2],
+	},
+} as const satisfies CombatEffectsTuning;
+
+const CLIENT_DIAGNOSTICS = {
+	/** Smoothing window used by the client frame-rate readout. */
+	frameMetricsEmaWindowMs: 1_000,
+	/** Client UI publication cadence for sampled frame-rate facts. */
+	frameRateDisplayIntervalMs: 250,
+	/** Largest numeric frame rate rendered by client diagnostics. */
+	maximumDisplayedFramesPerSecond: 1_000,
+} as const satisfies FrontendUiDiagnosticsTuning;
+
+const CLIENT_FRAME_SETTINGS = {
+	...SHARED_FRAME_SETTINGS,
+	/** Match retail presentation until an explicitly enabled client diagnostic asks otherwise. */
+	showRetailHiddenGeometry: false,
+} as const satisfies FrameSettings;
+
+const CLIENT_PORTAL_TRANSITION = {
+	/** Lifecycle timing consumed once by the client transition controller. */
+	timing: {
+		/** Time available for the captured origin to warp into portal space. */
+		enterDurationMs: 1_000,
+		/** Time available for portal space to reveal the settled destination. */
+		exitDurationMs: 1_000,
+	},
+	/** Shared browser-frontend look selected explicitly by the client composition root. */
+	visual: SHARED_FRONTEND_TUNING.portalTransition.visual,
+} as const satisfies ClientPortalTransitionTuning;
+
+/** Client-owned camera, scene-interest, diagnostics, and initial presentation policy. */
+export const CLIENT_TUNING = {
+	/** Critical-vital arbitration; theme tokens own screen-edge appearance. */
+	vitalWarning: {
+		selectionMargin: 0.03,
+	},
+	/** One-second journal countdown resolution; independent of scene cadence. */
+	journal: {
+		displayIntervalMs: 1_000,
+		mapMarkerSizeCssPixels: 18,
+		membershipToastBatchMs: 150,
+	},
+	/** Marker clustering stays in CSS pixels independently of render density. */
+	housingSearch: { clusterSpacingCssPixels: 28 },
+	resting: { acknowledgementTimeoutMs: 10_000 },
+	emotes: {
+		/** Maximum distinct queued poses retained on this local user profile. */
+		recentLimit: 6,
+		/** Bound peace readiness and local command admission; admitted playback has no deadline. */
+		admissionTimeoutMs: 10_000,
+	},
+	chat: {
+		/** Nonnegative maximum of locally queued chat inputs retained for recall. */
+		sentHistoryLimit: 100,
+		/** Fractional layout slack when deciding whether the reader is at the newest line. */
+		bottomToleranceCssPixels: 2,
+	},
+	/** Maximum publication cadence for asynchronously prepared spell artwork. */
+	spells: { iconDisplayIntervalMs: 100 },
+	statIcons: { displayIntervalMs: 100 },
+	xpFeedback: {
+		/** Time to traverse the full bar; shorter gains take proportionally less time. */
+		gainMs: 520,
+		/** Gold level-up highlight and number-pop duration, independent of fill travel. */
+		levelUpMs: 1_050,
+		/** Accessible color highlight duration, independent of bar travel speed. */
+		reducedMotionHighlightMs: 520,
+		/** Flight lifetime measured from the burst at fill completion. */
+		sparkleMs: 1_800,
+		/** Number of particles emitted on arrival at the new XP position. */
+		sparkleCount: 4,
+		/** Fixed pool bounds overlapping flights without clearing them on new gains. */
+		sparkleCapacity: 32,
+		/** Constant downward acceleration in CSS pixels per second squared. */
+		sparkleGravity: 18,
+		/** Random rightward launch speed in CSS pixels per second. */
+		sparkleHorizontalSpeed: { min: 8, max: 24 },
+		/** Peak level-number scale during the gold celebration. */
+		levelScale: 1.25,
+	},
+	characterSheet: {
+		/** Mounted sheet sampling cadence, independent of host stat publication. */
+		displayIntervalMs: 150,
+		feedback: {
+			pressMs: 130,
+			popMs: 360,
+			ringMs: 800,
+			ringScale: 2.2,
+			floatMs: 600,
+			trainingMs: 800,
+			synergyMs: 450,
+			iconScale: 1.3,
+			trainingIconScale: 1.4,
+			floatDistancePx: 22,
+			labelOffsetPx: 7,
+		},
+	},
+	/** Shared audio policy selected explicitly by the client composition root. */
+	audio: SHARED_FRONTEND_TUNING.audio,
+	diagnostics: CLIENT_DIAGNOSTICS,
+	portalTransition: CLIENT_PORTAL_TRANSITION,
+	objectInspection: {
+		refreshIntervalMs: 1_000,
+		collapsedDescriptionCharacters: 140,
+	},
+	objectPreview: {
+		height: {
+			...CLIENT_INSPECTION_PREVIEW_HEIGHT,
+			keyboardStep: 12,
+		},
+		maximumFramesPerSecond: 60,
+		maximumBufferWidth: 768,
+		maximumBufferHeight: 576,
+		minimumResolutionScale: 1.5,
+		initialYawRadians: 0.65,
+		yawRadiansPerPixel: 0.008,
+		keyboardYawStepRadians: 0.15,
+	},
+	camera: {
+		/** Projection used by the host-authored third-person camera. */
+		far: 2_000,
+		height: 2,
+		near: 0.1,
+		pitchRadians: -0.2,
+		rearDistance: 4.5,
+		distance: {
+			initial: 4.5,
+			minimum: 1.2,
+			maximum: 125,
+		},
+		orbit: {
+			maximumPitchRadians: 1.35,
+			pitchRadiansPerPixel: 0.004,
+			yawRadiansPerPixel: 0.004,
+		},
+		recenter: {
+			delayMs: 350,
+			durationMs: 180,
+		},
+	},
+	preciseJump: {
+		/** Explicit power selected on first entry; kept while aiming. */
+		initialPower: 0.5,
+		/** Normalized power increment per wheel/key step. */
+		powerStep: 0.05,
+		/** Normalized power change per second while the power controls are held. */
+		heldPowerPerSecond: 0.4,
+		/** Maximum authority evaluation cadence; raw pointer samples are coalesced behind it. */
+		aimEvaluationIntervalMs: 1_000 / 30,
+		/** Finite camera-ray reach; static prediction may reject targets long before this limit. */
+		maximumAimDistance: 120,
+		/** World-space outer radius of the compact surface-aligned target ring. */
+		markerRadius: 0.65,
+	},
+	/** Keep the combat arrow inward of the selected-target arrow, including artwork and glow. */
+	combatTargetIndicator: { safeInsetCssPixels: 128 },
+	entitySelection: {
+		/** Hold any cycle binding to acquire the immediate target once. */
+		holdDelayMs: 500,
+		/** Input-only candidate admission and ordering. */
+		cycle: {
+			radiusMeters: 125,
+			viewMarginMeters: 2,
+			/** Move the forward half-space plane this far behind the player origin. */
+			forwardHalfSpaceRearOffsetMeters: 1,
+			/** First band width; subsequent widths double with distance. */
+			initialDistanceBandMeters: 2.5,
+			/** Smart Tab acquisition half-angle; elevation does not restrict it. */
+			immediateMaxAngleDegrees: 22.5,
+		},
+		/** Modest staleness is sufficient for cursor feedback and selection range expiry. */
+		sampleIntervalMs: 1_000 / 15,
+		offscreenIndicator: {
+			/** Includes half the arrow, its glow radius, and a small viewport-edge gutter. */
+			safeInsetCssPixels: 64,
+			sizeCssPixels: 64,
+			fillColor: hexRgba("#e4a52d99"),
+			outlineColor: hexRgba("#fff0b099"),
+			outlineWidthCssPixels: 2,
+			glowColor: hexRgba("#ffc332cc"),
+			glowBlurCssPixels: 8,
+		},
+	},
+	worldContainer: {
+		displayIntervalMs: 100,
+		/** Initial contents footprint; window chrome is measured from the active theme. */
+		openingGrid: { minColumns: 4, maxColumns: 5, maxRows: 4 },
+	},
+	vendor: {
+		/** Maximum wait for a local draft quote, including stock refreshes. */
+		previewTimeoutMs: 10_000,
+		/** Generous reach beyond the vendor's use radius, checked in world space. */
+		maximumDistanceMeters: 15,
+	},
+	housing: {
+		/** Retail crystal range, sampled outside the reactive graph. */
+		maximumDistanceMeters: 9,
+	},
+	inventory: {
+		autoMerge: {
+			/** Maximum wait for one merge request's authoritative consequences. */
+			stepTimeoutMs: 10_000,
+			/** Maximum duration of the complete invocation. */
+			operationTimeoutMs: 30_000,
+		},
+		/** Pointer travel that distinguishes inventory selection from dragging. */
+		dragThresholdCssPixels: 6,
+		/** Ignore double-click completion from a finished drag gesture. */
+		doubleClickSuppressionMs: 500,
+		/** Mounted inventory display cadence, independent of host publication. */
+		displayIntervalMs: 250,
+	},
+	partyHud: { displayIntervalMs: 200 },
+	selectedEntityHud: {
+		/** TUI-inspired item accents where no 3D category color exists. */
+		healingKitColor: hexRgba("#f0abfcff"),
+		/** Cyan selected-name accent for mana stones. */
+		manaStoneColor: hexRgba("#67e8f9ff"),
+		/** Names change rarely and do not need to follow pointer sampling cadence. */
+		displayIntervalMs: 250,
+	},
+	/** Client-owned starting display policy. */
+	frameSettings: CLIENT_FRAME_SETTINGS,
+} as const satisfies ClientTuning;
+
+/** App-local action-bar gesture and placement tuning. */
+export const CLIENT_ACTION_BAR_TUNING = {
+	/** Thickness of the numbered menu strip beside the action cells. */
+	menuStripSize: 24,
+	/** Provisional cell extent before the mounted bar measures its active theme. */
+	initialCellSize: 36,
+} as const;
+
+/** CSS-pixel placement policy shared by HUD snapping and action-bar packing. */
+export const CLIENT_HUD_SNAP_TUNING = {
+	/** Maximum pointer-derived displacement on either axis that attracts a surface. */
+	distance: 8,
+	/** Spacing between adjacent surfaces, including cloned and reset action bars. */
+	gap: 4,
+} as const;
+
+/** Small connection badge presentation policy; transport health belongs to core. */
+export const CLIENT_CONNECTION_BADGE_TUNING = {
+	/** Text-relative footprint preserves proportions from the 13px HUD name row. */
+	widthEm: 20 / 13,
+	heightEm: 18 / 13,
+	/** Bound UI publication independently of incoming samples. */
+	displayIntervalMs: 250,
+	/** Allow consecutive one-second samples to read as sustained activity. */
+	activityHoldMs: 1_200,
+	/** Quiet dots disappear without changing the layout. */
+	activityIdleOpacity: 0,
+	/** Activity dots are fully visible while traffic is recent. */
+	activityActiveOpacity: 1,
+	/** Gentle dimming without blinking at packet cadence. */
+	activityFadeMs: 180,
+} as const;
+
+/** Visible Allegiance tab read cadence; hidden presentation produces no requests. */
+export const CLIENT_ALLEGIANCE_REFRESH_INTERVAL_MS = 15_000;
+
+/** Short target-local feedback; failure retries replace the existing icon rather than stack. */
+export const CLIENT_LOCK_FEEDBACK_TUNING = {
+	successLifetimeMs: 1_100,
+	failureLifetimeMs: 550,
+} as const;

@@ -10,6 +10,8 @@ pub struct Attribute {
     pub next_rank_xp: Option<u32>,
     pub base: u32,
     pub current: u32,
+    /// Inputs and direct modifiers used to calculate `current`.
+    pub breakdown: crate::stat_breakdown::AttributeBreakdown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -22,6 +24,8 @@ pub struct Vital {
     pub base: u32,       // Max Vital (unbuffed)
     pub buffed_max: u32, // Max Vital (including enchantments)
     pub current: u32,    // Current pool
+    /// Inputs and effects used to calculate `base` and `buffed_max`.
+    pub breakdown: crate::stat_breakdown::VitalBreakdown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -38,6 +42,8 @@ pub struct Skill {
     pub trained_cost: u32,
     /// The cost to train this skill from Trained to Specialized.
     pub specialized_cost: u32,
+    /// Inputs and effects used to calculate `base` and `current`.
+    pub breakdown: crate::stat_breakdown::SkillBreakdown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]

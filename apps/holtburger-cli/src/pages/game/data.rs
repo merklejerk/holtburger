@@ -1,11 +1,12 @@
-use crate::pages::game::combat::CombatRuntimeState;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::Instant;
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
-use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
+use holtburger_common::{CharacterOption, Guid};
+use holtburger_core::ClientProgressionEvaluation;
 use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::messages::EquipMask;
@@ -15,6 +16,7 @@ use holtburger_world::SelfMovementKinematics;
 use holtburger_world::SpatialEntitySample;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
+use holtburger_world::progression::{ProgressionIntent, StatTarget};
 use holtburger_world::spell::{SpellCatalog, SpellInfo};
 use holtburger_world::state::FellowshipState;
 use holtburger_world::stats::{
@@ -23,6 +25,38 @@ use holtburger_world::stats::{
 use std::sync::Arc;
 
 const OPENED_CONTAINER_HISTORY_LIMIT: usize = 256;
+
+/// Shared enchantment facts anchored to the TUI clock for countdown presentation.
+#[derive(Debug, Clone)]
+pub struct TimedResolvedEnchantments {
+    pub resolved: holtburger_world::enchantments::ResolvedEnchantments,
+    pub received_at: Instant,
+}
+
+impl TimedResolvedEnchantments {
+    /// Age the shared group snapshot for inventory and inspection without starting local timers.
+    pub fn remaining_cooldown(
+        &self,
+        definition: &holtburger_world::item_cooldowns::ItemCooldownDefinition,
+    ) -> Option<f64> {
+        holtburger_world::item_cooldowns::remaining_seconds(
+            definition,
+            &self.resolved.cooldowns,
+            self.received_at.elapsed().as_secs_f64(),
+        )
+    }
+}
+
+/// TUI projection of core-owned quotes and row-local pending submissions.
+#[derive(Debug, Clone, Default)]
+pub struct TuiProgressionState {
+    /// Latest batch request; earlier replies are ignored after any stat/resource change.
+    pub request_id: u32,
+    /// One-rank or training evaluations supplied by core for visible stat rows.
+    pub evaluations: HashMap<ProgressionIntent, ClientProgressionEvaluation>,
+    /// Unchanged target states already submitted by this client runtime.
+    pub guarded_targets: HashSet<StatTarget>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CuratedCharacterOption {
@@ -154,49 +188,7 @@ impl CuratedCharacterOption {
     }
 
     pub fn is_enabled(self, options: PlayerCharacterOptions) -> bool {
-        match self {
-            Self::CraftSuccessDialog => options
-                .options1
-                .contains(CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG),
-            Self::AutoAcceptFellowshipRequests => options
-                .options1
-                .contains(CharacterOptions1::AUTO_ACCEPT_FELLOW_REQUEST),
-            Self::IgnoreAllegianceRequests => options
-                .options1
-                .contains(CharacterOptions1::IGNORE_ALLEGIANCE_REQUESTS),
-            Self::IgnoreFellowshipRequests => options
-                .options1
-                .contains(CharacterOptions1::IGNORE_FELLOWSHIP_REQUESTS),
-            Self::IgnoreTradeRequests => options
-                .options1
-                .contains(CharacterOptions1::IGNORE_TRADE_REQUESTS),
-            Self::AllowItemGive => options.options1.contains(CharacterOptions1::ALLOW_GIVE),
-            Self::ShareXp => options
-                .options1
-                .contains(CharacterOptions1::FELLOWSHIP_SHARE_XP),
-            Self::ShareLoot => options
-                .options1
-                .contains(CharacterOptions1::FELLOWSHIP_SHARE_LOOT),
-            Self::AcceptLootPermit => options
-                .options1
-                .contains(CharacterOptions1::ACCEPT_LOOT_PERMITS),
-            Self::AllegianceChat => options
-                .options1
-                .contains(CharacterOptions1::HEAR_ALLEGIANCE_CHAT),
-            Self::GeneralChat => options
-                .options2
-                .contains(CharacterOptions2::HEAR_GENERAL_CHAT),
-            Self::TradeChat => options
-                .options2
-                .contains(CharacterOptions2::HEAR_TRADE_CHAT),
-            Self::LfgChat => options.options2.contains(CharacterOptions2::HEAR_LFG_CHAT),
-            Self::RoleplayChat => options
-                .options2
-                .contains(CharacterOptions2::HEAR_ROLEPLAY_CHAT),
-            Self::SocietyChat => options
-                .options2
-                .contains(CharacterOptions2::HEAR_SOCIETY_CHAT),
-        }
+        options.is_enabled(self.character_option())
     }
 }
 
@@ -271,6 +263,8 @@ pub struct GameData {
     pub vitals: HashMap<VitalType, Vital>,
     /// Skills like Sword, Mace, Magic Defense.
     pub skills: HashMap<SkillType, Skill>,
+    /// Shared progression evaluations retained for the existing one-rank TUI controls.
+    pub progression: TuiProgressionState,
     /// Calculated damage resistance values.
     pub resistances: Resistances,
     /// Total armor value.
@@ -283,6 +277,8 @@ pub struct GameData {
     pub player_grounded: Option<bool>,
     /// Active enchantments on the player.
     pub player_enchantments: Vec<Enchantment>,
+    /// Shared per-stat stacking interpretation for character presentation.
+    pub resolved_enchantments: Option<TimedResolvedEnchantments>,
     /// List of learned spell IDs.
     pub player_spells: Vec<u32>,
     /// Projected current player character option masks from the core client view.
@@ -297,12 +293,16 @@ pub struct GameData {
     pub skill_table: Option<Arc<SkillTable>>,
     /// Local cache of nearby entities.
     pub entities: HashMap<Guid, Entity>,
+    /// Shared semantic records consumed by Nearby membership and pickup verbs.
+    pub entity_facts: HashMap<Guid, holtburger_world::entity_facts::ClientEntityFacts>,
     /// Server name (e.g. "Morningthaw").
     pub world_name: String,
     /// Current combat stances.
     pub combat_mode: CombatMode,
-    /// Runtime-only combat state derived from feedback events and stance updates.
-    pub combat_runtime: CombatRuntimeState,
+    /// Core-owned desired engagement and ACE repeat lifecycle.
+    pub combat_status: holtburger_core::ClientCombatStatus,
+    /// Last locally issued begin/stop identity, retained independently of delayed status updates.
+    pub combat_intent_sequence: u64,
     /// Local CLI combat controls for melee power or missile accuracy and attack height.
     pub combat_controls: CombatControlState,
     /// Every entity currently in player's pack.
@@ -313,8 +313,8 @@ pub struct GameData {
     pub trade: Option<holtburger_world::state::TradeState>,
     /// Current fellowship or party state projected from the core client.
     pub party: Option<FellowshipState>,
-    /// Currently open containers in the world.
-    pub open_containers: HashSet<Guid>,
+    /// Confirmed external root projected by core, independent of roster history.
+    pub world_container: holtburger_world::state::WorldContainerState,
     /// Recently opened world containers retained for nearby-tab labeling.
     opened_container_history: VecDeque<Guid>,
     opened_container_history_set: HashSet<Guid>,
@@ -330,12 +330,14 @@ impl Default for GameData {
             attributes: HashMap::new(),
             vitals: HashMap::new(),
             skills: HashMap::new(),
+            progression: TuiProgressionState::default(),
             resistances: Resistances::default(),
             armor: 0,
             vitae: 1.0,
             player_pos: None,
             player_grounded: None,
             player_enchantments: Vec::new(),
+            resolved_enchantments: None,
             player_spells: Vec::new(),
             player_options: None,
             runtime_body_cache: RuntimeBodyViewCache::default(),
@@ -343,15 +345,17 @@ impl Default for GameData {
             spell_catalog: None,
             skill_table: None,
             entities: HashMap::new(),
+            entity_facts: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
-            combat_runtime: CombatRuntimeState::default(),
+            combat_status: Default::default(),
+            combat_intent_sequence: 0,
             combat_controls: CombatControlState::default(),
             inventory: HashSet::new(),
             equipment: HashMap::new(),
             trade: None,
             party: None,
-            open_containers: HashSet::new(),
+            world_container: holtburger_world::state::WorldContainerState::Closed,
             opened_container_history: VecDeque::new(),
             opened_container_history_set: HashSet::new(),
         }
@@ -359,6 +363,16 @@ impl Default for GameData {
 }
 
 impl GameData {
+    /// Allocate after both issued and recovered identities so queued commands never share a receipt.
+    pub fn next_combat_intent_sequence(&mut self) -> u64 {
+        self.combat_intent_sequence = self
+            .combat_intent_sequence
+            .max(self.combat_status.processed_intent_sequence)
+            .checked_add(1)
+            .expect("combat intent sequence exhausted");
+        self.combat_intent_sequence
+    }
+
     pub fn new(guid: Guid, name: String, world_name: String) -> Self {
         Self::new_with_account(guid, name, String::new(), world_name)
     }
@@ -455,10 +469,17 @@ impl GameData {
             }
 
             let pose = self.player_pos?;
-            let (velocity, omega, motion_state) = self
+            let (velocity, acceleration, omega, motion_state) = self
                 .entities
                 .get(&guid)
-                .map(|entity| (entity.velocity, entity.omega, entity.motion_snapshot))
+                .map(|entity| {
+                    (
+                        entity.velocity,
+                        entity.acceleration,
+                        entity.omega,
+                        entity.network_motion.snapshot(),
+                    )
+                })
                 .unwrap_or_default();
 
             return Some(SpatialEntitySample {
@@ -466,6 +487,7 @@ impl GameData {
                 authoritative_pose: pose,
                 projected_pose: pose,
                 velocity,
+                acceleration,
                 omega,
                 motion_state,
                 projection_mode: holtburger_world::SpatialSampleMode::AuthoritativeOnly,
@@ -483,9 +505,7 @@ impl GameData {
             .map(|position| position.rotation.to_heading())
     }
 
-    pub fn track_container_opened(&mut self, guid: Guid) {
-        self.open_containers.insert(guid);
-
+    pub fn record_container_history(&mut self, guid: Guid) {
         if self.opened_container_history_set.contains(&guid) {
             self.opened_container_history
                 .retain(|existing| *existing != guid);
@@ -502,16 +522,15 @@ impl GameData {
         }
     }
 
-    pub fn track_container_closed(&mut self, guid: Guid) {
-        self.open_containers.remove(&guid);
+    pub fn current_open_container(&self) -> Option<Guid> {
+        self.world_container.root()
     }
 
-    pub fn current_open_container(&self) -> Option<Guid> {
-        self.opened_container_history
-            .iter()
-            .rev()
-            .copied()
-            .find(|guid| self.open_containers.contains(guid))
+    /// Read shared access rather than walking raw parent properties in the frontend.
+    pub fn is_world_container_content(&self, guid: Guid) -> bool {
+        self.entity_facts
+            .get(&guid)
+            .is_some_and(|facts| facts.world_container_content)
     }
 
     pub fn has_opened_container_before(&self, guid: Guid) -> bool {
@@ -524,6 +543,14 @@ fn preferred_runtime_pose(position: Option<WorldPosition>) -> Option<WorldPositi
 }
 
 impl WorldContext for GameData {
+    fn container_parent(&self, guid: Guid) -> Option<Guid> {
+        self.entities.get(&guid)?.container_id()
+    }
+
+    fn equipment_mask(&self, guid: Guid) -> Option<EquipMask> {
+        self.equipment.get(&guid).copied()
+    }
+
     fn get_player_guid(&self) -> Option<Guid> {
         self.player_guid
     }
@@ -545,7 +572,7 @@ impl WorldContext for GameData {
     }
 
     fn is_open_container(&self, guid: Guid) -> bool {
-        self.open_containers.contains(&guid)
+        self.world_container.root() == Some(guid) || self.is_world_container_content(guid)
     }
 
     fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
@@ -596,6 +623,7 @@ mod tests {
                     authoritative_pose: Some(authoritative_pose),
                     runtime_pose,
                     velocity: Vector3::zero(),
+                    acceleration: Vector3::zero(),
                     omega: Vector3::zero(),
                     motion_state: None,
                     contact: ContactState::Grounded,
@@ -611,7 +639,7 @@ mod tests {
         let mut data = GameData::default();
 
         for raw in 1..=(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1) {
-            data.track_container_opened(Guid(raw));
+            data.record_container_history(Guid(raw));
         }
 
         assert!(!data.has_opened_container_before(Guid(1)));
@@ -624,14 +652,14 @@ mod tests {
         let mut data = GameData::default();
         let first = Guid(1);
 
-        data.track_container_opened(first);
+        data.record_container_history(first);
 
         for raw in 2..=(OPENED_CONTAINER_HISTORY_LIMIT as u32) {
-            data.track_container_opened(Guid(raw));
+            data.record_container_history(Guid(raw));
         }
 
-        data.track_container_opened(first);
-        data.track_container_opened(Guid(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1));
+        data.record_container_history(first);
+        data.record_container_history(Guid(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1));
 
         assert!(data.has_opened_container_before(first));
         assert!(!data.has_opened_container_before(Guid(2)));
@@ -772,6 +800,7 @@ mod tests {
                     authoritative_pose: Some(authoritative_player),
                     runtime_pose: authoritative_player,
                     velocity: Vector3::zero(),
+                    acceleration: Vector3::zero(),
                     omega: Vector3::zero(),
                     motion_state: Some(cached_motion),
                     contact: ContactState::Grounded,
@@ -884,6 +913,7 @@ mod tests {
                     next_rank_xp: None,
                     base: 100,
                     current: 100,
+                    breakdown: Default::default(),
                 },
             )]),
             entities: std::collections::HashMap::from([(player_guid, player), (item_guid, item)]),

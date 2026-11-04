@@ -1,0 +1,496 @@
+//! Measures bounded precise-jump prediction against canonical collision content.
+
+use std::hint::black_box;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
+
+use anyhow::{Context, Result, ensure};
+use clap::Parser;
+use holtburger_common::position::WorldPosition;
+use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_content::{
+    ColliderScale, CollisionCylinder, CollisionShape, ContentDecodeCache, ContentRepository,
+};
+use holtburger_core::{
+    ContentAssetService, JumpExtent, PreciseJumpFlightRequest, PreciseJumpPredictionControl,
+    PreciseJumpTarget, PreciseJumpWorldDisplacement, predict_selected_precise_jump,
+    resolve_selected_precise_jump, retail_player_grounded_profile,
+};
+use holtburger_world::state::SelfJumpCapabilities;
+use holtburger_world::{
+    CollisionScene, ContactState, DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
+    DynamicPhysicalBodyDefinition, EdgeProtection, EntityCollisionParticipation,
+    EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, GroundState, GroundSupport,
+    LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand, PhysicalBodyDefinition,
+    PhysicalBodyResponseState, PhysicalBodyState, PhysicalCollisionFilter, PhysicalElasticity,
+    PreparedEntityTargetGeometry, SpatialBody, SpatialBodyId, SpatialScene,
+    StaticSurfaceRayRequest,
+};
+
+const SIMULATION_INTEREST_RADIUS: i32 = 2;
+
+#[derive(Debug, Parser)]
+#[command(about = "Benchmark static precise-jump prediction against canonical content")]
+struct Args {
+    /// Normalized outdoor owner containing the benchmark start.
+    #[arg(long, default_value = "0xda55ffff", value_parser = parse_did)]
+    landblock: u32,
+    /// Optional installation directory; default/platform discovery is used when omitted.
+    #[arg(long)]
+    content: Option<PathBuf>,
+    /// Body-reference start coordinates formatted as X,Y,Z.
+    #[arg(long, value_parser = parse_vector3)]
+    start: Vector3,
+    /// Cursor sample formatted as X,Y,Z; the target ray begins five meters above it.
+    #[arg(long, value_parser = parse_vector3)]
+    target: Vector3,
+    /// Resolve outdoor start/target surfaces below the supplied Z values rather than exact Z.
+    #[arg(long, conflicts_with = "cell")]
+    resolve_ground: bool,
+    /// Retained starting EnvCell; omit for an outdoor benchmark.
+    #[arg(long, value_parser = parse_did)]
+    cell: Option<u32>,
+    /// Timed predictor evaluations after one untimed warmup.
+    #[arg(long, default_value_t = 10_000)]
+    iterations: usize,
+    /// Synthetic solid peers placed away from the jump to measure population overhead.
+    #[arg(long, default_value_t = 0)]
+    peers: usize,
+    /// Lower-left corner of the synthetic peer grid; defaults twenty metres east of start.
+    #[arg(long, value_parser = parse_vector3)]
+    peer_origin: Option<Vector3>,
+    /// User-selected normalized jump power.
+    #[arg(long, default_value_t = 1.0)]
+    power: f32,
+    /// Maximum fixed physical ticks evaluated for the selected launch.
+    #[arg(long, default_value_t = 160)]
+    ticks: usize,
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+    ensure!(
+        args.landblock & 0xffff == 0xffff,
+        "landblock must be an outdoor owner DID"
+    );
+    ensure!(args.iterations > 0, "iterations must be positive");
+    let owner = Guid(args.landblock);
+    let cell = args.cell.map(Guid);
+    if let Some(cell) = cell {
+        ensure!(
+            cell.0 & 0xffff_0000 == owner.0 & 0xffff_0000,
+            "EnvCell must belong to the selected landblock"
+        );
+    }
+
+    let repository = Arc::new(
+        ContentRepository::select_installation(args.content).context("content discovery failed")?,
+    );
+    let service =
+        ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
+    let landblock = service
+        .load_landblock(owner.0)?
+        .with_context(|| format!("CellLandblock 0x{:08X} is absent", owner.0))?;
+    let center_collision = service.resolve_collision(&landblock)?;
+    let center_colliders = center_collision.static_geometry.colliders.len();
+    let center_cells = center_collision.static_geometry.cell_volumes().len();
+    let mut collision = CollisionScene::new();
+    insert_simulation_interest_neighborhood(&service, center_collision, &mut collision)?;
+
+    let ray_distance = if args.resolve_ground { 1_000.0 } else { 10.0 };
+    let target_hit = collision
+        .cast_static_surface_ray(StaticSurfaceRayRequest {
+            anchor: owner,
+            start: args.target + Vector3::new(0.0, 0.0, 5.0),
+            direction: Vector3::new(0.0, 0.0, -1.0),
+            maximum_distance: ray_distance,
+            previous_cell: cell,
+            filter: PhysicalCollisionFilter::ALL,
+        })?
+        .context("target ray reached no authored static surface")?;
+    let target = PreciseJumpTarget::new(
+        owner,
+        holtburger_world::CollisionSurfaceRayHit::Environment(target_hit),
+    )?;
+    let now = Instant::now();
+    let profile = retail_player_grounded_profile(EdgeProtection::None)?;
+    let PhysicalBodyDefinition::Grounded { spheres, .. } = profile.definition else {
+        unreachable!("retail player profile must be grounded")
+    };
+    let start = if args.resolve_ground {
+        let hit = collision
+            .cast_static_surface_ray(StaticSurfaceRayRequest {
+                anchor: owner,
+                start: args.start + Vector3::new(0.0, 0.0, 5.0),
+                direction: Vector3::new(0.0, 0.0, -1.0),
+                maximum_distance: ray_distance,
+                previous_cell: None,
+                filter: PhysicalCollisionFilter::ALL,
+            })?
+            .context("start ray reached no authored static surface")?;
+        hit.point + hit.normal * spheres.support.radius - spheres.support.center
+    } else {
+        args.start
+    };
+    let (mut scene, body_id) = player_scene(&collision, owner, cell, start, now)?;
+    let peer_origin = args
+        .peer_origin
+        .unwrap_or(start + Vector3::new(20.0, 0.0, 0.0));
+    add_population(&mut scene, owner, cell, peer_origin, args.peers, now)?;
+    let capabilities = representative_capabilities();
+    let power = JumpExtent::new(args.power)
+        .map_err(|_| anyhow::anyhow!("power must be finite and between zero and one"))?;
+    let maximum_ticks = std::num::NonZeroU32::new(u32::try_from(args.ticks)?)
+        .context("flight horizon must be nonzero")?;
+    let desired_body_point = target.view().point + target.view().normal * spheres.support.radius
+        - Quaternion::from_heading(0.0).rotate_vector(spheres.support.center);
+    let displacement = PreciseJumpWorldDisplacement::new(desired_body_point - start)?;
+    let analytic_timer = Instant::now();
+    for _ in 0..args.iterations {
+        black_box(resolve_selected_precise_jump(
+            holtburger_core::client::precise_jump_prediction::PRECISE_JUMP_FIXED_TICK,
+            &capabilities,
+            profile.definition,
+            0.0,
+            black_box(displacement),
+            power,
+        )?);
+    }
+    let analytic_elapsed = analytic_timer.elapsed();
+    let entity_collision = scene.entity_collision_snapshot()?;
+    let ray = StaticSurfaceRayRequest {
+        anchor: owner,
+        start: args.target + Vector3::new(0.0, 0.0, 5.0),
+        direction: Vector3::new(0.0, 0.0, -1.0),
+        maximum_distance: ray_distance,
+        previous_cell: cell,
+        filter: PhysicalCollisionFilter::ALL,
+    };
+    let pick_timer = Instant::now();
+    for _ in 0..args.iterations {
+        black_box(collision.cast_surface_ray(&entity_collision, ray, |_| true)?);
+    }
+    let pick_elapsed = pick_timer.elapsed();
+    // Measure reuse independently of the first bounds-tree construction.
+    black_box(entity_collision.prepare_frozen_contacts(owner)?);
+    let preparation_timer = Instant::now();
+    for _ in 0..args.iterations {
+        black_box(entity_collision.prepare_frozen_contacts(owner)?);
+    }
+    let preparation_elapsed = preparation_timer.elapsed();
+    let selected = resolve_selected_precise_jump(
+        holtburger_core::PRECISE_JUMP_FIXED_TICK,
+        &capabilities,
+        profile.definition,
+        0.0,
+        displacement,
+        power,
+    )?;
+    let request = PreciseJumpFlightRequest {
+        body: scene.body(body_id).context("benchmark actor disappeared")?,
+        collision_scene: &collision,
+        entity_collision: &entity_collision,
+        target: &target,
+        candidate: selected.candidate(),
+        maximum_ticks,
+        start_time: now,
+    };
+    let cancelled = std::sync::atomic::AtomicBool::new(false);
+    let control = PreciseJumpPredictionControl {
+        cancelled: &cancelled,
+    };
+    let warmup = predict_selected_precise_jump(request, control)?;
+    // Whole-scene cloning is a historical baseline; live work now shares the publication.
+    let capture_timer = Instant::now();
+    for _ in 0..args.iterations {
+        black_box(scene.clone());
+    }
+    let capture_elapsed = capture_timer.elapsed();
+    let mut publication_build_elapsed = std::time::Duration::ZERO;
+    let mut cold_preparation_elapsed = std::time::Duration::ZERO;
+    let mut cold_prediction_elapsed = std::time::Duration::ZERO;
+    for _ in 0..args.iterations {
+        let mut capture = scene.clone();
+        // Publish the same peer pose to measure a cold successor rather than the shared read.
+        let id = SpatialBodyId::Entity(Guid(1));
+        if let Some(body) = capture.body(id).cloned() {
+            capture
+                .update_body(body)
+                .context("capture fixture peer disappeared")?;
+        } else {
+            capture.register_body(SpatialBody::new(
+                id,
+                scene
+                    .body(body_id)
+                    .context("capture fixture mover disappeared")?
+                    .pose,
+                now,
+            ));
+            capture
+                .remove_body(id)
+                .context("temporary capture body disappeared")?;
+        }
+        let timer = Instant::now();
+        let cold = capture.entity_collision_snapshot()?;
+        publication_build_elapsed += timer.elapsed();
+        let timer = Instant::now();
+        black_box(cold.prepare_frozen_contacts(owner)?);
+        cold_preparation_elapsed += timer.elapsed();
+        black_box(predict_selected_precise_jump(
+            PreciseJumpFlightRequest {
+                entity_collision: &cold,
+                ..request
+            },
+            control,
+        )?);
+        cold_prediction_elapsed += timer.elapsed();
+    }
+    let snapshot_timer = Instant::now();
+    for _ in 0..args.iterations {
+        black_box(scene.entity_collision_snapshot()?);
+    }
+    let snapshot_elapsed = snapshot_timer.elapsed();
+    let timer = Instant::now();
+    for _ in 0..args.iterations {
+        black_box(predict_selected_precise_jump(black_box(request), control)?);
+    }
+    let elapsed = timer.elapsed();
+    println!(
+        "start={start:?} peer_origin={peer_origin:?} capabilities={capabilities:?} profile={profile:?} build_debug={} architecture={} os={}",
+        cfg!(debug_assertions),
+        std::env::consts::ARCH,
+        std::env::consts::OS,
+    );
+    println!(
+        "stages pick_mean_us={:.3} frozen_preparation_reuse_mean_us={:.3} frozen_preparation_cold_mean_us={:.3} prediction_cold_mean_us={:.3}",
+        pick_elapsed.as_secs_f64() * 1_000_000.0 / args.iterations as f64,
+        preparation_elapsed.as_secs_f64() * 1_000_000.0 / args.iterations as f64,
+        cold_preparation_elapsed.as_secs_f64() * 1_000_000.0 / args.iterations as f64,
+        cold_prediction_elapsed.as_secs_f64() * 1_000_000.0 / args.iterations as f64,
+    );
+    println!(
+        "capture iterations={} peers={} scene_clone_mean_us={:.3} publication_build_mean_us={:.3} publication_reuse_mean_us={:.3}",
+        args.iterations,
+        args.peers,
+        capture_elapsed.as_secs_f64() * 1_000_000.0 / args.iterations as f64,
+        publication_build_elapsed.as_secs_f64() * 1_000_000.0 / args.iterations as f64,
+        snapshot_elapsed.as_secs_f64() * 1_000_000.0 / args.iterations as f64,
+    );
+    println!(
+        "precise_jump_benchmark owner=0x{:08X} cell={} center_colliders={center_colliders} center_env_cells={center_cells}",
+        owner.0,
+        cell.map_or_else(
+            || "outdoor".to_owned(),
+            |value| format!("0x{:08X}", value.0)
+        ),
+    );
+    println!(
+        "target point={:?} normal={:?} placement={:?}",
+        target.view().point,
+        target.view().normal,
+        target.view().committed_cell,
+    );
+    println!(
+        "outcome={:?} power={} solver_ticks={} accepted_segments={}",
+        warmup.outcome,
+        power.get(),
+        warmup.solver_ticks,
+        warmup.segments.len(),
+    );
+    println!(
+        "timing iterations={} analytic_mean_ns={:.1} prediction_total_ms={:.3} prediction_mean_us={:.3} evaluations_per_30hz_tick={:.1}",
+        args.iterations,
+        analytic_elapsed.as_secs_f64() * 1_000_000_000.0 / args.iterations as f64,
+        elapsed.as_secs_f64() * 1_000.0,
+        elapsed.as_secs_f64() * 1_000_000.0 / args.iterations as f64,
+        (1.0 / 30.0) / (elapsed.as_secs_f64() / args.iterations as f64),
+    );
+    Ok(())
+}
+
+fn player_scene(
+    collision: &CollisionScene,
+    owner: Guid,
+    cell: Option<Guid>,
+    coords: Vector3,
+    now: Instant,
+) -> Result<(SpatialScene, holtburger_world::SpatialBodyId)> {
+    let profile = retail_player_grounded_profile(EdgeProtection::None)?;
+    let mut scene = SpatialScene::new();
+    let body_id = scene.allocate_ephemeral_body_id();
+    let mut body = SpatialBody::new_ephemeral(
+        body_id,
+        WorldPosition {
+            landblock_id: cell.unwrap_or(owner),
+            coords,
+            rotation: Quaternion::from_heading(0.0),
+        },
+        now,
+    );
+    body.contact = ContactState::Grounded;
+    body.physical = Some(PhysicalBodyState::new(
+        profile.definition,
+        PhysicalCollisionFilter::ALL,
+        profile.response_policy,
+        cell,
+    ));
+    let PhysicalBodyDefinition::Grounded { .. } = profile.definition else {
+        unreachable!("retail player profile must be grounded")
+    };
+    let PhysicalBodyResponseState::Grounded { ground, .. } = &mut body
+        .physical
+        .as_mut()
+        .expect("installed physical body")
+        .response
+    else {
+        unreachable!("grounded definition must own grounded response")
+    };
+    *ground = GroundState::Supported(GroundSupport {
+        feature: holtburger_world::SupportFeature::Surface,
+        normal: Vector3::new(0.0, 0.0, 1.0),
+        source: holtburger_world::SupportSource::World(
+            collision
+                .owner_proof(owner)
+                .context("benchmark owner has no collision proof")?,
+        ),
+    });
+    scene.register_body(body);
+    Ok((scene, body_id))
+}
+
+/// Synthetic grid separates distant population cost from dense local query selection.
+fn add_population(
+    scene: &mut SpatialScene,
+    owner: Guid,
+    cell: Option<Guid>,
+    origin: Vector3,
+    count: usize,
+    now: Instant,
+) -> Result<()> {
+    let profile = retail_player_grounded_profile(EdgeProtection::None)?;
+    let geometry = Arc::new(PreparedEntityTargetGeometry {
+        setup_radius: 0.5,
+        setup_height: 1.0,
+        collision_animations: Default::default(),
+        physics_bsp_parts: Vec::new(),
+        fallback_setup_did: 0x0200_0001,
+        fallback_shapes: vec![Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+            low_point: Vector3::zero(),
+            radius: 0.5,
+            height: 2.0,
+        }))],
+        fallback_scale: ColliderScale::uniform(1.0)?,
+    });
+    let configuration = DynamicPhysicalBodyConfiguration::new(
+        DynamicPhysicalBodyDefinition {
+            movement: profile.definition,
+            response_policy: profile.response_policy,
+            entity_collision: DynamicBodyCollisionDefinition {
+                player_collision: None,
+                contact_response: holtburger_world::EntityContactResponse::Character(
+                    holtburger_world::EntityIntegrationEligibility::Eligible,
+                ),
+                target_geometry: geometry,
+                dynamic_collision: EntityDynamicCollisionPolicy {
+                    is_static: false,
+                    target: EntityCollisionParticipation::Solid,
+                    mover_accepts_response: true,
+                    accepts_peer_reports: true,
+                    missile: false,
+                    path_clipped: false,
+                },
+                reporting: EntityCollisionReportPolicy {
+                    enabled: true,
+                    as_environment: false,
+                },
+                uses_physics_bsp: false,
+                elasticity: PhysicalElasticity::DEFAULT,
+                default_animation_available: false,
+                default_script_available: false,
+            },
+        },
+        LocalPhysicalDemand {
+            target: LocalTargetDemand::Retained,
+            integration: LocalIntegrationDemand::Eligible,
+        },
+    )?;
+    for index in 0..count {
+        let id = SpatialBodyId::Entity(Guid(u32::try_from(index)? + 1));
+        let pose = WorldPosition {
+            landblock_id: cell.unwrap_or(owner),
+            coords: origin + Vector3::new((index % 16) as f32, (index / 16) as f32, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        scene.register_body(SpatialBody::new(id, pose, now));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(configuration.clone()),
+                PhysicalCollisionFilter::ALL,
+                cell,
+            )
+            .context("population body disappeared during installation")?;
+    }
+    Ok(())
+}
+
+fn representative_capabilities() -> SelfJumpCapabilities {
+    SelfJumpCapabilities {
+        run_rate_scalar: 1.0,
+        full_extent_jump_height: 4.2125,
+        burden: 0.0,
+    }
+}
+
+fn insert_simulation_interest_neighborhood(
+    service: &ContentAssetService,
+    center_asset: holtburger_content::LandblockCollisionAsset,
+    scene: &mut CollisionScene,
+) -> Result<()> {
+    let center = center_asset.landblock_id;
+    let center_x = ((center >> 24) & 0xff) as i32;
+    let center_y = ((center >> 16) & 0xff) as i32;
+    let mut insertions = vec![center_asset];
+    for offset_x in -SIMULATION_INTEREST_RADIUS..=SIMULATION_INTEREST_RADIUS {
+        for offset_y in -SIMULATION_INTEREST_RADIUS..=SIMULATION_INTEREST_RADIUS {
+            if offset_x == 0 && offset_y == 0 {
+                continue;
+            }
+            let x = center_x + offset_x;
+            let y = center_y + offset_y;
+            if !(0..=255).contains(&x) || !(0..=255).contains(&y) {
+                continue;
+            }
+            let neighbor = ((x as u32) << 24) | ((y as u32) << 16) | 0xffff;
+            let Some(landblock) = service.load_landblock(neighbor)? else {
+                continue;
+            };
+            insertions.push(service.resolve_collision(&landblock)?);
+        }
+    }
+    scene.apply_residency_change(insertions, &[])?;
+    Ok(())
+}
+
+fn parse_vector3(value: &str) -> std::result::Result<Vector3, String> {
+    let components = value
+        .split(',')
+        .map(str::trim)
+        .map(str::parse::<f32>)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let [x, y, z] = components.as_slice() else {
+        return Err("expected X,Y,Z".to_owned());
+    };
+    if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+        return Err("coordinates must be finite".to_owned());
+    }
+    Ok(Vector3::new(*x, *y, *z))
+}
+
+fn parse_did(value: &str) -> std::result::Result<u32, String> {
+    let value = value.trim();
+    u32::from_str_radix(value.strip_prefix("0x").unwrap_or(value), 16)
+        .map_err(|error| error.to_string())
+}

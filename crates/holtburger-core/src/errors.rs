@@ -1,4 +1,6 @@
+use crate::ActionResultReason;
 use holtburger_protocol::errors::WeenieError;
+use holtburger_world::interaction::EntityUseFeedback;
 
 pub fn format_weenie_error(error: WeenieError, parameter: Option<&str>) -> String {
     // Some errors have custom formatting templates.
@@ -19,7 +21,9 @@ pub fn format_weenie_error(error: WeenieError, parameter: Option<&str>) -> Strin
         }
 
         // WeenieErrorWithString (Parameterized)
-        WeenieError::IsTooBusyToAcceptGifts => Some("{} is too busy to accept gifts right now."),
+        WeenieError::IsTooBusyToAcceptGifts | WeenieError::AiRefuseItemDuringEmote => {
+            Some("{} is too busy to accept gifts right now.")
+        }
         WeenieError::CannotCarryAnymore => Some("{} cannot carry anymore."),
         WeenieError::YouFailToAffectYouCannotAffectAnyone => {
             Some("You fail to affect {} because you cannot affect anyone!")
@@ -311,4 +315,58 @@ pub fn is_actually_weenie_error(err: WeenieError) -> bool {
             | WeenieError::YouHaveEnteredTheChannel
             | WeenieError::CharacterNotAvailable
     )
+}
+
+/// Formats reusable action feedback without frontend presentation or delivery policy.
+pub fn format_action_result_message(reason: &ActionResultReason) -> String {
+    match reason {
+        ActionResultReason::Weenie(error, parameter) => {
+            format_weenie_error(*error, parameter.as_deref())
+        }
+        ActionResultReason::InventoryServerSaveFailed { item_guid, error } => {
+            if *error == WeenieError::None {
+                format!("Inventory save failed for {:?}", item_guid)
+            } else {
+                format!(
+                    "Inventory save failed for {:?}: {}",
+                    item_guid,
+                    format_weenie_error(*error, None)
+                )
+            }
+        }
+        ActionResultReason::Locked { name, .. } => format!("The {name} is locked"),
+        ActionResultReason::Character(error) => error.to_string(),
+        ActionResultReason::General(message)
+        | ActionResultReason::Transport(message)
+        | ActionResultReason::EquipmentSet { message, .. } => message.clone(),
+    }
+}
+
+/// Format local use progress; rejection messages come from the server.
+pub fn format_entity_use_feedback(
+    feedback: &holtburger_world::interaction::EntityUseFeedback,
+) -> String {
+    match feedback {
+        EntityUseFeedback::Approaching { name } => format!("Approaching {name}"),
+        EntityUseFeedback::Using { name } => format!("Using the {name}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::Guid;
+
+    #[test]
+    fn format_action_result_message_preserves_inventory_save_item_guid() {
+        let reason = ActionResultReason::InventoryServerSaveFailed {
+            item_guid: Guid(0x4000_0001),
+            error: holtburger_protocol::errors::WeenieError::YoureTooBusy,
+        };
+
+        assert_eq!(
+            format_action_result_message(&reason),
+            "Inventory save failed for 0x40000001: You're too busy!"
+        );
+    }
 }

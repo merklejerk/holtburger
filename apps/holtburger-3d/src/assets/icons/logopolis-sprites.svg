@@ -1,0 +1,28 @@
+<svg
+	xmlns="http://www.w3.org/2000/svg"
+	width="24"
+	height="8"
+	viewBox="0 0 24 8"
+	shape-rendering="crispEdges"
+>
+	<!-- Three 8×8 cells: purple portal facing right, amber portal facing right, shuffle pickup. -->
+	<defs>
+		<g id="portal">
+			<path
+				fill="currentColor"
+				d="M2 0h3v1H2z M1 1h1v1H1z M0 2h1v3H0z M1 5h1v1H1z M2 6h3v1H2z"
+			/>
+			<path
+				fill="#fff1b9"
+				d="M5 1h1v1H5z M6 2h1v1H6z M3 3h5v1H3z M6 4h1v1H6z M5 5h1v1H5z"
+			/>
+		</g>
+	</defs>
+	<use href="#portal" color="#cd40ff" />
+	<use href="#portal" x="8" color="#ffab18" />
+	<path
+		transform="translate(16)"
+		fill="#37edff"
+		d="M3 1h1v1H3z M2 2h1v1H2z M4 2h1v1H4z M1 3h1v1H1z M5 3h1v1H5z M2 4h1v1H2z M4 4h1v1H4z M3 5h1v1H3z"
+	/>
+</svg>

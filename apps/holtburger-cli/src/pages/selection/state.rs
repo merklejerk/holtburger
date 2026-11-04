@@ -7,7 +7,7 @@ use crate::components::text_input::SingleLineTextInput;
 use crate::pages::selection::creation::{CharacterCreationState, format_creation_errors};
 use crate::state::{EventContext, TickContext};
 use crate::types::{AppAction, AppUiAction, ChatMessageTags, UpdateResult};
-use crate::utils::format_action_result_message;
+use holtburger_core::errors::format_action_result_message;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CharacterScreen {
@@ -30,12 +30,6 @@ pub struct DeleteCharacterConfirmation {
     pub error_message: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PendingCharacterCreation {
-    pub slot: u32,
-    pub name: String,
-}
-
 impl DeleteCharacterConfirmation {
     pub(crate) fn new(slot: u32, character_name: String) -> Self {
         Self {
@@ -54,6 +48,8 @@ impl DeleteCharacterConfirmation {
 
 #[derive(Debug, Default)]
 pub struct SelectionState {
+    /// Retained entry refusal, visible until the next submission.
+    pub entry_rejection: Option<String>,
     /// List of available characters shown in the dashboard.
     pub characters: Vec<CharacterDashboardEntry>,
     /// Index of character currently selected in the dashboard list.
@@ -64,7 +60,6 @@ pub struct SelectionState {
     pub account_name: String,
     pub screen: CharacterScreen,
     pub creation: CharacterCreationState,
-    pub pending_create: Option<PendingCharacterCreation>,
     pub delete_confirmation: Option<DeleteCharacterConfirmation>,
 }
 
@@ -102,7 +97,6 @@ impl SelectionState {
                 }
             }
             ClientViewEvent::CharacterList(_) => {
-                self.pending_create = None;
                 if self.selected_character_index >= self.characters.len() {
                     self.selected_character_index = self.characters.len().saturating_sub(1);
                 }
@@ -151,7 +145,9 @@ impl SelectionState {
                 operation: Some(CharacterManagementOperation::Restore),
                 response,
             } => return self.handle_restore_response(response),
-            ClientViewEvent::CharacterEnterWorldServerReady => {
+            ClientViewEvent::StatusUpdate {
+                state: holtburger_core::ClientState::EnteringWorld,
+            } => {
                 if let Some(char_info) = self.characters.get(self.selected_character_index) {
                     return UpdateResult::new().with_action(AppAction::TransitionToGame {
                         guid: char_info.character.guid,
@@ -179,13 +175,8 @@ impl SelectionState {
             }
             AppAction::SubmitCharacterCreation => {
                 let creation = self.creation.ready_mut()?;
-                match creation.build_request(self.characters.iter().map(|character| character.slot))
-                {
+                match creation.build_request() {
                     Ok(request) => {
-                        self.pending_create = Some(PendingCharacterCreation {
-                            slot: request.character_slot,
-                            name: request.name.clone(),
-                        });
                         creation.set_feedback("Submitting character creation request...", false);
 
                         let mut result = UpdateResult::new();
@@ -294,51 +285,26 @@ impl SelectionState {
     fn handle_create_response(&mut self, response: CharacterCreateResponseData) -> UpdateResult {
         match response.response {
             holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok => {
-                let pending = self.pending_create.take();
-                if let Some((guid, slot)) = response
-                    .guid
-                    .zip(pending.as_ref().map(|pending| pending.slot))
-                {
-                    let name = response
-                        .name
-                        .clone()
-                        .or_else(|| pending.as_ref().map(|pending| pending.name.clone()))
-                        .unwrap_or_else(|| "New Character".to_string());
-                    self.characters.push(CharacterDashboardEntry {
-                        slot,
-                        character: CharacterEntry {
-                            guid,
-                            name: name.clone(),
-                            delete_time: 0,
-                        },
-                    });
-                    self.characters.sort_by(|left, right| {
-                        left.character
-                            .name
-                            .to_lowercase()
-                            .cmp(&right.character.name.to_lowercase())
-                    });
-                    if let Some(index) = self
-                        .characters
+                if let Some(index) = response.guid.and_then(|guid| {
+                    self.characters
                         .iter()
                         .position(|entry| entry.character.guid == guid)
-                    {
-                        self.selected_character_index = index;
-                    }
+                }) {
+                    let name = self.characters[index].character.name.clone();
+                    self.selected_character_index = index;
                     self.screen = CharacterScreen::Dashboard;
                     if let Some(creation) = self.creation.ready_mut() {
                         creation.set_feedback(format!("Character '{}' created.", name), false);
                     }
                 } else if let Some(creation) = self.creation.ready_mut() {
                     creation.set_feedback(
-                        "Character created, but the response was missing append metadata."
+                        "Character created, but its authoritative roster entry is unavailable."
                             .to_string(),
                         false,
                     );
                 }
             }
             other => {
-                self.pending_create = None;
                 if let Some(creation) = self.creation.ready_mut() {
                     creation.set_feedback(
                         format!("Character creation rejected by server: {:?}.", other),
@@ -352,26 +318,8 @@ impl SelectionState {
     }
 
     fn handle_restore_response(&mut self, response: CharacterCreateResponseData) -> UpdateResult {
-        self.pending_create = None;
-
         match response.response {
             holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok => {
-                if let Some(guid) = response.guid
-                    && let Some(entry) = self
-                        .characters
-                        .iter_mut()
-                        .find(|entry| entry.character.guid == guid)
-                {
-                    entry.character.delete_time = 0;
-                    if let Some(name) = response.name {
-                        entry.character.name = name;
-                    }
-                    if self.selected_character_index >= self.characters.len() {
-                        self.selected_character_index = self.characters.len().saturating_sub(1);
-                    }
-                    return UpdateResult::redraw();
-                }
-
                 UpdateResult::redraw()
             }
             other => {
@@ -396,6 +344,7 @@ mod tests {
 
     fn test_state() -> SelectionState {
         SelectionState {
+            entry_rejection: None,
             characters: vec![CharacterDashboardEntry {
                 slot: 7,
                 character: CharacterEntry {
@@ -409,7 +358,6 @@ mod tests {
             account_name: "account".to_string(),
             screen: CharacterScreen::Dashboard,
             creation: CharacterCreationState::default(),
-            pending_create: None,
             delete_confirmation: None,
         }
     }
@@ -521,7 +469,9 @@ mod tests {
     fn character_enter_world_server_ready_transitions_to_game_with_selected_identity() {
         let mut state = test_state();
 
-        let result = state.handle_view_event(ClientViewEvent::CharacterEnterWorldServerReady);
+        let result = state.handle_view_event(ClientViewEvent::StatusUpdate {
+            state: holtburger_core::ClientState::EnteringWorld,
+        });
 
         assert!(matches!(
             result.actions.as_slice(),
@@ -550,11 +500,15 @@ mod tests {
     }
 
     #[test]
-    fn create_response_appends_character_locally_and_selects_it() {
+    fn create_response_selects_the_authoritative_roster_entry() {
         let mut state = test_state();
-        state.pending_create = Some(PendingCharacterCreation {
+        state.characters.push(CharacterDashboardEntry {
             slot: 2,
-            name: "Zappy".to_string(),
+            character: CharacterEntry {
+                guid: Guid(0x5000_0009),
+                name: "Zappy".into(),
+                delete_time: 0,
+            },
         });
 
         let result = state.handle_view_event(ClientViewEvent::CharacterManagementResponse {
@@ -570,7 +524,6 @@ mod tests {
 
         assert!(result.redraw_requested());
         assert_eq!(state.screen, CharacterScreen::Dashboard);
-        assert_eq!(state.pending_create, None);
         assert!(
             state
                 .characters
@@ -583,26 +536,5 @@ mod tests {
                 .map(|entry| entry.character.name.as_str()),
             Some("Zappy")
         );
-    }
-
-    #[test]
-    fn restore_response_clears_pending_delete_marker() {
-        let mut state = test_state();
-        state.characters[0].character.delete_time = 123;
-
-        let result = state.handle_view_event(ClientViewEvent::CharacterManagementResponse {
-            operation: Some(CharacterManagementOperation::Restore),
-            response: CharacterCreateResponseData {
-                response:
-                    holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok,
-                guid: Some(Guid(0x5000_0001)),
-                name: Some("Sho Girl".to_string()),
-                seconds_disabled: Some(0),
-            },
-        });
-
-        assert!(result.redraw_requested());
-        assert_eq!(state.characters[0].character.delete_time, 0);
-        assert_eq!(state.characters[0].character.name, "Sho Girl");
     }
 }

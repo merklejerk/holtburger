@@ -1,0 +1,520 @@
+import type { ClientLocalMotionFeedback } from "../../client/client-host-contract";
+import type { ClientLockFeedback } from "../../client/client-lock-feedback-contract";
+import type { ClientGameplayPreferences } from "../../client/client-gameplay-options-contract";
+import type {
+	SalvagePreviewResult,
+	SalvageSubmitResult,
+} from "../../client/client-salvage-contract";
+import type { PlayerVisualCapture } from "../../client/client-object-preview-contract";
+import type { DeathLocationResult } from "../../client/client-death-contract";
+import type { ClientCombatOutcome } from "../../client/client-host-contract";
+import type { CharacterManagementState } from "../../client/client-host-contract";
+import type {
+	ContractsSnapshot,
+	ContractMembershipChange,
+} from "../../client/client-contracts-contract";
+import type {
+	AllegianceSnapshot,
+	AllegiancePreferences,
+} from "../../client/client-allegiance-contract";
+import type { SquelchSnapshot } from "../../client/client-squelch-contract";
+import type {
+	FriendsSnapshot,
+	FriendsPreferences,
+} from "../../client/client-friends-contract";
+import type {
+	PartyPreferences,
+	PartySnapshot,
+} from "../../client/client-party-contract";
+import type {
+	HousingSnapshot,
+	HousingCrystal,
+	HousingPreviewResult,
+	HousingPaymentResult,
+	HousingManagementResult,
+} from "../../client/client-housing-contract";
+import type { TradeSnapshot } from "../../client/client-trade-contract";
+import type {
+	BarberSnapshot,
+	BarberPreview,
+} from "../../client/client-barber-contract";
+import type {
+	VendorSnapshot,
+	VendorPreview,
+	VendorResult,
+	VendorPhase,
+} from "../../client/client-vendor-contract";
+import type {
+	SpellInspectionContext,
+	SpellInspectionResult,
+} from "../../client/client-spell-inspection-contract";
+import type {
+	ClientItemUseResult,
+	ClientItemUseFinished,
+	ClientLockedTarget,
+	ClientItemUseTargetResult,
+} from "../../client/client-item-use-contract";
+import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
+import type { ClientEntityDelta } from "../../client/client-entity-mirror";
+import type {
+	CharacterSheet,
+	ProgressionEvaluation,
+	ProgressionFeedback,
+} from "../../client/client-character-sheet-contract";
+import type { ObjectInspectionResult } from "../../client/client-object-inspection-contract";
+import type {
+	ClientBook,
+	ClientBookOpened,
+} from "../../client/client-book-contract";
+import type { ObjectPreviewResult } from "../../client/client-object-preview-contract";
+import type { DynamicEntityEvent } from "../game/runtime/dynamic-entity-feed";
+import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
+import type { PossessionEventOutcome } from "../../explorer/explorer-entity-possession";
+import type { HostPhysicalFlyFailure } from "../../explorer/physical-fly-session";
+import type { HostPhysicalFlyPath } from "../game/motion/host-physical-fly-path";
+import type {
+	RecallDestination,
+	ClientCurrentState,
+	ClientConnectionSample,
+	ClientCombatMode,
+	ClientCombatStatus,
+	ClientDynamicScriptCue,
+	ClientDynamicSoundCue,
+	ClientExitRequested,
+	ClientLifecycle,
+	ClientLocalPlayerEstablished,
+	ClientPresentationDiscontinuity,
+	ClientCameraStartReceipt,
+	ClientCameraTick,
+	ClientPresentationTick,
+	ClientChatMessage,
+	ClientPlayerEntered,
+	ClientVital,
+	ClientActionFeedback,
+	ClientServerText,
+	ClientConfirmation,
+	ClientEntityHealth,
+	ClientCharacterMotionCapabilities,
+	ClientCharacterMotionFeedback,
+	ClientAppearanceOptions,
+	ClientPreciseJumpEvaluation,
+	ClientPreciseJumpTransactionFeedback,
+	ClientEntitySelectionQueryResult,
+} from "../../client/client-host-contract";
+
+/** Bulk content commands sharing one connection-wide admission budget. */
+const CONTENT_HOST_COMMAND_NAMES = [
+	"load_character_creation_catalog",
+	"resolve_character_creation_appearance",
+	"resolve_character_creation_stats",
+	"load_soul_emotes",
+	"open_world_map",
+	"read_world_map_tiles",
+	"load_active_region_data",
+	"load_landblock_source_batch",
+	"load_landblock_profile",
+	"load_sky_source",
+	"load_texture_pixels",
+	"prepare_ui_icons",
+	"load_spell_references",
+	"load_spell_components",
+	"load_stat_icons",
+	"load_animation",
+	"load_setup_visual",
+	"load_physics_script",
+	"load_physics_script_table",
+	"load_particle_emitter",
+	"load_audio",
+	"load_sound_table",
+	"load_particle_meshes",
+	"load_motion_table_closure",
+] as const;
+
+/** Content/status commands implemented by the shared host-content capability. */
+const SHARED_HOST_COMMAND_NAMES = [
+	"host_status",
+	...CONTENT_HOST_COMMAND_NAMES,
+] as const;
+
+/** Derive admission policy from the command inventory rather than a second allowlist. */
+export function isContentHostCommand(command: HostCommandName): boolean {
+	return CONTENT_HOST_COMMAND_NAMES.some((name) => name === command);
+}
+
+/** Explorer-only commands; they are not accepted by a client-mode renderer. */
+const EXPLORER_HOST_COMMAND_NAMES = [
+	"start_physical_fly",
+	"set_physical_fly_intent",
+	"stop_physical_fly",
+	"replace_simulation_interest",
+	"start_simulation_interest_session",
+	"explorer_catalog_capability",
+	"search_explorer_weenies",
+	"request_explorer_dynamic_entity_snapshot",
+	"explorer_possession_motion_probe",
+	"spawn_explorer_entity",
+	"despawn_explorer_entity",
+	"replace_explorer_entity_physics_state",
+	"launch_explorer_entity",
+	"relocate_explorer_entity",
+	"possess_explorer_entity",
+	"set_explorer_possession_intent",
+	"queue_explorer_possession_event",
+	"start_kinematic_boom",
+	"set_kinematic_boom_intent",
+	"set_kinematic_boom_clearance",
+	"stop_kinematic_boom",
+	"reset_explorer_entities",
+] as const;
+
+/** Client lifecycle and movement commands; startup remains private to Electron main. */
+const CLIENT_HOST_COMMAND_NAMES = [
+	"examine_client_entity",
+	"read_client_book_page",
+	"request_client_current_state",
+	"refresh_client_housing",
+	"query_client_housing_access",
+	"search_client_housing",
+	"preview_client_housing_payment",
+	"submit_client_housing_payment",
+	"submit_client_housing_management",
+	"select_client_character",
+	"create_client_character",
+	"delete_client_character",
+	"restore_client_character",
+	"replace_client_drive",
+	"queue_client_character_motion_event",
+	"submit_client_party",
+	"submit_client_friends",
+	"submit_client_contracts",
+	"submit_client_squelch",
+	"submit_client_allegiance",
+	"set_client_party_updates",
+	"query_client_death_locations",
+	"manage_client_corpse_consent",
+	"set_client_corpse_permission",
+	"set_client_corpse_consent",
+	"kill_client_character",
+	"send_client_chat",
+	"teleport_client_to_map_position",
+	"recall_client",
+	"toggle_client_combat_mode",
+	"set_client_combat_mode",
+	"set_client_rest_posture",
+	"cancel_client_rest_posture",
+	"set_client_appearance_option",
+	"set_client_gameplay_option",
+	"cast_client_spell",
+	"begin_client_combat_engagement",
+	"update_client_combat_profile",
+	"stop_client_combat_engagement",
+	"query_client_entity_health",
+	"preview_client_inventory",
+	"preview_client_vendor",
+	"submit_client_vendor",
+	"submit_client_trade",
+	"request_client_barber",
+	"submit_client_inventory",
+	"auto_merge_client_container",
+	"close_client_container",
+	"equip_client_item",
+	"apply_client_equipment_set",
+	"preview_client_salvage",
+	"submit_client_salvage",
+	"submit_client_item_use",
+	"query_client_item_use_target",
+	"query_client_spell_inspection",
+	"evaluate_client_progression",
+	"submit_client_progression",
+	"set_client_character_title",
+	"respond_to_client_confirmation",
+	"start_client_camera",
+	"set_client_camera_intent",
+	"set_client_camera_clearance",
+	"set_client_entity_collision_disabled",
+	"set_client_precise_jump_aim",
+	"query_client_entity_selection_candidates",
+	"commit_client_precise_jump",
+	"cancel_client_precise_jump",
+	"acknowledge_client_world_reveal",
+	"stop_client_camera",
+	"logout_client",
+	"disconnect_client",
+] as const;
+
+/** One command accepted by the app-local host boundary. */
+export type HostCommandName =
+	| (typeof SHARED_HOST_COMMAND_NAMES)[number]
+	| (typeof EXPLORER_HOST_COMMAND_NAMES)[number]
+	| (typeof CLIENT_HOST_COMMAND_NAMES)[number];
+
+/** Host compositions supported by the Electron shell and protocol diagnostics. */
+export const HOST_MODES = ["explorer", "client"] as const;
+
+/** Composed command inventories used by the renderer allowlist and its contract tests. */
+export const MODE_COMMAND_NAMES = {
+	explorer: [...SHARED_HOST_COMMAND_NAMES, ...EXPLORER_HOST_COMMAND_NAMES],
+	client: [...SHARED_HOST_COMMAND_NAMES, ...CLIENT_HOST_COMMAND_NAMES],
+} as const satisfies Record<HostMode, readonly HostCommandName[]>;
+
+/** Complete command inventory; privileged client startup intentionally remains absent. */
+export const HOST_COMMAND_NAMES = [
+	...SHARED_HOST_COMMAND_NAMES,
+	...EXPLORER_HOST_COMMAND_NAMES,
+	...CLIENT_HOST_COMMAND_NAMES,
+] as const;
+
+/** Shared host events. The first shared content slice is request/response only. */
+const SHARED_HOST_EVENT_NAMES = [] as const;
+
+/** Explorer-only events; they are not published by a client-mode host. */
+const EXPLORER_HOST_EVENT_NAMES = [
+	"explorer-dynamic-entity",
+	"explorer-fixed-tick",
+	"explorer-possession-event-outcomes",
+	"explorer-physical-fly-motion",
+	"explorer-physical-fly-failure",
+] as const;
+
+/** Client lifecycle, focused presentation, and terminal events. */
+const CLIENT_HOST_EVENT_NAMES = [
+	"client-object-inspection-result",
+	"client-book-opened",
+	"client-book-updated",
+	"client-object-preview-result",
+	"client-current-state",
+	"client-inventory-preview",
+	"client-vendor-snapshot",
+	"client-vendor-approached",
+	"client-housing-updated",
+	"client-housing-payment-preview",
+	"client-housing-payment-finished",
+	"client-housing-management-finished",
+	"client-housing-crystal-received",
+	"client-trade-snapshot",
+	"client-barber-updated",
+	"client-barber-preview",
+	"client-vendor-preview",
+	"client-vendor-result",
+	"client-vendor-phase",
+	"client-salvage-preview",
+	"client-salvage-result",
+	"client-item-use-result",
+	"client-item-use-finished",
+	"client-lock-feedback",
+	"client-locked-target",
+	"client-death-locations",
+	"client-item-use-target-result",
+	"client-spell-inspection-context",
+	"client-spell-inspection-result",
+	"client-state-resyncing",
+	"client-entity-facts-changed",
+	"client-entity-collision-disabled",
+	"client-map-teleport-capability-changed",
+	"client-recall-destinations-changed",
+	"client-lifecycle-changed",
+	"client-character-management-changed",
+	"client-player-visual-capture-changed",
+	"client-connection-updated",
+	"client-character-motion-capabilities-updated",
+	"client-character-motion-feedback",
+	"client-server-controlled-motion",
+	"client-precise-jump-evaluation",
+	"client-precise-jump-transaction-feedback",
+	"client-entity-selection-query-result",
+	"client-local-player-established",
+	"client-server-time-updated",
+	"client-world-name-updated",
+	"client-player-entered",
+	"client-player-vitals-updated",
+	"client-character-sheet-updated",
+	"client-progression-evaluated",
+	"client-progression-feedback",
+	"client-player-spells-updated",
+	"client-player-enchantments-updated",
+	"client-character-preferences-updated",
+	"client-party-updated",
+	"client-friends-updated",
+	"client-contracts-updated",
+	"client-contract-membership-changed",
+	"client-squelch-updated",
+	"client-allegiance-updated",
+	"client-social-motion-ready-updated",
+	"client-local-motion-feedback",
+	"client-combat-mode-updated",
+	"client-combat-status-updated",
+	"client-spell-cast-target-updated",
+	"client-entity-health-updated",
+	"client-chat-message",
+	"client-combat-outcome",
+	"client-action-feedback",
+	"client-transient-string",
+	"client-popup-string",
+	"client-confirmation-updated",
+	"client-dynamic-entity",
+	"client-dynamic-script-cue",
+	"client-dynamic-sound-cue",
+	"client-camera-started",
+	"client-camera",
+	"client-presentation-tick",
+	"client-presentation-discontinuity",
+	"client-exit-requested",
+] as const;
+
+/** One event emitted by the app-local host boundary. */
+export type HostEventName =
+	| (typeof SHARED_HOST_EVENT_NAMES)[number]
+	| (typeof EXPLORER_HOST_EVENT_NAMES)[number]
+	| (typeof CLIENT_HOST_EVENT_NAMES)[number];
+
+/** Composed event inventories used by the Electron listener installation and diagnostics. */
+export const MODE_EVENT_NAMES = {
+	explorer: [...SHARED_HOST_EVENT_NAMES, ...EXPLORER_HOST_EVENT_NAMES],
+	client: [...SHARED_HOST_EVENT_NAMES, ...CLIENT_HOST_EVENT_NAMES],
+} as const satisfies Record<HostMode, readonly HostEventName[]>;
+
+/** Complete event inventory emitted by either mode. */
+export const HOST_EVENT_NAMES = [
+	...SHARED_HOST_EVENT_NAMES,
+	...EXPLORER_HOST_EVENT_NAMES,
+	...CLIENT_HOST_EVENT_NAMES,
+] as const;
+
+/** Host composition selected before the renderer starts issuing requests. */
+export type HostMode = "explorer" | "client";
+
+/** Returns the command allowlist for one selected host mode. */
+export function hostCommandNamesForMode(
+	mode: HostMode,
+): readonly HostCommandName[] {
+	return MODE_COMMAND_NAMES[mode];
+}
+
+/** Returns the event allowlist for one selected host mode. */
+export function hostEventNamesForMode(
+	mode: HostMode,
+): readonly HostEventName[] {
+	return MODE_EVENT_NAMES[mode];
+}
+
+/** Payload map kept at the shell boundary so listeners cannot silently accept arbitrary events. */
+export interface HostEventPayloadMap {
+	"client-book-opened": ClientBookOpened;
+	"client-book-updated": ClientBook;
+	"client-object-inspection-result": ObjectInspectionResult;
+	"client-object-preview-result": ObjectPreviewResult;
+	"client-inventory-preview": ClientInventoryPreviewResult;
+	"client-vendor-snapshot": VendorSnapshot;
+	"client-vendor-approached": NonNullable<VendorSnapshot>;
+	"client-housing-updated": HousingSnapshot;
+	"client-housing-payment-preview": HousingPreviewResult;
+	"client-housing-payment-finished": HousingPaymentResult;
+	"client-housing-management-finished": HousingManagementResult;
+	"client-housing-crystal-received": HousingCrystal;
+	"client-trade-snapshot": TradeSnapshot;
+	"client-barber-updated": BarberSnapshot;
+	"client-barber-preview": BarberPreview;
+	"client-vendor-preview": VendorPreview;
+	"client-vendor-result": VendorResult;
+	"client-vendor-phase": VendorPhase;
+	"client-salvage-preview": SalvagePreviewResult;
+	"client-salvage-result": SalvageSubmitResult;
+	"client-item-use-result": ClientItemUseResult;
+	"client-item-use-finished": ClientItemUseFinished;
+	"client-lock-feedback": ClientLockFeedback;
+	"client-locked-target": ClientLockedTarget;
+	"client-death-locations": DeathLocationResult;
+	"client-item-use-target-result": ClientItemUseTargetResult;
+	"client-spell-inspection-context": SpellInspectionContext;
+	"client-spell-inspection-result": SpellInspectionResult;
+	"explorer-dynamic-entity": DynamicEntityEvent;
+	"explorer-fixed-tick": ExplorerFixedTickEnvelope;
+	"explorer-possession-event-outcomes": readonly PossessionEventOutcome[];
+	"explorer-physical-fly-motion": HostPhysicalFlyPath;
+	"explorer-physical-fly-failure": HostPhysicalFlyFailure;
+	"client-current-state": ClientCurrentState;
+	"client-state-resyncing": null;
+	"client-entity-facts-changed": ClientEntityDelta;
+	"client-entity-collision-disabled": boolean;
+	"client-map-teleport-capability-changed": boolean;
+	"client-recall-destinations-changed": RecallDestination[];
+	"client-lifecycle-changed": ClientLifecycle;
+	"client-character-management-changed": CharacterManagementState;
+	"client-player-visual-capture-changed": PlayerVisualCapture | null;
+	"client-connection-updated": ClientConnectionSample;
+	"client-character-motion-capabilities-updated": ClientCharacterMotionCapabilities | null;
+	"client-character-motion-feedback": ClientCharacterMotionFeedback;
+	"client-server-controlled-motion": null;
+	"client-precise-jump-evaluation": ClientPreciseJumpEvaluation;
+	"client-precise-jump-transaction-feedback": ClientPreciseJumpTransactionFeedback;
+	"client-entity-selection-query-result": ClientEntitySelectionQueryResult;
+	"client-local-player-established": ClientLocalPlayerEstablished;
+	"client-server-time-updated": { time: number };
+	"client-world-name-updated": { name: string };
+	"client-player-entered": ClientPlayerEntered;
+	"client-player-spells-updated": { spellIds: number[] };
+	"client-player-enchantments-updated": unknown;
+	"client-character-preferences-updated": {
+		appearance: ClientAppearanceOptions;
+		gameplay: ClientGameplayPreferences;
+		party: PartyPreferences;
+		friends: FriendsPreferences;
+		allegiance: AllegiancePreferences;
+	};
+	"client-friends-updated": { friends: FriendsSnapshot | null };
+	"client-contracts-updated": { contracts: ContractsSnapshot | null };
+	"client-contract-membership-changed": ContractMembershipChange;
+	"client-squelch-updated": { squelch: SquelchSnapshot | null };
+	"client-allegiance-updated": { allegiance: AllegianceSnapshot };
+	"client-party-updated": {
+		party: PartySnapshot | null;
+	};
+	"client-social-motion-ready-updated": { ready: boolean };
+	"client-local-motion-feedback": ClientLocalMotionFeedback;
+	"client-combat-mode-updated": { mode: ClientCombatMode };
+	"client-combat-status-updated": ClientCombatStatus;
+	/** Non-self spell recipient, already resolved by the shared operation owner. */
+	"client-spell-cast-target-updated": { target: number | null };
+	"client-player-vitals-updated": {
+		vitals: ClientVital[];
+	};
+	"client-character-sheet-updated": CharacterSheet | null;
+	"client-progression-evaluated": {
+		requestId: number;
+		evaluations: ProgressionEvaluation[];
+	};
+	"client-progression-feedback": ProgressionFeedback;
+	"client-chat-message": ClientChatMessage;
+	"client-combat-outcome": ClientCombatOutcome;
+	"client-action-feedback": ClientActionFeedback;
+	"client-transient-string": ClientServerText;
+	"client-popup-string": ClientServerText;
+	"client-confirmation-updated": {
+		readonly confirmation: ClientConfirmation | null;
+	};
+	"client-entity-health-updated": ClientEntityHealth;
+	"client-dynamic-entity": DynamicEntityEvent;
+	"client-dynamic-script-cue": ClientDynamicScriptCue;
+	"client-dynamic-sound-cue": ClientDynamicSoundCue;
+	"client-camera-started": ClientCameraStartReceipt;
+	"client-camera": ClientCameraTick;
+	"client-presentation-tick": ClientPresentationTick;
+	"client-presentation-discontinuity": ClientPresentationDiscontinuity;
+	"client-exit-requested": ClientExitRequested;
+}
+
+/** Request values are validated by the host command handlers and remain opaque to the shell. */
+export type HostCommandArguments =
+	Readonly<Record<string, unknown>> | undefined;
+
+/** One narrow, shell-neutral request/event boundary shared by every frontend capability adapter. */
+export interface HostTransport {
+	invoke(
+		command: HostCommandName,
+		args?: HostCommandArguments,
+	): Promise<unknown>;
+	listen<K extends HostEventName>(
+		event: K,
+		handler: (payload: HostEventPayloadMap[K]) => void,
+	): Promise<() => void>;
+}

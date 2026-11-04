@@ -58,9 +58,9 @@ fn test_dispatch_play_sound() {
 }
 
 #[test]
-fn test_dispatch_play_effect() {
-    assert_dispatch_match(test_fixtures::PLAY_EFFECT, |msg| {
-        matches!(msg, GameMessage::PlayEffect(_))
+fn test_dispatch_play_script() {
+    assert_dispatch_match(test_fixtures::PLAY_SCRIPT, |msg| {
+        matches!(msg, GameMessage::PlayScript(_))
     });
 }
 
@@ -83,6 +83,17 @@ fn test_dispatch_ddd_interrogation_response() {
     assert_dispatch_match(test_fixtures::DDD_INTERROGATION_RESPONSE, |msg| {
         matches!(msg, GameMessage::DddInterrogationResponse(_))
     });
+}
+
+#[test]
+fn test_dispatch_ddd_end_ddd() {
+    // ACE GameMessageDDDEndDDD sends only the little-endian opcode, with no payload.
+    let wire = [0xEA, 0xF7, 0x00, 0x00];
+    assert_dispatch_match(&wire, |msg| matches!(msg, GameMessage::DddEndDdd));
+
+    let mut offset = 0;
+    GameMessage::unpack(&wire, &mut offset).expect("DDD end marker must decode");
+    assert_eq!(offset, wire.len());
 }
 
 #[test]
@@ -337,4 +348,42 @@ fn test_dispatch_parent_event_with_full_payload() {
     let mut packed = Vec::new();
     msg.pack(&mut packed);
     assert_eq!(packed, fixture);
+}
+
+#[test]
+fn account_ban_round_trip_and_truncation() {
+    use crate::messages::misc::types::AccountBannedData;
+    for duration_seconds in [0, 3600, u32::MAX] {
+        for reason in [
+            None,
+            Some(String::new()),
+            Some(" - policy violation".into()),
+        ] {
+            let message = GameMessage::AccountBanned(Box::new(AccountBannedData {
+                duration_seconds,
+                reason,
+            }));
+            let mut bytes = Vec::new();
+            message.pack(&mut bytes);
+            assert_eq!(GameMessage::unpack(&bytes, &mut 0), Some(message));
+        }
+    }
+    // Opcode, duration, and an incomplete string length/body are distinct failures.
+    for bytes in [
+        vec![0xc1, 0xf7, 0, 0, 1],
+        vec![0xc1, 0xf7, 0, 0, 1, 0, 0, 0, 3],
+        vec![0xc1, 0xf7, 0, 0, 1, 0, 0, 0, 3, 0, b'x'],
+    ] {
+        assert!(GameMessage::unpack(&bytes, &mut 0).is_none());
+    }
+}
+
+#[test]
+fn unknown_character_error_preserves_wire_value() {
+    let message = GameMessage::CharacterError(Box::new(crate::messages::CharacterErrorData {
+        error_id: 0xfedc_ba98,
+    }));
+    let mut bytes = Vec::new();
+    message.pack(&mut bytes);
+    assert_eq!(GameMessage::unpack(&bytes, &mut 0), Some(message));
 }

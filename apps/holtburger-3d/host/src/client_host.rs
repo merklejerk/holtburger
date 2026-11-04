@@ -1,0 +1,1307 @@
+//! Client-mode lifecycle task and command adapter.
+//!
+//! `ClientRuntime` remains the sole network/world authority. This module owns only the sidecar
+//! lifetime and its typed command seam; client wire projection lives in `client_projection`.
+
+use std::sync::Arc;
+use std::time::Instant;
+
+use holtburger_core::client::movement_types::{
+    CharacterDrive, Gait, LateralMotion, LongitudinalMotion, PlayerDriveIntent, Turn,
+};
+use holtburger_core::{
+    CharacterMotionEvent, CharacterMotionSequence, ClientExitCause, ClientViewEvent, JumpExtent,
+    SequencedCharacterMotionEvent,
+};
+use serde::Deserialize;
+use tokio::sync::{broadcast, mpsc};
+
+use crate::client_projection::{ClientHostEvent, client_exit_requested, project_client_event};
+use crate::protocol::EVENT_PROFILE_TARGET;
+
+/// Character gait accepted by the renderer's held-drive controller.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientDriveGait {
+    Walk,
+    Run,
+}
+
+/// Signed longitudinal axis accepted at the renderer boundary.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientDriveLongitudinal {
+    Forward,
+    Backward,
+}
+
+/// Signed lateral axis accepted at the renderer boundary.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientDriveLateral {
+    Left,
+    Right,
+}
+
+/// Signed facing turn accepted at the renderer boundary.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientDriveTurning {
+    Left,
+    Right,
+}
+
+/// Held semantic axes shared by drive commands and jump lifecycle snapshots.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientDriveSnapshot {
+    /// Walk/run gait retained even while both movement axes are neutral.
+    pub gait: ClientDriveGait,
+    /// Optional forward/backward held axis.
+    pub longitudinal: Option<ClientDriveLongitudinal>,
+    /// Optional left/right sidestep axis.
+    pub lateral: Option<ClientDriveLateral>,
+    /// Optional left/right held turn axis.
+    pub turning: Option<ClientDriveTurning>,
+}
+
+impl ClientDriveSnapshot {
+    fn into_drive(self) -> CharacterDrive {
+        CharacterDrive {
+            gait: match self.gait {
+                ClientDriveGait::Walk => Gait::Walk,
+                ClientDriveGait::Run => Gait::Run,
+            },
+            longitudinal: self.longitudinal.map(|motion| match motion {
+                ClientDriveLongitudinal::Forward => LongitudinalMotion::Forward,
+                ClientDriveLongitudinal::Backward => LongitudinalMotion::Backward,
+            }),
+            lateral: self.lateral.map(|motion| match motion {
+                ClientDriveLateral::Left => LateralMotion::Left,
+                ClientDriveLateral::Right => LateralMotion::Right,
+            }),
+            turning: self.turning.map(|turn| match turn {
+                ClientDriveTurning::Left => Turn::Left,
+                ClientDriveTurning::Right => Turn::Right,
+            }),
+            turn_rate_scalar: None,
+        }
+    }
+}
+
+/// Semantic movement-command intent; the adapter never infers acquisition from axis values.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ClientDriveRequest {
+    /// Explicitly acquire player-controlled movement.
+    Acquire { drive: ClientDriveSnapshot },
+    /// Reconcile held controls without taking movement ownership.
+    Synchronize { drive: ClientDriveSnapshot },
+    /// Add relative yaw without replacing held movement or acquiring another controller.
+    RotateFacing {
+        /// Signed AC yaw displacement accumulated by the frontend since its last submission.
+        #[serde(rename = "deltaRadians")]
+        delta_radians: f32,
+    },
+    /// Release manual movement without disturbing a replacement owner.
+    Release,
+}
+
+impl ClientDriveRequest {
+    pub fn into_intent(self) -> PlayerDriveIntent {
+        match self {
+            Self::Acquire { drive } => PlayerDriveIntent::ManualHeld(drive.into_drive()),
+            Self::Synchronize { drive } => PlayerDriveIntent::SynchronizeHeld(drive.into_drive()),
+            Self::RotateFacing { delta_radians } => {
+                PlayerDriveIntent::RotateFacing { delta_radians }
+            }
+            Self::Release => PlayerDriveIntent::ReleaseManual,
+        }
+    }
+}
+
+/// Ordered jump lifecycle edge accepted at the renderer boundary.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ClientCharacterMotionEventRequest {
+    BeginJump {
+        sequence: u64,
+        drive: ClientDriveSnapshot,
+    },
+    ReleaseJump {
+        sequence: u64,
+        drive: ClientDriveSnapshot,
+        extent: f32,
+    },
+    Reset {
+        sequence: u64,
+    },
+}
+
+impl ClientCharacterMotionEventRequest {
+    pub fn into_event(self) -> anyhow::Result<SequencedCharacterMotionEvent> {
+        let (sequence, event) = match self {
+            Self::BeginJump { sequence, drive } => (
+                sequence,
+                CharacterMotionEvent::BeginJump {
+                    drive: drive.into_drive(),
+                },
+            ),
+            Self::ReleaseJump {
+                sequence,
+                drive,
+                extent,
+            } => (
+                sequence,
+                CharacterMotionEvent::ReleaseJump {
+                    drive: drive.into_drive(),
+                    extent: JumpExtent::new(extent)
+                        .map_err(|error| anyhow::anyhow!("invalid jump extent: {error:?}"))?,
+                },
+            ),
+            Self::Reset { sequence } => (sequence, CharacterMotionEvent::Reset),
+        };
+        Ok(SequencedCharacterMotionEvent {
+            sequence: CharacterMotionSequence(sequence),
+            event,
+        })
+    }
+}
+
+/// Owns independently scheduled authority and forwarding, without sharing mutable world state.
+pub async fn run_client_task(
+    mut client: holtburger_core::ClientRuntime,
+    events: broadcast::Receiver<ClientViewEvent>,
+    command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
+    sink: Arc<dyn crate::host_event_sink::ClientEventSink>,
+    shutdown_requested: Arc<std::sync::atomic::AtomicBool>,
+) -> anyhow::Result<()> {
+    supervise_client_runtime(
+        async move {
+            let result = client.run().await;
+            let exit = client_task_exit(
+                client.exit_outcome(),
+                result,
+                shutdown_requested.load(std::sync::atomic::Ordering::Acquire),
+            );
+            // Dropping the sole authority also closes its event sender. The forwarder drains
+            // that ordered stream before the supervisor publishes the terminal outcome.
+            exit
+        },
+        events,
+        command_tx,
+        sink,
+    )
+    .await
+}
+
+/// Specific authority evidence wins over a shutdown request or a generic task error.
+fn client_task_exit(
+    outcome: Option<&holtburger_core::ClientExitOutcome>,
+    result: anyhow::Result<()>,
+    shutdown_requested: bool,
+) -> ClientHostEvent {
+    if let Some(outcome) = outcome.filter(|outcome| outcome.failure.is_some()) {
+        return client_exit_requested(outcome.cause, outcome.diagnostic());
+    }
+    match result {
+        Ok(()) if shutdown_requested => {
+            client_exit_requested(ClientExitCause::HostShutdown, "client host shutdown")
+        }
+        Ok(()) => match outcome {
+            Some(outcome) => client_exit_requested(outcome.cause, outcome.diagnostic()),
+            None => client_exit_requested(
+                ClientExitCause::ServerDisconnect,
+                "The server connection ended.",
+            ),
+        },
+        Err(error) => client_exit_requested(ClientExitCause::RuntimeFailure, format!("{error:#}")),
+    }
+}
+
+/// The runtime future owns the event sender; completion or panic must close its stream.
+/// JoinSet aborts the authority if forwarding fails or the host cancels this supervisor.
+async fn supervise_client_runtime(
+    run: impl std::future::Future<Output = ClientHostEvent> + Send + 'static,
+    events: broadcast::Receiver<ClientViewEvent>,
+    command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
+    sink: Arc<dyn crate::host_event_sink::ClientEventSink>,
+) -> anyhow::Result<()> {
+    let mut authority = tokio::task::JoinSet::new();
+    authority.spawn(run);
+    forward_client_events(events, command_tx, sink.as_ref()).await?;
+    while let Some(result) = authority.join_next().await {
+        let exit = match result {
+            Ok(exit) => exit,
+            Err(error) => client_exit_requested(ClientExitCause::RuntimeFailure, error.to_string()),
+        };
+        sink.publish_client_event(exit)?;
+    }
+    Ok(())
+}
+
+/// Preserve snapshot recovery and event order independently of the authority's tick polling.
+async fn forward_client_events(
+    mut events: broadcast::Receiver<ClientViewEvent>,
+    command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
+    sink: &dyn crate::host_event_sink::ClientEventSink,
+) -> anyhow::Result<()> {
+    // Core emits a few broad compatibility events while constructing its replacement level. The
+    // client host publishes only the atomic application snapshot for the initial baseline.
+    let mut awaiting_snapshot = true;
+    let mut snapshot_request_pending = false;
+
+    loop {
+        match events.recv().await {
+            Ok(event) => {
+                if awaiting_snapshot && !matches!(event, ClientViewEvent::ApplicationSnapshot(_)) {
+                    continue;
+                }
+                if matches!(event, ClientViewEvent::ApplicationSnapshot(_)) {
+                    awaiting_snapshot = false;
+                    snapshot_request_pending = false;
+                }
+                let started = log::log_enabled!(target: EVENT_PROFILE_TARGET, log::Level::Debug)
+                    .then(Instant::now);
+                let presentation_tick = matches!(event, ClientViewEvent::PresentationTick { .. });
+                let projected = project_client_event(event);
+                let projection = started.map(|started| (started, Instant::now()));
+                if let Some(projected) = projected {
+                    sink.publish_client_event(projected)?;
+                }
+                if let Some((started, projected_at)) = projection {
+                    let finished = Instant::now();
+                    log::debug!(
+                        target: EVENT_PROFILE_TARGET,
+                        "scope=event_forward presentation_tick={} projection_ms={:.3} enqueue_ms={:.3}",
+                        presentation_tick,
+                        projected_at.duration_since(started).as_secs_f64() * 1_000.0,
+                        finished.duration_since(projected_at).as_secs_f64() * 1_000.0,
+                    );
+                }
+            }
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                awaiting_snapshot = true;
+                if !snapshot_request_pending {
+                    snapshot_request_pending = true;
+                    sink.publish_client_event(ClientHostEvent::StateResyncing)?;
+                    if command_tx
+                        .send(holtburger_core::ClientCommand::RequestCurrentApplicationState)
+                        .is_err()
+                    {
+                        // Authority ended before recovery could be requested. The
+                        // supervisor owns its real terminal cause, not a second exit.
+                        break;
+                    }
+                }
+            }
+            Err(broadcast::error::RecvError::Closed) => {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client_projection::{
+        ClientCurrentState, ClientHostEvent, ClientLifecycleWire, project_client_event,
+    };
+    use holtburger_common::Guid;
+    use holtburger_core::{
+        ClientApplicationSnapshot, ClientCameraIdentity, ClientCameraStartReceipt,
+        ClientLifecycleState, ClientViewEvent, DynamicEntityHostTime, DynamicEntitySnapshot,
+    };
+
+    /// Test-owned synchronous publication behavior, including output failure and coordination.
+    struct TestSink<F>(F);
+
+    impl<F> crate::host_event_sink::ClientEventSink for TestSink<F>
+    where
+        F: Fn(ClientHostEvent) -> anyhow::Result<()> + Send + Sync,
+    {
+        fn publish_client_event(&self, event: ClientHostEvent) -> anyhow::Result<()> {
+            (self.0)(event)
+        }
+    }
+
+    #[test]
+    fn allegiance_projection_recovery_and_typed_actions_share_domain_roles() {
+        use holtburger_core::ClientCommand;
+        use holtburger_core::client::allegiance::AllegianceSnapshot;
+        use holtburger_protocol::messages::{
+            AllegianceChild, AllegianceData, AllegianceNodes, AllegianceTime,
+        };
+        use holtburger_world::state::allegiance::AllegianceState;
+        let member = |guid, name: &str| AllegianceData {
+            guid,
+            name: name.into(),
+            cached_xp: u32::MAX,
+            contributed_xp: u32::MAX,
+            flags: 1,
+            gender: 1,
+            heritage: 1,
+            rank: 3,
+            level: None,
+            loyalty: 100,
+            leadership: 100,
+            time: AllegianceTime::Age {
+                time_online: 0,
+                allegiance_age: 0,
+            },
+        };
+        let patron = Guid(10);
+        let player = Guid(42);
+        let vassal = Guid(11);
+        let allegiance = AllegianceSnapshot {
+            player_guid: Some(player),
+            refreshing: true,
+            can_swear: false,
+            profile: Some(AllegianceState {
+                rank: 3,
+                name: "Allegiance".into(),
+                total_members: 20,
+                total_descendants: 10,
+                nodes: AllegianceNodes::Tree {
+                    monarch: member(patron, "Patron"),
+                    children: vec![
+                        AllegianceChild {
+                            parent: patron,
+                            data: member(player, "Player"),
+                        },
+                        AllegianceChild {
+                            parent: player,
+                            data: member(vassal, "Vassal"),
+                        },
+                    ],
+                },
+            }),
+        };
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("Expected fixture");
+        };
+        snapshot.allegiance = allegiance.clone();
+        let replacement = ClientCurrentState::from(snapshot.as_ref());
+        let Some(ClientHostEvent::AllegianceUpdated {
+            allegiance: incremental,
+        }) = project_client_event(ClientViewEvent::AllegianceUpdated(allegiance))
+        else {
+            panic!("Expected allegiance publication");
+        };
+        let value = serde_json::to_value(&replacement.allegiance).unwrap();
+        assert_eq!(value, serde_json::to_value(incremental).unwrap());
+        assert_eq!(value["playerGuid"], 42);
+        assert_eq!(value["profile"]["selfMember"]["title"], "Baron");
+        assert_eq!(
+            value["profile"]["patron"]["guid"],
+            value["profile"]["monarch"]["guid"]
+        );
+        assert_eq!(value["profile"]["selfMember"]["contributedXp"], u32::MAX);
+        assert_eq!(
+            value["profile"]["selfMember"]["level"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            value["profile"]["directVassals"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(value["profile"]["totalDescendants"], 10);
+        let event = crate::protocol::HostEvent::ClientAllegianceUpdated {
+            allegiance: replacement.allegiance,
+        };
+        let envelope = serde_json::to_value(event).unwrap();
+        assert_eq!(envelope["event"], "client-allegiance-updated");
+        assert_eq!(envelope["payload"]["allegiance"], value);
+        for (json, expected) in [
+            (
+                serde_json::json!({"kind":"refresh"}),
+                ClientCommand::QueryAllegiance,
+            ),
+            (
+                serde_json::json!({"kind":"swear","guid":10}),
+                ClientCommand::SwearAllegiance { target: patron },
+            ),
+            (
+                serde_json::json!({"kind":"break","guid":11}),
+                ClientCommand::Unswear { target: vassal },
+            ),
+            (
+                serde_json::json!({"kind":"showLogons","enabled":true}),
+                ClientCommand::SetCharacterOption {
+                    option: holtburger_common::CharacterOption::ShowAllegianceLogons,
+                    value: true,
+                },
+            ),
+        ] {
+            let action: crate::client_allegiance::ClientAllegianceAction =
+                serde_json::from_value(json).unwrap();
+            match (ClientCommand::from(action), expected) {
+                (ClientCommand::QueryAllegiance, ClientCommand::QueryAllegiance) => {}
+                (
+                    ClientCommand::SwearAllegiance { target },
+                    ClientCommand::SwearAllegiance { target: expected },
+                )
+                | (
+                    ClientCommand::Unswear { target },
+                    ClientCommand::Unswear { target: expected },
+                ) => assert_eq!(target, expected),
+                (
+                    ClientCommand::SetCharacterOption { option, value },
+                    ClientCommand::SetCharacterOption {
+                        option: expected_option,
+                        value: expected_value,
+                    },
+                ) => {
+                    assert_eq!(option, expected_option);
+                    assert_eq!(value, expected_value);
+                }
+                (actual, expected) => panic!("Expected {expected:?}, got {actual:?}"),
+            }
+        }
+    }
+
+    fn snapshot_event() -> ClientViewEvent {
+        ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
+            barber: Default::default(),
+            character_management: holtburger_core::client::types::CharacterManagementState::Idle,
+            player_visual_capture: None,
+            fellowship: None,
+            friends: None,
+            contracts: None,
+            squelch: None,
+            allegiance: holtburger_core::client::allegiance::AllegianceSnapshot {
+                player_guid: None,
+                profile: None,
+                refreshing: false,
+                can_swear: false,
+            },
+            housing: Default::default(),
+            connection: None,
+            trade: Default::default(),
+            character_options: None,
+            known_spells: None,
+            enchantments: None,
+            combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
+            social_motion_ready: true,
+            combat: Default::default(),
+            spell_cast_target: None,
+            entities: holtburger_core::ClientEntitySnapshot::default(),
+            entity_collision_disabled: false,
+            can_teleport_from_map: false,
+            recall_destinations: Vec::new(),
+            lifecycle: ClientLifecycleState::InWorld,
+            local_player_guid: None,
+            server_time: None,
+            world_generation: 1,
+            world_name: None,
+            player_name: None,
+            vitals: Default::default(),
+            character_sheet: None,
+            character_motion: None,
+            active_confirmation: None,
+            dynamic: DynamicEntitySnapshot::new(
+                DynamicEntityHostTime::new(0.0).unwrap(),
+                Vec::new(),
+            ),
+            runtime_bodies: Vec::new().into(),
+        }))
+    }
+
+    #[test]
+    fn player_visual_delta_and_recovery_preserve_the_same_complete_equipment_capture() {
+        use holtburger_core::client::player_visual::PlayerVisualCapture;
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/object-preview-wire.json"
+        ))
+        .unwrap();
+        let capture: PlayerVisualCapture = serde_json::from_value(serde_json::json!({
+            "guid": fixture["equipped"]["guid"],
+            "source": fixture["equipped"]["outcome"]["source"],
+        }))
+        .unwrap();
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("snapshot fixture");
+        };
+        snapshot.player_visual_capture = Some(capture.clone());
+        let baseline = ClientCurrentState::from(snapshot.as_ref());
+        let delta =
+            project_client_event(ClientViewEvent::PlayerVisualCaptureChanged(Some(capture)))
+                .expect("capture projection");
+        let ClientHostEvent::PlayerVisualCaptureChanged(delta) = delta else {
+            panic!("capture delta");
+        };
+        assert_eq!(baseline.player_visual_capture, delta);
+        assert_eq!(
+            serde_json::to_value(&baseline).unwrap()["playerVisualCapture"]["source"],
+            fixture["equipped"]["outcome"]["source"]
+        );
+    }
+
+    #[test]
+    fn trade_offers_and_acknowledgment_waits_cross_baseline_and_delta_together() {
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("snapshot fixture");
+        };
+        snapshot.trade = holtburger_core::client::trade::TradeSnapshot {
+            trade: Some(holtburger_world::state::TradeState {
+                revision: 7,
+                partner_guid: Guid(2),
+                initiator_guid: Guid(1),
+                trade_stamp: 0.0,
+                self_side: holtburger_world::state::TradeSide {
+                    guid: Guid(1),
+                    accepted: false,
+                    items: vec![Guid(3)],
+                },
+                partner_side: holtburger_world::state::TradeSide {
+                    guid: Guid(2),
+                    accepted: true,
+                    items: vec![Guid(4)],
+                },
+            }),
+            pending_items: vec![Guid(5)],
+        };
+        let current = serde_json::to_value(ClientCurrentState::from(snapshot.as_ref())).unwrap();
+        let event =
+            project_client_event(ClientViewEvent::TradeStateUpdated(snapshot.trade.clone()))
+                .unwrap();
+        let ClientHostEvent::TradeSnapshot(trade) = event else {
+            panic!("trade publication");
+        };
+        assert_eq!(current["trade"], serde_json::to_value(trade).unwrap());
+        assert_eq!(current["trade"]["pending_items"], serde_json::json!([5]));
+    }
+
+    #[test]
+    fn container_access_crosses_snapshot_and_delta_projection_without_a_second_event() {
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("snapshot fixture");
+        };
+        let access = holtburger_world::state::WorldContainerState::Open { root: Guid(10) };
+        snapshot.entities.world_container = access;
+        let current = ClientCurrentState::from(snapshot.as_ref());
+        assert_eq!(
+            serde_json::to_value(current).unwrap()["entities"]["worldContainer"],
+            serde_json::json!({"kind": "open", "root": 10})
+        );
+        let event = project_client_event(ClientViewEvent::EntityFactsChanged(
+            holtburger_core::ClientEntityDelta {
+                salvage: None,
+                world_container: Some(holtburger_world::state::WorldContainerState::Closed),
+                ..Default::default()
+            },
+        ));
+        let Some(ClientHostEvent::EntityFactsChanged(delta)) = event else {
+            panic!("semantic delta projection");
+        };
+        assert_eq!(
+            serde_json::to_value(delta).unwrap()["worldContainer"],
+            serde_json::json!({"kind": "closed"})
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn forwards_during_a_busy_authority_turn_and_drains_before_exit() {
+        let (event_tx, events) = broadcast::channel(8);
+        let (command_tx, _commands) = mpsc::unbounded_channel();
+        let (forwarded_tx, mut forwarded) = mpsc::unbounded_channel();
+        let (progress_tx, progress) = std::sync::mpsc::channel();
+        let sink = Arc::new(TestSink(move |event| {
+            if matches!(event, ClientHostEvent::CurrentState(_)) {
+                progress_tx.send(())?;
+            }
+            forwarded_tx.send(event)?;
+            Ok(())
+        }));
+        supervise_client_runtime(
+            async move {
+                event_tx.send(snapshot_event()).unwrap();
+                // Deliberately occupy the authority worker until forwarding makes progress.
+                // The timeout is a deadlock guard, not a performance assertion.
+                progress
+                    .recv_timeout(std::time::Duration::from_secs(2))
+                    .unwrap();
+                event_tx
+                    .send(ClientViewEvent::LocalPlayerEstablished {
+                        player_guid: Guid(7),
+                    })
+                    .unwrap();
+                client_exit_requested(ClientExitCause::HostShutdown, "test shutdown")
+            },
+            events,
+            command_tx,
+            sink,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            forwarded.recv().await,
+            Some(ClientHostEvent::CurrentState(_))
+        ));
+        assert!(matches!(
+            forwarded.recv().await,
+            Some(ClientHostEvent::LocalPlayerEstablished {
+                player_guid: Guid(7)
+            })
+        ));
+        let Some(ClientHostEvent::ExitRequested(exit)) = forwarded.recv().await else {
+            panic!("missing terminal exit");
+        };
+        assert!(matches!(
+            exit.cause,
+            crate::client_projection::ClientExitCauseWire::HostShutdown
+        ));
+        assert!(forwarded.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn lag_requests_one_snapshot_and_suppresses_deltas_until_replacement() {
+        let (event_tx, events) = broadcast::channel(2);
+        let (command_tx, mut commands) = mpsc::unbounded_channel();
+        let (forwarded_tx, mut forwarded) = mpsc::unbounded_channel();
+        let sink = Arc::new(TestSink(move |event| {
+            forwarded_tx.send(event)?;
+            Ok(())
+        }));
+        for _ in 0..4 {
+            event_tx
+                .send(ClientViewEvent::LocalPlayerEstablished {
+                    player_guid: Guid(1),
+                })
+                .unwrap();
+        }
+        let forwarder =
+            tokio::spawn(
+                async move { forward_client_events(events, command_tx, sink.as_ref()).await },
+            );
+        assert!(matches!(
+            commands.recv().await,
+            Some(holtburger_core::ClientCommand::RequestCurrentApplicationState)
+        ));
+        assert!(matches!(
+            forwarded.recv().await,
+            Some(ClientHostEvent::StateResyncing)
+        ));
+        assert!(forwarded.try_recv().is_err());
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("snapshot fixture");
+        };
+        let effect_flags = (holtburger_common::properties::EnchantmentTypeFlags::BODY_ARMOR_VALUE
+            | holtburger_common::properties::EnchantmentTypeFlags::ADDITIVE
+            | holtburger_common::properties::EnchantmentTypeFlags::BENEFICIAL)
+            .bits();
+        snapshot.enchantments = Some(
+            holtburger_core::client::types::ClientPlayerEnchantmentsSnapshot {
+                records: vec![holtburger_protocol::messages::magic::Enchantment {
+                    spell_id: 123,
+                    spell_category: 7,
+                    power_level: 5,
+                    duration: -1.0,
+                    stat_mod_type: effect_flags,
+                    stat_mod_value: 2.0,
+                    ..Default::default()
+                }],
+                resolved: holtburger_world::enchantments::ResolvedEnchantments {
+                    cooldowns: Vec::new(),
+                    instances: vec![holtburger_world::enchantments::ResolvedEnchantment {
+                        key: holtburger_world::enchantments::EnchantmentKey {
+                            spell_id: 123,
+                            layer: 0,
+                        },
+                        spell_category: 7,
+                        power_level: 5,
+                        kind: holtburger_world::enchantments::EnchantmentKind::Beneficial,
+                        remaining_seconds: None,
+                        stat_mod_type: effect_flags,
+                        stat_mod_key: 0,
+                        stat_mod_value: 2.0,
+                    }],
+                    groups: vec![holtburger_world::enchantments::EnchantmentLayerGroup {
+                        affected_stat: holtburger_world::enchantments::AffectedStat::Armor,
+                        stat_name: None,
+                        operation: holtburger_world::enchantments::EnchantmentOperation::Additive,
+                        channel: holtburger_world::enchantments::EnchantmentChannel::Ordinary,
+                        spell_category: 7,
+                        effective: holtburger_world::enchantments::EnchantmentKey {
+                            spell_id: 123,
+                            layer: 0,
+                        },
+                        overridden: Vec::new(),
+                    }],
+                },
+            },
+        );
+        snapshot.housing.home = holtburger_world::housing::HomeKnowledge::None;
+        snapshot.housing.pending_payment = Some(
+            holtburger_core::client::housing_execution::HousingPendingPayment {
+                sequence: 9,
+                crystal: Guid(100),
+                purpose:
+                    holtburger_core::client::housing_payment::HousingPaymentPurpose::Maintenance,
+            },
+        );
+        snapshot.housing.access.generation = 7;
+        snapshot.character_management =
+            holtburger_core::client::types::CharacterManagementState::Rejected {
+                operation: holtburger_core::client::types::CharacterManagementOperation::Create,
+                message: "Name is already in use.".into(),
+            };
+        let expected_management = snapshot.character_management.clone();
+        snapshot.housing.search.pending_type = Some(4);
+        let expected_housing = snapshot.housing.clone();
+        snapshot.character_sheet = Some(Box::new(holtburger_core::ClientCharacterSheet {
+            character: Guid(1),
+            name: Some("Test Character".into()),
+            title: None,
+            title_selection: None,
+            maximum_luminance: None,
+            level: holtburger_world::stats::CharacterLevelInfo {
+                level: 999,
+                unspent_xp: u64::MAX,
+                ..Default::default()
+            },
+            attributes: Vec::new(),
+            vitals: Vec::new(),
+            skills: Vec::new(),
+            armor: 123,
+            resistances: Default::default(),
+            vitae: 0.75,
+            guarded_targets: Vec::new(),
+        }));
+        event_tx
+            .send(ClientViewEvent::ApplicationSnapshot(snapshot))
+            .unwrap();
+        let Some(ClientHostEvent::CurrentState(current)) = forwarded.recv().await else {
+            panic!("missing lag replacement");
+        };
+        assert_eq!(current.housing, expected_housing);
+        assert_eq!(current.character_management, expected_management);
+        let sheet = current
+            .character_sheet
+            .expect("lag replacement lost character sheet");
+        assert_eq!(sheet.level.level, 999);
+        assert_eq!(sheet.level.unspent_xp, u64::MAX.to_string());
+        assert_eq!(sheet.armor, 123);
+        assert_eq!(sheet.vitae, 0.75);
+        assert_eq!(current.enchantments.unwrap().instances[0].key.spell_id, 123);
+        event_tx
+            .send(ClientViewEvent::LocalPlayerEstablished {
+                player_guid: Guid(2),
+            })
+            .unwrap();
+        assert!(matches!(
+            forwarded.recv().await,
+            Some(ClientHostEvent::LocalPlayerEstablished {
+                player_guid: Guid(2)
+            })
+        ));
+        assert!(commands.try_recv().is_err());
+        drop(event_tx);
+        forwarder.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn sink_failure_cancels_the_owned_authority() {
+        let (event_tx, events) = broadcast::channel(2);
+        let (command_tx, _commands) = mpsc::unbounded_channel();
+        let (lifetime, dropped) = tokio::sync::oneshot::channel::<()>();
+        let sink = Arc::new(TestSink(|_| anyhow::bail!("output closed")));
+        let error = supervise_client_runtime(
+            async move {
+                let _lifetime = lifetime;
+                event_tx.send(snapshot_event()).unwrap();
+                std::future::pending::<()>().await;
+                drop(event_tx);
+                client_exit_requested(ClientExitCause::HostShutdown, "unreachable")
+            },
+            events,
+            command_tx,
+            sink,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.to_string(), "output closed");
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), dropped)
+                .await
+                .unwrap()
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_the_supervisor_does_not_detach_authority() {
+        let (event_tx, events) = broadcast::channel(2);
+        let (command_tx, _commands) = mpsc::unbounded_channel();
+        let (started_tx, started) = tokio::sync::oneshot::channel();
+        let (lifetime, dropped) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(supervise_client_runtime(
+            async move {
+                let _lifetime = lifetime;
+                started_tx.send(()).unwrap();
+                std::future::pending::<()>().await;
+                drop(event_tx);
+                client_exit_requested(ClientExitCause::HostShutdown, "unreachable")
+            },
+            events,
+            command_tx,
+            Arc::new(TestSink(|_| Ok(()))),
+        ));
+        started.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), dropped)
+                .await
+                .unwrap()
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn authority_panic_publishes_one_terminal_failure() {
+        let (event_tx, events) = broadcast::channel(2);
+        let (command_tx, _commands) = mpsc::unbounded_channel();
+        let (forwarded_tx, mut forwarded) = mpsc::unbounded_channel();
+        supervise_client_runtime(
+            async move {
+                let _events = event_tx;
+                panic!("authority test failure");
+            },
+            events,
+            command_tx,
+            Arc::new(TestSink(move |event| {
+                forwarded_tx.send(event)?;
+                Ok(())
+            })),
+        )
+        .await
+        .unwrap();
+        let Some(ClientHostEvent::ExitRequested(exit)) = forwarded.recv().await else {
+            panic!("missing terminal failure");
+        };
+        assert!(exit.diagnostic.contains("authority test failure"));
+        assert!(matches!(
+            exit.cause,
+            crate::client_projection::ClientExitCauseWire::RuntimeFailure
+        ));
+        assert!(forwarded.recv().await.is_none());
+    }
+
+    #[test]
+    fn relative_facing_request_preserves_signed_displacement() {
+        let request: ClientDriveRequest = serde_json::from_value(serde_json::json!({
+            "kind": "rotate-facing", "deltaRadians": -0.25
+        }))
+        .expect("relative facing request should decode");
+        assert_eq!(
+            request.into_intent(),
+            PlayerDriveIntent::RotateFacing {
+                delta_radians: -0.25
+            }
+        );
+    }
+
+    #[test]
+    fn drive_request_maps_only_renderer_axes_into_core_intent() {
+        let request: ClientDriveRequest = serde_json::from_value(serde_json::json!({
+            "kind": "acquire",
+            "drive": {
+            "gait": "run",
+            "longitudinal": "backward",
+            "lateral": "right",
+            "turning": "left",
+            }
+        }))
+        .expect("drive request should decode");
+
+        assert_eq!(
+            request.into_intent(),
+            PlayerDriveIntent::ManualHeld(CharacterDrive {
+                gait: Gait::Run,
+                longitudinal: Some(LongitudinalMotion::Backward),
+                lateral: Some(LateralMotion::Right),
+                turning: Some(Turn::Left),
+                turn_rate_scalar: None,
+            })
+        );
+        assert!(
+            serde_json::from_value::<ClientDriveRequest>(serde_json::json!({
+                "kind": "acquire",
+                "drive": {"gait": "run", "longitudinal": null, "lateral": null, "turning": null},
+                "extra": true,
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn drive_request_preserves_passive_synchronization_for_non_neutral_input() {
+        let request: ClientDriveRequest = serde_json::from_value(serde_json::json!({
+            "kind": "synchronize",
+            "drive": { "gait": "run", "longitudinal": "forward", "lateral": null, "turning": null }
+        }))
+        .unwrap();
+        assert_eq!(
+            request.into_intent(),
+            PlayerDriveIntent::SynchronizeHeld(CharacterDrive::builder().run().forward().build())
+        );
+    }
+
+    #[test]
+    fn drive_request_maps_release_to_scoped_manual_retirement() {
+        let request: ClientDriveRequest =
+            serde_json::from_value(serde_json::json!({ "kind": "release" })).unwrap();
+        assert_eq!(request.into_intent(), PlayerDriveIntent::ReleaseManual);
+    }
+
+    #[test]
+    fn character_motion_requests_preserve_ordered_edges_and_release_drive() {
+        let begin: ClientCharacterMotionEventRequest = serde_json::from_value(serde_json::json!({
+            "kind": "begin-jump",
+            "sequence": 41,
+            "drive": {
+                "gait": "walk",
+                "longitudinal": null,
+                "lateral": null,
+                "turning": "right"
+            }
+        }))
+        .expect("begin request should decode");
+        assert_eq!(
+            begin.into_event().expect("begin edge should convert"),
+            SequencedCharacterMotionEvent {
+                sequence: CharacterMotionSequence(41),
+                event: CharacterMotionEvent::BeginJump {
+                    drive: CharacterDrive {
+                        gait: Gait::Walk,
+                        longitudinal: None,
+                        lateral: None,
+                        turning: Some(Turn::Right),
+                        turn_rate_scalar: None,
+                    },
+                },
+            }
+        );
+
+        let release: ClientCharacterMotionEventRequest =
+            serde_json::from_value(serde_json::json!({
+                "kind": "release-jump",
+                "sequence": 42,
+                "drive": {
+                    "gait": "run",
+                    "longitudinal": "forward",
+                    "lateral": "left",
+                    "turning": null
+                },
+                "extent": 0.75
+            }))
+            .expect("release request should decode");
+        assert_eq!(
+            release.into_event().expect("release edge should convert"),
+            SequencedCharacterMotionEvent {
+                sequence: CharacterMotionSequence(42),
+                event: CharacterMotionEvent::ReleaseJump {
+                    drive: CharacterDrive {
+                        gait: Gait::Run,
+                        longitudinal: Some(LongitudinalMotion::Forward),
+                        lateral: Some(LateralMotion::Left),
+                        turning: None,
+                        turn_rate_scalar: None,
+                    },
+                    extent: JumpExtent::new(0.75).unwrap(),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn replacement_and_incremental_squelch_projections_agree() {
+        use holtburger_core::ClientCommand;
+        use holtburger_world::state::squelch::{SquelchFilter, SquelchRecord, SquelchState};
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("Expected fixture");
+        };
+        let db = SquelchState {
+            characters: [(
+                Guid(42),
+                SquelchRecord {
+                    name: "Amy".into(),
+                    account: true,
+                    filter: SquelchFilter {
+                        words: vec![8, 8, 8, 8],
+                    },
+                },
+            )]
+            .into(),
+            accounts: [("legacy".into(), Guid(42))].into(),
+            globals: SquelchRecord {
+                filter: SquelchFilter { words: vec![4] },
+                ..Default::default()
+            },
+        };
+        snapshot.squelch = Some(db.clone());
+        let replacement = ClientCurrentState::from(snapshot.as_ref());
+        let Some(ClientHostEvent::SquelchUpdated {
+            squelch: incremental,
+        }) = project_client_event(ClientViewEvent::SquelchStateUpdated { squelch: Some(db) })
+        else {
+            panic!("Expected publication");
+        };
+        let replacement = serde_json::to_value(replacement.squelch).unwrap();
+        assert_eq!(replacement, serde_json::to_value(incremental).unwrap());
+        assert_eq!(replacement["entries"][0]["removalScope"], "account");
+        assert_eq!(replacement["entries"][0]["coverage"], "partial");
+        let action: crate::client_squelch::ClientSquelchAction = serde_json::from_value(
+            serde_json::json!({"kind":"remove","guid":42,"scope":"account"}),
+        )
+        .unwrap();
+        assert!(matches!(
+            ClientCommand::from(action),
+            ClientCommand::RemoveIgnore {
+                guid: Guid(42),
+                scope: holtburger_world::state::squelch::SquelchScope::Account
+            }
+        ));
+    }
+
+    #[test]
+    fn replacement_and_incremental_friends_projections_agree_without_event_history() {
+        use holtburger_world::state::friends::{FriendState, FriendsState};
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("Expected replacement fixture");
+        };
+        let friend = FriendState {
+            guid: Guid(42),
+            name: "Amy".into(),
+            online: true,
+        };
+        let friends = FriendsState {
+            members: [(friend.guid, friend)].into(),
+        };
+        snapshot.friends = Some(friends.clone());
+        let replacement = ClientCurrentState::from(snapshot.as_ref());
+        let Some(ClientHostEvent::FriendsUpdated {
+            friends: incremental,
+        }) = project_client_event(ClientViewEvent::FriendsStateUpdated {
+            friends: Some(friends),
+        })
+        else {
+            panic!("Expected Friends publication");
+        };
+        assert_eq!(
+            serde_json::to_value(replacement.friends).unwrap(),
+            serde_json::to_value(incremental).unwrap()
+        );
+    }
+
+    #[test]
+    fn replacement_and_incremental_party_projections_agree_without_event_history() {
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("Expected replacement fixture");
+        };
+        let party = holtburger_world::state::FellowshipState {
+            name: "Raid".to_string(),
+            leader_guid: Some(Guid(1)),
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: false,
+            members: vec![holtburger_world::state::FellowshipMemberState {
+                guid: Guid(1),
+                name: "Leader".to_string(),
+                level: 1,
+                cached_cp: 0,
+                cached_luminance: 0,
+                max_health: 0,
+                max_stamina: 0,
+                max_mana: 0,
+                current_health: 0,
+                current_stamina: 0,
+                current_mana: 0,
+                share_loot: false,
+            }],
+            departed_members: Vec::new(),
+            locks: Vec::new(),
+        };
+        snapshot.local_player_guid = Some(Guid(1));
+        snapshot.fellowship = Some(party.clone());
+        let replacement = ClientCurrentState::from(snapshot.as_ref());
+        let event = project_client_event(ClientViewEvent::FellowshipStateUpdated {
+            player_guid: snapshot.local_player_guid,
+            fellowship: Some(party),
+        });
+        let Some(ClientHostEvent::PartyUpdated { party: incremental }) = event else {
+            panic!("Expected party publication");
+        };
+        assert_eq!(
+            serde_json::to_value(replacement.party).unwrap(),
+            serde_json::to_value(incremental).unwrap()
+        );
+    }
+
+    #[test]
+    fn character_motion_request_rejects_invalid_extent_and_unknown_fields() {
+        let invalid_extent: ClientCharacterMotionEventRequest =
+            serde_json::from_value(serde_json::json!({
+                "kind": "release-jump",
+                "sequence": 2,
+                "drive": {
+                    "gait": "run",
+                    "longitudinal": null,
+                    "lateral": null,
+                    "turning": null
+                },
+                "extent": 1.1
+            }))
+            .expect("finite extent is decoded before semantic validation");
+        assert!(invalid_extent.into_event().is_err());
+        assert!(
+            serde_json::from_value::<ClientCharacterMotionEventRequest>(serde_json::json!({
+                "kind": "reset",
+                "sequence": 3,
+                "extra": true
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn lifecycle_projects_character_selection_while_snapshot_owns_local_identity() {
+        let lifecycle = ClientLifecycleWire::from(&ClientLifecycleState::CharacterSelection {
+            rejection: None,
+            max_slots: 11,
+            characters: vec![holtburger_core::ClientCharacterSummary {
+                guid: Guid(0x5000_0007),
+                name: "Mira".to_string(),
+                slot: 3,
+                delete_time: 0,
+            }],
+        });
+        assert_eq!(
+            serde_json::to_value(lifecycle).expect("wire lifecycle should serialize"),
+            serde_json::json!({
+                "kind": "character-selection",
+                "rejection": null,
+                "maxSlots": 11,
+                "characters": [{
+                    "guid": 0x5000_0007u64,
+                    "name": "Mira",
+                    "slot": 3,
+                    "deleteTime": 0,
+                }],
+            })
+        );
+
+        let snapshot = ClientApplicationSnapshot {
+            barber: Default::default(),
+            character_management: holtburger_core::client::types::CharacterManagementState::Idle,
+            player_visual_capture: None,
+            fellowship: None,
+            friends: None,
+            contracts: None,
+            squelch: None,
+            allegiance: holtburger_core::client::allegiance::AllegianceSnapshot {
+                player_guid: None,
+                profile: None,
+                refreshing: false,
+                can_swear: false,
+            },
+            housing: Default::default(),
+            connection: None,
+            trade: Default::default(),
+            character_options: None,
+            known_spells: None,
+            enchantments: None,
+            combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
+            social_motion_ready: true,
+            combat: Default::default(),
+            spell_cast_target: None,
+            entities: holtburger_core::ClientEntitySnapshot::default(),
+            entity_collision_disabled: false,
+            can_teleport_from_map: false,
+            recall_destinations: Vec::new(),
+            lifecycle: ClientLifecycleState::InWorld,
+            local_player_guid: Some(Guid(0x5000_0008)),
+            server_time: Some(22.0),
+            world_generation: 4,
+            world_name: Some("Leafcull".to_string()),
+            player_name: Some("Mira".to_string()),
+            vitals: std::collections::HashMap::new(),
+            character_sheet: None,
+            character_motion: None,
+            active_confirmation: None,
+            dynamic: DynamicEntitySnapshot::new(
+                DynamicEntityHostTime::new(22.0).unwrap(),
+                Vec::new(),
+            ),
+            runtime_bodies: Vec::new().into(),
+        };
+        let current = ClientCurrentState::from(&snapshot);
+        assert_eq!(
+            serde_json::to_value(&current)
+                .expect("current state should serialize")
+                .get("localPlayerGuid"),
+            Some(&serde_json::json!(0x5000_0008u64))
+        );
+        assert!(matches!(current.lifecycle, ClientLifecycleWire::InWorld));
+        assert_eq!(current.local_player_guid, Some(Guid(0x5000_0008)));
+        assert_eq!(current.world_generation, 4);
+    }
+
+    #[test]
+    fn local_player_identity_crosses_independently_of_lifecycle() {
+        let player_guid = Guid(0x5000_0009);
+        assert!(matches!(
+            project_client_event(ClientViewEvent::LocalPlayerEstablished { player_guid }),
+            Some(ClientHostEvent::LocalPlayerEstablished {
+                player_guid: projected
+            }) if projected == player_guid
+        ));
+    }
+
+    #[test]
+    fn camera_generation_receipts_cross_only_the_client_host_surface() {
+        let identity = ClientCameraIdentity {
+            camera_generation: 3,
+            player_guid: Guid(0x5000_0009),
+            entity_generation: 7,
+        };
+        let projected =
+            project_client_event(ClientViewEvent::CameraStarted(ClientCameraStartReceipt {
+                identity,
+            }));
+        assert!(matches!(
+            projected,
+            Some(ClientHostEvent::CameraStarted(receipt)) if receipt.identity == identity
+        ));
+    }
+    #[test]
+    fn retained_server_rejection_survives_shutdown_and_task_error() {
+        let outcome = holtburger_core::ClientExitOutcome {
+            cause: ClientExitCause::ServerDisconnect,
+            failure: Some(holtburger_core::ConnectionFailure {
+                state: Some(holtburger_core::ClientState::Connected),
+                cause: holtburger_core::ConnectionFailureCause::Character(
+                    holtburger_core::CharacterErrorCode::Unknown(0xfedc_ba98),
+                ),
+            }),
+        };
+        for shutdown in [false, true] {
+            for result in [Ok(()), Err(anyhow::anyhow!("generic task failure"))] {
+                let ClientHostEvent::ExitRequested(exit) =
+                    client_task_exit(Some(&outcome), result, shutdown)
+                else {
+                    panic!("expected terminal projection")
+                };
+                assert_eq!(exit.diagnostic, outcome.diagnostic());
+                assert!(matches!(
+                    exit.cause,
+                    crate::client_projection::ClientExitCauseWire::ServerDisconnect
+                ));
+            }
+        }
+    }
+}

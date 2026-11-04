@@ -4,6 +4,29 @@ This crate is the primary interactive interface for Holtburger. It is a Terminal
 
 ## 🏗️ Project Structure
 
+The TUI owns content requirements in `installation.rs`. Explicit `--content DIR` bypasses
+discovery; otherwise `HOLTBURGER_DEFAULT_CONTENT` replaces the executable-adjacent `content/`
+root before shared platform fallback. All installation paths are directories. A directory
+selects `bootstrap.hba` when present, otherwise `assets.hba`, and requires `navigation.hnav`.
+Missing requirements permit automatic candidate rejection; malformed existing inputs fail.
+The frontend opens the HBA repository and navigation archive independently and passes a
+`PreparedNavigationSource` through core's storage-independent scene/setup contracts.
+Shared `holtburger-content::installation` owns candidate iteration; frontend admission owns
+HNAV and bootstrap requirements. Development runner policy stays outside the installed client.
+Prepared cells preserve the authored directed visibility lists and SeenOutside flags alongside
+containment geometry. Both reduced and full scene products supply those facts to shared world
+retention; the TUI does not infer entity lifetime from its display or geometric distance.
+
+Local approach/follow/scoot policy remains in `navigation.rs`, which submits bounded full-XYZ
+intent pulses toward known destinations. Core validates and commits positions, retains progress
+through known gaps, and reports accepted cell changes. The frontend does not assign a target
+cell to an unrelated position or snap Z at arrival. Local gravity/jumping/stairs are unsupported;
+remote prediction uses shared room-shell/terrain solving without furniture or peer collision.
+
+Gameplay requests whose physical eligibility cannot be evaluated in this reduced composition
+are delegated to ACE. This allows missile requests without inventing local ground contact;
+known target/range/ownership/busy checks remain shared. h3d retains its physical composition.
+
 - **`src/bin/tui.rs`**: The main executable entry point. Orchestrates terminal lifecycle, logging, and the core event loop.
 - **`src/lib.rs`**: The crate surface. Re-exports the top-level modules used by the binary and by tests: `components`, `navigation`, `pages`, `scripting`, `state`, `theme`, `types`, `update`, `utils`, and `version`.
 - **`src/state.rs`**: Core application state management. Defines `AppState`, `RenderContext`, and the top-level shell/event plumbing.
@@ -16,7 +39,7 @@ This crate is the primary interactive interface for Holtburger. It is a Terminal
     - `world.rs`: Routes incoming network messages into frontend state updates.
 - **`src/pages/`**: High-level screen abstractions and page-specific reducers.
     - `selection/`: Character selection and creation screen state, input, and rendering.
-    - `game/`: The main game interface, split into `state.rs`, `render.rs`, `data.rs`, `layout.rs`, `combat.rs`, `input.rs`, `input/commands.rs`, `hud/`, `panels/`, `domains/`, `weapon_swap.rs`, and `salvaging.rs`.
+    - `game/`: The main game interface, split into `state.rs`, `render.rs`, `data.rs`, `layout.rs`, `combat.rs`, `input.rs`, `input/commands.rs`, `hud/`, `panels/`, `domains/`, and `salvaging.rs`.
 - **`src/components/`**: Reusable UI widgets such as modal overlays and scroll state logic.
 - **`src/theme.rs`**, **`src/types.rs`**, **`src/utils.rs`**, **`src/version.rs`**: Global definitions for styling, CLI-specific types (`UpdateResult`, `AppAction`), layout helpers, and build/version metadata.
 
@@ -134,3 +157,10 @@ For script or other external integration layers, compile external intents into `
 - Render and layout support remain presentation concerns; they should not become alternative state-transition pathways.
 
 If a new behavior cannot be described cleanly as input handling, an `AppAction`, an `AppUiAction`, a `ClientViewEvent`, or a tick update, revisit the design before adding another direct mutator path.
+
+Equipment requests are delegated to core’s equipment planner and executor. The TUI does not stage combat-mode changes or emit conflict-clearing unequips; core owns capacity preflight, sequencing, and server-confirmed completion.
+
+Salvage candidate readiness and normalized predictor inputs are read from shared entity facts.
+The CLI retains queue/confirmation presentation policy, uses shared exact-Ust discovery and
+skill-profile assembly, and displays explicit Examine guidance when raw appraisal details are
+missing. It does not independently infer eligibility or filter missing sources out of previews.

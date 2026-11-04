@@ -1,18 +1,20 @@
+use crate::motion::MotionRuntimeRegistry;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, PropertyInt64, PropertyString,
     WorldObjectExt as _, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
-use holtburger_content::SoulEmoteCatalog;
-use holtburger_dat::file_type::{MotionKinematics, SkillTable, XpTable};
+use holtburger_content::{CharacterTitleCatalog, MotionSequenceCatalog, SoulEmoteCatalog};
+use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, XpTable};
 use holtburger_protocol::messages::GameMessage;
 use holtburger_protocol::messages::combat::CombatMode;
 use std::sync::Arc;
 
 use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
-use crate::spatial::{BasicSpatialPhysics, SpatialPhysics, SpatialScene};
+use crate::spatial::SpatialScene;
 use crate::spell::{SpellCatalog, SpellInfo};
+use crate::state::attachment_lifecycle::ScenePlacementScope;
 use crate::state::fellowship::FellowshipState;
 use crate::state::liveness::EntityLifecycleStore;
 use crate::state::self_movement::SelfMovementCapabilities;
@@ -34,7 +36,8 @@ pub struct ServerTimeSync {
 ///
 /// NOTE: The player `Entity` is the authoritative holder of player world/object state.
 /// `self.player` only owns local-player/session overlays such as sequencing, stat caches,
-/// enchantments, inventory/equipment indices, and related derived-state bookkeeping.
+/// enchantments and related derived-state bookkeeping; storage relationships belong
+/// to WorldState.
 /// Live local runtime motion is world-owned through `SpatialScene`, which composes
 /// shared body-sampling state without exposing it as an app-facing projection surface.
 ///
@@ -46,17 +49,47 @@ pub struct ServerTimeSync {
 pub struct WorldState {
     pub entities: EntityManager,
     pub player: PlayerState,
+    /// Accepted containment/equipment declarations, independent of descriptions.
+    pub(crate) storage: super::storage::StorageState,
     pub server_time: Option<ServerTimeSync>,
     pub xp_table: Arc<XpTable>,
     pub skill_table: Arc<SkillTable>,
+    /// Static authored inputs for calculating local-player vital maximums.
+    pub secondary_attribute_table: Arc<SecondaryAttributeTable>,
     pub spell_catalog: Arc<SpellCatalog>,
+    /// Localized static character titles consumed by inspection construction.
+    pub character_titles: Arc<CharacterTitleCatalog>,
+    /// Immutable contract definitions used by shared tracker interpretation.
+    pub contract_catalog: Arc<holtburger_content::ContractCatalog>,
     pub soul_emote_catalog: Arc<SoulEmoteCatalog>,
-    pub motion_kinematics: Arc<MotionKinematics>,
+    pub motion_sequences: Arc<MotionSequenceCatalog>,
+    /// Immutable setup cylinders for interaction queries without a physical-body dependency.
+    pub setup_dimensions: Arc<holtburger_content::SetupDimensionCatalog>,
+    /// Authored-motion playback for every entity this client simulates.
+    ///
+    /// Advanced once per tick by `advance_authored_motion`; the solver basis reads the result
+    /// rather than producing it.
+    pub motion_runtimes: MotionRuntimeRegistry,
     pub scene: SpatialScene,
+    /// Retained character housing, independent of local scene residency.
+    pub housing: crate::housing::HousingState,
     pub vendor: Option<VendorState>,
     pub fellowship: Option<FellowshipState>,
+    /// Last accepted friend list; None until initial delivery or after character retirement.
+    pub friends: Option<super::friends::FriendsState>,
+    /// Character journal; active entry initializes an empty registry.
+    pub contracts: Option<super::contracts::ContractsState>,
+    /// Character-owned ignore DB; initialized empty at entry and retired on exit.
+    pub squelch: Option<super::squelch::SquelchState>,
+    /// Last received partial allegiance profile for this character.
+    pub allegiance: Option<super::allegiance::AllegianceState>,
     pub trade: Option<TradeState>,
-    pub open_containers: std::collections::HashSet<Guid>,
+    /// Last published trade revision, retained across negotiations with the same partner.
+    pub(crate) trade_revision: u32,
+    /// Confirmed external storage access; roster receipt does not mutate this state.
+    pub(crate) world_container: super::WorldContainerState,
+    /// Attachment admission, pending dependencies and scene transition history.
+    pub(crate) attachments: super::attachment_lifecycle::AttachmentLifecycle,
     pub(crate) entity_lifecycle: EntityLifecycleStore,
     pub(crate) self_movement_capabilities_override: Option<SelfMovementCapabilities>,
 }
@@ -147,10 +180,14 @@ impl WorldState {
             .unwrap_or(0) as u64
     }
 
+    /// Effective stance: login starts in peace until an explicit server update replaces it.
     pub fn player_combat_mode(&self) -> CombatMode {
+        // Retail initializes NONCOMBAT in retail begin. ACE initializes Creature.CombatMode
+        // separately from the property dictionary (Creature.cs:91), so PlayerDescription need
+        // not contain PropertyInt::CombatMode.
         let value = self
             .player_int_property(PropertyInt::CombatMode)
-            .unwrap_or(0);
+            .unwrap_or(CombatMode::NonCombat as i32);
         CombatMode::from_repr(value as u32).unwrap_or(CombatMode::NonCombat)
     }
 
@@ -171,6 +208,24 @@ impl WorldState {
 
     pub fn player_vitae(&self) -> f32 {
         self.player.vitae()
+    }
+
+    /// Read bonuses from the same authoritative player entity used for all other properties.
+    pub(crate) fn player_skill_augmentations(
+        &self,
+    ) -> crate::player::stats_calc::SkillAugmentations {
+        use crate::player::stats_calc::SkillAugmentations;
+
+        let value = |property| self.player_int_property(property).unwrap_or(0).max(0) as u32;
+        SkillAugmentations {
+            all_skills: value(PropertyInt::LumAugAllSkills),
+            skilled_melee: value(PropertyInt::AugmentationSkilledMelee),
+            skilled_missile: value(PropertyInt::AugmentationSkilledMissile),
+            skilled_magic: value(PropertyInt::AugmentationSkilledMagic),
+            enlightenment: value(PropertyInt::Enlightenment),
+            jack_of_all_trades: value(PropertyInt::AugmentationJackOfAllTrades),
+            specialized_luminance: value(PropertyInt::LumAugSkilledSpec),
+        }
     }
 
     fn player_resistance_augmentation(&self, prop: PropertyFloat) -> i32 {
@@ -223,7 +278,16 @@ impl WorldState {
     }
 
     pub(crate) fn emit_player_derived_stats(&mut self, events: &mut Vec<WorldEvent>) {
-        self.player.refresh_cached_derived_stat_inputs();
+        let augmentations = self.player_skill_augmentations();
+        let vitae = self.player_vitae();
+        self.player.refresh_cached_derived_stat_inputs(
+            crate::player::stats_calc::SkillCalculationContext {
+                table: &self.skill_table,
+                augmentations,
+                vitae,
+            },
+            &self.secondary_attribute_table,
+        );
 
         let current = crate::player::types::LastSentStats {
             attributes: self.player.attribute_snapshot(),
@@ -256,8 +320,26 @@ impl WorldState {
     /// Feature handlers own the orchestration order; this method preserves the external API while
     /// keeping routing separate from the state model itself.
     pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<WorldEvent> {
+        self.expire_missing_placement_dependencies();
+        self.seed_scene_placements();
+        let previous_player = self.player.guid;
         let mut events = Vec::new();
         crate::handlers::handle_message(self, msg, &mut events);
+        if self
+            .world_container
+            .root()
+            .is_some_and(|root| self.storage_location(root).is_some())
+        {
+            self.close_world_container();
+        }
+        self.prepare_deferred_scene_placements(&mut events);
+        let mutations = self.entities.take_mutations();
+        let scope = if previous_player == self.player.guid {
+            ScenePlacementScope::ChangedEntities(mutations)
+        } else {
+            ScenePlacementScope::All
+        };
+        self.reconcile_scene_placements(&mut events, scope);
         events
     }
 
@@ -369,28 +451,65 @@ impl WorldState {
         crate::magic::get_enchanted_resistance(base, &self.player.enchantments, key as u32)
     }
 
-    pub fn new(bootstrap: Arc<WorldBootstrap>) -> Self {
-        Self::new_with_spatial_physics(bootstrap, Arc::new(BasicSpatialPhysics))
+    /// Retire all character-owned runtime data while preserving content and server time.
+    pub fn retire_character(&mut self) {
+        self.entities = EntityManager::new();
+        self.player = PlayerState {
+            enchantments: crate::enchantments::PlayerEnchantments::with_rules(
+                crate::enchantments::EnchantmentRules::from_catalog(&self.spell_catalog),
+            ),
+            ..PlayerState::new()
+        };
+        self.storage = Default::default();
+        self.motion_runtimes = MotionRuntimeRegistry::new();
+        self.scene = SpatialScene::new();
+        self.housing = Default::default();
+        self.vendor = None;
+        self.fellowship = None;
+        self.friends = None;
+        self.contracts = None;
+        self.squelch = None;
+        self.allegiance = None;
+        self.trade = None;
+        self.world_container = super::WorldContainerState::Closed;
+        self.attachments = Default::default();
+        self.entity_lifecycle = Default::default();
+        self.self_movement_capabilities_override = None;
     }
 
-    pub fn new_with_spatial_physics(
-        bootstrap: Arc<WorldBootstrap>,
-        spatial_physics: Arc<dyn SpatialPhysics>,
-    ) -> Self {
+    pub fn new(bootstrap: Arc<WorldBootstrap>) -> Self {
         Self {
             entities: EntityManager::new(),
-            player: PlayerState::new(),
+            player: PlayerState {
+                enchantments: crate::enchantments::PlayerEnchantments::with_rules(
+                    crate::enchantments::EnchantmentRules::from_catalog(&bootstrap.spell_catalog()),
+                ),
+                ..PlayerState::new()
+            },
+            storage: super::storage::StorageState::default(),
             server_time: None,
             xp_table: Arc::clone(&bootstrap.xp_table),
             skill_table: Arc::clone(&bootstrap.skill_table),
+            secondary_attribute_table: Arc::clone(&bootstrap.secondary_attribute_table),
             spell_catalog: bootstrap.spell_catalog(),
+            character_titles: Arc::clone(&bootstrap.character_titles),
+            contract_catalog: Arc::clone(&bootstrap.contracts),
             soul_emote_catalog: Arc::clone(&bootstrap.soul_emote_catalog),
-            motion_kinematics: Arc::clone(&bootstrap.motion_kinematics),
-            scene: SpatialScene::new_with_physics(spatial_physics),
+            motion_sequences: Arc::clone(&bootstrap.motion_sequences),
+            setup_dimensions: Arc::clone(&bootstrap.setup_dimensions),
+            motion_runtimes: MotionRuntimeRegistry::new(),
+            scene: SpatialScene::new(),
+            housing: crate::housing::HousingState::default(),
             vendor: None,
             fellowship: None,
+            friends: None,
+            contracts: None,
+            squelch: None,
+            allegiance: None,
             trade: None,
-            open_containers: std::collections::HashSet::new(),
+            trade_revision: 0,
+            world_container: super::WorldContainerState::Closed,
+            attachments: super::attachment_lifecycle::AttachmentLifecycle::default(),
             entity_lifecycle: EntityLifecycleStore::default(),
             self_movement_capabilities_override: None,
         }
@@ -398,17 +517,12 @@ impl WorldState {
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn synthetic() -> Self {
-        Self::synthetic_with_spatial_physics(Arc::new(BasicSpatialPhysics))
+        Self::new(Arc::new(WorldBootstrap::synthetic()))
     }
 
     #[cfg(any(test, feature = "test-support"))]
-    pub fn synthetic_with_spatial_physics(spatial_physics: Arc<dyn SpatialPhysics>) -> Self {
-        Self::new_with_spatial_physics(Arc::new(WorldBootstrap::synthetic()), spatial_physics)
-    }
-
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn set_motion_kinematics(&mut self, motion_kinematics: MotionKinematics) {
-        self.motion_kinematics = Arc::new(motion_kinematics);
+    pub fn set_motion_sequences(&mut self, motion_sequences: MotionSequenceCatalog) {
+        self.motion_sequences = Arc::new(motion_sequences);
     }
 
     pub fn current_server_time(&self) -> f64 {
@@ -434,22 +548,27 @@ impl WorldState {
         let omega = entity.omega;
 
         self.entities.insert(entity);
-        self.scene.update_entity(guid, pos.landblock_id, pos);
-        self.reconcile_authoritative_body(
-            guid,
-            pos,
-            velocity,
-            omega,
-            crate::spatial::AuthoritativeBodySync::Snapshot,
-        );
+        self.initialize_authoritative_body(guid, pos, velocity, omega);
     }
 
     pub fn remove_entity<G: Into<Guid> + Copy>(&mut self, guid: G) -> Option<Entity> {
         let guid = guid.into();
+        let deletion_already_retired_storage = self.current_instance_delete_requested(guid);
         if let Some(entity) = self.entities.remove(guid) {
-            self.scene.remove_entity(guid, entity.position.landblock_id);
+            self.retire_attachment_endpoint(guid, entity.instance_sequence());
+            self.motion_runtimes.forget(guid);
             self.retire_authoritative_body_for_guid(guid);
             self.entity_lifecycle.clear(guid);
+            // Accepted deletion already retired the old relationships. Later declarations must
+            // survive eviction of that description and await their own hydration.
+            if !deletion_already_retired_storage {
+                self.retire_entity_storage(guid);
+            }
+            // Pending links live only as long as the entities at either end of them.
+            self.attachments.announcements.remove(&guid);
+            self.attachments
+                .announcements
+                .retain(|_, link| link.parent != guid);
 
             let dependent_guids: Vec<_> = self
                 .entities
@@ -457,7 +576,9 @@ impl WorldState {
                 .filter(|dependent| {
                     dependent.container_id() == Some(guid)
                         || dependent.wielder_id() == Some(guid)
-                        || dependent.physics_parent_id == Some(guid)
+                        || dependent
+                            .attachment()
+                            .is_some_and(|attachment| attachment.parent == guid)
                 })
                 .map(|dependent| dependent.guid)
                 .collect();
@@ -482,8 +603,11 @@ impl WorldState {
                         detached_wielder = true;
                     }
 
-                    if dependent.physics_parent_id == Some(guid) {
-                        dependent.physics_parent_id = None;
+                    if dependent
+                        .attachment()
+                        .is_some_and(|attachment| attachment.parent == guid)
+                    {
+                        dependent.set_attachment(None);
                         detached = true;
                     }
                 }
@@ -493,7 +617,8 @@ impl WorldState {
                 }
 
                 if detached {
-                    self.sync_player_ownership_for_entity(dependent_guid);
+                    self.retire_authoritative_body_for_guid(dependent_guid);
+
                     let _ = self
                         .mark_entity_immediately_eligible_for_pruning_if_unretained(dependent_guid);
                 }

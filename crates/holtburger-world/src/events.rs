@@ -1,6 +1,6 @@
 use crate::book::BookData;
-use crate::entity::{Entity, EntityMotionSnapshot};
-use crate::spatial::{RuntimeBodyResetCause, SpatialBodyId};
+use crate::entity::{Entity, EntityNetworkMotion};
+use crate::spatial::{RuntimeBodyAdvanceKind, RuntimeBodyResetCause, SpatialBodyId};
 use crate::state;
 use crate::stats;
 use crate::vendor;
@@ -51,12 +51,68 @@ pub enum FellowshipActivity {
 
 #[derive(Debug, Clone)]
 pub enum WorldEvent {
+    /// The active character's earned-title registry changed.
+    PlayerTitlesUpdated,
+    /// Accepted effective-home facts, including an authoritative absence.
+    HousingHomeUpdated {
+        /// Retained accepted facts after this packet.
+        home: crate::housing::HomeKnowledge,
+        /// Complete replies and maintenance deltas have different query lifetimes.
+        source: crate::housing::HousingHomeUpdateSource,
+    },
+    /// Full crystal profile receipt; consumers distinguish receipt from retained state.
+    HousingCrystalReceived(Box<crate::housing::HousingCrystal>),
+    /// Raw housing status notice for core query/feedback handling.
+    HousingStatusReceived(u32),
+    /// Incremental facts arrived before a full home baseline.
+    HousingRefreshRequired,
+    /// Invalid authoritative housing payload; previous accepted facts remain intact.
+    HousingDataRejected {
+        /// Failed complete reply or incremental maintenance input.
+        source: crate::housing::HousingHomeUpdateSource,
+        /// Distinct validation failure, without changing retained authority.
+        error: String,
+    },
+    /// Crystal validation failure cannot finish an effective-home query.
+    HousingCrystalRejected(String),
+    /// Raw transaction notice; no inventory-success claim is derived from it.
+    HousingTransactionNotice(u32),
+    /// Named permissions for the server's implicit effective home; no request or house ID.
+    HousingAccessUpdated(Box<crate::housing::management::HousingAccessRecords>),
+    /// Invalid permission facts, without invalidating a simultaneous home query.
+    HousingAccessRejected(String),
+    /// Available area results retaining their searched type and total house count.
+    HousingSearchUpdated(Box<crate::housing::management::HousingSearchResults>),
+    /// Invalid search results, separate from home/access-query lifecycles.
+    HousingSearchRejected(String),
+    /// Data lifetime is unchanged; scene consumers must admit or withdraw this incarnation.
+    EntityScenePlacementChanged {
+        /// Retained entity whose placement changed.
+        guid: Guid,
+        /// Server incarnation; scene admission does not manufacture a new generation.
+        generation: u16,
+        /// Prior scene incarnation to withdraw when replacement cannot yet be admitted.
+        previous_generation: u16,
+        /// Complete world-owned placement decision for consumers.
+        placement: crate::ResolvedScenePlacement,
+    },
     EntitySpawned(Box<Entity>),
     EntityReplaced(Box<Entity>),
+    /// An accepted health observation, including unchanged responses to a fresh health query.
     EntityHealthUpdated {
         guid: Guid,
         health_fraction: f32,
     },
+    /// Complete book data received after use; consumers may open a reader.
+    EntityBookOpened {
+        /// Book object that supplied the full response.
+        guid: Guid,
+        /// Name captured from the entity at response time.
+        name: String,
+        /// Full page state, including any text included in the response.
+        book: Box<BookData>,
+    },
+    /// A single page response merged into the retained book.
     EntityBookUpdated {
         guid: Guid,
         book: Box<BookData>,
@@ -66,6 +122,12 @@ pub enum WorldEvent {
         pos: WorldPosition,
     },
     EntityIdentified(Box<Entity>),
+    /// Cold appraisal result populated once after any successful world merge.
+    ObjectInspectionResult(crate::inspection::ObjectInspectionResult),
+    /// Complete visual appearance changed without replacing the entity incarnation.
+    EntityAppearanceUpdated {
+        guid: Guid,
+    },
     EntityVectorUpdated {
         guid: Guid,
         velocity: holtburger_common::math::Vector3,
@@ -73,10 +135,23 @@ pub enum WorldEvent {
     },
     EntityMotionUpdated {
         guid: Guid,
-        snapshot: Option<EntityMotionSnapshot>,
+        motion: EntityNetworkMotion,
     },
+    /// Packet admission changed authored playback without a network-motion notification.
+    /// Core republishes the current entity view; routine playback progression uses tick batches.
+    EntityMotionPlaybackChanged {
+        /// Entity whose admitted playback description changed.
+        guid: Guid,
+    },
+    /// A runtime body's structure or externally-authored state changed.
     RuntimeBodyChanged {
         body_id: SpatialBodyId,
+    },
+    /// One routine solver commit; consumers batch these at the owning fixed-tick boundary.
+    RuntimeBodyAdvanced {
+        body_id: SpatialBodyId,
+        /// Whether this tick integrated a path or installed an ordinary correction snap.
+        kind: RuntimeBodyAdvanceKind,
     },
     RuntimeBodyRemoved {
         body_id: SpatialBodyId,
@@ -84,7 +159,11 @@ pub enum WorldEvent {
     RuntimeBodiesReset {
         cause: RuntimeBodyResetCause,
     },
-    EntityDespawned(Guid),
+    EntityDespawned {
+        guid: Guid,
+        /// Retired server instance sequence used to reject a late focused removal.
+        generation: u64,
+    },
     VitalUpdated(stats::Vital),
     AttributeUpdated(stats::Attribute),
     SkillUpdated(stats::Skill),
@@ -101,10 +180,22 @@ pub enum WorldEvent {
         grounded: bool,
     },
     SelfUpdatePosition {
+        /// Accepted server pose consumed once by the core-owned local authority adapter.
+        position: WorldPosition,
+        /// Teleport epoch before this accepted packet was applied.
+        known_teleport_sequence: u16,
+        /// Force-position epoch before this accepted packet was applied.
+        known_force_position_sequence: u16,
         teleport_sequence: u16,
         force_position_sequence: u16,
     },
     SelfAutonomousPosition {
+        /// Accepted autonomous pose consumed once by the core-owned local authority adapter.
+        position: WorldPosition,
+        /// Teleport epoch before this accepted packet was applied.
+        known_teleport_sequence: u16,
+        /// Force-position epoch before this accepted packet was applied.
+        known_force_position_sequence: u16,
         teleport_sequence: u16,
         force_position_sequence: u16,
         server_control_sequence: u16,
@@ -146,10 +237,19 @@ pub enum WorldEvent {
     UseDone {
         error: WeenieError,
     },
-    ContainerOpened(Guid),
-    ContainerClosed(Guid),
-    VendorStateUpdated(Option<vendor::VendorState>),
+    /// A server ApproachVendor response supplies a complete interaction, including trade refreshes.
+    VendorApproached(vendor::VendorState),
     VendorItemIdentified(Box<vendor::CoreVendorItem>),
+    /// The retained character friend list changed.
+    FriendsStateUpdated,
+    /// Contract membership/stage/timer observation changed.
+    ContractsStateUpdated,
+    /// Accepted incremental membership change; table replacement is silent.
+    ContractMembershipChanged(state::contracts::ContractMembershipChange),
+    /// Character ignore DB replaced.
+    SquelchStateUpdated,
+    /// Partial allegiance profile or known-node presence changed.
+    AllegianceStateUpdated,
     FellowshipStateUpdated(Option<state::FellowshipState>),
     FellowshipActivity(FellowshipActivity),
     TradeStateUpdated(Option<state::TradeState>),

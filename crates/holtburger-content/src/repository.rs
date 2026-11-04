@@ -1,20 +1,93 @@
 use anyhow::{Context, Result, anyhow};
 use binrw::{BinRead, Endian};
 use holtburger_dat::{
-    HbaReader, LayeredResourceResolver, ResourceKey, ResourceSource, StaticResourceKey,
-    file_type::ChatPoseTable,
+    EOR_PORTAL_NAMESPACE, LayeredResourceResolver, ResourceKey, ResourceSource, StaticResourceKey,
+    file_type::{Animation, ChatPoseTable, DatFileType, MotionTable, SetupModel},
 };
-use std::ffi::OsStr;
-use std::fs;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::SoulEmoteCatalog;
+use crate::material_capabilities::{MaterialArchiveCapabilityReport, RepositoryResourceIndexEntry};
+use crate::motion_sequence::MotionSequenceCatalog;
+use crate::{ContentResourceError, ContentResourceErrorKind, SoulEmoteCatalog};
+
+/// Parsed bootstrap facts projected together so each authored setup is decoded once.
+pub struct MotionReferenceData {
+    /// Tables, animation facts, and setup-owned default motion-table selections.
+    pub motion_sequences: MotionSequenceCatalog,
+    /// Setup-owned interaction geometry for bodies without prepared collision targets.
+    pub setup_dimensions: crate::SetupDimensionCatalog,
+}
+
+mod mounting;
+
+pub use mounting::{ContentSelectionError, ResolvedContent};
+
+/// Filesystem revision of an archive captured from its opened handle at mounting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountedContentSource {
+    /// Canonical source path, in repository precedence order.
+    pub path: PathBuf,
+    /// Opened archive length in bytes.
+    pub size: u64,
+    /// Opened archive modification time; this is a revision stamp, not a byte digest.
+    pub modified: std::time::SystemTime,
+}
 
 pub struct ContentRepository {
     mounts: Vec<Arc<dyn ResourceSource>>,
+    mounted_sources: Vec<MountedContentSource>,
+    resource_index: Vec<RepositoryResourceIndexEntry>,
+    /// Sorted, unique archived EnvCell IDs grouped by normalized landblock owner.
+    env_cells_by_landblock: HashMap<u32, Vec<u32>>,
     source_description: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RepositoryResource {
+    pub namespace: String,
+    pub file_id: u32,
+    pub bytes: Vec<u8>,
+    /// Every successful read resolves a mounted entry with known availability metadata.
+    pub metadata: holtburger_dat::FileMetadata,
+    pub source_description: Option<String>,
+}
+
+impl RepositoryResource {
+    /// Decodes owned bytes while preserving the source resource identity on failure.
+    pub fn decode<T>(self, decode: impl FnOnce(Vec<u8>) -> Result<T>) -> Result<T> {
+        decode(self.bytes).map_err(|source| {
+            ContentResourceError {
+                kind: ContentResourceErrorKind::Invalid,
+                namespace: self.namespace,
+                file_id: self.file_id,
+                source_description: self.source_description,
+                source,
+            }
+            .into()
+        })
+    }
+
+    /// Requires full authored detail for visual consumers, retaining typed optional-absence facts.
+    pub(crate) fn require_full(self) -> Result<Self> {
+        if self.metadata.is_pruned {
+            return Err(ContentResourceError {
+                kind: ContentResourceErrorKind::Pruned,
+                source: anyhow!(
+                    "resource {}:0x{:08X} is pruned",
+                    self.namespace,
+                    self.file_id
+                ),
+                namespace: self.namespace,
+                file_id: self.file_id,
+                source_description: self.source_description,
+            }
+            .into());
+        }
+        Ok(self)
+    }
 }
 
 impl std::fmt::Debug for ContentRepository {
@@ -27,54 +100,49 @@ impl std::fmt::Debug for ContentRepository {
 }
 
 impl ContentRepository {
-    pub fn from_hba_path(path: impl Into<PathBuf>) -> Result<Self> {
-        let path = path.into();
-        let mut mounts = Vec::new();
-
-        if path.extension() == Some(OsStr::new("hba")) {
-            mount_hba_source(&path, &mut mounts)?;
-            return Ok(Self {
-                mounts,
-                source_description: Some(path.display().to_string()),
-            });
-        }
-
-        let hba_path = path.with_extension("hba");
-        if hba_path.exists() {
-            mount_hba_source(&hba_path, &mut mounts)?;
-            return Ok(Self {
-                mounts,
-                source_description: Some(hba_path.display().to_string()),
-            });
-        }
-
-        Err(anyhow!(
-            "Could not resolve an HBA archive from {}.",
-            path.display()
-        ))
-    }
-
-    pub fn from_hba_dir(path: impl Into<PathBuf>) -> Result<Self> {
-        let path = path.into();
-        let mut mounts = Vec::new();
-
-        if !path.is_dir() {
-            return Err(anyhow!(
-                "Expected an HBA directory but {} is not a directory.",
-                path.display()
-            ));
-        }
-
-        discover_hba_mounts_in_dir(&path, &mut mounts)?;
-        Ok(Self {
-            mounts,
-            source_description: Some(path.display().to_string()),
+    /// Select an installation directory using an explicit path or default/platform discovery.
+    /// Frontends with an installed bundle root use `installation::select_content_directory`.
+    pub fn select_installation(explicit: Option<PathBuf>) -> Result<Self> {
+        crate::installation::select_content_directory(explicit, None, |path| {
+            Ok(Some(Self::open_selected(path.to_path_buf())?))
         })
     }
 
+    /// Opens exactly the selected file, or a directory with HBA-first family selection.
+    ///
+    /// No environment overrides or sibling-extension probing apply to an explicit selection.
+    pub fn open_selected(path: impl Into<PathBuf>) -> Result<Self> {
+        mounting::open_selection(path.into(), None)
+    }
+
+    /// Opens an HBA path; extensionless base paths remain supported for tooling callers.
+    pub fn from_hba_path(path: impl Into<PathBuf>) -> Result<Self> {
+        let path = path.into();
+        let path = if path.extension().is_none() {
+            path.with_extension("hba")
+        } else {
+            path
+        };
+        mounting::open_selection(path, Some(mounting::ArchiveFamily::Hba))
+    }
+
+    /// Opens the HBA family in a directory without mounting retail DATs underneath it.
+    pub fn from_hba_dir(path: impl Into<PathBuf>) -> Result<Self> {
+        mounting::open_selection(path.into(), Some(mounting::ArchiveFamily::Hba))
+    }
+
+    /// Mounts already-constructed sources without a resource index.
+    ///
+    /// `ResourceSource` cannot enumerate its contents, so index-driven readers — the material
+    /// capability report, additional EnvCell discovery, and the motion contract — see nothing
+    /// from a repository built this way.
+    /// Use `from_hba_dir` or `from_hba_path` when a caller needs those.
     pub fn from_mounts(mounts: Vec<Arc<dyn ResourceSource>>) -> Self {
         Self {
             mounts,
+            mounted_sources: Vec::new(),
+            resource_index: Vec::new(),
+            env_cells_by_landblock: HashMap::new(),
             source_description: None,
         }
     }
@@ -83,191 +151,372 @@ impl ContentRepository {
     where
         T: StaticResourceKey + for<'a> BinRead<Args<'a> = ()>,
     {
+        let resource = self
+            .read_resource(T::RESOURCE_KEY)
+            .with_context(|| format!("failed to load {asset_name}"))?;
+        resource
+            .decode(|bytes| {
+                Ok(T::read_options(
+                    &mut Cursor::new(bytes),
+                    Endian::Little,
+                    (),
+                )?)
+            })
+            .with_context(|| format!("failed to parse {asset_name}"))
+    }
+
+    /// Reads raw resource bytes by dynamic namespace and file id.
+    ///
+    /// Use this for app-local asset lookups whose keys are discovered at runtime,
+    /// such as terrain, setup-model, gfx-obj, or env-cell requests.
+    pub fn read_resource(&self, key: ResourceKey<'_>) -> Result<RepositoryResource> {
         let resources = LayeredResourceResolver::from_sources(self.mounts.clone());
-        read_asset_from_resources(&resources, self.source_description.as_deref(), asset_name)
+        let resource_error = |kind, source| ContentResourceError {
+            kind,
+            namespace: key.namespace.to_owned(),
+            file_id: key.file_id,
+            source_description: self.source_description.clone(),
+            source,
+        };
+        let metadata = resources.get_metadata_by_key(key).ok_or_else(|| {
+            resource_error(
+                ContentResourceErrorKind::Missing,
+                missing_asset_error(key, self.source_description.as_deref()),
+            )
+        })?;
+        let bytes = resources
+            .get_file_by_key(key)
+            .map_err(|error| resource_error(ContentResourceErrorKind::Invalid, error.into()))?;
+        Ok(RepositoryResource {
+            namespace: key.namespace.to_owned(),
+            file_id: key.file_id,
+            bytes,
+            metadata,
+            source_description: self.source_description.clone(),
+        })
+    }
+
+    /// Opened archive revisions in mount order; injected sources have no filesystem provenance.
+    pub fn mounted_sources(&self) -> &[MountedContentSource] {
+        &self.mounted_sources
+    }
+
+    pub fn source_description(&self) -> Option<&str> {
+        self.source_description.as_deref()
+    }
+
+    /// Returns the mounted static-resource census in deterministic mount/index order.
+    ///
+    /// This is metadata only: callers that need bytes must still use `read_resource`, which
+    /// applies the repository's layered resolution policy.
+    pub fn resource_index(&self) -> &[RepositoryResourceIndexEntry] {
+        &self.resource_index
+    }
+
+    /// Archived indoor cells for this owner, independent of LandblockInfo's prefetch count.
+    pub(crate) fn archived_env_cells(&self, landblock_id: u32) -> &[u32] {
+        self.env_cells_by_landblock
+            .get(&crate::normalize_landblock_id(landblock_id))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    pub fn resource_metadata(&self, key: ResourceKey<'_>) -> Option<holtburger_dat::FileMetadata> {
+        let resources = LayeredResourceResolver::from_sources(self.mounts.clone());
+        resources.get_metadata_by_key(key)
+    }
+
+    pub fn material_capability_report(&self) -> MaterialArchiveCapabilityReport {
+        MaterialArchiveCapabilityReport::build(self, &self.resource_index)
+    }
+
+    /// Projects motion and interaction reference facts from one setup pass.
+    /// Linked visual resources are never loaded; missing referenced animations remain errors.
+    pub fn read_motion_reference_data(&self) -> Result<MotionReferenceData> {
+        let tables = self.decode_portal_records(DatFileType::MotionTable, MotionTable::read)?;
+        // Seek past articulated part frames: bootstrap needs root motion and simulation hooks.
+        let animations =
+            self.decode_portal_records(DatFileType::Animation, Animation::read_simulation_facts)?;
+        let setups = self.decode_portal_records(DatFileType::SetupModel, SetupModel::read)?;
+        let setup_default_tables = setups
+            .iter()
+            .filter_map(|setup| Some((setup.id, setup.default_motion_table?)));
+        let motion_sequences =
+            MotionSequenceCatalog::assemble(tables, animations, setup_default_tables)
+                .context("failed to project raw motion content into the runtime motion contract")?;
+        let setup_dimensions = crate::SetupDimensionCatalog::new(setups.into_iter().map(|setup| {
+            (
+                setup.id,
+                crate::SetupDimensions {
+                    radius: setup.radius,
+                    height: setup.height,
+                },
+            )
+        }));
+        Ok(MotionReferenceData {
+            motion_sequences,
+            setup_dimensions,
+        })
+    }
+
+    /// Decodes each resolved portal resource once, in deterministic index order.
+    ///
+    /// File types are inferred from the id prefix, which is namespace-blind, so the namespace is
+    /// part of the filter: `0x09......` is a motion table under `eor/portal` and a cell record
+    /// under `eor/cell`.
+    fn decode_portal_records<T>(
+        &self,
+        file_type: DatFileType,
+        decode: fn(&mut Cursor<Vec<u8>>) -> binrw::BinResult<T>,
+    ) -> Result<Vec<T>> {
+        let mut seen = HashSet::new();
+        self.resource_index
+            .iter()
+            .filter(|entry| {
+                entry.namespace == EOR_PORTAL_NAMESPACE
+                    && DatFileType::from_id(entry.file_id) == file_type
+                    && seen.insert(entry.file_id)
+            })
+            .map(|entry| {
+                let resource =
+                    self.read_resource(ResourceKey::new(&entry.namespace, entry.file_id))?;
+                resource
+                    .decode(|bytes| Ok(decode(&mut Cursor::new(bytes))?))
+                    .with_context(|| {
+                        format!(
+                            "failed to decode {} {}:0x{:08X}",
+                            file_type, entry.namespace, entry.file_id
+                        )
+                    })
+            })
+            .collect()
     }
 
     pub fn read_soul_emote_catalog(&self) -> Result<SoulEmoteCatalog> {
         let chat_pose_table = self
             .read_asset::<ChatPoseTable>("chat pose table")
             .context("failed to load chat pose table for soul emote catalog")?;
-        Ok(SoulEmoteCatalog::from_asset(&chat_pose_table))
+        SoulEmoteCatalog::from_asset(&chat_pose_table)
+    }
+
+    /// Parses static contract definitions once for shared runtime interpretation.
+    pub fn read_contract_catalog(&self) -> Result<crate::ContractCatalog> {
+        let table =
+            self.read_asset::<holtburger_dat::file_type::ContractTable>("contract table")?;
+        crate::ContractCatalog::from_table(table).context("failed to assemble contract catalog")
+    }
+
+    /// Loads and joins the portal and language records used by retail character-title display.
+    pub fn read_character_title_catalog(&self) -> Result<crate::CharacterTitleCatalog> {
+        let mapper = self
+            .read_asset::<holtburger_dat::file_type::EnumMapper>("character-title enum mapper")
+            .context("failed to load character-title enum mapper")?;
+        let strings = self
+            .read_asset::<holtburger_dat::file_type::StringTable>("character-title string table")
+            .context("failed to load character-title string table")?;
+        crate::CharacterTitleCatalog::from_assets(&mapper, &strings)
+            .context("failed to build character-title catalog")
     }
 }
 
-fn read_asset_from_resources<T>(
-    resources: &LayeredResourceResolver,
-    source_description: Option<&str>,
-    asset_name: &'static str,
-) -> Result<T>
-where
-    T: StaticResourceKey + for<'a> BinRead<Args<'a> = ()>,
-{
-    let bytes = read_asset_bytes::<T>(resources, source_description, asset_name)?;
-    T::read_options(&mut Cursor::new(bytes), Endian::Little, ())
-        .with_context(|| format!("failed to parse {asset_name}"))
-}
-
-fn read_asset_bytes<T>(
-    resources: &LayeredResourceResolver,
-    source_description: Option<&str>,
-    asset_name: &'static str,
-) -> Result<Vec<u8>>
-where
-    T: StaticResourceKey,
-{
-    let key = T::RESOURCE_KEY;
-
-    if let Some(metadata) = resources.get_metadata_by_key(key)
-        && !metadata.is_pruned
-    {
-        return resources.get_file_by_key(key).map_err(anyhow::Error::from);
-    }
-
-    if resources.get_metadata_by_key(key).is_some() {
-        return resources.get_file_by_key(key).map_err(anyhow::Error::from);
-    }
-
-    Err(missing_asset_error(key, asset_name, source_description))
-}
-
-fn missing_asset_error(
-    key: ResourceKey<'static>,
-    asset_name: &'static str,
-    source_description: Option<&str>,
-) -> anyhow::Error {
+fn missing_asset_error(key: ResourceKey<'_>, source_description: Option<&str>) -> anyhow::Error {
     match source_description {
         Some(source) => anyhow!(
-            "Missing asset {}:0x{:08X} ({}) while reading client data from {}.",
+            "Missing asset {}:0x{:08X} while reading client data from {}.",
             key.namespace,
             key.file_id,
-            asset_name,
             source
         ),
         None => anyhow!(
-            "Missing asset {}:0x{:08X} ({}) in the mounted resource namespaces.",
+            "Missing asset {}:0x{:08X} in the mounted resource namespaces.",
             key.namespace,
             key.file_id,
-            asset_name,
         ),
     }
-}
-
-fn discover_hba_mounts_in_dir(
-    dats_path: &Path,
-    mounts: &mut Vec<Arc<dyn ResourceSource>>,
-) -> Result<()> {
-    let mut candidates = Vec::new();
-
-    let entries = fs::read_dir(dats_path).map_err(|error| {
-        anyhow!(
-            "Could not enumerate HBA archives under {}: {}",
-            dats_path.display(),
-            error
-        )
-    })?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension() != Some(OsStr::new("hba")) {
-            continue;
-        }
-
-        let archive = match HbaReader::open(&path) {
-            Ok(archive) => archive,
-            Err(error) => {
-                log::warn!("Could not open HBA archive {}: {}", path.display(), error);
-                continue;
-            }
-        };
-
-        let namespaces = archive
-            .namespaces()
-            .map(|namespace| namespace.to_string())
-            .collect::<Vec<_>>();
-        if namespaces.is_empty() {
-            log::warn!(
-                "Skipping HBA archive {} because it exposes no namespaces",
-                path.display()
-            );
-            continue;
-        }
-
-        candidates.push((path, namespaces, Arc::new(archive)));
-    }
-
-    candidates.sort_by(|left, right| {
-        right
-            .1
-            .len()
-            .cmp(&left.1.len())
-            .then_with(|| left.0.cmp(&right.0))
-    });
-
-    for (path, namespaces, archive) in candidates {
-        mount_archive_source(&path, archive, namespaces, mounts)?;
-    }
-
-    Ok(())
-}
-
-fn mount_hba_source(path: &Path, mounts: &mut Vec<Arc<dyn ResourceSource>>) -> Result<()> {
-    let archive = HbaReader::open(path)
-        .map_err(|error| anyhow!("Could not open HBA archive {}: {}", path.display(), error))?;
-    let namespaces = archive
-        .namespaces()
-        .map(|namespace| namespace.to_string())
-        .collect::<Vec<_>>();
-
-    if namespaces.is_empty() {
-        return Err(anyhow!(
-            "HBA archive {} exposes no namespaces.",
-            path.display()
-        ));
-    }
-
-    mount_archive_source(path, Arc::new(archive), namespaces, mounts)
-}
-
-fn mount_archive_source(
-    path: &Path,
-    archive: Arc<HbaReader>,
-    namespaces: Vec<String>,
-    mounts: &mut Vec<Arc<dyn ResourceSource>>,
-) -> Result<()> {
-    log::info!(
-        "Mounted content source {} with namespaces [{}]",
-        path.display(),
-        namespaces.join(", ")
-    );
-
-    mounts.push(archive);
-
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::properties::GfxObjFlags;
+    use holtburger_common::{Sphere, Vector3};
     use holtburger_dat::file_type::{
-        CharGen, ChatPoseTable, MotionKinematics, SkillTable, SpellTable, XpTable,
+        AnimationPartChange, CharGen, ChatPoseTable, EnvCell, GfxObj, ObjDesc, SkillTable,
+        SpellTable, SubPalette, TextureMapChange, XpTable,
     };
+    use holtburger_dat::file_type::{PixelFormatId, SetupModel, SurfaceType};
+    use holtburger_dat::graphics::CVertexArray;
+    use holtburger_dat::graphics::Frame;
     use holtburger_dat::{
-        DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE,
-        HbaWriter, LayeredResourceResolver,
+        DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaWriter, LayeredResourceResolver,
     };
+    use std::path::Path;
     use tempfile::tempdir;
 
-    fn repo_assets_hba_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
+    #[test]
+    fn motion_reference_projects_each_setup_once_for_both_consumers() {
+        use crate::test_support::CountingSource;
+        let setup_ids = [0x0200_0001, 0x0200_0002];
+        let default_table = 0x0900_0001;
+        let mut files = HashMap::new();
+        let mut entries = Vec::new();
+        for (index, id) in setup_ids.into_iter().enumerate() {
+            let mut setup = test_setup_model(id, &[]);
+            setup.radius = 0.5 + index as f32;
+            setup.height = 2.0 + index as f32;
+            setup.default_motion_table = (index == 0).then_some(default_table);
+            let mut bytes = Cursor::new(Vec::new());
+            setup.pack(&mut bytes).unwrap();
+            let bytes = bytes.into_inner();
+            entries.push(RepositoryResourceIndexEntry {
+                namespace: EOR_PORTAL_NAMESPACE.into(),
+                file_id: id,
+                type_id: DatFileType::SetupModel as u32,
+                size: bytes.len() as u32,
+                is_pruned: false,
+                source_description: "counted setup fixture".into(),
+            });
+            files.insert((EOR_PORTAL_NAMESPACE.into(), id), bytes);
+        }
+        let source = Arc::new(CountingSource::new(files));
+        let mut repository = ContentRepository::from_mounts(vec![source.clone()]);
+        repository.resource_index = entries;
+        let reference = repository.read_motion_reference_data().unwrap();
+        assert_eq!(
+            reference
+                .motion_sequences
+                .default_motion_table_for_setup(setup_ids[0]),
+            Some(default_table)
+        );
+        assert_eq!(
+            reference
+                .motion_sequences
+                .default_motion_table_for_setup(setup_ids[1]),
+            None
+        );
+        for (index, id) in setup_ids.into_iter().enumerate() {
+            assert_eq!(
+                reference.setup_dimensions.get(id),
+                Some(crate::SetupDimensions {
+                    radius: 0.5 + index as f32,
+                    height: 2.0 + index as f32
+                })
+            );
+            assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, id), 1);
+        }
     }
 
-    fn test_motion_kinematics_bytes() -> Vec<u8> {
-        let mut bytes = std::io::Cursor::new(Vec::new());
-        MotionKinematics::new()
-            .write(&mut bytes)
-            .expect("test motion kinematics asset should write");
-        bytes.into_inner()
+    #[test]
+    fn surface_texture_pixels_selects_the_first_available_source_level() {
+        let directory = tempdir().expect("temporary directory should be created");
+        let path = directory.path().join("texture-levels.hba");
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0500_0001,
+                DatFileType::SurfaceTexture as u32,
+                surface_texture_bytes(0x0500_0001, &[0x0600_DEAD, 0x0600_0001]),
+            )
+            .expect("surface texture should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0001,
+                DatFileType::Texture as u32,
+                render_surface_bytes(
+                    0x0600_0001,
+                    PixelFormatId::A8R8G8B8,
+                    &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+                    None,
+                ),
+            )
+            .expect("available render surface should be added");
+        writer.write(&path).expect("test HBA should be written");
+
+        let repository =
+            ContentRepository::from_hba_path(&path).expect("test repository should be opened");
+        let pixels = repository
+            .resolve_surface_texture_pixels(0x0500_0001, crate::TexturePixelFormat::Rgba8)
+            .expect("available source level should resolve");
+
+        assert_eq!(pixels.render_surface_id, 0x0600_0001);
+        assert_eq!(pixels.width, 2);
+        assert_eq!(pixels.height, 2);
+        assert_eq!(pixels.pixels[0..4], [3, 2, 1, 4]);
+    }
+
+    #[test]
+    fn required_texture_preserves_invalid_dependency_identity_instead_of_skipping_it() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("texture.hba");
+        let texture_id = 0x0500_0001;
+        let broken_id = 0x0600_0001;
+        let mut writer = HbaWriter::new();
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                texture_id,
+                DatFileType::SurfaceTexture as u32,
+                surface_texture_bytes(texture_id, &[broken_id, 0x0600_0002]),
+            )
+            .unwrap();
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                broken_id,
+                DatFileType::Texture as u32,
+                vec![0xff],
+            )
+            .unwrap();
+        writer.write(&path).unwrap();
+        let repository = ContentRepository::open_selected(path).unwrap();
+        let error = repository
+            .resolve_surface_texture_pixels(texture_id, crate::TexturePixelFormat::Rgba8)
+            .unwrap_err();
+        let resource = error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<ContentResourceError>())
+            .unwrap();
+        assert_eq!(resource.kind, ContentResourceErrorKind::Invalid);
+        assert_eq!(resource.file_id, broken_id);
+    }
+
+    #[test]
+    fn required_texture_reports_exhausted_optional_levels_as_a_resource_failure() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("texture.hba");
+        let texture_id = 0x0500_0001;
+        let pruned_id = 0x0600_0002;
+        let mut writer = HbaWriter::new();
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                texture_id,
+                DatFileType::SurfaceTexture as u32,
+                surface_texture_bytes(texture_id, &[0x0600_0001, pruned_id]),
+            )
+            .unwrap();
+        writer
+            .add_pruned(
+                EOR_PORTAL_NAMESPACE,
+                pruned_id,
+                DatFileType::Texture as u32,
+                vec![0xff],
+            )
+            .unwrap();
+        writer.write(&path).unwrap();
+        let repository = ContentRepository::open_selected(path).unwrap();
+        let error = repository
+            .resolve_surface_texture_pixels(texture_id, crate::TexturePixelFormat::Rgba8)
+            .unwrap_err();
+        let resource = error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<ContentResourceError>())
+            .unwrap();
+        assert_eq!(resource.kind, ContentResourceErrorKind::Invalid);
+        assert_eq!(resource.file_id, texture_id);
+        assert!(format!("{error:#}").contains("no available RenderSurface levels"));
     }
 
     fn test_chat_pose_table_bytes() -> Vec<u8> {
@@ -308,32 +557,18 @@ mod tests {
         writer.write(path).expect("test HBA should be written");
     }
 
-    fn write_hba(path: &Path, ids: &[u32], include_cell_namespace: bool) -> bool {
-        let source_path = repo_assets_hba_path();
-        if !source_path.is_file() {
-            eprintln!(
-                "skipping content repository fixture test; missing repo-local {}",
-                source_path.display()
-            );
-            return false;
-        }
-
-        let source = match HbaReader::open(&source_path) {
-            Ok(source) => source,
-            Err(error) => panic!(
-                "content repository fixture test requires repo-local {} to be a valid HBA v2 fixture: {}",
-                source_path.display(),
-                error
-            ),
-        };
-
+    fn write_hba(path: &Path, ids: &[u32], include_cell_namespace: bool) {
         let mut writer = HbaWriter::new();
         writer.set_compression(false);
 
         for id in ids {
-            let data = source
-                .get_file_in_namespace(EOR_PORTAL_NAMESPACE, *id)
-                .unwrap_or_else(|_| panic!("repo assets.hba should contain eor/portal:0x{id:08X}"));
+            // Namespace/index tests need opaque records, not an unchecked retail corpus.
+            // CharGen is decoded by the loader test and has empty authored collections.
+            let mut data = id.to_le_bytes().to_vec();
+            if *id == CharGen::FILE_ID {
+                data.extend_from_slice(&0u32.to_le_bytes());
+                data.extend_from_slice(&[0, 0, 0]); // Starter count, reserved byte, heritage count.
+            }
             writer
                 .add(
                     EOR_PORTAL_NAMESPACE,
@@ -343,15 +578,6 @@ mod tests {
                 )
                 .expect("test HBA entry should be added");
         }
-
-        writer
-            .add(
-                HOLTBURGER_CORE_NAMESPACE,
-                MotionKinematics::FILE_ID,
-                DatFileType::MotionKinematics as u32,
-                test_motion_kinematics_bytes(),
-            )
-            .expect("motion kinematics test HBA entry should be added");
 
         if include_cell_namespace {
             writer
@@ -365,14 +591,548 @@ mod tests {
         }
 
         writer.write(path).expect("test HBA should be written");
+    }
 
-        true
+    fn write_malformed_static_asset_hba(path: &Path) {
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                SpellTable::FILE_ID,
+                DatFileType::from_id(SpellTable::FILE_ID) as u32,
+                vec![0xCC],
+            )
+            .expect("malformed spell table test HBA entry should be added");
+        writer.write(path).expect("test HBA should be written");
+    }
+
+    fn write_material_capability_hba(path: &Path) {
+        let mut env_cell_bytes = std::io::Cursor::new(Vec::new());
+        EnvCell {
+            id: 0x0D00_0001,
+            flags: 0,
+            cell_id: 1,
+            surfaces: vec![1, 2, 3],
+            environment_id: 0,
+            cell_structure: 0,
+            position: Frame::default(),
+            portals: Vec::new(),
+            visible_cells: Vec::new(),
+            static_objects: Vec::new(),
+            restriction_obj: None,
+        }
+        .pack(&mut env_cell_bytes)
+        .expect("test env cell should pack");
+
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0D00_0001,
+                DatFileType::EnvCell as u32,
+                env_cell_bytes.into_inner(),
+            )
+            .expect("env cell should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0001,
+                DatFileType::Surface as u32,
+                solid_csurface_bytes(0xFFAA_5500),
+            )
+            .expect("surface should be added");
+        writer
+            .add_pruned(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0002,
+                DatFileType::Surface as u32,
+                vec![],
+            )
+            .expect("pruned surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0500_0001,
+                DatFileType::SurfaceTexture as u32,
+                vec![0x05],
+            )
+            .expect("surface texture should be added");
+        writer
+            .add_pruned(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0001,
+                DatFileType::Texture as u32,
+                vec![],
+            )
+            .expect("pruned render surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0400_0001,
+                DatFileType::Palette as u32,
+                vec![0x04],
+            )
+            .expect("palette should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x1000_0001,
+                DatFileType::Clothing as u32,
+                vec![0x10],
+            )
+            .expect("clothing table should be added");
+
+        writer.write(path).expect("test HBA should be written");
+    }
+
+    fn write_material_dependency_hba(path: &Path) {
+        let mut env_cell_bytes = std::io::Cursor::new(Vec::new());
+        EnvCell {
+            id: 0x0D00_0002,
+            flags: 0,
+            cell_id: 2,
+            surfaces: vec![0x10, 0x11, 0x12],
+            environment_id: 0,
+            cell_structure: 0,
+            position: Frame::default(),
+            portals: Vec::new(),
+            visible_cells: Vec::new(),
+            static_objects: Vec::new(),
+            restriction_obj: None,
+        }
+        .pack(&mut env_cell_bytes)
+        .expect("test env cell should pack");
+
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0D00_0002,
+                DatFileType::EnvCell as u32,
+                env_cell_bytes.into_inner(),
+            )
+            .expect("env cell should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0010,
+                DatFileType::Surface as u32,
+                textured_csurface_bytes(0x0500_0010, 0x0400_0010),
+            )
+            .expect("textured surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0011,
+                DatFileType::Surface as u32,
+                textured_csurface_bytes(0x0500_0011, 0),
+            )
+            .expect("missing-texture surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0012,
+                DatFileType::Surface as u32,
+                solid_csurface_bytes(0xFF00_AACC),
+            )
+            .expect("solid surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0500_0010,
+                DatFileType::SurfaceTexture as u32,
+                surface_texture_bytes(0x0500_0010, &[0x0600_0010, 0x0600_0011, 0x0600_0012]),
+            )
+            .expect("surface texture should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0010,
+                DatFileType::Texture as u32,
+                render_surface_bytes(
+                    0x0600_0010,
+                    PixelFormatId::P8,
+                    &[1, 2, 3, 4],
+                    Some(0x0400_0011),
+                ),
+            )
+            .expect("render surface should be added");
+        writer
+            .add_pruned(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0011,
+                DatFileType::Texture as u32,
+                vec![],
+            )
+            .expect("pruned render surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0400_0010,
+                DatFileType::Palette as u32,
+                palette_bytes(0x0400_0010),
+            )
+            .expect("palette should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x1000_0010,
+                DatFileType::Clothing as u32,
+                vec![0x10],
+            )
+            .expect("clothing table should be added");
+
+        writer.write(path).expect("test HBA should be written");
+    }
+
+    fn write_resolvable_material_hba(path: &Path) {
+        let mut env_cell_bytes = std::io::Cursor::new(Vec::new());
+        EnvCell {
+            id: 0x0D00_0003,
+            flags: 0,
+            cell_id: 3,
+            surfaces: vec![0x20, 0x21],
+            environment_id: 0,
+            cell_structure: 0,
+            position: Frame::default(),
+            portals: Vec::new(),
+            visible_cells: Vec::new(),
+            static_objects: Vec::new(),
+            restriction_obj: None,
+        }
+        .pack(&mut env_cell_bytes)
+        .expect("test env cell should pack");
+
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0D00_0003,
+                DatFileType::EnvCell as u32,
+                env_cell_bytes.into_inner(),
+            )
+            .expect("env cell should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0020,
+                DatFileType::Surface as u32,
+                solid_csurface_bytes(0xFF11_2233),
+            )
+            .expect("solid surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0021,
+                DatFileType::Surface as u32,
+                textured_csurface_bytes(0x0500_0021, 0x0400_0021),
+            )
+            .expect("textured surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0500_0021,
+                DatFileType::SurfaceTexture as u32,
+                surface_texture_bytes(0x0500_0021, &[0x0600_0021]),
+            )
+            .expect("surface texture should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0021,
+                DatFileType::Texture as u32,
+                render_surface_bytes(0x0600_0021, PixelFormatId::A8R8G8B8, &[1, 2, 3, 4], None),
+            )
+            .expect("render surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0400_0021,
+                DatFileType::Palette as u32,
+                palette_bytes(0x0400_0021),
+            )
+            .expect("palette should be added");
+
+        writer.write(path).expect("test HBA should be written");
+    }
+
+    fn write_setup_appearance_hba(path: &Path) {
+        let mut setup_bytes = std::io::Cursor::new(Vec::new());
+        test_setup_model(0x0200_0030, &[0x0100_0030, 0x0100_0031])
+            .pack(&mut setup_bytes)
+            .expect("test setup should pack");
+
+        let mut gfx_a_bytes = std::io::Cursor::new(Vec::new());
+        test_gfx_obj(0x0100_0030, &[0x0800_0030])
+            .pack(&mut gfx_a_bytes)
+            .expect("test gfx obj should pack");
+
+        let mut gfx_b_bytes = std::io::Cursor::new(Vec::new());
+        test_gfx_obj(0x0100_0031, &[0x0800_0031])
+            .pack(&mut gfx_b_bytes)
+            .expect("test gfx obj should pack");
+
+        let mut replacement_gfx_bytes = std::io::Cursor::new(Vec::new());
+        test_gfx_obj(0x0100_0032, &[0x0800_0032])
+            .pack(&mut replacement_gfx_bytes)
+            .expect("replacement gfx obj should pack");
+
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0200_0030,
+                DatFileType::SetupModel as u32,
+                setup_bytes.into_inner(),
+            )
+            .expect("setup should be added");
+        for (id, bytes) in [
+            (0x0100_0030, gfx_a_bytes.into_inner()),
+            (0x0100_0031, gfx_b_bytes.into_inner()),
+            (0x0100_0032, replacement_gfx_bytes.into_inner()),
+        ] {
+            writer
+                .add(EOR_PORTAL_NAMESPACE, id, DatFileType::Model as u32, bytes)
+                .expect("gfx obj should be added");
+        }
+        for (surface_id, surface_texture_id, palette_id) in [
+            (0x0800_0030, 0x0500_0030, 0x0400_0030),
+            (0x0800_0031, 0x0500_0031, 0x0400_0031),
+            (0x0800_0032, 0x0500_0032, 0x0400_0032),
+        ] {
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    surface_id,
+                    DatFileType::Surface as u32,
+                    textured_csurface_bytes(surface_texture_id, palette_id),
+                )
+                .expect("surface should be added");
+        }
+        for (surface_texture_id, render_surface_id) in [
+            (0x0500_0030, 0x0600_0030),
+            (0x0500_0031, 0x0600_0031),
+            (0x0500_0032, 0x0600_0032),
+            (0x0500_0040, 0x0600_0040),
+        ] {
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    surface_texture_id,
+                    DatFileType::SurfaceTexture as u32,
+                    surface_texture_bytes(surface_texture_id, &[render_surface_id]),
+                )
+                .expect("surface texture should be added");
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    render_surface_id,
+                    DatFileType::Texture as u32,
+                    render_surface_bytes(
+                        render_surface_id,
+                        PixelFormatId::A8R8G8B8,
+                        &[1, 2, 3, 4],
+                        None,
+                    ),
+                )
+                .expect("render surface should be added");
+        }
+        for palette_id in [
+            0x0400_0030,
+            0x0400_0031,
+            0x0400_0032,
+            0x0400_0040,
+            0x0400_0041,
+            0x0400_0042,
+        ] {
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    palette_id,
+                    DatFileType::Palette as u32,
+                    palette_bytes(palette_id),
+                )
+                .expect("palette should be added");
+        }
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0F00_0040,
+                DatFileType::from_id(0x0F00_0040) as u32,
+                palette_set_bytes(0x0F00_0040, &[0x0400_0041, 0x0400_0042]),
+            )
+            .expect("palette set should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x1000_0040,
+                DatFileType::Clothing as u32,
+                clothing_table_bytes(),
+            )
+            .expect("clothing table should be added");
+
+        writer.write(path).expect("test HBA should be written");
+    }
+
+    fn test_setup_model(id: u32, parts: &[u32]) -> SetupModel {
+        SetupModel {
+            id,
+            flags: 0,
+            parts: parts.to_vec(),
+            parent_index: Vec::new(),
+            default_scale: Vec::new(),
+            holding_locations: Default::default(),
+            connection_points: Default::default(),
+            placement_frames: Default::default(),
+            cyl_spheres: Vec::new(),
+            spheres: Vec::new(),
+            height: 0.0,
+            radius: 0.0,
+            step_up: 0.0,
+            step_down: 0.0,
+            sorting_sphere: Sphere {
+                center: Vector3::zero(),
+                radius: 0.0,
+            },
+            selection_sphere: Sphere {
+                center: Vector3::zero(),
+                radius: 0.0,
+            },
+            lights: Default::default(),
+            default_animation: None,
+            default_script_did: None,
+            default_motion_table: None,
+            default_sound_table: None,
+            default_script_table: None,
+        }
+    }
+
+    fn test_gfx_obj(id: u32, surfaces: &[u32]) -> GfxObj {
+        GfxObj {
+            id,
+            flags: GfxObjFlags::empty(),
+            surfaces: surfaces.to_vec(),
+            vertex_array: CVertexArray {
+                vertex_type: 1,
+                vertices: Default::default(),
+            },
+            physics_polygons: Default::default(),
+            physics_bsp: None,
+            sort_center: Vector3::zero(),
+            polygons: Default::default(),
+            drawing_bsp: None,
+            did_degrade: None,
+        }
+    }
+
+    fn solid_csurface_bytes(color: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&SurfaceType::BASE1_SOLID.bits().to_le_bytes());
+        bytes.extend_from_slice(&color.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes
+    }
+
+    fn textured_csurface_bytes(surface_texture_id: u32, palette_id: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&SurfaceType::BASE1_IMAGE.bits().to_le_bytes());
+        bytes.extend_from_slice(&surface_texture_id.to_le_bytes());
+        bytes.extend_from_slice(&palette_id.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes
+    }
+
+    fn surface_texture_bytes(id: u32, render_surface_ids: &[u32]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&id.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.push(1);
+        bytes.extend_from_slice(&(render_surface_ids.len() as u32).to_le_bytes());
+        for render_surface_id in render_surface_ids {
+            bytes.extend_from_slice(&render_surface_id.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn render_surface_bytes(
+        id: u32,
+        format: PixelFormatId,
+        source_data: &[u8],
+        default_palette_id: Option<u32>,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&id.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&format.raw().to_le_bytes());
+        bytes.extend_from_slice(&(source_data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(source_data);
+        if let Some(default_palette_id) = default_palette_id {
+            bytes.extend_from_slice(&default_palette_id.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn palette_bytes(id: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&id.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&0xFF00_0000u32.to_le_bytes());
+        bytes.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+        bytes
+    }
+
+    fn palette_set_bytes(id: u32, palette_ids: &[u32]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&id.to_le_bytes());
+        bytes.extend_from_slice(&(palette_ids.len() as i32).to_le_bytes());
+        for palette_id in palette_ids {
+            bytes.extend_from_slice(&palette_id.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn clothing_table_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x1000_0040u32.to_le_bytes());
+        push_packed_hash_header(&mut bytes, 1);
+        bytes.extend_from_slice(&0x0200_0030u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0100_0032u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0500_0032u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0500_0040u32.to_le_bytes());
+        push_packed_hash_header(&mut bytes, 1);
+        bytes.extend_from_slice(&7u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0600_1000u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&24u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0F00_0040u32.to_le_bytes());
+        bytes
+    }
+
+    fn push_packed_hash_header(bytes: &mut Vec<u8>, count: u16) {
+        bytes.extend_from_slice(&count.to_le_bytes());
+        bytes.extend_from_slice(&count.to_le_bytes());
     }
 
     #[test]
     fn read_asset_loads_char_gen_from_repository() {
         let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
+        write_hba(
             &dir.path().join("bundle.hba"),
             &[
                 CharGen::FILE_ID,
@@ -381,9 +1141,7 @@ mod tests {
                 XpTable::FILE_ID,
             ],
             false,
-        ) {
-            return;
-        }
+        );
 
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
@@ -391,28 +1149,9 @@ mod tests {
             .read_asset::<CharGen>("character generator table")
             .expect("char gen should resolve from content repository");
 
-        assert!(!char_gen.starter_areas.is_empty());
-        assert!(!char_gen.heritage_groups.is_empty());
-    }
-
-    #[test]
-    fn read_asset_loads_motion_kinematics_from_repository() {
-        let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
-            &dir.path().join("bundle.hba"),
-            &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
-            false,
-        ) {
-            return;
-        }
-
-        let repository =
-            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
-        let motion_kinematics = repository
-            .read_asset::<MotionKinematics>("motion kinematics table")
-            .expect("motion kinematics should resolve from content repository");
-
-        assert_eq!(motion_kinematics.id, MotionKinematics::FILE_ID);
+        assert_eq!(char_gen.id, CharGen::FILE_ID);
+        assert!(char_gen.starter_areas.is_empty());
+        assert!(char_gen.heritage_groups.is_empty());
     }
 
     #[test]
@@ -434,13 +1173,11 @@ mod tests {
     #[test]
     fn from_hba_dir_discovers_namespaces_from_archive_contents() {
         let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
+        write_hba(
             &dir.path().join("anything.hba"),
             &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
             true,
-        ) {
-            return;
-        }
+        );
 
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
@@ -452,15 +1189,38 @@ mod tests {
     }
 
     #[test]
+    fn read_resource_loads_dynamic_key_from_repository() {
+        let dir = tempdir().expect("tempdir should be created");
+        write_hba(
+            &dir.path().join("bundle.hba"),
+            &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
+            true,
+        );
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let resource = repository
+            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, 0x0000_0001))
+            .expect("dynamic resource should resolve from content repository");
+
+        assert_eq!(resource.namespace, EOR_CELL_NAMESPACE);
+        assert_eq!(resource.file_id, 0x0000_0001);
+        assert_eq!(resource.bytes, vec![0xCC]);
+        assert_eq!(resource.metadata.id, resource.file_id);
+        assert_eq!(
+            resource.source_description.as_deref(),
+            Some(dir.path().to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
     fn read_asset_fails_when_spell_table_is_missing() {
         let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
+        write_hba(
             &dir.path().join("bundle.hba"),
             &[SkillTable::FILE_ID, XpTable::FILE_ID],
             false,
-        ) {
-            return;
-        }
+        );
 
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
@@ -469,5 +1229,425 @@ mod tests {
             .expect_err("spell table load should fail when the asset is missing");
 
         assert!(error.to_string().contains("spell table"));
+    }
+
+    #[test]
+    fn read_resource_fails_when_dynamic_key_is_missing() {
+        let dir = tempdir().expect("tempdir should be created");
+        write_hba(
+            &dir.path().join("bundle.hba"),
+            &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
+            false,
+        );
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let error = repository
+            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, 0x0000_0001))
+            .expect_err("missing dynamic resource should fail");
+
+        assert!(error.to_string().contains(EOR_CELL_NAMESPACE));
+        assert!(error.to_string().contains("0x00000001"));
+    }
+
+    #[test]
+    fn read_asset_reports_malformed_static_asset_bytes() {
+        let dir = tempdir().expect("tempdir should be created");
+        write_malformed_static_asset_hba(&dir.path().join("bundle.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let error = repository
+            .read_asset::<SpellTable>("spell table")
+            .expect_err("malformed spell table should fail");
+
+        assert!(error.to_string().contains("failed to parse spell table"));
+    }
+
+    #[test]
+    fn material_capability_report_counts_material_records_and_surface_references() {
+        let dir = tempdir().expect("tempdir should be created");
+        write_material_capability_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let report = repository.material_capability_report();
+
+        assert_eq!(report.record_counts.c_surface.total, 2);
+        assert_eq!(report.record_counts.c_surface.available, 1);
+        assert_eq!(report.record_counts.c_surface.pruned, 1);
+        assert_eq!(report.record_counts.surface_texture.available, 1);
+        assert_eq!(report.record_counts.render_surface.pruned, 1);
+        assert_eq!(report.record_counts.palette.available, 1);
+        assert_eq!(report.record_counts.clothing_table.available, 1);
+        assert_eq!(report.visual_source_records.available, 1);
+        assert_eq!(report.material_references.referenced_csurfaces, 3);
+        assert_eq!(report.material_references.available_csurfaces, 1);
+        assert_eq!(
+            report.material_references.pruned_csurfaces,
+            vec![0x0800_0002]
+        );
+        assert_eq!(
+            report.material_references.missing_csurfaces,
+            vec![0x0800_0003]
+        );
+        assert_eq!(report.material_references.referenced_surface_textures, 0);
+        assert!(report.material_references.parse_failures.is_empty());
+        assert!(!report.material_complete);
+    }
+
+    #[test]
+    fn material_capability_report_validates_deep_material_dependencies() {
+        let dir = tempdir().expect("tempdir should be created");
+        write_material_dependency_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let report = repository.material_capability_report();
+
+        assert_eq!(report.material_references.referenced_csurfaces, 3);
+        assert_eq!(report.material_references.available_csurfaces, 3);
+        assert_eq!(report.material_references.referenced_surface_textures, 2);
+        assert_eq!(report.material_references.available_surface_textures, 1);
+        assert_eq!(
+            report.material_references.missing_surface_textures,
+            vec![0x0500_0011]
+        );
+        assert_eq!(report.material_references.referenced_render_surfaces, 3);
+        assert_eq!(report.material_references.available_render_surfaces, 1);
+        assert_eq!(
+            report.material_references.pruned_render_surfaces,
+            vec![0x0600_0011]
+        );
+        assert_eq!(
+            report.material_references.missing_render_surfaces,
+            vec![0x0600_0012]
+        );
+        assert_eq!(report.material_references.referenced_palettes, 2);
+        assert_eq!(report.material_references.available_palettes, 1);
+        assert_eq!(
+            report.material_references.missing_palettes,
+            vec![0x0400_0011]
+        );
+        assert!(report.material_references.parse_failures.is_empty());
+        assert!(!report.material_complete);
+    }
+
+    #[test]
+    fn resolves_env_cell_material_slots_to_material_recipes() {
+        use crate::{ResolvedMaterialSource, ResolvedTextureMaterial};
+
+        let dir = tempdir().expect("tempdir should be created");
+        write_resolvable_material_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let slots = repository
+            .resolve_env_cell_material_slots(0x0D00_0003)
+            .expect("material slots should resolve");
+
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slots[0].slot_index, 0);
+        assert_eq!(slots[0].material.surface_id, 0x0800_0020);
+        assert_eq!(
+            slots[0].material.source,
+            ResolvedMaterialSource::SolidColor(0xFF11_2233)
+        );
+        assert_eq!(slots[1].slot_index, 1);
+        assert_eq!(slots[1].material.surface_id, 0x0800_0021);
+        assert_eq!(
+            slots[1].material.source,
+            ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
+                surface_texture_id: 0x0500_0021,
+                render_surface_ids: vec![0x0600_0021],
+                palette_id: Some(0x0400_0021),
+                palette_composite: None,
+            })
+        );
+    }
+
+    #[test]
+    fn resolves_textured_material_preserving_surface_texture_source_levels() {
+        use crate::{ResolvedMaterialSource, ResolvedTextureMaterial};
+
+        let dir = tempdir().expect("tempdir should be created");
+        let path = dir.path().join("materials.hba");
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0040,
+                DatFileType::Surface as u32,
+                textured_csurface_bytes(0x0500_0040, 0),
+            )
+            .expect("surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0500_0040,
+                DatFileType::SurfaceTexture as u32,
+                surface_texture_bytes(0x0500_0040, &[0x0600_4040, 0x0600_0040]),
+            )
+            .expect("surface texture should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0040,
+                DatFileType::Texture as u32,
+                render_surface_bytes(0x0600_0040, PixelFormatId::A8R8G8B8, &[1, 2, 3, 4], None),
+            )
+            .expect("available render surface should be added");
+        writer.write(&path).expect("test HBA should be written");
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let recipe = repository
+            .resolve_material_recipe(0x0800_0040)
+            .expect("material should preserve its source-level render-surface IDs");
+        let surface_texture = repository
+            .resolve_surface_texture(0x0500_0040)
+            .expect("surface texture should expose its source-level render-surface IDs");
+
+        assert_eq!(
+            recipe.source,
+            ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
+                surface_texture_id: 0x0500_0040,
+                render_surface_ids: vec![0x0600_4040, 0x0600_0040],
+                palette_id: None,
+                palette_composite: None,
+            })
+        );
+        assert_eq!(
+            surface_texture.render_surface_ids,
+            vec![0x0600_4040, 0x0600_0040]
+        );
+    }
+
+    #[test]
+    fn resolves_setup_appearance_with_texture_and_part_overrides() {
+        use crate::MaterialAppearanceInput;
+
+        let dir = tempdir().expect("tempdir should be created");
+        write_setup_appearance_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let base = repository
+            .resolve_setup_appearance(0x0200_0030, MaterialAppearanceInput::default())
+            .expect("base setup appearance should resolve");
+        let overridden = repository
+            .resolve_setup_appearance(
+                0x0200_0030,
+                MaterialAppearanceInput {
+                    obj_desc: Some(ObjDesc {
+                        palette_id: Some(0x0400_0040),
+                        sub_palettes: vec![SubPalette {
+                            sub_id: 0x0400_0041,
+                            offset: 16,
+                            num_colors: 24,
+                        }],
+                        texture_changes: vec![TextureMapChange {
+                            part_index: 0,
+                            old_texture: 0x0500_0030,
+                            new_texture: 0x0500_0040,
+                        }],
+                        anim_part_changes: vec![AnimationPartChange {
+                            part_index: 1,
+                            part_id: 0x0100_0032,
+                        }],
+                    }),
+                },
+            )
+            .expect("overridden setup appearance should resolve");
+
+        assert_ne!(base.appearance_key, overridden.appearance_key);
+        assert_eq!(base.parts[1].gfx_obj_id, 0x0100_0031);
+        assert_eq!(overridden.parts[1].gfx_obj_id, 0x0100_0032);
+        assert_eq!(
+            texture_id(&overridden.parts[0].material_slots[0].material.source),
+            Some(0x0500_0040)
+        );
+        assert_eq!(
+            texture_id(&base.parts[0].material_slots[0].material.source),
+            Some(0x0500_0030)
+        );
+        assert_eq!(
+            overridden.material_asset_ids,
+            vec![0x0800_0030, 0x0800_0032]
+        );
+    }
+
+    #[test]
+    fn invalid_wire_palette_rejects_the_entire_optional_composition() {
+        use crate::{MaterialAppearanceInput, ResolvedMaterialSource};
+
+        let dir = tempdir().expect("tempdir should be created");
+        write_setup_appearance_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        for obj_desc in [
+            ObjDesc {
+                palette_id: Some(0x0400_0000),
+                sub_palettes: vec![SubPalette {
+                    sub_id: 0x0400_0041,
+                    offset: 0,
+                    num_colors: 2048,
+                }],
+                texture_changes: Vec::new(),
+                anim_part_changes: Vec::new(),
+            },
+            ObjDesc {
+                palette_id: Some(0x0400_0030),
+                sub_palettes: vec![SubPalette {
+                    sub_id: 0x0400_0000,
+                    offset: 0,
+                    num_colors: 2048,
+                }],
+                texture_changes: Vec::new(),
+                anim_part_changes: Vec::new(),
+            },
+            ObjDesc {
+                palette_id: Some(0x0400_0030),
+                sub_palettes: vec![
+                    SubPalette {
+                        sub_id: 0x0400_0041,
+                        offset: 0,
+                        num_colors: 8,
+                    },
+                    SubPalette {
+                        sub_id: 0x0400_0000,
+                        offset: 8,
+                        num_colors: 2040,
+                    },
+                ],
+                texture_changes: Vec::new(),
+                anim_part_changes: Vec::new(),
+            },
+        ] {
+            let appearance = repository
+                .resolve_setup_appearance(
+                    0x0200_0030,
+                    MaterialAppearanceInput {
+                        obj_desc: Some(obj_desc),
+                    },
+                )
+                .expect("an invalid optional palette composition should preserve the setup");
+            let ResolvedMaterialSource::Texture(texture) =
+                &appearance.parts[0].material_slots[0].material.source
+            else {
+                panic!("fixture material should be textured");
+            };
+            assert_eq!(texture.palette_id, Some(0x0400_0030));
+            assert_eq!(texture.palette_composite, None);
+        }
+    }
+
+    #[test]
+    fn missing_non_sentinel_palette_remains_an_error() {
+        use crate::MaterialAppearanceInput;
+
+        let dir = tempdir().expect("tempdir should be created");
+        write_setup_appearance_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let error = repository
+            .resolve_setup_appearance(
+                0x0200_0030,
+                MaterialAppearanceInput {
+                    obj_desc: Some(ObjDesc {
+                        palette_id: Some(0x0400_0030),
+                        sub_palettes: vec![SubPalette {
+                            sub_id: 0x0400_0099,
+                            offset: 0,
+                            num_colors: 2048,
+                        }],
+                        texture_changes: Vec::new(),
+                        anim_part_changes: Vec::new(),
+                    }),
+                },
+            )
+            .expect_err("a non-sentinel missing palette should remain a content error");
+
+        let resource = error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<ContentResourceError>())
+            .expect("missing palette identity should survive material assembly");
+        assert_eq!(resource.kind, ContentResourceErrorKind::Missing);
+        assert_eq!(resource.namespace, EOR_PORTAL_NAMESPACE);
+        assert_eq!(resource.file_id, 0x0400_0099);
+    }
+
+    #[test]
+    fn clothing_generated_obj_desc_matches_direct_setup_appearance_input() {
+        use crate::MaterialAppearanceInput;
+
+        let dir = tempdir().expect("tempdir should be created");
+        write_setup_appearance_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let clothing_obj_desc = repository
+            .build_clothing_obj_desc(0x1000_0040, 0x0200_0030, 7, 1.0)
+            .expect("clothing table should produce ObjDesc");
+        let direct_obj_desc = ObjDesc {
+            palette_id: None,
+            sub_palettes: vec![SubPalette {
+                sub_id: 0x0400_0042,
+                offset: 16,
+                num_colors: 24,
+            }],
+            texture_changes: vec![TextureMapChange {
+                part_index: 1,
+                old_texture: 0x0500_0032,
+                new_texture: 0x0500_0040,
+            }],
+            anim_part_changes: vec![AnimationPartChange {
+                part_index: 1,
+                part_id: 0x0100_0032,
+            }],
+        };
+
+        assert_eq!(clothing_obj_desc, direct_obj_desc);
+
+        let clothing_appearance = repository
+            .resolve_setup_appearance(
+                0x0200_0030,
+                MaterialAppearanceInput {
+                    obj_desc: Some(clothing_obj_desc),
+                },
+            )
+            .expect("clothing-generated appearance should resolve");
+        let direct_appearance = repository
+            .resolve_setup_appearance(
+                0x0200_0030,
+                MaterialAppearanceInput {
+                    obj_desc: Some(direct_obj_desc),
+                },
+            )
+            .expect("direct ObjDesc appearance should resolve");
+
+        assert_eq!(
+            clothing_appearance.appearance_key,
+            direct_appearance.appearance_key
+        );
+        assert_eq!(clothing_appearance.parts, direct_appearance.parts);
+        assert_eq!(
+            clothing_appearance.texture_changes,
+            direct_appearance.texture_changes
+        );
+        assert_eq!(
+            clothing_appearance.anim_part_changes,
+            direct_appearance.anim_part_changes
+        );
+    }
+
+    fn texture_id(source: &crate::ResolvedMaterialSource) -> Option<u32> {
+        match source {
+            crate::ResolvedMaterialSource::SolidColor(_) => None,
+            crate::ResolvedMaterialSource::Texture(texture) => Some(texture.surface_texture_id),
+        }
     }
 }

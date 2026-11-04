@@ -95,6 +95,14 @@ pub fn render_dynamic_pane(f: &mut Frame, data: &GameData, view: &ViewState, are
                 .map(|session| data.salvage_preview(&session.queued_items))
                 .unwrap_or_else(|| data.salvage_preview(&[]));
 
+            let preview = match preview {
+                Ok(preview) => preview,
+                Err(reason) => {
+                    f.render_widget(Paragraph::new(format!("  {reason}")), chunks[0]);
+                    return;
+                }
+            };
+
             let mut line_spans = vec![
                 Span::raw("  "),
                 Span::styled(
@@ -250,7 +258,15 @@ fn combat_controls_line(data: &GameData, _view: &ViewState) -> Option<Line<'stat
         AttackHeight::Low => "Low",
     };
 
-    let attack_activity = data.combat_runtime.attack_activity(data.combat_mode);
+    let attack_activity = match data.combat_status.state {
+        holtburger_core::ClientCombatControlState::Idle => None,
+        holtburger_core::ClientCombatControlState::Active
+        | holtburger_core::ClientCombatControlState::Retiring => Some(AttackActivity::Active),
+        holtburger_core::ClientCombatControlState::Charging
+        | holtburger_core::ClientCombatControlState::WaitingForReadiness => {
+            Some(AttackActivity::Ready)
+        }
+    };
 
     match data.combat_mode {
         CombatMode::Melee | CombatMode::Missile => {
@@ -337,7 +353,7 @@ mod tests {
         TARGET_HEALTH_BAR_WIDTH, attack_indicator_span, busy_title, combat_controls_line,
         format_target_line, format_world_info, health_bar_spans, render_dynamic_pane,
     };
-    use crate::pages::game::combat::{AttackActivity, CombatIssueState};
+    use crate::pages::game::combat::AttackActivity;
     use crate::pages::game::{GameData, ViewState};
     use crate::types::Interaction;
     use holtburger_common::Guid;
@@ -377,7 +393,7 @@ mod tests {
             "World".to_string(),
         );
         data.combat_mode = CombatMode::Missile;
-        data.combat_runtime.issue_state = CombatIssueState::Ready;
+        data.combat_status.state = holtburger_core::ClientCombatControlState::Charging;
         data.combat_controls.attack_height = AttackHeight::High;
         let view = ViewState {
             active_interaction: Some(Interaction::Targeting {
@@ -427,7 +443,7 @@ mod tests {
             "World".to_string(),
         );
         data.combat_mode = CombatMode::Melee;
-        data.combat_runtime.issue_state = CombatIssueState::InFlight;
+        data.combat_status.state = holtburger_core::ClientCombatControlState::Active;
         let view = ViewState {
             active_interaction: Some(Interaction::Targeting {
                 target_guid: Default::default(),
@@ -484,7 +500,7 @@ mod tests {
         data.account_name = "acct".to_string();
         data.party = Some(FellowshipState {
             name: "Raid Bus".to_string(),
-            leader_guid: Guid(0x50000001),
+            leader_guid: Some(Guid(0x50000001)),
             share_xp: true,
             even_share: false,
             open: false,
@@ -510,7 +526,7 @@ mod tests {
         data.account_name = "acct".to_string();
         data.party = Some(FellowshipState {
             name: "   ".to_string(),
-            leader_guid: Guid(0x50000001),
+            leader_guid: Some(Guid(0x50000001)),
             share_xp: true,
             even_share: false,
             open: false,

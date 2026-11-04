@@ -1,0 +1,228 @@
+import { parseClientLaunchArgument } from "../scripts/entry-paths.mjs";
+import { resolve } from "node:path";
+
+/** Session content, credentials, and endpoint resolved by Electron main. */
+export interface ClientLaunchConfiguration {
+	/** Session asset selection; null uses the application default. */
+	contentPath: string | null;
+	host: string;
+	port: number;
+	account: string;
+	password: string;
+	/** Optional developer override for the shared melee pursuit leash, in meters. */
+	meleeMaxChaseDistance?: number;
+}
+
+export interface ParsedClientLaunchArguments {
+	readonly startup: ClientLaunchConfiguration | null;
+	/** Direct sessions exit on disconnect/cancellation instead of returning to the picker. */
+	readonly noLauncher: boolean;
+	/** Disable update lookups for this process without changing persisted settings. */
+	readonly noUpdates: boolean;
+	/** Treat persisted renderer-owned settings as absent without disabling later saves. */
+	readonly ignorePersistedConfig: boolean;
+	/** Regenerate the map on first request, then reuse it for this host lifetime. */
+	readonly ignoreWorldMapCache: boolean;
+	/** Resolved path for the collection-format settings file. */
+	readonly settingsFile: string | null;
+	/** Arguments intentionally left for the renderer entry URL (for example --query). */
+	readonly rendererArguments: readonly string[];
+}
+
+/** Remove Electron's executable and, for unpackaged development, its application path. */
+export function electronApplicationArguments(
+	argv: readonly string[],
+	unpackaged: boolean,
+	applicationPath: string,
+): readonly string[] {
+	if (!unpackaged) return argv.slice(1);
+	const appIndex = argv.findIndex(
+		(argument, index) =>
+			index > 0 &&
+			!argument.startsWith("-") &&
+			resolve(argument) === resolve(applicationPath),
+	);
+	if (appIndex < 0)
+		throw new Error("Electron development application path is missing");
+	return argv.slice(appIndex + 1);
+}
+
+/** Identifies flags reserved for the client launch contract before entry-query construction. */
+export function isClientLaunchArgument(argument: string): boolean {
+	return parseClientLaunchArgument(argument) !== null;
+}
+
+const DEFAULT_HOST = "127.0.0.1";
+const DEFAULT_PORT = 9000;
+
+/**
+ * Resolves the TUI-shaped connection flags without copying credentials into an entry URL.
+ * `--server` wins over `--host`/`--port`; an explicitly embedded server port must be valid.
+ */
+export function parseClientLaunchArguments(
+	arguments_: readonly string[],
+): ParsedClientLaunchArguments {
+	let server: string | undefined;
+	let host = DEFAULT_HOST;
+	let port = DEFAULT_PORT;
+	let account: string | undefined;
+	let password = "";
+	let meleeMaxChaseDistance: number | undefined;
+	let ignorePersistedConfig = false;
+	let noLauncher = false;
+	let noUpdates = false;
+	let ignoreWorldMapCache = false;
+	let settingsFile: string | null = null;
+	const rendererArguments: string[] = [];
+	const seen = new Set<string>();
+
+	for (let index = 0; index < arguments_.length; index += 1) {
+		const argument = arguments_[index];
+		const parsed = parseClientLaunchArgument(argument);
+		if (parsed === null) {
+			rendererArguments.push(argument);
+			continue;
+		}
+		const { name } = parsed;
+		if (seen.has(name))
+			throw new Error(
+				`client launch argument --${name} was specified more than once`,
+			);
+		seen.add(name);
+		if (name === "no-launcher") {
+			if (parsed.value !== undefined)
+				throw new Error("--no-launcher does not accept a value");
+			noLauncher = true;
+			continue;
+		}
+		if (name === "no-updates") {
+			if (parsed.value !== undefined)
+				throw new Error("--no-updates does not accept a value");
+			noUpdates = true;
+			continue;
+		}
+		if (name === "ignore-config") {
+			if (parsed.value !== undefined)
+				throw new Error(
+					"client launch argument --ignore-config/-i does not accept a value",
+				);
+			ignorePersistedConfig = true;
+			continue;
+		}
+
+		if (name === "ignore-world-map-cache") {
+			if (parsed.value !== undefined)
+				throw new Error("--ignore-world-map-cache does not accept a value");
+			ignoreWorldMapCache = true;
+			continue;
+		}
+
+		let value = parsed.value;
+		if (value === undefined) {
+			value = arguments_[index + 1];
+			if (value === undefined || value.startsWith("-"))
+				throw new Error(`client launch argument --${name} requires a value`);
+			index += 1;
+		}
+		if (value.length === 0 && name !== "password")
+			throw new Error(`client launch argument --${name} cannot be empty`);
+
+		switch (name) {
+			case "settings-file":
+				settingsFile = resolve(value);
+				break;
+			case "server":
+				server = value;
+				break;
+			case "host":
+				host = value;
+				break;
+			case "port":
+				port = parsePort(value, "--port");
+				break;
+			case "account":
+				account = value;
+				break;
+			case "password":
+				password = value;
+				break;
+			case "melee-max-chase-distance":
+				meleeMaxChaseDistance = parsePositiveFinite(
+					value,
+					"--melee-max-chase-distance",
+				);
+				break;
+		}
+	}
+
+	const connectionSupplied = [
+		"server",
+		"host",
+		"port",
+		"account",
+		"password",
+		"melee-max-chase-distance",
+	].some((name) => seen.has(name));
+	if (noLauncher && account === undefined)
+		throw new Error("--no-launcher requires --account");
+	if (connectionSupplied && account === undefined)
+		throw new Error("client mode requires --account");
+	if (server !== undefined) {
+		const resolved = parseServer(server, port);
+		host = resolved.host;
+		port = resolved.port;
+	}
+	return {
+		startup:
+			account === undefined
+				? null
+				: {
+						contentPath: null,
+						host,
+						port,
+						account,
+						password,
+						...(meleeMaxChaseDistance === undefined
+							? {}
+							: { meleeMaxChaseDistance }),
+					},
+		ignorePersistedConfig,
+		noLauncher,
+		noUpdates,
+		ignoreWorldMapCache,
+		settingsFile,
+		rendererArguments,
+	};
+}
+
+function parseServer(
+	value: string,
+	defaultPort: number,
+): { host: string; port: number } {
+	const separator = value.lastIndexOf(":");
+	if (separator === -1) return { host: value, port: defaultPort };
+	const host = value.slice(0, separator);
+	if (host.length === 0)
+		throw new Error(`client launch argument --server has an empty host`);
+	return { host, port: parsePort(value.slice(separator + 1), "--server") };
+}
+
+function parsePort(value: string, argumentName: string): number {
+	if (!/^[0-9]+$/.test(value))
+		throw new Error(
+			`client launch argument ${argumentName} has an invalid port`,
+		);
+	const port = Number(value);
+	if (!Number.isSafeInteger(port) || port < 1 || port > 65_535)
+		throw new Error(
+			`client launch argument ${argumentName} has an invalid port`,
+		);
+	return port;
+}
+
+function parsePositiveFinite(value: string, argumentName: string): number {
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed <= 0)
+		throw new Error(`${argumentName} must be a finite positive number`);
+	return parsed;
+}

@@ -245,51 +245,18 @@ fn acquiring_pack_recursively_tracks_known_contents() {
 }
 
 #[test]
-fn equip_weapon_in_combat_exits_peace_then_reenters() {
+fn equip_request_preserves_explicit_target_for_core() {
     let player_guid = Guid(0x50000001);
     let weapon_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
     state.data.combat_mode = CombatMode::Melee;
-
-    let mut weapon = Entity::new(weapon_guid, "Sword".to_string(), WorldPosition::default());
-    weapon.set_int_prop(
-        PropertyInt::ValidLocations,
-        holtburger_protocol::messages::EquipMask::MELEE_WEAPON.bits() as i32,
-    );
-    state.data.entities.insert(weapon_guid, weapon.clone());
-
-    let start = state
-        .handle_action(AppAction::Equip { guid: weapon_guid })
+    let result = state
+        .handle_action(AppAction::EquipInSlot {
+            guid: weapon_guid,
+            slot: holtburger_core::client::types::TargetSlot::OffHand,
+        })
         .unwrap();
-    assert!(matches!(
-        start.commands.first(),
-        Some(ClientCommand::SetCombatMode(CombatMode::NonCombat))
-    ));
-    assert!(is_weapon_swap_active(&state));
-
-    let peace = state.handle_view_event(ClientViewEvent::CombatModeUpdated {
-        mode: CombatMode::NonCombat,
-    });
-    assert!(matches!(
-        peace.commands.first(),
-        Some(ClientCommand::GetAndWield { item, slot: None }) if *item == weapon_guid
-    ));
-
-    weapon.set_iid_prop(
-        holtburger_common::properties::PropertyInstanceId::Wielder,
-        player_guid,
+    assert!(
+        matches!(result.commands.as_slice(), [ClientCommand::GetAndWield { item, slot: Some(holtburger_core::client::types::TargetSlot::OffHand) }] if *item == weapon_guid)
     );
-    weapon.set_int_prop(
-        PropertyInt::CurrentWieldedLocation,
-        holtburger_protocol::messages::EquipMask::MELEE_WEAPON.bits() as i32,
-    );
-    let finish = state.handle_view_event(ClientViewEvent::EntityReplaced {
-        entity: Box::new(weapon),
-    });
-
-    assert!(matches!(
-        finish.commands.first(),
-        Some(ClientCommand::SetCombatMode(CombatMode::Melee))
-    ));
-    assert!(!is_weapon_swap_active(&state));
 }

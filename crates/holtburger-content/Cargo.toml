@@ -8,10 +8,16 @@ repository.workspace = true
 
 [dependencies]
 holtburger-common.workspace = true
+holtburger-weenie-catalog.workspace = true
+serde.workspace = true
 holtburger-dat.workspace = true
 anyhow.workspace = true
 binrw.workspace = true
 log.workspace = true
+directories.workspace = true
+thiserror.workspace = true
+zstd.workspace = true
+rmp-serde.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

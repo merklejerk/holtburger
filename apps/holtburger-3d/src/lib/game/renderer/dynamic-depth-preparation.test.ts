@@ -1,0 +1,356 @@
+import { describe, expect, it, vi } from "vitest";
+import { Mat4, Vec3 } from "../math/types";
+import { createObjectGeometryKey } from "../geometry/types";
+import type { SceneNodeId } from "../scene";
+import type { DynamicAppearance } from "../systems/dynamic-appearance";
+import { TextureWrapMode } from "../textures/types";
+import { compileDynamicIndexBatches } from "./dynamic-index-batches";
+import {
+	compileDynamicPartRangeGroups,
+	summarizeDynamicRangeAdmission,
+} from "./object-rendering-policy";
+import { DynamicDepthPreparations } from "./dynamic-depth-preparation";
+
+const NODE_ID = "scene-node:selection-test" as SceneNodeId;
+
+function fixture(
+	orderingPerPart: readonly DynamicAppearance["ranges"][number]["ordering"][] = [
+		"opaque",
+		"opaque",
+		"opaque",
+		"opaque",
+	],
+) {
+	const appearance: DynamicAppearance = {
+		materials: [
+			{
+				source: {
+					id: "material:test",
+					kind: "solid-color",
+					color: [1, 1, 1, 1],
+					rawSurfaceFlags: 0,
+					translucency: 0,
+					luminosity: 0,
+					diffuseScale: 1,
+				},
+				detailRole: null,
+				textures: { base: null, palette: null },
+				sampler: { wrap: TextureWrapMode.Clamp },
+				palettedClipMap: false,
+			},
+		],
+		ranges: [0, 1, 2, 3].map((partSelector) => ({
+			transparentSort: { key: "fixture-order", center: Vec3.zero() },
+			partSelector,
+			materialSelector: 0,
+			indexStart: partSelector * 3,
+			indexCount: 3,
+			ordering: orderingPerPart[partSelector] ?? "opaque",
+			polygon: {
+				cullFace: partSelector === 3 ? "front" : "back",
+				stippled: false,
+			},
+			retailVisibility:
+				partSelector === 2 ? "degrade-hidden" : "normally-visible",
+		})),
+	};
+	const plan = compileDynamicIndexBatches<WebGLTexture, WebGLSampler>(
+		new Uint32Array(12),
+		appearance,
+		[
+			{
+				material: { kind: "solid-color", color: [1, 1, 1, 1] },
+				alphaTest: 0,
+				luminosity: 0,
+				palettedClipMap: false,
+				wrapRepeat: false,
+			},
+		],
+	);
+	const parts = [1, 0.4, 1, 1].map((a) => ({
+		renderState: { translucency: 0, textureVelocity: [0, 0] as const },
+		frameInstance: {
+			color: { a, r: 1, g: 1, b: 1 },
+			sourceToLandblock: Mat4.identity(),
+		},
+	}));
+	const visible = {
+		landblockId: "0x0000ffff" as const,
+		renderScopes: [{ kind: "outdoor" as const }],
+		visual: {
+			layout: { key: createObjectGeometryKey("selection-test") },
+			appearance,
+			parts,
+		},
+	};
+	const read = vi.fn(() => visible);
+	const pass = new DynamicDepthPreparations(read, () => ({
+		kind: "drawable",
+		table: {} as WebGLTexture,
+		indexBuffer: {} as WebGLBuffer,
+		plan,
+		rangeGroupsByPart: compileDynamicPartRangeGroups(appearance),
+	}));
+	return { pass, read, parts, appearance };
+}
+
+describe("DynamicDepthPreparations", () => {
+	it("counts split source cohorts once and reads opacity changes from compiled part facts", () => {
+		const { appearance, parts } = fixture();
+		const first = appearance.ranges[0];
+		if (first === undefined)
+			throw new Error("Fixture requires a source range.");
+		const compiled = compileDynamicPartRangeGroups({
+			...appearance,
+			ranges: [
+				{ ...first, ordering: "alpha-test" },
+				{ ...first, ordering: "opaque", retailVisibility: "degrade-hidden" },
+			],
+		});
+		expect(summarizeDynamicRangeAdmission(compiled, parts, false)).toEqual({
+			sourceRangeGroupCount: 1,
+			hasMaterialFreeShadowGeometry: false,
+		});
+		expect(summarizeDynamicRangeAdmission(compiled, parts, true)).toEqual({
+			sourceRangeGroupCount: 1,
+			hasMaterialFreeShadowGeometry: true,
+		});
+		for (const part of parts) part.frameInstance.color.a = 0;
+		expect(summarizeDynamicRangeAdmission(compiled, parts, true)).toEqual({
+			sourceRangeGroupCount: 0,
+			hasMaterialFreeShadowGeometry: false,
+		});
+		for (const part of parts) part.frameInstance.color.a = 0.25;
+		expect(summarizeDynamicRangeAdmission(compiled, parts, true)).toEqual({
+			sourceRangeGroupCount: 1,
+			hasMaterialFreeShadowGeometry: true,
+		});
+	});
+
+	it("rejects source cohorts that mix geometry-local parts", () => {
+		const { appearance } = fixture();
+		const first = appearance.ranges[0];
+		if (first === undefined)
+			throw new Error("Fixture requires a source range.");
+		expect(() =>
+			compileDynamicPartRangeGroups({
+				...appearance,
+				ranges: [first, { ...first, partSelector: first.partSelector + 1 }],
+			}),
+		).toThrow("Dynamic source cohort spans multiple parts.");
+	});
+
+	it("derives grounding geometry admission from logical ranges with the exact depth policy", () => {
+		for (const ordering of [
+			"opaque",
+			"alpha-test",
+			"transparent",
+			"additive",
+		] as const) {
+			for (const opacity of [0, 0.25, 1]) {
+				for (const showHidden of [false, true]) {
+					const { pass, parts, appearance } = fixture([
+						ordering,
+						ordering,
+						ordering,
+						ordering,
+					]);
+					for (const part of parts) part.frameInstance.color.a = opacity;
+					const admission = summarizeDynamicRangeAdmission(
+						compileDynamicPartRangeGroups(appearance),
+						parts,
+						showHidden,
+					);
+					expect(admission.hasMaterialFreeShadowGeometry).toBe(
+						pass.prepare(NODE_ID, showHidden) !== null,
+					);
+					expect(admission.sourceRangeGroupCount).toBe(
+						opacity === 0 ? 0 : showHidden ? 4 : 3,
+					);
+				}
+			}
+		}
+		const { appearance, parts } = fixture();
+		expect(
+			summarizeDynamicRangeAdmission(
+				compileDynamicPartRangeGroups({ ...appearance, ranges: [] }),
+				parts,
+				false,
+			),
+		).toEqual({
+			sourceRangeGroupCount: 0,
+			hasMaterialFreeShadowGeometry: false,
+		});
+		const first = appearance.ranges[0];
+		if (first === undefined) throw new Error("Fixture requires a range.");
+		expect(() =>
+			summarizeDynamicRangeAdmission(
+				compileDynamicPartRangeGroups({
+					...appearance,
+					ranges: [
+						first,
+						{
+							...first,
+							transparentSort: { ...first.transparentSort },
+							partSelector: parts.length,
+						},
+					],
+				}),
+				parts,
+				false,
+			),
+		).toThrow("Dynamic appearance references a missing part.");
+		// Cohort identity is shared when several source ranges came from the same authored draw.
+		expect(
+			summarizeDynamicRangeAdmission(
+				compileDynamicPartRangeGroups({
+					...appearance,
+					ranges: [first, { ...first }],
+				}),
+				parts,
+				false,
+			),
+		).toEqual({
+			sourceRangeGroupCount: 1,
+			hasMaterialFreeShadowGeometry: true,
+		});
+	});
+
+	it("coalesces physical spans while preserving culling, retail visibility, and partial fades", () => {
+		const { pass, read } = fixture();
+		const selected = pass.prepare(NODE_ID, false);
+		if (selected === null) throw new Error("Fixture requires rigid selection.");
+		expect(selected.ranges).toEqual([
+			{ indexStart: 0, indexCount: 6, cullFace: "back" },
+			{ indexStart: 9, indexCount: 3, cullFace: "front" },
+		]);
+		expect(selected.selectedPartCount).toBe(3);
+		expect(selected.selectedTriangleCount).toBe(3);
+		expect(pass.prepare(NODE_ID, false)).toBe(selected);
+		expect(read).toHaveBeenCalledTimes(1);
+		const records = selected.ranges;
+		const span = records[0];
+		pass.beginFrame();
+		expect(records).toHaveLength(0);
+		const debug = pass.prepare(NODE_ID, true);
+		if (debug === null) throw new Error("Fixture requires rigid selection.");
+		expect(debug.ranges).toBe(records);
+		expect(debug.ranges[0]).toBe(span);
+		expect(debug.ranges).toEqual([
+			{ indexStart: 0, indexCount: 9, cullFace: "back" },
+			{ indexStart: 9, indexCount: 3, cullFace: "front" },
+		]);
+		expect(debug.selectedPartCount).toBe(4);
+		pass.beginFrame();
+	});
+	it("does not merge across a fully hidden part and excludes it from exact work", () => {
+		const { pass, parts } = fixture();
+		const faded = parts[1];
+		if (faded === undefined) throw new Error("Fixture requires a faded part.");
+		faded.frameInstance.color.a = 0;
+		const selected = pass.prepare(NODE_ID, true);
+		if (selected === null) throw new Error("Fixture requires rigid selection.");
+		expect(
+			selected.ranges.map(({ indexStart, indexCount }) => [
+				indexStart,
+				indexCount,
+			]),
+		).toEqual([
+			[0, 3],
+			[6, 3],
+			[9, 3],
+		]);
+		expect(selected.selectedPartCount).toBe(3);
+		expect(selected.selectedTriangleCount).toBe(3);
+		pass.beginFrame();
+	});
+	it("retires prior frame references and caches hidden roots without reading appearance resources", () => {
+		const read = vi.fn(() => null);
+		const pass = new DynamicDepthPreparations(read, () => {
+			throw new Error("Hidden root has no appearance.");
+		});
+		expect(pass.prepare(NODE_ID, false)).toBeNull();
+		expect(pass.prepare(NODE_ID, false)).toBeNull();
+		expect(read).toHaveBeenCalledTimes(1);
+		pass.beginFrame();
+		expect(pass.prepare(NODE_ID, false)).toBeNull();
+		expect(read).toHaveBeenCalledTimes(2);
+	});
+	it("retains independent root spans until frame reset", () => {
+		const { pass, parts } = fixture();
+		const first = pass.prepare(NODE_ID, true);
+		if (first === null) throw new Error("Fixture requires depth geometry.");
+		const saved = first.ranges.map((range) => ({ ...range }));
+		for (const part of parts) part.frameInstance.color.a = 0;
+		expect(pass.prepare("scene-node:other" as SceneNodeId, true)).toBeNull();
+		expect(first.ranges).toEqual(saved);
+		pass.beginFrame();
+		expect(first.ranges).toHaveLength(0);
+	});
+	it("excludes non-opaque ranges (alpha-test, transparent, additive) from depth preparation", () => {
+		const { pass } = fixture([
+			"opaque",
+			"alpha-test",
+			"transparent",
+			"additive",
+		]);
+		const selected = pass.prepare(NODE_ID, false);
+		if (selected === null) throw new Error("Fixture requires rigid selection.");
+		expect(selected.ranges).toEqual([
+			{ indexStart: 0, indexCount: 3, cullFace: "back" },
+		]);
+		expect(selected.selectedPartCount).toBe(1);
+		expect(selected.selectedTriangleCount).toBe(1);
+	});
+	it("returns null when an appearance has no opaque ranges", () => {
+		const { pass } = fixture([
+			"alpha-test",
+			"alpha-test",
+			"transparent",
+			"additive",
+		]);
+		expect(pass.prepare(NODE_ID, false)).toBeNull();
+		expect(pass.prepare(NODE_ID, true)).toBeNull();
+	});
+	it("retains non-opaque ranges for selection mask preparation", () => {
+		const { pass } = fixture([
+			"opaque",
+			"alpha-test",
+			"transparent",
+			"additive",
+		]);
+		const selected = pass.prepareSelection(NODE_ID, false);
+		if (selected === null) throw new Error("Fixture requires selection.");
+		expect(selected.ranges).toEqual([
+			{ indexStart: 0, indexCount: 6, cullFace: "back" },
+			{ indexStart: 9, indexCount: 3, cullFace: "front" },
+		]);
+		expect(selected.selectedPartCount).toBe(3);
+	});
+	it("maintains independent caches for shadow depth and selection mask on the same node", () => {
+		const { pass } = fixture([
+			"opaque",
+			"transparent",
+			"transparent",
+			"transparent",
+		]);
+		const shadow = pass.prepare(NODE_ID, false);
+		const selection = pass.prepareSelection(NODE_ID, false);
+		expect(shadow?.selectedPartCount).toBe(1);
+		expect(selection?.selectedPartCount).toBe(3);
+	});
+	it("retains fully transparent parts for selection while omitting them from shadows", () => {
+		const { pass, parts } = fixture();
+		for (const part of parts) part.frameInstance.color.a = 0;
+		expect(pass.prepare(NODE_ID, false)).toBeNull();
+		const selection = pass.prepareSelection(NODE_ID, false);
+		expect(selection?.ranges).toEqual([
+			{ indexStart: 0, indexCount: 6, cullFace: "back" },
+			{ indexStart: 9, indexCount: 3, cullFace: "front" },
+		]);
+		expect(selection?.selectedPartCount).toBe(3);
+		expect(selection?.selectedTriangleCount).toBe(3);
+		expect(pass.prepareSelection(NODE_ID, false)).toBe(selection);
+		pass.beginFrame();
+	});
+});

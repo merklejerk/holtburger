@@ -77,11 +77,15 @@ impl ProtocolUnpack for GameMessage {
                 Some(GameMessage::CharacterEnterWorldServerReady)
             }
             GameOpcode::DddInterrogation => Some(GameMessage::DddInterrogation),
+            GameOpcode::DddEndDdd => Some(GameMessage::DddEndDdd),
             GameOpcode::DddInterrogationResponse => Some(GameMessage::DddInterrogationResponse(
                 Box::new(DddInterrogationResponseData::unpack(data, offset)?),
             )),
             GameOpcode::CharacterError => Some(GameMessage::CharacterError(Box::new(
                 CharacterErrorData::unpack(data, offset)?,
+            ))),
+            GameOpcode::AccountBanned => Some(GameMessage::AccountBanned(Box::new(
+                AccountBannedData::unpack(data, offset)?,
             ))),
             GameOpcode::AccountBoot => Some(GameMessage::AccountBoot(Box::new(
                 BootAccountData::unpack(data, offset)?,
@@ -186,8 +190,8 @@ impl ProtocolUnpack for GameMessage {
             GameOpcode::Sound => Some(GameMessage::PlaySound(Box::new(PlaySoundData::unpack(
                 data, offset,
             )?))),
-            GameOpcode::PlayEffect => Some(GameMessage::PlayEffect(Box::new(
-                PlayEffectData::unpack(data, offset)?,
+            GameOpcode::PlayScript => Some(GameMessage::PlayScript(Box::new(
+                PlayScriptData::unpack(data, offset)?,
             ))),
             GameOpcode::PrivateUpdatePropertyInt => Some(GameMessage::PrivateUpdatePropertyInt(
                 Box::new(PrivateUpdatePropertyIntData::unpack(data, offset)?),

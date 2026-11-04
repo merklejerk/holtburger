@@ -19,6 +19,8 @@ Protocol structs are grouped by domain to keep files logically separated and man
 - `magic`: Spellcasting requests, spellbook synchronization, and enchantment indicators.
 - `movement`: Local XYZ/heading position updates, multi-cell teleports, and physical jump vectors.
 - `object`: "Semantic Deltas" representing spawning entities, updating float/int properties, or despawning entities out of local distance.
+- `contracts`: tracker tables/deltas and abandonment; typed stages preserve a wire-safe counter and remaining-duration fields.
+- `housing`: lossless crystal/home/payment contracts, implicit-home management actions, versioned HAR guest tables, and available-area search.
 
 ### 3. Serialization Layer ([src/messages/utils.rs](src/messages/utils.rs))
 Every message implements the `ProtocolPack` and `ProtocolUnpack` traits backed by the `binrw` crate parser logic.
@@ -29,7 +31,7 @@ Every message implements the `ProtocolPack` and `ProtocolUnpack` traits backed b
 ### Testing Strategy (The "Gold Standard")
 Because the protocol is purely a serialization problem, we use a 100%-parity test loop driven by actual server traffic instead of guessing. Do not guess packet formations natively!
 
-1. Generate Hex Capture: Sniff a true representation packet from an operating local ACE Server using the `debug-harness` or a pcap tool.
+1. Obtain a verified wire payload. Optional reference provisioning and capture instructions belong in `local/AGENTS.md`; see [FIXTURES.md](FIXTURES.md) for the fixture workflow.
 2. Store the Buffer: Place it as a text/hex file into `tests/fixtures/`.
 3. Assert Perfect Translation: Write a test inside the relevant module ensuring that `YourStruct::unpack(&hex_bytes)` translates correctly and `YourStruct.pack()` emits the exact identical hex string back.
 

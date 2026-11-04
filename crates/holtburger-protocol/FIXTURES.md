@@ -6,25 +6,14 @@ This document defines the canonical workflow for generating, storing, and identi
 
 To ensure bit-perfect parity with the official Asheron's Call protocol (as implemented by the ACE Server), follow this four-step loop:
 
-### Step 1: Generate (ACE Server)
-Add or locate a `[TestMethod]` in `Source/ACE.Server.Tests/SyntheticProtocolTests.cs` within the `ACE/` submodule. This test should use the `ACE.Entity.Serialization` logic to generate a known payload and print its hex string to the console.
+### Step 1: Obtain a verified payload
 
-**Example Test:**
-```csharp
-[TestMethod]
-public void Dump_PlayerTeleport() {
-    var message = new GameMessagePrivateUpdatePosition {
-        // ... set properties ...
-    };
-    Console.WriteLine(BitConverter.ToString(message.Pack()).Replace("-", ""));
-}
-```
+Use a payload whose wire behavior has been established from reference evidence.
+Reference provisioning and server-side generation instructions belong in the
+optional machine-local `local/AGENTS.md`.
 
 ### Step 2: Export
-Run the test and capture the hex output:
-```bash
-dotnet test ACE/Source/ACE.Server.Tests --filter "Method=Dump_PlayerTeleport" --logger "console;verbosity=detailed"
-```
+
 Convert this hex to a binary file. You can use `printf` or a small script:
 ```bash
 printf '\xDE\xAD\xBE\xEF...' > crates/holtburger-protocol/tests/fixtures/player_teleport.bin

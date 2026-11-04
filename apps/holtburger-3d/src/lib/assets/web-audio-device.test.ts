@@ -1,0 +1,338 @@
+import { describe, expect, it, vi } from "vitest";
+import type { DatAssetId } from "../game/game-types";
+import { WebAudioDevice, type AudioAssetSource } from "./web-audio-device";
+
+const SOUND = "0x0a000207" as DatAssetId;
+
+interface FakeParam {
+	value: number;
+	setTargetAtTime: ReturnType<typeof vi.fn>;
+	cancelAndHoldAtTime: ReturnType<typeof vi.fn>;
+	linearRampToValueAtTime: ReturnType<typeof vi.fn>;
+}
+
+interface FakeSourceNode {
+	start: ReturnType<typeof vi.fn>;
+	stop: ReturnType<typeof vi.fn>;
+	onended: (() => void) | null;
+}
+
+function fakeContext() {
+	const started: FakeSourceNode[] = [];
+	const stopped: unknown[] = [];
+	/** Gain params in creation order: shared output, then voice, left, right per voice. */
+	const gains: FakeParam[] = [];
+	const node = () => ({
+		connect: vi.fn(function (this: unknown, next: unknown) {
+			return next;
+		}),
+		disconnect: vi.fn(),
+	});
+	const gainNodes: ReturnType<typeof node>[] = [];
+	const param = (record: FakeParam[]): FakeParam => {
+		const created: FakeParam = {
+			setTargetAtTime: vi.fn(),
+			cancelAndHoldAtTime: vi.fn(),
+			linearRampToValueAtTime: vi.fn(),
+			value: 0,
+		};
+		record.push(created);
+		return created;
+	};
+	const context = {
+		createBufferSource: () => {
+			const source = {
+				...node(),
+				buffer: null as AudioBuffer | null,
+				onended: null as (() => void) | null,
+				start: vi.fn((): void => {
+					started.push(source);
+				}),
+				stop: vi.fn((): void => {
+					stopped.push(source);
+				}),
+			};
+			return source;
+		},
+		createChannelMerger: () => node(),
+		createGain: () => {
+			const created = { ...node(), gain: param(gains) };
+			gainNodes.push(created);
+			return created;
+		},
+		currentTime: 42,
+		decodeAudioData: async () => ({}) as AudioBuffer,
+		destination: {},
+	} as unknown as AudioContext;
+	return { context, gains, gainNodes, started, stopped };
+}
+
+/** Per-voice view over the flat creation-ordered gain params. */
+function voiceGains(gains: FakeParam[], voiceIndex: number) {
+	const offset = 1 + voiceIndex * 3;
+	const [gain, left, right] = gains.slice(offset, offset + 3);
+	if (!gain || !left || !right)
+		throw new Error("Voice gains were not constructed");
+	return { gain, left, right };
+}
+
+/** Retail's far-channel shadow at full pan: 15 dB down. */
+const FULL_PAN_SHADOW = 10 ** (-15 / 20);
+
+const SMOOTHING = 0.02;
+/** Identity contour: tests reason in retail-linear gain unless shaping is the subject. */
+const LINEAR = 1;
+
+function fakeSource(): AudioAssetSource & { loads: DatAssetId[] } {
+	const loads: DatAssetId[] = [];
+	return {
+		destroy: () => {},
+		loads,
+		loadAudio: async (soundId) => {
+			loads.push(soundId);
+			return new ArrayBuffer(8);
+		},
+	};
+}
+
+describe("WebAudioDevice", () => {
+	it("contains a media decoder source rejection until explicit retry", async () => {
+		const { context } = fakeContext();
+		const source = fakeSource();
+		const cause = new DOMException("Invalid wave", "EncodingError");
+		const decode = vi
+			.spyOn(context, "decodeAudioData")
+			.mockRejectedValueOnce(cause);
+		const device = new WebAudioDevice(context, source, SMOOTHING, LINEAR);
+		await expect(device.prepare(SOUND)).rejects.toMatchObject({
+			cause,
+			failure: { resource: { kind: "invalid", file_id: Number(SOUND) } },
+		});
+		await expect(device.prepare(SOUND)).rejects.toThrow("Invalid wave");
+		expect(source.loads).toEqual([SOUND]);
+		expect(decode).toHaveBeenCalledTimes(1);
+		device.retryFailed();
+		await device.prepare(SOUND);
+		expect(source.loads).toEqual([SOUND, SOUND]);
+		expect(device.playOneShot(SOUND, 1, 0)).not.toBeNull();
+		device.destroy();
+	});
+	it("installs the initial mix before playback and ramps live output to exact silence", async () => {
+		const { context, gains, gainNodes } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
+		const [output] = gains;
+		if (!output) throw new Error("Output gain missing");
+		device.setOutputVolume(0);
+		expect(output.value).toBe(0);
+		await device.prepare(SOUND);
+		device.playOneShot(SOUND, 0.5, 0);
+		device.setOutputVolume(0.25);
+		expect(output.cancelAndHoldAtTime).toHaveBeenLastCalledWith(
+			context.currentTime,
+		);
+		expect(output.linearRampToValueAtTime).toHaveBeenLastCalledWith(
+			0.25,
+			context.currentTime + SMOOTHING,
+		);
+		device.setOutputVolume(0);
+		expect(output.linearRampToValueAtTime).toHaveBeenLastCalledWith(
+			0,
+			context.currentTime + SMOOTHING,
+		);
+		expect(voiceGains(gains, 0).gain.value).toBe(0.5);
+		device.playOneShot(SOUND, 0.2, 0);
+		expect(voiceGains(gains, 1).gain.value).toBe(0.2);
+		const [outputNode] = gainNodes;
+		if (!outputNode) throw new Error("Output node missing");
+		expect(outputNode.connect).toHaveBeenCalledWith(context.destination);
+		device.destroy();
+		device.destroy();
+		expect(outputNode.disconnect).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([NaN, Infinity, -0.01, 1.01])(
+		"rejects invalid output volume %s",
+		(volume) => {
+			const { context } = fakeContext();
+			const device = new WebAudioDevice(
+				context,
+				fakeSource(),
+				SMOOTHING,
+				LINEAR,
+			);
+			expect(() => device.setOutputVolume(volume)).toThrow(
+				"Output volume must be finite and within [0, 1]",
+			);
+		},
+	);
+
+	it("refuses an undecoded sound until the audio owner prepares it", async () => {
+		const { context, started } = fakeContext();
+		const source = fakeSource();
+		const device = new WebAudioDevice(context, source, SMOOTHING, LINEAR);
+
+		// The audio owner decides whether and when to replay a cold sound.
+		expect(device.playOneShot(SOUND, 1, 0)).toBeNull();
+		expect(started).toHaveLength(0);
+
+		await device.prepare(SOUND);
+		expect(device.getPreparedSourceBytes?.(SOUND)).toBe(8);
+		expect(device.playOneShot(SOUND, 1, 0)).not.toBeNull();
+		expect(started).toHaveLength(1);
+	});
+
+	it("keeps every concurrent prepare pending until decoding completes", async () => {
+		const { context, started } = fakeContext();
+		let complete: (bytes: ArrayBuffer) => void = () => {
+			throw new Error("Decode gate not initialized");
+		};
+		const bytes = new Promise<ArrayBuffer>((resolve) => {
+			complete = resolve;
+		});
+		const device = new WebAudioDevice(
+			context,
+			{ destroy() {}, loadAudio: () => bytes },
+			SMOOTHING,
+			LINEAR,
+		);
+		const first = device.prepare(SOUND);
+		const second = device.prepare(SOUND);
+		expect(second).toBe(first);
+		expect(device.playOneShot(SOUND, 1, 0)).toBeNull();
+		complete(new ArrayBuffer(8));
+		await second;
+		expect(device.playOneShot(SOUND, 1, 0)).not.toBeNull();
+		expect(started).toHaveLength(1);
+		device.destroy();
+	});
+
+	it("decodes each sound exactly once across concurrent requests", async () => {
+		const { context } = fakeContext();
+		const source = fakeSource();
+		const device = new WebAudioDevice(context, source, SMOOTHING, LINEAR);
+
+		await Promise.all([device.prepare(SOUND), device.prepare(SOUND)]);
+		await device.prepare(SOUND);
+
+		expect(source.loads).toEqual([SOUND]);
+	});
+
+	it("tolerates stopping a voice that already ended", async () => {
+		const { context } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
+		await device.prepare(SOUND);
+		const voice = device.playOneShot(SOUND, 1, 0)!;
+
+		voice.stop();
+		// Stopping twice must not throw: a finished voice is the normal case.
+		expect(() => voice.stop()).not.toThrow();
+	});
+
+	it("steers a live voice through setTargetAtTime rather than stepping the params", async () => {
+		const { context, gains } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
+		await device.prepare(SOUND);
+		const voice = device.playOneShot(SOUND, 1, 0)!;
+
+		voice.setPlacement(0.5, -0.25);
+
+		const { left, gain, right } = voiceGains(gains, 0);
+		// Initial values are set directly (the signal starts there); updates must glide.
+		expect(gain.value).toBe(1);
+		expect(gain.setTargetAtTime).toHaveBeenCalledWith(0.5, 42, SMOOTHING);
+		// Pan -0.25 puts the source to the left: left ear untouched, right ear shadowed.
+		expect(left.setTargetAtTime).toHaveBeenCalledWith(1, 42, SMOOTHING);
+		expect(right.setTargetAtTime).toHaveBeenCalledWith(
+			10 ** ((-15 * 0.25) / 20),
+			42,
+			SMOOTHING,
+		);
+	});
+
+	it("plays a centred sound at full gain in both channels, as retail does", async () => {
+		// RETAIL QUIRK: DirectSound pan attenuates the far channel only; centred means no
+		// attenuation anywhere, not the -3 dB per ear an equal-power panner would apply.
+		const { context, gains } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
+		await device.prepare(SOUND);
+		device.playOneShot(SOUND, 0.8, 0)!;
+
+		const { left, gain, right } = voiceGains(gains, 0);
+		expect(gain.value).toBeCloseTo(0.8);
+		expect(left.value).toBe(1);
+		expect(right.value).toBe(1);
+	});
+
+	it("keeps the far ear at a 15 dB shadow at full pan instead of silencing it", async () => {
+		const { context, gains } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
+		await device.prepare(SOUND);
+		device.playOneShot(SOUND, 1, 1)!;
+
+		const { left, right } = voiceGains(gains, 0);
+		// Full right pan: right ear untouched, left ear shadowed but never silent.
+		expect(right.value).toBe(1);
+		expect(left.value).toBeCloseTo(FULL_PAN_SHADOW);
+		expect(left.value).toBeGreaterThan(0.17);
+	});
+
+	it("ignores placement on a voice that ended or was stopped", async () => {
+		const { context, gains, started } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
+		await device.prepare(SOUND);
+
+		const ended = device.playOneShot(SOUND, 1, 0)!;
+		started[0]!.onended?.();
+		ended.setPlacement(0.5, 0);
+
+		const halted = device.playOneShot(SOUND, 1, 0)!;
+		halted.stop();
+		halted.setPlacement(0.5, 0);
+
+		for (const gain of gains) {
+			expect(gain.setTargetAtTime).not.toHaveBeenCalled();
+		}
+	});
+
+	it("rejects a non-positive smoothing constant", () => {
+		const { context } = fakeContext();
+		expect(() => new WebAudioDevice(context, fakeSource(), 0, LINEAR)).toThrow(
+			"positive duration",
+		);
+	});
+
+	it("rejects a non-positive loudness curve exponent", () => {
+		const { context } = fakeContext();
+		expect(
+			() => new WebAudioDevice(context, fakeSource(), SMOOTHING, 0),
+		).toThrow("must be positive");
+	});
+
+	it("shapes gain through the loudness contour, at start and when steered", async () => {
+		// RETAIL DIVERGENCE (see shared frontend tuning): exponent < 1 lifts quiet gains toward the mids
+		// with fixed points at 0 and 1; the channel shadow stays dB-exact retail pan law.
+		const { context, gains } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, 0.5);
+		await device.prepare(SOUND);
+		const voice = device.playOneShot(SOUND, 0.04, 1)!;
+
+		const { left, gain, right } = voiceGains(gains, 0);
+		expect(gain.value).toBeCloseTo(0.2);
+		expect(right.value).toBe(1);
+		expect(left.value).toBeCloseTo(FULL_PAN_SHADOW);
+
+		voice.setPlacement(0.25, 1);
+		expect(gain.setTargetAtTime).toHaveBeenCalledWith(0.5, 42, SMOOTHING);
+	});
+
+	it("refuses playback after destruction", async () => {
+		const { context } = fakeContext();
+		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);
+		await device.prepare(SOUND);
+
+		device.destroy();
+
+		expect(device.playOneShot(SOUND, 1, 0)).toBeNull();
+		expect(device.getPreparedSourceBytes?.(SOUND)).toBeNull();
+	});
+});

@@ -1,0 +1,445 @@
+import { describe, expect, it } from "vitest";
+
+import {
+	CLIENT_CHAT_CHANNEL_FILTERS,
+	CLIENT_CHAT_FILTER_TAGS,
+	clientChatChannelLabel,
+	clientChatFiltersAllow,
+	clientChatShouldSuppress,
+	clientChatTone,
+	clientChatMessageLabel,
+	type ClientChatEntry,
+	type ClientChatLine,
+} from "./client-chat-policy";
+
+import { createDefaultClientUserSections } from "./client-settings-defaults";
+
+const channelFilters =
+	createDefaultClientUserSections("windows").chatChannelFilters;
+
+function line(message: ClientChatEntry): ClientChatLine {
+	return { ...message, id: 1, receivedAt: new Date(0), generation: 0 };
+}
+
+describe("client chat presentation policy", () => {
+	it.each([
+		["general", "general"],
+		["trade", "trade"],
+		["lfg", "lfg"],
+		["roleplay", "roleplay"],
+		["allegiance", "allegiance"],
+		["allegiance-broadcast", "allegiance"],
+		["society", "society"],
+		["society-celestial-hand", "society"],
+		["society-eldrytch-web", "society"],
+		["society-radiant-blood", "society"],
+		["olthoi", "olthoi"],
+	] as const)(
+		"filters %s with the %s choice under the Chat master switch",
+		(channel, group) => {
+			const message = line({
+				kind: "channel",
+				channel,
+				origin: { kind: "turbine", roomId: 2, typeId: 2 },
+				sender: "Mira",
+				speakerKind: "player",
+				message: "hello",
+			});
+			expect(clientChatFiltersAllow(["chat"], message, channelFilters)).toBe(
+				true,
+			);
+			expect(clientChatFiltersAllow([], message, channelFilters)).toBe(false);
+			expect(
+				clientChatFiltersAllow(["chat"], message, {
+					...channelFilters,
+					[group]: false,
+				}),
+			).toBe(false);
+			for (const { key } of CLIENT_CHAT_CHANNEL_FILTERS) {
+				if (key !== group)
+					expect(
+						clientChatFiltersAllow(["chat"], message, {
+							...channelFilters,
+							[key]: false,
+						}),
+					).toBe(true);
+			}
+		},
+	);
+
+	it.each([
+		"fellowship",
+		"vassals",
+		"patron",
+		"monarch",
+		"co-vassals",
+		"unknown",
+		"fellowship-broadcast",
+	] as const)(
+		"retains coarse visibility for %s regardless of named-channel choices",
+		(channel) => {
+			const hiddenChannels = {
+				...channelFilters,
+				general: false,
+				trade: false,
+				lfg: false,
+				roleplay: false,
+				allegiance: false,
+				society: false,
+				olthoi: false,
+			};
+			const message = line({
+				kind: "channel",
+				channel,
+				origin: { kind: "legacy", channelId: 2 },
+				sender: "Mira",
+				speakerKind: "player",
+				message: "hello",
+			});
+			expect(clientChatFiltersAllow(["chat"], message, hiddenChannels)).toBe(
+				true,
+			);
+			expect(clientChatFiltersAllow([], message, hiddenChannels)).toBe(
+				channel === "fellowship-broadcast",
+			);
+		},
+	);
+
+	it.each(["emote", "soul-emote"] as const)(
+		"presents %s without a label while preserving speaker colors",
+		(kind) => {
+			for (const [speakerKind, tone] of [
+				["player", "emote"],
+				["unknown", "emote"],
+				["non-player", "npc"],
+			] as const) {
+				const message = line({
+					kind,
+					sender: "Mira",
+					speakerKind,
+					message: "waves.",
+				});
+				expect(clientChatMessageLabel(message)).toBeNull();
+				expect(clientChatTone(message)).toBe(tone);
+			}
+		},
+	);
+
+	it.each(["player", "unknown", "non-player"] as const)(
+		"omits the local category prefix from %s speakers",
+		(speakerKind) => {
+			for (const message of [
+				{
+					kind: "speech",
+					category: "speech",
+					sender: "Mira",
+					speakerKind,
+					message: "Hello",
+				},
+				{
+					kind: "tell",
+					category: "speech",
+					target: null,
+					sender: "Mira",
+					speakerKind,
+					message: "Hello",
+				},
+			] as const)
+				expect(clientChatMessageLabel(line(message))).toBeNull();
+		},
+	);
+
+	it("omits the local category prefix from server text", () => {
+		expect(
+			clientChatMessageLabel(
+				line({ kind: "server", category: "speech", message: "Hello" }),
+			),
+		).toBeNull();
+	});
+
+	it("preserves server text categories while keeping the existing coarse filters", () => {
+		const outgoing = line({
+			kind: "server",
+			category: "outgoing-tell",
+			message: 'You tell Mira, "hello"',
+		});
+		expect(clientChatMessageLabel(outgoing)).toBe("Tell");
+		expect(clientChatTone(outgoing)).toBe("tell");
+		expect(clientChatFiltersAllow([], outgoing, channelFilters)).toBe(false);
+		for (const category of ["combat", "combat-enemy", "combat-self"] as const) {
+			const feedback = line({
+				kind: "server",
+				category,
+				message: "combat feedback",
+			});
+			expect(clientChatTone(feedback)).toBe("combat");
+			expect(clientChatFiltersAllow(["chat"], feedback, channelFilters)).toBe(
+				false,
+			);
+			expect(clientChatFiltersAllow(["combat"], feedback, channelFilters)).toBe(
+				true,
+			);
+		}
+		for (const category of ["fellowship", "advancement", "craft"] as const) {
+			const notice = line({ kind: "server", category, message: "notice" });
+			expect(clientChatFiltersAllow([], notice, channelFilters)).toBe(true);
+			expect(clientChatMessageLabel(notice)).toBeNull();
+		}
+		const unknown = line({
+			kind: "server",
+			category: { raw: 0xabcdef },
+			message: "unknown",
+		});
+		expect(clientChatMessageLabel(unknown)).toBeNull();
+		expect(clientChatFiltersAllow([], unknown, channelFilters)).toBe(true);
+	});
+
+	it.each(["magic", "spellcasting"] as const)(
+		"filters %s with Combat while preserving its message category",
+		(category) => {
+			for (const message of [
+				{ kind: "server", category, message: "Spell feedback" },
+				{
+					kind: "speech",
+					category,
+					sender: "Mira",
+					speakerKind: "player",
+					message: "Spell feedback",
+				},
+			] as const) {
+				const feedback = line(message);
+				expect(clientChatFiltersAllow([], feedback, channelFilters)).toBe(
+					false,
+				);
+				expect(clientChatFiltersAllow(["chat"], feedback, channelFilters)).toBe(
+					false,
+				);
+				expect(
+					clientChatFiltersAllow(["combat"], feedback, channelFilters),
+				).toBe(true);
+				expect(clientChatMessageLabel(feedback)).toBeNull();
+			}
+		},
+	);
+
+	it("labels specific channels and retains unknown numeric namespaces", () => {
+		for (const [channel, label] of [
+			["allegiance-broadcast", "Allegiance Broadcast"],
+			["fellowship-broadcast", "Party Notice"],
+			["society-celestial-hand", "Celestial Hand"],
+			["society-eldrytch-web", "Eldrytch Web"],
+			["society-radiant-blood", "Radiant Blood"],
+		] as const) {
+			expect(clientChatChannelLabel(channel)).toBe(label);
+		}
+		for (const channelSource of ["legacy", "turbine"] as const) {
+			const message = line({
+				kind: "channel",
+				channel: "unknown",
+				origin:
+					channelSource === "legacy"
+						? { kind: "legacy", channelId: 0xcafe }
+						: { kind: "turbine", roomId: 0xcafe, typeId: 0x1234 },
+				sender: "Mira",
+				speakerKind: "unknown",
+				message: "hello",
+			});
+			expect(clientChatMessageLabel(message)).toBe(
+				channelSource === "legacy"
+					? "Channel 0xCAFE"
+					: "Room 0xCAFE (type 0x1234)",
+			);
+		}
+		const npc = line({
+			kind: "tell",
+			category: "tell",
+			target: { kind: "npc", guid: 0x80000001, name: "Professor" },
+			sender: "Professor",
+			speakerKind: "non-player",
+			message: "Choose a level.",
+		});
+		expect(clientChatMessageLabel(npc)).toBe("Tell");
+	});
+	it("combines independently enabled tags while always retaining system context", () => {
+		const speech = line({
+			kind: "speech",
+			category: "speech",
+			sender: "Mira",
+			speakerKind: "player",
+			message: "Hi",
+		});
+		const combat = line({
+			kind: "combat",
+			message: "You hit a Drudge.",
+			emphasized: false,
+			selfEvasion: false,
+		});
+		const system = line({ kind: "system", message: "Welcome" });
+		const error = line({ kind: "error", message: "Renderer failed" });
+
+		expect(CLIENT_CHAT_FILTER_TAGS).toEqual(["chat", "combat"]);
+		expect(
+			clientChatFiltersAllow(CLIENT_CHAT_FILTER_TAGS, speech, channelFilters),
+		).toBe(true);
+		expect(
+			clientChatFiltersAllow(CLIENT_CHAT_FILTER_TAGS, combat, channelFilters),
+		).toBe(true);
+		expect(clientChatFiltersAllow(["chat"], combat, channelFilters)).toBe(
+			false,
+		);
+		expect(clientChatFiltersAllow(["combat"], speech, channelFilters)).toBe(
+			false,
+		);
+		expect(clientChatFiltersAllow([], system, channelFilters)).toBe(true);
+		expect(clientChatFiltersAllow([], error, channelFilters)).toBe(true);
+		expect(clientChatMessageLabel(error)).toBe("Error");
+		expect(clientChatMessageLabel(combat)).toBeNull();
+		const formatted = line({
+			kind: "formatted-system",
+			rows: [{ indented: false, spans: [{ kind: "emphasis", text: "Help" }] }],
+		});
+		expect(clientChatFiltersAllow([], formatted, channelFilters)).toBe(true);
+		expect(clientChatTone(formatted)).toBe("system");
+	});
+
+	it("assigns combat feedback its dedicated color family", () => {
+		expect(
+			clientChatTone(
+				line({
+					kind: "combat",
+					message: "You evade.",
+					emphasized: false,
+					selfEvasion: false,
+				}),
+			),
+		).toBe("combat");
+	});
+
+	it("gives proven non-player speech its own color family", () => {
+		expect(
+			clientChatTone(
+				line({
+					kind: "speech",
+					category: "speech",
+					sender: "Ulgrim",
+					speakerKind: "non-player",
+					message: "Hrm.",
+				}),
+			),
+		).toBe("npc");
+	});
+
+	it("uses the TUI channel color families while retaining exact channel identity", () => {
+		expect(
+			clientChatTone(
+				line({
+					kind: "channel",
+					origin: { kind: "legacy", channelId: 2048 },
+					channel: "fellowship",
+					sender: "Mira",
+					speakerKind: "player",
+					message: "Ready",
+				}),
+			),
+		).toBe("party");
+		expect(
+			clientChatTone(
+				line({
+					kind: "channel",
+					origin: { kind: "turbine", roomId: 1, typeId: 1 },
+					channel: "allegiance",
+					sender: "Mira",
+					speakerKind: "player",
+					message: "Ready",
+				}),
+			),
+		).toBe("guild");
+		expect(clientChatChannelLabel("co-vassals")).toBe("Co-Vassals");
+	});
+});
+
+describe("chat admission suppression", () => {
+	const enabled = {
+		hideSelfEvasionsAndResists: true,
+		hideSpellIncantations: true,
+	};
+	const selfEvasion: ClientChatEntry = {
+		kind: "combat",
+		message: "You evaded Drudge's attack.",
+		emphasized: false,
+		selfEvasion: true,
+	};
+	const selfResist = {
+		kind: "server",
+		category: "magic",
+		message: "You resist the spell cast by Drudge",
+	} as const;
+	const incantation = {
+		kind: "speech",
+		category: "spellcasting",
+		sender: "Mira",
+		speakerKind: "player",
+		message: "Martine's incantation",
+	} as const;
+	it("drops both kinds of self defense independently of incantations", () => {
+		for (const message of [selfEvasion, selfResist]) {
+			expect(clientChatShouldSuppress(enabled, message)).toBe(true);
+			expect(
+				clientChatShouldSuppress(
+					{ ...enabled, hideSpellIncantations: false },
+					message,
+				),
+			).toBe(true);
+			expect(
+				clientChatShouldSuppress(
+					{ ...enabled, hideSelfEvasionsAndResists: false },
+					message,
+				),
+			).toBe(false);
+		}
+	});
+	it.each(["player", "non-player", "unknown"] as const)(
+		"drops %s incantations",
+		(speakerKind) => {
+			expect(
+				clientChatShouldSuppress(enabled, { ...incantation, speakerKind }),
+			).toBe(true);
+			expect(
+				clientChatShouldSuppress(
+					{ ...enabled, hideSelfEvasionsAndResists: false },
+					incantation,
+				),
+			).toBe(true);
+			expect(
+				clientChatShouldSuppress(
+					{ ...enabled, hideSpellIncantations: false },
+					incantation,
+				),
+			).toBe(false);
+		},
+	);
+	it("keeps outgoing evasion/resistance, damage, ordinary speech, and unknown feedback", () => {
+		const messages: ClientChatEntry[] = [
+			{
+				...selfEvasion,
+				selfEvasion: false,
+				message: "Drudge evaded your attack.",
+			},
+			{
+				...selfEvasion,
+				selfEvasion: false,
+				message: "Drudge hit you for 10 damage.",
+			},
+			{ ...selfResist, message: "Drudge resists your spell" },
+			{ ...selfResist, message: "You resist the spell cast by " },
+			{ ...selfResist, message: "You cast Armor Self on yourself." },
+			{ ...selfResist, category: { raw: 999 } },
+			{ ...selfResist, category: "system" },
+			{ ...incantation, category: "speech", message: selfResist.message },
+			{ kind: "system", message: selfResist.message },
+			{ kind: "error", message: "Unable to cast spell." },
+		];
+		for (const message of messages)
+			expect(clientChatShouldSuppress(enabled, message)).toBe(false);
+	});
+});

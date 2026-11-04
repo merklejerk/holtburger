@@ -1,0 +1,57 @@
+/* Housing surfaces share native disclosures, themed controls, and aligned data rows. */
+@layer components {
+	.housing-tab {
+		overflow: auto;
+		height: 100%;
+	}
+	.housing-form-row {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.housing-tab p {
+		margin: 8px 0;
+	}
+	.housing-table {
+		width: 100%;
+		border-collapse: collapse;
+	}
+	.housing-table th,
+	.housing-table td {
+		padding: 6px 4px;
+		text-align: left;
+	}
+	.housing-table thead {
+		color: var(--ui-color-muted);
+		border-bottom: 1px solid var(--ui-color-border);
+	}
+	.housing-table tbody th {
+		font-weight: normal;
+	}
+	.housing-table th:last-child,
+	.housing-table td:last-child {
+		text-align: right;
+		font-variant-numeric: tabular-nums;
+	}
+	.housing-tab .housing-toggle {
+		margin: 10px 0;
+	}
+	.housing-form-row .ui-input {
+		min-width: 0;
+		flex: 1;
+	}
+	.housing-guest-access {
+		margin: 12px 0;
+	}
+	.housing-guest-row > strong {
+		flex: 1;
+		overflow-wrap: anywhere;
+	}
+	.housing-guest-list {
+		margin: 8px 0;
+	}
+	.housing-danger {
+		color: var(--ui-color-danger);
+	}
+}

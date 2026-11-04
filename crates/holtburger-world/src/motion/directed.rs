@@ -1,0 +1,1636 @@
+//! Retail server-directed MoveTo/TurnTo reduction into ordinary authored motion orders.
+
+use crate::entity::{EntityMotionDirective, EntityMoveToParameters};
+use crate::spatial::ContactState;
+use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
+
+use super::{
+    CharacterMotionPresentation, MotionCommand, MotionContact, MotionOrder,
+    RETAIL_BACKWARD_SPEED_FACTOR,
+};
+
+/// Retail physics epsilon expressed as radians.
+const TURN_COMPLETION_THRESHOLD_RAD: f32 = 0.000_2_f32.to_radians();
+/// Heading disagreement at which moving retail actors add an auxiliary turn.
+const MOVING_TURN_THRESHOLD_RAD: f32 = 20.0_f32.to_radians();
+
+const CAN_WALK: u32 = 0x0000_0001;
+const CAN_RUN: u32 = 0x0000_0002;
+const CAN_CHARGE: u32 = 0x0000_0010;
+const USE_FINAL_HEADING: u32 = 0x0000_0040;
+const STICKY: u32 = 0x0000_0080;
+const MOVE_AWAY: u32 = 0x0000_0100;
+const MOVE_TOWARDS: u32 = 0x0000_0200;
+const USE_SPHERES: u32 = 0x0000_0400;
+const STOP_COMPLETELY: u32 = 0x0001_0000;
+
+/// Current authoritative facts for an object targeted by a server directive.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ServerDirectedTarget {
+    /// Current authoritative target pose.
+    pub pose: WorldPosition,
+    /// Current retail cylinder separation from the moving actor, when both bodies are prepared.
+    pub cylinder_distance: Option<f32>,
+}
+
+impl ServerDirectedTarget {
+    /// Couples one target pose to the geometry-owned distance sampled for the same tick.
+    pub fn new(pose: WorldPosition, cylinder_distance: Option<f32>) -> Option<Self> {
+        cylinder_distance
+            .is_none_or(f32::is_finite)
+            .then_some(Self {
+                pose,
+                cylinder_distance,
+            })
+    }
+}
+
+/// Stateful retail node currently active inside one MoveTo command.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum MoveToPhase {
+    /// Turn to the target line before starting translation.
+    InitialTurn {
+        /// Heading and direction chosen when the turn began.
+        progress: Option<DirectedTurnProgress>,
+    },
+    /// Translate with the command and gait chosen when the node began.
+    Moving {
+        /// Walk/run/backwards intent retained for heading selection before playback conversion.
+        command: MotionCommand,
+        /// Requested speed after applying the Run hold key, before backward playback conversion.
+        speed_mod: f32,
+        /// Whether progress increases as distance from the target increases.
+        moving_away: bool,
+        /// Authored auxiliary-turn multiplier after applying the Run hold key.
+        turn_speed_mod: f32,
+    },
+    /// Apply the authored final heading after translation completes.
+    FinalTurn {
+        /// Heading and direction chosen when the turn began.
+        progress: Option<DirectedTurnProgress>,
+    },
+}
+
+/// Direction of one retail TurnTo node before command canonicalization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DirectedTurnDirection {
+    /// Increasing heading, presented as positive-rate canonical TurnRight.
+    Positive,
+    /// Decreasing heading, presented as negative-rate canonical TurnRight.
+    Negative,
+}
+
+/// Fixed decision facts for one active retail TurnTo node.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DirectedTurnProgress {
+    /// Normalized heading queued when the node began.
+    desired_heading: f32,
+    /// Direction selected from the initial signed heading delta.
+    direction: DirectedTurnDirection,
+}
+
+/// Target ownership after retail's receipt-time object lookup.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum MoveToTarget {
+    /// Fixed position command, including MoveToObject's retail fallback when lookup initially fails.
+    Position(WorldPosition),
+    /// Object lookup succeeded at admission and must remain available for tracking.
+    Object {
+        /// Target object identity.
+        guid: Guid,
+    },
+}
+
+/// Mutable progress facts for one MoveTo lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MoveToState {
+    /// Complete retained movement policy.
+    params: EntityMoveToParameters,
+    /// Actor-specific rate applied when Run is held.
+    run_rate: f32,
+    /// Pose from which retail measures `fail_distance`.
+    starting_pose: WorldPosition,
+    /// Current fixed or tracked target.
+    target: MoveToTarget,
+    /// Ordered node currently executing.
+    phase: MoveToPhase,
+}
+
+/// Target ownership for one TurnTo lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TurnToTarget {
+    /// Absolute heading in radians.
+    Heading(f32),
+    /// Object lookup succeeded at admission and remains required while turning.
+    Object {
+        /// Target object identity.
+        guid: Guid,
+        /// Object-relative heading offset in radians.
+        heading_offset: f32,
+    },
+}
+
+/// Mutable progress facts for one TurnTo lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TurnToState {
+    /// Turn target selected at admission.
+    target: TurnToTarget,
+    /// Authored animation-rate multiplier.
+    speed_mod: f32,
+    /// Whether receipt stops retained forward/sidestep state.
+    stop_completely: bool,
+    /// Heading and direction chosen when the turn began.
+    progress: Option<DirectedTurnProgress>,
+}
+
+/// Internal command-kind state for one admitted server directive.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ServerDirectedMotionKind {
+    /// MoveTo node/progress state.
+    MoveTo(MoveToState),
+    /// TurnTo node/progress state.
+    TurnTo(TurnToState),
+}
+
+/// Opaque caller-owned runtime state for one admitted server directive.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ServerDirectedMotionState {
+    /// Interdependent progress fields for the directive's concrete kind.
+    kind: ServerDirectedMotionKind,
+}
+
+impl ServerDirectedMotionState {
+    /// Object identity that must be resampled while this admitted directive remains active.
+    pub const fn target_guid(self) -> Option<Guid> {
+        match self.kind {
+            ServerDirectedMotionKind::MoveTo(MoveToState {
+                target: MoveToTarget::Object { guid, .. },
+                ..
+            })
+            | ServerDirectedMotionKind::TurnTo(TurnToState {
+                target: TurnToTarget::Object { guid, .. },
+                ..
+            }) => Some(guid),
+            ServerDirectedMotionKind::MoveTo(_) | ServerDirectedMotionKind::TurnTo(_) => None,
+        }
+    }
+}
+
+/// Why a retained directive could no longer execute.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerDirectedMotionFailure {
+    /// An object resolved at admission but disappeared before completion.
+    TargetUnavailable { guid: Guid },
+    /// Travel from the starting pose exceeded the authored fail distance.
+    FailDistanceExceeded,
+}
+
+/// Support requirement for reducing a directed movement command, independent of wire contact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectedMotionSupport {
+    /// Physical actors keep retail contact-dependent presentation and travel completion.
+    Physical(MotionContact),
+    /// Position-only local travel has no support solver. Preserve commanded motion and allow
+    /// completion at a committed endpoint without claiming that physical contact was observed.
+    PositionOnly,
+}
+
+impl DirectedMotionSupport {
+    fn can_complete_travel(self) -> bool {
+        match self {
+            Self::Physical(contact) => contact.physical() == ContactState::Grounded,
+            Self::PositionOnly => true,
+        }
+    }
+
+    /// Authored-command presentation; this never writes a body's physical or reported contact.
+    pub const fn presentation(self) -> CharacterMotionPresentation {
+        match self {
+            Self::Physical(contact) => {
+                contact.presentation(CharacterMotionPresentation::StanceDefault)
+            }
+            Self::PositionOnly => CharacterMotionPresentation::Grounded,
+        }
+    }
+}
+
+/// Target direction already resolved by the directed command owner for this tick.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DirectedMotionTravel {
+    /// Fixed or freshly sampled object destination, in its authored cell frame.
+    pub target: WorldPosition,
+    /// MoveAway reverses travel while preserving the same target reference.
+    pub moving_away: bool,
+}
+
+/// Active authored order and successor state produced by one pure reduction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ServerDirectedMotionStep {
+    /// State to supply to the next reduction.
+    pub state: ServerDirectedMotionState,
+    /// Ordinary authored order consumed by the shared motion runtime.
+    pub order: MotionOrder,
+    /// Present only during translation; position-only consumers use the authored travel budget
+    /// along this full-XYZ target direction instead of flattening it through grounded physics.
+    pub travel: Option<DirectedMotionTravel>,
+}
+
+/// Result of reducing one directive against current body/target/support facts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ServerDirectedMotionResolution {
+    /// The directive remains active for another tick.
+    Active(ServerDirectedMotionStep),
+    /// All translation and final-heading nodes completed.
+    Complete {
+        /// Successful object movement can hand off to sticky targeting exactly once.
+        sticky_target: Option<Guid>,
+    },
+    /// The directive failed for one explicit retail-owned reason.
+    Failed(ServerDirectedMotionFailure),
+}
+
+/// Installs a fresh directive using retail's receipt-time object fallback rule.
+pub fn begin_server_directed_motion(
+    directive: EntityMotionDirective,
+    current_pose: WorldPosition,
+    object_target: Option<ServerDirectedTarget>,
+) -> ServerDirectedMotionState {
+    match directive {
+        EntityMotionDirective::MoveToPosition {
+            target,
+            params,
+            run_rate,
+            ..
+        } => ServerDirectedMotionState {
+            kind: ServerDirectedMotionKind::MoveTo(MoveToState {
+                params,
+                run_rate: run_rate.to_f32(),
+                starting_pose: current_pose,
+                target: MoveToTarget::Position(target.world_position()),
+                phase: MoveToPhase::InitialTurn { progress: None },
+            }),
+        },
+        EntityMotionDirective::MoveToObject {
+            target,
+            fallback_target,
+            params,
+            run_rate,
+            ..
+        } => ServerDirectedMotionState {
+            kind: ServerDirectedMotionKind::MoveTo(MoveToState {
+                params,
+                run_rate: run_rate.to_f32(),
+                starting_pose: current_pose,
+                target: object_target.map_or_else(
+                    || MoveToTarget::Position(fallback_target.world_position()),
+                    |_| MoveToTarget::Object { guid: target },
+                ),
+                phase: MoveToPhase::InitialTurn { progress: None },
+            }),
+        },
+        EntityMotionDirective::TurnToHeading { params, .. } => ServerDirectedMotionState {
+            kind: ServerDirectedMotionKind::TurnTo(TurnToState {
+                target: TurnToTarget::Heading(degrees_to_heading(
+                    params.desired_heading_degrees.to_f32(),
+                )),
+                speed_mod: params.speed.to_f32(),
+                stop_completely: params.flags & STOP_COMPLETELY != 0,
+                progress: None,
+            }),
+        },
+        EntityMotionDirective::TurnToObject {
+            target,
+            fallback_heading_degrees,
+            params,
+            ..
+        } => ServerDirectedMotionState {
+            kind: ServerDirectedMotionKind::TurnTo(TurnToState {
+                target: object_target.map_or_else(
+                    || TurnToTarget::Heading(degrees_to_heading(fallback_heading_degrees.to_f32())),
+                    |_| TurnToTarget::Object {
+                        guid: target,
+                        heading_offset: params.desired_heading_degrees.to_f32().to_radians(),
+                    },
+                ),
+                speed_mod: params.speed.to_f32(),
+                stop_completely: params.flags & STOP_COMPLETELY != 0,
+                progress: None,
+            }),
+        },
+    }
+}
+
+/// Reduces one retained directive without mutating world, body, playback, or target state.
+pub fn resolve_server_directed_motion(
+    state: ServerDirectedMotionState,
+    steady_order: MotionOrder,
+    current_pose: WorldPosition,
+    support: DirectedMotionSupport,
+    object_target: Option<ServerDirectedTarget>,
+) -> ServerDirectedMotionResolution {
+    match state.kind {
+        ServerDirectedMotionKind::MoveTo(state) => {
+            resolve_move_to(state, steady_order, current_pose, support, object_target)
+        }
+        ServerDirectedMotionKind::TurnTo(state) => {
+            resolve_turn_to(state, steady_order, current_pose, support, object_target)
+        }
+    }
+}
+
+/// Retail MoveTo completion transfers Sticky object targets after all movement nodes finish
+/// (ACE MoveToManager.BeginNextNode). Position fallback has no object.
+fn complete_move(state: MoveToState) -> ServerDirectedMotionResolution {
+    let sticky_target = match state.target {
+        MoveToTarget::Object { guid, .. } if state.params.flags & STICKY != 0 => Some(guid),
+        _ => None,
+    };
+    ServerDirectedMotionResolution::Complete { sticky_target }
+}
+
+fn resolve_move_to(
+    mut state: MoveToState,
+    steady_order: MotionOrder,
+    current_pose: WorldPosition,
+    support: DirectedMotionSupport,
+    object_target: Option<ServerDirectedTarget>,
+) -> ServerDirectedMotionResolution {
+    let (target_pose, distance) = match state.target {
+        MoveToTarget::Position(pose) => (pose, Some(current_pose.distance_to(&pose))),
+        MoveToTarget::Object { guid } => {
+            let Some(target) = object_target else {
+                return ServerDirectedMotionResolution::Failed(
+                    ServerDirectedMotionFailure::TargetUnavailable { guid },
+                );
+            };
+            // Retail object approach uses cylinder separation with UseSpheres, otherwise
+            // origin distance. Interaction reach is the wire threshold, not a physical radius
+            // to subtract from this sample.
+            let distance = if state.params.flags & USE_SPHERES != 0 {
+                target.cylinder_distance
+            } else {
+                Some(current_pose.distance_to(&target.pose))
+            };
+            (target.pose, distance)
+        }
+    };
+
+    loop {
+        match (state.phase, distance) {
+            (MoveToPhase::InitialTurn { .. } | MoveToPhase::Moving { .. }, None) => {
+                // Missing geometry pauses approach, but cannot block a final heading already
+                // admitted after arrival. Target identity and phase survive preparation.
+                return active_move_step(
+                    state,
+                    directed_order(steady_order, None, None),
+                    support,
+                    target_pose,
+                );
+            }
+            (MoveToPhase::InitialTurn { progress }, Some(distance)) => {
+                let Some((command, speed_mod, moving_away, turn_speed_mod)) =
+                    select_move_command(state.params, state.run_rate, distance)
+                else {
+                    if !support.can_complete_travel() {
+                        return active_move_step(
+                            state,
+                            directed_order(steady_order, None, None),
+                            support,
+                            target_pose,
+                        );
+                    }
+                    state.phase = MoveToPhase::FinalTurn { progress: None };
+                    continue;
+                };
+                let desired_heading =
+                    travel_heading(current_pose, target_pose, command, moving_away);
+                if let Some((turn, progress)) = progressing_turn_order(
+                    current_pose,
+                    desired_heading,
+                    state.params.speed.to_f32(),
+                    false,
+                    progress,
+                ) {
+                    state.phase = MoveToPhase::InitialTurn {
+                        progress: Some(progress),
+                    };
+                    return active_move_step(
+                        state,
+                        directed_order(steady_order, None, Some(turn)),
+                        support,
+                        target_pose,
+                    );
+                }
+                state.phase = MoveToPhase::Moving {
+                    command,
+                    speed_mod,
+                    moving_away,
+                    turn_speed_mod,
+                };
+            }
+            (
+                MoveToPhase::Moving {
+                    command,
+                    speed_mod,
+                    moving_away,
+                    turn_speed_mod,
+                },
+                Some(distance),
+            ) => {
+                if support.can_complete_travel()
+                    && move_completed(state.params, distance, moving_away)
+                {
+                    state.phase = MoveToPhase::FinalTurn { progress: None };
+                    continue;
+                }
+                if support.can_complete_travel()
+                    && current_pose.distance_to(&state.starting_pose)
+                        > state.params.fail_distance.to_f32()
+                {
+                    return ServerDirectedMotionResolution::Failed(
+                        ServerDirectedMotionFailure::FailDistanceExceeded,
+                    );
+                }
+                let desired_heading =
+                    travel_heading(current_pose, target_pose, command, moving_away);
+                let turn = turn_order(current_pose, desired_heading, turn_speed_mod, true);
+                let order = directed_order(steady_order, Some((command, speed_mod)), turn);
+                return active_move_step(state, order, support, target_pose);
+            }
+            (MoveToPhase::FinalTurn { progress }, _) => {
+                if state.params.flags & USE_FINAL_HEADING == 0 {
+                    return complete_move(state);
+                }
+                let desired_heading = final_move_heading(
+                    state.params,
+                    current_pose,
+                    target_pose,
+                    matches!(state.target, MoveToTarget::Object { .. }),
+                );
+                let Some((turn, progress)) = progressing_turn_order(
+                    current_pose,
+                    desired_heading,
+                    state.params.speed.to_f32(),
+                    false,
+                    progress,
+                ) else {
+                    return complete_move(state);
+                };
+                state.phase = MoveToPhase::FinalTurn {
+                    progress: Some(progress),
+                };
+                return active_move_step(
+                    state,
+                    directed_order(steady_order, None, Some(turn)),
+                    support,
+                    target_pose,
+                );
+            }
+        }
+    }
+}
+
+fn resolve_turn_to(
+    mut state: TurnToState,
+    steady_order: MotionOrder,
+    current_pose: WorldPosition,
+    support: DirectedMotionSupport,
+    object_target: Option<ServerDirectedTarget>,
+) -> ServerDirectedMotionResolution {
+    let desired_heading = if let Some(progress) = state.progress {
+        progress.desired_heading
+    } else {
+        match state.target {
+            TurnToTarget::Heading(heading) => heading,
+            TurnToTarget::Object {
+                guid,
+                heading_offset,
+            } => {
+                let Some(target) = object_target else {
+                    return ServerDirectedMotionResolution::Failed(
+                        ServerDirectedMotionFailure::TargetUnavailable { guid },
+                    );
+                };
+                normalize_heading(current_pose.heading_to(&target.pose) + heading_offset)
+            }
+        }
+    };
+    let Some((turn, progress)) = progressing_turn_order(
+        current_pose,
+        desired_heading,
+        state.speed_mod,
+        false,
+        state.progress,
+    ) else {
+        return ServerDirectedMotionResolution::Complete {
+            sticky_target: None,
+        };
+    };
+    state.progress = Some(progress);
+    let base = if state.stop_completely {
+        MotionOrder {
+            style: steady_order.style,
+            ..MotionOrder::default()
+        }
+    } else {
+        steady_order
+    };
+    let order = present_for_support(
+        MotionOrder {
+            turn: Some(turn),
+            ..base
+        },
+        support,
+    );
+    ServerDirectedMotionResolution::Active(ServerDirectedMotionStep {
+        state: ServerDirectedMotionState {
+            kind: ServerDirectedMotionKind::TurnTo(state),
+        },
+        order,
+        travel: None,
+    })
+}
+
+fn active_move_step(
+    state: MoveToState,
+    order: MotionOrder,
+    support: DirectedMotionSupport,
+    target: WorldPosition,
+) -> ServerDirectedMotionResolution {
+    ServerDirectedMotionResolution::Active(ServerDirectedMotionStep {
+        state: ServerDirectedMotionState {
+            kind: ServerDirectedMotionKind::MoveTo(state),
+        },
+        order: present_for_support(order, support),
+        travel: match state.phase {
+            MoveToPhase::Moving { moving_away, .. } => Some(DirectedMotionTravel {
+                target,
+                moving_away,
+            }),
+            MoveToPhase::InitialTurn { .. } | MoveToPhase::FinalTurn { .. } => None,
+        },
+    })
+}
+
+fn directed_order(
+    steady_order: MotionOrder,
+    forward: Option<(MotionCommand, f32)>,
+    turn: Option<(MotionCommand, f32)>,
+) -> MotionOrder {
+    MotionOrder {
+        style: steady_order.style,
+        // Retail converts backward intent before table selection. Keep the raw intent in the
+        // movement phase so retreat still faces the target and completes by increasing distance.
+        forward: forward.map(|(command, speed)| {
+            if command == MotionCommand::WALK_BACKWARDS {
+                (
+                    MotionCommand::WALK_FORWARD,
+                    -RETAIL_BACKWARD_SPEED_FACTOR * speed,
+                )
+            } else {
+                (command, speed)
+            }
+        }),
+        sidestep: None,
+        turn,
+    }
+}
+
+fn present_for_support(order: MotionOrder, support: DirectedMotionSupport) -> MotionOrder {
+    let presentation = support.presentation();
+    order.with_character_presentation(presentation)
+}
+
+fn select_move_command(
+    params: EntityMoveToParameters,
+    run_rate: f32,
+    distance: f32,
+) -> Option<(MotionCommand, f32, bool, f32)> {
+    let move_towards = params.flags & MOVE_TOWARDS != 0;
+    let move_away = params.flags & MOVE_AWAY != 0;
+    let distance_to_object = params.distance_to_object.to_f32();
+    let min_distance = params.min_distance.to_f32();
+    let (command, moving_away) = if move_towards || !move_away {
+        if move_away && distance < min_distance {
+            (MotionCommand::WALK_BACKWARDS, true)
+        } else if distance > distance_to_object {
+            (MotionCommand::WALK_FORWARD, false)
+        } else {
+            return None;
+        }
+    } else if distance < min_distance {
+        (MotionCommand::WALK_FORWARD, true)
+    } else {
+        return None;
+    };
+    let run_held = params.flags & CAN_CHARGE != 0
+        || params.flags & CAN_RUN != 0
+            && (params.flags & CAN_WALK == 0
+                || distance - distance_to_object > params.walk_run_threshold.to_f32());
+    let speed = params.speed.to_f32();
+    let turn_speed_mod = speed * 1.5;
+    if run_held && command == MotionCommand::WALK_FORWARD && speed > 0.0 {
+        Some((
+            MotionCommand::RUN_FORWARD,
+            run_rate * speed,
+            moving_away,
+            turn_speed_mod,
+        ))
+    } else {
+        Some((command, speed, moving_away, turn_speed_mod))
+    }
+}
+
+fn move_completed(params: EntityMoveToParameters, distance: f32, moving_away: bool) -> bool {
+    if moving_away {
+        distance >= params.min_distance.to_f32()
+    } else {
+        distance <= params.distance_to_object.to_f32()
+    }
+}
+
+fn travel_heading(
+    current_pose: WorldPosition,
+    target_pose: WorldPosition,
+    command: MotionCommand,
+    moving_away: bool,
+) -> f32 {
+    let offset = if command == MotionCommand::WALK_BACKWARDS {
+        if moving_away {
+            0.0
+        } else {
+            std::f32::consts::PI
+        }
+    } else if moving_away {
+        std::f32::consts::PI
+    } else {
+        0.0
+    };
+    normalize_heading(current_pose.heading_to(&target_pose) + offset)
+}
+
+fn final_move_heading(
+    params: EntityMoveToParameters,
+    current_pose: WorldPosition,
+    target_pose: WorldPosition,
+    object_relative: bool,
+) -> f32 {
+    let authored = params.desired_heading_degrees.to_f32().to_radians();
+    if object_relative {
+        normalize_heading(current_pose.heading_to(&target_pose) + authored)
+    } else {
+        normalize_heading(authored)
+    }
+}
+
+fn turn_order(
+    current_pose: WorldPosition,
+    desired_heading: f32,
+    speed_mod: f32,
+    use_moving_threshold: bool,
+) -> Option<(MotionCommand, f32)> {
+    progressing_turn_order(
+        current_pose,
+        desired_heading,
+        speed_mod,
+        use_moving_threshold,
+        None,
+    )
+    .map(|(order, _)| order)
+}
+
+/// Select one turn and retire it once authored rotation crosses its target heading.
+///
+/// Retail remembers the chosen command, detects when that command carries the body past the
+/// queued heading, snaps to the target, and stops the command. The world solver owns pose
+/// commits here, so crossing retires the authored turn at the first solved pose beyond the
+/// target rather than reversing it indefinitely.
+fn progressing_turn_order(
+    current_pose: WorldPosition,
+    desired_heading: f32,
+    speed_mod: f32,
+    use_moving_threshold: bool,
+    active_progress: Option<DirectedTurnProgress>,
+) -> Option<((MotionCommand, f32), DirectedTurnProgress)> {
+    let desired_heading = active_progress
+        .map(|progress| progress.desired_heading)
+        .unwrap_or_else(|| normalize_heading(desired_heading));
+    let delta = signed_heading_delta(current_pose.rotation.to_heading(), desired_heading);
+    let threshold = if use_moving_threshold {
+        MOVING_TURN_THRESHOLD_RAD
+    } else {
+        TURN_COMPLETION_THRESHOLD_RAD
+    };
+    let current_direction = turn_direction(delta);
+    if delta.abs() <= threshold
+        || active_progress.is_some_and(|active| active.direction != current_direction)
+    {
+        return None;
+    }
+    let progress = active_progress.unwrap_or(DirectedTurnProgress {
+        desired_heading,
+        direction: current_direction,
+    });
+    Some((
+        (
+            // Retail canonicalizes TurnLeft into TurnRight with a negative speed before table
+            // selection. Keeping the family identity canonical also lets the ordinary
+            // absent-turn release retire either direction by exact command identity.
+            MotionCommand::TURN_RIGHT,
+            match progress.direction {
+                DirectedTurnDirection::Positive => speed_mod,
+                DirectedTurnDirection::Negative => -speed_mod,
+            },
+        ),
+        progress,
+    ))
+}
+
+fn turn_direction(delta: f32) -> DirectedTurnDirection {
+    if delta > 0.0 {
+        DirectedTurnDirection::Positive
+    } else {
+        DirectedTurnDirection::Negative
+    }
+}
+
+fn degrees_to_heading(degrees: f32) -> f32 {
+    normalize_heading(degrees.to_radians())
+}
+
+fn normalize_heading(heading: f32) -> f32 {
+    heading.rem_euclid(std::f32::consts::TAU)
+}
+
+fn signed_heading_delta(current: f32, desired: f32) -> f32 {
+    let mut delta = (desired - current) % std::f32::consts::TAU;
+    if delta <= -std::f32::consts::PI {
+        delta += std::f32::consts::TAU;
+    } else if delta > std::f32::consts::PI {
+        delta -= std::f32::consts::TAU;
+    }
+    delta
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity::{
+        EntityMotionAdmission, EntityMoveToParameters, EntityTurnToParameters,
+        OrderedMotionPosition, OrderedMotionScalar,
+    };
+    use holtburger_common::{Quaternion, Vector3};
+    use holtburger_content::MotionSequenceCatalog;
+    use holtburger_dat::file_type::animation::AnimationFlags;
+    use holtburger_dat::file_type::motion_table::{AnimData, MotionData, MotionDataFlags};
+    use holtburger_dat::file_type::setup_model::AnimationFrame;
+    use holtburger_dat::file_type::{Animation, MotionTable};
+    use holtburger_dat::graphics::Frame;
+    use std::collections::HashMap;
+
+    use crate::motion::{BodyMotionRuntime, MotionPresentation};
+
+    const STYLE: MotionCommand = MotionCommand(0x8000_003D);
+
+    fn scalar(value: f32) -> OrderedMotionScalar {
+        OrderedMotionScalar::from_f32(value).expect("fixture scalar is finite")
+    }
+
+    fn admission() -> EntityMotionAdmission {
+        EntityMotionAdmission {
+            object_instance_sequence: 1,
+            movement_sequence: 2,
+            server_control_sequence: 3,
+            is_autonomous: false,
+        }
+    }
+
+    fn position(x: f32, y: f32, heading_degrees: f32) -> WorldPosition {
+        WorldPosition {
+            landblock_id: Guid(0xDA55_0001),
+            coords: Vector3::new(x, y, 0.0),
+            rotation: Quaternion::from_heading(heading_degrees.to_radians()),
+        }
+    }
+
+    fn target_position(x: f32, y: f32) -> OrderedMotionPosition {
+        OrderedMotionPosition {
+            cell_id: Guid(0xDA55_0001),
+            x: scalar(x),
+            y: scalar(y),
+            z: scalar(0.0),
+        }
+    }
+
+    fn move_params(flags: u32) -> EntityMoveToParameters {
+        EntityMoveToParameters {
+            flags,
+            distance_to_object: scalar(1.0),
+            min_distance: scalar(2.0),
+            fail_distance: scalar(100.0),
+            speed: scalar(1.0),
+            walk_run_threshold: scalar(5.0),
+            desired_heading_degrees: scalar(90.0),
+        }
+    }
+
+    fn steady() -> MotionOrder {
+        MotionOrder {
+            style: Some(STYLE),
+            ..MotionOrder::default()
+        }
+    }
+
+    #[test]
+    fn retreat_reverses_forward_playback_while_facing_target_until_separated() {
+        const TABLE: u32 = 0x0900_0008;
+        const ANIMATION: u32 = 0x0300_0001;
+        const WALK_FRAMERATE: f32 = 4.0;
+        const WALK_SPEED: f32 = 1.0;
+        const REQUESTED_SPEED: f32 = 2.0;
+        let row = |speed| MotionData {
+            bitfield: 0,
+            flags: MotionDataFlags::HAS_VELOCITY,
+            anims: vec![AnimData {
+                anim_id: ANIMATION,
+                low_frame: 0,
+                high_frame: -1,
+                framerate: WALK_FRAMERATE,
+            }],
+            velocity: Some(Vector3::new(0.0, speed, 0.0)),
+            omega: None,
+        };
+        let catalog = MotionSequenceCatalog::assemble(
+            [MotionTable {
+                id: TABLE,
+                default_style: STYLE.raw(),
+                style_defaults: HashMap::from([(STYLE.raw(), MotionCommand::READY.raw())]),
+                cycles: HashMap::from([
+                    (
+                        MotionTable::cycle_key(STYLE.raw(), MotionCommand::READY.raw()),
+                        row(0.0),
+                    ),
+                    (
+                        MotionTable::cycle_key(STYLE.raw(), MotionCommand::WALK_FORWARD.raw()),
+                        row(WALK_SPEED),
+                    ),
+                ]),
+                modifiers: HashMap::new(),
+                links: HashMap::new(),
+            }],
+            [Animation {
+                id: ANIMATION,
+                flags: AnimationFlags::POS_FRAMES,
+                num_parts: 0,
+                num_frames: 1,
+                pos_frames: vec![Frame {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                }],
+                part_frames: vec![AnimationFrame {
+                    frames: vec![],
+                    hooks: vec![],
+                }],
+            }],
+            [],
+        )
+        .expect("retreat fixture assembles");
+        let table = catalog.table(TABLE).expect("retreat table is present");
+        let params = EntityMoveToParameters {
+            speed: scalar(REQUESTED_SPEED),
+            ..move_params(CAN_WALK | CAN_RUN | CAN_CHARGE | MOVE_TOWARDS | MOVE_AWAY)
+        };
+        let mut current = position(0.0, 0.0, 0.0);
+        let target = target_position(0.0, 1.0);
+        current.rotation = Quaternion::from_heading(current.heading_to(&target.world_position()));
+        let state = begin_server_directed_motion(
+            EntityMotionDirective::MoveToPosition {
+                admission: admission(),
+                target,
+                params,
+                run_rate: scalar(3.0),
+            },
+            current,
+            None,
+        );
+        let support = DirectedMotionSupport::PositionOnly;
+        let ServerDirectedMotionResolution::Active(step) =
+            resolve_server_directed_motion(state, steady(), current, support, None)
+        else {
+            panic!("nearby target should trigger retreat");
+        };
+        let reverse_rate = -RETAIL_BACKWARD_SPEED_FACTOR * REQUESTED_SPEED;
+        assert_eq!(
+            step.order.forward,
+            Some((MotionCommand::WALK_FORWARD, reverse_rate))
+        );
+        assert_eq!(step.order.turn, None);
+        assert!(step.travel.expect("retreat has travel").moving_away);
+
+        let ServerDirectedMotionResolution::Active(step) =
+            resolve_server_directed_motion(step.state, steady(), current, support, None)
+        else {
+            panic!("retreat should remain active before separation");
+        };
+        assert_eq!(
+            step.order.forward,
+            Some((MotionCommand::WALK_FORWARD, reverse_rate))
+        );
+        assert_eq!(step.order.turn, None);
+
+        let mut runtime = BodyMotionRuntime::new(table);
+        let tick = runtime.drive(table, step.order, 1.0);
+        assert!((tick.offset.translation.y - WALK_SPEED * reverse_rate).abs() < f32::EPSILON);
+        assert_eq!(tick.offset.rotation, Quaternion::identity());
+        current.coords = current.coords + current.rotation.rotate_vector(tick.offset.translation);
+        let playback = runtime
+            .motion_playback()
+            .expect("retreat publishes playback");
+        let MotionPresentation::Playing(clip) =
+            playback.ordinary.expect("ordinary walk is active").clip
+        else {
+            panic!("retreat should advance its forward clip backwards");
+        };
+        assert_eq!(clip.framerate, WALK_FRAMERATE * reverse_rate);
+        assert_eq!(
+            resolve_server_directed_motion(step.state, steady(), current, support, None),
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            }
+        );
+    }
+
+    #[test]
+    fn position_only_travel_preserves_commands_and_completes_without_physical_support() {
+        let target = position(20.0, 0.0, 0.0);
+        let mut current = position(0.0, 0.0, 0.0);
+        current.rotation = Quaternion::from_heading(current.heading_to(&target));
+        let state = begin_server_directed_motion(
+            EntityMotionDirective::MoveToPosition {
+                admission: admission(),
+                target: target_position(20.0, 0.0),
+                params: move_params(CAN_WALK | MOVE_TOWARDS),
+                run_rate: scalar(1.0),
+            },
+            current,
+            None,
+        );
+        let ServerDirectedMotionResolution::Active(step) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            DirectedMotionSupport::PositionOnly,
+            None,
+        ) else {
+            panic!("position-only travel should select its ordinary authored command")
+        };
+        assert!(step.order.forward.is_some());
+        assert_eq!(
+            step.travel,
+            Some(DirectedMotionTravel {
+                target: target_position(20.0, 0.0).world_position(),
+                moving_away: false
+            })
+        );
+        assert_eq!(
+            resolve_server_directed_motion(
+                step.state,
+                steady(),
+                target,
+                DirectedMotionSupport::PositionOnly,
+                None
+            ),
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            }
+        );
+        assert!(matches!(
+            resolve_server_directed_motion(
+                step.state,
+                steady(),
+                target,
+                DirectedMotionSupport::Physical(MotionContact::RequiresSupport(
+                    ContactState::Unknown
+                )),
+                None
+            ),
+            ServerDirectedMotionResolution::Active(_)
+        ));
+    }
+
+    #[test]
+    fn completed_object_move_hands_off_sticky_only_for_a_resolved_object() {
+        let current = position(0.0, 0.0, 0.0);
+        let target = ServerDirectedTarget::new(position(0.0, 1.0, 0.0), Some(0.0)).unwrap();
+        let guid = Guid(2);
+        for resolved in [false, true] {
+            for sticky in [false, true] {
+                let directive = EntityMotionDirective::MoveToObject {
+                    admission: admission(),
+                    target: guid,
+                    fallback_target: target_position(0.0, 1.0),
+                    params: move_params(CAN_WALK | MOVE_TOWARDS | if sticky { STICKY } else { 0 }),
+                    run_rate: scalar(1.0),
+                };
+                let target = resolved.then_some(target);
+                let state = begin_server_directed_motion(directive, current, target);
+                assert_eq!(
+                    resolve_server_directed_motion(
+                        state,
+                        steady(),
+                        current,
+                        DirectedMotionSupport::Physical(MotionContact::RequiresSupport(
+                            ContactState::Grounded
+                        )),
+                        target
+                    ),
+                    ServerDirectedMotionResolution::Complete {
+                        sticky_target: (resolved && sticky).then_some(guid)
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn spherical_object_move_uses_sampled_cylinder_separation_once() {
+        let target_pose = position(4.0, 0.0, 0.0);
+        let current = position(
+            0.0,
+            0.0,
+            position(0.0, 0.0, 0.0)
+                .heading_to(&target_pose)
+                .to_degrees(),
+        );
+        let guid = Guid(2);
+        let directive = EntityMotionDirective::MoveToObject {
+            admission: admission(),
+            target: guid,
+            fallback_target: target_position(4.0, 0.0),
+            params: EntityMoveToParameters {
+                distance_to_object: scalar(2.0),
+                ..move_params(CAN_WALK | MOVE_TOWARDS | USE_SPHERES)
+            },
+            run_rate: scalar(1.0),
+        };
+        let outside = ServerDirectedTarget::new(target_pose, Some(2.1)).unwrap();
+        let state = begin_server_directed_motion(directive, current, Some(outside));
+
+        let ServerDirectedMotionResolution::Active(moving) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            Some(outside),
+        ) else {
+            panic!("cylinder separation outside the use radius must keep approaching");
+        };
+        assert!(moving.order.forward.is_some());
+
+        let boundary = ServerDirectedTarget::new(target_pose, Some(2.0)).unwrap();
+        assert_eq!(
+            resolve_server_directed_motion(
+                moving.state,
+                steady(),
+                current,
+                DirectedMotionSupport::Physical(MotionContact::RequiresSupport(
+                    ContactState::Grounded
+                )),
+                Some(boundary),
+            ),
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            }
+        );
+    }
+
+    #[test]
+    fn spherical_object_move_waits_for_geometry_without_losing_object_identity() {
+        let target_pose = position(4.0, 0.0, 0.0);
+        let current = position(
+            0.0,
+            0.0,
+            position(0.0, 0.0, 0.0)
+                .heading_to(&target_pose)
+                .to_degrees(),
+        );
+        let guid = Guid(2);
+        let target = ServerDirectedTarget::new(target_pose, None).unwrap();
+        let directive = EntityMotionDirective::MoveToObject {
+            admission: admission(),
+            target: guid,
+            fallback_target: target_position(20.0, 0.0),
+            params: move_params(CAN_WALK | MOVE_TOWARDS | USE_SPHERES),
+            run_rate: scalar(1.0),
+        };
+        let state = begin_server_directed_motion(directive, current, Some(target));
+
+        let ServerDirectedMotionResolution::Active(waiting) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            Some(target),
+        ) else {
+            panic!("an existing target with pending geometry must remain admitted");
+        };
+        assert_eq!(waiting.order.forward, None);
+
+        let ready = ServerDirectedTarget::new(target_pose, Some(3.0)).unwrap();
+        let ServerDirectedMotionResolution::Active(moving) = resolve_server_directed_motion(
+            waiting.state,
+            steady(),
+            current,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            Some(ready),
+        ) else {
+            panic!("the retained object directive must resume when geometry becomes ready");
+        };
+        assert!(moving.order.forward.is_some());
+    }
+
+    #[test]
+    fn non_spherical_object_move_uses_origin_distance() {
+        let target_pose = position(4.0, 0.0, 0.0);
+        let current = position(
+            0.0,
+            0.0,
+            position(0.0, 0.0, 0.0)
+                .heading_to(&target_pose)
+                .to_degrees(),
+        );
+        let target = ServerDirectedTarget::new(target_pose, Some(0.0)).unwrap();
+        let directive = EntityMotionDirective::MoveToObject {
+            admission: admission(),
+            target: Guid(2),
+            fallback_target: target_position(4.0, 0.0),
+            params: EntityMoveToParameters {
+                distance_to_object: scalar(2.0),
+                ..move_params(CAN_WALK | MOVE_TOWARDS)
+            },
+            run_rate: scalar(1.0),
+        };
+        let state = begin_server_directed_motion(directive, current, Some(target));
+
+        let ServerDirectedMotionResolution::Active(moving) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            Some(target),
+        ) else {
+            panic!("non-spherical movement must ignore the supplied cylinder separation");
+        };
+        assert!(moving.order.forward.is_some());
+    }
+
+    #[test]
+    fn sticky_handoff_finishes_final_heading_even_if_geometry_is_repreparing() {
+        let current = position(0.0, 0.0, 0.0);
+        let target = ServerDirectedTarget::new(position(0.0, 1.0, 0.0), Some(0.0)).unwrap();
+        let guid = Guid(2);
+        let directive = EntityMotionDirective::MoveToObject {
+            admission: admission(),
+            target: guid,
+            fallback_target: target_position(0.0, 1.0),
+            params: move_params(CAN_WALK | MOVE_TOWARDS | STICKY | USE_FINAL_HEADING | USE_SPHERES),
+            run_rate: scalar(1.0),
+        };
+        let state = begin_server_directed_motion(directive, current, Some(target));
+        let ServerDirectedMotionResolution::Active(turn) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            Some(target),
+        ) else {
+            panic!("arrival must finish the requested turn before sticky handoff");
+        };
+        assert!(turn.order.turn.is_some());
+        let target = ServerDirectedTarget::new(target.pose, None).unwrap();
+        assert_eq!(
+            resolve_server_directed_motion(
+                turn.state,
+                steady(),
+                position(
+                    0.0,
+                    0.0,
+                    current.heading_to(&target.pose).to_degrees() + 90.0
+                ),
+                DirectedMotionSupport::Physical(MotionContact::RequiresSupport(
+                    ContactState::Grounded
+                )),
+                Some(target)
+            ),
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: Some(guid)
+            }
+        );
+    }
+
+    #[test]
+    fn move_to_turns_first_then_selects_retail_walk_run_threshold() {
+        let directive = EntityMotionDirective::MoveToPosition {
+            admission: admission(),
+            target: target_position(20.0, 0.0),
+            params: move_params(CAN_WALK | CAN_RUN | MOVE_TOWARDS),
+            run_rate: scalar(1.25),
+        };
+        let current = position(0.0, 0.0, 90.0);
+        let state = begin_server_directed_motion(directive, current, None);
+
+        let ServerDirectedMotionResolution::Active(turning) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            None,
+        ) else {
+            panic!("misaligned MoveTo should begin by turning");
+        };
+        assert!(turning.order.forward.is_none());
+        assert!(turning.order.turn.is_some());
+
+        let target = position(20.0, 0.0, 0.0);
+        let aligned = position(0.0, 0.0, current.heading_to(&target).to_degrees());
+        let ServerDirectedMotionResolution::Active(moving) = resolve_server_directed_motion(
+            turning.state,
+            steady(),
+            aligned,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            None,
+        ) else {
+            panic!("aligned MoveTo should translate");
+        };
+        assert_eq!(
+            moving.order.forward,
+            Some((MotionCommand::RUN_FORWARD, 1.25))
+        );
+    }
+
+    #[test]
+    fn airborne_move_to_retains_progress_and_presents_falling_with_turn() {
+        let current = position(0.0, 0.0, 0.0);
+        let directive = EntityMotionDirective::MoveToPosition {
+            admission: admission(),
+            target: target_position(20.0, 0.0),
+            params: move_params(CAN_WALK | MOVE_TOWARDS),
+            run_rate: scalar(1.0),
+        };
+        let state = begin_server_directed_motion(directive, current, None);
+        let ServerDirectedMotionResolution::Active(step) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Airborne)),
+            None,
+        ) else {
+            panic!("airborne MoveTo remains pending");
+        };
+
+        assert_eq!(step.order.forward, Some((MotionCommand::FALLING, 1.0)));
+        assert!(matches!(
+            step.state.kind,
+            ServerDirectedMotionKind::MoveTo(_)
+        ));
+    }
+
+    #[test]
+    fn turn_to_heading_converts_retail_degrees_once() {
+        let current = position(0.0, 0.0, 90.0);
+        let state = begin_server_directed_motion(
+            EntityMotionDirective::TurnToHeading {
+                admission: admission(),
+                params: EntityTurnToParameters {
+                    flags: STOP_COMPLETELY,
+                    speed: scalar(1.0),
+                    desired_heading_degrees: scalar(90.0),
+                },
+            },
+            current,
+            None,
+        );
+        assert_eq!(
+            resolve_server_directed_motion(
+                state,
+                steady(),
+                current,
+                DirectedMotionSupport::Physical(MotionContact::RequiresSupport(
+                    ContactState::Grounded
+                )),
+                None,
+            ),
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            }
+        );
+    }
+
+    #[test]
+    fn directed_turns_use_one_retail_command_with_signed_rates() {
+        let current = position(0.0, 0.0, 90.0);
+        let right = turn_order(current, 100.0_f32.to_radians(), 1.5, false)
+            .expect("right target should require a turn");
+        let left = turn_order(current, 80.0_f32.to_radians(), 1.5, false)
+            .expect("left target should require a turn");
+
+        assert_eq!(right, (MotionCommand::TURN_RIGHT, 1.5));
+        assert_eq!(left, (MotionCommand::TURN_RIGHT, -1.5));
+    }
+
+    #[test]
+    fn turn_to_retires_when_authored_rotation_crosses_the_target() {
+        let start = position(0.0, 0.0, 90.0);
+        let state = begin_server_directed_motion(
+            EntityMotionDirective::TurnToHeading {
+                admission: admission(),
+                params: EntityTurnToParameters {
+                    flags: STOP_COMPLETELY,
+                    speed: scalar(1.0),
+                    desired_heading_degrees: scalar(80.0),
+                },
+            },
+            start,
+            None,
+        );
+        let ServerDirectedMotionResolution::Active(turning) = resolve_server_directed_motion(
+            state,
+            steady(),
+            start,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            None,
+        ) else {
+            panic!("left target should begin a directed turn");
+        };
+        assert_eq!(turning.order.turn, Some((MotionCommand::TURN_RIGHT, -1.0)));
+
+        assert_eq!(
+            resolve_server_directed_motion(
+                turning.state,
+                steady(),
+                position(0.0, 0.0, 79.0),
+                DirectedMotionSupport::Physical(MotionContact::RequiresSupport(
+                    ContactState::Grounded
+                )),
+                None,
+            ),
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            }
+        );
+    }
+
+    #[test]
+    fn active_turn_to_object_keeps_its_queued_heading_when_the_target_moves() {
+        let current = position(0.0, 0.0, 90.0);
+        let initial_target =
+            ServerDirectedTarget::new(position(20.0, 0.0, 0.0), Some(19.0)).unwrap();
+        let moved_target =
+            ServerDirectedTarget::new(position(-20.0, 0.0, 0.0), Some(19.0)).unwrap();
+        let state = begin_server_directed_motion(
+            EntityMotionDirective::TurnToObject {
+                admission: admission(),
+                target: Guid(7),
+                fallback_heading_degrees: scalar(0.0),
+                params: EntityTurnToParameters {
+                    flags: STOP_COMPLETELY,
+                    speed: scalar(1.0),
+                    desired_heading_degrees: scalar(0.0),
+                },
+            },
+            current,
+            Some(initial_target),
+        );
+        let ServerDirectedMotionResolution::Active(initial_turn) = resolve_server_directed_motion(
+            state,
+            steady(),
+            current,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            Some(initial_target),
+        ) else {
+            panic!("misaligned object target should begin a directed turn");
+        };
+
+        let ServerDirectedMotionResolution::Active(retained_turn) = resolve_server_directed_motion(
+            initial_turn.state,
+            steady(),
+            current,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            Some(moved_target),
+        ) else {
+            panic!("target motion must not masquerade as actor crossing");
+        };
+        assert_eq!(retained_turn.order.turn, initial_turn.order.turn);
+    }
+
+    #[test]
+    fn move_to_crossing_retires_initial_turn_and_selects_run() {
+        let start = position(0.0, 0.0, 1.0);
+        let state = begin_server_directed_motion(
+            EntityMotionDirective::MoveToPosition {
+                admission: admission(),
+                target: target_position(20.0, 0.0),
+                params: move_params(CAN_WALK | CAN_RUN | MOVE_TOWARDS),
+                run_rate: scalar(1.25),
+            },
+            start,
+            None,
+        );
+        let ServerDirectedMotionResolution::Active(turning) = resolve_server_directed_motion(
+            state,
+            steady(),
+            start,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            None,
+        ) else {
+            panic!("misaligned MoveTo should begin a directed turn");
+        };
+        assert_eq!(turning.order.turn, Some((MotionCommand::TURN_RIGHT, 1.0)));
+
+        let ServerDirectedMotionResolution::Active(moving) = resolve_server_directed_motion(
+            turning.state,
+            steady(),
+            position(0.0, 0.0, 181.0),
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            None,
+        ) else {
+            panic!("crossed initial heading should advance to translation");
+        };
+        assert_eq!(
+            moving.order.forward,
+            Some((MotionCommand::RUN_FORWARD, 1.25))
+        );
+        assert_eq!(moving.order.turn, None);
+    }
+
+    #[test]
+    fn an_object_resolved_at_admission_fails_if_it_disappears() {
+        let current = position(0.0, 0.0, 0.0);
+        let target = ServerDirectedTarget::new(position(20.0, 0.0, 0.0), Some(19.0)).unwrap();
+        let state = begin_server_directed_motion(
+            EntityMotionDirective::MoveToObject {
+                admission: admission(),
+                target: Guid(7),
+                fallback_target: target_position(20.0, 0.0),
+                params: move_params(CAN_WALK | MOVE_TOWARDS),
+                run_rate: scalar(1.0),
+            },
+            current,
+            Some(target),
+        );
+
+        assert_eq!(
+            resolve_server_directed_motion(
+                state,
+                steady(),
+                current,
+                DirectedMotionSupport::Physical(MotionContact::RequiresSupport(
+                    ContactState::Grounded
+                )),
+                None,
+            ),
+            ServerDirectedMotionResolution::Failed(
+                ServerDirectedMotionFailure::TargetUnavailable { guid: Guid(7) }
+            )
+        );
+    }
+
+    #[test]
+    fn walk_run_threshold_is_strict_at_the_retail_boundary() {
+        let params = move_params(CAN_WALK | CAN_RUN | MOVE_TOWARDS);
+        let target_pose = position(6.0, 0.0, 0.0);
+        let exactly_at_threshold = position(
+            0.0,
+            0.0,
+            position(0.0, 0.0, 0.0)
+                .heading_to(&target_pose)
+                .to_degrees(),
+        );
+        let directive = EntityMotionDirective::MoveToPosition {
+            admission: admission(),
+            target: target_position(6.0, 0.0),
+            params,
+            run_rate: scalar(1.25),
+        };
+        let state = begin_server_directed_motion(directive, exactly_at_threshold, None);
+        let ServerDirectedMotionResolution::Active(step) = resolve_server_directed_motion(
+            state,
+            steady(),
+            exactly_at_threshold,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            None,
+        ) else {
+            panic!("threshold fixture should remain active");
+        };
+        assert_eq!(step.order.forward, Some((MotionCommand::WALK_FORWARD, 1.0)));
+    }
+
+    #[test]
+    fn move_away_faces_outward_and_completes_at_minimum_distance() {
+        let params = move_params(CAN_WALK | MOVE_AWAY);
+        let target_pose = position(0.0, 0.0, 0.0);
+        let unaligned = position(1.0, 0.0, 0.0);
+        let outward_heading =
+            normalize_heading(unaligned.heading_to(&target_pose) + std::f32::consts::PI);
+        let close = position(1.0, 0.0, outward_heading.to_degrees());
+        let target = target_position(0.0, 0.0);
+        let directive = EntityMotionDirective::MoveToPosition {
+            admission: admission(),
+            target,
+            params,
+            run_rate: scalar(1.0),
+        };
+        let state = begin_server_directed_motion(directive, close, None);
+        let ServerDirectedMotionResolution::Active(step) = resolve_server_directed_motion(
+            state,
+            steady(),
+            close,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            None,
+        ) else {
+            panic!("close move-away fixture should remain active");
+        };
+        assert_eq!(step.order.forward, Some((MotionCommand::WALK_FORWARD, 1.0)));
+
+        let separated = position(2.0, 0.0, 0.0);
+        assert_eq!(
+            resolve_server_directed_motion(
+                step.state,
+                steady(),
+                separated,
+                DirectedMotionSupport::Physical(MotionContact::RequiresSupport(
+                    ContactState::Grounded
+                )),
+                None,
+            ),
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            },
+        );
+    }
+
+    #[test]
+    fn crossing_target_airborne_does_not_complete_until_grounded() {
+        let target_pose = position(20.0, 0.0, 0.0);
+        let start = position(
+            0.0,
+            0.0,
+            position(0.0, 0.0, 0.0)
+                .heading_to(&target_pose)
+                .to_degrees(),
+        );
+        let directive = EntityMotionDirective::MoveToPosition {
+            admission: admission(),
+            target: target_position(20.0, 0.0),
+            params: move_params(CAN_WALK | MOVE_TOWARDS),
+            run_rate: scalar(1.0),
+        };
+        let state = begin_server_directed_motion(directive, start, None);
+        let ServerDirectedMotionResolution::Active(moving) = resolve_server_directed_motion(
+            state,
+            steady(),
+            start,
+            DirectedMotionSupport::Physical(MotionContact::RequiresSupport(ContactState::Grounded)),
+            None,
+        ) else {
+            panic!("grounded fixture should begin moving");
+        };
+        let crossed = position(20.0, 0.0, 0.0);
+        for (contact, expected) in [
+            (
+                MotionContact::RequiresSupport(ContactState::Airborne),
+                Some((MotionCommand::FALLING, 1.0)),
+            ),
+            (
+                MotionContact::Unrestricted(ContactState::Airborne),
+                moving.order.forward,
+            ),
+        ] {
+            let ServerDirectedMotionResolution::Active(airborne) = resolve_server_directed_motion(
+                moving.state,
+                steady(),
+                crossed,
+                DirectedMotionSupport::Physical(contact),
+                None,
+            ) else {
+                panic!("airborne target crossing must retain the directive");
+            };
+            assert_eq!(airborne.order.forward, expected);
+            assert_eq!(
+                resolve_server_directed_motion(
+                    airborne.state,
+                    steady(),
+                    crossed,
+                    DirectedMotionSupport::Physical(MotionContact::RequiresSupport(
+                        ContactState::Grounded
+                    )),
+                    None,
+                ),
+                ServerDirectedMotionResolution::Complete {
+                    sticky_target: None
+                },
+            );
+        }
+    }
+}

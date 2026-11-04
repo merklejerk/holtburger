@@ -1,17 +1,26 @@
+use crate::attachment::{EntityPlacementIntent, PhysicsAttachment};
 use crate::book::BookData;
+use crate::entity_appearance::EntityAppearance;
+use crate::entity_physics::{EntityPhysicsRuntimeState, resolve_effective_entity_physics_state};
+use crate::entity_scale::EntityScaleState;
 use crate::hydration::WorldObjectPropertiesHydrationExt;
 use crate::identify::{self, IdentifyTarget};
+use crate::inspection::InspectionSupplement;
+use crate::motion::{MotionCommand, MotionContact};
+use crate::spatial::ContactState;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PhysicsState, PropertyInstanceId,
-    PropertyInt, PropertyString, PropertyUpdate, WeenieHeaderFlag, WeenieHeaderFlag2,
-    WorldObjectProperties, WorldObjectPropertyAccessorsMut,
+    HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PhysicsState, PropertyFloat,
+    PropertyInstanceId, PropertyInt, PropertyString, PropertyUpdate, WeenieHeaderFlag,
+    WeenieHeaderFlag2, WorldObjectExt, WorldObjectProperties, WorldObjectPropertyAccessors,
+    WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::MovementType;
 use holtburger_protocol::messages::movement::messages::motion::{
-    MoveToObject, MoveToPosition, MovementInvalid, TurnToHeading, TurnToObject,
+    MoveToObject, MoveToParameters, MoveToPosition, MovementInvalid, Origin, TurnToHeading,
+    TurnToObject, TurnToParameters,
 };
 use holtburger_protocol::messages::movement::{
     InterpretedMotionCommand, MotionStance, MovementEventData, MovementTypeData,
@@ -22,7 +31,8 @@ use holtburger_protocol::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
 };
 use holtburger_protocol::traits::ProtocolUnpack;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EntityMotionSnapshot {
@@ -30,16 +40,37 @@ pub struct EntityMotionSnapshot {
     pub forward_command: Option<InterpretedMotionCommand>,
     pub sidestep_command: Option<InterpretedMotionCommand>,
     pub turn_command: Option<InterpretedMotionCommand>,
-    pub forward_speed: Option<OrderedMotionSpeed>,
-    pub sidestep_speed: Option<OrderedMotionSpeed>,
-    pub turn_speed: Option<OrderedMotionSpeed>,
+    pub forward_speed: Option<OrderedMotionScalar>,
+    pub sidestep_speed: Option<OrderedMotionScalar>,
+    pub turn_speed: Option<OrderedMotionScalar>,
     pub directive: Option<EntityMotionDirective>,
 }
 
+/// Retained network authority for one entity's steady-state movement.
+///
+/// `Uninitialized` means no movement state has ever been admitted for this object generation.
+/// `Initialized` may contain an idle snapshot; an explicit stop must never collapse back to
+/// `Uninitialized`, because the motion runtime needs that idle order to retire a prior cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct OrderedMotionSpeed(u32);
+pub enum EntityNetworkMotion {
+    #[default]
+    Uninitialized,
+    Initialized(EntityMotionSnapshot),
+}
 
-impl OrderedMotionSpeed {
+impl EntityNetworkMotion {
+    pub const fn snapshot(self) -> Option<EntityMotionSnapshot> {
+        match self {
+            Self::Uninitialized => None,
+            Self::Initialized(snapshot) => Some(snapshot),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OrderedMotionScalar(u32);
+
+impl OrderedMotionScalar {
     pub fn from_f32(value: f32) -> Option<Self> {
         value.is_finite().then_some(Self(value.to_bits()))
     }
@@ -49,17 +80,282 @@ impl OrderedMotionSpeed {
     }
 }
 
+/// One exact finite wire position retained for server-directed motion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OrderedMotionPosition {
+    /// Cell containing the authored target.
+    pub cell_id: Guid,
+    /// Authored X coordinate retained by IEEE-754 bits.
+    pub x: OrderedMotionScalar,
+    /// Authored Y coordinate retained by IEEE-754 bits.
+    pub y: OrderedMotionScalar,
+    /// Authored Z coordinate retained by IEEE-754 bits.
+    pub z: OrderedMotionScalar,
+}
+
+impl OrderedMotionPosition {
+    fn from_origin(origin: &Origin) -> Option<Self> {
+        Some(Self {
+            cell_id: origin.cell_id,
+            x: OrderedMotionScalar::from_f32(origin.position.x)?,
+            y: OrderedMotionScalar::from_f32(origin.position.y)?,
+            z: OrderedMotionScalar::from_f32(origin.position.z)?,
+        })
+    }
+
+    /// Reconstructs the world position without inventing a target orientation.
+    pub fn world_position(self) -> WorldPosition {
+        WorldPosition {
+            landblock_id: self.cell_id,
+            coords: Vector3::new(self.x.to_f32(), self.y.to_f32(), self.z.to_f32()),
+            ..WorldPosition::default()
+        }
+    }
+}
+
+/// Interdependent retail parameters governing one MoveTo command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntityMoveToParameters {
+    /// Lossless retail movement-parameter flags, including unknown bits.
+    pub flags: u32,
+    /// Desired approach distance.
+    pub distance_to_object: OrderedMotionScalar,
+    /// Minimum separation used by away/backwards movement.
+    pub min_distance: OrderedMotionScalar,
+    /// Maximum travel before the command fails.
+    pub fail_distance: OrderedMotionScalar,
+    /// Authored motion speed multiplier.
+    pub speed: OrderedMotionScalar,
+    /// Remaining-distance threshold controlling walk versus run.
+    pub walk_run_threshold: OrderedMotionScalar,
+    /// Final heading in retail degrees.
+    pub desired_heading_degrees: OrderedMotionScalar,
+}
+
+impl EntityMoveToParameters {
+    fn from_wire(params: &MoveToParameters) -> Option<Self> {
+        Some(Self {
+            flags: params.movement_parameters,
+            distance_to_object: OrderedMotionScalar::from_f32(params.distance_to_object)?,
+            min_distance: OrderedMotionScalar::from_f32(params.min_distance)?,
+            fail_distance: OrderedMotionScalar::from_f32(params.fail_distance)?,
+            speed: OrderedMotionScalar::from_f32(params.speed)?,
+            walk_run_threshold: OrderedMotionScalar::from_f32(params.walk_run_threshold)?,
+            desired_heading_degrees: OrderedMotionScalar::from_f32(params.desired_heading)?,
+        })
+    }
+}
+
+/// Interdependent retail parameters governing one TurnTo command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntityTurnToParameters {
+    /// Lossless retail movement-parameter flags, including unknown bits.
+    pub flags: u32,
+    /// Authored turn speed multiplier.
+    pub speed: OrderedMotionScalar,
+    /// Absolute or object-relative desired heading in retail degrees.
+    pub desired_heading_degrees: OrderedMotionScalar,
+}
+
+/// Outer movement-event identity controlling one directive's lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntityMotionAdmission {
+    /// Object-generation sequence that admitted the command.
+    pub object_instance_sequence: u16,
+    /// Movement epoch that distinguishes repeated byte-identical directives.
+    pub movement_sequence: u16,
+    /// Server-control epoch used by non-autonomous admission.
+    pub server_control_sequence: u16,
+    /// Whether the server classified the event as autonomous motion.
+    pub is_autonomous: bool,
+}
+
+/// Wire path that produced an interpreted motion command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityMotionCommandSource {
+    /// Client-authored edge; its playback owner reports local lifecycle outcomes.
+    LocalCommand {
+        /// Optional local caller identity, independent of wrapping wire sequence stamps.
+        request_id: Option<u32>,
+    },
+    /// Retail command-list item with its own wrapping 15-bit sequence.
+    CommandList,
+    /// ACE action-class forward command keyed by the fresh outer movement event.
+    ForwardCommand,
+}
+
+/// One admitted transient action, separate from retained steady motion channels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntityMotionAction {
+    /// Expanded action-class motion-table command.
+    pub command: MotionCommand,
+    /// Exact finite authored speed multiplier.
+    pub speed: OrderedMotionScalar,
+    /// Action stamp: command-list sequence or outer movement sequence for ACE forward actions.
+    pub action_sequence: u16,
+    /// Autonomous classification carried by the producing wire fact.
+    pub is_autonomous: bool,
+    /// Fresh outer event identity that admitted this edge.
+    pub admission: EntityMotionAdmission,
+    /// Wire path used to distinguish command-list freshness from ACE forward admission.
+    pub source: EntityMotionCommandSource,
+}
+
+/// Fresh wire command that could not enter retained state or the action queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityMotionCommandRejection {
+    /// The interpreted index has no retail command expansion.
+    UnknownCommand {
+        command: InterpretedMotionCommand,
+        source: EntityMotionCommandSource,
+    },
+    /// The expanded command is not action-class and cannot enter the transient queue.
+    NotAnAction {
+        command: MotionCommand,
+        source: EntityMotionCommandSource,
+    },
+    /// The command's authored speed was non-finite.
+    NonFiniteSpeed {
+        command: InterpretedMotionCommand,
+        source: EntityMotionCommandSource,
+    },
+}
+
+fn reduce_motion_action(
+    command: InterpretedMotionCommand,
+    speed: f32,
+    action_sequence: u16,
+    is_autonomous: bool,
+    admission: EntityMotionAdmission,
+    source: EntityMotionCommandSource,
+) -> Result<EntityMotionAction, EntityMotionCommandRejection> {
+    let speed = OrderedMotionScalar::from_f32(speed)
+        .ok_or(EntityMotionCommandRejection::NonFiniteSpeed { command, source })?;
+    let command = MotionCommand::from_interpreted(command)
+        .ok_or(EntityMotionCommandRejection::UnknownCommand { command, source })?;
+    if !command.is_action() {
+        return Err(EntityMotionCommandRejection::NotAnAction { command, source });
+    }
+    Ok(EntityMotionAction {
+        command,
+        speed,
+        action_sequence,
+        is_autonomous,
+        admission,
+        source,
+    })
+}
+
+fn is_newer_u15(candidate: u16, current: u16) -> bool {
+    let difference = candidate.wrapping_sub(current) & 0x7FFF;
+    difference != 0 && difference < 0x4000
+}
+
+impl EntityMotionAdmission {
+    fn from_movement_event(data: &MovementEventData) -> Self {
+        Self {
+            object_instance_sequence: data.object_instance_sequence,
+            movement_sequence: data.movement_sequence,
+            server_control_sequence: data.server_control_sequence,
+            is_autonomous: data.is_autonomous,
+        }
+    }
+}
+
+impl EntityTurnToParameters {
+    fn from_wire(params: &TurnToParameters) -> Option<Self> {
+        Some(Self {
+            flags: params.movement_parameters,
+            speed: OrderedMotionScalar::from_f32(params.speed)?,
+            desired_heading_degrees: OrderedMotionScalar::from_f32(params.desired_heading)?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntityMotionDirective {
-    TurnToHeading {
-        desired_heading: OrderedMotionSpeed,
-        speed: OrderedMotionSpeed,
+    /// Server-authored travel toward a world position.
+    MoveToPosition {
+        /// Outer event identity controlling restart and replacement.
+        admission: EntityMotionAdmission,
+        /// Fixed target received on the wire.
+        target: OrderedMotionPosition,
+        /// Complete movement policy received with the target.
+        params: EntityMoveToParameters,
+        /// Actor-specific Run rate used when retail applies the Run hold key.
+        run_rate: OrderedMotionScalar,
     },
-    TurnToObject {
+    /// Server-authored travel toward another object.
+    MoveToObject {
+        /// Outer event identity controlling restart and replacement.
+        admission: EntityMotionAdmission,
+        /// Object whose current authoritative pose should be sampled each tick.
         target: Guid,
-        desired_heading: Option<OrderedMotionSpeed>,
-        speed: OrderedMotionSpeed,
+        /// Admission-time target position used when retail cannot resolve the object.
+        fallback_target: OrderedMotionPosition,
+        /// Complete movement policy received with the target.
+        params: EntityMoveToParameters,
+        /// Actor-specific Run rate used when retail applies the Run hold key.
+        run_rate: OrderedMotionScalar,
     },
+    /// Absolute heading-only command.
+    TurnToHeading {
+        /// Outer event identity controlling restart and replacement.
+        admission: EntityMotionAdmission,
+        /// Complete turn policy received on the wire.
+        params: EntityTurnToParameters,
+    },
+    /// Object-relative heading command with retail's absolute fallback.
+    TurnToObject {
+        /// Outer event identity controlling restart and replacement.
+        admission: EntityMotionAdmission,
+        /// Object whose current authoritative bearing should be sampled each tick.
+        target: Guid,
+        /// Absolute heading used when the target is unavailable, in retail degrees.
+        fallback_heading_degrees: OrderedMotionScalar,
+        /// Complete turn policy received on the wire.
+        params: EntityTurnToParameters,
+    },
+}
+
+impl EntityMotionDirective {
+    /// Reduces one wire movement payload into a complete finite server directive.
+    pub fn from_movement_event(data: &MovementEventData) -> Option<Self> {
+        match &data.data {
+            MovementTypeData::MoveToPosition(motion) => Some(Self::MoveToPosition {
+                admission: EntityMotionAdmission::from_movement_event(data),
+                target: OrderedMotionPosition::from_origin(&motion.origin)?,
+                params: EntityMoveToParameters::from_wire(&motion.params)?,
+                run_rate: OrderedMotionScalar::from_f32(motion.run_rate)?,
+            }),
+            MovementTypeData::MoveToObject(motion) => Some(Self::MoveToObject {
+                admission: EntityMotionAdmission::from_movement_event(data),
+                target: motion.target,
+                fallback_target: OrderedMotionPosition::from_origin(&motion.origin)?,
+                params: EntityMoveToParameters::from_wire(&motion.params)?,
+                run_rate: OrderedMotionScalar::from_f32(motion.run_rate)?,
+            }),
+            MovementTypeData::TurnToHeading(turn) => Some(Self::TurnToHeading {
+                admission: EntityMotionAdmission::from_movement_event(data),
+                params: EntityTurnToParameters::from_wire(&turn.params)?,
+            }),
+            MovementTypeData::TurnToObject(turn) => Some(Self::TurnToObject {
+                admission: EntityMotionAdmission::from_movement_event(data),
+                target: turn.target,
+                fallback_heading_degrees: OrderedMotionScalar::from_f32(turn.desired_heading)?,
+                params: EntityTurnToParameters::from_wire(&turn.params)?,
+            }),
+            MovementTypeData::Invalid(_) => None,
+        }
+    }
+
+    /// Object identity sampled by object-target directives.
+    pub const fn target_guid(self) -> Option<Guid> {
+        match self {
+            Self::MoveToObject { target, .. } | Self::TurnToObject { target, .. } => Some(target),
+            Self::MoveToPosition { .. } | Self::TurnToHeading { .. } => None,
+        }
+    }
 }
 
 impl EntityMotionSnapshot {
@@ -69,68 +365,88 @@ impl EntityMotionSnapshot {
             .or(self.turn_command)
     }
 
-    pub fn from_movement_event(data: &MovementEventData) -> Option<Self> {
-        let mut snapshot = Self {
-            current_style: MotionStance::from_interpreted(data.current_style),
-            ..Self::default()
+    /// Whether retail preserves authored heading while pose interpolation owns translation.
+    pub const fn is_moving_to(self) -> bool {
+        matches!(
+            self.directive,
+            Some(
+                EntityMotionDirective::MoveToPosition { .. }
+                    | EntityMotionDirective::MoveToObject { .. }
+            )
+        )
+    }
+
+    /// Reduces the steady-state portion of one retail movement payload.
+    ///
+    /// Retail initializes omitted interpreted fields to their concrete defaults before
+    /// replacing the prior interpreted movement state. In particular, an omitted style becomes
+    /// NonCombat, an omitted forward command becomes Ready, and omitted sidestep/turn channels
+    /// stop. Ready is represented here by the absence of authored forward locomotion so the
+    /// motion table selects its default.
+    pub fn from_movement_event(
+        data: &MovementEventData,
+        previous: Option<EntityMotionSnapshot>,
+    ) -> Self {
+        let mut snapshot = if matches!(data.data, MovementTypeData::Invalid(_)) {
+            // UnPack constructs a complete replacement interpreted state. Its default stance is
+            // NonCombat; the outer style is applied first but then overwritten by this state.
+            Self {
+                current_style: Some(MotionStance::NonCombat),
+                ..Self::default()
+            }
+        } else {
+            // MoveTo/TurnTo do not replace the interpreted movement state. They may change the
+            // outer style, and otherwise retain the state to which movement later returns.
+            let mut retained = previous.unwrap_or_default();
+            if let Some(style) = MotionStance::from_interpreted(data.current_style) {
+                retained.current_style = Some(style);
+            }
+            retained.directive = None;
+            retained
         };
 
         if let MovementTypeData::Invalid(invalid) = &data.data {
-            if let Some(style) = invalid
+            snapshot.current_style = invalid
                 .state
                 .current_style
                 .and_then(MotionStance::from_interpreted)
-            {
-                snapshot.current_style = Some(style);
-            }
+                .or(Some(MotionStance::NonCombat));
             snapshot.forward_command = invalid.state.forward_command;
             snapshot.sidestep_command = invalid.state.sidestep_command;
             snapshot.turn_command = invalid.state.turn_command;
             snapshot.forward_speed = invalid
                 .state
                 .forward_speed
-                .and_then(OrderedMotionSpeed::from_f32);
+                .and_then(OrderedMotionScalar::from_f32);
             snapshot.sidestep_speed = invalid
                 .state
                 .sidestep_speed
-                .and_then(OrderedMotionSpeed::from_f32);
+                .and_then(OrderedMotionScalar::from_f32);
             snapshot.turn_speed = invalid
                 .state
                 .turn_speed
-                .and_then(OrderedMotionSpeed::from_f32);
-        } else if let MovementTypeData::TurnToHeading(turn) = &data.data {
-            let desired_heading = OrderedMotionSpeed::from_f32(turn.params.desired_heading);
-            let speed = OrderedMotionSpeed::from_f32(turn.params.speed);
-
-            if let (Some(desired_heading), Some(speed)) = (desired_heading, speed) {
-                snapshot.directive = Some(EntityMotionDirective::TurnToHeading {
-                    desired_heading,
-                    speed,
-                });
+                .and_then(OrderedMotionScalar::from_f32);
+            if snapshot
+                .forward_command
+                .and_then(MotionCommand::from_interpreted)
+                .is_some_and(MotionCommand::is_action)
+            {
+                snapshot.forward_command = None;
+                snapshot.forward_speed = None;
             }
-        } else if let MovementTypeData::TurnToObject(turn) = &data.data
-            && let Some(speed) = OrderedMotionSpeed::from_f32(turn.params.speed)
-        {
-            snapshot.directive = Some(EntityMotionDirective::TurnToObject {
-                target: turn.target,
-                desired_heading: OrderedMotionSpeed::from_f32(turn.desired_heading),
-                speed,
-            });
+        } else {
+            snapshot.directive = EntityMotionDirective::from_movement_event(data);
         }
 
-        let has_data = snapshot.current_style.is_some()
-            || snapshot.forward_command.is_some()
-            || snapshot.sidestep_command.is_some()
-            || snapshot.turn_command.is_some()
-            || snapshot.forward_speed.is_some()
-            || snapshot.sidestep_speed.is_some()
-            || snapshot.turn_speed.is_some()
-            || snapshot.directive.is_some();
-
-        has_data.then_some(snapshot)
+        snapshot.forward_speed = snapshot.forward_command.and(snapshot.forward_speed);
+        snapshot.sidestep_speed = snapshot.sidestep_command.and(snapshot.sidestep_speed);
+        snapshot.turn_speed = snapshot.turn_command.and(snapshot.turn_speed);
+        snapshot
     }
 
-    pub fn from_object_description(data: &ObjectDescriptionData) -> Option<Self> {
+    pub(crate) fn from_object_description(
+        data: &ObjectDescriptionData,
+    ) -> Option<(Self, Option<Guid>)> {
         let movement_data = data.movement_data.as_deref()?;
         let mut offset = 0;
         let movement_type_raw = u8::unpack(movement_data, &mut offset)?;
@@ -161,17 +477,27 @@ impl EntityMotionSnapshot {
             ),
         };
 
-        Self::from_movement_event(&MovementEventData {
-            guid: data.public_weenie_desc.guid,
-            object_instance_sequence: data.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX],
-            movement_sequence: 0,
-            server_control_sequence: data.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX],
-            is_autonomous: data.autonomous_movement.unwrap_or(false),
-            movement_type,
-            motion_flags,
-            current_style,
-            data: payload,
-        })
+        let sticky_target = match &payload {
+            MovementTypeData::Invalid(motion) => motion.sticky_object,
+            _ => None,
+        };
+        Some((
+            Self::from_movement_event(
+                &MovementEventData {
+                    guid: data.public_weenie_desc.guid,
+                    object_instance_sequence: data.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX],
+                    movement_sequence: 0,
+                    server_control_sequence: data.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX],
+                    is_autonomous: data.autonomous_movement.unwrap_or(false),
+                    movement_type,
+                    motion_flags,
+                    current_style,
+                    data: payload,
+                },
+                None,
+            ),
+            sticky_target,
+        ))
     }
 
     pub fn indicates_death_motion(self) -> bool {
@@ -182,33 +508,105 @@ impl EntityMotionSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use super::{EntityMotionSnapshot, MotionStance, MovementEventData, MovementTypeData};
+    use super::{
+        Entity, EntityMotionCommandRejection, EntityMotionCommandSource, EntityMotionDirective,
+        EntityMotionSnapshot, EntityMovementAdmission, MotionStance, MovementEventData,
+        MovementTypeData,
+    };
     use holtburger_common::Guid;
-    use holtburger_protocol::messages::MovementType;
+    use holtburger_common::position::WorldPosition;
     use holtburger_protocol::messages::movement::messages::motion::{
-        TurnToHeading, TurnToObject, TurnToParameters,
+        MoveToObject, MoveToParameters, Origin, TurnToHeading, TurnToObject, TurnToParameters,
+    };
+    use holtburger_protocol::messages::{
+        InterpretedMotionCommand, InterpretedMotionState, MotionItem, MovementInvalid,
+        MovementStateFlags, MovementType,
     };
 
     #[test]
+    fn independent_description_retains_lossless_placement_and_defaults_to_zero() {
+        use holtburger_protocol::messages::object::messages::description::ObjectDescriptionData;
+        let mut entity = Entity::new(Guid(1), "missile".into(), Default::default());
+        for requested in [Some(101), Some(u32::MAX), None] {
+            entity.apply_description(&ObjectDescriptionData {
+                animation_frame: requested,
+                ..Default::default()
+            });
+            assert_eq!(entity.placement_frame, requested.unwrap_or(0));
+        }
+    }
+
+    #[test]
+    fn initial_description_returns_sticky_target_with_the_decoded_motion() {
+        use holtburger_protocol::messages::movement::MovementType;
+        use holtburger_protocol::messages::movement::messages::motion::MovementInvalid;
+        use holtburger_protocol::traits::ProtocolPack;
+        let target = Guid(2);
+        let mut movement = vec![MovementType::Invalid as u8, 1];
+        0u16.pack(&mut movement);
+        MovementInvalid {
+            sticky_object: Some(target),
+            ..Default::default()
+        }
+        .pack(&mut movement);
+        let description =
+            holtburger_protocol::messages::object::messages::description::ObjectDescriptionData {
+                movement_data: Some(movement),
+                ..Default::default()
+            };
+        let (snapshot, sticky) =
+            super::EntityMotionSnapshot::from_object_description(&description).unwrap();
+        assert_eq!(sticky, Some(target));
+        let mut entity = Entity::new(Guid(1), "actor".into(), Default::default());
+        assert_eq!(entity.apply_description(&description), Some(target));
+        assert_eq!(entity.network_motion.snapshot(), Some(snapshot));
+    }
+
+    #[test]
+    fn omitted_interpreted_style_uses_retail_noncombat_default() {
+        let snapshot = EntityMotionSnapshot::from_movement_event(
+            &MovementEventData {
+                guid: Guid(0x60000001),
+                object_instance_sequence: 1,
+                movement_sequence: 2,
+                server_control_sequence: 3,
+                is_autonomous: true,
+                movement_type: MovementType::Invalid,
+                motion_flags: 0,
+                current_style: 0,
+                data: MovementTypeData::Invalid(Default::default()),
+            },
+            None,
+        );
+
+        assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
+        assert_eq!(snapshot.forward_command, None);
+        assert_eq!(snapshot.sidestep_command, None);
+        assert_eq!(snapshot.turn_command, None);
+    }
+
+    #[test]
     fn turn_to_heading_with_non_finite_directive_preserves_other_snapshot_fields() {
-        let snapshot = EntityMotionSnapshot::from_movement_event(&MovementEventData {
-            guid: Guid(0x60000001),
-            object_instance_sequence: 1,
-            movement_sequence: 2,
-            server_control_sequence: 3,
-            is_autonomous: false,
-            movement_type: MovementType::TurnToHeading,
-            motion_flags: 0,
-            current_style: MotionStance::NonCombat.interpreted(),
-            data: MovementTypeData::TurnToHeading(TurnToHeading {
-                params: TurnToParameters {
-                    movement_parameters: 0,
-                    speed: 1.5,
-                    desired_heading: f32::NAN,
-                },
-            }),
-        })
-        .expect("expected current style to keep snapshot populated");
+        let snapshot = EntityMotionSnapshot::from_movement_event(
+            &MovementEventData {
+                guid: Guid(0x60000001),
+                object_instance_sequence: 1,
+                movement_sequence: 2,
+                server_control_sequence: 3,
+                is_autonomous: false,
+                movement_type: MovementType::TurnToHeading,
+                motion_flags: 0,
+                current_style: MotionStance::NonCombat.interpreted(),
+                data: MovementTypeData::TurnToHeading(TurnToHeading {
+                    params: TurnToParameters {
+                        movement_parameters: 0,
+                        speed: 1.5,
+                        desired_heading: f32::NAN,
+                    },
+                }),
+            },
+            None,
+        );
 
         assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
         assert_eq!(snapshot.directive, None);
@@ -216,29 +614,599 @@ mod tests {
 
     #[test]
     fn turn_to_object_with_non_finite_speed_preserves_other_snapshot_fields() {
-        let snapshot = EntityMotionSnapshot::from_movement_event(&MovementEventData {
-            guid: Guid(0x60000001),
-            object_instance_sequence: 1,
-            movement_sequence: 2,
-            server_control_sequence: 3,
-            is_autonomous: false,
-            movement_type: MovementType::TurnToObject,
-            motion_flags: 0,
-            current_style: MotionStance::NonCombat.interpreted(),
-            data: MovementTypeData::TurnToObject(TurnToObject {
-                target: Guid(0x70000001),
-                desired_heading: 0.25,
-                params: TurnToParameters {
-                    movement_parameters: 0,
-                    speed: f32::NAN,
+        let snapshot = EntityMotionSnapshot::from_movement_event(
+            &MovementEventData {
+                guid: Guid(0x60000001),
+                object_instance_sequence: 1,
+                movement_sequence: 2,
+                server_control_sequence: 3,
+                is_autonomous: false,
+                movement_type: MovementType::TurnToObject,
+                motion_flags: 0,
+                current_style: MotionStance::NonCombat.interpreted(),
+                data: MovementTypeData::TurnToObject(TurnToObject {
+                    target: Guid(0x70000001),
                     desired_heading: 0.25,
-                },
-            }),
-        })
-        .expect("expected current style to keep snapshot populated");
+                    params: TurnToParameters {
+                        movement_parameters: 0,
+                        speed: f32::NAN,
+                        desired_heading: 0.25,
+                    },
+                }),
+            },
+            None,
+        );
 
         assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
         assert_eq!(snapshot.directive, None);
+    }
+
+    #[test]
+    fn move_to_object_retains_every_wire_parameter_and_outer_admission_identity() {
+        let data = MovementEventData {
+            guid: Guid(0x6000_0001),
+            object_instance_sequence: 11,
+            movement_sequence: 12,
+            server_control_sequence: 13,
+            is_autonomous: true,
+            movement_type: MovementType::MoveToObject,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::MoveToObject(MoveToObject {
+                target: Guid(0x7000_0001),
+                origin: Origin {
+                    cell_id: Guid(0x1234_0001),
+                    position: holtburger_common::Vector3::new(1.25, 2.5, 3.75),
+                },
+                params: MoveToParameters {
+                    movement_parameters: 0x10203,
+                    distance_to_object: 0.5,
+                    min_distance: 1.5,
+                    fail_distance: 42.0,
+                    speed: 1.25,
+                    walk_run_threshold: 8.0,
+                    desired_heading: 270.0,
+                },
+                run_rate: 1.75,
+            }),
+        };
+
+        let first = EntityMotionDirective::from_movement_event(&data)
+            .expect("finite MoveToObject should retain a directive");
+        let mut successor = data.clone();
+        successor.movement_sequence += 1;
+        let second = EntityMotionDirective::from_movement_event(&successor)
+            .expect("fresh identical MoveToObject should retain a directive");
+
+        assert_ne!(
+            first, second,
+            "outer admission identity must restart the lifecycle"
+        );
+        let EntityMotionDirective::MoveToObject {
+            admission,
+            target,
+            fallback_target,
+            params,
+            run_rate,
+        } = first
+        else {
+            panic!("MoveToObject wire payload changed directive kind");
+        };
+        assert_eq!(admission.object_instance_sequence, 11);
+        assert_eq!(admission.movement_sequence, 12);
+        assert_eq!(admission.server_control_sequence, 13);
+        assert!(admission.is_autonomous);
+        assert_eq!(target, Guid(0x7000_0001));
+        assert_eq!(fallback_target.cell_id, Guid(0x1234_0001));
+        assert_eq!(
+            fallback_target.world_position().coords,
+            holtburger_common::Vector3::new(1.25, 2.5, 3.75)
+        );
+        assert_eq!(params.flags, 0x10203);
+        assert_eq!(params.distance_to_object.to_f32(), 0.5);
+        assert_eq!(params.min_distance.to_f32(), 1.5);
+        assert_eq!(params.fail_distance.to_f32(), 42.0);
+        assert_eq!(params.speed.to_f32(), 1.25);
+        assert_eq!(params.walk_run_threshold.to_f32(), 8.0);
+        assert_eq!(params.desired_heading_degrees.to_f32(), 270.0);
+        assert_eq!(run_rate.to_f32(), 1.75);
+    }
+
+    fn movement_event(
+        guid: Guid,
+        instance: u16,
+        movement: u16,
+        server_control: u16,
+        forward: Option<InterpretedMotionCommand>,
+    ) -> MovementEventData {
+        MovementEventData {
+            guid,
+            object_instance_sequence: instance,
+            movement_sequence: movement,
+            server_control_sequence: server_control,
+            is_autonomous: true,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: 0,
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: forward.map_or(MovementStateFlags::empty(), |_| {
+                        MovementStateFlags::FORWARD_COMMAND
+                    }),
+                    forward_command: forward,
+                    ..Default::default()
+                },
+                sticky_object: None,
+            }),
+        }
+    }
+
+    fn action_event(
+        guid: Guid,
+        movement: u16,
+        outer_autonomous: bool,
+        commands: Vec<MotionItem>,
+    ) -> MovementEventData {
+        MovementEventData {
+            guid,
+            object_instance_sequence: 7,
+            movement_sequence: movement,
+            server_control_sequence: 0,
+            is_autonomous: outer_autonomous,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: 0,
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    commands,
+                    ..Default::default()
+                },
+                sticky_object: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn command_list_actions_use_wrapping_u15_freshness_without_replaying_duplicates() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Remote".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+        entity.server_action_sequence = 0x7FFE;
+
+        let admission = entity.admit_remote_movement(&action_event(
+            guid,
+            1,
+            false,
+            vec![MotionItem::new(74, 1, false, 1.25)],
+        ));
+        let EntityMovementAdmission::Applied {
+            actions,
+            next_action_sequence,
+            ..
+        } = admission
+        else {
+            panic!("fresh wrapped command-list action should be admitted");
+        };
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].command.raw(), 0x1000_004A);
+        assert_eq!(actions[0].speed.to_f32(), 1.25);
+        assert_eq!(actions[0].action_sequence, 1);
+        assert_eq!(actions[0].source, EntityMotionCommandSource::CommandList);
+        assert_eq!(next_action_sequence, 1);
+
+        let EntityMovementAdmission::Applied { actions, .. } = entity.admit_remote_movement(
+            &action_event(guid, 2, false, vec![MotionItem::new(74, 1, false, 1.25)]),
+        ) else {
+            panic!("fresh outer event should still update retained motion");
+        };
+        assert!(actions.is_empty(), "duplicate action stamp must not replay");
+    }
+
+    #[test]
+    fn locally_echoing_autonomous_action_does_not_consume_its_action_stamp() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Local".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+
+        let EntityMovementAdmission::Applied {
+            actions,
+            next_action_sequence,
+            ..
+        } = entity.admit_movement_with_action_policy(
+            &action_event(guid, 1, true, vec![MotionItem::new(74, 5, true, 1.0)]),
+            false,
+        )
+        else {
+            panic!("fresh movement should be admitted");
+        };
+        assert!(actions.is_empty());
+        assert_eq!(next_action_sequence, 0);
+
+        let EntityMovementAdmission::Applied { actions, .. } = entity.admit_remote_movement(
+            &action_event(guid, 2, true, vec![MotionItem::new(74, 5, true, 1.0)]),
+        ) else {
+            panic!("remote autonomous action should be admitted");
+        };
+        assert_eq!(actions.len(), 1);
+        assert!(actions[0].is_autonomous);
+    }
+
+    #[test]
+    fn mixed_local_action_list_filters_only_autonomous_items_and_preserves_fifo_order() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Local".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+
+        let EntityMovementAdmission::Applied {
+            actions,
+            next_action_sequence,
+            ..
+        } = entity.admit_movement_with_action_policy(
+            &action_event(
+                guid,
+                1,
+                true,
+                vec![
+                    MotionItem::new(74, 1, true, 1.0),
+                    MotionItem::new(74, 2, false, 1.25),
+                    MotionItem::new(74, 3, true, 1.0),
+                    MotionItem::new(74, 4, false, 1.5),
+                ],
+            ),
+            false,
+        )
+        else {
+            panic!("fresh mixed command list should be admitted");
+        };
+        assert_eq!(
+            actions
+                .iter()
+                .map(|action| (action.action_sequence, action.speed.to_f32()))
+                .collect::<Vec<_>>(),
+            vec![(2, 1.25), (4, 1.5)],
+        );
+        assert_eq!(next_action_sequence, 4);
+    }
+
+    #[test]
+    fn action_class_forward_command_is_an_edge_and_not_retained_steady_motion() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Remote".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+
+        for movement in [1, 2] {
+            let mut event =
+                movement_event(guid, 7, movement, 0, Some(InterpretedMotionCommand(74)));
+            event.is_autonomous = false;
+            let EntityMovementAdmission::Applied {
+                snapshot, actions, ..
+            } = entity.admit_remote_movement(&event)
+            else {
+                panic!("fresh ACE forward action should be admitted");
+            };
+            assert_eq!(snapshot.forward_command, None);
+            assert_eq!(actions.len(), 1);
+            assert_eq!(actions[0].source, EntityMotionCommandSource::ForwardCommand);
+            assert_eq!(actions[0].speed.to_f32(), 1.0);
+            assert_eq!(actions[0].action_sequence, movement);
+        }
+    }
+
+    #[test]
+    fn fresh_pose_command_list_entries_become_retained_state_without_action_rejection() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Remote".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+        let bow = InterpretedMotionCommand(0x00ec);
+        let EntityMovementAdmission::Applied {
+            snapshot,
+            actions,
+            rejected_commands,
+            next_action_sequence,
+            motion_changed,
+            ..
+        } = entity.admit_remote_movement(&action_event(
+            guid,
+            1,
+            true,
+            vec![MotionItem::new(bow, 1, true, 1.0)],
+        ))
+        else {
+            panic!("fresh remote pose should be admitted");
+        };
+        assert_eq!(snapshot.forward_command, Some(bow));
+        assert_eq!(snapshot.forward_speed.unwrap().to_f32(), 1.0);
+        assert!(actions.is_empty());
+        assert!(rejected_commands.is_empty());
+        assert!(motion_changed);
+        assert_eq!(next_action_sequence, 1);
+    }
+
+    #[test]
+    fn locally_authored_pose_echo_is_filtered_and_nonfinite_remote_pose_reports_its_speed() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Local".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+        let bow = InterpretedMotionCommand(0x00ec);
+        let event = action_event(guid, 1, true, vec![MotionItem::new(bow, 1, true, 1.0)]);
+        let EntityMovementAdmission::Applied {
+            snapshot,
+            next_action_sequence,
+            ..
+        } = entity.admit_movement_with_action_policy(&event, false)
+        else {
+            panic!("outer movement may still be admitted");
+        };
+        assert_eq!(snapshot.forward_command, None);
+        assert_eq!(next_action_sequence, 0);
+        let EntityMovementAdmission::Applied {
+            rejected_commands, ..
+        } = entity.admit_remote_movement(&action_event(
+            guid,
+            2,
+            false,
+            vec![MotionItem::new(bow, 2, false, f32::NAN)],
+        ))
+        else {
+            panic!("outer movement may still be admitted");
+        };
+        assert!(matches!(
+            rejected_commands.as_slice(),
+            [EntityMotionCommandRejection::NonFiniteSpeed { .. }]
+        ));
+    }
+
+    #[test]
+    fn malformed_fresh_action_items_advance_the_stamp_and_report_one_reason_each() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Remote".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+
+        let EntityMovementAdmission::Applied {
+            actions,
+            rejected_commands,
+            next_action_sequence,
+            ..
+        } = entity.admit_remote_movement(&action_event(
+            guid,
+            1,
+            false,
+            vec![
+                MotionItem::new(u16::MAX, 1, false, 1.0),
+                MotionItem::new(
+                    holtburger_protocol::messages::movement::MotionStance::NonCombat.interpreted(),
+                    2,
+                    false,
+                    1.0,
+                ),
+                MotionItem::new(74, 3, false, f32::NAN),
+            ],
+        ))
+        else {
+            panic!("fresh outer event should be admitted");
+        };
+        assert!(actions.is_empty());
+        assert_eq!(next_action_sequence, 3);
+        assert!(matches!(
+            rejected_commands.as_slice(),
+            [
+                EntityMotionCommandRejection::UnknownCommand { .. },
+                EntityMotionCommandRejection::NotAnAction { .. },
+                EntityMotionCommandRejection::NonFiniteSpeed { .. },
+            ]
+        ));
+    }
+
+    #[test]
+    fn remote_movement_admission_handles_wrapping_run_stop_and_rejects_replay() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Remote".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+        entity.sequences[1] = u16::MAX - 1;
+        entity.sequences[5] = 10;
+
+        assert!(matches!(
+            entity.admit_remote_movement(&movement_event(
+                guid,
+                7,
+                u16::MAX,
+                10,
+                Some(InterpretedMotionCommand::RUN_FORWARD),
+            )),
+            EntityMovementAdmission::Applied {
+                motion_changed: true,
+                ..
+            }
+        ));
+        assert_eq!(
+            entity.motion_command(),
+            Some(InterpretedMotionCommand::RUN_FORWARD)
+        );
+
+        assert!(matches!(
+            entity.admit_remote_movement(&movement_event(guid, 7, 0, 10, None)),
+            EntityMovementAdmission::Applied {
+                motion_changed: true,
+                ..
+            }
+        ));
+        let idle = entity
+            .network_motion
+            .snapshot()
+            .expect("a stop is initialized idle authority");
+        assert_eq!(idle.current_style, Some(MotionStance::NonCombat));
+        assert_eq!(idle.motion_command(), None);
+
+        assert_eq!(
+            entity.admit_remote_movement(&movement_event(guid, 7, 0, 10, None)),
+            EntityMovementAdmission::Rejected,
+            "duplicate delivery is not a fresh motion epoch"
+        );
+
+        assert_eq!(
+            entity.admit_remote_movement(&movement_event(
+                guid,
+                7,
+                u16::MAX,
+                10,
+                Some(InterpretedMotionCommand::RUN_FORWARD),
+            )),
+            EntityMovementAdmission::Rejected
+        );
+        assert_eq!(entity.network_motion.snapshot(), Some(idle));
+    }
+
+    #[test]
+    fn wrong_instance_and_stale_server_control_cannot_replace_motion_authority() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Remote".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+        entity.sequences[5] = 10;
+
+        assert_eq!(
+            entity.admit_remote_movement(&movement_event(
+                guid,
+                6,
+                1,
+                10,
+                Some(InterpretedMotionCommand::RUN_FORWARD),
+            )),
+            EntityMovementAdmission::Rejected
+        );
+        assert_eq!(entity.movement_sequence(), 0);
+
+        assert_eq!(
+            entity.admit_remote_movement(&movement_event(
+                guid,
+                7,
+                1,
+                9,
+                Some(InterpretedMotionCommand::RUN_FORWARD),
+            )),
+            EntityMovementAdmission::MovementSequenceAdvanced
+        );
+        assert_eq!(entity.movement_sequence(), 1);
+        assert_eq!(entity.server_control_sequence(), 10);
+        assert_eq!(entity.network_motion.snapshot(), None);
+    }
+
+    #[test]
+    fn successor_replaces_all_interpreted_channels_and_same_order_does_not_restart() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Remote".to_owned(), WorldPosition::default());
+        entity.sequences[8] = 7;
+        let with_all_channels = MovementEventData {
+            guid,
+            object_instance_sequence: 7,
+            movement_sequence: 1,
+            server_control_sequence: 0,
+            is_autonomous: true,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: MotionStance::SwordCombat.interpreted(),
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: MovementStateFlags::CURRENT_STYLE
+                        | MovementStateFlags::FORWARD_COMMAND
+                        | MovementStateFlags::FORWARD_SPEED
+                        | MovementStateFlags::SIDE_STEP_COMMAND
+                        | MovementStateFlags::SIDE_STEP_SPEED
+                        | MovementStateFlags::TURN_COMMAND
+                        | MovementStateFlags::TURN_SPEED,
+                    current_style: Some(MotionStance::SwordCombat.interpreted()),
+                    forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+                    forward_speed: Some(2.0),
+                    sidestep_command: Some(InterpretedMotionCommand::SIDESTEP_RIGHT),
+                    sidestep_speed: Some(3.0),
+                    turn_command: Some(InterpretedMotionCommand::TURN_LEFT),
+                    turn_speed: Some(0.5),
+                    ..Default::default()
+                },
+                sticky_object: None,
+            }),
+        };
+        assert!(matches!(
+            entity.admit_remote_movement(&with_all_channels),
+            EntityMovementAdmission::Applied {
+                motion_changed: true,
+                ..
+            }
+        ));
+
+        let forward_only = MovementEventData {
+            movement_sequence: 2,
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: MovementStateFlags::CURRENT_STYLE
+                        | MovementStateFlags::FORWARD_COMMAND
+                        | MovementStateFlags::FORWARD_SPEED,
+                    current_style: Some(MotionStance::SwordCombat.interpreted()),
+                    forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+                    forward_speed: Some(2.0),
+                    ..Default::default()
+                },
+                sticky_object: None,
+            }),
+            ..with_all_channels.clone()
+        };
+        assert!(matches!(
+            entity.admit_remote_movement(&forward_only),
+            EntityMovementAdmission::Applied {
+                motion_changed: true,
+                ..
+            }
+        ));
+        let successor = entity.network_motion.snapshot().unwrap();
+        assert_eq!(successor.current_style, Some(MotionStance::SwordCombat));
+        assert_eq!(successor.sidestep_command, None);
+        assert_eq!(successor.sidestep_speed, None);
+        assert_eq!(successor.turn_command, None);
+        assert_eq!(successor.turn_speed, None);
+
+        let same_order = MovementEventData {
+            movement_sequence: 3,
+            ..forward_only
+        };
+        assert!(matches!(
+            entity.admit_remote_movement(&same_order),
+            EntityMovementAdmission::Applied {
+                motion_changed: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn replacement_generation_rejects_the_predecessors_motion_epoch() {
+        let guid = Guid(0x6000_0001);
+        let mut replacement = Entity::new(guid, "Replacement".to_owned(), WorldPosition::default());
+        replacement.sequences[8] = 8;
+
+        assert_eq!(
+            replacement.admit_remote_movement(&movement_event(
+                guid,
+                7,
+                1,
+                0,
+                Some(InterpretedMotionCommand::RUN_FORWARD),
+            )),
+            EntityMovementAdmission::Rejected
+        );
+        assert_eq!(replacement.network_motion.snapshot(), None);
+
+        assert!(matches!(
+            replacement.admit_remote_movement(&movement_event(
+                guid,
+                8,
+                1,
+                0,
+                Some(InterpretedMotionCommand::RUN_FORWARD),
+            )),
+            EntityMovementAdmission::Applied {
+                motion_changed: true,
+                ..
+            }
+        ));
     }
 }
 
@@ -252,25 +1220,40 @@ pub struct Entity {
     pub acceleration: Vector3,
     pub omega: Vector3,
     pub gfx_id: Option<u32>,
-    pub icon_id: Option<u32>,
     pub flags: ObjectDescriptionFlag,
     pub weenie_flags: WeenieHeaderFlag,
     pub weenie_flags2: WeenieHeaderFlag2,
-    pub physics_state: PhysicsState,
-    pub physics_parent_id: Option<Guid>,
+    /// Server-owned state and temporary authored collision prediction as one invariant.
+    pub physics: EntityPhysicsRuntimeState,
+    /// Server-owned authored scale and temporary PhysicsScript ramp as one invariant.
+    pub scale: EntityScaleState,
+    /// Lossless ordered visual substitutions normalized from the producer's source format.
+    pub appearance: EntityAppearance,
+    /// Received placement authority; retained coordinates alone cannot override withdrawal.
+    pub placement_intent: EntityPlacementIntent,
+    /// Lossless ANIMFRAME setup-placement key, independent of parent attachment.
+    pub placement_frame: u32,
     pub autonomous_movement: bool,
-    pub motion_snapshot: Option<EntityMotionSnapshot>,
+    /// Retained steady-state movement supplied by this entity's current network generation.
+    pub network_motion: EntityNetworkMotion,
+    /// Latest admitted command-list action stamp in retail's wrapping 15-bit domain.
+    server_action_sequence: u16,
     pub health_fraction: Option<f32>,
 
     pub sequences: [u16; 9],
 
     pub properties: WorldObjectProperties,
+    /// Public-only catalog evidence; appraisal merges affect `properties` alone.
+    pub(crate) public_description:
+        Option<crate::entity_public_description::EntityPublicDescription>,
 
     pub armor_profile: Option<ArmorProfile>,
     pub creature_profile: Option<CreatureProfile>,
     pub weapon_profile: Option<WeaponProfile>,
     pub hook_profile: Option<HookProfile>,
     pub armor_levels: Option<ArmorLevels>,
+    /// Facts retained from the latest successful appraisal as one replaceable snapshot.
+    pub inspection_supplement: Option<InspectionSupplement>,
     pub spell_book: Vec<u32>,
     pub book: Option<BookData>,
 
@@ -283,16 +1266,27 @@ pub struct Entity {
 }
 
 const OBJECT_POSITION_SEQUENCE_INDEX: usize = 0;
+const OBJECT_MOVEMENT_SEQUENCE_INDEX: usize = 1;
+const OBJECT_VECTOR_SEQUENCE_INDEX: usize = 3;
 const OBJECT_TELEPORT_SEQUENCE_INDEX: usize = 4;
 const OBJECT_SERVER_CONTROL_SEQUENCE_INDEX: usize = 5;
 const OBJECT_FORCE_POSITION_SEQUENCE_INDEX: usize = 6;
+const OBJECT_VISUAL_DESCRIPTION_SEQUENCE_INDEX: usize = 7;
 const OBJECT_INSTANCE_SEQUENCE_INDEX: usize = 8;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityPositionSyncOutcome {
+/// Result of applying retail's movement timestamp admission to one existing entity generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum EntityMovementAdmission {
     Rejected,
-    Moved,
-    Reset { sequence: u16 },
+    /// Retail advances the movement timestamp before rejecting an older server-control epoch.
+    MovementSequenceAdvanced,
+    Applied {
+        snapshot: EntityMotionSnapshot,
+        motion_changed: bool,
+        actions: Vec<EntityMotionAction>,
+        rejected_commands: Vec<EntityMotionCommandRejection>,
+        next_action_sequence: u16,
+    },
 }
 
 impl HasProperties for Entity {
@@ -308,12 +1302,301 @@ impl HasPropertiesMut for Entity {
 }
 
 impl Entity {
+    /// Resolve retail animation contact eligibility from current authoritative entity facts.
+    /// Non-creatures and gravity-disabled objects bypass contact restriction.
+    pub fn motion_contact(&self, contact: ContactState) -> MotionContact {
+        if self.is_creature() && self.physics.effective().response.gravity {
+            MotionContact::RequiresSupport(contact)
+        } else {
+            MotionContact::Unrestricted(contact)
+        }
+    }
+
+    /// Received attachment intent, which may still be waiting for a usable parent.
+    pub const fn attachment(&self) -> Option<PhysicsAttachment> {
+        self.placement_intent.attachment()
+    }
+
+    /// Apply an attachment or withdraw placement without promoting retained coordinates.
+    pub fn set_attachment(&mut self, attachment: Option<PhysicsAttachment>) {
+        self.placement_intent = match attachment {
+            Some(attachment) => EntityPlacementIntent::Attached(attachment),
+            None => EntityPlacementIntent::Withdrawn,
+        };
+    }
+
+    /// Current server instance sequence used as the client composition's realization generation.
+    pub const fn instance_sequence(&self) -> u16 {
+        self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX]
+    }
+
+    /// Latest admitted complete visual-description update for this object incarnation.
+    pub const fn visual_description_sequence(&self) -> u16 {
+        self.sequences[OBJECT_VISUAL_DESCRIPTION_SEQUENCE_INDEX]
+    }
+
+    /// Replaces the complete appearance after its instance and visual sequence gates pass.
+    pub(crate) fn apply_visual_description(
+        &mut self,
+        model_data: &holtburger_protocol::messages::object::types::ModelData,
+        visual_description_sequence: u16,
+    ) {
+        self.appearance = EntityAppearance::from(model_data);
+        self.sequences[OBJECT_VISUAL_DESCRIPTION_SEQUENCE_INDEX] = visual_description_sequence;
+    }
+
+    /// Current remote-object movement timestamp.
+    pub const fn movement_sequence(&self) -> u16 {
+        self.sequences[OBJECT_MOVEMENT_SEQUENCE_INDEX]
+    }
+
+    /// Current server-control timestamp shared by movement and correction packets.
+    pub const fn server_control_sequence(&self) -> u16 {
+        self.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX]
+    }
+
     pub fn motion_command(&self) -> Option<InterpretedMotionCommand> {
-        self.motion_snapshot
+        self.network_motion
+            .snapshot()
             .and_then(EntityMotionSnapshot::motion_command)
     }
 
-    pub fn should_accept_server_position_sequences(
+    /// Admits and reduces one remote movement packet using retail's timestamp ordering.
+    ///
+    /// The current object instance must match exactly. Movement uses wrapping strictly-newer
+    /// ordering; once fresh, retail advances that timestamp even if the packet's server-control
+    /// epoch is older. Equal server-control timestamps are valid (retail object movement
+    /// assignment, instance gate applies).
+    #[cfg(test)]
+    pub(crate) fn admit_remote_movement(
+        &mut self,
+        data: &MovementEventData,
+    ) -> EntityMovementAdmission {
+        self.admit_movement_with_action_policy(data, true)
+    }
+
+    /// Admits movement while choosing whether locally echoed autonomous actions re-enter playback.
+    pub(crate) fn admit_movement_with_action_policy(
+        &mut self,
+        data: &MovementEventData,
+        accept_autonomous_actions: bool,
+    ) -> EntityMovementAdmission {
+        let admission = self.reduce_remote_movement(data, accept_autonomous_actions);
+        self.commit_movement_admission(data, &admission);
+        admission
+    }
+
+    /// Reduces a self packet whose player-authority adapter already admitted its outer timestamp.
+    pub(crate) fn apply_locally_admitted_movement(
+        &mut self,
+        data: &MovementEventData,
+    ) -> EntityMovementAdmission {
+        self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = data.object_instance_sequence;
+        let admission = self.reduce_admitted_movement(data, false);
+        self.commit_movement_admission(data, &admission);
+        admission
+    }
+
+    /// A local echo or declined directive advances authority without replacing accepted motion.
+    pub(crate) fn acknowledge_local_movement(&mut self, data: &MovementEventData) {
+        self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = data.object_instance_sequence;
+        self.sequences[OBJECT_MOVEMENT_SEQUENCE_INDEX] = data.movement_sequence;
+        self.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX] = data.server_control_sequence;
+    }
+
+    fn commit_movement_admission(
+        &mut self,
+        data: &MovementEventData,
+        admission: &EntityMovementAdmission,
+    ) {
+        match admission {
+            EntityMovementAdmission::Rejected => {}
+            EntityMovementAdmission::MovementSequenceAdvanced => {
+                self.sequences[OBJECT_MOVEMENT_SEQUENCE_INDEX] = data.movement_sequence;
+            }
+            EntityMovementAdmission::Applied {
+                snapshot,
+                next_action_sequence,
+                ..
+            } => {
+                self.sequences[OBJECT_MOVEMENT_SEQUENCE_INDEX] = data.movement_sequence;
+                self.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX] = data.server_control_sequence;
+                self.network_motion = EntityNetworkMotion::Initialized(*snapshot);
+                self.server_action_sequence = *next_action_sequence;
+            }
+        }
+    }
+
+    /// Pure successor reduction used by [`Self::admit_remote_movement`].
+    fn reduce_remote_movement(
+        &self,
+        data: &MovementEventData,
+        accept_autonomous_actions: bool,
+    ) -> EntityMovementAdmission {
+        if data.guid != self.guid
+            || data.object_instance_sequence != self.instance_sequence()
+            || !is_newer_u16(data.movement_sequence, self.movement_sequence())
+        {
+            return EntityMovementAdmission::Rejected;
+        }
+
+        if is_newer_u16(self.server_control_sequence(), data.server_control_sequence) {
+            return EntityMovementAdmission::MovementSequenceAdvanced;
+        }
+
+        self.reduce_admitted_movement(data, accept_autonomous_actions)
+    }
+
+    fn reduce_admitted_movement(
+        &self,
+        data: &MovementEventData,
+        accept_autonomous_actions: bool,
+    ) -> EntityMovementAdmission {
+        let mut snapshot =
+            EntityMotionSnapshot::from_movement_event(data, self.network_motion.snapshot());
+        let (actions, rejected_commands, next_action_sequence) =
+            self.reduce_motion_commands(data, accept_autonomous_actions, &mut snapshot);
+        let motion_changed = self.network_motion != EntityNetworkMotion::Initialized(snapshot);
+        EntityMovementAdmission::Applied {
+            snapshot,
+            motion_changed,
+            actions,
+            rejected_commands,
+            next_action_sequence,
+        }
+    }
+
+    fn reduce_motion_commands(
+        &self,
+        data: &MovementEventData,
+        accept_autonomous_actions: bool,
+        snapshot: &mut EntityMotionSnapshot,
+    ) -> (
+        Vec<EntityMotionAction>,
+        Vec<EntityMotionCommandRejection>,
+        u16,
+    ) {
+        let admission = EntityMotionAdmission::from_movement_event(data);
+        let mut accepted = Vec::new();
+        let mut rejected = Vec::new();
+        let mut action_sequence = self.server_action_sequence;
+        let MovementTypeData::Invalid(invalid) = &data.data else {
+            return (accepted, rejected, action_sequence);
+        };
+
+        for item in &invalid.state.commands {
+            let sequence = item.sequence();
+            if !is_newer_u15(sequence, action_sequence)
+                || item.is_autonomous() && !accept_autonomous_actions
+            {
+                continue;
+            }
+            action_sequence = sequence;
+            // Command lists carry fresh interpreted commands, not only one-shot actions.
+            // Retail DoInterpretedMotion applies substate entries to retained movement; ACE
+            // MovementData retains the raw list.
+            if MotionCommand::from_interpreted(item.command).is_some_and(MotionCommand::is_substate)
+            {
+                match OrderedMotionScalar::from_f32(item.speed) {
+                    Some(speed) => {
+                        snapshot.forward_command = Some(item.command);
+                        snapshot.forward_speed = Some(speed);
+                    }
+                    None => rejected.push(EntityMotionCommandRejection::NonFiniteSpeed {
+                        command: item.command,
+                        source: EntityMotionCommandSource::CommandList,
+                    }),
+                }
+                continue;
+            }
+            match reduce_motion_action(
+                item.command,
+                item.speed,
+                sequence,
+                item.is_autonomous(),
+                admission,
+                EntityMotionCommandSource::CommandList,
+            ) {
+                Ok(action) => accepted.push(action),
+                Err(rejection) => rejected.push(rejection),
+            }
+        }
+
+        if let Some(command) = invalid.state.forward_command
+            && MotionCommand::from_interpreted(command).is_some_and(MotionCommand::is_action)
+            && (!data.is_autonomous || accept_autonomous_actions)
+        {
+            // InterpretedMotionState initializes an omitted speed to 1.0.
+            let speed = invalid.state.forward_speed.unwrap_or(1.0);
+            match reduce_motion_action(
+                command,
+                speed,
+                data.movement_sequence & 0x7FFF,
+                data.is_autonomous,
+                admission,
+                EntityMotionCommandSource::ForwardCommand,
+            ) {
+                Ok(action) => accepted.push(action),
+                Err(rejection) => rejected.push(rejection),
+            }
+        }
+
+        (accepted, rejected, action_sequence)
+    }
+
+    /// Current remote-object position timestamp.
+    pub const fn position_sequence(&self) -> u16 {
+        self.sequences[OBJECT_POSITION_SEQUENCE_INDEX]
+    }
+
+    /// Current remote-object teleport timestamp.
+    pub const fn teleport_sequence(&self) -> u16 {
+        self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX]
+    }
+
+    /// Current remote-object vector timestamp.
+    pub const fn vector_sequence(&self) -> u16 {
+        self.sequences[OBJECT_VECTOR_SEQUENCE_INDEX]
+    }
+
+    /// Admits a remote vector only in the current object instance and at a fresh timestamp.
+    ///
+    /// Retail performs these two checks before retail viewer do vector update mutates velocity.
+    pub fn admit_remote_vector_sequences(
+        &mut self,
+        instance_sequence: u16,
+        vector_sequence: u16,
+    ) -> bool {
+        if instance_sequence != self.instance_sequence()
+            || !is_newer_u16(vector_sequence, self.vector_sequence())
+        {
+            return false;
+        }
+        self.sequences[OBJECT_VECTOR_SEQUENCE_INDEX] = vector_sequence;
+        true
+    }
+
+    /// Advances the position timestamp for an admitted relationship transition without a pose.
+    pub fn apply_remote_position_sequence_only(&mut self, position_sequence: u16) {
+        self.sequences[OBJECT_POSITION_SEQUENCE_INDEX] = position_sequence;
+    }
+
+    /// Retains an admitted server pose independently of whether world policy corrects simulation.
+    pub fn apply_remote_position_sample(
+        &mut self,
+        position: WorldPosition,
+        instance_sequence: u16,
+        position_sequence: u16,
+        teleport_sequence: u16,
+    ) {
+        self.position = position;
+        self.placement_intent = EntityPlacementIntent::Independent;
+        self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = instance_sequence;
+        self.sequences[OBJECT_POSITION_SEQUENCE_INDEX] = position_sequence;
+        self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX] = teleport_sequence;
+    }
+
+    fn should_accept_autonomous_position_sequences(
         &self,
         teleport_sequence: u16,
         force_position_sequence: u16,
@@ -334,49 +1617,65 @@ impl Entity {
         true
     }
 
-    pub fn apply_server_position_update(
+    /// Admits autonomous-position timestamps before world policy commits the received pose.
+    pub(crate) fn admit_server_autonomous_position_sequences(
         &mut self,
-        position: WorldPosition,
         instance_sequence: u16,
-        position_sequence: Option<u16>,
         teleport_sequence: u16,
         force_position_sequence: u16,
-        server_control_sequence: Option<u16>,
-    ) -> EntityPositionSyncOutcome {
-        if !self.should_accept_server_position_sequences(teleport_sequence, force_position_sequence)
+        server_control_sequence: u16,
+    ) -> bool {
+        if !self
+            .should_accept_autonomous_position_sequences(teleport_sequence, force_position_sequence)
         {
-            return EntityPositionSyncOutcome::Rejected;
+            return false;
         }
 
-        let old_teleport_sequence = self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX];
-        let old_force_position_sequence = self.sequences[OBJECT_FORCE_POSITION_SEQUENCE_INDEX];
-
-        self.position = position;
         self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = instance_sequence;
-        if let Some(position_sequence) = position_sequence {
-            self.sequences[OBJECT_POSITION_SEQUENCE_INDEX] = position_sequence;
-        }
         self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX] = teleport_sequence;
         self.sequences[OBJECT_FORCE_POSITION_SEQUENCE_INDEX] = force_position_sequence;
-        if let Some(server_control_sequence) = server_control_sequence {
-            self.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX] = server_control_sequence;
-        }
-
-        let reset_required = position_sequence.is_none()
-            || is_newer_u16(teleport_sequence, old_teleport_sequence)
-            || is_newer_u16(force_position_sequence, old_force_position_sequence);
-
-        if reset_required {
-            EntityPositionSyncOutcome::Reset {
-                sequence: force_position_sequence,
-            }
-        } else {
-            EntityPositionSyncOutcome::Moved
-        }
+        self.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX] = server_control_sequence;
+        true
     }
 
     pub fn set_property(&mut self, update: PropertyUpdate) {
+        if let Some(public) = &mut self.public_description {
+            public.apply(&update);
+        }
+        // Retail player killer status assignment replaces all three status flags. Apply at
+        // mutation time so a later description can supersede them.
+        if let PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, status) = &update {
+            self.flags.remove(
+                ObjectDescriptionFlag::PLAYER_KILLER
+                    | ObjectDescriptionFlag::PK_LITE_STATUS
+                    | ObjectDescriptionFlag::FREE_PK_STATUS,
+            );
+            self.flags.insert(match *status {
+                4 => ObjectDescriptionFlag::PLAYER_KILLER,
+                0x40 => ObjectDescriptionFlag::PK_LITE_STATUS,
+                0x20 => ObjectDescriptionFlag::FREE_PK_STATUS,
+                _ => ObjectDescriptionFlag::empty(),
+            });
+        }
+        let scale_update = match &update {
+            PropertyUpdate::Float(PropertyFloat::DefaultScale, value) => Some(*value as f32),
+            _ => None,
+        };
         self.properties.apply(update);
+        if let Some(scale) = scale_update
+            && let Err(error) = self.scale.reconcile(scale)
+        {
+            log::warn!(
+                "Entity {:?} rejected server object scale {scale}: {error}",
+                self.guid
+            );
+        }
+    }
+
+    /// Best disclosed display average; public descriptions never establish raw totals.
+    pub fn display_workmanship(&self) -> Option<f64> {
+        self.effective_workmanship()
+            .or_else(|| self.public_description.as_ref()?.workmanship.map(f64::from))
     }
 
     pub fn apply_identify_response(&mut self, data: &IdentifyObjectResponseEventData) -> bool {
@@ -388,6 +1687,7 @@ impl Entity {
                 weapon_profile: &mut self.weapon_profile,
                 hook_profile: &mut self.hook_profile,
                 armor_levels: &mut self.armor_levels,
+                inspection_supplement: &mut self.inspection_supplement,
                 spell_book: &mut self.spell_book,
                 armor_highlight: &mut self.armor_highlight,
                 armor_color: &mut self.armor_color,
@@ -408,19 +1708,39 @@ impl Entity {
         self.set_iid_prop(PropertyInstanceId::Wielder, val.unwrap_or(Guid::NULL))
     }
 
-    pub fn apply_description(&mut self, data: &ObjectDescriptionData) {
+    /// Hydrate description facts and return its decoded sticky target for one-time world admission.
+    pub fn apply_description(&mut self, data: &ObjectDescriptionData) -> Option<Guid> {
+        self.public_description = Some(
+            crate::entity_public_description::EntityPublicDescription::from_description(
+                &data.public_weenie_desc,
+            ),
+        );
         self.wcid = Some(data.public_weenie_desc.wcid);
         self.flags = data.public_weenie_desc.obj_desc_flags;
         self.weenie_flags = data.public_weenie_desc.weenie_flags;
         self.weenie_flags2 = data.public_weenie_desc.weenie_flags2;
 
-        self.properties.ints.0.insert(
-            PropertyInt::ItemType,
-            data.public_weenie_desc.item_type as i32,
-        );
+        self.physics
+            .reconcile(resolve_effective_entity_physics_state(data.physics_state));
+        self.appearance = EntityAppearance::from(&data.model_data);
+        // The wire carries placement in the ANIMFRAME slot, defaulting to 0 when the flag is
+        // absent, exactly as `PhysicsDesc` initializes `animframe_id`.
+        self.placement_frame = data.animation_frame.unwrap_or(0);
+        let attachment = data.parent.and_then(|parent| {
+            PhysicsAttachment::from_wire(parent.id, parent.location_id, self.placement_frame)
+                .inspect_err(|error| {
+                    log::warn!(
+                        "Entity {:?} description names an unusable attachment: {error}",
+                        self.guid
+                    )
+                })
+                .ok()
+        });
 
-        self.physics_state = data.physics_state;
-        self.physics_parent_id = data.parent_id;
+        self.placement_intent = match attachment {
+            Some(attachment) => EntityPlacementIntent::Attached(attachment),
+            None => EntityPlacementIntent::Independent,
+        };
 
         if let Some(v) = data.velocity {
             self.velocity = v;
@@ -432,17 +1752,31 @@ impl Entity {
             self.omega = o;
         }
 
-        self.icon_id = Some(data.public_weenie_desc.icon_id);
         self.sequences = data.sequences;
 
         if let Some(val) = data.autonomous_movement {
             self.autonomous_movement = val;
         }
 
-        self.motion_snapshot = EntityMotionSnapshot::from_object_description(data);
+        let description_motion = EntityMotionSnapshot::from_object_description(data);
+        self.network_motion = description_motion
+            .map_or(EntityNetworkMotion::Uninitialized, |(snapshot, _)| {
+                EntityNetworkMotion::Initialized(snapshot)
+            });
 
         // Hydrate properties from the description (using common mapping logic)
         self.properties.hydrate_from_odd(data);
+        let scale = self
+            .properties
+            .get_float_prop(PropertyFloat::DefaultScale)
+            .unwrap_or(1.0) as f32;
+        if let Err(error) = self.scale.reconcile(scale) {
+            log::warn!(
+                "Entity {:?} rejected description object scale {scale}: {error}",
+                self.guid
+            );
+        }
+        description_motion.and_then(|(_, target)| target)
     }
 
     pub fn new(guid: Guid, name: String, position: WorldPosition) -> Self {
@@ -469,23 +1803,30 @@ impl Entity {
                 z: 0.0,
             },
             gfx_id: None,
-            icon_id: None,
             flags: ObjectDescriptionFlag::empty(),
             weenie_flags: WeenieHeaderFlag::empty(),
             weenie_flags2: WeenieHeaderFlag2::empty(),
 
-            physics_state: PhysicsState::NONE,
-            physics_parent_id: None,
+            physics: EntityPhysicsRuntimeState::reconciled(resolve_effective_entity_physics_state(
+                PhysicsState::NONE,
+            )),
+            scale: EntityScaleState::default(),
+            appearance: EntityAppearance::default(),
+            placement_intent: EntityPlacementIntent::Independent,
+            placement_frame: 0,
             autonomous_movement: false,
-            motion_snapshot: None,
+            network_motion: EntityNetworkMotion::Uninitialized,
+            server_action_sequence: 0,
             health_fraction: None,
             sequences: [0; 9],
             properties,
+            public_description: None,
             armor_profile: None,
             creature_profile: None,
             weapon_profile: None,
             hook_profile: None,
             armor_levels: None,
+            inspection_supplement: None,
             spell_book: Vec::new(),
             book: None,
             armor_highlight: None,
@@ -498,8 +1839,27 @@ impl Entity {
     }
 }
 
+/// An observed entity-journal boundary; consuming the journal invalidates earlier observations.
+///
+/// The shared identity also distinguishes different stores and keeps replaced boundaries alive
+/// while readers hold them. It carries no entity data and is not a per-entity revision cache.
+#[derive(Clone)]
+pub struct EntityMutationBoundary(Arc<()>);
+
+/// Pending changes and the boundary needed to interpret their absence as evidence.
+#[derive(Default)]
+struct EntityMutationJournal {
+    /// Conservative identities changed since the last reconciliation selection.
+    pending: BTreeSet<Guid>,
+    /// Detaches on journal consumption only while an earlier reader still holds this identity.
+    boundary: Arc<()>,
+}
+
 pub struct EntityManager {
-    pub entities: HashMap<Guid, Entity>,
+    /// Retained descriptions; all mutable access records conservative relationship invalidation.
+    entities: HashMap<Guid, Entity>,
+    /// Identities changed since the world last selected its placement-reconciliation work.
+    mutations: EntityMutationJournal,
 }
 
 impl Default for EntityManager {
@@ -512,11 +1872,59 @@ impl EntityManager {
     pub fn new() -> Self {
         Self {
             entities: HashMap::new(),
+            mutations: EntityMutationJournal::default(),
         }
     }
 
     pub fn insert(&mut self, entity: Entity) {
+        self.record_mutation(entity.guid);
         self.entities.insert(entity.guid, entity);
+    }
+
+    /// Number of retained descriptions, independent of scene visibility.
+    pub fn len(&self) -> usize {
+        self.entities.len()
+    }
+
+    /// Whether any descriptions are retained.
+    pub fn is_empty(&self) -> bool {
+        self.entities.is_empty()
+    }
+
+    /// Carry mutation identities into world reconciliation, including non-network world APIs.
+    /// Mutable access that changes no fields can produce harmless extra work.
+    pub(crate) fn take_mutations(&mut self) -> BTreeSet<Guid> {
+        // A held observation keeps the old identity alive; detach before erasing its evidence.
+        Arc::make_mut(&mut self.mutations.boundary);
+        std::mem::take(&mut self.mutations.pending)
+    }
+
+    /// Inspect pending identities when establishing baselines before applying the next input.
+    pub(crate) fn mutation_guids(&self) -> impl Iterator<Item = Guid> + '_ {
+        self.mutations.pending.iter().copied()
+    }
+
+    /// Full periodic reconciliation already includes every retained identity and stale baseline.
+    pub(crate) fn clear_mutations(&mut self) {
+        Arc::make_mut(&mut self.mutations.boundary);
+        self.mutations.pending.clear();
+    }
+
+    /// Observe the journal before deriving entity metadata that may be reused in one operation.
+    pub fn mutation_boundary(&self) -> EntityMutationBoundary {
+        EntityMutationBoundary(Arc::clone(&self.mutations.boundary))
+    }
+
+    /// Proves no mutable access/lifecycle invalidation for this identity across an intact journal.
+    /// A consumed journal or a boundary from another store conservatively returns false.
+    pub fn unchanged_since(&self, guid: Guid, boundary: &EntityMutationBoundary) -> bool {
+        Arc::ptr_eq(&self.mutations.boundary, &boundary.0)
+            && !self.mutations.pending.contains(&guid)
+    }
+
+    /// Lifecycle metadata can change visibility without mutating the retained description.
+    pub(crate) fn record_mutation(&mut self, guid: Guid) {
+        self.mutations.pending.insert(guid);
     }
 
     pub fn contains(&self, guid: impl Into<Guid>) -> bool {
@@ -536,7 +1944,10 @@ impl EntityManager {
     }
 
     pub fn get_mut(&mut self, guid: impl Into<Guid>) -> Option<&mut Entity> {
-        self.entities.get_mut(&guid.into())
+        let guid = guid.into();
+        let entity = self.entities.get_mut(&guid)?;
+        self.mutations.pending.insert(guid);
+        Some(entity)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Entity> {
@@ -553,6 +1964,68 @@ impl EntityManager {
     }
 
     pub fn remove(&mut self, guid: impl Into<Guid>) -> Option<Entity> {
-        self.entities.remove(&guid.into())
+        let guid = guid.into();
+        let entity = self.entities.remove(&guid)?;
+        self.record_mutation(guid);
+        Some(entity)
+    }
+}
+
+#[cfg(test)]
+mod entity_manager_tests {
+    use super::*;
+
+    #[test]
+    fn metadata_observation_requires_untouched_identity_and_unconsumed_journal() {
+        let changed = Guid(1);
+        let untouched = Guid(2);
+        let mut entities = EntityManager::new();
+        entities.insert(Entity::new(
+            changed,
+            "Player".into(),
+            WorldPosition::default(),
+        ));
+        entities.clear_mutations();
+        let boundary = entities.mutation_boundary();
+        assert!(entities.unchanged_since(changed, &boundary));
+        entities
+            .get_mut(changed)
+            .unwrap()
+            .set_string_prop(PropertyString::Name, "Changed".into());
+        assert!(!entities.unchanged_since(changed, &boundary));
+        assert!(entities.unchanged_since(untouched, &boundary));
+
+        let pending = entities.take_mutations();
+        assert_eq!(pending, BTreeSet::from([changed]));
+        assert!(!entities.unchanged_since(changed, &boundary));
+        assert!(!entities.unchanged_since(untouched, &boundary));
+        let after_take = entities.mutation_boundary();
+        assert!(entities.unchanged_since(changed, &after_take));
+        entities.clear_mutations();
+        assert!(!entities.unchanged_since(changed, &after_take));
+        assert!(!EntityManager::new().unchanged_since(changed, &entities.mutation_boundary()));
+    }
+}
+
+#[cfg(test)]
+mod collision_status_tests {
+    use super::*;
+
+    #[test]
+    fn pk_updates_replace_status_flags_without_erasing_identity() {
+        let mut entity = Entity::new(Guid(1), "Player".into(), WorldPosition::default());
+        let identity = ObjectDescriptionFlag::PLAYER | ObjectDescriptionFlag::ATTACKABLE;
+        entity.flags = identity;
+        for (status, expected) in [
+            (4, ObjectDescriptionFlag::PLAYER_KILLER),
+            (0x40, ObjectDescriptionFlag::PK_LITE_STATUS),
+            (0x20, ObjectDescriptionFlag::FREE_PK_STATUS),
+            (1, ObjectDescriptionFlag::empty()),
+            (4, ObjectDescriptionFlag::PLAYER_KILLER),
+            (0, ObjectDescriptionFlag::empty()),
+        ] {
+            entity.set_property(PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, status));
+            assert_eq!(entity.flags, identity | expected);
+        }
     }
 }

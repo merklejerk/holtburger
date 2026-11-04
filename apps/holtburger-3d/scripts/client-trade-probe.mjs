@@ -1,0 +1,502 @@
+/** Exercise production HUD controls and a real inventory pointer drop without image checks. */
+export async function probeTrade(client, evaluateExpression) {
+	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__";
+	const fixture = `${api}.tradeProbe`;
+	const read = (expression) => evaluateExpression(client, expression);
+	const wait = async (expression) => {
+		const deadline = Date.now() + 5000;
+		while (!(await read(expression))) {
+			if (Date.now() > deadline)
+				throw new Error(`Trade UI did not settle: ${expression}`);
+			await new Promise((resolve) => setTimeout(resolve, 30));
+		}
+	};
+	const button = (text) =>
+		`Array.from(document.querySelectorAll('[data-trade-panel] button')).find((button) => button.getAttribute("aria-label") === ${JSON.stringify(text)})`;
+	await read(`${fixture}.begin()`);
+	await wait(
+		`document.querySelector('[aria-label="Trade"]')?.disabled === false`,
+	);
+	await read(`document.querySelector('[aria-label="Trade"]').click()`);
+	const open = await read(`${fixture}.request()`);
+	if (
+		open.kind !== "open" ||
+		open.partner !== 5001 ||
+		(await read("document.querySelector('[data-trade-panel]') !== null"))
+	)
+		throw new Error("Trade initiation did not wait for server registration");
+	await read(`(() => {
+        const inventory = document.querySelector('button[aria-label="Inventory"]');
+        if (inventory?.getAttribute('aria-pressed') !== 'true') inventory?.click();
+    })()`);
+	await wait(
+		"document.querySelector('.client-inventory .contents-scroll [data-item-guid=\"6001\"]') !== null",
+	);
+	await read(`${fixture}.register()`);
+	await wait("document.querySelector('[data-trade-panel]') !== null");
+	await wait(
+		`document.querySelector('.client-inventory [data-item-guid="6003"]')?.dataset.dimmed === 'true' && document.querySelector('.client-inventory [data-item-guid="6001"]')?.dataset.dimmed === 'false'`,
+	);
+
+	await read(`(async () => {
+		const panel = document.querySelector('[data-trade-panel]');
+		const reset = panel.querySelector('.trade-reset');
+		const art = reset.querySelector('svg');
+		const surround = panel.querySelector('.trade-reset-control');
+		const { CLIENT_UI_SCALE } = await import('/src/client/client-settings-values.ts');
+		const measure = () => [reset, art, surround].map(node => node.getBoundingClientRect());
+		globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setUiScale(CLIENT_UI_SCALE.initial);
+		await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+		const baseline = measure();
+		try {
+			for (const scale of [CLIENT_UI_SCALE.minimum, CLIENT_UI_SCALE.maximum]) {
+				globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setUiScale(scale);
+				await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+				const bounds = measure();
+				bounds.forEach((rect, index) => {
+					if (Math.abs(rect.width - baseline[index].width * scale) > 0.1 || Math.abs(rect.height - baseline[index].height * scale) > 0.1)
+						throw new Error('Trade reset artwork and hit geometry do not scale together');
+				});
+				if (bounds[1].left < bounds[0].left || bounds[1].right > bounds[0].right || bounds[1].top < bounds[0].top || bounds[1].bottom > bounds[0].bottom)
+					throw new Error('Trade reset artwork escapes its hit target');
+			}
+		} finally { globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setUiScale(CLIENT_UI_SCALE.initial);
+			await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); }
+	})()`);
+
+	const point = (selector) =>
+		read(`(() => {
+        const element = document.querySelector(${JSON.stringify(selector)});
+        if (!element) throw new Error('Missing trade probe element');
+        element.scrollIntoView({block: 'nearest'});
+        const rect = element.getBoundingClientRect();
+        const point = {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2};
+        if (!element.contains(document.elementFromPoint(point.x, point.y))) throw new Error('Trade probe element is covered');
+        return point;
+    })()`);
+	const from = await point(
+		'.client-inventory .contents-scroll [data-item-guid="6001"]',
+	);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mousePressed",
+		...from,
+		button: "left",
+		buttons: 1,
+		clickCount: 1,
+	});
+	const to = await point('[data-trade-offer="5001"]');
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		...to,
+		button: "left",
+		buttons: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseReleased",
+		...to,
+		button: "left",
+		buttons: 0,
+		clickCount: 1,
+	});
+	const add = await read(`${fixture}.request()`);
+	if (
+		add.kind !== "add" ||
+		JSON.stringify(add.items) !== JSON.stringify([6001])
+	)
+		throw new Error("Inventory drop did not submit a trade addition");
+	await read(`${fixture}.pending()`);
+	await wait(
+		`document.querySelector('.client-inventory [data-item-guid="6001"]')?.dataset.dimmed === 'true'`,
+	);
+
+	await wait(`${button("Confirm trade")}?.disabled === true`);
+	if (await read("document.querySelector('[data-trade-item]') !== null"))
+		throw new Error("Pending addition became a confirmed offer");
+	await read(`${fixture}.acknowledge()`);
+	await wait(
+		`${button("Confirm trade")}?.disabled === false && document.querySelector('[data-trade-item="6001"]') !== null`,
+	);
+	for (const item of [6001, 6002]) {
+		const selectedPoint = await point(`[data-trade-item="${item}"]`);
+		for (const type of ["mousePressed", "mouseReleased"]) {
+			await client.send("Input.dispatchMouseEvent", {
+				type,
+				...selectedPoint,
+				button: "left",
+				buttons: type === "mousePressed" ? 1 : 0,
+				clickCount: 1,
+			});
+		}
+		await wait(
+			`document.querySelector('[data-trade-item="${item}"]')?.getAttribute('aria-pressed') === 'true'`,
+		);
+	}
+
+	const inputSettings = await read(`${api}.bindingSettings.read()`);
+	await read(
+		`${api}.bindingSettings.replace({...${JSON.stringify(inputSettings)}, client: {...${JSON.stringify(inputSettings.client)}, examine: [{key: "F8"}]}})`,
+	);
+	await wait(
+		`document.querySelector('[data-trade-item="6002"]')?.dataset.uiTooltip.includes('Examine (F8)')`,
+	);
+	await read(`${api}.selectInventoryItem(6001)`);
+	// Pointer selection intentionally keeps game ownership until the click task retires.
+	// Verify deliberate keyboard focus before testing contextual shortcut dispatch.
+	await wait(`(() => {
+		const cell = document.querySelector('[data-trade-item="6002"]');
+		cell?.focus();
+		return cell !== null && document.activeElement === cell;
+	})()`);
+	const beforeExamine = await read(
+		`${api}.inventoryDragCommands().filter(entry => entry.command === 'examine_client_entity').length`,
+	);
+	for (const type of ["keyDown", "keyUp"])
+		await client.send("Input.dispatchKeyEvent", {
+			type,
+			key: "e",
+			code: "KeyE",
+			windowsVirtualKeyCode: 69,
+		});
+	if (
+		(await read(
+			`${api}.inventoryDragCommands().filter(entry => entry.command === 'examine_client_entity').length`,
+		)) !== beforeExamine
+	)
+		throw new Error("Trade used the old Examine binding");
+	for (const type of ["keyDown", "keyUp"])
+		await client.send("Input.dispatchKeyEvent", {
+			type,
+			key: "F8",
+			code: "F8",
+			windowsVirtualKeyCode: 119,
+		});
+	const contextualExamine = await read(
+		`${api}.inventoryDragCommands().findLast(entry => entry.command === 'examine_client_entity')`,
+	);
+	if (contextualExamine?.args?.guid !== 6002)
+		throw new Error("Trade Examine did not capture the focused partner cell");
+	await read(`${api}.objectInspectionProbe().end()`);
+	await read(
+		`${api}.bindingSettings.replace(${JSON.stringify(inputSettings)})`,
+	);
+
+	const confirmPoint = await point(".trade-rail .trade-confirm");
+	for (const type of ["mousePressed", "mouseReleased"]) {
+		await client.send("Input.dispatchMouseEvent", {
+			type,
+			...confirmPoint,
+			button: "left",
+			buttons: type === "mousePressed" ? 1 : 0,
+			clickCount: 1,
+		});
+	}
+	const accept = await read(`${fixture}.request()`);
+	if (accept.kind !== "accept" || accept.revision !== 2)
+		throw new Error("Acceptance did not name the displayed offer revision");
+	await read(`${fixture}.accepted("partner", true)`);
+	await wait(
+		"document.querySelector('[data-trade-side=\"partner\"]').dataset.tradeAccepted === 'true'",
+	);
+	const theme = await read(`(() => {
+        const panel = document.querySelector('[data-trade-panel]');
+        const confirm = panel.querySelector('.trade-confirm');
+        const transition = confirm.style.transition;
+        confirm.style.transition = 'none';
+        const overrides = {
+            '--ui-trade-self-color': 'rgb(210, 100, 120)',
+            '--ui-trade-partner-color': 'rgb(80, 140, 220)',
+            '--ui-trade-self-background': 'rgb(21, 22, 23)',
+            '--ui-trade-partner-background': 'rgb(31, 32, 33)',
+            '--ui-trade-self-header-background': 'rgb(41, 42, 43)',
+            '--ui-trade-partner-header-background': 'rgb(51, 52, 53)',
+            '--ui-trade-accepted-color': 'rgb(70, 200, 100)',
+            '--ui-trade-reset-size': '38px',
+            '--ui-trade-reset-inset': '5px',
+            '--ui-button-color': 'rgb(180, 160, 220)',
+            '--ui-button-border-color': 'rgb(140, 120, 200)',
+        };
+        for (const [name, value] of Object.entries(overrides)) panel.style.setProperty(name, value);
+        const self = panel.querySelector('[data-trade-side="self"]');
+        const partner = panel.querySelector('[data-trade-side="partner"]');
+        const actual = {
+            selfColor: getComputedStyle(self).borderColor,
+            partnerColor: getComputedStyle(partner).borderColor,
+            selfBackground: getComputedStyle(self).backgroundColor,
+            partnerBackground: getComputedStyle(partner).backgroundColor,
+            selfHeader: getComputedStyle(self.querySelector('header')).backgroundColor,
+            partnerHeader: getComputedStyle(partner.querySelector('header')).backgroundColor,
+            acceptedColor: getComputedStyle(panel.querySelector('[role="status"]')).color,
+            resetSize: getComputedStyle(panel.querySelector('.trade-reset')).width,
+            resetSurroundSize: getComputedStyle(panel.querySelector('.trade-reset-control')).width,
+            resetBackground: getComputedStyle(panel.querySelector('.trade-reset-control')).backgroundColor,
+            buttonColor: getComputedStyle(panel.querySelector('.trade-confirm')).color,
+            buttonBorder: getComputedStyle(panel.querySelector('.trade-confirm')).borderColor,
+        };
+        for (const name of Object.keys(overrides)) panel.style.removeProperty(name);
+        confirm.style.transition = transition;
+        return actual;
+    })()`);
+	const expectedTheme = {
+		selfColor: "rgb(210, 100, 120)",
+		partnerColor: "rgb(80, 140, 220)",
+		selfBackground: "rgb(21, 22, 23)",
+		partnerBackground: "rgb(31, 32, 33)",
+		selfHeader: "rgb(41, 42, 43)",
+		partnerHeader: "rgb(51, 52, 53)",
+		acceptedColor: "rgb(70, 200, 100)",
+		resetSize: "38px",
+		resetSurroundSize: "48px",
+		resetBackground: "rgba(0, 0, 0, 0)",
+		buttonColor: "rgb(180, 160, 220)",
+		buttonBorder: "rgb(140, 120, 200)",
+	};
+	for (const [name, value] of Object.entries(expectedTheme)) {
+		if (theme[name] !== value)
+			throw new Error(
+				`Trade theme override failed for ${name}: ${theme[name]}`,
+			);
+	}
+
+	await read(`${fixture}.accepted("self", true)`);
+	await wait(
+		`${button("Withdraw acceptance")}?.disabled === true && document.querySelector('[data-trade-side="self"]').dataset.tradeAccepted === 'true'`,
+	);
+	await read(`${fixture}.accepted("partner", false)`);
+	await wait(`${button("Withdraw acceptance")}?.disabled === false`);
+	const acceptedButtonTheme = await read(`(() => {
+        const button = document.querySelector('.trade-confirm');
+        const transition = button.style.transition;
+        button.style.transition = 'none';
+        button.style.setProperty('--ui-button-color', 'rgb(180, 160, 220)');
+        button.style.setProperty('--ui-button-border-color', 'rgb(140, 120, 200)');
+        const result = {color: getComputedStyle(button).color, border: getComputedStyle(button).borderColor};
+        button.style.removeProperty('--ui-button-color');
+        button.style.removeProperty('--ui-button-border-color');
+        button.style.transition = transition;
+        return result;
+    })()`);
+	if (
+		acceptedButtonTheme.color !== "rgb(180, 160, 220)" ||
+		acceptedButtonTheme.border !== "rgb(140, 120, 200)"
+	)
+		throw new Error("Accepted trade button bypassed theme overrides");
+
+	await read(`${button("Withdraw acceptance")}.click()`);
+	if ((await read(`${fixture}.request()`)).kind !== "withdraw")
+		throw new Error("Ready control did not withdraw acceptance");
+	await read(`${fixture}.accepted("self", false)`);
+	const resetPoint = await point(".trade-reset-control .trade-reset");
+	for (const type of ["mousePressed", "mouseReleased"]) {
+		await client.send("Input.dispatchMouseEvent", {
+			type,
+			...resetPoint,
+			button: "left",
+			buttons: type === "mousePressed" ? 1 : 0,
+			clickCount: 1,
+		});
+	}
+	if ((await read(`${fixture}.request()`)).kind !== "reset")
+		throw new Error("Integrated reset did not submit reset");
+	await read(`${fixture}.complete()`);
+	await wait(
+		"document.querySelector('[data-trade-panel]') !== null && document.querySelector('[data-trade-item]') === null",
+	);
+	await read(
+		`document.querySelector('button[aria-label="Close Trade with Item 5001"]').click()`,
+	);
+	const close = await read(`${fixture}.request()`);
+	if (
+		close.kind !== "close" ||
+		!(await read("document.querySelector('[data-trade-panel]') !== null"))
+	)
+		throw new Error("Trade close did not wait for the server");
+	await read(`${fixture}.close()`);
+	await wait(
+		`document.querySelector('.client-inventory [data-item-guid="6003"]')?.dataset.dimmed === 'false'`,
+	);
+
+	await wait("document.querySelector('[data-trade-panel]') === null");
+	await read(`${fixture}.register()`);
+	await wait("document.querySelector('[data-trade-panel]') !== null");
+	await read(`${fixture}.largeOffer(181)`);
+	await wait("document.querySelectorAll('[data-trade-item]').length === 181");
+	const offerGeometry = await read(`(async () => {
+		const panel = document.querySelector('[data-trade-panel]');
+		const grid = panel.querySelector('[data-trade-side="partner"] .trade-grid');
+		const { CLIENT_UI_SCALE } = await import('/src/client/client-settings-values.ts');
+		const measurements = [];
+		try {
+			for (const scale of [CLIENT_UI_SCALE.minimum, CLIENT_UI_SCALE.initial, CLIENT_UI_SCALE.maximum]) {
+				globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setUiScale(scale);
+				await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+				const cells = Array.from(grid.querySelectorAll('[data-trade-item]'), cell => cell.getBoundingClientRect());
+				const gap = parseFloat(getComputedStyle(grid).rowGap) * scale;
+				for (let index = 0; index < cells.length; index++) {
+					const cell = cells[index];
+					if (Math.abs(cell.width - cell.height) > 1)
+						throw new Error('Trade cell is not square: ' + JSON.stringify({scale, width: cell.width, height: cell.height}));
+					const nextRow = cells.slice(index + 1).find(next => next.top > cell.top + 1);
+					if (nextRow && nextRow.top < cell.bottom + gap - 1)
+						throw new Error('Trade rows overlap: ' + JSON.stringify({scale, height: cell.height, rowPitch: nextRow.top - cell.top, gap}));
+				}
+				if (grid.scrollHeight <= grid.clientHeight)
+					throw new Error('Large trade offer does not scroll');
+				measurements.push({scale, width: cells[0].width, height: cells[0].height, scrollHeight: grid.scrollHeight, clientHeight: grid.clientHeight});
+			}
+		} finally { globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setUiScale(CLIENT_UI_SCALE.initial);
+			await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); }
+		return measurements;
+	})()`);
+	await read(`${fixture}.close()`);
+	await wait("document.querySelector('[data-trade-panel]') === null");
+	await read(`${fixture}.register()`);
+	await read(`${fixture}.packs()`);
+	await wait(`document.querySelector('[data-trade-offer="5001"]') !== null`);
+	await wait(
+		`document.querySelector('.client-inventory .contents-packs [data-item-guid="8000"]')?.dataset.dimmed === 'false'`,
+	);
+	const dragPack = async (selector) => {
+		const from = await point(selector);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...from,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		const to = await point('[data-trade-offer="5001"]');
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			...to,
+			button: "left",
+			buttons: 1,
+		});
+		await read(`(() => {
+			const source = document.querySelector(${JSON.stringify(selector)});
+			const cell = source.matches('.contents-header')
+				? source.closest('[data-contents-root]').querySelector('.item-grid-cell[data-item-guid="' + source.dataset.itemGuid + '"]')
+				: source;
+			const preview = cell.querySelector('[data-drag-preview]');
+			const artwork = preview.querySelector('[data-drag-artwork]');
+			const ghost = document.querySelector('.item-drag-ghost');
+			const bounds = preview.getBoundingClientRect();
+			if (ghost.hidden || !artwork.isEqualNode(ghost.querySelector('[data-drag-artwork]')))
+				throw new Error('Pack drag ghost does not match its displayed item icon');
+			if (Math.abs(parseFloat(ghost.style.width) - bounds.width) > 0.1 || Math.abs(parseFloat(ghost.style.height) - bounds.height) > 0.1)
+				throw new Error('Pack drag ghost does not use its displayed item icon size');
+		})()`);
+		if (
+			(await read(
+				`document.querySelector('[data-trade-offer="5001"]').dataset.inventoryDrop`,
+			)) !== "accepted"
+		)
+			throw new Error("Eligible pack did not highlight the trade drop target");
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			...to,
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+		});
+		return read(`${fixture}.request()`);
+	};
+	const packAdd = await dragPack(
+		'.client-inventory .contents-packs [data-item-guid="8000"]',
+	);
+	if (
+		packAdd.kind !== "add" ||
+		JSON.stringify(packAdd.items) !== JSON.stringify([8010, 8011])
+	)
+		throw new Error(
+			"Non-empty pack did not offer only its eligible direct contents",
+		);
+	const emptyPackAdd = await dragPack(
+		'.client-inventory .contents-packs [data-item-guid="8001"]',
+	);
+	if (
+		emptyPackAdd.kind !== "add" ||
+		JSON.stringify(emptyPackAdd.items) !== JSON.stringify([8001])
+	)
+		throw new Error("Empty pack did not offer itself");
+	const headerPackAdd = await dragPack(
+		'.client-inventory .contents-header[data-item-guid="8000"]',
+	);
+	if (JSON.stringify(headerPackAdd) !== JSON.stringify(packAdd))
+		throw new Error(
+			"Pack header did not use the same contents selection as the pack strip",
+		);
+	const emptyHeaderAdd = await dragPack(
+		'.client-inventory .contents-header[data-item-guid="8001"]',
+	);
+	if (JSON.stringify(emptyHeaderAdd) !== JSON.stringify(emptyPackAdd))
+		throw new Error("Empty pack header did not offer the pack itself");
+	const mainPackAdd = await dragPack(
+		'.client-inventory .contents-packs [data-item-guid="1"]',
+	);
+	if (
+		mainPackAdd.kind !== "add" ||
+		JSON.stringify(mainPackAdd.items) !== JSON.stringify([6001])
+	)
+		throw new Error(
+			"Main Pack did not select only eligible items on its own page",
+		);
+	const mainHeaderAdd = await dragPack(
+		'.client-inventory .contents-header[data-item-guid="1"]',
+	);
+	if (JSON.stringify(mainHeaderAdd) !== JSON.stringify(mainPackAdd))
+		throw new Error(
+			"Main Pack header did not use the same selection as the strip",
+		);
+	const inventoryRequests = () =>
+		read(
+			`${api}.inventoryDragCommands().filter(entry => entry.command === 'preview_client_inventory' || entry.command === 'submit_client_inventory').length`,
+		);
+	const beforeRootMove = await inventoryRequests();
+	const root = await point(
+		'.client-inventory .contents-header[data-item-guid="1"]',
+	);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mousePressed",
+		...root,
+		button: "left",
+		buttons: 1,
+		clickCount: 1,
+	});
+	const destination = await point(
+		'.client-inventory .contents-header[data-item-guid="8000"]',
+	);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		...destination,
+		button: "left",
+		buttons: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseReleased",
+		...destination,
+		button: "left",
+		buttons: 0,
+		clickCount: 1,
+	});
+	if ((await inventoryRequests()) !== beforeRootMove)
+		throw new Error("Main Pack gesture attempted to move the character root");
+	await read(`${fixture}.close()`);
+	await wait("document.querySelector('[data-trade-panel]') === null");
+	return {
+		headerPackAdd,
+		mainPackAdd,
+		mainHeaderAdd,
+		packAdd,
+		emptyPackAdd,
+		contextualExamine,
+		open,
+		add,
+		accept,
+		close,
+		theme,
+		acceptedButtonTheme,
+		incoming: true,
+		completionRetainsWindow: true,
+		offerGeometry,
+	};
+}

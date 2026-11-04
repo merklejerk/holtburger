@@ -101,6 +101,34 @@ pub fn read_pstring<R: Read + Seek>(
     Ok(res.into_owned())
 }
 
+/// Reads a DAT Unicode string: a compressed UTF-16 code-unit count followed by UTF-16LE data.
+///
+/// The length is checked against the bounded record before allocation so malformed content cannot
+/// turn a short resource into an unbounded allocation request.
+pub fn read_unicode_string<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<String> {
+    let length_position = reader.stream_position()?;
+    let code_unit_count = u64::from(read_compressed_u32(reader)?);
+    let data_position = reader.stream_position()?;
+    let end = reader.seek(SeekFrom::End(0))?;
+    reader.seek(SeekFrom::Start(data_position))?;
+
+    if code_unit_count > end.saturating_sub(data_position) / 2 {
+        return Err(binrw::Error::AssertFail {
+            pos: length_position,
+            message: "Unicode string length exceeds remaining record bytes".to_string(),
+        });
+    }
+
+    let mut code_units = Vec::with_capacity(code_unit_count as usize);
+    for _ in 0..code_unit_count {
+        code_units.push(u16::read_le(reader)?);
+    }
+    String::from_utf16(&code_units).map_err(|error| binrw::Error::AssertFail {
+        pos: data_position,
+        message: format!("Unicode string contains invalid UTF-16: {error}"),
+    })
+}
+
 pub fn read_obfuscated_string<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<String> {
     let length = u16::read_le(reader)? as usize;
     let mut buffer = vec![0u8; length];
@@ -234,30 +262,6 @@ impl FileExtPolyfill for std::fs::File {
         }
         Ok(())
     }
-}
-
-/// Helper to find a portal.dat for testing/benchmarking purposes.
-///
-/// Priority 1: `HOLTBURGER_PORTAL_DAT` environment variable.
-/// Priority 2: Repository-relative fallback (`dats/portal.dat` from workspace root).
-pub fn get_portal_dat_path() -> Option<std::path::PathBuf> {
-    if let Ok(path_str) = std::env::var("HOLTBURGER_PORTAL_DAT") {
-        let path = std::path::PathBuf::from(path_str);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-
-    // Workspace-relative fallbacks
-    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
-
-    // 1. Repository dats/ folder
-    let repo_dats = workspace_root.join("dats/portal.dat");
-    if repo_dats.exists() {
-        return Some(repo_dats);
-    }
-
-    None
 }
 
 #[cfg(test)]

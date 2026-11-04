@@ -5,12 +5,11 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use directories::ProjectDirs;
 use holtburger_cli::pages;
 use holtburger_cli::state::{AppState, NetStats, QueuedScriptStartup};
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
-use holtburger_cli::utils::format_action_result_message;
-use holtburger_content::ContentRepository;
+use holtburger_content::CharacterGenCatalog;
+use holtburger_core::errors::format_action_result_message;
 use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{
     ActionResultReason, ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState,
@@ -19,7 +18,6 @@ use holtburger_core::{
 use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::errors::CharacterError;
 use holtburger_scripting::{ScriptFetchAllowedHost, ScriptFetchPolicy, ScriptHostConfig};
-use holtburger_world::BasicSpatialPhysics;
 use holtburger_world::RuntimeBodyResetCause;
 use holtburger_world::spell::SpellCatalog;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -37,29 +35,116 @@ const DEFAULT_SCRIPT_FETCH_ALLOWED_HOST: &str = "localhost:9999";
 struct BootstrappedClient {
     server_cmd_tx: mpsc::UnboundedSender<ClientCommand>,
     server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
-    client_task_handle: tokio::task::JoinHandle<Result<()>>,
+    client_task_handle: tokio::task::JoinHandle<ClientTaskResult>,
     initial_events: Vec<ClientViewEvent>,
-    content: Arc<ContentRepository>,
+    character_gen_catalog: Arc<CharacterGenCatalog>,
     spell_catalog: Arc<SpellCatalog>,
     skill_table: Arc<SkillTable>,
 }
 
+/// The authority's retained terminal value survives the spawned runtime's destruction.
+struct ClientTaskResult {
+    /// Operational completion; normal server rejections still resolve through `outcome`.
+    result: Result<()>,
+    /// Core's final retained result, captured before authority is dropped.
+    outcome: Option<holtburger_core::ClientExitOutcome>,
+}
+
+impl ClientTaskResult {
+    fn into_bootstrap_failure(self) -> BootstrapFailure {
+        if let Some(outcome) = &self.outcome
+            && outcome.failure.is_some()
+        {
+            return classify_terminal_outcome(outcome);
+        }
+        match self.result {
+            Err(error) => BootstrapFailure {
+                retry: false,
+                message: format!("{error:#}"),
+            },
+            Ok(()) => self.outcome.as_ref().map_or_else(
+                || BootstrapFailure {
+                    retry: false,
+                    message: "Disconnected before receiving character list.".into(),
+                },
+                classify_terminal_outcome,
+            ),
+        }
+    }
+
+    fn into_result(self) -> Result<()> {
+        if let Some(outcome) = self.outcome
+            && outcome.failure.is_some()
+        {
+            anyhow::bail!(outcome.diagnostic());
+        }
+        self.result
+    }
+}
+
+async fn run_client_attempt(mut client: ClientRuntime) -> ClientTaskResult {
+    let result = client.run().await;
+    ClientTaskResult {
+        result,
+        outcome: client.exit_outcome().cloned(),
+    }
+}
+
+/// Frontend-owned retry policy applied only after core resolves an attempt.
+struct BootstrapFailure {
+    /// Existing TUI policy; permission to start another attempt after retirement.
+    retry: bool,
+    /// Shared explanation, enriched only when task retirement itself fails.
+    message: String,
+}
+
+fn classify_terminal_outcome(outcome: &holtburger_core::ClientExitOutcome) -> BootstrapFailure {
+    BootstrapFailure {
+        message: outcome.diagnostic(),
+        retry: outcome.failure.as_ref().is_some_and(|failure| matches!(failure.cause,
+            holtburger_core::ConnectionFailureCause::Character(holtburger_core::CharacterErrorCode::Known(error)) if is_retryable_pre_world_character_error(error))),
+    }
+}
+
 enum BootstrapOutcome {
     Ready(BootstrappedClient),
-    Retry { message: String },
-    Fatal { message: String },
+    Failed(BootstrapFailure),
 }
 
 enum BootstrapEventOutcome {
     Ready {
         initial_events: Vec<ClientViewEvent>,
     },
-    Retry {
-        message: String,
-    },
-    Fatal {
-        message: String,
-    },
+    Failed(BootstrapFailure),
+}
+
+/// Failure may be reported while authority still runs; cancellation must join before retry.
+async fn retire_bootstrap_attempt(
+    handle: tokio::task::JoinHandle<ClientTaskResult>,
+    failure: BootstrapFailure,
+) -> BootstrapFailure {
+    handle.abort();
+    match handle.await {
+        Ok(completed) => match (completed.outcome, completed.result) {
+            (Some(outcome), _) if outcome.failure.is_some() => classify_terminal_outcome(&outcome),
+            (_, Ok(())) => failure,
+            (_, Err(error)) => BootstrapFailure {
+                retry: false,
+                message: format!(
+                    "{} Client task failed while retiring: {error:#}",
+                    failure.message
+                ),
+            },
+        },
+        Err(error) if error.is_cancelled() => failure,
+        Err(error) => BootstrapFailure {
+            retry: false,
+            message: format!(
+                "{} Client task failed while retiring: {error}",
+                failure.message
+            ),
+        },
+    }
 }
 
 struct CapturedLog {
@@ -208,8 +293,12 @@ struct Args {
     verbose: u8,
     #[arg(short = 'V', long = "debug-verbose", action = clap::ArgAction::Count, requires = "debug_log", help = "Increase log messages written to --debug-log (-V warn, -VV info, -VVV debug, -VVVV trace)")]
     debug_verbosity: u8,
-    #[arg(short, long)]
-    dats: Option<String>,
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Content directory containing bootstrap.hba or assets.hba, plus navigation.hnav (overrides automatic discovery)"
+    )]
+    content: Option<std::path::PathBuf>,
     #[arg(
         short = 'Q',
         long = "auto-quit",
@@ -264,28 +353,31 @@ fn classify_pre_world_action_result(reason: &ActionResultReason) -> Option<Boots
     let message = format_action_result_message(reason);
 
     match reason {
-        ActionResultReason::Character(error) if is_retryable_pre_world_character_error(*error) => {
-            Some(BootstrapEventOutcome::Retry { message })
-        }
-        ActionResultReason::Character(_) | ActionResultReason::General(_) => {
-            Some(BootstrapEventOutcome::Fatal { message })
+        ActionResultReason::Character(_)
+        | ActionResultReason::General(_)
+        | ActionResultReason::Locked { .. } => {
+            Some(BootstrapEventOutcome::Failed(BootstrapFailure {
+                retry: false,
+                message,
+            }))
         }
         ActionResultReason::InventoryServerSaveFailed { .. } => {
-            Some(BootstrapEventOutcome::Fatal { message })
+            Some(BootstrapEventOutcome::Failed(BootstrapFailure {
+                retry: false,
+                message,
+            }))
         }
         ActionResultReason::Weenie(error, _) if is_actually_weenie_error(*error) => {
-            Some(BootstrapEventOutcome::Fatal { message })
+            Some(BootstrapEventOutcome::Failed(BootstrapFailure {
+                retry: false,
+                message,
+            }))
         }
-        ActionResultReason::Weenie(_, _) => None,
-        ActionResultReason::Transport(_) => Some(BootstrapEventOutcome::Fatal { message }),
-    }
-}
-
-fn format_boot_account_message(reason: &str) -> String {
-    if reason.trim().is_empty() {
-        "Booted from server.".to_string()
-    } else {
-        format!("Booted from server: {}", reason)
+        ActionResultReason::Weenie(_, _) | ActionResultReason::EquipmentSet { .. } => None,
+        ActionResultReason::Transport(_) => Some(BootstrapEventOutcome::Failed(BootstrapFailure {
+            retry: false,
+            message,
+        })),
     }
 }
 
@@ -503,22 +595,49 @@ fn process_bootstrap_event(
             ),
         }),
         ClientViewEvent::ActionResult { reason, .. } => classify_pre_world_action_result(&reason),
-        ClientViewEvent::BootAccount(reason) => Some(BootstrapEventOutcome::Fatal {
-            message: format_boot_account_message(&reason),
-        }),
-        ClientViewEvent::Disconnected => Some(BootstrapEventOutcome::Fatal {
-            message: AppState::DEFAULT_DISCONNECT_MESSAGE.to_string(),
-        }),
+        ClientViewEvent::LifecycleChanged(holtburger_core::ClientLifecycleState::Exiting {
+            outcome,
+        }) => Some(BootstrapEventOutcome::Failed(classify_terminal_outcome(
+            &outcome,
+        ))),
+        ClientViewEvent::ApplicationSnapshot(snapshot) => match &snapshot.lifecycle {
+            holtburger_core::ClientLifecycleState::Exiting { outcome } => Some(
+                BootstrapEventOutcome::Failed(classify_terminal_outcome(outcome)),
+            ),
+            holtburger_core::ClientLifecycleState::CharacterSelection {
+                characters,
+                rejection: None,
+                ..
+            } => {
+                *latest_status = Some(ClientState::CharacterSelection);
+                Some(BootstrapEventOutcome::Ready {
+                    initial_events: bootstrap_ready_events(
+                        latest_status,
+                        latest_world_name,
+                        latest_server_time,
+                        characters
+                            .iter()
+                            .map(|character| holtburger_protocol::messages::CharacterEntry {
+                                guid: character.guid,
+                                name: character.name.clone(),
+                                delete_time: character.delete_time,
+                            })
+                            .collect(),
+                    ),
+                })
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
 
-fn finalize_bootstrap_outcome(
+async fn finalize_bootstrap_outcome(
     outcome: BootstrapEventOutcome,
     server_cmd_tx: mpsc::UnboundedSender<ClientCommand>,
     server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
-    client_task_handle: tokio::task::JoinHandle<Result<()>>,
-    content: Arc<ContentRepository>,
+    client_task_handle: tokio::task::JoinHandle<ClientTaskResult>,
+    character_gen_catalog: Arc<CharacterGenCatalog>,
     spell_catalog: Arc<SpellCatalog>,
     skill_table: Arc<SkillTable>,
 ) -> BootstrapOutcome {
@@ -529,31 +648,24 @@ fn finalize_bootstrap_outcome(
                 server_event_rx,
                 client_task_handle,
                 initial_events,
-                content,
+                character_gen_catalog,
                 spell_catalog,
                 skill_table,
             })
         }
-        BootstrapEventOutcome::Retry { message } => BootstrapOutcome::Retry { message },
-        BootstrapEventOutcome::Fatal { message } => BootstrapOutcome::Fatal { message },
+        BootstrapEventOutcome::Failed(failure) => {
+            BootstrapOutcome::Failed(retire_bootstrap_attempt(client_task_handle, failure).await)
+        }
     }
 }
 
-async fn bootstrap_once(
-    args: &Args,
-    host: &str,
-    port: u16,
-    dats_path: &std::path::Path,
-) -> Result<BootstrapOutcome> {
-    let content = Arc::new(if dats_path.is_dir() {
-        ContentRepository::from_hba_dir(dats_path)?
-    } else {
-        ContentRepository::from_hba_path(dats_path)?
-    });
+async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapOutcome> {
+    let content = holtburger_cli::installation::content(args.content.clone())?;
     let mut builder = ClientRuntimeBuilder::new(args.account.clone())
         .server(host.to_string(), port)
-        .spatial_physics(Arc::new(BasicSpatialPhysics));
-    builder.load_assets(content.as_ref())?;
+        .navigation_movement_source(content.navigation.clone(), content.navigation.clone());
+    builder.load_assets(&content.bootstrap)?;
+    let character_gen_catalog = Arc::new(content.bootstrap.read_character_gen_catalog()?);
 
     let mut client = builder.connect().await?;
     let spell_catalog = Arc::clone(&client.world.spell_catalog);
@@ -564,9 +676,9 @@ async fn bootstrap_once(
     let (server_cmd_tx, server_cmd_rx) = mpsc::unbounded_channel();
     client.set_command_rx(server_cmd_rx);
     let mut server_event_rx = client.subscribe_client_view_events();
-    let mut client_task_handle = tokio::spawn(async move { client.run().await });
+    let mut client_task_handle = tokio::spawn(run_client_attempt(client));
 
-    let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+    let _ = server_cmd_tx.send(ClientCommand::RequestCurrentApplicationState);
     let _ = server_cmd_tx.send(ClientCommand::Login(args.password.clone()));
 
     let mut latest_status = Some(ClientState::Connected);
@@ -577,38 +689,9 @@ async fn bootstrap_once(
     loop {
         tokio::select! {
             result = &mut client_task_handle => {
-                let client_result = match result {
-                    Ok(inner) => inner,
-                    Err(error) => Err(anyhow::anyhow!("Client task failed: {}", error)),
-                };
-
-                while let Ok(event) = server_event_rx.try_recv() {
-                    if let Some(outcome) = process_bootstrap_event(
-                        event,
-                        &mut latest_status,
-                        &mut latest_world_name,
-                        &mut latest_server_time,
-                    ) {
-                        return Ok(finalize_bootstrap_outcome(
-                            outcome,
-                            server_cmd_tx,
-                            server_event_rx,
-                            client_task_handle,
-                            Arc::clone(&content),
-                            Arc::clone(&spell_catalog),
-                            Arc::clone(&skill_table),
-                        ));
-                    }
-                }
-
-                return Ok(match client_result {
-                    Ok(()) => BootstrapOutcome::Fatal {
-                        message: "Disconnected before receiving character list.".to_string(),
-                    },
-                    Err(error) => BootstrapOutcome::Fatal {
-                        message: error.to_string(),
-                    },
-                });
+                // The handle is consumed here; do not pass it to finalization and poll it twice.
+                let completed = result.map_err(|error| anyhow::anyhow!("Client task failed: {error}"))?;
+                return Ok(BootstrapOutcome::Failed(completed.into_bootstrap_failure()));
             }
             event = server_event_rx.recv() => {
                 match event {
@@ -625,22 +708,23 @@ async fn bootstrap_once(
                                 server_cmd_tx,
                                 server_event_rx,
                                 client_task_handle,
-                                Arc::clone(&content),
+                                Arc::clone(&character_gen_catalog),
                                 Arc::clone(&spell_catalog),
                                 Arc::clone(&skill_table),
-                            ));
+                            ).await);
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                         if !requested_initial_view_state {
                             requested_initial_view_state = true;
-                            let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                            let _ = server_cmd_tx.send(ClientCommand::RequestCurrentApplicationState);
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        return Ok(BootstrapOutcome::Fatal {
-                            message: "Client event stream closed before receiving character list.".to_string(),
-                        });
+                        // The sender closes as the task returns. Join it to recover its retained
+                        // outcome instead of racing a generic channel-closed diagnostic.
+                        let completed = client_task_handle.await.map_err(|error| anyhow::anyhow!("Client task failed: {error}"))?;
+                        return Ok(BootstrapOutcome::Failed(completed.into_bootstrap_failure()));
                     }
                 }
             }
@@ -652,7 +736,6 @@ async fn bootstrap_client(
     args: &Args,
     host: &str,
     port: u16,
-    dats_path: &std::path::Path,
     local_log_rx: &mut mpsc::UnboundedReceiver<CapturedLog>,
 ) -> Result<BootstrappedClient> {
     let mut attempt = 1usize;
@@ -660,9 +743,12 @@ async fn bootstrap_client(
     loop {
         println!("Initializing HoltBurger client (parsing DAT files & connecting)...");
 
-        match bootstrap_once(args, host, port, dats_path).await? {
+        match bootstrap_once(args, host, port).await? {
             BootstrapOutcome::Ready(ready) => return Ok(ready),
-            BootstrapOutcome::Retry { message } => {
+            BootstrapOutcome::Failed(BootstrapFailure {
+                retry: true,
+                message,
+            }) => {
                 eprintln!(
                     "{} Retrying in {} seconds (attempt {}).",
                     message,
@@ -673,7 +759,10 @@ async fn bootstrap_client(
                 tokio::time::sleep(PRE_WORLD_RETRY_DELAY).await;
                 attempt += 1;
             }
-            BootstrapOutcome::Fatal { message } => anyhow::bail!(message),
+            BootstrapOutcome::Failed(BootstrapFailure {
+                retry: false,
+                message,
+            }) => anyhow::bail!(message),
         }
     }
 }
@@ -710,25 +799,6 @@ async fn run() -> Result<()> {
     } else {
         (args.host.clone(), args.port)
     };
-
-    let dats_path = args
-        .dats
-        .clone()
-        .or_else(|| std::env::var("HOLTBURGER_DATS").ok())
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            // Priority:
-            // 1. Current directory ./dats (typical for portable/zip installs)
-            // 2. Standard project data directory (typical for system installs)
-            let local_dats = std::path::PathBuf::from("./dats");
-            if local_dats.exists() {
-                return local_dats;
-            }
-
-            ProjectDirs::from("io.github", "merklejerk", "holtburger")
-                .map(|dirs| dirs.data_dir().join("dats"))
-                .unwrap_or_else(|| local_dats)
-        });
 
     let (local_log_tx, mut local_log_rx) = mpsc::unbounded_channel::<CapturedLog>();
 
@@ -777,10 +847,10 @@ async fn run() -> Result<()> {
         mut server_event_rx,
         client_task_handle,
         initial_events,
-        content,
+        character_gen_catalog,
         spell_catalog,
         skill_table,
-    } = match bootstrap_client(&args, &host, port, &dats_path, &mut local_log_rx).await {
+    } = match bootstrap_client(&args, &host, port, &mut local_log_rx).await {
         Ok(ready) => ready,
         Err(e) => {
             eprintln!("Failed to initialize client: {}", e);
@@ -805,7 +875,7 @@ async fn run() -> Result<()> {
         net_stats: NetStats::default(),
         world_name: String::new(),
         server_time: None,
-        content: Some(content),
+        character_gen_catalog: Some(character_gen_catalog),
         spell_catalog: Some(spell_catalog),
         skill_table: Some(skill_table),
         quit_on_disconnect: args.quit_on_disconnect,
@@ -850,7 +920,7 @@ async fn run() -> Result<()> {
     };
 
     for event in initial_events {
-        let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
+        let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(Box::new(event)));
         let mut should_quit = false;
         update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
         if should_quit {
@@ -869,7 +939,7 @@ async fn run() -> Result<()> {
                 .take()
                 .expect("finished client task should still be present");
             let client_result = match handle.await {
-                Ok(result) => result,
+                Ok(result) => result.into_result(),
                 Err(error) => Err(anyhow::anyhow!("Client task failed: {}", error)),
             };
 
@@ -907,26 +977,29 @@ async fn run() -> Result<()> {
                 Ok(event) => {
                     requested_initial_view_state = false;
 
-                    let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
+                    let res =
+                        app_state.handle_app_event(AppEvent::ReceivedViewEvent(Box::new(event)));
                     update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     should_quit |= app_state.has_pending_exit();
                 }
                 Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
                 Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
-                    let reset = app_state.handle_app_event(AppEvent::ReceivedViewEvent(
+                    let reset = app_state.handle_app_event(AppEvent::ReceivedViewEvent(Box::new(
                         ClientViewEvent::RuntimeBodiesReset {
                             cause: RuntimeBodyResetCause::Resync,
                         },
-                    ));
+                    )));
                     update_state(reset, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     if !requested_initial_view_state {
                         requested_initial_view_state = true;
-                        let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                        let _ = server_cmd_tx.send(ClientCommand::RequestCurrentApplicationState);
                     }
                     break;
                 }
                 Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
-                    should_quit = true;
+                    // Core ends its event stream after disconnecting; retain the game page
+                    // unless frontend policy requests an exit.
+                    should_quit |= app_state.should_exit_on_disconnect();
                     break;
                 }
             }
@@ -1003,13 +1076,14 @@ async fn run() -> Result<()> {
     if let Some(message) = pending_exit_message {
         if let Some(handle) = client_task_handle.take() {
             handle.abort();
+            let _ = handle.await;
         }
         anyhow::bail!(message);
     }
 
     if let Some(handle) = client_task_handle {
         let client_result = match handle.await {
-            Ok(result) => result,
+            Ok(result) => result.into_result(),
             Err(error) => Err(anyhow::anyhow!("Client task failed: {}", error)),
         };
 
@@ -1024,7 +1098,56 @@ mod tests {
     use super::*;
     use clap::Parser;
     use clap::error::ErrorKind;
-    use holtburger_core::client::types::ActionResultSource;
+
+    #[test]
+    fn bootstrap_retains_runtime_diagnostic_when_exit_has_no_specific_failure() {
+        let failure = ClientTaskResult {
+            result: Err(anyhow::anyhow!("invalid content record")),
+            outcome: Some(holtburger_core::ClientExitOutcome {
+                cause: holtburger_core::ClientExitCause::RuntimeFailure,
+                failure: None,
+            }),
+        }
+        .into_bootstrap_failure();
+        assert_eq!(failure.message, "invalid content record");
+        assert!(!failure.retry);
+    }
+
+    #[test]
+    fn bootstrap_prefers_specific_failure_over_task_error() {
+        let outcome = holtburger_core::ClientExitOutcome {
+            cause: holtburger_core::ClientExitCause::ServerDisconnect,
+            failure: Some(holtburger_core::ConnectionFailure {
+                state: Some(ClientState::Connected),
+                cause: holtburger_core::ConnectionFailureCause::AccountBoot(Some(
+                    " during maintenance".into(),
+                )),
+            }),
+        };
+        let expected = outcome.diagnostic();
+        let failure = ClientTaskResult {
+            result: Err(anyhow::anyhow!("task stopped")),
+            outcome: Some(outcome),
+        }
+        .into_bootstrap_failure();
+        assert_eq!(failure.message, expected);
+    }
+
+    #[test]
+    fn explicit_content_path_accepts_a_prepared_directory_or_hba_location() {
+        let args = Args::try_parse_from([
+            "tui",
+            "--account",
+            "fixture",
+            "--content",
+            "my content/full.hba",
+        ])
+        .unwrap();
+        assert_eq!(
+            args.content,
+            Some(std::path::PathBuf::from("my content/full.hba"))
+        );
+    }
 
     #[test]
     fn debug_verbosity_requires_debug_log() {
@@ -1213,31 +1336,61 @@ mod tests {
     #[test]
     fn retryable_pre_world_character_errors_are_classified_for_retry() {
         let outcome = process_bootstrap_event(
-            ClientViewEvent::ActionResult {
-                source: ActionResultSource::Wire,
-                reason: ActionResultReason::Character(CharacterError::LogonServerFull),
-            },
+            ClientViewEvent::LifecycleChanged(holtburger_core::ClientLifecycleState::Exiting {
+                outcome: holtburger_core::ClientExitOutcome {
+                    cause: holtburger_core::ClientExitCause::ServerDisconnect,
+                    failure: Some(holtburger_core::ConnectionFailure {
+                        state: Some(ClientState::Connected),
+                        cause: holtburger_core::ConnectionFailureCause::Character(
+                            holtburger_core::CharacterErrorCode::Known(
+                                CharacterError::LogonServerFull,
+                            ),
+                        ),
+                    }),
+                },
+            }),
             &mut Some(ClientState::Connected),
             &mut None,
             &mut None,
         );
 
-        assert!(matches!(outcome, Some(BootstrapEventOutcome::Retry { .. })));
+        assert!(matches!(
+            outcome,
+            Some(BootstrapEventOutcome::Failed(BootstrapFailure {
+                retry: true,
+                ..
+            }))
+        ));
     }
 
     #[test]
     fn fatal_pre_world_character_errors_do_not_retry() {
         let outcome = process_bootstrap_event(
-            ClientViewEvent::ActionResult {
-                source: ActionResultSource::Wire,
-                reason: ActionResultReason::Character(CharacterError::AccountInvalid),
-            },
+            ClientViewEvent::LifecycleChanged(holtburger_core::ClientLifecycleState::Exiting {
+                outcome: holtburger_core::ClientExitOutcome {
+                    cause: holtburger_core::ClientExitCause::ServerDisconnect,
+                    failure: Some(holtburger_core::ConnectionFailure {
+                        state: Some(ClientState::Connected),
+                        cause: holtburger_core::ConnectionFailureCause::Character(
+                            holtburger_core::CharacterErrorCode::Known(
+                                CharacterError::AccountInvalid,
+                            ),
+                        ),
+                    }),
+                },
+            }),
             &mut Some(ClientState::Connected),
             &mut None,
             &mut None,
         );
 
-        assert!(matches!(outcome, Some(BootstrapEventOutcome::Fatal { .. })));
+        assert!(matches!(
+            outcome,
+            Some(BootstrapEventOutcome::Failed(BootstrapFailure {
+                retry: false,
+                ..
+            }))
+        ));
     }
 
     #[test]
@@ -1273,8 +1426,59 @@ mod tests {
         )));
     }
 
+    #[tokio::test]
+    async fn bootstrap_failure_joins_cancelled_authority_before_returning() {
+        struct Retirement(std::sync::Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for Retirement {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let retired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observer = retired.clone();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _retirement = Retirement(observer);
+            started.send(()).unwrap();
+            std::future::pending::<ClientTaskResult>().await
+        });
+        ready.await.unwrap();
+        let failure = retire_bootstrap_attempt(
+            task,
+            BootstrapFailure {
+                retry: true,
+                message: "server full".into(),
+            },
+        )
+        .await;
+        assert!(failure.retry);
+        assert!(retired.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
     #[test]
-    fn boot_account_message_uses_default_when_reason_empty() {
-        assert_eq!(format_boot_account_message(""), "Booted from server.");
+    fn boot_ban_and_unknown_codes_do_not_enable_automatic_retry() {
+        for cause in [
+            holtburger_core::ConnectionFailureCause::AccountBoot(Some("password mismatch".into())),
+            holtburger_core::ConnectionFailureCause::AccountBanned(
+                holtburger_protocol::messages::AccountBannedData {
+                    duration_seconds: 3600,
+                    reason: None,
+                },
+            ),
+            holtburger_core::ConnectionFailureCause::Character(
+                holtburger_core::CharacterErrorCode::Unknown(0xfedc_ba98),
+            ),
+        ] {
+            let outcome = holtburger_core::ClientExitOutcome {
+                cause: holtburger_core::ClientExitCause::ServerDisconnect,
+                failure: Some(holtburger_core::ConnectionFailure {
+                    state: Some(ClientState::Connected),
+                    cause,
+                }),
+            };
+            let failure = classify_terminal_outcome(&outcome);
+            assert!(!failure.retry);
+            assert_eq!(failure.message, outcome.diagnostic());
+        }
     }
 }

@@ -1,77 +1,77 @@
+use crate::client::progression::{
+    ClientProgressionEvaluation, ClientProgressionFeedback, ClientProgressionQuote,
+    ClientProgressionRejection,
+};
 use crate::client::types::{
-    ActionResultReason, ActionResultSource, BusyOperationKind, ClientCommand, TargetSlot,
+    ActionResultReason, ActionResultSource, CharacterManagementOperation, ChatTellTarget,
+    ClientCommand, ClientExitCause, ClientViewEvent,
 };
 use crate::client::{ClientRuntime, ClientState};
 use crate::motion_command_for_soul_emote_pose;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, ensure};
 use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
-use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::GameMessage;
-use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
-use holtburger_world::spell::MagicSchool;
+use holtburger_world::interaction::EntityUseRejection;
+use holtburger_world::progression::{ProgressionIntent, StatTarget};
 use std::time::Instant;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NormalizedSpellCast {
-    Targeted { target: Guid, spell_id: u32 },
-    Untargeted { spell_id: u32 },
-}
-
-fn normalize_spell_cast(
-    world: &holtburger_world::WorldState,
-    spell_id: u32,
-    requested_target: Option<Guid>,
-) -> NormalizedSpellCast {
-    let player_guid = world.player.guid;
-
-    if let Some(spell) = world.spell_catalog.get(spell_id) {
-        if spell.is_untargeted() {
-            return NormalizedSpellCast::Untargeted { spell_id };
-        }
-
-        if spell.is_self_targeted() {
-            return NormalizedSpellCast::Targeted {
-                target: player_guid,
-                spell_id,
-            };
-        }
-
-        if requested_target == Some(player_guid) && spell.school == MagicSchool::WarMagic {
-            return NormalizedSpellCast::Untargeted { spell_id };
-        }
-    }
-
-    match requested_target {
-        Some(target) => NormalizedSpellCast::Targeted { target, spell_id },
-        None => NormalizedSpellCast::Untargeted { spell_id },
-    }
-}
 
 fn render_soul_emote_text(text: &str) -> String {
     text.replace("%p", "their")
 }
 
+/// Raw mutations admitted by the runtime's inventory gate. Controllers reuse this
+/// classification; guarded workflows retain their own typed receipt/admission handlers.
+pub(super) fn inventory_command_requires_guard(command: &ClientCommand) -> bool {
+    // Missile attacks consume ammunition; casting consumes components. Both also compete
+    // with equipment stance transitions, so they share ordinary inventory admission.
+    matches!(
+        command,
+        ClientCommand::Drop(_)
+            | ClientCommand::Get(_)
+            | ClientCommand::Stack { .. }
+            | ClientCommand::Split { .. }
+            | ClientCommand::MoveItem { .. }
+            | ClientCommand::Use { .. }
+            | ClientCommand::UseWithTarget { .. }
+            | ClientCommand::SalvageItemsWith { .. }
+            | ClientCommand::GiveObjectRequest { .. }
+            | ClientCommand::VendorTrade(_)
+            | ClientCommand::Buy { .. }
+            | ClientCommand::Sell { .. }
+            | ClientCommand::Trade(
+                crate::client::trade::TradeRequest::Open { .. }
+                    | crate::client::trade::TradeRequest::Accept { .. }
+                    | crate::client::trade::TradeRequest::Add { .. }
+            )
+            | ClientCommand::CastSpell { .. }
+            | ClientCommand::TargetedMeleeAttack { .. }
+            | ClientCommand::TargetedMissileAttack { .. }
+    )
+}
+
 impl ClientRuntime {
-    fn resolve_legacy_channel(kind: crate::client::types::ChatChannelKind) -> Option<ChatChannel> {
+    fn resolve_legacy_channel(
+        kind: crate::client::types::ChatChannelDestination,
+    ) -> Option<ChatChannel> {
         match kind {
-            crate::client::types::ChatChannelKind::Fellowship => Some(ChatChannel::Fellow),
-            crate::client::types::ChatChannelKind::Allegiance => {
+            crate::client::types::ChatChannelDestination::Fellowship => Some(ChatChannel::Fellow),
+            crate::client::types::ChatChannelDestination::AllegianceBroadcast => {
                 Some(ChatChannel::AllegianceBroadcast)
             }
-            crate::client::types::ChatChannelKind::Vassals => Some(ChatChannel::Vassals),
-            crate::client::types::ChatChannelKind::Patron => Some(ChatChannel::Patron),
-            crate::client::types::ChatChannelKind::Monarch => Some(ChatChannel::Monarch),
-            crate::client::types::ChatChannelKind::CoVassals => Some(ChatChannel::CoVassals),
+            crate::client::types::ChatChannelDestination::Vassals => Some(ChatChannel::Vassals),
+            crate::client::types::ChatChannelDestination::Patron => Some(ChatChannel::Patron),
+            crate::client::types::ChatChannelDestination::Monarch => Some(ChatChannel::Monarch),
+            crate::client::types::ChatChannelDestination::CoVassals => Some(ChatChannel::CoVassals),
             _ => None,
         }
     }
 
     fn resolve_turbine_channel(
         &self,
-        kind: crate::client::types::ChatChannelKind,
+        kind: crate::client::types::ChatChannelDestination,
     ) -> Option<(TurbineChatChannelId, TurbineChatType)> {
         if !self.turbine_chat.enabled {
             return None;
@@ -80,72 +80,193 @@ impl ClientRuntime {
         let channels = self.turbine_chat.channels.as_ref()?;
 
         match kind {
-            crate::client::types::ChatChannelKind::Allegiance => channels
+            crate::client::types::ChatChannelDestination::Allegiance => channels
                 .allegiance
                 .map(|channel| (channel, TurbineChatType::Allegiance)),
-            crate::client::types::ChatChannelKind::General => channels
+            crate::client::types::ChatChannelDestination::General => channels
                 .channel_for_type(TurbineChatType::General)
                 .map(|channel| (channel, TurbineChatType::General)),
-            crate::client::types::ChatChannelKind::Trade => channels
+            crate::client::types::ChatChannelDestination::Trade => channels
                 .channel_for_type(TurbineChatType::Trade)
                 .map(|channel| (channel, TurbineChatType::Trade)),
-            crate::client::types::ChatChannelKind::Lfg => channels
+            crate::client::types::ChatChannelDestination::Lfg => channels
                 .channel_for_type(TurbineChatType::Lfg)
                 .map(|channel| (channel, TurbineChatType::Lfg)),
-            crate::client::types::ChatChannelKind::Roleplay => channels
+            crate::client::types::ChatChannelDestination::Roleplay => channels
                 .channel_for_type(TurbineChatType::Roleplay)
                 .map(|channel| (channel, TurbineChatType::Roleplay)),
-            crate::client::types::ChatChannelKind::Society => channels
+            crate::client::types::ChatChannelDestination::Society => channels
                 .channel_for_type(TurbineChatType::Society)
                 .map(|channel| (channel, TurbineChatType::Society)),
-            crate::client::types::ChatChannelKind::Olthoi => channels
+            crate::client::types::ChatChannelDestination::Olthoi => channels
                 .channel_for_type(TurbineChatType::Olthoi)
                 .map(|channel| (channel, TurbineChatType::Olthoi)),
             _ => None,
         }
     }
 
+    /// Sends one server-backed preference and mirrors it after transport acceptance.
+    pub(super) async fn set_character_option(
+        &mut self,
+        option: CharacterOption,
+        value: bool,
+    ) -> Result<()> {
+        self.send_game_action(GameAction::SetSingleCharacterOption(Box::new(
+            SetSingleCharacterOptionActionData { option, value },
+        )))
+        .await?;
+        self.world
+            .player
+            .set_character_option_enabled(option, value);
+        self.emit_player_options_updated();
+        Ok(())
+    }
+
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        #[cfg(feature = "runtime-fixture")]
+        if let Some(capture) = &mut self.runtime_fixture {
+            capture.record_command(&cmd)?;
+        }
+        self.poll_auto_merge(std::time::Instant::now());
+        if self.interrupt_auto_merge(&cmd) {
+            return self.reject_auto_merge_conflict(cmd).await;
+        }
+        self.cancel_rest_for_command(&cmd);
+        match &cmd {
+            ClientCommand::GetAndWield { item, .. }
+            | ClientCommand::SplitToWield { item, .. }
+            | ClientCommand::MoveItem { item, .. }
+            | ClientCommand::Split { item, .. }
+            | ClientCommand::Drop(item)
+            | ClientCommand::Get(item) => self.equipment_set.supersede_item(*item),
+            ClientCommand::SubmitInventory(intent) => {
+                self.equipment_set.supersede_item(intent.item)
+            }
+            ClientCommand::Stack {
+                source,
+                destination,
+                ..
+            } => {
+                self.equipment_set.supersede_item(*source);
+                self.equipment_set.supersede_item(*destination);
+            }
+            _ => {}
+        }
+        if self.inventory_change_pending() && inventory_command_requires_guard(&cmd) {
+            if let ClientCommand::Trade(_) = &cmd {
+                self.report_trade_failure("An inventory change is still pending".into());
+                return Ok(());
+            }
+            if let ClientCommand::VendorTrade(request) = &cmd {
+                self.reject_vendor_request(request, "An inventory change is still pending".into());
+                return Ok(());
+            }
+            self.emit_action_result(
+                ActionResultSource::Client,
+                ActionResultReason::General("An inventory change is still pending".into()),
+            );
+            return Ok(());
+        }
         match cmd {
+            ClientCommand::SetRestPosture(posture) => self.request_rest_posture(posture).await,
+            ClientCommand::CancelRestPosture => {
+                self.cancel_rest_posture();
+                Ok(())
+            }
+            ClientCommand::Barber(request) => self.handle_barber_request(request).await,
+            ClientCommand::ApplyEquipmentSet(bindings) => self.apply_equipment_set(bindings).await,
+            ClientCommand::SubmitHousingManagement(request) => {
+                self.submit_housing_management(request).await
+            }
+            ClientCommand::RefreshHousing => self.query_home().await,
+            ClientCommand::QueryHousingAccess => self.query_housing_access().await,
+            ClientCommand::SearchHousing { house_type } => self.search_housing(house_type).await,
+            ClientCommand::SubmitHousingPayment(request) => {
+                self.submit_housing_payment(request).await
+            }
+            ClientCommand::PreviewHousingPayment(request) => {
+                self.preview_housing_payment(request);
+                Ok(())
+            }
+            ClientCommand::Trade(request) => self.submit_trade(request).await,
+            ClientCommand::PreviewVendorTrade(request) => {
+                self.preview_vendor_trade(request);
+                Ok(())
+            }
+            ClientCommand::QuerySpellInspection(query) => {
+                self.query_spell_inspection(query);
+                Ok(())
+            }
+            ClientCommand::PreviewSalvage(request) => {
+                self.preview_salvage(request);
+                Ok(())
+            }
+            ClientCommand::SubmitSalvage(request) => self.submit_salvage(request).await,
+            ClientCommand::SubmitItemUse(request) => self.submit_item_use(request).await,
+            ClientCommand::QueryItemUseTarget(query) => {
+                self.query_item_use_target(query);
+                Ok(())
+            }
+            ClientCommand::SubmitInventory(intent) => self.submit_inventory_intent(intent).await,
+            ClientCommand::AutoMergeContainer { container, policy } => {
+                self.start_auto_merge(container, policy).await
+            }
+            ClientCommand::PreviewInventory(request) => {
+                self.preview_inventory_intent(request);
+                Ok(())
+            }
+            ClientCommand::SetEntityCollisionDisabled(disabled) => {
+                let coordinator = self.collision_coordinator.as_mut().ok_or_else(|| {
+                    anyhow::anyhow!("entity collision override requires client collision")
+                })?;
+                let disabled = coordinator.set_entity_collision_disabled(&mut self.world, disabled);
+                self.precise_jump.invalidate();
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityCollisionDisabled(disabled));
+                Ok(())
+            }
             ClientCommand::Login(_)
             | ClientCommand::SelectCharacter(_)
-            | ClientCommand::SendCharacterEnterWorld { .. }
             | ClientCommand::CreateCharacter(_)
             | ClientCommand::DeleteCharacter { .. }
-            | ClientCommand::RestoreCharacter(_)
-            | ClientCommand::EnterWorld => self.handle_auth_command(cmd).await,
+            | ClientCommand::RestoreCharacter(_) => self.handle_auth_command(cmd).await,
+
+            ClientCommand::QueryDeathLocations(query) => {
+                self.query_death_locations(query);
+                Ok(())
+            }
+            ClientCommand::ManageCorpseConsent(action) => {
+                self.send_game_action(action.game_action()).await
+            }
+            ClientCommand::QueryAllegiance => self.query_allegiance().await,
+            ClientCommand::AddFriend { name } => self.add_friend(name).await,
+            ClientCommand::AddIgnore { name, scope } => self.add_ignore(name, scope).await,
+            ClientCommand::RemoveIgnore { guid, scope } => self.remove_ignore(guid, scope).await,
+            ClientCommand::RemoveFriend { guid } => self.remove_friend(guid).await,
+            ClientCommand::AbandonContract { id } => self.abandon_contract(id).await,
 
             ClientCommand::Talk(_)
             | ClientCommand::Tell { .. }
             | ClientCommand::ChannelMessage { .. }
             | ClientCommand::Emote(_)
-            | ClientCommand::SoulEmote(_) => self.handle_chat_command(cmd).await,
+            | ClientCommand::SoulEmote { .. } => self.handle_chat_command(cmd).await,
 
             ClientCommand::Identify(_)
             | ClientCommand::ReadBookPage { .. }
             | ClientCommand::QueryHealth(_)
-            | ClientCommand::Use(_)
+            | ClientCommand::Use { .. }
             | ClientCommand::CloseContainer(_)
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::SalvageItemsWith { .. }
-            | ClientCommand::CastTargetedSpell { .. }
-            | ClientCommand::CastUntargetedSpell { .. }
-            | ClientCommand::TargetedMeleeAttack { .. }
-            | ClientCommand::TargetedMissileAttack { .. }
+            | ClientCommand::VendorTrade(_)
             | ClientCommand::Buy { .. }
             | ClientCommand::Sell { .. }
-            | ClientCommand::OpenTrade(_)
-            | ClientCommand::CloseTrade
-            | ClientCommand::AcceptTrade
-            | ClientCommand::DeclineTrade
-            | ClientCommand::ResetTrade
-            | ClientCommand::AddToTrade { .. }
             | ClientCommand::GiveObjectRequest { .. }
+            | ClientCommand::SetCharacterTitle { .. }
             | ClientCommand::SetCharacterOption { .. }
-            | ClientCommand::RecallLifestone
-            | ClientCommand::TeleportToPklArena
-            | ClientCommand::TeleportToMarketplace
-            | ClientCommand::RecallAllegianceHousing
+            | ClientCommand::Recall(_)
+            | ClientCommand::TeleportToMapPosition(_)
             | ClientCommand::SwearAllegiance { .. }
             | ClientCommand::Unswear { .. }
             | ClientCommand::Suicide
@@ -156,12 +277,17 @@ impl ClientRuntime {
                 self.handle_interaction_command(cmd).await
             }
 
+            ClientCommand::SetFellowshipUpdatesSubscribed { enabled } => {
+                self.set_fellowship_updates_subscribed(enabled).await
+            }
             ClientCommand::CreateParty { .. }
             | ClientCommand::ShowPartyStatus
             | ClientCommand::InviteToParty { .. }
             | ClientCommand::PromotePartyLeader { .. }
             | ClientCommand::LeaveParty
-            | ClientCommand::UninviteFromParty { .. } => self.handle_social_command(cmd).await,
+            | ClientCommand::DisbandParty
+            | ClientCommand::SetPartyOpenness { .. }
+            | ClientCommand::UninviteFromParty { .. } => self.handle_party_command(cmd).await,
 
             ClientCommand::Drop(_)
             | ClientCommand::Get(_)
@@ -171,34 +297,148 @@ impl ClientRuntime {
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
-            ClientCommand::DriveSelf(_) => self.handle_movement_command(cmd).await,
+            ClientCommand::DriveSelf(_) | ClientCommand::ControlCharacter(_) => {
+                self.handle_movement_command(cmd).await
+            }
 
-            ClientCommand::RaiseAttribute { .. }
-            | ClientCommand::RaiseVital { .. }
-            | ClientCommand::RaiseSkill { .. }
-            | ClientCommand::TrainSkill { .. } => self.handle_progression_command(cmd).await,
+            ClientCommand::SetPreciseJumpAim(request) => {
+                let collision = self
+                    .collision_coordinator
+                    .as_ref()
+                    .map(super::collision::ClientCollisionCoordinator::snapshot);
+                if let Some(evaluation) = self.precise_jump.submit_aim(
+                    request,
+                    self.world_generation,
+                    self.camera.identity(),
+                    &self.world,
+                    collision,
+                ) {
+                    let _ = self.client_view_event_tx.send(
+                        crate::client::types::ClientViewEvent::PreciseJumpEvaluation(evaluation),
+                    );
+                }
+                Ok(())
+            }
+            ClientCommand::QueryEntitySelectionCandidates(request) => {
+                self.query_entity_selection_candidates(request)
+            }
+            ClientCommand::CancelPreciseJump(request) => {
+                let feedback = self.precise_jump.cancel(request);
+                let _ = self.client_view_event_tx.send(
+                    crate::client::types::ClientViewEvent::PreciseJumpTransactionFeedback(feedback),
+                );
+                Ok(())
+            }
+            ClientCommand::CommitPreciseJump(request) => {
+                if let Some(feedback) = self.precise_jump.queue_commit(
+                    request,
+                    self.world_generation,
+                    self.camera.identity(),
+                ) {
+                    let _ = self.client_view_event_tx.send(
+                        crate::client::types::ClientViewEvent::PreciseJumpTransactionFeedback(
+                            feedback,
+                        ),
+                    );
+                }
+                Ok(())
+            }
 
-            ClientCommand::SetCombatMode(_)
+            ClientCommand::StartClientCamera(_)
+            | ClientCommand::SetClientCameraIntent(_)
+            | ClientCommand::SetClientCameraClearance(_)
+            | ClientCommand::StopClientCamera(_) => self.handle_camera_command(cmd).await,
+
+            ClientCommand::EvaluateProgression {
+                request_id,
+                intents,
+            } => {
+                let evaluations = intents
+                    .into_iter()
+                    .map(|intent| ClientProgressionEvaluation {
+                        intent,
+                        result: self.quote_progression(intent),
+                    })
+                    .collect();
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ProgressionEvaluated {
+                        request_id,
+                        evaluations,
+                    });
+                Ok(())
+            }
+            ClientCommand::SubmitProgression(_) => self.handle_progression_command(cmd).await,
+
+            ClientCommand::ToggleCombatMode
+            | ClientCommand::SetCombatMode(_)
             | ClientCommand::CancelAttack
-            | ClientCommand::Ping
-            | ClientCommand::RequestInitialViewState
-            | ClientCommand::SetFellowshipUpdatesSubscribed { .. }
+            | ClientCommand::CastSpell { .. }
+            | ClientCommand::BeginCombatEngagement { .. }
+            | ClientCommand::UpdateCombatProfile(_)
+            | ClientCommand::StopCombatEngagement { .. }
+            | ClientCommand::TargetedMeleeAttack { .. }
+            | ClientCommand::TargetedMissileAttack { .. } => self.handle_combat_command(cmd).await,
+
+            ClientCommand::Ping
+            | ClientCommand::RequestCurrentApplicationState
+            | ClientCommand::AcknowledgeClientWorldReveal { .. }
             | ClientCommand::QueryEntityDebugInfo(_)
+            | ClientCommand::Logout
+            | ClientCommand::Disconnect
             | ClientCommand::Quit => self.handle_system_command(cmd).await,
         }
     }
 
+    /// Preserve each workflow's correlated rejection while the merge still owns admission.
+    async fn reject_auto_merge_conflict(&mut self, cmd: ClientCommand) -> Result<()> {
+        const REASON: &str =
+            "Auto-merge stopped; inventory change still pending. Try again shortly.";
+        match cmd {
+            // These handlers reject at their inventory admission gate and publish the exact
+            // receipt their frontend is awaiting. A generic toast would strand that workflow.
+            ClientCommand::SubmitItemUse(request) => return self.submit_item_use(request).await,
+            ClientCommand::SubmitSalvage(request) => return self.submit_salvage(request).await,
+            ClientCommand::ApplyEquipmentSet(bindings) => {
+                return self.apply_equipment_set(bindings).await;
+            }
+            ClientCommand::VendorTrade(request) => {
+                self.reject_vendor_request(&request, REASON.into());
+                return Ok(());
+            }
+            ClientCommand::Trade(_) => {
+                self.report_trade_failure(REASON.into());
+                return Ok(());
+            }
+            // A refused begin still acknowledges its sequence, without retaining an attack.
+            ClientCommand::BeginCombatEngagement {
+                intent_sequence, ..
+            } if self.combat_engagement.admit_intent(intent_sequence) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CombatStatusUpdated(
+                        self.combat_engagement.status(),
+                    ));
+            }
+            _ => {}
+        }
+        self.emit_action_result(
+            ActionResultSource::Client,
+            ActionResultReason::General(REASON.into()),
+        );
+        Ok(())
+    }
+
     pub(super) async fn disconnect(&mut self) -> Result<()> {
-        let header = PacketHeader {
-            flags: packet_flags::DISCONNECT,
-            sequence: self.session.packet_sequence,
-            id: self.session.client_id,
-            ..Default::default()
-        };
-        self.session.packet_sequence += 1;
-        self.session
-            .send_packet_to_addr(header, &[], self.session.server_addr)
-            .await?;
+        self.disconnect_with_cause(ClientExitCause::ExplicitDisconnect)
+            .await
+    }
+
+    pub(super) async fn disconnect_with_cause(&mut self, cause: ClientExitCause) -> Result<()> {
+        self.reset_barber();
+        self.reset_camera();
+        self.set_exit_cause(cause);
+        self.session.send_disconnect().await?;
 
         self.state = ClientState::Disconnected;
         self.send_status_event();
@@ -206,30 +446,160 @@ impl ClientRuntime {
         Ok(())
     }
 
-    async fn send_game_action(&mut self, action: GameAction) -> Result<()> {
-        self.session.send_action(action).await
+    pub(super) async fn send_game_action(&mut self, action: GameAction) -> Result<()> {
+        let requested_mode = match &action {
+            GameAction::ChangeCombatMode(data) => Some(data.mode),
+            _ => None,
+        };
+        if let Some(mode) = requested_mode
+            && let Some(pending) = self.pending_combat_mode
+        {
+            // ACE can omit a reply for a redundant combat request (Creature_Combat.cs:67).
+            // Keep one outstanding request rather than queue uncorrelatable confirmations.
+            if mode != pending {
+                self.emit_action_result(
+                    ActionResultSource::Client,
+                    ActionResultReason::General("Wait for the pending combat-mode request.".into()),
+                );
+            }
+            return Ok(());
+        }
+        let use_target = match &action {
+            GameAction::Use(data) => Some(data.guid),
+            _ => None,
+        };
+        let transfer = match &action {
+            GameAction::PutItemInContainer(data)
+                if self.world.is_world_container_content(data.item_guid)
+                    || self.world.has_world_container_access(data.container_guid) =>
+            {
+                Some(data.item_guid)
+            }
+            _ => None,
+        };
+        if let Some(item) = transfer {
+            self.world.retain_inventory_transfer(item);
+        }
+        let result = self.session.send_action(action).await;
+        if result.is_ok()
+            && let Some(mode) = requested_mode
+            && mode != self.world.player_combat_mode()
+        {
+            self.pending_combat_mode = Some(mode);
+        }
+        if result.is_ok()
+            && let Some(crystal) = use_target
+        {
+            self.housing_opening = Some(super::housing::HousingOpening {
+                crystal,
+                deadline: Instant::now() + super::BUSY_OPERATION_TIMEOUT,
+            });
+        }
+        if result.is_err()
+            && let Some(item) = transfer
+        {
+            self.world.finish_inventory_transfer(item);
+        }
+        result
+    }
+
+    /// Admission failures are domain feedback, not fatal errors in the transport run loop.
+    fn admit_character_command(&self, command: &ClientCommand) -> Result<()> {
+        if matches!(command, ClientCommand::Login(_)) {
+            return Ok(());
+        }
+        ensure!(
+            self.state == ClientState::CharacterSelection,
+            "Character operations require character selection."
+        );
+        self.character_selection.ensure_available()?;
+        let characters = &self.character_selection.characters;
+        match command {
+            ClientCommand::CreateCharacter(_) => ensure!(
+                characters.len() < self.character_selection.max_slots as usize,
+                "The server's character slots are full."
+            ),
+            ClientCommand::DeleteCharacter { slot } => ensure!(
+                (*slot as usize) < characters.len(),
+                "Character deletion slot is outside the server roster."
+            ),
+            ClientCommand::RestoreCharacter(guid) => ensure!(
+                characters
+                    .iter()
+                    .any(|c| c.guid == *guid && c.delete_time != 0),
+                "Character is not pending deletion in the server roster."
+            ),
+            ClientCommand::SelectCharacter(guid) => ensure!(
+                characters
+                    .iter()
+                    .any(|c| c.guid == *guid && c.delete_time == 0),
+                "Character is not available in the server roster."
+            ),
+            _ => {}
+        }
+        Ok(())
     }
 
     async fn handle_auth_command(&mut self, cmd: ClientCommand) -> Result<()> {
-        match cmd {
+        let management_operation = match &cmd {
+            ClientCommand::CreateCharacter(_) => Some(CharacterManagementOperation::Create),
+            ClientCommand::DeleteCharacter { .. } => Some(CharacterManagementOperation::Delete),
+            ClientCommand::RestoreCharacter(_) => Some(CharacterManagementOperation::Restore),
+            _ => None,
+        };
+        if let Err(error) = self.admit_character_command(&cmd) {
+            if let Some(operation) = management_operation
+                && !self.character_selection.management.blocks_submission()
+            {
+                self.character_selection
+                    .reject(operation, error.to_string());
+                self.emit_character_management();
+            }
+            self.emit_action_result(
+                ActionResultSource::Client,
+                ActionResultReason::General(error.to_string()),
+            );
+            return Ok(());
+        }
+        let result = match cmd {
             ClientCommand::Login(password) => {
+                self.authenticating = true;
+                self.send_status_event();
                 log::info!("Attempting login...");
                 self.session
                     .send_login_request(&self.character_selection.account_name, &password)
                     .await
+                    .inspect_err(|error| {
+                        self.fail_connection(
+                            super::ConnectionFailureCause::Local {
+                                operation: super::ConnectionOperation::SendLogin,
+                                diagnostic: format!("{error:#}"),
+                            },
+                            ClientExitCause::RuntimeFailure,
+                        )
+                    })
             }
             ClientCommand::SelectCharacter(id) => {
                 log::info!("Selecting character: 0x{:08X}", id);
+                // Selection is the command's input, so publish it before starting the
+                // activation barrier. `select_character` also stores it, but only after the
+                // asynchronous request setup; beginning the transition first would leave the
+                // barrier without the identity it is required to hydrate.
+                self.character_selection.entry_rejection = None;
+                self.character_selection.character_id = Some(id);
                 self.begin_world_entry_transition().await?;
                 self.character_selection
                     .select_character(id, &mut self.session)
                     .await
-            }
-            ClientCommand::SendCharacterEnterWorld { guid, account } => {
-                log::info!("Entering world with character: 0x{:08X}", guid);
-                self.character_selection
-                    .send_character_enter_world(guid, account, &mut self.session)
-                    .await
+                    .inspect_err(|error| {
+                        self.fail_connection(
+                            super::ConnectionFailureCause::Local {
+                                operation: super::ConnectionOperation::ServerTraffic,
+                                diagnostic: format!("{error:#}"),
+                            },
+                            ClientExitCause::RuntimeFailure,
+                        )
+                    })
             }
             ClientCommand::CreateCharacter(request) => {
                 log::info!("Creating character: {}", request.name);
@@ -249,150 +619,151 @@ impl ClientRuntime {
                     .restore_character(guid, &mut self.session)
                     .await
             }
-            ClientCommand::EnterWorld => {
-                if let Some(char_id) = self.character_selection.character_id {
-                    log::info!(
-                        "Attempting to enter world with character: 0x{:08X}",
-                        char_id
-                    );
-                    self.begin_world_entry_transition().await?;
-                    self.character_selection
-                        .select_character(char_id, &mut self.session)
-                        .await
-                } else {
-                    Ok(())
-                }
-            }
             _ => unreachable!(),
+        };
+        if management_operation.is_some() {
+            self.emit_character_management();
         }
+        result
     }
 
     async fn handle_chat_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
             ClientCommand::Talk(text) => {
-                if matches!(self.state, ClientState::InWorld) {
-                    log::info!(">>> You say: \"{}\"", text);
-                    return self.send_talk(&text).await;
-                }
-                Ok(())
+                log::info!(">>> You say: \"{}\"", text);
+                self.send_talk(&text).await
             }
             ClientCommand::Tell { target, message } => {
-                if matches!(self.state, ClientState::InWorld) {
-                    log::info!(">>> You tell {}, \"{}\"", target, message);
-                    return self
-                        .send_game_action(GameAction::Tell(Box::new(TellActionData {
-                            target,
+                log::info!(">>> Tell {:?}: {}", target, message);
+                let action = match target {
+                    ChatTellTarget::Player { name } => GameAction::Tell(Box::new(TellActionData {
+                        target: name,
+                        message,
+                    })),
+                    ChatTellTarget::Npc { guid, .. } => {
+                        GameAction::TalkDirect(Box::new(TalkDirectActionData {
+                            target: guid.0,
                             message,
-                        })))
-                        .await;
-                }
-                Ok(())
+                        }))
+                    }
+                };
+                self.send_game_action(action).await
             }
             ClientCommand::ChannelMessage { channel, message } => {
-                if matches!(self.state, ClientState::InWorld) {
-                    log::info!(">>> You send {:?}: \"{}\"", channel, message);
-                    if let Some((room_id, chat_type)) = self.resolve_turbine_channel(channel) {
-                        let context_id = self.turbine_chat.next_context_id;
-                        self.turbine_chat.next_context_id =
-                            self.turbine_chat.next_context_id.wrapping_add(1).max(1);
+                log::info!(">>> You send {:?}: \"{}\"", channel, message);
+                if let Some((room_id, chat_type)) = self.resolve_turbine_channel(channel) {
+                    let context_id = self.turbine_chat.next_context_id;
+                    self.turbine_chat.next_context_id =
+                        self.turbine_chat.next_context_id.wrapping_add(1).max(1);
 
-                        return self
-                            .session
-                            .send_message(&GameMessage::TurbineChat(Box::new(
-                                TurbineChatMessageData {
-                                    blob_type: TurbineChatBlobType::RequestBinary,
-                                    dispatch_type: TurbineChatDispatchType::SendToRoomById,
-                                    target_type: 1,
-                                    target_id: 0,
-                                    transport_type: 0,
-                                    transport_id: 0,
-                                    cookie: 0,
-                                    payload: TurbineChatPayload::RequestSendToRoomById {
-                                        context_id,
-                                        room_id,
-                                        message,
-                                        extra_data_size: 0x0C,
-                                        sender_id: self.world.player.guid.0,
-                                        hresult: 0,
-                                        chat_type: chat_type.into(),
-                                    },
-                                },
-                            )))
-                            .await;
-                    }
-
-                    if let Some(channel) = Self::resolve_legacy_channel(channel) {
-                        return self
-                            .send_game_action(GameAction::ChatChannel(Box::new(
-                                ChatChannelActionData {
-                                    channel: channel.into(),
+                    return self
+                        .session
+                        .send_message(&GameMessage::TurbineChat(Box::new(
+                            TurbineChatMessageData {
+                                blob_type: TurbineChatBlobType::RequestBinary,
+                                dispatch_type: TurbineChatDispatchType::SendToRoomById,
+                                target_type: 1,
+                                target_id: 0,
+                                transport_type: 0,
+                                transport_id: 0,
+                                cookie: 0,
+                                payload: TurbineChatPayload::RequestSendToRoomById {
+                                    context_id,
+                                    room_id,
                                     message,
+                                    extra_data_size: 0x0C,
+                                    sender_id: self.world.player.guid.0,
+                                    hresult: 0,
+                                    chat_type: chat_type.into(),
                                 },
-                            )))
-                            .await;
-                    }
-
-                    self.emit_action_result(
-                        ActionResultSource::Client,
-                        ActionResultReason::General(format!(
-                            "No supported chat transport is available for {:?}.",
-                            channel
-                        )),
-                    );
+                            },
+                        )))
+                        .await;
                 }
+
+                if let Some(channel) = Self::resolve_legacy_channel(channel) {
+                    return self
+                        .send_game_action(GameAction::ChatChannel(Box::new(
+                            ChatChannelActionData {
+                                channel: channel.into(),
+                                message,
+                            },
+                        )))
+                        .await;
+                }
+
+                let _ = self.client_view_event_tx.send(ClientViewEvent::ChatError {
+                    message: format!(
+                        "No supported chat transport is available for {:?}.",
+                        channel
+                    ),
+                });
                 Ok(())
             }
             ClientCommand::Emote(text) => {
-                if matches!(self.state, ClientState::InWorld) {
-                    log::info!(">>> You emote: \"{}\"", text);
-                    return self
-                        .send_game_action(GameAction::Emote(Box::new(EmoteActionData {
-                            message: text,
-                        })))
-                        .await;
-                }
-                Ok(())
+                log::info!(">>> You emote: \"{}\"", text);
+                self.send_game_action(GameAction::Emote(Box::new(EmoteActionData {
+                    message: text,
+                })))
+                .await
             }
-            ClientCommand::SoulEmote(token) => {
-                if matches!(self.state, ClientState::InWorld) {
-                    let Some(resolved) = self.world.soul_emote_catalog.resolve(&token) else {
-                        self.emit_action_result(
-                            ActionResultSource::Client,
-                            ActionResultReason::General(format!(
-                                "Unknown soul emote token: {}",
-                                token
-                            )),
-                        );
-                        return Ok(());
-                    };
-
-                    let pose = resolved.pose.to_string();
-                    let message = resolved
-                        .other_emote
-                        .map(render_soul_emote_text)
-                        .or_else(|| resolved.my_emote.map(str::to_owned))
-                        .unwrap_or_else(|| resolved.token.to_string());
-
-                    if let Some(command) = motion_command_for_soul_emote_pose(&pose) {
-                        let motion_style = self
-                            .world
-                            .player
-                            .last_server_motion_style
-                            .unwrap_or(MotionStance::NonCombat);
-                        self.movement.enqueue_transient_motion(
-                            command,
-                            crate::client::movement_types::MotionStyle::Explicit(motion_style),
-                        );
+            ClientCommand::SoulEmote { token, request_id } => {
+                let Some(resolved) = self.world.soul_emote_catalog.resolve(&token) else {
+                    if let Some(request_id) = request_id {
+                        let _ =
+                            self.client_view_event_tx
+                                .send(ClientViewEvent::LocalMotionFeedback {
+                                    request_id,
+                                    world_generation: self.world_generation,
+                                    outcome: holtburger_world::motion::LocalMotionOutcome::Refused,
+                                });
                     }
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(format!("Unknown soul emote token: {}", token)),
+                    );
+                    return Ok(());
+                };
 
-                    log::info!(">>> You soul emote: \"{}\"", message);
-                    return self
-                        .send_game_action(GameAction::SoulEmote(Box::new(SoulEmoteActionData {
-                            message,
-                        })))
-                        .await;
+                let pose = resolved.pose.to_string();
+                let message = resolved
+                    .other_emote
+                    .map(render_soul_emote_text)
+                    .or_else(|| resolved.my_emote.map(str::to_owned))
+                    .unwrap_or_else(|| resolved.token.to_string());
+
+                let motion_command = motion_command_for_soul_emote_pose(&pose);
+                if self.world.player.guid != Guid::NULL
+                    && let Some(command) = motion_command
+                {
+                    self.movement.enqueue_authored_motion_request(
+                        command,
+                        // World admission requires peace. An older autonomous echo must not
+                        // put a stale combat style back onto the outgoing social command.
+                        crate::client::movement_types::MotionStyle::Explicit(
+                            MotionStance::NonCombat,
+                        ),
+                        request_id,
+                    );
                 }
-                Ok(())
+
+                if motion_command.is_none()
+                    && let Some(request_id) = request_id
+                {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::LocalMotionFeedback {
+                            request_id,
+                            world_generation: self.world_generation,
+                            outcome: holtburger_world::motion::LocalMotionOutcome::Unsupported,
+                        });
+                }
+
+                log::info!(">>> You soul emote: \"{}\"", message);
+                self.send_game_action(GameAction::SoulEmote(Box::new(SoulEmoteActionData {
+                    message,
+                })))
+                .await
             }
             _ => unreachable!(),
         }
@@ -407,7 +778,14 @@ impl ClientRuntime {
                 )))
                 .await
             }
-            ClientCommand::ReadBookPage { book, page_index } => {
+            ClientCommand::ReadBookPage {
+                player,
+                book,
+                page_index,
+            } => {
+                if player != self.world.player.guid {
+                    return Err(anyhow!("book page request belongs to another character"));
+                }
                 log::info!(">>> Reading book page {} from 0x{:08X}", page_index, book);
                 let page_index = i32::try_from(page_index).map_err(|_| {
                     anyhow!("book page index {} exceeds i32 wire range", page_index)
@@ -425,83 +803,41 @@ impl ClientRuntime {
                 })))
                 .await
             }
-            ClientCommand::Use(guid) => {
-                log::info!(">>> Using: 0x{:08X}", guid);
-                if !self.arm_busy_operation(BusyOperationKind::Use) {
+            ClientCommand::Use { guid, unrestricted } => {
+                if !unrestricted
+                    && let Some(rejection) =
+                        holtburger_world::interaction::entity_use_rejection(&self.world, guid)
+                {
+                    // Retail rejects before sending Use or incrementing busy state.
+                    let message = match rejection {
+                        EntityUseRejection::Door { name } => {
+                            format!("You can't open or close this {name} that way")
+                        }
+                        EntityUseRejection::Object { name } => format!("The {name} cannot be used"),
+                    };
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(message),
+                    );
                     return Ok(());
                 }
-                self.send_game_action(GameAction::Use(Box::new(UseActionData { guid })))
-                    .await
+                self.dispatch_item_use(&holtburger_world::item_use::ItemUseIntent::Direct {
+                    source: guid,
+                    unrestricted,
+                })
+                .await?;
+                Ok(())
             }
             ClientCommand::UseWithTarget { item, target } => {
-                log::info!(">>> Using: 0x{:08X} on 0x{:08X}", item, target);
-                if !self.arm_busy_operation(BusyOperationKind::UseWithTarget) {
-                    return Ok(());
-                }
-                self.send_game_action(GameAction::UseWithTarget(Box::new(
-                    UseWithTargetActionData {
-                        item_guid: item,
-                        target_guid: target,
-                    },
-                )))
-                .await
+                self.dispatch_item_use(&holtburger_world::item_use::ItemUseIntent::Targeted {
+                    source: item,
+                    target,
+                })
+                .await?;
+                Ok(())
             }
             ClientCommand::SalvageItemsWith { tool, items } => {
-                log::info!(">>> Salvaging {} item(s) with 0x{:08X}", items.len(), tool);
-                self.send_game_action(GameAction::SalvageItemsWith(Box::new(
-                    SalvageItemsWithActionData {
-                        tool_guid: tool,
-                        items,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::CastTargetedSpell { target, spell_id } => {
-                self.send_normalized_spell_cast(spell_id, Some(target))
-                    .await
-            }
-            ClientCommand::CastUntargetedSpell { spell_id } => {
-                self.send_normalized_spell_cast(spell_id, None).await
-            }
-            ClientCommand::TargetedMeleeAttack {
-                target,
-                attack_height,
-                power_level,
-            } => {
-                log::info!(
-                    ">>> Targeted melee attack on 0x{:08X} ({:?}, power {:.2})",
-                    target.0,
-                    attack_height,
-                    power_level
-                );
-                self.send_game_action(GameAction::TargetedMeleeAttack(Box::new(
-                    TargetedMeleeAttackActionData {
-                        target_guid: target,
-                        attack_height,
-                        power_level,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::TargetedMissileAttack {
-                target,
-                attack_height,
-                accuracy_level,
-            } => {
-                log::info!(
-                    ">>> Targeted missile attack on 0x{:08X} ({:?}, accuracy {:.2})",
-                    target.0,
-                    attack_height,
-                    accuracy_level
-                );
-                self.send_game_action(GameAction::TargetedMissileAttack(Box::new(
-                    TargetedMissileAttackActionData {
-                        target_guid: target,
-                        attack_height,
-                        accuracy_level,
-                    },
-                )))
-                .await
+                self.salvage_items_with(tool, items).await
             }
             ClientCommand::GiveObjectRequest {
                 target,
@@ -523,94 +859,43 @@ impl ClientRuntime {
                 )))
                 .await
             }
+            ClientCommand::VendorTrade(request) => self.submit_vendor_trade(request).await,
             ClientCommand::Buy { vendor, items } => {
-                if !self.arm_busy_operation(BusyOperationKind::Buy) {
-                    return Ok(());
-                }
-                self.send_game_action(GameAction::Buy(Box::new(BuyActionData {
-                    vendor_guid: vendor,
-                    items,
-                })))
-                .await
+                self.start_vendor_trade(None, vendor, items, Vec::new())
+                    .await
             }
             ClientCommand::Sell { vendor, items } => {
-                if !self.arm_busy_operation(BusyOperationKind::Sell) {
+                self.start_vendor_trade(None, vendor, Vec::new(), items)
+                    .await
+            }
+            ClientCommand::CloseContainer(guid) => self.close_container(guid).await,
+            ClientCommand::SetCharacterTitle {
+                character,
+                title_id,
+            } => {
+                if character != self.world.player.guid
+                    || self.described_character != Some(character)
+                    || !matches!(self.state, ClientState::InWorld)
+                {
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(
+                            "Title selection requires the current ready character".into(),
+                        ),
+                    );
                     return Ok(());
                 }
-                self.send_game_action(GameAction::Sell(Box::new(SellActionData {
-                    vendor_guid: vendor,
-                    items,
+                self.send_game_action(GameAction::TitleSet(Box::new(TitleSetActionData {
+                    title_id,
                 })))
-                .await
-            }
-            ClientCommand::OpenTrade(target) => {
-                self.send_game_action(GameAction::OpenTradeNegotiations(Box::new(
-                    OpenTradeNegotiationsActionData {
-                        trade_partner_guid: target,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::CloseTrade => {
-                self.send_game_action(GameAction::CloseTradeNegotiations(Box::new(
-                    CloseTradeNegotiationsActionData {},
-                )))
-                .await
-            }
-            ClientCommand::AcceptTrade => {
-                let data = if let Some(trade) = self.world.trade.as_ref() {
-                    AcceptTradeActionData {
-                        partner_guid: trade.partner_guid,
-                        trade_stamp: trade.trade_stamp,
-                        trade_status: 1,
-                        initiator_guid: trade.initiator_guid,
-                        initiator_accepts: 1,
-                        partner_accepts: if trade.partner_side.accepted { 1 } else { 0 },
-                    }
-                } else {
-                    AcceptTradeActionData::default()
-                };
-                self.send_game_action(GameAction::AcceptTrade(Box::new(data)))
-                    .await
-            }
-            ClientCommand::DeclineTrade => {
-                self.send_game_action(GameAction::DeclineTrade(Box::new(
-                    DeclineTradeActionData {},
-                )))
-                .await
-            }
-            ClientCommand::ResetTrade => {
-                self.send_game_action(GameAction::ResetTrade(Box::new(ResetTradeActionData {})))
-                    .await
-            }
-            ClientCommand::AddToTrade { item } => {
-                self.send_game_action(GameAction::AddToTrade(Box::new(AddToTradeActionData {
-                    item_guid: item,
-                    trade_slot: 0,
-                })))
-                .await
-            }
-            ClientCommand::CloseContainer(guid) => {
-                log::info!(">>> Closing container: 0x{:08X}", guid);
-
-                self.send_game_action(GameAction::NoLongerViewingContents(Box::new(
-                    NoLongerViewingContentsActionData {
-                        container_guid: guid,
-                    },
-                )))
-                .await
+                .await?;
+                let event = self.world.set_player_character_title(title_id);
+                self.handle_world_event(&event);
+                Ok(())
             }
             ClientCommand::SetCharacterOption { option, value } => {
                 log::info!(">>> Setting character option {:?} to {}", option, value);
-                self.send_game_action(GameAction::SetSingleCharacterOption(Box::new(
-                    SetSingleCharacterOptionActionData { option, value },
-                )))
-                .await?;
-                self.world
-                    .player
-                    .set_character_option_enabled(option, value);
-                self.emit_player_options_updated();
-                Ok(())
+                self.set_character_option(option, value).await
             }
             ClientCommand::AddPlayerPermission { player_name } => {
                 log::info!(">>> Permitting {} to loot corpse", player_name);
@@ -626,50 +911,12 @@ impl ClientRuntime {
                 )))
                 .await
             }
-            ClientCommand::RecallLifestone => {
-                log::info!(">>> Recalling to lifestone");
-                self.send_game_action(GameAction::TeleToLifestone(Box::new(
-                    TeleToLifestoneActionData,
-                )))
-                .await
+            ClientCommand::Recall(destination) => self.recall(destination).await,
+            ClientCommand::TeleportToMapPosition(position) => {
+                self.teleport_to_map_position(position).await
             }
-            ClientCommand::TeleportToPklArena => {
-                log::info!(">>> Teleporting to PKL arena");
-                self.send_game_action(GameAction::TeleToPklArena(Box::new(
-                    TeleToPklArenaActionData,
-                )))
-                .await
-            }
-            ClientCommand::TeleportToMarketplace => {
-                log::info!(">>> Teleporting to marketplace");
-                self.send_game_action(GameAction::TeleToMarketPlace(Box::new(
-                    TeleToMarketPlaceActionData,
-                )))
-                .await
-            }
-            ClientCommand::RecallAllegianceHousing => {
-                log::info!(">>> Recalling to allegiance housing");
-                self.send_game_action(GameAction::TeleToMansion(Box::new(TeleToMansionActionData)))
-                    .await
-            }
-            ClientCommand::SwearAllegiance {
-                target: target_guid,
-            } => {
-                log::info!(">>> Swearing allegiance to 0x{:08X}", target_guid.0);
-                self.send_game_action(GameAction::SwearAllegiance(Box::new(
-                    SwearAllegianceActionData { target_guid },
-                )))
-                .await
-            }
-            ClientCommand::Unswear {
-                target: target_guid,
-            } => {
-                log::info!(">>> Breaking allegiance from 0x{:08X}", target_guid.0);
-                self.send_game_action(GameAction::BreakAllegiance(Box::new(
-                    BreakAllegianceActionData { target_guid },
-                )))
-                .await
-            }
+            ClientCommand::SwearAllegiance { target } => self.swear_allegiance(target).await,
+            ClientCommand::Unswear { target } => self.break_allegiance(target).await,
             ClientCommand::Suicide => {
                 log::info!(">>> Initiating suicide");
                 self.send_game_action(GameAction::Suicide(Box::new(SuicideActionData)))
@@ -680,14 +927,22 @@ impl ClientRuntime {
                 self.send_game_action(GameAction::EnterPkLite(Box::new(EnterPkLiteActionData)))
                     .await
             }
-            ClientCommand::RespondToConfirmation { accepted } => {
-                let Some(confirmation) = self.active_confirmation.clone() else {
+            ClientCommand::RespondToConfirmation {
+                request_id,
+                accepted,
+            } => {
+                let Some(confirmation) = self
+                    .active_confirmation
+                    .clone()
+                    .filter(|request| request.request_id == request_id)
+                else {
                     self.emit_action_result(
                         ActionResultSource::Client,
                         ActionResultReason::General(
-                            "No active confirmation request to answer.".to_string(),
+                            "That confirmation request is no longer active.".to_string(),
                         ),
                     );
+                    self.emit_active_character_confirmation_updated();
                     return Ok(());
                 };
 
@@ -796,41 +1051,10 @@ impl ClientRuntime {
                 .await
             }
             ClientCommand::GetAndWield { item, slot } => {
-                let (target_mask, resolved_slot) = self.resolve_and_clear_slots(item, slot).await?;
-
-                log::info!(
-                    ">>> Getting and wielding item 0x{:08X} in slot {:?}",
-                    item,
-                    resolved_slot,
-                );
-
-                // Sequencing is handled automatically by the send_game_action helper.
-                self.send_game_action(GameAction::GetAndWieldItem(Box::new(
-                    GetAndWieldItemActionData {
-                        item_guid: item,
-                        equip_mask: target_mask,
-                    },
-                )))
-                .await
+                self.start_equipment_change(item, slot, None).await
             }
             ClientCommand::SplitToWield { item, slot, amount } => {
-                let (target_mask, resolved_slot) = self.resolve_and_clear_slots(item, slot).await?;
-
-                log::info!(
-                    ">>> Splitting 0x{:08X} ({}x) to wield in {:?}",
-                    item,
-                    amount,
-                    resolved_slot,
-                );
-
-                self.send_game_action(GameAction::StackableSplitToWield(Box::new(
-                    StackableSplitToWieldActionData {
-                        stack_guid: item,
-                        amount: amount as i32,
-                        equip_mask: target_mask,
-                    },
-                )))
-                .await
+                self.start_equipment_change(item, slot, Some(amount)).await
             }
             _ => unreachable!(),
         }
@@ -838,52 +1062,154 @@ impl ClientRuntime {
 
     async fn handle_progression_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
-            ClientCommand::RaiseAttribute {
-                attribute,
-                xp_spent,
-            } => {
-                log::info!(">>> Raising Attribute: {:?} (XP: {})", attribute, xp_spent);
-                self.send_game_action(GameAction::RaiseAttribute(Box::new(
-                    RaiseAttributeActionData {
-                        attribute_type: attribute as u32,
-                        xp_spent,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::RaiseVital { vital, xp_spent } => {
-                log::info!(">>> Raising Vital: {:?} (XP: {})", vital, xp_spent);
-                self.send_game_action(GameAction::RaiseVital(Box::new(RaiseVitalActionData {
-                    vital_type: vital as u32,
-                    xp_spent,
-                })))
-                .await
-            }
-            ClientCommand::RaiseSkill { skill, xp_spent } => {
-                log::info!(">>> Raising Skill: {:?} (XP: {})", skill, xp_spent);
-                self.send_game_action(GameAction::RaiseSkill(Box::new(RaiseSkillActionData {
-                    skill_type: skill as u32,
-                    xp_spent,
-                })))
-                .await
-            }
-            ClientCommand::TrainSkill { skill, credits } => {
-                log::info!(">>> Training Skill: {:?} (Credits: {})", skill, credits);
-                self.send_game_action(GameAction::TrainSkill(Box::new(TrainSkillActionData {
-                    skill_type: skill as u32,
-                    credits_spent: credits as i32,
-                })))
-                .await
-            }
+            ClientCommand::SubmitProgression(submitted) => self.submit_progression(submitted).await,
             _ => unreachable!(),
+        }
+    }
+
+    async fn submit_progression(&mut self, submitted: ClientProgressionQuote) -> Result<()> {
+        let intent = submitted.quote.intent;
+        let reject = if !matches!(self.state, ClientState::InWorld)
+            || self.activation.is_some()
+            || self.described_character != Some(self.world.player.guid)
+        {
+            Some(ClientProgressionRejection::CharacterNotReady)
+        } else {
+            None
+        };
+        let quote =
+            match reject.map_or_else(|| self.progression.validate(&self.world, submitted), Err) {
+                Ok(quote) => quote,
+                Err(reason) => {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ProgressionFeedback(
+                            ClientProgressionFeedback::Rejected { intent, reason },
+                        ));
+                    return Ok(());
+                }
+            };
+
+        let action = match intent {
+            ProgressionIntent::Raise {
+                target: StatTarget::Attribute(attribute),
+                ..
+            }
+            | ProgressionIntent::RaiseMax {
+                target: StatTarget::Attribute(attribute),
+            } => GameAction::RaiseAttribute(Box::new(RaiseAttributeActionData {
+                attribute_type: attribute as u32,
+                xp_spent: quote.xp_spent,
+            })),
+            ProgressionIntent::Raise {
+                target: StatTarget::Vital(vital),
+                ..
+            }
+            | ProgressionIntent::RaiseMax {
+                target: StatTarget::Vital(vital),
+            } => GameAction::RaiseVital(Box::new(RaiseVitalActionData {
+                vital_type: vital as u32,
+                xp_spent: quote.xp_spent,
+            })),
+            ProgressionIntent::Raise {
+                target: StatTarget::Skill(skill),
+                ..
+            }
+            | ProgressionIntent::RaiseMax {
+                target: StatTarget::Skill(skill),
+            } => GameAction::RaiseSkill(Box::new(RaiseSkillActionData {
+                skill_type: skill as u32,
+                xp_spent: quote.xp_spent,
+            })),
+            ProgressionIntent::Train { skill } => {
+                GameAction::TrainSkill(Box::new(TrainSkillActionData {
+                    skill_type: skill as u32,
+                    credits_spent: i32::try_from(quote.credits_spent)
+                        .expect("validated DAT training cost must fit the wire type"),
+                }))
+            }
+        };
+        self.progression.guard(quote);
+        self.emit_progression_guards();
+        match self.send_game_action(action).await {
+            Ok(()) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ProgressionFeedback(
+                        ClientProgressionFeedback::Submitted {
+                            target: intent.target(),
+                        },
+                    ));
+                Ok(())
+            }
+            Err(error) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ProgressionFeedback(
+                        ClientProgressionFeedback::DispatchFailed {
+                            intent,
+                            message: error.to_string(),
+                        },
+                    ));
+                Err(error)
+            }
         }
     }
 
     async fn handle_movement_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
             ClientCommand::DriveSelf(intent) => {
+                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                    // Activation owns the input boundary. A stale held-drive edge must not be
+                    // replayed after the destination handoff, and it is not a runtime failure.
+                    return Ok(());
+                }
                 log::info!(">>> Queueing self drive intent: {:?}", intent);
+                if intent.interrupts_combat() {
+                    self.interrupt_combat_for_player_movement(Instant::now());
+                }
                 self.movement.enqueue_drive_intent(intent, Instant::now());
+                Ok(())
+            }
+            ClientCommand::ControlCharacter(event) => {
+                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                    return Ok(());
+                }
+                self.movement.enqueue_character_motion_event(event);
+                Ok(())
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    async fn handle_camera_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        match cmd {
+            ClientCommand::StartClientCamera(request) => {
+                if self.activation.is_none() && !matches!(self.state, ClientState::InWorld) {
+                    return Ok(());
+                }
+                let receipt = self.start_camera(request)?;
+                log::info!(
+                    "accepted client camera generation {} for player {:?}",
+                    receipt.identity.camera_generation,
+                    receipt.identity.player_guid
+                );
+                Ok(())
+            }
+            ClientCommand::SetClientCameraIntent(request) => {
+                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                    return Ok(());
+                }
+                self.set_camera_intent(request).map(|_| ())
+            }
+            ClientCommand::SetClientCameraClearance(request) => {
+                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                    return Ok(());
+                }
+                self.set_camera_clearance(request).map(|_| ())
+            }
+            ClientCommand::StopClientCamera(identity) => {
+                self.stop_camera(identity);
                 Ok(())
             }
             _ => unreachable!(),
@@ -897,37 +1223,17 @@ impl ClientRuntime {
                 self.send_game_action(GameAction::PingRequest(Box::new(PingRequestActionData)))
                     .await
             }
-            ClientCommand::RequestInitialViewState => {
-                log::info!(">>> Client requested initial view state snapshot");
-                self.emit_initial_view_state_snapshot();
+            ClientCommand::RequestCurrentApplicationState => {
+                log::info!(">>> Client requested current application snapshot");
+                self.emit_current_application_snapshot();
                 Ok(())
             }
-            ClientCommand::SetFellowshipUpdatesSubscribed { enabled } => {
-                if !matches!(self.state, ClientState::InWorld) {
-                    return Ok(());
-                }
-
-                log::info!(">>> Setting fellowship update subscription to {}", enabled);
-                self.send_game_action(GameAction::FellowshipUpdateRequest(Box::new(
-                    FellowshipUpdateRequestActionData {
-                        panel_open: enabled,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::SetCombatMode(mode) => {
-                log::info!(">>> Changing combat mode to: {:?}", mode);
-                self.send_game_action(GameAction::ChangeCombatMode(Box::new(
-                    ChangeCombatModeActionData { mode },
-                )))
-                .await
-            }
-            ClientCommand::CancelAttack => {
-                log::info!(">>> Canceling attack");
-                self.send_game_action(GameAction::CancelAttack(Box::new(
-                    CancelAttackActionData {},
-                )))
-                .await
+            ClientCommand::AcknowledgeClientWorldReveal { world_generation } => {
+                log::info!(
+                    ">>> Client acknowledged world reveal for generation {}",
+                    world_generation
+                );
+                self.acknowledge_world_reveal(world_generation).await
             }
             ClientCommand::QueryEntityDebugInfo(guid) => {
                 log::info!(">>> Client requested Debug Snapshot for {}", guid);
@@ -940,7 +1246,8 @@ impl ClientRuntime {
                 }
                 Ok(())
             }
-            ClientCommand::Quit => {
+            ClientCommand::Logout => self.logout().await,
+            ClientCommand::Disconnect | ClientCommand::Quit => {
                 log::info!("Disconnecting...");
                 // First attempt a graceful logout from the world
                 if matches!(self.state, ClientState::InWorld) {
@@ -969,321 +1276,10 @@ impl ClientRuntime {
         self.send_game_action(GameAction::LoginComplete(Box::new(LoginCompleteActionData)))
             .await
     }
-
-    async fn send_normalized_spell_cast(
-        &mut self,
-        spell_id: u32,
-        requested_target: Option<Guid>,
-    ) -> Result<()> {
-        match normalize_spell_cast(&self.world, spell_id, requested_target) {
-            NormalizedSpellCast::Targeted { target, spell_id } => {
-                log::info!(
-                    ">>> Casting targeted spell {} on 0x{:08X}",
-                    spell_id,
-                    target.0
-                );
-                if !self.arm_busy_operation(BusyOperationKind::SpellCast) {
-                    return Ok(());
-                }
-                self.send_game_action(GameAction::CastTargetedSpell(Box::new(
-                    CastTargetedSpellActionData { target, spell_id },
-                )))
-                .await
-            }
-            NormalizedSpellCast::Untargeted { spell_id } => {
-                log::info!(">>> Casting untargeted spell {}", spell_id);
-                if !self.arm_busy_operation(BusyOperationKind::SpellCast) {
-                    return Ok(());
-                }
-                self.send_game_action(GameAction::CastUntargetedSpell(Box::new(
-                    CastUntargetedSpellActionData { spell_id },
-                )))
-                .await
-            }
-        }
-    }
-
-    async fn resolve_and_clear_slots(
-        &mut self,
-        item: Guid,
-        slot: Option<TargetSlot>,
-    ) -> Result<(EquipMask, TargetSlot)> {
-        let item_mask = self
-            .world
-            .entities
-            .get(item)
-            .map(|e| e.valid_locations())
-            .unwrap_or(EquipMask::NONE);
-
-        let resolved_slot = slot.unwrap_or(TargetSlot::EquipMask(item_mask));
-
-        let (target_mask, unequip_mask) = match resolved_slot {
-            TargetSlot::EquipMask(m) => (m, get_equip_unequip_mask(item_mask, Some(resolved_slot))),
-            TargetSlot::MainHand => {
-                let tm = if item_mask.intersects(EquipMask::MELEE_WEAPON) {
-                    EquipMask::MELEE_WEAPON
-                } else if item_mask.intersects(EquipMask::MISSILE_WEAPON) {
-                    EquipMask::MISSILE_WEAPON
-                } else if item_mask.intersects(EquipMask::CASTER) {
-                    EquipMask::CASTER
-                } else {
-                    item_mask
-                };
-                (tm, get_equip_unequip_mask(item_mask, Some(resolved_slot)))
-            }
-            TargetSlot::OffHand => (
-                EquipMask::SHIELD,
-                get_equip_unequip_mask(item_mask, Some(resolved_slot)),
-            ),
-            TargetSlot::TopClothes => (
-                PseudoEquipMask::TOP_CLOTHES.into(),
-                get_equip_unequip_mask(item_mask, Some(resolved_slot)),
-            ),
-            TargetSlot::BottomClothes => (
-                PseudoEquipMask::BOTTOM_CLOTHES.into(),
-                get_equip_unequip_mask(item_mask, Some(resolved_slot)),
-            ),
-        };
-
-        // Auto-unequip overlapping items
-        let to_unequip: Vec<holtburger_common::Guid> = self
-            .world
-            .player
-            .equipment
-            .iter()
-            .filter(|&(eq_guid, eq_mask)| eq_mask.intersects(unequip_mask) && *eq_guid != item)
-            .map(|(&eq_guid, _)| eq_guid)
-            .collect();
-
-        for guid in to_unequip {
-            self.send_game_action(GameAction::PutItemInContainer(Box::new(
-                PutItemInContainerActionData {
-                    item_guid: guid,
-                    container_guid: self.world.player.guid,
-                    placement: 0,
-                },
-            )))
-            .await?;
-        }
-
-        Ok((target_mask, resolved_slot))
-    }
-
-    async fn handle_social_command(&mut self, cmd: ClientCommand) -> Result<()> {
-        if !matches!(self.state, ClientState::InWorld) {
-            return Ok(());
-        }
-
-        match cmd {
-            ClientCommand::CreateParty { name } => {
-                log::info!(">>> Creating party: \"{}\"", name);
-                let share_xp = self
-                    .world
-                    .player
-                    .character_option_enabled(CharacterOption::ShareFellowshipExpAndLuminance);
-                self.send_game_action(GameAction::FellowshipCreate(Box::new(
-                    FellowshipCreateActionData { name, share_xp },
-                )))
-                .await
-            }
-            ClientCommand::ShowPartyStatus => {
-                for line in self.format_party_status_lines() {
-                    self.emit_log_message(line);
-                }
-                Ok(())
-            }
-            ClientCommand::InviteToParty { target } => {
-                log::info!(">>> Inviting 0x{:08X} to party", target.0);
-                self.send_game_action(GameAction::FellowshipRecruit(Box::new(
-                    FellowshipRecruitActionData {
-                        player_guid: target,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::PromotePartyLeader { target } => {
-                let Some(fellowship) = self.world.fellowship.as_ref() else {
-                    log::warn!(
-                        ">>> Ignoring promote request because there is no active fellowship"
-                    );
-                    return Ok(());
-                };
-
-                let Some(member) = fellowship
-                    .members
-                    .iter()
-                    .find(|member| member.guid == target)
-                else {
-                    log::warn!(
-                        ">>> Ignoring promote request for 0x{:08X} because the player is not in the fellowship",
-                        target.0
-                    );
-                    return Ok(());
-                };
-
-                log::info!(">>> Promoting {} to party leader", member.name);
-                self.send_game_action(GameAction::FellowshipAssignNewLeader(Box::new(
-                    FellowshipAssignNewLeaderActionData {
-                        new_leader_guid: target,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::LeaveParty => {
-                log::info!(">>> Leaving party");
-                self.send_game_action(GameAction::FellowshipQuit(Box::new(
-                    FellowshipQuitActionData { disband: false },
-                )))
-                .await
-            }
-            ClientCommand::UninviteFromParty { target } => {
-                log::info!(">>> Removing 0x{:08X} from party", target.0);
-                self.send_game_action(GameAction::FellowshipDismiss(Box::new(
-                    FellowshipDismissActionData {
-                        player_guid: target,
-                    },
-                )))
-                .await
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    fn format_party_status_lines(&self) -> Vec<String> {
-        let Some(fellowship) = self.world.fellowship.as_ref() else {
-            return vec!["Not currently in a party.".to_string()];
-        };
-
-        let mut lines = Vec::new();
-        let leader_name = fellowship
-            .members
-            .iter()
-            .find(|member| member.guid == fellowship.leader_guid)
-            .map(|member| member.name.as_str())
-            .unwrap_or("Unknown");
-
-        let party_name = if fellowship.name.is_empty() {
-            "(unknown)"
-        } else {
-            fellowship.name.as_str()
-        };
-
-        lines.push(format!(
-            "Party: {} | Leader: {} | Members: {}",
-            party_name,
-            leader_name,
-            fellowship.members.len()
-        ));
-        lines.push(format!(
-            "Sharing: XP {} | Even {} | Open {} | Locked {}",
-            on_off(fellowship.share_xp),
-            on_off(fellowship.even_share),
-            on_off(fellowship.open),
-            on_off(fellowship.is_locked)
-        ));
-
-        for member in &fellowship.members {
-            let leader_suffix = if member.guid == fellowship.leader_guid {
-                " [leader]"
-            } else {
-                ""
-            };
-            let self_suffix = if member.guid == self.world.player.guid {
-                " [you]"
-            } else {
-                ""
-            };
-
-            lines.push(format!(
-                "- {}{}{} L{} H {}/{} S {}/{} M {}/{} Loot {}",
-                member.name,
-                leader_suffix,
-                self_suffix,
-                member.level,
-                member.current_health,
-                member.max_health,
-                member.current_stamina,
-                member.max_stamina,
-                member.current_mana,
-                member.max_mana,
-                on_off(member.share_loot)
-            ));
-        }
-
-        if !fellowship.departed_members.is_empty() {
-            lines.push(format!(
-                "Departed members tracked: {}",
-                fellowship.departed_members.len()
-            ));
-        }
-
-        if !fellowship.locks.is_empty() {
-            let lock_names = fellowship
-                .locks
-                .iter()
-                .map(|lock| lock.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            lines.push(format!("Locks: {}", lock_names));
-        }
-
-        lines
-    }
-}
-
-fn on_off(value: bool) -> &'static str {
-    if value { "on" } else { "off" }
-}
-
-/// Pure/stateless function to determine the unequip mask for a given target slot and item.
-///
-/// Returns an `EquipMask` of all potential overlapping slots that must be cleared
-/// to make room for the new item at the specified `target`.
-fn get_equip_unequip_mask(item_mask: EquipMask, target: Option<TargetSlot>) -> EquipMask {
-    log::info!(
-        "Resolving equip/unequip masks for item_mask={:?}, target={:?}",
-        item_mask,
-        target
-    );
-    let target_mask = target.unwrap_or(TargetSlot::EquipMask(item_mask));
-    match target_mask {
-        TargetSlot::EquipMask(m) => {
-            let mut unequip = m;
-            // If we're equipping something that's a main hand exclusive (like a 2H weapon),
-            // we must also clear the offhand slot.
-            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
-                unequip |= PseudoEquipMask::OFF_HAND_SLOT.into();
-            }
-            // Equipping in offhand must unequip anything in main hand that blocks it (2H).
-            if item_mask.intersects(PseudoEquipMask::OFF_HAND_SLOT.into()) {
-                unequip |= PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into();
-            }
-            unequip
-        }
-        TargetSlot::MainHand => {
-            // If the item is a main hand exclusive, we must also clear the offhand slot.
-            let mut unequip = PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into();
-            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
-                unequip |= PseudoEquipMask::OFF_HAND_SLOT.into();
-            }
-            unequip
-        }
-        TargetSlot::OffHand => {
-            let mut unequip = PseudoEquipMask::OFF_HAND_SLOT.into();
-            // If the item is a main hand exclusive, we must also clear the main hand slot.
-            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
-                unequip |= PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into();
-            }
-            unequip
-        }
-        TargetSlot::TopClothes => PseudoEquipMask::TOP_CLOTHES.into(),
-        TargetSlot::BottomClothes => PseudoEquipMask::BOTTOM_CLOTHES.into(),
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{NormalizedSpellCast, normalize_spell_cast};
     use crate::client::builder;
     use crate::client::types::{
         ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
@@ -1291,146 +1287,263 @@ mod tests {
     };
     use crate::client::{ClientRuntime, ClientState};
     use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{
+        ObjectDescriptionFlag, PropertyDataId, PropertyInt, Usable,
+        WorldObjectPropertyAccessorsMut as _,
+    };
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
-    use holtburger_content::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteToken};
+    use holtburger_content::SoulEmoteCatalog;
+    use holtburger_protocol::errors::WeenieError;
+    use holtburger_protocol::messages::combat::CombatMode;
+    use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_protocol::messages::{
         CharacterCreateAppearanceData, CharacterCreateRequestData, CharacterEntry,
-        SkillAdvancementClass,
+        ItemProfileActionData, SkillAdvancementClass,
     };
     use holtburger_world::RuntimeBodyResetCause;
-    use holtburger_world::WorldState;
-    use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
+    use holtburger_world::entity::{Entity, EntityMotionSnapshot, EntityNetworkMotion};
+    use holtburger_world::motion::{LocalMotionFeedback, LocalMotionOutcome};
+    use holtburger_world::spell::SpellCatalog;
+    use holtburger_world::state::motion_resolution::test_support::{
+        FIXTURE_STAND_COMMAND, explicit_motion_catalog,
+    };
     use holtburger_world::state::{
         FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,
         FellowshipMemberState, FellowshipState, TradeSide, TradeState,
     };
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
-    use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Instant;
 
     fn build_test_client() -> ClientRuntime {
         let mut client = builder::build_test_client(ClientState::InWorld);
-        client.world.soul_emote_catalog = Arc::new(SoulEmoteCatalog {
-            tokens: std::collections::BTreeMap::from([(
-                "wave".to_string(),
-                SoulEmoteToken {
-                    token: "wave".to_string(),
-                    pose: "Wave".to_string(),
-                },
-            )]),
-            poses: std::collections::BTreeMap::from([(
-                "Wave".to_string(),
-                SoulEmotePose {
-                    pose: "Wave".to_string(),
-                    my_emote: "wave.".to_string(),
-                    other_emote: "waves.".to_string(),
-                },
-            )]),
-        });
+        client.world.soul_emote_catalog = Arc::new(
+            SoulEmoteCatalog::from_asset(&holtburger_dat::file_type::ChatPoseTable {
+                id: holtburger_dat::file_type::ChatPoseTable::FILE_ID,
+                chat_pose_hash: std::collections::HashMap::from([
+                    ("wave".into(), "Wave".into()),
+                    ("bow".into(), "BowDeepState".into()),
+                ]),
+                chat_emote_hash: std::collections::HashMap::from([(
+                    "Wave".into(),
+                    holtburger_dat::file_type::ChatEmoteData {
+                        my_emote: "wave.".into(),
+                        other_emote: "waves.".into(),
+                    },
+                )]),
+            })
+            .unwrap(),
+        );
         client
     }
 
-    fn spell_info(school: MagicSchool, bitfield: u32, non_component_target_type: u32) -> SpellInfo {
-        SpellInfo {
-            name: "Test Spell".to_string(),
-            description: String::new(),
-            school,
-            icon_id: 0,
-            category: 0,
-            bitfield,
-            base_mana: 0,
-            base_range_constant: 0.0,
-            base_range_mod: 0.0,
-            power: 0,
-            spell_economy_mod: 0.0,
-            formula_version: 0,
-            component_loss: 0.0,
-            meta_spell_type: 0,
-            meta_spell_id: 0,
-            extras: SpellExtrasInfo::None,
-            components: [0; 8],
-            caster_effect: 0,
-            target_effect: 0,
-            fizzle_effect: 0,
-            recovery_interval: 0.0,
-            recovery_amount: 0.0,
-            display_order: 0,
-            non_component_target_type,
-            mana_mod: 0,
+    #[tokio::test]
+    async fn unavailable_allegiance_chat_never_substitutes_a_privileged_broadcast() {
+        use crate::client::types::ChatChannelDestination;
+        let mut client = build_test_client();
+        client.turbine_chat.enabled = false;
+        let mut events = client.subscribe_client_view_events();
+        let before = client.session.game_action_sequence;
+        client
+            .handle_command(ClientCommand::ChannelMessage {
+                channel: ChatChannelDestination::Allegiance,
+                message: "hello".to_string(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, before);
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            ClientViewEvent::ChatError { .. }
+        ));
+        assert!(matches!(client.state, ClientState::InWorld));
+        client
+            .handle_command(ClientCommand::ChannelMessage {
+                channel: ChatChannelDestination::AllegianceBroadcast,
+                message: "notice".to_string(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, before + 1);
+    }
+
+    #[tokio::test]
+    async fn character_title_selection_is_optimistic_and_server_reconciled() {
+        let mut client = build_test_client();
+        let character = Guid(1);
+        client
+            .world
+            .seed_local_player_entity(character, "Player", WorldPosition::default());
+        client.described_character = Some(character);
+        client.world.player.character_titles = Some([1].into_iter().collect());
+        client.world.set_player_character_title(1);
+        let mut views = client.subscribe_client_view_events();
+        // Core does not enforce registry membership or require local title content.
+        client
+            .handle_command(ClientCommand::SetCharacterTitle {
+                character,
+                title_id: 999,
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert_eq!(
+            client
+                .world
+                .player_int_property(PropertyInt::CharacterTitleId),
+            Some(999)
+        );
+        let mut published = false;
+        while let Ok(event) = views.try_recv() {
+            if let ClientViewEvent::CharacterSheetUpdated(Some(sheet)) = event {
+                assert_eq!(sheet.title_selection.unwrap().selected_id, 999);
+                published = true;
+            }
         }
-    }
-
-    fn world_with_spell(player_guid: Guid, spell_id: u32, spell: SpellInfo) -> WorldState {
-        let mut world = WorldState::synthetic();
-        world.player.guid = player_guid;
-        world.spell_catalog = Arc::new(SpellCatalog {
-            spells: HashMap::from([(spell_id, spell)]),
-            ..Default::default()
-        });
-        world
-    }
-
-    #[test]
-    fn self_targeted_spells_are_normalized_to_target_self() {
-        let player_guid = Guid(0x5000_0001);
-        let world = world_with_spell(
-            player_guid,
-            100,
-            spell_info(MagicSchool::CreatureEnchantment, 0x8, 1),
-        );
-
-        let normalized = normalize_spell_cast(&world, 100, None);
-
+        assert!(published);
+        let event = client.world.set_player_character_title(1);
+        client.handle_world_event(&event);
         assert_eq!(
-            normalized,
-            NormalizedSpellCast::Targeted {
-                target: player_guid,
-                spell_id: 100,
-            }
+            client
+                .character_sheet()
+                .unwrap()
+                .title_selection
+                .as_ref()
+                .unwrap()
+                .selected_id,
+            1
         );
+        client
+            .handle_command(ClientCommand::SetCharacterTitle {
+                character: Guid(999),
+                title_id: 42,
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        client.state = ClientState::EnteringWorld;
+        client
+            .handle_command(ClientCommand::SetCharacterTitle {
+                character,
+                title_id: 42,
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        client.state = ClientState::Disconnected;
+        client.send_status_event();
+        assert!(client.world.player.character_titles.is_none());
+        assert!(client.character_sheet().unwrap().title_selection.is_none());
     }
 
-    #[test]
-    fn untargeted_spells_ignore_requested_self_target() {
-        let player_guid = Guid(0x5000_0001);
-        let world = world_with_spell(player_guid, 200, spell_info(MagicSchool::WarMagic, 0, 0));
-
-        let normalized = normalize_spell_cast(&world, 200, Some(player_guid));
-
-        assert_eq!(
-            normalized,
-            NormalizedSpellCast::Untargeted { spell_id: 200 }
-        );
+    #[tokio::test]
+    async fn book_page_request_rejects_a_replaced_character() {
+        let mut client = build_test_client();
+        client.world.player.guid = Guid(0x5000_0002);
+        let error = client
+            .handle_interaction_command(ClientCommand::ReadBookPage {
+                player: Guid(0x5000_0001),
+                book: Guid(0x6000_0042),
+                page_index: 0,
+            })
+            .await
+            .expect_err("stale character request must be rejected");
+        assert!(error.to_string().contains("another character"));
     }
 
-    #[test]
-    fn war_magic_self_casts_are_normalized_to_untargeted() {
-        let player_guid = Guid(0x5000_0001);
-        let world = world_with_spell(player_guid, 300, spell_info(MagicSchool::WarMagic, 0, 5));
-
-        let normalized = normalize_spell_cast(&world, 300, Some(player_guid));
-
-        assert_eq!(
-            normalized,
-            NormalizedSpellCast::Untargeted { spell_id: 300 }
-        );
+    fn seed_action_capable_player(client: &mut ClientRuntime, guid: Guid) {
+        const MOTION_TABLE_ID: u32 = 0x0900_2001;
+        client.world.set_motion_sequences(explicit_motion_catalog(
+            MOTION_TABLE_ID,
+            holtburger_protocol::messages::movement::MotionStance::NonCombat as u32,
+            [
+                holtburger_world::state::motion_resolution::test_support::FixtureCycle {
+                    command: 0x4300_00ec,
+                    velocity: None,
+                    omega: None,
+                },
+            ],
+            [],
+        ));
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", WorldPosition::default());
+        client
+            .world
+            .entities
+            .get_mut(guid)
+            .expect("seeded player should exist")
+            .set_did_prop(PropertyDataId::MotionTable, Guid(MOTION_TABLE_ID));
     }
 
-    #[test]
-    fn non_war_targeted_self_casts_remain_targeted() {
-        let player_guid = Guid(0x5000_0001);
-        let world = world_with_spell(player_guid, 400, spell_info(MagicSchool::LifeMagic, 0, 5));
-
-        let normalized = normalize_spell_cast(&world, 400, Some(player_guid));
-
+    #[tokio::test]
+    async fn combat_toggle_waits_for_world_and_preserves_server_authority_and_use_busy() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        // ACE initializes peace without requiring a CombatMode property in login data.
         assert_eq!(
-            normalized,
-            NormalizedSpellCast::Targeted {
-                target: player_guid,
-                spell_id: 400,
-            }
+            client.world.player_int_property(PropertyInt::CombatMode),
+            None
         );
+        client.state = ClientState::EnteringWorld;
+        client
+            .handle_command(ClientCommand::ToggleCombatMode)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 0);
+
+        client.state = ClientState::InWorld;
+        assert!(
+            client.arm_busy_operation(crate::client::PendingOperation::Use { source: Guid::NULL })
+        );
+        client
+            .handle_command(ClientCommand::ToggleCombatMode)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert_eq!(client.world.player_combat_mode(), CombatMode::NonCombat);
+        assert_eq!(
+            client.application_snapshot().combat_mode,
+            CombatMode::NonCombat
+        );
+        assert_eq!(
+            client
+                .active_busy_operation
+                .as_ref()
+                .unwrap()
+                .operation
+                .kind(),
+            BusyOperationKind::Use
+        );
+
+        client
+            .world
+            .entities
+            .get_mut(Guid(1))
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, CombatMode::Melee as i32);
+        client.handle_world_event(&holtburger_world::WorldEvent::CombatModeUpdated(
+            CombatMode::Melee,
+        ));
+        client
+            .handle_command(ClientCommand::ToggleCombatMode)
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 2);
+        assert_eq!(client.world.player_combat_mode(), CombatMode::Melee);
+    }
+
+    #[tokio::test]
+    async fn talk_is_forwarded_without_local_world_state() {
+        let mut client = builder::build_test_client(ClientState::EnteringWorld);
+
+        client
+            .handle_command(ClientCommand::Talk("portal chat".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
     }
 
     #[tokio::test]
@@ -1479,7 +1592,7 @@ mod tests {
         let mut events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::RequestInitialViewState)
+            .handle_command(ClientCommand::RequestCurrentApplicationState)
             .await
             .unwrap();
 
@@ -1498,7 +1611,7 @@ mod tests {
         let mut client = build_test_client();
         client.world.fellowship = Some(FellowshipState {
             name: "Raid Bus".to_string(),
-            leader_guid: Guid(0x5000_0001),
+            leader_guid: Some(Guid(0x5000_0001)),
             share_xp: true,
             even_share: false,
             open: true,
@@ -1535,7 +1648,7 @@ mod tests {
         let mut events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::RequestInitialViewState)
+            .handle_command(ClientCommand::RequestCurrentApplicationState)
             .await
             .unwrap();
 
@@ -1543,7 +1656,7 @@ mod tests {
         while let Ok(event) = events.try_recv() {
             if matches!(
                 event,
-                ClientViewEvent::FellowshipStateUpdated { fellowship: Some(fellowship) }
+                ClientViewEvent::FellowshipStateUpdated { fellowship: Some(fellowship), .. }
                     if fellowship.name == "Raid Bus"
                         && fellowship.members.len() == 1
                         && fellowship.departed_members.len() == 1
@@ -1563,7 +1676,7 @@ mod tests {
         let mut events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::RequestInitialViewState)
+            .handle_command(ClientCommand::RequestCurrentApplicationState)
             .await
             .unwrap();
 
@@ -1594,11 +1707,13 @@ mod tests {
             buy_multiplier: 1.0,
             sell_multiplier: 1.0,
             merchandise_item_types: 0xDEAD_BEEF,
+            value_limits: Default::default(),
             alternate_currency_wcid: 0,
             alternate_currency_amount: 0,
             alternate_currency_name: String::from("Pyreals"),
         });
         client.world.trade = Some(TradeState {
+            revision: 1,
             partner_guid: vendor_guid,
             initiator_guid: player_guid,
             trade_stamp: 0.0,
@@ -1617,7 +1732,7 @@ mod tests {
         let mut events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::RequestInitialViewState)
+            .handle_command(ClientCommand::RequestCurrentApplicationState)
             .await
             .unwrap();
 
@@ -1628,7 +1743,7 @@ mod tests {
                 ClientViewEvent::VendorStateUpdated { vendor } if vendor.is_some() => {
                     saw_vendor = true;
                 }
-                ClientViewEvent::TradeStateUpdated { trade } if trade.is_some() => {
+                ClientViewEvent::TradeStateUpdated(snapshot) if snapshot.trade.is_some() => {
                     saw_trade = true;
                 }
                 _ => {}
@@ -1640,17 +1755,175 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unusable_entities_reject_before_busy_and_allow_explicit_override() {
+        for (flags, expected) in [
+            (
+                ObjectDescriptionFlag::DOOR,
+                "You can't open or close this Door that way",
+            ),
+            (ObjectDescriptionFlag::empty(), "The Door cannot be used"),
+        ] {
+            let mut client = build_test_client();
+            let guid = Guid(7);
+            let mut entity = Entity::new(guid, "Door".into(), WorldPosition::default());
+            entity.flags = flags;
+            entity
+                .properties
+                .ints
+                .insert(PropertyInt::ItemUseable, Usable::NO.bits() as i32);
+            client.world.add_entity(entity);
+            let mut events = client.subscribe_client_view_events();
+            client
+                .handle_command(ClientCommand::Use {
+                    guid,
+                    unrestricted: false,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 0);
+            assert!(client.active_busy_operation.is_none());
+            assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+                event,
+                ClientViewEvent::ActionResult { source: ActionResultSource::Client, reason: ActionResultReason::General(message) } if message == expected
+            )));
+            client
+                .handle_command(ClientCommand::Use {
+                    guid,
+                    unrestricted: true,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 1);
+            assert!(client.active_busy_operation.is_some());
+            client
+                .handle_command(ClientCommand::Use {
+                    guid,
+                    unrestricted: true,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn container_use_reports_progress_and_sends_the_wire_command() {
+        let mut client = build_test_client();
+        let guid = Guid(7);
+        let mut entity = Entity::new(guid, "Locked chest".into(), WorldPosition::default());
+        entity
+            .flags
+            .insert(holtburger_common::properties::ObjectDescriptionFlag::REQUIRES_PACK_SLOT);
+        client.world.add_entity(entity);
+        let mut events = client.subscribe_client_view_events();
+        client
+            .handle_command(ClientCommand::Use {
+                guid,
+                unrestricted: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(
+            std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+                event,
+                ClientViewEvent::EntityUseFeedback(
+                    holtburger_world::interaction::EntityUseFeedback::Using { .. }
+                )
+            ))
+        );
+        // Existing busy admission owns repeat rejection; it must not manufacture another local use.
+        client
+            .handle_command(ClientCommand::Use {
+                guid,
+                unrestricted: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(
+            !std::iter::from_fn(|| events.try_recv().ok())
+                .any(|event| matches!(event, ClientViewEvent::EntityUseFeedback(_)))
+        );
+    }
+
+    #[tokio::test]
+    async fn confirmation_receipts_reject_repeated_context_and_recover_exact_request() {
+        for accepted in [false, true] {
+            let mut client = build_test_client();
+            let old =
+                ActiveCharacterConfirmation::received(ConfirmationType::YesNo, 7, "Old?".into());
+            let current =
+                ActiveCharacterConfirmation::received(ConfirmationType::YesNo, 7, "New?".into());
+            assert_ne!(old.request_id, current.request_id);
+            client.active_confirmation = Some(current.clone());
+            assert_eq!(
+                client.application_snapshot().active_confirmation,
+                Some(current.clone())
+            );
+            client
+                .handle_command(ClientCommand::RespondToConfirmation {
+                    request_id: old.request_id,
+                    accepted,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 0);
+            assert_eq!(client.active_confirmation, Some(current.clone()));
+            client
+                .handle_command(ClientCommand::RespondToConfirmation {
+                    request_id: current.request_id,
+                    accepted,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 1);
+            assert!(client.application_snapshot().active_confirmation.is_none());
+            // Duplicate UI submission cannot send the answer twice.
+            client
+                .handle_command(ClientCommand::RespondToConfirmation {
+                    request_id: current.request_id,
+                    accepted,
+                })
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 1);
+        }
+    }
+
+    #[test]
+    fn confirmations_retire_on_disconnect_but_survive_in_world_status() {
+        let mut client = build_test_client();
+        let confirmation =
+            ActiveCharacterConfirmation::received(ConfirmationType::YesNo, 7, "Proceed?".into());
+        client.active_confirmation = Some(confirmation.clone());
+        client.state = ClientState::InWorld;
+        client.send_status_event();
+        assert_eq!(
+            client.application_snapshot().active_confirmation,
+            Some(confirmation)
+        );
+        client.state = ClientState::Disconnected;
+        client.send_status_event();
+        assert!(client.application_snapshot().active_confirmation.is_none());
+    }
+
+    #[tokio::test]
     async fn respond_to_confirmation_uses_active_confirmation_state() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
         client.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 0xDEADBEEF,
             text: "Craft this item?".to_string(),
         });
 
         client
-            .handle_command(ClientCommand::RespondToConfirmation { accepted: true })
+            .handle_command(ClientCommand::RespondToConfirmation {
+                request_id: 1,
+                accepted: true,
+            })
             .await
             .unwrap();
 
@@ -1673,112 +1946,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invite_to_party_sends_guid_directly() {
-        let mut client = build_test_client();
-
-        client
-            .handle_command(ClientCommand::InviteToParty {
-                target: Guid(0x5000_0042),
-            })
-            .await
-            .unwrap();
-
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
-    }
-
-    #[tokio::test]
-    async fn uninvite_from_party_sends_guid_directly() {
-        let mut client = build_test_client();
-
-        client
-            .handle_command(ClientCommand::UninviteFromParty {
-                target: Guid(0x5000_0042),
-            })
-            .await
-            .unwrap();
-
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
-    }
-
-    #[tokio::test]
-    async fn promote_party_leader_sends_guid_directly() {
-        let mut client = build_test_client();
-
-        client.world.fellowship = Some(holtburger_world::state::FellowshipState {
-            name: "Raid Bus".to_string(),
-            leader_guid: Guid(0x5000_0001),
-            share_xp: true,
-            even_share: false,
-            open: true,
-            is_locked: false,
-            members: vec![
-                holtburger_world::state::FellowshipMemberState {
-                    guid: Guid(0x5000_0001),
-                    name: "Player".to_string(),
-                    level: 42,
-                    cached_cp: 0,
-                    cached_luminance: 0,
-                    max_health: 200,
-                    max_stamina: 180,
-                    max_mana: 160,
-                    current_health: 190,
-                    current_stamina: 170,
-                    current_mana: 150,
-                    share_loot: true,
-                },
-                holtburger_world::state::FellowshipMemberState {
-                    guid: Guid(0x5000_0042),
-                    name: "Bestie".to_string(),
-                    level: 37,
-                    cached_cp: 0,
-                    cached_luminance: 0,
-                    max_health: 180,
-                    max_stamina: 160,
-                    max_mana: 140,
-                    current_health: 175,
-                    current_stamina: 155,
-                    current_mana: 135,
-                    share_loot: true,
-                },
-            ],
-            departed_members: Vec::new(),
-            locks: Vec::new(),
-        });
-
-        client
-            .handle_command(ClientCommand::PromotePartyLeader {
-                target: Guid(0x5000_0042),
-            })
-            .await
-            .unwrap();
-
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
-    }
-
-    #[tokio::test]
     async fn swear_allegiance_sends_guid_directly() {
         let mut client = build_test_client();
 
         client
             .handle_command(ClientCommand::SwearAllegiance {
-                target: Guid(0x5000_0042),
-            })
-            .await
-            .unwrap();
-
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
-    }
-
-    #[tokio::test]
-    async fn unswear_sends_guid_directly() {
-        let mut client = build_test_client();
-
-        client
-            .handle_command(ClientCommand::Unswear {
                 target: Guid(0x5000_0042),
             })
             .await
@@ -1800,6 +1972,7 @@ mod tests {
 
         client.world.player.guid = player_guid;
         client.world.set_local_player_runtime_pose(player_pose);
+        client.state = ClientState::CharacterSelection;
         client.character_selection.characters = vec![CharacterEntry {
             guid: player_guid,
             name: "Player".to_string(),
@@ -1829,103 +2002,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn show_party_status_logs_cached_fellowship_summary() {
-        let mut client = build_test_client();
-        client.world.player.guid = Guid(0x5000_0001);
-        client.world.fellowship = Some(FellowshipState {
-            name: "Raid Bus".to_string(),
-            leader_guid: Guid(0x5000_0001),
-            share_xp: true,
-            even_share: false,
-            open: true,
-            is_locked: true,
-            members: vec![
-                FellowshipMemberState {
-                    guid: Guid(0x5000_0001),
-                    name: "Player".to_string(),
-                    level: 12,
-                    cached_cp: 0,
-                    cached_luminance: 0,
-                    max_health: 180,
-                    max_stamina: 150,
-                    max_mana: 120,
-                    current_health: 170,
-                    current_stamina: 140,
-                    current_mana: 110,
-                    share_loot: true,
-                },
-                FellowshipMemberState {
-                    guid: Guid(0x5000_0032),
-                    name: "Bravo".to_string(),
-                    level: 18,
-                    cached_cp: 0,
-                    cached_luminance: 0,
-                    max_health: 220,
-                    max_stamina: 160,
-                    max_mana: 140,
-                    current_health: 215,
-                    current_stamina: 150,
-                    current_mana: 130,
-                    share_loot: true,
-                },
-            ],
-            departed_members: vec![FellowshipDepartedMemberState {
-                guid: Guid(0x5000_0044),
-                departed_timestamp: 1_712_345_678,
-            }],
-            locks: vec![FellowshipLockEntryState {
-                name: "Leader Lock".to_string(),
-                lock: FellowshipLockState {
-                    unknown_1: 1,
-                    unknown_2: 2,
-                    unknown_3: 3,
-                    timestamp: 4,
-                    sequence: 5,
-                },
-            }],
-        });
-        let mut view_events = client.subscribe_client_view_events();
-
-        client
-            .handle_command(ClientCommand::ShowPartyStatus)
-            .await
-            .unwrap();
-
-        let mut log_lines = Vec::new();
-        while let Ok(event) = view_events.try_recv() {
-            if let ClientViewEvent::LogMessage(line) = event {
-                log_lines.push(line);
-            }
-        }
-
-        assert!(
-            log_lines
-                .iter()
-                .any(|line| line == "Party: Raid Bus | Leader: Player | Members: 2")
-        );
-        assert!(
-            log_lines
-                .iter()
-                .any(|line| line == "Sharing: XP on | Even off | Open on | Locked on")
-        );
-        assert!(log_lines.iter().any(|line| {
-            line == "- Player [leader] [you] L12 H 170/180 S 140/150 M 110/120 Loot on"
-        }));
-        assert!(
-            log_lines
-                .iter()
-                .any(|line| line == "Departed members tracked: 1")
-        );
-        assert!(log_lines.iter().any(|line| line == "Locks: Leader Lock"));
-    }
-
-    #[tokio::test]
     async fn respond_to_confirmation_without_active_request_emits_client_action_result() {
         let mut client = build_test_client();
         let mut view_events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::RespondToConfirmation { accepted: true })
+            .handle_command(ClientCommand::RespondToConfirmation {
+                request_id: 1,
+                accepted: true,
+            })
             .await
             .unwrap();
 
@@ -1936,7 +2021,7 @@ mod tests {
                 assert_eq!(
                     reason,
                     ActionResultReason::General(
-                        "No active confirmation request to answer.".to_string(),
+                        "That confirmation request is no longer active.".to_string(),
                     )
                 );
                 saw_result = true;
@@ -1948,24 +2033,229 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_fellowship_updates_subscribed_sends_update_request_in_world() {
+    async fn social_motion_death_refusal_preserves_its_specific_reason() {
         let mut client = build_test_client();
-
+        seed_action_capable_player(&mut client, Guid(1));
         client
-            .handle_command(ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true })
+            .world
+            .entities
+            .get_mut(Guid(1))
+            .unwrap()
+            .network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(
+                holtburger_protocol::messages::movement::InterpretedMotionCommand::DEAD,
+            ),
+            ..EntityMotionSnapshot::default()
+        });
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".into(),
+                request_id: Some(7),
+            })
             .await
             .unwrap();
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        assert_eq!(
+            client.movement.take_authored_motion_rejections(),
+            vec![WeenieError::Dead]
+        );
+        assert_eq!(
+            client
+                .movement
+                .take_authored_request_feedback(&mut client.world),
+            vec![LocalMotionFeedback {
+                request_id: 7,
+                outcome: LocalMotionOutcome::Refused
+            }]
+        );
+    }
 
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
+    #[tokio::test]
+    async fn a_replacement_world_epoch_can_reuse_retired_request_identity() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".into(),
+                request_id: Some(7),
+            })
+            .await
+            .unwrap();
+        let _prepared = client
+            .movement
+            .prepare_tick(Instant::now(), &mut client.world);
+        client.bump_world_generation();
+        client.movement.retire_movement_epoch();
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".into(),
+                request_id: Some(7),
+            })
+            .await
+            .unwrap();
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        client
+            .movement
+            .advance_local_authored_motion(&mut client.world, std::time::Duration::from_millis(30))
+            .unwrap();
+        assert_eq!(
+            client
+                .movement
+                .take_authored_request_feedback(&mut client.world),
+            vec![
+                LocalMotionFeedback {
+                    request_id: 7,
+                    outcome: LocalMotionOutcome::Accepted
+                },
+                LocalMotionFeedback {
+                    request_id: 7,
+                    outcome: LocalMotionOutcome::Unsupported
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn social_readiness_is_revoked_before_publishing_a_combat_mode_change() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        client.publish_social_motion_readiness();
+        let mut events = client.subscribe_client_view_events();
+        client
+            .world
+            .entities
+            .get_mut(Guid(1))
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, CombatMode::Magic as i32);
+        client.handle_world_event(&holtburger_world::WorldEvent::CombatModeUpdated(
+            CombatMode::Magic,
+        ));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            ClientViewEvent::SocialMotionReadyUpdated { ready: false }
+        ));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            ClientViewEvent::CombatModeUpdated {
+                mode: CombatMode::Magic
+            }
+        ));
+    }
+
+    #[test]
+    fn social_motion_readiness_requires_mode_and_motion_stance_to_agree() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        assert!(client.world.player_social_motion_ready());
+        client.world.player.last_server_motion_style = Some(MotionStance::Magic);
+        assert!(!client.world.player_social_motion_ready());
+        client.world.player.last_server_motion_style = Some(MotionStance::NonCombat);
+        client
+            .world
+            .entities
+            .get_mut(Guid(1))
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, CombatMode::Magic as i32);
+        assert!(!client.world.player_social_motion_ready());
+        client
+            .world
+            .entities
+            .get_mut(Guid(1))
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, CombatMode::NonCombat as i32);
+        assert!(client.world.player_social_motion_ready());
+    }
+
+    #[tokio::test]
+    async fn server_stance_takeover_explicitly_cancels_an_uncommitted_emote() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".into(),
+                request_id: Some(8),
+            })
+            .await
+            .unwrap();
+        // A stance packet can be processed after chat admission but before the movement tick.
+        client
+            .movement
+            .admit_server_controlled_motion(None, Instant::now(), &mut client.world);
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        assert_eq!(
+            client
+                .movement
+                .take_authored_request_feedback(&mut client.world),
+            vec![LocalMotionFeedback {
+                request_id: 8,
+                outcome: LocalMotionOutcome::Cancelled
+            }]
+        );
+        assert!(!client.world.has_local_authored_motion(Guid(1)));
+    }
+
+    #[tokio::test]
+    async fn correlated_emote_exposes_selector_failure_without_stopping_the_client() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".into(),
+                request_id: Some(7),
+            })
+            .await
+            .unwrap();
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        client
+            .movement
+            .advance_local_authored_motion(&mut client.world, std::time::Duration::from_millis(30))
+            .unwrap();
+        assert_eq!(
+            client
+                .movement
+                .take_authored_request_feedback(&mut client.world),
+            vec![
+                LocalMotionFeedback {
+                    request_id: 7,
+                    outcome: LocalMotionOutcome::Accepted
+                },
+                LocalMotionFeedback {
+                    request_id: 7,
+                    outcome: LocalMotionOutcome::Unsupported
+                }
+            ]
+        );
+        assert!(matches!(client.state, ClientState::InWorld));
     }
 
     #[tokio::test]
     async fn soul_emote_command_sends_dedicated_game_action() {
         let mut client = build_test_client();
+        let guid = Guid(0x5000_0001);
+        seed_action_capable_player(&mut client, guid);
 
         client
-            .handle_command(ClientCommand::SoulEmote("wave".to_string()))
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".to_string(),
+                request_id: None,
+            })
             .await
             .unwrap();
 
@@ -1978,6 +2268,161 @@ mod tests {
             .unwrap();
 
         assert_eq!(client.session.game_action_sequence, 2);
+        assert!(client.session.bytes_out > 0);
+        assert!(client.world.has_authored_motion_actions(guid));
+    }
+
+    #[tokio::test]
+    async fn combat_soul_emotes_keep_chat_but_refuse_motion_without_sending_a_motion_packet() {
+        for token in ["wave", "bow"] {
+            let mut client = build_test_client();
+            let guid = Guid(0x5000_0001);
+            seed_action_capable_player(&mut client, guid);
+            client.world.player.last_server_motion_style = Some(MotionStance::Magic);
+            client
+                .handle_command(ClientCommand::SoulEmote {
+                    token: token.into(),
+                    request_id: None,
+                })
+                .await
+                .unwrap();
+            let chat_bytes = client.session.bytes_out;
+            assert_eq!(client.session.game_action_sequence, 1);
+            client
+                .movement
+                .tick(Instant::now(), &mut client.world, &mut client.session)
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 1);
+            assert_eq!(client.session.bytes_out, chat_bytes);
+            assert_eq!(
+                client.movement.take_authored_motion_rejections(),
+                vec![WeenieError::CantChatEmoteInCombat]
+            );
+            assert!(!client.world.has_local_authored_motion(guid));
+            assert!(!client.world.has_authored_motion_actions(guid));
+        }
+    }
+
+    #[tokio::test]
+    async fn soul_emotes_preserve_one_shot_requests_and_replace_held_poses() {
+        let mut client = build_test_client();
+        let guid = Guid(0x5000_0001);
+        seed_action_capable_player(&mut client, guid);
+        for token in ["wave", "bow", "wave"] {
+            client
+                .handle_command(ClientCommand::SoulEmote {
+                    token: token.into(),
+                    request_id: None,
+                })
+                .await
+                .unwrap();
+        }
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        assert_eq!(
+            client.session.game_action_sequence, 6,
+            "each request sends its chat action and motion edge"
+        );
+        let runtime = client.world.motion_runtimes.get(guid).unwrap();
+        assert_eq!(runtime.state().substate.raw(), FIXTURE_STAND_COMMAND);
+        assert_eq!(
+            runtime.action_count(),
+            2,
+            "neither one-shot edge is overwritten by its neighbor"
+        );
+        assert!(runtime.has_local_command());
+    }
+
+    #[tokio::test]
+    async fn soul_emote_queue_overflow_reports_a_refusal_without_terminating_movement() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(0x5000_0001));
+        for _ in 0..=holtburger_world::motion::MAX_AUTHORED_ACTIONS {
+            client
+                .handle_command(ClientCommand::SoulEmote {
+                    token: "wave".into(),
+                    request_id: None,
+                })
+                .await
+                .unwrap();
+        }
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        assert_eq!(
+            client.movement.take_authored_motion_rejections(),
+            [WeenieError::TooManyActions]
+        );
+        assert!(client.movement.take_authored_motion_rejections().is_empty());
+    }
+
+    #[tokio::test]
+    async fn explicit_stop_replaces_a_local_pose_without_needing_a_server_snapshot() {
+        let mut client = build_test_client();
+        let guid = Guid(0x5000_0001);
+        seed_action_capable_player(&mut client, guid);
+        let now = Instant::now();
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "bow".into(),
+                request_id: None,
+            })
+            .await
+            .unwrap();
+        client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        client
+            .movement
+            .enqueue_drive_intent(crate::client::movement_types::PlayerDriveIntent::Stop, now);
+        client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        client
+            .movement
+            .advance_local_authored_motion(&mut client.world, std::time::Duration::from_millis(30))
+            .unwrap();
+        assert!(!client.world.has_local_authored_motion(guid));
+        assert_ne!(
+            client
+                .world
+                .motion_runtimes
+                .state(guid)
+                .unwrap()
+                .substate
+                .raw(),
+            0x4300_00ec
+        );
+    }
+
+    #[tokio::test]
+    async fn soul_emote_without_player_identity_skips_only_local_motion() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".to_string(),
+                request_id: None,
+            })
+            .await
+            .unwrap();
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.session.bytes_out > 0);
     }
 
@@ -1995,7 +2440,10 @@ mod tests {
         let mut view_events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::SoulEmote("ploop".to_string()))
+            .handle_command(ClientCommand::SoulEmote {
+                token: "ploop".to_string(),
+                request_id: None,
+            })
             .await
             .unwrap();
 
@@ -2018,81 +2466,170 @@ mod tests {
         assert!(saw_result);
     }
 
-    #[tokio::test]
-    async fn set_fellowship_updates_subscribed_is_ignored_outside_world() {
-        let mut client = builder::build_test_client(ClientState::Connected);
+    fn character_creation_request() -> CharacterCreateRequestData {
+        CharacterCreateRequestData {
+            account_name: String::new(),
+            unknown_constant: 1,
+            heritage: 6,
+            gender: 1,
+            appearance: CharacterCreateAppearanceData {
+                eyes: 0,
+                nose: 0,
+                mouth: 0,
+                hair_color: 0,
+                eye_color: 0,
+                hair_style: 0,
+                headgear_style: u32::MAX,
+                headgear_color: 0,
+                shirt_style: 0,
+                shirt_color: 0,
+                pants_style: 0,
+                pants_color: 0,
+                footwear_style: 0,
+                footwear_color: 0,
+                skin_hue: 1.0,
+                hair_hue: 1.0,
+                headgear_hue: 0.0,
+                shirt_hue: 0.0,
+                pants_hue: 0.0,
+                footwear_hue: 0.0,
+            },
+            template_option: 0,
+            strength_ability: 100,
+            endurance_ability: 10,
+            coordination_ability: 100,
+            quickness_ability: 100,
+            focus_ability: 10,
+            self_ability: 10,
+            character_slot: 0,
+            class_id: 1,
+            skill_advancement_classes: vec![SkillAdvancementClass::Untrained; 55],
+            name: "Bestie".to_string(),
+            start_area: 2,
+            is_admin: false,
+            is_sentinel: false,
+        }
+    }
 
+    #[tokio::test]
+    async fn character_admission_rejections_do_not_disconnect_or_send() {
+        let mut client = builder::build_test_client(ClientState::Connected);
         client
-            .handle_command(ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true })
+            .handle_command(ClientCommand::CreateCharacter(Box::new(
+                character_creation_request(),
+            )))
             .await
             .unwrap();
-
-        assert_eq!(client.session.game_action_sequence, 0);
+        assert_eq!(client.state, ClientState::Connected);
         assert_eq!(client.session.bytes_out, 0);
+        assert!(matches!(
+            client.application_snapshot().character_management,
+            super::super::types::CharacterManagementState::Rejected {
+                operation: CharacterManagementOperation::Create,
+                ..
+            }
+        ));
+
+        client.state = ClientState::CharacterSelection;
+        client.character_selection.max_slots = 0;
+        client
+            .handle_command(ClientCommand::CreateCharacter(Box::new(
+                character_creation_request(),
+            )))
+            .await
+            .unwrap();
+        assert_eq!(client.state, ClientState::CharacterSelection);
+        assert_eq!(client.session.bytes_out, 0);
+        assert!(matches!(
+            client.application_snapshot().character_management,
+            super::super::types::CharacterManagementState::Rejected { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn pending_creation_blocks_duplicate_management_and_entry_without_losing_progress() {
+        let mut client = builder::build_test_client(ClientState::CharacterSelection);
+        let pending = super::super::types::CharacterManagementState::Creating {
+            name: "Bestie".into(),
+        };
+        client.character_selection.management = pending.clone();
+        let guid = Guid(0x5000_0001);
+        for command in [
+            ClientCommand::CreateCharacter(Box::new(character_creation_request())),
+            ClientCommand::DeleteCharacter { slot: 0 },
+            ClientCommand::RestoreCharacter(guid),
+            ClientCommand::SelectCharacter(guid),
+        ] {
+            client.handle_command(command).await.unwrap();
+            assert_eq!(client.application_snapshot().character_management, pending);
+        }
+        assert_eq!(client.session.bytes_out, 0);
+        assert_eq!(client.state, ClientState::CharacterSelection);
+    }
+
+    #[tokio::test]
+    async fn failed_creation_send_releases_the_pending_operation() {
+        let mut client = builder::build_test_client(ClientState::CharacterSelection);
+        client.character_selection.max_slots = 1;
+        // Session binds IPv4; IPv6 is a deterministic send failure, as in other transport tests.
+        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
+            .await
+            .unwrap();
+        assert!(
+            client
+                .handle_command(ClientCommand::CreateCharacter(Box::new(
+                    character_creation_request()
+                )))
+                .await
+                .is_err()
+        );
+        assert!(matches!(
+            client.application_snapshot().character_management,
+            super::super::types::CharacterManagementState::Rejected {
+                operation: CharacterManagementOperation::Create,
+                ..
+            }
+        ));
+        assert!(!client.character_selection.management.blocks_submission());
     }
 
     #[tokio::test]
     async fn create_character_command_sends_auth_message() {
-        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut client = builder::build_test_client(ClientState::CharacterSelection);
+        client.character_selection.max_slots = 4;
+        client.character_selection.characters = (0..3)
+            .map(|slot| CharacterEntry {
+                guid: Guid(0x5000_1234 + slot),
+                name: format!("Character {slot}"),
+                delete_time: 10,
+            })
+            .collect();
 
         client
             .handle_command(ClientCommand::CreateCharacter(Box::new(
-                CharacterCreateRequestData {
-                    account_name: String::new(),
-                    unknown_constant: 1,
-                    heritage: 6,
-                    gender: 1,
-                    appearance: CharacterCreateAppearanceData {
-                        eyes: 0,
-                        nose: 0,
-                        mouth: 0,
-                        hair_color: 0,
-                        eye_color: 0,
-                        hair_style: 0,
-                        headgear_style: u32::MAX,
-                        headgear_color: 0,
-                        shirt_style: 0,
-                        shirt_color: 0,
-                        pants_style: 0,
-                        pants_color: 0,
-                        footwear_style: 0,
-                        footwear_color: 0,
-                        skin_hue: 1.0,
-                        hair_hue: 1.0,
-                        headgear_hue: 0.0,
-                        shirt_hue: 0.0,
-                        pants_hue: 0.0,
-                        footwear_hue: 0.0,
-                    },
-                    template_option: 0,
-                    strength_ability: 100,
-                    endurance_ability: 10,
-                    coordination_ability: 100,
-                    quickness_ability: 100,
-                    focus_ability: 10,
-                    self_ability: 10,
-                    character_slot: 0,
-                    class_id: 1,
-                    skill_advancement_classes: vec![SkillAdvancementClass::Untrained; 55],
-                    name: "Bestie".to_string(),
-                    start_area: 2,
-                    is_admin: false,
-                    is_sentinel: false,
-                },
+                character_creation_request(),
             )))
             .await
             .unwrap();
 
         assert!(client.session.bytes_out > 0);
         assert_eq!(
-            client.character_selection.pending_character_operation,
+            client.character_selection.management.pending_operation(),
             Some(CharacterManagementOperation::Create)
         );
     }
 
     #[tokio::test]
     async fn delete_character_command_sends_auth_message() {
-        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut client = builder::build_test_client(ClientState::CharacterSelection);
+        client.character_selection.max_slots = 4;
+        client.character_selection.characters = (0..3)
+            .map(|slot| CharacterEntry {
+                guid: Guid(0x5000_1234 + slot),
+                name: format!("Character {slot}"),
+                delete_time: 10,
+            })
+            .collect();
 
         client
             .handle_command(ClientCommand::DeleteCharacter { slot: 2 })
@@ -2101,14 +2638,22 @@ mod tests {
 
         assert!(client.session.bytes_out > 0);
         assert_eq!(
-            client.character_selection.pending_character_operation,
+            client.character_selection.management.pending_operation(),
             Some(CharacterManagementOperation::Delete)
         );
     }
 
     #[tokio::test]
     async fn restore_character_command_sends_auth_message() {
-        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut client = builder::build_test_client(ClientState::CharacterSelection);
+        client.character_selection.max_slots = 4;
+        client.character_selection.characters = (0..3)
+            .map(|slot| CharacterEntry {
+                guid: Guid(0x5000_1234 + slot),
+                name: format!("Character {slot}"),
+                delete_time: 10,
+            })
+            .collect();
 
         client
             .handle_command(ClientCommand::RestoreCharacter(Guid(0x5000_1234)))
@@ -2117,7 +2662,7 @@ mod tests {
 
         assert!(client.session.bytes_out > 0);
         assert_eq!(
-            client.character_selection.pending_character_operation,
+            client.character_selection.management.pending_operation(),
             Some(CharacterManagementOperation::Restore)
         );
     }
@@ -2130,7 +2675,10 @@ mod tests {
         client
             .handle_command(ClientCommand::Buy {
                 vendor: Guid(0x7000_0001),
-                items: Vec::new(),
+                items: vec![ItemProfileActionData {
+                    object_guid: Guid(42),
+                    amount: 1,
+                }],
             })
             .await
             .unwrap();
@@ -2138,7 +2686,7 @@ mod tests {
         assert!(matches!(
             client.active_busy_operation,
             Some(crate::client::PendingBusyOperation {
-                operation: BusyOperationKind::Buy,
+                operation: crate::client::PendingOperation::Vendor(_),
                 ..
             })
         ));
@@ -2166,7 +2714,10 @@ mod tests {
         client
             .handle_command(ClientCommand::Buy {
                 vendor: Guid(0x7000_0001),
-                items: Vec::new(),
+                items: vec![ItemProfileActionData {
+                    object_guid: Guid(42),
+                    amount: 1,
+                }],
             })
             .await
             .unwrap();
@@ -2176,7 +2727,10 @@ mod tests {
         client
             .handle_command(ClientCommand::Sell {
                 vendor: Guid(0x7000_0001),
-                items: Vec::new(),
+                items: vec![ItemProfileActionData {
+                    object_guid: Guid(42),
+                    amount: 1,
+                }],
             })
             .await
             .unwrap();
@@ -2185,52 +2739,9 @@ mod tests {
         assert!(matches!(
             client.active_busy_operation,
             Some(crate::client::PendingBusyOperation {
-                operation: BusyOperationKind::Buy,
+                operation: crate::client::PendingOperation::Vendor(_),
                 ..
             })
         ));
-    }
-
-    #[tokio::test]
-    async fn salvage_command_does_not_arm_busy_operation() {
-        let mut client = build_test_client();
-
-        client
-            .handle_command(ClientCommand::SalvageItemsWith {
-                tool: Guid(0x7000_0001),
-                items: vec![Guid(0x8000_0001)],
-            })
-            .await
-            .unwrap();
-
-        assert!(client.active_busy_operation.is_none());
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
-    }
-
-    #[tokio::test]
-    async fn teleport_to_pkl_arena_sends_game_action() {
-        let mut client = build_test_client();
-
-        client
-            .handle_command(ClientCommand::TeleportToPklArena)
-            .await
-            .unwrap();
-
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
-    }
-
-    #[tokio::test]
-    async fn teleport_to_marketplace_sends_game_action() {
-        let mut client = build_test_client();
-
-        client
-            .handle_command(ClientCommand::TeleportToMarketplace)
-            .await
-            .unwrap();
-
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
     }
 }

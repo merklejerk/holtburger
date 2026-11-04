@@ -1,0 +1,472 @@
+import {
+	landblockVector3,
+	renderVector3,
+	sceneVector3,
+} from "../../assets/ac-frame";
+import { describe, expect, it, vi } from "vitest";
+import type { DatAssetId } from "../game-types";
+import type { ParticleDrawRange } from "./particle-render-routing";
+import {
+	WebGL2ParticlePass,
+	type ParticleDrawGeometry,
+} from "./webgl2-particle-pass";
+import {
+	PARTICLE_INSTANCE_FLOAT_COUNT,
+	PARTICLE_RECORDS_PER_ROW,
+} from "./particle-record-layout";
+
+import { TextureWrapMode } from "../textures/types";
+import type { WebGL2TextureSamplerCatalog } from "./webgl2-texture-sampler-catalog";
+import { WebGL2DeviceStateApplicator } from "./webgl2-device-state-applicator";
+
+const MESH = "0x01000ff4" as DatAssetId;
+const RECORD_FRAME = { kind: "record" } as const;
+
+/** A fresh one-row mirror for tests that only exercise drawing. */
+const emptyRecordFrame = () => ({
+	data: new Float32Array(
+		PARTICLE_RECORDS_PER_ROW * PARTICLE_INSTANCE_FLOAT_COUNT,
+	),
+	dirtySlots: null,
+});
+
+let nextBaseSlot = 0;
+
+/** One drawable slot range; slots are handed out ascending so ranges never overlap. */
+function batch(
+	motionType: number,
+	particleCount: number,
+	hwGfxObjId: DatAssetId = MESH,
+	frame: ParticleDrawRange["frame"] = RECORD_FRAME,
+): ParticleDrawRange {
+	const baseSlot = nextBaseSlot;
+	nextBaseSlot += particleCount;
+	return {
+		baseSlot,
+		count: particleCount,
+		hwGfxObjId,
+		motionType,
+		frame,
+	};
+}
+
+const GEOMETRY: ParticleDrawGeometry = {
+	alphaTest: 0,
+	baseMipLevels: 2,
+	baseTexture: {} as WebGLTexture,
+	indexCount: 6,
+	indexOffsetBytes: 0,
+	lockedAxis: renderVector3([0, 0, 1]),
+	materialColor: null,
+	// 1 is direct colour in the encoding now shared with the object program.
+	materialKind: 1,
+	orientation: 1,
+	paletteTexture: null,
+	palettedClipMap: false,
+	rawSurfaceFlags: 0,
+	vertexArray: {} as WebGLVertexArrayObject,
+	wrap: TextureWrapMode.Clamp,
+};
+
+function fakeGl() {
+	const draws: number[] = [];
+	const blendFuncs: Array<[number, number]> = [];
+	const intUniforms: Array<[string, number]> = [];
+	const vec3Uniforms: Array<[string, number, number, number]> = [];
+	const vec4Uniforms: Array<[string, number, number, number, number]> = [];
+	const samplerBinds: Array<{
+		readonly unit: number;
+		readonly request: unknown;
+	}> = [];
+	const texImage2D = vi.fn();
+	const texSubImage2D = vi.fn();
+	const gl = {
+		ARRAY_BUFFER: 1,
+		BLEND: 2,
+		COMPILE_STATUS: 3,
+		DEPTH_TEST: 4,
+		DYNAMIC_DRAW: 5,
+		FLOAT: 6,
+		FRAGMENT_SHADER: 7,
+		LINK_STATUS: 8,
+		TEXTURE0: 9,
+		TEXTURE1: 10,
+		TEXTURE_2D: 11,
+		TEXTURE_MIN_FILTER: 19,
+		TEXTURE_MAG_FILTER: 20,
+		TEXTURE_WRAP_S: 21,
+		TEXTURE_WRAP_T: 22,
+		NEAREST: 23,
+		CLAMP_TO_EDGE: 24,
+		RGBA: 25,
+		RGBA32F: 26,
+		TRIANGLES: 12,
+		UNSIGNED_INT: 13,
+		VERTEX_SHADER: 14,
+		ONE: 15,
+		ONE_MINUS_SRC_ALPHA: 16,
+		SRC_ALPHA: 17,
+		activeTexture: () => undefined,
+		attachShader: () => undefined,
+		bindBuffer: () => undefined,
+		bindTexture: () => undefined,
+		bindSampler: (unit: number, sampler: { request: unknown }) =>
+			samplerBinds.push({ request: sampler.request, unit }),
+		bindVertexArray: () => undefined,
+		blendFunc: (source: number, destination: number) =>
+			blendFuncs.push([source, destination]),
+		bufferData: () => undefined,
+		bufferSubData: () => undefined,
+		compileShader: () => undefined,
+		createBuffer: () => ({}) as WebGLBuffer,
+		createTexture: () => ({}) as WebGLTexture,
+		createProgram: () => ({}) as WebGLProgram,
+		createShader: () => ({}) as WebGLShader,
+		deleteBuffer: () => undefined,
+		deleteTexture: () => undefined,
+		deleteProgram: () => undefined,
+		deleteShader: () => undefined,
+		depthMask: () => undefined,
+		disable: () => undefined,
+		drawElementsInstanced: (
+			_mode: number,
+			_count: number,
+			_type: number,
+			_offset: number,
+			instanceCount: number,
+		) => draws.push(instanceCount),
+		enable: () => undefined,
+		enableVertexAttribArray: () => undefined,
+		getProgramInfoLog: () => "",
+		getProgramParameter: () => true,
+		getShaderInfoLog: () => "",
+		getShaderParameter: () => true,
+		getUniformLocation: (_p: WebGLProgram, name: string) =>
+			({ name }) as unknown as WebGLUniformLocation,
+		linkProgram: () => undefined,
+		shaderSource: () => undefined,
+		texImage2D,
+		texParameteri: () => undefined,
+		texSubImage2D,
+		uniform1f: () => undefined,
+		uniform1i: (location: { name: string }, value: number) =>
+			intUniforms.push([location.name, value]),
+		uniform3f: (location: { name: string }, x: number, y: number, z: number) =>
+			vec3Uniforms.push([location.name, x, y, z]),
+		uniform4f: (
+			location: { name: string },
+			x: number,
+			y: number,
+			z: number,
+			w: number,
+		) => vec4Uniforms.push([location.name, x, y, z, w]),
+		uniformMatrix4fv: () => undefined,
+		useProgram: () => undefined,
+		vertexAttribDivisor: () => undefined,
+		vertexAttribPointer: () => undefined,
+	} as unknown as WebGL2RenderingContext;
+	const samplers = {
+		getSampler: (request: unknown) => ({ request }) as unknown as WebGLSampler,
+	} as unknown as WebGL2TextureSamplerCatalog;
+	return {
+		calls: { blendFuncs, texImage2D, texSubImage2D },
+		draws,
+		gl,
+		intUniforms,
+		samplerBinds,
+		samplers,
+		vec3Uniforms,
+		vec4Uniforms,
+	};
+}
+
+const context = (
+	gl: WebGL2RenderingContext,
+	samplers?: WebGL2TextureSamplerCatalog,
+) => ({
+	anchorOrigin: sceneVector3([0, 0, 0]),
+	cameraPosition: renderVector3([0, 0, 0]),
+	clockSeconds: 1,
+	gl,
+	projection: new Float32Array(16),
+	samplers:
+		samplers ??
+		({
+			getSampler: () => ({}) as WebGLSampler,
+		} as unknown as WebGL2TextureSamplerCatalog),
+	state: new WebGL2DeviceStateApplicator(gl),
+	textureFiltering: "linear" as const,
+	view: new Float32Array(16),
+});
+
+describe("WebGL2ParticlePass", () => {
+	it("retires replaced visual records while preserving the device's particle program", () => {
+		const { calls, gl } = fakeGl();
+		const create = vi.spyOn(gl, "createProgram");
+		const deleteProgram = vi.spyOn(gl, "deleteProgram");
+		const deleteTexture = vi.spyOn(gl, "deleteTexture");
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		const drawContext = context(gl);
+		const ranges = [batch(2, 1)];
+		pass.beginFrame(emptyRecordFrame());
+		pass.draw(drawContext, ranges);
+		pass.resetRecords();
+		expect(deleteTexture).toHaveBeenCalledOnce();
+		expect(deleteProgram).not.toHaveBeenCalled();
+		pass.beginFrame(emptyRecordFrame());
+		pass.draw(drawContext, ranges);
+		expect(calls.texImage2D).toHaveBeenCalledTimes(2);
+		expect(create).toHaveBeenCalledOnce();
+		pass.destroy();
+		expect(deleteProgram).toHaveBeenCalledOnce();
+	});
+	it("uploads once across sky and world draws, then consumes changes on the same mirror next frame", () => {
+		const { calls, draws, gl } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		const records = {
+			data: new Float32Array(
+				PARTICLE_RECORDS_PER_ROW * PARTICLE_INSTANCE_FLOAT_COUNT,
+			),
+			dirtySlots: { first: 0, last: 0 },
+		};
+		const drawContext = context(gl);
+		const sky = [batch(2, 1)];
+		const world = new Map([["outdoor", [batch(2, 2)]]]);
+
+		pass.beginFrame(records);
+		pass.draw(drawContext, []);
+		expect(calls.texImage2D).not.toHaveBeenCalled();
+		pass.draw(drawContext, sky);
+		expect(calls.texImage2D).toHaveBeenCalledTimes(1);
+		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(1);
+		pass.drawWorld(drawContext, world);
+		expect(calls.texSubImage2D).not.toHaveBeenCalled();
+		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(0);
+
+		// The mirror and dirty-range identities persist while their contents change.
+		records.data[0] = 42;
+		pass.beginFrame(records);
+		pass.drawWorld(drawContext, world);
+		expect(calls.texSubImage2D).toHaveBeenCalledTimes(1);
+		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(1);
+		pass.draw(drawContext, sky);
+		expect(calls.texSubImage2D).toHaveBeenCalledTimes(1);
+		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(0);
+		expect(draws).toEqual([1, 2, 2, 1]);
+
+		pass.beginFrame({ data: records.data, dirtySlots: null });
+		pass.draw(drawContext, sky);
+		pass.drawWorld(drawContext, world);
+		expect(calls.texSubImage2D).toHaveBeenCalledTimes(1);
+		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(0);
+	});
+
+	it("requires a record frame before the first nonempty draw", () => {
+		const { gl } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		expect(() => pass.draw(context(gl), [batch(2, 1)])).toThrow(
+			"Particle draw requires beginFrame records.",
+		);
+	});
+
+	it("grows the shared record texture once before drawing multiple consumers", () => {
+		const { calls, gl } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		const rowFloats = PARTICLE_RECORDS_PER_ROW * PARTICLE_INSTANCE_FLOAT_COUNT;
+		const drawContext = context(gl);
+		const batches = [batch(2, 1)];
+		pass.beginFrame({ data: new Float32Array(rowFloats), dirtySlots: null });
+		pass.draw(drawContext, batches);
+		pass.beginFrame({
+			data: new Float32Array(rowFloats * 2),
+			dirtySlots: null,
+		});
+		pass.draw(drawContext, batches);
+		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(2);
+		pass.draw(drawContext, batches);
+		expect(calls.texImage2D).toHaveBeenCalledTimes(2);
+		expect(calls.texSubImage2D).not.toHaveBeenCalled();
+		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(0);
+	});
+
+	it("draws one instanced call per batch", () => {
+		const { calls, draws, gl } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		pass.beginFrame(emptyRecordFrame());
+
+		pass.draw(context(gl), [batch(2, 3), batch(5, 7)]);
+
+		// One call per batch regardless of particle count; retail's per-part ceiling is not inherited.
+		expect(draws).toEqual([3, 7]);
+		expect(
+			calls.texImage2D.mock.calls.length +
+				calls.texSubImage2D.mock.calls.length,
+		).toBe(1);
+		expect(pass.getDiagnostics()).toMatchObject({
+			drawnBatchCount: 2,
+			drawnParticleCount: 10,
+		});
+	});
+
+	it("binds motion type as a per-batch constant", () => {
+		const { gl, intUniforms } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		pass.beginFrame(emptyRecordFrame());
+
+		pass.draw(context(gl), [batch(6, 1)]);
+
+		expect(intUniforms).toContainEqual(["uMotionType", 6]);
+		expect(intUniforms).toContainEqual(["uOrientation", 1]);
+	});
+
+	it("filters repeated batch state while retaining the required slot-base write", () => {
+		const { calls, gl, intUniforms } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		pass.beginFrame(emptyRecordFrame());
+
+		pass.draw(context(gl), [batch(2, 1), batch(2, 1)]);
+
+		expect(calls.blendFuncs).toHaveLength(1);
+		expect(intUniforms.filter(([name]) => name === "uMotionType")).toHaveLength(
+			1,
+		);
+		expect(
+			intUniforms.filter(([name]) => name === "uUsesRangeFrame"),
+		).toHaveLength(1);
+		expect(
+			intUniforms.filter(([name]) => name === "uInstanceBase"),
+		).toHaveLength(2);
+	});
+
+	it("binds one coherent live frame for a parent-following range", () => {
+		const { gl, intUniforms, vec3Uniforms, vec4Uniforms } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		pass.beginFrame(emptyRecordFrame());
+
+		pass.draw(context(gl), [
+			batch(2, 4, MESH, {
+				kind: "range",
+				landblockOrigin: sceneVector3([384, 0, -576]),
+				localOrigin: landblockVector3([12, 7, 18]),
+				rotation: { w: 0.5, x: 0.5, y: -0.5, z: 0.5 },
+			}),
+		]);
+
+		expect(intUniforms).toContainEqual(["uUsesRangeFrame", 1]);
+		expect(vec3Uniforms).toContainEqual([
+			"uRangeLandblockOrigin",
+			384,
+			0,
+			-576,
+		]);
+		expect(vec3Uniforms).toContainEqual(["uRangeLocalOrigin", 12, 7, 18]);
+		expect(vec4Uniforms).toContainEqual([
+			"uRangeRotation",
+			0.5,
+			0.5,
+			-0.5,
+			0.5,
+		]);
+	});
+
+	it("submits world scope groups in order with one upload and keeps sky separate", () => {
+		const { calls, draws, gl } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		const createProgram = vi.spyOn(gl, "createProgram");
+		pass.beginFrame(emptyRecordFrame());
+
+		pass.drawWorld(
+			context(gl),
+			new Map([
+				["outdoor", [batch(2, 3), batch(9, 2)]],
+				["sky", [batch(11, 5)]],
+				["env-cell:0101/01010001", [batch(5, 7)]],
+			]),
+		);
+		pass.draw(context(gl), [batch(11, 5)]);
+
+		expect(draws).toEqual([3, 2, 7, 5]);
+		expect(createProgram).toHaveBeenCalledTimes(1);
+		expect(
+			calls.texImage2D.mock.calls.length +
+				calls.texSubImage2D.mock.calls.length,
+		).toBe(1);
+	});
+
+	it("selects a blend mode per batch instead of inheriting one", () => {
+		const { calls, gl } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		pass.beginFrame(emptyRecordFrame());
+
+		pass.draw(context(gl), [batch(2, 1)]);
+
+		// Enabling BLEND without a func leaves whatever the previous pass bound, which renders
+		// particles opaque over their own black backing.
+		expect(calls.blendFuncs).toHaveLength(1);
+	});
+
+	it("counts a batch whose mesh is not resident instead of dropping it silently", () => {
+		const { draws, gl } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => null);
+		pass.beginFrame(emptyRecordFrame());
+
+		pass.draw(context(gl), [batch(2, 4)]);
+
+		expect(draws).toEqual([]);
+		expect(pass.getDiagnostics().unresolvedBatchCount).toBe(1);
+	});
+
+	it("does not create a program for an empty frame", () => {
+		const { gl } = fakeGl();
+		const createProgram = vi.spyOn(gl, "createProgram");
+		const createTexture = vi.spyOn(gl, "createTexture");
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		pass.beginFrame(emptyRecordFrame());
+
+		pass.draw(context(gl), []);
+		pass.draw(context(gl), [batch(2, 0)]);
+
+		// A scene with no live particles must cost nothing, including no lazy GPU allocation.
+		expect(createProgram).not.toHaveBeenCalled();
+		expect(createTexture).not.toHaveBeenCalled();
+		expect(pass.getDiagnostics().drawnBatchCount).toBe(0);
+	});
+
+	it("owns sampler state for every texture unit", () => {
+		const { gl, samplerBinds, samplers } = fakeGl();
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		pass.beginFrame(emptyRecordFrame());
+
+		pass.draw(context(gl, samplers), [batch(2, 3)]);
+
+		expect(samplerBinds.sort((left, right) => left.unit - right.unit)).toEqual([
+			{
+				request: {
+					mipLevels: 2,
+					policy: "linear",
+					samplingClass: "filterable",
+					wrap: TextureWrapMode.Clamp,
+				},
+				unit: 0,
+			},
+			{
+				request: {
+					mipLevels: 1,
+					policy: "linear",
+					samplingClass: "exact",
+					wrap: TextureWrapMode.Clamp,
+				},
+				unit: 1,
+			},
+			{
+				request: {
+					mipLevels: 1,
+					policy: "linear",
+					samplingClass: "exact",
+					wrap: TextureWrapMode.Clamp,
+				},
+				unit: 2,
+			},
+		]);
+	});
+});

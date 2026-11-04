@@ -2,13 +2,14 @@ use super::types::EquipMask;
 use crate::errors::WeenieError;
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
-use holtburger_common::Guid;
+use holtburger_common::{Guid, properties::InventoryEntryKind};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewContentsEventItem {
     pub guid: Guid,
-    pub container_type: u32,
+    /// Server category determines the independent item or pack ordering domain.
+    pub container_type: InventoryEntryKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,7 +32,8 @@ impl ProtocolUnpack for ViewContentsEventData {
             if *offset + 4 > data.len() {
                 return None;
             }
-            let container_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+            let container_type =
+                InventoryEntryKind::from_repr(LittleEndian::read_u32(&data[*offset..*offset + 4]))?;
             *offset += 4;
             items.push(ViewContentsEventItem {
                 guid,
@@ -49,7 +51,8 @@ impl ProtocolPack for ViewContentsEventData {
             .unwrap();
         for item in &self.items {
             item.guid.pack(buf);
-            buf.write_u32::<LittleEndian>(item.container_type).unwrap();
+            buf.write_u32::<LittleEndian>(item.container_type as u32)
+                .unwrap();
         }
     }
 }
@@ -59,7 +62,8 @@ pub struct InventoryPutObjInContainerEventData {
     pub item_guid: Guid,
     pub container_guid: Guid,
     pub slot: u32,
-    pub container_type: u32,
+    /// Server category determines the independent item or pack ordering domain.
+    pub container_type: InventoryEntryKind,
 }
 
 impl ProtocolUnpack for InventoryPutObjInContainerEventData {
@@ -70,7 +74,8 @@ impl ProtocolUnpack for InventoryPutObjInContainerEventData {
             return None;
         }
         let slot = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let container_type = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        let container_type =
+            InventoryEntryKind::from_repr(LittleEndian::read_u32(&data[*offset + 4..*offset + 8]))?;
         *offset += 8;
         Some(InventoryPutObjInContainerEventData {
             item_guid,
@@ -86,7 +91,8 @@ impl ProtocolPack for InventoryPutObjInContainerEventData {
         self.item_guid.pack(buf);
         self.container_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.slot).unwrap();
-        buf.write_u32::<LittleEndian>(self.container_type).unwrap();
+        buf.write_u32::<LittleEndian>(self.container_type as u32)
+            .unwrap();
     }
 }
 
@@ -182,7 +188,81 @@ impl ProtocolPack for CloseGroundContainerEventData {
     }
 }
 
-// #[cfg(test)]
+/// One server-reported material yield; it is not an inventory-object declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SalvageResultRow {
+    /// Material identifier retained losslessly, including unknown extensions.
+    pub material: u32,
+    /// Average workmanship reported by the server.
+    pub workmanship: f64,
+    /// Total units obtained for this material/skill group.
+    pub units: u32,
+}
+
+/// Optional salvage feedback, grouped by skill and without a client request identity.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SalvageOperationsResultData {
+    /// Skill used for these yield rows.
+    pub skill: u32,
+    /// Unsuitable source GUIDs; ACE currently sends an empty list, retail supports entries.
+    pub rejected: Vec<Guid>,
+    /// Yield rows, independent of the actual inventory bag boundaries.
+    pub results: Vec<SalvageResultRow>,
+    /// Augmentation return bonus as a percentage.
+    pub augmentation_bonus: u32,
+}
+
+impl ProtocolUnpack for SalvageOperationsResultData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let skill = u32::unpack(data, offset)?;
+        let rejected_count = u32::unpack(data, offset)? as usize;
+        // Bound allocations by actual packet contents, before allocating attacker-provided counts.
+        data.get(*offset..offset.checked_add(rejected_count.checked_mul(4)?)?)?;
+        let rejected = (0..rejected_count)
+            .map(|_| Guid::unpack(data, offset))
+            .collect::<Option<Vec<_>>>()?;
+        let result_count = u32::unpack(data, offset)? as usize;
+        data.get(
+            *offset
+                ..offset
+                    .checked_add(result_count.checked_mul(16)?)?
+                    .checked_add(4)?,
+        )?;
+        let mut results = Vec::with_capacity(result_count);
+        for _ in 0..result_count {
+            results.push(SalvageResultRow {
+                material: u32::unpack(data, offset)?,
+                workmanship: f64::unpack(data, offset)?,
+                units: u32::unpack(data, offset)?,
+            });
+        }
+        let augmentation_bonus = u32::unpack(data, offset)?;
+        Some(Self {
+            skill,
+            rejected,
+            results,
+            augmentation_bonus,
+        })
+    }
+}
+
+impl ProtocolPack for SalvageOperationsResultData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.skill.pack(buf);
+        (self.rejected.len() as u32).pack(buf);
+        for guid in &self.rejected {
+            guid.pack(buf);
+        }
+        (self.results.len() as u32).pack(buf);
+        for row in &self.results {
+            row.material.pack(buf);
+            row.workmanship.pack(buf);
+            row.units.pack(buf);
+        }
+        self.augmentation_bonus.pack(buf);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,17 +272,54 @@ mod tests {
     use crate::test_helpers::assert_pack_unpack_parity;
 
     #[test]
+    fn inventory_categories_round_trip_and_reject_unknown_values() {
+        for kind in [
+            InventoryEntryKind::Item,
+            InventoryEntryKind::Container,
+            InventoryEntryKind::Foci,
+        ] {
+            let containment = InventoryPutObjInContainerEventData {
+                item_guid: Guid(1),
+                container_guid: Guid(2),
+                slot: 0,
+                container_type: kind,
+            };
+            let mut bytes = Vec::new();
+            containment.pack(&mut bytes);
+            assert_eq!(
+                InventoryPutObjInContainerEventData::unpack(&bytes, &mut 0),
+                Some(containment)
+            );
+            bytes[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+            assert!(InventoryPutObjInContainerEventData::unpack(&bytes, &mut 0).is_none());
+
+            let roster = ViewContentsEventData {
+                container: Guid(2),
+                items: vec![ViewContentsEventItem {
+                    guid: Guid(1),
+                    container_type: kind,
+                }],
+            };
+            let mut bytes = Vec::new();
+            roster.pack(&mut bytes);
+            assert_eq!(ViewContentsEventData::unpack(&bytes, &mut 0), Some(roster));
+            bytes[12..16].copy_from_slice(&u32::MAX.to_le_bytes());
+            assert!(ViewContentsEventData::unpack(&bytes, &mut 0).is_none());
+        }
+    }
+
+    #[test]
     fn test_view_contents_fixture() {
         let expected = ViewContentsEventData {
             container: Guid(0x11111111),
             items: vec![
                 ViewContentsEventItem {
                     guid: Guid(0x22222222),
-                    container_type: 1,
+                    container_type: InventoryEntryKind::Container,
                 },
                 ViewContentsEventItem {
                     guid: Guid(0x33333333),
-                    container_type: 0,
+                    container_type: InventoryEntryKind::Item,
                 },
             ],
         };
@@ -224,7 +341,7 @@ mod tests {
                     item_guid: Guid(0x80000001),
                     container_guid: Guid(0x80000002),
                     slot: 3,
-                    container_type: 1,
+                    container_type: InventoryEntryKind::Container,
                 },
             )),
         }));
@@ -288,5 +405,57 @@ mod tests {
             })),
         }));
         assert_pack_unpack_parity(&hex::decode(hex_str).unwrap(), &expected);
+    }
+}
+
+#[cfg(test)]
+mod salvage_tests {
+    use super::*;
+    use holtburger_common::{properties::MaterialType, stats::SkillType};
+
+    #[test]
+    fn result_preserves_skill_rejections_fractional_workmanship_and_bonus() {
+        let result = SalvageOperationsResultData {
+            skill: SkillType::Salvaging as u32,
+            rejected: vec![Guid(0x80000001)],
+            results: vec![SalvageResultRow {
+                material: MaterialType::Steel as u32,
+                workmanship: 7.25,
+                units: 42,
+            }],
+            augmentation_bonus: 25,
+        };
+        let mut bytes = Vec::new();
+        result.pack(&mut bytes);
+        // Independent ACE field ordering, including its IEEE754 double at row offset +4.
+        let expected: Vec<_> = [
+            (SkillType::Salvaging as u32).to_le_bytes().as_slice(),
+            1u32.to_le_bytes().as_slice(),
+            Guid(0x80000001).0.to_le_bytes().as_slice(),
+            1u32.to_le_bytes().as_slice(),
+            (MaterialType::Steel as u32).to_le_bytes().as_slice(),
+            7.25f64.to_le_bytes().as_slice(),
+            42u32.to_le_bytes().as_slice(),
+            25u32.to_le_bytes().as_slice(),
+        ]
+        .concat();
+        assert_eq!(bytes, expected);
+        let mut offset = 0;
+        assert_eq!(
+            SalvageOperationsResultData::unpack(&bytes, &mut offset),
+            Some(result)
+        );
+        assert_eq!(offset, bytes.len());
+        for prefix in 0..bytes.len() {
+            assert!(SalvageOperationsResultData::unpack(&bytes[..prefix], &mut 0).is_none());
+        }
+    }
+
+    #[test]
+    fn impossible_list_lengths_are_rejected_before_allocation() {
+        let mut bytes = Vec::new();
+        0u32.pack(&mut bytes);
+        u32::MAX.pack(&mut bytes);
+        assert!(SalvageOperationsResultData::unpack(&bytes, &mut 0).is_none());
     }
 }

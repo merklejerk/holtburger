@@ -1,0 +1,350 @@
+import { clientInventoryMembership } from "./client-inventory-sections";
+import { describe, expect, it } from "vitest";
+import {
+	ClientEntityMirror,
+	type ClientEntityFacts,
+} from "./client-entity-mirror";
+import { entityFacts } from "./client-entity-mirror.test-support";
+import {
+	contentsSections,
+	contentsPackSlots,
+	sortContentsItems,
+} from "./client-container-contents";
+
+/** Explicit received slot kind; storage capability is supplied independently. */
+function child(
+	guid: number,
+	parentGuid: number,
+	slot: Extract<ClientEntityFacts["location"], { kind: "contained" }>["slot"],
+	storage = false,
+): ClientEntityFacts {
+	return entityFacts(guid, {
+		ownedByPlayer: true,
+		location: { kind: "contained", parentGuid, slot },
+		targeting: "ineligible",
+		scenePlacement: "unavailable",
+		storage: storage
+			? {
+					kind: "container",
+					roster: "announced",
+					packCapacity: 7,
+					itemCapacity: 24,
+				}
+			: { kind: "not-established" },
+	});
+}
+
+describe("contentsSections", () => {
+	it("uses server order and separates foci, ordinary-slot storage, and direct pack sections", () => {
+		const mirror = new ClientEntityMirror();
+		const prepared = mirror.prepareSnapshot(
+			{
+				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
+				worldContainer: { kind: "closed" },
+				entities: [
+					entityFacts(1),
+					child(20, 1, { kind: "pack", index: 1, entryKind: "foci" }),
+					child(30, 1, { kind: "item", index: 1 }, true),
+					child(
+						10,
+						1,
+						{ kind: "pack", index: 0, entryKind: "container" },
+						true,
+					),
+					child(40, 1, { kind: "item", index: 0 }),
+					child(50, 10, { kind: "item", index: 0 }, true),
+					child(80, 50, { kind: "item", index: 0 }),
+					child(60, 1, { kind: "pending" }),
+					entityFacts(70, {
+						ownedByPlayer: true,
+						location: { kind: "equipped", wearerGuid: 1, mask: null },
+					}),
+				],
+			},
+			1,
+		);
+		const membership = clientInventoryMembership(prepared.level);
+		expect(
+			membership?.members.map((item) => item.guid).sort((a, b) => a - b),
+		).toEqual([1, 10, 20, 30, 40, 50, 60]);
+		const sections = contentsSections(membership, "pack-slots", "native");
+		expect(sections.map((section) => section.container.guid)).toEqual([
+			1, 30, 10,
+		]);
+		expect(
+			sections.map((section) => section.items.map((item) => item.guid)),
+		).toEqual([[40, 30], [], [50]]);
+		expect(
+			sections.map((section) => section.packs.map((item) => item.guid)),
+		).toEqual([[], [], []]);
+		expect(
+			contentsPackSlots(membership).map((item) => item?.guid ?? null),
+		).toEqual([1, 10, 20]);
+		expect(
+			sections.map((section) => section.unslotted.map((item) => item.guid)),
+		).toEqual([[60], [], []]);
+		expect(sections.map((section) => section.rootSection)).toEqual([
+			true,
+			false,
+			false,
+		]);
+	});
+
+	it("retains pending entries and empty or awaiting containers without inventing storage from category", () => {
+		const mirror = new ClientEntityMirror();
+		const pending: ClientEntityFacts = {
+			...child(2, 1, { kind: "pack", index: 0, entryKind: "container" }),
+			description: { kind: "pending" },
+		};
+		const awaiting: ClientEntityFacts = {
+			...child(3, 1, { kind: "pack", index: 1, entryKind: "container" }, true),
+			storage: {
+				kind: "container",
+				roster: "awaiting",
+				packCapacity: null,
+				itemCapacity: null,
+			},
+		};
+		const prepared = mirror.prepareSnapshot(
+			{
+				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
+				worldContainer: { kind: "closed" },
+				entities: [
+					entityFacts(1),
+					pending,
+					awaiting,
+					child(4, 1, { kind: "pack", index: 2, entryKind: "container" }, true),
+				],
+			},
+			1,
+		);
+		const sections = contentsSections(
+			clientInventoryMembership(prepared.level),
+			"pack-slots",
+			"native",
+		);
+		expect(sections.map((section) => section.container.guid)).toEqual([
+			1, 3, 4,
+		]);
+		expect(sections[0]?.packs).toEqual([]);
+		expect(
+			contentsPackSlots(clientInventoryMembership(prepared.level)),
+		).toContain(pending);
+		expect(sections[1]?.container.storage).toEqual({
+			kind: "container",
+			roster: "awaiting",
+			packCapacity: null,
+			itemCapacity: null,
+		});
+		expect(sections[2]?.items).toEqual([]);
+	});
+});
+
+describe("contentsPackSlots", () => {
+	it("keeps Main Pack first, groups foci after containers, and leaves free capacity last", () => {
+		const root = entityFacts(1, {
+			storage: {
+				kind: "container",
+				roster: "announced",
+				itemCapacity: 24,
+				packCapacity: 4,
+			},
+		});
+		const bag = child(
+			2,
+			1,
+			{ kind: "pack", index: 2, entryKind: "container" },
+			true,
+		);
+		const foci = child(3, 1, { kind: "pack", index: 0, entryKind: "foci" });
+		const ordinary = child(4, 1, { kind: "item", index: 0 }, true);
+		const mirror = new ClientEntityMirror();
+		const { level } = mirror.prepareSnapshot(
+			{
+				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
+				worldContainer: { kind: "closed" },
+				entities: [root, bag, foci, ordinary],
+			},
+			1,
+		);
+		expect(
+			contentsPackSlots(clientInventoryMembership(level)).map(
+				(item) => item?.guid ?? null,
+			),
+		).toEqual([1, 2, 3, null, null]);
+		const unknown = {
+			...root,
+			storage: {
+				kind: "container" as const,
+				roster: "announced" as const,
+				itemCapacity: null,
+				packCapacity: null,
+			},
+		};
+		const pending = mirror.prepareSnapshot(
+			{
+				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
+				worldContainer: { kind: "closed" },
+				entities: [unknown, bag],
+			},
+			1,
+		);
+		expect(
+			contentsPackSlots(clientInventoryMembership(pending.level)).map(
+				(item) => item?.guid ?? null,
+			),
+		).toEqual([1, 2, null, null]);
+	});
+
+	it("orders containers by their native indices independently of capacity", () => {
+		const pack = (guid: number, index: number, itemCapacity: number | null) =>
+			entityFacts(guid, {
+				...child(guid, 1, { kind: "pack", index, entryKind: "container" }),
+				storage: {
+					kind: "container",
+					roster: "announced",
+					itemCapacity,
+					packCapacity: 0,
+				},
+			});
+		const mirror = new ClientEntityMirror();
+		const { level } = mirror.prepareSnapshot(
+			{
+				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
+				worldContainer: { kind: "closed" },
+				entities: [
+					entityFacts(1),
+					pack(2, 3, 24),
+					pack(3, 2, 48),
+					pack(4, 1, 24),
+					pack(5, 4, null),
+					child(6, 1, { kind: "pack", index: 5, entryKind: "foci" }),
+				],
+			},
+			1,
+		);
+		expect(
+			contentsPackSlots(clientInventoryMembership(level)).map(
+				(item) => item?.guid ?? null,
+			),
+		).toEqual([1, 4, 3, 2, 5, 6, null]);
+	});
+});
+
+describe("sortContentsItems", () => {
+	it("sorts names and types without changing native order or placing unknown names first", () => {
+		const named = (guid: number, name: string, itemType: number) => ({
+			...child(guid, 1, { kind: "item" as const, index: guid }),
+			description: {
+				kind: "known" as const,
+				name,
+				itemType,
+				healthQuery: "ineligible" as const,
+				hasAlternateEquipSide: false,
+				builtInSpell: null,
+				mapCategory: "other" as const,
+				objectFlags: 0,
+				wcid: null,
+				pyrealBalance: null,
+				aetheriaActivation: null,
+				burden: null,
+				equipLocations: null,
+				consumable: null,
+				useCapability: "direct" as const,
+				cooldown: null,
+				stackCount: null,
+				structure: { current: null, max: null },
+				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+			},
+		});
+		const native = [
+			named(2, "Zebra", 1),
+			named(3, "apple", 2),
+			named(4, "Apple", 1),
+			{
+				...child(5, 1, { kind: "item" as const, index: 5 }),
+				description: { kind: "pending" as const },
+			},
+		];
+		expect(
+			sortContentsItems(native, "alphabetical").map((item) => item.guid),
+		).toEqual([3, 4, 2, 5]);
+		expect(
+			sortContentsItems(native, "item-type").map((item) => item.guid),
+		).toEqual([4, 2, 3, 5]);
+		expect(sortContentsItems(native, "native")).toBe(native);
+		expect(native.map((item) => item.guid)).toEqual([2, 3, 4, 5]);
+	});
+});
+
+describe("inventory type precedence", () => {
+	it("orders public item type and WCID before names, with missing templates last", () => {
+		const classified = (
+			guid: number,
+			name: string,
+			itemType: number,
+			wcid: number | null,
+		): ClientEntityFacts => {
+			const entity = child(guid, 1, { kind: "item", index: guid });
+			if (entity.description.kind !== "known")
+				throw new Error("Known fixture required.");
+			return {
+				...entity,
+				description: { ...entity.description, name, itemType, wcid },
+			};
+		};
+		const items = [
+			classified(1, "First category", 1, 900),
+			classified(2, "Zebra", 2, 10),
+			classified(3, "Apple", 2, 20),
+			classified(4, "Low template", 2, 1),
+			classified(5, "Unknown template", 2, null),
+			classified(6, "Apple", 2, 10),
+			classified(7, "Apple", 2, 10),
+		];
+		expect(
+			sortContentsItems([...items].reverse(), "item-type").map(
+				(item) => item.guid,
+			),
+		).toEqual([1, 4, 6, 7, 2, 3, 5]);
+		expect(
+			sortContentsItems(items, "alphabetical").map((item) => item.guid),
+		).toEqual([3, 6, 7, 1, 4, 5, 2]);
+		expect(sortContentsItems(items, "native")).toBe(items);
+	});
+});

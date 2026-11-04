@@ -262,6 +262,7 @@ mod tests {
 
     fn test_state() -> SelectionState {
         SelectionState {
+            entry_rejection: None,
             characters: vec![CharacterDashboardEntry {
                 slot: 4,
                 character: CharacterEntry {
@@ -275,7 +276,6 @@ mod tests {
             account_name: "account".to_string(),
             screen: CharacterScreen::Dashboard,
             creation: crate::pages::selection::creation::CharacterCreationState::default(),
-            pending_create: None,
             delete_confirmation: Some(DeleteCharacterConfirmation::new(4, "Sho Girl".to_string())),
         }
     }
@@ -294,6 +294,7 @@ mod tests {
                         environment_setup_id: 0,
                         attribute_credits: 66,
                         skill_credits: 0,
+                        uses_starter_clothing: true,
                         primary_start_area_ids: Vec::new(),
                         secondary_start_area_ids: Vec::new(),
                         skill_overrides: BTreeMap::new(),

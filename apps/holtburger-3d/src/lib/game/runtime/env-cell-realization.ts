@@ -1,0 +1,357 @@
+import type {
+	EnvCellLayerArtifact,
+	PortalDrawUnit,
+	StaticObjectGeometryDiagnostics,
+	StaticObjectLayerArtifact,
+} from "../commit/artifacts";
+import type { EnvCellMaterializationPlan } from "../commit/env-cell-materialization";
+import type { ResolvedStaticObjectLayerSource } from "../resolution/landblock-layer";
+import { Vec3 } from "../math/types";
+import { transformPoint3 } from "../math/matrices";
+import { landblockVec3 } from "../../assets/ac-frame";
+import type { ScenePortalCrossingInput } from "../scene";
+import {
+	qualifyPortalApertureId,
+	qualifyPortalCrossingId,
+} from "../resolution/portal-scene-identity";
+import { LandblockLayerKind } from "./scene-interest";
+import { mergeAssetTextureFacts } from "../textures/texture-facts";
+import type { StaticLayerGeometryPreparer } from "./static-layer-realizer";
+import type { OwnerId } from "./owner-ids";
+import { staticRevisionToInstallNamespace } from "./owner-ids";
+import { StaticBatchCellCoverage } from "../commit/static-batch-cell-coverage";
+import type { SceneInterestRevision } from "./scene-availability";
+
+/** Environment and resident artifacts staged together for one EnvCell layer revision. */
+export interface EnvCellRealizationArtifact {
+	readonly environment: EnvCellLayerArtifact;
+	readonly residents: StaticObjectLayerArtifact | null;
+	readonly residentGeometryDiagnostics: StaticObjectGeometryDiagnostics;
+}
+
+/** Executes the plan's independent resident partitions without taking scene or atlas ownership. */
+export class EnvCellGeometryPreparer {
+	readonly #residentGeometry: StaticLayerGeometryPreparer<
+		ResolvedStaticObjectLayerSource,
+		StaticObjectLayerArtifact | null,
+		OwnerId
+	>;
+
+	constructor(
+		residentGeometry: StaticLayerGeometryPreparer<
+			ResolvedStaticObjectLayerSource,
+			StaticObjectLayerArtifact | null,
+			OwnerId
+		>,
+	) {
+		this.#residentGeometry = residentGeometry;
+	}
+
+	async prepare(options: {
+		readonly layer: LandblockLayerKind.EnvCells;
+		readonly owner: OwnerId;
+		readonly revision: SceneInterestRevision;
+		readonly source: EnvCellMaterializationPlan;
+		readonly textureRequirements: readonly import("../textures/types").AssetTextureFact[];
+	}): Promise<EnvCellRealizationArtifact> {
+		const environment = createEnvCellEnvironmentArtifact(options.source);
+		const coverage = new StaticBatchCellCoverage(environment);
+		const residentArtifacts = await Promise.all(
+			options.source.residentJobs.map((job) =>
+				this.#residentGeometry.prepare({
+					layer: LandblockLayerKind.EnvCells,
+					owner: options.owner,
+					partition: `cell-${job.source.envCellId}`,
+					revision: options.revision,
+					source: job.source,
+					textureRequirements: job.textureRequirements,
+				}),
+			),
+		);
+		return {
+			environment,
+			residents: mergeResidentArtifacts(
+				options.owner,
+				options.revision,
+				residentArtifacts.map((artifact) =>
+					artifact === null
+						? null
+						: {
+								...artifact,
+								objects: artifact.objects.map((object) => ({
+									...object,
+									placement: {
+										...object.placement,
+										spatialMembership: coverage.resolve(
+											object.placement,
+											object.localBounds,
+										),
+									},
+								})),
+							},
+				),
+			),
+			residentGeometryDiagnostics: mergeGeometryDiagnostics(residentArtifacts),
+		};
+	}
+}
+
+/** Project one materialization plan into the exact scene topology artifact used by the renderer. */
+export function createEnvCellEnvironmentArtifact(
+	plan: EnvCellMaterializationPlan,
+): EnvCellLayerArtifact {
+	const apertureGeometry = new Map(
+		plan.apertures.map((aperture, index) => [
+			aperture.id,
+			plan.apertureGeometries[index]?.key,
+		]),
+	);
+	const portalDrawUnits = new Map<
+		`portal-aperture:${string}`,
+		PortalDrawUnit
+	>();
+	const sceneApertures: readonly ScenePortalCrossingInput["sourceAperture"][] =
+		plan.apertures.map((aperture) => ({
+			id: qualifyPortalApertureId(plan.landblockId, aperture.id),
+			indices: aperture.triangleIndices,
+			landblockBounds: aperture.landblockBounds,
+			landblockId: plan.landblockId,
+			plane: aperture.plane,
+			vertices: aperture.positions,
+		}));
+	for (const aperture of plan.apertures) {
+		const geometry = apertureGeometry.get(aperture.id);
+		if (!geometry) {
+			throw new Error(`Portal aperture ${aperture.id} lost its geometry.`);
+		}
+		const apertureId = qualifyPortalApertureId(plan.landblockId, aperture.id);
+		portalDrawUnits.set(apertureId, {
+			apertureId,
+			geometry,
+			indexStart: 0,
+			indexCount: aperture.triangleIndices.length,
+			landblockId: plan.landblockId,
+		});
+	}
+	return {
+		geometry: [...plan.shellGeometries, ...plan.apertureGeometries],
+		cellShells: plan.shells.map((shell) => ({
+			placement: shell.placement,
+			structureLocalBounds: shell.structureLocalBounds,
+			renderable: {
+				drawUnits: shell.materialRanges.map((range, rangeIndex) => ({
+					geometry: shell.geometry,
+					indexStart: range.indexStart,
+					indexCount: range.indexCount,
+					material: range.material,
+					ordering: range.ordering,
+					transparentSort:
+						range.ordering === "transparent"
+							? {
+									// A realized cell's structure never moves, so its landblock-space
+									// center is resolved here rather than by every ordering frame.
+									center: landblockVec3(
+										transformPoint3(
+											shell.placement.localTransform,
+											new Vec3(
+												(shell.structureLocalBounds.min.x +
+													shell.structureLocalBounds.max.x) *
+													0.5,
+												(shell.structureLocalBounds.min.y +
+													shell.structureLocalBounds.max.y) *
+													0.5,
+												(shell.structureLocalBounds.min.z +
+													shell.structureLocalBounds.max.z) *
+													0.5,
+											),
+										),
+									),
+									stableId: `${shell.envCellId}/shell-range:${rangeIndex}`,
+								}
+							: null,
+				})),
+			},
+		})),
+		portalDrawUnits,
+		scopes: plan.scopes.map((scope) => ({
+			scope: scope.scope,
+			landblockBounds: scope.landblockBounds,
+			containmentPlanes: scope.containmentPlanes,
+			potentiallyVisibleEnvCellIds: scope.potentiallyVisibleEnvCellIds,
+			seenOutside: scope.seenOutside,
+			structureToLandblock: scope.structureToLandblock,
+			visibilityIslandId: `env-cell-island:${scope.scope.landblockId}/${scope.visibilityIslandOrdinal}`,
+		})),
+		crossings: plan.crossings.map((crossing) => {
+			const sourceAperture = sceneApertures[crossing.sourceApertureIndex];
+			if (!sourceAperture) {
+				throw new Error(
+					`Portal crossing ${crossing.id} lost source aperture ${crossing.sourceApertureIndex}.`,
+				);
+			}
+			const visibilityAperture =
+				sceneApertures[crossing.visibilityApertureIndex];
+			if (!visibilityAperture) {
+				throw new Error(
+					`Portal crossing ${crossing.id} lost visibility aperture ${crossing.visibilityApertureIndex}.`,
+				);
+			}
+			return {
+				acceptedSide: crossing.acceptedSide,
+				exactMatch: crossing.exactMatch,
+				id: qualifyPortalCrossingId(plan.landblockId, crossing.id),
+				maskDepthPolicy: crossing.maskDepthPolicy,
+				reciprocalCrossingId:
+					crossing.reciprocalCrossingIndex === null
+						? null
+						: resolveReciprocalCrossingId(
+								plan,
+								crossing.reciprocalCrossingIndex,
+							),
+				source: crossing.source,
+				spatialRelationship: resolveSpatialRelationship(
+					plan,
+					crossing.spatialRelationship,
+				),
+				target: crossing.target,
+				sourceAperture,
+				visibilityAperture,
+			};
+		}),
+	};
+}
+
+function resolveReciprocalCrossingId(
+	plan: EnvCellMaterializationPlan,
+	index: number,
+): EnvCellMaterializationPlan["crossings"][number]["id"] {
+	const reciprocal = plan.crossings[index];
+	if (!reciprocal) {
+		throw new Error(`Portal crossing lost reciprocal crossing ${index}.`);
+	}
+	return qualifyPortalCrossingId(plan.landblockId, reciprocal.id);
+}
+
+function resolveSpatialRelationship(
+	plan: EnvCellMaterializationPlan,
+	relationship: EnvCellMaterializationPlan["crossings"][number]["spatialRelationship"],
+): import("../scene").ScenePortalCrossingInput["spatialRelationship"] {
+	if (relationship.kind !== "indoor-depth-continuous") return relationship;
+	const reciprocalAperture =
+		plan.apertures[relationship.reciprocalApertureIndex];
+	if (!reciprocalAperture) {
+		throw new Error(
+			`Portal relationship lost reciprocal aperture ${relationship.reciprocalApertureIndex}.`,
+		);
+	}
+	return {
+		kind: relationship.kind,
+		reciprocalApertureId: qualifyPortalApertureId(
+			plan.landblockId,
+			reciprocalAperture.id,
+		),
+	};
+}
+
+function mergeResidentArtifacts(
+	owner: OwnerId,
+	revision: SceneInterestRevision,
+	artifacts: readonly (StaticObjectLayerArtifact | null)[],
+): StaticObjectLayerArtifact | null {
+	const present = artifacts.filter(
+		(artifact): artifact is StaticObjectLayerArtifact => artifact !== null,
+	);
+	if (present.length === 0) return null;
+	const geometry = deduplicateResidentGeometry(
+		present.flatMap((artifact) => artifact.geometry),
+	);
+	return {
+		// Interior residents are lit by their bake, not by the runtime set.
+		staticLights: [],
+		resourceNamespace: staticRevisionToInstallNamespace(
+			owner,
+			revision,
+			"env-cell-residents",
+		),
+		objects: present.flatMap((artifact) => artifact.objects),
+		geometry,
+		textureRequirements: mergeAssetTextureFacts(
+			present.flatMap((artifact) => artifact.textureRequirements),
+			"EnvCell",
+		),
+		geometryDiagnostics: mergeGeometryDiagnostics(present),
+	};
+}
+
+function deduplicateResidentGeometry(
+	sources: readonly StaticObjectLayerArtifact["geometry"][number][],
+): readonly StaticObjectLayerArtifact["geometry"][number][] {
+	const unique = new Map<
+		StaticObjectLayerArtifact["geometry"][number]["key"],
+		StaticObjectLayerArtifact["geometry"][number]
+	>();
+	for (const source of sources) {
+		const existing = unique.get(source.key);
+		if (existing && !sameGeometry(existing.geometry, source.geometry)) {
+			throw new Error(
+				`EnvCell resident geometry ${source.key} has divergent buffers.`,
+			);
+		}
+		if (!existing) unique.set(source.key, source);
+	}
+	return [...unique.values()];
+}
+
+function sameGeometry(
+	left: StaticObjectLayerArtifact["geometry"][number]["geometry"],
+	right: StaticObjectLayerArtifact["geometry"][number]["geometry"],
+): boolean {
+	if (left.kind !== right.kind) return false;
+	if (!sameNumbers(left.positions, right.positions)) return false;
+	if (!sameNumbers(left.indices, right.indices)) return false;
+	if (left.kind === "portal-aperture" || right.kind === "portal-aperture") {
+		return left.kind === right.kind;
+	}
+	return (
+		sameNumbers(left.normals, right.normals) &&
+		sameNumbers(left.textureCoordinates, right.textureCoordinates)
+	);
+}
+
+function sameNumbers(
+	left: ArrayLike<number>,
+	right: ArrayLike<number>,
+): boolean {
+	if (left.length !== right.length) return false;
+	for (let index = 0; index < left.length; index += 1) {
+		if (left[index] !== right[index]) return false;
+	}
+	return true;
+}
+
+function mergeGeometryDiagnostics(
+	artifacts: readonly (StaticObjectLayerArtifact | null)[],
+): StaticObjectGeometryDiagnostics {
+	const diagnostics = artifacts.flatMap((artifact) =>
+		artifact ? [artifact.geometryDiagnostics] : [],
+	);
+	const sum = (select: (entry: StaticObjectGeometryDiagnostics) => number) =>
+		diagnostics.reduce((total, entry) => total + select(entry), 0);
+	return {
+		bakedRangeCount: sum((entry) => entry.bakedRangeCount),
+		bakedGeometryBytes: sum((entry) => entry.bakedGeometryBytes),
+		geometryWorkerDurationMs: sum((entry) => entry.geometryWorkerDurationMs),
+		instancedGeometryBytes: sum((entry) => entry.instancedGeometryBytes),
+		sourceMaterialSlotCount: sum((entry) => entry.sourceMaterialSlotCount),
+		sourcePartCount: sum((entry) => entry.sourcePartCount),
+		sourceRangeCount: sum((entry) => entry.sourceRangeCount),
+		sourceResidentCount: sum((entry) => entry.sourceResidentCount),
+		transparentTemplateBytes: sum((entry) => entry.transparentTemplateBytes),
+		transparentTemplateCohortCount: sum(
+			(entry) => entry.transparentTemplateCohortCount,
+		),
+		transparentTemplateInstanceCount: sum(
+			(entry) => entry.transparentTemplateInstanceCount,
+		),
+	};
+}

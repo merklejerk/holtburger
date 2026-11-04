@@ -2,7 +2,37 @@ use super::test_support::*;
 use super::*;
 
 #[test]
-fn vendor_item_identified_refreshes_visible_assess_context() {
+fn vendor_dismissal_survives_catalog_recovery_until_another_approach() {
+    let player = Guid(0x50000001);
+    let mut state = GameState::new(player, "Player".into(), "World".into());
+    let vendor = VendorState {
+        vendor_guid: Guid(0x60000001),
+        items: vec![],
+        buy_multiplier: 1.0,
+        sell_multiplier: 1.0,
+        merchandise_item_types: 0,
+        value_limits: Default::default(),
+        alternate_currency_wcid: 0,
+        alternate_currency_amount: 0,
+        alternate_currency_name: String::new(),
+    };
+    state.handle_view_event(ClientViewEvent::VendorApproached {
+        vendor: vendor.clone(),
+    });
+    assert!(state.view.vendor.is_some());
+    state.handle_action(AppAction::ClearVendor).unwrap();
+    state.handle_view_event(ClientViewEvent::VendorStateUpdated {
+        vendor: Some(vendor.clone()),
+    });
+    assert!(state.view.vendor.is_none());
+    state.handle_view_event(ClientViewEvent::VendorApproached { vendor });
+    assert!(state.view.vendor.is_some());
+    state.handle_view_event(ClientViewEvent::VendorStateUpdated { vendor: None });
+    assert!(state.view.vendor.is_none());
+}
+
+#[test]
+fn vendor_assessment_waits_for_the_world_populated_inspection_result() {
     let player_guid = Guid(0x50000001);
     let vendor_guid = Guid(0x60000001);
     let item_guid = Guid(0x70000001);
@@ -14,6 +44,7 @@ fn vendor_item_identified_refreshes_visible_assess_context() {
         buy_multiplier: 1.0,
         sell_multiplier: 1.0,
         merchandise_item_types: 0,
+        value_limits: Default::default(),
         alternate_currency_wcid: 0,
         alternate_currency_amount: 0,
         alternate_currency_name: String::new(),
@@ -23,25 +54,39 @@ fn vendor_item_identified_refreshes_visible_assess_context() {
 
     assert!(context_buffer_contains(
         super::super::context_buffer(&state),
-        "OLD NAME"
-    ));
-    assert!(!context_buffer_contains(
-        super::super::context_buffer(&state),
-        "NEW NAME"
+        "Awaiting appraisal details"
     ));
 
+    let identified = vendor_item_named(item_guid, 1, "New Name");
     let result = state.handle_view_event(ClientViewEvent::VendorItemIdentified(Box::new(
-        vendor_item_named(item_guid, 1, "New Name"),
+        identified.clone(),
     )));
 
     assert!(result.redraw_requested());
     assert!(context_buffer_contains(
         super::super::context_buffer(&state),
-        "NEW NAME"
+        "Awaiting appraisal details"
     ));
-    assert!(!context_buffer_contains(
+
+    let titles = holtburger_content::CharacterTitleCatalog::default();
+    let inspection = holtburger_world::inspection::ObjectInspection::from_vendor_item(
+        &identified,
+        holtburger_world::inspection::InspectionContext::new(&titles),
+    )
+    .expect("vendor fixture should populate an item inspection");
+    let result = state.handle_view_event(ClientViewEvent::ObjectInspectionResult(
+        holtburger_world::inspection::ObjectInspectionResult {
+            guid: item_guid,
+            outcome: holtburger_world::inspection::ObjectInspectionOutcome::Ready {
+                inspection: Box::new(inspection),
+            },
+        },
+    ));
+
+    assert!(result.redraw_requested());
+    assert!(context_buffer_contains(
         super::super::context_buffer(&state),
-        "OLD NAME"
+        "NEW NAME"
     ));
 }
 
@@ -58,6 +103,7 @@ fn oversize_vendor_amounts_are_rejected() {
         buy_multiplier: 1.0,
         sell_multiplier: 1.0,
         merchandise_item_types: 0,
+        value_limits: Default::default(),
         alternate_currency_wcid: 0,
         alternate_currency_amount: 0,
         alternate_currency_name: String::new(),
@@ -104,6 +150,7 @@ fn clear_vendor_clears_trade_panel_vendor_state() {
         buy_multiplier: 1.0,
         sell_multiplier: 1.0,
         merchandise_item_types: 0,
+        value_limits: Default::default(),
         alternate_currency_wcid: 0,
         alternate_currency_amount: 0,
         alternate_currency_name: String::new(),

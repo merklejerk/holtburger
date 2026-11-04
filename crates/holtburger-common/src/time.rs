@@ -1,3 +1,5 @@
+pub mod phase_profile;
+
 pub const DERETH_TICKS_PER_HOUR: f64 = 476.25;
 pub const DERETH_HOURS_PER_DAY: f64 = 16.0;
 pub const DERETH_DAY_LENGTH: f64 = DERETH_TICKS_PER_HOUR * DERETH_HOURS_PER_DAY; // 7620.0

@@ -1,3 +1,4 @@
+pub mod formula;
 use std::collections::HashMap;
 
 use holtburger_dat::file_type::spell_table::{
@@ -95,23 +96,44 @@ pub struct SpellInfo {
     pub mana_mod: u32,
 }
 
+/// Recipient source for an ordinary spellbook cast, independent of UI selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SpellCastingRoute {
+    /// The caster is the recipient, regardless of selection.
+    SelfTarget,
+    /// The spell is cast without an object recipient.
+    Untargeted,
+    /// The caller must supply its selected object.
+    SelectedTarget,
+}
+
 impl SpellInfo {
+    /// The shared ordinary-cast decision, also exposed to reference views.
+    pub fn casting_route(&self) -> SpellCastingRoute {
+        SpellCastingRoute::from_decoded_formula(self.bitfield, &self.components)
+    }
+}
+
+impl SpellCastingRoute {
     const SELF_TARGETED_FLAG: u32 = 0x8;
 
-    pub fn is_self_targeted(&self) -> bool {
-        self.bitfield & Self::SELF_TARGETED_FLAG != 0
-    }
-
-    pub fn is_untargeted(&self) -> bool {
-        self.non_component_target_type == 0
+    /// Retail checks self before formula targeting. Use original decoded slots, never
+    /// account-customized display formulas. Authored recipient masks do not determine whether
+    /// selection is required.
+    pub fn from_decoded_formula(flags: u32, components: &[u32; 8]) -> Self {
+        if flags & Self::SELF_TARGETED_FLAG != 0 {
+            Self::SelfTarget
+        } else if formula::casting_target_type(components) == 0 {
+            Self::Untargeted
+        } else {
+            Self::SelectedTarget
+        }
     }
 }
 
 impl From<DatSpellBase> for SpellInfo {
     fn from(value: DatSpellBase) -> Self {
-        let components =
-            std::array::from_fn(|index| value.raw_components.get(index).copied().unwrap_or(0));
-
         Self {
             name: value.name,
             description: value.description,
@@ -129,7 +151,7 @@ impl From<DatSpellBase> for SpellInfo {
             meta_spell_type: value.meta_spell_type,
             meta_spell_id: value.meta_spell_id,
             extras: value.extras.into(),
-            components,
+            components: value.components,
             caster_effect: value.caster_effect,
             target_effect: value.target_effect,
             fizzle_effect: value.fizzle_effect,
@@ -204,5 +226,104 @@ impl From<DatSpellSetTiers> for SpellSetTierInfo {
             spell_count: value.spell_count,
             spells: value.spells,
         }
+    }
+}
+
+/// Retail examination and ACE spellbook-casting distance limit, in metres; ACE
+/// Player_Magic.cs:481. Item-cast range uses a different skill input and is deliberately
+/// outside this spellbook query.
+pub fn spellbook_range_metres(
+    spell: &SpellInfo,
+    skills: &HashMap<crate::stats::SkillType, crate::stats::Skill>,
+) -> Option<f32> {
+    use crate::stats::SkillType;
+    let school_skill = match spell.school {
+        MagicSchool::WarMagic => Some(SkillType::WarMagic),
+        MagicSchool::LifeMagic => Some(SkillType::LifeMagic),
+        MagicSchool::ItemEnchantment => Some(SkillType::ItemEnchantment),
+        MagicSchool::CreatureEnchantment => Some(SkillType::CreatureEnchantment),
+        MagicSchool::VoidMagic => Some(SkillType::VoidMagic),
+        MagicSchool::None => None,
+    };
+    let level = |kind| {
+        skills
+            .get(&kind)
+            .map(|skill| skill.init.wrapping_add(skill.ranks))
+    };
+    let level = match school_skill {
+        Some(kind) => level(kind)?,
+        None => [
+            SkillType::WarMagic,
+            SkillType::LifeMagic,
+            SkillType::ItemEnchantment,
+            SkillType::CreatureEnchantment,
+            SkillType::VoidMagic,
+        ]
+        .into_iter()
+        .try_fold(0, |maximum, kind| {
+            level(kind).map(|value| maximum.max(value))
+        })?,
+    };
+    Some((spell.base_range_constant + spell.base_range_mod * level as f32).min(75.0))
+}
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+    use crate::stats::{Skill, SkillType, TrainingLevel};
+
+    fn skill(kind: SkillType, ranks: u32) -> Skill {
+        Skill {
+            skill_type: kind,
+            ranks,
+            init: 10,
+            spent_xp: 0,
+            next_rank_xp: None,
+            base: 200,
+            current: 300,
+            training: TrainingLevel::Trained,
+            trained_cost: 0,
+            specialized_cost: 0,
+            breakdown: Default::default(),
+        }
+    }
+
+    #[test]
+    fn spellbook_range_uses_ranks_and_initial_bonus_not_buffed_or_attribute_skill() {
+        let mut spell: SpellInfo = DatSpellBase {
+            school: 1,
+            base_range_constant: 10.0,
+            base_range_mod: 0.5,
+            ..DatSpellBase::default()
+        }
+        .into();
+        let skills = HashMap::from([(SkillType::WarMagic, skill(SkillType::WarMagic, 20))]);
+        assert_eq!(spellbook_range_metres(&spell, &skills), Some(25.0));
+        spell.base_range_mod = 10.0;
+        assert_eq!(spellbook_range_metres(&spell, &skills), Some(75.0));
+        assert_eq!(spellbook_range_metres(&spell, &HashMap::new()), None);
+    }
+
+    #[test]
+    fn schoolless_inspection_requires_complete_context_and_selects_highest_magic_level() {
+        let spell: SpellInfo = DatSpellBase {
+            base_range_mod: 1.0,
+            ..DatSpellBase::default()
+        }
+        .into();
+        let mut skills: HashMap<_, _> = [
+            SkillType::WarMagic,
+            SkillType::LifeMagic,
+            SkillType::ItemEnchantment,
+            SkillType::CreatureEnchantment,
+            SkillType::VoidMagic,
+        ]
+        .into_iter()
+        .map(|kind| (kind, skill(kind, 0)))
+        .collect();
+        skills.insert(SkillType::VoidMagic, skill(SkillType::VoidMagic, 30));
+        assert_eq!(spellbook_range_metres(&spell, &skills), Some(40.0));
+        skills.remove(&SkillType::LifeMagic);
+        assert_eq!(spellbook_range_metres(&spell, &skills), None);
     }
 }

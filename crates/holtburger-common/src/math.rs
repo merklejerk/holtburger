@@ -134,6 +134,23 @@ impl Quaternion {
         }
     }
 
+    /// Builds a unit rotation from one finite nonzero axis and a finite angle in radians.
+    pub fn from_axis_angle(axis: Vector3, angle: f32) -> Option<Self> {
+        let axis_length = axis.length();
+        if !axis_length.is_finite() || axis_length <= f32::EPSILON || !angle.is_finite() {
+            return None;
+        }
+        let unit = axis / axis_length;
+        let half = angle * 0.5;
+        let sin = half.sin();
+        Some(Self {
+            w: half.cos(),
+            x: unit.x * sin,
+            y: unit.y * sin,
+            z: unit.z * sin,
+        })
+    }
+
     /// Converts a quaternion to a heading (yaw) in radians.
     /// AC heading matches the official client: 0 at West, 90 at North, 180 at East, 270 at South.
     pub fn to_heading(&self) -> f32 {
@@ -181,9 +198,116 @@ impl Quaternion {
             z,
         }
     }
+
+    /// Returns the inverse rotation for a unit quaternion.
+    pub fn conjugate(&self) -> Self {
+        Self {
+            w: self.w,
+            x: -self.x,
+            y: -self.y,
+            z: -self.z,
+        }
+    }
+
+    /// Rotates one vector without allocating a matrix.
+    pub fn rotate_vector(&self, vector: Vector3) -> Vector3 {
+        let axis = Vector3::new(self.x, self.y, self.z);
+        let first = axis.cross(&vector);
+        let second = axis.cross(&first);
+        Vector3::new(
+            vector.x + 2.0 * (self.w * first.x + second.x),
+            vector.y + 2.0 * (self.w * first.y + second.y),
+            vector.z + 2.0 * (self.w * first.z + second.z),
+        )
+    }
+
+    /// Composes rotations so the result applies `other` first, then `self`.
+    pub fn multiply(&self, other: &Self) -> Self {
+        Self {
+            w: self.w * other.w - self.x * other.x - self.y * other.y - self.z * other.z,
+            x: self.w * other.x + self.x * other.w + self.y * other.z - self.z * other.y,
+            y: self.w * other.y - self.x * other.z + self.y * other.w + self.z * other.x,
+            z: self.w * other.z + self.x * other.y - self.y * other.x + self.z * other.w,
+        }
+    }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead, BinWrite)]
+/// A local rigid transform: a translation paired with a rotation.
+///
+/// This is retail's `Frame` as a math primitive rather than a wire type. Authored root motion
+/// is expressed as ordered rigid transforms, and one tick's authored contribution composes down
+/// to exactly one of them, so the same primitive serves the content projection and the solver
+/// input.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RigidTransform {
+    pub translation: Vector3,
+    pub rotation: Quaternion,
+}
+
+impl RigidTransform {
+    /// The transform that moves and rotates nothing.
+    pub fn identity() -> Self {
+        Self {
+            translation: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        }
+    }
+
+    /// Composes `local`, expressed in this transform's frame, onto this one.
+    ///
+    /// This is retail frame composition verbatim: `origin = f1.origin + f1.rot x f2.origin` and
+    /// `rot = f1.rot * f2.rot`. Composition is exact, which is why an ordered program of
+    /// authored offsets collapses to a single transform with no error to bound.
+    pub fn combine(&self, local: &Self) -> Self {
+        Self {
+            translation: self.translation + self.rotation.rotate_vector(local.translation),
+            rotation: self.rotation.multiply(&local.rotation),
+        }
+    }
+
+    /// Removes a transform previously composed with `combine`, retail relative-frame
+    /// calculation.
+    ///
+    /// Retail computes the new rotation first and then subtracts the translation through the
+    /// *new* rotation, which is what makes this the exact inverse of `combine` rather than an
+    /// approximation of it. ACE's `AFrame.Subtract` uses the operand's own orientation instead
+    /// and is not equivalent; the retail form is authoritative for client behavior.
+    pub fn subtract(&self, local: &Self) -> Self {
+        let rotation = self.rotation.multiply(&local.rotation.conjugate());
+        Self {
+            translation: self.translation - rotation.rotate_vector(local.translation),
+            rotation,
+        }
+    }
+
+    /// Rotates about an axis expressed in this transform's own frame, retail vector rotation.
+    ///
+    /// The vector's direction is the axis and its magnitude is the angle in radians. Retail
+    /// maps the axis into global space through the frame's cached matrix and then
+    /// left-multiplies; because that matrix *is* this rotation, `R(M·w) * q` and `q * R(w)` are
+    /// the same rotation, so the local right-multiply below is the same operation without
+    /// materialising a matrix.
+    ///
+    /// Rotations below retail's threshold are dropped rather than normalised through a
+    /// near-zero magnitude.
+    pub fn rotate(&self, axis_angle: Vector3) -> Self {
+        if axis_angle.length_squared() < ROTATION_EPSILON * ROTATION_EPSILON {
+            return *self;
+        }
+        let Some(delta) = Quaternion::from_axis_angle(axis_angle, axis_angle.length()) else {
+            return *self;
+        };
+        Self {
+            translation: self.translation,
+            rotation: self.rotation.multiply(&delta),
+        }
+    }
+}
+
+/// Smallest rotation magnitude retail acts on; `Frame::grotate` ignores anything below it.
+pub const ROTATION_EPSILON: f32 = 0.000_2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, BinRead, BinWrite)]
 #[br(little)]
 #[bw(little)]
 pub struct Plane {
@@ -218,6 +342,56 @@ impl Sphere {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `subtract` must undo `combine` exactly, including for a rotating offset: it is what lets
+    /// reverse playback walk back out of an accumulated offset without drift.
+    #[test]
+    fn rigid_subtract_inverts_combine_under_rotation() {
+        let base = RigidTransform {
+            translation: Vector3::new(1.0, -2.0, 0.5),
+            rotation: Quaternion::from_heading(0.7),
+        };
+        let local = RigidTransform {
+            translation: Vector3::new(0.25, 0.5, -0.75),
+            rotation: Quaternion::from_heading(1.9),
+        };
+
+        let restored = base.combine(&local).subtract(&local);
+
+        assert!((restored.translation - base.translation).length() < 1e-5);
+        assert!((restored.rotation.w - base.rotation.w).abs() < 1e-5);
+        assert!((restored.rotation.z - base.rotation.z).abs() < 1e-5);
+    }
+
+    /// A local rotation must turn about the transform's own axis, so composing it is the same as
+    /// combining a pure rotation.
+    #[test]
+    fn rigid_rotate_is_a_local_composition() {
+        let base = RigidTransform {
+            translation: Vector3::new(3.0, 0.0, 0.0),
+            rotation: Quaternion::from_heading(0.4),
+        };
+        let quarter_turn = std::f32::consts::FRAC_PI_2;
+
+        let rotated = base.rotate(Vector3::new(0.0, 0.0, quarter_turn));
+        let combined = base.combine(&RigidTransform {
+            translation: Vector3::zero(),
+            rotation: Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), quarter_turn)
+                .expect("a unit axis and finite angle build a rotation"),
+        });
+
+        assert_eq!(rotated.translation, base.translation);
+        assert!((rotated.rotation.w - combined.rotation.w).abs() < 1e-5);
+        assert!((rotated.rotation.z - combined.rotation.z).abs() < 1e-5);
+    }
+
+    #[test]
+    fn rigid_rotate_ignores_rotations_below_the_retail_threshold() {
+        let base = RigidTransform::identity();
+        let below = ROTATION_EPSILON * 0.5;
+
+        assert_eq!(base.rotate(Vector3::new(0.0, 0.0, below)), base);
+    }
 
     #[test]
     fn test_heading_roundtrip() {

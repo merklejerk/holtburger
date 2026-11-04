@@ -3,8 +3,12 @@ use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::movement::MotionStance;
 use std::time::Duration;
 
-pub(crate) fn planar_velocity_for_heading(heading: f32, speed: f32) -> Vector3 {
-    Vector3::new(-heading.cos() * speed, heading.sin() * speed, 0.0)
+/// Core-owned simulation choice selected explicitly at client composition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ClientMovementPolicy {
+    #[default]
+    Physical,
+    Navigation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -53,12 +57,18 @@ pub struct AutonomousDriveIntent {
     pub force_grounded: bool,
 }
 
+/// Signed character motion along the facing axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Locomotion {
+pub enum LongitudinalMotion {
     Forward,
-    Backstep,
-    StrafeLeft,
-    StrafeRight,
+    Backward,
+}
+
+/// Signed character motion perpendicular to the facing axis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LateralMotion {
+    Left,
+    Right,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,97 +77,162 @@ pub enum Turn {
     Right,
 }
 
+/// What a controller is asking a character to do, in semantic axes rather than motion commands.
+///
+/// Named for the drive it is, not the state it is not. This was `MotionState` until the
+/// vocabulary sweep, which collided with `holtburger_world::motion::MotionState` — retail's
+/// actual motion-table state machine (`style`, `substate`, modifiers). That type models the
+/// retail motion-table state machine; this one names controller intent.
+///
+/// Deliberately *not* merged into `holtburger_world::motion::MotionOrder`, despite both
+/// carrying four locomotion axes. An order names concrete motion-table commands and speed
+/// multipliers; this names intent with no motion-table knowledge at all. Collapsing them would
+/// push table vocabulary into the controller layer, and the mapping between them is exactly
+/// what the resolvers exist to perform.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MotionState {
+pub struct CharacterDrive {
     pub gait: Gait,
-    pub locomotion: Option<Locomotion>,
+    /// Active forward/backward motion, independent from sidestepping.
+    pub longitudinal: Option<LongitudinalMotion>,
+    /// Active sidestep motion, independent from forward/backward motion.
+    pub lateral: Option<LateralMotion>,
     pub turning: Option<Turn>,
-    pub turn_speed: Option<f32>,
+    /// Explicit animation-rate scalar for turn motion; gait supplies retail's default when absent.
+    pub turn_rate_scalar: Option<f32>,
 }
 
-impl Default for MotionState {
+impl Default for CharacterDrive {
     fn default() -> Self {
         Self {
             gait: Gait::Walk,
-            locomotion: None,
+            longitudinal: None,
+            lateral: None,
             turning: None,
-            turn_speed: None,
+            turn_rate_scalar: None,
         }
     }
 }
 
-impl MotionState {
-    pub fn builder() -> MotionStateBuilder {
-        MotionStateBuilder::default()
+impl CharacterDrive {
+    pub fn builder() -> CharacterDriveBuilder {
+        CharacterDriveBuilder::default()
+    }
+
+    /// Returns whether any translation or turn command is active.
+    pub fn is_stationary(self) -> bool {
+        self.longitudinal.is_none() && self.lateral.is_none() && self.turning.is_none()
+    }
+
+    /// Removes translation while retaining gait and facing control.
+    pub fn without_translation(self) -> Self {
+        Self {
+            longitudinal: None,
+            lateral: None,
+            ..self
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct MotionStateBuilder {
-    state: MotionState,
+pub struct CharacterDriveBuilder {
+    drive: CharacterDrive,
 }
 
-impl MotionStateBuilder {
+impl CharacterDriveBuilder {
     pub fn walk(mut self) -> Self {
-        self.state.gait = Gait::Walk;
+        self.drive.gait = Gait::Walk;
         self
     }
 
     pub fn run(mut self) -> Self {
-        self.state.gait = Gait::Run;
+        self.drive.gait = Gait::Run;
         self
     }
 
     pub fn forward(mut self) -> Self {
-        self.state.locomotion = Some(Locomotion::Forward);
+        self.drive.longitudinal = Some(LongitudinalMotion::Forward);
         self
     }
 
     pub fn backstep(mut self) -> Self {
-        self.state.locomotion = Some(Locomotion::Backstep);
+        self.drive.longitudinal = Some(LongitudinalMotion::Backward);
         self
     }
 
     pub fn strafe_left(mut self) -> Self {
-        self.state.locomotion = Some(Locomotion::StrafeLeft);
+        self.drive.lateral = Some(LateralMotion::Left);
         self
     }
 
     pub fn strafe_right(mut self) -> Self {
-        self.state.locomotion = Some(Locomotion::StrafeRight);
+        self.drive.lateral = Some(LateralMotion::Right);
         self
     }
 
     pub fn turn_left(mut self) -> Self {
-        self.state.turning = Some(Turn::Left);
+        self.drive.turning = Some(Turn::Left);
         self
     }
 
     pub fn turn_right(mut self) -> Self {
-        self.state.turning = Some(Turn::Right);
+        self.drive.turning = Some(Turn::Right);
         self
     }
 
-    pub fn with_turn_speed(mut self, turn_speed: f32) -> Self {
-        self.state.turn_speed = Some(turn_speed);
+    pub fn with_turn_rate_scalar(mut self, turn_rate_scalar: f32) -> Self {
+        self.drive.turn_rate_scalar = Some(turn_rate_scalar);
         self
     }
 
-    pub fn build(self) -> MotionState {
-        self.state
+    pub fn build(self) -> CharacterDrive {
+        self.drive
+    }
+}
+
+/// Ordered commands from the frontend's client-directed movement controller.
+/// Acquisition is explicit; later updates and cleanup only apply while that source owns control.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClientDirectedCommand {
+    /// Acquire and begin displacement immediately.
+    Acquire(AutonomousDriveIntent),
+    /// Acquire with an initial facing correction before the first displacement update.
+    AcquireFacing { heading: f32 },
+    /// Supply displacement for one simulation tick without reacquiring control.
+    Update(AutonomousDriveIntent),
+    /// Stop displacement at the committed position and retain controller ownership.
+    Settle,
+    /// Finish the controller; cannot stop a different movement source.
+    Release,
+}
+
+impl ClientDirectedCommand {
+    /// Whether this command installs a new client-directed movement owner.
+    pub const fn acquires_control(self) -> bool {
+        match self {
+            Self::Acquire(_) | Self::AcquireFacing { .. } => true,
+            Self::Update(_) | Self::Settle | Self::Release => false,
+        }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PlayerDriveIntent {
-    ManualHeld(MotionState),
+    /// Explicitly acquires manual control with the supplied held drive.
+    ManualHeld(CharacterDrive),
+    /// Updates held input without taking control from a server directive or another controller.
+    SynchronizeHeld(CharacterDrive),
+    /// Releases manual control only while that source still owns movement.
+    ReleaseManual,
     ManualPulse {
-        state: MotionState,
+        state: CharacterDrive,
         duration: Duration,
     },
-    Autonomous(AutonomousDriveIntent),
-    ArriveAtPose {
-        pose: WorldPosition,
+    /// Scoped lifecycle of client-generated steering.
+    ClientDirected(ClientDirectedCommand),
+    /// Add a signed yaw displacement at the movement authority's current facing.
+    RotateFacing {
+        /// Accumulated radians; positive follows increasing clockwise AC heading.
+        delta_radians: f32,
     },
     SnapFacing {
         heading: f32,
@@ -165,21 +240,39 @@ pub enum PlayerDriveIntent {
     Stop,
 }
 
+impl PlayerDriveIntent {
+    /// A fresh movement owner supersedes both retained authored playback and queued posture work.
+    /// Passive reconciliation/releases do not acquire control, even if they carry nonzero axes.
+    pub fn supersedes_local_motion(self) -> bool {
+        match self {
+            Self::ManualHeld(_)
+            | Self::ManualPulse { .. }
+            | Self::Stop
+            | Self::SnapFacing { .. }
+            | Self::RotateFacing { .. } => true,
+            Self::ClientDirected(command) => command.acquires_control(),
+            Self::SynchronizeHeld(_) | Self::ReleaseManual => false,
+        }
+    }
+
+    /// Whether this intent takes manual movement authority from an active combat engagement.
+    pub fn interrupts_combat(self) -> bool {
+        match self {
+            Self::ManualHeld(state) | Self::ManualPulse { state, .. } => !state.is_stationary(),
+            Self::SnapFacing { .. } | Self::RotateFacing { .. } => true,
+            Self::SynchronizeHeld(_)
+            | Self::ReleaseManual
+            | Self::ClientDirected(_)
+            | Self::Stop => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{Guid, Quaternion};
-
-    #[test]
-    fn planar_velocity_matches_ac_heading_convention() {
-        let west_velocity = planar_velocity_for_heading(0.0, 2.0);
-        let north_velocity = planar_velocity_for_heading(90.0f32.to_radians(), 2.0);
-
-        assert_eq!(west_velocity, Vector3::new(-2.0, 0.0, 0.0));
-        assert!(north_velocity.x.abs() < 1e-5);
-        assert!((north_velocity.y - 2.0).abs() < 1e-5);
-    }
 
     #[test]
     fn metadata_can_override_motion_style_without_contact() {
@@ -203,42 +296,49 @@ mod tests {
 
     #[test]
     fn motion_state_builder_builds_resolved_motion_state() {
-        let state = MotionState::builder()
+        let state = CharacterDrive::builder()
             .run()
             .forward()
             .turn_left()
-            .with_turn_speed(1.25)
+            .with_turn_rate_scalar(1.25)
             .build();
 
         assert_eq!(state.gait, Gait::Run);
-        assert_eq!(state.locomotion, Some(Locomotion::Forward));
+        assert_eq!(state.longitudinal, Some(LongitudinalMotion::Forward));
+        assert_eq!(state.lateral, None);
         assert_eq!(state.turning, Some(Turn::Left));
-        assert_eq!(state.turn_speed, Some(1.25));
+        assert_eq!(state.turn_rate_scalar, Some(1.25));
     }
 
     #[test]
     fn motion_state_defaults_to_walk_with_no_axes() {
-        let state = MotionState::default();
+        let state = CharacterDrive::default();
 
         assert_eq!(state.gait, Gait::Walk);
-        assert_eq!(state.locomotion, None);
+        assert_eq!(state.longitudinal, None);
+        assert_eq!(state.lateral, None);
         assert_eq!(state.turning, None);
-        assert_eq!(state.turn_speed, None);
+        assert_eq!(state.turn_rate_scalar, None);
     }
 
     #[test]
     fn manual_held_intent_preserves_resolved_state() {
         let intent = PlayerDriveIntent::ManualHeld(
-            MotionState::builder().run().forward().turn_right().build(),
+            CharacterDrive::builder()
+                .run()
+                .forward()
+                .turn_right()
+                .build(),
         );
 
         assert_eq!(
             intent,
-            PlayerDriveIntent::ManualHeld(MotionState {
+            PlayerDriveIntent::ManualHeld(CharacterDrive {
                 gait: Gait::Run,
-                locomotion: Some(Locomotion::Forward),
+                longitudinal: Some(LongitudinalMotion::Forward),
+                lateral: None,
                 turning: Some(Turn::Right),
-                turn_speed: None,
+                turn_rate_scalar: None,
             })
         );
     }
@@ -246,18 +346,19 @@ mod tests {
     #[test]
     fn manual_pulse_intent_preserves_duration_and_state() {
         let intent = PlayerDriveIntent::ManualPulse {
-            state: MotionState::builder().walk().forward().build(),
+            state: CharacterDrive::builder().walk().forward().build(),
             duration: Duration::from_millis(120),
         };
 
         assert_eq!(
             intent,
             PlayerDriveIntent::ManualPulse {
-                state: MotionState {
+                state: CharacterDrive {
                     gait: Gait::Walk,
-                    locomotion: Some(Locomotion::Forward),
+                    longitudinal: Some(LongitudinalMotion::Forward),
+                    lateral: None,
                     turning: None,
-                    turn_speed: None,
+                    turn_rate_scalar: None,
                 },
                 duration: Duration::from_millis(120),
             }
@@ -276,14 +377,32 @@ mod tests {
         assert_ne!(
             PlayerDriveIntent::Stop,
             PlayerDriveIntent::ManualPulse {
-                state: MotionState::builder().walk().forward().build(),
+                state: CharacterDrive::builder().walk().forward().build(),
                 duration: Duration::from_millis(120),
             }
         );
         assert_ne!(
             PlayerDriveIntent::Stop,
-            PlayerDriveIntent::ManualHeld(MotionState::builder().walk().forward().build())
+            PlayerDriveIntent::ManualHeld(CharacterDrive::builder().walk().forward().build())
         );
+    }
+
+    #[test]
+    fn only_manual_acquisition_interrupts_combat() {
+        let moving = CharacterDrive::builder().run().forward().build();
+        assert!(PlayerDriveIntent::ManualHeld(moving).interrupts_combat());
+        assert!(
+            PlayerDriveIntent::ManualPulse {
+                state: moving,
+                duration: Duration::from_millis(120),
+            }
+            .interrupts_combat()
+        );
+        assert!(PlayerDriveIntent::SnapFacing { heading: 1.0 }.interrupts_combat());
+        assert!(!PlayerDriveIntent::ManualHeld(CharacterDrive::default()).interrupts_combat());
+        assert!(!PlayerDriveIntent::SynchronizeHeld(moving).interrupts_combat());
+        assert!(!PlayerDriveIntent::ReleaseManual.interrupts_combat());
+        assert!(!PlayerDriveIntent::Stop.interrupts_combat());
     }
 
     #[test]
@@ -312,27 +431,5 @@ mod tests {
         );
         assert_eq!(intent.gait, Gait::Run);
         assert!(intent.force_grounded);
-    }
-
-    #[test]
-    fn player_drive_intent_can_wrap_autonomous_drive() {
-        let intent = PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
-            desired_world_delta: Vector3::new(0.0, 1.0, 0.0),
-            desired_heading: None,
-            target_hint: None,
-            gait: Gait::Walk,
-            force_grounded: false,
-        });
-
-        assert!(matches!(
-            intent,
-            PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
-                desired_world_delta,
-                desired_heading: None,
-                target_hint: None,
-                gait: Gait::Walk,
-                force_grounded: false,
-            }) if desired_world_delta == Vector3::new(0.0, 1.0, 0.0)
-        ));
     }
 }

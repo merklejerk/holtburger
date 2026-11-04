@@ -244,7 +244,10 @@ impl GameState {
                 commands: vec![ClientCommand::Talk(message)],
             }),
             ScriptIntent::Tell { target, message } => Ok(AppAction::SendCommands {
-                commands: vec![ClientCommand::Tell { target, message }],
+                commands: vec![ClientCommand::Tell {
+                    target: holtburger_core::client::types::ChatTellTarget::Player { name: target },
+                    message,
+                }],
             }),
             ScriptIntent::Use { guid } => Ok(AppAction::Use { guid }),
             ScriptIntent::Emote { message } => Ok(AppAction::Emote { message }),
@@ -302,9 +305,12 @@ impl GameState {
             }),
             ScriptIntent::Unequip { guid } => Ok(AppAction::Unequip { guid }),
             ScriptIntent::RespondToConfirmation { accepted } => {
-                if view.active_confirmation.is_some() {
+                if let Some(confirmation) = &view.active_confirmation {
                     return Ok(AppAction::SendCommands {
-                        commands: vec![ClientCommand::RespondToConfirmation { accepted }],
+                        commands: vec![ClientCommand::RespondToConfirmation {
+                            request_id: confirmation.request_id,
+                            accepted,
+                        }],
                     });
                 }
 

@@ -1,0 +1,40 @@
+[package]
+name = "holtburger-debug-harness"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+holtburger-common.workspace = true
+holtburger-content.workspace = true
+holtburger-core.workspace = true
+holtburger-dat.workspace = true
+holtburger-world.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+env_logger.workspace = true
+log.workspace = true
+hex.workspace = true
+holtburger-protocol.workspace = true
+holtburger-weenie-catalog.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rmp-serde.workspace = true
+tempfile = { workspace = true, optional = true }
+
+[[bin]]
+name = "contact_collection_benchmark"
+path = "src/bin/contact_collection_benchmark.rs"
+required-features = ["physics-profiling"]
+
+[features]
+physics-profiling = ["holtburger-world/physics-profiling"]
+runtime-fixture = ["holtburger-core/runtime-fixture", "dep:tempfile"]
+
+[[bin]]
+name = "runtime_scene_fixture"
+path = "src/bin/runtime_scene_fixture.rs"
+required-features = ["runtime-fixture"]

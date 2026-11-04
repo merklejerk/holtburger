@@ -1,0 +1,1800 @@
+//! Reconstructible semantic entity publication, separate from renderer motion delivery.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use holtburger_common::{Guid, properties::ObjectDescriptionFlag};
+use holtburger_protocol::messages::{GameAction, IdentifyObjectActionData};
+use holtburger_world::crafting::salvage::SalvageContext;
+use holtburger_world::{
+    WorldEvent, WorldState,
+    entity_facts::{ClientEntityFacts, EntityStorageLocation},
+    projectile_supply::ProjectileSupply,
+    state::{ScenePlacementError, WorldContainerState},
+};
+use serde::{Deserialize, Serialize};
+
+/// Complete retained semantic baseline used by initial connection and recovery.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientEntitySnapshot {
+    /// World-resolved equipped projectile supply, independent of attack control state.
+    pub projectile_supply: ProjectileSupply,
+    /// Shared cold salvage yield profile.
+    pub salvage: SalvageContext,
+    /// Confirmed access published together with its descendant records.
+    pub world_container: WorldContainerState,
+    /// GUID-ordered records, including pending owned and accessible external identities.
+    pub entities: Vec<ClientEntityFacts>,
+}
+
+impl ClientEntitySnapshot {
+    /// Use exactly the same world query as incremental record publication.
+    pub fn from_world(world: &WorldState) -> Result<Self, ScenePlacementError> {
+        Self::from_world_with_opened(world, &BTreeSet::new())
+    }
+
+    /// Apply client-session corpse history to the reconstructible world baseline.
+    pub fn from_world_with_opened(
+        world: &WorldState,
+        opened_corpses: &BTreeSet<Guid>,
+    ) -> Result<Self, ScenePlacementError> {
+        let mut entities = Vec::new();
+        for guid in world.client_entity_guids() {
+            if let Some(record) = session_entity_facts(world, guid, opened_corpses)? {
+                entities.push(record);
+            }
+        }
+        Ok(Self {
+            projectile_supply: world.projectile_supply(),
+            salvage: world.salvage_context(),
+            world_container: world.world_container(),
+            entities,
+        })
+    }
+}
+
+/// Shared snapshot/delta projection keeps session history identical at both publication boundaries.
+fn session_entity_facts(
+    world: &WorldState,
+    guid: Guid,
+    opened_corpses: &BTreeSet<Guid>,
+) -> Result<Option<ClientEntityFacts>, ScenePlacementError> {
+    let mut record = world.client_entity_facts(guid)?;
+    if let Some(record) = &mut record
+        && record.corpse.is_some()
+        && opened_corpses.contains(&guid)
+    {
+        record.corpse = Some(holtburger_world::entity_facts::CorpseState::Opened);
+    }
+    Ok(record)
+}
+
+/// One change to the semantic mirror, never a transaction across separate server messages.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientEntityDelta {
+    /// Replacement supply when changed; None keeps the previously accepted supply.
+    pub projectile_supply: Option<ProjectileSupply>,
+    /// Changed yield profile; None preserves the previous value.
+    pub salvage: Option<SalvageContext>,
+    /// Replacement access when changed; None keeps the previously accepted level.
+    pub world_container: Option<WorldContainerState>,
+    /// Complete replacement records, applied together before observers run.
+    pub upserts: Vec<ClientEntityFacts>,
+    /// Accepted identities leaving the retained semantic domain, not renderer removals.
+    pub removed: Vec<Guid>,
+}
+
+/// One collection feeds both semantic publication and complete player-visual invalidation.
+struct CollectedEntityFacts {
+    delta: ClientEntityDelta,
+    /// Storage is drained once here; appearance capture observes the same completed mutation.
+    storage_changed: bool,
+}
+
+/// Last published facts plus invalidation; only core publication mutates this cache.
+#[derive(Default)]
+pub(super) struct EntityFactsPublication {
+    /// Last supply published alongside the entity domain.
+    projectile_supply: ProjectileSupply,
+    /// Last cold salvage inputs published with the entity domain.
+    salvage: SalvageContext,
+    records: BTreeMap<Guid, ClientEntityFacts>,
+    dirty: BTreeSet<Guid>,
+    owner: Option<Guid>,
+    /// Last trade publication used to invalidate preview-only semantic records.
+    trade_revision: Option<u32>,
+    /// Vendor replacement/retirement invalidates sale verdicts for every owned source.
+    vendor: Option<Guid>,
+    /// Access changes invalidate eligibility even when no item changes parent.
+    container: WorldContainerState,
+}
+
+impl EntityFactsPublication {
+    pub(super) fn invalidate(&mut self, guid: Guid) {
+        self.dirty.insert(guid);
+    }
+
+    pub(super) fn observe(&mut self, event: &WorldEvent) {
+        if matches!(event, WorldEvent::VendorApproached(_)) {
+            // Refreshed terms can change acceptance while retaining the same vendor GUID.
+            self.dirty.extend(
+                self.records
+                    .values()
+                    .filter(|record| record.owned_by_player)
+                    .map(|record| record.guid),
+            );
+        }
+        // Strength and enchantments change burden without changing an owned item.
+        // Before the first collection, owner establishment already prepares the player.
+        if matches!(
+            event,
+            WorldEvent::AttributeUpdated(_) | WorldEvent::PlayerEnchantmentsUpdated { .. }
+        ) && let Some(owner) = self.owner
+        {
+            self.dirty.insert(owner);
+        }
+        let guid = match event {
+            WorldEvent::EntitySpawned(entity)
+            | WorldEvent::EntityReplaced(entity)
+            | WorldEvent::EntityIdentified(entity) => Some(entity.guid),
+            WorldEvent::PlayerInfo(data) => Some(data.entity.guid),
+            WorldEvent::PropertiesUpdated { guid, .. }
+            | WorldEvent::EntityStateUpdated { guid, .. }
+            | WorldEvent::EntityScenePlacementChanged { guid, .. }
+            | WorldEvent::EntityDespawned { guid, .. } => Some(*guid),
+            _ => None,
+        };
+        if let Some(guid) = guid {
+            self.dirty.insert(guid);
+        }
+    }
+
+    #[cfg(test)]
+    fn collect(
+        &mut self,
+        world: &mut WorldState,
+    ) -> Result<ClientEntityDelta, ScenePlacementError> {
+        self.collect_with_opened(world, &BTreeSet::new())
+            .map(|collected| collected.delta)
+    }
+
+    fn collect_with_opened(
+        &mut self,
+        world: &mut WorldState,
+        opened_corpses: &BTreeSet<Guid>,
+    ) -> Result<CollectedEntityFacts, ScenePlacementError> {
+        let revision = world.trade.as_ref().map(|trade| trade.revision);
+        let vendor = world.vendor.as_ref().map(|vendor| vendor.vendor_guid);
+        if self.trade_revision != revision || self.vendor != vendor {
+            self.dirty.extend(self.records.keys().copied());
+            self.dirty.extend(world.client_entity_guids());
+            self.trade_revision = revision;
+            self.vendor = vendor;
+        }
+        let storage_changes = world.take_storage_changes();
+        let projectile_supply = world.projectile_supply();
+        let salvage = world.salvage_context();
+        let mut delta = ClientEntityDelta {
+            salvage: (salvage != self.salvage).then_some(salvage),
+            projectile_supply: (projectile_supply != self.projectile_supply)
+                .then_some(projectile_supply),
+            ..Default::default()
+        };
+        if self.container != world.world_container() {
+            self.dirty.extend(self.records.keys().copied());
+            self.dirty.extend(world.client_entity_guids());
+            delta.world_container = Some(world.world_container());
+        }
+        if self.owner != Some(world.player.guid) {
+            self.dirty.extend(self.records.keys().copied());
+            self.dirty.extend(world.client_entity_guids());
+            self.owner = Some(world.player.guid);
+        } else if !storage_changes.is_empty() {
+            // Ancestor moves affect ownership/access even when descendants did not move.
+            self.dirty.extend(
+                self.records
+                    .values()
+                    .filter(|record| {
+                        record.owned_by_player
+                            || matches!(record.location, EntityStorageLocation::Contained { .. })
+                    })
+                    .map(|record| record.guid),
+            );
+            self.dirty
+                .extend(holtburger_world::context::WorldContext::iter_inventory(
+                    world,
+                ));
+            self.dirty.extend(world.world_container_contents());
+        }
+        let storage_changed = !storage_changes.is_empty();
+        self.dirty.extend(storage_changes);
+        // Every player threat relationship depends on our own current PvP flags. Refresh peers
+        // when the local record changes, including replacement descriptions and private updates.
+        if self.dirty.contains(&world.player.guid) {
+            self.dirty.extend(
+                world
+                    .iter_visible_entities()
+                    .filter(|entity| entity.flags.contains(ObjectDescriptionFlag::PLAYER))
+                    .map(|entity| entity.guid),
+            );
+        }
+        // Prepare before mutating the published cache so invalid world graphs fail coherently.
+        let mut prepared = Vec::new();
+        for guid in &self.dirty {
+            prepared.push((*guid, session_entity_facts(world, *guid, opened_corpses)?));
+        }
+        // Reuse projected ownership to invalidate burden, including items just transferred out.
+        // The player may already be prepared through an ordinary property/storage update.
+        if !self.dirty.contains(&world.player.guid)
+            && prepared.iter().any(|(guid, record)| {
+                record.as_ref().is_some_and(|record| record.owned_by_player)
+                    || self
+                        .records
+                        .get(guid)
+                        .is_some_and(|record| record.owned_by_player)
+            })
+        {
+            prepared.push((
+                world.player.guid,
+                session_entity_facts(world, world.player.guid, opened_corpses)?,
+            ));
+        }
+        for (guid, record) in prepared {
+            match record {
+                Some(record) if self.records.get(&guid) != Some(&record) => {
+                    self.records.insert(guid, record.clone());
+                    delta.upserts.push(record);
+                }
+                None if self.records.remove(&guid).is_some() => delta.removed.push(guid),
+                _ => {}
+            }
+        }
+        self.dirty.clear();
+        self.container = world.world_container();
+        self.projectile_supply = projectile_supply;
+        self.salvage = salvage;
+        Ok(CollectedEntityFacts {
+            delta,
+            storage_changed,
+        })
+    }
+}
+
+impl super::ClientRuntime {
+    /// Publish completed semantic changes without coupling them to dynamic rendering events.
+    pub(super) fn publish_entity_facts(&mut self) {
+        let collected = self
+            .entity_facts
+            .collect_with_opened(&mut self.world, self.opened_corpses.ids())
+            .expect("accepted world relationships must project into coherent entity facts");
+        if collected.storage_changed {
+            self.player_visual.invalidate();
+        }
+        let delta = collected.delta;
+        if delta.salvage.is_some()
+            || delta.projectile_supply.is_some()
+            || delta.world_container.is_some()
+            || !delta.upserts.is_empty()
+            || !delta.removed.is_empty()
+        {
+            // Storage-only messages can change foci readiness without a separate world event.
+            self.refresh_spell_inspection_context();
+            let _ = self
+                .client_view_event_tx
+                .send(super::ClientViewEvent::EntityFactsChanged(delta));
+        }
+        let active = matches!(
+            self.state,
+            super::ClientState::EnteringWorld | super::ClientState::InWorld
+        );
+        if self.player_visual.collect(&self.world, active) {
+            let _ =
+                self.client_view_event_tx
+                    .send(super::ClientViewEvent::PlayerVisualCaptureChanged(
+                        self.player_visual.snapshot(),
+                    ));
+        }
+    }
+
+    /// Appraise only an unresolved equipped source, once per continuous pending source.
+    /// Successful appraisal feeds ordinary entity publication; no frontend panel must open.
+    pub(super) async fn hydrate_projectile_supply(&mut self) -> anyhow::Result<()> {
+        let requested = match self.entity_facts.projectile_supply {
+            ProjectileSupply::Pending { appraisal } => appraisal,
+            _ => None,
+        };
+        if requested != self.projectile_appraisal {
+            if let Some(guid) = requested {
+                self.send_game_action(GameAction::IdentifyObject(Box::new(
+                    IdentifyObjectActionData { guid },
+                )))
+                .await?;
+            }
+            // Failed/rejected appraisal remains unknown, without retrying every tick.
+            self.projectile_appraisal = requested;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::{
+        properties::{EquipMask, InventoryEntryKind, PropertyInt},
+        stats::AttributeType,
+    };
+    use holtburger_protocol::messages::{
+        GameEvent, GameEventMessage, GameMessage, InventoryPutObjInContainerEventData,
+        InventoryRemoveObjectData, ObjectDescriptionData, PlayerDescriptionEventData,
+        PrivateUpdatePropertyIntData, PublicUpdatePropertyIntData, ViewContentsEventData,
+        WieldObjectEventData,
+    };
+    use holtburger_world::entity_facts::EntityDescription;
+    use holtburger_world::stats::Attribute;
+
+    const PLAYER: Guid = Guid(1);
+    const PACK: Guid = Guid(2);
+    const ITEM: Guid = Guid(3);
+
+    #[test]
+    fn projectile_state_changes_reconstruct_the_same_targeting_as_snapshots() {
+        use holtburger_common::properties::{
+            ItemType, PhysicsState, WorldObjectPropertyAccessorsMut,
+        };
+        use holtburger_protocol::messages::SetStateData;
+        use holtburger_world::{entity::Entity, entity_facts::EntityTargetingCategory};
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut entity = Entity::new(ITEM, "Thrown weapon".into(), Default::default());
+        entity.position.landblock_id = Guid(0xda55_0100);
+        entity.set_int_prop(PropertyInt::ItemType, ItemType::MELEE_WEAPON.bits() as i32);
+        world.add_entity(entity);
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(
+            mirror[&ITEM].targeting,
+            EntityTargetingCategory::NonCreature
+        );
+
+        for (sequence, physics_state, expected) in [
+            (
+                1,
+                PhysicsState::MISSILE,
+                EntityTargetingCategory::Projectile,
+            ),
+            (
+                2,
+                PhysicsState::empty(),
+                EntityTargetingCategory::NonCreature,
+            ),
+        ] {
+            for event in world.handle_message(&GameMessage::SetState(Box::new(SetStateData {
+                guid: ITEM,
+                physics_state,
+                instance_sequence: 0,
+                state_sequence: sequence,
+            }))) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert_eq!(mirror[&ITEM].targeting, expected);
+        }
+    }
+
+    #[test]
+    fn vendor_terms_republish_owned_sale_verdicts_without_item_updates() {
+        use holtburger_common::properties::{ItemType, WorldObjectPropertyAccessorsMut};
+        use holtburger_world::{
+            entity::Entity,
+            vendor::{VendorState, VendorValueLimits},
+        };
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut item = Entity::new(ITEM, "Food".into(), Default::default());
+        item.set_int_prop(PropertyInt::ItemType, ItemType::FOOD.bits() as i32);
+        item.set_int_prop(PropertyInt::Value, 10);
+        world.add_entity(item);
+        world.handle_message(&place(ITEM, PLAYER, InventoryEntryKind::Item));
+        let mut publication = EntityFactsPublication::default();
+        publication.collect(&mut world).unwrap();
+        let mut vendor = VendorState {
+            vendor_guid: Guid(100),
+            items: Vec::new(),
+            buy_multiplier: 1.0,
+            sell_multiplier: 1.0,
+            merchandise_item_types: ItemType::FOOD.bits(),
+            value_limits: VendorValueLimits::default(),
+            alternate_currency_wcid: 0,
+            alternate_currency_amount: 0,
+            alternate_currency_name: String::new(),
+        };
+        for (vendor_guid, item_type, accepted) in [
+            (Guid(100), ItemType::FOOD, true),
+            (Guid(100), ItemType::ARMOR, false),
+            (Guid(101), ItemType::FOOD, true),
+        ] {
+            vendor.vendor_guid = vendor_guid;
+            vendor.merchandise_item_types = item_type.bits();
+            world.vendor = Some(vendor.clone());
+            publication.observe(&WorldEvent::VendorApproached(vendor.clone()));
+            let delta = publication.collect(&mut world).unwrap();
+            let verdict = delta
+                .upserts
+                .iter()
+                .find(|record| record.guid == ITEM)
+                .unwrap()
+                .vendor_sale
+                .as_ref()
+                .unwrap();
+            assert_eq!(verdict.vendor, vendor_guid);
+            assert_eq!(verdict.accepted, accepted);
+        }
+        world.vendor = None;
+        let delta = publication.collect(&mut world).unwrap();
+        assert!(
+            delta
+                .upserts
+                .iter()
+                .find(|record| record.guid == ITEM)
+                .unwrap()
+                .vendor_sale
+                .is_none()
+        );
+    }
+
+    fn event(event: GameEvent) -> GameMessage {
+        GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: PLAYER,
+            sequence: 0,
+            event,
+        }))
+    }
+
+    fn place(item: Guid, parent: Guid, kind: InventoryEntryKind) -> GameMessage {
+        event(GameEvent::InventoryPutObjInContainer(Box::new(
+            InventoryPutObjInContainerEventData {
+                item_guid: item,
+                container_guid: parent,
+                slot: 0,
+                container_type: kind,
+            },
+        )))
+    }
+
+    fn player_baseline() -> GameMessage {
+        event(GameEvent::PlayerDescription(Box::new(
+            PlayerDescriptionEventData {
+                guid: PLAYER,
+                sequence: 0,
+                name: "Player".into(),
+                wee_type: 1,
+                pos: None,
+                properties: Default::default(),
+                positions: Default::default(),
+                attributes: Default::default(),
+                skills: Default::default(),
+                enchantments: Vec::new(),
+                spells: Default::default(),
+                has_health: true,
+                options1: Default::default(),
+                options2: Default::default(),
+                shortcuts: Vec::new(),
+                hotbar_spells: Vec::new(),
+                desired_comps: Vec::new(),
+                spellbook_filters: 0,
+                gameplay_options: Vec::new(),
+                inventory: Vec::new(),
+                equipped_objects: Vec::new(),
+            },
+        )))
+    }
+
+    #[test]
+    fn login_descriptions_republish_threats_from_the_latest_private_pvp_status() {
+        use holtburger_common::properties::{ItemType, WorldObjectPropertyAccessorsMut};
+        use holtburger_world::entity::Entity;
+        let peer = Guid(7);
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        world.entities.get_mut(PLAYER).unwrap().flags = ObjectDescriptionFlag::PLAYER;
+        let mut other = Entity::new(peer, "Peer".into(), Default::default());
+        other.flags = ObjectDescriptionFlag::PLAYER | ObjectDescriptionFlag::PLAYER_KILLER;
+        other.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        world.entities.insert(other);
+        let mut publication = EntityFactsPublication::default();
+        publication.collect(&mut world).unwrap();
+        for (status, threat) in [(4, true), (2, false), (4, true)] {
+            let mut message = player_baseline();
+            let GameMessage::GameEvent(event) = &mut message else {
+                unreachable!()
+            };
+            let GameEvent::PlayerDescription(data) = &mut event.event else {
+                unreachable!()
+            };
+            data.properties
+                .set_int_prop(PropertyInt::PlayerKillerStatus, status);
+            for event in world.handle_message(&message) {
+                publication.observe(&event);
+            }
+            let delta = publication.collect(&mut world).unwrap();
+            assert_eq!(
+                delta
+                    .upserts
+                    .iter()
+                    .find(|record| record.guid == peer)
+                    .map(|record| record.player_threat),
+                Some(threat)
+            );
+            let snapshot = ClientEntitySnapshot::from_world(&world).unwrap();
+            assert_eq!(
+                snapshot
+                    .entities
+                    .iter()
+                    .find(|record| record.guid == peer)
+                    .unwrap()
+                    .player_threat,
+                threat
+            );
+        }
+    }
+
+    #[test]
+    fn pvp_changes_republish_peer_threats_when_either_player_changes_status() {
+        use holtburger_common::properties::{
+            ItemType, PropertyUpdate, WorldObjectPropertyAccessorsMut,
+        };
+        use holtburger_world::entity::Entity;
+        let peer = Guid(7);
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        world.entities.get_mut(PLAYER).unwrap().flags = ObjectDescriptionFlag::PLAYER;
+        let mut other = Entity::new(peer, "Peer".into(), Default::default());
+        other.flags = ObjectDescriptionFlag::PLAYER;
+        other.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        other.set_property(PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, 4));
+        world.entities.insert(other);
+        let mut publication = EntityFactsPublication::default();
+        let initial = publication.collect(&mut world).unwrap();
+        assert!(
+            !initial
+                .upserts
+                .iter()
+                .find(|record| record.guid == peer)
+                .unwrap()
+                .player_threat
+        );
+        // First change our private status, then change the remote public status, then restore it.
+        for (guid, status, expected) in [
+            (PLAYER, 4, true),
+            (peer, 0x40, false),
+            (peer, 4, true),
+            (PLAYER, 2, false),
+        ] {
+            let update = PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, status);
+            world
+                .entities
+                .get_mut(guid)
+                .unwrap()
+                .set_property(update.clone());
+            publication.observe(&WorldEvent::PropertiesUpdated {
+                guid,
+                updates: vec![update],
+            });
+            let delta = publication.collect(&mut world).unwrap();
+            assert_eq!(
+                delta
+                    .upserts
+                    .iter()
+                    .find(|record| record.guid == peer)
+                    .unwrap()
+                    .player_threat,
+                expected
+            );
+            assert_eq!(
+                publication.collect(&mut world).unwrap(),
+                ClientEntityDelta::default()
+            );
+        }
+    }
+
+    #[test]
+    fn salvage_context_changes_publish_without_republishing_candidates() {
+        use holtburger_common::properties::WorldObjectPropertyAccessorsMut;
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publication = EntityFactsPublication::default();
+        publication.collect(&mut world).unwrap();
+        assert_eq!(
+            publication.collect(&mut world).unwrap(),
+            ClientEntityDelta::default()
+        );
+        world
+            .entities
+            .get_mut(PLAYER)
+            .unwrap()
+            .set_int_prop(PropertyInt::AugmentationBonusSalvage, 2);
+        let delta = publication.collect(&mut world).unwrap();
+        assert_eq!(delta.salvage.unwrap().skills.augmentation_bonus_salvage, 2);
+        assert!(delta.upserts.is_empty());
+    }
+
+    #[test]
+    fn aetheria_activation_publishes_login_updates_and_resets() {
+        use holtburger_common::properties::{ItemType, WorldObjectPropertyAccessorsMut};
+        use holtburger_world::equipment::AetheriaActivation;
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        world
+            .entities
+            .get_mut(PLAYER)
+            .unwrap()
+            .set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        let activation = |description: &EntityDescription| match description {
+            EntityDescription::Known {
+                aetheria_activation,
+                ..
+            } => *aetheria_activation,
+            EntityDescription::Pending => panic!("player description must be known"),
+        };
+        let mut publication = EntityFactsPublication::default();
+        let initial = publication.collect(&mut world).unwrap();
+        assert_eq!(
+            activation(
+                &initial
+                    .upserts
+                    .iter()
+                    .find(|record| record.guid == PLAYER)
+                    .unwrap()
+                    .description
+            ),
+            None
+        );
+
+        let baseline = |flags: Option<i32>| {
+            let mut message = player_baseline();
+            let GameMessage::GameEvent(event) = &mut message else {
+                unreachable!()
+            };
+            let GameEvent::PlayerDescription(data) = &mut event.event else {
+                unreachable!()
+            };
+            data.properties
+                .set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+            if let Some(flags) = flags {
+                data.properties
+                    .set_int_prop(PropertyInt::AetheriaBitfield, flags);
+            }
+            message
+        };
+        // Omission means locked only after a complete login baseline. Each color is independent.
+        let states = [
+            (
+                baseline(None),
+                AetheriaActivation {
+                    blue: false,
+                    yellow: false,
+                    red: false,
+                },
+            ),
+            (
+                baseline(Some(1)),
+                AetheriaActivation {
+                    blue: true,
+                    yellow: false,
+                    red: false,
+                },
+            ),
+            (
+                GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                    sequence: 1,
+                    guid: Guid::NULL,
+                    property: PropertyInt::AetheriaBitfield as u32,
+                    value: 2,
+                })),
+                AetheriaActivation {
+                    blue: false,
+                    yellow: true,
+                    red: false,
+                },
+            ),
+            (
+                GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                    sequence: 2,
+                    guid: Guid::NULL,
+                    property: PropertyInt::AetheriaBitfield as u32,
+                    value: 4,
+                })),
+                AetheriaActivation {
+                    blue: false,
+                    yellow: false,
+                    red: true,
+                },
+            ),
+            (
+                baseline(Some(7)),
+                AetheriaActivation {
+                    blue: true,
+                    yellow: true,
+                    red: true,
+                },
+            ),
+            // Enlightenment uses an explicit zero private update.
+            (
+                GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                    sequence: 3,
+                    guid: Guid::NULL,
+                    property: PropertyInt::AetheriaBitfield as u32,
+                    value: 0,
+                })),
+                AetheriaActivation {
+                    blue: false,
+                    yellow: false,
+                    red: false,
+                },
+            ),
+        ];
+        for (message, expected) in states {
+            for event in world.handle_message(&message) {
+                publication.observe(&event);
+            }
+            let delta = publication.collect(&mut world).unwrap();
+            let record = delta
+                .upserts
+                .iter()
+                .find(|record| record.guid == PLAYER)
+                .expect("activation change must republish player facts");
+            assert_eq!(activation(&record.description), Some(expected));
+            assert_eq!(
+                activation(
+                    &ClientEntitySnapshot::from_world(&world)
+                        .unwrap()
+                        .entities
+                        .iter()
+                        .find(|record| record.guid == PLAYER)
+                        .unwrap()
+                        .description
+                ),
+                Some(expected)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn projectile_supply_hydrates_once_and_publishes_counts_with_equipment() {
+        use holtburger_common::properties::{CombatUse, ItemType};
+        use holtburger_protocol::messages::{
+            IdentifyObjectResponseEventData, inventory::types::SetStackSizeData,
+        };
+        let mut client =
+            super::super::builder::build_test_client(super::super::ClientState::InWorld);
+        client
+            .world
+            .seed_local_player_entity(PLAYER, "Player", Default::default());
+        let capture = tempfile::NamedTempFile::new().unwrap();
+        client
+            .session
+            .set_capture(capture.path().to_str().unwrap())
+            .unwrap();
+        let mut receiver = client.client_view_event_tx.subscribe();
+        let mut weapon = ObjectDescriptionData::with_guid(ITEM);
+        weapon.public_weenie_desc.name = Some("Throwing Axe".into());
+        weapon.public_weenie_desc.item_type = ItemType::MISSILE_WEAPON.bits();
+        weapon.public_weenie_desc.combat_use = Some(CombatUse::Missile as u32);
+        weapon.public_weenie_desc.wielder_id = Some(PLAYER);
+        weapon.public_weenie_desc.currently_wielded_location =
+            Some(EquipMask::MISSILE_WEAPON.bits());
+        weapon.public_weenie_desc.stack_size = Some(12);
+        for message in [
+            player_baseline(),
+            event(GameEvent::WieldObject(Box::new(WieldObjectEventData {
+                object_guid: ITEM,
+                equip_mask: EquipMask::MISSILE_WEAPON,
+            }))),
+            GameMessage::ObjectCreate(Box::new(weapon.clone())),
+        ] {
+            for change in client.world.handle_message(&message) {
+                client.handle_world_event(&change);
+            }
+        }
+        client.publish_entity_facts();
+        assert_eq!(
+            client.entity_facts.projectile_supply,
+            ProjectileSupply::Pending {
+                appraisal: Some(ITEM)
+            }
+        );
+        client.hydrate_projectile_supply().await.unwrap();
+        let sent = std::fs::metadata(capture.path()).unwrap().len();
+        assert!(sent > 0);
+        client.hydrate_projectile_supply().await.unwrap();
+        assert_eq!(std::fs::metadata(capture.path()).unwrap().len(), sent);
+
+        // Recreation while a request is outstanding must not strand the new instance.
+        for change in client
+            .world
+            .handle_message(&GameMessage::UpdateObject(Box::new(weapon)))
+        {
+            client.handle_world_event(&change);
+        }
+        client.hydrate_projectile_supply().await.unwrap();
+        assert!(std::fs::metadata(capture.path()).unwrap().len() > sent);
+
+        for (message, expected) in [
+            (
+                event(GameEvent::IdentifyObjectResponse(Box::new(
+                    IdentifyObjectResponseEventData {
+                        object_guid: ITEM,
+                        success: true,
+                        ..Default::default()
+                    },
+                ))),
+                ProjectileSupply::Finite { count: 12 },
+            ),
+            (
+                GameMessage::SetStackSize(Box::new(SetStackSizeData {
+                    sequence: 1,
+                    object_guid: ITEM,
+                    stack_size: 11,
+                    value: 0,
+                })),
+                ProjectileSupply::Finite { count: 11 },
+            ),
+            (
+                GameMessage::InventoryRemoveObject(Box::new(InventoryRemoveObjectData {
+                    object_guid: ITEM,
+                })),
+                ProjectileSupply::NotApplicable,
+            ),
+        ] {
+            while receiver.try_recv().is_ok() {}
+            for change in client.world.handle_message(&message) {
+                client.handle_world_event(&change);
+            }
+            client.publish_entity_facts();
+            let mut published = None;
+            while let Ok(event) = receiver.try_recv() {
+                if let super::super::ClientViewEvent::EntityFactsChanged(delta) = event
+                    && let Some(supply) = delta.projectile_supply
+                {
+                    published = Some(supply);
+                }
+            }
+            assert_eq!(published, Some(expected));
+            assert_eq!(
+                ClientEntitySnapshot::from_world(&client.world)
+                    .unwrap()
+                    .projectile_supply,
+                expected
+            );
+            assert_eq!(
+                client
+                    .entity_facts
+                    .collect(&mut client.world)
+                    .unwrap()
+                    .projectile_supply,
+                None,
+                "unchanged supply must not be repeated in later deltas"
+            );
+        }
+    }
+
+    #[test]
+    fn ancestor_roster_updates_admit_and_withdraw_pending_pack_contents() {
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let root = Guid(0x8000_0080);
+        let pack = Guid(0x8000_0081);
+        let item = Guid(0x8000_0082);
+        world.confirm_world_container(root);
+        world.handle_message(&place(item, pack, InventoryEntryKind::Item));
+        let mut publication = EntityFactsPublication::default();
+        publication.collect(&mut world).unwrap();
+        world.handle_message(&place(pack, root, InventoryEntryKind::Container));
+        let admitted = publication.collect(&mut world).unwrap();
+        assert!(admitted.upserts.iter().any(|entry| entry.guid == item));
+        world.handle_message(&event(GameEvent::ViewContents(Box::new(
+            ViewContentsEventData {
+                container: root,
+                items: Vec::new(),
+            },
+        ))));
+        let withdrawn = publication.collect(&mut world).unwrap();
+        assert!(withdrawn.removed.contains(&item));
+        assert!(withdrawn.removed.contains(&pack));
+    }
+
+    #[test]
+    fn access_transitions_publish_pending_contents_and_revoke_eligibility_without_moves() {
+        use holtburger_common::properties::ItemType;
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let root = Guid(0x8000_0070);
+        let item = Guid(0x8000_0071);
+        world.handle_message(&place(item, root, InventoryEntryKind::Item));
+        let mut publication = EntityFactsPublication::default();
+        publication.collect(&mut world).unwrap();
+        world.confirm_world_container(root);
+        let opened = publication.collect(&mut world).unwrap();
+        assert_eq!(
+            opened.world_container,
+            Some(WorldContainerState::Open { root })
+        );
+        assert_eq!(
+            ClientEntitySnapshot::from_world(&world)
+                .unwrap()
+                .world_container,
+            WorldContainerState::Open { root }
+        );
+        let pending = opened
+            .upserts
+            .iter()
+            .find(|entry| entry.guid == item)
+            .expect("pending external record");
+        assert!(!pending.can_pick_up);
+        let mut description = ObjectDescriptionData::with_guid(item);
+        description.public_weenie_desc.name = Some("Loot".into());
+        description.public_weenie_desc.item_type = ItemType::MISC.bits();
+        description.public_weenie_desc.container_id = Some(root);
+        for event in world.handle_message(&GameMessage::ObjectCreate(Box::new(description))) {
+            publication.observe(&event);
+        }
+        let hydrated = publication.collect(&mut world).unwrap();
+        assert!(
+            hydrated
+                .upserts
+                .iter()
+                .any(|entry| entry.guid == item && entry.can_pick_up)
+        );
+        world.close_world_container();
+        let closed = publication.collect(&mut world).unwrap();
+        assert_eq!(closed.world_container, Some(WorldContainerState::Closed));
+        assert!(closed.removed.contains(&item));
+    }
+
+    #[test]
+    fn pickup_affordance_republishes_property_and_storage_changes() {
+        use holtburger_common::{
+            ParentLocation, Placement,
+            properties::{ItemType, PropertyBool},
+        };
+        use holtburger_protocol::messages::{
+            ParentEventData, PositionPack, PublicUpdatePropertyBoolData, UpdatePositionData,
+        };
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let ground = Guid(0x8000_0042);
+        let mut entity =
+            holtburger_world::entity::Entity::new(ground, "Loose item".into(), Default::default());
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::FOOD.bits() as i32);
+        world.add_entity(entity);
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(mirror[&ground].can_pick_up);
+        for (sequence, stuck) in [(1, true), (2, false)] {
+            for event in world.handle_message(&GameMessage::PublicUpdatePropertyBool(Box::new(
+                PublicUpdatePropertyBoolData {
+                    sequence,
+                    guid: ground,
+                    property: PropertyBool::Stuck as u32,
+                    value: stuck,
+                },
+            ))) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert_eq!(mirror[&ground].can_pick_up, !stuck);
+        }
+        let position = world.entities.get(ground).expect("ground item").position;
+        for (message, expected) in [
+            (
+                GameMessage::ParentEvent(Box::new(ParentEventData {
+                    parent_guid: PLAYER,
+                    child_guid: ground,
+                    location: ParentLocation::RightHand as u32,
+                    placement: Placement::RightHandCombat as u32,
+                    parent_instance_sequence: 0,
+                    child_position_sequence: 1,
+                })),
+                false,
+            ),
+            (
+                GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                    guid: ground,
+                    pos: PositionPack {
+                        pos: position,
+                        position_sequence: 2,
+                        ..Default::default()
+                    },
+                })),
+                true,
+            ),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert_eq!(mirror[&ground].can_pick_up, expected);
+        }
+        for event in world.handle_message(&place(ground, PLAYER, InventoryEntryKind::Item)) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(mirror[&ground].owned_by_player);
+        assert!(!mirror[&ground].can_pick_up);
+    }
+
+    #[test]
+    fn give_recipient_fact_republishes_type_and_storage_changes() {
+        use holtburger_common::properties::{ItemType, PropertyInt};
+        use holtburger_protocol::messages::PublicUpdatePropertyIntData;
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let recipient = Guid(0x8000_0042);
+        let mut entity = holtburger_world::entity::Entity::new(
+            recipient,
+            "Recipient".into(),
+            Default::default(),
+        );
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        world.add_entity(entity);
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(mirror[&recipient].can_receive_give);
+        for (sequence, item_type, expected) in
+            [(1, ItemType::FOOD, false), (2, ItemType::CREATURE, true)]
+        {
+            for event in world.handle_message(&GameMessage::PublicUpdatePropertyInt(Box::new(
+                PublicUpdatePropertyIntData {
+                    sequence,
+                    guid: recipient,
+                    property: PropertyInt::ItemType as u32,
+                    value: item_type.bits() as i32,
+                },
+            ))) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert_eq!(mirror[&recipient].can_receive_give, expected);
+        }
+        for event in world.handle_message(&place(recipient, PLAYER, InventoryEntryKind::Item)) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(!mirror[&recipient].can_receive_give);
+    }
+
+    #[test]
+    fn built_in_spell_survives_creation_and_public_updates() {
+        use holtburger_common::properties::{ItemType, PropertyDataId};
+        use holtburger_protocol::messages::{
+            ObjectDescriptionData, PublicUpdatePropertyDataIdData,
+        };
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Caster".into());
+        description.public_weenie_desc.item_type = ItemType::CASTER.bits();
+        description.public_weenie_desc.spell = Some(Guid(42));
+        for (message, expected) in [
+            (GameMessage::ObjectCreate(Box::new(description)), Some(42)),
+            (
+                GameMessage::PublicUpdatePropertyDataId(Box::new(PublicUpdatePropertyDataIdData {
+                    sequence: 1,
+                    guid: ITEM,
+                    property: PropertyDataId::Spell as u32,
+                    value: Guid(43),
+                })),
+                Some(43),
+            ),
+            (
+                GameMessage::PublicUpdatePropertyDataId(Box::new(PublicUpdatePropertyDataIdData {
+                    sequence: 2,
+                    guid: ITEM,
+                    property: PropertyDataId::Spell as u32,
+                    value: Guid::NULL,
+                })),
+                None,
+            ),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let EntityDescription::Known { built_in_spell, .. } = mirror[&ITEM].description else {
+                panic!("Known caster required");
+            };
+            assert_eq!(built_in_spell, expected);
+        }
+    }
+
+    #[test]
+    fn item_use_capability_republishes_after_public_property_updates() {
+        use holtburger_common::properties::{ItemType, PropertyInt, Usable};
+        use holtburger_protocol::messages::{ObjectDescriptionData, PublicUpdatePropertyIntData};
+        use holtburger_world::item_use::ItemUseCapability;
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Tool".into());
+        description.public_weenie_desc.item_type = ItemType::MANA_STONE.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        for event in world.handle_message(&GameMessage::ObjectCreate(Box::new(description))) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        for (sequence, property, value, expected) in [
+            (
+                1,
+                PropertyInt::ItemUseable,
+                Usable::SOURCE_CONTAINED_TARGET_SELF_OR_CONTAINED.bits(),
+                ItemUseCapability::Unavailable,
+            ),
+            (
+                2,
+                PropertyInt::TargetType,
+                ItemType::ARMOR.bits(),
+                ItemUseCapability::Targeted,
+            ),
+            (
+                3,
+                PropertyInt::ItemUseable,
+                Usable::NO.bits(),
+                ItemUseCapability::Unsupported,
+            ),
+        ] {
+            for event in world.handle_message(&GameMessage::PublicUpdatePropertyInt(Box::new(
+                PublicUpdatePropertyIntData {
+                    sequence,
+                    guid: ITEM,
+                    property: property as u32,
+                    value: value as i32,
+                },
+            ))) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let EntityDescription::Known { use_capability, .. } = mirror[&ITEM].description else {
+                panic!("Known source required");
+            };
+            assert_eq!(use_capability, expected);
+        }
+    }
+
+    #[test]
+    fn consumable_charge_and_removal_reconstruct_from_protocol_publications() {
+        use holtburger_common::properties::{ItemType, PropertyInt};
+        use holtburger_protocol::messages::PublicUpdatePropertyIntData;
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Mana Stone".into());
+        description.public_weenie_desc.wcid = 42;
+        description.public_weenie_desc.item_type = ItemType::MANA_STONE.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        for event in world.handle_message(&GameMessage::ObjectCreate(Box::new(description))) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        for (sequence, effects, availability) in [(1, 1, "ready"), (2, 0, "exhausted")] {
+            for event in world.handle_message(&GameMessage::PublicUpdatePropertyInt(Box::new(
+                PublicUpdatePropertyIntData {
+                    sequence,
+                    guid: ITEM,
+                    property: PropertyInt::UiEffects as u32,
+                    value: effects,
+                },
+            ))) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let wire = serde_json::to_value(&mirror[&ITEM]).unwrap();
+            assert_eq!(
+                wire["description"]["consumable"],
+                serde_json::json!({
+                    "identity": {"wcid": 42, "category": "charged-mana-stone"},
+                    "availability": availability,
+                })
+            );
+        }
+        for event in world.handle_message(&GameMessage::InventoryRemoveObject(Box::new(
+            InventoryRemoveObjectData { object_guid: ITEM },
+        ))) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(!mirror.contains_key(&ITEM));
+    }
+
+    fn assert_reconstructed(
+        world: &mut WorldState,
+        publisher: &mut EntityFactsPublication,
+        mirror: &mut BTreeMap<Guid, ClientEntityFacts>,
+    ) {
+        let delta = publisher.collect(world).unwrap();
+        for guid in delta.removed {
+            mirror.remove(&guid);
+        }
+        for record in delta.upserts {
+            mirror.insert(record.guid, record);
+        }
+        let fresh = ClientEntitySnapshot::from_world(world).unwrap();
+        assert_eq!(mirror.values().cloned().collect::<Vec<_>>(), fresh.entities);
+    }
+
+    #[test]
+    fn player_burden_republishes_when_inventory_strength_or_augmentations_change() {
+        let mut world = WorldState::synthetic();
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        for event in world.handle_message(&player_baseline()) {
+            publisher.observe(&event);
+        }
+        let mut player_description = ObjectDescriptionData::with_guid(PLAYER);
+        player_description.public_weenie_desc.name = Some("Player".into());
+        player_description.public_weenie_desc.item_type =
+            holtburger_common::properties::ItemType::CREATURE.bits();
+        for event in world.handle_message(&GameMessage::ObjectCreate(Box::new(player_description)))
+        {
+            publisher.observe(&event);
+        }
+        let burden = |mirror: &BTreeMap<Guid, ClientEntityFacts>| {
+            let EntityDescription::Known { burden, .. } = mirror[&PLAYER].description else {
+                panic!("player description must be known");
+            };
+            burden
+        };
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(burden(&mirror), None);
+
+        let mut strength = Attribute {
+            attr_type: AttributeType::StrengthAttr,
+            ranks: 0,
+            start: 100,
+            spent_xp: 0,
+            next_rank_xp: None,
+            base: 100,
+            current: 100,
+            breakdown: Default::default(),
+        };
+        world
+            .player
+            .attributes
+            .insert(strength.attr_type, strength.clone());
+        publisher.observe(&WorldEvent::AttributeUpdated(strength.clone()));
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(burden(&mirror), Some(0.0));
+
+        for event in world.handle_message(&place(ITEM, PLAYER, InventoryEntryKind::Item)) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(burden(&mirror), None);
+
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Heavy item".into());
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        description.public_weenie_desc.burden = Some(15000);
+        for (message, expected) in [
+            (GameMessage::ObjectCreate(Box::new(description)), 1.0),
+            (
+                GameMessage::PublicUpdatePropertyInt(Box::new(PublicUpdatePropertyIntData {
+                    sequence: 1,
+                    guid: ITEM,
+                    property: PropertyInt::EncumbranceVal as u32,
+                    value: 30000,
+                })),
+                2.0,
+            ),
+            (
+                GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                    sequence: 1,
+                    guid: Guid::NULL,
+                    property: PropertyInt::AugmentationIncreasedCarryingCapacity as u32,
+                    value: 5,
+                })),
+                1.0,
+            ),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert_eq!(burden(&mirror), Some(expected), "after {message:?}");
+        }
+        strength.current = 200;
+        world
+            .player
+            .attributes
+            .insert(strength.attr_type, strength.clone());
+        publisher.observe(&WorldEvent::AttributeUpdated(strength));
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(burden(&mirror), Some(0.5));
+
+        for event in world.handle_message(&place(ITEM, Guid(99), InventoryEntryKind::Item)) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(burden(&mirror), Some(0.0));
+        assert!(publisher.collect(&mut world).unwrap().upserts.is_empty());
+    }
+
+    #[test]
+    fn cooldown_definitions_publish_before_appraisal_and_follow_property_updates() {
+        use holtburger_common::properties::{ItemType, PropertyFloat, PropertyInt};
+        use holtburger_protocol::messages::{
+            PublicUpdatePropertyFloatData, PublicUpdatePropertyIntData,
+        };
+        use holtburger_world::{
+            entity_facts::EntityDescription, item_cooldowns::ItemCooldownDefinition,
+        };
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Essence".into());
+        description.public_weenie_desc.item_type = ItemType::FOOD.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        description.public_weenie_desc.cooldown = Some(213);
+        for (message, group_id, duration_seconds) in [
+            (GameMessage::ObjectCreate(Box::new(description)), 213, None),
+            (
+                GameMessage::PublicUpdatePropertyFloat(Box::new(PublicUpdatePropertyFloatData {
+                    sequence: 1,
+                    guid: ITEM,
+                    property: PropertyFloat::CooldownDuration as u32,
+                    value: 45.0,
+                })),
+                213,
+                Some(45.0),
+            ),
+            (
+                GameMessage::PublicUpdatePropertyInt(Box::new(PublicUpdatePropertyIntData {
+                    sequence: 1,
+                    guid: ITEM,
+                    property: PropertyInt::SharedCooldown as u32,
+                    value: 1000,
+                })),
+                1000,
+                Some(45.0),
+            ),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let EntityDescription::Known { cooldown, .. } = mirror[&ITEM].description else {
+                panic!("known item cooldown");
+            };
+            assert_eq!(
+                cooldown,
+                Some(ItemCooldownDefinition {
+                    group_id: Some(group_id),
+                    duration_seconds
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn structure_updates_preserve_independent_properties_in_snapshots() {
+        use holtburger_common::properties::{ItemType, PropertyInt};
+        use holtburger_protocol::messages::PublicUpdatePropertyIntData;
+        use holtburger_world::entity_facts::{EntityDescription, EntityStructure};
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Uses".into());
+        description.public_weenie_desc.item_type = ItemType::FOOD.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        description.public_weenie_desc.structure = Some(32);
+        let update = |property: PropertyInt, value| {
+            GameMessage::PublicUpdatePropertyInt(Box::new(PublicUpdatePropertyIntData {
+                sequence: 1,
+                guid: ITEM,
+                property: property as u32,
+                value,
+            }))
+        };
+        for (message, current, max) in [
+            (
+                GameMessage::ObjectCreate(Box::new(description)),
+                Some(32),
+                None,
+            ),
+            (update(PropertyInt::MaxStructure, 50), Some(32), Some(50)),
+            (update(PropertyInt::Structure, 0), Some(0), Some(50)),
+            (update(PropertyInt::Structure, 50), Some(50), Some(50)),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let EntityDescription::Known { ref structure, .. } = mirror[&ITEM].description else {
+                panic!("known structure item");
+            };
+            assert_eq!(*structure, EntityStructure { current, max });
+        }
+    }
+
+    #[test]
+    fn stack_count_updates_and_late_stackability_reconstruct_inventory_snapshots() {
+        use holtburger_common::properties::{ItemType, PropertyInt};
+        use holtburger_protocol::messages::{
+            PublicUpdatePropertyIntData, inventory::types::SetStackSizeData,
+        };
+        use holtburger_world::entity_facts::{EntityDescription, SceneAvailability};
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Stack".into());
+        description.public_weenie_desc.item_type = ItemType::FOOD.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        description.public_weenie_desc.stack_size = Some(2);
+        description.public_weenie_desc.max_stack_size = Some(100);
+        let mut replacement = description.clone();
+        replacement.public_weenie_desc.stack_size = Some(3);
+        let update = |property: PropertyInt, value| {
+            GameMessage::PublicUpdatePropertyInt(Box::new(PublicUpdatePropertyIntData {
+                sequence: 1,
+                guid: ITEM,
+                property: property as u32,
+                value,
+            }))
+        };
+        for (message, expected) in [
+            (GameMessage::ObjectCreate(Box::new(description)), Some(2)),
+            (
+                GameMessage::SetStackSize(Box::new(SetStackSizeData {
+                    sequence: 1,
+                    object_guid: ITEM,
+                    stack_size: 1,
+                    value: 0,
+                })),
+                Some(1),
+            ),
+            (update(PropertyInt::StackSize, 20), Some(20)),
+            (update(PropertyInt::MaxStackSize, 1), None),
+            (update(PropertyInt::StackSize, 40), None),
+            (update(PropertyInt::MaxStackSize, 100), Some(40)),
+            (GameMessage::ObjectCreate(Box::new(replacement)), Some(3)),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let facts = &mirror[&ITEM];
+            assert_eq!(facts.scene_placement, SceneAvailability::Unavailable);
+            let EntityDescription::Known { stack_count, .. } = facts.description else {
+                panic!("known stack");
+            };
+            assert_eq!(stack_count, expected);
+        }
+        let mut no_maximum = ObjectDescriptionData::with_guid(ITEM);
+        no_maximum.public_weenie_desc.name = Some("Unestablished stack".into());
+        no_maximum.public_weenie_desc.item_type = ItemType::FOOD.bits();
+        no_maximum.public_weenie_desc.container_id = Some(PLAYER);
+        no_maximum.public_weenie_desc.stack_size = Some(5);
+        for event in world.handle_message(&GameMessage::ObjectCreate(Box::new(no_maximum))) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(matches!(
+            mirror[&ITEM].description,
+            EntityDescription::Known {
+                stack_count: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn player_public_icon_wins_while_omitted_private_layers_survive_recreation() {
+        use holtburger_common::properties::{PropertyDataId, PropertyInt};
+        use holtburger_protocol::messages::{
+            PrivateUpdatePropertyDataIdData, PrivateUpdatePropertyIntData,
+        };
+        use holtburger_world::entity_facts::{EntityDescription, EntityIconAppearance};
+
+        let mut world = WorldState::synthetic();
+        world.handle_message(&player_baseline());
+        for (key, value) in [
+            (PropertyDataId::Icon, 0x06000001),
+            (PropertyDataId::IconOverlay, 0x06000002),
+        ] {
+            world.handle_message(&GameMessage::PrivateUpdatePropertyDataId(Box::new(
+                PrivateUpdatePropertyDataIdData {
+                    guid: Guid::NULL,
+                    sequence: 1,
+                    property: key as u32,
+                    value: Guid(value),
+                },
+            )));
+        }
+        world.handle_message(&GameMessage::PrivateUpdatePropertyInt(Box::new(
+            PrivateUpdatePropertyIntData {
+                guid: Guid::NULL,
+                sequence: 1,
+                property: PropertyInt::UiEffects as u32,
+                value: 7,
+            },
+        )));
+        let mut description = ObjectDescriptionData::with_guid(PLAYER);
+        description.public_weenie_desc.name = Some("Player".into());
+        description.public_weenie_desc.icon_id = 0x06000003;
+        for (overlay, effects, expected) in [
+            (
+                None,
+                None,
+                EntityIconAppearance {
+                    base: Some(0x06000003),
+                    overlay: Some(0x06000002),
+                    underlay: None,
+                    ui_effects: 7,
+                },
+            ),
+            (
+                Some(Guid::NULL),
+                Some(0),
+                EntityIconAppearance {
+                    base: Some(0x06000003),
+                    overlay: None,
+                    underlay: None,
+                    ui_effects: 0,
+                },
+            ),
+        ] {
+            description.public_weenie_desc.icon_overlay = overlay;
+            description.public_weenie_desc.ui_effects = effects;
+            world.handle_message(&GameMessage::ObjectCreate(Box::new(description.clone())));
+            let EntityDescription::Known { icon, .. } = world
+                .client_entity_facts(PLAYER)
+                .unwrap()
+                .unwrap()
+                .description
+            else {
+                panic!("known player");
+            };
+            assert_eq!(icon, expected);
+        }
+    }
+
+    #[test]
+    fn icon_updates_and_recreation_reconstruct_the_same_inventory_only_facts_as_snapshots() {
+        use holtburger_common::properties::{
+            ItemType, PropertyDataId, PropertyInt, WorldObjectPropertyAccessors,
+        };
+        use holtburger_protocol::messages::{
+            PublicUpdatePropertyDataIdData, PublicUpdatePropertyIntData,
+        };
+        use holtburger_world::entity_facts::{
+            EntityDescription, EntityIconAppearance, SceneAvailability,
+        };
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Icon item".into());
+        description.public_weenie_desc.item_type = ItemType::MELEE_WEAPON.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        description.public_weenie_desc.icon_id = 0x06000001;
+        description.public_weenie_desc.icon_overlay = Some(Guid(0x06000002));
+        description.public_weenie_desc.icon_underlay = Some(Guid(0x06000003));
+        let mut replacement = description.clone();
+        replacement.public_weenie_desc.icon_id = 0x06000005;
+        replacement.public_weenie_desc.icon_overlay = None;
+        replacement.public_weenie_desc.icon_underlay = None;
+        let update = |key: PropertyDataId, value| {
+            GameMessage::PublicUpdatePropertyDataId(Box::new(PublicUpdatePropertyDataIdData {
+                sequence: 1,
+                guid: ITEM,
+                property: key as u32,
+                value: Guid(value),
+            }))
+        };
+        let cases = [
+            (
+                GameMessage::ObjectCreate(Box::new(description)),
+                (Some(0x06000001), Some(0x06000002), Some(0x06000003), 0),
+            ),
+            (
+                update(PropertyDataId::Icon, 0x06000004),
+                (Some(0x06000004), Some(0x06000002), Some(0x06000003), 0),
+            ),
+            (
+                GameMessage::PublicUpdatePropertyInt(Box::new(PublicUpdatePropertyIntData {
+                    sequence: 1,
+                    guid: ITEM,
+                    property: PropertyInt::UiEffects as u32,
+                    value: 0x80000001u32 as i32,
+                })),
+                (
+                    Some(0x06000004),
+                    Some(0x06000002),
+                    Some(0x06000003),
+                    0x80000001,
+                ),
+            ),
+            (
+                update(PropertyDataId::IconOverlay, 0),
+                (Some(0x06000004), None, Some(0x06000003), 0x80000001),
+            ),
+            (
+                GameMessage::ObjectCreate(Box::new(replacement)),
+                (Some(0x06000005), None, None, 0),
+            ),
+            (update(PropertyDataId::Icon, 0), (None, None, None, 0)),
+        ];
+        for (message, (base, overlay, underlay, ui_effects)) in cases {
+            for change in world.handle_message(&message) {
+                publisher.observe(&change);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let facts = &mirror[&ITEM];
+            assert_eq!(facts.scene_placement, SceneAvailability::Unavailable);
+            let EntityDescription::Known { icon, .. } = &facts.description else {
+                panic!("known item");
+            };
+            assert_eq!(
+                icon,
+                &EntityIconAppearance {
+                    base,
+                    overlay,
+                    underlay,
+                    ui_effects
+                }
+            );
+        }
+        // A zero property update is the existing DID-removal primitive.
+        assert_eq!(
+            world
+                .entities
+                .get(ITEM)
+                .unwrap()
+                .get_data_prop(PropertyDataId::Icon),
+            None
+        );
+        // A public description carries mandatory zero literally; the shared accessor
+        // normalizes it while raw storage preserves its precedence over private values.
+        let mut zero = ObjectDescriptionData::with_guid(ITEM);
+        zero.public_weenie_desc.name = Some("No art".into());
+        world.handle_message(&GameMessage::ObjectCreate(Box::new(zero)));
+        assert_eq!(
+            world
+                .entities
+                .get(ITEM)
+                .unwrap()
+                .properties
+                .dids
+                .get(&PropertyDataId::Icon),
+            Some(&Guid::NULL)
+        );
+    }
+
+    #[test]
+    fn deltas_reconstruct_pending_hydrated_moved_and_withdrawn_storage() {
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Sword".into());
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        let messages = [
+            place(PACK, PLAYER, InventoryEntryKind::Container),
+            place(ITEM, PACK, InventoryEntryKind::Item),
+            GameMessage::ObjectCreate(Box::new(description)),
+            place(PACK, Guid(9), InventoryEntryKind::Container),
+            place(PACK, PLAYER, InventoryEntryKind::Container),
+            event(GameEvent::ViewContents(Box::new(ViewContentsEventData {
+                container: PACK,
+                items: vec![],
+            }))),
+            event(GameEvent::WieldObject(Box::new(WieldObjectEventData {
+                object_guid: ITEM,
+                equip_mask: EquipMask::MELEE_WEAPON,
+            }))),
+            GameMessage::InventoryRemoveObject(Box::new(InventoryRemoveObjectData {
+                object_guid: ITEM,
+            })),
+            player_baseline(),
+        ];
+        for message in messages {
+            for change in world.handle_message(&message) {
+                publisher.observe(&change);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        }
+        assert!(!mirror.contains_key(&ITEM));
+        assert!(!mirror.contains_key(&PACK));
+        assert!(publisher.collect(&mut world).unwrap().upserts.is_empty());
+    }
+
+    #[test]
+    fn readmitted_pending_parent_survives_deferred_description_eviction() {
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(PACK);
+        description.public_weenie_desc.name = Some("Pack".into());
+        for message in [
+            GameMessage::ObjectCreate(Box::new(description.clone())),
+            place(PACK, PLAYER, InventoryEntryKind::Container),
+            GameMessage::InventoryRemoveObject(Box::new(InventoryRemoveObjectData {
+                object_guid: PACK,
+            })),
+            place(PACK, PLAYER, InventoryEntryKind::Container),
+            place(ITEM, PACK, InventoryEntryKind::Item),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        }
+        assert_eq!(
+            mirror[&PACK].description,
+            holtburger_world::entity_facts::EntityDescription::Pending
+        );
+        for event in world.tick(None) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(mirror[&PACK].owned_by_player);
+        assert!(mirror[&ITEM].owned_by_player);
+        for event in world.handle_message(&GameMessage::ObjectCreate(Box::new(description))) {
+            publisher.observe(&event);
+        }
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert!(matches!(
+            mirror[&PACK].description,
+            holtburger_world::entity_facts::EntityDescription::Known { .. }
+        ));
+    }
+
+    #[test]
+    fn unchanged_semantics_do_not_publish_on_position_updates() {
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        publisher.collect(&mut world).unwrap();
+        publisher.observe(&WorldEvent::EntityMoved {
+            guid: PLAYER,
+            pos: Default::default(),
+        });
+        assert_eq!(
+            publisher.collect(&mut world).unwrap(),
+            ClientEntityDelta::default()
+        );
+    }
+}

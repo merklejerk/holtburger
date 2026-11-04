@@ -1,0 +1,69 @@
+{
+	"snapshot": {
+		"event": "client-vendor-snapshot",
+		"payload": {
+			"vendor": 100,
+			"currency": { "wcid": 999, "name": "Tokens" },
+			"offers": [
+				{
+					"guid": 1000,
+					"wcid": 42,
+					"name": "Food",
+					"item_type": 32,
+					"stack_count": 10,
+					"stackable": true,
+					"supply": null,
+					"icon": {
+						"base": null,
+						"overlay": null,
+						"underlay": null,
+						"uiEffects": 0
+					},
+					"price": { "kind": "quoted", "amount": 100, "quantity": 10 }
+				}
+			]
+		}
+	},
+	"preview": {
+		"event": "client-vendor-preview",
+		"payload": {
+			"sequence": 7,
+			"vendor": 100,
+			"outcome": {
+				"kind": "ready",
+				"quote": {
+					"buys": [
+						{ "item": 1000, "amount": 10, "total": 100, "merge_key": 42 }
+					],
+					"sells": [],
+					"currencies": [
+						{ "wcid": 999, "name": "Tokens", "current": 500, "projected": 400 },
+						{
+							"wcid": 273,
+							"name": "Pyreals",
+							"current": 3000,
+							"projected": 3000
+						}
+					],
+					"affordable": true
+				}
+			}
+		}
+	},
+	"phase": { "event": "client-vendor-phase", "payload": "buying" },
+	"failed": {
+		"event": "client-vendor-result",
+		"payload": {
+			"sequence": 7,
+			"vendor": 100,
+			"sold": [],
+			"sale_issue": null,
+			"outcome": {
+				"kind": "failed",
+				"phase": "buying",
+				"message": "Purchase refused"
+			}
+		}
+	},
+	"closed": { "event": "client-vendor-snapshot", "payload": null }
+}

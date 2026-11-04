@@ -1,0 +1,140 @@
+name: Build checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+    inputs:
+      product:
+        type: string
+        default: both
+      commit:
+        description: Immutable release source; ordinary PR/push runs use their event source
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-checks-${{ github.workflow }}-${{ inputs.commit || github.sha }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' && github.event_name != 'workflow_dispatch' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  changes:
+    runs-on: ubuntu-22.04
+    outputs:
+      relevant: ${{ steps.changes.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install release tooling dependencies
+        run: python -m pip install -r .github/scripts/requirements.txt
+      - id: changes
+        name: Select build inputs without skipping the final status
+        run: python .github/scripts/build_changes.py
+      - name: Check release tooling
+        run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Check suite versions
+        run: python .github/scripts/release_version.py check
+      - name: Review committed dependency notices (advisory)
+        run: |
+          if ! python .github/scripts/generate_notices.py check; then
+            echo '::warning::Dependency notice check failed. Review and regenerate locally when needed; CI will use the checked-in notices.'
+          fi
+
+  quality:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install release tooling dependencies
+        run: python -m pip install -r .github/scripts/requirements.txt
+      - uses: actions/setup-node@v4
+        if: inputs.product != 'cli'
+        with:
+          node-version: 24.13.1
+          cache: npm
+          cache-dependency-path: apps/holtburger-3d/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Install frontend dependencies
+        if: inputs.product != 'cli'
+        working-directory: apps/holtburger-3d
+        run: npm ci
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+      - name: Check shared frontend and Electron logic once
+        if: inputs.product != 'cli'
+        working-directory: apps/holtburger-3d
+        run: |
+          npm run check
+          npm run lint:ts
+          npm run test:ts
+      - name: Check native branding generation
+        if: inputs.product != 'cli'
+        working-directory: apps/holtburger-3d
+        run: npm run check:branding
+      - name: Test CLI development runner
+        run: python3 -m unittest discover -s apps/holtburger-cli/tests -p 'test_*.py' -v
+      - name: Test the complete Rust workspace
+        run: cargo test --locked --workspace --all-targets --all-features
+      - name: Deny Rust lint warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Exercise exhaustive theme and font behavior once
+        if: inputs.product != 'cli'
+        working-directory: apps/holtburger-3d
+        run: |
+          npm run build
+          npm run build:electron:main
+          if ! command -v Xvfb >/dev/null || ! command -v xauth >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends xvfb xauth
+          fi
+          xvfb-run --auto-servernum npm run probe:user-themes:built
+
+  result:
+    name: Validation
+    if: always()
+    needs: [changes, quality]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Require selected checks to pass
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          RELEVANT: ${{ needs.changes.outputs.relevant }}
+        run: |
+          test "$CHANGES_RESULT" = success
+          if [ "$RELEVANT" = true ]; then
+            test "$QUALITY_RESULT" = success
+          else
+            test "$QUALITY_RESULT" = skipped
+          fi

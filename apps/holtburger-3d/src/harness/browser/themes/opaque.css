@@ -1,0 +1,10 @@
+/* A user override can replace material styling without a separate app preference. */
+@layer overrides {
+	:root {
+		--ui-backdrop-filter: none;
+		--ui-surface-opacity: 1;
+	}
+	.ui-button {
+		border-radius: 11px;
+	}
+}

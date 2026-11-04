@@ -61,11 +61,6 @@ impl AppState {
                 let mut result = UpdateResult::redraw();
                 if let Page::Game(game) = &mut self.page {
                     game.set_queued_script_startup(queued_script_startup, &mut result);
-                    if let Some(enter_world) =
-                        game.handle_action(AppAction::SendCharacterEnterWorld)
-                    {
-                        result.merge(enter_world);
-                    }
                 }
                 result
             }
@@ -119,7 +114,7 @@ mod tests {
             net_stats: NetStats::default(),
             world_name: "World".to_string(),
             server_time: None,
-            content: None,
+            character_gen_catalog: None,
             spell_catalog: None,
             skill_table: None,
             verbosity: 0,
@@ -149,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn transition_to_game_sends_character_enter_world_from_game_page() {
+    fn transition_to_game_does_not_emit_protocol_entry_follow_up() {
         let mut app_state = AppState {
             account_name: "account".to_string(),
             account_password: "password".to_string(),
@@ -160,7 +155,7 @@ mod tests {
             net_stats: NetStats::default(),
             world_name: "World".to_string(),
             server_time: None,
-            content: None,
+            character_gen_catalog: None,
             spell_catalog: None,
             skill_table: None,
             verbosity: 0,
@@ -177,11 +172,7 @@ mod tests {
             account: "account".to_string(),
         });
 
-        assert!(matches!(
-            result.commands.as_slice(),
-            [ClientCommand::SendCharacterEnterWorld { guid, account }]
-                if *guid == Guid(0x50000001) && account == "account"
-        ));
+        assert!(result.commands.is_empty());
     }
 
     #[test]
@@ -200,7 +191,7 @@ mod tests {
             net_stats: NetStats::default(),
             world_name: "World".to_string(),
             server_time: None,
-            content: None,
+            character_gen_catalog: None,
             spell_catalog: None,
             skill_table: None,
             verbosity: 0,
@@ -247,7 +238,7 @@ mod tests {
             net_stats: NetStats::default(),
             world_name: "World".to_string(),
             server_time: None,
-            content: None,
+            character_gen_catalog: None,
             spell_catalog: None,
             skill_table: None,
             verbosity: 0,
@@ -284,7 +275,7 @@ mod tests {
             net_stats: NetStats::default(),
             world_name: "World".to_string(),
             server_time: None,
-            content: None,
+            character_gen_catalog: None,
             spell_catalog: None,
             skill_table: None,
             verbosity: 0,
@@ -321,7 +312,7 @@ mod tests {
             net_stats: NetStats::default(),
             world_name: "World".to_string(),
             server_time: None,
-            content: None,
+            character_gen_catalog: None,
             spell_catalog: None,
             skill_table: None,
             verbosity: 0,

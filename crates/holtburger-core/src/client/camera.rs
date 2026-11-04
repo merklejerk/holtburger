@@ -1,0 +1,2134 @@
+//! Client-owned third-person camera placement over the shared kinematic boom controller.
+//!
+//! The camera is deliberately a presentation product, but its placement still belongs beside the
+//! client authority, which publishes the installed collision snapshot and accepted local-player
+//! path to the camera solve in the same physics tick. The host forwards semantic inputs and receives a
+//! serializable path; it never owns a second body or collision scene.
+
+use crate::placed_motion::present_placed_motion_pose;
+use std::collections::BTreeSet;
+use std::sync::Arc;
+use std::time::Duration;
+
+use anyhow::{Context, Result, ensure};
+use holtburger_common::position::WorldPosition;
+use holtburger_common::{Guid, Vector3};
+use holtburger_world::{
+    ChildSpatialBody, ChildSpatialBodyDefinition, ChildSpatialBodyWaypoint, PhysicalBodyDefinition,
+    SpatialBodyId, WorldState,
+};
+use serde::{Deserialize, Serialize};
+
+use super::ClientRuntime;
+use crate::SimulationSceneSnapshot;
+use crate::client::types::ClientViewEvent;
+use crate::kinematic_boom::{
+    KinematicBoomAdvance, KinematicBoomClearance, KinematicBoomCollisionProof,
+    KinematicBoomController, KinematicBoomConvergence, KinematicBoomDiagnostics,
+    KinematicBoomFailureReason, KinematicBoomIntent, KinematicBoomOutcome, KinematicBoomPathLeg,
+    KinematicBoomPlacedPath, KinematicBoomPlacement, KinematicBoomProfile,
+    KinematicBoomReseedReason, KinematicBoomTargetSample, KinematicBoomTargetSeed,
+    KinematicBoomUpdateAcceptance, interpolate_pose, resolve_camera_pivot_offset,
+    serialize_kinematic_boom_path, standard_kinematic_boom_profile, stationary_kinematic_boom_path,
+};
+use crate::{DynamicEntityPlacementAdvanceKind, DynamicEntityTickBatch};
+/// Current physics interval, or an explicit placement discontinuity.
+enum TargetUpdate {
+    /// Complete accepted travel consumed once by the camera in this physics tick.
+    Travel(crate::DynamicEntityPlacedPath),
+    /// Retire camera placement continuity after a correction or teleport.
+    Reset,
+}
+
+/// Renderer-authored camera registration request.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientCameraStartRequest {
+    /// Authority-published player identity to follow.
+    pub player_guid: Guid,
+    /// Player instance generation that guards reuse of the GUID.
+    pub entity_generation: u64,
+    /// Desired initial boom reach in metres.
+    pub initial_reach: f32,
+    /// Inclusive minimum user-controlled reach.
+    pub minimum_reach: f32,
+    /// Inclusive maximum user-controlled reach.
+    pub maximum_reach: f32,
+    /// First semantic input sequence for this registration.
+    pub input_sequence: u64,
+    /// Unit view direction in the player's spatial frame.
+    pub view_direction: [f32; 3],
+    /// Cumulative zoom displacement consumed exactly once by the controller.
+    pub cumulative_zoom_displacement: f32,
+    /// Frontend projection revision paired with its clearance radius.
+    pub projection_revision: u64,
+    /// Camera near-plane clearance sphere radius in metres.
+    pub clearance_radius: f32,
+}
+
+/// Latest-wins camera intent targeted to one camera generation.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientCameraIntentRequest {
+    /// Camera generation receiving this latest-wins update.
+    pub camera_generation: u64,
+    /// Player identity retained as part of the generation guard.
+    pub player_guid: Guid,
+    /// Player instance generation retained as part of the generation guard.
+    pub entity_generation: u64,
+    /// Monotonic semantic input sequence.
+    pub input_sequence: u64,
+    /// Unit view direction in the player's spatial frame.
+    pub view_direction: [f32; 3],
+    /// Cumulative zoom displacement, not a per-message delta.
+    pub cumulative_zoom_displacement: f32,
+}
+
+/// Latest-wins projection-clearance update targeted to one camera generation.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientCameraClearanceRequest {
+    /// Camera generation receiving this projection update.
+    pub camera_generation: u64,
+    /// Player identity retained as part of the generation guard.
+    pub player_guid: Guid,
+    /// Player instance generation retained as part of the generation guard.
+    pub entity_generation: u64,
+    /// Monotonic frontend projection revision.
+    pub projection_revision: u64,
+    /// Camera near-plane clearance sphere radius in metres.
+    pub clearance_radius: f32,
+}
+
+/// Complete client camera identity carried by every command receipt and tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCameraIdentity {
+    /// Monotonic camera registration generation.
+    pub camera_generation: u64,
+    /// Authority-published player identity followed by the camera.
+    pub player_guid: Guid,
+    /// Player instance generation that prevents stale GUID reuse.
+    pub entity_generation: u64,
+}
+
+/// Receipt returned after a camera generation is accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCameraStartReceipt {
+    #[serde(flatten)]
+    /// Complete accepted registration identity.
+    pub identity: ClientCameraIdentity,
+}
+
+/// Result of one client camera semantic update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientCameraUpdateReceipt {
+    Accepted,
+    IgnoredStale,
+}
+
+/// Projection clearance proven by a client camera placement.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCameraClearance {
+    /// Frontend projection revision proven by this placement.
+    pub projection_revision: u64,
+    /// Clearance sphere radius used by the solve.
+    pub radius: f32,
+}
+
+/// Sphere selected from the local player's accepted physical body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientCameraTargetSphereRole {
+    Primary,
+    UpperConstraint,
+}
+
+/// Whether the published camera path was proven against complete static coverage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+pub enum ClientCameraCollisionProof {
+    /// Every selected owner was resident in the sampled scene.
+    Covered,
+    /// Installed topology was used despite one unavailable selected owner.
+    Uncovered {
+        /// First unavailable normalized collision owner.
+        owner: Guid,
+    },
+}
+
+impl From<KinematicBoomCollisionProof> for ClientCameraCollisionProof {
+    fn from(value: KinematicBoomCollisionProof) -> Self {
+        match value {
+            KinematicBoomCollisionProof::Covered => Self::Covered,
+            KinematicBoomCollisionProof::Uncovered { owner } => Self::Uncovered { owner },
+        }
+    }
+}
+
+/// Finite-work diagnostics for one camera solve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCameraDiagnostics {
+    /// Collision-authority proof for this camera result.
+    pub collision_proof: ClientCameraCollisionProof,
+    /// Semantic controller path legs evaluated.
+    pub control_legs: usize,
+    /// Radial clearance sweeps executed.
+    pub clearance_sweeps: usize,
+    /// Sweeps checking safe interpolation between radial camera placements.
+    pub continuity_sweeps: usize,
+    /// Free-sphere contact passes executed.
+    pub contact_passes: usize,
+}
+
+impl From<KinematicBoomDiagnostics> for ClientCameraDiagnostics {
+    fn from(value: KinematicBoomDiagnostics) -> Self {
+        Self {
+            collision_proof: value.collision_proof.into(),
+            control_legs: value.control_legs,
+            clearance_sweeps: value.clearance_sweeps,
+            continuity_sweeps: value.continuity_sweeps,
+            contact_passes: value.contact_passes,
+        }
+    }
+}
+
+/// Machine-readable reason a recoverable camera tick could not prove a new placement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientCameraFailureReason {
+    ClearanceSweep,
+    FreeSphereQuery,
+    TargetContract,
+    ControllerInput,
+    PathProjection,
+}
+
+impl From<KinematicBoomFailureReason> for ClientCameraFailureReason {
+    fn from(value: KinematicBoomFailureReason) -> Self {
+        match value {
+            KinematicBoomFailureReason::ClearanceSweep => Self::ClearanceSweep,
+            KinematicBoomFailureReason::FreeSphereQuery => Self::FreeSphereQuery,
+        }
+    }
+}
+
+/// Reason a client camera published a safe placement discontinuously.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientCameraReseedReason {
+    InitialPlacement,
+    PlacedPath,
+    PlacementRecovery,
+    /// Geometry blocked interpolation to the target-origin camera placement.
+    ObstructedPath,
+}
+
+impl From<KinematicBoomReseedReason> for ClientCameraReseedReason {
+    fn from(value: KinematicBoomReseedReason) -> Self {
+        match value {
+            KinematicBoomReseedReason::InitialPlacement => Self::InitialPlacement,
+            KinematicBoomReseedReason::PlacedPath => Self::PlacedPath,
+            KinematicBoomReseedReason::PlacementRecovery => Self::PlacementRecovery,
+            KinematicBoomReseedReason::ObstructedPath => Self::ObstructedPath,
+        }
+    }
+}
+
+/// One host-authored client camera tick with explicit projection-proof state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientCameraTick {
+    Advanced {
+        #[serde(flatten)]
+        identity: ClientCameraIdentity,
+        sequence: u64,
+        /// Accepted physics duration shared by entity and camera path playback.
+        duration_ms: f64,
+        target_sphere_role: ClientCameraTargetSphereRole,
+        clearance: ClientCameraClearance,
+        desired_reach: f32,
+        rendered_reach: f32,
+        path: KinematicBoomPlacedPath,
+        diagnostics: ClientCameraDiagnostics,
+        /// Host-owned convergence classification for the published placement.
+        convergence: KinematicBoomConvergence,
+    },
+    Reseeded {
+        #[serde(flatten)]
+        identity: ClientCameraIdentity,
+        sequence: u64,
+        /// Accepted physics duration shared by entity and camera path playback.
+        duration_ms: f64,
+        target_sphere_role: ClientCameraTargetSphereRole,
+        clearance: ClientCameraClearance,
+        desired_reach: f32,
+        rendered_reach: f32,
+        path: KinematicBoomPlacedPath,
+        reason: ClientCameraReseedReason,
+        diagnostics: ClientCameraDiagnostics,
+        /// Host-owned convergence classification for the published placement.
+        convergence: KinematicBoomConvergence,
+    },
+    Held {
+        #[serde(flatten)]
+        identity: ClientCameraIdentity,
+        sequence: u64,
+        /// Accepted physics duration shared by entity and camera path playback.
+        duration_ms: f64,
+        target_sphere_role: ClientCameraTargetSphereRole,
+        clearance: ClientCameraClearance,
+        desired_reach: f32,
+        rendered_reach: f32,
+        path: KinematicBoomPlacedPath,
+        reason: ClientCameraFailureReason,
+        diagnostics: ClientCameraDiagnostics,
+        /// Held results remain converging because this tick could not advance the controller.
+        convergence: KinematicBoomConvergence,
+    },
+    /// Current target placement used before projection clearance can be proven.
+    Fallback {
+        #[serde(flatten)]
+        identity: ClientCameraIdentity,
+        sequence: u64,
+        /// Accepted physics duration used for stationary playback.
+        duration_ms: f64,
+        target_sphere_role: ClientCameraTargetSphereRole,
+        desired_reach: f32,
+        path: KinematicBoomPlacedPath,
+        reason: ClientCameraFailureReason,
+        diagnostics: ClientCameraDiagnostics,
+        /// Fallback results remain converging until projection clearance can be proven.
+        convergence: KinematicBoomConvergence,
+    },
+}
+
+impl ClientCameraTick {
+    fn convergence(&self) -> KinematicBoomConvergence {
+        match self {
+            Self::Advanced { convergence, .. }
+            | Self::Reseeded { convergence, .. }
+            | Self::Held { convergence, .. }
+            | Self::Fallback { convergence, .. } => *convergence,
+        }
+    }
+
+    fn make_path_stationary(&mut self) -> Result<()> {
+        let path = match self {
+            Self::Advanced { path, .. }
+            | Self::Reseeded { path, .. }
+            | Self::Held { path, .. }
+            | Self::Fallback { path, .. } => path,
+        };
+        let final_point = path
+            .legs
+            .last()
+            .context("cannot settle a client camera path without a terminal leg")?
+            .end;
+        path.initial = final_point;
+        // A settled activation publishes no elapsed transit, but the shared path contract remains
+        // non-empty so every consumer can sample its exact terminal placement at fraction one.
+        path.legs = vec![KinematicBoomPathLeg {
+            end_fraction: 1.0,
+            end: final_point,
+        }];
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SelectedSphere {
+    role: ClientCameraTargetSphereRole,
+    center: Vector3,
+    radius: f32,
+}
+
+/// Result of one bounded activation-only camera convergence transaction.
+pub(super) enum ClientCameraSettlement {
+    Pending,
+    Settled(ClientCameraTick),
+    Exhausted,
+}
+
+const ACTIVATION_SETTLE_STEP: Duration = Duration::from_millis(16);
+const ACTIVATION_SETTLE_MAXIMUM_STEPS: usize = 256;
+
+/// Coherent camera query inputs captured by the world owner before publication.
+/// Collision topology is shared; no mutable simulation state crosses this boundary.
+pub(super) struct ClientCameraSceneInput {
+    /// Current hydrated local-player instance, including its independently prepared body.
+    target: Option<CameraTargetInput>,
+    /// Collision topology paired with the captured target placement.
+    collision: Option<Result<CameraCollisionPublication, String>>,
+}
+
+/// Environment and entities captured together for the post-physics camera solve.
+struct CameraCollisionPublication {
+    /// Installed environment geometry and topology.
+    environment: Arc<holtburger_world::CollisionScene>,
+    /// Prepared peers from this epoch; absent when the followed player excludes entity response.
+    entities: Option<Arc<holtburger_world::EntityCollisionSnapshot>>,
+    /// Camera-only exclusions captured with the same server entity state as the geometry.
+    excluded: BTreeSet<SpatialBodyId>,
+}
+
+/// Local-player identity and body preparation state from one publication.
+struct CameraTargetInput {
+    /// Local-player GUID paired with the exact hydrated instance generation.
+    identity: (Guid, u64),
+    /// Absent until the canonical local-player body has been installed.
+    body: Option<CameraBodyInput>,
+}
+
+/// Minimal physical target data needed by the camera controller.
+struct CameraBodyInput {
+    /// Latest authoritative root placement, used to detect and recover discontinuities.
+    pose: WorldPosition,
+    /// Absent while physical content is still being prepared.
+    definition: Option<PhysicalBodyDefinition>,
+    /// Latest movement publication: timed travel or an explicit discontinuity.
+    update: Option<TargetUpdate>,
+}
+
+impl ClientCameraSceneInput {
+    pub(super) fn capture(
+        world: &WorldState,
+        collision: Option<&SimulationSceneSnapshot>,
+        batch: Option<&DynamicEntityTickBatch>,
+    ) -> Self {
+        let target = world.player_entity().map(|entity| {
+            let identity = (world.player.guid, u64::from(entity.instance_sequence()));
+            let body = world
+                .scene
+                .body(SpatialBodyId::LocalPlayer(identity.0))
+                .map(|body| {
+                    let update = batch.and_then(|batch| {
+                        batch
+                            .advances
+                            .iter()
+                            .find(|advance| {
+                                advance.entity.identity.guid == identity.0
+                                    && advance.entity.generation == identity.1
+                            })
+                            .map(|advance| match advance.kind {
+                                DynamicEntityPlacementAdvanceKind::Integrated => {
+                                    TargetUpdate::Travel(advance.path.clone())
+                                }
+                                _ => TargetUpdate::Reset,
+                            })
+                    });
+                    CameraBodyInput {
+                        pose: body.pose,
+                        definition: body.physical.as_ref().map(|physical| physical.definition),
+                        update,
+                    }
+                });
+            CameraTargetInput { identity, body }
+        });
+        Self {
+            target,
+            collision: collision.map(|snapshot| {
+                let excludes_entities = world
+                    .scene
+                    .body(SpatialBodyId::LocalPlayer(world.player.guid))
+                    .and_then(|body| body.physical.as_ref())
+                    .is_some_and(|physical| {
+                        physical.collision_filter.excludes(
+                            holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+                        )
+                    });
+                let entities =
+                    if excludes_entities {
+                        None
+                    } else {
+                        Some(world.scene.entity_collision_snapshot().map_err(|error| {
+                            format!("camera collision capture failed: {error:#}")
+                        })?)
+                    };
+                Ok(CameraCollisionPublication {
+                    environment: Arc::clone(&snapshot.scene),
+                    entities,
+                    // RETAIL DIVERGENCE: retail clears missile state on impact, removing its
+                    // missile exclusion before a server state update. Keep server-classified
+                    // projectiles out of camera queries across that local transition.
+                    // Restoring retail eligibility can snap the boom onto an impacted spell.
+                    // Camera-only filtering cannot affect content collision or reporting.
+                    // Census 2026-10-22: local 43,913-template catalog contains 193
+                    // ProjectileSpell and 317 Missile templates; eligibility still uses live
+                    // server state, so custom-server projectiles follow the same rule.
+                    excluded: world
+                        .entities
+                        .iter()
+                        .filter(|entity| entity.physics.is_authoritative_projectile())
+                        .map(|entity| SpatialBodyId::Entity(entity.guid))
+                        .chain([SpatialBodyId::LocalPlayer(world.player.guid)])
+                        .collect(),
+                })
+            }),
+        }
+    }
+
+    fn body(&self, identity: ClientCameraIdentity) -> Option<&CameraBodyInput> {
+        self.target
+            .as_ref()
+            .filter(|target| target.identity == (identity.player_guid, identity.entity_generation))
+            .and_then(|target| target.body.as_ref())
+    }
+}
+
+struct PendingCamera {
+    identity: ClientCameraIdentity,
+    request: ClientCameraStartRequest,
+}
+
+struct ActiveCamera {
+    identity: ClientCameraIdentity,
+    controller: KinematicBoomController,
+    target_sphere_role: ClientCameraTargetSphereRole,
+    pivot_offset: Vector3,
+    /// Parent-driven target sphere whose topology is reconciled by the shared spatial solver.
+    target_body: ChildSpatialBody,
+    /// Last consumed parent endpoint; detects discontinuities without a playback queue.
+    target_pose: WorldPosition,
+    sequence: u64,
+}
+
+impl ActiveCamera {
+    /// Retire parent continuity so the next boom solve proves a fresh placement.
+    fn reset_target(&mut self, pose: WorldPosition) {
+        self.target_pose = pose;
+        self.target_body = ChildSpatialBody::new(self.target_body.definition(), pose);
+        self.controller.invalidate_target_path();
+    }
+}
+
+/// Client-side lifecycle owner for the generic kinematic boom controller.
+pub(super) struct ClientCameraRuntime {
+    /// Validated camera policy shared by registrations.
+    profile: KinematicBoomProfile,
+    next_generation: u64,
+    pending: Option<PendingCamera>,
+    active: Option<ActiveCamera>,
+}
+
+impl ClientCameraRuntime {
+    pub(super) fn new() -> Result<Self> {
+        Ok(Self {
+            profile: standard_kinematic_boom_profile()?,
+            next_generation: 0,
+            pending: None,
+            active: None,
+        })
+    }
+
+    /// Identity currently accepted for semantic camera-dependent commands.
+    pub(super) fn identity(&self) -> Option<ClientCameraIdentity> {
+        self.active
+            .as_ref()
+            .map(|camera| camera.identity)
+            .or_else(|| self.pending.as_ref().map(|camera| camera.identity))
+    }
+
+    pub(super) fn start(
+        &mut self,
+        request: ClientCameraStartRequest,
+        world: &WorldState,
+    ) -> Result<ClientCameraStartReceipt> {
+        ensure!(
+            request.player_guid != Guid::NULL && request.player_guid == world.player.guid,
+            "client camera start targets a stale local player"
+        );
+        let entity_generation = world
+            .player_entity()
+            .context("client camera target entity is unavailable")?
+            .instance_sequence();
+        ensure!(
+            request.entity_generation == u64::from(entity_generation),
+            "client camera start targets a stale entity generation"
+        );
+        validate_camera_request(request)?;
+        self.next_generation = self
+            .next_generation
+            .checked_add(1)
+            .context("client camera generation exhausted")?;
+        let identity = ClientCameraIdentity {
+            camera_generation: self.next_generation,
+            player_guid: request.player_guid,
+            entity_generation: request.entity_generation,
+        };
+        self.active = None;
+        self.pending = Some(PendingCamera { identity, request });
+        Ok(ClientCameraStartReceipt { identity })
+    }
+
+    pub(super) fn set_intent(
+        &mut self,
+        request: ClientCameraIntentRequest,
+    ) -> Result<ClientCameraUpdateReceipt> {
+        let identity = ClientCameraIdentity {
+            camera_generation: request.camera_generation,
+            player_guid: request.player_guid,
+            entity_generation: request.entity_generation,
+        };
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|camera| camera.identity == identity)
+        {
+            let active = self.active.as_mut().expect("active camera was checked");
+            let acceptance = active.controller.accept_intent(KinematicBoomIntent {
+                sequence: request.input_sequence,
+                view_direction: Vector3::new(
+                    request.view_direction[0],
+                    request.view_direction[1],
+                    request.view_direction[2],
+                ),
+                cumulative_zoom_displacement: request.cumulative_zoom_displacement,
+            })?;
+            return Ok(match acceptance {
+                KinematicBoomUpdateAcceptance::Accepted => ClientCameraUpdateReceipt::Accepted,
+                KinematicBoomUpdateAcceptance::Stale => ClientCameraUpdateReceipt::IgnoredStale,
+            });
+        }
+        let Some(pending) = self.pending.as_mut() else {
+            return Ok(ClientCameraUpdateReceipt::IgnoredStale);
+        };
+        if pending.identity != identity || request.input_sequence <= pending.request.input_sequence
+        {
+            return Ok(ClientCameraUpdateReceipt::IgnoredStale);
+        }
+        validate_view_direction(request.view_direction)?;
+        ensure!(
+            request.cumulative_zoom_displacement.is_finite(),
+            "client camera cumulative zoom must be finite"
+        );
+        pending.request.input_sequence = request.input_sequence;
+        pending.request.view_direction = request.view_direction;
+        pending.request.cumulative_zoom_displacement = request.cumulative_zoom_displacement;
+        Ok(ClientCameraUpdateReceipt::Accepted)
+    }
+
+    pub(super) fn set_clearance(
+        &mut self,
+        request: ClientCameraClearanceRequest,
+    ) -> Result<ClientCameraUpdateReceipt> {
+        let identity = ClientCameraIdentity {
+            camera_generation: request.camera_generation,
+            player_guid: request.player_guid,
+            entity_generation: request.entity_generation,
+        };
+        validate_clearance(request.projection_revision, request.clearance_radius)?;
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|camera| camera.identity == identity)
+        {
+            let active = self.active.as_mut().expect("active camera was checked");
+            let acceptance = active
+                .controller
+                .request_clearance(KinematicBoomClearance {
+                    revision: request.projection_revision,
+                    radius: request.clearance_radius,
+                })?;
+            return Ok(match acceptance {
+                KinematicBoomUpdateAcceptance::Accepted => ClientCameraUpdateReceipt::Accepted,
+                KinematicBoomUpdateAcceptance::Stale => ClientCameraUpdateReceipt::IgnoredStale,
+            });
+        }
+        let Some(pending) = self.pending.as_mut() else {
+            return Ok(ClientCameraUpdateReceipt::IgnoredStale);
+        };
+        if pending.identity != identity
+            || request.projection_revision <= pending.request.projection_revision
+        {
+            return Ok(ClientCameraUpdateReceipt::IgnoredStale);
+        }
+        pending.request.projection_revision = request.projection_revision;
+        pending.request.clearance_radius = request.clearance_radius;
+        Ok(ClientCameraUpdateReceipt::Accepted)
+    }
+
+    pub(super) fn stop(&mut self, identity: ClientCameraIdentity) -> bool {
+        let matches = self
+            .active
+            .as_ref()
+            .is_some_and(|camera| camera.identity == identity)
+            || self
+                .pending
+                .as_ref()
+                .is_some_and(|camera| camera.identity == identity);
+        if matches {
+            self.active = None;
+            self.pending = None;
+        }
+        matches
+    }
+
+    /// Drops all placement and projection history on a client discontinuity or disconnect.
+    pub(super) fn reset(&mut self) {
+        self.active = None;
+        self.pending = None;
+    }
+
+    /// Advances against a published query view without reading mutable world state.
+    pub(super) fn advance(
+        &mut self,
+        input: &ClientCameraSceneInput,
+        duration: Duration,
+    ) -> Result<Option<ClientCameraTick>> {
+        let starting = self.active.is_none();
+        self.initialize_if_ready(input)?;
+        let Some(_) = self.active.as_ref() else {
+            return Ok(None);
+        };
+        let duration_seconds = duration.as_secs_f32();
+        if !duration_seconds.is_finite() || duration_seconds <= 0.0 {
+            return Ok(None);
+        }
+        let Some(collision) = input.collision.as_ref() else {
+            return Ok(None);
+        };
+        let collision = collision
+            .as_ref()
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let Some(active) = self.active.as_mut() else {
+            return Ok(None);
+        };
+        let duration_ms = duration.as_secs_f64() * 1_000.0;
+        let samples = input
+            .body(active.identity)
+            .context("client camera target body is unavailable")
+            .and_then(|body| {
+                let (initial, waypoints) = match body.update.as_ref() {
+                    Some(TargetUpdate::Travel(path)) if !starting => (
+                        path.initial.pose,
+                        path.legs
+                            .iter()
+                            .map(|leg| ChildSpatialBodyWaypoint {
+                                parent_pose: leg.end.pose,
+                                end_fraction: leg.end_fraction,
+                            })
+                            .collect(),
+                    ),
+                    _ => (
+                        body.pose,
+                        vec![ChildSpatialBodyWaypoint {
+                            parent_pose: body.pose,
+                            end_fraction: 1.0,
+                        }],
+                    ),
+                };
+                if initial != active.target_pose || matches!(body.update, Some(TargetUpdate::Reset))
+                {
+                    active.reset_target(initial);
+                }
+                active.target_pose = body.pose;
+                target_samples_from_parent_path(
+                    collision.environment.as_ref(),
+                    initial,
+                    &waypoints,
+                    &mut active.target_body,
+                    active.pivot_offset,
+                )
+            });
+        let samples = match samples {
+            Ok(samples) => samples,
+            Err(_) => {
+                // Publish the existing safe placement before retiring its proof for recovery.
+                let tick = project_camera_failure(
+                    active,
+                    duration_ms,
+                    ClientCameraFailureReason::TargetContract,
+                    KinematicBoomDiagnostics::default(),
+                )?;
+                if let Some(body) = input.body(active.identity) {
+                    active.reset_target(body.pose);
+                }
+                return Ok(Some(tick));
+            }
+        };
+        let initial_visual_pivot = active.controller.visual_pivot();
+        let entity_query = collision.entities.as_ref().map(|entities| {
+            holtburger_world::spatial::CameraCollisionQuery {
+                environment: collision.environment.as_ref(),
+                entities,
+                excluded: &collision.excluded,
+            }
+        });
+        let query: &dyn holtburger_world::spatial::SphereCollisionQuery = match &entity_query {
+            Some(query) => query,
+            None => collision.environment.as_ref(),
+        };
+        let outcome = match active.controller.advance(query, duration_seconds, &samples) {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                // Publish the existing safe placement before retiring its proof for recovery.
+                let tick = project_camera_failure(
+                    active,
+                    duration_ms,
+                    ClientCameraFailureReason::ControllerInput,
+                    KinematicBoomDiagnostics::default(),
+                )?;
+                if let Some(body) = input.body(active.identity) {
+                    active.reset_target(body.pose);
+                }
+                return Ok(Some(tick));
+            }
+        };
+        let tick = project_camera_outcome(active, initial_visual_pivot, duration_ms, outcome)?;
+        if matches!(
+            tick,
+            ClientCameraTick::Held { .. } | ClientCameraTick::Fallback { .. }
+        ) && let Some(body) = input.body(active.identity)
+        {
+            active.reset_target(body.pose);
+        }
+        Ok(Some(tick))
+    }
+
+    /// Run ordinary stationary boom solves synchronously without publishing intermediate paths.
+    pub(super) fn settle_for_activation(
+        &mut self,
+        input: &ClientCameraSceneInput,
+    ) -> Result<ClientCameraSettlement> {
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            let Some(mut tick) = self.advance(input, ACTIVATION_SETTLE_STEP)? else {
+                return Ok(ClientCameraSettlement::Pending);
+            };
+            if tick.convergence() == KinematicBoomConvergence::Settled {
+                tick.make_path_stationary()?;
+                return Ok(ClientCameraSettlement::Settled(tick));
+            }
+        }
+        Ok(ClientCameraSettlement::Exhausted)
+    }
+
+    fn initialize_if_ready(&mut self, input: &ClientCameraSceneInput) -> Result<bool> {
+        if self.active.is_some() {
+            return Ok(true);
+        }
+        let Some(pending) = self.pending.as_ref() else {
+            return Ok(false);
+        };
+        let Some(collision) = input.collision.as_ref() else {
+            return Ok(false);
+        };
+        let collision = collision
+            .as_ref()
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let body = input
+            .body(pending.identity)
+            .context("client camera target body is unavailable")?;
+        let Some(definition) = body.definition else {
+            return Ok(false);
+        };
+        let sphere = selected_sphere(definition);
+        let mut target_body = ChildSpatialBody::new(
+            ChildSpatialBodyDefinition::new(sphere.center, sphere.radius)?,
+            body.pose,
+        );
+        let initial_sample = target_sample_from_pose(
+            collision.environment.as_ref(),
+            body.pose,
+            &mut target_body,
+            resolve_camera_pivot_offset(sphere.center, 0.0),
+        )?;
+        let seed = initial_sample.target_seed;
+        let pivot_offset = resolve_camera_pivot_offset(sphere.center, 0.0);
+        let profile = self.profile;
+        let request = pending.request;
+        let controller = KinematicBoomController::new(
+            profile.with_reach_limits(request.minimum_reach, request.maximum_reach)?,
+            visual_pivot(body.pose, pivot_offset),
+            seed,
+            KinematicBoomClearance {
+                revision: request.projection_revision,
+                radius: request.clearance_radius,
+            },
+            request.initial_reach,
+            KinematicBoomIntent {
+                sequence: request.input_sequence,
+                view_direction: Vector3::new(
+                    request.view_direction[0],
+                    request.view_direction[1],
+                    request.view_direction[2],
+                ),
+                cumulative_zoom_displacement: request.cumulative_zoom_displacement,
+            },
+        )?;
+        self.active = Some(ActiveCamera {
+            identity: pending.identity,
+            controller,
+            target_sphere_role: sphere.role,
+            pivot_offset,
+            target_body,
+            target_pose: body.pose,
+            sequence: 0,
+        });
+        self.pending = None;
+        Ok(true)
+    }
+}
+
+impl ClientRuntime {
+    pub(super) fn start_camera(
+        &mut self,
+        request: ClientCameraStartRequest,
+    ) -> Result<ClientCameraStartReceipt> {
+        let receipt = self.camera.start(
+            request,
+            &self.world,
+            self.activation.is_none() && matches!(self.state, super::ClientState::InWorld),
+            &self.client_view_event_tx,
+        )?;
+        self.precise_jump.invalidate();
+        Ok(receipt)
+    }
+
+    pub(super) fn set_camera_intent(
+        &mut self,
+        request: ClientCameraIntentRequest,
+    ) -> Result<ClientCameraUpdateReceipt> {
+        self.camera.input_handle().set_intent(request)
+    }
+
+    pub(super) fn set_camera_clearance(
+        &mut self,
+        request: ClientCameraClearanceRequest,
+    ) -> Result<ClientCameraUpdateReceipt> {
+        self.camera.input_handle().set_clearance(request)
+    }
+
+    pub(super) fn stop_camera(&mut self, identity: ClientCameraIdentity) -> bool {
+        let stopped = self.camera.stop(identity);
+        if stopped {
+            self.precise_jump.invalidate();
+        }
+        stopped
+    }
+
+    pub(super) fn reset_camera(&mut self) {
+        self.camera.reset();
+        self.precise_jump.invalidate();
+    }
+
+    pub(super) fn emit_camera_event(&self, tick: ClientCameraTick) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::Camera(tick));
+    }
+}
+
+fn selected_sphere(definition: PhysicalBodyDefinition) -> SelectedSphere {
+    let spheres = definition.spheres();
+    spheres
+        .upper_constraint()
+        .map(|sphere| SelectedSphere {
+            role: ClientCameraTargetSphereRole::UpperConstraint,
+            center: sphere.center,
+            radius: sphere.radius,
+        })
+        .unwrap_or_else(|| {
+            let sphere = spheres.primary();
+            SelectedSphere {
+                role: ClientCameraTargetSphereRole::Primary,
+                center: sphere.center,
+                radius: sphere.radius,
+            }
+        })
+}
+
+fn target_samples_from_parent_path(
+    scene: &holtburger_world::CollisionScene,
+    initial: WorldPosition,
+    parent_waypoints: &[ChildSpatialBodyWaypoint],
+    target_body: &mut ChildSpatialBody,
+    pivot_offset: Vector3,
+) -> Result<Vec<KinematicBoomTargetSample>> {
+    let child_path = target_body.reconcile_parent_path(scene, initial, parent_waypoints)?;
+    let samples = child_path
+        .legs()
+        .iter()
+        .map(|leg| {
+            let pose = present_placed_motion_pose(
+                &child_path,
+                leg.end(),
+                holtburger_common::Quaternion::identity(),
+            )?;
+            Ok(KinematicBoomTargetSample {
+                end_fraction: leg.end_fraction(),
+                visual_pivot: visual_pivot_at_fraction(
+                    initial,
+                    parent_waypoints,
+                    leg.end_fraction(),
+                    pivot_offset,
+                )?,
+                target_seed: KinematicBoomTargetSeed {
+                    placement: KinematicBoomPlacement {
+                        pose,
+                        cell: leg.end().placement().committed_cell(),
+                    },
+                },
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ensure!(
+        samples
+            .last()
+            .is_some_and(|sample| sample.end_fraction == 1.0),
+        "client camera target path must end at one"
+    );
+    Ok(samples)
+}
+
+fn target_sample_from_pose(
+    scene: &holtburger_world::CollisionScene,
+    pose: WorldPosition,
+    target_body: &mut ChildSpatialBody,
+    pivot_offset: Vector3,
+) -> Result<KinematicBoomTargetSample> {
+    let child_path = target_body.reconcile_parent_path(
+        scene,
+        pose,
+        &[ChildSpatialBodyWaypoint {
+            parent_pose: pose,
+            end_fraction: 1.0,
+        }],
+    )?;
+    let point = child_path.final_point();
+    let child_pose = present_placed_motion_pose(
+        &child_path,
+        point,
+        holtburger_common::Quaternion::identity(),
+    )?;
+    Ok(KinematicBoomTargetSample {
+        end_fraction: 1.0,
+        visual_pivot: visual_pivot(pose, pivot_offset),
+        target_seed: KinematicBoomTargetSeed {
+            placement: KinematicBoomPlacement {
+                pose: child_pose,
+                cell: point.placement().committed_cell(),
+            },
+        },
+    })
+}
+
+fn visual_pivot_at_fraction(
+    initial: WorldPosition,
+    waypoints: &[ChildSpatialBodyWaypoint],
+    fraction: f32,
+    pivot_offset: Vector3,
+) -> Result<WorldPosition> {
+    let mut start_fraction = 0.0;
+    let mut start = initial;
+    for leg in waypoints {
+        if fraction == leg.end_fraction {
+            return Ok(visual_pivot(leg.parent_pose, pivot_offset));
+        }
+        if fraction < leg.end_fraction {
+            let span = leg.end_fraction - start_fraction;
+            let local_fraction = (fraction - start_fraction) / span;
+            return Ok(visual_pivot(
+                interpolate_pose(start, leg.parent_pose, local_fraction)?,
+                pivot_offset,
+            ));
+        }
+        start_fraction = leg.end_fraction;
+        start = leg.parent_pose;
+    }
+    anyhow::bail!("client camera target fraction is outside the accepted parent path")
+}
+
+fn visual_pivot(mut pose: WorldPosition, pivot_offset: Vector3) -> WorldPosition {
+    pose.coords = pose.coords + pose.rotation.rotate_vector(pivot_offset);
+    pose
+}
+
+fn project_camera_outcome(
+    active: &mut ActiveCamera,
+    initial_visual_pivot: WorldPosition,
+    duration_ms: f64,
+    outcome: KinematicBoomOutcome,
+) -> Result<ClientCameraTick> {
+    ensure!(duration_ms.is_finite() && duration_ms > 0.0);
+    active.sequence = next_camera_sequence(active)?;
+    let identity = active.identity;
+    Ok(match outcome {
+        KinematicBoomOutcome::Advanced {
+            advance,
+            clearance,
+            diagnostics,
+            convergence,
+        } => match advance {
+            KinematicBoomAdvance::Continuous { path } => {
+                match serialize_kinematic_boom_path(
+                    &path,
+                    initial_visual_pivot,
+                    active.controller.visual_pivot(),
+                ) {
+                    Ok(path) => ClientCameraTick::Advanced {
+                        identity,
+                        sequence: active.sequence,
+                        duration_ms,
+                        target_sphere_role: active.target_sphere_role,
+                        clearance: ClientCameraClearance {
+                            projection_revision: clearance.revision,
+                            radius: clearance.radius,
+                        },
+                        desired_reach: active.controller.desired_reach(),
+                        rendered_reach: active.controller.rendered_reach(),
+                        path,
+                        diagnostics: diagnostics.into(),
+                        convergence,
+                    },
+                    Err(_) => held_tick(
+                        active,
+                        clearance,
+                        ClientCameraFailureReason::PathProjection,
+                        diagnostics,
+                        duration_ms,
+                    ),
+                }
+            }
+            KinematicBoomAdvance::Reseeded { placement, reason } => ClientCameraTick::Reseeded {
+                identity,
+                sequence: active.sequence,
+                duration_ms,
+                target_sphere_role: active.target_sphere_role,
+                clearance: ClientCameraClearance {
+                    projection_revision: clearance.revision,
+                    radius: clearance.radius,
+                },
+                desired_reach: active.controller.desired_reach(),
+                rendered_reach: active.controller.rendered_reach(),
+                path: stationary_kinematic_boom_path(placement, active.controller.visual_pivot()),
+                reason: reason.into(),
+                diagnostics: diagnostics.into(),
+                convergence,
+            },
+        },
+        KinematicBoomOutcome::Held {
+            reason,
+            clearance,
+            diagnostics,
+            ..
+        } => held_tick(active, clearance, reason.into(), diagnostics, duration_ms),
+        KinematicBoomOutcome::Fallback {
+            reason,
+            placement,
+            diagnostics,
+        } => fallback_tick(active, placement, reason.into(), diagnostics, duration_ms),
+    })
+}
+
+fn project_camera_failure(
+    active: &mut ActiveCamera,
+    duration_ms: f64,
+    reason: ClientCameraFailureReason,
+    diagnostics: KinematicBoomDiagnostics,
+) -> Result<ClientCameraTick> {
+    ensure!(duration_ms.is_finite() && duration_ms > 0.0);
+    active.sequence = next_camera_sequence(active)?;
+    Ok(match active.controller.committed_clearance() {
+        Some(clearance) => held_tick(active, clearance, reason, diagnostics, duration_ms),
+        None => fallback_tick(
+            active,
+            active.controller.camera(),
+            reason,
+            diagnostics,
+            duration_ms,
+        ),
+    })
+}
+
+fn next_camera_sequence(active: &ActiveCamera) -> Result<u64> {
+    active
+        .sequence
+        .checked_add(1)
+        .context("client camera output sequence exhausted")
+}
+
+fn held_tick(
+    active: &ActiveCamera,
+    clearance: KinematicBoomClearance,
+    reason: ClientCameraFailureReason,
+    diagnostics: KinematicBoomDiagnostics,
+    duration_ms: f64,
+) -> ClientCameraTick {
+    ClientCameraTick::Held {
+        identity: active.identity,
+        sequence: active.sequence,
+        // Held outputs have no newly solved transit, but retain the fixed tick duration so the
+        // frontend can keep one receipt-clocked playback contract for every output kind.
+        duration_ms,
+        target_sphere_role: active.target_sphere_role,
+        clearance: ClientCameraClearance {
+            projection_revision: clearance.revision,
+            radius: clearance.radius,
+        },
+        desired_reach: active.controller.desired_reach(),
+        rendered_reach: active.controller.rendered_reach(),
+        path: stationary_kinematic_boom_path(
+            active.controller.camera(),
+            active.controller.visual_pivot(),
+        ),
+        reason,
+        diagnostics: diagnostics.into(),
+        convergence: KinematicBoomConvergence::Converging,
+    }
+}
+
+fn fallback_tick(
+    active: &ActiveCamera,
+    placement: KinematicBoomPlacement,
+    reason: ClientCameraFailureReason,
+    diagnostics: KinematicBoomDiagnostics,
+    duration_ms: f64,
+) -> ClientCameraTick {
+    ClientCameraTick::Fallback {
+        identity: active.identity,
+        sequence: active.sequence,
+        duration_ms,
+        target_sphere_role: active.target_sphere_role,
+        desired_reach: active.controller.desired_reach(),
+        path: stationary_kinematic_boom_path(placement, active.controller.visual_pivot()),
+        reason,
+        diagnostics: diagnostics.into(),
+        convergence: KinematicBoomConvergence::Converging,
+    }
+}
+
+fn validate_camera_request(request: ClientCameraStartRequest) -> Result<()> {
+    ensure!(
+        request.player_guid != Guid::NULL,
+        "client camera player GUID must be non-null"
+    );
+    ensure!(
+        request.initial_reach.is_finite()
+            && request.minimum_reach.is_finite()
+            && request.maximum_reach.is_finite()
+            && request.minimum_reach >= 0.0
+            && request.maximum_reach >= request.minimum_reach
+            && (request.minimum_reach..=request.maximum_reach).contains(&request.initial_reach),
+        "client camera reach policy is invalid"
+    );
+    validate_view_direction(request.view_direction)?;
+    ensure!(
+        request.cumulative_zoom_displacement.is_finite(),
+        "client camera cumulative zoom must be finite"
+    );
+    validate_clearance(request.projection_revision, request.clearance_radius)
+}
+
+fn validate_view_direction(direction: [f32; 3]) -> Result<()> {
+    ensure!(
+        direction.iter().all(|value| value.is_finite())
+            && direction.iter().map(|value| value * value).sum::<f32>() > f32::EPSILON,
+        "client camera view direction must be finite and non-zero"
+    );
+    Ok(())
+}
+
+fn validate_clearance(revision: u64, radius: f32) -> Result<()> {
+    ensure!(
+        revision > 0,
+        "client camera projection revision must be positive"
+    );
+    ensure!(
+        radius.is_finite() && radius > 0.0,
+        "client camera clearance radius must be finite and positive"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::client::ClientState;
+    use crate::client::builder::build_test_client;
+    use crate::{SimulationSceneInterest, SimulationSceneOwnerAvailability};
+    use holtburger_common::{Plane, Sphere};
+    use holtburger_content::{
+        CellCollisionPortal, CellCollisionPortalTarget, CellVolume, LandblockColliders,
+        LandblockCollisionAsset, LandblockPlacement, TerrainCollisionSurface,
+    };
+    use holtburger_world::{
+        CollisionScene, PhysicalBodyResponsePolicy, PhysicalCollisionFilter, PhysicalFriction,
+        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+    };
+
+    #[test]
+    fn partial_parent_travel_commits_the_child_portal_only_when_crossed() {
+        let cell = Guid(0x10000100);
+        let initial = WorldPosition {
+            landblock_id: cell,
+            coords: Vector3::new(11.0, 10.0, 4.0),
+            rotation: holtburger_common::Quaternion::identity(),
+        };
+        let mut end = initial;
+        end.landblock_id = Guid(0x10000001);
+        end.coords.x = 9.0;
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: 0x1000ffff,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
+                        cell_selector: 0x100,
+                        placement: LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: holtburger_common::Quaternion::identity(),
+                        },
+                        planes: vec![Plane {
+                            normal: Vector3::new(1.0, 0.0, 0.0),
+                            d: -10.0,
+                        }],
+                        portals: vec![CellCollisionPortal {
+                            plane: Plane {
+                                normal: Vector3::new(1.0, 0.0, 0.0),
+                                d: -10.0,
+                            },
+                            aperture_vertices: Vec::new(),
+                            reciprocal_visibility_vertices: None,
+                            positive_side: true,
+                            target: CellCollisionPortalTarget::Outdoor,
+                            outdoor_building: None,
+                        }],
+                    }],
+                ),
+            })
+            .unwrap();
+        let mut child = ChildSpatialBody::new(
+            ChildSpatialBodyDefinition::new(Vector3::zero(), 0.1).unwrap(),
+            initial,
+        );
+        let start = initial;
+        let quarter = interpolate_pose(initial, end, 0.25).unwrap();
+        let waypoints = [ChildSpatialBodyWaypoint {
+            parent_pose: quarter,
+            end_fraction: 1.0,
+        }];
+        let samples =
+            target_samples_from_parent_path(&scene, start, &waypoints, &mut child, Vector3::zero())
+                .unwrap();
+        assert_eq!(child.committed_cell(), Some(cell));
+        assert_eq!(
+            samples.last().unwrap().target_seed.placement.cell,
+            Some(cell)
+        );
+        let start = quarter;
+        let waypoints = [ChildSpatialBodyWaypoint {
+            parent_pose: interpolate_pose(initial, end, 0.75).unwrap(),
+            end_fraction: 1.0,
+        }];
+        let samples =
+            target_samples_from_parent_path(&scene, start, &waypoints, &mut child, Vector3::zero())
+                .unwrap();
+        assert_eq!(child.committed_cell(), None);
+        assert_eq!(samples.last().unwrap().target_seed.placement.cell, None);
+        assert!((samples.last().unwrap().visual_pivot.coords.x - 9.5).abs() < 1e-5);
+    }
+
+    /// Install a solid peer halfway along a clear upward boom, then let the boom settle.
+    fn boom_with_obstacle() -> (
+        ClientRuntime,
+        SimulationSceneSnapshot,
+        ClientCameraRuntime,
+        SpatialBodyId,
+        f32,
+    ) {
+        let (mut client, collision, _) = super::super::tests::floor_contact_publication();
+        let player = SpatialBodyId::LocalPlayer(client.world.player.guid);
+        let mut camera = ClientCameraRuntime::new().unwrap();
+        let mut request = start_request(
+            client.world.player.guid,
+            u64::from(client.world.player_entity().unwrap().instance_sequence()),
+        );
+        // Aim above the floor so the baseline reach is limited only by the inserted entity.
+        request.view_direction = [0.0, 0.0, 1.0];
+        camera.start(request, &client.world).unwrap();
+        let duration = ACTIVATION_SETTLE_STEP;
+        let clear = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&clear, duration).unwrap().unwrap();
+        }
+        let controller = &camera.active.as_ref().unwrap().controller;
+        let clear_reach = controller.rendered_reach();
+        assert!(clear_reach > 4.0);
+        let pivot = controller.visual_pivot();
+        let end = controller.camera().pose;
+        let mut blocker = client.world.scene.body(player).unwrap().clone();
+        blocker.id = SpatialBodyId::Entity(Guid(0x7000_0001));
+        blocker.pose.coords = (pivot.coords + end.coords) * 0.5;
+        let physical = blocker.physical.as_ref().unwrap();
+        let configuration =
+            super::super::tests::dynamic_definition(physical.definition, physical.response_policy);
+        let mut definition = configuration.definition().clone();
+        definition.entity_collision.contact_response =
+            holtburger_world::EntityContactResponse::Obstacle;
+        Arc::make_mut(&mut definition.entity_collision.target_geometry).fallback_shapes =
+            vec![Arc::new(holtburger_content::CollisionShape::Ball(
+                holtburger_content::CollisionBall {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                },
+            ))];
+        let blocker_id = blocker.id;
+        client.world.scene.register_body(blocker);
+        client
+            .world
+            .scene
+            .set_dynamic_physical_body(
+                blocker_id,
+                Some(
+                    holtburger_world::DynamicPhysicalBodyConfiguration::new(
+                        definition,
+                        configuration.demand(),
+                    )
+                    .unwrap(),
+                ),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let blocked = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&blocked, duration).unwrap().unwrap();
+        }
+        assert!(
+            camera.active.as_ref().unwrap().controller.rendered_reach() < clear_reach - 0.5,
+            "clear {clear_reach}, blocked {}",
+            camera.active.as_ref().unwrap().controller.rendered_reach()
+        );
+        (client, collision, camera, blocker_id, clear_reach)
+    }
+
+    #[test]
+    fn server_projectiles_remain_camera_excluded_until_server_reclassification() {
+        let (mut client, collision, mut camera, blocker_id, clear_reach) = boom_with_obstacle();
+        let duration = ACTIVATION_SETTLE_STEP;
+        // The indexed geometry is an ordinary solid after local missile retirement. The
+        // server classification must still exclude it without removing that world target.
+        let blocker_pose = client.world.scene.body(blocker_id).unwrap().pose;
+        let guid = blocker_id.authoritative_guid().unwrap();
+        let mut entity =
+            holtburger_world::entity::Entity::new(guid, "Projectile".into(), blocker_pose);
+        entity
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                holtburger_common::properties::PhysicsState::MISSILE,
+            ));
+        // Insert only entity facts: preserve the already-installed solid body in this fixture.
+        client.world.entities.insert(entity);
+        let projectile = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        assert!(
+            projectile
+                .collision
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .excluded
+                .contains(&blocker_id)
+        );
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&projectile, duration).unwrap().unwrap();
+        }
+        assert!(
+            (camera.active.as_ref().unwrap().controller.rendered_reach() - clear_reach).abs()
+                < 0.01
+        );
+        client
+            .world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                holtburger_common::properties::PhysicsState::empty(),
+            ));
+        let reclassified = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        assert!(
+            !reclassified
+                .collision
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .excluded
+                .contains(&blocker_id)
+        );
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&reclassified, duration).unwrap().unwrap();
+        }
+        assert!(camera.active.as_ref().unwrap().controller.rendered_reach() < clear_reach - 0.5);
+    }
+
+    #[test]
+    fn boom_follows_player_entity_exclusion_without_restarting_the_camera() {
+        let (mut client, collision, mut camera, _, clear_reach) = boom_with_obstacle();
+        let player = SpatialBodyId::LocalPlayer(client.world.player.guid);
+        let duration = ACTIVATION_SETTLE_STEP;
+        assert!(client.world.scene.set_physical_collision_exclusion(
+            player,
+            holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+            true
+        ));
+        let excluded = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        assert!(
+            excluded
+                .collision
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .entities
+                .is_none()
+        );
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&excluded, duration).unwrap().unwrap();
+        }
+        assert!(
+            (camera.active.as_ref().unwrap().controller.rendered_reach() - clear_reach).abs()
+                < 0.01
+        );
+        assert!(client.world.scene.set_physical_collision_exclusion(
+            player,
+            holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+            false
+        ));
+        let restored = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&restored, duration).unwrap().unwrap();
+        }
+        assert!(
+            camera.active.as_ref().unwrap().controller.rendered_reach() < clear_reach - 0.5,
+            "clear {clear_reach}, blocked {}",
+            camera.active.as_ref().unwrap().controller.rendered_reach()
+        );
+    }
+
+    #[test]
+    fn physical_contact_path_survives_client_publication_and_camera_sampling() {
+        let (client, collision, batch) = super::super::tests::floor_contact_publication();
+        let input = ClientCameraSceneInput::capture(&client.world, Some(&collision), Some(&batch));
+        let body = input.target.as_ref().unwrap().body.as_ref().unwrap();
+        let TargetUpdate::Travel(travel) = body.update.as_ref().unwrap() else {
+            panic!("expected integrated travel");
+        };
+        let path = travel;
+        assert_eq!(path, &batch.advances[0].path);
+        let mut child = ChildSpatialBody::new(
+            ChildSpatialBodyDefinition::new(Vector3::zero(), 0.1).unwrap(),
+            path.initial.pose,
+        );
+        let waypoints = path
+            .legs
+            .iter()
+            .map(|leg| ChildSpatialBodyWaypoint {
+                parent_pose: leg.end.pose,
+                end_fraction: leg.end_fraction,
+            })
+            .collect::<Vec<_>>();
+        let samples = target_samples_from_parent_path(
+            &collision.scene,
+            path.initial.pose,
+            &waypoints,
+            &mut child,
+            Vector3::zero(),
+        )
+        .unwrap();
+        for leg in &path.legs {
+            let sample = samples
+                .iter()
+                .find(|sample| sample.end_fraction == leg.end_fraction)
+                .expect("camera must retain each accepted boundary");
+            assert!((sample.visual_pivot.coords - leg.end.pose.coords).length() < 0.0001);
+            assert!(
+                (sample.target_seed.placement.pose.coords - leg.end.pose.coords).length() < 0.0001
+            );
+        }
+    }
+
+    fn start_request(player_guid: Guid, entity_generation: u64) -> ClientCameraStartRequest {
+        ClientCameraStartRequest {
+            player_guid,
+            entity_generation,
+            initial_reach: 4.5,
+            minimum_reach: 1.2,
+            maximum_reach: 8.0,
+            input_sequence: 0,
+            view_direction: [0.0, 0.0, -1.0],
+            cumulative_zoom_displacement: 0.0,
+            projection_revision: 1,
+            clearance_radius: 0.5,
+        }
+    }
+
+    fn registered_camera(world: &WorldState) -> ClientCameraRuntime {
+        let mut camera = ClientCameraRuntime::new().unwrap();
+        let generation = u64::from(world.player_entity().unwrap().instance_sequence());
+        camera
+            .start(start_request(world.player.guid, generation), world)
+            .unwrap();
+        camera
+    }
+
+    fn collision_snapshot(
+        interest: SimulationSceneInterest,
+        scene: CollisionScene,
+    ) -> SimulationSceneSnapshot {
+        let availability = interest
+            .owners()
+            .iter()
+            .map(|&owner| {
+                (
+                    owner,
+                    SimulationSceneOwnerAvailability::Resident { owner_revision: 1 },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        SimulationSceneSnapshot {
+            revision: 1,
+            content_source_generation: 1,
+            interest,
+            availability,
+            scene: Arc::new(scene),
+        }
+    }
+
+    #[test]
+    fn activation_settlement_retains_a_non_empty_stationary_wire_path() {
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(1.0, 2.0, 3.0),
+            rotation: holtburger_common::Quaternion::identity(),
+        };
+        let mut tick = ClientCameraTick::Fallback {
+            identity: ClientCameraIdentity {
+                player_guid: Guid(0x0102_0304),
+                entity_generation: 1,
+                camera_generation: 1,
+            },
+            sequence: 1,
+            duration_ms: 30.0,
+            target_sphere_role: ClientCameraTargetSphereRole::Primary,
+            desired_reach: 4.5,
+            path: stationary_kinematic_boom_path(KinematicBoomPlacement { pose, cell: None }, pose),
+            reason: ClientCameraFailureReason::TargetContract,
+            diagnostics: KinematicBoomDiagnostics::default().into(),
+            convergence: KinematicBoomConvergence::Settled,
+        };
+
+        tick.make_path_stationary().unwrap();
+
+        let ClientCameraTick::Fallback { path, .. } = tick else {
+            unreachable!("test constructs a fallback tick")
+        };
+        assert_eq!(path.legs.len(), 1);
+        assert_eq!(path.legs[0].end_fraction, 1.0);
+        assert_eq!(path.legs[0].end, path.initial);
+    }
+
+    #[test]
+    fn camera_generation_guard_requires_the_exact_hydrated_player_instance() {
+        let mut client = build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        client.world.player.guid = guid;
+        let missing = client
+            .start_camera(start_request(guid, 0))
+            .expect_err("an unhydrated player cannot establish a camera generation");
+        assert!(missing.to_string().contains("target entity is unavailable"));
+
+        client.world.seed_local_player_entity(
+            guid,
+            "Player",
+            WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: Vector3::zero(),
+                rotation: holtburger_common::Quaternion::identity(),
+            },
+        );
+        let generation = u64::from(client.world.player_entity().unwrap().instance_sequence());
+        let aliased = client
+            .start_camera(start_request(guid, generation + (u64::from(u16::MAX) + 1)))
+            .expect_err("a generation that only matches after narrowing must remain stale");
+        assert!(aliased.to_string().contains("stale entity generation"));
+    }
+
+    #[test]
+    fn unavailable_collision_snapshot_advances_with_an_uncovered_proof() {
+        let mut client = build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let player_pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(96.0, 96.0, 1.0),
+            rotation: holtburger_common::Quaternion::identity(),
+        };
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", player_pose);
+
+        let body_id = SpatialBodyId::LocalPlayer(guid);
+        let definition = PhysicalBodyDefinition::free_sphere(
+            PhysicalSphereSet::new(
+                Sphere {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                },
+                None,
+            )
+            .expect("test sphere should be valid"),
+        )
+        .expect("test physical definition should be valid");
+        client
+            .world
+            .scene
+            .install_physical_body(
+                body_id,
+                definition,
+                PhysicalCollisionFilter::ALL,
+                PhysicalBodyResponsePolicy {
+                    restitution: PhysicalRestitution::Inelastic,
+                    friction: PhysicalFriction::DEFAULT,
+                    surface_motion: PhysicalSurfaceMotion::Stable,
+                    align_path: false,
+                },
+                None,
+            )
+            .expect("seeded local player should have a canonical body");
+
+        let instance_sequence = client
+            .world
+            .player_entity()
+            .expect("seeded player should be hydrated")
+            .instance_sequence();
+        let interest = SimulationSceneInterest::prefetch_neighborhood(
+            player_pose,
+            crate::CLIENT_COLLISION_OWNER_RADIUS,
+        )
+        .expect("test position should demand collision");
+        let unavailable_owner = Guid(0x1000_ffff);
+        let availability = interest
+            .owners()
+            .iter()
+            .map(|&owner| (owner, SimulationSceneOwnerAvailability::Absent))
+            .collect();
+        let collision = SimulationSceneSnapshot {
+            revision: 1,
+            content_source_generation: 1,
+            interest,
+            availability,
+            scene: Arc::new(CollisionScene::new()),
+        };
+
+        client
+            .start_camera(ClientCameraStartRequest {
+                player_guid: guid,
+                entity_generation: u64::from(instance_sequence),
+                initial_reach: 4.5,
+                minimum_reach: 1.2,
+                maximum_reach: 8.0,
+                input_sequence: 0,
+                view_direction: [0.0, 0.0, -1.0],
+                cumulative_zoom_displacement: 0.0,
+                projection_revision: 1,
+                clearance_radius: 0.5,
+            })
+            .expect("camera registration should be accepted");
+        let tick_duration = Duration::from_millis(30);
+        let mut camera = registered_camera(&client.world);
+        let input = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let tick = camera
+            .advance(&input, tick_duration)
+            .expect("initial camera solve should not fail")
+            .expect("initial camera solve should publish a tick");
+        let diagnostics = match &tick {
+            ClientCameraTick::Advanced { diagnostics, .. }
+            | ClientCameraTick::Reseeded { diagnostics, .. }
+            | ClientCameraTick::Held { diagnostics, .. }
+            | ClientCameraTick::Fallback { diagnostics, .. } => diagnostics,
+        };
+        assert_eq!(
+            diagnostics.collision_proof,
+            ClientCameraCollisionProof::Uncovered {
+                owner: unavailable_owner,
+            },
+            "unexpected uncovered camera tick: {tick:?}"
+        );
+    }
+
+    /// Ordinary interior placement shared by the camera lifecycle fixtures.
+    const INDOOR_PLAYER_POSE: WorldPosition = WorldPosition {
+        landblock_id: Guid(0x1000_0100),
+        coords: Vector3 {
+            x: 20.0,
+            y: 30.0,
+            z: 4.0,
+        },
+        rotation: holtburger_common::Quaternion {
+            w: 1.0,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    };
+
+    fn indoor_camera(
+        player_pose: WorldPosition,
+    ) -> (ClientRuntime, SimulationSceneSnapshot, WorldPosition) {
+        let mut client = build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let cell = player_pose.landblock_id;
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", player_pose);
+        let body_id = SpatialBodyId::LocalPlayer(guid);
+        let definition = PhysicalBodyDefinition::free_sphere(
+            PhysicalSphereSet::new(
+                Sphere {
+                    center: Vector3::zero(),
+                    radius: 0.5,
+                },
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        client
+            .world
+            .scene
+            .install_physical_body(
+                body_id,
+                definition,
+                PhysicalCollisionFilter::ALL,
+                PhysicalBodyResponsePolicy {
+                    restitution: PhysicalRestitution::Inelastic,
+                    friction: PhysicalFriction::DEFAULT,
+                    surface_motion: PhysicalSurfaceMotion::Stable,
+                    align_path: false,
+                },
+                Some(cell),
+            )
+            .unwrap();
+
+        let mut scene = CollisionScene::new();
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: (cell.0 & 0xffff_0000) | 0xffff,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::new(
+                    Vec::new(),
+                    vec![CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
+                        cell_selector: (cell.0 & 0xffff) as u16,
+                        placement: LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: holtburger_common::Quaternion::identity(),
+                        },
+                        planes: Vec::new(),
+                        portals: Vec::new(),
+                    }],
+                ),
+            })
+            .unwrap();
+        let instance_sequence = client.world.player_entity().unwrap().instance_sequence();
+        let interest = SimulationSceneInterest::prefetch_neighborhood(
+            player_pose,
+            crate::CLIENT_COLLISION_OWNER_RADIUS,
+        )
+        .unwrap();
+        let collision = collision_snapshot(interest, scene);
+        client
+            .start_camera(ClientCameraStartRequest {
+                player_guid: guid,
+                entity_generation: u64::from(instance_sequence),
+                initial_reach: 4.5,
+                minimum_reach: 1.2,
+                maximum_reach: 8.0,
+                input_sequence: 0,
+                view_direction: [0.0, 0.0, -1.0],
+                cumulative_zoom_displacement: 0.0,
+                projection_revision: 1,
+                clearance_radius: 0.5,
+            })
+            .unwrap();
+
+        (client, collision, player_pose)
+    }
+
+    #[test]
+    fn camera_initializes_from_authoritative_deep_env_cell() {
+        let (client, collision, player_pose) = indoor_camera(INDOOR_PLAYER_POSE);
+        let mut camera = registered_camera(&client.world);
+        let input = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let tick = camera
+            .advance(&input, Duration::from_millis(30))
+            .expect("deep indoor camera initialization must not fail")
+            .expect("initialized camera should publish a tick");
+        let ClientCameraTick::Reseeded {
+            path,
+            reason: ClientCameraReseedReason::InitialPlacement,
+            ..
+        } = &tick
+        else {
+            panic!("ordinary indoor initialization must prove its initial placement: {tick:?}")
+        };
+        assert_eq!(path.initial.position.landblock_id, player_pose.landblock_id);
+    }
+
+    #[test]
+    fn camera_settles_when_dungeon_coordinates_cross_into_region_zero() {
+        // Reproduce the coordinate-frame crossing from the 0x000102C7 login incident.
+        // The empty synthetic interior isolates coordinate conversion from content geometry.
+        let (client, collision, player_pose) = indoor_camera(WorldPosition {
+            landblock_id: Guid(0x0001_02c7),
+            coords: Vector3::new(66.25, -2.25, 1.35),
+            rotation: holtburger_common::Quaternion::identity(),
+        });
+        let request = start_request(
+            client.world.player.guid,
+            u64::from(client.world.player_entity().unwrap().instance_sequence()),
+        );
+        let mut camera = ClientCameraRuntime::new().unwrap();
+        camera.start(request, &client.world).unwrap();
+        let input = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let ClientCameraSettlement::Settled(tick) = camera.settle_for_activation(&input).unwrap()
+        else {
+            panic!("stationary dungeon camera must settle");
+        };
+        let ClientCameraTick::Advanced {
+            path,
+            rendered_reach,
+            diagnostics,
+            ..
+        } = tick
+        else {
+            panic!("settlement must finish with a continuous camera placement: {tick:?}");
+        };
+        assert!(rendered_reach >= request.minimum_reach);
+        assert_eq!(path.initial.position.landblock_id, player_pose.landblock_id);
+        assert_eq!(
+            diagnostics.collision_proof,
+            ClientCameraCollisionProof::Covered
+        );
+    }
+
+    #[test]
+    fn camera_snapshot_is_independent_and_refreshes_a_target_without_travel() {
+        let (mut client, collision, original_pose) = indoor_camera(INDOOR_PLAYER_POSE);
+        let mut camera = registered_camera(&client.world);
+        let original = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let identity = client.camera.identity().unwrap();
+        let mut body = client
+            .world
+            .scene
+            .body(SpatialBodyId::LocalPlayer(identity.player_guid))
+            .unwrap()
+            .clone();
+        body.pose.coords.x += 1.0;
+        let moved_pose = body.pose;
+        client.world.scene.update_body(body);
+        let moved = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let duration = Duration::from_millis(30);
+
+        // Publishing a later world pose must not mutate the camera's already captured input.
+        camera.advance(&original, duration).unwrap().unwrap();
+        let active = camera.active.as_ref().unwrap();
+        assert_eq!(
+            active.controller.visual_pivot(),
+            visual_pivot(original_pose, active.pivot_offset)
+        );
+
+        // A correction-only publication has no integrated travel, but still replaces the target.
+        camera.advance(&moved, duration).unwrap().unwrap();
+        let active = camera.active.as_ref().unwrap();
+        assert_eq!(
+            active.controller.visual_pivot().coords,
+            visual_pivot(moved_pose, active.pivot_offset).coords
+        );
+        assert!(Arc::ptr_eq(
+            &moved
+                .collision
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .environment,
+            &collision.scene
+        ));
+    }
+
+    #[test]
+    fn successive_physics_paths_keep_the_camera_extended() {
+        let (client, collision, batch) = super::super::tests::floor_contact_publication();
+        let mut camera = ClientCameraRuntime::new().unwrap();
+        let mut request = start_request(
+            client.world.player.guid,
+            u64::from(client.world.player_entity().unwrap().instance_sequence()),
+        );
+        // Keep the camera above the floor; this test exercises movement continuity, not obstruction.
+        request.view_direction = [0.0, 0.0, 1.0];
+        camera.start(request, &client.world).unwrap();
+        let mut input = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let duration = Duration::from_millis(super::super::PHYSICS_TICK_MS);
+        for _ in 0..100 {
+            camera.advance(&input, duration).unwrap();
+        }
+        for _ in 0..10 {
+            let body = input.target.as_mut().unwrap().body.as_mut().unwrap();
+            let start = body.pose;
+            let mut end = start;
+            end.coords.x += 0.1;
+            let mut path = batch.advances[0].path.clone();
+            path.initial.pose = start;
+            path.legs.truncate(1);
+            path.legs[0].end_fraction = 1.0;
+            path.legs[0].end.pose = end;
+            body.pose = end;
+            body.update = Some(TargetUpdate::Travel(path));
+            let tick = camera.advance(&input, duration).unwrap().unwrap();
+            let ClientCameraTick::Advanced { rendered_reach, .. } = tick else {
+                panic!("continuous movement reset camera: {tick:?}");
+            };
+            assert!(rendered_reach >= request.minimum_reach);
+            assert_eq!(camera.active.as_ref().unwrap().target_pose, end);
+        }
+    }
+
+    #[test]
+    fn invalid_target_interval_preserves_the_last_safe_camera_for_failure_output() {
+        let (client, collision, batch) = super::super::tests::floor_contact_publication();
+        let mut camera = registered_camera(&client.world);
+        let mut input = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let duration = Duration::from_millis(super::super::PHYSICS_TICK_MS);
+        for _ in 0..100 {
+            camera.advance(&input, duration).unwrap();
+        }
+        let safe = camera.active.as_ref().unwrap().controller.camera();
+        let body = input.target.as_mut().unwrap().body.as_mut().unwrap();
+        let mut path = batch.advances[0].path.clone();
+        path.initial.pose = body.pose;
+        path.legs.truncate(1);
+        path.legs[0].end.pose = body.pose;
+        path.legs[0].end_fraction = -1.0;
+        body.update = Some(TargetUpdate::Travel(path));
+        let tick = camera.advance(&input, duration).unwrap().unwrap();
+        let ClientCameraTick::Held { path, .. } = tick else {
+            panic!("failed interval must preserve the prior proof: {tick:?}");
+        };
+        assert_eq!(path.initial.position, safe.pose.into());
+    }
+
+    #[test]
+    fn stationary_physics_ticks_apply_orbit_and_retire_input_on_shutdown() {
+        let (client, collision, _) = indoor_camera(INDOOR_PLAYER_POSE);
+        let identity = client.camera.identity().unwrap();
+        let input = client.camera_input_handle();
+        let scope = client.camera.run_scope();
+        let request = ClientCameraIntentRequest {
+            camera_generation: identity.camera_generation,
+            player_guid: identity.player_guid,
+            entity_generation: identity.entity_generation,
+            input_sequence: 1,
+            view_direction: [1.0, 0.0, 0.0],
+            cumulative_zoom_displacement: 0.0,
+        };
+        assert_eq!(
+            input.set_intent(request).unwrap(),
+            ClientCameraUpdateReceipt::Accepted
+        );
+        let duration = Duration::from_millis(super::super::PHYSICS_TICK_MS);
+        let scene = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        let mut previous = 0;
+        for _ in 0..3 {
+            let tick = client
+                .camera
+                .advance_world(&scene, duration)
+                .unwrap()
+                .unwrap();
+            let (sequence, duration_ms) = match tick {
+                ClientCameraTick::Advanced {
+                    sequence,
+                    duration_ms,
+                    ..
+                }
+                | ClientCameraTick::Reseeded {
+                    sequence,
+                    duration_ms,
+                    ..
+                } => (sequence, duration_ms),
+                other => panic!("stationary orbit failed: {other:?}"),
+            };
+            assert!(sequence > previous);
+            assert_eq!(duration_ms, duration.as_secs_f64() * 1000.0);
+            previous = sequence;
+        }
+        drop(scope);
+        assert_eq!(client.camera.identity(), None);
+        assert_eq!(
+            input
+                .set_intent(ClientCameraIntentRequest {
+                    input_sequence: 2,
+                    ..request
+                })
+                .unwrap(),
+            ClientCameraUpdateReceipt::IgnoredStale
+        );
+    }
+
+    #[test]
+    fn teleport_registration_suspends_direct_camera_input_until_world_publication() {
+        let (mut client, collision, _) = indoor_camera(INDOOR_PLAYER_POSE);
+        let guid = client.world.player.guid;
+        let generation = u64::from(client.world.player_entity().unwrap().instance_sequence());
+        client.start_world_activation(crate::client::ClientWorldActivationState::Teleport, guid);
+        let receipt = client
+            .start_camera(start_request(guid, generation))
+            .unwrap();
+        let input = client.camera_input_handle();
+        let request = ClientCameraIntentRequest {
+            camera_generation: receipt.identity.camera_generation,
+            player_guid: guid,
+            entity_generation: generation,
+            input_sequence: 1,
+            view_direction: [1.0, 0.0, 0.0],
+            cumulative_zoom_displacement: 0.0,
+        };
+        assert!(matches!(
+            input.set_intent(request).unwrap(),
+            ClientCameraUpdateReceipt::IgnoredStale
+        ));
+        client
+            .camera
+            .advance_world(
+                &ClientCameraSceneInput::capture(&client.world, Some(&collision), None),
+                Duration::from_millis(super::super::PHYSICS_TICK_MS),
+            )
+            .unwrap();
+        assert!(matches!(
+            input.set_intent(request).unwrap(),
+            ClientCameraUpdateReceipt::Accepted
+        ));
+    }
+}

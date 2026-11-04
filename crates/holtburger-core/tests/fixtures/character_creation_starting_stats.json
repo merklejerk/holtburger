@@ -1,0 +1,16 @@
+{
+  "attributes": [55, 55, 55, 55, 55, 55],
+  "vitals": [28, 55, 55],
+  "heritage": 1,
+  "heritageWithoutSkillBonus": 6,
+  "skill": {
+    "id": 6,
+    "first": "Quickness",
+    "second": "Coordination",
+    "divisor": 3,
+    "untrained": 42,
+    "trained": 47,
+    "specialized": 52,
+    "racialBonus": 5
+  }
+}

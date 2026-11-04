@@ -1,11 +1,15 @@
-# Holtburger 🍔
+<p align="center">
+  <img src="assets/branding/portal-static.svg" width="160" height="160" alt="Holtburger portal logo" />
+</p>
+
+# Holtburger
 
 Holtburger is a modern, cross-platform, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for a new generation of clients and bots. The TUI client already covers a meaningful set of gameplay, automation, and data-projection workflows, and the stack keeps expanding.
 
 > [!IMPORTANT]
 > Holtburger is being developed against the ACE server implementation, not GDLE. It will likely be very unstable on GDLE servers.
 
-![tui client screenshot](screenshot.png)
+![tui client screenshot](assets/screenshots/tui.png)
 
 ## The Ecosystem
 
@@ -88,9 +92,19 @@ This phase matters because the TUI is not the end state, but the underlying stac
 
 ### Phase 4: 3D Client
 
-With the stack proven out and scripting in place, work can begin on a full 3D client as a fast follow. The current expectation is a Tauri-based client with a classic visual style, backed by a modern, scriptable, and more extensible UI model.
+With the stack proven out and scripting in place, work can begin on a full 3D client as a fast follow. The current implementation uses an Electron shell with a classic visual style, backed by a modern, scriptable, and more extensible UI model.
 
 The TUI is therefore not a side project or disposable prototype. It is the shortest path to validating the complete client architecture, and it should continue to produce useful standalone value even after the 3D client exists.
+
+## Project branding
+
+The portal is Holtburger's project logo. Its [canonical animated SVG](assets/branding/portal.svg)
+also supplies the client loading animation. The [static mark](assets/branding/portal-static.svg),
+PNG, Windows ICO, and macOS ICNS in `assets/branding/` are generated from its still geometry,
+centered on a square canvas. Browser favicons and the CLI Flatpak icon are generated copies.
+To update the artwork, edit the animated source, then run `npm ci` and
+`npm run generate:branding` from `apps/holtburger-3d`. Commit the resulting assets;
+`npm run check:branding` verifies they match the source. Normal builds use the checked-in exports.
 
 ## Disclaimers
 
@@ -131,7 +145,12 @@ Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
 
 ### Linux Flatpak (recommended)
 
-Download the flatpak from releases then run `flatpak install ./holtburger-cli.flatpak`.
+Download the Flatpak from releases, then install it with
+`flatpak install --user --reinstall ./holtburger-cli-VERSION-x86_64.flatpak`
+(substitute the downloaded version).
+The app ID is `io.github.merklejerk.holtburger-cli`, displayed as **Holtburger CLI**.
+Beta and nightly share the same installation and settings; installing either replaces the
+other. See the [CLI quickstart](release/CLI_QUICKSTART.md) for its commands.
 
 ```bash
 # see help
@@ -173,16 +192,19 @@ For day-to-day development, launch the TUI through Cargo from a terminal:
 
 ```bash
 # see help
-cargo run --bin tui -- --help
-# connect
-cargo run --bin tui -- -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
+./apps/holtburger-cli/dev.sh --help
+# connect (pass --release first for an optimized build)
+./apps/holtburger-cli/dev.sh -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
 ```
 
-The source tree uses `./scripts/` as the local script directory by default. Local scripts, script data, and per-script config live under that writable directory unless you override `SCRIPT_DIR`.
+The development runner selects `local/scripts/` for writable scripts and preferences,
+and `assets/scripts/` for the checked-in fighter/mage scripts and sidecars. Local scripts
+take precedence over shipped scripts with the same basename. The runtime default remains
+`./scripts/` when `SCRIPT_DIR` is unset; installed bundles retain their `scripts/` layout.
 
 Script storage:
 
-- Default local script directory: `./scripts/`
+- Source development local script directory: `local/scripts/` (through the development runner)
 - Custom scripts: `<SCRIPT_DIR>/<BASENAME>.js`
 - Script data: `<SCRIPT_DIR>/<BASENAME>.data.json`
 - Script config: `<SCRIPT_DIR>/.config/<BASENAME>.config.json`
@@ -195,7 +217,7 @@ Use the launch command that matches how you installed Holtburger:
 
 - Release archive: `./holtburger-cli [ARGS]`
 - Flatpak: `flatpak run io.github.merklejerk.holtburger-cli [ARGS]`
-- Local development: `cargo run --bin tui -- [ARGS]`
+- Local development: `./apps/holtburger-cli/dev.sh [ARGS]`
 
 The Windows-specific terminal guidance above still applies when launching any of those binaries.
 
@@ -229,43 +251,34 @@ done
 
 ## Data File Configuration
 
-The TUI client requires a namespaced HBA bundle that carries retail data under `eor/portal` and the derived runtime asset under `holtburger/core`. Optional richer world data may also be present under `eor/cell`.
+The TUI uses an HBA for bootstrap/reference facts and `navigation.hnav` for geometry. An HBA
+may contain reduced bootstrap data or full retail resources; either uses the same reduced
+TUI simulation. There is no baked `holtburger/core` asset and no runtime full-HBA geometry path.
 
-- Release archives already include the bundled `assets.hba` archive for the current runtime path.
-- Flatpak builds also include that bundled `assets.hba`.
-- Source builds and local development setups require you to provide the archive yourself.
+`--content DIR` selects an installation directory explicitly. Without it, automatic discovery
+starts at `HOLTBURGER_DEFAULT_CONTENT` when configured, otherwise executable-adjacent `content/`,
+then tries the platform data directory. Working-directory content is not searched. Missing or
+insufficient candidates may fall through; corrupt or unreadable content is reported.
 
-If you are setting up local data, you have two practical options:
+The CLI requires `navigation.hnav` alongside `bootstrap.hba` (preferred when present) or
+`assets.hba`. The environment setting changes discovery only; it never overrides `--content`.
 
-1. Download the latest HBA bundle from the [Releases](https://github.com/merklejerk/holtburger/releases) page and extract it into `./dats/` so `assets.hba` is present.
-2. Repack retail DAT files such as `client_portal.dat` and `client_cell_1.dat` into a namespaced HBA v2 bundle with `dat2hba`.
+Development runners default to ignored `local/content/`. Machine-local provisioning and
+archive-generation instructions belong in `local/AGENTS.md`, when available. For a manual
+PowerShell development launch, set absolute paths before running Cargo:
 
-### Repacking DATs Into HBA v2
-
-Runtime bootstrap is HBA-only now. The supported path for retail DAT inputs is to emit a combined namespaced archive instead of pointing the client at raw `.dat` files directly:
-
-```bash
-cargo run -p holtburger-tools --bin dat2hba -- \
-    --profile micro \
-    eor/portal=client_portal.dat \
-    eor/cell=client_cell_1.dat \
-    dats/assets.hba
+```powershell
+$env:HOLTBURGER_DEFAULT_CONTENT = Join-Path $PWD 'local/content'
+$env:SCRIPT_DIR = Join-Path $PWD 'local/scripts'
+$env:SCRIPT_BUNDLE_DIR = Join-Path $PWD 'assets/scripts'
+cargo run --bin tui -- [ARGS]
 ```
 
-`dat2hba` defaults to `--profile full`. Use `--profile micro` if you want the release-oriented minimal bundle; it contains the required portal tables plus the derived `holtburger/core:MotionKinematics` asset.
-
-At runtime, the frontend constructs a `holtburger-content::ContentRepository` from that HBA source, requests a parsed `WorldBootstrap` for `holtburger-core`, and may retain the repository for static reference-data lookups.
-
-**Search Priority:**
-1.  `--dats <PATH>` command-line argument.
-2.  `HOLTBURGER_DATS` environment variable.
-3.  Local `./dats/` directory relative to the binary.
-4.  Standard OS Data Directory:
-    *   **Linux**: `~/.local/share/holtburger/dats/`
-    *   **MacOS**: `~/Library/Application Support/io.github.merklejerk.holtburger/dats/`
-    *   **Windows**: `%APPDATA%\merklejerk\holtburger\data\dats\`
-
-> **Note:** Official DAT files no longer need to be renamed when passed to tooling. Runtime startup no longer scans raw DAT files; use `dat2hba` to produce a namespaced `assets.hba` bundle first.
+CLI native/Flatpak bundles include the generated reference and navigation data. Source builds
+need generated data compatible with the current navigation format; see the
+[CLI quickstart](release/CLI_QUICKSTART.md).
+A full HBA alone does not replace navigation data. h3d separately supports full retail DATs or
+HBAs through its own content selection; see the [3D quickstart](release/3D_QUICKSTART.md).
 
 ## License
 

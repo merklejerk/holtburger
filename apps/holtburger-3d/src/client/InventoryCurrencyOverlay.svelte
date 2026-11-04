@@ -1,0 +1,178 @@
+<script lang="ts">
+	import { onMount, type Snippet } from "svelte";
+	import { uiScale, UI_SCALE_CHANGE_EVENT } from "../app/ui-scale";
+	import UiIcon from "../app/UiIcon.svelte";
+	import type { UiIconDisplay } from "../app/ui-icon-repository";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
+	import type { InventoryCurrencyRow } from "./client-inventory-state";
+
+	interface Props {
+		/** Footer trigger artwork and pyreal balance. */
+		children: Snippet;
+		/** Includes the currency name and balance because the artwork is decorative. */
+		label: string;
+		/** Inventory-state aggregates and their hydration status. */
+		rows: readonly InventoryCurrencyRow[];
+		pending: boolean;
+		/** Images sampled by the panel under its display leases. */
+		displays: ReadonlyMap<string, UiIconDisplay>;
+	}
+	const { children, label, rows, pending, displays }: Props = $props();
+	const { keyboard } = useAppInputPolicy();
+	const id = $props.id();
+	let trigger: HTMLButtonElement;
+	let popup: HTMLDivElement;
+	let closeTimer: ReturnType<typeof setTimeout> | undefined;
+	let escapeContext: EscapeContextHandle | null = null;
+	function cancelClose() {
+		clearTimeout(closeTimer);
+	}
+	function close() {
+		cancelClose();
+		escapeContext?.release();
+		escapeContext = null;
+		popup.hidePopover();
+	}
+	function position() {
+		const rect = trigger.getBoundingClientRect();
+		const bounds = popup.getBoundingClientRect();
+		const scale = uiScale(popup);
+		popup.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - bounds.width - 8)) / scale}px`;
+		popup.style.top = `${Math.max(8, Math.min(rect.top - bounds.height - 4, window.innerHeight - bounds.height - 8)) / scale}px`;
+	}
+
+	function open() {
+		cancelClose();
+		popup.showPopover();
+		if (escapeContext === null)
+			escapeContext = keyboard.bindEscapeContext(close);
+		else escapeContext.promote();
+		position();
+	}
+	function scheduleClose() {
+		cancelClose();
+		closeTimer = setTimeout(() => {
+			if (!trigger.matches(":hover, :focus")) close();
+		}, 150);
+	}
+	onMount(() => {
+		const reposition = () => {
+			if (popup.matches(":popover-open")) position();
+		};
+		const observer = new ResizeObserver(reposition);
+		observer.observe(popup);
+		observer.observe(trigger);
+		window.addEventListener("resize", reposition);
+		window.addEventListener(UI_SCALE_CHANGE_EVENT, close);
+		window.addEventListener("scroll", reposition, true);
+		return () => {
+			cancelClose();
+			escapeContext?.release();
+			escapeContext = null;
+			observer.disconnect();
+			window.removeEventListener("resize", reposition);
+			window.removeEventListener(UI_SCALE_CHANGE_EVENT, close);
+			window.removeEventListener("scroll", reposition, true);
+		};
+	});
+</script>
+
+<button
+	bind:this={trigger}
+	type="button"
+	class="inventory-currency ui-hud-control"
+	aria-label={label}
+	aria-describedby={id}
+	onpointerenter={open}
+	onpointerleave={scheduleClose}
+	onfocus={open}
+	onblur={scheduleClose}
+	onclick={open}
+>
+	{@render children()}
+</button>
+<div
+	bind:this={popup}
+	{id}
+	popover="manual"
+	role="tooltip"
+	class="inventory-currency-overlay ui-overlay-surface"
+>
+	<strong>Alternate currencies</strong>
+	{#if pending}<p role="status">Updating inventory…</p>
+	{:else if rows.length === 0}<p>No alternate currencies carried.</p>
+	{:else}
+		<dl>
+			{#each rows as row (row.wcid)}
+				<div class="currency-row">
+					<dt>
+						<span class="currency-icon"
+							><UiIcon display={displays.get(row.iconKey)} /></span
+						><span>{row.name}</span>
+					</dt>
+					<dd>{row.count.toLocaleString()}</dd>
+				</div>
+			{/each}
+		</dl>
+	{/if}
+</div>
+
+<style>
+	@layer components {
+		.inventory-currency {
+			display: inline-flex;
+			align-items: center;
+			gap: 0.35em;
+		}
+		.inventory-currency-overlay {
+			white-space: normal;
+			overflow-wrap: anywhere;
+			position: fixed;
+			inset: auto;
+			margin: 0;
+			padding: var(--ui-overlay-padding);
+			width: max-content;
+			max-width: min(360px, calc(var(--ui-viewport-width) - 16px));
+			max-height: min(360px, calc(var(--ui-viewport-height) - 16px));
+			overflow: hidden;
+		}
+		p,
+		dl {
+			margin: 8px 0 0;
+		}
+		.currency-row {
+			display: flex;
+			align-items: center;
+			gap: 16px;
+			margin-top: 6px;
+		}
+		dt {
+			display: flex;
+			align-items: center;
+			gap: var(--ui-overlay-gap);
+			flex: 1;
+			min-width: 0;
+		}
+		dd {
+			margin: 0;
+			font-variant-numeric: tabular-nums;
+		}
+		.currency-icon {
+			container: currency-art / inline-size;
+			width: var(--ui-inventory-currency-icon-size);
+			height: var(--ui-inventory-currency-icon-size);
+			flex: none;
+		}
+		.currency-icon :global(.ui-icon) {
+			--ui-icon-rendering: var(--ui-inventory-currency-icon-upsample-filter);
+		}
+		@container currency-art (width < 32px) {
+			.currency-icon :global(.ui-icon) {
+				--ui-icon-rendering: var(
+					--ui-inventory-currency-icon-downsample-filter
+				);
+			}
+		}
+	}
+</style>

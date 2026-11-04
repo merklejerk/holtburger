@@ -1,0 +1,3809 @@
+//! Client-specific projection from core view events to the renderer contract.
+
+use std::collections::HashMap;
+
+use holtburger_common::{CharacterOption, Guid, stats::VitalType};
+use holtburger_core::client::container_auto_merge::AutoMergeOutcome;
+use holtburger_core::client::types::{
+    ChatChannelKind, ChatChannelSource, ChatSpeakerKind, ChatTellTarget, CombatFeedback,
+    CombatOutcomeContext, ServerTextCombatOutcomeKind,
+};
+use holtburger_core::errors::{
+    format_action_result_message, format_entity_use_feedback, format_weenie_error,
+    is_actually_weenie_error,
+};
+use holtburger_core::{ActionResultReason, BusyOperationKind, BusyOperationResult};
+use holtburger_core::{
+    ClientApplicationSnapshot, ClientCameraStartReceipt, ClientCameraTick,
+    ClientCharacterMotionCapabilities, ClientCharacterMotionFeedback, ClientCharacterMotionOutcome,
+    ClientCharacterMotionRejection, ClientDynamicScriptCue, ClientDynamicSoundCue, ClientExitCause,
+    ClientLifecycleState, ClientViewEvent, ClientWorldActivationCause, DynamicEntityEvent,
+    PreciseJumpEvaluation, PreciseJumpEvaluationStatus, PreciseJumpProgress, PreciseJumpTargetView,
+    PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection,
+    combat_feedback_message,
+};
+use holtburger_protocol::errors::WeenieError;
+use holtburger_protocol::messages::{ChatMessageType, ChatMessageTypeId};
+use holtburger_world::book::BookData;
+use holtburger_world::stats::Vital;
+use serde::{Deserialize, Serialize};
+
+/// Confirmed outgoing combat outcome consumed by h3d's combat effects owner.
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientCombatOutcomeKindWire {
+    /// Confirmed amount and critical styling, including zero damage.
+    Damage { amount: u32, critical_hit: bool },
+    /// Explicit defender evasion; not an inferred absence of damage.
+    Evaded,
+    /// Explicit spell resistance; distinct from physical evasion.
+    Resisted,
+}
+
+/// Producer identity and attribution accompany one transient outcome.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCombatOutcomeWire {
+    /// Generation stamped at core receipt, not transport publication.
+    pub world_generation: u64,
+    /// Read-only best-effort attribution from the shared combat owner.
+    pub attribution: holtburger_core::client::types::CombatOutcomeAttribution,
+    /// Narrow presentation payload; complete combat facts remain in core feedback.
+    pub outcome: ClientCombatOutcomeKindWire,
+}
+
+/// Reader facts projected from retained world book data; editing metadata stays server-side.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientBookWire {
+    /// Server object whose page state this snapshot describes.
+    pub guid: Guid,
+    /// Actual page entries in server order; capacity is intentionally absent.
+    pub pages: Vec<ClientBookPageWire>,
+    /// Book-level inscription, separate from individual page text.
+    pub inscription: Option<String>,
+    /// Book-level scribe signature.
+    pub author_name: Option<String>,
+}
+
+/// One page, with absent text distinguished from a loaded empty page.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientBookPageWire {
+    /// Zero-based page request identity.
+    pub index: u32,
+    /// Page author as disclosed by the server.
+    pub author_name: String,
+    /// None means the page needs an explicit text request.
+    pub text: Option<String>,
+}
+
+impl ClientBookWire {
+    fn from_world(guid: Guid, book: &BookData) -> Self {
+        Self {
+            guid,
+            pages: book
+                .pages
+                .iter()
+                .map(|page| ClientBookPageWire {
+                    index: page.index,
+                    author_name: page.author_name.clone(),
+                    text: page.page_text.clone(),
+                })
+                .collect(),
+            inscription: book.inscription.clone(),
+            author_name: book.author_name.clone(),
+        }
+    }
+}
+
+/// Full response opens a book; page updates only refresh the open reader.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientBookOpenedWire {
+    /// Display title captured from the accepted entity.
+    pub name: String,
+    /// Complete initial page state for the opened book.
+    pub book: ClientBookWire,
+}
+
+/// Cold UI stance; unknown is preserved until character facts arrive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientCombatMode {
+    Unknown,
+    Peace,
+    Melee,
+    Missile,
+    Magic,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientAttackHeightWire {
+    Low,
+    Medium,
+    High,
+}
+
+impl From<holtburger_protocol::messages::combat::AttackHeight> for ClientAttackHeightWire {
+    fn from(value: holtburger_protocol::messages::combat::AttackHeight) -> Self {
+        use holtburger_protocol::messages::combat::AttackHeight;
+        match value {
+            AttackHeight::Low => Self::Low,
+            AttackHeight::Medium => Self::Medium,
+            AttackHeight::High => Self::High,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ClientAttackProfileWire {
+    Melee {
+        height: ClientAttackHeightWire,
+        power: f32,
+    },
+    Missile {
+        height: ClientAttackHeightWire,
+        accuracy: f32,
+    },
+}
+
+impl From<holtburger_core::ClientAttackProfile> for ClientAttackProfileWire {
+    fn from(value: holtburger_core::ClientAttackProfile) -> Self {
+        match value {
+            holtburger_core::ClientAttackProfile::Melee { height, power } => Self::Melee {
+                height: height.into(),
+                power,
+            },
+            holtburger_core::ClientAttackProfile::Missile { height, accuracy } => Self::Missile {
+                height: height.into(),
+                accuracy,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientCombatControlStateWire {
+    Idle,
+    Charging,
+    WaitingForReadiness,
+    Active,
+    Retiring,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCombatEngagementWire {
+    pub target: Guid,
+    pub profile: ClientAttackProfileWire,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCombatRefillWire {
+    pub elapsed_ms: u64,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCombatStatusWire {
+    /// Latest processed begin/stop identity, independent of retained attack intent.
+    pub processed_intent_sequence: u64,
+    pub desired: Option<ClientCombatEngagementWire>,
+    pub state: ClientCombatControlStateWire,
+    pub refill: Option<ClientCombatRefillWire>,
+}
+
+impl From<holtburger_core::ClientCombatStatus> for ClientCombatStatusWire {
+    fn from(value: holtburger_core::ClientCombatStatus) -> Self {
+        let state = match value.state {
+            holtburger_core::ClientCombatControlState::Idle => ClientCombatControlStateWire::Idle,
+            holtburger_core::ClientCombatControlState::Charging => {
+                ClientCombatControlStateWire::Charging
+            }
+            holtburger_core::ClientCombatControlState::WaitingForReadiness => {
+                ClientCombatControlStateWire::WaitingForReadiness
+            }
+            holtburger_core::ClientCombatControlState::Active => {
+                ClientCombatControlStateWire::Active
+            }
+            holtburger_core::ClientCombatControlState::Retiring => {
+                ClientCombatControlStateWire::Retiring
+            }
+        };
+        let now = std::time::Instant::now();
+        Self {
+            processed_intent_sequence: value.processed_intent_sequence,
+            desired: value.desired.map(|desired| ClientCombatEngagementWire {
+                target: desired.target,
+                profile: desired.profile.into(),
+            }),
+            state,
+            refill: value.refill.map(|refill| ClientCombatRefillWire {
+                elapsed_ms: now
+                    .saturating_duration_since(refill.started_at)
+                    .min(refill.duration)
+                    .as_millis()
+                    .try_into()
+                    .expect("combat refill elapsed time must fit the wire contract"),
+                duration_ms: refill
+                    .duration
+                    .as_millis()
+                    .try_into()
+                    .expect("combat refill duration must fit the wire contract"),
+            }),
+        }
+    }
+}
+
+impl From<holtburger_protocol::messages::combat::CombatMode> for ClientCombatMode {
+    fn from(mode: holtburger_protocol::messages::combat::CombatMode) -> Self {
+        use holtburger_protocol::messages::combat::CombatMode;
+        match mode {
+            CombatMode::Undef => Self::Unknown,
+            CombatMode::NonCombat => Self::Peace,
+            CombatMode::Melee => Self::Melee,
+            CombatMode::Missile => Self::Missile,
+            CombatMode::Magic => Self::Magic,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientVitalKind {
+    Health,
+    Stamina,
+    Mana,
+}
+
+/// App-owned presentation class for ephemeral action feedback.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientActionFeedbackTone {
+    /// Use/approach progress may yield to an active warning without losing a terminal result.
+    Progress,
+    Status,
+    Warning,
+}
+
+/// Human-readable action result; protocol errors stop at the host boundary.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientActionFeedback {
+    /// Shared formatted message, including any server-supplied parameter.
+    pub message: String,
+    /// Presentation class chosen by the app's host projection.
+    pub tone: ClientActionFeedbackTone,
+    /// Equipment requests affected by this warning; renderer supplies saved names/slot labels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equipment: Option<Vec<ClientEquipmentBindingWire>>,
+}
+
+/// Numeric equipment bindings at the app host boundary; no saved-loadout metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientEquipmentBindingWire {
+    /// Exact owned item identity, or None for an explicit empty-location request.
+    pub item: Option<Guid>,
+    /// Requested location bits, resolved by shared equipment semantics.
+    pub target: u32,
+}
+
+impl From<holtburger_core::client::equipment_set::EquipmentBinding> for ClientEquipmentBindingWire {
+    fn from(binding: holtburger_core::client::equipment_set::EquipmentBinding) -> Self {
+        Self {
+            item: binding.item,
+            target: binding.target.bits(),
+        }
+    }
+}
+
+/// Recoverable question; the renderer echoes only its opaque receipt when answering.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientConfirmation {
+    /// Decimal receipt preserves all u64 bits across JavaScript.
+    pub request_id: String,
+    /// App-formatted question; protocol-specific confirmation families stay in the host.
+    pub text: String,
+}
+
+impl From<&holtburger_core::ActiveCharacterConfirmation> for ClientConfirmation {
+    fn from(value: &holtburger_core::ActiveCharacterConfirmation) -> Self {
+        Self {
+            request_id: value.request_id.to_string(),
+            text: match value.confirmation_type {
+                // ACE's Fellowship.AddFellowshipMember sends only the inviter's name.
+                holtburger_common::ConfirmationType::Fellowship => {
+                    format!(
+                        "{} has invited you to join their party. Accept?",
+                        value.text
+                    )
+                }
+                _ => value.text.clone(),
+            },
+        }
+    }
+}
+
+/// One local-player vital level, projected without exposing world stat internals.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientVitalWire {
+    pub kind: ClientVitalKind,
+    pub current: u32,
+    pub maximum: u32,
+}
+
+/// Stable semantic channel identity retained after protocol-specific routing is interpreted.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientChatChannelWire {
+    Fellowship,
+    FellowshipBroadcast,
+    Allegiance,
+    AllegianceBroadcast,
+    Vassals,
+    Patron,
+    Monarch,
+    CoVassals,
+    General,
+    Trade,
+    Lfg,
+    Roleplay,
+    Society,
+    SocietyCelestialHand,
+    SocietyEldrytchWeb,
+    SocietyRadiantBlood,
+    Olthoi,
+    Unknown,
+}
+
+impl From<ChatChannelKind> for ClientChatChannelWire {
+    fn from(value: ChatChannelKind) -> Self {
+        match value {
+            ChatChannelKind::Fellowship => Self::Fellowship,
+            ChatChannelKind::Allegiance => Self::Allegiance,
+            ChatChannelKind::Vassals => Self::Vassals,
+            ChatChannelKind::Patron => Self::Patron,
+            ChatChannelKind::Monarch => Self::Monarch,
+            ChatChannelKind::CoVassals => Self::CoVassals,
+            ChatChannelKind::General => Self::General,
+            ChatChannelKind::Trade => Self::Trade,
+            ChatChannelKind::Lfg => Self::Lfg,
+            ChatChannelKind::Roleplay => Self::Roleplay,
+            ChatChannelKind::Society => Self::Society,
+            ChatChannelKind::Olthoi => Self::Olthoi,
+            ChatChannelKind::FellowshipBroadcast => Self::FellowshipBroadcast,
+            ChatChannelKind::AllegianceBroadcast => Self::AllegianceBroadcast,
+            ChatChannelKind::SocietyCelestialHand => Self::SocietyCelestialHand,
+            ChatChannelKind::SocietyEldrytchWeb => Self::SocietyEldrytchWeb,
+            ChatChannelKind::SocietyRadiantBlood => Self::SocietyRadiantBlood,
+            ChatChannelKind::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// Stable speaker identity retained after GUID ranges are interpreted by shared client logic.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientChatSpeakerKindWire {
+    Player,
+    NonPlayer,
+    Unknown,
+}
+
+impl From<ChatSpeakerKind> for ClientChatSpeakerKindWire {
+    fn from(value: ChatSpeakerKind) -> Self {
+        match value {
+            ChatSpeakerKind::Player => Self::Player,
+            ChatSpeakerKind::NonPlayer => Self::NonPlayer,
+            ChatSpeakerKind::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// Preserved semantic server text category; reserved and unknown IDs remain explicit.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum ClientChatCategoryWire {
+    Known(ClientChatKnownCategoryWire),
+    Unknown { raw: u32 },
+}
+
+/// Display categories interpreted at the host boundary, independent of packet shape.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientChatKnownCategoryWire {
+    Broadcast,
+    AllChannels,
+    Speech,
+    Tell,
+    OutgoingTell,
+    System,
+    Combat,
+    Magic,
+    Channel,
+    ChannelSend,
+    Social,
+    SocialSend,
+    Emote,
+    Advancement,
+    Abuse,
+    Help,
+    Appraisal,
+    Spellcasting,
+    Allegiance,
+    Fellowship,
+    WorldBroadcast,
+    CombatEnemy,
+    CombatSelf,
+    Recall,
+    Craft,
+    Salvaging,
+    AdminTell,
+}
+
+impl From<ChatMessageTypeId> for ClientChatCategoryWire {
+    fn from(value: ChatMessageTypeId) -> Self {
+        match value.known() {
+            Some(ChatMessageType::Broadcast) => Self::Known(ClientChatKnownCategoryWire::Broadcast),
+            Some(ChatMessageType::AllChannels) => {
+                Self::Known(ClientChatKnownCategoryWire::AllChannels)
+            }
+            Some(ChatMessageType::Speech) => Self::Known(ClientChatKnownCategoryWire::Speech),
+            Some(ChatMessageType::Tell) => Self::Known(ClientChatKnownCategoryWire::Tell),
+            Some(ChatMessageType::OutgoingTell) => {
+                Self::Known(ClientChatKnownCategoryWire::OutgoingTell)
+            }
+            Some(ChatMessageType::System) => Self::Known(ClientChatKnownCategoryWire::System),
+            Some(ChatMessageType::Combat) => Self::Known(ClientChatKnownCategoryWire::Combat),
+            Some(ChatMessageType::Magic) => Self::Known(ClientChatKnownCategoryWire::Magic),
+            Some(ChatMessageType::Channel) => Self::Known(ClientChatKnownCategoryWire::Channel),
+            Some(ChatMessageType::ChannelSend) => {
+                Self::Known(ClientChatKnownCategoryWire::ChannelSend)
+            }
+            Some(ChatMessageType::Social) => Self::Known(ClientChatKnownCategoryWire::Social),
+            Some(ChatMessageType::SocialSend) => {
+                Self::Known(ClientChatKnownCategoryWire::SocialSend)
+            }
+            Some(ChatMessageType::Emote) => Self::Known(ClientChatKnownCategoryWire::Emote),
+            Some(ChatMessageType::Advancement) => {
+                Self::Known(ClientChatKnownCategoryWire::Advancement)
+            }
+            Some(ChatMessageType::Abuse) => Self::Known(ClientChatKnownCategoryWire::Abuse),
+            Some(ChatMessageType::Help) => Self::Known(ClientChatKnownCategoryWire::Help),
+            Some(ChatMessageType::Appraisal) => Self::Known(ClientChatKnownCategoryWire::Appraisal),
+            Some(ChatMessageType::Spellcasting) => {
+                Self::Known(ClientChatKnownCategoryWire::Spellcasting)
+            }
+            Some(ChatMessageType::Allegiance) => {
+                Self::Known(ClientChatKnownCategoryWire::Allegiance)
+            }
+            Some(ChatMessageType::Fellowship) => {
+                Self::Known(ClientChatKnownCategoryWire::Fellowship)
+            }
+            Some(ChatMessageType::WorldBroadcast) => {
+                Self::Known(ClientChatKnownCategoryWire::WorldBroadcast)
+            }
+            Some(ChatMessageType::CombatEnemy) => {
+                Self::Known(ClientChatKnownCategoryWire::CombatEnemy)
+            }
+            Some(ChatMessageType::CombatSelf) => {
+                Self::Known(ClientChatKnownCategoryWire::CombatSelf)
+            }
+            Some(ChatMessageType::Recall) => Self::Known(ClientChatKnownCategoryWire::Recall),
+            Some(ChatMessageType::Craft) => Self::Known(ClientChatKnownCategoryWire::Craft),
+            Some(ChatMessageType::Salvaging) => Self::Known(ClientChatKnownCategoryWire::Salvaging),
+            Some(ChatMessageType::AdminTell) => Self::Known(ClientChatKnownCategoryWire::AdminTell),
+            _ => Self::Unknown { raw: value.raw() },
+        }
+    }
+}
+
+/// The numeric identity has a different namespace in each channel transport.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientChatChannelSourceWire {
+    /// Legacy channels have no Turbine room or chat-type namespace.
+    Legacy { channel_id: u32 },
+    /// Unknown room/type values remain available to the history label without guessing meaning.
+    Turbine { room_id: u32, type_id: u32 },
+}
+
+/// One already-interpreted chat line with variant-specific fields enforced by the wire shape.
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientChatMessageWire {
+    Speech {
+        category: ClientChatCategoryWire,
+        sender: String,
+        speaker_kind: ClientChatSpeakerKindWire,
+        message: String,
+    },
+    Tell {
+        category: ClientChatCategoryWire,
+        target: Option<ChatTellTarget>,
+        sender: String,
+        speaker_kind: ClientChatSpeakerKindWire,
+        message: String,
+    },
+    Channel {
+        channel: ClientChatChannelWire,
+        origin: ClientChatChannelSourceWire,
+        sender: String,
+        speaker_kind: ClientChatSpeakerKindWire,
+        message: String,
+    },
+    Server {
+        category: ClientChatCategoryWire,
+        message: String,
+    },
+    System {
+        message: String,
+    },
+    /// A refused chat action stays visible even when conversation filters are disabled.
+    Error {
+        message: String,
+    },
+    Combat {
+        message: String,
+        emphasized: bool,
+        /// Typed defender evasion survives formatting for local chat admission.
+        self_evasion: bool,
+    },
+    Emote {
+        sender: String,
+        speaker_kind: ClientChatSpeakerKindWire,
+        message: String,
+    },
+    SoulEmote {
+        sender: String,
+        speaker_kind: ClientChatSpeakerKindWire,
+        message: String,
+    },
+}
+
+/// Renderer-safe lifecycle state. Core's broad state and protocol packet values stop here.
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientLifecycleWire {
+    Connecting,
+    Authenticating,
+    CharacterSelection {
+        /// Advertised account capacity, including occupied pending-deletion slots.
+        max_slots: u32,
+        characters: Vec<ClientCharacterWire>,
+        /// Shared explanation retained after recoverable entry refusal.
+        rejection: Option<String>,
+    },
+    EnteringWorld {
+        character_guid: Guid,
+    },
+    PortalSpace {
+        /// Generation shared by the pending world replacement and its renderer products.
+        world_generation: u64,
+        /// Authority-proven reason for replacing the active scene.
+        cause: ClientWorldActivationCauseWire,
+    },
+    InWorld,
+    /// Character logout retains the authenticated transport.
+    LoggingOut,
+    Exiting {
+        cause: ClientExitCauseWire,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterWire {
+    /// Server-assigned character identity used by the entry command.
+    pub guid: Guid,
+    /// Server-provided display name.
+    pub name: String,
+    /// Stable ordinal in the server-provided character list.
+    pub slot: u32,
+    /// Server deletion timestamp; zero denotes an active character.
+    pub delete_time: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientExitCauseWire {
+    ExplicitDisconnect,
+    ServerDisconnect,
+    StartupFailure,
+    RuntimeFailure,
+    HostShutdown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientPresentationDiscontinuityWire {
+    ForcedReposition,
+    Reset,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientWorldActivationCauseWire {
+    InitialEntry,
+    Teleport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCurrentState {
+    /// Character-bound barber interaction and retained local racial effects.
+    pub barber: holtburger_core::client::barber::BarberSnapshot,
+    /// Recoverable management operation and latest server-confirmed result.
+    pub character_management: holtburger_core::client::types::CharacterManagementState,
+    /// Latest complete gameplay visual, retained through event-stream recovery.
+    pub player_visual_capture: Option<holtburger_core::client::player_visual::PlayerVisualCapture>,
+    /// Fellowship replacement baseline, independent of sibling events.
+    pub party: Option<crate::client_party::ClientPartySnapshot>,
+    /// Last accepted friend list; None until delivery or after retirement.
+    pub friends: Option<crate::client_friends::ClientFriendsSnapshot>,
+    /// Shared resolved contract facts; None outside a character lifetime.
+    pub contracts: Option<holtburger_world::state::contracts::ContractsSnapshot>,
+    /// Character-owned ignore facts and basic scope eligibility.
+    pub squelch: Option<crate::client_squelch::ClientSquelchSnapshot>,
+    /// Partial allegiance facts and bounded refresh progress.
+    pub allegiance: crate::client_allegiance::ClientAllegianceSnapshot,
+    /// Locally mirrored presence notification preference.
+    pub allegiance_preferences: Option<crate::client_allegiance::ClientAllegiancePreferences>,
+    /// Locally mirrored visibility preference.
+    pub friends_preferences: Option<crate::client_friends::ClientFriendsPreferences>,
+    /// Locally mirrored party preferences after character description.
+    pub party_preferences: Option<crate::client_party::ClientPartyPreferences>,
+    /// Effective-home and crystal facts recovered atomically with the character.
+    pub housing: holtburger_core::client::housing::HousingSnapshot,
+    /// Core-derived current permission and lifecycle admission for map teleport.
+    pub can_teleport_from_map: bool,
+    /// Core-filtered standard recall attempts.
+    pub recall_destinations: Vec<holtburger_core::client::recall::RecallDestination>,
+    /// Shared transport observation, absent before the first completed interval.
+    pub connection: Option<holtburger_core::client::connection::ConnectionSample>,
+    /// Server-confirmed P2P offers, atomically recovered with their item descriptions.
+    pub trade: holtburger_core::client::trade::TradeSnapshot,
+    /// Complete knowledge, absent until the initial character description.
+    pub known_spells: Option<Vec<u32>>,
+    /// Shared player enchantment resolution, absent until character description.
+    pub enchantments: Option<holtburger_world::enchantments::ResolvedEnchantments>,
+    /// Narrow server-backed appearance preferences consumed by client HUD controls.
+    pub appearance_options: Option<ClientAppearanceOptions>,
+    /// Server-saved gameplay choices, absent before character description or after retirement.
+    pub gameplay_preferences: Option<crate::client_gameplay::ClientGameplayPreferences>,
+    /// Server-confirmed stance for the combat shortcut.
+    pub combat_mode: ClientCombatMode,
+    /// Shared social-command admission, including accepted server motion stance.
+    pub social_motion_ready: bool,
+    /// Desired targeted combat and shared repeat lifecycle.
+    pub combat: ClientCombatStatusWire,
+    /// Non-self recipient retained by the current spell operation until completion or retirement.
+    pub spell_cast_target: Option<Guid>,
+    /// Accepted local-player entity response override.
+    pub entity_collision_disabled: bool,
+    /// Complete renderer-facing lifecycle level.
+    pub lifecycle: ClientLifecycleWire,
+    /// Exact local-player identity, absent until the server creates the player object.
+    pub local_player_guid: Option<Guid>,
+    /// Synchronized server time, absent until a server time-sync arrives.
+    pub server_time: Option<f64>,
+    /// Monotonic generation invalidating presentation history across discontinuities.
+    pub world_generation: u64,
+    /// Latest server-provided world name.
+    pub world_name: Option<String>,
+    /// Current local-player display name.
+    pub player_name: Option<String>,
+    /// Complete local-player vital replacement level.
+    pub vitals: Vec<ClientVitalWire>,
+    /// Complete character facts, absent until the active description arrives.
+    pub character_sheet: Option<ClientCharacterSheetWire>,
+    /// Current jump charge timing, absent until core has complete authority facts.
+    pub character_motion: Option<ClientCharacterMotionCapabilitiesWire>,
+    /// Pending interaction, recovered with the application snapshot.
+    pub active_confirmation: Option<ClientConfirmation>,
+    /// Complete focused dynamic-entity replacement level.
+    pub dynamic: holtburger_core::DynamicEntitySnapshot,
+    /// Complete retained entity/storage baseline for inventory and selection.
+    pub entities: holtburger_core::ClientEntitySnapshot,
+}
+
+/// XP totals are decimal strings because character lifetime totals exceed JS safe integers.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterLevelWire {
+    pub level: u32,
+    pub current_xp: String,
+    pub unspent_xp: String,
+    pub unspent_skill_points: u32,
+    pub available_luminance: String,
+    pub next_level_xp: String,
+    pub xp_into_level: String,
+    pub xp_for_next_level: String,
+}
+
+impl From<&holtburger_world::stats::CharacterLevelInfo> for ClientCharacterLevelWire {
+    fn from(level: &holtburger_world::stats::CharacterLevelInfo) -> Self {
+        Self {
+            level: level.level,
+            current_xp: level.current_xp.to_string(),
+            unspent_xp: level.unspent_xp.to_string(),
+            unspent_skill_points: level.unspent_skill_points,
+            available_luminance: level.available_luminance.to_string(),
+            next_level_xp: level.next_level_xp.to_string(),
+            xp_into_level: level.xp_into_level.to_string(),
+            xp_for_next_level: level.xp_for_next_level.to_string(),
+        }
+    }
+}
+
+/// Authored skill description paired with shared calculated values.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterSkillWire {
+    pub stat: holtburger_world::stats::Skill,
+    pub description: Option<String>,
+    pub available_in_eor: bool,
+}
+
+/// Atomic current character sheet across snapshots and update events.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterSheetWire {
+    pub character: Guid,
+    /// Server identity and localized selected title for the progression summary.
+    pub name: Option<String>,
+    pub title: Option<String>,
+    /// Shared registry and current optimistic/server selection.
+    pub title_selection: Option<holtburger_core::ClientCharacterTitleSelection>,
+    /// Exact decimal capacity, absent when the server has not provided it.
+    pub maximum_luminance: Option<String>,
+    pub level: ClientCharacterLevelWire,
+    pub attributes: Vec<holtburger_world::stats::Attribute>,
+    pub vitals: Vec<holtburger_world::stats::Vital>,
+    pub skills: Vec<ClientCharacterSkillWire>,
+    /// World-owned current defense and vitae facts for the complete character view.
+    pub armor: i32,
+    pub resistances: holtburger_world::stats::Resistances,
+    pub vitae: f32,
+    pub guarded_targets: Vec<holtburger_world::progression::StatTarget>,
+}
+
+impl From<&holtburger_core::ClientCharacterSheet> for ClientCharacterSheetWire {
+    fn from(sheet: &holtburger_core::ClientCharacterSheet) -> Self {
+        Self {
+            character: sheet.character,
+            name: sheet.name.clone(),
+            title: sheet.title.clone(),
+            title_selection: sheet.title_selection.clone(),
+            maximum_luminance: sheet.maximum_luminance.map(|value| value.to_string()),
+            level: (&sheet.level).into(),
+            attributes: sheet.attributes.clone(),
+            vitals: sheet.vitals.clone(),
+            skills: sheet
+                .skills
+                .iter()
+                .map(|row| ClientCharacterSkillWire {
+                    stat: row.stat.clone(),
+                    description: row.description.clone(),
+                    available_in_eor: row.available_in_eor,
+                })
+                .collect(),
+            armor: sheet.armor,
+            resistances: sheet.resistances.clone(),
+            vitae: sheet.vitae,
+            guarded_targets: sheet.guarded_targets.clone(),
+        }
+    }
+}
+
+/// Server-backed appearance preferences exposed to the client HUD.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientAppearanceOptions {
+    /// Whether server-authored appearance includes equipped headwear.
+    pub show_helmet: bool,
+    /// Whether server-authored appearance includes the equipped cloak.
+    pub show_cloak: bool,
+}
+
+impl From<holtburger_core::PlayerCharacterOptions> for ClientAppearanceOptions {
+    fn from(options: holtburger_core::PlayerCharacterOptions) -> Self {
+        Self {
+            show_helmet: options.is_enabled(CharacterOption::ShowYourHelmOrHeadGear),
+            show_cloak: options.is_enabled(CharacterOption::ShowYourCloak),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterMotionCapabilitiesWire {
+    pub full_charge_duration_ms: u64,
+}
+
+impl From<ClientCharacterMotionCapabilities> for ClientCharacterMotionCapabilitiesWire {
+    fn from(capabilities: ClientCharacterMotionCapabilities) -> Self {
+        Self {
+            full_charge_duration_ms: capabilities
+                .full_charge_duration
+                .as_millis()
+                .try_into()
+                .expect("character jump charge duration must fit the host wire contract"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterMotionFeedbackWire {
+    pub sequence: u64,
+    pub outcome: ClientCharacterMotionOutcomeWire,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ClientCharacterMotionOutcomeWire {
+    ChargeAccepted,
+    ChargeContinues,
+    JumpCommitted,
+    Reset,
+    Rejected {
+        reason: ClientCharacterMotionRejectionWire,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientCharacterMotionRejectionWire {
+    ChargeNotActive,
+    Airborne,
+    Unsupported,
+    Overburdened,
+    CapabilityUnavailable,
+    BodyUnavailable,
+    CollisionUnavailable,
+    LaunchRejected,
+}
+
+impl From<ClientCharacterMotionFeedback> for ClientCharacterMotionFeedbackWire {
+    fn from(feedback: ClientCharacterMotionFeedback) -> Self {
+        let outcome = match feedback.outcome {
+            ClientCharacterMotionOutcome::ChargeAccepted => {
+                ClientCharacterMotionOutcomeWire::ChargeAccepted
+            }
+            ClientCharacterMotionOutcome::ChargeContinues => {
+                ClientCharacterMotionOutcomeWire::ChargeContinues
+            }
+            ClientCharacterMotionOutcome::JumpCommitted => {
+                ClientCharacterMotionOutcomeWire::JumpCommitted
+            }
+            ClientCharacterMotionOutcome::Reset => ClientCharacterMotionOutcomeWire::Reset,
+            ClientCharacterMotionOutcome::Rejected(reason) => {
+                ClientCharacterMotionOutcomeWire::Rejected {
+                    reason: reason.into(),
+                }
+            }
+        };
+        Self {
+            sequence: feedback.sequence.0,
+            outcome,
+        }
+    }
+}
+
+impl From<ClientCharacterMotionRejection> for ClientCharacterMotionRejectionWire {
+    fn from(reason: ClientCharacterMotionRejection) -> Self {
+        match reason {
+            ClientCharacterMotionRejection::ChargeNotActive => Self::ChargeNotActive,
+            ClientCharacterMotionRejection::Airborne => Self::Airborne,
+            ClientCharacterMotionRejection::Unsupported => Self::Unsupported,
+            ClientCharacterMotionRejection::Overburdened => Self::Overburdened,
+            ClientCharacterMotionRejection::CapabilityUnavailable => Self::CapabilityUnavailable,
+            ClientCharacterMotionRejection::BodyUnavailable => Self::BodyUnavailable,
+            ClientCharacterMotionRejection::CollisionUnavailable => Self::CollisionUnavailable,
+            ClientCharacterMotionRejection::LaunchRejected => Self::LaunchRejected,
+        }
+    }
+}
+
+/// Collision target placement in one explicit normalized outdoor anchor frame.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClientPreciseJumpTargetWire {
+    pub anchor: Guid,
+    pub point: [f32; 3],
+    pub normal: [f32; 3],
+    pub committed_cell: Option<Guid>,
+}
+
+impl From<PreciseJumpTargetView> for ClientPreciseJumpTargetWire {
+    fn from(target: PreciseJumpTargetView) -> Self {
+        Self {
+            anchor: target.anchor,
+            point: [target.point.x, target.point.y, target.point.z],
+            normal: [target.normal.x, target.normal.y, target.normal.z],
+            committed_cell: target.committed_cell,
+        }
+    }
+}
+
+/// Selected launch feedback followed by independent collision prediction.
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "phase",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientPreciseJumpEvaluationWire {
+    LaunchResolved {
+        camera: holtburger_core::ClientCameraIdentity,
+        sequence: u64,
+        launch: Box<ClientPreciseJumpLaunchWire>,
+    },
+    Completed {
+        #[serde(flatten)]
+        evaluation: ClientPreciseJumpCompletedEvaluationWire,
+    },
+}
+
+impl From<PreciseJumpProgress> for ClientPreciseJumpEvaluationWire {
+    fn from(progress: PreciseJumpProgress) -> Self {
+        match progress {
+            PreciseJumpProgress::LaunchResolved(progress) => Self::LaunchResolved {
+                camera: progress.camera,
+                sequence: progress.sequence.0,
+                launch: Box::new(progress.launch.into()),
+            },
+            PreciseJumpProgress::Completed(evaluation) => Self::Completed {
+                evaluation: evaluation.into(),
+            },
+        }
+    }
+}
+
+/// One portal/render-domain interval over the trajectory's normalized time.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpTrajectoryPlacementWire {
+    /// Inclusive start of this render-domain interval.
+    pub start_fraction: f32,
+    /// Exclusive interval end, except that the final interval includes one.
+    pub end_fraction: f32,
+    /// EnvCell identity, or `None` for the outdoor domain.
+    pub committed_cell: Option<Guid>,
+}
+
+/// Compact read-only analytic curve authorized by the collision predictor.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpTrajectoryWire {
+    /// Normalized outdoor coordinate frame containing every coefficient.
+    pub anchor: Guid,
+    /// Body-reference launch point in anchor-local AC axes.
+    pub origin: [f32; 3],
+    /// Launch velocity in anchor-local AC axes.
+    pub velocity: [f32; 3],
+    /// Constant acceleration in anchor-local AC axes.
+    pub acceleration: [f32; 3],
+    /// Positive analytic curve duration.
+    pub duration_seconds: f32,
+    /// Gap-free render-domain partition over normalized curve time.
+    pub placements: Vec<ClientPreciseJumpTrajectoryPlacementWire>,
+}
+
+impl From<holtburger_core::PreciseJumpTrajectory> for ClientPreciseJumpTrajectoryWire {
+    fn from(trajectory: holtburger_core::PreciseJumpTrajectory) -> Self {
+        Self {
+            anchor: trajectory.anchor(),
+            origin: vec3_wire(trajectory.origin()),
+            velocity: vec3_wire(trajectory.velocity()),
+            acceleration: vec3_wire(trajectory.acceleration()),
+            duration_seconds: trajectory.duration_seconds(),
+            placements: trajectory
+                .placements()
+                .iter()
+                .map(|p| ClientPreciseJumpTrajectoryPlacementWire {
+                    start_fraction: p.start_fraction(),
+                    end_fraction: p.end_fraction(),
+                    committed_cell: p.committed_cell(),
+                })
+                .collect(),
+        }
+    }
+}
+
+fn vec3_wire(vector: holtburger_common::Vector3) -> [f32; 3] {
+    [vector.x, vector.y, vector.z]
+}
+
+/// Exactly the analytic curve consumed by world presentation, classified by intent.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ClientPreciseJumpPreviewCurveWire {
+    Desired {
+        curve: ClientPreciseJumpTrajectoryWire,
+    },
+    BelowHeight {
+        curve: ClientPreciseJumpTrajectoryWire,
+    },
+}
+
+/// Analytic preview of the chosen power before expensive collision work.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpLaunchWire {
+    pub target: ClientPreciseJumpTargetWire,
+    pub power: f32,
+    pub preview: ClientPreciseJumpPreviewCurveWire,
+}
+impl From<holtburger_core::PreciseJumpLaunchView> for ClientPreciseJumpLaunchWire {
+    fn from(launch: holtburger_core::PreciseJumpLaunchView) -> Self {
+        Self {
+            target: launch.target.into(),
+            power: launch.power.get(),
+            preview: match launch.preview {
+                holtburger_core::PreciseJumpPreviewCurve::Desired(curve) => {
+                    ClientPreciseJumpPreviewCurveWire::Desired {
+                        curve: curve.into(),
+                    }
+                }
+                holtburger_core::PreciseJumpPreviewCurve::BelowHeight(curve) => {
+                    ClientPreciseJumpPreviewCurveWire::BelowHeight {
+                        curve: curve.into(),
+                    }
+                }
+            },
+        }
+    }
+}
+
+/// Accepted root-motion leg; adjustments can consume zero physical time.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpFlightSegmentWire {
+    pub start: [f32; 3],
+    pub end: [f32; 3],
+
+    pub committed_cell: Option<Guid>,
+}
+
+/// Explicit incomplete outcomes retain missing collision ownership where applicable.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ClientPreciseJumpIncompleteReasonWire {
+    Cancelled,
+    SessionChanged,
+    BodyUnavailable,
+    BodyDefinitionChanged,
+    FlightHorizonExhausted,
+    CollisionUnavailable { owner: Guid },
+    EnvCellUnavailable { cell: Guid },
+}
+impl From<holtburger_core::PreciseJumpPredictionIncompleteReason>
+    for ClientPreciseJumpIncompleteReasonWire
+{
+    fn from(reason: holtburger_core::PreciseJumpPredictionIncompleteReason) -> Self {
+        use holtburger_core::PreciseJumpPredictionIncompleteReason as Reason;
+        match reason {
+            Reason::Cancelled => Self::Cancelled,
+            Reason::SessionChanged => Self::SessionChanged,
+            Reason::BodyUnavailable => Self::BodyUnavailable,
+            Reason::BodyDefinitionChanged => Self::BodyDefinitionChanged,
+            Reason::FlightHorizonExhausted => Self::FlightHorizonExhausted,
+            Reason::CollisionUnavailable { owner } => Self::CollisionUnavailable { owner },
+            Reason::EnvCellUnavailable { cell } => Self::EnvCellUnavailable { cell },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientPreciseJumpFlightOutcomeWire {
+    Landed {
+        contact_point: [f32; 3],
+        normal: [f32; 3],
+        committed_cell: Option<Guid>,
+        matches_target: bool,
+    },
+    Incomplete {
+        reason: ClientPreciseJumpIncompleteReasonWire,
+    },
+}
+
+/// One selected launch's accepted path and endpoint classification.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpFlightWire {
+    pub anchor: Guid,
+    pub segments: Vec<ClientPreciseJumpFlightSegmentWire>,
+    pub outcome: ClientPreciseJumpFlightOutcomeWire,
+}
+impl From<holtburger_core::PreciseJumpFlight> for ClientPreciseJumpFlightWire {
+    fn from(flight: holtburger_core::PreciseJumpFlight) -> Self {
+        let outcome = match flight.outcome {
+            holtburger_core::PreciseJumpFlightOutcome::Landed {
+                contact_point,
+                normal,
+                committed_cell,
+                matches_target,
+            } => ClientPreciseJumpFlightOutcomeWire::Landed {
+                contact_point: vec3_wire(contact_point),
+                normal: vec3_wire(normal),
+                committed_cell,
+                matches_target,
+            },
+            holtburger_core::PreciseJumpFlightOutcome::Incomplete(reason) => {
+                ClientPreciseJumpFlightOutcomeWire::Incomplete {
+                    reason: reason.into(),
+                }
+            }
+        };
+        Self {
+            anchor: flight.anchor,
+            segments: flight
+                .segments
+                .into_iter()
+                .map(|s| ClientPreciseJumpFlightSegmentWire {
+                    start: vec3_wire(s.start),
+                    end: vec3_wire(s.end),
+
+                    committed_cell: s.committed_cell,
+                })
+                .collect(),
+            outcome,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+pub enum ClientPreciseJumpResultWire {
+    NoSurface,
+    Predicted {
+        launch: Box<ClientPreciseJumpLaunchWire>,
+        flight: ClientPreciseJumpFlightWire,
+    },
+    PredictionFailed {
+        launch: Box<ClientPreciseJumpLaunchWire>,
+    },
+    Unproven,
+    InvalidAim,
+    SolverFailed,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpCompletedEvaluationWire {
+    pub camera: holtburger_core::ClientCameraIdentity,
+    pub sequence: u64,
+    #[serde(flatten)]
+    pub result: ClientPreciseJumpResultWire,
+}
+impl From<PreciseJumpEvaluation> for ClientPreciseJumpCompletedEvaluationWire {
+    fn from(evaluation: PreciseJumpEvaluation) -> Self {
+        let result = match evaluation.status {
+            PreciseJumpEvaluationStatus::NoSurface => ClientPreciseJumpResultWire::NoSurface,
+            PreciseJumpEvaluationStatus::Predicted { launch, flight } => {
+                ClientPreciseJumpResultWire::Predicted {
+                    launch: Box::new(launch.into()),
+                    flight: flight.into(),
+                }
+            }
+            PreciseJumpEvaluationStatus::PredictionFailed(launch) => {
+                ClientPreciseJumpResultWire::PredictionFailed {
+                    launch: Box::new(launch.into()),
+                }
+            }
+            PreciseJumpEvaluationStatus::Unproven(_) => ClientPreciseJumpResultWire::Unproven,
+            PreciseJumpEvaluationStatus::InvalidAim => ClientPreciseJumpResultWire::InvalidAim,
+            PreciseJumpEvaluationStatus::SolverFailed => ClientPreciseJumpResultWire::SolverFailed,
+        };
+        Self {
+            camera: evaluation.camera,
+            sequence: evaluation.sequence.0,
+            result,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ClientPreciseJumpTransactionRejectionWire {
+    StaleAction,
+    CommitPending,
+    SessionChanged,
+    LaunchRejected,
+    Airborne,
+    Unsupported,
+    Overburdened,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ClientPreciseJumpTransactionOutcomeWire {
+    Cancelled,
+    Committed,
+    Rejected {
+        reason: ClientPreciseJumpTransactionRejectionWire,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPreciseJumpTransactionFeedbackWire {
+    pub sequence: u64,
+    pub outcome: ClientPreciseJumpTransactionOutcomeWire,
+}
+
+impl From<PreciseJumpTransactionFeedback> for ClientPreciseJumpTransactionFeedbackWire {
+    fn from(feedback: PreciseJumpTransactionFeedback) -> Self {
+        let outcome = match feedback.outcome {
+            PreciseJumpTransactionOutcome::Cancelled => {
+                ClientPreciseJumpTransactionOutcomeWire::Cancelled
+            }
+            PreciseJumpTransactionOutcome::Committed => {
+                ClientPreciseJumpTransactionOutcomeWire::Committed
+            }
+            PreciseJumpTransactionOutcome::Rejected(reason) => {
+                ClientPreciseJumpTransactionOutcomeWire::Rejected {
+                    reason: match reason {
+                        PreciseJumpTransactionRejection::Airborne => {
+                            ClientPreciseJumpTransactionRejectionWire::Airborne
+                        }
+                        PreciseJumpTransactionRejection::Unsupported => {
+                            ClientPreciseJumpTransactionRejectionWire::Unsupported
+                        }
+                        PreciseJumpTransactionRejection::Overburdened => {
+                            ClientPreciseJumpTransactionRejectionWire::Overburdened
+                        }
+                        PreciseJumpTransactionRejection::StaleAction => {
+                            ClientPreciseJumpTransactionRejectionWire::StaleAction
+                        }
+                        PreciseJumpTransactionRejection::CommitPending => {
+                            ClientPreciseJumpTransactionRejectionWire::CommitPending
+                        }
+                        PreciseJumpTransactionRejection::SessionChanged => {
+                            ClientPreciseJumpTransactionRejectionWire::SessionChanged
+                        }
+                        PreciseJumpTransactionRejection::LaunchRejected => {
+                            ClientPreciseJumpTransactionRejectionWire::LaunchRejected
+                        }
+                    },
+                }
+            }
+        };
+        Self {
+            sequence: feedback.sequence.0,
+            outcome,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPresentationDiscontinuity {
+    /// Generation that becomes current after this edge.
+    pub world_generation: u64,
+    /// Authority-classified discontinuity kind.
+    pub kind: ClientPresentationDiscontinuityWire,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientExitRequested {
+    /// Typed terminal cause used by the client outcome screen.
+    pub cause: ClientExitCauseWire,
+    /// Redacted diagnostic suitable for the in-app error surface.
+    pub diagnostic: String,
+}
+
+/// Narrow event vocabulary emitted by the client host. It is converted into the outer sidecar
+/// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
+#[derive(Debug, Clone)]
+pub enum ClientHostEvent {
+    /// Cold appearance-editing interaction and local Apply consequences.
+    BarberUpdated(holtburger_core::client::barber::BarberSnapshot),
+    /// Candidate visual for one exact editor revision.
+    BarberPreview(holtburger_core::client::barber::BarberPreviewResult),
+    /// Requested historical death locations for frontend-owned chat output.
+    DeathLocations(holtburger_core::client::corpse::DeathLocationResult),
+    /// Housing replacement level, independent of window-opening policy.
+    HousingUpdated(holtburger_core::client::housing::HousingSnapshot),
+    /// Accepted full crystal receipt for the active character.
+    HousingCrystalReceived(holtburger_core::client::housing::HousingCrystalView),
+    /// Coherent character facts after a relevant authoritative mutation.
+    CharacterSheetUpdated(Option<Box<ClientCharacterSheetWire>>),
+    /// Correlated quotes for the active character scope.
+    ProgressionEvaluated {
+        request_id: u32,
+        evaluations: Vec<holtburger_core::ClientProgressionEvaluation>,
+    },
+    /// Send or local validation feedback; submission is never server success.
+    ProgressionFeedback(holtburger_core::ClientProgressionFeedback),
+    /// Complete book response that opens the frontend reader.
+    BookOpened(ClientBookOpenedWire),
+    /// Retained page text update for an already open reader.
+    BookUpdated(ClientBookWire),
+    /// Server approach response supplies the complete catalog and permits opening the window.
+    VendorApproached(crate::client_vendor::ClientVendorSnapshot),
+    /// Complete retained vendor stock and terms, independent of window visibility.
+    VendorSnapshot(Option<crate::client_vendor::ClientVendorSnapshot>),
+    /// Confirmed P2P state; all window policy belongs to the frontend.
+    TradeSnapshot(holtburger_core::client::trade::TradeSnapshot),
+    /// Correlated shared draft quote.
+    VendorPreview(holtburger_core::client::vendor_transaction::VendorPreviewResult),
+    HousingPaymentPreview(holtburger_core::client::housing_payment::HousingPreviewResult),
+    HousingPaymentFinished(holtburger_core::client::housing_execution::HousingPaymentResult),
+    /// Administrative evidence classification, without another toast owner.
+    HousingManagementFinished(holtburger_core::client::housing_management::HousingManagementResult),
+    /// Terminal receipt identifying which sale sources actually transferred.
+    VendorResult(holtburger_core::client::vendor_transaction::VendorTradeResult),
+    /// Current operation label while the submitted draft is locked.
+    VendorPhase(holtburger_core::client::vendor_transaction::VendorTradePhase),
+    /// One world-populated examination outcome; presentation lifetime remains frontend-owned.
+    ObjectInspectionResult(holtburger_world::inspection::ObjectInspectionResult),
+    /// Captured creature visual facts correlated with the preceding examination result.
+    ObjectPreviewResult(holtburger_core::client::object_preview::ObjectPreviewResult),
+    /// Character input invalidation for spell inspectors.
+    SpellInspectionContext(holtburger_core::client::spell_inspection::SpellInspectionContext),
+    /// Correlated character-bound spell facts.
+    SpellInspectionResult(holtburger_core::client::spell_inspection::SpellInspectionResult),
+    /// Correlated salvage evaluation.
+    SalvagePreview(holtburger_core::client::salvage::SalvagePreviewResult),
+    /// Correlated salvage dispatch receipt.
+    SalvageResult(holtburger_core::client::salvage::SalvageSubmitResult),
+    /// Correlated semantic item-use outcome.
+    ItemUseResult(holtburger_core::client::item_use::ItemUseResult),
+    ItemUseFinished(holtburger_core::client::item_use::ItemUseFinished),
+    LockFeedback(holtburger_core::client::lock_feedback::LockFeedback),
+    LockedTarget {
+        /// Original guarded direct-use receipt identity.
+        sequence: u32,
+        target: Guid,
+        name: String,
+    },
+    ItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
+    /// Core-derived inventory preview, correlated with the active gesture.
+    InventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
+    EntityCollisionDisabled(bool),
+    MapTeleportCapabilityChanged(bool),
+    /// Replacement recall choices derived from disclosed character facts.
+    RecallDestinationsChanged(Vec<holtburger_core::client::recall::RecallDestination>),
+    CurrentState(Box<ClientCurrentState>),
+    /// The receiver lost events and is awaiting the existing application replacement.
+    StateResyncing,
+    /// Narrow accepted entity/storage changes.
+    EntityFactsChanged(holtburger_core::ClientEntityDelta),
+    /// Bounded-cadence shared transport observation.
+    ConnectionUpdated(holtburger_core::client::connection::ConnectionSample),
+    LifecycleChanged(ClientLifecycleWire),
+    /// Same retained management value as the current-state baseline.
+    CharacterManagementChanged(holtburger_core::client::types::CharacterManagementState),
+    /// Same complete visual level as the current-state recovery baseline.
+    PlayerVisualCaptureChanged(Option<holtburger_core::client::player_visual::PlayerVisualCapture>),
+    CharacterMotionCapabilitiesUpdated(Option<ClientCharacterMotionCapabilitiesWire>),
+    CharacterMotionFeedback(ClientCharacterMotionFeedbackWire),
+    /// Accepted non-autonomous server movement for the local character.
+    ServerControlledMotion,
+    PreciseJumpEvaluation(ClientPreciseJumpEvaluationWire),
+    PreciseJumpTransactionFeedback(ClientPreciseJumpTransactionFeedbackWire),
+    EntitySelectionQueryResult(ClientEntitySelectionQueryResultWire),
+    LocalPlayerEstablished {
+        player_guid: Guid,
+    },
+    ServerTimeUpdated {
+        time: f64,
+    },
+    WorldNameUpdated {
+        name: String,
+    },
+    PlayerEntered {
+        player_guid: Guid,
+        name: String,
+    },
+    /// Shared readiness for social command admission.
+    SocialMotionReadyUpdated {
+        ready: bool,
+    },
+    LocalMotionFeedback {
+        request_id: u32,
+        world_generation: u64,
+        outcome: holtburger_world::motion::LocalMotionOutcome,
+    },
+    CombatModeUpdated {
+        mode: ClientCombatMode,
+    },
+    CombatStatusUpdated(ClientCombatStatusWire),
+    /// Complete replacement for the pending spell operation's non-self recipient.
+    SpellCastTargetUpdated {
+        target: Option<Guid>,
+    },
+    PlayerSpellsUpdated {
+        spell_ids: Vec<u32>,
+    },
+    PlayerEnchantmentsUpdated(holtburger_world::enchantments::ResolvedEnchantments),
+    CharacterPreferencesUpdated {
+        appearance: ClientAppearanceOptions,
+        gameplay: crate::client_gameplay::ClientGameplayPreferences,
+        party: crate::client_party::ClientPartyPreferences,
+        friends: crate::client_friends::ClientFriendsPreferences,
+        allegiance: crate::client_allegiance::ClientAllegiancePreferences,
+    },
+    /// Partial allegiance publication.
+    AllegianceUpdated {
+        allegiance: crate::client_allegiance::ClientAllegianceSnapshot,
+    },
+    /// Retained character-owned ignore publication.
+    SquelchUpdated {
+        squelch: Option<crate::client_squelch::ClientSquelchSnapshot>,
+    },
+    /// Complete journal publication with currently aged durations.
+    ContractsUpdated {
+        /// None outside character lifetime; an empty snapshot is an active empty journal.
+        contracts: Option<holtburger_world::state::contracts::ContractsSnapshot>,
+    },
+    /// Live authoritative membership activity, absent from recovery snapshots.
+    ContractMembershipChanged(holtburger_world::state::contracts::ContractMembershipChange),
+    /// Retained friend list publication.
+    FriendsUpdated {
+        friends: Option<crate::client_friends::ClientFriendsSnapshot>,
+    },
+    PartyUpdated {
+        party: Option<crate::client_party::ClientPartySnapshot>,
+    },
+    PlayerVitalsUpdated {
+        vitals: Vec<ClientVitalWire>,
+    },
+    /// Server-reported health for an entity, independent of frontend selection.
+    EntityHealthUpdated {
+        guid: Guid,
+        health_fraction: f32,
+    },
+    /// Brief server text for app-owned notice presentation.
+    TransientString {
+        message: String,
+    },
+    /// Server text retained until the user dismisses its dialog.
+    PopupString {
+        message: String,
+    },
+    /// Replacement pending confirmation, including explicit cancellation.
+    ConfirmationUpdated {
+        confirmation: Option<ClientConfirmation>,
+    },
+    ActionFeedback(ClientActionFeedback),
+    ChatMessage(ClientChatMessageWire),
+    /// Adapter expands one confirmed outcome into chat and visual feedback in order.
+    CombatFeedback {
+        chat: ClientChatMessageWire,
+        outcome: ClientCombatOutcomeWire,
+    },
+    DynamicEntity(DynamicEntityEvent),
+    DynamicScriptCue(ClientDynamicScriptCue),
+    DynamicSoundCue(ClientDynamicSoundCue),
+    Camera(ClientCameraTick),
+    /// One physics interval, published atomically for coherent character/camera playback.
+    PresentationTick {
+        /// Entity paths and levels accepted in this physics interval.
+        dynamic: Option<holtburger_core::DynamicEntityTickBatch>,
+        /// Camera path solved against that same interval, when registered and ready.
+        camera: Option<holtburger_core::ClientCameraTick>,
+    },
+    CameraStarted(ClientCameraStartReceipt),
+    PresentationDiscontinuity(ClientPresentationDiscontinuity),
+    ExitRequested(ClientExitRequested),
+}
+
+/// Wire-safe reason for a selection query that cannot mutate frontend selection.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(
+    tag = "reason",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientEntitySelectionUnavailableWire {
+    StaleCamera,
+    CollisionCoordinatorUnavailable,
+    MissingCollisionOwner { missing_collision_owner: Guid },
+}
+
+/// Narrow correlated selection broad-phase result.
+#[derive(Debug, Clone, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ClientEntitySelectionQueryResultWire {
+    Available {
+        sequence: u64,
+        static_limit_distance: f32,
+        candidate_guids: Vec<Guid>,
+    },
+    Unavailable {
+        sequence: u64,
+        #[serde(flatten)]
+        reason: ClientEntitySelectionUnavailableWire,
+    },
+}
+
+impl From<holtburger_core::EntitySelectionQueryResult> for ClientEntitySelectionQueryResultWire {
+    fn from(result: holtburger_core::EntitySelectionQueryResult) -> Self {
+        let sequence = result.sequence.0;
+        match result.outcome {
+            holtburger_core::EntitySelectionQueryOutcome::Available {
+                static_limit_distance,
+                candidate_guids,
+            } => Self::Available {
+                sequence,
+                static_limit_distance,
+                candidate_guids,
+            },
+            holtburger_core::EntitySelectionQueryOutcome::Unavailable(reason) => {
+                let reason = match reason {
+                    holtburger_core::EntitySelectionQueryUnavailable::StaleCamera => {
+                        ClientEntitySelectionUnavailableWire::StaleCamera
+                    }
+                    holtburger_core::EntitySelectionQueryUnavailable::CollisionCoordinatorUnavailable => {
+                        ClientEntitySelectionUnavailableWire::CollisionCoordinatorUnavailable
+                    }
+                    holtburger_core::EntitySelectionQueryUnavailable::MissingCollisionOwner {
+                        owner,
+                    } => ClientEntitySelectionUnavailableWire::MissingCollisionOwner {
+                        missing_collision_owner: owner,
+                    },
+                };
+                Self::Unavailable { sequence, reason }
+            }
+        }
+    }
+}
+
+impl From<&ClientLifecycleState> for ClientLifecycleWire {
+    fn from(state: &ClientLifecycleState) -> Self {
+        match state {
+            ClientLifecycleState::Connecting => Self::Connecting,
+            ClientLifecycleState::Authenticating => Self::Authenticating,
+            ClientLifecycleState::CharacterSelection {
+                characters,
+                max_slots,
+                rejection,
+            } => Self::CharacterSelection {
+                rejection: rejection.as_ref().map(ToString::to_string),
+                max_slots: *max_slots,
+                characters: characters
+                    .iter()
+                    .map(|character| ClientCharacterWire {
+                        guid: character.guid,
+                        name: character.name.clone(),
+                        slot: character.slot,
+                        delete_time: character.delete_time,
+                    })
+                    .collect(),
+            },
+            ClientLifecycleState::EnteringWorld { character_guid } => Self::EnteringWorld {
+                character_guid: *character_guid,
+            },
+            ClientLifecycleState::PortalSpace {
+                world_generation,
+                cause,
+            } => Self::PortalSpace {
+                world_generation: *world_generation,
+                cause: (*cause).into(),
+            },
+            ClientLifecycleState::InWorld => Self::InWorld,
+            ClientLifecycleState::LoggingOut => Self::LoggingOut,
+            ClientLifecycleState::Exiting { outcome } => Self::Exiting {
+                cause: outcome.cause.into(),
+            },
+        }
+    }
+}
+
+impl From<ClientWorldActivationCause> for ClientWorldActivationCauseWire {
+    fn from(cause: ClientWorldActivationCause) -> Self {
+        match cause {
+            ClientWorldActivationCause::InitialEntry => Self::InitialEntry,
+            ClientWorldActivationCause::Teleport => Self::Teleport,
+        }
+    }
+}
+
+impl From<ClientExitCause> for ClientExitCauseWire {
+    fn from(cause: ClientExitCause) -> Self {
+        match cause {
+            ClientExitCause::ExplicitDisconnect => Self::ExplicitDisconnect,
+            ClientExitCause::ServerDisconnect => Self::ServerDisconnect,
+            ClientExitCause::StartupFailure => Self::StartupFailure,
+            ClientExitCause::RuntimeFailure => Self::RuntimeFailure,
+            ClientExitCause::HostShutdown => Self::HostShutdown,
+        }
+    }
+}
+
+impl From<holtburger_core::ClientPresentationDiscontinuityKind>
+    for ClientPresentationDiscontinuityWire
+{
+    fn from(kind: holtburger_core::ClientPresentationDiscontinuityKind) -> Self {
+        match kind {
+            holtburger_core::ClientPresentationDiscontinuityKind::ForcedReposition => {
+                Self::ForcedReposition
+            }
+            holtburger_core::ClientPresentationDiscontinuityKind::Reset => Self::Reset,
+        }
+    }
+}
+
+impl From<&ClientApplicationSnapshot> for ClientCurrentState {
+    fn from(snapshot: &ClientApplicationSnapshot) -> Self {
+        Self {
+            barber: snapshot.barber.clone(),
+            character_management: snapshot.character_management.clone(),
+            player_visual_capture: snapshot.player_visual_capture.clone(),
+            party: snapshot.fellowship.as_ref().map(|party| {
+                crate::client_party::ClientPartySnapshot::project(party, snapshot.local_player_guid)
+            }),
+            party_preferences: snapshot.character_options.map(Into::into),
+            friends: snapshot.friends.as_ref().map(Into::into),
+            contracts: snapshot.contracts.clone(),
+            squelch: snapshot.squelch.as_ref().map(Into::into),
+            allegiance: (&snapshot.allegiance).into(),
+            allegiance_preferences: snapshot.character_options.map(Into::into),
+            friends_preferences: snapshot.character_options.map(Into::into),
+            housing: snapshot.housing.clone(),
+            can_teleport_from_map: snapshot.can_teleport_from_map,
+            recall_destinations: snapshot.recall_destinations.clone(),
+            known_spells: snapshot.known_spells.clone(),
+            trade: snapshot.trade.clone(),
+            enchantments: snapshot
+                .enchantments
+                .as_ref()
+                .map(|effects| effects.resolved.clone()),
+            appearance_options: snapshot.character_options.map(Into::into),
+            gameplay_preferences: snapshot.character_options.map(Into::into),
+            combat_mode: snapshot.combat_mode.into(),
+            social_motion_ready: snapshot.social_motion_ready,
+            combat: snapshot.combat.into(),
+            spell_cast_target: snapshot.spell_cast_target,
+            lifecycle: (&snapshot.lifecycle).into(),
+            connection: snapshot.connection,
+            entity_collision_disabled: snapshot.entity_collision_disabled,
+            local_player_guid: snapshot.local_player_guid,
+            server_time: snapshot.server_time,
+            world_generation: snapshot.world_generation,
+            world_name: snapshot.world_name.clone(),
+            player_name: snapshot.player_name.clone(),
+            vitals: project_vitals(&snapshot.vitals),
+            character_sheet: snapshot.character_sheet.as_deref().map(Into::into),
+            character_motion: snapshot.character_motion.map(Into::into),
+            active_confirmation: snapshot.active_confirmation.as_ref().map(Into::into),
+            dynamic: snapshot.dynamic.clone(),
+            entities: snapshot.entities.clone(),
+        }
+    }
+}
+
+/// Projects one broad core event into the renderer-safe client event surface.
+pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
+    match event {
+        ClientViewEvent::AutoMergeFinished(result) => {
+            let (message, tone) = match result.outcome {
+                AutoMergeOutcome::Completed { changed: false } => {
+                    ("Nothing to merge".into(), ClientActionFeedbackTone::Status)
+                }
+                AutoMergeOutcome::Completed { changed: true } => (
+                    format!("Auto-merge complete: {} slots freed", result.slots_freed),
+                    ClientActionFeedbackTone::Status,
+                ),
+                AutoMergeOutcome::Rejected(reason) => (
+                    format!("Could not auto-merge: {reason}"),
+                    ClientActionFeedbackTone::Warning,
+                ),
+                AutoMergeOutcome::Stopped(reason) => (
+                    format!(
+                        "Auto-merge stopped: {reason}. {} slots freed",
+                        result.slots_freed
+                    ),
+                    ClientActionFeedbackTone::Warning,
+                ),
+            };
+            Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                message,
+                tone,
+                equipment: None,
+            }))
+        }
+        ClientViewEvent::BarberUpdated(snapshot) => Some(ClientHostEvent::BarberUpdated(snapshot)),
+        ClientViewEvent::BarberPreview(result) => Some(ClientHostEvent::BarberPreview(result)),
+        ClientViewEvent::HousingUpdated(housing) => Some(ClientHostEvent::HousingUpdated(housing)),
+        ClientViewEvent::HousingCrystalReceived(crystal) => {
+            Some(ClientHostEvent::HousingCrystalReceived(crystal))
+        }
+        ClientViewEvent::RecallDestinationsChanged(destinations) => {
+            Some(ClientHostEvent::RecallDestinationsChanged(destinations))
+        }
+        ClientViewEvent::MapTeleportCapabilityChanged(allowed) => {
+            Some(ClientHostEvent::MapTeleportCapabilityChanged(allowed))
+        }
+        ClientViewEvent::ProgressionEvaluated {
+            request_id,
+            evaluations,
+        } => Some(ClientHostEvent::ProgressionEvaluated {
+            request_id,
+            evaluations,
+        }),
+        ClientViewEvent::ProgressionFeedback(feedback) => {
+            Some(ClientHostEvent::ProgressionFeedback(feedback))
+        }
+        ClientViewEvent::CharacterSheetUpdated(sheet) => {
+            Some(ClientHostEvent::CharacterSheetUpdated(
+                sheet
+                    .as_deref()
+                    .map(|sheet| Box::new(ClientCharacterSheetWire::from(sheet))),
+            ))
+        }
+        ClientViewEvent::EntityBookOpened { guid, name, book } => {
+            Some(ClientHostEvent::BookOpened(ClientBookOpenedWire {
+                name,
+                book: ClientBookWire::from_world(guid, &book),
+            }))
+        }
+        ClientViewEvent::EntityBookUpdated { guid, book } => Some(ClientHostEvent::BookUpdated(
+            ClientBookWire::from_world(guid, &book),
+        )),
+        ClientViewEvent::TradeStateUpdated(snapshot) => {
+            Some(ClientHostEvent::TradeSnapshot(snapshot))
+        }
+        ClientViewEvent::VendorApproached { vendor } => {
+            Some(ClientHostEvent::VendorApproached(vendor.into()))
+        }
+        ClientViewEvent::VendorStateUpdated { vendor } => {
+            Some(ClientHostEvent::VendorSnapshot(vendor.map(Into::into)))
+        }
+        ClientViewEvent::VendorDraftPreview(result) => Some(ClientHostEvent::VendorPreview(result)),
+        ClientViewEvent::HousingPaymentPreview(result) => {
+            Some(ClientHostEvent::HousingPaymentPreview(result))
+        }
+        ClientViewEvent::HousingManagementFinished(result) => {
+            Some(ClientHostEvent::HousingManagementFinished(result))
+        }
+        ClientViewEvent::HousingPaymentFinished(result) => {
+            Some(ClientHostEvent::HousingPaymentFinished(result))
+        }
+        ClientViewEvent::VendorTradeFinished(result) => Some(ClientHostEvent::VendorResult(result)),
+        ClientViewEvent::BusyStateUpdated {
+            busy: Some(BusyOperationKind::Buy),
+        } => Some(ClientHostEvent::VendorPhase(
+            holtburger_core::client::vendor_transaction::VendorTradePhase::Buying,
+        )),
+        ClientViewEvent::BusyStateUpdated {
+            busy: Some(BusyOperationKind::Sell),
+        } => Some(ClientHostEvent::VendorPhase(
+            holtburger_core::client::vendor_transaction::VendorTradePhase::Selling,
+        )),
+
+        ClientViewEvent::ObjectInspectionResult(result) => {
+            Some(ClientHostEvent::ObjectInspectionResult(result))
+        }
+        ClientViewEvent::ObjectPreviewResult(result) => {
+            Some(ClientHostEvent::ObjectPreviewResult(result))
+        }
+        ClientViewEvent::SpellInspectionContext(context) => {
+            Some(ClientHostEvent::SpellInspectionContext(context))
+        }
+        ClientViewEvent::SpellInspectionResult(result) => {
+            Some(ClientHostEvent::SpellInspectionResult(result))
+        }
+        ClientViewEvent::DeathLocations(result) => Some(ClientHostEvent::DeathLocations(result)),
+        ClientViewEvent::SalvagePreview(result) => Some(ClientHostEvent::SalvagePreview(result)),
+        ClientViewEvent::SalvageSubmitted(result) => Some(ClientHostEvent::SalvageResult(result)),
+        ClientViewEvent::ItemUseResult(result) => Some(ClientHostEvent::ItemUseResult(result)),
+        ClientViewEvent::ItemUseFinished(result) => Some(ClientHostEvent::ItemUseFinished(result)),
+        ClientViewEvent::LockFeedback(feedback) => Some(ClientHostEvent::LockFeedback(feedback)),
+        ClientViewEvent::ItemUseTargetResult(result) => {
+            Some(ClientHostEvent::ItemUseTargetResult(result))
+        }
+        ClientViewEvent::InventoryPreview(result) => {
+            Some(ClientHostEvent::InventoryPreview(result))
+        }
+        ClientViewEvent::EntityFactsChanged(delta) => {
+            Some(ClientHostEvent::EntityFactsChanged(delta))
+        }
+        ClientViewEvent::EntityCollisionDisabled(disabled) => {
+            Some(ClientHostEvent::EntityCollisionDisabled(disabled))
+        }
+        ClientViewEvent::ApplicationSnapshot(snapshot) => Some(ClientHostEvent::CurrentState(
+            Box::new(snapshot.as_ref().into()),
+        )),
+        ClientViewEvent::ConnectionUpdated(sample) => {
+            Some(ClientHostEvent::ConnectionUpdated(sample))
+        }
+        ClientViewEvent::LifecycleChanged(lifecycle) => {
+            Some(ClientHostEvent::LifecycleChanged((&lifecycle).into()))
+        }
+        ClientViewEvent::CharacterManagementChanged(state) => {
+            Some(ClientHostEvent::CharacterManagementChanged(state))
+        }
+        ClientViewEvent::PlayerVisualCaptureChanged(capture) => {
+            Some(ClientHostEvent::PlayerVisualCaptureChanged(capture))
+        }
+        ClientViewEvent::CharacterMotionCapabilitiesUpdated { capabilities } => Some(
+            ClientHostEvent::CharacterMotionCapabilitiesUpdated(capabilities.map(Into::into)),
+        ),
+        ClientViewEvent::CharacterMotionFeedback(feedback) => {
+            Some(ClientHostEvent::CharacterMotionFeedback(feedback.into()))
+        }
+        ClientViewEvent::SelfServerControlledMotion { .. } => {
+            Some(ClientHostEvent::ServerControlledMotion)
+        }
+        ClientViewEvent::PreciseJumpEvaluation(evaluation) => {
+            Some(ClientHostEvent::PreciseJumpEvaluation(evaluation.into()))
+        }
+        ClientViewEvent::PreciseJumpTransactionFeedback(feedback) => Some(
+            ClientHostEvent::PreciseJumpTransactionFeedback(feedback.into()),
+        ),
+        ClientViewEvent::EntitySelectionQueryResult(result) => {
+            Some(ClientHostEvent::EntitySelectionQueryResult(result.into()))
+        }
+        ClientViewEvent::LocalPlayerEstablished { player_guid } => {
+            Some(ClientHostEvent::LocalPlayerEstablished { player_guid })
+        }
+        ClientViewEvent::ServerTimeUpdated { time } => {
+            Some(ClientHostEvent::ServerTimeUpdated { time })
+        }
+        ClientViewEvent::WorldNameUpdated(name) => Some(ClientHostEvent::WorldNameUpdated { name }),
+        ClientViewEvent::PlayerEntered { guid, name } => Some(ClientHostEvent::PlayerEntered {
+            player_guid: guid,
+            name,
+        }),
+        ClientViewEvent::EntityHealthUpdated {
+            guid,
+            health_fraction,
+        } => Some(ClientHostEvent::EntityHealthUpdated {
+            guid,
+            health_fraction,
+        }),
+        ClientViewEvent::SocialMotionReadyUpdated { ready } => {
+            Some(ClientHostEvent::SocialMotionReadyUpdated { ready })
+        }
+        ClientViewEvent::LocalMotionFeedback {
+            request_id,
+            world_generation,
+            outcome,
+        } => Some(ClientHostEvent::LocalMotionFeedback {
+            request_id,
+            world_generation,
+            outcome,
+        }),
+        ClientViewEvent::CombatModeUpdated { mode } => {
+            Some(ClientHostEvent::CombatModeUpdated { mode: mode.into() })
+        }
+        ClientViewEvent::SpellCastTargetUpdated { target } => {
+            Some(ClientHostEvent::SpellCastTargetUpdated { target })
+        }
+        ClientViewEvent::CombatStatusUpdated(status) => {
+            Some(ClientHostEvent::CombatStatusUpdated(status.into()))
+        }
+        ClientViewEvent::PlayerSpellsUpdated { spell_ids } => {
+            Some(ClientHostEvent::PlayerSpellsUpdated { spell_ids })
+        }
+        ClientViewEvent::PlayerEnchantmentsUpdated { resolved, .. } => {
+            Some(ClientHostEvent::PlayerEnchantmentsUpdated(resolved))
+        }
+        ClientViewEvent::AllegianceUpdated(snapshot) => Some(ClientHostEvent::AllegianceUpdated {
+            allegiance: (&snapshot).into(),
+        }),
+        ClientViewEvent::SquelchStateUpdated { squelch } => Some(ClientHostEvent::SquelchUpdated {
+            squelch: squelch.as_ref().map(Into::into),
+        }),
+        ClientViewEvent::ContractsStateUpdated { contracts } => {
+            Some(ClientHostEvent::ContractsUpdated { contracts })
+        }
+        ClientViewEvent::ContractMembershipChanged(change) => {
+            Some(ClientHostEvent::ContractMembershipChanged(change))
+        }
+        ClientViewEvent::FriendsStateUpdated { friends } => Some(ClientHostEvent::FriendsUpdated {
+            friends: friends.as_ref().map(Into::into),
+        }),
+        ClientViewEvent::FellowshipStateUpdated {
+            fellowship,
+            player_guid,
+        } => Some(ClientHostEvent::PartyUpdated {
+            party: fellowship
+                .as_ref()
+                .map(|party| crate::client_party::ClientPartySnapshot::project(party, player_guid)),
+        }),
+        ClientViewEvent::PlayerOptionsUpdated { options } => {
+            Some(ClientHostEvent::CharacterPreferencesUpdated {
+                appearance: options.into(),
+                gameplay: options.into(),
+                party: options.into(),
+                friends: options.into(),
+                allegiance: options.into(),
+            })
+        }
+        ClientViewEvent::PlayerVitalsUpdated { vitals } => {
+            Some(ClientHostEvent::PlayerVitalsUpdated {
+                vitals: project_vitals(&vitals),
+            })
+        }
+        ClientViewEvent::ActionResult {
+            reason:
+                ActionResultReason::Locked {
+                    target,
+                    name,
+                    sequence,
+                },
+            ..
+        } => Some(ClientHostEvent::LockedTarget {
+            target,
+            name,
+            sequence,
+        }),
+        ClientViewEvent::ActionResult { reason, .. } => {
+            if let ActionResultReason::Weenie(error, _) = &reason
+                && matches!(
+                    error,
+                    WeenieError::CharacterNotAvailable
+                        | WeenieError::MessageBlocked
+                        | WeenieError::ThatChannelDoesntExist
+                        | WeenieError::YouCantUseThatChannel
+                        | WeenieError::YouAreNotOnThatChannel
+                        | WeenieError::YouAreNotListeningToChannel
+                        | WeenieError::YouDoNotBelongToAFellowship
+                        | WeenieError::YouAreNotInAllegiance
+                        | WeenieError::YouDoNotHaveAuthorityInAllegiance
+                )
+            {
+                return Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Error {
+                    message: format_action_result_message(&reason),
+                }));
+            }
+            if let ActionResultReason::EquipmentSet { bindings, message } = &reason {
+                return Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                    message: message.clone(),
+                    tone: ClientActionFeedbackTone::Warning,
+                    equipment: Some(bindings.iter().copied().map(Into::into).collect()),
+                }));
+            }
+            if let ActionResultReason::Weenie(error, _) = &reason
+                && matches!(
+                    error,
+                    WeenieError::TurbineChatIsEnabled
+                        | WeenieError::YouHaveEnteredTheChannel
+                        | WeenieError::YouHaveLeftTheChannel
+                        | WeenieError::TradeIgnoringRequests
+                        | WeenieError::TradeSquelched
+                        | WeenieError::TradeMaxDistanceExceeded
+                        | WeenieError::TradeAlreadyTrading
+                        | WeenieError::TradeBusy
+                        | WeenieError::TradeClosed
+                        | WeenieError::TradeExpired
+                        | WeenieError::TradeItemBeingTraded
+                        | WeenieError::TradeNonEmptyContainer
+                        | WeenieError::TradeNonCombatMode
+                        | WeenieError::TradeIncomplete
+                        | WeenieError::TradeStampMismatch
+                        | WeenieError::TradeUnopened
+                        | WeenieError::TradeEmpty
+                        | WeenieError::TradeAlreadyAccepted
+                        | WeenieError::TradeOutOfSync
+                        | WeenieError::CantDoThatTradeInProgress
+                        | WeenieError::TradeComplete
+                )
+            {
+                return Some(ClientHostEvent::ChatMessage(
+                    ClientChatMessageWire::System {
+                        message: format_action_result_message(&reason),
+                    },
+                ));
+            }
+            // ACE uses this packet for ordinary inventory refusals. A reasonless
+            // packet also follows separate feedback (Player_Inventory.cs:1371-1399);
+            // it is a rollback signal, not an additional player-facing error.
+            if let ActionResultReason::InventoryServerSaveFailed { error, .. } = &reason {
+                return (*error != WeenieError::None).then(|| {
+                    ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                        message: format_weenie_error(*error, None),
+                        tone: ClientActionFeedbackTone::Status,
+                        equipment: None,
+                    })
+                });
+            }
+            if matches!(reason, ActionResultReason::Weenie(WeenieError::None, _)) {
+                return None;
+            }
+            let tone = match &reason {
+                ActionResultReason::Weenie(error, _) if !is_actually_weenie_error(*error) => {
+                    ClientActionFeedbackTone::Status
+                }
+                _ => ClientActionFeedbackTone::Warning,
+            };
+            Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                message: format_action_result_message(&reason),
+                tone,
+                equipment: None,
+            }))
+        }
+        // Completed errors already arrive through ActionResult; only timeout needs its own notice.
+        ClientViewEvent::BusyOperationFinished {
+            operation,
+            result: BusyOperationResult::TimedOut,
+        } => {
+            let operation = match operation {
+                BusyOperationKind::Use => "Use",
+                BusyOperationKind::UseWithTarget => "Use with target",
+                BusyOperationKind::Salvage => "Salvage",
+                BusyOperationKind::SpellCast => "Spell cast",
+                // Transaction receipts already own the terminal notice, including partial progress.
+                BusyOperationKind::Buy
+                | BusyOperationKind::Sell
+                | BusyOperationKind::HousingPurchase
+                | BusyOperationKind::HousingMaintenance
+                | BusyOperationKind::HousingManagement => return None,
+            };
+            Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                message: format!("{operation} timed out waiting for the server."),
+                tone: ClientActionFeedbackTone::Warning,
+                equipment: None,
+            }))
+        }
+        ClientViewEvent::EntityUseFeedback(feedback) => {
+            Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                message: format_entity_use_feedback(&feedback),
+                tone: ClientActionFeedbackTone::Progress,
+                equipment: None,
+            }))
+        }
+        ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
+            Some(ClientHostEvent::ConfirmationUpdated {
+                confirmation: confirmation.as_ref().map(Into::into),
+            })
+        }
+        ClientViewEvent::TransientString { message } => {
+            Some(ClientHostEvent::TransientString { message })
+        }
+        ClientViewEvent::PopupString { message } => Some(ClientHostEvent::PopupString { message }),
+        ClientViewEvent::ServerMessage {
+            message,
+            chat_type,
+            combat_outcome,
+        } => {
+            let visual = combat_outcome.map(|outcome| {
+                (
+                    outcome.context,
+                    match outcome.kind {
+                        ServerTextCombatOutcomeKind::Damage {
+                            amount,
+                            critical_hit,
+                        } => ClientCombatOutcomeKindWire::Damage {
+                            amount,
+                            critical_hit,
+                        },
+                        ServerTextCombatOutcomeKind::Resisted => {
+                            ClientCombatOutcomeKindWire::Resisted
+                        }
+                    },
+                )
+            });
+            Some(project_chat_with_outcome(
+                project_server_message(message, chat_type),
+                visual,
+            ))
+        }
+        ClientViewEvent::ChatError { message } => {
+            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Error {
+                message,
+            }))
+        }
+        ClientViewEvent::Chat {
+            speaker,
+            message,
+            chat_type,
+        } => {
+            let (sender, speaker_kind) = speaker.into_name_and_kind();
+            Some(ClientHostEvent::ChatMessage(
+                ClientChatMessageWire::Speech {
+                    category: chat_type.into(),
+                    sender,
+                    speaker_kind: speaker_kind.into(),
+                    message,
+                },
+            ))
+        }
+        ClientViewEvent::Tell {
+            speaker,
+            message,
+            chat_type,
+        } => {
+            let target = speaker.tell_target();
+            let (sender, speaker_kind) = speaker.into_name_and_kind();
+            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Tell {
+                category: chat_type.into(),
+                target,
+                sender,
+                speaker_kind: speaker_kind.into(),
+                message,
+            }))
+        }
+        ClientViewEvent::ChannelMessage {
+            channel,
+            speaker,
+            message,
+        } => {
+            let origin = match channel.source {
+                ChatChannelSource::Legacy { channel } => ClientChatChannelSourceWire::Legacy {
+                    channel_id: channel.raw(),
+                },
+                ChatChannelSource::Turbine {
+                    room_id, chat_type, ..
+                } => ClientChatChannelSourceWire::Turbine {
+                    room_id: room_id.raw(),
+                    type_id: chat_type.raw(),
+                },
+            };
+            let (sender, speaker_kind) = speaker.into_name_and_kind();
+            Some(ClientHostEvent::ChatMessage(
+                ClientChatMessageWire::Channel {
+                    origin,
+                    channel: channel.kind.into(),
+                    sender,
+                    speaker_kind: speaker_kind.into(),
+                    message,
+                },
+            ))
+        }
+        ClientViewEvent::Emote { speaker, text } => {
+            let (sender, speaker_kind) = speaker.into_name_and_kind();
+            Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Emote {
+                sender,
+                speaker_kind: speaker_kind.into(),
+                message: text,
+            }))
+        }
+        ClientViewEvent::SoulEmote { speaker, text } => {
+            let (sender, speaker_kind) = speaker.into_name_and_kind();
+            Some(ClientHostEvent::ChatMessage(
+                ClientChatMessageWire::SoulEmote {
+                    sender,
+                    speaker_kind: speaker_kind.into(),
+                    message: text,
+                },
+            ))
+        }
+        ClientViewEvent::CombatFeedback(feedback) => project_combat_feedback_event(feedback),
+        ClientViewEvent::DynamicEntity(event) => Some(ClientHostEvent::DynamicEntity(event)),
+        ClientViewEvent::DynamicSoundCue(cue) => Some(ClientHostEvent::DynamicSoundCue(cue)),
+        ClientViewEvent::DynamicScriptCue(cue) => Some(ClientHostEvent::DynamicScriptCue(cue)),
+        ClientViewEvent::Camera(tick) => Some(ClientHostEvent::Camera(tick)),
+        ClientViewEvent::PresentationTick { dynamic, camera } => {
+            Some(ClientHostEvent::PresentationTick { dynamic, camera })
+        }
+        ClientViewEvent::CameraStarted(receipt) => Some(ClientHostEvent::CameraStarted(receipt)),
+        ClientViewEvent::PresentationDiscontinuity {
+            world_generation,
+            kind,
+        } => Some(ClientHostEvent::PresentationDiscontinuity(
+            ClientPresentationDiscontinuity {
+                world_generation,
+                kind: kind.into(),
+            },
+        )),
+        _ => None,
+    }
+}
+
+fn project_server_message(message: String, chat_type: ChatMessageTypeId) -> ClientChatMessageWire {
+    ClientChatMessageWire::Server {
+        message,
+        category: chat_type.into(),
+    }
+}
+
+/// Preserve one projection per core event while the transport adapter handles fan-out.
+fn project_combat_feedback_event(feedback: CombatFeedback) -> Option<ClientHostEvent> {
+    let chat = project_combat_feedback(&feedback)?;
+    let visual = match &feedback {
+        CombatFeedback::AttackerNotification {
+            context,
+            damage,
+            critical_hit,
+            ..
+        } => Some((
+            *context,
+            ClientCombatOutcomeKindWire::Damage {
+                amount: *damage,
+                critical_hit: *critical_hit,
+            },
+        )),
+        CombatFeedback::EvasionAttackerNotification { context, .. } => {
+            Some((*context, ClientCombatOutcomeKindWire::Evaded))
+        }
+        _ => None,
+    };
+    Some(project_chat_with_outcome(chat, visual))
+}
+
+/// One shared composite construction keeps generation/attribution intact for both sources.
+fn project_chat_with_outcome(
+    chat: ClientChatMessageWire,
+    visual: Option<(CombatOutcomeContext, ClientCombatOutcomeKindWire)>,
+) -> ClientHostEvent {
+    match visual {
+        Some((context, outcome)) => ClientHostEvent::CombatFeedback {
+            chat,
+            outcome: ClientCombatOutcomeWire {
+                world_generation: context.world_generation,
+                attribution: context.attribution,
+                outcome,
+            },
+        },
+        None => ClientHostEvent::ChatMessage(chat),
+    }
+}
+
+/// Projects shared player-facing combat feedback; attack lifecycle edges remain diagnostics only.
+fn project_combat_feedback(feedback: &CombatFeedback) -> Option<ClientChatMessageWire> {
+    combat_feedback_message(feedback).map(|message| {
+        let (message, emphasized) = message.into_text_and_emphasis();
+        ClientChatMessageWire::Combat {
+            message,
+            emphasized,
+            self_evasion: matches!(feedback, CombatFeedback::EvasionDefenderNotification { .. }),
+        }
+    })
+}
+
+fn project_vitals(vitals: &HashMap<VitalType, Vital>) -> Vec<ClientVitalWire> {
+    [VitalType::Health, VitalType::Stamina, VitalType::Mana]
+        .into_iter()
+        .filter_map(|kind| {
+            let vital = vitals.get(&kind)?;
+            Some(ClientVitalWire {
+                kind: match kind {
+                    VitalType::Health => ClientVitalKind::Health,
+                    VitalType::Stamina => ClientVitalKind::Stamina,
+                    VitalType::Mana => ClientVitalKind::Mana,
+                },
+                current: vital.current,
+                maximum: vital.buffed_max,
+            })
+        })
+        .collect()
+}
+
+/// Converts an explicit task result into a redacted diagnostic without preserving credentials.
+pub fn client_exit_requested(
+    cause: ClientExitCause,
+    diagnostic: impl Into<String>,
+) -> ClientHostEvent {
+    ClientHostEvent::ExitRequested(ClientExitRequested {
+        cause: cause.into(),
+        diagnostic: diagnostic.into(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host_event_sink::ClientEventSink;
+    use crate::protocol::{ProtocolFrame, StdioEventSink};
+    use holtburger_common::legacy_hash::legacy_string_hash;
+    use holtburger_common::properties::{
+        DamageType, EquipMask, ObjectDescriptionFlag, PropertyBool, PropertyInt, PropertyString,
+        WorldObjectPropertyAccessorsMut,
+    };
+    use holtburger_core::client::types::{ChatChannelInfo, ChatSpeaker};
+    use holtburger_dat::file_type::{EnumMapper, StringTable, StringTableData};
+    use holtburger_protocol::messages::{
+        ChatChannelId, ChatMessageType, TurbineChatChannelId, TurbineChatDispatchType,
+        TurbineChatTypeId,
+    };
+
+    use holtburger_protocol::messages::combat::AttackConditions;
+    use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
+    use holtburger_world::entity::Entity;
+    use holtburger_world::inspection::{
+        ArmorCoverage, ArmorCoverageValue, CharacterAllegianceRank, CharacterDetails,
+        CreatureRatings, InspectionContext, InspectionSupplement, ObjectInspection,
+        ObjectInspectionOutcome, ObjectInspectionResult,
+    };
+
+    #[test]
+    fn spell_cast_target_projects_replacement_and_terminal_levels() {
+        for target in [Some(Guid(42)), None] {
+            let projected =
+                project_client_event(ClientViewEvent::SpellCastTargetUpdated { target });
+            let Some(ClientHostEvent::SpellCastTargetUpdated { target: actual }) = projected else {
+                panic!("Spell cast target must survive host projection");
+            };
+            assert_eq!(actual, target);
+            let wire = crate::protocol::HostEvent::ClientSpellCastTargetUpdated { target: actual };
+            let value = serde_json::to_value(wire).unwrap();
+            assert_eq!(value["event"], "client-spell-cast-target-updated");
+            assert_eq!(
+                value["payload"]["target"],
+                serde_json::to_value(target).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn npc_tell_projection_retains_reply_identity_and_unknown_category() {
+        let projected = project_client_event(ClientViewEvent::Tell {
+            speaker: ChatSpeaker::from_guid("Professor".to_string(), Guid(0x8000_0001)),
+            message: "Choose a level.".to_string(),
+            chat_type: ChatMessageTypeId::from_raw(0x1234),
+        });
+        let Some(ClientHostEvent::ChatMessage(message)) = projected else {
+            panic!("NPC tell must reach chat");
+        };
+        assert_eq!(
+            serde_json::to_value(message).unwrap(),
+            serde_json::json!({
+                "kind": "tell", "sender": "Professor", "speakerKind": "non-player", "message": "Choose a level.",
+                "category": { "raw": 0x1234 }, "target": { "kind": "npc", "guid": 0x8000_0001_u32, "name": "Professor" }
+            })
+        );
+    }
+
+    #[test]
+    fn vanished_npc_and_blocked_tell_refusals_reach_durable_history() {
+        for error in [
+            WeenieError::CharacterNotAvailable,
+            WeenieError::MessageBlocked,
+        ] {
+            let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Error { message })) =
+                project_client_event(ClientViewEvent::ActionResult {
+                    source: holtburger_core::ActionResultSource::Wire,
+                    reason: ActionResultReason::Weenie(error, None),
+                })
+            else {
+                panic!("Tell refusal must reach durable history");
+            };
+            assert_eq!(message, format_weenie_error(error, None));
+        }
+    }
+
+    #[test]
+    fn unknown_channel_projection_preserves_both_numeric_namespaces() {
+        for (channel, expected) in [
+            (
+                ChatChannelInfo::legacy(ChatChannelId::from_raw(0xCAFE)),
+                serde_json::json!({"kind":"legacy", "channelId":0xCAFE}),
+            ),
+            (
+                ChatChannelInfo::turbine(
+                    TurbineChatChannelId::from_raw(0xCAFE),
+                    TurbineChatTypeId::from_raw(0xBEEF),
+                    TurbineChatDispatchType::SendToRoomById,
+                ),
+                serde_json::json!({"kind":"turbine", "roomId":0xCAFE, "typeId":0xBEEF}),
+            ),
+        ] {
+            let Some(ClientHostEvent::ChatMessage(message)) =
+                project_client_event(ClientViewEvent::ChannelMessage {
+                    channel,
+                    speaker: ChatSpeaker::unknown(String::new()),
+                    message: "unknown channel".into(),
+                })
+            else {
+                panic!("Unknown channels must remain visible");
+            };
+            let wire = serde_json::to_value(message).unwrap();
+            assert_eq!(wire["channel"], "unknown");
+            assert_eq!(wire["sender"], "");
+            assert_eq!(wire["origin"], expected);
+        }
+    }
+    #[test]
+    fn death_query_projection_preserves_character_cell_and_unavailable_samples() {
+        use holtburger_core::client::corpse::{DeathLocationResult, DeathLocations};
+        let position = holtburger_common::position::WorldPosition {
+            landblock_id: Guid(0xda550100),
+            coords: holtburger_common::math::Vector3::new(12.0, 34.0, 56.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        };
+        let event = project_client_event(ClientViewEvent::DeathLocations(DeathLocationResult {
+            character: Guid(7),
+            locations: DeathLocations::Recent {
+                positions: vec![Some(position), None],
+            },
+        }))
+        .unwrap();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let sink = crate::protocol::StdioEventSink::new(sender);
+        crate::host_event_sink::ClientEventSink::publish_client_event(&sink, event).unwrap();
+        let crate::protocol::ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("death result must publish an event frame");
+        };
+        let wire = serde_json::to_value(event).unwrap();
+        assert_eq!(wire["event"], "client-death-locations");
+        assert_eq!(wire["payload"]["character"], 7);
+        assert_eq!(wire["payload"]["locations"]["kind"], "recent");
+        assert_eq!(
+            wire["payload"]["locations"]["positions"][0]["landblockId"],
+            position.landblock_id.0
+        );
+        assert_eq!(
+            wire["payload"]["locations"]["positions"][0]["coords"]["z"],
+            56.0
+        );
+        assert!(wire["payload"]["locations"]["positions"][1].is_null());
+    }
+
+    #[test]
+    fn progression_wire_preserves_large_xp_totals_as_decimal_strings() {
+        use holtburger_world::progression::{
+            ProgressionIntent, ProgressionQuote, ProgressionTargetState, StatTarget,
+        };
+        use holtburger_world::stats::{AttributeType, CharacterLevelInfo};
+
+        let character = Guid(0x5000_0001);
+        let large_xp = 9_007_199_254_740_993_u64;
+        let sheet = holtburger_core::ClientCharacterSheet {
+            character,
+            name: Some("Test Character".into()),
+            title: Some("Adventurer".into()),
+            title_selection: Some(holtburger_core::ClientCharacterTitleSelection {
+                selected_id: 999,
+                entries: vec![holtburger_core::ClientCharacterTitle {
+                    id: 999,
+                    name: None,
+                }],
+            }),
+            maximum_luminance: Some(large_xp),
+            level: CharacterLevelInfo {
+                current_xp: large_xp,
+                unspent_xp: large_xp,
+                ..CharacterLevelInfo::default()
+            },
+            attributes: Vec::new(),
+            vitals: Vec::new(),
+            skills: Vec::new(),
+            armor: 0,
+            resistances: Default::default(),
+            vitae: 1.0,
+            guarded_targets: Vec::new(),
+        };
+        let projected = serde_json::to_value(ClientCharacterSheetWire::from(&sheet)).unwrap();
+        assert_eq!(projected["name"], "Test Character");
+        assert_eq!(projected["title"], "Adventurer");
+        assert_eq!(
+            projected["titleSelection"],
+            serde_json::json!({ "selectedId": 999, "entries": [{ "id": 999, "name": null }] })
+        );
+        assert_eq!(projected["maximumLuminance"], large_xp.to_string());
+        assert_eq!(projected["level"]["currentXp"], large_xp.to_string());
+        assert_eq!(projected["level"]["unspentXp"], large_xp.to_string());
+
+        let quote = holtburger_core::ClientProgressionQuote {
+            scope_id: 4,
+            quote: ProgressionQuote {
+                character,
+                intent: ProgressionIntent::Raise {
+                    target: StatTarget::Attribute(AttributeType::StrengthAttr),
+                    ranks: 1,
+                },
+                target_state: ProgressionTargetState {
+                    training: None,
+                    ranks: 1,
+                    spent_xp: 100,
+                },
+                resulting_ranks: 2,
+                xp_spent: 200,
+                credits_spent: 0,
+                available_xp: large_xp,
+                available_credits: 2,
+            },
+        };
+        let serialized = serde_json::to_value(quote).unwrap();
+        assert_eq!(serialized["quote"]["available_xp"], large_xp.to_string());
+        assert_eq!(
+            serde_json::from_value::<holtburger_core::ClientProgressionQuote>(serialized).unwrap(),
+            quote
+        );
+    }
+
+    #[test]
+    fn housing_row_preview_matches_the_browser_wire_fixture() {
+        use crate::{client_runtime::ClientHostCommand, host_event_sink::ClientEventSink};
+        use holtburger_core::client::housing_payment::{
+            HousingPreviewOperation, HousingPreviewOutcome, HousingPreviewResult,
+        };
+        use holtburger_world::housing::{
+            HousingRequirement,
+            payment::{HousingPaymentItem, HousingPaymentKind, quote_payment},
+        };
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/housing-preview-wire.json"
+        ))
+        .unwrap();
+        let command: ClientHostCommand = serde_json::from_value(serde_json::json!({"command":"preview_client_housing_payment", "request":fixture["request"]})).unwrap();
+        let ClientHostCommand::PreviewClientHousingPayment { request } = command else {
+            panic!("Expected row preview command");
+        };
+        assert_eq!(
+            request.operation,
+            HousingPreviewOperation::Fill { wcid: 42 }
+        );
+        assert_eq!(serde_json::to_value(&request).unwrap(), fixture["request"]);
+        let requirements =
+            [(273, 13, 0), (42, 4, 1)].map(|(wcid, required, paid)| HousingRequirement {
+                wcid,
+                required,
+                paid,
+                remaining: required - paid,
+                name: "Payment".into(),
+                plural_name: "Payments".into(),
+            });
+        let facts =
+            [(11, 273, 13), (12, 42, 2), (14, 273, 20), (13, 42, 3)].map(|(id, wcid, quantity)| {
+                HousingPaymentItem {
+                    guid: Guid(id),
+                    wcid,
+                    quantity,
+                    kind: HousingPaymentKind::Item,
+                }
+            });
+        let result = HousingPreviewResult {
+            sequence: request.sequence,
+            crystal: request.draft.crystal,
+            outcome: HousingPreviewOutcome::Ready {
+                items: facts.iter().map(|source| source.guid).collect(),
+                quote: quote_payment(&requirements, &facts).unwrap(),
+                unavailable: vec![],
+            },
+        };
+        let projected =
+            project_client_event(ClientViewEvent::HousingPaymentPreview(result)).unwrap();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        crate::protocol::StdioEventSink::new(sender)
+            .publish_client_event(projected)
+            .unwrap();
+        let crate::protocol::ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("Expected preview event");
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap()["payload"],
+            fixture["result"]
+        );
+    }
+
+    #[test]
+    fn housing_management_intent_and_result_match_the_browser_fixture() {
+        use crate::{client_runtime::ClientHostCommand, host_event_sink::ClientEventSink};
+        use holtburger_core::client::housing_management::{
+            HousingManagementAction, HousingManagementOutcome, HousingManagementResult,
+        };
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/housing-management-wire.json"
+        ))
+        .unwrap();
+        let command: ClientHostCommand = serde_json::from_value(serde_json::json!({"command": "submit_client_housing_management", "request": fixture["request"]})).unwrap();
+        let ClientHostCommand::SubmitClientHousingManagement { request } = command else {
+            panic!("expected administrative command")
+        };
+        assert_eq!(
+            request.action,
+            HousingManagementAction::Hooks { enabled: false }
+        );
+        assert_eq!(serde_json::to_value(&request).unwrap(), fixture["request"]);
+        let result = HousingManagementResult {
+            sequence: request.sequence,
+            generation: request.generation,
+            outcome: HousingManagementOutcome::Requested,
+        };
+        let projected =
+            project_client_event(ClientViewEvent::HousingManagementFinished(result)).unwrap();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let sink = crate::protocol::StdioEventSink::new(sender);
+        sink.publish_client_event(projected).unwrap();
+        let crate::protocol::ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("expected receipt event")
+        };
+        let wire = serde_json::to_value(event).unwrap();
+        assert_eq!(wire["payload"], fixture["result"]);
+    }
+
+    #[test]
+    fn housing_information_snapshot_matches_the_shared_browser_fixture() {
+        use holtburger_core::client::{
+            housing::HousingSnapshot,
+            housing_queries::{HousingAccessSnapshot, HousingSearchSnapshot},
+        };
+        use holtburger_world::housing::management::HousingSearchResults;
+        let snapshot = HousingSnapshot {
+            refreshing: true,
+            access: HousingAccessSnapshot {
+                refreshing: true,
+                ..Default::default()
+            },
+            search: HousingSearchSnapshot {
+                results: Some(HousingSearchResults {
+                    house_type: 4,
+                    areas: vec![Guid(0x12340001)],
+                    total_available: 2,
+                }),
+                pending_type: Some(1),
+            },
+            ..Default::default()
+        };
+        let projected = project_client_event(ClientViewEvent::HousingUpdated(snapshot)).unwrap();
+        use crate::host_event_sink::ClientEventSink;
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let sink = crate::protocol::StdioEventSink::new(sender);
+        sink.publish_client_event(projected).unwrap();
+        let crate::protocol::ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("housing projection must publish an event");
+        };
+        let wire = serde_json::to_value(event).unwrap();
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../src/client/fixtures/housing-wire.json"))
+                .unwrap();
+        assert_eq!(wire["payload"], fixture);
+    }
+
+    #[test]
+    fn book_receipts_project_only_reader_facts_and_keep_open_provenance() {
+        let guid = Guid(0x6000_0042);
+        let book = holtburger_world::book::BookData {
+            pages: vec![holtburger_world::book::BookPage {
+                index: 0,
+                author_id: 7,
+                author_name: "Writer".into(),
+                author_account: "private-account".into(),
+                flags: 0xffff_0002,
+                text_included: false,
+                ignore_author: false,
+                page_text: None,
+            }],
+            inscription: Some("Signed".into()),
+            author_name: Some("Writer".into()),
+            ..Default::default()
+        };
+        let opened = project_client_event(ClientViewEvent::EntityBookOpened {
+            guid,
+            name: "Journal".into(),
+            book: Box::new(book.clone()),
+        });
+        let Some(ClientHostEvent::BookOpened(opened)) = opened else {
+            panic!("full response must open the reader");
+        };
+        let value = serde_json::to_value(opened).unwrap();
+        assert_eq!(value["name"], "Journal");
+        assert_eq!(value["book"]["guid"], guid.0);
+        assert!(value["book"]["pages"][0]["text"].is_null());
+        assert!(value.to_string().find("private-account").is_none());
+        assert!(value.to_string().find("flags").is_none());
+
+        assert!(matches!(
+            project_client_event(ClientViewEvent::EntityBookUpdated {
+                guid,
+                book: Box::new(book),
+            }),
+            Some(ClientHostEvent::BookUpdated(_))
+        ));
+    }
+
+    #[test]
+    fn appearance_projection_exposes_only_helmet_and_cloak() {
+        let options = holtburger_core::PlayerCharacterOptions {
+            options1: holtburger_common::CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
+            options2: holtburger_common::CharacterOptions2::SHOW_HELM,
+        };
+
+        assert_eq!(
+            ClientAppearanceOptions::from(options),
+            ClientAppearanceOptions {
+                show_helmet: true,
+                show_cloak: false,
+            }
+        );
+    }
+
+    #[test]
+    fn item_progression_wire_preserves_large_thresholds_in_both_advancement_states() {
+        use holtburger_world::item_progression::{ItemAdvancement, ItemProgression};
+        let total_xp = 9_007_199_254_740_993;
+        for advancement in [
+            ItemAdvancement::Advancing {
+                level_start_xp: total_xp - 1,
+                next_level_xp: total_xp + 3,
+            },
+            ItemAdvancement::Maximum {
+                max_level_xp: total_xp,
+            },
+        ] {
+            let progression = ItemProgression {
+                level: 1,
+                max_level: if matches!(advancement, ItemAdvancement::Maximum { .. }) {
+                    1
+                } else {
+                    2
+                },
+                total_xp,
+                advancement,
+            };
+            let wire = serde_json::to_value(&progression).unwrap();
+            assert_eq!(wire["totalXp"], total_xp.to_string());
+            match progression.advancement {
+                ItemAdvancement::Advancing { .. } => {
+                    assert_eq!(
+                        wire["advancement"]["levelStartXp"],
+                        (total_xp - 1).to_string()
+                    );
+                    assert_eq!(
+                        wire["advancement"]["nextLevelXp"],
+                        (total_xp + 3).to_string()
+                    );
+                }
+                ItemAdvancement::Maximum { .. } => {
+                    assert_eq!(wire["advancement"]["maxLevelXp"], total_xp.to_string())
+                }
+            }
+            assert_eq!(
+                serde_json::from_value::<ItemProgression>(wire).unwrap(),
+                progression
+            );
+        }
+    }
+
+    #[test]
+    fn object_inspection_variants_match_the_shared_browser_fixture() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/object-inspection-wire.json"
+        ))
+        .unwrap();
+        let item_guid = Guid(0x6000_0001);
+        let mut item = Entity::new(
+            item_guid,
+            "Test Item".into(),
+            holtburger_common::position::WorldPosition::default(),
+        );
+        item.flags = ObjectDescriptionFlag::FOOD;
+        item.set_int_prop(PropertyInt::BoosterEnum, 4);
+        item.set_int_prop(PropertyInt::BoostValue, 50);
+        item.set_int_prop(PropertyInt::SharedCooldown, 213);
+        item.set_float_prop(
+            holtburger_common::properties::PropertyFloat::CooldownDuration,
+            45.0,
+        );
+        item.set_did_prop(
+            holtburger_common::properties::PropertyDataId::Spell,
+            Guid(42),
+        );
+        item.spell_book = vec![43, 42, 0x8000_002A];
+        // Full item appraisal fixture exercises the shared wire additions in both languages.
+        for (property, value) in [
+            (PropertyInt::EquipmentSetId, 13),
+            (PropertyInt::GearCritDamage, 3),
+            (PropertyInt::MinLevel, 80),
+            (PropertyInt::MaxLevel, 0),
+            (PropertyInt::Lifespan, 10800),
+            (PropertyInt::RemainingLifespan, 3600),
+            (PropertyInt::GemCount, 2),
+            (
+                PropertyInt::GemType,
+                holtburger_common::properties::MaterialType::Ruby as i32,
+            ),
+            (
+                PropertyInt::AppraisalItemSkill,
+                holtburger_common::stats::SkillType::Summoning as i32,
+            ),
+            (PropertyInt::ItemSkillLevelLimit, 570),
+            (
+                PropertyInt::ItemAttributeLimit,
+                holtburger_world::inspection::AttributeType::SelfAttr as i32,
+            ),
+            (PropertyInt::ItemAttributeLevelLimit, 295),
+        ] {
+            item.set_int_prop(property, value);
+        }
+        item.set_bool_prop(PropertyBool::Dyable, true);
+        item.set_did_prop(
+            holtburger_common::properties::PropertyDataId::ProcSpell,
+            Guid(43),
+        );
+        item.set_string_prop(PropertyString::TinkerName, "Test Tinker".to_owned());
+
+        item.set_string_prop(
+            PropertyString::AppraisalPortalDestination,
+            "Holtburg (42.1N, 33.6E).".into(),
+        );
+        item.inspection_supplement = Some(InspectionSupplement {
+            portal_restrictions: Some(vec![
+                holtburger_world::inspection::PortalRestriction::NoRecallOrTie,
+                holtburger_world::inspection::PortalRestriction::NoSummon,
+            ]),
+            equipment_unenchantable: Some(true),
+            ..InspectionSupplement::default()
+        });
+        item.set_int_prop(PropertyInt::ItemMaxLevel, 5);
+        item.set_int_prop(PropertyInt::ItemXpStyle, 2);
+        item.set_int64_prop(
+            holtburger_common::properties::PropertyInt64::ItemBaseXp,
+            100_000_000,
+        );
+        item.set_int64_prop(
+            holtburger_common::properties::PropertyInt64::ItemTotalXp,
+            350_000_000,
+        );
+        let creature_guid = Guid(0x6000_0002);
+        let mut creature = Entity::new(
+            creature_guid,
+            "Test Creature".into(),
+            holtburger_common::position::WorldPosition::default(),
+        );
+        creature.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 25,
+            health_max: 50,
+            attributes: None,
+            buffs: None,
+        });
+        let character_guid = Guid(0x6000_0003);
+        let mut character = Entity::new(
+            character_guid,
+            "Drawohan the Gem Seller".into(),
+            holtburger_common::position::WorldPosition::default(),
+        );
+        character.set_string_prop(PropertyString::Template, "Template Fallback".into());
+        character.set_int_prop(PropertyInt::CharacterTitleId, 42);
+        character.set_int_prop(PropertyInt::CreatureType, 5);
+        character.set_int_prop(PropertyInt::Level, 42);
+        character.flags = ObjectDescriptionFlag::VENDOR;
+        character.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 100,
+            health_max: 100,
+            attributes: None,
+            buffs: None,
+        });
+        let enchantable = |level| ArmorCoverageValue {
+            level,
+            enchantable: true,
+        };
+        character.inspection_supplement = Some(InspectionSupplement {
+            portal_restrictions: None,
+            lockpicking: None,
+            equipment_unenchantable: None,
+            armor_coverage: Some(ArmorCoverage {
+                head: enchantable(312),
+                chest: enchantable(507),
+                abdomen: enchantable(484),
+                upper_arm: enchantable(181),
+                lower_arm: enchantable(181),
+                hand: enchantable(277),
+                upper_leg: enchantable(484),
+                lower_leg: ArmorCoverageValue {
+                    level: 484,
+                    enchantable: false,
+                },
+                foot: enchantable(490),
+            }),
+            ratings: Some(CreatureRatings {
+                damage_rating: Some(5),
+                damage_resistance_rating: Some(0),
+                critical_rating: Some(-2),
+                critical_damage_rating: Some(0),
+                ..CreatureRatings::default()
+            }),
+            max_health_bonus: Some(25),
+            character_details: Some(CharacterDetails {
+                allegiance_rank: Some(CharacterAllegianceRank {
+                    rank: 2,
+                    title: Some("Baronet".into()),
+                }),
+                allegiance_name: Some("Test Allegiance".into()),
+                fellowship: Some("Test Fellowship".into()),
+                deaths: Some(0),
+                titles_earned: Some(7),
+                ..CharacterDetails::default()
+            }),
+        });
+        let mapper = EnumMapper {
+            id: EnumMapper::FILE_ID,
+            base_enum_map: 0,
+            numbering: 0,
+            entries: [(42, "GemSeller".to_owned())].into_iter().collect(),
+        };
+        let strings = StringTable {
+            id: StringTable::FILE_ID,
+            language: 1,
+            unknown: 0,
+            entries: vec![StringTableData {
+                id: legacy_string_hash(b"GemSeller"),
+                variable_names: Vec::new(),
+                variables: Vec::new(),
+                strings: vec!["Gem Seller".to_owned()],
+                comments: Vec::new(),
+                unknown: 0,
+            }],
+        };
+        let titles = holtburger_content::CharacterTitleCatalog::from_assets(&mapper, &strings)
+            .expect("synthetic character title should join");
+        let inspection_context = InspectionContext::new(&titles);
+        let mut healing_kit = item.clone();
+        healing_kit.flags = ObjectDescriptionFlag::HEALER;
+        healing_kit.set_float_prop(
+            holtburger_common::properties::PropertyFloat::HealkitMod,
+            1.3,
+        );
+        let healing_kit_wire = serde_json::to_value(
+            ObjectInspection::from_entity(&healing_kit, inspection_context).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            healing_kit_wire["details"]["details"]["useEffect"],
+            serde_json::json!({
+                "kind": "healing-kit", "skillBonus": 50, "restorationMultiplier": 1.3,
+            })
+        );
+        let mut unsupported_item = item.clone();
+        unsupported_item.set_int_prop(PropertyInt::ItemXpStyle, 3);
+        let cases = [
+            (
+                "unavailable",
+                ObjectInspectionResult {
+                    guid: item_guid,
+                    outcome: ObjectInspection::from_entity(&unsupported_item, inspection_context)
+                        .into(),
+                },
+            ),
+            (
+                "item",
+                ObjectInspectionResult {
+                    guid: item_guid,
+                    outcome: ObjectInspectionOutcome::Ready {
+                        inspection: Box::new(
+                            ObjectInspection::from_entity(&item, inspection_context).unwrap(),
+                        ),
+                    },
+                },
+            ),
+            (
+                "creature",
+                ObjectInspectionResult {
+                    guid: creature_guid,
+                    outcome: ObjectInspectionOutcome::Ready {
+                        inspection: Box::new(
+                            ObjectInspection::from_entity(&creature, inspection_context).unwrap(),
+                        ),
+                    },
+                },
+            ),
+            (
+                "character",
+                ObjectInspectionResult {
+                    guid: character_guid,
+                    outcome: ObjectInspectionOutcome::Ready {
+                        inspection: Box::new(
+                            ObjectInspection::from_entity(&character, inspection_context).unwrap(),
+                        ),
+                    },
+                },
+            ),
+            (
+                "rejected",
+                ObjectInspectionResult {
+                    guid: item_guid,
+                    outcome: ObjectInspectionOutcome::Rejected,
+                },
+            ),
+            (
+                "missing",
+                ObjectInspectionResult {
+                    guid: item_guid,
+                    outcome: ObjectInspectionOutcome::Missing,
+                },
+            ),
+        ];
+
+        for (name, result) in cases {
+            let projected = project_client_event(ClientViewEvent::ObjectInspectionResult(result))
+                .expect("inspection event should cross the host projection");
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(projected)
+                .unwrap();
+            let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+                panic!("expected event frame");
+            };
+            let event = serde_json::to_value(event).unwrap();
+            assert_eq!(event["event"], "client-object-inspection-result");
+            assert_eq!(event["payload"], fixture[name]);
+        }
+    }
+
+    #[test]
+    fn object_preview_variants_match_the_shared_browser_fixture() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/object-preview-wire.json"
+        ))
+        .unwrap();
+        for value in fixture.as_object().unwrap().values() {
+            let result: holtburger_core::client::object_preview::ObjectPreviewResult =
+                serde_json::from_value(value.clone()).unwrap();
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(ClientHostEvent::ObjectPreviewResult(result))
+                .unwrap();
+            let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+                panic!("Expected event");
+            };
+            assert_eq!(
+                serde_json::to_value(event).unwrap(),
+                serde_json::json!({
+                    "event": "client-object-preview-result",
+                    "payload": value,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn server_controlled_motion_projects_as_a_payloadless_notification() {
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        StdioEventSink::new(sender)
+            .publish_client_event(ClientHostEvent::ServerControlledMotion)
+            .unwrap();
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("Expected event");
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "event": "client-server-controlled-motion", "payload": null
+            })
+        );
+    }
+
+    #[test]
+    fn local_use_reports_progress_without_predicting_server_rejection() {
+        use holtburger_world::interaction::EntityUseFeedback;
+        for (feedback, expected) in [
+            (
+                EntityUseFeedback::Using {
+                    name: "Chest".into(),
+                },
+                "Using the Chest",
+            ),
+            (
+                EntityUseFeedback::Using {
+                    name: "Door".into(),
+                },
+                "Using the Door",
+            ),
+            (
+                EntityUseFeedback::Approaching {
+                    name: "Drudge".into(),
+                },
+                "Approaching Drudge",
+            ),
+        ] {
+            let Some(ClientHostEvent::ActionFeedback(result)) =
+                project_client_event(ClientViewEvent::EntityUseFeedback(feedback))
+            else {
+                panic!("Missing use notice");
+            };
+            assert_eq!(
+                serde_json::to_value(result).unwrap(),
+                serde_json::json!({
+                    "message": expected,
+                    "tone": "progress",
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn server_text_channels_and_confirmation_receipts_survive_host_projection() {
+        for (event, name) in [
+            (
+                ClientViewEvent::TransientString {
+                    message: "  Locked!\nTry again.  ".into(),
+                },
+                "client-transient-string",
+            ),
+            (
+                ClientViewEvent::PopupString {
+                    message: "  Locked!\nTry again.  ".into(),
+                },
+                "client-popup-string",
+            ),
+        ] {
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(project_client_event(event).unwrap())
+                .unwrap();
+            let ProtocolFrame::Event { event: projected } = receiver.recv().unwrap() else {
+                panic!("Expected event");
+            };
+            assert_eq!(
+                serde_json::to_value(projected).unwrap(),
+                serde_json::json!({
+                    "event": name, "payload": { "message": "  Locked!\nTry again.  " }
+                })
+            );
+        }
+        let event = ClientViewEvent::ActiveCharacterConfirmationUpdated {
+            confirmation: Some(holtburger_core::ActiveCharacterConfirmation {
+                request_id: u64::MAX,
+                confirmation_type: holtburger_common::ConfirmationType::YesNo,
+                context: 7,
+                text: "Proceed?".into(),
+            }),
+        };
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        StdioEventSink::new(sender)
+            .publish_client_event(project_client_event(event).unwrap())
+            .unwrap();
+        let ProtocolFrame::Event { event: projected } = receiver.recv().unwrap() else {
+            panic!("Expected event");
+        };
+        assert_eq!(
+            serde_json::to_value(projected).unwrap(),
+            serde_json::json!({
+                "event": "client-confirmation-updated", "payload": { "confirmation": { "requestId": u64::MAX.to_string(), "text": "Proceed?" } }
+            })
+        );
+    }
+
+    #[test]
+    fn trade_refusals_reach_system_chat() {
+        for error in [
+            WeenieError::TradeIgnoringRequests,
+            WeenieError::TradeNonCombatMode,
+            WeenieError::TradeNonEmptyContainer,
+            WeenieError::TradeAlreadyTrading,
+        ] {
+            let event = project_client_event(ClientViewEvent::ActionResult {
+                source: holtburger_core::ActionResultSource::Wire,
+                reason: ActionResultReason::Weenie(error, None),
+            })
+            .unwrap();
+            assert!(
+                matches!(event, ClientHostEvent::ChatMessage(ClientChatMessageWire::System { message }) if !message.is_empty())
+            );
+        }
+    }
+
+    #[test]
+    fn combat_status_projects_acknowledgement_independently_of_retained_intent() {
+        let status = holtburger_core::ClientCombatStatus {
+            processed_intent_sequence: 17,
+            ..Default::default()
+        };
+        let wire = ClientCombatStatusWire::from(status);
+        assert_eq!(
+            serde_json::to_value(wire).unwrap(),
+            serde_json::json!({
+                "processedIntentSequence": 17,
+                "desired": null,
+                "state": "idle",
+                "refill": null
+            })
+        );
+    }
+
+    #[test]
+    fn action_feedback_preserves_error_parameters_and_severity() {
+        for (reason, message, tone) in [
+            (
+                ActionResultReason::Weenie(WeenieError::YoureTooBusy, None),
+                "You're too busy!",
+                "warning",
+            ),
+            (
+                ActionResultReason::Weenie(
+                    WeenieError::IsTooBusyToAcceptGifts,
+                    Some("Drudge".into()),
+                ),
+                "Drudge is too busy to accept gifts right now.",
+                "warning",
+            ),
+            (
+                ActionResultReason::Weenie(
+                    WeenieError::AiRefuseItemDuringEmote,
+                    Some("Town Crier".into()),
+                ),
+                "Town Crier is too busy to accept gifts right now.",
+                "warning",
+            ),
+            (
+                ActionResultReason::Weenie(WeenieError::ITeleported, None),
+                "I teleported.",
+                "status",
+            ),
+        ] {
+            let projected = project_client_event(ClientViewEvent::ActionResult {
+                source: holtburger_core::ActionResultSource::Wire,
+                reason,
+            })
+            .expect("action feedback must reach the renderer");
+            let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(projected)
+                .unwrap();
+            let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+                panic!("action feedback must be an event");
+            };
+            assert_eq!(
+                serde_json::to_value(event).unwrap(),
+                serde_json::json!({
+                    "event": "client-action-feedback", "payload": { "message": message, "tone": tone }
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn equipment_set_feedback_preserves_requested_numeric_targets() {
+        let binding = holtburger_core::client::equipment_set::EquipmentBinding {
+            item: Some(Guid(91)),
+            target: EquipMask::FINGER_WEAR_LEFT,
+        };
+        let event = project_client_event(ClientViewEvent::ActionResult {
+            source: holtburger_core::ActionResultSource::Client,
+            reason: ActionResultReason::EquipmentSet {
+                bindings: vec![
+                    binding,
+                    holtburger_core::client::equipment_set::EquipmentBinding {
+                        item: None,
+                        target: binding.target,
+                    },
+                ],
+                message: "The server rejected the equipment request".into(),
+            },
+        })
+        .unwrap();
+        let ClientHostEvent::ActionFeedback(feedback) = event else {
+            panic!("Expected equipment feedback");
+        };
+        let encoded = serde_json::to_value(feedback).unwrap();
+        assert_eq!(encoded["tone"], "warning");
+        assert_eq!(
+            encoded["equipment"],
+            serde_json::json!([{ "item": binding.item, "target": binding.target.bits() }, { "item": null, "target": binding.target.bits() }])
+        );
+    }
+
+    #[test]
+    fn channel_membership_acknowledgements_are_system_chat() {
+        for error in [
+            WeenieError::TurbineChatIsEnabled,
+            WeenieError::YouHaveEnteredTheChannel,
+            WeenieError::YouHaveLeftTheChannel,
+        ] {
+            let reason = ActionResultReason::Weenie(error, Some("LFG".into()));
+            let message = format_action_result_message(&reason);
+            let event = project_client_event(ClientViewEvent::ActionResult {
+                source: holtburger_core::ActionResultSource::Wire,
+                reason,
+            });
+            let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::System {
+                message: received,
+            })) = event
+            else {
+                panic!("channel membership must reach chat");
+            };
+            assert_eq!(received, message);
+        }
+    }
+
+    #[test]
+    fn inventory_refusals_are_plain_status_notices() {
+        for error in [WeenieError::AttunedItem, WeenieError::FullInventoryLocation] {
+            let Some(ClientHostEvent::ActionFeedback(feedback)) =
+                project_client_event(ClientViewEvent::ActionResult {
+                    source: holtburger_core::ActionResultSource::Wire,
+                    reason: ActionResultReason::InventoryServerSaveFailed {
+                        item_guid: Guid(0x4000_0001),
+                        error,
+                    },
+                })
+            else {
+                panic!("inventory refusal must reach the renderer");
+            };
+            assert_eq!(feedback.message, format_weenie_error(error, None));
+            assert!(matches!(feedback.tone, ClientActionFeedbackTone::Status));
+        }
+        assert!(
+            project_client_event(ClientViewEvent::ActionResult {
+                source: holtburger_core::ActionResultSource::Wire,
+                reason: ActionResultReason::InventoryServerSaveFailed {
+                    item_guid: Guid(0x4000_0001),
+                    error: WeenieError::None,
+                },
+            })
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn use_timeout_warns_without_duplicating_completed_action_errors() {
+        let Some(ClientHostEvent::ActionFeedback(feedback)) =
+            project_client_event(ClientViewEvent::BusyOperationFinished {
+                operation: BusyOperationKind::Use,
+                result: BusyOperationResult::TimedOut,
+            })
+        else {
+            panic!("use timeout must reach the renderer");
+        };
+        assert_eq!(feedback.message, "Use timed out waiting for the server.");
+        assert!(matches!(feedback.tone, ClientActionFeedbackTone::Warning));
+        for error in [WeenieError::None, WeenieError::YoureTooBusy] {
+            assert!(
+                project_client_event(ClientViewEvent::BusyOperationFinished {
+                    operation: BusyOperationKind::Use,
+                    result: BusyOperationResult::Completed {
+                        error,
+                        parameter: None
+                    },
+                })
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn transaction_timeouts_leave_feedback_to_their_receipts() {
+        for operation in [
+            BusyOperationKind::Buy,
+            BusyOperationKind::Sell,
+            BusyOperationKind::HousingPurchase,
+            BusyOperationKind::HousingMaintenance,
+            BusyOperationKind::HousingManagement,
+        ] {
+            assert!(
+                project_client_event(ClientViewEvent::BusyOperationFinished {
+                    operation,
+                    result: BusyOperationResult::TimedOut,
+                })
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn entity_health_reaches_the_renderer_with_identity_and_fraction() {
+        let projected = project_client_event(ClientViewEvent::EntityHealthUpdated {
+            guid: Guid(7),
+            health_fraction: 0.5,
+        })
+        .expect("entity health must reach the host");
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        StdioEventSink::new(sender)
+            .publish_client_event(projected)
+            .unwrap();
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("entity health must be published as an event");
+        };
+        let wire = serde_json::to_value(event).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "event": "client-entity-health-updated",
+                "payload": { "guid": 7, "healthFraction": 0.5 }
+            })
+        );
+    }
+
+    #[test]
+    fn dynamic_script_cue_retains_generation_and_authored_values() {
+        let cue = holtburger_core::ClientDynamicScriptCue {
+            guid: Guid(0x5000_0008),
+            generation: 17,
+            cue: 7,
+            intensity: 0.625,
+        };
+
+        let projected = project_client_event(ClientViewEvent::DynamicScriptCue(cue));
+
+        assert!(matches!(
+            projected,
+            Some(ClientHostEvent::DynamicScriptCue(projected)) if projected == cue
+        ));
+    }
+
+    #[test]
+    fn selection_projection_keeps_only_correlated_browser_inputs() {
+        let projected = project_client_event(ClientViewEvent::EntitySelectionQueryResult(
+            holtburger_core::EntitySelectionQueryResult {
+                sequence: holtburger_core::EntitySelectionQuerySequence(14),
+                outcome: holtburger_core::EntitySelectionQueryOutcome::Available {
+                    static_limit_distance: 37.5,
+                    candidate_guids: vec![Guid(0x7000_0002), Guid(0x7000_0003)],
+                },
+            },
+        ));
+        let Some(ClientHostEvent::EntitySelectionQueryResult(result)) = projected else {
+            panic!("selection result should project");
+        };
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            serde_json::json!({
+                "status": "available",
+                "sequence": 14,
+                "staticLimitDistance": 37.5,
+                "candidateGuids": [0x7000_0002_u32, 0x7000_0003_u32]
+            })
+        );
+
+        let unavailable = ClientEntitySelectionQueryResultWire::from(
+            holtburger_core::EntitySelectionQueryResult {
+                sequence: holtburger_core::EntitySelectionQuerySequence(15),
+                outcome: holtburger_core::EntitySelectionQueryOutcome::Unavailable(
+                    holtburger_core::EntitySelectionQueryUnavailable::MissingCollisionOwner {
+                        owner: Guid(0xda55_ffff),
+                    },
+                ),
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(unavailable).unwrap(),
+            serde_json::json!({
+                "status": "unavailable",
+                "sequence": 15,
+                "reason": "missing-collision-owner",
+                "missingCollisionOwner": 0xda55_ffff_u32,
+            })
+        );
+    }
+
+    #[test]
+    fn non_player_speech_identity_survives_host_projection() {
+        let projected = project_client_event(ClientViewEvent::Chat {
+            speaker: ChatSpeaker::from_guid("Drudge".to_string(), Guid(0x7000_0001)),
+            message: "Grrr.".to_string(),
+            chat_type: ChatMessageType::Speech.into(),
+        });
+
+        let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Speech {
+            sender,
+            speaker_kind,
+            message,
+            category,
+        })) = projected
+        else {
+            panic!("speech should project to the chat contract");
+        };
+        assert_eq!(sender, "Drudge");
+        assert!(matches!(speaker_kind, ClientChatSpeakerKindWire::NonPlayer));
+        assert_eq!(message, "Grrr.");
+        assert!(matches!(
+            category,
+            ClientChatCategoryWire::Known(ClientChatKnownCategoryWire::Speech)
+        ));
+    }
+
+    #[test]
+    fn combat_typed_server_message_remains_filterable_combat() {
+        let projected = project_client_event(ClientViewEvent::ServerMessage {
+            combat_outcome: None,
+            message: "You enter combat.".to_string(),
+            chat_type: ChatMessageType::Combat.into(),
+        });
+
+        let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Server { message, category })) =
+            projected
+        else {
+            panic!("combat-typed server text should remain combat");
+        };
+        assert_eq!(message, "You enter combat.");
+        assert!(matches!(
+            category,
+            ClientChatCategoryWire::Known(ClientChatKnownCategoryWire::Combat)
+        ));
+    }
+
+    #[test]
+    fn defender_evasion_retains_identity_without_parsing_the_message() {
+        let event = project_client_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::EvasionDefenderNotification {
+                attacker_name: "Drudge".to_string(),
+            },
+        ));
+        let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Combat {
+            self_evasion,
+            message,
+            ..
+        })) = event
+        else {
+            panic!("self evasion must project as chat");
+        };
+        assert!(self_evasion);
+        assert_eq!(message, "You evaded Drudge's attack.");
+    }
+
+    #[test]
+    fn combat_damage_projects_as_a_typed_chat_line() {
+        let projected = project_client_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackerNotification {
+                context: holtburger_core::client::types::CombatOutcomeContext {
+                    world_generation: 0,
+                    attribution: holtburger_core::client::types::CombatOutcomeAttribution::Unplaced,
+                },
+                defender_name: "Drudge".to_string(),
+                damage_type: DamageType::SLASH,
+                health_percent: 0.25,
+                damage: 37,
+                critical_hit: true,
+                attack_conditions: AttackConditions::RECKLESSNESS | AttackConditions::SNEAK_ATTACK,
+            },
+        ));
+
+        let Some(ClientHostEvent::CombatFeedback {
+            chat:
+                ClientChatMessageWire::Combat {
+                    message,
+                    emphasized,
+                    self_evasion,
+                },
+            outcome,
+        }) = projected
+        else {
+            panic!("combat damage should project to chat and outcome contracts");
+        };
+        assert_eq!(
+            message,
+            "You hit Drudge for 37 slashing damage. Critical hit. [Recklessness, Sneak Attack]"
+        );
+        assert!(emphasized);
+        assert!(!self_evasion);
+        assert!(matches!(
+            outcome.outcome,
+            ClientCombatOutcomeKindWire::Damage {
+                amount: 37,
+                critical_hit: true
+            }
+        ));
+    }
+
+    #[test]
+    fn attack_lifecycle_edges_remain_diagnostic_only() {
+        assert!(
+            project_client_event(ClientViewEvent::CombatFeedback(
+                CombatFeedback::AttackCommenced
+            ))
+            .is_none()
+        );
+    }
+}
+
+#[cfg(test)]
+mod salvage_wire_tests {
+    use crate::host_event_sink::ClientEventSink;
+    use crate::protocol::{HostCommand, InboundFrame, StdioEventSink, encode_frame, read_frame};
+    use holtburger_common::{
+        Guid,
+        properties::{ItemType, MaterialType},
+    };
+    use holtburger_core::ClientViewEvent;
+    use holtburger_core::client::salvage::{
+        SalvagePreviewResult, SalvageSubmitOutcome, SalvageSubmitRequest, SalvageSubmitResult,
+    };
+    use holtburger_world::crafting::salvage::{
+        SalvageCandidate, SalvageContext, SalvageEvaluation, SalvageItemInput, SalvagePreviewBag,
+        SalvageReview, SalvageSkillProfile, SalvageSource, SalvageTool,
+    };
+    use serde_json::Value;
+    use std::{io::Cursor, sync::mpsc};
+
+    #[test]
+    fn salvage_contract_matches_browser_fixture_and_round_trips_the_review() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../src/client/fixtures/salvage-wire.json"))
+                .unwrap();
+        let source = SalvageSource {
+            guid: Guid(3),
+            instance: 1,
+            input: SalvageItemInput {
+                item_type: ItemType::MELEE_WEAPON,
+                material_type: MaterialType::Steel,
+                stack_size: 2,
+                structure: 0,
+                item_workmanship: 7,
+                num_items_in_material: 1,
+            },
+        };
+        let skills = SalvageSkillProfile {
+            salvaging_skill: 300,
+            tinkering_skill: 200,
+            augmentation_bonus_salvage: 0,
+        };
+        let review = SalvageReview {
+            player: Guid(1),
+            tool: SalvageTool {
+                guid: Guid(2),
+                instance: 1,
+            },
+            sources: vec![source.clone()],
+            skills,
+        };
+        assert_eq!(
+            serde_json::to_value(SalvageCandidate::Ready {
+                source: source.clone()
+            })
+            .unwrap(),
+            fixture["candidate"]
+        );
+        assert_eq!(
+            serde_json::to_value(SalvageContext { skills }).unwrap(),
+            fixture["context"]
+        );
+        let preview = SalvagePreviewResult {
+            sequence: 9,
+            evaluation: SalvageEvaluation::Ready {
+                review: review.clone(),
+                bags: vec![SalvagePreviewBag {
+                    material_type: MaterialType::Steel,
+                    units: 42,
+                    workmanship: 7.0,
+                }],
+            },
+        };
+        assert_eq!(serde_json::to_value(&preview).unwrap(), fixture["preview"]);
+        // Exercise the actual sidecar event framing, not just human-readable serde.
+        let event = super::project_client_event(ClientViewEvent::SalvagePreview(preview)).unwrap();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        StdioEventSink::new(sender)
+            .publish_client_event(event)
+            .unwrap();
+        let bytes = encode_frame(&receiver.recv().unwrap()).unwrap();
+        let frame: Value = rmp_serde::from_slice(&bytes[4..]).unwrap();
+        assert_eq!(frame["event"]["payload"], fixture["preview"]);
+        let candidate = SalvageCandidate::Ready { source };
+        let bytes = rmp_serde::to_vec_named(&candidate).unwrap();
+        let candidate: Value = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(candidate, fixture["candidate"]);
+
+        let submit: SalvageSubmitRequest =
+            serde_json::from_value(fixture["submit"].clone()).unwrap();
+        assert_eq!(submit.review, review);
+        // HostCommand decodes MessagePack into JSON before deserializing its request.
+        // Returning the same numeric review must survive that production path too.
+        let payload = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 1,
+            "command": { "command": "submit_client_salvage", "request": fixture["submit"] }
+        }))
+        .unwrap();
+        let mut bytes = u32::try_from(payload.len()).unwrap().to_le_bytes().to_vec();
+        bytes.extend(payload);
+        let Some(InboundFrame::Request {
+            command:
+                HostCommand::Client(crate::client_runtime::ClientHostCommand::SubmitClientSalvage {
+                    request,
+                }),
+            ..
+        }) = read_frame(&mut Cursor::new(bytes)).unwrap()
+        else {
+            panic!("salvage submission did not decode");
+        };
+        assert_eq!(request.review, review);
+
+        assert_eq!(
+            serde_json::to_value(SalvageSubmitResult {
+                sequence: 10,
+                outcome: SalvageSubmitOutcome::Dispatched
+            })
+            .unwrap(),
+            fixture["result"]
+        );
+    }
+}
+
+#[cfg(test)]
+mod barber_contract_tests {
+    use holtburger_core::client::barber::{BarberPreviewResult, BarberRequest, BarberSnapshot};
+
+    #[test]
+    fn barber_contract_round_trips_browser_fixture_through_host_events() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../src/client/fixtures/barber-wire.json"))
+                .unwrap();
+        let snapshot: BarberSnapshot = serde_json::from_value(fixture["snapshot"].clone()).unwrap();
+        let preview: BarberPreviewResult =
+            serde_json::from_value(fixture["preview"].clone()).unwrap();
+        let request: BarberRequest = serde_json::from_value(fixture["request"].clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&snapshot).unwrap(),
+            fixture["snapshot"]
+        );
+        assert_eq!(serde_json::to_value(&preview).unwrap(), fixture["preview"]);
+        assert_eq!(serde_json::to_value(&request).unwrap(), fixture["request"]);
+        let event =
+            super::project_client_event(holtburger_core::ClientViewEvent::BarberPreview(preview));
+        assert!(matches!(
+            event,
+            Some(super::ClientHostEvent::BarberPreview(_))
+        ));
+    }
+}
+
+#[cfg(test)]
+mod auto_merge_tests {
+    use super::*;
+    use holtburger_core::client::container_auto_merge::{AutoMergeOutcome, AutoMergeResult};
+
+    #[test]
+    fn terminal_results_use_existing_action_feedback_with_honest_progress() {
+        for (outcome, slots_freed, message, warning) in [
+            (
+                AutoMergeOutcome::Completed { changed: false },
+                0,
+                "Nothing to merge",
+                false,
+            ),
+            (
+                AutoMergeOutcome::Completed { changed: true },
+                0,
+                "Auto-merge complete: 0 slots freed",
+                false,
+            ),
+            (
+                AutoMergeOutcome::Completed { changed: true },
+                2,
+                "Auto-merge complete: 2 slots freed",
+                false,
+            ),
+            (
+                AutoMergeOutcome::Rejected("Finish trading".into()),
+                0,
+                "Could not auto-merge: Finish trading",
+                true,
+            ),
+            (
+                AutoMergeOutcome::Stopped("Timed out".into()),
+                1,
+                "Auto-merge stopped: Timed out. 1 slots freed",
+                true,
+            ),
+        ] {
+            let event = project_client_event(ClientViewEvent::AutoMergeFinished(AutoMergeResult {
+                slots_freed,
+                outcome,
+            }))
+            .unwrap();
+            let ClientHostEvent::ActionFeedback(feedback) = event else {
+                panic!("result must use the existing feedback path")
+            };
+            assert_eq!(feedback.message, message);
+            assert_eq!(
+                matches!(feedback.tone, ClientActionFeedbackTone::Warning),
+                warning
+            );
+            assert!(feedback.equipment.is_none());
+        }
+    }
+}

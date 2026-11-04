@@ -8,10 +8,13 @@ pub(crate) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     result.merge(combat::reduce_view_event(state, event));
     result.merge(lifecycle::reduce_view_event(state, event));
     result.merge(player::reduce_view_event(state, event));
-    result.merge(entity::reduce_view_event(state, event, now));
+    result.merge(progression::reduce_view_event(state, event));
+    result.merge(object_interaction::reduce_view_event(state, event));
+    result.merge(entity::reduce_view_event(state, event));
     result.merge(navigation::reduce_view_event(state, event));
     result.merge(party::reduce_view_event(state, event));
     result.merge(trade_vendor::reduce_view_event(state, event));
+    object_interaction::reconcile_refresh(state);
 
     result
 }
@@ -22,18 +25,6 @@ pub(crate) fn reduce_action(state: &mut GameState, action: AppAction) -> Option<
         | AppAction::Log { .. }
         | AppAction::SendCommands { .. }
         | AppAction::TransitionToGame { .. } => None,
-        AppAction::SendCharacterEnterWorld => {
-            let guid = state
-                .data
-                .player_guid
-                .expect("game page should know the selected player guid before world entry");
-            Some(UpdateResult::commands(vec![
-                ClientCommand::SendCharacterEnterWorld {
-                    guid,
-                    account: state.data.account_name.clone(),
-                },
-            ]))
-        }
         AppAction::Sequence { actions } => {
             let mut result = UpdateResult::new();
             for inner_action in actions {
@@ -64,6 +55,7 @@ fn broadcast_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     result.merge(progression::reduce_action(state, action.clone()));
     result.merge(interaction::reduce_action(state, action.clone()));
     result.merge(ui::reduce_action(state, action));
+    object_interaction::reconcile_refresh(state);
 
     result
 }
@@ -72,9 +64,9 @@ pub(crate) fn reduce_tick(state: &mut GameState, elapsed: f64) -> UpdateResult {
     let mut result = UpdateResult::new();
     let now = Instant::now();
 
-    inventory::apply_tick(state, now, &mut result);
-    player::apply_tick(state, elapsed, &mut result);
-    combat::apply_tick(state, now, &mut result);
+    inventory::apply_tick(state, now);
+    object_interaction::apply_tick(state, now, &mut result);
+    player::apply_tick(state, &mut result);
     navigation::apply_tick(state, now, elapsed, &mut result);
     ui::apply_tick(state, elapsed, &mut result);
     logopolis::apply_tick(state, elapsed, &mut result);

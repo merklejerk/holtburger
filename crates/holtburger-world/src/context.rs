@@ -4,10 +4,12 @@ use crate::stats::{AttributeType, SkillType};
 use crate::vendor::VendorState;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    EquipMask, ItemType, PropertyInt, Usable, WorldObjectExt, WorldObjectPropertyAccessors,
+    CombatUse, EquipMask, ItemType, PropertyInt, Usable, WorldObjectExt,
+    WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CombatTargetStatus {
@@ -74,10 +76,27 @@ pub fn normalize_name_for_lookup(name: &str) -> String {
 pub trait WorldContext {
     fn get_player_guid(&self) -> Option<Guid>;
     fn get_entity(&self, guid: Guid) -> Option<&Entity>;
+
+    /// Descriptions eligible for interaction; retention caches may also contain retired instances.
+    /// Frontend read models contain only current descriptions and can use their ordinary lookup.
+    fn get_visible_entity(&self, guid: Guid) -> Option<&Entity> {
+        self.get_entity(guid)
+    }
     fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_;
+    /// Membership in the same accepted domain as `iter_inventory`, including pending descriptions.
+    /// Storage owners can answer directly without enumerating unrelated items.
+    fn is_in_player_inventory(&self, guid: Guid) -> bool {
+        self.iter_inventory().any(|candidate| candidate == guid)
+    }
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_;
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_;
     fn is_open_container(&self, guid: Guid) -> bool;
+
+    /// Direct accepted storage parent; read models supply the relationships they retain.
+    fn container_parent(&self, guid: Guid) -> Option<Guid>;
+
+    /// Accepted equipment mask, absent while a wearer announcement awaits its slot data.
+    fn equipment_mask(&self, guid: Guid) -> Option<EquipMask>;
 
     fn get_player_attribute_current(&self, _attr: AttributeType) -> Option<u32> {
         None
@@ -93,6 +112,20 @@ pub trait WorldContext {
 }
 
 impl WorldContext for WorldState {
+    fn container_parent(&self, guid: Guid) -> Option<Guid> {
+        match self.storage_location(guid) {
+            Some(crate::state::storage::StorageLocation::Contained { parent, .. }) => Some(parent),
+            _ => None,
+        }
+    }
+
+    fn equipment_mask(&self, guid: Guid) -> Option<EquipMask> {
+        match self.storage_location(guid) {
+            Some(crate::state::storage::StorageLocation::Equipped { mask, .. }) => mask,
+            _ => None,
+        }
+    }
+
     fn get_player_guid(&self) -> Option<Guid> {
         (self.player.guid != Guid::NULL).then_some(self.player.guid)
     }
@@ -101,12 +134,22 @@ impl WorldContext for WorldState {
         self.entities.get(guid)
     }
 
+    fn get_visible_entity(&self, guid: Guid) -> Option<&Entity> {
+        WorldState::get_visible_entity(self, guid)
+    }
+
     fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_ {
-        self.player.inventory.iter().copied()
+        self.storage.owned_items(self.player.guid)
+    }
+
+    fn is_in_player_inventory(&self, guid: Guid) -> bool {
+        self.storage.owned_by(guid, self.player.guid)
     }
 
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_ {
-        self.player.equipment.keys().copied()
+        self.storage
+            .equipment(self.player.guid)
+            .map(|(guid, _)| guid)
     }
 
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_ {
@@ -114,7 +157,7 @@ impl WorldContext for WorldState {
     }
 
     fn is_open_container(&self, guid: Guid) -> bool {
-        self.open_containers.contains(&guid)
+        self.has_world_container_access(guid)
     }
 
     fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
@@ -153,13 +196,17 @@ pub trait WorldContextExt: WorldContext {
 
     fn player_encumbrance(&self) -> Option<f32> {
         let player_guid = self.get_player_guid()?;
-
+        let inventory = self.iter_inventory().collect::<Vec<_>>();
+        // Container burden already includes its contents (ACE Container.cs, inventory load).
+        // Resolve membership once instead of traversing the entire inventory for each child.
+        // Keep the original iteration order for identical floating-point accumulation.
+        let inventory_membership = inventory.iter().copied().collect::<HashSet<_>>();
         let mut encumbrance = 0.0;
-        for guid in self.iter_inventory() {
+        for guid in inventory {
             let item = self.get_entity(guid)?;
 
-            if let Some(container_id) = item.container_id()
-                && self.is_in_player_inventory(container_id)
+            if let Some(container_id) = self.container_parent(guid)
+                && inventory_membership.contains(&container_id)
                 && container_id != player_guid
             {
                 continue;
@@ -182,7 +229,8 @@ pub trait WorldContextExt: WorldContext {
         let num_augs = self
             .get_player_int_property(PropertyInt::AugmentationIncreasedCarryingCapacity)
             .unwrap_or(0)
-            .max(0) as f32;
+            // ACE EncumbranceSystem.EncumbranceCapacity caps the bonus at 150 * Strength.
+            .clamp(0, 5) as f32;
         Some((150.0 * strength) + (num_augs * 30.0 * strength))
     }
 
@@ -226,10 +274,6 @@ pub trait WorldContextExt: WorldContext {
         CombatTargetStatus::Available
     }
 
-    fn is_in_player_inventory(&self, guid: Guid) -> bool {
-        self.iter_inventory().any(|candidate| candidate == guid)
-    }
-
     fn is_equipped_item(&self, guid: Guid) -> bool {
         self.iter_equipment().any(|candidate| candidate == guid)
     }
@@ -255,8 +299,8 @@ pub trait WorldContextExt: WorldContext {
             available |= Usable::WIELDED;
         }
 
-        if entity
-            .container_id()
+        if self
+            .container_parent(guid)
             .is_some_and(|container_guid| self.is_open_container(container_guid))
         {
             available |= Usable::VIEWED;
@@ -340,7 +384,7 @@ pub trait WorldContextExt: WorldContext {
     fn get_container_counts(&self) -> std::collections::HashMap<Guid, u32> {
         let mut counts = std::collections::HashMap::new();
         for e in self.iter_entities() {
-            if let Some(cid) = e.container_id() {
+            if let Some(cid) = self.container_parent(e.guid) {
                 *counts.entry(cid).or_default() += 1;
             }
         }
@@ -368,7 +412,7 @@ pub trait WorldContextExt: WorldContext {
         };
 
         for child in self.iter_entities() {
-            if child.container_id() != Some(container_id) {
+            if self.container_parent(child.guid) != Some(container_id) {
                 continue;
             }
 
@@ -410,7 +454,7 @@ pub trait WorldContextExt: WorldContext {
 
     fn is_in_main_pack(&self, guid: Guid) -> bool {
         if let Some(player_guid) = self.get_player_guid() {
-            self.get_entity(guid).and_then(|e| e.container_id()) == Some(player_guid)
+            self.container_parent(guid) == Some(player_guid)
         } else {
             false
         }
@@ -430,8 +474,7 @@ pub trait WorldContextExt: WorldContext {
 
         // Recursive case: check all items contained within this one
         for other_guid in self.iter_inventory() {
-            if let Some(other) = self.get_entity(other_guid)
-                && other.container_id() == Some(guid)
+            if self.container_parent(other_guid) == Some(guid)
                 && self.is_attuned_sticky_recursive(other_guid)
             {
                 return true;
@@ -476,67 +519,94 @@ pub trait WorldContextExt: WorldContext {
         !e.has_active_pet()
     }
 
+    /// Whole-item offer admission shared by UI hints and command validation.
     fn can_add_to_trade(&self, guid: Guid) -> bool {
-        let e = match self.get_entity(guid) {
-            Some(e) => e,
-            None => return false,
-        };
-
-        if e.is_attuned_sticky() {
-            return false;
-        }
-
-        // If it's a container, it must be empty.
-        if !self.is_container_empty(guid) {
-            return false;
-        }
-
-        // Check for active pet
-        !e.has_active_pet()
+        self.trade_item_rejection(guid).is_none()
     }
 
+    /// Local restrictions supported by both clients; ACE owns unique-item and recipient checks.
+    fn trade_item_rejection(&self, guid: Guid) -> Option<&'static str> {
+        if !self.is_owned_by_player(guid) {
+            return Some("You can only offer items you own.");
+        }
+        let Some(entity) = self.get_visible_entity(guid) else {
+            return Some("Wait for that item's description before offering it.");
+        };
+        if entity.item_type().is_none()
+            || entity
+                .get_string_prop(holtburger_common::properties::PropertyString::Name)
+                .is_none()
+        {
+            return Some("Wait for that item's description before offering it.");
+        }
+        if entity.is_attuned_sticky() {
+            return Some("You cannot trade an attuned item.");
+        }
+        if !self.is_container_empty(guid) {
+            return Some("Empty that container before offering it.");
+        }
+        if entity.has_active_pet() {
+            return Some("Unsummon the pet before offering this item.");
+        }
+        None
+    }
+
+    /// Retail's default stance from wielded weapons, then the held/caster slot.
+    /// A held non-caster or incomplete equipped entity cannot enter combat.
     fn get_suggested_combat_mode(&self) -> CombatMode {
-        let mut best = CombatMode::Melee;
-        for guid in self.iter_equipment() {
-            if let Some(entity) = self.get_entity(guid) {
-                let wield_location = entity.wield_location();
-                if wield_location.intersects(EquipMask::CASTER) {
-                    return CombatMode::Magic;
-                }
-                if wield_location.intersects(EquipMask::MISSILE_WEAPON) {
-                    best = CombatMode::Missile;
-                }
+        self.get_suggested_combat_mode_for_equipment(
+            self.iter_equipment()
+                .map(|guid| (guid, self.equipment_mask(guid))),
+        )
+    }
+
+    /// Resolve combat mode for a caller's intended equipment without mutating world state.
+    /// Missing locations retain the same hydration policy as confirmed equipment.
+    fn get_suggested_combat_mode_for_equipment(
+        &self,
+        equipment: impl IntoIterator<Item = (Guid, Option<EquipMask>)>,
+    ) -> CombatMode {
+        // Retail behavior: weapons take precedence over the held slot; empty hands use melee.
+        let mut held_mode = CombatMode::Melee;
+        let mut weapon_mode = None;
+        for (guid, location) in equipment {
+            let Some(location) = location else {
+                return CombatMode::NonCombat;
+            };
+            if location.intersects(
+                EquipMask::MELEE_WEAPON | EquipMask::MISSILE_WEAPON | EquipMask::TWO_HANDED,
+            ) {
+                let Some(entity) = self.get_entity(guid) else {
+                    return CombatMode::NonCombat;
+                };
+                // Finish checking hydration before accepting a weapon. Equipment iteration
+                // order must not decide whether an unknown wield slot blocks this request.
+                weapon_mode = Some(if entity.combat_use() == Some(CombatUse::Missile as u32) {
+                    CombatMode::Missile
+                } else {
+                    CombatMode::Melee
+                });
+            }
+            if location.intersects(EquipMask::CASTER) {
+                held_mode = if self
+                    .get_entity(guid)
+                    .and_then(|entity| entity.item_type())
+                    .is_some_and(|kind| kind.contains(ItemType::CASTER))
+                {
+                    CombatMode::Magic
+                } else {
+                    CombatMode::NonCombat
+                };
             }
         }
-        best
+        match weapon_mode {
+            Some(mode) => mode,
+            None => held_mode,
+        }
     }
 
     fn is_wielding_caster(&self) -> bool {
         self.get_suggested_combat_mode() == CombatMode::Magic
-    }
-
-    fn is_salvage_candidate(&self, guid: Guid) -> bool {
-        let Some(entity) = self.get_entity(guid) else {
-            return false;
-        };
-
-        if entity.is_retained() {
-            return false;
-        }
-
-        let Some(item_type) = entity.item_type() else {
-            return false;
-        };
-
-        if item_type.contains(ItemType::TINKERING_MATERIAL) {
-            let structure = entity.structure().unwrap_or(0);
-            let max_structure = entity.max_structure().unwrap_or(0);
-            if structure >= max_structure && max_structure > 0 {
-                return false;
-            }
-        }
-
-        entity.material_type().is_some() && entity.workmanship().is_some()
     }
 
     /// Finds a non-full container in the player's possession that can accept the item.
@@ -576,23 +646,33 @@ pub trait WorldContextExt: WorldContext {
         None
     }
 
-    // Find the effective stack count that can be merged from src_guid into dst_guid.
+    /// Quantity transferable between established stacks; zero retains compatibility
+    /// for a full target so callers can apply their merge-only or movement policy.
     fn resolve_merge_stack_amount(
         &self,
         src_guid: Guid,
         dst_guid: Guid,
         max_src_amount: Option<u32>,
     ) -> Option<u32> {
+        if src_guid == dst_guid {
+            return None;
+        }
         let src = self.get_entity(src_guid)?;
         let dst = self.get_entity(dst_guid)?;
 
-        if src.wcid != dst.wcid {
+        if src.stack_compatibility_key(src.wcid)? != dst.stack_compatibility_key(dst.wcid)? {
             return None;
         }
 
         let max_stack_size = dst.max_stack_size()?;
-        let src_count = src.stack_size().min(max_src_amount.unwrap_or(u32::MAX));
-        let dst_count = dst.stack_size();
+        // ACE rejects absent/empty quantities. The display accessor's default of
+        // one must not turn an incomplete description into a merge request.
+        let src_count = u32::try_from(src.get_int_prop(PropertyInt::StackSize)?).ok()?;
+        let dst_count = u32::try_from(dst.get_int_prop(PropertyInt::StackSize)?).ok()?;
+        if src_count == 0 || dst_count == 0 {
+            return None;
+        }
+        let src_count = max_src_amount.map_or(src_count, |limit| src_count.min(limit));
         Some(src_count.min(max_stack_size.saturating_sub(dst_count)))
     }
 
@@ -653,14 +733,15 @@ mod tests {
         CombatTargetStatus, WorldContext, WorldContextExt, burden_load_modifier,
         run_rate_from_skill_and_burden,
     };
-    use crate::entity::{Entity, EntityMotionSnapshot};
+    use crate::attachment::PhysicsAttachment;
+    use crate::entity::{Entity, EntityMotionSnapshot, EntityNetworkMotion};
     use crate::stats::{AttributeType, SkillType};
-    use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::EquipMask;
+    use holtburger_common::properties::{CombatUse, EquipMask, WorldObjectExt};
     use holtburger_common::properties::{
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, Usable,
     };
+    use holtburger_common::{Guid, ParentLocation, Placement};
     use holtburger_protocol::messages::combat::CombatMode;
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 
@@ -669,14 +750,25 @@ mod tests {
         player_guid: Option<Guid>,
         entities: HashMap<Guid, Entity>,
         inventory: HashSet<Guid>,
-        equipment: HashSet<Guid>,
-        open_containers: HashSet<Guid>,
+        // Explicit order lets tests exercise partially hydrated equipment in either order.
+        equipment: Vec<Guid>,
+        accessible_containers: HashSet<Guid>,
         player_attributes: HashMap<AttributeType, u32>,
         player_skills: HashMap<SkillType, u32>,
         player_int_properties: Vec<(PropertyInt, i32)>,
     }
 
     impl WorldContext for TestWorld {
+        fn container_parent(&self, guid: Guid) -> Option<Guid> {
+            self.entities.get(&guid)?.container_id()
+        }
+
+        fn equipment_mask(&self, guid: Guid) -> Option<EquipMask> {
+            self.entities
+                .get(&guid)
+                .map(|entity| entity.wield_location())
+        }
+
         fn get_player_guid(&self) -> Option<Guid> {
             self.player_guid
         }
@@ -698,7 +790,7 @@ mod tests {
         }
 
         fn is_open_container(&self, guid: Guid) -> bool {
-            self.open_containers.contains(&guid)
+            self.accessible_containers.contains(&guid)
         }
 
         fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
@@ -745,7 +837,7 @@ mod tests {
         let mut world = TestWorld {
             player_guid: Some(player_guid),
             inventory: HashSet::from([side_pack_guid, nested_item_guid, equipped_item_guid]),
-            equipment: HashSet::from([equipped_item_guid]),
+            equipment: vec![equipped_item_guid],
             player_attributes: HashMap::from([(AttributeType::StrengthAttr, 100)]),
             player_skills: HashMap::from([(SkillType::Run, 300)]),
             player_int_properties: vec![(PropertyInt::AugmentationIncreasedCarryingCapacity, 1)],
@@ -784,13 +876,81 @@ mod tests {
     }
 
     #[test]
+    fn inventory_burden_remains_unknown_until_nested_descriptions_arrive() {
+        let player = Guid(1);
+        let pack = Guid(2);
+        let child = Guid(3);
+        let mut world = TestWorld {
+            player_guid: Some(player),
+            inventory: HashSet::from([pack, child]),
+            ..Default::default()
+        };
+        let mut container = item_in_container(pack, player, "Pack");
+        container
+            .properties
+            .ints
+            .insert(PropertyInt::EncumbranceVal, 120);
+        world.entities.insert(pack, container);
+        assert_eq!(world.player_encumbrance(), None);
+
+        let mut item = item_in_container(child, pack, "Nested item");
+        item.properties
+            .ints
+            .insert(PropertyInt::EncumbranceVal, 100);
+        world.entities.insert(child, item);
+        assert_eq!(world.player_encumbrance(), Some(120.0));
+    }
+
+    #[test]
+    fn inventory_burden_counts_an_item_when_its_parent_is_outside_the_inventory_view() {
+        let player = Guid(1);
+        let foreign_parent = Guid(2);
+        let item = Guid(3);
+        let mut world = TestWorld {
+            player_guid: Some(player),
+            inventory: HashSet::from([item]),
+            ..Default::default()
+        };
+        // WorldContext also supports frontend read models whose inventory view is partial.
+        let mut entity = item_in_container(item, foreign_parent, "Item");
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::EncumbranceVal, 100);
+        world.entities.insert(item, entity);
+        assert_eq!(world.player_encumbrance(), Some(100.0));
+    }
+
+    #[test]
+    fn burden_capacity_clamps_augmentation_bonus_to_ace_limits() {
+        let mut world = TestWorld {
+            player_guid: Some(Guid(1)),
+            player_attributes: HashMap::from([(AttributeType::StrengthAttr, 100)]),
+            ..Default::default()
+        };
+        for (augmentations, capacity) in [
+            (-1, 15000.0),
+            (0, 15000.0),
+            (1, 18000.0),
+            (5, 30000.0),
+            (6, 30000.0),
+        ] {
+            world.player_int_properties = vec![(
+                PropertyInt::AugmentationIncreasedCarryingCapacity,
+                augmentations,
+            )];
+            assert_eq!(world.player_capacity(), Some(capacity));
+        }
+    }
+
+    #[test]
     fn suggested_combat_mode_uses_wield_location_over_item_type_noise() {
         let player_guid = Guid(0x5000_0001);
         let sword_guid = Guid(0x8000_0001);
 
         let mut world = TestWorld {
             player_guid: Some(player_guid),
-            equipment: HashSet::from([sword_guid]),
+            equipment: vec![sword_guid],
             ..Default::default()
         };
 
@@ -918,14 +1078,54 @@ mod tests {
     }
 
     #[test]
-    fn suggested_combat_mode_detects_missile_and_caster_by_wield_slot() {
+    fn incomplete_equipment_defers_combat_in_either_iteration_order() {
+        let bow_guid = Guid(1);
+        let pending_guid = Guid(2);
+        for equipment in [vec![bow_guid, pending_guid], vec![pending_guid, bow_guid]] {
+            let mut world = TestWorld {
+                equipment,
+                ..Default::default()
+            };
+            let mut bow = entity(bow_guid, "Bow");
+            bow.properties.ints.insert(
+                PropertyInt::CurrentWieldedLocation,
+                EquipMask::MISSILE_WEAPON.bits() as i32,
+            );
+            bow.properties
+                .ints
+                .insert(PropertyInt::CombatUse, CombatUse::Missile as i32);
+            world.entities.insert(bow_guid, bow);
+            assert_eq!(world.get_suggested_combat_mode(), CombatMode::NonCombat);
+        }
+    }
+
+    #[test]
+    fn held_non_casters_refuse_combat_and_empty_hands_allow_melee() {
+        let guid = Guid(1);
+        let mut world = TestWorld::default();
+        assert_eq!(world.get_suggested_combat_mode(), CombatMode::Melee);
+        let mut held = entity(guid, "Held item");
+        held.properties.ints.insert(
+            PropertyInt::CurrentWieldedLocation,
+            EquipMask::CASTER.bits() as i32,
+        );
+        held.properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::MISC.bits() as i32);
+        world.entities.insert(guid, held);
+        world.equipment.push(guid);
+        assert_eq!(world.get_suggested_combat_mode(), CombatMode::NonCombat);
+    }
+
+    #[test]
+    fn suggested_combat_mode_uses_weapon_combat_use_and_held_item_type() {
         let player_guid = Guid(0x5000_0001);
         let bow_guid = Guid(0x8000_0001);
         let wand_guid = Guid(0x8000_0002);
 
         let mut world = TestWorld {
             player_guid: Some(player_guid),
-            equipment: HashSet::from([bow_guid]),
+            equipment: vec![bow_guid],
             ..Default::default()
         };
 
@@ -934,6 +1134,9 @@ mod tests {
             PropertyInt::CurrentWieldedLocation,
             EquipMask::MISSILE_WEAPON.bits() as i32,
         );
+        bow.properties
+            .ints
+            .insert(PropertyInt::CombatUse, CombatUse::Missile as i32);
         world.entities.insert(bow_guid, bow);
 
         assert_eq!(world.get_suggested_combat_mode(), CombatMode::Missile);
@@ -943,8 +1146,11 @@ mod tests {
             PropertyInt::CurrentWieldedLocation,
             EquipMask::CASTER.bits() as i32,
         );
+        wand.properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CASTER.bits() as i32);
         world.entities.insert(wand_guid, wand);
-        world.equipment.insert(wand_guid);
+        world.equipment = vec![wand_guid];
 
         assert_eq!(world.get_suggested_combat_mode(), CombatMode::Magic);
     }
@@ -1021,7 +1227,7 @@ mod tests {
             .properties
             .ints
             .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
-        target.motion_snapshot = Some(EntityMotionSnapshot {
+        target.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
             current_style: Some(MotionStance::NonCombat),
             forward_command: Some(InterpretedMotionCommand::DEAD),
             sidestep_command: None,
@@ -1038,7 +1244,7 @@ mod tests {
     }
 
     #[test]
-    fn physics_parent_alone_does_not_make_item_remote() {
+    fn attachment_alone_does_not_make_item_remote() {
         let player_guid = Guid(0x5000_0001);
         let item_guid = Guid(0x8000_0001);
 
@@ -1048,7 +1254,11 @@ mod tests {
         };
 
         let mut attached_item = entity(item_guid, "Attached Item");
-        attached_item.physics_parent_id = Some(Guid(0x7000_0001));
+        attached_item.set_attachment(Some(PhysicsAttachment {
+            parent: Guid(0x7000_0001),
+            location: ParentLocation::RightHand,
+            placement: Placement::RightHandCombat,
+        }));
         attached_item
             .properties
             .ints
@@ -1101,6 +1311,61 @@ mod tests {
     }
 
     #[test]
+    fn merge_amount_preserves_full_target_and_requires_established_stacks() {
+        const SOURCE: Guid = Guid(1);
+        const TARGET: Guid = Guid(2);
+        const MAXIMUM: i32 = 100;
+        let make_stack = |guid, count| {
+            let mut item = entity(guid, "Stack");
+            item.wcid = Some(1);
+            item.properties.ints.insert(PropertyInt::StackSize, count);
+            item.properties
+                .ints
+                .insert(PropertyInt::MaxStackSize, MAXIMUM);
+            item
+        };
+        let mut world = TestWorld {
+            entities: HashMap::from([
+                (SOURCE, make_stack(SOURCE, MAXIMUM)),
+                (TARGET, make_stack(TARGET, MAXIMUM - 1)),
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(
+            world.resolve_merge_stack_amount(SOURCE, TARGET, None),
+            Some(1)
+        );
+        assert_eq!(world.resolve_merge_stack_amount(SOURCE, SOURCE, None), None);
+        world.entities.insert(TARGET, make_stack(TARGET, MAXIMUM));
+        assert_eq!(
+            world.resolve_merge_stack_amount(SOURCE, TARGET, None),
+            Some(0)
+        );
+        world.entities.insert(TARGET, make_stack(TARGET, 1));
+        assert_eq!(
+            world.resolve_merge_stack_amount(SOURCE, TARGET, Some(2)),
+            Some(2)
+        );
+
+        for property in [PropertyInt::StackSize, PropertyInt::MaxStackSize] {
+            let mut incomplete = make_stack(SOURCE, 1);
+            incomplete.properties.ints.0.remove(&property);
+            world.entities.insert(SOURCE, incomplete);
+            assert_eq!(world.resolve_merge_stack_amount(SOURCE, TARGET, None), None);
+        }
+        for count in [0, -1] {
+            world.entities.insert(SOURCE, make_stack(SOURCE, count));
+            assert_eq!(world.resolve_merge_stack_amount(SOURCE, TARGET, None), None);
+        }
+        for guid in [SOURCE, TARGET] {
+            let mut unknown = make_stack(guid, 1);
+            unknown.wcid = None;
+            world.entities.insert(guid, unknown);
+        }
+        assert_eq!(world.resolve_merge_stack_amount(SOURCE, TARGET, None), None);
+    }
+
+    #[test]
     fn combine_respects_target_viewed_location() {
         let player_guid = Guid(0x5000_0001);
         let source_guid = Guid(0x8000_0001);
@@ -1110,7 +1375,7 @@ mod tests {
         let mut world = TestWorld {
             player_guid: Some(player_guid),
             inventory: HashSet::from([source_guid]),
-            open_containers: HashSet::from([container_guid]),
+            accessible_containers: HashSet::from([container_guid]),
             ..Default::default()
         };
 
@@ -1142,7 +1407,7 @@ mod tests {
 
         assert!(world.can_use_with(source_guid, target_guid));
 
-        world.open_containers.clear();
+        world.accessible_containers.clear();
         assert!(!world.can_use_with(source_guid, target_guid));
     }
 
@@ -1156,7 +1421,7 @@ mod tests {
         let world = TestWorld {
             player_guid: Some(player_guid),
             inventory: HashSet::from([inventory_guid]),
-            equipment: HashSet::from([equipped_guid]),
+            equipment: vec![equipped_guid],
             ..Default::default()
         };
 

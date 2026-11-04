@@ -1,0 +1,98 @@
+{
+	"candidate": {
+		"kind": "ready",
+		"source": {
+			"guid": 3,
+			"instance": 1,
+			"input": {
+				"itemType": 1,
+				"materialType": "Steel",
+				"stackSize": 2,
+				"structure": 0,
+				"itemWorkmanship": 7,
+				"numItemsInMaterial": 1
+			}
+		}
+	},
+	"context": {
+		"skills": {
+			"salvagingSkill": 300,
+			"tinkeringSkill": 200,
+			"augmentationBonusSalvage": 0
+		}
+	},
+	"preview": {
+		"sequence": 9,
+		"evaluation": {
+			"kind": "ready",
+			"review": {
+				"player": 1,
+				"tool": {
+					"guid": 2,
+					"instance": 1
+				},
+				"sources": [
+					{
+						"guid": 3,
+						"instance": 1,
+						"input": {
+							"itemType": 1,
+							"materialType": "Steel",
+							"stackSize": 2,
+							"structure": 0,
+							"itemWorkmanship": 7,
+							"numItemsInMaterial": 1
+						}
+					}
+				],
+				"skills": {
+					"salvagingSkill": 300,
+					"tinkeringSkill": 200,
+					"augmentationBonusSalvage": 0
+				}
+			},
+			"bags": [
+				{
+					"materialType": "Steel",
+					"units": 42,
+					"workmanship": 7.0
+				}
+			]
+		}
+	},
+	"submit": {
+		"sequence": 10,
+		"review": {
+			"player": 1,
+			"tool": {
+				"guid": 2,
+				"instance": 1
+			},
+			"sources": [
+				{
+					"guid": 3,
+					"instance": 1,
+					"input": {
+						"itemType": 1,
+						"materialType": "Steel",
+						"stackSize": 2,
+						"structure": 0,
+						"itemWorkmanship": 7,
+						"numItemsInMaterial": 1
+					}
+				}
+			],
+			"skills": {
+				"salvagingSkill": 300,
+				"tinkeringSkill": 200,
+				"augmentationBonusSalvage": 0
+			}
+		}
+	},
+	"result": {
+		"sequence": 10,
+		"outcome": {
+			"kind": "dispatched"
+		}
+	}
+}

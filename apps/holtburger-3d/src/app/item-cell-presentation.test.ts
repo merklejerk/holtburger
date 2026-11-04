@@ -1,0 +1,79 @@
+import { describe, expect, it } from "vitest";
+import {
+	itemCellPresentation,
+	type ItemCellFacts,
+} from "./item-cell-presentation";
+
+const item: ItemCellFacts = {
+	label: "Tool",
+	count: null,
+	structure: null,
+	capacity: null,
+	equipped: false,
+};
+
+describe("item cell presentation", () => {
+	it("combines active shared cooldown with existing item status", () => {
+		expect(
+			itemCellPresentation({ ...item, equipped: true, cooldownSeconds: 23 })
+				.label,
+		).toBe("Tool\nEquipped\nReady in 23s; shared cooldown");
+	});
+	it("puts a consumer's configured action on its own line after the quantity", () => {
+		expect(
+			itemCellPresentation({
+				...item,
+				count: 20,
+				quantityActionHint: "Ctrl + F9 to split",
+			}).label,
+		).toBe("Tool\nQuantity: 20\nCtrl + F9 to split");
+	});
+	it("combines exact quantity, remaining uses, and equipment status", () => {
+		expect(
+			itemCellPresentation({
+				...item,
+				count: 20100,
+				structure: { current: 10, max: 50 },
+				equipped: true,
+			}),
+		).toEqual({
+			label: "Tool\nQuantity: 20,100\nStructure: [10/50]\nEquipped",
+			count: 20100,
+			meter: { fraction: 0.2, hue: 24 },
+			equipped: true,
+		});
+	});
+	it("keeps empty container occupancy in the tooltip without drawing a bar", () => {
+		expect(
+			itemCellPresentation({
+				...item,
+				capacity: { used: 0, max: 24 },
+				structure: { current: 10, max: 50 },
+			}),
+		).toMatchObject({ label: "Tool\nContents: [0 / 24]", meter: null });
+	});
+	it.each([
+		[6, 24, 0.25, 90],
+		[24, 24, 1, 0],
+		[25, 24, 1, 0],
+		[1, 0, 1, 0],
+	])(
+		"fills container occupancy %s/%s toward red",
+		(used, max, fraction, hue) => {
+			expect(
+				itemCellPresentation({ ...item, capacity: { used, max } }),
+			).toMatchObject({
+				label: `Tool\nContents: [${used} / ${max}]`,
+				meter: { fraction, hue },
+			});
+		},
+	);
+	it("retains an empty red track for exhausted structure", () => {
+		expect(
+			itemCellPresentation({ ...item, structure: { current: 0, max: 50 } }),
+		).toMatchObject({
+			label: "Tool\nStructure: [0/50]",
+			meter: { fraction: 0, hue: 0 },
+		});
+	});
+});

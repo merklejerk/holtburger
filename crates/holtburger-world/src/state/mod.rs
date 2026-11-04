@@ -1,23 +1,39 @@
+pub mod allegiance;
+pub(crate) mod attachment_lifecycle;
+pub mod contracts;
+mod entity_scale;
 pub mod fellowship;
+pub mod friends;
 pub mod liveness;
 pub mod motion_resolution;
 pub mod mutations;
+mod pose_orientation;
+mod scene_placement;
 pub mod self_movement;
+pub mod squelch;
+pub mod storage;
 #[cfg(test)]
 pub mod tests;
 pub mod trade;
 pub mod types;
+mod visibility;
+mod world_container;
+pub use world_container::WorldContainerState;
 
 pub use fellowship::{
-    FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,
-    FellowshipMemberState, FellowshipState,
+    FELLOWSHIP_MEMBER_LIMIT, FellowshipCapabilities, FellowshipDepartedMemberState,
+    FellowshipLockEntryState, FellowshipLockState, FellowshipMemberState, FellowshipState,
 };
 pub use motion_resolution::{
+    AuthoredBodyMotionTick, AuthoredMotionDriveError, BodyProjectionResolver,
+    LocalAuthoredMotionCommandError, MotionCommandKinematics, MotionTableMovementProfile,
     PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,
 };
+pub use scene_placement::{ResolvedScenePlacement, ScenePlacementError, UnresolvedScenePlacement};
 pub use self_movement::{
-    RequiredSelfMovementKinematics, SelfMovementCapabilities, SelfMovementCapabilitiesError,
-    SelfMovementKinematics, SelfMovementKinematicsError,
+    RequiredSelfMovementKinematics, SelfJumpCapabilities, SelfJumpCapabilitiesError,
+    SelfMovementCapabilities, SelfMovementCapabilitiesError, SelfMovementKinematics,
+    SelfMovementKinematicsError,
 };
 pub use trade::{TradeSide, TradeState};
 pub use types::{ServerTimeSync, WorldState};

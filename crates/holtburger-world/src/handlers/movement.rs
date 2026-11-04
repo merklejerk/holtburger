@@ -1,26 +1,64 @@
 use crate::WorldEvent;
-use crate::entity::EntityMotionSnapshot;
+use crate::entity::{EntityMotionSnapshot, EntityMovementAdmission};
+use crate::motion::MotionCommand;
 use crate::state::WorldState;
 use holtburger_common::Guid;
-use holtburger_common::math::Quaternion;
-use holtburger_protocol::messages::{GameMessage, MovementTypeData};
+use holtburger_protocol::messages::GameMessage;
 
-fn update_entity_motion_snapshot(
+fn publish_entity_motion_update(
     state: &mut WorldState,
     guid: Guid,
-    snapshot: Option<EntityMotionSnapshot>,
+    snapshot: EntityMotionSnapshot,
     events: &mut Vec<WorldEvent>,
 ) {
-    let Some(entity) = state.entities.get_mut(guid) else {
-        return;
-    };
+    if let Some(body_id) = state.update_runtime_body_motion_snapshot_for_guid(guid, Some(snapshot))
+    {
+        events.push(WorldEvent::RuntimeBodyChanged { body_id });
+    }
+    events.push(WorldEvent::EntityMotionUpdated {
+        guid,
+        motion: crate::entity::EntityNetworkMotion::Initialized(snapshot),
+    });
+}
 
-    if entity.motion_snapshot != snapshot {
-        entity.motion_snapshot = snapshot;
-        if let Some(body_id) = state.update_runtime_body_motion_snapshot_for_guid(guid, snapshot) {
-            events.push(WorldEvent::RuntimeBodyChanged { body_id });
+/// Reports an admitted wire command retail cannot expand before playback silently loses it.
+fn report_unsupported_interpreted_commands(
+    state: &WorldState,
+    guid: Guid,
+    snapshot: EntityMotionSnapshot,
+) {
+    let motion_table_id = state.effective_motion_table_id_for_guid(guid);
+    let style = snapshot.current_style.map_or(0, |style| style as u32);
+    for (channel, command) in [
+        ("forward", snapshot.forward_command),
+        ("sidestep", snapshot.sidestep_command),
+        ("turn", snapshot.turn_command),
+    ] {
+        let Some(command) = command else {
+            continue;
+        };
+        if MotionCommand::from_interpreted(command).is_some() {
+            continue;
         }
-        events.push(WorldEvent::EntityMotionUpdated { guid, snapshot });
+        match motion_table_id {
+            Some(motion_table_id) => log::warn!(
+                "entity 0x{guid:08X} admitted unsupported interpreted {channel} command 0x{:04X} for motion table 0x{motion_table_id:08X} in style 0x{style:08X}",
+                command.raw(),
+            ),
+            None => log::warn!(
+                "entity 0x{guid:08X} admitted unsupported interpreted {channel} command 0x{:04X} with no effective motion table in style 0x{style:08X}",
+                command.raw(),
+            ),
+        }
+    }
+}
+
+fn report_rejected_motion_commands(
+    guid: Guid,
+    rejected: impl IntoIterator<Item = crate::entity::EntityMotionCommandRejection>,
+) {
+    for rejection in rejected {
+        log::warn!("entity 0x{guid:08X} rejected motion command: {rejection:?}");
     }
 }
 
@@ -35,7 +73,13 @@ pub(crate) fn handle_message(
                 events.extend(state.set_player_position(data.pos.pos));
                 true
             } else {
-                state.apply_entity_position_pack(data.guid, &data.pos, events)
+                state.receive_placement_message(
+                    crate::state::attachment_lifecycle::DeferredPlacementMessage::Position(
+                        (**data).clone(),
+                    ),
+                    events,
+                );
+                true
             }
         }
         GameMessage::PrivateUpdatePosition(data) => {
@@ -55,62 +99,79 @@ pub(crate) fn handle_message(
         }
         GameMessage::UpdateMotion(data) => {
             let guid = data.guid;
-            let snapshot = EntityMotionSnapshot::from_movement_event(data);
-
-            update_entity_motion_snapshot(state, guid, snapshot, events);
-
-            if snapshot.is_some_and(EntityMotionSnapshot::indicates_death_motion) {
-                state.update_health_fraction(guid, 0.0, events);
+            let is_local = guid == state.player.guid && !guid.is_null();
+            if is_local && !state.player.apply_self_update_motion(data) {
+                return true;
             }
-
-            let mut target_info = None;
-            if let MovementTypeData::TurnToObject(turn) = &data.data
-                && turn.desired_heading.abs() <= 1e-6
-                && let Some(target) = state.entities.get(turn.target)
-            {
-                target_info = Some((target.position.landblock_id, target.position.coords));
+            if is_local && data.is_autonomous {
+                // Retail acknowledges timestamps but does not unpack autonomous self movement.
+                // ACE's jump broadcast carries an empty interpreted state; installing its
+                // NonCombat default would overwrite local stance intent.
+                if let Some(entity) = state.entities.get_mut(guid) {
+                    entity.acknowledge_local_movement(data);
+                }
+                return true;
             }
-
-            let current_position = match state.entities.get(guid) {
-                Some(entity) => entity.position,
+            if is_local {
+                events.push(WorldEvent::SelfServerControlledMotion(Box::new(
+                    (**data).clone(),
+                )));
+            }
+            let admission = match state.entities.get_mut(guid) {
+                Some(entity) if is_local => entity.apply_locally_admitted_movement(data),
+                Some(entity) => entity.admit_movement_with_action_policy(data, true),
                 None => return false,
             };
+            let (snapshot, motion_changed, actions, rejected_commands) = match admission {
+                EntityMovementAdmission::Rejected
+                | EntityMovementAdmission::MovementSequenceAdvanced => return true,
+                EntityMovementAdmission::Applied {
+                    snapshot,
+                    motion_changed,
+                    actions,
+                    rejected_commands,
+                    ..
+                } => (snapshot, motion_changed, actions, rejected_commands),
+            };
 
-            let maybe_rotation = match &data.data {
-                MovementTypeData::TurnToHeading(turn)
-                    if turn.params.desired_heading.is_finite() =>
-                {
-                    Some(Quaternion::from_heading(turn.params.desired_heading))
-                }
-                MovementTypeData::TurnToObject(turn) => {
-                    if turn.desired_heading.is_finite() && turn.desired_heading.abs() > 1e-6 {
-                        Some(Quaternion::from_heading(turn.desired_heading))
-                    } else if let Some((target_lb, target_coords)) = target_info {
-                        if target_lb == current_position.landblock_id {
-                            Some(Quaternion::from_heading(
-                                current_position.coords.heading_to(&target_coords),
-                            ))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
+            let sticky_target = match &data.data {
+                holtburger_protocol::messages::MovementTypeData::Invalid(motion) => {
+                    motion.sticky_object
                 }
                 _ => None,
             };
+            report_unsupported_interpreted_commands(state, guid, snapshot);
+            report_rejected_motion_commands(guid, rejected_commands);
+            let playback_changed =
+                state.accept_entity_motion(guid, snapshot, actions, sticky_target);
 
-            if let Some(rotation) = maybe_rotation {
-                state.set_entity_rotation(guid, rotation, events)
-            } else {
-                false
+            if motion_changed {
+                publish_entity_motion_update(state, guid, snapshot, events);
+            } else if playback_changed {
+                // The next tick captures its baseline after packet admission, so it cannot
+                // discover this edge. A network-motion notification already publishes it above.
+                events.push(WorldEvent::EntityMotionPlaybackChanged { guid });
             }
+
+            if snapshot.indicates_death_motion() {
+                state.update_health_fraction(guid, 0.0, events);
+            }
+
+            true
         }
         GameMessage::VectorUpdate(data) => {
             if data.guid == state.player.guid {
-                events.extend(state.set_player_vector(data.velocity, data.omega));
+                events.extend(state.record_player_server_vectors(data.velocity, data.omega));
                 true
             } else {
+                let Some(entity) = state.entities.get_mut(data.guid) else {
+                    return false;
+                };
+                if !entity
+                    .admit_remote_vector_sequences(data.instance_sequence, data.vector_sequence)
+                {
+                    return true;
+                }
                 state.update_entity_velocity(data.guid, data.velocity, data.omega, events)
             }
         }

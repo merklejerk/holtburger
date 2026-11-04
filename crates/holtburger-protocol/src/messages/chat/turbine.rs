@@ -521,8 +521,11 @@ fn read_turbine_string(data: &[u8], offset: &mut usize) -> Option<String> {
     }
 
     let utf16: Vec<u16> = data[*offset..*offset + bytes_len]
-        .chunks_exact(2)
-        .map(LittleEndian::read_u16)
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .copied()
+        .map(u16::from_le_bytes)
         .collect();
     *offset += bytes_len;
     String::from_utf16(&utf16).ok()

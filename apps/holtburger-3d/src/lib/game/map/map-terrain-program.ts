@@ -1,0 +1,339 @@
+import { TERRAIN_TYPE_COUNT } from "../terrain/pcode";
+import {
+	linkWebGL2Program,
+	requireWebGL2Uniform,
+} from "../webgl/shader-program";
+
+/** Vertex attribute slots shared by the map terrain buffers and program. */
+export const MAP_TERRAIN_ATTRIBUTES = {
+	localPosition: 0,
+	normal: 1,
+	terrainCode: 2,
+	roadMask: 3,
+	passable: 4,
+	cellUv: 5,
+} as const;
+
+/**
+ * Orthographic top-down terrain shading.
+ *
+ * `uWorldToClip` folds zoom, rotation, canvas aspect, and the world-to-screen axis flip into one
+ * CPU-computed 2x2, so the shader holds no orientation policy and the map can be reoriented without
+ * touching GLSL. Depth is deliberately absent: outdoor terrain tiles without overlap, so Phase 1
+ * draws with the depth test off. The anchor-relative depth rule arrives with the interior program,
+ * which is the first geometry that can overlap itself.
+ */
+const MAP_TERRAIN_VERTEX_SHADER = `#version 300 es
+layout(location = ${MAP_TERRAIN_ATTRIBUTES.localPosition}) in vec3 aLocalPosition;
+layout(location = ${MAP_TERRAIN_ATTRIBUTES.normal}) in vec3 aNormal;
+layout(location = ${MAP_TERRAIN_ATTRIBUTES.terrainCode}) in uint aTerrainCode;
+layout(location = ${MAP_TERRAIN_ATTRIBUTES.roadMask}) in uint aRoadMask;
+layout(location = ${MAP_TERRAIN_ATTRIBUTES.passable}) in float aPassable;
+layout(location = ${MAP_TERRAIN_ATTRIBUTES.cellUv}) in vec2 aCellUv;
+
+uniform mat2 uWorldToClip;
+uniform vec2 uLandblockOrigin;
+uniform vec2 uMapCenter;
+uniform vec3 uTerrainPalette[${TERRAIN_TYPE_COUNT}];
+
+// The palette is resolved here rather than in the fragment stage, because a colour interpolates
+// and the terrain code that selects it does not. That is what lets the boundary between two kinds
+// of ground cross a triangle instead of following its edges.
+out vec3 vBaseColor;
+// A road belongs to its cell, not to this triangle, so the mask travels flat and the position
+// inside the cell interpolates. The fragment stage puts the two back together.
+flat out uint vRoadMask;
+out vec2 vCellUv;
+// Passability is a fact about one triangle's own face — its geometric slope, and the water type of
+// the landblock it belongs to — decided on the CPU, so it must not be smeared by interpolation.
+flat out float vPassable;
+out float vHeight;
+out vec3 vNormal;
+
+void main() {
+	vec2 worldOffset =
+		uLandblockOrigin + vec2(aLocalPosition.x, aLocalPosition.z) - uMapCenter;
+	vBaseColor = uTerrainPalette[int(aTerrainCode)];
+	vRoadMask = aRoadMask;
+	vCellUv = aCellUv;
+	vPassable = aPassable;
+	// Landblock origins carry no height, so local Y is already world height.
+	vHeight = aLocalPosition.y;
+	vNormal = aNormal;
+	gl_Position = vec4(uWorldToClip * worldOffset, 0.0, 1.0);
+}
+`;
+
+const MAP_TERRAIN_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform vec3 uRoadColor;
+uniform float uRoadTintStrength;
+uniform float uRoadCasingPixels;
+uniform float uRoadCasingStrength;
+uniform float uRoadWidth;
+uniform float uTileLength;
+uniform float uMetersPerPixel;
+uniform vec3 uSunDirection;
+uniform float uAmbientLevel;
+uniform vec3 uImpassableColor;
+uniform float uImpassableHatchPeriodPixels;
+uniform float uImpassableHatchStrength;
+uniform vec3 uContourSameLevelColor;
+uniform vec3 uContourAboveColor;
+uniform vec3 uContourBelowColor;
+uniform float uContourInterval;
+uniform float uContourStrength;
+uniform float uContourMinimumClimbPerPixel;
+uniform float uContourHeightSpan;
+uniform vec3 uInkColor;
+uniform float uAnchorHeight;
+uniform float uReliefExaggeration;
+
+in vec3 vBaseColor;
+flat in float vPassable;
+flat in uint vRoadMask;
+in vec2 vCellUv;
+in float vHeight;
+in vec3 vNormal;
+out vec4 fragmentColor;
+
+// How far outside the road one point in a cell lies, in world units; negative means on it.
+//
+// Retail's own shape, not one the terrain grid implies: retail road classification reads the
+// same four corners and tests plain distances against a fixed five-unit road width (a fixed
+// retail land constant). Every case below is one of that function's branches, rewritten as a
+// distance so the edge can be antialiased and the casing can be a band outside it.
+//
+// The point of taking retail's shape rather than interpolating the grid: a road is a line with
+// a width, and a width is in metres. Interpolation can only place an edge as a fraction of a
+// 24 unit cell, which made a road as wide as the grid it was inferred from.
+float roadEdgeDistance(uint mask, vec2 cell) {
+	// Roaded at all four corners, and retail calls the whole cell road.
+	if (mask == 0xFu) return -uRoadWidth;
+	bool southwest = (mask & 1u) != 0u;
+	bool southeast = (mask & 2u) != 0u;
+	bool northeast = (mask & 4u) != 0u;
+	bool northwest = (mask & 8u) != 0u;
+	// Nothing claims this point yet, and a cell is never wider than itself.
+	float nearest = uTileLength;
+	// An edge with road at both ends carries a band along it.
+	if (southwest && southeast) nearest = min(nearest, cell.y);
+	if (southeast && northeast) nearest = min(nearest, uTileLength - cell.x);
+	if (northeast && northwest) nearest = min(nearest, uTileLength - cell.y);
+	if (northwest && southwest) nearest = min(nearest, cell.x);
+	// An opposite pair is joined along its diagonal rather than left as two loose corners. This
+	// single branch is the connectivity a per-triangle interpolation could not express at all.
+	if (mask == 0x5u) nearest = min(nearest, abs(cell.x - cell.y));
+	if (mask == 0xAu) nearest = min(nearest, abs(cell.x + cell.y - uTileLength));
+	// A corner with neither neighbour roaded keeps a wedge of its own. Where a diagonal band also
+	// applies its wedges fall inside that band, so the two never disagree.
+	if (southwest && !southeast && !northwest) {
+		nearest = min(nearest, cell.x + cell.y);
+	}
+	if (southeast && !northeast && !southwest) {
+		nearest = min(nearest, uTileLength - cell.x + cell.y);
+	}
+	if (northeast && !northwest && !southeast) {
+		nearest = min(nearest, 2.0 * uTileLength - cell.x - cell.y);
+	}
+	if (northwest && !southwest && !northeast) {
+		nearest = min(nearest, uTileLength + cell.x - cell.y);
+	}
+	return nearest - uRoadWidth;
+}
+
+void main() {
+	vec3 normal = normalize(vNormal);
+	// Terrain colour blends across its boundaries and a road does not, because ground cover really
+	// does grade from one kind into another while a road is a line a reader follows.
+	//
+	// Cased in the map's ink, for the reason the building footprints are: a tan road crossing tan
+	// ground disappears exactly where it is most needed, which is inside a settlement. The rim is a
+	// band just outside the same edge the fill ends at, so it needs no data of its own.
+	//
+	// Both edges are measured against how much world one fragment covers, which the view already
+	// knows exactly. Reading it from a uniform rather than from fwidth matters here: the road
+	// distance jumps between cells with different corner masks, so a screen-space derivative of it
+	// spikes along those seams and would smear the rim wherever a road ends.
+	float roadDistance = roadEdgeDistance(vRoadMask, vCellUv * uTileLength);
+	float halfPixel = 0.5 * uMetersPerPixel;
+	float roadFill = 1.0 - smoothstep(-halfPixel, halfPixel, roadDistance);
+	float casingWidth = uRoadCasingPixels * uMetersPerPixel;
+	float withinCasing =
+		1.0 - smoothstep(casingWidth - halfPixel, casingWidth + halfPixel, roadDistance);
+	float roadCasing = withinCasing - roadFill;
+	vec3 color = mix(vBaseColor, uRoadColor, roadFill * uRoadTintStrength);
+	color = mix(color, uInkColor, roadCasing * uRoadCasingStrength);
+	// Exaggerate the surface for shading only. Passability was classified on the CPU from the real
+	// geometry, so nothing downstream of here can inherit the exaggeration.
+	vec3 reliefNormal = normalize(
+		vec3(normal.x * uReliefExaggeration, normal.y, normal.z * uReliefExaggeration)
+	);
+	float lambert = max(dot(reliefNormal, uSunDirection), 0.0);
+	vec3 shaded = color * (uAmbientLevel + (1.0 - uAmbientLevel) * lambert);
+	// Contours first, so hatching sits on top of them where the two coincide: on a cliff, "cannot
+	// climb this" outranks "and it is this high".
+	float contours = vHeight / uContourInterval;
+	float contourDistance =
+		abs(fract(contours - 0.5) - 0.5) / max(fwidth(contours), 1e-5);
+	// A contour is a *crossing*, so it needs the ground to change height across the pixel. A flat
+	// face sitting exactly on a multiple of the interval is a level set with area rather than a
+	// curve: the distance above is zero across the whole face, and the guard on the denominator
+	// turns "no variation" into "tiny variation", so the face floods with line colour. AC's
+	// quantised terrain heights put whole landblocks and shelves on exact multiples — Holtburg's
+	// ground is flat at 20 m, two intervals exactly — which makes this the common case rather than
+	// a corner case.
+	//
+	// The test reads the pixel's own height span rather than the surface normal, because the normal
+	// is a smoothed central difference and reads as tilted on a flat shelf beside a cliff, which is
+	// exactly where the flooding is. Gating on it left the flood untouched. Measured on 0x2E36:
+	// flooded faces span 0 m per pixel while ordinary ground spans about 5 mm, so this separates
+	// two populations that do not overlap rather than trimming a continuum.
+	float crossing =
+		smoothstep(0.0, uContourMinimumClimbPerPixel, fwidth(vHeight));
+	float contour = crossing * (1.0 - smoothstep(0.0, 1.0, contourDistance));
+	// A wider dark halo under a narrower coloured core. Without it a "below" line lands green on
+	// green grass and disappears exactly where the ground is most like it; haloing is how paper
+	// maps keep a coloured line readable over any ground it crosses.
+	float halo = crossing * (1.0 - smoothstep(0.0, 2.0, contourDistance));
+	// Lines carry the same height ramp the interior floors use, so one contour says both how high
+	// the ground is and whether it stands above or below the reader.
+	float relativeHeight = vHeight - uAnchorHeight;
+	float departure = clamp(abs(relativeHeight) / uContourHeightSpan, 0.0, 1.0);
+	vec3 endpoint =
+		relativeHeight >= 0.0 ? uContourAboveColor : uContourBelowColor;
+	vec3 contourColor = mix(uContourSameLevelColor, endpoint, departure);
+	vec3 withHalo = mix(shaded, uInkColor, halo * uContourStrength);
+	vec3 withContours = mix(withHalo, contourColor, contour * uContourStrength);
+
+	// Screen-space diagonal hatching, so stripe spacing stays readable at every zoom rather than
+	// collapsing into solid fill when the map pulls back. The stripes are the whole marking:
+	// ground between them keeps its own colour, so a cliff or an ocean reads as hatched rather than
+	// as merely darker.
+	float impassable = 1.0 - vPassable;
+	float hatchPhase =
+		(gl_FragCoord.x + gl_FragCoord.y) / max(uImpassableHatchPeriodPixels, 1.0);
+	float hatch = step(0.5, fract(hatchPhase));
+	fragmentColor = vec4(
+		mix(
+			withContours,
+			uImpassableColor,
+			impassable * hatch * uImpassableHatchStrength
+		),
+		1.0
+	);
+}
+`;
+
+/** Compiled map terrain program and every uniform it requires. */
+export interface MapTerrainProgram {
+	readonly program: WebGLProgram;
+	readonly uniforms: {
+		readonly ambientLevel: WebGLUniformLocation;
+		readonly landblockOrigin: WebGLUniformLocation;
+		readonly mapCenter: WebGLUniformLocation;
+		readonly palette: WebGLUniformLocation;
+		readonly roadColor: WebGLUniformLocation;
+		readonly roadTintStrength: WebGLUniformLocation;
+		readonly roadCasingPixels: WebGLUniformLocation;
+		readonly roadCasingStrength: WebGLUniformLocation;
+		readonly roadWidth: WebGLUniformLocation;
+		readonly tileLength: WebGLUniformLocation;
+		readonly metersPerPixel: WebGLUniformLocation;
+		readonly anchorHeight: WebGLUniformLocation;
+		readonly contourAboveColor: WebGLUniformLocation;
+		readonly contourBelowColor: WebGLUniformLocation;
+		readonly inkColor: WebGLUniformLocation;
+		readonly contourHeightSpan: WebGLUniformLocation;
+		readonly contourInterval: WebGLUniformLocation;
+		readonly contourSameLevelColor: WebGLUniformLocation;
+		readonly contourStrength: WebGLUniformLocation;
+		readonly contourMinimumClimbPerPixel: WebGLUniformLocation;
+		readonly impassableColor: WebGLUniformLocation;
+		readonly impassableHatchPeriodPixels: WebGLUniformLocation;
+		readonly impassableHatchStrength: WebGLUniformLocation;
+		readonly sunDirection: WebGLUniformLocation;
+		readonly reliefExaggeration: WebGLUniformLocation;
+		readonly worldToClip: WebGLUniformLocation;
+	};
+}
+
+/** Compile the map's terrain draw program. */
+export function createMapTerrainProgram(
+	gl: WebGL2RenderingContext,
+): MapTerrainProgram {
+	const program = linkWebGL2Program(
+		gl,
+		"map terrain",
+		MAP_TERRAIN_VERTEX_SHADER,
+		MAP_TERRAIN_FRAGMENT_SHADER,
+	);
+	return {
+		program,
+		uniforms: {
+			ambientLevel: requireWebGL2Uniform(gl, program, "uAmbientLevel"),
+			landblockOrigin: requireWebGL2Uniform(gl, program, "uLandblockOrigin"),
+			mapCenter: requireWebGL2Uniform(gl, program, "uMapCenter"),
+			palette: requireWebGL2Uniform(gl, program, "uTerrainPalette[0]"),
+			roadColor: requireWebGL2Uniform(gl, program, "uRoadColor"),
+			roadTintStrength: requireWebGL2Uniform(gl, program, "uRoadTintStrength"),
+			roadCasingPixels: requireWebGL2Uniform(gl, program, "uRoadCasingPixels"),
+			roadCasingStrength: requireWebGL2Uniform(
+				gl,
+				program,
+				"uRoadCasingStrength",
+			),
+			roadWidth: requireWebGL2Uniform(gl, program, "uRoadWidth"),
+			tileLength: requireWebGL2Uniform(gl, program, "uTileLength"),
+			metersPerPixel: requireWebGL2Uniform(gl, program, "uMetersPerPixel"),
+			anchorHeight: requireWebGL2Uniform(gl, program, "uAnchorHeight"),
+			contourAboveColor: requireWebGL2Uniform(
+				gl,
+				program,
+				"uContourAboveColor",
+			),
+			contourBelowColor: requireWebGL2Uniform(
+				gl,
+				program,
+				"uContourBelowColor",
+			),
+			inkColor: requireWebGL2Uniform(gl, program, "uInkColor"),
+			contourHeightSpan: requireWebGL2Uniform(
+				gl,
+				program,
+				"uContourHeightSpan",
+			),
+			contourInterval: requireWebGL2Uniform(gl, program, "uContourInterval"),
+			contourSameLevelColor: requireWebGL2Uniform(
+				gl,
+				program,
+				"uContourSameLevelColor",
+			),
+			contourStrength: requireWebGL2Uniform(gl, program, "uContourStrength"),
+			contourMinimumClimbPerPixel: requireWebGL2Uniform(
+				gl,
+				program,
+				"uContourMinimumClimbPerPixel",
+			),
+			impassableColor: requireWebGL2Uniform(gl, program, "uImpassableColor"),
+			impassableHatchPeriodPixels: requireWebGL2Uniform(
+				gl,
+				program,
+				"uImpassableHatchPeriodPixels",
+			),
+			impassableHatchStrength: requireWebGL2Uniform(
+				gl,
+				program,
+				"uImpassableHatchStrength",
+			),
+			sunDirection: requireWebGL2Uniform(gl, program, "uSunDirection"),
+			reliefExaggeration: requireWebGL2Uniform(
+				gl,
+				program,
+				"uReliefExaggeration",
+			),
+			worldToClip: requireWebGL2Uniform(gl, program, "uWorldToClip"),
+		},
+	};
+}

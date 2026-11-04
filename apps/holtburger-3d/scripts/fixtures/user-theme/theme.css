@@ -1,0 +1,14 @@
+@import url("./styles/controls.css");
+@font-face {
+	font-family: "Theme Probe";
+	src: url("./font.ttf") format("truetype");
+}
+@layer theme {
+	#font {
+		font-family: "Theme Probe";
+		font-size: 40px;
+	}
+	#image {
+		background-image: url("./panel.svg");
+	}
+}

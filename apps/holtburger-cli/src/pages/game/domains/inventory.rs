@@ -58,24 +58,16 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             result.commands.push(ClientCommand::Drop(guid));
         }
         AppAction::Equip { guid } => {
-            if state.runtime.weapon_swap.is_active() {
-                result.actions.push(AppAction::Log {
-                    chat_tags: ChatMessageTags::warning(),
-                    message: "Already waiting on a weapon swap.".to_string(),
-                });
-            } else {
-                handle_equip_request(state, guid, None, &mut result);
-            }
+            result.commands.push(ClientCommand::GetAndWield {
+                item: guid,
+                slot: None,
+            });
         }
         AppAction::EquipInSlot { guid, slot } => {
-            if state.runtime.weapon_swap.is_active() {
-                result.actions.push(AppAction::Log {
-                    chat_tags: ChatMessageTags::warning(),
-                    message: "Already waiting on a weapon swap.".to_string(),
-                });
-            } else {
-                handle_equip_request(state, guid, Some(slot), &mut result);
-            }
+            result.commands.push(ClientCommand::GetAndWield {
+                item: guid,
+                slot: Some(slot),
+            });
         }
         AppAction::Unequip { guid } => {
             if let Some(container) = state.data.find_non_full_pack(guid, None) {
@@ -123,23 +115,15 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 amount,
             });
         }
-        AppAction::PickUp {
-            item: guid,
-            container: preferred_container_id,
-        } => {
-            if let Some(container_id) = state.data.find_non_full_pack(guid, preferred_container_id)
-            {
-                result.commands.push(ClientCommand::MoveItem {
-                    item: guid,
-                    container: container_id,
-                    placement: 0,
-                });
-            } else {
-                result.actions.push(AppAction::Log {
-                    chat_tags: ChatMessageTags::system(),
-                    message: "No space left.".to_string(),
-                });
-            }
+        AppAction::PickUp { item, container } => {
+            result.commands.push(ClientCommand::SubmitInventory(
+                holtburger_core::client::inventory_plan::InventoryIntent {
+                    item,
+                    target: holtburger_core::client::inventory_plan::InventoryTarget::Pickup {
+                        container,
+                    },
+                },
+            ));
         }
         AppAction::Give {
             item,
@@ -177,36 +161,8 @@ pub(super) fn begin_salvaging_interaction(
     reset_salvaging_state(state, result)
 }
 
-pub(super) fn apply_tick(state: &mut GameState, now: Instant, result: &mut UpdateResult) {
+pub(super) fn apply_tick(state: &mut GameState, now: Instant) {
     sync_inventory_notification_arming(state, now);
-    sync_weapon_swap_controller(state, now, result);
-}
-
-pub(super) fn sync_weapon_swap_controller(
-    state: &mut GameState,
-    now: Instant,
-    result: &mut UpdateResult,
-) {
-    let Some(item_guid) = state.runtime.weapon_swap.tracked_item_guid() else {
-        return;
-    };
-
-    let equipped_mask = state
-        .data
-        .equipment
-        .get(&item_guid)
-        .copied()
-        .unwrap_or(holtburger_protocol::messages::EquipMask::NONE);
-    drive_weapon_swap(
-        state,
-        WeaponSwapInput::Tick {
-            now,
-            combat_mode: state.data.combat_mode,
-            equipped_mask,
-            suggested_mode: state.data.get_suggested_combat_mode(),
-        },
-        result,
-    );
 }
 
 pub(super) fn update_inventory_and_equipment(state: &mut GameState, entity: &Entity) -> bool {
@@ -278,6 +234,7 @@ pub(super) fn handle_entity_removed(state: &mut GameState, guid: Guid) -> Update
             | ContextView::Book(target_guid)
             if target_guid == guid
     ) {
+        state.view.object_inspection = None;
         state.view.context_view = ContextView::Default;
         object_interaction::refresh_context_buffer(state);
     }
@@ -307,10 +264,7 @@ pub(super) fn handle_entity_removed(state: &mut GameState, guid: Guid) -> Update
 }
 
 pub(super) fn handle_entity_identified(state: &mut GameState, entity: &Entity) {
-    let guid = entity.guid;
-    state.data.entities.insert(guid, entity.clone());
-    state.view.context_view = ContextView::Assess(InspectTarget::Entity(guid));
-    object_interaction::refresh_context_buffer(state);
+    state.data.entities.insert(entity.guid, entity.clone());
 }
 
 pub(super) fn refresh_entity_context_if_visible(
@@ -359,35 +313,6 @@ fn push_missing_ust_warning(_state: &GameState, result: &mut UpdateResult) {
         chat_tags: ChatMessageTags::warning(),
         message: "You do not have an Ust in your inventory.".to_string(),
     });
-}
-
-fn handle_equip_request(
-    state: &mut GameState,
-    guid: Guid,
-    slot: Option<holtburger_core::client::types::TargetSlot>,
-    result: &mut UpdateResult,
-) {
-    drive_weapon_swap(
-        state,
-        WeaponSwapInput::Start {
-            now: Instant::now(),
-            item_guid: guid,
-            slot,
-            current_mode: state.data.combat_mode,
-            item_mask: state
-                .data
-                .entities
-                .get(&guid)
-                .map(|entity| entity.valid_locations()),
-        },
-        result,
-    );
-}
-
-fn drive_weapon_swap(state: &mut GameState, input: WeaponSwapInput, result: &mut UpdateResult) {
-    for command in state.runtime.weapon_swap.advance(input) {
-        result.commands.push(command);
-    }
 }
 
 fn sync_inventory_notification_arming(state: &mut GameState, now: Instant) {

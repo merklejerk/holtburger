@@ -358,23 +358,26 @@ impl ScriptClientView for TuiScriptClientView<'_> {
     fn combat_info(&self) -> ScriptCombatInfo {
         ScriptCombatInfo {
             combat_mode: self.data.combat_mode,
-            is_engaged: self.data.combat_runtime.desired_engagement().is_some(),
-            target: self.data.combat_runtime.desired_engagement_target(),
+            is_engaged: self.data.combat_status.desired.is_some(),
+            target: self
+                .data
+                .combat_status
+                .desired
+                .map(|engagement| engagement.target),
             power: self.data.combat_controls.profile_level.wire_value(),
             height: self.data.combat_controls.attack_height,
-            last_attack_time: self.server_time.and_then(|(server_time, now)| {
-                self.data.combat_runtime.last_attack_attempt_at().and_then(
-                    |last_attack_attempt_at| {
-                        now.checked_duration_since(last_attack_attempt_at)
-                            .map(|age| server_time - age.as_secs_f64())
-                    },
-                )
-            }),
+            // Shared repetition does not expose a cadence-derived fake request time.
+            last_attack_time: None,
         }
     }
 
     fn current_interaction(&self) -> Option<ScriptClientInteraction> {
-        if let Some(target) = self.data.combat_runtime.desired_engagement_target() {
+        if let Some(target) = self
+            .data
+            .combat_status
+            .desired
+            .map(|engagement| engagement.target)
+        {
             return Some(ScriptClientInteraction::Attack { guid: target });
         }
 
@@ -394,15 +397,17 @@ impl ScriptClientView for TuiScriptClientView<'_> {
 
     fn enchantments(&self) -> Vec<ScriptEnchantmentView> {
         let mut best_by_spell_id: BTreeMap<u32, (f64, u16, u32)> = BTreeMap::new();
+        let Some(timed) = &self.data.resolved_enchantments else {
+            return Vec::new();
+        };
+        let elapsed = timed.received_at.elapsed().as_secs_f64();
 
-        for enchantment in &self.data.player_enchantments {
-            let spell_id = u32::from(enchantment.spell_id);
-            let end_time = if enchantment.duration < 0.0 {
-                f64::INFINITY
-            } else {
-                enchantment.start_time + enchantment.duration
-            };
-            let candidate = (end_time, enchantment.layer, enchantment.power_level);
+        for enchantment in &timed.resolved.instances {
+            let spell_id = u32::from(enchantment.key.spell_id);
+            let end_time = enchantment
+                .remaining_seconds
+                .map_or(f64::INFINITY, |seconds| (seconds - elapsed).max(0.0));
+            let candidate = (end_time, enchantment.key.layer, enchantment.power_level);
 
             best_by_spell_id
                 .entry(spell_id)
@@ -843,13 +848,21 @@ fn map_chat_channel(kind: ChatChannelKind) -> ScriptChatChannelKind {
         ChatChannelKind::Roleplay => ScriptChatChannelKind::Roleplay,
         ChatChannelKind::Society => ScriptChatChannelKind::Society,
         ChatChannelKind::Olthoi => ScriptChatChannelKind::Olthoi,
+        ChatChannelKind::FellowshipBroadcast => ScriptChatChannelKind::FellowshipBroadcast,
+        ChatChannelKind::AllegianceBroadcast => ScriptChatChannelKind::AllegianceBroadcast,
+        ChatChannelKind::SocietyCelestialHand => ScriptChatChannelKind::SocietyCelestialHand,
+        ChatChannelKind::SocietyEldrytchWeb => ScriptChatChannelKind::SocietyEldrytchWeb,
+        ChatChannelKind::SocietyRadiantBlood => ScriptChatChannelKind::SocietyRadiantBlood,
         ChatChannelKind::Unknown => ScriptChatChannelKind::Unknown,
     }
 }
 
 pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<ScriptEvent> {
     match event {
-        ClientViewEvent::LogMessage(message) | ClientViewEvent::ServerMessage { message, .. } => {
+        ClientViewEvent::LogMessage(message)
+        | ClientViewEvent::TransientString { message }
+        | ClientViewEvent::PopupString { message }
+        | ClientViewEvent::ServerMessage { message, .. } => {
             Some(ScriptEvent::ChatMessage(ScriptChatEvent {
                 channel: ScriptChatChannelKind::System,
                 sender: None,
@@ -857,40 +870,40 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
             }))
         }
         ClientViewEvent::Chat {
-            sender, message, ..
+            speaker, message, ..
         } => Some(ScriptEvent::ChatMessage(ScriptChatEvent {
             channel: ScriptChatChannelKind::Say,
-            sender: Some(sender.clone()),
+            sender: Some(speaker.name().to_string()),
             message: message.clone(),
         })),
-        ClientViewEvent::Tell { sender, message } => {
-            Some(ScriptEvent::ChatMessage(ScriptChatEvent {
-                channel: ScriptChatChannelKind::Tell,
-                sender: Some(sender.clone()),
-                message: message.clone(),
-            }))
-        }
-        ClientViewEvent::Emote { sender, text } => {
+        ClientViewEvent::Tell {
+            speaker, message, ..
+        } => Some(ScriptEvent::ChatMessage(ScriptChatEvent {
+            channel: ScriptChatChannelKind::Tell,
+            sender: Some(speaker.name().to_string()),
+            message: message.clone(),
+        })),
+        ClientViewEvent::Emote { speaker, text } => {
             Some(ScriptEvent::ChatMessage(ScriptChatEvent {
                 channel: ScriptChatChannelKind::Emote,
-                sender: Some(sender.clone()),
+                sender: Some(speaker.name().to_string()),
                 message: text.clone(),
             }))
         }
-        ClientViewEvent::SoulEmote { sender, text, .. } => {
+        ClientViewEvent::SoulEmote { speaker, text, .. } => {
             Some(ScriptEvent::ChatMessage(ScriptChatEvent {
                 channel: ScriptChatChannelKind::SoulEmote,
-                sender: Some(sender.clone()),
+                sender: Some(speaker.name().to_string()),
                 message: text.clone(),
             }))
         }
         ClientViewEvent::ChannelMessage {
             channel,
-            sender,
+            speaker,
             message,
         } => Some(ScriptEvent::ChatMessage(ScriptChatEvent {
             channel: map_chat_channel(channel.kind),
-            sender: Some(sender.clone()),
+            sender: Some(speaker.name().to_string()),
             message: message.clone(),
         })),
         ClientViewEvent::ActionResult {
@@ -910,6 +923,7 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
             damage,
             critical_hit,
             attack_conditions,
+            ..
         }) => Some(ScriptEvent::CombatFeedback(
             ScriptCombatFeedback::AttackerNotification {
                 defender_name: defender_name.clone(),
@@ -941,6 +955,7 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
         )),
         ClientViewEvent::CombatFeedback(CombatFeedback::EvasionAttackerNotification {
             defender_name,
+            ..
         }) => Some(ScriptEvent::CombatFeedback(
             ScriptCombatFeedback::EvasionAttackerNotification {
                 defender_name: defender_name.clone(),
@@ -987,6 +1002,7 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
             Some(ScriptEvent::EntityUpdated { guid: entity.guid })
         }
         ClientViewEvent::EntityHealthUpdated { guid, .. }
+        | ClientViewEvent::EntityBookOpened { guid, .. }
         | ClientViewEvent::EntityBookUpdated { guid, .. }
         | ClientViewEvent::EntityPropertiesUpdated { guid, .. }
         | ClientViewEvent::EntityMoved { guid, .. }
@@ -1073,6 +1089,10 @@ fn script_bundle_directory() -> Option<PathBuf> {
     std::env::var_os(SCRIPT_BUNDLE_DIR_ENV_VAR)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+        .or_else(|| {
+            let path = crate::installation::bundled_resource_path("scripts");
+            path.is_dir().then_some(path)
+        })
 }
 
 fn resolve_script_source_path_for_basename_in_dirs(
@@ -1223,7 +1243,7 @@ mod tests {
     use holtburger_protocol::messages::magic::Enchantment;
     use holtburger_protocol::messages::movement::InterpretedMotionCommand;
     use holtburger_protocol::messages::object::types::ArmorProfile;
-    use holtburger_world::entity::{Entity, EntityMotionSnapshot};
+    use holtburger_world::entity::{Entity, EntityMotionSnapshot, EntityNetworkMotion};
     use holtburger_world::state::{TradeSide, TradeState};
     use holtburger_world::stats::{
         Attribute, AttributeType, Skill, SkillType, TrainingLevel, Vital, VitalType,
@@ -1231,7 +1251,7 @@ mod tests {
     use std::fs;
     use std::fs::File;
     use std::path::PathBuf;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     #[test]
     fn discoverable_script_basenames_reads_js_files_in_sorted_order() {
@@ -1307,7 +1327,7 @@ mod tests {
     }
 
     #[test]
-    fn script_resolution_prefers_local_roots_over_system_roots() {
+    fn script_resolution_prefers_local_files_and_finds_bundled_files_without_a_local_directory() {
         let local_dir = std::env::temp_dir().join(format!(
             "holtburger-local-script-resolution-{}",
             std::process::id()
@@ -1347,6 +1367,20 @@ mod tests {
         assert_eq!(data_path, local_dir.join("fighter.data.json"));
 
         fs::remove_dir_all(&local_dir).expect("clean up local test directory");
+        assert_eq!(
+            resolve_script_source_path_for_basename_in_dirs(
+                &local_dir,
+                Some(&system_dir),
+                "fighter"
+            )
+            .unwrap(),
+            system_dir.join("fighter.js")
+        );
+        assert_eq!(
+            resolve_script_data_path_for_name_in_dirs(&local_dir, Some(&system_dir), "fighter.js")
+                .unwrap(),
+            system_dir.join("fighter.data.json")
+        );
         fs::remove_dir_all(&system_dir).expect("clean up system test directory");
     }
 
@@ -1396,6 +1430,7 @@ mod tests {
                 base: 111,
                 buffed_max: 222,
                 current: 99,
+                breakdown: Default::default(),
             },
         );
         data.vitals.insert(
@@ -1409,6 +1444,7 @@ mod tests {
                 base: 333,
                 buffed_max: 444,
                 current: 333,
+                breakdown: Default::default(),
             },
         );
         data.vitals.insert(
@@ -1422,6 +1458,7 @@ mod tests {
                 base: 555,
                 buffed_max: 666,
                 current: 444,
+                breakdown: Default::default(),
             },
         );
         data.attributes.insert(
@@ -1434,6 +1471,7 @@ mod tests {
                 next_rank_xp: None,
                 base: 100,
                 current: 100,
+                breakdown: Default::default(),
             },
         );
 
@@ -1492,6 +1530,7 @@ mod tests {
                 next_rank_xp: None,
                 base: 100,
                 current: 110,
+                breakdown: Default::default(),
             },
         );
         data.vitals.insert(
@@ -1505,6 +1544,7 @@ mod tests {
                 base: 150,
                 buffed_max: 175,
                 current: 160,
+                breakdown: Default::default(),
             },
         );
         data.skills.insert(
@@ -1520,6 +1560,7 @@ mod tests {
                 training: TrainingLevel::Trained,
                 trained_cost: 0,
                 specialized_cost: 0,
+                breakdown: Default::default(),
             },
         );
         data.skills.insert(
@@ -1535,6 +1576,7 @@ mod tests {
                 training: TrainingLevel::Specialized,
                 trained_cost: 0,
                 specialized_cost: 0,
+                breakdown: Default::default(),
             },
         );
 
@@ -1578,12 +1620,15 @@ mod tests {
         let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
         data.combat_mode = CombatMode::Melee;
         data.combat_controls.attack_height = AttackHeight::High;
-        data.combat_runtime
-            .begin_explicit_engagement(target_guid, CombatMode::Melee);
-
         let now = Instant::now();
-        data.combat_runtime
-            .note_attack_attempt(now - Duration::from_secs(2));
+        data.combat_status.desired = Some(holtburger_core::ClientCombatEngagement {
+            target: target_guid,
+            profile: holtburger_core::ClientAttackProfile::Melee {
+                height: AttackHeight::High,
+                power: 0.5,
+            },
+        });
+        data.combat_status.state = holtburger_core::ClientCombatControlState::Active;
 
         let script_view = TuiScriptClientView {
             data: &data,
@@ -1599,7 +1644,7 @@ mod tests {
         assert_eq!(combat_info.target, Some(target_guid));
         assert_eq!(combat_info.power, 0.5);
         assert_eq!(combat_info.height, AttackHeight::High);
-        assert!((combat_info.last_attack_time.expect("timestamp") - 898.0).abs() < 1e-6);
+        assert_eq!(combat_info.last_attack_time, None);
     }
 
     #[test]
@@ -1654,6 +1699,27 @@ mod tests {
             },
         ];
 
+        let received_at = Instant::now();
+        let observations: Vec<_> = data
+            .player_enchantments
+            .iter()
+            .copied()
+            .map(
+                |enchantment| holtburger_world::enchantments::EnchantmentObservation {
+                    enchantment,
+                    received_at,
+                },
+            )
+            .collect();
+        data.resolved_enchantments = Some(crate::pages::game::data::TimedResolvedEnchantments {
+            resolved: holtburger_world::enchantments::resolve_enchantments(
+                &observations,
+                &holtburger_world::enchantments::EnchantmentRules::default(),
+                received_at,
+            ),
+            received_at,
+        });
+
         let script_view = TuiScriptClientView {
             data: &data,
             view: &ViewState::default(),
@@ -1661,18 +1727,16 @@ mod tests {
             script_name: None,
         };
 
+        let projected = script_view.enchantments();
+        assert_eq!(projected.len(), 2);
+        assert_eq!(projected[0].spell_id, 10);
+        assert!((134.0..=135.0).contains(&projected[0].end_time));
         assert_eq!(
-            script_view.enchantments(),
-            vec![
-                ScriptEnchantmentView {
-                    spell_id: 10,
-                    end_time: 135.0,
-                },
-                ScriptEnchantmentView {
-                    spell_id: 42,
-                    end_time: f64::INFINITY,
-                },
-            ]
+            projected[1],
+            ScriptEnchantmentView {
+                spell_id: 42,
+                end_time: f64::INFINITY
+            }
         );
     }
 
@@ -1766,6 +1830,7 @@ mod tests {
             Entity::new(partner_guid, "Buddy".to_string(), WorldPosition::default()),
         );
         data.trade = Some(TradeState {
+            revision: 1,
             partner_guid,
             initiator_guid: partner_guid,
             trade_stamp: 123.0,
@@ -2131,7 +2196,7 @@ mod tests {
         data.player_pos = Some(player_position);
 
         let mut entity = Entity::new(entity_guid, "Drudge".to_string(), player_position);
-        entity.motion_snapshot = Some(EntityMotionSnapshot {
+        entity.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
             forward_command: Some(InterpretedMotionCommand::DEAD),
             ..Default::default()
         });

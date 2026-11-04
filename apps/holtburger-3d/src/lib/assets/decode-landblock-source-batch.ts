@@ -1,0 +1,234 @@
+import { z } from "zod";
+import type { LandblockOwnerId } from "../game/game-types";
+import { LandblockLayerKind } from "../game/runtime/scene-interest";
+import type { ActiveRegionSource } from "./active-region-source";
+import { decodeEnvCellRecord } from "./decode-env-cell-record";
+import { decodeLandblockTerrainRecord } from "./decode-landblock-terrain-record";
+import {
+	decodeOutdoorStaticRecord,
+	type OutdoorStaticLayerKind,
+} from "./decode-static-source-record";
+import type {
+	LandblockSourceBatch,
+	LandblockSourceRecord,
+	LandblockSourceLayer,
+} from "./landblock-source-batch";
+
+const HEADER_LENGTH = 12;
+const MAGIC = "HBLB";
+const datId = z.string().regex(/^0x[0-9a-f]{8}$/i);
+const knownLayer = z.enum([
+	LandblockLayerKind.Terrain,
+	LandblockLayerKind.Buildings,
+	LandblockLayerKind.Objects,
+	LandblockLayerKind.Generated,
+	LandblockLayerKind.EnvCells,
+]);
+const layer = z.string().min(1);
+const knownLayers = new Set<LandblockSourceLayer>(knownLayer.options);
+const manifestSchema = z.object({
+	transport: z.literal("holtburger-landblock-source-batch"),
+	byteOrder: z.literal("little-endian"),
+	recordByteOffsetBase: z.literal("record-data"),
+	landblockId: datId,
+	requestedLayers: z.array(layer).nonempty(),
+	records: z.array(
+		z.object({
+			layer,
+			byteOffset: z.number().int().nonnegative(),
+			byteLength: z.number().int().positive(),
+		}),
+	),
+});
+
+/** Decodes, validates, and projects one closed landblock source batch response. */
+export function decodeLandblockSourceBatch(
+	response: Uint8Array,
+	requestedLandblockId: LandblockOwnerId,
+	requestedLayers: ReadonlySet<LandblockSourceLayer>,
+	activeRegion: ActiveRegionSource,
+): LandblockSourceBatch {
+	if (response.byteLength < HEADER_LENGTH) {
+		throw new Error(
+			"Landblock source batch is shorter than its binary header.",
+		);
+	}
+	const view = new DataView(
+		response.buffer,
+		response.byteOffset,
+		response.byteLength,
+	);
+	const magic = new TextDecoder().decode(response.subarray(0, 4));
+	if (magic !== MAGIC)
+		throw new Error(`Unexpected landblock source batch magic ${magic}.`);
+	const manifestLength = view.getUint32(4, true);
+	const totalLength = view.getUint32(8, true);
+	if (totalLength !== response.byteLength) {
+		throw new Error(
+			`Landblock source batch length is ${response.byteLength}; header declares ${totalLength}.`,
+		);
+	}
+	const recordDataOffset = HEADER_LENGTH + manifestLength;
+	if (recordDataOffset > response.byteLength) {
+		throw new Error(
+			"Landblock source batch manifest exceeds the binary response.",
+		);
+	}
+	const manifest = parseManifest(
+		new TextDecoder().decode(
+			response.subarray(HEADER_LENGTH, recordDataOffset),
+		),
+	);
+	if (
+		manifest.landblockId.toLowerCase() !== requestedLandblockId.toLowerCase()
+	) {
+		throw new Error(
+			`Landblock source batch returned ${manifest.landblockId} for ${requestedLandblockId}.`,
+		);
+	}
+	assertExactLayerSet(
+		manifest.requestedLayers,
+		requestedLayers,
+		"requested layer set",
+	);
+	if (manifest.records.length !== manifest.requestedLayers.length) {
+		throw new Error(
+			"Landblock source batch must contain exactly one record for every requested layer.",
+		);
+	}
+	assertExactStringSet(
+		manifest.records.map((record) => record.layer),
+		new Set(manifest.requestedLayers),
+		"returned record set",
+	);
+	if (
+		new Set(manifest.records.map((record) => record.layer)).size !==
+		manifest.records.length
+	) {
+		throw new Error("Landblock source batch contains duplicate layer records.");
+	}
+
+	const recordRanges = new Map<
+		string,
+		{ readonly start: number; readonly end: number }
+	>();
+	const claimedRanges: Array<{
+		readonly start: number;
+		readonly end: number;
+		readonly layer: string;
+	}> = [];
+	for (const record of manifest.records) {
+		const start = recordDataOffset + record.byteOffset;
+		const end = start + record.byteLength;
+		if (start < recordDataOffset || end > response.byteLength) {
+			throw new Error(
+				`Landblock source batch ${record.layer} record byte range is invalid.`,
+			);
+		}
+		const overlap = claimedRanges.find(
+			(claimed) => start < claimed.end && end > claimed.start,
+		);
+		if (overlap) {
+			throw new Error(
+				`Landblock source batch ${record.layer} record overlaps ${overlap.layer}.`,
+			);
+		}
+		claimedRanges.push({ end, layer: record.layer, start });
+		recordRanges.set(record.layer, { end, start });
+	}
+
+	const records = new Map<LandblockSourceLayer, LandblockSourceRecord>();
+	for (const record of manifest.records) {
+		const range = recordRanges.get(record.layer);
+		if (!range) {
+			throw new Error(
+				`Landblock source batch lost the validated ${record.layer} record range.`,
+			);
+		}
+		if (!isKnownLayer(record.layer)) continue;
+		// Record decoders honor byteOffset and copy retained typed sections into owned buffers.
+		const bytes = response.subarray(range.start, range.end);
+		const decoded = decodeRecord(
+			record.layer,
+			bytes,
+			requestedLandblockId,
+			activeRegion,
+		);
+		records.set(record.layer, decoded);
+	}
+	if (records.size !== requestedLayers.size) {
+		throw new Error("Landblock source batch lost a requested known record.");
+	}
+	return { landblockId: manifest.landblockId as LandblockOwnerId, records };
+}
+
+function decodeRecord(
+	layer: LandblockSourceLayer,
+	bytes: Uint8Array,
+	landblockId: LandblockOwnerId,
+	activeRegion: ActiveRegionSource,
+) {
+	if (layer === LandblockLayerKind.Terrain) {
+		return decodeLandblockTerrainRecord(bytes, landblockId, activeRegion);
+	}
+	if (layer === LandblockLayerKind.EnvCells) {
+		return decodeEnvCellRecord(bytes, landblockId);
+	}
+	return decodeOutdoorStaticRecord(
+		bytes,
+		landblockId,
+		layer as OutdoorStaticLayerKind,
+	);
+}
+
+function parseManifest(serialized: string): z.infer<typeof manifestSchema> {
+	let value: unknown;
+	try {
+		value = JSON.parse(serialized);
+	} catch {
+		throw new Error("Landblock source batch manifest is not valid JSON.");
+	}
+	const parsed = manifestSchema.safeParse(value);
+	if (!parsed.success) {
+		throw new Error(
+			`Landblock source batch manifest is invalid: ${parsed.error.message}`,
+		);
+	}
+	return parsed.data;
+}
+
+function assertExactLayerSet(
+	actual: Iterable<string>,
+	expected: ReadonlySet<LandblockSourceLayer>,
+	label: string,
+): void {
+	const actualSet = new Set([...actual].filter(isKnownLayer));
+	if (
+		actualSet.size !== expected.size ||
+		[...expected].some((layer) => !actualSet.has(layer))
+	) {
+		throw new Error(
+			`Landblock source batch ${label} does not match the request.`,
+		);
+	}
+}
+
+function assertExactStringSet(
+	actual: Iterable<string>,
+	expected: ReadonlySet<string>,
+	label: string,
+): void {
+	const actualSet = new Set(actual);
+	if (
+		actualSet.size !== expected.size ||
+		[...expected].some((entry) => !actualSet.has(entry))
+	) {
+		throw new Error(
+			`Landblock source batch ${label} does not match the request.`,
+		);
+	}
+}
+
+function isKnownLayer(value: string): value is LandblockSourceLayer {
+	return knownLayers.has(value as LandblockSourceLayer);
+}

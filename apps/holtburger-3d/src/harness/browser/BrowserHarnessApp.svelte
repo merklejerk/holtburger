@@ -1,0 +1,5133 @@
+<script lang="ts">
+	import { probeRealizedCycleTargeting } from "./realized-cycle-targeting-probe";
+	import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
+	import { probeCombatEffectsAppearance } from "./combat-effects-appearance-probe";
+	import {
+		CombatEffectsRuntimeProbe,
+		type CombatEffectsRuntimeProof,
+	} from "./combat-effects-runtime-probe";
+	import type { CombatEffectsFixtureResult } from "../../lib/game/renderer/webgl2-combat-effects-fixture";
+	import { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
+	import { ViewportInputGate } from "../../lib/input/viewport-input-gate";
+	import { AppInput } from "../../lib/input/app-input";
+	import { createInputDefaults } from "../../lib/input/input-defaults";
+	import { onMount, tick as svelteTick } from "svelte";
+	import { PortalTransitionController } from "../../lib/client/portal-transition-controller";
+	import type { PortalTransitionPresentationReceipt } from "../../lib/client/portal-transition-presentation";
+	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
+	import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
+	import { EXPLORER_TUNING } from "../../explorer/explorer-tuning";
+	import type { BakedDrawMergeCensus } from "../../lib/game/renderer/baked-draw-merge-census";
+	import { MapRenderer } from "../../lib/game/map/map-renderer";
+	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../../lib/game/map/map-appearance";
+	import {
+		type MapAnchor,
+		clampMapViewDiameter,
+		mapEnvironment,
+		mapHeadingFromSceneTransform,
+	} from "../../lib/game/map/map-view";
+	import {
+		createColorGradeParameters,
+		type ColorGradeParameters,
+	} from "../../lib/game/renderer/color-grade-policy";
+	import { HttpLandblockContentSource } from "../../lib/assets/http-landblock-content-source";
+	import type {
+		HttpLandblockProfileDiagnostic,
+		HttpLandblockSourceBatchDiagnostic,
+	} from "../../lib/assets/http-landblock-content-source";
+	import { CachedLandblockProfileSource } from "../../lib/assets/landblock-profile-source";
+	import { StandardCommitPipeline } from "../../lib/game/commit/pipeline";
+	import { SyntheticBlendedBuildingPipeline } from "./synthetic-blended-building-pipeline";
+	import { SyntheticInstancedObjectPipeline } from "./synthetic-instanced-object-pipeline";
+	import {
+		createSyntheticNameplateWorkload,
+		SyntheticNameplateSetupVisualSource,
+		type SyntheticNameplateWorkload,
+		syntheticTargetingAnimationSource,
+	} from "./synthetic-nameplate-workload";
+	import { OPENED_CONTAINER_NAMEPLATE_ICON_ID } from "../../lib/game/renderer/nameplate-icon-source";
+	import {
+		DynamicOnlyLandblockSource,
+		WithoutAuthoredDynamicsLandblockSource,
+	} from "./dynamic-only-landblock-source";
+	import type { EnvCellId, LandblockOwnerId } from "../../lib/game/game-types";
+	import {
+		createLandblockWorldOrigin,
+		landblockAtWorldPoint,
+		OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	} from "../../lib/game/landblocks";
+	import {
+		createCameraAxesRadians,
+		createCameraRotationRadians,
+		createEntityFacingCameraYaw,
+		resolveCameraLookAtAngles,
+	} from "../../lib/game/math/camera-orientation";
+	import { sceneVec3, sceneVector3 } from "../../lib/assets/ac-frame";
+	import type { Camera } from "../../lib/game/runtime/types";
+	import { probeDynamicViews } from "./dynamic-multiview-probe";
+	import { probeDynamicBlendFlags } from "./dynamic-blend-probe";
+	import { probeMixedTransparency } from "./mixed-transparency-probe";
+	import { probeDynamicDomains } from "./dynamic-domain-probe";
+	import { SyntheticCutoutTextureSource } from "./synthetic-cutout-texture";
+	import type { SceneInterestRadii } from "../../lib/game/runtime/types";
+	import {
+		createProjectionClearanceRevision,
+		type ProjectionClearanceRevision,
+	} from "../../lib/game/camera/projection-clearance";
+	import { Vec3, type Mat4 } from "../../lib/game/math/types";
+	import { transformPoint3 } from "../../lib/game/math/matrices";
+	import {
+		WebGL2Device,
+		type WebGL2ContextLossPolicyProbe,
+	} from "../../lib/game/renderer/webgl2-device";
+	import type { WebGL2PortalScopeAtlasTargetsFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-targets-fixture";
+	import type { WebGL2PortalScopeAtlasExecutorFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-executor-fixture";
+	import type { WebGL2PssmFixtureResult } from "../../lib/game/renderer/webgl2-pssm-fixture";
+	import type { WebGL2EntitySelectionFixtureResult } from "../../lib/game/renderer/webgl2-entity-selection-fixture";
+	import {
+		refineEntitySelectionCandidates,
+		type EntitySelectionRefinement,
+	} from "../../lib/game/selection/entity-selection-intersection";
+	import {
+		runPortalTransitionPresentationFixture,
+		type PortalTransitionPresentationFixtureResult,
+	} from "../../lib/game/renderer/webgl2-portal-transition-presentation-fixture";
+	import {
+		GamePresentationRuntime,
+		type PortalTransitionRuntimeDiagnostics,
+		type StaticObjectLayerRuntimeDiagnostics,
+		type StaticObjectRuntimeDiagnostics,
+	} from "../../lib/game/runtime/game-presentation-runtime";
+	import type { ClosedWorkerPoolDiagnostics } from "../../lib/game/workers/closed-worker";
+	import { RuntimeTickProfiler } from "../../lib/game/runtime/runtime-tick-profiler";
+	import { LandblockLayerKind } from "../../lib/game/runtime/scene-interest";
+	import {
+		SceneInterestRequestCoordinator,
+		type SceneInterestTarget,
+	} from "../../lib/game/runtime/scene-target";
+	import { ActiveRegionStaticDetailOwner } from "../../lib/game/resolution/active-region-static-detail";
+	import {
+		type EntityShadowResourceDiagnostics,
+		type FrameSelectionMetrics,
+		type FrameSettings,
+		type RendererFrameDiagnosticsSnapshot,
+		type RendererFrameProfile,
+	} from "../../lib/game/renderer/renderer";
+	import type { ObjectPreviewSource } from "../../lib/game/runtime/object-preview-source";
+	import {
+		ObjectPreviewController,
+		type ObjectPreviewResources,
+		type ObjectPreviewHandle,
+	} from "../../lib/game/preview/object-preview-controller";
+	import type { ObjectPreviewRendererDiagnostics } from "../../lib/game/renderer/webgl2-preview-renderer";
+	import { PresentationAssetService } from "../../lib/game/runtime/presentation-asset-service";
+	import { validateRenderScale } from "../../lib/game/renderer/render-scale";
+	import {
+		createEntityShadowSettings,
+		type EntityShadowMode,
+		type EntityShadowSettings,
+	} from "../../lib/game/renderer/entity-shadow-policy";
+	import type { RenderExtent } from "../../lib/game/renderer/render-extent";
+	import type {
+		PortalExecutionProbeResult,
+		WebGL2Renderer,
+	} from "../../lib/game/renderer/webgl2-renderer";
+	import {
+		isTextureFilteringPolicy,
+		type TextureFilteringCapabilities,
+		type TextureFilteringPolicy,
+	} from "../../lib/game/renderer/texture-filtering-policy";
+	import { resolveSceneEnvironment } from "../../lib/game/environment/scene-environment";
+	import { resolvePhysicalFlyViewDirection } from "../../lib/game/motion/host-physical-fly-path";
+	import type { HostCameraPlacement } from "../../lib/game/motion/host-placed-path";
+	import {
+		decodeHostKinematicBoomUpdateReceipt,
+		resolveKinematicBoomDirection,
+		type HostKinematicBoomIdentity,
+	} from "../../lib/game/motion/host-kinematic-boom-path";
+	import { dynamicEntityPlacement } from "../../lib/game/runtime/dynamic-entity-presentation";
+	import {
+		createExplorerLaunchRequest,
+		createExplorerRelocationRequest,
+		createExplorerSpawnRequest,
+		parseExplorerWcid,
+	} from "../../explorer/explorer-entity-commands";
+	import type {
+		DynamicEntityEvent,
+		DynamicEntityMotion,
+		DynamicEntityView,
+	} from "../../lib/game/runtime/dynamic-entity-feed";
+	import {
+		HttpExplorerEntityHost,
+		type HttpKinematicBoomClearanceRequest,
+		type HttpKinematicBoomIntentRequest,
+		type HttpKinematicBoomStartRequest,
+	} from "./http-explorer-entity-host";
+	import {
+		HostKinematicBoomSession,
+		type HostKinematicBoomTransport,
+	} from "../../lib/game/camera/host-kinematic-boom-session";
+	import { PossessionCameraController } from "../../lib/game/camera/possession-camera-controller";
+	import type {
+		ExplorerPossession,
+		ExplorerPossessionEventRequest,
+		ExplorerPossessionIntent,
+		PossessionEventQueueReceipt,
+		PossessionMotionProbe,
+	} from "../../explorer/explorer-entity-possession";
+	import type { PossessionTickResponse } from "./http-explorer-entity-host";
+	import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
+	import {
+		installTerrainGlTrace,
+		type TerrainGlTrace,
+	} from "./terrain-gl-trace";
+	import { parseResidenceInput } from "../../explorer/world-input";
+	import { loadPortalTransitionAssets } from "../../lib/client/portal-transition-assets";
+
+	const CAMERA_FOV_DEGREES = 90;
+	const CAMERA_NEAR = 0.5;
+	const CAMERA_FAR = 2_000;
+	/**
+	 * Deterministic uniform [0, 1) source, so particle emission repeats exactly between runs.
+	 *
+	 * mulberry32. Only the harness uses it: production randomness stays `Math.random`, and without
+	 * a seed two runs differ by more pixels than most rendering changes do, which makes screenshot
+	 * comparison useless for anything that emits particles.
+	 */
+	function seededRoll(seed: number): () => number {
+		if (!Number.isFinite(seed)) throw new Error("particleSeed must be finite.");
+		let state = seed >>> 0;
+		return () => {
+			state = (state + 0x6d2b79f5) >>> 0;
+			let drawn = Math.imul(state ^ (state >>> 15), 1 | state);
+			drawn = (drawn + Math.imul(drawn ^ (drawn >>> 7), 61 | drawn)) ^ drawn;
+			return ((drawn ^ (drawn >>> 14)) >>> 0) / 4294967296;
+		};
+	}
+
+	/**
+	 * Set the camera and put the listener on it, exactly as the Explorer coordinator does.
+	 *
+	 * Without this the harness never places the listener, so every trigger reports `inaudible` and
+	 * the audio path cannot be exercised at all.
+	 */
+	function applyHarnessCamera(
+		target: GamePresentationRuntime,
+		camera: Camera,
+		extent?: RenderExtent,
+	): void {
+		const canvas = canvasElement;
+		if (canvas === null) {
+			throw new Error("Browser harness camera requires a mounted canvas.");
+		}
+		target.setPrimaryView({
+			camera,
+			extent:
+				extent ??
+				target.resolveViewportExtent(canvas.clientWidth, canvas.clientHeight),
+		});
+		const { position, rotation, envCellId } = camera.placement;
+		target.setAudioListener({
+			position: sceneVector3([position.x, position.y, position.z]),
+			rotation,
+			envCellId,
+		});
+	}
+
+	const query = new URLSearchParams(window.location.search);
+	const TRACE_TERRAIN_GL = query.get("traceTerrainGl") === "true";
+	/** Exercise the depth-tested world-marker draw path in renderer screenshots. */
+	const WORLD_MARKER = query.has("worldMarker");
+	let worldIndicatorProof: {
+		readonly desiredKind: "curve";
+		readonly actualKind: "polyline";
+		readonly markerShapes: readonly ["target", "miss"];
+	} | null = null;
+	const WORLD_MARKER_PENDING = query.get("worldMarker") === "pending";
+	/** Harness-only fixed compositor input; this deliberately does not claim lifecycle coverage. */
+	const PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC =
+		query.get("portalTransitionCompositorDiagnostic") === "true";
+	const PORTAL_TRANSITION_LIFECYCLE_FIXTURE =
+		query.get("portalTransitionLifecycleFixture") === "true";
+	const PORTAL_TRANSITION_COMPOSITION =
+		query.get("portalTransitionComposition") === "origin-to-tunnel" ||
+		query.get("portalTransitionComposition") === "tunnel-to-destination"
+			? query.get("portalTransitionComposition")
+			: "tunnel-only";
+	const PORTAL_TRANSITION_PROGRESS = Math.max(
+		0,
+		Math.min(1, Number(query.get("portalTransitionProgress") ?? 0)),
+	);
+	let portalTransitionCompositorDiagnosticFrames = 0;
+	let portalTransitionPresentationFixture: PortalTransitionPresentationFixtureResult | null =
+		null;
+	/** Sits above the runtime's conservative ±510 outdoor terrain bound. */
+	const cameraHeightSource = query.get("cameraHeight");
+	const CAMERA_HEIGHT =
+		cameraHeightSource === null ? 600 : Number(cameraHeightSource);
+	const INITIAL_VIEWPORT_WIDTH = parsePositiveIntegerQuery(
+		query,
+		"viewportWidth",
+		1_280,
+	);
+	const INITIAL_VIEWPORT_HEIGHT = parsePositiveIntegerQuery(
+		query,
+		"viewportHeight",
+		720,
+	);
+	/**
+	 * Regional day fraction used to resolve lighting and fog. Absent means the harness keeps
+	 * the runtime's unauthored-lighting default instead of resolving the active region.
+	 */
+	const PARTICLE_SEED = query.get("particleSeed");
+	/**
+	 * Record every voice the runtime starts and every audio-control placement it receives.
+	 *
+	 * Replaces the refusing stub device so live-placement evidence exists headlessly: the harness
+	 * cannot listen, but a gain/pan series over a camera flyby proves what a listener would hear.
+	 */
+	const AUDIO_TRACE = query.get("audioTrace") === "1";
+	type AuthoredDynamicDiagnostics = ReturnType<
+		GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
+	>;
+
+	interface AudioTraceSample {
+		readonly frame: number;
+		readonly gain: number;
+		readonly pan: number;
+		readonly step: number;
+	}
+
+	interface AudioTraceVoice {
+		readonly soundId: string;
+		/** Flyby step active when the voice started; -1 outside a flyby. */
+		readonly startedAtStep: number;
+		/** Trigger-time placement first, then one sample per `setPlacement`. */
+		readonly samples: AudioTraceSample[];
+		stopped: boolean;
+	}
+
+	interface AudioTraceSnapshot {
+		readonly ambient: AuthoredDynamicDiagnostics["ambient"];
+		readonly ambientBakes: AuthoredDynamicDiagnostics["ambientBakes"];
+		readonly audio: AuthoredDynamicDiagnostics["audio"];
+		readonly voices: readonly {
+			readonly samples: readonly AudioTraceSample[];
+			readonly soundId: string;
+			readonly startedAtStep: number;
+			readonly stopped: boolean;
+		}[];
+	}
+	const audioTraceVoices: AudioTraceVoice[] = [];
+	let audioFlybyStep = -1;
+	/**
+	 * Whether the active region carried ambient records at all, for diagnosing a silent flyby:
+	 * "no sound authored" and "installed but produced nothing" need different investigations.
+	 */
+	let ambientRegionEvidence: { hasScenes: boolean; hasSound: boolean } | null =
+		null;
+
+	/** Always-ready device whose voices record their steering instead of producing sound. */
+	function recordingAudioDevice() {
+		return {
+			playOneShot: (soundId: string, gain: number, pan: number) => {
+				const voice: AudioTraceVoice = {
+					samples: [{ frame: frames, gain, pan, step: audioFlybyStep }],
+					soundId,
+					startedAtStep: audioFlybyStep,
+					stopped: false,
+				};
+				audioTraceVoices.push(voice);
+				return {
+					finished: false,
+					setPlacement: (nextGain: number, nextPan: number) => {
+						voice.samples.push({
+							frame: frames,
+							gain: nextGain,
+							pan: nextPan,
+							step: audioFlybyStep,
+						});
+					},
+					stop: () => {
+						voice.stopped = true;
+					},
+				};
+			},
+			prepare: async () => {},
+		};
+	}
+
+	/** Capture only placement samples added since the supplied per-voice offsets. */
+	function audioTraceSnapshot(
+		sampleOffsets: readonly number[],
+	): AudioTraceSnapshot {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		const dynamics = runtime.getAuthoredDynamicRuntimeDiagnostics();
+		return {
+			ambient: dynamics.ambient,
+			ambientBakes: dynamics.ambientBakes,
+			audio: dynamics.audio,
+			voices: audioTraceVoices.flatMap((voice, index) => {
+				const samples = voice.samples.slice(sampleOffsets[index] ?? 0);
+				if (samples.length === 0) return [];
+				return [
+					{
+						samples,
+						soundId: voice.soundId,
+						startedAtStep: voice.startedAtStep,
+						stopped: voice.stopped,
+					},
+				];
+			}),
+		};
+	}
+	/**
+	 * Fixed milliseconds of runtime time per frame, or null to follow the wall clock.
+	 *
+	 * The runtime takes its whole notion of time as one argument to `render`, so nothing inside it
+	 * changes: this only chooses what the harness passes. With a value set, particle ages, animation
+	 * clocks, and script schedules advance identically between runs, which is what makes screenshot
+	 * comparison possible. Frame *cost* is still measured against the real clock, so timing runs are
+	 * unaffected either way.
+	 */
+	const FRAME_INTERVAL_MS = query.get("frameIntervalMs");
+	/**
+	 * Frame at which runtime time stops advancing, or null to keep advancing.
+	 *
+	 * A fixed interval alone is not reproducible: capture happens after a wall-clock settle, so two
+	 * runs screenshot at different frame counts and therefore different simulation times. Freezing
+	 * makes the captured instant identical no matter when the screenshot lands.
+	 */
+	const CAPTURE_FRAME = query.get("captureFrame");
+	const TIME_OF_DAY = query.get("timeOfDay");
+	const DAY_GROUP = query.get("dayGroup");
+	const ISOLATE_AUTHORED_DYNAMICS =
+		query.get("isolateAuthoredDynamics") === "true";
+	const EXCLUDE_AUTHORED_DYNAMICS =
+		query.get("excludeAuthoredDynamics") === "true";
+	const EXCLUDE_SPAWNED_ATTACHMENTS =
+		query.get("excludeSpawnedAttachments") === "true";
+	if (!Number.isFinite(CAMERA_HEIGHT)) {
+		throw new Error("Browser harness camera height must be finite.");
+	}
+
+	interface BrowserHarnessApi {
+		/** Replay world-produced motion and lifecycle identity on a catalog-backed camera anchor. */
+		readonly applyMotionPlaybackSample: (
+			sample: {
+				readonly guid: number;
+				readonly motion: DynamicEntityMotion;
+				readonly fresh: boolean;
+			} | null,
+		) => Promise<string>;
+		/** Resolve one target and request its exact shared scene-interest policy. */
+		readonly requestSceneInterest: (
+			landblockId: string,
+			terrainRadius: number,
+			buildingRadius: number,
+			envCellRadius: number | null,
+			explicitObjectRadius: number | null,
+			generatedObjectRadius: number | null,
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => Promise<void>;
+		/**
+		 * Fly the outdoor camera in a straight line to the target landblock's centre over the given
+		 * duration, replacing outdoor scene interest on every landblock crossing — the harness
+		 * mirror of the Explorer's outdoor interest-follows-camera mode. Resolves with the crossing
+		 * log, audio trace (when enabled), and the flight window's frame timing.
+		 */
+		readonly runFollowFlight: (
+			targetLandblockId: string,
+			durationMs: number,
+		) => Promise<BrowserHarnessFollowFlightReport>;
+		/** Move only the render-world anchor; current scene interest remains installed. */
+		readonly setCameraLandblock: (
+			landblockId: string,
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => void;
+		/** Place the continuous camera at one explicit outdoor world-space pose. */
+		readonly setOutdoorCamera: (
+			landblockId: string,
+			position: readonly [number, number, number],
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => void;
+		/** Apply the Explorer's automatic outdoor focus policy after terrain becomes queryable. */
+		readonly focusExplorerOutdoor: (
+			landblockId: string,
+		) => BrowserHarnessCameraEvidence;
+		/** Apply the resolved target's Explorer focus policy, including dungeon default-cell focus. */
+		readonly focusExplorerTarget: (
+			target: string,
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => BrowserHarnessCameraEvidence;
+		/** Place the camera at the contained bounds center of one authored EnvCell. */
+		readonly focusExplorerEnvCell: (
+			envCellId: string,
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => BrowserHarnessCameraEvidence;
+		/** Check the collision geometry before a diagnostic camera crosses a portal. */
+		readonly portalProbeContainsPoint: (
+			cell: string,
+			position: readonly [number, number, number],
+		) => boolean | null;
+		/** Place the continuous camera at one authoritative EnvCell pose. */
+		readonly setEnvCellCamera: (
+			envCellId: string,
+			position: readonly [number, number, number],
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => void;
+		/** Place an EnvCell camera with an explicit projection for paired work-count probes. */
+		readonly setEnvCellCameraProjection: (
+			envCellId: string,
+			position: readonly [number, number, number],
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+			projection: Pick<Camera, "far" | "fov" | "near">,
+		) => void;
+		/** Change EnvCell rendering policy without changing camera placement or scene interest. */
+		readonly setEnvCellRenderMode: (
+			envCellRenderMode: "flat" | "portal",
+		) => void;
+		/** Toggle one existing production layer solely for workload isolation. */
+		readonly setLayerVisibility: (
+			layer: keyof FrameSettings["layerVisibility"],
+			visible: boolean,
+		) => void;
+		/** Change filterable texture quality without changing content or resources. */
+		readonly setTextureFiltering: (policy: string) => void;
+		/** Change the generic portal-footprint cutoff without rebuilding content. */
+		readonly setMinimumPortalFootprintCssPixelArea: (pixelArea: number) => void;
+		/** Change shared object-footprint policy without rebuilding content. */
+		readonly setMinimumObjectFootprintCssPixelArea: (pixelArea: number) => void;
+		/** Change device pixels per CSS pixel, which is also the only anti-aliasing control. */
+		readonly setRenderScale: (renderScale: number) => void;
+		/** Change only the nameplate submission ceiling without rebuilding entity content. */
+		readonly setNameplateMaximumVisible: (maximumVisible: number) => void;
+		/** Change only the projected name-font cutoff without rebuilding entity content. */
+		readonly setNameplateMinimumLegiblePixels: (minimumPixels: number) => void;
+		/** Replace the complete validated entity-shadow policy without rebuilding content. */
+		readonly setEntityShadowSettings: (settings: EntityShadowSettings) => void;
+		/** Change the coupled per-view N/M budget without copying the full shadow policy. */
+		readonly setEntityShadowCasterBudget: (
+			maximumSelectedRoots: number,
+			maximumMappedRoots: number,
+		) => void;
+		/** Select one exhaustive shadow mode while retaining inactive appearance parameters. */
+		readonly setEntityShadowMode: (mode: EntityShadowMode) => void;
+		/** Change offscreen visual animation cadence without changing semantic advancement. */
+		readonly setOffscreenAnimationSampleIntervalSeconds: (
+			intervalSeconds: number,
+		) => void;
+		/** Reset steady-state frame timing after asynchronous content publication settles. */
+		readonly resetTiming: () => void;
+		/** Reset harness-only terrain GL counters after the requested scene is configured. */
+		readonly resetTerrainGlTrace: () => void;
+		/** Explicitly enable or tear down renderer CPU/GPU profiling. */
+		readonly setFrameProfiling: (enabled: boolean) => void;
+		/** Size how far the next frame's baked object draws could merge. */
+		readonly captureBakedDrawMergeCensus: () => Promise<BakedDrawMergeCensus>;
+		/** Toggle near-field ambient occlusion without rebuilding content. */
+		readonly setAmbientOcclusion: (enabled: boolean) => void;
+		/** Toggle the harness-only AO distance-category view and one-shot depth census. */
+		readonly setAmbientOcclusionCoverageVisualization: (
+			enabled: boolean,
+		) => void;
+		/** Apply one authored presentation grade, or `null` to present ungraded. */
+		readonly setColorGrade: (parameters: ColorGradeParameters | null) => void;
+		/** Toggle authored outdoor lamps, to measure their cost against an identical scene. */
+		readonly setStaticLights: (enabled: boolean) => void;
+		/** Toggle degradation-hidden geometry without rebuilding loaded scene content. */
+		readonly setShowRetailHiddenGeometry: (visible: boolean) => void;
+		/** Toggle authored weather, mirroring retail's `DisableMostWeatherEffects` player option. */
+		readonly setWeather: (enabled: boolean) => void;
+		/** Withdraw every requested scene layer while retaining the harness runtime. */
+		readonly clearSceneInterest: () => void;
+		/**
+		 * Draw one overhead-map frame onto a harness-owned canvas and report what it drew.
+		 *
+		 * Pass `visible: false` to retire the canvas without tearing the map down. Centre defaults
+		 * to the current camera position; heading is explicit rather than derived from camera yaw,
+		 * because the map's bearing convention is not settled until the compass panel exists.
+		 */
+		readonly configureMap: (request: {
+			readonly size?: number;
+			readonly visible?: boolean;
+			readonly centerX?: number;
+			readonly centerY?: number;
+			readonly centerZ?: number;
+			readonly viewDiameter?: number;
+			readonly headingRadians?: number;
+		}) => BrowserHarnessMapEvidence;
+		/** Spawn one real catalog-backed entity through the app-local host and shared runtime. */
+		readonly spawnExplorerEntity: (
+			wcid: string,
+			distance: number,
+		) => Promise<DynamicEntityView>;
+		/** Verify local collision-cue dispatch separately from the server explosion's particles. */
+		readonly probeCollisionScriptPlayback: () => Promise<{
+			readonly staleIgnored: boolean;
+			readonly dispatchedHooks: number;
+			readonly collisionHookOutcomes: readonly string[];
+			readonly geometryHidden: boolean;
+			readonly geometryRestored: boolean;
+			readonly lightsDisabled: boolean;
+			readonly lightsRestored: boolean;
+			readonly createdEmitters: number;
+			/** Particles submitted for the impacted projectile while its mesh remains NoDraw. */
+			readonly submittedExplosionParticles: number;
+		}>;
+		/** Open, close, and reopen one catalog visual through the production preview renderer. */
+		readonly probeObjectPreviewLifecycle: (
+			guid: number,
+		) => Promise<BrowserHarnessObjectPreviewEvidence>;
+		/** Hold or clear one production preview for paired renderer timing windows. */
+		readonly setObjectPreviewBenchmarkVisible: (
+			guid: number,
+			visible: boolean,
+		) => Promise<void>;
+		/** Cold preview counters sampled only around explicit benchmark windows. */
+		readonly objectPreviewDiagnostics: () => ObjectPreviewRendererDiagnostics | null;
+		/** Spawn one simulated body for deterministic host-solver scenarios. */
+		readonly spawnSimulatedExplorerEntity: (
+			wcid: string,
+			distance: number,
+		) => Promise<DynamicEntityView>;
+		/** Spawn many entities at exact camera-relative AC-axis offsets for pair/population runs. */
+		readonly spawnExplorerEntityFleet: (
+			wcid: string,
+			offsets: readonly (readonly [number, number, number])[],
+			physicalMode: "pose-only" | "integrated",
+		) => Promise<readonly DynamicEntityView[]>;
+		/** Install a deterministic catalog-independent population through the shared dynamic runtime. */
+		readonly probeRuntimeCombatEffects: () => Promise<void>;
+		readonly installSyntheticNameplateWorkload: (
+			workload: SyntheticNameplateWorkload,
+		) => Promise<readonly DynamicEntityView[]>;
+		/** Move unchanged plate content, then retire it, returning renderer-owned lifecycle evidence. */
+		readonly probeSyntheticNameplateLifecycle: () => Promise<{
+			readonly before: RendererFrameDiagnosticsSnapshot["nameplates"];
+			readonly moved: RendererFrameDiagnosticsSnapshot["nameplates"];
+			readonly cleared: RendererFrameDiagnosticsSnapshot["nameplates"];
+			readonly movedGuid: number;
+			readonly previousY: number;
+			readonly movedY: number;
+		}>;
+		/** Verify frozen multi-view publication through the production renderer. */
+		readonly probeDynamicViews: () => ReturnType<typeof probeDynamicViews>;
+		/** Compare one plural entity with each single-domain material control. */
+		readonly probeDynamicDomains: () => ReturnType<typeof probeDynamicDomains>;
+		/** Exercise posed-volume cycle acquisition through the real gameplay adapter and input owner. */
+		readonly probeRealizedCycleTargeting: () => ReturnType<
+			typeof probeRealizedCycleTargeting
+		>;
+		/** Compare merged blend output with independent equations on a synthetic triangle. */
+		readonly probeDynamicBlendFlags: () => ReturnType<
+			typeof probeDynamicBlendFlags | typeof probeMixedTransparency
+		>;
+		/** Replace a synthetic entity's appearance without moving it or the camera. */
+		readonly probeSyntheticAppearanceReplacement: () => Promise<{
+			readonly barberCycles: number;
+			readonly beforeDataUrl: string;
+			readonly afterDataUrl: string;
+			readonly placementUnchanged: boolean;
+			readonly replacementBoundsWidth: number;
+			readonly opacityCycle: readonly {
+				readonly translucency: number;
+				readonly dataUrl: string;
+				readonly dynamicDraws: number;
+				readonly transparentDraws: number;
+			}[];
+		}>;
+		/** Select one realized entity and sample its production geometry and mask across two frames. */
+		readonly probeSpawnedEntitySelection: (
+			guid: number,
+			delayMilliseconds: number,
+		) => Promise<BrowserHarnessSpawnedSelectionEvidence>;
+		/** Retire every live harness-spawned generation through the same host lifecycle. */
+		readonly despawnExplorerEntityFleet: () => Promise<number>;
+		/** Apply catalog-authored launch speed/spin to one exact generation. */
+		readonly launchExplorerEntity: (
+			guid: number,
+			generation: number,
+			direction: readonly [number, number, number],
+		) => Promise<DynamicEntityView>;
+		/** Advance the host collection by one explicit deterministic duration. */
+		readonly tickExplorerEntities: (
+			durationMilliseconds: number,
+		) => Promise<ExplorerFixedTickEnvelope | null>;
+		/** Acquire or release exact host possession without browser input synthesis. */
+		readonly possessExplorerEntity: (
+			guid: number | null,
+		) => Promise<ExplorerPossession>;
+		/** Replace one generation-bound semantic possession snapshot. */
+		readonly setPossessionIntent: (
+			request: ExplorerPossessionIntent,
+		) => Promise<string>;
+		/** Queue one ordered jump/reset edge with its complete contemporaneous snapshot. */
+		readonly queuePossessionEvent: (
+			request: ExplorerPossessionEventRequest,
+		) => Promise<PossessionEventQueueReceipt>;
+		/** Advance and project one deterministic possession tick plus lifecycle outcomes. */
+		readonly tickPossession: (
+			durationMilliseconds: number,
+		) => Promise<PossessionTickResponse>;
+		/** Read the host's exact active stance/substate/modifier/clip projection. */
+		readonly possessionMotionProbe: () => Promise<PossessionMotionProbe | null>;
+		/** Register one exact boom generation through the production-shaped host adapter. */
+		readonly startKinematicBoom: (
+			request: Omit<
+				HttpKinematicBoomStartRequest,
+				"clearanceRadius" | "projectionRevision"
+			>,
+		) => Promise<HostKinematicBoomIdentity>;
+		/** Replace semantic boom intent while retaining cumulative wheel displacement. */
+		readonly setKinematicBoomIntent: (
+			request: HttpKinematicBoomIntentRequest,
+		) => Promise<"accepted" | "ignored-stale">;
+		/** Resize the canvas and request the matching runtime-FOV projection from the active boom. */
+		readonly reprojectKinematicBoom: (
+			width: number,
+			height: number,
+			fov: number,
+		) => Promise<ProjectionClearanceRevision>;
+		/** Stop one exact boom generation without affecting a replacement generation. */
+		readonly stopKinematicBoom: (
+			identity: HostKinematicBoomIdentity,
+		) => Promise<boolean>;
+		/** Read the production pivot-to-camera direction for the current harness view. */
+		readonly kinematicBoomDirection: () => readonly [number, number, number];
+		/** Measure whether one possessed target is in front of the presented boom camera. */
+		readonly probeBoomFraming: (guid: number) => {
+			readonly planarCameraToTargetDistance: number;
+			readonly planarForwardAlignment: number;
+			readonly planarForwardProjection: number;
+		};
+		/** Wait for presentation and return camera plus renderer selection state. */
+		readonly probeNextFrameState: () => Promise<{
+			readonly boomProjection: {
+				readonly active: ProjectionClearanceRevision | null;
+				readonly requested: ProjectionClearanceRevision | null;
+			};
+			readonly camera: BrowserHarnessCameraEvidence | null;
+			readonly envCellRenderMode: "flat" | "portal";
+			readonly metrics: FrameSelectionMetrics | null;
+		}>;
+		/** Exercise the compiled shared third-person router/look/boom ownership in-browser. */
+		readonly probeThirdPersonControls: () => Promise<{
+			readonly boomZoomDisplacement: number;
+			readonly cameraYawAfterKeyboardTurn: number;
+			readonly cameraYawBefore: number;
+			readonly characterInputCountAfterKeyboard: number;
+			readonly characterInputCountAfterPointerAndWheel: number;
+			readonly possessionOrbitDelta: readonly [number, number] | null;
+			readonly recenterAfterYaw: number;
+			readonly recenterBeforeYaw: number;
+			readonly recenterMidYaw: number;
+			readonly recenterPitch: number;
+			readonly recenterTrackingYaw: number;
+		}>;
+		/** Apply a host-resolved discontinuity and synchronously snap frontend placement. */
+		readonly relocateExplorerEntity: (
+			guid: number,
+			generation: number,
+			distance: number,
+			kind: "teleport" | "reset",
+		) => Promise<DynamicEntityEvent>;
+		/** Retire one exact harness-spawned generation through the same host lifecycle. */
+		readonly despawnExplorerEntity: (
+			guid: number,
+			generation: number,
+		) => Promise<void>;
+		/** Exercise the public portal compositor without changing continuous frame settings. */
+		readonly probePortalExecution: (
+			envCellId: string,
+			position: readonly [number, number, number],
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => PortalExecutionProbeResult;
+		/** Drive production portal plans through the real runtime/renderer and assert GPU lifetimes. */
+		readonly probePortalTransitionLifecycle: () => PortalTransitionLifecycleFixtureResult;
+		/** Sweep the camera past an audio emitter over discrete steps and record voice gains/pans. */
+		readonly probeAudioFlyby: (
+			rawLandblockId: string,
+			from: readonly [number, number, number],
+			to: readonly [number, number, number],
+			steps: number,
+			framesPerStep: number,
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+		) => Promise<{
+			readonly ambientRegion: unknown;
+			readonly ambientBakes: unknown;
+			readonly ambient: unknown;
+			readonly audio: unknown;
+			readonly steps: number;
+			readonly voices: readonly {
+				readonly samples: readonly {
+					readonly gain: number;
+					readonly pan: number;
+					readonly step: number;
+				}[];
+				readonly soundId: string;
+				readonly startedAtStep: number;
+				readonly stopped: boolean;
+			}[];
+		}>;
+		/** Snapshot lifecycle evidence without exposing runtime ownership. */
+		readonly state: () => BrowserHarnessState;
+	}
+
+	interface BrowserHarnessState {
+		/** Last harness-authored camera pose, retained to prove benchmark parity. */
+		readonly camera: BrowserHarnessCameraEvidence | null;
+		readonly error: string | null;
+		readonly frames: number;
+		readonly metrics: FrameSelectionMetrics | null;
+		readonly ambientOcclusionCoverageCensus: ReturnType<
+			WebGL2Renderer["getAmbientOcclusionCoverageCensus"]
+		>;
+		/** Latest explicit renderer profile, or null while profiling is disabled. */
+		readonly frameProfile: RendererFrameProfile | null;
+		/** Latest plate selection, submission, and renderer-local cache evidence. */
+		readonly nameplates: RendererFrameDiagnosticsSnapshot["nameplates"] | null;
+		readonly tickProfile: ReturnType<
+			GamePresentationRuntime["getTickProfile"]
+		> | null;
+		readonly authoredDynamics: AuthoredDynamicDiagnostics | null;
+		/** Required authored portal closure and transition cursor/resource evidence. */
+		readonly portalTransition: PortalTransitionRuntimeDiagnostics | null;
+		/** Real-controller synthetic framebuffer proof, enabled with the transition demo. */
+		readonly portalTransitionPresentationFixture: PortalTransitionPresentationFixtureResult | null;
+		readonly frameSettings: FrameSettings;
+		/** Cold shadow-target ownership used by same-runtime toggle and resize fixtures. */
+		readonly entityShadowResources: EntityShadowResourceDiagnostics | null;
+		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
+		/** Browser main-thread timing facts accumulated during this harness session. */
+		readonly timing: BrowserHarnessTiming;
+		readonly staticObjects: StaticObjectRuntimeDiagnostics | null;
+		/** Dedicated terrain generation queue and transfer facts. */
+		readonly terrainWorker: ClosedWorkerPoolDiagnostics | null;
+		/** Harness-only calls observed while the far terrain program was active. */
+		readonly terrainGlTrace: TerrainGlTrace | null;
+		/** Layer-separated static diagnostics prove outdoor-static lifetimes stay distinct. */
+		readonly staticObjectLayers: {
+			readonly buildings: readonly StaticObjectLayerRuntimeDiagnostics[];
+			readonly generated: readonly StaticObjectLayerRuntimeDiagnostics[];
+			readonly objects: readonly StaticObjectLayerRuntimeDiagnostics[];
+		};
+		/** Whole-device invalidation proof from an isolated browser context. */
+		readonly portalContextLossPolicy: WebGL2ContextLossPolicyProbe | null;
+		/** Browser allocation evidence for the selected scope-atlas target generation. */
+		readonly portalScopeAtlasTargets: WebGL2PortalScopeAtlasTargetsFixtureResult | null;
+		/** Numeric real-GPU evidence for the scope-atlas shader executor. */
+		readonly portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null;
+		/** Real-browser depth-array and caster-program evidence for outdoor PSSM. */
+		readonly outdoorPssm: WebGL2PssmFixtureResult | null;
+		/** Real-browser selected-mask, compositor, resize, and teardown evidence. */
+		readonly entitySelection: WebGL2EntitySelectionFixtureResult | null;
+		readonly combatEffects: CombatEffectsFixtureResult | null;
+		readonly combatEffectsRuntime: CombatEffectsRuntimeProof | null;
+		/** One read-only observation for every host source-batch response received by this harness. */
+		readonly sourceBatches: readonly HttpLandblockSourceBatchDiagnostic[];
+		/** One read-only observation for every profile transport request. */
+		readonly profiles: readonly HttpLandblockProfileDiagnostic[];
+		/** Complete static demand selected by the current scene target. */
+		readonly sceneInterest: BrowserHarnessSceneInterestEvidence | null;
+		/** Current harness-only projection of the app-local host registry. */
+		readonly spawnedEntities: readonly DynamicEntityView[];
+		readonly ready: boolean;
+		/** CSS and physical viewport dimensions that determine visible work. */
+		readonly viewport: BrowserHarnessViewportEvidence;
+	}
+
+	interface BrowserHarnessSelectionGeometryEvidence {
+		readonly guid: number;
+		readonly landblockId: LandblockOwnerId;
+		readonly partCount: number;
+		readonly transformChecksum: number;
+		readonly triangleCount: number;
+	}
+
+	interface BrowserHarnessSpawnedSelectionSample {
+		readonly exactHit: EntitySelectionRefinement;
+		readonly geometry: BrowserHarnessSelectionGeometryEvidence;
+		readonly mask: RendererFrameDiagnosticsSnapshot["selectionMetrics"]["entitySelection"];
+		readonly resolvedPlacementChecksum: number;
+	}
+
+	interface BrowserHarnessSpawnedSelectionEvidence {
+		readonly first: BrowserHarnessSpawnedSelectionSample;
+		readonly second: BrowserHarnessSpawnedSelectionSample;
+	}
+
+	interface BrowserHarnessObjectPreviewSample {
+		readonly backgroundAlpha: number;
+		readonly changedPixelCount: number;
+		readonly checksum: number;
+		/** Additive light carried by premultiplied RGB without falsely covering the DOM. */
+		readonly emissiveTransparentPixelCount: number;
+		readonly extent: RenderExtent;
+		/** Wall time from viewport publication to the first downloaded frame. */
+		readonly firstFrameLatencyMs: number;
+		readonly frameCount: number;
+		readonly glErrors: readonly number[];
+		/** Present only when this sample also performed production asset installation. */
+		readonly installDurationMs: number | null;
+		readonly partiallyTransparentPixelCount: number;
+		readonly rendererDiagnostics: ObjectPreviewRendererDiagnostics;
+		/** Wall time through stable close-fit publication. */
+		readonly settledFrameLatencyMs: number;
+		/** Pixels contributing either coverage or additive premultiplied colour. */
+		readonly visiblePixelCount: number;
+		readonly visibleBounds: {
+			readonly height: number;
+			readonly maxX: number;
+			readonly maxY: number;
+			readonly minX: number;
+			readonly minY: number;
+			readonly width: number;
+		} | null;
+	}
+	type BrowserHarnessObjectPreviewFrameSummary = Omit<
+		BrowserHarnessObjectPreviewSample,
+		| "firstFrameLatencyMs"
+		| "installDurationMs"
+		| "rendererDiagnostics"
+		| "settledFrameLatencyMs"
+	>;
+
+	interface BrowserHarnessObjectPreviewEvidence {
+		readonly contextLoss: {
+			readonly previewContextLost: boolean;
+			readonly supported: boolean;
+			readonly worldContextLost: boolean;
+		};
+		readonly first: BrowserHarnessObjectPreviewSample;
+		readonly resizedRotated: BrowserHarnessObjectPreviewSample;
+		readonly reopened: BrowserHarnessObjectPreviewSample;
+		readonly suspension: {
+			readonly pausedFrameCount: number;
+			readonly resumedFrameCount: number;
+		};
+	}
+
+	interface PortalTransitionLifecycleResourceEvidence {
+		readonly animationFramePosition: number | null;
+		readonly axialRollFramePosition: number | null;
+		readonly generation: number | null;
+		readonly kind: FrameSelectionMetrics["portalTransitionKind"];
+		readonly originCaptured: boolean;
+		readonly snapshotAllocatedGenerationCount: number;
+		readonly snapshotBytes: number;
+		readonly snapshotDisposedGenerationCount: number;
+		readonly submittedTunnelDrawCount: number;
+		readonly transitionOnlyFramePresented: boolean;
+		readonly tunnelTargetBytes: number;
+	}
+
+	interface PortalTransitionLifecycleFixtureResult {
+		readonly baseline: PortalTransitionLifecycleResourceEvidence;
+		readonly initialEntry: PortalTransitionLifecycleResourceEvidence;
+		readonly entry: PortalTransitionLifecycleResourceEvidence;
+		readonly entryMidpoint: PortalTransitionLifecycleResourceEvidence;
+		readonly superseded: PortalTransitionLifecycleResourceEvidence;
+		readonly resizedWaiting: PortalTransitionLifecycleResourceEvidence;
+		readonly exitStart: PortalTransitionLifecycleResourceEvidence;
+		readonly exitMidpoint: PortalTransitionLifecycleResourceEvidence;
+		readonly handoff: PortalTransitionLifecycleResourceEvidence;
+		readonly inactive: PortalTransitionLifecycleResourceEvidence;
+		readonly failureBeforeClear: PortalTransitionLifecycleResourceEvidence;
+		readonly failureAfterClear: PortalTransitionLifecycleResourceEvidence;
+		readonly failureBlackPixel: readonly [number, number, number, number];
+		readonly revealGeneration: number;
+	}
+
+	interface BrowserHarnessSceneInterestEvidence {
+		readonly interest: readonly BrowserHarnessSceneInterestEntry[];
+		readonly resolvedTarget: ReturnType<
+			GamePresentationRuntime["sceneInterestState"]
+		>["resolvedTarget"];
+	}
+
+	interface BrowserHarnessSceneInterestEntry {
+		readonly landblockId: LandblockOwnerId;
+		readonly layers: readonly LandblockLayerKind[];
+	}
+
+	/** One scripted follow-mode flight's evidence: crossings, publications, and timing. */
+	interface BrowserHarnessFollowFlightReport {
+		/** Audio admissions and bounded placement updates observed during the flight. */
+		readonly audioTrace: AudioTraceSnapshot | null;
+		/** Outdoor-interest crossings in flight order, stamped with elapsed flight time. */
+		readonly crossings: readonly {
+			readonly elapsedMs: number;
+			readonly landblockId: LandblockOwnerId;
+		}[];
+		readonly durationMs: number;
+		/** Outdoor static layer publications that landed during the flight window. */
+		readonly staticLayerPublicationCount: number;
+		/** Cumulative dedicated terrain-worker facts at flight completion. */
+		readonly terrainWorker: ClosedWorkerPoolDiagnostics;
+		/** Frame timing accumulated across the flight; reset when the flight starts. */
+		readonly timing: BrowserHarnessTiming;
+	}
+
+	/** In-progress scripted flight, advanced by the frame loop until its duration elapses. */
+	interface FollowFlightState {
+		/** The destination pose is installed and the promise should resolve after this render. */
+		completionPending: boolean;
+		/** Latest profile-aware scene-interest transition started during this flight. */
+		sceneInterestReady: Promise<void> | null;
+		readonly crossings: { elapsedMs: number; landblockId: LandblockOwnerId }[];
+		readonly durationMs: number;
+		readonly from: Vec3;
+		readonly pitchDegrees: number;
+		/** Active projection retained while scripted movement changes only the outdoor pose. */
+		readonly projection: Pick<Camera, "far" | "fov" | "near">;
+		readonly radii: SceneInterestRadii;
+		readonly reject: (cause: Error) => void;
+		readonly resolve: (report: BrowserHarnessFollowFlightReport) => void;
+		readonly startAudioSampleCounts: readonly number[];
+		readonly startPublicationCount: number;
+		readonly startedAt: number;
+		readonly to: Vec3;
+		readonly yawDegrees: number;
+	}
+
+	interface BrowserHarnessCameraEvidence {
+		/** Authoritative indoor residency, or null for an outdoor camera. */
+		readonly envCellId: EnvCellId | null;
+		readonly far: number;
+		readonly fov: number;
+		readonly landblockId: LandblockOwnerId;
+		readonly near: number;
+		readonly pitchDegrees: number;
+		readonly policy:
+			| "explicit-env-cell"
+			| "explicit-outdoor"
+			| "explorer-outdoor-focus"
+			| "host-boom";
+		readonly position: readonly [number, number, number];
+		readonly yawDegrees: number;
+	}
+
+	/** One overhead-map draw, reported so a screenshot can be judged against known state. */
+	interface BrowserHarnessMapEvidence {
+		/** False once the map's own WebGL2 context is lost. */
+		readonly available: boolean;
+		/** Whether the draw produced pixels; outdoors waits for the region palette. */
+		readonly drew: boolean;
+		/** Landblocks resident on the map's context after syncing. */
+		readonly residentLandblockCount: number;
+		/** Terrain installation revision the map last synced against. */
+		readonly terrainInstallationRevision: number;
+		readonly paletteReady: boolean;
+		readonly centerX: number;
+		readonly centerZ: number;
+		readonly viewDiameter: number;
+		/** Authored height span across resident terrain, proving relief reaches the map at all. */
+		readonly heightRange: readonly [number, number];
+		/** Distinct authored terrain codes resident, proving the palette has something to vary. */
+		readonly distinctTerrainCodes: readonly number[];
+		/** Vertices carrying a road classification. */
+		readonly roadVertexCount: number;
+		/** Which mode the anchor's residency selected. */
+		readonly mode: "outdoor" | "indoor";
+		/**
+		 * Entities the map would draw, read from the scene rather than any published snapshot.
+		 *
+		 * Sampled here so a probe can prove the position moves between ticks: the diagnostics
+		 * snapshot deliberately does not republish on ordinary advances, and the map must not
+		 * depend on it.
+		 */
+		readonly presentedEntities: {
+			readonly count: number;
+			readonly firstWorldX: number | null;
+			readonly firstWorldZ: number | null;
+			/** Extracted facing of the first entity, in degrees clockwise from north. */
+			readonly firstHeadingDegrees: number | null;
+		};
+		/** Derived map geometry resident in the runtime store. */
+		readonly geometry: {
+			readonly revision: number;
+			readonly blockerLandblockCount: number;
+			readonly blockerInstanceCount: number;
+			readonly interiorLandblockCount: number;
+			readonly floorInstanceCount: number;
+			readonly crossingCount: number;
+		};
+	}
+
+	interface BrowserHarnessViewportEvidence {
+		readonly cssHeight: number;
+		readonly cssWidth: number;
+		readonly devicePixelRatio: number;
+		readonly pixelHeight: number;
+		readonly pixelWidth: number;
+	}
+
+	interface BrowserHarnessTiming {
+		readonly sampleCount: number;
+		readonly averageTickMs: number;
+		readonly averageRenderMs: number;
+		readonly averageFrameWorkMs: number;
+		readonly longestTickMs: number;
+		readonly longestRenderMs: number;
+		readonly longestFrameWorkMs: number;
+		/** Largest requestAnimationFrame gap after the harness began drawing. */
+		readonly longestFrameGapMs: number;
+		/** Long Task API events observed while this harness was mounted. */
+		readonly longTaskCount: number;
+		/** Largest Long Task API event duration. */
+		readonly longestLongTaskMs: number;
+	}
+
+	interface BrowserHarnessTimingAccumulator {
+		sampleCount: number;
+		totalTickMs: number;
+		totalRenderMs: number;
+		longestTickMs: number;
+		longestRenderMs: number;
+		longestFrameWorkMs: number;
+		longestFrameGapMs: number;
+		longTaskCount: number;
+		longestLongTaskMs: number;
+	}
+
+	interface HarnessGlobal {
+		__HOLTBURGER_3D_BROWSER_HARNESS__?: BrowserHarnessApi;
+	}
+
+	let canvasElement: HTMLCanvasElement | null = $state(null);
+	let previewCanvasElement: HTMLCanvasElement | null = $state(null);
+	let mapCanvasElement: HTMLCanvasElement | null = $state(null);
+	let mapCanvasSize = $state(0);
+	let mapRenderer: MapRenderer | null = null;
+	let error: string | null = $state(null);
+	let frames = 0;
+	let lastFrameAt: number | undefined;
+	let timing: BrowserHarnessTimingAccumulator = {
+		sampleCount: 0,
+		totalTickMs: 0,
+		totalRenderMs: 0,
+		longestTickMs: 0,
+		longestRenderMs: 0,
+		longestFrameWorkMs: 0,
+		longestFrameGapMs: 0,
+		longTaskCount: 0,
+		longestLongTaskMs: 0,
+	};
+	let contentSource: HttpLandblockContentSource | undefined;
+	let landblockProfileSource: CachedLandblockProfileSource | undefined;
+	let sceneInterestCoordinator: SceneInterestRequestCoordinator | undefined;
+	let entityHost: HttpExplorerEntityHost | undefined;
+	let boomCameraSession: HostKinematicBoomSession | undefined;
+	let boomInputSequence = 0;
+	let boomCumulativeZoomDisplacement = 0;
+	let boomStopResult = false;
+	let boomProjectionRevision = 0;
+	let requestedBoomProjection: ProjectionClearanceRevision | null = null;
+	let activeBoomProjection: ProjectionClearanceRevision | null = null;
+	let viewportWidth = $state(INITIAL_VIEWPORT_WIDTH);
+	let viewportHeight = $state(INITIAL_VIEWPORT_HEIGHT);
+	let spawnedEntities: readonly DynamicEntityView[] = [];
+	let runtime: GamePresentationRuntime | undefined;
+	let presentationAssets: PresentationAssetService | undefined;
+	let objectPreviewResources: ObjectPreviewResources | undefined;
+	let activePreviewHandle: ObjectPreviewHandle | null = null;
+	let renderer: WebGL2Renderer | undefined;
+	let textureFilteringCapabilities: TextureFilteringCapabilities | null = null;
+	let cameraEvidence: BrowserHarnessCameraEvidence | null = null;
+	/** Owner and radii of the most recent interest request, reused by outdoor follow flights. */
+	let lastInterestLandblockId: LandblockOwnerId | null = null;
+	let lastInterestRadii: SceneInterestRadii | null = null;
+	let followFlight: FollowFlightState | null = null;
+	let frameSettings: FrameSettings = {
+		...EXPLORER_TUNING.frameSettings,
+		envCellRenderMode: "flat",
+	};
+	let portalContextLossPolicy: WebGL2ContextLossPolicyProbe | null = null;
+	let portalScopeAtlasTargets: WebGL2PortalScopeAtlasTargetsFixtureResult | null =
+		null;
+	let portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null =
+		null;
+	let outdoorPssm: WebGL2PssmFixtureResult | null = null;
+	let combatEffects: CombatEffectsFixtureResult | null = null;
+	let combatEffectsRuntime: CombatEffectsRuntimeProof | null = null;
+	const combatEffectsRuntimeProbe = new CombatEffectsRuntimeProbe();
+	let entitySelection: WebGL2EntitySelectionFixtureResult | null = null;
+	let ready = false;
+	const fixture = query.get("fixture");
+
+	function parseOutdoorLandblockId(value: string): LandblockOwnerId {
+		const match = /^(?:0x)?([0-9a-f]{4})(?:[0-9a-f]{4})?$/i.exec(value.trim());
+		if (!match) {
+			throw new Error(
+				"Browser harness landblock id must contain four or eight hexadecimal digits.",
+			);
+		}
+		return `0x${match[1]!.toLowerCase()}ffff`;
+	}
+
+	function sceneInterestEvidence(): BrowserHarnessSceneInterestEvidence | null {
+		const state = runtime?.sceneInterestState();
+		if (state === undefined) return null;
+		const entries = (
+			interest: ReturnType<
+				GamePresentationRuntime["sceneInterestState"]
+			>["interest"],
+		): readonly BrowserHarnessSceneInterestEntry[] =>
+			[...interest.entries()].map(([landblockId, layers]) => ({
+				landblockId,
+				layers: [...layers],
+			}));
+		return {
+			interest: entries(state.interest),
+			resolvedTarget: state.resolvedTarget,
+		};
+	}
+
+	async function requestSceneInterest(
+		rawLandblockId: string,
+		terrainRadius: number,
+		buildingRadius: number,
+		envCellRadius: number | null,
+		explicitObjectRadius: number | null,
+		generatedObjectRadius: number | null,
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): Promise<void> {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		if (!Number.isInteger(terrainRadius) || terrainRadius < 0) {
+			throw new Error(
+				"Browser harness terrain radius must be a non-negative integer.",
+			);
+		}
+		if (
+			!Number.isInteger(buildingRadius) ||
+			buildingRadius < 0 ||
+			buildingRadius > terrainRadius
+		) {
+			throw new Error(
+				"Browser harness building radius must be a non-negative integer no greater than terrain radius.",
+			);
+		}
+		if (
+			envCellRadius !== null &&
+			(!Number.isInteger(envCellRadius) ||
+				envCellRadius < 0 ||
+				envCellRadius > buildingRadius)
+		) {
+			throw new Error(
+				"Browser harness EnvCell radius must be a non-negative integer no greater than building radius.",
+			);
+		}
+		if (
+			explicitObjectRadius !== null &&
+			(!Number.isInteger(explicitObjectRadius) ||
+				explicitObjectRadius < 0 ||
+				explicitObjectRadius > buildingRadius)
+		) {
+			throw new Error(
+				"Browser harness explicit-object radius must be a non-negative integer no greater than building radius.",
+			);
+		}
+		if (
+			generatedObjectRadius !== null &&
+			(!Number.isInteger(generatedObjectRadius) ||
+				generatedObjectRadius < 0 ||
+				generatedObjectRadius > buildingRadius)
+		) {
+			throw new Error(
+				"Browser harness generated-object radius must be a non-negative integer no greater than building radius.",
+			);
+		}
+		if (![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)) {
+			throw new Error("Browser harness camera orientation must be finite.");
+		}
+		const parsed = parseResidenceInput(rawLandblockId);
+		if (parsed === null) {
+			throw new Error(`Browser harness target is invalid: ${rawLandblockId}.`);
+		}
+		const requestCoordinator = sceneInterestCoordinator;
+		if (!requestCoordinator) {
+			throw new Error(
+				"Browser harness scene-interest coordinator is not ready.",
+			);
+		}
+		const usesGeneratedFixture = fixture === "instanced";
+		const requestedRadii: SceneInterestRadii = {
+			buildingRadius: usesGeneratedFixture ? null : buildingRadius,
+			envCellRadius,
+			explicitObjectRadius,
+			generatedObjectRadius: usesGeneratedFixture
+				? buildingRadius
+				: generatedObjectRadius,
+			terrainRadius,
+		};
+		const request = requestCoordinator.request(parsed.target, requestedRadii);
+		const resolved = await request.promise;
+		if (!requestCoordinator.isCurrent(request.revision)) return;
+		const landblockId = parsed.residency.landblockId;
+		if (!entityHost) {
+			throw new Error("Browser harness simulation-interest host is not ready.");
+		}
+		await entityHost.ensureSimulationInterest(landblockId);
+		runtime.updateSceneInterest(resolved);
+		lastInterestLandblockId = landblockId;
+		lastInterestRadii = requestedRadii;
+		setCameraLandblock(landblockId, cameraYawDegrees, cameraPitchDegrees);
+	}
+
+	function setCameraLandblock(
+		rawLandblockId: string,
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		const landblockId = parseOutdoorLandblockId(rawLandblockId);
+		const origin = createLandblockWorldOrigin(landblockId);
+		const position = new Vec3(
+			origin.x + OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
+			CAMERA_HEIGHT,
+			origin.z - OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
+		);
+		setOutdoorCamera(
+			landblockId,
+			[position.x, position.y, position.z],
+			cameraYawDegrees,
+			cameraPitchDegrees,
+		);
+	}
+
+	function setOutdoorCamera(
+		rawLandblockId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): void {
+		setOutdoorCameraProjection(
+			rawLandblockId,
+			position,
+			cameraYawDegrees,
+			cameraPitchDegrees,
+			{ far: CAMERA_FAR, fov: CAMERA_FOV_DEGREES, near: CAMERA_NEAR },
+		);
+	}
+
+	/** Place an outdoor camera without changing the projection owned by its calling policy. */
+	function setOutdoorCameraProjection(
+		rawLandblockId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+		projection: Pick<Camera, "far" | "fov" | "near">,
+	): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		if (
+			position.length !== 3 ||
+			!position.every(Number.isFinite) ||
+			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)
+		) {
+			throw new Error(
+				"Browser harness outdoor camera requires a finite position and orientation.",
+			);
+		}
+		const landblockId = parseOutdoorLandblockId(rawLandblockId);
+		const cameraPosition = new Vec3(...position);
+		applyHarnessCamera(runtime, {
+			...projection,
+			placement: {
+				envCellId: null,
+				landblockId,
+				position: sceneVec3(cameraPosition),
+				rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
+			},
+		});
+		installWorldIndicatorFixture(
+			cameraPosition,
+			cameraYawDegrees,
+			cameraPitchDegrees,
+			"outdoor",
+		);
+		cameraEvidence = {
+			...projection,
+			envCellId: null,
+			landblockId,
+			pitchDegrees: cameraPitchDegrees,
+			policy: "explicit-outdoor",
+			position,
+			yawDegrees: cameraYawDegrees,
+		};
+	}
+
+	/** Begin a scripted outdoor follow-mode flight; see the BrowserHarnessApi entry for semantics. */
+	async function runFollowFlight(
+		rawTargetLandblockId: string,
+		durationMs: number,
+	): Promise<BrowserHarnessFollowFlightReport> {
+		const activeRuntime = runtime;
+		if (!activeRuntime)
+			throw new Error("Browser harness runtime is not ready.");
+		if (!Number.isFinite(durationMs) || durationMs <= 0) {
+			throw new Error(
+				"Browser harness follow flight duration must be a positive number of milliseconds.",
+			);
+		}
+		if (followFlight !== null) {
+			throw new Error("Browser harness follow flight is already running.");
+		}
+		const radii = lastInterestRadii;
+		if (radii === null) {
+			throw new Error(
+				"Browser harness follow flight requires a prior scene-interest request.",
+			);
+		}
+		const evidence = cameraEvidence;
+		if (evidence === null || evidence.envCellId !== null) {
+			throw new Error(
+				"Browser harness follow flight requires a current outdoor camera.",
+			);
+		}
+		const targetLandblockId = parseOutdoorLandblockId(rawTargetLandblockId);
+		const origin = createLandblockWorldOrigin(targetLandblockId);
+		// Fly level at the current camera height to the target landblock's centre.
+		const to = new Vec3(
+			origin.x + OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
+			evidence.position[1],
+			origin.z - OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
+		);
+		const from = new Vec3(...evidence.position);
+		const startPublicationCount =
+			activeRuntime.getStaticObjectRuntimeDiagnostics()
+				.staticLayerPublicationCount;
+		resetTiming();
+		return new Promise<BrowserHarnessFollowFlightReport>((resolve, reject) => {
+			followFlight = {
+				completionPending: false,
+				crossings: [],
+				durationMs,
+				from,
+				pitchDegrees: evidence.pitchDegrees,
+				projection: {
+					far: evidence.far,
+					fov: evidence.fov,
+					near: evidence.near,
+				},
+				radii,
+				reject,
+				resolve,
+				sceneInterestReady: null,
+				startAudioSampleCounts: audioTraceVoices.map(
+					(voice) => voice.samples.length,
+				),
+				startPublicationCount,
+				startedAt: performance.now(),
+				to,
+				yawDegrees: evidence.yawDegrees,
+			};
+		});
+	}
+
+	/**
+	 * Advance the scripted outdoor flight one frame: move the camera along the line and, on a
+	 * landblock crossing, replace scene interest with the outdoor radii centered there.
+	 */
+	function advanceFollowFlight(now: number): void {
+		const flight = followFlight;
+		const activeRuntime = runtime;
+		if (flight === null || !activeRuntime) return;
+		const fraction = Math.min(1, (now - flight.startedAt) / flight.durationMs);
+		const position = new Vec3(
+			flight.from.x + (flight.to.x - flight.from.x) * fraction,
+			flight.from.y + (flight.to.y - flight.from.y) * fraction,
+			flight.from.z + (flight.to.z - flight.from.z) * fraction,
+		);
+		const landblockId = landblockAtWorldPoint(position);
+		if (landblockId === null) {
+			followFlight = null;
+			flight.reject(
+				new Error("Browser harness follow flight left canonical world bounds."),
+			);
+			return;
+		}
+		if (landblockId !== lastInterestLandblockId) {
+			lastInterestLandblockId = landblockId;
+			const requestCoordinator = sceneInterestCoordinator;
+			if (!requestCoordinator) {
+				followFlight = null;
+				flight.reject(
+					new Error("Browser harness scene-interest coordinator is not ready."),
+				);
+				return;
+			}
+			const request = requestCoordinator.request(
+				{ kind: "outdoor", landblockId },
+				flight.radii,
+			);
+			flight.sceneInterestReady = request.promise
+				.then((resolved) => {
+					if (
+						followFlight !== flight ||
+						!requestCoordinator.isCurrent(request.revision)
+					)
+						return;
+					activeRuntime.updateSceneInterest(resolved);
+				})
+				.catch((error: unknown) => {
+					if (
+						followFlight === flight &&
+						requestCoordinator.isCurrent(request.revision)
+					) {
+						followFlight = null;
+						flight.reject(
+							error instanceof Error ? error : new Error(String(error)),
+						);
+					}
+				});
+			flight.crossings.push({
+				elapsedMs: now - flight.startedAt,
+				landblockId,
+			});
+		}
+		setOutdoorCameraProjection(
+			landblockId,
+			[position.x, position.y, position.z],
+			flight.yawDegrees,
+			flight.pitchDegrees,
+			flight.projection,
+		);
+		if (fraction < 1) return;
+		flight.completionPending = true;
+	}
+
+	/** Resolve a completed flight only after its destination pose has rendered and updated audio. */
+	function completeFollowFlight(): void {
+		const flight = followFlight;
+		if (flight === null || !flight.completionPending || !runtime) return;
+		if (flight.sceneInterestReady !== null) {
+			const sceneInterestReady = flight.sceneInterestReady;
+			flight.sceneInterestReady = null;
+			void sceneInterestReady.then(() => completeFollowFlight());
+			return;
+		}
+		followFlight = null;
+		flight.resolve({
+			audioTrace: AUDIO_TRACE
+				? audioTraceSnapshot(flight.startAudioSampleCounts)
+				: null,
+			crossings: flight.crossings,
+			durationMs: flight.durationMs,
+			staticLayerPublicationCount:
+				runtime.getStaticObjectRuntimeDiagnostics()
+					.staticLayerPublicationCount - flight.startPublicationCount,
+			terrainWorker: runtime.getTerrainWorkerDiagnostics(),
+			timing: timingSnapshot(),
+		});
+	}
+
+	function focusExplorerOutdoor(
+		rawLandblockId: string,
+	): BrowserHarnessCameraEvidence {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		const landblockId = parseOutdoorLandblockId(rawLandblockId);
+		const pose = resolveExplorerOutdoorFocusPose(runtime, landblockId);
+		if (!pose) {
+			throw new Error(
+				`Browser harness cannot apply Explorer focus before terrain ${landblockId} is queryable.`,
+			);
+		}
+		applyHarnessCamera(runtime, {
+			...EXPLORER_TUNING.camera.framing,
+			placement: {
+				envCellId: null,
+				landblockId,
+				position: sceneVec3(pose.position),
+				rotation: createCameraRotationRadians(
+					pose.yawRadians,
+					pose.pitchRadians,
+				),
+			},
+		});
+		cameraEvidence = {
+			...EXPLORER_TUNING.camera.framing,
+			envCellId: null,
+			landblockId,
+			pitchDegrees: (pose.pitchRadians * 180) / Math.PI,
+			policy: "explorer-outdoor-focus",
+			position: [pose.position.x, pose.position.y, pose.position.z],
+			yawDegrees: (pose.yawRadians * 180) / Math.PI,
+		};
+		return cameraEvidence;
+	}
+
+	function setEnvCellCamera(
+		rawEnvCellId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): void {
+		setEnvCellCameraProjection(
+			rawEnvCellId,
+			position,
+			cameraYawDegrees,
+			cameraPitchDegrees,
+			{ far: CAMERA_FAR, fov: CAMERA_FOV_DEGREES, near: CAMERA_NEAR },
+		);
+	}
+
+	function setEnvCellCameraProjection(
+		rawEnvCellId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+		projection: Pick<Camera, "far" | "fov" | "near">,
+	): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		if (
+			position.length !== 3 ||
+			!position.every(Number.isFinite) ||
+			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)
+		) {
+			throw new Error(
+				"Browser harness portal frame requires a finite position and orientation.",
+			);
+		}
+		const envCellId = parseEnvCellId(rawEnvCellId, "portal frame");
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockOwnerId;
+		const cameraPosition = new Vec3(...position);
+		applyHarnessCamera(runtime, {
+			...projection,
+			placement: {
+				envCellId,
+				landblockId,
+				position: sceneVec3(cameraPosition),
+				rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
+			},
+		});
+		installWorldIndicatorFixture(
+			cameraPosition,
+			cameraYawDegrees,
+			cameraPitchDegrees,
+			envCellId,
+		);
+		cameraEvidence = {
+			envCellId,
+			...projection,
+			landblockId,
+			pitchDegrees: cameraPitchDegrees,
+			policy: "explicit-env-cell",
+			position,
+			yawDegrees: cameraYawDegrees,
+		};
+	}
+
+	/** Installs one synthetic semantic curve through the production world-indicator seam. */
+	function installWorldIndicatorFixture(
+		cameraPosition: Vec3,
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+		renderScopeKey: string,
+	): void {
+		if (!WORLD_MARKER || !runtime) return;
+		const axes = createCameraAxesRadians(
+			(cameraYawDegrees * Math.PI) / 180,
+			(cameraPitchDegrees * Math.PI) / 180,
+		);
+		const durationSeconds = 1.5;
+		const velocity = new Vec3(axes.forward.x * 8, 9, axes.forward.z * 8);
+		const acceleration = new Vec3(0, -9.8, 0);
+		const halfDurationSquared = 0.5 * durationSeconds * durationSeconds;
+		const markerPosition = cameraPosition.add(
+			new Vec3(
+				velocity.x * durationSeconds + acceleration.x * halfDurationSquared,
+				velocity.y * durationSeconds + acceleration.y * halfDurationSquared,
+				velocity.z * durationSeconds + acceleration.z * halfDurationSquared,
+			),
+		);
+		const middleTime = durationSeconds * 0.5;
+		const middle = cameraPosition
+			.add(
+				new Vec3(
+					velocity.x * middleTime,
+					velocity.y * middleTime,
+					velocity.z * middleTime,
+				),
+			)
+			.add(
+				new Vec3(
+					acceleration.x * 0.5 * middleTime * middleTime,
+					acceleration.y * 0.5 * middleTime * middleTime,
+					acceleration.z * 0.5 * middleTime * middleTime,
+				),
+			);
+		const actualEnd = markerPosition.add(
+			new Vec3(axes.right.x * -3, axes.right.y * -3, axes.right.z * -3),
+		);
+		runtime.setWorldIndicator({
+			marker: {
+				shape: "target",
+				pending: WORLD_MARKER_PENDING,
+				color: [0.62, 0.68, 0.75, 0.8],
+				normal: sceneVector3([0, 1, 0]),
+				position: sceneVec3(markerPosition),
+				radius: 0.65,
+				renderScopeKey,
+			},
+			...(WORLD_MARKER_PENDING
+				? {}
+				: {
+						desiredTrajectory: {
+							kind: "curve",
+							style: "dashed",
+							revision: 1,
+							color: [0.62, 0.68, 0.75, 0.35],
+							origin: sceneVec3(cameraPosition),
+							velocity: [velocity.x, velocity.y, velocity.z],
+							acceleration: [acceleration.x, acceleration.y, acceleration.z],
+							durationSeconds,
+							placements: [
+								{ startFraction: 0, endFraction: 1, renderScopeKey },
+							],
+						},
+						trajectory: {
+							kind: "polyline",
+							style: "solid",
+							revision: 1,
+							color: [0.08, 0.48, 1, 0.9],
+							segments: [
+								{
+									start: sceneVec3(cameraPosition),
+									end: sceneVec3(middle),
+									renderScopeKey,
+								},
+								{
+									start: sceneVec3(middle),
+									end: sceneVec3(actualEnd),
+									renderScopeKey,
+								},
+							],
+						},
+						landingMarker: {
+							shape: "miss",
+							pending: false,
+							color: [1, 0.12, 0.08, 0.9],
+							normal: sceneVector3([0, 1, 0]),
+							position: sceneVec3(actualEnd),
+							radius: 0.65,
+							renderScopeKey,
+						},
+					}),
+		});
+		if (!WORLD_MARKER_PENDING)
+			worldIndicatorProof = {
+				desiredKind: "curve",
+				actualKind: "polyline",
+				markerShapes: ["target", "miss"],
+			};
+	}
+
+	function focusExplorerEnvCell(
+		rawEnvCellId: string,
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): BrowserHarnessCameraEvidence {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		const envCellId = parseEnvCellId(rawEnvCellId, "EnvCell focus");
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockOwnerId;
+		const residency = { envCellId, landblockId };
+		const bounds = runtime.queryEnvCellBounds(residency);
+		if (bounds === null) {
+			throw new Error(`EnvCell focus cannot find bounds for ${envCellId}.`);
+		}
+		const position = new Vec3(
+			(bounds.min.x + bounds.max.x) * 0.5,
+			(bounds.min.y + bounds.max.y) * 0.5,
+			(bounds.min.z + bounds.max.z) * 0.5,
+		);
+		if (runtime.queryEnvCellPointContainment(residency, position) !== true) {
+			throw new Error(
+				`EnvCell focus bounds center is not contained by ${envCellId}.`,
+			);
+		}
+		setEnvCellCamera(
+			envCellId,
+			[position.x, position.y, position.z],
+			cameraYawDegrees,
+			cameraPitchDegrees,
+		);
+		if (cameraEvidence === null) {
+			throw new Error("EnvCell focus did not retain camera evidence.");
+		}
+		return cameraEvidence;
+	}
+
+	function focusExplorerTarget(
+		rawTarget: string,
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): BrowserHarnessCameraEvidence {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		const parsed = parseResidenceInput(rawTarget);
+		if (parsed === null) throw new Error(`Target is invalid: ${rawTarget}.`);
+		const resolved = runtime.sceneInterestState().resolvedTarget;
+		if (resolved === null) {
+			throw new Error(
+				"Explorer target focus requires resolved scene interest.",
+			);
+		}
+		if (resolved.kind === "dungeon") {
+			const envCellId =
+				parsed.target.kind === "env-cell"
+					? parsed.target.envCellId
+					: (`${parsed.target.landblockId.slice(0, 6)}0100` as EnvCellId);
+			return focusExplorerEnvCell(
+				envCellId,
+				cameraYawDegrees,
+				cameraPitchDegrees,
+			);
+		}
+		if (parsed.target.kind === "env-cell") {
+			return focusExplorerEnvCell(
+				parsed.target.envCellId,
+				cameraYawDegrees,
+				cameraPitchDegrees,
+			);
+		}
+		return focusExplorerOutdoor(parsed.target.landblockId);
+	}
+
+	function setEnvCellRenderMode(envCellRenderMode: "flat" | "portal"): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = { ...frameSettings, envCellRenderMode };
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	async function spawnExplorerEntity(
+		rawWcid: string,
+		distance: number,
+	): Promise<DynamicEntityView> {
+		return spawnExplorerEntityWithMode(rawWcid, distance, "pose-only");
+	}
+
+	async function probeCollisionScriptPlayback() {
+		const entity = await spawnExplorerEntity("1499", 4);
+		if (!runtime || !renderer)
+			throw new Error(
+				"Collision script probe requires a runtime and renderer.",
+			);
+		const activeRuntime = runtime;
+		const activeRenderer = renderer;
+		const drawFrame = activeRenderer.drawFrame;
+		const submitParticles = activeRenderer.particles.submit;
+		const submittedParticleCounts = new Map<string, number>();
+		activeRenderer.particles.submit = (ranges, records) => {
+			submittedParticleCounts.clear();
+			for (const range of ranges) {
+				const owner = String(range.renderOwner);
+				submittedParticleCounts.set(
+					owner,
+					(submittedParticleCounts.get(owner) ?? 0) + range.count,
+				);
+			}
+			submitParticles(ranges, records);
+		};
+		let lightCount = 0;
+		activeRenderer.drawFrame = (input) => {
+			lightCount = input.dynamicLights.length;
+			return drawFrame.call(activeRenderer, input);
+		};
+		// Flame Bolt's table 0x34000005 maps ProjectileCollision (0x5a) to this root.
+		const observations = () =>
+			activeRuntime
+				.getAuthoredDynamicRuntimeDiagnostics()
+				.worldOwnedBehavior.observations.filter(
+					(observation) => observation.provenance.assetId === "0x33000109",
+				);
+		const cue = {
+			guid: entity.identity.guid,
+			generation: entity.generation,
+			cue: 0x5a,
+			intensity: 1,
+		};
+		try {
+			const lit = {
+				...entity,
+				physics: { ...entity.physics, noDraw: false, lighting: true },
+			};
+			await activeRuntime.upsertDynamicEntity(lit);
+			await waitForTwoAnimationFrames();
+			const baselineLights = lightCount;
+			if (
+				baselineLights <= 0 ||
+				activeRuntime.withSpawnedEntitySelectionGeometry(
+					cue.guid,
+					() => true,
+				) !== true
+			)
+				throw new Error(
+					"Collision probe requires visible geometry and an emitted light.",
+				);
+			activeRuntime.playDynamicEntityScriptCue({
+				...cue,
+				generation: cue.generation + 1,
+			});
+			await waitForTwoAnimationFrames();
+			const staleIgnored = observations().length === 0;
+			if (!staleIgnored)
+				throw new Error("Stale collision cue started playback.");
+			const before =
+				activeRuntime.getAuthoredDynamicRuntimeDiagnostics().particles
+					.createdEmitterTotal;
+			activeRuntime.playDynamicEntityScriptCue(cue);
+			const deadline = performance.now() + 10_000;
+			while (observations().length < 2) {
+				if (performance.now() >= deadline)
+					throw new Error(
+						"Collision script did not dispatch its authored hooks.",
+					);
+				await nextAnimationFrame();
+			}
+			const collisionHooks = observations();
+			if (
+				collisionHooks.map((observation) => observation.command).join(",") !==
+					"no-draw,set-light" ||
+				collisionHooks.some(
+					(observation) => observation.outcome !== "owned-by-world",
+				)
+			)
+				throw new Error("Collision cue selected a different authored script.");
+			// The core integration test verifies these flags come from the local collision root.
+			// Exercise their production browser consumer while the cue leaves state ownership alone.
+			await activeRuntime.upsertDynamicEntity({
+				...entity,
+				physics: { ...entity.physics, noDraw: true, lighting: false },
+			});
+			await waitForTwoAnimationFrames();
+			const geometryHidden =
+				activeRuntime.withSpawnedEntitySelectionGeometry(
+					cue.guid,
+					() => true,
+				) === null;
+			const lightsDisabled = lightCount < baselineLights;
+			if (!geometryHidden || !lightsDisabled)
+				throw new Error(
+					"Projected collision state did not hide geometry and extinguish lights.",
+				);
+			// ACE sends Explode independently. Its root is different from the local collision cue.
+			activeRuntime.playDynamicEntityScriptCue({ ...cue, cue: 5 });
+			while (
+				!activeRuntime
+					.getAuthoredDynamicRuntimeDiagnostics()
+					.worldOwnedBehavior.observations.some(
+						(observation) =>
+							observation.provenance.assetId === "0x33000120" &&
+							observation.command === "create-particle" &&
+							observation.outcome === "executed",
+					)
+			) {
+				if (performance.now() >= deadline)
+					throw new Error(
+						"Server explosion did not create its authored particles.",
+					);
+				await nextAnimationFrame();
+			}
+			const createdEmitters =
+				activeRuntime.getAuthoredDynamicRuntimeDiagnostics().particles
+					.createdEmitterTotal - before;
+			if (createdEmitters <= 0)
+				throw new Error("Server explosion produced no emitter activation.");
+			const collisionTarget = collisionHooks[0]?.targetId;
+			if (collisionTarget === undefined)
+				throw new Error("Collision script has no projectile target.");
+			let submittedExplosionParticles = 0;
+			while (submittedExplosionParticles === 0) {
+				submittedExplosionParticles =
+					submittedParticleCounts.get(String(collisionTarget)) ?? 0;
+				if (performance.now() >= deadline)
+					throw new Error(
+						"NoDraw projectile's explosion particles never reached the renderer.",
+					);
+				await nextAnimationFrame();
+			}
+			await activeRuntime.upsertDynamicEntity(lit);
+			await waitForTwoAnimationFrames();
+			const geometryRestored =
+				activeRuntime.withSpawnedEntitySelectionGeometry(
+					cue.guid,
+					() => true,
+				) === true;
+			const lightsRestored = lightCount === baselineLights;
+			if (!geometryRestored || !lightsRestored)
+				throw new Error(
+					"Server reconciliation did not restore geometry and lights.",
+				);
+			return {
+				staleIgnored,
+				dispatchedHooks: collisionHooks.length,
+				collisionHookOutcomes: collisionHooks.map(
+					(observation) => observation.outcome,
+				),
+				createdEmitters,
+				submittedExplosionParticles,
+				geometryHidden,
+				geometryRestored,
+				lightsDisabled,
+				lightsRestored,
+			};
+		} finally {
+			activeRenderer.drawFrame = drawFrame;
+			activeRenderer.particles.submit = submitParticles;
+			await despawnExplorerEntityFleet();
+		}
+	}
+
+	async function spawnSimulatedExplorerEntity(
+		rawWcid: string,
+		distance: number,
+	): Promise<DynamicEntityView> {
+		return spawnExplorerEntityWithMode(rawWcid, distance, "integrated");
+	}
+
+	async function spawnExplorerEntityWithMode(
+		rawWcid: string,
+		distance: number,
+		physicalMode: "pose-only" | "integrated",
+	): Promise<DynamicEntityView> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity spawn requires a current camera and runtime.",
+			);
+		const { direction, placement } = entityScenarioAnchor();
+		await entityHost.ensureSimulationInterest(placement.residency.landblockId);
+		const request = createExplorerSpawnRequest(
+			parseExplorerWcid(rawWcid),
+			placement,
+			direction,
+			distance,
+			physicalMode,
+		);
+		const previousGuids = new Set(
+			spawnedEntities.map((entity) => entity.identity.guid),
+		);
+		const event = await entityHost.spawn(request);
+		await applyDynamicEntitySnapshotEvent(event);
+		const entity = spawnedEntities.find(
+			(current) =>
+				!previousGuids.has(current.identity.guid) &&
+				current.identity.wcid === request.wcid &&
+				current.placement.kind === "world",
+		);
+		if (!entity)
+			throw new Error("Explorer spawn snapshot omitted its new world entity.");
+		return entity;
+	}
+
+	/** Derive the captured setup-pose source used by preview diagnostics. */
+	function objectPreviewSource(guid: number): ObjectPreviewSource {
+		const entity = spawnedEntities.find(
+			(candidate) => candidate.identity.guid === guid,
+		);
+		if (!entity)
+			throw new Error(`Object preview probe could not find entity ${guid}.`);
+		return {
+			attachments: [],
+			background: null,
+			body: {
+				setupDid: entity.presentation.content.setupDid,
+				appearance: entity.presentation.appearance,
+				scale: entity.presentation.objectScale,
+				translucency: entity.physics.translucency,
+				pose: { kind: "setup-pose" },
+			},
+		};
+	}
+
+	/** Hold or clear the current production preview without adding measurement-side work. */
+	async function setObjectPreviewBenchmarkVisible(
+		guid: number,
+		visible: boolean,
+	): Promise<void> {
+		if (!objectPreviewResources || !previewCanvasElement)
+			throw new Error("Object preview benchmark requires an active runtime.");
+		const resources = objectPreviewResources;
+		const retiring = activePreviewHandle?.dispose() ?? Promise.resolve();
+		activePreviewHandle = null;
+		if (!visible) {
+			await retiring;
+			return;
+		}
+		const handle = new ObjectPreviewController(
+			{
+				activationBarrier: retiring,
+				canvas: previewCanvasElement,
+				source: objectPreviewSource(guid),
+			},
+			{
+				resolveResources: async () => resources,
+				startFrameLoop: startPresentationFrameLoop,
+			},
+		);
+		activePreviewHandle = handle;
+		handle.setViewport({
+			extent: { height: 192, width: 256 },
+			minimumFrameIntervalSeconds: 1 / 60,
+			rotation: { kind: "orbit", yawRadians: 0.65 },
+			framing: { kind: "body" },
+		});
+		try {
+			await handle.ready;
+		} catch (cause) {
+			await handle.dispose();
+			if (activePreviewHandle === handle) activePreviewHandle = null;
+			throw cause;
+		}
+	}
+
+	function objectPreviewDiagnostics(): ObjectPreviewRendererDiagnostics | null {
+		return activePreviewHandle?.diagnostics() ?? null;
+	}
+
+	/** Read the callback-mutated preview owner without relying on Svelte's lexical narrowing. */
+	function requireActivePreviewHandle(message: string): ObjectPreviewHandle {
+		if (activePreviewHandle === null) throw new Error(message);
+		return activePreviewHandle;
+	}
+
+	/** Exercise direct-canvas resize, rotation, close and reopen through the production mount. */
+	async function probeObjectPreviewLifecycle(
+		guid: number,
+	): Promise<BrowserHarnessObjectPreviewEvidence> {
+		if (!objectPreviewResources || !previewCanvasElement)
+			throw new Error("Object preview probe requires an active runtime.");
+		const resources = objectPreviewResources;
+		const previewCanvas = previewCanvasElement;
+		const source = objectPreviewSource(guid);
+		let handle: ObjectPreviewHandle | null = null;
+		const capture = async (
+			yawRadians: number,
+			extent: RenderExtent,
+			install: boolean,
+		): Promise<BrowserHarnessObjectPreviewSample> => {
+			const startedAt = performance.now();
+			let installedAt: number | null = null;
+			if (install) {
+				const retiring = handle?.dispose() ?? Promise.resolve();
+				handle = new ObjectPreviewController(
+					{
+						activationBarrier: retiring,
+						canvas: previewCanvas,
+						source,
+					},
+					{
+						resolveResources: async () => resources,
+						startFrameLoop: startPresentationFrameLoop,
+					},
+				);
+				activePreviewHandle = handle;
+			}
+			if (!handle) throw new Error("Object preview probe has no active mount.");
+			handle.setViewport({
+				extent,
+				minimumFrameIntervalSeconds: 1 / 60,
+				rotation: { kind: "orbit", yawRadians },
+				framing: { kind: "body" },
+			});
+			await withTimeout(handle.ready, 5_000, "Object preview frame timed out.");
+			await withTimeout(
+				waitForPreviewExtent(previewCanvas, extent),
+				1_000,
+				"Object preview resize timed out.",
+			);
+			const firstFrameAt = performance.now();
+			if (install) installedAt = firstFrameAt;
+			const gl = previewCanvas.getContext("webgl2");
+			if (!gl) throw new Error("Object preview probe requires WebGL2.");
+			const observedGlErrors: number[] = [];
+			let candidate = summarizeObjectPreviewCanvas(gl, extent, 1);
+			observedGlErrors.push(...candidate.glErrors);
+			let sample: BrowserHarnessObjectPreviewFrameSummary | null =
+				candidate.visiblePixelCount === 0 ? null : candidate;
+			for (let frame = 2; sample === null && frame <= 8; frame += 1) {
+				await nextAnimationFrame();
+				candidate = summarizeObjectPreviewCanvas(gl, extent, frame);
+				observedGlErrors.push(...candidate.glErrors);
+				if (candidate.visiblePixelCount > 0) {
+					sample = candidate;
+					break;
+				}
+			}
+			if (sample === null)
+				throw new Error(
+					`Object preview default framebuffer remained empty across admitted draws; GL errors: ${observedGlErrors.join(", ") || "none"}; diagnostics: ${JSON.stringify(handle.diagnostics())}.`,
+				);
+			const rendererDiagnostics = handle.diagnostics();
+			if (rendererDiagnostics === null)
+				throw new Error("Object preview diagnostics retired before capture.");
+			return {
+				...sample,
+				firstFrameLatencyMs: firstFrameAt - startedAt,
+				installDurationMs:
+					installedAt === null ? null : installedAt - startedAt,
+				rendererDiagnostics,
+				settledFrameLatencyMs: performance.now() - startedAt,
+			};
+		};
+		try {
+			const first = await capture(0.65, { height: 192, width: 256 }, true);
+			const resizedRotated = await capture(
+				-0.65,
+				{ height: 160, width: 320 },
+				false,
+			);
+			const suspendedHandle = requireActivePreviewHandle(
+				"Object preview suspension lost its mount handle.",
+			);
+			const beforePause = suspendedHandle.diagnostics()?.frameCount;
+			if (beforePause === undefined)
+				throw new Error(
+					"Object preview suspension has no renderer diagnostics.",
+				);
+			suspendedHandle.setViewport(null);
+			for (let frame = 0; frame < 4; frame += 1) await nextAnimationFrame();
+			const pausedFrameCount = suspendedHandle.diagnostics()?.frameCount;
+			if (pausedFrameCount !== beforePause)
+				throw new Error(
+					`Hidden object preview advanced from frame ${beforePause} to ${String(pausedFrameCount)}.`,
+				);
+			suspendedHandle.setViewport({
+				extent: { height: 160, width: 320 },
+				minimumFrameIntervalSeconds: 1 / 60,
+				rotation: { kind: "orbit", yawRadians: -0.65 },
+				framing: { kind: "body" },
+			});
+			await withTimeout(
+				waitForPreviewFrameAfter(suspendedHandle, pausedFrameCount),
+				1_000,
+				"Object preview did not resume after suspension.",
+			);
+			const resumedFrameCount = suspendedHandle.diagnostics()?.frameCount;
+			if (resumedFrameCount === undefined)
+				throw new Error("Resumed object preview lost renderer diagnostics.");
+			const suspension = { pausedFrameCount, resumedFrameCount };
+			await activePreviewHandle?.dispose();
+			handle = null;
+			activePreviewHandle = null;
+			await nextAnimationFrame();
+			await nextAnimationFrame();
+			const reopened = await capture(-0.35, { height: 192, width: 256 }, true);
+			const reopenedHandle = requireActivePreviewHandle(
+				"Object preview reopen lost its mount handle.",
+			);
+			const previewGl = previewCanvas.getContext("webgl2");
+			const worldGl = canvasElement?.getContext("webgl2") ?? null;
+			if (!previewGl || !worldGl)
+				throw new Error(
+					"Object preview context-loss probe requires both contexts.",
+				);
+			const loseContext = previewGl.getExtension("WEBGL_lose_context");
+			const contextLoss = {
+				previewContextLost: false,
+				supported: loseContext !== null,
+				worldContextLost: worldGl.isContextLost(),
+			};
+			if (loseContext !== null) {
+				loseContext.loseContext();
+				await withTimeout(
+					waitForPreviewRetirement(reopenedHandle),
+					1_000,
+					"Lost object preview context did not retire.",
+				);
+				contextLoss.previewContextLost = previewGl.isContextLost();
+				contextLoss.worldContextLost = worldGl.isContextLost();
+			}
+			await reopenedHandle.dispose();
+			handle = null;
+			activePreviewHandle = null;
+			return { contextLoss, first, reopened, resizedRotated, suspension };
+		} finally {
+			await activePreviewHandle?.dispose();
+			activePreviewHandle = null;
+		}
+	}
+
+	/** Wait for the cadence-bounded renderer to consume a post-ready viewport update. */
+	async function waitForPreviewExtent(
+		canvas: HTMLCanvasElement,
+		extent: RenderExtent,
+	): Promise<void> {
+		while (canvas.width !== extent.width || canvas.height !== extent.height)
+			await nextAnimationFrame();
+	}
+
+	async function waitForPreviewRetirement(
+		handle: ObjectPreviewHandle,
+	): Promise<void> {
+		while (handle.diagnostics() !== null) await nextAnimationFrame();
+	}
+
+	async function waitForPreviewFrameAfter(
+		handle: ObjectPreviewHandle,
+		frameCount: number,
+	): Promise<void> {
+		while ((handle.diagnostics()?.frameCount ?? frameCount) <= frameCount)
+			await nextAnimationFrame();
+	}
+
+	function summarizeObjectPreviewCanvas(
+		gl: WebGL2RenderingContext,
+		extent: RenderExtent,
+		frameCount: number,
+	): BrowserHarnessObjectPreviewFrameSummary {
+		const pixels = new Uint8Array(extent.width * extent.height * 4);
+		gl.readPixels(
+			0,
+			0,
+			extent.width,
+			extent.height,
+			gl.RGBA,
+			gl.UNSIGNED_BYTE,
+			pixels,
+		);
+		let changedPixelCount = 0;
+		let emissiveTransparentPixelCount = 0;
+		let partiallyTransparentPixelCount = 0;
+		let visiblePixelCount = 0;
+		let checksum = 2166136261;
+		let minX = extent.width;
+		let minY = extent.height;
+		let maxX = -1;
+		let maxY = -1;
+		for (let offset = 0; offset < pixels.length; offset += 4) {
+			const alpha = pixels[offset + 3]!;
+			const carriesColor =
+				pixels[offset] !== 0 ||
+				pixels[offset + 1] !== 0 ||
+				pixels[offset + 2] !== 0;
+			if (alpha !== 0) changedPixelCount += 1;
+			if (alpha > 0 && alpha < 255) partiallyTransparentPixelCount += 1;
+			if (alpha === 0 && carriesColor) emissiveTransparentPixelCount += 1;
+			if (alpha !== 0 || carriesColor) {
+				visiblePixelCount += 1;
+				const pixel = offset / 4;
+				const x = pixel % extent.width;
+				const y = Math.floor(pixel / extent.width);
+				minX = Math.min(minX, x);
+				minY = Math.min(minY, y);
+				maxX = Math.max(maxX, x);
+				maxY = Math.max(maxY, y);
+			}
+			for (let channel = 0; channel < 4; channel += 1) {
+				checksum ^= pixels[offset + channel]!;
+				checksum = Math.imul(checksum, 16777619) >>> 0;
+			}
+		}
+		return {
+			backgroundAlpha: pixels[3]!,
+			changedPixelCount,
+			checksum,
+			emissiveTransparentPixelCount,
+			extent,
+			frameCount,
+			glErrors: drainGlErrors(gl),
+			partiallyTransparentPixelCount,
+			visiblePixelCount,
+			visibleBounds:
+				maxX < 0
+					? null
+					: {
+							height: maxY - minY + 1,
+							maxX,
+							maxY,
+							minX,
+							minY,
+							width: maxX - minX + 1,
+						},
+		};
+	}
+
+	async function withTimeout<T>(
+		promise: Promise<T>,
+		durationMs: number,
+		message: string,
+	): Promise<T> {
+		let timeout = 0;
+		try {
+			return await Promise.race([
+				promise,
+				new Promise<T>((_, reject) => {
+					timeout = window.setTimeout(
+						() => reject(new Error(message)),
+						durationMs,
+					);
+				}),
+			]);
+		} finally {
+			window.clearTimeout(timeout);
+		}
+	}
+
+	function drainGlErrors(gl: WebGL2RenderingContext): readonly number[] {
+		const errors: number[] = [];
+		for (let index = 0; index < 32; index += 1) {
+			const error = gl.getError();
+			if (error === gl.NO_ERROR) return errors;
+			errors.push(error);
+		}
+		throw new Error(
+			"Object preview probe exceeded the bounded GL error drain.",
+		);
+	}
+
+	function nextAnimationFrame(): Promise<void> {
+		return new Promise((resolve) =>
+			window.requestAnimationFrame(() => resolve()),
+		);
+	}
+
+	function entityScenarioAnchor(): {
+		readonly placement: HostCameraPlacement;
+		readonly direction: readonly [number, number, number];
+	} {
+		if (cameraEvidence === null)
+			throw new Error("Entity scenario requires a current camera.");
+		const yaw = (cameraEvidence.yawDegrees * Math.PI) / 180;
+		const pitch = (cameraEvidence.pitchDegrees * Math.PI) / 180;
+		const axes = createCameraAxesRadians(yaw, pitch);
+		return {
+			placement: {
+				position: sceneVec3(new Vec3(...cameraEvidence.position)),
+				residency: {
+					envCellId: cameraEvidence.envCellId,
+					landblockId: cameraEvidence.landblockId,
+				},
+			},
+			direction: resolvePhysicalFlyViewDirection({
+				forward: [axes.forward.x, axes.forward.y, axes.forward.z],
+				right: [axes.right.x, axes.right.y, axes.right.z],
+				up: [axes.up.x, axes.up.y, axes.up.z],
+			}),
+		};
+	}
+
+	function kinematicBoomDirection(): readonly [number, number, number] {
+		return resolveKinematicBoomDirection(entityScenarioAnchor().direction);
+	}
+
+	function probeBoomFraming(guid: number): {
+		readonly planarCameraToTargetDistance: number;
+		readonly planarForwardAlignment: number;
+		readonly planarForwardProjection: number;
+	} {
+		const camera = cameraEvidence;
+		if (camera === null)
+			throw new Error("Boom framing probe requires a presented camera.");
+		const entity = spawnedEntities.find(
+			(candidate) => candidate.identity.guid === guid,
+		);
+		if (entity === undefined)
+			throw new Error(`Boom framing probe could not find entity ${guid}.`);
+		const placement = dynamicEntityPlacement(entity);
+		const owner = createLandblockWorldOrigin(placement.landblockId);
+		const target = new Vec3(
+			owner.x + placement.localTransform.m41,
+			placement.localTransform.m42,
+			owner.z + placement.localTransform.m43,
+		);
+		const cameraToTarget = new Vec3(
+			target.x - camera.position[0],
+			0,
+			target.z - camera.position[2],
+		);
+		const distance = Math.hypot(cameraToTarget.x, cameraToTarget.z);
+		const axes = createCameraAxesRadians(
+			(camera.yawDegrees * Math.PI) / 180,
+			(camera.pitchDegrees * Math.PI) / 180,
+		);
+		const horizontalForwardLength = Math.hypot(axes.forward.x, axes.forward.z);
+		const forwardProjection =
+			horizontalForwardLength === 0
+				? 0
+				: (cameraToTarget.x * axes.forward.x +
+						cameraToTarget.z * axes.forward.z) /
+					horizontalForwardLength;
+		return {
+			planarCameraToTargetDistance: distance,
+			planarForwardAlignment: distance === 0 ? 0 : forwardProjection / distance,
+			planarForwardProjection: forwardProjection,
+		};
+	}
+
+	/**
+	 * Spawn many entities at exact camera-relative offsets in AC world axes.
+	 *
+	 * The host resolves a candidate as `camera + normalize(direction) * distance`, so passing the
+	 * desired offset as the direction and its length as the distance places each entity exactly.
+	 * Pair and population scenarios need deterministic separation; the single-spawn path's shared
+	 * view direction would stack every entity on one point.
+	 */
+	async function spawnExplorerEntityFleet(
+		rawWcid: string,
+		offsets: readonly (readonly [number, number, number])[],
+		physicalMode: "pose-only" | "integrated",
+	): Promise<readonly DynamicEntityView[]> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity fleet requires a current camera and runtime.",
+			);
+		if (offsets.length === 0)
+			throw new Error("Entity fleet requires at least one offset.");
+		const { placement } = entityScenarioAnchor();
+		await entityHost.ensureSimulationInterest(placement.residency.landblockId);
+		const wcid = parseExplorerWcid(rawWcid);
+		const spawned: DynamicEntityView[] = [];
+		for (const offset of offsets) {
+			const distance = Math.hypot(...offset);
+			if (!Number.isFinite(distance) || distance <= 0)
+				throw new Error("Each entity fleet offset must be finite and nonzero.");
+			const previousGuids = new Set(
+				spawnedEntities.map((entity) => entity.identity.guid),
+			);
+			const event = await entityHost.spawn(
+				createExplorerSpawnRequest(
+					wcid,
+					placement,
+					offset,
+					distance,
+					physicalMode,
+				),
+			);
+			await applyDynamicEntitySnapshotEvent(event);
+			const entity = spawnedEntities.find(
+				(current) =>
+					!previousGuids.has(current.identity.guid) &&
+					current.identity.wcid === wcid &&
+					current.placement.kind === "world",
+			);
+			if (!entity)
+				throw new Error(
+					"Explorer fleet snapshot omitted its new world entity.",
+				);
+			spawned.push(entity);
+		}
+		return spawned;
+	}
+
+	async function installSyntheticNameplateWorkload(
+		workload: SyntheticNameplateWorkload,
+	): Promise<readonly DynamicEntityView[]> {
+		if (!runtime || cameraEvidence === null)
+			throw new Error(
+				"Synthetic nameplate workload requires a current camera and runtime.",
+			);
+		const entities = createSyntheticNameplateWorkload(
+			workload,
+			cameraEvidence.landblockId,
+			cameraEvidence.position,
+			cameraEvidence.envCellId,
+		);
+		await runtime.replaceDynamicEntitySnapshot(entities);
+		if (workload.startsWith("svg-")) {
+			const target = entities[0];
+			if (target === undefined)
+				throw new Error("Synthetic SVG nameplate workload has no target.");
+			const icon = {
+				kind: "icon" as const,
+				iconId: OPENED_CONTAINER_NAMEPLATE_ICON_ID,
+			};
+			runtime.setDynamicEntityNameplateDecoration(target.identity.guid, {
+				indicators: workload === "svg-icons" ? [icon, icon] : [icon],
+				strikeThrough: true,
+			});
+		}
+		spawnedEntities = entities;
+		return entities;
+	}
+
+	async function probeRuntimeCombatEffects(): Promise<void> {
+		const entities = await installSyntheticNameplateWorkload("svg-icon");
+		const entity = entities[0];
+		if (!runtime || !entity)
+			throw new Error("Combat fixture requires an installed target.");
+		combatEffectsRuntime = await combatEffectsRuntimeProbe.run(runtime, entity);
+		await probeCombatEffectsAppearance();
+		spawnedEntities = [];
+	}
+
+	async function probeSyntheticNameplateLifecycle(): Promise<{
+		readonly before: RendererFrameDiagnosticsSnapshot["nameplates"];
+		readonly moved: RendererFrameDiagnosticsSnapshot["nameplates"];
+		readonly cleared: RendererFrameDiagnosticsSnapshot["nameplates"];
+		readonly movedGuid: number;
+		readonly previousY: number;
+		readonly movedY: number;
+	}> {
+		if (!runtime)
+			throw new Error(
+				"Synthetic nameplate lifecycle requires an active runtime.",
+			);
+		const current = spawnedEntities[0];
+		if (current?.placement.kind !== "world")
+			throw new Error("Synthetic nameplate lifecycle has no world target.");
+		const readNameplates =
+			(): RendererFrameDiagnosticsSnapshot["nameplates"] => {
+				const diagnostics = runtime?.getRendererFrameDiagnostics()?.nameplates;
+				if (!diagnostics)
+					throw new Error(
+						"Synthetic nameplate lifecycle has no renderer diagnostics.",
+					);
+				return diagnostics;
+			};
+		// Exercise hover admission with ordinary plates disabled, then restore the workload.
+		const maximumVisible = frameSettings.nameplates.maximumVisible;
+		try {
+			setNameplateMaximumVisible(0);
+			runtime.setHoveredEntityGuid(current.identity.guid);
+			await waitForTwoAnimationFrames();
+			if (readNameplates().submittedInstanceCount < 1)
+				throw new Error(
+					"Hovered nameplate did not bypass the disabled budget.",
+				);
+			runtime.setHoveredEntityGuid(null);
+			await waitForTwoAnimationFrames();
+			if (readNameplates().submittedInstanceCount !== 0)
+				throw new Error("Cleared hover retained a forced nameplate.");
+		} finally {
+			runtime.setHoveredEntityGuid(null);
+			setNameplateMaximumVisible(maximumVisible);
+		}
+		await waitForTwoAnimationFrames();
+		// Hover may populate the cache even when the original budget was zero.
+		const before = readNameplates();
+		const previousY = current.placement.pose.coords.y;
+		const movedY = previousY + 2;
+		const movedEntity: DynamicEntityView = {
+			...current,
+			placement: {
+				...current.placement,
+				pose: {
+					...current.placement.pose,
+					coords: { ...current.placement.pose.coords, y: movedY },
+				},
+			},
+		};
+		spawnedEntities = spawnedEntities.map((entity) =>
+			entity.identity.guid === movedEntity.identity.guid ? movedEntity : entity,
+		);
+		await runtime.upsertDynamicEntity(movedEntity);
+		await waitForTwoAnimationFrames();
+		const moved = readNameplates();
+		await runtime.replaceDynamicEntitySnapshot([]);
+		spawnedEntities = [];
+		await waitForTwoAnimationFrames();
+		return {
+			before,
+			cleared: readNameplates(),
+			moved,
+			movedGuid: movedEntity.identity.guid,
+			movedY,
+			previousY,
+		};
+	}
+
+	async function probeSyntheticAppearanceReplacement() {
+		const activeRuntime = runtime;
+		const canvas = canvasElement;
+		const current = spawnedEntities[0];
+		if (
+			!activeRuntime ||
+			!canvas ||
+			current === undefined ||
+			spawnedEntities.length !== 1
+		)
+			throw new Error(
+				"Appearance probe requires one synthetic entity and an active canvas.",
+			);
+		await waitForTwoAnimationFrames();
+		const beforeDataUrl = canvas.toDataURL("image/png");
+		const revision = activeRuntime.dynamicEntityPlacementRevision;
+		const changed: DynamicEntityView = {
+			...current,
+			presentation: {
+				...current.presentation,
+				appearance: { ...current.presentation.appearance, paletteDid: 2 },
+			},
+		};
+		const outcome = await activeRuntime.upsertDynamicEntity(changed);
+		if (outcome !== "installed")
+			throw new Error("Synthetic appearance was not installed.");
+		spawnedEntities = [changed];
+		await waitForTwoAnimationFrames();
+		const afterDataUrl = canvas.toDataURL("image/png");
+		const selected = activeRuntime.dynamicEntityPresentationState(
+			current.identity.guid,
+		);
+		if (selected.kind !== "realized")
+			throw new Error("Appearance replacement lost selection geometry.");
+		const bounds = selected.frame.localBounds;
+		// Same-generation opacity crosses opaque -> ordered -> hidden -> opaque without moving.
+		const opacityCycle = [];
+		for (const translucency of [0, 0.5, 1, 0]) {
+			const faded: DynamicEntityView = {
+				...changed,
+				physics: { ...changed.physics, translucency },
+			};
+			await activeRuntime.upsertDynamicEntity(faded);
+			spawnedEntities = [faded];
+			await waitForTwoAnimationFrames();
+			const metrics =
+				activeRuntime.getRendererFrameDiagnostics()?.selectionMetrics;
+			if (metrics === undefined)
+				throw new Error("Opacity probe has no renderer diagnostics.");
+			const dynamicDraws = metrics.submittedDynamicDrawCount;
+			const transparentDraws = metrics.submittedTransparentObjectDrawCount;
+			if (
+				dynamicDraws !== (translucency === 1 ? 0 : 1) ||
+				transparentDraws !== (translucency === 0.5 ? 1 : 0)
+			) {
+				throw new Error(
+					`Merged opacity routing failed at ${translucency}: draws=${dynamicDraws}, transparent=${transparentDraws}.`,
+				);
+			}
+			opacityCycle.push({
+				translucency,
+				dataUrl: canvas.toDataURL("image/png"),
+				dynamicDraws,
+				transparentDraws,
+			});
+		}
+		if (
+			opacityCycle[0].dataUrl === opacityCycle[1].dataUrl ||
+			opacityCycle[1].dataUrl === opacityCycle[2].dataUrl ||
+			opacityCycle[0].dataUrl !== opacityCycle[3].dataUrl
+		) {
+			throw new Error(
+				"Merged opacity cycle did not change pixels and restore its original image.",
+			);
+		}
+		// Exercise the same scoped body API used by the barber against the live WebGL runtime.
+		const baselineEntities =
+			activeRuntime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount;
+		for (let cycle = 0; cycle < 3; cycle += 1) {
+			await activeRuntime.setDynamicPresentationOverride({
+				guid: current.identity.guid,
+				generation: current.generation,
+				body: {
+					setupDid: current.presentation.content.setupDid,
+					appearance: { ...current.presentation.appearance, paletteDid: 2 },
+				},
+				particles: null,
+			});
+			const latest = {
+				...current,
+				presentation: {
+					...current.presentation,
+					appearance: { ...current.presentation.appearance, paletteDid: 3 },
+				},
+			};
+			await activeRuntime.upsertDynamicEntity(latest);
+			if (
+				[...activeRuntime.listPresentedSpawnedEntities()][0]?.view.presentation
+					.appearance.paletteDid !== 2
+			)
+				throw new Error(
+					"Accepted server appearance replaced the local barber draft.",
+				);
+			await activeRuntime.setDynamicPresentationOverride(null);
+			if (
+				[...activeRuntime.listPresentedSpawnedEntities()][0]?.view.presentation
+					.appearance.paletteDid !== 3
+			)
+				throw new Error(
+					"Closing barber did not restore the latest authoritative appearance.",
+				);
+			if (
+				activeRuntime.getAuthoredDynamicRuntimeDiagnostics().dynamics
+					.entityCount !== baselineEntities
+			)
+				throw new Error("Barber cycle duplicated a live entity.");
+		}
+		await activeRuntime.upsertDynamicEntity(changed);
+		spawnedEntities = [changed];
+
+		return {
+			barberCycles: 3,
+			opacityCycle,
+			beforeDataUrl,
+			afterDataUrl,
+			placementUnchanged:
+				revision === activeRuntime.dynamicEntityPlacementRevision,
+			replacementBoundsWidth: bounds.max.x - bounds.min.x,
+		};
+	}
+
+	function waitForTwoAnimationFrames(): Promise<void> {
+		return new Promise((resolve) =>
+			window.requestAnimationFrame(() =>
+				window.requestAnimationFrame(() => resolve()),
+			),
+		);
+	}
+
+	/**
+	 * Sample the exact borrowed geometry and renderer mask that production selection consumes.
+	 *
+	 * A weighted matrix checksum is compact harness evidence, not runtime identity. Any animated
+	 * part or inherited attachment transform change alters it while the underlying mesh stays borrowed.
+	 */
+	async function probeSpawnedEntitySelection(
+		guid: number,
+		delayMilliseconds: number,
+	): Promise<BrowserHarnessSpawnedSelectionEvidence> {
+		if (!runtime)
+			throw new Error("Spawned selection probe requires an active runtime.");
+		const activeRuntime = runtime;
+		if (!Number.isFinite(delayMilliseconds) || delayMilliseconds < 0)
+			throw new Error(
+				"Spawned selection probe delay must be finite and non-negative.",
+			);
+		activeRuntime.setSelectedEntityGuid(guid);
+		await waitForTwoAnimationFrames();
+		const sample = (): BrowserHarnessSpawnedSelectionSample => {
+			const state = activeRuntime.dynamicEntityPresentationState(guid);
+			if (state.kind !== "realized" || state.frame.guid !== guid)
+				throw new Error(
+					`Spawned selection target ${guid} is not realized: ${JSON.stringify(state)}.`,
+				);
+			const selected = state.frame;
+			const geometry = activeRuntime.withSpawnedEntitySelectionGeometry(
+				guid,
+				(current) => {
+					if (current.kind === "sphere-proxy") {
+						return {
+							guid,
+							landblockId: current.landblockId,
+							partCount: 0,
+							transformChecksum: matrixChecksum(current.sourceToLandblock, 1),
+							triangleCount: 0,
+						};
+					}
+					let triangleCount = 0;
+					let transformChecksum = 0;
+					for (const [partIndex, part] of current.parts.entries()) {
+						triangleCount += part.ranges.reduce(
+							(total, range) => total + range.indexCount / 3,
+							0,
+						);
+						transformChecksum += matrixChecksum(
+							part.sourceToLandblock,
+							partIndex + 1,
+						);
+					}
+					return {
+						guid,
+						landblockId: current.landblockId,
+						partCount: current.parts.length,
+						transformChecksum,
+						triangleCount,
+					};
+				},
+			);
+			const mask =
+				activeRuntime.getRendererFrameDiagnostics()?.selectionMetrics
+					.entitySelection;
+			if (geometry === null || geometry === undefined || mask === undefined)
+				throw new Error(
+					`Spawned selection target ${guid} has no frame evidence.`,
+				);
+			return {
+				exactHit: exactSelfHit(activeRuntime, guid),
+				geometry,
+				mask: { ...mask },
+				resolvedPlacementChecksum: matrixChecksum(
+					selected.placement.localToLandblock,
+					1,
+				),
+			};
+		};
+		const first = sample();
+		await new Promise((resolve) =>
+			window.setTimeout(resolve, delayMilliseconds),
+		);
+		await waitForTwoAnimationFrames();
+		return { first, second: sample() };
+	}
+
+	/** Build a short ray through one current visible triangle, then run the production refiner. */
+	function exactSelfHit(
+		runtime: GamePresentationRuntime,
+		guid: number,
+	): EntitySelectionRefinement {
+		const rays = runtime.withSpawnedEntitySelectionGeometry(
+			guid,
+			(geometry) => {
+				const origin = createLandblockWorldOrigin(geometry.landblockId);
+				if (geometry.kind === "sphere-proxy") {
+					const center = origin.add(
+						transformPoint3(geometry.sourceToLandblock, geometry.sphere.center),
+					);
+					return [
+						{
+							direction: new Vec3(1, 0, 0),
+							start: new Vec3(center.x - 1, center.y, center.z),
+						},
+						{
+							direction: new Vec3(-1, 0, 0),
+							start: new Vec3(center.x + 1, center.y, center.z),
+						},
+					] as const;
+				}
+				for (const part of geometry.parts) {
+					for (const range of part.ranges) {
+						const end = range.indexStart + range.indexCount;
+						for (let offset = range.indexStart; offset < end; offset += 3) {
+							const points = [0, 1, 2].map((corner) => {
+								const vertex = part.geometry.indices[offset + corner]! * 3;
+								return origin.add(
+									transformPoint3(
+										part.sourceToLandblock,
+										new Vec3(
+											part.geometry.positions[vertex]!,
+											part.geometry.positions[vertex + 1]!,
+											part.geometry.positions[vertex + 2]!,
+										),
+									),
+								);
+							});
+							const first = points[0]!;
+							const second = points[1]!;
+							const third = points[2]!;
+							const ab = new Vec3(
+								second.x - first.x,
+								second.y - first.y,
+								second.z - first.z,
+							);
+							const ac = new Vec3(
+								third.x - first.x,
+								third.y - first.y,
+								third.z - first.z,
+							);
+							const normal = new Vec3(
+								ab.y * ac.z - ab.z * ac.y,
+								ab.z * ac.x - ab.x * ac.z,
+								ab.x * ac.y - ab.y * ac.x,
+							);
+							const length = Math.hypot(normal.x, normal.y, normal.z);
+							if (length <= Number.EPSILON) continue;
+							const direction = new Vec3(
+								normal.x / length,
+								normal.y / length,
+								normal.z / length,
+							);
+							const center = new Vec3(
+								(first.x + second.x + third.x) / 3,
+								(first.y + second.y + third.y) / 3,
+								(first.z + second.z + third.z) / 3,
+							);
+							return [
+								{
+									direction,
+									start: new Vec3(
+										center.x - direction.x,
+										center.y - direction.y,
+										center.z - direction.z,
+									),
+								},
+								{
+									direction: new Vec3(-direction.x, -direction.y, -direction.z),
+									start: new Vec3(
+										center.x + direction.x,
+										center.y + direction.y,
+										center.z + direction.z,
+									),
+								},
+							] as const;
+						}
+					}
+				}
+				return null;
+			},
+		);
+		if (rays === null)
+			throw new Error(
+				`Spawned selection target ${guid} has no nondegenerate triangle.`,
+			);
+		for (const ray of rays) {
+			const refinement = refineEntitySelectionCandidates(
+				runtime,
+				ray,
+				[guid],
+				2,
+			);
+			if (refinement.selectedGuid === guid) return refinement;
+		}
+		throw new Error(
+			`Spawned selection target ${guid} rejected both triangle faces.`,
+		);
+	}
+
+	function matrixChecksum(matrix: Mat4, weight: number): number {
+		return [
+			matrix.m11,
+			matrix.m12,
+			matrix.m13,
+			matrix.m14,
+			matrix.m21,
+			matrix.m22,
+			matrix.m23,
+			matrix.m24,
+			matrix.m31,
+			matrix.m32,
+			matrix.m33,
+			matrix.m34,
+			matrix.m41,
+			matrix.m42,
+			matrix.m43,
+			matrix.m44,
+		].reduce((sum, value, index) => sum + value * (index + 1) * weight, 0);
+	}
+
+	async function launchExplorerEntity(
+		guid: number,
+		generation: number,
+		direction: readonly [number, number, number],
+	): Promise<DynamicEntityView> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity launch requires an active runtime.",
+			);
+		const entity = await entityHost.launch(
+			createExplorerLaunchRequest(guid, generation, direction),
+		);
+		spawnedEntities = spawnedEntities.map((current) =>
+			current.identity.guid === guid && current.generation === generation
+				? entity
+				: current,
+		);
+		await runtime.upsertDynamicEntity(entity);
+		return entity;
+	}
+
+	async function tickExplorerEntities(
+		durationMilliseconds: number,
+	): Promise<ExplorerFixedTickEnvelope | null> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity tick requires an active runtime.",
+			);
+		if (!Number.isFinite(durationMilliseconds) || durationMilliseconds <= 0)
+			throw new Error("Entity tick duration must be positive and finite.");
+		const envelope = await entityHost.tick(durationMilliseconds);
+		if (envelope?.entityEvent) {
+			applyDynamicEntityTickEvent(envelope.entityEvent);
+		}
+		return envelope;
+	}
+
+	async function possessExplorerEntity(
+		guid: number | null,
+	): Promise<ExplorerPossession> {
+		if (!entityHost)
+			throw new Error("Browser harness possession requires an active host.");
+		return entityHost.possess(guid);
+	}
+
+	async function setPossessionIntent(
+		request: ExplorerPossessionIntent,
+	): Promise<string> {
+		if (!entityHost)
+			throw new Error("Browser harness possession requires an active host.");
+		return entityHost.setPossessionIntent(request);
+	}
+
+	async function queuePossessionEvent(
+		request: ExplorerPossessionEventRequest,
+	): Promise<PossessionEventQueueReceipt> {
+		if (!entityHost)
+			throw new Error("Browser harness possession requires an active host.");
+		return entityHost.queuePossessionEvent(request);
+	}
+
+	async function tickPossession(
+		durationMilliseconds: number,
+	): Promise<PossessionTickResponse> {
+		if (!runtime || !entityHost)
+			throw new Error("Browser harness possession requires an active runtime.");
+		if (!Number.isFinite(durationMilliseconds) || durationMilliseconds <= 0)
+			throw new Error("Possession tick duration must be positive and finite.");
+		const response = await entityHost.tickPossession(durationMilliseconds);
+		const receivedAtMs = performance.now();
+		if (response.envelope?.entityEvent) {
+			applyDynamicEntityTickEvent(response.envelope.entityEvent);
+		}
+		if (response.envelope?.boom) {
+			boomCameraSession?.receive(
+				response.envelope.boom,
+				response.envelope.durationMs,
+				receivedAtMs,
+			);
+		}
+		return response;
+	}
+
+	async function possessionMotionProbe(): Promise<PossessionMotionProbe | null> {
+		if (!entityHost)
+			throw new Error("Browser harness possession requires an active host.");
+		return entityHost.possessionMotionProbe();
+	}
+
+	async function startKinematicBoom(
+		request: Omit<
+			HttpKinematicBoomStartRequest,
+			"clearanceRadius" | "projectionRevision"
+		>,
+	): Promise<HostKinematicBoomIdentity> {
+		if (!entityHost)
+			throw new Error(
+				"Browser harness kinematic boom requires an active host.",
+			);
+		if (
+			request.inputSequence !== 0 ||
+			request.cumulativeZoomDisplacement !== 0
+		) {
+			throw new Error(
+				"Browser harness frontend boom must start at input sequence and cumulative zoom zero.",
+			);
+		}
+		const session = new HostKinematicBoomSession(boomTransport(entityHost));
+		const activeRuntime = runtime;
+		const canvas = canvasElement;
+		const evidence = cameraEvidence;
+		if (activeRuntime === undefined || canvas === null || evidence === null) {
+			throw new Error(
+				"Browser harness boom requires an active camera viewport.",
+			);
+		}
+		await entityHost.ensureSimulationInterest(evidence.landblockId);
+		if (
+			cameraEvidence?.landblockId !== evidence.landblockId ||
+			cameraEvidence?.envCellId !== evidence.envCellId ||
+			cameraEvidence?.position.some(
+				(value, index) => value !== evidence.position[index],
+			) === true
+		) {
+			throw new Error(
+				"Browser harness camera placement changed while collision interest loaded.",
+			);
+		}
+		const revision = ++boomProjectionRevision;
+		if (!Number.isSafeInteger(revision)) {
+			throw new Error("Browser harness boom projection revision exhausted.");
+		}
+		const projection = createProjectionClearanceRevision(
+			revision,
+			{ fov: evidence.fov, near: evidence.near },
+			activeRuntime.resolveViewportExtent(
+				canvas.clientWidth,
+				canvas.clientHeight,
+			),
+		);
+		requestedBoomProjection = projection;
+		await session.start(
+			{
+				possessionGeneration: request.possessionGeneration,
+				guid: request.guid,
+				entityGeneration: request.entityGeneration,
+			},
+			{
+				initial: request.initialReach,
+				minimum: request.minimumReach,
+				maximum: request.maximumReach,
+			},
+			request.viewDirection,
+			projection,
+		);
+		const status = session.status();
+		if (status.kind !== "awaiting-first-path") {
+			throw new Error("Browser harness boom did not retain its registration.");
+		}
+		boomCameraSession = session;
+		boomInputSequence = 0;
+		boomCumulativeZoomDisplacement = 0;
+		return status.identity;
+	}
+
+	async function reprojectKinematicBoom(
+		width: number,
+		height: number,
+		fov: number,
+	): Promise<ProjectionClearanceRevision> {
+		if (
+			!Number.isSafeInteger(width) ||
+			width <= 0 ||
+			!Number.isSafeInteger(height) ||
+			height <= 0
+		) {
+			throw new Error(
+				"Browser harness viewport extent must be positive integers.",
+			);
+		}
+		const session = boomCameraSession;
+		const activeRuntime = runtime;
+		const canvas = canvasElement;
+		const evidence = cameraEvidence;
+		if (
+			session === undefined ||
+			activeRuntime === undefined ||
+			canvas === null ||
+			evidence === null
+		) {
+			throw new Error(
+				"Browser harness reproject requires an active boom viewport.",
+			);
+		}
+		viewportWidth = width;
+		viewportHeight = height;
+		await svelteTick();
+		const revision = ++boomProjectionRevision;
+		if (!Number.isSafeInteger(revision)) {
+			throw new Error("Browser harness boom projection revision exhausted.");
+		}
+		const projection = createProjectionClearanceRevision(
+			revision,
+			{ fov, near: evidence.near },
+			activeRuntime.resolveViewportExtent(
+				canvas.clientWidth,
+				canvas.clientHeight,
+			),
+		);
+		requestedBoomProjection = projection;
+		await session.setClearance(projection);
+		return projection;
+	}
+
+	async function setKinematicBoomIntent(
+		request: HttpKinematicBoomIntentRequest,
+	): Promise<"accepted" | "ignored-stale"> {
+		if (!entityHost)
+			throw new Error(
+				"Browser harness kinematic boom requires an active host.",
+			);
+		const session = boomCameraSession;
+		if (session === undefined) {
+			throw new Error("Browser harness frontend boom is not registered.");
+		}
+		if (request.inputSequence <= boomInputSequence) {
+			return decodeHostKinematicBoomUpdateReceipt(
+				await entityHost.setKinematicBoomIntent(request),
+			);
+		}
+		if (request.inputSequence !== boomInputSequence + 1) {
+			throw new Error(
+				"Browser harness boom input sequence must be contiguous.",
+			);
+		}
+		await session.setIntent(
+			request.viewDirection,
+			request.cumulativeZoomDisplacement - boomCumulativeZoomDisplacement,
+		);
+		boomInputSequence = request.inputSequence;
+		boomCumulativeZoomDisplacement = request.cumulativeZoomDisplacement;
+		return "accepted";
+	}
+
+	async function stopKinematicBoom(
+		identity: HostKinematicBoomIdentity,
+	): Promise<boolean> {
+		if (!entityHost)
+			throw new Error(
+				"Browser harness kinematic boom requires an active host.",
+			);
+		const session = boomCameraSession;
+		if (session === undefined) return entityHost.stopKinematicBoom(identity);
+		await session.stop();
+		boomCameraSession = undefined;
+		requestedBoomProjection = null;
+		activeBoomProjection = null;
+		return boomStopResult;
+	}
+
+	function boomTransport(
+		host: HttpExplorerEntityHost,
+	): HostKinematicBoomTransport {
+		return {
+			invoke: async (command, args) => {
+				const request = args?.request;
+				if (command === "start_kinematic_boom") {
+					return host.startKinematicBoom(
+						request as HttpKinematicBoomStartRequest,
+					);
+				}
+				if (command === "set_kinematic_boom_intent") {
+					return host.setKinematicBoomIntent(
+						request as HttpKinematicBoomIntentRequest,
+					);
+				}
+				if (command === "set_kinematic_boom_clearance") {
+					return host.setKinematicBoomClearance(
+						request as HttpKinematicBoomClearanceRequest,
+					);
+				}
+				if (command === "stop_kinematic_boom") {
+					boomStopResult = await host.stopKinematicBoom(
+						request as HostKinematicBoomIdentity,
+					);
+					return boomStopResult;
+				}
+				throw new Error(`Unknown browser boom command ${command}.`);
+			},
+		};
+	}
+
+	function syncHarnessBoomCamera(nowMs: number): void {
+		const activeRuntime = runtime;
+		const evidence = cameraEvidence;
+		const session = boomCameraSession;
+		const presentation = session?.presentation(nowMs);
+		const projection = session?.acknowledgedProjection(nowMs) ?? null;
+		if (
+			activeRuntime === undefined ||
+			evidence === null ||
+			presentation == null ||
+			projection === null
+		)
+			return;
+		activeBoomProjection = projection;
+		const { placement, visualPivot } = presentation;
+		// A reseed instant carries no look direction, and the harness has no desired orbit to fall
+		// back on, so it holds its last applied camera rather than inventing one.
+		const orientation = resolveCameraLookAtAngles(
+			placement.position,
+			visualPivot,
+		);
+		if (orientation === null) return;
+		const rotation = createCameraRotationRadians(
+			orientation.yawRadians,
+			orientation.pitchRadians,
+		);
+		applyHarnessCamera(
+			activeRuntime,
+			{
+				far: evidence.far,
+				fov: projection.fov,
+				near: projection.near,
+				placement: {
+					envCellId: placement.residency.envCellId,
+					landblockId: placement.residency.landblockId,
+					position: placement.position,
+					rotation,
+				},
+			},
+			projection.extent,
+		);
+		cameraEvidence = {
+			...evidence,
+			fov: projection.fov,
+			near: projection.near,
+			envCellId: placement.residency.envCellId,
+			landblockId: placement.residency.landblockId,
+			policy: "host-boom",
+			pitchDegrees: (orientation.pitchRadians * 180) / Math.PI,
+			position: [
+				placement.position.x,
+				placement.position.y,
+				placement.position.z,
+			],
+			yawDegrees: (orientation.yawRadians * 180) / Math.PI,
+		};
+	}
+
+	async function probeNextFrameState(): Promise<{
+		readonly boomProjection: {
+			readonly active: ProjectionClearanceRevision | null;
+			readonly requested: ProjectionClearanceRevision | null;
+		};
+		readonly camera: BrowserHarnessCameraEvidence | null;
+		readonly envCellRenderMode: "flat" | "portal";
+		readonly metrics: FrameSelectionMetrics | null;
+	}> {
+		await new Promise<void>((resolve) =>
+			window.requestAnimationFrame(() => resolve()),
+		);
+		return {
+			boomProjection: {
+				active: activeBoomProjection,
+				requested: requestedBoomProjection,
+			},
+			camera: cameraEvidence,
+			envCellRenderMode: frameSettings.envCellRenderMode,
+			metrics: runtime?.getRendererFrameDiagnostics()?.selectionMetrics ?? null,
+		};
+	}
+
+	async function probeThirdPersonControls(): Promise<
+		Awaited<ReturnType<BrowserHarnessApi["probeThirdPersonControls"]>>
+	> {
+		const listeners = new Map<string, EventListener>();
+		const routedCharacterInput: unknown[] = [];
+		let possessionOrbitDelta: readonly [number, number] | null = null;
+		let wheelDistance = 0;
+		const canvas = {
+			addEventListener(
+				type: string,
+				listener: EventListenerOrEventListenerObject,
+			) {
+				if (typeof listener === "function") listeners.set(type, listener);
+			},
+			focus() {},
+			hasPointerCapture: () => false,
+			releasePointerCapture() {},
+			removeEventListener() {},
+			setPointerCapture() {},
+		} as unknown as HTMLCanvasElement;
+		const inputGate = new ViewportInputGate();
+		const keyboard = new KeyboardInputPolicy(inputGate);
+		const dispatch = (type: string, event: object) =>
+			(type === "keydown"
+				? keyboard.keydown
+				: type === "keyup"
+					? keyboard.keyup
+					: listeners.get(type))?.(
+				Object.assign(
+					new KeyboardEvent(type, { cancelable: true }),
+					{ getModifierState: () => false },
+					event,
+				),
+			);
+		const controller = new ExplorerCameraInputController({
+			inputGate,
+			keyboard,
+			input: new AppInput(createInputDefaults("windows")),
+			canvas,
+			onChange() {},
+			onCharacterInput: (input) => routedCharacterInput.push(input),
+			onPhysicalWheel: (distance) => (wheelDistance = distance),
+			onPossessionOrbit: (deltaX, deltaY) =>
+				(possessionOrbitDelta = [deltaX, deltaY]),
+			onPossessionWheel: (distance) => (wheelDistance = distance),
+			requestAnimationFrame: () => 1,
+			cancelAnimationFrame() {},
+		});
+		controller.setControlScheme({ kind: "possessed-character" });
+		const cameraYawBefore = controller.snapshotState().yawRadians;
+		dispatch("keydown", { key: "a", repeat: false, shiftKey: false });
+		const cameraYawAfterKeyboardTurn = controller.snapshotState().yawRadians;
+		const characterInputCountAfterKeyboard = routedCharacterInput.length;
+		dispatch("pointerdown", {
+			button: 0,
+			clientX: 0,
+			clientY: 0,
+			pointerId: 1,
+		});
+		dispatch("pointermove", {
+			clientX: 20,
+			clientY: 5,
+			pointerId: 1,
+			shiftKey: false,
+		});
+		dispatch("wheel", { deltaX: 0, deltaY: 100, shiftKey: false });
+		const characterInputCountAfterPointerAndWheel = routedCharacterInput.length;
+		controller.dispose();
+		const projection = createProjectionClearanceRevision(
+			1,
+			{ fov: CAMERA_FOV_DEGREES, near: CAMERA_NEAR },
+			{ height: 720, width: 1_280 },
+		);
+		const transport: HostKinematicBoomTransport = {
+			async invoke(command) {
+				if (command === "start_kinematic_boom") {
+					return {
+						boomGeneration: 1,
+						entityGeneration: 1,
+						guid: 1,
+						possessionGeneration: 1,
+					};
+				}
+				if (
+					command === "set_kinematic_boom_intent" ||
+					command === "set_kinematic_boom_clearance"
+				)
+					return "accepted";
+				if (command === "stop_kinematic_boom") return true;
+				throw new Error(`Unexpected third-person probe command ${command}.`);
+			},
+		};
+		const recenter = new PossessionCameraController({
+			initialLook: { pitchRadians: -0.4, yawRadians: 0 },
+			orbit: {
+				maximumPitchRadians: 1,
+				pitchRadiansPerPixel: 0.01,
+				yawRadiansPerPixel: 0.01,
+			},
+			recenter: {
+				delayMs: EXPLORER_TUNING.camera.boom.recenterDelayMs,
+				durationMs: EXPLORER_TUNING.camera.boom.recenterDurationMs,
+			},
+			transport,
+		});
+		await recenter.start(
+			{ possessionGeneration: 1, guid: 1, entityGeneration: 1 },
+			{ initial: 4.5, minimum: 1.2, maximum: 32 },
+			projection,
+		);
+		const targetYaw = createEntityFacingCameraYaw({
+			w: Math.SQRT1_2,
+			x: 0,
+			y: 0,
+			z: Math.SQRT1_2,
+		});
+		const recenterDelayMs = EXPLORER_TUNING.camera.boom.recenterDelayMs;
+		const recenterDurationMs = EXPLORER_TUNING.camera.boom.recenterDurationMs;
+		recenter.setTranslationIntent(true, 0);
+		await recenter.synchronize(projection, recenterDelayMs - 1, targetYaw);
+		const recenterBefore = recenter.desiredLook();
+		await recenter.synchronize(
+			projection,
+			recenterDelayMs + recenterDurationMs / 2,
+			targetYaw,
+		);
+		const recenterMid = recenter.desiredLook();
+		await recenter.synchronize(
+			projection,
+			recenterDelayMs + recenterDurationMs,
+			targetYaw,
+		);
+		const recenterAfter = recenter.desiredLook();
+		const trackingTargetYaw = targetYaw + 0.4;
+		recenter.setTranslationIntent(false, recenterDelayMs + recenterDurationMs);
+		await recenter.synchronize(
+			projection,
+			recenterDelayMs + recenterDurationMs + 1,
+			trackingTargetYaw,
+		);
+		const recenterTracking = recenter.desiredLook();
+		await recenter.stop();
+		return {
+			boomZoomDisplacement:
+				-wheelDistance * EXPLORER_TUNING.camera.boom.zoomDistanceMultiplier,
+			cameraYawAfterKeyboardTurn,
+			cameraYawBefore,
+			characterInputCountAfterKeyboard,
+			characterInputCountAfterPointerAndWheel,
+			possessionOrbitDelta,
+			recenterAfterYaw: recenterAfter.yawRadians,
+			recenterBeforeYaw: recenterBefore.yawRadians,
+			recenterMidYaw: recenterMid.yawRadians,
+			recenterPitch: recenterAfter.pitchRadians,
+			recenterTrackingYaw: recenterTracking.yawRadians,
+		};
+	}
+
+	async function relocateExplorerEntity(
+		guid: number,
+		generation: number,
+		distance: number,
+		kind: "teleport" | "reset",
+	): Promise<DynamicEntityEvent> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity relocation requires an active runtime.",
+			);
+		const { direction, placement } = entityScenarioAnchor();
+		await entityHost.ensureSimulationInterest(placement.residency.landblockId);
+		const event = await entityHost.relocate(
+			createExplorerRelocationRequest(
+				guid,
+				generation,
+				placement,
+				direction,
+				distance,
+				kind,
+			),
+		);
+		applyDynamicEntityTickEvent(event);
+		return event;
+	}
+
+	function applyDynamicEntityTickEvent(event: DynamicEntityEvent): void {
+		if (!runtime)
+			throw new Error("Dynamic-entity tick requires an active runtime.");
+		if (event.kind !== "ticked")
+			throw new Error(
+				`Dynamic-entity operation returned unexpected ${event.kind} event.`,
+			);
+		for (const advance of event.batch.advances) {
+			const current = spawnedEntities.find(
+				(entity) => entity.identity.guid === advance.entity.identity.guid,
+			);
+			if (current?.generation !== advance.entity.generation)
+				throw new Error(
+					`Dynamic-entity operation returned unknown generation ${advance.entity.generation} for 0x${advance.entity.identity.guid.toString(16)}.`,
+				);
+		}
+		runtime.applyDynamicEntityTick(event.batch, performance.now());
+		const advanced = new Map(
+			event.batch.advances.map((advance) => [
+				advance.entity.identity.guid,
+				advance.entity,
+			]),
+		);
+		spawnedEntities = spawnedEntities.map(
+			(entity) => advanced.get(entity.identity.guid) ?? entity,
+		);
+	}
+
+	async function applyDynamicEntitySnapshotEvent(
+		event: DynamicEntityEvent,
+	): Promise<void> {
+		if (!runtime)
+			throw new Error("Dynamic-entity snapshot requires an active runtime.");
+		if (event.kind !== "snapshot")
+			throw new Error(
+				`Dynamic-entity lifecycle returned unexpected ${event.kind} event.`,
+			);
+		spawnedEntities = EXCLUDE_SPAWNED_ATTACHMENTS
+			? event.snapshot.entities.filter(
+					(entity) => entity.placement.kind === "world",
+				)
+			: event.snapshot.entities;
+		await runtime.replaceDynamicEntitySnapshot(spawnedEntities);
+	}
+
+	async function despawnExplorerEntity(
+		guid: number,
+		generation: number,
+	): Promise<void> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity despawn requires an active runtime.",
+			);
+		await applyDynamicEntitySnapshotEvent(
+			await entityHost.despawn(guid, generation),
+		);
+	}
+
+	/** Retire every live harness-spawned generation, so teardown census has one exact call. */
+	async function despawnExplorerEntityFleet(): Promise<number> {
+		if (!runtime || !entityHost)
+			throw new Error(
+				"Browser harness entity despawn requires an active runtime.",
+			);
+		const retiring = spawnedEntities.filter(
+			(entity) => entity.placement.kind === "world",
+		);
+		for (const entity of retiring)
+			await applyDynamicEntitySnapshotEvent(
+				await entityHost.despawn(entity.identity.guid, entity.generation),
+			);
+		return retiring.length;
+	}
+
+	function setLayerVisibility(
+		layer: keyof FrameSettings["layerVisibility"],
+		visible: boolean,
+	): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		if (!(layer in frameSettings.layerVisibility)) {
+			throw new Error(`Unknown browser harness render layer ${layer}.`);
+		}
+		frameSettings = {
+			...frameSettings,
+			layerVisibility: { ...frameSettings.layerVisibility, [layer]: visible },
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setTextureFiltering(rawPolicy: string): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		if (!isTextureFilteringPolicy(rawPolicy)) {
+			throw new Error(`Unknown texture filtering policy ${rawPolicy}.`);
+		}
+		const policy: TextureFilteringPolicy = rawPolicy;
+		frameSettings = {
+			...frameSettings,
+			quality: { ...frameSettings.quality, textureFiltering: policy },
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setMinimumPortalFootprintCssPixelArea(pixelArea: number): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		if (!Number.isFinite(pixelArea) || pixelArea < 0) {
+			throw new Error(
+				"Minimum portal footprint CSS pixel area must be non-negative and finite.",
+			);
+		}
+		frameSettings = {
+			...frameSettings,
+			quality: {
+				...frameSettings.quality,
+				minimumPortalFootprintCssPixelArea: pixelArea,
+			},
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setMinimumObjectFootprintCssPixelArea(pixelArea: number): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		if (!Number.isFinite(pixelArea) || pixelArea < 0) {
+			throw new Error(
+				"Minimum object-footprint CSS pixel area must be non-negative and finite.",
+			);
+		}
+		frameSettings = {
+			...frameSettings,
+			quality: {
+				...frameSettings.quality,
+				minimumObjectFootprintCssPixelArea: pixelArea,
+			},
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	/** Drive sampling density explicitly; the renderer no longer reads `devicePixelRatio`. */
+	function setRenderScale(renderScale: number): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		validateRenderScale(renderScale, "Browser harness");
+		frameSettings = {
+			...frameSettings,
+			quality: { ...frameSettings.quality, renderScale },
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setNameplateMaximumVisible(maximumVisible: number): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = {
+			...frameSettings,
+			nameplates: { ...frameSettings.nameplates, maximumVisible },
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setNameplateMinimumLegiblePixels(minimumPixels: number): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = {
+			...frameSettings,
+			nameplates: {
+				...frameSettings.nameplates,
+				minimumLegibleNamePixels: minimumPixels,
+			},
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setEntityShadowSettings(settings: EntityShadowSettings): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = {
+			...frameSettings,
+			entityShadows: createEntityShadowSettings(settings),
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setEntityShadowMode(mode: EntityShadowMode): void {
+		setEntityShadowSettings({ ...frameSettings.entityShadows, mode });
+	}
+
+	function setEntityShadowCasterBudget(
+		maximumSelectedRoots: number,
+		maximumMappedRoots: number,
+	): void {
+		setEntityShadowSettings({
+			...frameSettings.entityShadows,
+			casterBudget: { maximumMappedRoots, maximumSelectedRoots },
+		});
+	}
+
+	function setOffscreenAnimationSampleIntervalSeconds(
+		intervalSeconds: number,
+	): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		runtime.setOffscreenAnimationSampleIntervalSeconds(intervalSeconds);
+	}
+
+	function setFrameProfiling(enabled: boolean): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		runtime.setRendererFrameProfilingEnabled(enabled);
+	}
+
+	function captureBakedDrawMergeCensus(): Promise<BakedDrawMergeCensus> {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		return runtime.captureBakedDrawMergeCensus();
+	}
+
+	function setAmbientOcclusion(enabled: boolean): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = {
+			...frameSettings,
+			ambientOcclusion: { ...frameSettings.ambientOcclusion, enabled },
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setAmbientOcclusionCoverageVisualization(enabled: boolean): void {
+		if (!renderer) throw new Error("Browser harness renderer is not ready.");
+		renderer.setAmbientOcclusionCoverageVisualizationEnabled(enabled);
+	}
+
+	/** Apply one authored grade, or `null` to present ungraded. */
+	function setColorGrade(parameters: ColorGradeParameters | null): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = {
+			...frameSettings,
+			colorGrade: parameters
+				? { enabled: true, parameters: createColorGradeParameters(parameters) }
+				: { ...frameSettings.colorGrade, enabled: false },
+		};
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setStaticLights(enabled: boolean): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = { ...frameSettings, staticLightsEnabled: enabled };
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setShowRetailHiddenGeometry(visible: boolean): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = { ...frameSettings, showRetailHiddenGeometry: visible };
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function setWeather(enabled: boolean): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		frameSettings = { ...frameSettings, weatherEnabled: enabled };
+		runtime.setFrameSettings(frameSettings);
+	}
+
+	function clearSceneInterest(): void {
+		if (!runtime) throw new Error("Browser harness runtime is not ready.");
+		runtime.clearSceneInterest();
+		lastInterestLandblockId = null;
+		lastInterestRadii = null;
+	}
+
+	function resetTiming(): void {
+		timing = {
+			sampleCount: 0,
+			totalTickMs: 0,
+			totalRenderMs: 0,
+			longestTickMs: 0,
+			longestRenderMs: 0,
+			longestFrameWorkMs: 0,
+			longestFrameGapMs: 0,
+			longTaskCount: 0,
+			longestLongTaskMs: 0,
+		};
+		lastFrameAt = undefined;
+		// One reset delimits both aggregates, so a --measure-ms window governs the renderer profile
+		// mean as well as the harness frame timing rather than leaving it a rolling tail.
+		runtime?.resetRendererFrameProfile();
+	}
+
+	function timingSnapshot(): BrowserHarnessTiming {
+		const divisor = Math.max(1, timing.sampleCount);
+		return {
+			averageFrameWorkMs: (timing.totalTickMs + timing.totalRenderMs) / divisor,
+			averageRenderMs: timing.totalRenderMs / divisor,
+			averageTickMs: timing.totalTickMs / divisor,
+			longestFrameGapMs: timing.longestFrameGapMs,
+			longestFrameWorkMs: timing.longestFrameWorkMs,
+			longestLongTaskMs: timing.longestLongTaskMs,
+			longestRenderMs: timing.longestRenderMs,
+			longestTickMs: timing.longestTickMs,
+			longTaskCount: timing.longTaskCount,
+			sampleCount: timing.sampleCount,
+		};
+	}
+
+	function probePortalExecution(
+		rawEnvCellId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+	): PortalExecutionProbeResult {
+		const activeRuntime = runtime;
+		const canvas = canvasElement;
+		if (!renderer || activeRuntime === undefined || canvas === null) {
+			throw new Error("Browser harness renderer and viewport are not ready.");
+		}
+		if (
+			position.length !== 3 ||
+			!position.every(Number.isFinite) ||
+			![cameraYawDegrees, cameraPitchDegrees].every(Number.isFinite)
+		) {
+			throw new Error(
+				"Browser harness portal execution probe requires a finite position and orientation.",
+			);
+		}
+		const envCellId = parseEnvCellId(rawEnvCellId, "portal execution");
+		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockOwnerId;
+		return renderer.probePortalExecution(
+			landblockId,
+			{
+				cameraInsideSealedCell: false,
+				camera: {
+					far: CAMERA_FAR,
+					fov: CAMERA_FOV_DEGREES,
+					near: CAMERA_NEAR,
+					placement: {
+						envCellId,
+						landblockId,
+						position: sceneVec3(new Vec3(...position)),
+						rotation: cameraRotation(cameraYawDegrees, cameraPitchDegrees),
+					},
+				},
+			},
+			{ envCellId, kind: "env-cell", landblockId },
+			activeRuntime.resolveViewportExtent(
+				canvas.clientWidth,
+				canvas.clientHeight,
+			),
+			frameSettings,
+		);
+	}
+
+	function probePortalTransitionLifecycle(): PortalTransitionLifecycleFixtureResult {
+		const activeRuntime = runtime;
+		const canvas = canvasElement;
+		if (activeRuntime === undefined || canvas === null) {
+			throw new Error("Browser harness runtime and viewport are not ready.");
+		}
+		if (!PORTAL_TRANSITION_LIFECYCLE_FIXTURE) {
+			throw new Error(
+				"Portal transition lifecycle assets were not requested for this harness run.",
+			);
+		}
+		const extent = activeRuntime.resolveViewportExtent(
+			canvas.clientWidth,
+			canvas.clientHeight,
+		);
+		const evidence = (): PortalTransitionLifecycleResourceEvidence => {
+			const selection =
+				activeRuntime.getRendererFrameDiagnostics()?.selectionMetrics;
+			if (selection === undefined) {
+				throw new Error(
+					"Portal lifecycle fixture requires renderer diagnostics.",
+				);
+			}
+			const animation =
+				activeRuntime.getPortalTransitionDiagnostics()?.animation ?? null;
+			return {
+				animationFramePosition: animation?.framePosition ?? null,
+				axialRollFramePosition: animation?.axialRollFramePosition ?? null,
+				generation: selection.portalTransitionGeneration,
+				kind: selection.portalTransitionKind,
+				originCaptured: selection.portalTransitionOriginCaptured,
+				snapshotAllocatedGenerationCount:
+					selection.portalTransitionSnapshotAllocatedGenerationCount,
+				snapshotBytes: selection.portalTransitionSnapshotBytes,
+				snapshotDisposedGenerationCount:
+					selection.portalTransitionSnapshotDisposedGenerationCount,
+				submittedTunnelDrawCount: selection.submittedPortalTransitionDrawCount,
+				transitionOnlyFramePresented:
+					selection.portalTransitionOnlyFramePresented,
+				tunnelTargetBytes: selection.portalTransitionTargetBytes,
+			};
+		};
+		const renderPortal = (
+			controller: PortalTransitionController,
+			nowMs: number,
+			destinationReady: boolean,
+			frameExtent = extent,
+		) => {
+			const update = controller.advance({ destinationReady, nowMs });
+			activeRuntime.setPortalTransition(update.plan);
+			const receipt = activeRuntime.renderPortalTransition(
+				performance.now() / 1_000,
+				frameExtent,
+			);
+			return { receipt, update };
+		};
+		const renderWorld = (
+			controller: PortalTransitionController,
+			nowMs: number,
+		) => {
+			const update = controller.advance({ destinationReady: true, nowMs });
+			activeRuntime.setPortalTransition(update.plan);
+			return {
+				receipt: activeRuntime.render(performance.now() / 1_000),
+				update,
+			};
+		};
+
+		activeRuntime.setPortalTransition(undefined);
+		activeRuntime.render(performance.now() / 1_000);
+		const baseline = evidence();
+		const initialController = new PortalTransitionController(
+			EXPLORER_TUNING.portalTransition.timing,
+		);
+		initialController.begin(100, { kind: "absent" });
+		renderPortal(initialController, 0, false);
+		const initialEntry = evidence();
+		initialController.reset();
+		activeRuntime.setPortalTransition(undefined);
+		activeRuntime.render(performance.now() / 1_000);
+		const controller = new PortalTransitionController(
+			EXPLORER_TUNING.portalTransition.timing,
+		);
+		controller.begin(101, { kind: "capture-last-world" });
+		renderPortal(controller, 0, false);
+		const entry = evidence();
+		renderPortal(controller, 500, false);
+		const entryMidpoint = evidence();
+
+		controller.begin(102, { kind: "capture-last-world" });
+		const supersededFrame = renderPortal(controller, 600, false);
+		const superseded = evidence();
+		controller.acknowledgePresented(
+			requirePortalPresentationReceipt(supersededFrame.receipt, "superseded"),
+		);
+		const resizedExtent = {
+			height: Math.max(1, extent.height - 17),
+			width: Math.max(1, extent.width - 19),
+		};
+		renderPortal(controller, 1_600, false, resizedExtent);
+		const resizedWaiting = evidence();
+
+		const exitStartFrame = renderWorld(controller, 2_000);
+		const exitStart = evidence();
+		if (exitStartFrame.update.plan.kind !== "tunnel-to-destination") {
+			throw new Error(
+				"Portal lifecycle fixture did not begin destination exit.",
+			);
+		}
+		renderWorld(controller, 2_500);
+		const exitMidpoint = evidence();
+		const handoffFrame = renderWorld(controller, 3_000);
+		const handoff = evidence();
+		const reveal = controller.acknowledgePresented(
+			requirePortalPresentationReceipt(handoffFrame.receipt, "handoff"),
+		);
+		if (reveal === null) {
+			throw new Error(
+				"Portal lifecycle fixture did not acknowledge neutral handoff.",
+			);
+		}
+
+		controller.reset();
+		activeRuntime.setPortalTransition(undefined);
+		activeRuntime.render(performance.now() / 1_000);
+		const inactive = evidence();
+
+		controller.begin(103, { kind: "capture-last-world" });
+		renderPortal(controller, 4_000, false);
+		const failureBeforeClear = evidence();
+		controller.reset();
+		activeRuntime.setPortalTransition(undefined);
+		activeRuntime.clearPresentation();
+		const failureAfterClear = evidence();
+		const failureGl = canvas.getContext("webgl2");
+		if (failureGl === null) {
+			throw new Error(
+				"Portal lifecycle failure proof lost its WebGL2 context.",
+			);
+		}
+		const failurePixel = new Uint8Array(4);
+		failureGl.readPixels(
+			Math.floor(extent.width / 2),
+			Math.floor(extent.height / 2),
+			1,
+			1,
+			failureGl.RGBA,
+			failureGl.UNSIGNED_BYTE,
+			failurePixel,
+		);
+		const [failureRed, failureGreen, failureBlue, failureAlpha] = failurePixel;
+		if (
+			failureRed === undefined ||
+			failureGreen === undefined ||
+			failureBlue === undefined ||
+			failureAlpha === undefined
+		) {
+			throw new Error("Portal lifecycle failure proof returned no RGBA pixel.");
+		}
+		const failureBlackPixel = [
+			failureRed,
+			failureGreen,
+			failureBlue,
+			failureAlpha,
+		] as const;
+
+		assertPortalTransitionLifecycleFixture({
+			baseline,
+			entry,
+			entryMidpoint,
+			exitMidpoint,
+			exitStart,
+			failureAfterClear,
+			failureBlackPixel,
+			failureBeforeClear,
+			handoff,
+			inactive,
+			initialEntry,
+			resizedWaiting,
+			revealGeneration: reveal.generation,
+			superseded,
+		});
+		return {
+			baseline,
+			entry,
+			entryMidpoint,
+			exitMidpoint,
+			exitStart,
+			failureAfterClear,
+			failureBlackPixel,
+			failureBeforeClear,
+			handoff,
+			inactive,
+			initialEntry,
+			resizedWaiting,
+			revealGeneration: reveal.generation,
+			superseded,
+		};
+	}
+
+	function requirePortalPresentationReceipt(
+		receipt: PortalTransitionPresentationReceipt | null,
+		stage: "superseded" | "handoff",
+	): PortalTransitionPresentationReceipt {
+		if (receipt === null) {
+			throw new Error(`Portal lifecycle ${stage} frame produced no receipt.`);
+		}
+		return receipt;
+	}
+
+	function assertPortalTransitionLifecycleFixture(
+		result: PortalTransitionLifecycleFixtureResult,
+	): void {
+		if (
+			result.baseline.generation !== null ||
+			result.baseline.snapshotBytes !== 0 ||
+			result.baseline.tunnelTargetBytes !== 0 ||
+			result.baseline.submittedTunnelDrawCount !== 0 ||
+			result.baseline.transitionOnlyFramePresented
+		) {
+			throw new Error(
+				"Portal lifecycle baseline retained transition resources.",
+			);
+		}
+		if (
+			result.initialEntry.generation !== 100 ||
+			result.initialEntry.kind !== "tunnel-only" ||
+			result.initialEntry.originCaptured ||
+			result.initialEntry.snapshotBytes !== 0 ||
+			result.initialEntry.snapshotAllocatedGenerationCount !== 0 ||
+			result.initialEntry.tunnelTargetBytes === 0 ||
+			result.initialEntry.submittedTunnelDrawCount === 0 ||
+			!result.initialEntry.transitionOnlyFramePresented
+		) {
+			throw new Error(
+				"Portal lifecycle initial entry sampled or allocated an origin.",
+			);
+		}
+		if (
+			result.entry.generation !== 101 ||
+			result.entry.kind !== "origin-to-tunnel" ||
+			!result.entry.originCaptured ||
+			result.entry.snapshotBytes === 0 ||
+			result.entry.tunnelTargetBytes === 0
+		) {
+			throw new Error(
+				"Portal lifecycle entry did not capture one real origin.",
+			);
+		}
+		if (
+			result.entryMidpoint.snapshotAllocatedGenerationCount !==
+				result.entry.snapshotAllocatedGenerationCount ||
+			result.entryMidpoint.snapshotBytes !== result.entry.snapshotBytes ||
+			(result.entryMidpoint.axialRollFramePosition ?? 0) <= 0
+		) {
+			throw new Error(
+				"Portal lifecycle entry recaptured its origin or stopped roll.",
+			);
+		}
+		if (
+			result.superseded.generation !== 102 ||
+			result.superseded.kind !== "tunnel-only" ||
+			result.superseded.originCaptured ||
+			result.superseded.snapshotBytes !== 0 ||
+			result.superseded.snapshotDisposedGenerationCount <=
+				result.entry.snapshotDisposedGenerationCount ||
+			result.superseded.axialRollFramePosition !== 0
+		) {
+			throw new Error(
+				"Portal lifecycle supersession retained the origin or failed to reset roll.",
+			);
+		}
+		if (
+			result.resizedWaiting.tunnelTargetBytes === 0 ||
+			result.resizedWaiting.tunnelTargetBytes ===
+				result.superseded.tunnelTargetBytes ||
+			(result.resizedWaiting.axialRollFramePosition ?? 0) <= 0
+		) {
+			throw new Error(
+				"Portal lifecycle resize did not replace the tunnel target.",
+			);
+		}
+		if (
+			result.exitStart.kind !== "tunnel-to-destination" ||
+			result.exitMidpoint.kind !== "tunnel-to-destination" ||
+			result.exitStart.tunnelTargetBytes === 0 ||
+			result.exitMidpoint.tunnelTargetBytes === 0
+		) {
+			throw new Error(
+				"Portal lifecycle destination exit lost its tunnel target.",
+			);
+		}
+		if (
+			result.handoff.kind !== "destination-only-awaiting-handoff" ||
+			result.handoff.snapshotBytes !== 0 ||
+			result.handoff.tunnelTargetBytes !== 0 ||
+			result.revealGeneration !== 102
+		) {
+			throw new Error(
+				"Portal lifecycle handoff retained resources or wrong authority.",
+			);
+		}
+		if (
+			result.inactive.generation !== null ||
+			result.inactive.kind !== null ||
+			result.inactive.snapshotBytes !== 0 ||
+			result.inactive.tunnelTargetBytes !== 0 ||
+			result.inactive.submittedTunnelDrawCount !== 0 ||
+			result.inactive.transitionOnlyFramePresented
+		) {
+			throw new Error(
+				"Portal lifecycle inactive frame retained transition work.",
+			);
+		}
+		if (
+			!result.failureBeforeClear.originCaptured ||
+			result.failureBeforeClear.snapshotBytes === 0 ||
+			result.failureBeforeClear.tunnelTargetBytes === 0 ||
+			result.failureAfterClear.generation !== null ||
+			result.failureAfterClear.snapshotBytes !== 0 ||
+			result.failureAfterClear.tunnelTargetBytes !== 0 ||
+			result.failureBlackPixel[0] !== 0 ||
+			result.failureBlackPixel[1] !== 0 ||
+			result.failureBlackPixel[2] !== 0 ||
+			result.failureBlackPixel[3] !== 255
+		) {
+			throw new Error(
+				"Portal lifecycle failure did not release resources to opaque black.",
+			);
+		}
+	}
+
+	function parseEnvCellId(rawEnvCellId: string, operation: string): EnvCellId {
+		const match = /^(?:0x)?([0-9a-f]{8})$/i.exec(rawEnvCellId.trim());
+		if (!match) {
+			throw new Error(
+				`Browser harness ${operation} EnvCell id must contain eight hexadecimal digits.`,
+			);
+		}
+		return `0x${match[1]!.toLowerCase()}`;
+	}
+
+	function cameraRotation(yawDegrees: number, pitchDegrees: number) {
+		const yaw = (yawDegrees * Math.PI) / 180;
+		const pitch = (pitchDegrees * Math.PI) / 180;
+		return createCameraRotationRadians(yaw, pitch);
+	}
+
+	function parsePositiveIntegerQuery(
+		parameters: URLSearchParams,
+		name: string,
+		fallback: number,
+	): number {
+		const rawValue = parameters.get(name);
+		if (rawValue === null) return fallback;
+		const value = Number(rawValue);
+		if (!Number.isInteger(value) || value <= 0) {
+			throw new Error(`Browser harness ${name} must be a positive integer.`);
+		}
+		return value;
+	}
+
+	onMount(() => {
+		if (!canvasElement) {
+			error = "Browser harness canvas was not mounted.";
+			return;
+		}
+		const hostUrl = query.get("contentHost");
+		if (!hostUrl) {
+			error = "Browser harness requires a contentHost query parameter.";
+			return;
+		}
+
+		let destroyed = false;
+		let frameHandle: number | undefined;
+		let longTaskObserver: PerformanceObserver | undefined;
+		let pipeline:
+			| StandardCommitPipeline
+			| SyntheticBlendedBuildingPipeline
+			| SyntheticInstancedObjectPipeline
+			| undefined;
+		let device: WebGL2Device | undefined;
+		let staticDetailOwner: ActiveRegionStaticDetailOwner | undefined;
+		const terrainGlTrace = TRACE_TERRAIN_GL ? installTerrainGlTrace() : null;
+		const hostGlobal = globalThis as typeof globalThis & HarnessGlobal;
+		const start = async (): Promise<void> => {
+			try {
+				if (
+					PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC ||
+					PORTAL_TRANSITION_LIFECYCLE_FIXTURE
+				) {
+					portalTransitionPresentationFixture =
+						runPortalTransitionPresentationFixture(
+							EXPLORER_TUNING.portalTransition.visual,
+						);
+				}
+				contentSource = await HttpLandblockContentSource.build(hostUrl);
+				landblockProfileSource = new CachedLandblockProfileSource(
+					contentSource,
+				);
+				sceneInterestCoordinator = new SceneInterestRequestCoordinator(
+					landblockProfileSource,
+				);
+				entityHost = new HttpExplorerEntityHost(hostUrl);
+				const landblockSource = ISOLATE_AUTHORED_DYNAMICS
+					? new DynamicOnlyLandblockSource(contentSource)
+					: EXCLUDE_AUTHORED_DYNAMICS
+						? new WithoutAuthoredDynamicsLandblockSource(contentSource)
+						: contentSource;
+				device = await WebGL2Device.build(
+					canvasElement!,
+					EXPLORER_TUNING.portalTransition.visual,
+				);
+				textureFilteringCapabilities = device.getTextureFilteringCapabilities();
+				if (fixture === "portal-scope-atlas") {
+					portalScopeAtlasTargets = device.probePortalScopeAtlasTargets();
+					portalScopeAtlasExecutor = device.probePortalScopeAtlasExecutor();
+					portalContextLossPolicy = await WebGL2Device.probeContextLossPolicy(
+						EXPLORER_TUNING.portalTransition.visual,
+					);
+				}
+				if (fixture === "outdoor-pssm") {
+					outdoorPssm = device.probeOutdoorPssm();
+				}
+				if (fixture === "combat-effects")
+					combatEffects = device.probeCombatEffects();
+				if (fixture === "entity-selection") {
+					entitySelection = device.probeEntitySelection();
+				}
+				pipeline =
+					fixture === "blended"
+						? new SyntheticBlendedBuildingPipeline(
+								await StandardCommitPipeline.build({
+									sourceBatch: landblockSource,
+								}),
+							)
+						: fixture === "instanced"
+							? new SyntheticInstancedObjectPipeline()
+							: await StandardCommitPipeline.build({
+									sourceBatch: landblockSource,
+								});
+				const texturePixelSource = new SyntheticCutoutTextureSource(
+					contentSource,
+				);
+				const setupVisualSource = new SyntheticNameplateSetupVisualSource(
+					contentSource,
+				);
+				presentationAssets = await PresentationAssetService.build({
+					animationSource: syntheticTargetingAnimationSource(contentSource),
+					particleEmitterSource: contentSource,
+					physicsScriptSource: contentSource,
+					setupVisualSource,
+					texturePixelSource,
+				});
+				const particleMeshContentSource = contentSource;
+				objectPreviewResources = {
+					assets: presentationAssets,
+					preserveDrawingBuffer: true,
+					// The harness content source is composition-owned. Preview caches borrow its
+					// particle endpoint and therefore must not destroy the whole source on close.
+					particleMeshSource: () => ({
+						destroy: () => {},
+						loadParticleMeshes: (ids) =>
+							particleMeshContentSource.loadParticleMeshes(ids),
+					}),
+				};
+				runtime = await GamePresentationRuntime.build(
+					{
+						buildRenderer: async (world) => {
+							renderer = await device!.buildRenderer(world);
+							if (fixture === "combat-effects")
+								combatEffectsRuntimeProbe.attach(renderer);
+							return renderer;
+						},
+						resources: device.resources,
+					},
+					pipeline,
+					presentationAssets,
+					contentSource,
+					// The harness renders headlessly; authored audio has no observable output here,
+					// so by default a refusing device keeps the runtime honest without a context.
+					// Under `audioTrace=1` a recording device stands in, so live placement leaves
+					// machine-readable evidence instead of silence.
+					AUDIO_TRACE
+						? recordingAudioDevice()
+						: { playOneShot: () => null, prepare: async () => {} },
+					contentSource,
+					contentSource,
+					EXPLORER_TUNING.frameSettings,
+					PARTICLE_SEED === null
+						? undefined
+						: seededRoll(Number(PARTICLE_SEED)),
+					// The harness is a measurement surface, so it always wants tick timing.
+					new RuntimeTickProfiler(),
+				);
+				if (
+					PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC ||
+					PORTAL_TRANSITION_LIFECYCLE_FIXTURE
+				) {
+					await runtime.installPortalTransitionAssets(
+						await loadPortalTransitionAssets({
+							reportContentFailure: runtime.reportContentFailure.bind(runtime),
+							audio: {
+								playOneShot: () => null,
+								prepare: async () => {},
+							},
+							animation: contentSource,
+							setupVisual: contentSource,
+							soundTable: contentSource,
+						}),
+					);
+				}
+				// Harness comparisons select their render policy explicitly and start from flat.
+				runtime.setFrameSettings(frameSettings);
+				staticDetailOwner = new ActiveRegionStaticDetailOwner(contentSource);
+				runtime.installActiveRegionStaticDetails(
+					await staticDetailOwner.install(contentSource.activeRegion),
+				);
+				const ambientRegion = contentSource.activeRegion.data;
+				ambientRegionEvidence = {
+					hasScenes: Boolean(ambientRegion.scenes),
+					hasSound: Boolean(ambientRegion.sound),
+				};
+				if (ambientRegion.sound && ambientRegion.scenes) {
+					await runtime.installAmbientRegion({
+						sceneTypes: ambientRegion.scenes.types.map((type) => ({
+							soundTableIndex: type.soundTableIndex,
+						})),
+						tables: ambientRegion.sound.tables.map((table) => ({
+							soundTableId: table.soundTableId,
+							sounds: table.sounds,
+						})),
+						terrainTypes:
+							ambientRegion.terrain?.types.map((type) => ({
+								sceneTypes: type.sceneTypes,
+							})) ?? [],
+					});
+				}
+				await runtime.installSky(await contentSource.loadSkySource());
+				if (TIME_OF_DAY !== null) {
+					const timeOfDay = Number(TIME_OF_DAY);
+					if (!Number.isFinite(timeOfDay) || timeOfDay < 0 || timeOfDay >= 1) {
+						throw new Error("timeOfDay must be normalized to [0, 1).");
+					}
+					runtime.setSceneEnvironment(
+						resolveSceneEnvironment(contentSource.activeRegion, {
+							dayIndex: 0,
+							dayGroupOverride: DAY_GROUP === null ? 0 : Number(DAY_GROUP),
+							timeOfDay,
+						}),
+					);
+				}
+				if (destroyed) return;
+				ready = true;
+				if ("PerformanceObserver" in window) {
+					longTaskObserver = new PerformanceObserver((entries) => {
+						for (const entry of entries.getEntries()) {
+							timing = {
+								...timing,
+								longTaskCount: timing.longTaskCount + 1,
+								longestLongTaskMs: Math.max(
+									timing.longestLongTaskMs,
+									entry.duration,
+								),
+							};
+						}
+					});
+					longTaskObserver.observe({ buffered: true, type: "longtask" });
+				}
+				/**
+				 * Fly the camera (and with it the listener) through interpolated positions, pumping
+				 * real frames at each step, and return every voice's placement series.
+				 *
+				 * The flyby is the runtime-verification probe for live spatial audio: a `"world"`
+				 * voice's gain must rise and fall with distance and its pan sweep through zero as
+				 * the camera passes it; a bed must hold zero pan while its gain follows share.
+				 */
+				async function probeAudioFlyby(
+					rawLandblockId: string,
+					from: readonly [number, number, number],
+					to: readonly [number, number, number],
+					steps: number,
+					framesPerStep: number,
+					cameraYawDegrees: number,
+					cameraPitchDegrees: number,
+				) {
+					if (!AUDIO_TRACE) {
+						throw new Error("probeAudioFlyby requires audioTrace=1.");
+					}
+					if (!Number.isInteger(steps) || steps < 2) {
+						throw new Error("Audio flyby needs at least two steps.");
+					}
+					const startAudioSampleCounts = audioTraceVoices.map(
+						(voice) => voice.samples.length,
+					);
+					const nextFrame = () =>
+						new Promise<void>((resolve) => {
+							window.requestAnimationFrame(() => resolve());
+						});
+					for (let step = 0; step < steps; step += 1) {
+						audioFlybyStep = step;
+						const t = step / (steps - 1);
+						setOutdoorCamera(
+							rawLandblockId,
+							[
+								from[0] + (to[0] - from[0]) * t,
+								from[1] + (to[1] - from[1]) * t,
+								from[2] + (to[2] - from[2]) * t,
+							],
+							cameraYawDegrees,
+							cameraPitchDegrees,
+						);
+						for (let frame = 0; frame < framesPerStep; frame += 1) {
+							await nextFrame();
+						}
+					}
+					audioFlybyStep = -1;
+					const trace = audioTraceSnapshot(startAudioSampleCounts);
+					return {
+						ambientRegion: ambientRegionEvidence,
+						ambientBakes: trace.ambientBakes,
+						ambient: trace.ambient,
+						audio: trace.audio,
+						steps,
+						voices: trace.voices,
+					};
+				}
+				/**
+				 * Draw one overhead-map frame onto the harness map canvas.
+				 *
+				 * The draw is synchronous so a screenshot taken immediately after this returns shows
+				 * exactly the reported state.
+				 */
+				function configureMap(request: {
+					readonly size?: number;
+					readonly visible?: boolean;
+					readonly centerX?: number;
+					readonly centerY?: number;
+					readonly centerZ?: number;
+					readonly viewDiameter?: number;
+					readonly headingRadians?: number;
+				}): BrowserHarnessMapEvidence {
+					if (!runtime)
+						throw new Error("Browser harness runtime is not ready.");
+					if (request.visible === false) {
+						mapCanvasSize = 0;
+						return {
+							available: mapRenderer?.available ?? false,
+							centerX: 0,
+							centerZ: 0,
+							distinctTerrainCodes: [],
+							drew: false,
+							geometry: {
+								blockerInstanceCount: 0,
+								blockerLandblockCount: 0,
+								crossingCount: 0,
+								floorInstanceCount: 0,
+								interiorLandblockCount: 0,
+								revision: runtime.mapGeometry.revision,
+							},
+							heightRange: [0, 0],
+							mode: "outdoor",
+							presentedEntities: {
+								count: 0,
+								firstHeadingDegrees: null,
+								firstWorldX: null,
+								firstWorldZ: null,
+							},
+							roadVertexCount: 0,
+							paletteReady: runtime.terrainColorPalette() !== null,
+							residentLandblockCount: mapRenderer?.residentLandblockCount ?? 0,
+							terrainInstallationRevision: runtime.terrainInstallationRevision,
+							viewDiameter: 0,
+						};
+					}
+					mapCanvasSize = Math.max(1, Math.floor(request.size ?? 512));
+					const canvas = mapCanvasElement;
+					if (!canvas) {
+						throw new Error("Browser harness map canvas is not mounted.");
+					}
+					canvas.width = mapCanvasSize;
+					canvas.height = mapCanvasSize;
+					mapRenderer ??= new MapRenderer(canvas, runtime);
+					const camera = cameraEvidence?.position ?? ([0, 0, 0] as const);
+					const centerX = request.centerX ?? camera[0];
+					const centerZ = request.centerZ ?? camera[2];
+					const anchor: MapAnchor = {
+						headingRadians: request.headingRadians ?? 0,
+						residency: cameraEvidence
+							? {
+									envCellId: cameraEvidence.envCellId,
+									landblockId: cameraEvidence.landblockId,
+								}
+							: null,
+						worldX: centerX,
+						worldY: request.centerY ?? camera[1],
+						worldZ: centerZ,
+					};
+					const defaultViewDiameter =
+						mapEnvironment(anchor) === "indoor"
+							? MAP_DEFAULT_VIEW_DIAMETERS.indoor
+							: MAP_DEFAULT_VIEW_DIAMETERS.outdoor;
+					const viewDiameter = clampMapViewDiameter(
+						request.viewDiameter ?? defaultViewDiameter,
+					);
+					let minimumHeight = Number.POSITIVE_INFINITY;
+					let maximumHeight = Number.NEGATIVE_INFINITY;
+					const distinctTerrainCodes = new Set<number>();
+					let roadVertexCount = 0;
+					for (const { generation } of runtime.listInstalledTerrain()) {
+						for (const height of generation.heights) {
+							minimumHeight = Math.min(minimumHeight, height);
+							maximumHeight = Math.max(maximumHeight, height);
+						}
+						for (const authored of generation.terrainSamples) {
+							distinctTerrainCodes.add((authored >>> 2) & 0x1f);
+							if ((authored & 0x03) !== 0) roadVertexCount += 1;
+						}
+					}
+					let blockerInstanceCount = 0;
+					let blockerLandblockCount = 0;
+					for (const [, instances] of runtime.mapGeometry.listBlockers()) {
+						blockerLandblockCount += 1;
+						blockerInstanceCount += instances.length;
+					}
+					let interiorLandblockCount = 0;
+					let floorInstanceCount = 0;
+					let crossingCount = 0;
+					for (const [, resident] of runtime.mapGeometry.listInteriors()) {
+						interiorLandblockCount += 1;
+						floorInstanceCount += resident.floors.length;
+						crossingCount += resident.crossings.length;
+					}
+					// Residency comes from the harness camera: an EnvCell camera puts the map indoors,
+					// which is the same rule the app shell will apply to a possessed entity.
+					let presentedCount = 0;
+					let firstWorldX: number | null = null;
+					let firstWorldZ: number | null = null;
+					let firstHeadingDegrees: number | null = null;
+					for (const { placement } of runtime.listPresentedSpawnedEntities()) {
+						presentedCount += 1;
+						if (firstWorldX !== null) continue;
+						const entityOrigin = createLandblockWorldOrigin(
+							placement.landblockId,
+						);
+						firstWorldX = entityOrigin.x + placement.localTransform.m41;
+						firstWorldZ = entityOrigin.z + placement.localTransform.m43;
+						firstHeadingDegrees =
+							(mapHeadingFromSceneTransform(placement.localTransform) * 180) /
+							Math.PI;
+					}
+					const drew = mapRenderer.render({
+						anchor,
+						center: { worldX: anchor.worldX, worldZ: anchor.worldZ },
+						viewDiameter,
+					});
+					return {
+						available: mapRenderer.available,
+						centerX,
+						centerZ,
+						distinctTerrainCodes: [...distinctTerrainCodes].sort(
+							(a, b) => a - b,
+						),
+						drew,
+						geometry: {
+							blockerInstanceCount,
+							blockerLandblockCount,
+							crossingCount,
+							floorInstanceCount,
+							interiorLandblockCount,
+							revision: runtime.mapGeometry.revision,
+						},
+						heightRange: [minimumHeight, maximumHeight],
+						presentedEntities: {
+							count: presentedCount,
+							firstHeadingDegrees,
+							firstWorldX,
+							firstWorldZ,
+						},
+						mode: anchor.residency?.envCellId == null ? "outdoor" : "indoor",
+						roadVertexCount,
+						paletteReady: runtime.terrainColorPalette() !== null,
+						residentLandblockCount: mapRenderer.residentLandblockCount,
+						terrainInstallationRevision: runtime.terrainInstallationRevision,
+						viewDiameter,
+					};
+				}
+				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
+					applyMotionPlaybackSample: async (sample) => {
+						const captureCanvas = canvasElement;
+						if (!captureCanvas)
+							throw new Error("Motion playback probe requires a canvas.");
+						if (!runtime)
+							throw new Error("Motion playback probe requires a runtime.");
+						const anchor = spawnedEntities[0];
+						if (!anchor || spawnedEntities.length !== 1)
+							throw new Error(
+								"Motion playback probe requires one catalog-backed anchor.",
+							);
+						if (sample === null) {
+							await runtime.replaceDynamicEntitySnapshot(spawnedEntities);
+						} else {
+							if (sample.fresh) await runtime.replaceDynamicEntitySnapshot([]);
+							await runtime.replaceDynamicEntitySnapshot([
+								{
+									...anchor,
+									identity: { ...anchor.identity, guid: sample.guid },
+									motion: sample.motion,
+								},
+							]);
+						}
+						// Capture the first rendered frame, before a delayed screenshot could hide
+						// an upright initialization flash. The main render callback is already queued.
+						return new Promise<string>((resolve) =>
+							window.requestAnimationFrame(() => {
+								resolve(
+									captureCanvas
+										.toDataURL("image/png")
+										.slice("data:image/png;base64,".length),
+								);
+							}),
+						);
+					},
+					probeSyntheticAppearanceReplacement,
+					probeRealizedCycleTargeting: async () => {
+						const activeRuntime = runtime;
+						const canvas = canvasElement;
+						const anchor = spawnedEntities[0];
+						const previousCamera = cameraEvidence;
+						const radii = lastInterestRadii;
+						const target = activeRuntime?.sceneInterestState().resolvedTarget;
+						const coordinator = sceneInterestCoordinator;
+						const content = contentSource;
+						const entities = [...spawnedEntities];
+						if (
+							!activeRuntime ||
+							!canvas ||
+							anchor === undefined ||
+							previousCamera === null ||
+							previousCamera.envCellId !== null ||
+							radii === null ||
+							target === null ||
+							target === undefined ||
+							coordinator === undefined ||
+							content === undefined
+						)
+							throw new Error(
+								"Realized targeting probe requires a synthetic outdoor entity and an active runtime.",
+							);
+						if (frameHandle !== undefined)
+							window.cancelAnimationFrame(frameHandle);
+						try {
+							return await probeRealizedCycleTargeting(
+								activeRuntime,
+								anchor,
+								canvas,
+								content,
+							);
+						} finally {
+							activeRuntime.updateSceneInterest(
+								await coordinator.request(target.requested, radii).promise,
+							);
+							setOutdoorCamera(
+								previousCamera.landblockId,
+								previousCamera.position,
+								previousCamera.yawDegrees,
+								previousCamera.pitchDegrees,
+							);
+							await activeRuntime.replaceDynamicEntitySnapshot(entities);
+							const deadline = performance.now() + 20_000;
+							while (true) {
+								activeRuntime.tick();
+								await activeRuntime.reevaluateDynamicEntityEligibility();
+								let restored = 0;
+								activeRuntime.visitRealizedEntitySelectionBounds(
+									() => restored++,
+								);
+								if (restored === entities.length) break;
+								if (performance.now() > deadline)
+									throw new Error(
+										"Realized targeting probe failed to restore its borrowed world.",
+									);
+								await new Promise<void>((resolve) =>
+									requestAnimationFrame(() => resolve()),
+								);
+							}
+							activeRuntime.render(performance.now() / 1000);
+							frameHandle = window.requestAnimationFrame(frame);
+						}
+					},
+					probeDynamicDomains: () => {
+						const current = spawnedEntities[0];
+						if (
+							!runtime ||
+							!canvasElement ||
+							!current ||
+							spawnedEntities.length !== 1
+						)
+							throw new Error("Domain probe requires one synthetic entity.");
+						return probeDynamicDomains(
+							runtime,
+							current,
+							canvasElement,
+							frameSettings,
+						);
+					},
+					probeDynamicBlendFlags: () => {
+						const current = spawnedEntities[0];
+						if (
+							!runtime ||
+							!canvasElement ||
+							!current ||
+							spawnedEntities.length !== 1
+						)
+							throw new Error("Blend probe requires one synthetic entity.");
+						return (
+							fixture === "blended"
+								? probeMixedTransparency
+								: probeDynamicBlendFlags
+						)(runtime, current, canvasElement, frameSettings);
+					},
+					probeDynamicViews: () => {
+						if (!renderer || !canvasElement)
+							throw new Error(
+								"Multi-view probe requires an active renderer and canvas.",
+							);
+						return probeDynamicViews(renderer, canvasElement);
+					},
+					clearSceneInterest,
+					configureMap,
+					despawnExplorerEntity,
+					focusExplorerEnvCell,
+					focusExplorerOutdoor,
+					focusExplorerTarget,
+					launchExplorerEntity,
+					probeAudioFlyby,
+					probeNextFrameState,
+					probeBoomFraming,
+					probePortalExecution,
+					probePortalTransitionLifecycle,
+					relocateExplorerEntity,
+					requestSceneInterest,
+					runFollowFlight,
+					setCameraLandblock,
+					portalProbeContainsPoint: (rawCell, position) => {
+						if (!runtime) throw new Error("Portal probe runtime unavailable.");
+						const envCellId = parseEnvCellId(rawCell, "portal probe");
+						const landblockId =
+							`${envCellId.slice(0, 6)}ffff` as LandblockOwnerId;
+						return runtime.queryEnvCellPointContainment(
+							{ envCellId, landblockId },
+							new Vec3(...position),
+						);
+					},
+					setEnvCellCamera,
+					setEnvCellCameraProjection,
+					setEnvCellRenderMode,
+					setLayerVisibility,
+					setOutdoorCamera,
+					setAmbientOcclusion,
+					setAmbientOcclusionCoverageVisualization,
+					setColorGrade,
+					setFrameProfiling,
+					captureBakedDrawMergeCensus,
+					setStaticLights,
+					setShowRetailHiddenGeometry,
+					setWeather,
+					setMinimumObjectFootprintCssPixelArea,
+					setMinimumPortalFootprintCssPixelArea,
+					setRenderScale,
+					setNameplateMaximumVisible,
+					setNameplateMinimumLegiblePixels,
+					setEntityShadowSettings,
+					setEntityShadowCasterBudget,
+					setEntityShadowMode,
+					setOffscreenAnimationSampleIntervalSeconds,
+					setTextureFiltering,
+					resetTiming,
+					resetTerrainGlTrace: () => terrainGlTrace?.reset(),
+					spawnExplorerEntity,
+					probeCollisionScriptPlayback,
+					spawnExplorerEntityFleet,
+					installSyntheticNameplateWorkload,
+					probeSyntheticNameplateLifecycle,
+					probeRuntimeCombatEffects,
+					probeSpawnedEntitySelection,
+					probeObjectPreviewLifecycle,
+					objectPreviewDiagnostics,
+					setObjectPreviewBenchmarkVisible,
+					despawnExplorerEntityFleet,
+					spawnSimulatedExplorerEntity,
+					possessExplorerEntity,
+					possessionMotionProbe,
+					probeThirdPersonControls,
+					queuePossessionEvent,
+					setPossessionIntent,
+					setKinematicBoomIntent,
+					reprojectKinematicBoom,
+					startKinematicBoom,
+					stopKinematicBoom,
+					kinematicBoomDirection,
+					tickExplorerEntities,
+					tickPossession,
+					state: () => {
+						const staticObjects =
+							runtime?.getStaticObjectRuntimeDiagnostics() ?? null;
+						const frameDiagnostics =
+							runtime?.getRendererFrameDiagnostics() ?? null;
+						return {
+							boomProjection: {
+								active: activeBoomProjection,
+								requested: requestedBoomProjection,
+							},
+							ambientOcclusionCoverageCensus:
+								renderer?.getAmbientOcclusionCoverageCensus() ?? null,
+							authoredDynamics:
+								runtime?.getAuthoredDynamicRuntimeDiagnostics() ?? null,
+							portalTransition:
+								runtime?.getPortalTransitionDiagnostics() ?? null,
+							portalTransitionPresentationFixture,
+							tickProfile: runtime?.getTickProfile() ?? null,
+							camera: cameraEvidence,
+							error,
+							frameSettings,
+							entityShadowResources: frameDiagnostics?.entityShadows ?? null,
+							dynamicResources: frameDiagnostics?.dynamicResources ?? null,
+							entitySelection,
+							combatEffects,
+							combatEffectsRuntime,
+							compiledObjectDraws:
+								frameDiagnostics?.compiledObjectDraws ?? null,
+							frameProfile: frameDiagnostics?.profile ?? null,
+							nameplates: frameDiagnostics?.nameplates ?? null,
+							worldIndicatorProof,
+							frames,
+							metrics: frameDiagnostics?.selectionMetrics ?? null,
+							portalContextLossPolicy,
+							portalScopeAtlasExecutor,
+							portalScopeAtlasTargets,
+							outdoorPssm,
+							ready,
+							staticObjectLayers: {
+								buildings:
+									staticObjects?.layers.filter(
+										(layer) => layer.layer === LandblockLayerKind.Buildings,
+									) ?? [],
+								generated:
+									staticObjects?.layers.filter(
+										(layer) => layer.layer === LandblockLayerKind.Generated,
+									) ?? [],
+								objects:
+									staticObjects?.layers.filter(
+										(layer) => layer.layer === LandblockLayerKind.Objects,
+									) ?? [],
+							},
+							staticObjects,
+							terrainWorker: runtime?.getTerrainWorkerDiagnostics() ?? null,
+							terrainGlTrace: terrainGlTrace?.snapshot() ?? null,
+							sourceBatches:
+								contentSource?.getLandblockSourceBatchDiagnostics() ?? [],
+							profiles: contentSource?.getLandblockProfileDiagnostics() ?? [],
+							sceneInterest: sceneInterestEvidence(),
+							spawnedEntities,
+							timing: timingSnapshot(),
+							textureFilteringCapabilities,
+							viewport: {
+								cssHeight: canvasElement!.clientHeight,
+								cssWidth: canvasElement!.clientWidth,
+								devicePixelRatio: window.devicePixelRatio,
+								pixelHeight: canvasElement!.height,
+								pixelWidth: canvasElement!.width,
+							},
+						};
+					},
+				};
+				const frame = (): void => {
+					if (!runtime || destroyed) return;
+					// The driving script authors the first camera together with scene interest.
+					// Keep the render loop dormant until that complete primary view exists.
+					if (cameraEvidence === null) {
+						frameHandle = window.requestAnimationFrame(frame);
+						return;
+					}
+					const now = performance.now();
+					if (lastFrameAt !== undefined) {
+						timing = {
+							...timing,
+							longestFrameGapMs: Math.max(
+								timing.longestFrameGapMs,
+								now - lastFrameAt,
+							),
+						};
+					}
+					lastFrameAt = now;
+					advanceFollowFlight(now);
+					syncHarnessBoomCamera(now);
+					if (
+						PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC &&
+						portalTransitionCompositorDiagnosticFrames >= 2
+					) {
+						if (PORTAL_TRANSITION_COMPOSITION === "origin-to-tunnel") {
+							runtime.setPortalTransition({
+								generation: 1,
+								kind: "origin-to-tunnel",
+								progress: PORTAL_TRANSITION_PROGRESS,
+							});
+						} else if (
+							PORTAL_TRANSITION_COMPOSITION === "tunnel-to-destination"
+						) {
+							runtime.setPortalTransition({
+								generation: 1,
+								kind: "tunnel-to-destination",
+								progress: PORTAL_TRANSITION_PROGRESS,
+							});
+						} else {
+							runtime.setPortalTransition({
+								generation: 1,
+								kind: "tunnel-only",
+							});
+						}
+					}
+					if (PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC) {
+						portalTransitionCompositorDiagnosticFrames += 1;
+					}
+					const tickStartedAt = performance.now();
+					runtime.tick();
+					const renderStartedAt = performance.now();
+					runtime.render(
+						FRAME_INTERVAL_MS === null
+							? renderStartedAt / 1_000
+							: (Math.min(
+									frames,
+									CAPTURE_FRAME === null
+										? Number.POSITIVE_INFINITY
+										: Number(CAPTURE_FRAME),
+								) *
+									Number(FRAME_INTERVAL_MS)) /
+									1_000,
+					);
+					const frameFinishedAt = performance.now();
+					const tickMs = renderStartedAt - tickStartedAt;
+					const renderMs = frameFinishedAt - renderStartedAt;
+					timing = {
+						...timing,
+						longestFrameWorkMs: Math.max(
+							timing.longestFrameWorkMs,
+							frameFinishedAt - tickStartedAt,
+						),
+						longestRenderMs: Math.max(timing.longestRenderMs, renderMs),
+						longestTickMs: Math.max(timing.longestTickMs, tickMs),
+						sampleCount: timing.sampleCount + 1,
+						totalRenderMs: timing.totalRenderMs + renderMs,
+						totalTickMs: timing.totalTickMs + tickMs,
+					};
+					frames += 1;
+					completeFollowFlight();
+					frameHandle = window.requestAnimationFrame(frame);
+				};
+				frameHandle = window.requestAnimationFrame(frame);
+			} catch (cause) {
+				error = cause instanceof Error ? cause.message : String(cause);
+				// The harness API is never published when startup throws, so record the reason
+				// somewhere the driving script can read after it gives up waiting.
+				(
+					globalThis as { __HOLTBURGER_3D_HARNESS_STARTUP_ERROR__?: string }
+				).__HOLTBURGER_3D_HARNESS_STARTUP_ERROR__ = error;
+			}
+		};
+		void start();
+
+		return () => {
+			destroyed = true;
+			if (frameHandle !== undefined) window.cancelAnimationFrame(frameHandle);
+			longTaskObserver?.disconnect();
+			terrainGlTrace?.destroy();
+			mapRenderer?.destroy();
+			sceneInterestCoordinator?.invalidate();
+			landblockProfileSource?.destroy();
+			delete hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__;
+			staticDetailOwner?.teardown();
+			void activePreviewHandle?.dispose().finally(() => {
+				activePreviewHandle = null;
+			});
+			void runtime?.destroy().finally(async () => {
+				await presentationAssets?.destroy();
+				await pipeline?.destroy();
+				await device?.destroy();
+			});
+		};
+	});
+</script>
+
+<canvas
+	bind:this={canvasElement}
+	aria-label="Browser harness render viewport"
+	style:height={`${viewportHeight}px`}
+	style:width={`${viewportWidth}px`}
+></canvas>
+
+<canvas
+	bind:this={previewCanvasElement}
+	class="preview"
+	aria-label="Browser harness object preview"
+></canvas>
+
+<canvas
+	bind:this={mapCanvasElement}
+	class="map"
+	aria-label="Browser harness overhead map"
+	style:display={mapCanvasSize > 0 ? "block" : "none"}
+	style:height={`${mapCanvasSize}px`}
+	style:width={`${mapCanvasSize}px`}
+></canvas>
+
+<style>
+	@layer components {
+		:global(body) {
+			margin: 0;
+			overflow: hidden;
+		}
+
+		canvas {
+			display: block;
+		}
+
+		canvas.map {
+			position: absolute;
+			top: 0;
+			left: 0;
+		}
+
+		canvas.preview {
+			position: absolute;
+			top: 0;
+			right: 0;
+			width: 320px;
+			height: 192px;
+			pointer-events: none;
+		}
+	}
+</style>

@@ -6,6 +6,7 @@ fn projected_active_confirmation_updates_view_state() {
 
     let result = state.handle_view_event(ClientViewEvent::ActiveCharacterConfirmationUpdated {
         confirmation: Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: holtburger_common::ConfirmationType::CraftInteraction,
             context: 7,
             text: "Apply the tinkering attempt?".to_string(),
@@ -16,6 +17,7 @@ fn projected_active_confirmation_updates_view_state() {
     assert!(matches!(
         state.view.active_confirmation,
         Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: holtburger_common::ConfirmationType::CraftInteraction,
             context: 7,
             ref text,

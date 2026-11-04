@@ -2,6 +2,20 @@ use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, FromRepr};
 
+/// Server-declared inventory ordering category, independent of storage capacity.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, FromRepr,
+)]
+#[repr(u32)]
+pub enum InventoryEntryKind {
+    /// Uses an ordinary item slot (ACE NonContainer).
+    Item = 0,
+    /// Uses a pack slot as a container.
+    Container = 1,
+    /// Uses a pack slot without implying storage capability.
+    Foci = 2,
+}
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
     pub struct ItemType: u32 {
@@ -312,6 +326,12 @@ bitflags! {
 }
 
 impl Usable {
+    /// Retail's direct-use admission bit: UNDEF is allowed, explicit NO is not. This says
+    /// nothing about server lock or quest checks.
+    pub fn allows_direct_use(self) -> bool {
+        !self.contains(Self::NO)
+    }
+
     pub fn from_raw(bits: u32) -> Self {
         Self::from_bits_retain(bits)
     }

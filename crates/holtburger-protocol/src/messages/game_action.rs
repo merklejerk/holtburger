@@ -1,13 +1,19 @@
+pub use crate::messages::allegiance::*;
 pub use crate::messages::book::actions::*;
+pub use crate::messages::character::barber::*;
 pub use crate::messages::chat::actions::*;
 pub use crate::messages::combat::actions::*;
+pub use crate::messages::contracts::*;
 pub use crate::messages::fellowship::actions::*;
+pub use crate::messages::friends::*;
+pub use crate::messages::housing::*;
 pub use crate::messages::inventory::actions::*;
 pub use crate::messages::magic::actions::*;
 pub use crate::messages::misc::actions::*;
 pub use crate::messages::movement::actions::*;
 pub use crate::messages::object::actions::*;
 pub use crate::messages::player::actions::*;
+pub use crate::messages::squelch::*;
 pub use crate::messages::trade::actions::*;
 
 use crate::opcodes::GameActionOpcode;
@@ -22,6 +28,36 @@ pub struct GameActionMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameAction {
+    /// Complete resolved appearance submitted once when leaving the barber with Apply.
+    FinishBarber(Box<BarberAppearanceData>),
+    /// Contract registry wire operation.
+    AbandonContract(Box<AbandonContractActionData>),
+
+    AllegianceUpdateRequest(Box<AllegianceUpdateRequestActionData>),
+    AddFriend(Box<AddFriendActionData>),
+    ModifyAccountSquelch(Box<ModifyAccountSquelchActionData>),
+    ModifyCharacterSquelch(Box<ModifyCharacterSquelchActionData>),
+    RemoveFriend(Box<RemoveFriendActionData>),
+    BuyHouse(Box<HousePaymentActionData>),
+    RentHouse(Box<HousePaymentActionData>),
+    HouseQuery,
+    AbandonHouse,
+    RemoveAllStoragePermission,
+    RequestFullGuestList,
+    AddAllStoragePermission,
+    RemoveAllPermanentGuests,
+    BootEveryone,
+    AddPermanentGuest(Box<HouseGuestActionData>),
+    RemovePermanentGuest(Box<HouseGuestActionData>),
+    BootSpecificHouseGuest(Box<HouseGuestActionData>),
+    SetOpenHouseStatus(Box<HouseFlagActionData>),
+    SetHooksVisibility(Box<HouseFlagActionData>),
+    ModifyAllegianceGuestPermission(Box<HouseFlagActionData>),
+    ModifyAllegianceStoragePermission(Box<HouseFlagActionData>),
+    ChangeStoragePermission(Box<HouseStoragePermissionActionData>),
+    ListAvailableHouses(Box<HouseSearchActionData>),
+
+    AdvocateTeleport(Box<AdvocateTeleportActionData>),
     Jump(Box<JumpActionData>),
     AutonomousPosition(Box<AutonomousPositionActionData>),
     MoveToState(Box<MoveToStateActionData>),
@@ -33,9 +69,17 @@ pub enum GameAction {
     StackableSplitTo3D(Box<StackableSplitTo3DActionData>),
     StackableSplitToWield(Box<StackableSplitToWieldActionData>),
     Talk(Box<TalkActionData>),
+    /// Entity-addressed creature dialogue; name-addressed player tells use Tell.
+    TalkDirect(Box<TalkDirectActionData>),
     Tell(Box<TellActionData>),
     SwearAllegiance(Box<SwearAllegianceActionData>),
     BreakAllegiance(Box<BreakAllegianceActionData>),
+    /// Clear all permissions received from other corpse owners.
+    ClearPlayerConsentList,
+    /// Ask ACE to print permissions received from other corpse owners.
+    DisplayPlayerConsentList,
+    /// Discard one permission received from a named corpse owner.
+    RemoveFromPlayerConsentList(Box<RemoveFromPlayerConsentListActionData>),
     AddPlayerPermission(Box<AddPlayerPermissionActionData>),
     RemovePlayerPermission(Box<RemovePlayerPermissionActionData>),
     Emote(Box<EmoteActionData>),
@@ -47,6 +91,7 @@ pub enum GameAction {
     FellowshipRecruit(Box<FellowshipRecruitActionData>),
     FellowshipAssignNewLeader(Box<FellowshipAssignNewLeaderActionData>),
     FellowshipUpdateRequest(Box<FellowshipUpdateRequestActionData>),
+    FellowshipChangeOpenness(Box<FellowshipChangeOpennessActionData>),
     PingRequest(Box<PingRequestActionData>),
     DropItem(Box<DropItemActionData>),
     PutItemInContainer(Box<PutItemInContainerActionData>),
@@ -58,6 +103,9 @@ pub enum GameAction {
     QueryHealth(Box<QueryHealthActionData>),
     QueryItemMana(Box<QueryItemManaActionData>),
     LoginComplete(Box<LoginCompleteActionData>),
+    TeleToHouse(Box<TeleToHouseActionData>),
+    TeleToPkArena(Box<TeleToPkArenaActionData>),
+    RecallAllegianceHometown(Box<RecallAllegianceHometownActionData>),
     TeleToLifestone(Box<TeleToLifestoneActionData>),
     TeleToPklArena(Box<TeleToPklArenaActionData>),
     TeleToMarketPlace(Box<TeleToMarketPlaceActionData>),
@@ -69,6 +117,7 @@ pub enum GameAction {
     RaiseSkill(Box<RaiseSkillActionData>),
     TrainSkill(Box<TrainSkillActionData>),
     SetSingleCharacterOption(Box<SetSingleCharacterOptionActionData>),
+    TitleSet(Box<TitleSetActionData>),
     GiveObjectRequest(Box<GiveObjectRequestActionData>),
     CastTargetedSpell(Box<CastTargetedSpellActionData>),
     CastUntargetedSpell(Box<CastUntargetedSpellActionData>),
@@ -100,6 +149,15 @@ impl ProtocolUnpack for GameActionMessage {
 
         let action_data = match action_op {
             Some(op) => match op {
+                GameActionOpcode::FinishBarber => {
+                    GameAction::FinishBarber(Box::new(BarberAppearanceData::unpack(data, offset)?))
+                }
+                GameActionOpcode::AbandonContract => GameAction::AbandonContract(Box::new(
+                    AbandonContractActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::AdvocateTeleport => GameAction::AdvocateTeleport(Box::new(
+                    AdvocateTeleportActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::Jump => {
                     GameAction::Jump(Box::new(JumpActionData::unpack(data, offset)?))
                 }
@@ -138,12 +196,25 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Tell => {
                     GameAction::Tell(Box::new(TellActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::TalkDirect => {
+                    GameAction::TalkDirect(Box::new(TalkDirectActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::AllegianceUpdateRequest => GameAction::AllegianceUpdateRequest(
+                    Box::new(AllegianceUpdateRequestActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::SwearAllegiance => GameAction::SwearAllegiance(Box::new(
                     SwearAllegianceActionData::unpack(data, offset)?,
                 )),
                 GameActionOpcode::BreakAllegiance => GameAction::BreakAllegiance(Box::new(
                     BreakAllegianceActionData::unpack(data, offset)?,
                 )),
+                GameActionOpcode::ClearPlayerConsentList => GameAction::ClearPlayerConsentList,
+                GameActionOpcode::DisplayPlayerConsentList => GameAction::DisplayPlayerConsentList,
+                GameActionOpcode::RemoveFromPlayerConsentList => {
+                    GameAction::RemoveFromPlayerConsentList(Box::new(
+                        RemoveFromPlayerConsentListActionData::unpack(data, offset)?,
+                    ))
+                }
                 GameActionOpcode::AddPlayerPermission => GameAction::AddPlayerPermission(Box::new(
                     AddPlayerPermissionActionData::unpack(data, offset)?,
                 )),
@@ -159,6 +230,18 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::ChatChannel => {
                     GameAction::ChatChannel(Box::new(ChatChannelActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::ModifyCharacterSquelch => GameAction::ModifyCharacterSquelch(
+                    Box::new(ModifyCharacterSquelchActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::ModifyAccountSquelch => GameAction::ModifyAccountSquelch(
+                    Box::new(ModifyAccountSquelchActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::AddFriend => {
+                    GameAction::AddFriend(Box::new(AddFriendActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::RemoveFriend => GameAction::RemoveFriend(Box::new(
+                    RemoveFriendActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::FellowshipCreate => GameAction::FellowshipCreate(Box::new(
                     FellowshipCreateActionData::unpack(data, offset)?,
                 )),
@@ -178,6 +261,9 @@ impl ProtocolUnpack for GameActionMessage {
                 }
                 GameActionOpcode::FellowshipUpdateRequest => GameAction::FellowshipUpdateRequest(
                     Box::new(FellowshipUpdateRequestActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::FellowshipChangeOpenness => GameAction::FellowshipChangeOpenness(
+                    Box::new(FellowshipChangeOpennessActionData::unpack(data, offset)?),
                 ),
                 GameActionOpcode::PingRequest => {
                     GameAction::PingRequest(Box::new(PingRequestActionData::unpack(data, offset)?))
@@ -212,6 +298,15 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::LoginComplete => GameAction::LoginComplete(Box::new(
                     LoginCompleteActionData::unpack(data, offset)?,
                 )),
+                GameActionOpcode::TeleToHouse => {
+                    GameAction::TeleToHouse(Box::new(TeleToHouseActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::TeleToPkArena => GameAction::TeleToPkArena(Box::new(
+                    TeleToPkArenaActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::RecallAllegianceHometown => GameAction::RecallAllegianceHometown(
+                    Box::new(RecallAllegianceHometownActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::TeleToLifestone => GameAction::TeleToLifestone(Box::new(
                     TeleToLifestoneActionData::unpack(data, offset)?,
                 )),
@@ -242,6 +337,9 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::TrainSkill => {
                     GameAction::TrainSkill(Box::new(TrainSkillActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::TitleSet => {
+                    GameAction::TitleSet(Box::new(TitleSetActionData::unpack(data, offset)?))
+                }
                 GameActionOpcode::SetSingleCharacterOption => GameAction::SetSingleCharacterOption(
                     Box::new(SetSingleCharacterOptionActionData::unpack(data, offset)?),
                 ),
@@ -266,6 +364,53 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Sell => {
                     GameAction::Sell(Box::new(SellActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::BuyHouse => {
+                    GameAction::BuyHouse(Box::new(HousePaymentActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::RentHouse => {
+                    GameAction::RentHouse(Box::new(HousePaymentActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::HouseQuery => GameAction::HouseQuery,
+                GameActionOpcode::AbandonHouse => GameAction::AbandonHouse,
+                GameActionOpcode::RemoveAllStoragePermission => {
+                    GameAction::RemoveAllStoragePermission
+                }
+                GameActionOpcode::RequestFullGuestList => GameAction::RequestFullGuestList,
+                GameActionOpcode::AddAllStoragePermission => GameAction::AddAllStoragePermission,
+                GameActionOpcode::RemoveAllPermanentGuests => GameAction::RemoveAllPermanentGuests,
+                GameActionOpcode::BootEveryone => GameAction::BootEveryone,
+                GameActionOpcode::AddPermanentGuest => GameAction::AddPermanentGuest(Box::new(
+                    HouseGuestActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::RemovePermanentGuest => GameAction::RemovePermanentGuest(
+                    Box::new(HouseGuestActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::BootSpecificHouseGuest => GameAction::BootSpecificHouseGuest(
+                    Box::new(HouseGuestActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::SetOpenHouseStatus => GameAction::SetOpenHouseStatus(Box::new(
+                    HouseFlagActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::SetHooksVisibility => GameAction::SetHooksVisibility(Box::new(
+                    HouseFlagActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::ModifyAllegianceGuestPermission => {
+                    GameAction::ModifyAllegianceGuestPermission(Box::new(
+                        HouseFlagActionData::unpack(data, offset)?,
+                    ))
+                }
+                GameActionOpcode::ModifyAllegianceStoragePermission => {
+                    GameAction::ModifyAllegianceStoragePermission(Box::new(
+                        HouseFlagActionData::unpack(data, offset)?,
+                    ))
+                }
+                GameActionOpcode::ChangeStoragePermission => GameAction::ChangeStoragePermission(
+                    Box::new(HouseStoragePermissionActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::ListAvailableHouses => GameAction::ListAvailableHouses(Box::new(
+                    HouseSearchActionData::unpack(data, offset)?,
+                )),
+
                 GameActionOpcode::BookPageData => GameAction::BookPageData(Box::new(
                     BookPageDataActionData::unpack(data, offset)?,
                 )),
@@ -310,6 +455,19 @@ impl ProtocolPack for GameActionMessage {
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
         match &self.action {
+            GameAction::FinishBarber(data) => {
+                (GameActionOpcode::FinishBarber as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::AbandonContract(data) => {
+                (GameActionOpcode::AbandonContract as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::AdvocateTeleport(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::AdvocateTeleport as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameAction::Jump(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Jump as u32)
                     .unwrap();
@@ -370,6 +528,14 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::TalkDirect(data) => {
+                (GameActionOpcode::TalkDirect as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::AllegianceUpdateRequest(data) => {
+                (GameActionOpcode::AllegianceUpdateRequest as u32).pack(buf);
+                data.pack(buf);
+            }
             GameAction::SwearAllegiance(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::SwearAllegiance as u32)
                     .unwrap();
@@ -377,6 +543,19 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::BreakAllegiance(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::BreakAllegiance as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::ClearPlayerConsentList => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::ClearPlayerConsentList as u32)
+                    .unwrap();
+            }
+            GameAction::DisplayPlayerConsentList => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::DisplayPlayerConsentList as u32)
+                    .unwrap();
+            }
+            GameAction::RemoveFromPlayerConsentList(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::RemoveFromPlayerConsentList as u32)
                     .unwrap();
                 data.pack(buf);
             }
@@ -402,6 +581,24 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::ChatChannel(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::ChatChannel as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::ModifyCharacterSquelch(data) => {
+                (GameActionOpcode::ModifyCharacterSquelch as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::ModifyAccountSquelch(data) => {
+                (GameActionOpcode::ModifyAccountSquelch as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::AddFriend(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::AddFriend as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::RemoveFriend(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::RemoveFriend as u32)
                     .unwrap();
                 data.pack(buf);
             }
@@ -490,6 +687,21 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::TeleToHouse(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::TeleToHouse as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::TeleToPkArena(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::TeleToPkArena as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::RecallAllegianceHometown(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::RecallAllegianceHometown as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameAction::TeleToLifestone(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::TeleToLifestone as u32)
                     .unwrap();
@@ -540,6 +752,10 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::TitleSet(data) => {
+                (GameActionOpcode::TitleSet as u32).pack(buf);
+                data.pack(buf);
+            }
             GameAction::SetSingleCharacterOption(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::SetSingleCharacterOption as u32)
                     .unwrap();
@@ -580,6 +796,66 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::BuyHouse(data) => {
+                (GameActionOpcode::BuyHouse as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::RentHouse(data) => {
+                (GameActionOpcode::RentHouse as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::HouseQuery => (GameActionOpcode::HouseQuery as u32).pack(buf),
+            GameAction::AbandonHouse => (GameActionOpcode::AbandonHouse as u32).pack(buf),
+            GameAction::RemoveAllStoragePermission => {
+                (GameActionOpcode::RemoveAllStoragePermission as u32).pack(buf)
+            }
+            GameAction::RequestFullGuestList => {
+                (GameActionOpcode::RequestFullGuestList as u32).pack(buf)
+            }
+            GameAction::AddAllStoragePermission => {
+                (GameActionOpcode::AddAllStoragePermission as u32).pack(buf)
+            }
+            GameAction::RemoveAllPermanentGuests => {
+                (GameActionOpcode::RemoveAllPermanentGuests as u32).pack(buf)
+            }
+            GameAction::BootEveryone => (GameActionOpcode::BootEveryone as u32).pack(buf),
+            GameAction::AddPermanentGuest(data) => {
+                (GameActionOpcode::AddPermanentGuest as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::RemovePermanentGuest(data) => {
+                (GameActionOpcode::RemovePermanentGuest as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::BootSpecificHouseGuest(data) => {
+                (GameActionOpcode::BootSpecificHouseGuest as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::SetOpenHouseStatus(data) => {
+                (GameActionOpcode::SetOpenHouseStatus as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::SetHooksVisibility(data) => {
+                (GameActionOpcode::SetHooksVisibility as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::ModifyAllegianceGuestPermission(data) => {
+                (GameActionOpcode::ModifyAllegianceGuestPermission as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::ModifyAllegianceStoragePermission(data) => {
+                (GameActionOpcode::ModifyAllegianceStoragePermission as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::ChangeStoragePermission(data) => {
+                (GameActionOpcode::ChangeStoragePermission as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameAction::ListAvailableHouses(data) => {
+                (GameActionOpcode::ListAvailableHouses as u32).pack(buf);
+                data.pack(buf);
+            }
+
             GameAction::BookPageData(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::BookPageData as u32)
                     .unwrap();
@@ -617,6 +893,11 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::ResetTrade(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::ResetTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::FellowshipChangeOpenness(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::FellowshipChangeOpenness as u32)
                     .unwrap();
                 data.pack(buf);
             }

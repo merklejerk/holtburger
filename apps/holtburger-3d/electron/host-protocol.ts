@@ -1,0 +1,716 @@
+import { APP_LIFECYCLE_TUNING } from "../src/app/app-tuning.js";
+import { decode, encode } from "@msgpack/msgpack";
+import { z } from "zod";
+import {
+	contentFailureSchema,
+	type ContentFailure,
+} from "../src/app/content-startup-contract.js";
+import type { ClientLaunchConfiguration } from "./client-launch.js";
+import {
+	MAX_PENDING_REQUESTS,
+	MAX_CONCURRENT_CONTENT_REQUESTS,
+} from "../src/lib/host/host-limits.js";
+export { MAX_PENDING_REQUESTS } from "../src/lib/host/host-limits.js";
+import { HostRequestGate } from "../src/lib/host/host-request-gate.js";
+import {
+	HOST_EVENT_NAMES,
+	isContentHostCommand,
+} from "../src/lib/host/host-transport.js";
+import {
+	hostCommandErrorSchema,
+	type HostCommandFailure,
+} from "../src/lib/host/host-command-result.js";
+import type {
+	HostCommandArguments,
+	HostCommandName,
+	HostEventName,
+	HostEventPayloadMap,
+	HostMode,
+} from "../src/lib/host/host-transport.js";
+
+/** Must match the Rust sidecar's encoded payload ceiling. */
+export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
+/** Version negotiated before any command is accepted. */
+export const PROTOCOL_VERSION = 3;
+
+interface WritableStreamLike {
+	write(chunk: Uint8Array): boolean;
+	end(): void;
+	on(event: "error", listener: (error: Error) => void): this;
+}
+
+interface ReadableStreamLike {
+	on(event: "data", listener: (chunk: Uint8Array) => void): this;
+	on(event: "error", listener: (error: Error) => void): this;
+}
+
+/** Minimal child-process surface needed by the protocol; keeps tests independent of Electron. */
+export interface SidecarProcessLike {
+	stdin: WritableStreamLike;
+	stdout: ReadableStreamLike;
+	on(
+		event: "exit" | "close",
+		listener: (code: number | null, signal: string | null) => void,
+	): this;
+	on(event: "error", listener: (error: Error) => void): this;
+	kill(signal?: NodeJS.Signals): boolean;
+}
+
+const wireIdSchema = z
+	.number()
+	.int()
+	.nonnegative()
+	.max(Number.MAX_SAFE_INTEGER);
+const wireErrorSchema = hostCommandErrorSchema;
+const wireResponseSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("unit") }),
+	z.object({ kind: z.literal("json"), value: z.unknown() }),
+	z.object({ kind: z.literal("binary"), value: z.instanceof(Uint8Array) }),
+]);
+const wireFrameSchema = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("handshake"),
+		protocol_version: z.number().int().nonnegative(),
+		host_name: z.string(),
+		host_version: z.string(),
+		host_mode: z.enum(["explorer", "client"]),
+		content_location: z.string(),
+	}),
+	z.object({
+		kind: z.literal("startup_failed"),
+		protocol_version: z.number().int().nonnegative(),
+		failure: contentFailureSchema,
+	}),
+	z.object({
+		kind: z.literal("content_failed"),
+		failure: contentFailureSchema,
+	}),
+	z.object({
+		kind: z.literal("response"),
+		id: wireIdSchema,
+		result: z.union([
+			z.object({ Ok: wireResponseSchema }),
+			z.object({ Err: wireErrorSchema }),
+		]),
+	}),
+	z.object({
+		kind: z.literal("event"),
+		event: z.object({
+			event: z.enum(HOST_EVENT_NAMES),
+			payload: z.unknown(),
+		}),
+	}),
+	z.object({ kind: z.literal("shutdown_ack"), id: wireIdSchema }),
+	z.object({ kind: z.literal("rejected"), error: wireErrorSchema }),
+]);
+
+type WireFrame = z.infer<typeof wireFrameSchema>;
+
+/** Error reported when the sidecar violates the framing or negotiated protocol contract. */
+export class SidecarProtocolError extends Error {
+	readonly code: string;
+	/** Present only for an individually rejected source resource. */
+	readonly resource: HostCommandFailure["resource"];
+
+	constructor(
+		code: string,
+		message: string,
+		resource?: HostCommandFailure["resource"],
+	) {
+		super(message);
+		this.name = "SidecarProtocolError";
+		this.code = code;
+		this.resource = resource;
+	}
+}
+
+/** Recoverable startup refusal; kept distinct from protocol and executable failures. */
+export class ContentStartupError extends SidecarProtocolError {
+	readonly failure: ContentFailure;
+	constructor(failure: ContentFailure) {
+		super("content_startup", failure.message);
+		this.name = "ContentStartupError";
+		this.failure = failure;
+	}
+}
+
+/** Incremental decoder that accepts fragmented and coalesced child-process stdout chunks. */
+export class SidecarFrameDecoder {
+	readonly #chunks: Uint8Array[] = [];
+	#headOffset = 0;
+	#bufferedBytes = 0;
+
+	push(chunk: Uint8Array): WireFrame[] {
+		if (chunk.length !== 0) {
+			this.#chunks.push(chunk);
+			this.#bufferedBytes += chunk.length;
+		}
+		const frames: WireFrame[] = [];
+		while (this.#bufferedBytes >= 4) {
+			const prefix = this.#peek(4);
+			const length = new DataView(
+				prefix.buffer,
+				prefix.byteOffset,
+				prefix.byteLength,
+			).getUint32(0, true);
+			if (length > MAX_FRAME_BYTES) {
+				throw new SidecarProtocolError(
+					"oversize_frame",
+					`sidecar announced ${length} bytes, exceeding ${MAX_FRAME_BYTES}`,
+				);
+			}
+			if (this.#bufferedBytes < length + 4) break;
+			this.#read(4);
+			const payload = this.#read(length);
+			const parsed = wireFrameSchema.safeParse(decode(payload));
+			if (!parsed.success) {
+				throw new SidecarProtocolError(
+					"malformed_frame",
+					`sidecar emitted an invalid frame: ${z.prettifyError(parsed.error)}`,
+				);
+			}
+			frames.push(parsed.data);
+		}
+		return frames;
+	}
+
+	#peek(length: number): Uint8Array {
+		const head = this.#chunks[0];
+		if (head !== undefined && head.length - this.#headOffset >= length) {
+			return head.subarray(this.#headOffset, this.#headOffset + length);
+		}
+		const value = new Uint8Array(length);
+		let written = 0;
+		let chunkIndex = 0;
+		let chunkOffset = this.#headOffset;
+		while (written < length) {
+			const chunk = this.#chunks[chunkIndex];
+			if (chunk === undefined)
+				throw new Error("frame decoder peek exceeded buffered bytes");
+			const copied = Math.min(length - written, chunk.length - chunkOffset);
+			value.set(chunk.subarray(chunkOffset, chunkOffset + copied), written);
+			written += copied;
+			chunkIndex += 1;
+			chunkOffset = 0;
+		}
+		return value;
+	}
+
+	#read(length: number): Uint8Array {
+		const value = this.#peek(length);
+		let remaining = length;
+		while (remaining > 0) {
+			const head = this.#chunks[0];
+			if (head === undefined)
+				throw new Error("frame decoder read exceeded buffered bytes");
+			const consumed = Math.min(remaining, head.length - this.#headOffset);
+			remaining -= consumed;
+			this.#headOffset += consumed;
+			if (this.#headOffset === head.length) {
+				this.#chunks.shift();
+				this.#headOffset = 0;
+			}
+		}
+		this.#bufferedBytes -= length;
+		return value;
+	}
+}
+
+/** Encode one MessagePack frame with a little-endian u32 payload length. */
+export function encodeSidecarFrame(frame: unknown): Uint8Array {
+	const payload = encode(frame);
+	if (payload.length > MAX_FRAME_BYTES) {
+		throw new SidecarProtocolError(
+			"oversize_frame",
+			`sidecar payload is ${payload.length} bytes, exceeding ${MAX_FRAME_BYTES}`,
+		);
+	}
+	const framed = new Uint8Array(payload.length + 4);
+	new DataView(framed.buffer).setUint32(0, payload.length, true);
+	framed.set(payload, 4);
+	return framed;
+}
+
+export function wireCommand(
+	command: HostCommandName,
+	args: HostCommandArguments,
+): Record<string, unknown> {
+	const base = { command };
+	if (args === undefined) return base;
+	if (
+		command === "despawn_explorer_entity" ||
+		command === "stop_physical_fly"
+	) {
+		return { ...base, ...args };
+	}
+	if (command === "select_client_character") {
+		return { ...base, guid: args.guid };
+	}
+	if (command === "replace_client_drive") {
+		return { ...base, request: args.request };
+	}
+	if (command === "start_physical_fly") {
+		return { ...base, registration: args.registration };
+	}
+	if (command === "set_physical_fly_intent") {
+		return { ...base, intent: args.intent };
+	}
+	if ("request" in args) return { ...base, request: args.request };
+	return { ...base, ...args };
+}
+
+/** Main-process client that owns one sidecar, request multiplexer, and event fanout. */
+export class SidecarHostClient {
+	/** Process completion includes stdout drainage, unlike a shutdown acknowledgement. */
+	readonly completed: Promise<{
+		readonly code: number | null;
+		readonly signal: string | null;
+	}>;
+	#closed = false;
+	readonly #process: SidecarProcessLike;
+	readonly #expectedMode: HostMode | undefined;
+	readonly #decoder = new SidecarFrameDecoder();
+	readonly #pending = new Map<
+		number,
+		{
+			resolve: (value: unknown) => void;
+			reject: (reason: unknown) => void;
+		}
+	>();
+	readonly #listeners = new Map<
+		HostEventName,
+		Set<(payload: unknown) => void>
+	>();
+	#nextRequestId = 1;
+	#connected: Promise<void>;
+	#resolveConnected!: () => void;
+	#rejectConnected!: (reason: unknown) => void;
+	/** One budget for every content caller on this sidecar connection. */
+	readonly #contentRequests = new HostRequestGate(
+		MAX_CONCURRENT_CONTENT_REQUESTS,
+	);
+	#shutdown: Promise<void> | undefined;
+	#failure: SidecarProtocolError | undefined;
+	/** Both facts become available atomically when the versioned handshake is accepted. */
+	#identity: { contentLocation: string; version: string } | undefined;
+	#latestContentFailure: ContentFailure | undefined;
+	readonly #contentListeners = new Set<(failure: ContentFailure) => void>();
+	readonly #handshakeTimeout: ReturnType<typeof setTimeout>;
+
+	constructor(process: SidecarProcessLike, expectedMode?: HostMode) {
+		this.#process = process;
+		this.#expectedMode = expectedMode;
+		this.#connected = new Promise<void>((resolve, reject) => {
+			this.#resolveConnected = resolve;
+			this.#rejectConnected = reject;
+		});
+		this.#handshakeTimeout = setTimeout(() => {
+			this.#fail(
+				new SidecarProtocolError(
+					"handshake_timeout",
+					"host did not complete its protocol handshake",
+				),
+				true,
+			);
+		}, APP_LIFECYCLE_TUNING.sidecarHandshakeTimeoutMs);
+		process.stdout.on("data", (chunk) => this.#receive(chunk));
+		process.stdin.on("error", (error) => {
+			this.#fail(new SidecarProtocolError("host_stdin", error.message), true);
+		});
+		process.stdout.on("error", (error) => {
+			this.#fail(new SidecarProtocolError("host_stdout", error.message), true);
+		});
+		process.on("error", (error) => {
+			this.#fail(
+				new SidecarProtocolError(
+					"host_spawn",
+					`failed to start host sidecar: ${error.message}`,
+				),
+				false,
+			);
+		});
+		this.completed = new Promise((resolve) =>
+			process.on("close", (code, signal) => {
+				this.#closed = true;
+				resolve({ code, signal });
+				this.#fail(
+					new SidecarProtocolError(
+						"host_exit",
+						`host exited before completing the protocol (code=${code ?? "none"}, signal=${signal ?? "none"})`,
+					),
+					false,
+				);
+			}),
+		);
+	}
+
+	/** Waits for the host handshake and acknowledges the negotiated protocol version. */
+	async connect(): Promise<void> {
+		await this.#connected;
+		if (this.#failure) throw this.#failure;
+	}
+
+	/** Canonical selection identity becomes available after a successful handshake. */
+	get contentLocation(): string {
+		if (this.#identity === undefined)
+			throw new Error("Host content is not initialized");
+		return this.#identity.contentLocation;
+	}
+
+	/** Packaged-host version used by release verification after connect completes. */
+	get hostVersion(): string {
+		if (this.#identity === undefined)
+			throw new Error("Host is not initialized");
+		return this.#identity.version;
+	}
+
+	/** Register synchronously before connect; replay any diagnostic already received. */
+	listenContentFailures(
+		handler: (failure: ContentFailure) => void,
+	): () => void {
+		this.#contentListeners.add(handler);
+		if (this.#latestContentFailure !== undefined)
+			handler(this.#latestContentFailure);
+		return () => {
+			this.#contentListeners.delete(handler);
+		};
+	}
+
+	/** Sends one typed command and resolves its matching response. */
+	async invoke(
+		command: HostCommandName,
+		args?: HostCommandArguments,
+	): Promise<unknown> {
+		const operation = () => this.#invokeWire(wireCommand(command, args));
+		return isContentHostCommand(command)
+			? this.#contentRequests.schedule(operation)
+			: operation();
+	}
+
+	/** Sends the one launch-only client command; this method is not part of the preload bridge. */
+	async startClient(startup: ClientLaunchConfiguration): Promise<void> {
+		try {
+			// Content was selected when the host process launched; the game command owns connection data.
+			const { host, port, account, password, meleeMaxChaseDistance } = startup;
+			await this.#invokeWire({
+				command: "start_client",
+				startup: {
+					host,
+					port,
+					account,
+					password,
+					...(meleeMaxChaseDistance === undefined
+						? {}
+						: { meleeMaxChaseDistance }),
+				},
+			});
+		} finally {
+			// Release the caller's retained credential as soon as the encoded startup request settles.
+			startup.password = "";
+		}
+	}
+
+	/** Registers one allowlisted event listener and returns its disposal function. */
+	async listen<K extends HostEventName>(
+		event: K,
+		handler: (payload: HostEventPayloadMap[K]) => void,
+	): Promise<() => void> {
+		await this.#connected;
+		if (this.#failure) throw this.#failure;
+		const listeners = this.#listeners.get(event) ?? new Set();
+		listeners.add(handler as (payload: unknown) => void);
+		this.#listeners.set(event, listeners);
+		return () => listeners.delete(handler as (payload: unknown) => void);
+	}
+
+	async #invokeWire(command: Record<string, unknown>): Promise<unknown> {
+		await this.#connected;
+		if (this.#failure) throw this.#failure;
+		if (this.#shutdown)
+			throw new SidecarProtocolError(
+				"host_shutdown",
+				"Host requests are stopped.",
+			);
+		if (this.#pending.size >= MAX_PENDING_REQUESTS) {
+			throw new SidecarProtocolError(
+				"pending_limit",
+				`host already has ${MAX_PENDING_REQUESTS} pending requests`,
+			);
+		}
+		const id = this.#nextRequestId++;
+		return new Promise((resolve, reject) => {
+			this.#pending.set(id, { resolve, reject });
+			try {
+				this.#write({ kind: "request", id, command });
+			} catch (error) {
+				this.#pending.delete(id);
+				reject(error);
+			}
+		});
+	}
+
+	/** Requests an orderly host shutdown and force-kills only after the bounded grace period. */
+	async shutdown(): Promise<void> {
+		if (this.#shutdown) return this.#shutdown;
+		this.#contentRequests.destroy(
+			new SidecarProtocolError("host_shutdown", "Host requests are stopped."),
+		);
+		this.#shutdown = this.#stop();
+		return this.#shutdown;
+	}
+
+	async #stop(): Promise<void> {
+		if (this.#closed) return;
+		if (this.#identity === undefined || this.#failure !== undefined) {
+			this.#process.kill();
+			await this.#waitForClose();
+			return;
+		}
+		try {
+			await this.#requestShutdown();
+		} finally {
+			await this.#waitForClose();
+		}
+	}
+
+	async #waitForClose(): Promise<void> {
+		if (this.#closed) return;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const bounded = () =>
+			Promise.race([
+				this.completed,
+				new Promise<never>((_resolve, reject) => {
+					timer = setTimeout(
+						() =>
+							reject(
+								new SidecarProtocolError(
+									"host_close_timeout",
+									"Host process did not terminate",
+								),
+							),
+						APP_LIFECYCLE_TUNING.sidecarShutdownGraceMs,
+					);
+				}),
+			]).finally(() => {
+				if (timer !== undefined) clearTimeout(timer);
+			});
+		try {
+			await bounded();
+		} catch {
+			this.#process.kill();
+			await bounded();
+		}
+	}
+
+	#requestShutdown(): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
+			const id = this.#nextRequestId++;
+			const timeout = setTimeout(() => {
+				this.#pending.delete(id);
+				this.#process.kill();
+				reject(
+					new SidecarProtocolError(
+						"shutdown_timeout",
+						"host did not acknowledge shutdown",
+					),
+				);
+			}, APP_LIFECYCLE_TUNING.sidecarShutdownGraceMs);
+			this.#pending.set(id, {
+				resolve: () => {
+					clearTimeout(timeout);
+					resolve();
+				},
+				reject: (error) => {
+					clearTimeout(timeout);
+					reject(error);
+				},
+			});
+			try {
+				this.#write({ kind: "shutdown", id });
+			} catch (error) {
+				clearTimeout(timeout);
+				this.#pending.delete(id);
+				reject(error);
+			}
+		});
+	}
+
+	#write(frame: unknown): void {
+		if (!this.#process.stdin.write(encodeSidecarFrame(frame))) {
+			// Node retains the frame until drain; the pending-request limit bounds this queue.
+		}
+	}
+
+	#receive(chunk: Uint8Array): void {
+		let frames: WireFrame[];
+		try {
+			frames = this.#decoder.push(chunk);
+		} catch (error) {
+			this.#fail(
+				error instanceof SidecarProtocolError
+					? error
+					: new SidecarProtocolError("malformed_frame", String(error)),
+				true,
+			);
+			return;
+		}
+		try {
+			for (const frame of frames) {
+				if (frame.kind === "startup_failed") {
+					if (
+						this.#identity !== undefined ||
+						frame.protocol_version !== PROTOCOL_VERSION
+					) {
+						this.#fail(
+							new SidecarProtocolError(
+								"invalid_startup_failure",
+								"Host startup failure has an incompatible version or arrived after handshake",
+							),
+							true,
+						);
+						return;
+					}
+					this.#fail(new ContentStartupError(frame.failure), false);
+					return;
+				}
+				if (frame.kind === "handshake") {
+					if (this.#identity !== undefined) {
+						this.#fail(
+							new SidecarProtocolError(
+								"duplicate_handshake",
+								"host emitted more than one protocol handshake",
+							),
+							true,
+						);
+						return;
+					}
+					if (frame.protocol_version !== PROTOCOL_VERSION) {
+						this.#fail(
+							new SidecarProtocolError(
+								"incompatible_protocol",
+								"host protocol version is unsupported",
+							),
+							true,
+						);
+						return;
+					}
+					if (
+						this.#expectedMode !== undefined &&
+						frame.host_mode !== this.#expectedMode
+					) {
+						this.#fail(
+							new SidecarProtocolError(
+								"host_mode_mismatch",
+								`host selected ${frame.host_mode} mode, expected ${this.#expectedMode}`,
+							),
+							true,
+						);
+						return;
+					}
+					this.#write({
+						kind: "handshake_ack",
+						protocol_version: PROTOCOL_VERSION,
+					});
+					this.#identity = {
+						contentLocation: frame.content_location,
+						version: frame.host_version,
+					};
+					clearTimeout(this.#handshakeTimeout);
+					this.#resolveConnected();
+					continue;
+				}
+				if (this.#identity === undefined) {
+					this.#fail(
+						new SidecarProtocolError(
+							"handshake_required",
+							"host emitted application traffic before its handshake",
+						),
+						true,
+					);
+					return;
+				}
+				if (frame.kind === "content_failed") {
+					this.#latestContentFailure = frame.failure;
+					for (const handler of this.#contentListeners) handler(frame.failure);
+					continue;
+				}
+				if (frame.kind === "response") {
+					const pending = this.#pending.get(frame.id);
+					if (!pending) {
+						this.#fail(
+							new SidecarProtocolError(
+								"unknown_response",
+								`host responded to unknown request ${frame.id}`,
+							),
+							true,
+						);
+						return;
+					}
+					this.#pending.delete(frame.id);
+					if ("Err" in frame.result) {
+						pending.reject(
+							new SidecarProtocolError(
+								frame.result.Err.code,
+								frame.result.Err.message,
+								frame.result.Err.resource,
+							),
+						);
+						continue;
+					}
+					const result = frame.result.Ok;
+					pending.resolve(result.kind === "unit" ? undefined : result.value);
+					continue;
+				}
+				if (frame.kind === "event") {
+					const event: HostEventName = frame.event.event;
+					for (const listener of this.#listeners.get(event) ?? [])
+						listener(frame.event.payload);
+					continue;
+				}
+				if (frame.kind === "shutdown_ack") {
+					const pending = this.#pending.get(frame.id);
+					if (!pending) {
+						this.#fail(
+							new SidecarProtocolError(
+								"unknown_shutdown",
+								`host acknowledged unknown shutdown ${frame.id}`,
+							),
+							true,
+						);
+						return;
+					}
+					this.#pending.delete(frame.id);
+					pending.resolve(undefined);
+					this.#process.stdin.end();
+					continue;
+				}
+				if (frame.kind === "rejected") {
+					this.#fail(
+						new SidecarProtocolError(frame.error.code, frame.error.message),
+						true,
+					);
+					return;
+				}
+			}
+		} catch (error) {
+			this.#fail(
+				new SidecarProtocolError(
+					"protocol_processing",
+					error instanceof Error ? error.message : String(error),
+				),
+				true,
+			);
+		}
+	}
+
+	#fail(error: SidecarProtocolError, terminate: boolean): void {
+		if (this.#failure) return;
+		this.#failure = error;
+		this.#contentRequests.destroy(error);
+		clearTimeout(this.#handshakeTimeout);
+		this.#rejectConnected(error);
+		for (const pending of this.#pending.values()) pending.reject(error);
+		this.#pending.clear();
+		if (terminate) this.#process.kill();
+	}
+}

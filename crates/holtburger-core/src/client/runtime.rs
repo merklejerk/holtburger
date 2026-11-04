@@ -1,42 +1,119 @@
+use super::runtime_profile::RuntimePhaseProfile;
 use super::*;
 use anyhow::Result;
-use holtburger_world::SpatialBodyId;
+use futures::FutureExt;
+use holtburger_protocol::messages::game_action::{GameAction, JumpActionData};
+use holtburger_session::SessionEvent;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc::error::TryRecvError;
+use tokio::time::MissedTickBehavior;
+
+/// Bound ordered input intake without requiring the command queue to become empty.
+const COMMAND_BATCH_LIMIT: usize = 64;
+/// Stop starting more commands after this budget; an individual command is not preemptible.
+const COMMAND_BATCH_BUDGET: Duration = Duration::from_millis(2);
+
+/// Bound ready network intake so sustained server traffic still leaves turns for input and physics.
+const NETWORK_BATCH_LIMIT: usize = 64;
+/// Stop starting another receive after this budget; one packet's handling is not preemptible.
+const NETWORK_BATCH_BUDGET: Duration = Duration::from_millis(8);
 
 impl ClientRuntime {
+    /// Handle the selected packet and a bounded prefix of already-ready ordered packets.
+    async fn process_network_batch(
+        &mut self,
+        mut received: Result<Vec<SessionEvent>>,
+    ) -> Result<()> {
+        let started = Instant::now();
+        for index in 0..NETWORK_BATCH_LIMIT {
+            let events = received.inspect_err(|error| {
+                log::error!("Session error: {error}");
+                self.fail_connection(
+                    super::ConnectionFailureCause::Local {
+                        operation: super::ConnectionOperation::ServerTraffic,
+                        diagnostic: format!("{error:#}"),
+                    },
+                    ClientExitCause::RuntimeFailure,
+                );
+            })?;
+            for event in events {
+                match event {
+                    SessionEvent::Message(data) => {
+                        self.handle_message(&data).await.inspect_err(|_| {
+                            // Handler errors may be content/invariant failures. Only actual
+                            // network boundaries record a ConnectionFailure; keep other errors
+                            // in the existing runtime-failure domain.
+                            if self.state != ClientState::Disconnected {
+                                self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                                self.state = ClientState::Disconnected;
+                                self.send_status_event();
+                            }
+                        })?;
+                    }
+                    SessionEvent::TimeSync(time) => self.sync_server_time(time, Instant::now()),
+                }
+                if matches!(self.state, ClientState::Disconnected) {
+                    return Ok(());
+                }
+            }
+            if index + 1 == NETWORK_BATCH_LIMIT || started.elapsed() >= NETWORK_BATCH_BUDGET {
+                break;
+            }
+            // Poll once, as the outer select does: an idle socket must not hold the core loop.
+            // Session owns partial fragments, ordered packets, and pending control sends across
+            // cancellation, so dropping a pending receive retains that transport progress.
+            let Some(next) = self.session.recv_message().now_or_never() else {
+                break;
+            };
+            received = next;
+        }
+        Ok(())
+    }
+
+    /// Consume the selected command first, then a bounded FIFO prefix of pending input.
+    async fn process_command_batch(&mut self, mut first: Option<ClientCommand>) -> Result<()> {
+        let started = Instant::now();
+        for _ in 0..COMMAND_BATCH_LIMIT {
+            if matches!(self.state, ClientState::Disconnected) {
+                break;
+            }
+            let command = if let Some(command) = first.take() {
+                command
+            } else {
+                let Some(receiver) = self.command_rx.as_mut() else {
+                    break;
+                };
+                match receiver.try_recv() {
+                    Ok(command) => command,
+                    Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                }
+            };
+            if let Err(error) = self.handle_command(command).await {
+                self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                self.state = ClientState::Disconnected;
+                self.send_status_event();
+                return Err(error);
+            }
+            if started.elapsed() >= COMMAND_BATCH_BUDGET {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     fn should_send_keepalive_ping(&self, now: Instant) -> bool {
         matches!(self.state, ClientState::InWorld)
             && now.duration_since(self.session.last_send_time) > Duration::from_secs(5)
     }
 
-    fn sync_remote_body_tracking(&mut self, body_id: SpatialBodyId) {
-        if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
-            return;
-        }
-
-        if self.world.body_has_simulatable_projection_basis(body_id) {
-            self.simulation.track_body(body_id);
-        } else {
-            self.simulation.untrack_body(body_id);
-        }
-    }
-
     pub(super) fn poll_busy_timeout(&mut self, now: Instant) {
-        let Some(pending) = self.active_busy_operation.as_ref() else {
-            return;
-        };
-
-        if now < pending.deadline {
-            return;
-        }
-
-        let pending = self
-            .active_busy_operation
-            .take()
-            .expect("busy operation should still exist when timing out");
-        self.emit_busy_state_updated();
-        self.emit_busy_operation_finished(pending.operation, BusyOperationResult::TimedOut);
+        self.poll_auto_merge(now);
+        self.poll_container_close_timeout(now);
+        self.poll_housing_query_timeout(now);
+        self.poll_allegiance_query_timeout(now);
+        self.poll_housing_information_timeouts(now);
+        self.expire_busy_operation(now);
     }
 
     pub(super) fn emit_runtime_body_snapshot(&self) {
@@ -47,53 +124,109 @@ impl ClientRuntime {
     }
 
     pub(super) fn sync_server_time(&mut self, server_time: f64, local_time: Instant) {
+        #[cfg(feature = "runtime-fixture")]
+        if let Some(capture) = &mut self.runtime_fixture {
+            capture.record(super::runtime_fixture::RuntimeFixtureInput::TimeSync(
+                server_time,
+            ));
+        }
         let world_events = self.world.set_server_time_sync(server_time, local_time);
         for event in world_events {
             self.handle_world_event(&event);
         }
     }
 
-    pub(super) fn observe_runtime_world_event(&mut self, event: &WorldEvent) {
-        match event {
-            WorldEvent::EntitySpawned(entity)
-            | WorldEvent::EntityReplaced(entity)
-            | WorldEvent::EntityIdentified(entity) => {
-                if let Some(body_id) = self.world.runtime_body_id_for_guid(entity.guid) {
-                    self.sync_remote_body_tracking(body_id);
-                }
-            }
-            WorldEvent::EntityVectorUpdated { guid, .. } => {
-                if let Some(body_id) = self.world.runtime_body_id_for_guid(*guid) {
-                    self.sync_remote_body_tracking(body_id);
-                }
-            }
-            WorldEvent::EntityDespawned(guid) => {
-                self.simulation.untrack_body(SpatialBodyId::Entity(*guid));
-            }
-            WorldEvent::RuntimeBodyChanged { body_id } => {
-                self.sync_remote_body_tracking(*body_id);
-            }
-            WorldEvent::RuntimeBodyRemoved { body_id }
-                if !matches!(body_id, SpatialBodyId::LocalPlayer(_)) =>
-            {
-                self.simulation.untrack_body(*body_id);
-            }
-            WorldEvent::RuntimeBodiesReset { .. } => {}
-            _ => {}
-        }
+    pub(super) fn handle_runtime_world_event(&mut self, event: &WorldEvent) {
+        self.handle_runtime_world_event_with_context(event, false, false);
+        self.finish_character_world_events(self.world_event_changes_character_sheet(event));
     }
 
-    pub(super) fn handle_runtime_world_event(&mut self, event: &WorldEvent) {
-        self.observe_runtime_world_event(event);
-        self.emit_world_view_projection(event);
+    pub(super) fn handle_runtime_world_event_with_context(
+        &mut self,
+        event: &WorldEvent,
+        teleport_batch: bool,
+        suppress_vital_projection: bool,
+    ) {
+        match event {
+            WorldEvent::EntityDespawned { guid, .. } => self.entity_cue_inbox.remove(*guid),
+            WorldEvent::RuntimeBodiesReset { .. } => {
+                self.entity_cue_inbox.clear();
+                self.movement.clear_server_controlled_motion();
+                self.reset_camera();
+                if let Some(coordinator) = self.collision_coordinator.as_mut() {
+                    coordinator.invalidate();
+                }
+                // PlayerTeleport emits this reset as an effect before its identifying edge. The
+                // batch handler lets the TeleportStarted event own the one generation increment;
+                // a standalone reset remains an in-place presentation discontinuity.
+                if !teleport_batch && self.activation.is_none() {
+                    self.bump_world_generation();
+                    let _ = self.client_view_event_tx.send(
+                        ClientViewEvent::PresentationDiscontinuity {
+                            world_generation: self.world_generation,
+                            kind: ClientPresentationDiscontinuityKind::Reset,
+                        },
+                    );
+                }
+            }
+            WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid => {
+                self.movement.clear_server_controlled_motion();
+                self.reset_camera();
+                if let Some(coordinator) = self.collision_coordinator.as_mut() {
+                    coordinator.invalidate();
+                }
+                if self.activation.is_none() {
+                    self.bump_world_generation();
+                    let _ = self.client_view_event_tx.send(
+                        ClientViewEvent::PresentationDiscontinuity {
+                            world_generation: self.world_generation,
+                            kind: ClientPresentationDiscontinuityKind::ForcedReposition,
+                        },
+                    );
+                }
+            }
+            WorldEvent::TeleportStarted { .. } => {
+                self.start_world_activation(
+                    ClientWorldActivationState::Teleport,
+                    self.world.player.guid,
+                );
+            }
+            _ => {}
+        }
+        self.project_world_event(event, suppress_vital_projection);
+    }
+
+    fn publish_precise_jump_progress(&mut self) {
+        for progress in
+            self.precise_jump
+                .poll(self.world_generation, self.camera.identity(), &self.world)
+        {
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::PreciseJumpEvaluation(progress));
+        }
     }
 
     pub async fn run(&mut self) -> Result<()> {
         self.send_status_event();
+        let _camera_scope = self.camera.run_scope();
 
         let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
-        let mut net_tick = tokio::time::interval(Duration::from_secs(1));
+        self.connection.observe(
+            Instant::now(),
+            self.session.bytes_in,
+            self.session.bytes_out,
+            self.session.reliability(),
+        );
+        let mut net_tick = tokio::time::interval_at(
+            tokio::time::Instant::now() + Duration::from_secs(1),
+            Duration::from_secs(1),
+        );
+        net_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        // Overdue slots are not extra simulation work. Advance once using actual elapsed time.
+        physics_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut last_physics_time = Instant::now();
+        let precise_jump_notification = self.precise_jump.progress_notification();
 
         loop {
             if matches!(self.state, ClientState::Disconnected) {
@@ -104,16 +237,15 @@ impl ClientRuntime {
                 _ = net_tick.tick() => {
                     let now = Instant::now();
 
-                    let _ = self.client_view_event_tx.send(ClientViewEvent::NetPulse {
-                        bytes_in: self.session.bytes_in,
-                        bytes_out: self.session.bytes_out,
-                    });
+                    let reliability = self.session.reliability();
+                    self.connection.observe(now, self.session.bytes_in, self.session.bytes_out, reliability);
+                    if let Some(sample) = self.connection.snapshot(now, self.session.last_recv_time, false, reliability.receive_gap) {
+                        let _ = self.client_view_event_tx.send(ClientViewEvent::ConnectionUpdated(sample));
+                    }
 
-                    if now.duration_since(self.session.last_recv_time) > Duration::from_secs(15) {
-                        log::warn!("Connection timed out (no data for 15s)");
-                        self.state = ClientState::Disconnected;
-                        let _ = self.client_view_event_tx.send(ClientViewEvent::Disconnected);
-                        self.send_status_event();
+                    if now.duration_since(self.session.last_recv_time) > super::connection::CONNECTION_TIMEOUT {
+                        log::warn!("Connection timed out (no data for {}s)", super::connection::CONNECTION_TIMEOUT.as_secs());
+                        self.fail_connection(super::ConnectionFailureCause::Inactivity { seconds: now.duration_since(self.session.last_recv_time).as_secs() }, ClientExitCause::ServerDisconnect);
                         break;
                     }
 
@@ -126,34 +258,23 @@ impl ClientRuntime {
                             .await?;
                     }
 
+                    self.poll_housing_recovery(now).await?;
+                    self.advance_housing_access_query(now).await?;
                     self.poll_busy_timeout(now);
+                    self.poll_trade_addition_timeout(now);
+                    if let Err(error) = self.maintain_container_range().await {
+                        self.emit_action_result(
+                            super::types::ActionResultSource::Client,
+                            super::types::ActionResultReason::General(format!("Could not close out-of-range container: {error:#}")),
+                        );
+                    }
+                    self.entity_cue_inbox.expire(now);
                 }
                 res = self.session.recv_message() => {
-                    use holtburger_session::SessionEvent;
-                    match res {
-                        Ok(events) => {
-                            for event in events {
-                                match event {
-                                    SessionEvent::Message(msg_data) => {
-                                        self.handle_message(&msg_data).await?;
-
-                                        if matches!(self.state, ClientState::Disconnected) {
-                                            return Ok(());
-                                        }
-                                    }
-                                    SessionEvent::TimeSync(server_time) => {
-                                        self.sync_server_time(server_time, Instant::now());
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Session error: {}", e);
-                            self.state = ClientState::Disconnected;
-                            self.send_status_event();
-                            return Err(e);
-                        }
-                    }
+                    let mut profile = RuntimePhaseProfile::begin("network_batch");
+                    self.process_network_batch(res).await?;
+                    profile.checkpoint("dispatch");
+                    profile.finish(format_args!(""));
                 }
                 Some(cmd) = async {
                     if let Some(rx) = &mut self.command_rx {
@@ -162,40 +283,298 @@ impl ClientRuntime {
                         None
                     }
                 } => {
-                    self.handle_command(cmd).await?;
+                    let mut profile = RuntimePhaseProfile::begin("command_batch");
+                    self.process_command_batch(Some(cmd)).await?;
+                    profile.checkpoint("dispatch");
+                    profile.finish(format_args!(""));
+                }
+                _ = precise_jump_notification.notified() => {
+                    self.publish_precise_jump_progress();
                 }
                 _ = physics_tick.tick() => {
+                    let mut profile = RuntimePhaseProfile::begin("physics_tick");
+                    // A ready physics deadline must not bypass all queued input. Preserve command
+                    // order, but leave a backlog for later turns rather than starving simulation.
+                    self.process_command_batch(None).await?;
+                    if matches!(self.state, ClientState::Disconnected) {
+                        break;
+                    }
                     let now = Instant::now();
-                    let dt = now.duration_since(last_physics_time).as_secs_f32();
-                    let dt_duration = Duration::from_secs_f32(dt.max(0.0));
+                    let dt_duration = now.duration_since(last_physics_time);
                     last_physics_time = now;
+                    profile.checkpoint("queued_commands");
 
-                    let movement_events = self
-                        .movement
-                        .tick(now, &mut self.world, &mut self.session)
-                        .await?;
-                    for event in movement_events {
-                        self.handle_runtime_world_event(&event);
+                    #[cfg(feature = "runtime-fixture")]
+                    if let Some(capture) = &mut self.runtime_fixture {
+                        capture.record(super::runtime_fixture::RuntimeFixtureInput::Physics {
+                            elapsed: dt_duration,
+                            entities: self.world.entities.len(),
+                        });
                     }
-
-                    let physics_events = self.world.tick();
-                    for event in physics_events {
-                        self.handle_runtime_world_event(&event);
-                    }
-
-                    let simulation_events = self.simulation.tick(
+                    self.advance_physics_tick(
                         now,
                         dt_duration,
-                        &mut self.world,
-                        &mut self.movement,
-                    );
-                    for event in simulation_events {
-                        self.handle_runtime_world_event(&event);
-                    }
+                        profile,
+                        #[cfg(feature = "runtime-fixture")]
+                        None,
+                    ).await?;
                 }
+            }
+            // Socket/channel/timer awaits can all be immediately ready. End the executor turn
+            // explicitly so the independent event forwarder can run even under sustained load.
+            tokio::task::yield_now().await;
+        }
+
+        Ok(())
+    }
+
+    /// Executes the same authority update for live scheduling and diagnostic input replay.
+    pub(super) async fn advance_physics_tick(
+        &mut self,
+        now: Instant,
+        dt_duration: Duration,
+        mut profile: RuntimePhaseProfile,
+        #[cfg(feature = "runtime-fixture")] fixture_content_wait: Option<&mut Duration>,
+    ) -> Result<()> {
+        self.advance_equipment_change(now).await?;
+        self.poll_barber();
+        self.advance_equipment_set(now).await?;
+        self.advance_inventory_operation(now).await?;
+        let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
+        if active_world {
+            self.advance_dynamic_scripts(self.dynamic_script_time())?;
+            self.poll_selection_envelopes();
+        }
+        if active_world {
+            let prepared_movement = self.movement.prepare_tick(now, &mut self.world);
+            self.advance_rest_posture(now);
+            self.prepare_combat_movement(now, dt_duration);
+            let movement_events = self
+                .movement
+                .advance_tick(prepared_movement, now, &mut self.world, &mut self.session)
+                .await
+                .inspect_err(|_| {
+                    self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                })?;
+            for event in movement_events {
+                self.handle_runtime_world_event(&event);
+            }
+            for error in self.movement.take_authored_motion_rejections() {
+                self.emit_action_result(
+                    super::types::ActionResultSource::Client,
+                    super::types::ActionResultReason::Weenie(error, None),
+                );
+            }
+            for feedback in self.movement.take_character_motion_feedback() {
+                if matches!(
+                    feedback.outcome,
+                    ClientCharacterMotionOutcome::ChargeAccepted
+                ) {
+                    self.interrupt_combat_for_player_movement(now);
+                }
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CharacterMotionFeedback(feedback));
             }
         }
 
+        profile.checkpoint("movement_and_equipment");
+        let scene_snapshot = self
+            .collision_coordinator
+            .as_ref()
+            .map(|coordinator| coordinator.snapshot());
+        let physics_events = self.world.tick(
+            scene_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.scene.as_ref()),
+        );
+        for event in physics_events {
+            self.handle_runtime_world_event(&event);
+        }
+
+        profile.checkpoint("world_tick");
+        if let Some(coordinator) = self.collision_coordinator.as_mut() {
+            let mut collision_events = coordinator.observe(&mut self.world);
+            #[cfg(feature = "runtime-fixture")]
+            let completions = match fixture_content_wait {
+                Some(waited) => {
+                    coordinator
+                        .poll_fixture_content(&mut self.world, now, waited)
+                        .await?
+                }
+                None => coordinator.poll(&mut self.world, now),
+            };
+            #[cfg(not(feature = "runtime-fixture"))]
+            let completions = coordinator.poll(&mut self.world, now);
+            collision_events.extend(completions);
+            for event in collision_events {
+                self.handle_runtime_world_event(&event);
+            }
+        }
+
+        profile.checkpoint("collision_content");
+        self.publish_precise_jump_progress();
+
+        self.try_complete_world_activation().await?;
+
+        self.advance_equipment_change(now).await?;
+        self.advance_equipment_set(now).await?;
+        self.advance_inventory_operation(now).await?;
+        let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
+        profile.checkpoint("activation_and_equipment");
+        let before_dynamic = active_world.then(|| self.capture_dynamic_entity_tick_baseline());
+        let collision_snapshot = self
+            .collision_coordinator
+            .as_ref()
+            .map(super::collision::ClientCollisionCoordinator::snapshot);
+        let mut body_motions = std::collections::HashMap::new();
+        self.publish_social_motion_readiness();
+        profile.checkpoint("before_entity_projection");
+        if active_world {
+            let prepared_precise_jump = match self
+                .precise_jump
+                .prepare_queued_commit(self.world_generation, self.camera.identity())
+            {
+                Some(Ok(prepared)) => Some(prepared),
+                Some(Err(feedback)) => {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::PreciseJumpTransactionFeedback(feedback));
+                    None
+                }
+                None => None,
+            };
+            let simulation_tick = super::simulation::tick_with_precise_jump(
+                now,
+                dt_duration,
+                &mut self.world,
+                &mut self.movement,
+                collision_snapshot.as_deref(),
+                prepared_precise_jump,
+            )
+            .inspect_err(|_| {
+                self.set_exit_cause(ClientExitCause::RuntimeFailure);
+            })?;
+            profile.checkpoint("simulation");
+            for feedback in self
+                .movement
+                .take_authored_request_feedback(&mut self.world)
+            {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::LocalMotionFeedback {
+                        request_id: feedback.request_id,
+                        world_generation: self.world_generation,
+                        outcome: feedback.outcome,
+                    });
+            }
+
+            body_motions = simulation_tick.body_motions;
+            let mut advanced_runtime_bodies = Vec::new();
+            for event in simulation_tick.events {
+                if let WorldEvent::RuntimeBodyAdvanced { body_id, .. } = event
+                    && let Some(body) = self.world.runtime_body_view(body_id)
+                {
+                    advanced_runtime_bodies.push(body);
+                }
+                self.handle_runtime_world_event(&event);
+            }
+            for cue in simulation_tick.collision_script_cues {
+                self.dispatch_script_cue(cue)?;
+            }
+            advanced_runtime_bodies.sort_by_key(|body| body.body_id);
+            if !advanced_runtime_bodies.is_empty() {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::RuntimeBodiesAdvanced {
+                        bodies: advanced_runtime_bodies.into(),
+                    });
+            }
+            if let Some(jump) = simulation_tick.committed_jump {
+                self.interrupt_combat_for_player_movement(now);
+                self.session
+                    .send_action(GameAction::Jump(Box::new(JumpActionData {
+                        extent: jump.resolved.extent().get(),
+                        velocity: jump.resolved.local_velocity(),
+                        position: jump.position,
+                        instance_sequence: jump.instance_sequence,
+                        server_control_sequence: jump.server_control_sequence,
+                        teleport_sequence: jump.teleport_sequence,
+                        force_position_sequence: jump.force_position_sequence,
+                    })))
+                    .await?;
+            }
+            // Jump publishes its release origin/velocity, not the accepted contact
+            // after this step. Keep the departure report in the routine decision.
+            self.movement
+                .publish_position_after_simulation(
+                    now,
+                    &self.world,
+                    &mut self.session,
+                    simulation_tick.relative_facing_changed,
+                )
+                .await?;
+            self.advance_combat_engagement(now).await?;
+            if let Some(feedback) = simulation_tick.character_motion_feedback {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CharacterMotionFeedback(feedback));
+            }
+            if let Some(feedback) = simulation_tick.precise_jump_feedback {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PreciseJumpTransactionFeedback(feedback));
+            }
+        }
+
+        profile.checkpoint("simulation_events_and_combat");
+        self.publish_entity_facts();
+        if active_world {
+            self.hydrate_projectile_supply().await?;
+        }
+        self.publish_character_motion_capabilities_if_changed();
+
+        profile.checkpoint("entity_facts_and_supply");
+        let dynamic_batch = if let Some(before_dynamic) =
+            before_dynamic.filter(|before| !before.views.is_empty())
+        {
+            self.dynamic_entity_tick_batch(
+                before_dynamic,
+                || self.dynamic_entity_host_time(),
+                dt_duration.as_secs_f64() * 1_000.0,
+                &body_motions,
+            )?
+        } else {
+            None
+        };
+        profile.checkpoint("after_entity_projection_and_diff");
+        let camera_input = (active_world && self.camera.identity().is_some()).then(|| {
+            camera::ClientCameraSceneInput::capture(
+                &self.world,
+                collision_snapshot.as_deref(),
+                dynamic_batch.as_ref(),
+            )
+        });
+        let camera = match camera_input {
+            Some(input) => self.camera.advance_world(&input, dt_duration)?,
+            None => None,
+        };
+        profile.checkpoint("camera");
+        if dynamic_batch.is_some() || camera.is_some() {
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::PresentationTick {
+                    dynamic: dynamic_batch,
+                    camera,
+                });
+        }
+        profile.checkpoint("event_enqueue");
+        profile.finish(format_args!(
+            "interval_ms={:.3} entities={} advanced_bodies={}",
+            dt_duration.as_secs_f64() * 1_000.0,
+            self.world.entities.len(),
+            body_motions.len(),
+        ));
         Ok(())
     }
 }
@@ -204,6 +583,206 @@ impl ClientRuntime {
 mod tests {
     use super::*;
     use crate::client::builder;
+    use holtburger_protocol::crypto::Hash32;
+    use holtburger_protocol::messages::PacketHeader;
+    use holtburger_protocol::messages::transport::packet_flags;
+    use holtburger_protocol::traits::ProtocolPack;
+
+    /// Real loopback packets exercise ready polling through Session's ordering and checksum path.
+    async fn network_fixture() -> (ClientRuntime, tokio::net::UdpSocket, std::net::SocketAddr) {
+        let server = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut client = builder::build_test_client(ClientState::Connected);
+        client.session = holtburger_session::Session::new(server.local_addr().unwrap())
+            .await
+            .unwrap();
+        client
+            .session
+            .send_action(GameAction::PingRequest(Box::new(
+                holtburger_protocol::messages::misc::actions::PingRequestActionData,
+            )))
+            .await
+            .unwrap();
+        let mut bytes = [0; 128];
+        let (_, client_addr) = server.recv_from(&mut bytes).await.unwrap();
+        (client, server, client_addr)
+    }
+
+    #[tokio::test]
+    async fn network_batch_preserves_order_and_leaves_a_bounded_backlog() {
+        let (mut client, server, addr) = network_fixture().await;
+        let mut events = client.subscribe_client_view_events();
+        for index in 0..=NETWORK_BATCH_LIMIT {
+            let payload = (index as f64).to_le_bytes();
+            let mut header = PacketHeader {
+                flags: packet_flags::TIME_SYNC,
+                sequence: client.session.last_server_seq + 1 + index as u32,
+                size: payload.len() as u16,
+                ..Default::default()
+            };
+            header.checksum = header
+                .calculate_checksum()
+                .wrapping_add(Hash32::compute(&payload));
+            let mut packet = Vec::new();
+            header.pack(&mut packet);
+            packet.extend_from_slice(&payload);
+            server.send_to(&packet, addr).await.unwrap();
+        }
+        let mut times = Vec::new();
+        while times.len() <= NETWORK_BATCH_LIMIT {
+            let first = tokio::time::timeout(Duration::from_secs(1), client.session.recv_message())
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(1), client.process_network_batch(first))
+                .await
+                .unwrap()
+                .unwrap();
+            let before = times.len();
+            while let Ok(event) = events.try_recv() {
+                if let ClientViewEvent::ServerTimeUpdated { time } = event {
+                    times.push(time);
+                }
+            }
+            assert!((1..=NETWORK_BATCH_LIMIT).contains(&(times.len() - before)));
+            assert_eq!(
+                times,
+                (0..times.len())
+                    .map(|index| index as f64)
+                    .collect::<Vec<_>>()
+            );
+        }
+        // With no queued packets, polling must return without waiting for new traffic.
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            client.process_network_batch(Ok(Vec::new())),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn network_batch_failure_retires_the_client() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        let error = client
+            .process_network_batch(Err(anyhow::anyhow!("test receive failure")))
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), "test receive failure");
+        assert!(matches!(client.state, ClientState::Disconnected));
+        assert_eq!(
+            client.exit_outcome.as_ref().map(|outcome| outcome.cause),
+            Some(ClientExitCause::RuntimeFailure)
+        );
+    }
+
+    #[tokio::test]
+    async fn command_batch_leaves_a_bounded_fifo_backlog() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut events = client.subscribe_client_view_events();
+        let (sender, receiver) = mpsc::unbounded_channel();
+        client.set_command_rx(receiver);
+        for _ in 0..COMMAND_BATCH_LIMIT {
+            sender
+                .send(ClientCommand::RequestCurrentApplicationState)
+                .unwrap();
+        }
+        // The command already removed by select counts toward the same batch limit.
+        client
+            .process_command_batch(Some(ClientCommand::RequestCurrentApplicationState))
+            .await
+            .unwrap();
+        let mut snapshots = 0;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::ApplicationSnapshot(_)) {
+                snapshots += 1;
+            }
+        }
+        assert!((1..=COMMAND_BATCH_LIMIT).contains(&snapshots));
+        assert_eq!(
+            client.command_rx.as_ref().unwrap().len(),
+            COMMAND_BATCH_LIMIT + 1 - snapshots
+        );
+    }
+
+    #[tokio::test]
+    async fn selected_disconnect_precedes_and_preserves_queued_commands() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        let (sender, receiver) = mpsc::unbounded_channel();
+        client.set_command_rx(receiver);
+        sender
+            .send(ClientCommand::RequestCurrentApplicationState)
+            .unwrap();
+        client
+            .process_command_batch(Some(ClientCommand::Quit))
+            .await
+            .unwrap();
+        assert!(matches!(client.state, ClientState::Disconnected));
+        assert_eq!(client.command_rx.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            client.exit_outcome.as_ref().map(|outcome| outcome.cause),
+            Some(ClientExitCause::ExplicitDisconnect)
+        );
+    }
+
+    #[tokio::test]
+    async fn queued_disconnect_preserves_the_order_of_surrounding_commands() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut events = client.subscribe_client_view_events();
+        let (sender, receiver) = mpsc::unbounded_channel();
+        client.set_command_rx(receiver);
+        for command in [
+            ClientCommand::RequestCurrentApplicationState,
+            ClientCommand::Quit,
+            ClientCommand::RequestCurrentApplicationState,
+        ] {
+            sender.send(command).unwrap();
+        }
+        while !matches!(client.state, ClientState::Disconnected) {
+            client.process_command_batch(None).await.unwrap();
+        }
+        let mut snapshots = 0;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::ApplicationSnapshot(_)) {
+                snapshots += 1;
+            }
+        }
+        assert_eq!(snapshots, 1);
+        assert_eq!(client.command_rx.as_ref().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn queued_command_failure_disconnects_without_consuming_the_next_command() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let (sender, receiver) = mpsc::unbounded_channel();
+        client.set_command_rx(receiver);
+        // Registration targets a different player identity than this empty world.
+        sender
+            .send(ClientCommand::StartClientCamera(
+                crate::ClientCameraStartRequest {
+                    player_guid: Guid(1),
+                    entity_generation: 1,
+                    initial_reach: 5.0,
+                    minimum_reach: 1.0,
+                    maximum_reach: 10.0,
+                    input_sequence: 1,
+                    view_direction: [0.0, 1.0, 0.0],
+                    cumulative_zoom_displacement: 0.0,
+                    projection_revision: 1,
+                    clearance_radius: 0.1,
+                },
+            ))
+            .unwrap();
+        sender
+            .send(ClientCommand::RequestCurrentApplicationState)
+            .unwrap();
+        assert!(client.process_command_batch(None).await.is_err());
+        assert!(matches!(client.state, ClientState::Disconnected));
+        assert_eq!(
+            client.exit_outcome.as_ref().map(|outcome| outcome.cause),
+            Some(ClientExitCause::RuntimeFailure)
+        );
+        assert_eq!(client.command_rx.as_ref().unwrap().len(), 1);
+    }
 
     #[test]
     fn keepalive_ping_requires_in_world_state() {
@@ -220,5 +799,34 @@ mod tests {
         let mut in_world = builder::build_test_client(ClientState::InWorld);
         in_world.session.last_send_time = now - Duration::from_secs(6);
         assert!(in_world.should_send_keepalive_ping(now));
+    }
+    #[tokio::test]
+    async fn malformed_lifecycle_reply_is_a_terminal_operational_failure() {
+        for opcode in [
+            holtburger_protocol::opcodes::GameOpcode::CharacterError,
+            holtburger_protocol::opcodes::GameOpcode::AccountBanned,
+        ] {
+            let mut client = builder::build_test_client(ClientState::Connected);
+            client.authenticating = true;
+            let error = client
+                .process_network_batch(Ok(vec![SessionEvent::Message(
+                    (opcode as u32).to_le_bytes().to_vec(),
+                )]))
+                .await
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("Malformed server lifecycle reply")
+            );
+            assert_eq!(client.state, ClientState::Disconnected);
+            assert!(
+                client
+                    .exit_outcome()
+                    .unwrap()
+                    .diagnostic()
+                    .contains("Malformed server lifecycle reply")
+            );
+        }
     }
 }

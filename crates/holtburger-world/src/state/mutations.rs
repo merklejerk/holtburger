@@ -1,20 +1,55 @@
+use super::pose_orientation::recover_pose_orientation;
 use super::*;
-use crate::context::WorldContextExt;
-use crate::entity::EntityPositionSyncOutcome;
+use crate::entity::{EntityMotionSnapshot, EntityNetworkMotion};
 use crate::spatial::{
-    AuthoritativeBodySync, ContactState, RuntimeBodyResetCause, RuntimeSpatialBodyView,
+    AuthoritativeBodyVectors, AuthoritativePoseEffect, AuthoritativePoseResetCause, ContactState,
+    RETAIL_INTERPOLATION_SNAP_DISTANCE_M, RuntimeBodyResetCause, RuntimeSpatialBodyView,
     SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId, SpatialSampleMode,
     SpatialSamplingConfig,
 };
-use holtburger_common::math::Quaternion;
+use anyhow::Context;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::properties::WorldObjectPropertyAccessors as _;
 use holtburger_protocol::messages::movement::{
     PositionPack, PositionType, ServerAutonomousPositionData, UpdatePositionFlag,
 };
 use std::time::Instant;
 
 impl WorldState {
+    /// Apply one authored presentation flag; ordinary entity publication carries the effective result.
+    pub fn apply_entity_script_presentation(
+        &mut self,
+        guid: Guid,
+        authoritative_revision: u64,
+        change: crate::EntityPresentationChange,
+    ) -> anyhow::Result<bool> {
+        let entity = self
+            .entities
+            .get_mut(guid)
+            .ok_or_else(|| anyhow::anyhow!("script presentation target {guid} is absent"))?;
+        // A newer complete server state supersedes this prediction, even if its flag values
+        // equal those at activation. Asset readiness must never reverse reconciliation order.
+        if entity.physics.authoritative_revision() != authoritative_revision {
+            return Ok(false);
+        }
+        Ok(entity.physics.apply_authored_presentation(change))
+    }
+
+    /// Apply a server selection or optimistic local selection through the private property path.
+    pub fn set_player_character_title(&mut self, title_id: u32) -> WorldEvent {
+        // PropertyInt stores the same 32 wire bits in a signed slot.
+        let update = PropertyUpdate::Int(PropertyInt::CharacterTitleId, title_id as i32);
+        self.player_entity_mut()
+            .expect("title selection requires a described player entity")
+            .set_property(update.clone());
+        self.player.property_retention.observe(&update);
+        WorldEvent::PropertiesUpdated {
+            guid: self.player.guid,
+            updates: vec![update],
+        }
+    }
+
     pub(crate) fn authoritative_body_id_for_guid(&self, guid: Guid) -> Option<SpatialBodyId> {
         if guid == Guid::NULL {
             return None;
@@ -27,31 +62,95 @@ impl WorldState {
         })
     }
 
-    pub(crate) fn reconcile_authoritative_body(
+    fn authoritative_body_vectors(
+        &self,
+        guid: Guid,
+        velocity: Vector3,
+        omega: Vector3,
+    ) -> AuthoritativeBodyVectors {
+        AuthoritativeBodyVectors {
+            velocity,
+            acceleration: self
+                .entities
+                .get(guid)
+                .map(|entity| entity.acceleration)
+                .unwrap_or_else(Vector3::zero),
+            omega,
+        }
+    }
+
+    pub(crate) fn apply_authoritative_pose_effect(
+        &mut self,
+        guid: Guid,
+        velocity: Vector3,
+        omega: Vector3,
+        effect: AuthoritativePoseEffect,
+    ) -> bool {
+        let Some(body_id) = self.authoritative_body_id_for_guid(guid) else {
+            return false;
+        };
+
+        // Retaining a child's last wire position does not authorize an independent body. This
+        // gate also covers vector-update recovery and replacement, which can initialize bodies.
+        if self.entities.get(guid).is_some_and(|entity| {
+            entity.placement_intent != crate::EntityPlacementIntent::Independent
+        }) {
+            match self.resolve_scene_placement(guid) {
+                Ok(crate::ResolvedScenePlacement::Attached { .. }) => {}
+                Ok(_) => {
+                    self.scene.retire_authoritative_body(body_id);
+                    return false;
+                }
+                Err(error) => {
+                    log::error!("Cannot establish entity body: {error}");
+                    self.scene.retire_authoritative_body(body_id);
+                    return false;
+                }
+            }
+        }
+
+        if effect.pose().landblock_id == Guid::NULL {
+            self.scene.retire_authoritative_body(body_id);
+            return false;
+        }
+
+        let vectors = self.authoritative_body_vectors(guid, velocity, omega);
+        let applied =
+            self.scene
+                .apply_authoritative_body_effect(body_id, effect, vectors, Instant::now());
+        if applied && matches!(body_id, SpatialBodyId::Entity(_)) {
+            self.motion_runtimes.apply_remote_pose_effect(guid, effect);
+        }
+        applied
+    }
+
+    pub(crate) fn initialize_authoritative_body(
         &mut self,
         guid: Guid,
         pose: WorldPosition,
         velocity: Vector3,
         omega: Vector3,
-        sync: AuthoritativeBodySync,
-    ) {
-        let Some(body_id) = self.authoritative_body_id_for_guid(guid) else {
-            return;
-        };
-
-        if pose.landblock_id == Guid::NULL {
-            self.scene.retire_authoritative_body(body_id);
-            return;
-        }
-
-        self.scene.reconcile_authoritative_body(
-            body_id,
-            pose,
+    ) -> bool {
+        self.apply_authoritative_pose_effect(
+            guid,
             velocity,
             omega,
-            sync,
-            Instant::now(),
-        );
+            AuthoritativePoseEffect::Initialize { pose },
+        )
+    }
+
+    pub(crate) fn apply_authoritative_vectors(
+        &mut self,
+        guid: Guid,
+        velocity: Vector3,
+        omega: Vector3,
+    ) -> bool {
+        let Some(body_id) = self.authoritative_body_id_for_guid(guid) else {
+            return false;
+        };
+        let vectors = self.authoritative_body_vectors(guid, velocity, omega);
+        self.scene
+            .apply_authoritative_body_vectors(body_id, vectors, Instant::now())
     }
 
     pub(crate) fn retire_authoritative_body_for_guid(&mut self, guid: Guid) {
@@ -81,7 +180,12 @@ impl WorldState {
     ) -> Option<(SpatialBodyId, WorldPosition, Vector3, Vector3)> {
         let body_id = self.runtime_body_id_for_guid(guid)?;
         if let Some(body) = self.scene.body(body_id) {
-            return Some((body_id, body.pose, body.velocity, body.omega));
+            return Some((
+                body_id,
+                body.pose,
+                body.retained.velocity,
+                body.retained.omega,
+            ));
         }
 
         self.entities
@@ -119,8 +223,9 @@ impl WorldState {
                 authoritative_pose: Some(entity.position),
                 runtime_pose: entity.position,
                 velocity: entity.velocity,
+                acceleration: entity.acceleration,
                 omega: entity.omega,
-                motion_state: entity.motion_snapshot,
+                motion_state: entity.network_motion.snapshot(),
                 contact: ContactState::Unknown,
                 sample_mode: SpatialSampleMode::AuthoritativeOnly,
             })
@@ -142,23 +247,56 @@ impl WorldState {
         let Some((_, pose, velocity, omega)) = self.runtime_kinematics_for_guid(guid) else {
             return false;
         };
-
-        self.scene.reconcile_authoritative_body(
-            body_id,
-            pose,
-            velocity,
-            omega,
-            AuthoritativeBodySync::Snapshot,
-            Instant::now(),
-        );
-        true
+        self.initialize_authoritative_body(guid, pose, velocity, omega)
     }
 
     pub fn suspend_runtime_bodies(&mut self, cause: RuntimeBodyResetCause) -> Vec<WorldEvent> {
-        self.scene.suspend_runtime_bodies(Instant::now());
         let mut events = Vec::new();
+        if matches!(cause, RuntimeBodyResetCause::TeleportOrWorldReset) {
+            self.retire_local_player_motion_epoch(&mut events);
+        }
+        self.scene.suspend_runtime_bodies(Instant::now());
         Self::emit_runtime_bodies_reset(&mut events, cause);
         events
+    }
+
+    /// Clears local-player motion authored against the world placement being replaced.
+    fn retire_local_player_motion_epoch(&mut self, events: &mut Vec<WorldEvent>) {
+        let guid = self.player.guid;
+        if guid == Guid::NULL {
+            return;
+        }
+
+        let current_style = self
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.network_motion.snapshot())
+            .and_then(|snapshot| snapshot.current_style)
+            .or(self.player.last_server_motion_style);
+        let replacement = current_style.map(|current_style| EntityMotionSnapshot {
+            current_style: Some(current_style),
+            ..EntityMotionSnapshot::default()
+        });
+        let network_motion = replacement.map_or(
+            EntityNetworkMotion::Uninitialized,
+            EntityNetworkMotion::Initialized,
+        );
+        let snapshot_changed = self.entities.get_mut(guid).is_some_and(|entity| {
+            let changed = entity.network_motion != network_motion;
+            entity.network_motion = network_motion;
+            changed
+        });
+        self.reset_authored_motion(guid, replacement);
+        if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
+            self.scene
+                .update_runtime_body_motion_state(body_id, replacement);
+        }
+        if snapshot_changed {
+            events.push(WorldEvent::EntityMotionUpdated {
+                guid,
+                motion: network_motion,
+            });
+        }
     }
 
     pub(crate) fn update_runtime_body_motion_snapshot_for_guid(
@@ -208,6 +346,50 @@ impl WorldState {
         vec![WorldEvent::RuntimeBodyChanged { body_id }]
     }
 
+    /// Relocates the canonical local-player body through the scene-owned discontinuity path.
+    ///
+    /// A server placement can cross from an outdoor owner into an EnvCell (or back again). The
+    /// scene relocation transaction rebuilds response/membership and clears pose-dependent
+    /// kinematics, contacts, and collision reports together; a pose-only write would retain the
+    /// previous residency and make the next solver tick query the wrong collision topology.
+    pub fn relocate_local_player_runtime_body(
+        &mut self,
+        pose: WorldPosition,
+        now: Instant,
+    ) -> Vec<WorldEvent> {
+        let Some(body_id) = self.runtime_body_id_for_guid(self.player.guid) else {
+            return Vec::new();
+        };
+
+        if !self.ensure_runtime_body(body_id) {
+            return Vec::new();
+        }
+
+        if self
+            .scene
+            .relocate_dynamic_body(body_id, pose, now)
+            .is_none()
+        {
+            return Vec::new();
+        }
+
+        vec![WorldEvent::RuntimeBodyChanged { body_id }]
+    }
+
+    /// Returns whether every object named by the player's recursive inventory closure is
+    /// hydrated. This mirrors retail `AllContainedObjectsExist`: an absent nested item keeps
+    /// world activation pending rather than exposing a partially materialized player.
+    pub fn all_player_contained_objects_exist(&self) -> bool {
+        let player_guid = self.player.guid;
+        if player_guid == Guid::NULL || self.entities.get(player_guid).is_none() {
+            return false;
+        }
+
+        self.storage
+            .owned_items(player_guid)
+            .all(|guid| self.entities.get(guid).is_some())
+    }
+
     pub fn apply_solved_body_kinematics(
         &mut self,
         solved: &SolvedBodyKinematics,
@@ -224,47 +406,146 @@ impl WorldState {
         Self::emit_runtime_body_changed(&mut events, solved.body_id);
 
         if matches!(solved.body_id, SpatialBodyId::LocalPlayer(_)) {
-            self.apply_player_contact_state(solved.contact, &mut events);
+            self.emit_player_walkability_change(solved.contact, &mut events);
         }
 
         events
     }
 
+    /// Commits one pose-only fixed-tick result with its explicit placement consequence.
+    pub fn apply_pose_only_body_tick(
+        &mut self,
+        solved: &SolvedBodyKinematics,
+        kind: crate::spatial::RuntimeBodyAdvanceKind,
+    ) -> Vec<WorldEvent> {
+        if !self.ensure_runtime_body(solved.body_id)
+            || !self.scene.apply_solved_runtime_body_kinematics(solved)
+        {
+            return Vec::new();
+        }
+        vec![WorldEvent::RuntimeBodyAdvanced {
+            body_id: solved.body_id,
+            kind,
+        }]
+    }
+
+    /// Reanchors remote command continuation after a checked local recovery, preserving actions.
+    pub fn apply_recovered_body(
+        &mut self,
+        body_id: SpatialBodyId,
+    ) -> anyhow::Result<Vec<WorldEvent>> {
+        let guid = body_id
+            .authoritative_guid()
+            .context("recovery body requires an entity")?;
+        let pose = self
+            .scene
+            .body(body_id)
+            .context("recovered body disappeared")?
+            .pose;
+        self.motion_runtimes.apply_remote_pose_effect(
+            guid,
+            AuthoritativePoseEffect::Reset {
+                pose,
+                cause: AuthoritativePoseResetCause::ForcedReposition,
+            },
+        );
+        Ok(vec![WorldEvent::RuntimeBodyAdvanced {
+            body_id,
+            kind: crate::spatial::RuntimeBodyAdvanceKind::CorrectionSnap,
+        }])
+    }
+
+    /// Projects an already-published physical body into runtime and player-walkability events.
+    /// Canonical pose and kinematics remain owned by the scene's collection publication.
+    pub fn apply_integrated_body(
+        &mut self,
+        update: &crate::spatial::DynamicEntityBodyTick,
+    ) -> anyhow::Result<Vec<WorldEvent>> {
+        let body_id = update.body_id;
+        anyhow::ensure!(
+            self.scene.body(body_id).is_some(),
+            "integrated body {body_id:?} is absent at projection"
+        );
+        let mut events = Vec::new();
+        if let Some(change) = update.dynamic_state_change {
+            let guid = body_id.authoritative_guid().ok_or_else(|| {
+                anyhow::anyhow!("impact body {body_id:?} has no authoritative entity")
+            })?;
+            let entity = self
+                .entities
+                .get_mut(guid)
+                .ok_or_else(|| anyhow::anyhow!("impact body {body_id:?} outlived its entity"))?;
+            entity.physics.clear_after_collision(change.cleared);
+            events.push(WorldEvent::RuntimeBodyChanged { body_id });
+        }
+        if let Some(guid) = body_id.authoritative_guid() {
+            // A short launch can land inside one collection: its final contact alone would
+            // hide both physical edges. Retire pre-launch animation work in that case too.
+            let previous = if update.launch_admitted {
+                self.interrupt_motion_on_support_change(
+                    guid,
+                    update.previous_contact,
+                    ContactState::Airborne,
+                );
+                ContactState::Airborne
+            } else {
+                update.previous_contact
+            };
+            self.interrupt_motion_on_support_change(guid, previous, update.current_contact);
+        }
+        events.push(WorldEvent::RuntimeBodyAdvanced {
+            body_id,
+            kind: crate::spatial::RuntimeBodyAdvanceKind::Integrated,
+        });
+        if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
+            self.emit_player_walkability_change(update.current_contact, &mut events);
+        }
+        Ok(events)
+    }
+
     pub fn apply_spatial_body_event(&mut self, event: &SpatialBodyEvent) -> Vec<WorldEvent> {
-        match *event {
+        match event {
             SpatialBodyEvent::ContactChanged { body_id, contact } => {
-                if !self.ensure_runtime_body(body_id) {
+                if !self.ensure_runtime_body(*body_id) {
                     return Vec::new();
                 }
 
-                if !self.scene.apply_runtime_body_contact(body_id, contact) {
+                let previous = self
+                    .scene
+                    .body(*body_id)
+                    .expect("ensured runtime body")
+                    .contact;
+                if !self.scene.apply_runtime_body_contact(*body_id, *contact) {
                     return Vec::new();
                 }
 
+                if let Some(guid) = body_id.authoritative_guid() {
+                    self.interrupt_motion_on_support_change(guid, previous, *contact);
+                }
                 let mut events = Vec::new();
-                Self::emit_runtime_body_changed(&mut events, body_id);
+                Self::emit_runtime_body_changed(&mut events, *body_id);
 
                 if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
-                    self.apply_player_contact_state(contact, &mut events);
+                    self.emit_player_walkability_change(*contact, &mut events);
                     events
                 } else {
                     events
                 }
             }
             SpatialBodyEvent::ForcedReposition { body_id, pose } => {
-                if !self.ensure_runtime_body(body_id) {
+                if !self.ensure_runtime_body(*body_id) {
                     return Vec::new();
                 }
 
                 self.scene
-                    .apply_forced_reposition_reset(body_id, pose, Instant::now());
+                    .relocate_dynamic_body(*body_id, *pose, Instant::now());
 
                 body_id.authoritative_guid().map_or_else(Vec::new, |guid| {
                     vec![
-                        WorldEvent::RuntimeBodyChanged { body_id },
+                        WorldEvent::RuntimeBodyChanged { body_id: *body_id },
                         WorldEvent::ForcedReposition {
                             guid,
-                            pos: pose,
+                            pos: *pose,
                             sequence: 0,
                         },
                     ]
@@ -273,71 +554,59 @@ impl WorldState {
         }
     }
 
-    fn apply_player_contact_state(&mut self, contact: ContactState, events: &mut Vec<WorldEvent>) {
-        let Some(grounded) = contact.grounded() else {
+    fn emit_player_walkability_change(
+        &mut self,
+        contact: ContactState,
+        events: &mut Vec<WorldEvent>,
+    ) {
+        let Some(grounded) = contact.walkable() else {
             return;
         };
 
-        if self.player.last_server_grounded == Some(grounded) {
+        if self.player.last_runtime_walkable == Some(grounded) {
             return;
         }
 
-        self.player.last_server_grounded = Some(grounded);
+        self.player.last_runtime_walkable = Some(grounded);
         events.push(WorldEvent::PlayerGroundedUpdated { grounded });
     }
 
-    fn emit_entity_position_sync(
+    fn emit_entity_pose_effect(
         &mut self,
         guid: Guid,
-        old_lb: Guid,
-        pos: WorldPosition,
-        outcome: EntityPositionSyncOutcome,
+        effect: AuthoritativePoseEffect,
+        reset_sequence: u16,
         events: &mut Vec<WorldEvent>,
     ) {
-        match outcome {
-            EntityPositionSyncOutcome::Rejected => {}
-            EntityPositionSyncOutcome::Moved => {
-                self.scene.update_entity(guid, old_lb, pos);
-                let (velocity, omega) = self
-                    .entities
-                    .get(guid)
-                    .map(|entity| (entity.velocity, entity.omega))
-                    .unwrap_or((Vector3::zero(), Vector3::zero()));
-                self.reconcile_authoritative_body(
-                    guid,
-                    pos,
-                    velocity,
-                    omega,
-                    AuthoritativeBodySync::Snapshot,
-                );
-                if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
-                    Self::emit_runtime_body_changed(events, body_id);
+        let pos = effect.pose();
+        let (velocity, omega) = self
+            .entities
+            .get(guid)
+            .map(|entity| (entity.velocity, entity.omega))
+            .unwrap_or((Vector3::zero(), Vector3::zero()));
+        let applied = self.apply_authoritative_pose_effect(guid, velocity, omega, effect);
+        if !applied
+            && matches!(
+                effect,
+                AuthoritativePoseEffect::Reset {
+                    cause: AuthoritativePoseResetCause::MissingCellRecovery,
+                    ..
                 }
-                events.push(WorldEvent::EntityMoved { guid, pos })
-            }
-            EntityPositionSyncOutcome::Reset { sequence } => {
-                self.scene.update_entity(guid, old_lb, pos);
-                let (velocity, omega) = self
-                    .entities
-                    .get(guid)
-                    .map(|entity| (entity.velocity, entity.omega))
-                    .unwrap_or((Vector3::zero(), Vector3::zero()));
-                self.reconcile_authoritative_body(
-                    guid,
-                    pos,
-                    velocity,
-                    omega,
-                    AuthoritativeBodySync::Reset,
-                );
-                if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
-                    Self::emit_runtime_body_changed(events, body_id);
-                }
-                events.push(WorldEvent::ForcedReposition {
-                    guid,
-                    pos,
-                    sequence,
-                });
-            }
+            )
+        {
+            self.initialize_authoritative_body(guid, pos, velocity, omega);
+        }
+        if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
+            Self::emit_runtime_body_changed(events, body_id);
+        }
+        if matches!(effect, AuthoritativePoseEffect::Reset { .. }) {
+            events.push(WorldEvent::ForcedReposition {
+                guid,
+                pos,
+                sequence: reset_sequence,
+            });
+        } else {
+            events.push(WorldEvent::EntityMoved { guid, pos });
         }
     }
 
@@ -355,33 +624,8 @@ impl WorldState {
             return false;
         }
 
-        self.set_entity_prune_deadline(guid, now);
+        self.request_unretained_entity_prune(guid, now);
         true
-    }
-
-    pub(crate) fn sync_player_ownership_for_entity(&mut self, guid: Guid) {
-        let Some((container_id, wielder_id, equip_mask)) = self.entities.get(guid).map(|entity| {
-            (
-                entity.container_id(),
-                entity.wielder_id(),
-                entity.wield_location(),
-            )
-        }) else {
-            return;
-        };
-
-        let held_by_player = container_id.is_some_and(|owner_guid| {
-            owner_guid == self.player.guid || self.is_in_player_inventory(owner_guid)
-        });
-        let wielded_by_player = wielder_id == Some(self.player.guid);
-
-        self.update_player_inventory_recursive(guid, held_by_player || wielded_by_player);
-
-        if wielded_by_player {
-            self.player.wield_item(guid, equip_mask);
-        } else {
-            self.player.unwield_item(guid);
-        }
     }
 
     pub(crate) fn emit_level_info(&self, events: &mut Vec<WorldEvent>) {
@@ -398,14 +642,18 @@ impl WorldState {
             attributes: self.player.attribute_snapshot(),
             vitals: self.player.vital_snapshot(),
             skills: self.player.skill_snapshot(),
-            enchantments: self.player.enchantments.clone(),
+            enchantments: self.player.enchantments.wire(),
             spells: self.player.spells.keys().cloned().collect(),
             level_info: self.get_level_info(),
             resistances: self.player_resistances(),
             armor: self.player_armor(),
             vitae: self.player_vitae(),
-            inventory: self.player.inventory.clone(),
-            equipment: self.player.equipment.clone(),
+            inventory: self.storage.owned_items(self.player.guid).collect(),
+            equipment: self
+                .storage
+                .equipment(self.player.guid)
+                .filter_map(|(guid, mask)| mask.map(|mask| (guid, mask)))
+                .collect(),
         })));
     }
 
@@ -414,6 +662,10 @@ impl WorldState {
         data: &PlayerDescriptionEventData,
     ) -> Option<WorldPosition> {
         let guid = data.guid;
+        self.player.property_retention =
+            crate::player::property_retention::PlayerPropertyRetention::from_description(
+                &data.properties,
+            );
         let mut properties = data.properties.clone();
         properties
             .strings
@@ -426,9 +678,22 @@ impl WorldState {
             .or_else(|| self.entities.get(guid).map(|entity| entity.position))
             .unwrap_or_default();
 
+        let bootstrap_position = if data.pos.is_some() {
+            recover_pose_orientation(
+                guid,
+                bootstrap_position,
+                self.entities
+                    .get(guid)
+                    .map(|entity| entity.position.rotation),
+            )
+        } else {
+            bootstrap_position
+        };
+
         if let Some(entity) = self.entities.get_mut(guid) {
             entity.properties = properties;
             entity.position = bootstrap_position;
+            entity.placement_intent = crate::EntityPlacementIntent::Independent;
             entity.set_string_prop(PropertyString::Name, data.name.clone());
         } else {
             let mut entity =
@@ -447,28 +712,27 @@ impl WorldState {
     pub(crate) fn apply_player_description_world_state(
         &mut self,
         data: &PlayerDescriptionEventData,
-        events: &mut Vec<WorldEvent>,
     ) {
+        self.storage.reset();
+        self.storage.replace_contents(data.guid, &data.inventory);
+        for (guid, mask, _) in &data.equipped_objects {
+            self.storage.equip(
+                *guid,
+                data.guid,
+                Some(EquipMask::from_bits(*mask).expect("invalid equipment mask in player roster")),
+            );
+        }
         self.bootstrap_player_entity_from_description(data);
-
-        self.emit_player_info(events);
-        self.emit_level_info(events);
-    }
-
-    pub(crate) fn update_player_inventory_recursive(&mut self, root: Guid, owned: bool) {
-        let mut stack = vec![root];
-        while let Some(current) = stack.pop() {
-            if owned {
-                self.player.add_to_inventory(current);
-            } else {
-                self.player.remove_from_inventory(current);
-            }
-
-            for (&guid, entity) in &self.entities.entities {
-                if entity.container_id() == Some(current) {
-                    stack.push(guid);
-                }
-            }
+        // Installing private properties directly bypasses the ordinary flag/contact updates.
+        // Reuse their mutation owner so PvP consumers observe the latest login baseline too.
+        if let Some(status) = data
+            .properties
+            .get_int_prop(PropertyInt::PlayerKillerStatus)
+        {
+            self.apply_property_update_to_target(
+                data.guid,
+                &PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, status),
+            );
         }
     }
 
@@ -478,36 +742,135 @@ impl WorldState {
         pos_pack: &PositionPack,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
-        let Some(entity) = self.entities.get_mut(guid) else {
+        let Some(entity) = self.entities.get(guid) else {
             return false;
         };
 
-        let old_lb = entity.position.landblock_id;
-        let pos = pos_pack.pos;
-        let outcome = entity.apply_server_position_update(
-            pos,
-            pos_pack.instance_sequence,
-            Some(pos_pack.position_sequence),
+        let current_position_sequence = entity.position_sequence();
+        let current_teleport_sequence = entity.teleport_sequence();
+        let keep_heading = entity
+            .network_motion
+            .snapshot()
+            .is_some_and(EntityMotionSnapshot::is_moving_to);
+        if !holtburger_common::sequence::is_newer_u16(
+            pos_pack.position_sequence,
+            current_position_sequence,
+        ) || holtburger_common::sequence::is_newer_u16(
+            current_teleport_sequence,
             pos_pack.teleport_sequence,
-            pos_pack.force_position_sequence,
-            None,
-        );
-        let accepted = !matches!(outcome, EntityPositionSyncOutcome::Rejected);
-
-        let mut velocity_event = None;
-        if accepted {
-            if let Some(velocity) = pos_pack.velocity {
-                entity.velocity = velocity;
-                velocity_event = Some((velocity, entity.omega));
-            } else if pos_pack.flags.contains(UpdatePositionFlag::IS_GROUNDED)
-                && entity.velocity != Vector3::zero()
-            {
-                entity.velocity = Vector3::zero();
-                velocity_event = Some((entity.velocity, entity.omega));
-            }
+        ) {
+            return false;
         }
 
-        self.emit_entity_position_sync(guid, old_lb, pos, outcome, events);
+        let teleported = holtburger_common::sequence::is_newer_u16(
+            pos_pack.teleport_sequence,
+            current_teleport_sequence,
+        );
+        let body_id = SpatialBodyId::Entity(guid);
+        let missing_runtime_cell = self
+            .scene
+            .body(body_id)
+            .is_none_or(|body| body.pose.landblock_id == Guid::NULL);
+        // Retail unparents after sequence admission, before deciding whether to interpolate.
+        // Missing-cell recovery applies even without contact.
+        let pos = recover_pose_orientation(guid, pos_pack.pos, Some(entity.position.rotation));
+        self.entities
+            .get_mut(guid)
+            .expect("admitted entity")
+            .apply_remote_position_sample(
+                pos,
+                pos_pack.instance_sequence,
+                pos_pack.position_sequence,
+                pos_pack.teleport_sequence,
+            );
+        if !teleported
+            && !missing_runtime_cell
+            && !pos_pack.flags.contains(UpdatePositionFlag::HAS_CONTACT)
+        {
+            let (velocity, omega) = self
+                .entities
+                .get(guid)
+                .map(|entity| (entity.velocity, entity.omega))
+                .expect("admitted entity");
+            self.apply_authoritative_pose_effect(
+                guid,
+                velocity,
+                omega,
+                AuthoritativePoseEffect::Observe { pose: pos },
+            );
+            return true;
+        }
+        if missing_runtime_cell {
+            self.ensure_runtime_body(body_id);
+        }
+        let viewer_distance = self
+            .scene
+            .body(body_id)
+            .and_then(|body| {
+                self.local_player_runtime_pose()
+                    .map(|viewer| body.pose.distance_to(&viewer))
+            })
+            .unwrap_or(f32::MAX);
+        let adjusted_max_speed_mps = self
+            .motion_runtimes
+            .get(guid)
+            .and_then(crate::motion::BodyMotionRuntime::adjusted_max_speed_mps);
+        let effect = if teleported {
+            AuthoritativePoseEffect::Reset {
+                pose: pos,
+                cause: AuthoritativePoseResetCause::Teleport,
+            }
+        } else if missing_runtime_cell {
+            AuthoritativePoseEffect::Reset {
+                pose: pos,
+                cause: AuthoritativePoseResetCause::MissingCellRecovery,
+            }
+        } else if viewer_distance >= RETAIL_INTERPOLATION_SNAP_DISTANCE_M {
+            AuthoritativePoseEffect::Snap { pose: pos }
+        } else {
+            AuthoritativePoseEffect::Interpolate {
+                pose: pos,
+                keep_heading,
+                adjusted_max_speed_mps,
+            }
+        };
+
+        let entity = self
+            .entities
+            .get_mut(guid)
+            .expect("entity admitted from this world turn must remain present");
+        let mut velocity_event = None;
+        if let Some(velocity) = pos_pack.velocity {
+            entity.velocity = velocity;
+            velocity_event = Some((velocity, entity.omega));
+        } else if pos_pack.flags.contains(UpdatePositionFlag::HAS_CONTACT)
+            && entity.velocity != Vector3::zero()
+        {
+            entity.velocity = Vector3::zero();
+            velocity_event = Some((entity.velocity, entity.omega));
+        }
+
+        let nominal_sample = pos_pack
+            .velocity
+            .or_else(|| {
+                pos_pack
+                    .flags
+                    .contains(UpdatePositionFlag::HAS_CONTACT)
+                    .then_some(Vector3::zero())
+            })
+            .map(|velocity| AuthoritativeBodyVectors {
+                velocity,
+                acceleration: entity.acceleration,
+                omega: entity.omega,
+            });
+        self.emit_entity_pose_effect(guid, effect, pos_pack.teleport_sequence, events);
+        // Presence is the packet edge, including an explicit zero identical to the last sample.
+        // Replaying the entity's cached vector on every pose update would restart its decay.
+        if let Some(vectors) = nominal_sample
+            && let Some(body_id) = self.authoritative_body_id_for_guid(guid)
+        {
+            self.scene.replace_nominal_body_vectors(body_id, vectors);
+        }
         if let Some((velocity, omega)) = velocity_event {
             events.push(WorldEvent::EntityVectorUpdated {
                 guid,
@@ -515,7 +878,7 @@ impl WorldState {
                 omega,
             });
         }
-        accepted
+        true
     }
 
     pub(crate) fn apply_entity_autonomous_position(
@@ -527,18 +890,26 @@ impl WorldState {
             return false;
         };
 
-        let old_lb = entity.position.landblock_id;
-        let pos = data.position;
-        let outcome = entity.apply_server_position_update(
-            pos,
+        let accepted = entity.admit_server_autonomous_position_sequences(
             data.instance_sequence,
-            None,
             data.teleport_sequence,
             data.force_position_sequence,
-            Some(data.server_control_sequence),
+            data.server_control_sequence,
         );
-        let accepted = !matches!(outcome, EntityPositionSyncOutcome::Rejected);
-        self.emit_entity_position_sync(data.guid, old_lb, pos, outcome, events);
+        if accepted {
+            let pos =
+                recover_pose_orientation(data.guid, data.position, Some(entity.position.rotation));
+            entity.position = pos;
+            self.emit_entity_pose_effect(
+                data.guid,
+                AuthoritativePoseEffect::Reset {
+                    pose: pos,
+                    cause: AuthoritativePoseResetCause::ForcedReposition,
+                },
+                data.force_position_sequence,
+                events,
+            );
+        }
         accepted
     }
 
@@ -561,46 +932,37 @@ impl WorldState {
     /// reconciliation state aligned with that world-owned pose.
     fn update_player_position(
         &mut self,
-        mut pos: WorldPosition,
-        sync: AuthoritativeBodySync,
+        effect: AuthoritativePoseEffect,
     ) -> Option<(Guid, WorldPosition)> {
         let guid = self.player.guid;
         if guid == Guid::NULL {
             return None;
         }
 
-        if !pos.rotation.w.is_finite()
-            || !pos.rotation.x.is_finite()
-            || !pos.rotation.y.is_finite()
-            || !pos.rotation.z.is_finite()
-        {
-            pos.rotation = self
-                .player_position()
-                .map(|current| current.rotation)
-                .unwrap_or_default();
-        }
+        let pos = recover_pose_orientation(
+            guid,
+            effect.pose(),
+            self.player_position().map(|current| current.rotation),
+        );
 
-        let old_lb = self.player_landblock().unwrap_or(Guid::NULL);
-        if let Some(entity) = self.player_entity_mut() {
-            entity.position = pos;
-        } else {
-            return None;
-        }
-        self.scene.update_entity(guid, old_lb, pos);
+        self.player_entity_mut()?.position = pos;
         let (velocity, omega) = self
             .entities
             .get(guid)
             .map(|entity| (entity.velocity, entity.omega))
             .unwrap_or((Vector3::zero(), Vector3::zero()));
-        self.reconcile_authoritative_body(guid, pos, velocity, omega, sync);
+        let effect = effect.with_pose(pos);
+        if !self.apply_authoritative_pose_effect(guid, velocity, omega, effect) {
+            self.initialize_authoritative_body(guid, pos, velocity, omega);
+        }
 
         Some((guid, pos))
     }
 
-    pub fn set_player_position(&mut self, pos: WorldPosition) -> Vec<WorldEvent> {
+    /// Applies one classified player pose effect and emits its authoritative entity change.
+    pub fn apply_player_pose_effect(&mut self, effect: AuthoritativePoseEffect) -> Vec<WorldEvent> {
         let mut events = Vec::new();
-        let Some((guid, pos)) = self.update_player_position(pos, AuthoritativeBodySync::Snapshot)
-        else {
+        let Some((guid, pos)) = self.update_player_position(effect) else {
             return events;
         };
 
@@ -611,41 +973,45 @@ impl WorldState {
         events
     }
 
+    /// Confirms an ordinary player pose without replacing its runtime placement.
+    pub fn set_player_position(&mut self, pos: WorldPosition) -> Vec<WorldEvent> {
+        self.apply_player_pose_effect(AuthoritativePoseEffect::Confirm { pose: pos })
+    }
+
     /// Synchronizes the authoritative player position without emitting movement events.
     ///
     /// This is intended for hydration/bootstrap flows where the client is seeding authoritative
     /// state rather than reacting to a live movement update packet.
     pub fn sync_player_position(&mut self, pos: WorldPosition) {
-        let _ = self.update_player_position(pos, AuthoritativeBodySync::Snapshot);
+        let _ = self.update_player_position(AuthoritativePoseEffect::Initialize { pose: pos });
     }
 
-    pub fn set_player_vector(&mut self, velocity: Vector3, omega: Vector3) -> Vec<WorldEvent> {
+    /// Records a fresh server vector sample for the retail-default autonomous player.
+    ///
+    /// Retail advances the vector timestamp but does not apply the sample to the local physics
+    /// object while `UsePositionFromServer` is false at autonomy level 2. The entity retains
+    /// the server-authored facts; the runtime body keeps its locally integrated vectors.
+    pub fn record_player_server_vectors(
+        &mut self,
+        velocity: Vector3,
+        omega: Vector3,
+    ) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         let guid = self.player.guid;
         if guid == Guid::NULL {
             return events;
         }
 
-        if let Some(entity) = self.entities.get_mut(guid) {
-            entity.velocity = velocity;
-            entity.omega = omega;
-            let pose = entity.position;
-            self.reconcile_authoritative_body(
-                guid,
-                pose,
-                velocity,
-                omega,
-                AuthoritativeBodySync::Snapshot,
-            );
-            if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
-                Self::emit_runtime_body_changed(&mut events, body_id);
-            }
-            events.push(WorldEvent::EntityVectorUpdated {
-                guid,
-                velocity,
-                omega,
-            });
-        }
+        let Some(entity) = self.entities.get_mut(guid) else {
+            return events;
+        };
+        entity.velocity = velocity;
+        entity.omega = omega;
+        events.push(WorldEvent::EntityVectorUpdated {
+            guid,
+            velocity,
+            omega,
+        });
 
         events
     }
@@ -655,6 +1021,8 @@ impl WorldState {
         &mut self,
         data: &ServerAutonomousPositionData,
     ) -> Vec<WorldEvent> {
+        let known_teleport_sequence = self.player.teleport_sequence;
+        let known_force_position_sequence = self.player.force_position_sequence;
         let accepted = self.player.should_accept_server_position_sequences(
             data.teleport_sequence,
             data.force_position_sequence,
@@ -687,13 +1055,14 @@ impl WorldState {
             return Vec::new();
         }
 
-        let mut events = vec![WorldEvent::SelfAutonomousPosition {
+        let events = vec![WorldEvent::SelfAutonomousPosition {
+            position: data.position,
+            known_teleport_sequence,
+            known_force_position_sequence,
             teleport_sequence: data.teleport_sequence,
             force_position_sequence: data.force_position_sequence,
             server_control_sequence: data.server_control_sequence,
         }];
-
-        events.extend(self.set_player_position(data.position));
 
         self.player.instance_sequence = data.instance_sequence;
         self.player.server_control_sequence = data.server_control_sequence;
@@ -720,13 +1089,13 @@ impl WorldState {
                 return false;
             };
 
-            let old_lb = entity.position.landblock_id;
+            let position = recover_pose_orientation(guid, position, Some(entity.position.rotation));
             entity.position = position;
-            self.emit_entity_position_sync(
+            entity.placement_intent = crate::EntityPlacementIntent::Independent;
+            self.emit_entity_pose_effect(
                 guid,
-                old_lb,
-                position,
-                EntityPositionSyncOutcome::Moved,
+                AuthoritativePoseEffect::Confirm { pose: position },
+                0,
                 events,
             );
             return true;
@@ -747,17 +1116,14 @@ impl WorldState {
         omega: Vector3,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
-        if let Some(entity) = self.entities.get_mut(guid) {
+        if let Some(pose) = self.entities.get_mut(guid).map(|entity| {
             entity.velocity = velocity;
             entity.omega = omega;
-            let pose = entity.position;
-            self.reconcile_authoritative_body(
-                guid,
-                pose,
-                velocity,
-                omega,
-                AuthoritativeBodySync::Snapshot,
-            );
+            entity.position
+        }) {
+            if !self.apply_authoritative_vectors(guid, velocity, omega) {
+                self.initialize_authoritative_body(guid, pose, velocity, omega);
+            }
             if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
                 Self::emit_runtime_body_changed(events, body_id);
             }
@@ -796,9 +1162,9 @@ impl WorldState {
             }
         }
 
-        if let Some(entity) = self.entities.get_mut(guid)
-            && entity.health_fraction != Some(health_fraction)
-        {
+        if let Some(entity) = self.entities.get_mut(guid) {
+            // QueryHealth also starts a subscription. Its response must reach a newly selected
+            // target's consumer even when the world already holds the same health fraction.
             entity.health_fraction = Some(health_fraction);
             events.push(WorldEvent::EntityHealthUpdated {
                 guid,
@@ -810,28 +1176,10 @@ impl WorldState {
         updated
     }
 
-    pub(crate) fn set_entity_rotation(
-        &mut self,
-        guid: Guid,
-        rotation: Quaternion,
-        events: &mut Vec<WorldEvent>,
-    ) -> bool {
-        let (old_lb, pos) = {
-            let Some(entity) = self.entities.get_mut(guid) else {
-                return false;
-            };
-
-            let old_lb = entity.position.landblock_id;
-            entity.position.rotation = rotation;
-            (old_lb, entity.position)
-        };
-
-        self.emit_entity_position_sync(guid, old_lb, pos, EntityPositionSyncOutcome::Moved, events);
-        true
-    }
-
     pub(crate) fn clear_entity_world_presence(&mut self, guid: Guid) -> Option<WorldPosition> {
         if let Some(entity) = self.entities.get_mut(guid) {
+            // Inventory/pickup authority withdraws any prior parent link as well as its body.
+            entity.placement_intent = crate::EntityPlacementIntent::Withdrawn;
             let old_lb = entity.position.landblock_id;
             if old_lb == Guid::NULL {
                 return None;
@@ -839,7 +1187,6 @@ impl WorldState {
 
             entity.position.landblock_id = Guid::NULL;
             let position = entity.position;
-            self.scene.remove_entity(guid, old_lb);
             self.retire_authoritative_body_for_guid(guid);
             Some(position)
         } else {
@@ -888,7 +1235,6 @@ impl WorldState {
             self.emit_entity_world_presence_cleared(guid, events);
         }
 
-        self.sync_player_ownership_for_entity(guid);
         let _ = self.reconcile_entity_retention(guid);
 
         events.push(WorldEvent::PropertiesUpdated { guid, updates });
@@ -900,6 +1246,7 @@ impl WorldState {
         container_guid: Guid,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
+        self.storage.announce_container(item_guid, container_guid);
         if !self.set_entity_inventory_location(
             item_guid,
             container_guid,
@@ -931,6 +1278,7 @@ impl WorldState {
         guid: Guid,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
+        self.storage.withdraw(guid);
         if !self.set_entity_inventory_location(guid, Guid::NULL, Guid::NULL, EquipMask::NONE) {
             return false;
         }
@@ -959,6 +1307,8 @@ impl WorldState {
         equip_mask: EquipMask,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
+        self.storage
+            .equip(object_guid, wielder_guid, Some(equip_mask));
         if !self.set_entity_inventory_location(object_guid, Guid::NULL, wielder_guid, equip_mask) {
             return false;
         }
@@ -988,6 +1338,19 @@ impl WorldState {
         }
     }
 
+    /// Joins current public collision identity to an installed body without changing its
+    /// geometry, motion, or sampling. Called after installation and admitted PK updates.
+    pub fn synchronize_entity_contact_status(&mut self, guid: Guid) {
+        let Some(entity) = self.entities.get(guid) else {
+            return;
+        };
+        let status = crate::PlayerCollisionStatus::from_description(entity.flags);
+        let Some(body_id) = self.runtime_body_id_for_guid(guid) else {
+            return;
+        };
+        self.scene.set_player_collision_status(body_id, status);
+    }
+
     pub(crate) fn apply_property_update_to_target(
         &mut self,
         guid: Guid,
@@ -995,6 +1358,13 @@ impl WorldState {
     ) -> Guid {
         let target_guid = self.resolve_property_target_guid(guid);
 
+        let scale_changed = matches!(
+            update,
+            PropertyUpdate::Float(
+                holtburger_common::properties::PropertyFloat::DefaultScale,
+                _
+            )
+        );
         if let Some(entity) = self.entities.get_mut(target_guid) {
             entity.set_property(update.clone());
         } else if let Some(vendor) = self.vendor.as_mut()
@@ -1004,6 +1374,33 @@ impl WorldState {
                 .find(|item| item.guid == target_guid)
         {
             item.set_property(update.clone());
+        }
+        if let PropertyUpdate::Int(PropertyInt::CurrentWieldedLocation, mask) = update
+            && let Some(super::storage::StorageLocation::Equipped { wearer, .. }) =
+                self.storage.location(target_guid)
+        {
+            self.storage.equip(
+                target_guid,
+                wearer,
+                Some(EquipMask::from_bits(*mask as u32).expect("invalid accepted equipment mask")),
+            );
+        }
+        if matches!(update, PropertyUpdate::Int(PropertyInt::ItemsCapacity, _))
+            && self
+                .entities
+                .get(target_guid)
+                .is_some_and(|entity| entity.can_hold_items())
+        {
+            self.storage.establish_container(target_guid);
+        }
+        if matches!(
+            update,
+            PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, _)
+        ) {
+            self.synchronize_entity_contact_status(target_guid);
+        }
+        if scale_changed {
+            self.synchronize_entity_body_scale(target_guid);
         }
 
         target_guid
@@ -1027,7 +1424,7 @@ impl WorldState {
                 }
                 PropertyInstanceId::Wielder => {
                     if value == Guid::NULL {
-                        entity.physics_parent_id = None;
+                        entity.set_attachment(None);
                     }
 
                     if value != Guid::NULL && target_guid != self.player.guid {
@@ -1047,12 +1444,28 @@ impl WorldState {
                 if property == PropertyInstanceId::Container {
                     if value == Guid::NULL {
                         self.clear_container_preview(target_guid);
-                    } else if self.open_containers.contains(&value) {
+                    } else if self.has_world_container_access(value) {
                         self.mark_container_preview(target_guid);
                     }
                 }
 
-                self.sync_player_ownership_for_entity(target_guid);
+                match property {
+                    PropertyInstanceId::Container => {
+                        self.storage.announce_container(target_guid, value)
+                    }
+                    PropertyInstanceId::Wielder if value != Guid::NULL => {
+                        self.storage.equip(target_guid, value, None)
+                    }
+                    PropertyInstanceId::Wielder
+                        if matches!(
+                            self.storage.location(target_guid),
+                            Some(super::storage::StorageLocation::Equipped { .. })
+                        ) =>
+                    {
+                        self.storage.withdraw(target_guid)
+                    }
+                    _ => {}
+                }
                 let _ = self.reconcile_entity_retention(target_guid);
             }
             _ => {}
@@ -1068,9 +1481,27 @@ impl WorldState {
             self.player.instance_sequence = data.instance_sequence;
         }
 
-        if let Some(entity) = self.entities.get_mut(data.guid) {
-            entity.physics_state = data.physics_state;
-            entity.properties.hydrate_from_set_state(data);
+        if self.entities.get(data.guid).is_some() {
+            let next = crate::resolve_effective_entity_physics_state(data.physics_state);
+            {
+                let entity = self
+                    .entities
+                    .get_mut(data.guid)
+                    .expect("entity presence was checked above");
+                entity.physics.reconcile(next);
+                entity.properties.hydrate_from_set_state(data);
+            }
+            if let Some(body_id) = self.runtime_body_id_for_guid(data.guid)
+                && self
+                    .scene
+                    .body(body_id)
+                    .and_then(|body| body.physical.as_ref())
+                    .is_some()
+                && let Some(outcome) = self.scene.reconfigure_dynamic_body_for_state(body_id, next)
+                && outcome.change != crate::PhysicalBodyReconfiguration::Unchanged
+            {
+                events.push(WorldEvent::RuntimeBodyChanged { body_id });
+            }
             events.push(WorldEvent::EntityStateUpdated {
                 guid: data.guid,
                 physics_state: data.physics_state,
@@ -1082,16 +1513,19 @@ impl WorldState {
     }
 
     pub(crate) fn handle_trade_complete(&mut self, events: &mut Vec<WorldEvent>) {
-        let trade_item_guids = self.current_trade_item_guids();
-        self.mark_trade_preview_entities_for_prune(&trade_item_guids);
+        self.reset_trade(events);
+    }
 
-        if let Some(trade) = self.trade.as_mut() {
-            trade.self_side.accepted = false;
-            trade.partner_side.accepted = false;
-            trade.self_side.items.clear();
-            trade.partner_side.items.clear();
-            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
+    /// Publish one coherent trade level; consumers never infer revisions from item counts.
+    fn publish_trade(&mut self, events: &mut Vec<WorldEvent>) {
+        self.trade_revision = self
+            .trade_revision
+            .checked_add(1)
+            .expect("trade revision exhausted");
+        if let Some(trade) = &mut self.trade {
+            trade.revision = self.trade_revision;
         }
+        events.push(WorldEvent::TradeStateUpdated(self.trade.clone()));
     }
 
     pub(crate) fn register_trade(
@@ -1105,8 +1539,8 @@ impl WorldState {
         } else {
             initiator
         };
-
-        let trade_state = TradeState {
+        self.trade = Some(TradeState {
+            revision: self.trade_revision,
             partner_guid,
             initiator_guid: initiator,
             trade_stamp: 0.0,
@@ -1120,10 +1554,8 @@ impl WorldState {
                 accepted: false,
                 items: Vec::new(),
             },
-        };
-
-        self.trade = Some(trade_state.clone());
-        events.push(WorldEvent::TradeStateUpdated(Some(trade_state)));
+        });
+        self.publish_trade(events);
     }
 
     pub(crate) fn add_trade_item(
@@ -1132,55 +1564,73 @@ impl WorldState {
         object_guid: Guid,
         events: &mut Vec<WorldEvent>,
     ) {
-        let should_mark_preview = self
-            .retention_snapshot(object_guid, self.current_server_time())
-            .is_none_or(|snapshot| !snapshot.has_authoritative_retention());
-
-        if let Some(trade) = self.trade.as_mut() {
-            if trade_side == 0x01 {
-                trade.self_side.items.push(object_guid);
-            } else {
-                trade.partner_side.items.push(object_guid);
-            }
-            trade.self_side.accepted = false;
-            trade.partner_side.accepted = false;
-            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
+        let Some(trade) = &mut self.trade else {
+            return;
+        };
+        let items = match trade_side {
+            1 => &mut trade.self_side.items,
+            2 => &mut trade.partner_side.items,
+            _ => return,
+        };
+        if items.contains(&object_guid) {
+            return;
         }
-
-        if should_mark_preview {
+        items.push(object_guid);
+        trade.self_side.accepted = false;
+        trade.partner_side.accepted = false;
+        if self
+            .retention_snapshot(object_guid, self.current_server_time())
+            .is_none_or(|snapshot| !snapshot.has_authoritative_retention())
+        {
             self.mark_trade_preview(object_guid);
         }
+        self.publish_trade(events);
     }
 
     pub(crate) fn accept_trade(&mut self, who_accepted: Guid, events: &mut Vec<WorldEvent>) {
-        if let Some(trade) = self.trade.as_mut() {
-            if who_accepted == self.player.guid {
-                trade.self_side.accepted = true;
-            } else {
-                trade.partner_side.accepted = true;
-            }
-            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
-        }
+        self.set_trade_acceptance(who_accepted, true, events);
+    }
+
+    pub(crate) fn decline_trade(&mut self, who_declined: Guid, events: &mut Vec<WorldEvent>) {
+        // ACE Player_Trade.cs:HandleActionDeclineTrade and retail behavior change only this side.
+        self.set_trade_acceptance(who_declined, false, events);
+    }
+
+    fn set_trade_acceptance(&mut self, who: Guid, accepted: bool, events: &mut Vec<WorldEvent>) {
+        let Some(trade) = &mut self.trade else {
+            return;
+        };
+        let side = if who == trade.self_side.guid {
+            &mut trade.self_side
+        } else if who == trade.partner_side.guid {
+            &mut trade.partner_side
+        } else {
+            return;
+        };
+        side.accepted = accepted;
+        events.push(WorldEvent::TradeStateUpdated(self.trade.clone()));
     }
 
     pub(crate) fn reset_trade(&mut self, events: &mut Vec<WorldEvent>) {
         let trade_item_guids = self.current_trade_item_guids();
         self.mark_trade_preview_entities_for_prune(&trade_item_guids);
-
-        if let Some(trade) = self.trade.as_mut() {
+        if let Some(trade) = &mut self.trade {
             trade.self_side.accepted = false;
             trade.partner_side.accepted = false;
             trade.self_side.items.clear();
             trade.partner_side.items.clear();
-            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
+            self.publish_trade(events);
         }
     }
 
-    pub(crate) fn clear_trade_acceptance(&mut self, events: &mut Vec<WorldEvent>) {
-        if let Some(trade) = self.trade.as_mut() {
+    pub(crate) fn reject_trade_item(&mut self, item: Guid, events: &mut Vec<WorldEvent>) {
+        if let Some(trade) = &mut self.trade {
+            // ACE revokes acceptance before evaluating an addition; failure does not reset other items.
+            trade.self_side.items.retain(|guid| *guid != item);
             trade.self_side.accepted = false;
             trade.partner_side.accepted = false;
-            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
+            self.mark_trade_preview_entities_for_prune(&[item]);
+            self.publish_trade(events);
         }
     }
 
@@ -1188,7 +1638,7 @@ impl WorldState {
         let trade_item_guids = self.current_trade_item_guids();
         self.mark_trade_preview_entities_for_prune(&trade_item_guids);
         self.trade = None;
-        events.push(WorldEvent::TradeStateUpdated(None));
+        self.publish_trade(events);
     }
 
     pub(crate) fn current_trade_item_guids(&self) -> Vec<Guid> {
@@ -1204,23 +1654,6 @@ impl WorldState {
         item_guids
     }
 
-    pub(crate) fn current_container_preview_item_guids(&self, container_guid: Guid) -> Vec<Guid> {
-        let mut item_guids: Vec<_> = self
-            .entities
-            .iter()
-            .filter(|entity| entity.container_id() == Some(container_guid))
-            .filter(|entity| {
-                self.entity_lifecycle_state(entity.guid)
-                    .is_some_and(|state| state.container_preview)
-            })
-            .map(|entity| entity.guid)
-            .collect();
-
-        item_guids.sort_unstable_by_key(|guid| guid.0);
-        item_guids.dedup();
-        item_guids
-    }
-
     pub(crate) fn mark_trade_preview_entities_for_prune(&mut self, item_guids: &[Guid]) {
         for &guid in item_guids {
             self.clear_trade_preview(guid);
@@ -1230,24 +1663,17 @@ impl WorldState {
 
     pub(crate) fn mark_container_preview_entities_for_prune(&mut self, item_guids: &[Guid]) {
         let now = self.current_server_time();
-
         for &guid in item_guids {
-            let Some(snapshot) = self.reconcile_entity_retention(guid) else {
-                continue;
-            };
-
-            if snapshot.has_authoritative_retention() {
+            self.mark_container_preview(guid);
+            if self
+                .retention_snapshot(guid, now)
+                .is_some_and(|snapshot| snapshot.has_authoritative_retention())
+            {
                 self.clear_container_preview(guid);
-                let _ = self.reconcile_entity_retention(guid);
-                continue;
+            } else {
+                // Preserve preview provenance through descriptions arriving after closure.
+                self.request_unretained_entity_prune(guid, now);
             }
-
-            if let Some(entity) = self.entities.get_mut(guid) {
-                entity.set_iid_prop(PropertyInstanceId::Container, Guid::NULL);
-            }
-
-            self.clear_container_preview(guid);
-            self.set_entity_prune_deadline(guid, now);
         }
     }
 
@@ -1268,12 +1694,16 @@ impl WorldState {
             buy_multiplier: data.buy_multiplier,
             sell_multiplier: data.sell_multiplier,
             merchandise_item_types: data.merchandise_item_types,
+            value_limits: crate::vendor::VendorValueLimits::from_wire(
+                data.merchandise_min_value,
+                data.merchandise_max_value,
+            ),
             alternate_currency_wcid: data.alternate_currency_wcid,
             alternate_currency_amount: data.alternate_currency_amount,
             alternate_currency_name: data.alternate_currency_name.clone(),
         };
 
         self.vendor = Some(vendor_state.clone());
-        events.push(WorldEvent::VendorStateUpdated(Some(vendor_state)));
+        events.push(WorldEvent::VendorApproached(vendor_state));
     }
 }

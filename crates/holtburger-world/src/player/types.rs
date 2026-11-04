@@ -1,10 +1,9 @@
+use crate::enchantments::PlayerEnchantments;
 use crate::stats;
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
-use holtburger_protocol::messages::EquipMask;
-use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::movement::{MotionStance, PositionType};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
 pub struct SkillBase {
@@ -31,6 +30,34 @@ pub(crate) struct LastSentStats {
 enum CharacterOptionMask {
     Options1(CharacterOptions1),
     Options2(CharacterOptions2),
+}
+
+/// Complete server-backed preference state for the active character.
+///
+/// The two masks are a wire-format detail retained losslessly here; consumers should use the
+/// typed accessors so option-to-mask knowledge stays in the world layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PlayerCharacterOptions {
+    /// Primary mask exactly as supplied by PlayerDescription.
+    pub options1: CharacterOptions1,
+    /// Secondary mask exactly as supplied by PlayerDescription.
+    pub options2: CharacterOptions2,
+}
+
+impl PlayerCharacterOptions {
+    pub fn is_enabled(self, option: CharacterOption) -> bool {
+        match character_option_mask(option) {
+            CharacterOptionMask::Options1(flag) => self.options1.contains(flag),
+            CharacterOptionMask::Options2(flag) => self.options2.contains(flag),
+        }
+    }
+
+    pub fn set_enabled(&mut self, option: CharacterOption, enabled: bool) {
+        match character_option_mask(option) {
+            CharacterOptionMask::Options1(flag) => self.options1.set(flag, enabled),
+            CharacterOptionMask::Options2(flag) => self.options2.set(flag, enabled),
+        }
+    }
 }
 
 fn character_option_mask(option: CharacterOption) -> CharacterOptionMask {
@@ -203,7 +230,7 @@ fn character_option_mask(option: CharacterOption) -> CharacterOptionMask {
 
 /// Session-local player model and derived player-facing state.
 ///
-/// `PlayerState` owns player-specific data such as attributes, vitals, spells, inventory, and
+/// `PlayerState` owns player-specific data such as attributes, vitals, spells, and
 /// protocol sequence tracking. It is intentionally **not** a second world object: authoritative
 /// entity/object state lives on the player `Entity`, while `PlayerState` retains only local-player
 /// overlays and session sequencing. Feature handlers under `crate::handlers` orchestrate message
@@ -213,6 +240,8 @@ fn character_option_mask(option: CharacterOption) -> CharacterOptionMask {
 pub struct PlayerState {
     /// Unique identifier for the player's character.
     pub guid: Guid,
+    /// Private-feed property provenance; values live only on the authoritative player entity.
+    pub(crate) property_retention: super::property_retention::PlayerPropertyRetention,
     /// Computed attribute values (Strength, Endurance, etc.) including buffs.
     pub attributes: HashMap<stats::AttributeType, stats::Attribute>,
     /// Computed vital values (Health, Stamina, Mana) including current/max/buffed states.
@@ -227,6 +256,8 @@ pub struct PlayerState {
     pub instance_sequence: u16,
     /// Sequence for server-controlled movement/actions.
     pub server_control_sequence: u16,
+    /// Freshness sequence for server vector samples; admitted samples do not own local physics.
+    pub vector_sequence: u16,
     /// Last non-zero server-reported motion stance/style cached for outbound movement packets.
     pub last_server_motion_style: Option<MotionStance>,
     /// Sequence for teleportation events to ignore stale position updates.
@@ -236,19 +267,22 @@ pub struct PlayerState {
     /// Sequence for client-initiated position updates.
     pub position_sequence: u16,
     /// Last grounded bit reported by authoritative self movement updates.
-    pub last_server_grounded: Option<bool>,
+    /// Last packet-authored `HAS_CONTACT` fact, retained only as an outbound packet fallback.
+    pub last_server_contact: Option<bool>,
+    /// Last locally solved walkability projected to consumers, retained to suppress duplicates.
+    pub last_runtime_walkable: Option<bool>,
     /// Monotonically increasing sequence for autonomous movement steps.
     pub movement_sequence: u16,
     /// Session-local private position overlays keyed by packet `PositionType`.
     pub local_position_overlays: HashMap<PositionType, holtburger_common::position::WorldPosition>,
     /// List of all active enchantments (buffs/debuffs) currently affecting the player.
-    pub enchantments: Vec<Enchantment>,
+    pub enchantments: PlayerEnchantments,
     /// Master list of known spells (Knowledge). Maps SpellID -> Power/Modifier level.
     pub spells: BTreeMap<u32, f32>,
-    /// Primary character option mask retained from PlayerDescription.
-    pub options1: CharacterOptions1,
-    /// Secondary character option mask retained from PlayerDescription.
-    pub options2: CharacterOptions2,
+    /// Complete server-backed character preferences retained from PlayerDescription.
+    pub character_options: PlayerCharacterOptions,
+    /// Server-reported earned IDs; None means the initial table has not arrived.
+    pub character_titles: Option<BTreeSet<u32>>,
     /// Content of the 8 spellbook hotbars (Organization). Each inner vec corresponds to a UI hotbar.
     pub hotbar_spells: Vec<Vec<u32>>,
     /// Desired material component counts retained from PlayerDescription.
@@ -257,11 +291,6 @@ pub struct PlayerState {
     pub spellbook_filters: u32,
     /// Opaque gameplay options blob retained from PlayerDescription.
     pub gameplay_options: Vec<u8>,
-
-    /// Flat set of all item GUIDs currently owned by the player (in pack or containers).
-    pub inventory: HashSet<Guid>,
-    /// Items currently equipped, mapped by their primary slot mask.
-    pub equipment: HashMap<Guid, EquipMask>,
 
     /// Dirty tracking for emitted derived-stat snapshots.
     pub(crate) last_emitted_derived_stats: Option<LastSentStats>,
@@ -277,6 +306,7 @@ impl PlayerState {
     pub fn new() -> Self {
         Self {
             guid: Guid::NULL,
+            property_retention: Default::default(),
             attributes: HashMap::new(),
             vitals: HashMap::new(),
             vital_bases: HashMap::new(),
@@ -284,23 +314,23 @@ impl PlayerState {
             skill_bases: HashMap::new(),
             instance_sequence: 0,
             server_control_sequence: 0,
+            vector_sequence: 0,
             last_server_motion_style: None,
             teleport_sequence: 0,
             force_position_sequence: 0,
             position_sequence: 0,
-            last_server_grounded: None,
+            last_server_contact: None,
+            last_runtime_walkable: None,
             movement_sequence: 0,
             local_position_overlays: HashMap::new(),
-            enchantments: Vec::new(),
+            enchantments: PlayerEnchantments::default(),
             spells: BTreeMap::new(),
-            options1: CharacterOptions1::empty(),
-            options2: CharacterOptions2::empty(),
+            character_options: PlayerCharacterOptions::default(),
+            character_titles: None,
             hotbar_spells: vec![Vec::new(); 8],
             desired_comps: Vec::new(),
             spellbook_filters: 0,
             gameplay_options: Vec::new(),
-            inventory: HashSet::new(),
-            equipment: HashMap::new(),
             last_emitted_derived_stats: None,
         }
     }
@@ -326,28 +356,6 @@ impl PlayerState {
 }
 
 impl PlayerState {
-    /// Adds an item to the player's inventory tracking.
-    pub fn add_to_inventory(&mut self, item: Guid) {
-        self.inventory.insert(item);
-    }
-
-    /// Removes an item from the player's inventory tracking and equipment.
-    pub fn remove_from_inventory(&mut self, item: Guid) {
-        self.inventory.remove(&item);
-        self.equipment.remove(&item);
-    }
-
-    /// Marks an item as equipped.
-    pub fn wield_item(&mut self, item: Guid, slot: EquipMask) {
-        self.inventory.insert(item);
-        self.equipment.insert(item, slot);
-    }
-
-    /// Marks an item as unequipped.
-    pub fn unwield_item(&mut self, item: Guid) {
-        self.equipment.remove(&item);
-    }
-
     pub fn attribute_snapshot(&self) -> Vec<stats::Attribute> {
         let mut attr_objs: Vec<_> = self.attributes.values().cloned().collect();
         attr_objs.sort_by_key(|a| a.attr_type as u32);
@@ -367,20 +375,10 @@ impl PlayerState {
     }
 
     pub fn character_option_enabled(&self, option: CharacterOption) -> bool {
-        match character_option_mask(option) {
-            CharacterOptionMask::Options1(flag) => self.options1.contains(flag),
-            CharacterOptionMask::Options2(flag) => self.options2.contains(flag),
-        }
+        self.character_options.is_enabled(option)
     }
 
     pub fn set_character_option_enabled(&mut self, option: CharacterOption, enabled: bool) {
-        match character_option_mask(option) {
-            CharacterOptionMask::Options1(flag) => {
-                self.options1.set(flag, enabled);
-            }
-            CharacterOptionMask::Options2(flag) => {
-                self.options2.set(flag, enabled);
-            }
-        }
+        self.character_options.set_enabled(option, enabled);
     }
 }

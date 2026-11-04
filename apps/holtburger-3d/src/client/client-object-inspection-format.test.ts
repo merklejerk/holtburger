@@ -1,0 +1,267 @@
+import { formatDuration } from "../app/duration-format";
+import { formatQuantity } from "../app/quantity-format";
+import { describe, expect, it } from "vitest";
+import fixture from "./fixtures/object-inspection-wire.json";
+import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
+import {
+	formatInspectionDamageTypes,
+	formatInspectionEffect,
+	formatInspectionImbuedEffects,
+	formatInspectionNumber,
+	formatInspectionVitalChange,
+	formatItemStatuses,
+	formatPortalInspection,
+	formatPlayerKillerStatus,
+	formatWieldRequirement,
+	formatUseRequirement,
+	humanizeInspectionName,
+	itemProgressPercent,
+	truncateInspectionDescription,
+} from "./client-object-inspection-format";
+
+describe("object inspection formatting", () => {
+	it("distinguishes undisclosed, empty and partially restricted portal appraisals", () => {
+		expect(formatPortalInspection(null)).toEqual({
+			recallAndTie: "Unknown",
+			summoning: "Unknown",
+			entryRestrictions: "Unknown",
+		});
+		expect(formatPortalInspection([])).toEqual({
+			recallAndTie: null,
+			summoning: null,
+			entryRestrictions: null,
+		});
+		expect(
+			formatPortalInspection([
+				"no-recall-or-tie",
+				"no-player-killers",
+				"no-lite-player-killers",
+			]),
+		).toEqual({
+			recallAndTie: "Prohibited",
+			summoning: null,
+			entryRestrictions: "No PK players; No PK Lite players",
+		});
+		expect(
+			formatPortalInspection(["no-summon", "no-non-player-killers"]),
+		).toEqual({
+			recallAndTie: null,
+			summoning: "Prohibited",
+			entryRestrictions: "No non-PK players",
+		});
+	});
+
+	it("describes signed base vital changes, including the full i32 range", () => {
+		expect(formatInspectionVitalChange({ vital: "Health", amount: 50 })).toBe(
+			"Restores 50 Health.",
+		);
+		expect(formatInspectionVitalChange({ vital: "Stamina", amount: -20 })).toBe(
+			"Depletes 20 Stamina.",
+		);
+		expect(formatInspectionVitalChange({ vital: "Mana", amount: 0 })).toBe(
+			"Restores 0 Mana.",
+		);
+		expect(
+			formatInspectionVitalChange({ vital: "Health", amount: -2147483648 }),
+		).toBe("Depletes 2,147,483,648 Health.");
+	});
+	it("measures item progress within the earned level and fills the capped state", () => {
+		const progression = {
+			level: 2,
+			maxLevel: 5,
+			totalXp: "350000000",
+			advancement: {
+				kind: "advancing" as const,
+				levelStartXp: "300000000",
+				nextLevelXp: "700000000",
+			},
+		};
+		expect(itemProgressPercent(progression)).toBe(12.5);
+		expect(itemProgressPercent({ ...progression, totalXp: "300000000" })).toBe(
+			0,
+		);
+		expect(
+			itemProgressPercent({
+				...progression,
+				level: 5,
+				advancement: { kind: "maximum", maxLevelXp: "3100000000" },
+			}),
+		).toBe(100);
+	});
+	it("keeps large XP differences and labels exact beyond the number range", () => {
+		expect(
+			itemProgressPercent({
+				level: 1,
+				maxLevel: 2,
+				totalXp: "9007199254740993",
+				advancement: {
+					kind: "advancing",
+					levelStartXp: "9007199254740992",
+					nextLevelXp: "9007199254740996",
+				},
+			}),
+		).toBe(25);
+		expect(formatQuantity(9007199254740993n)).toBe("9,007,199,254,740,993");
+	});
+	it("humanizes open semantic enum names", () => {
+		expect(humanizeInspectionName("BlackGarnet")).toBe("Black Garnet");
+		expect(humanizeInspectionName("max-health")).toBe("Max Health");
+	});
+
+	it("keeps mixed and unknown damage bits visible", () => {
+		expect(formatInspectionDamageTypes(0x8000_0011)).toBe(
+			"Slashing / Fire / Unknown damage bits 0x80000000",
+		);
+	});
+
+	it("keeps known and unknown imbue bits visible", () => {
+		expect(formatInspectionImbuedEffects(0x1000_0001)).toEqual([
+			"Critical Strike",
+			"Unknown imbue bits 0x10000000",
+		]);
+	});
+
+	it("groups inspection numbers with US-style commas", () => {
+		expect(formatInspectionNumber(125000)).toBe("125,000");
+		expect(formatInspectionNumber(12345.6)).toBe("12,345.6");
+	});
+
+	it("omits mana-duration seconds at one hour and above", () => {
+		expect(formatDuration(27_450)).toBe("7h 37m");
+		expect(formatDuration(3_630)).toBe("1h");
+		expect(formatDuration(3_599)).toBe("59m 59s");
+		expect(formatDuration(2_220)).toBe("37m");
+		expect(formatDuration(30)).toBe("30s");
+	});
+
+	it("prefers word boundaries while bounding uninterrupted descriptions", () => {
+		expect(truncateInspectionDescription("Short text", 10)).toBeNull();
+		expect(truncateInspectionDescription("alpha beta gamma", 10)).toBe(
+			"alpha beta",
+		);
+		expect(truncateInspectionDescription("alpha beta gamma", 8)).toBe("alpha");
+		expect(truncateInspectionDescription("uninterrupted", 6)).toBe("uninte");
+	});
+
+	it("preserves retail's character PK labels", () => {
+		expect(formatPlayerKillerStatus("non-player-killer")).toBe(
+			"Non-Player Killer",
+		);
+		expect(formatPlayerKillerStatus("player-killer-lite")).toBe(
+			"Player Killer Lite",
+		);
+	});
+
+	it("surfaces equipment appraisal resistance as Unenchantable", () => {
+		expect(
+			formatItemStatuses({
+				bonded: null,
+				attuned: null,
+				retained: null,
+				isOpen: null,
+				isLocked: null,
+				sellable: null,
+				ivoryable: null,
+				dyeable: null,
+				unenchantable: true,
+			}),
+		).toEqual(["Unenchantable"]);
+	});
+
+	it("formats every tagged shape without re-deriving semantics", () => {
+		expect(
+			formatWieldRequirement({
+				type: "training",
+				data: { skill: "HeavyWeapons", level: "specialized" },
+			}),
+		).toBe("Heavy Weapons: Specialized");
+		expect(
+			formatInspectionEffect({
+				type: "slayer",
+				data: { creatureType: "Olthoi", bonus: 0.15 },
+			}),
+		).toBe("Slayer: Olthoi (15%)");
+	});
+});
+
+it("formats activation skill thresholds, training-only clauses, and character levels", () => {
+	expect(
+		formatUseRequirement({
+			type: "skill",
+			data: {
+				skill: "Summoning",
+				requirement: {
+					kind: "training",
+					training: "specialized",
+					minimum: 570,
+				},
+			},
+		}),
+	).toBe("Summoning: 570 (Specialized)");
+	expect(
+		formatUseRequirement({
+			type: "skill",
+			data: {
+				skill: "Summoning",
+				requirement: { kind: "training", training: "trained", minimum: null },
+			},
+		}),
+	).toBe("Summoning: Trained");
+	expect(formatUseRequirement({ type: "level", data: { level: 180 } })).toBe(
+		"Level: 180",
+	);
+});
+
+it("formats threshold-only, attribute, vital, heritage and owner requirements", () => {
+	expect(
+		formatUseRequirement({
+			type: "skill",
+			data: {
+				skill: "ArcaneLore",
+				requirement: { kind: "minimum", minimum: 250 },
+			},
+		}),
+	).toBe("Arcane Lore: 250");
+	expect(
+		formatUseRequirement({
+			type: "attribute",
+			data: { attribute: "self", minimum: 295 },
+		}),
+	).toBe("Self: 295");
+	expect(
+		formatUseRequirement({
+			type: "vital",
+			data: { vital: "max-mana", minimum: 300 },
+		}),
+	).toBe("Max Mana: 300");
+	expect(formatUseRequirement({ type: "owner", data: { name: null } })).toBe(
+		"Original owner only",
+	);
+	expect(
+		formatUseRequirement({ type: "owner", data: { name: "Crafter" } }),
+	).toBe("Restricted to Crafter");
+	expect(
+		formatUseRequirement({
+			type: "heritage",
+			data: { heritage: "gear-knight" },
+		}),
+	).toBe("Heritage: Gear Knight");
+	expect(
+		formatUseRequirement({ type: "allegiance-rank", data: { rank: 4 } }),
+	).toBe("Allegiance rank: 4");
+});
+
+it("formats the Self requirement from the Rust-produced inspection fixture", () => {
+	const result = decodeObjectInspectionResult(fixture.item);
+	if (
+		result.outcome.kind !== "ready" ||
+		result.outcome.inspection.details.kind !== "item"
+	) {
+		throw new Error("Expected ready item inspection fixture");
+	}
+	expect(
+		result.outcome.inspection.details.details.useRequirements.map(
+			formatUseRequirement,
+		),
+	).toContain("Self: 295");
+});

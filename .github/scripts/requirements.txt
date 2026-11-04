@@ -1,0 +1,2 @@
+semver==3.1.0
+    # via -r .github/scripts/requirements.in

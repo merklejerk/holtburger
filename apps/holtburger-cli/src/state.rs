@@ -1,7 +1,7 @@
 use std::time::Instant;
 use std::{fs::File, sync::Mutex};
 
-use holtburger_content::ContentRepository;
+use holtburger_content::CharacterGenCatalog;
 use holtburger_core::ClientState;
 use holtburger_dat::file_type::SkillTable;
 use holtburger_scripting::ScriptHostConfig;
@@ -28,22 +28,19 @@ impl QueuedScriptStartup {
     }
 }
 
+/// TUI-owned spark history; rates are calculated by the shared core sampler.
 pub struct NetStats {
-    pub bytes_in: u64,
-    pub bytes_out: u64,
+    /// Received bytes per second for each completed observation.
     pub history_in: Vec<u64>,
+    /// Sent bytes per second for each completed observation.
     pub history_out: Vec<u64>,
-    pub last_update: Option<Instant>,
 }
 
 impl Default for NetStats {
     fn default() -> Self {
         Self {
-            bytes_in: 0,
-            bytes_out: 0,
             history_in: vec![0; NET_PULSE_HISTORY_SIZE],
             history_out: vec![0; NET_PULSE_HISTORY_SIZE],
-            last_update: None,
         }
     }
 }
@@ -58,7 +55,8 @@ pub struct AppState {
     pub net_stats: NetStats,
     pub world_name: String,
     pub server_time: Option<(f64, Instant)>,
-    pub content: Option<Arc<ContentRepository>>,
+    /// Parsed creation choices from the exact bootstrap source, shared across roster rebuilds.
+    pub character_gen_catalog: Option<Arc<CharacterGenCatalog>>,
     pub spell_catalog: Option<Arc<SpellCatalog>>,
     pub skill_table: Option<Arc<SkillTable>>,
     pub verbosity: u8,

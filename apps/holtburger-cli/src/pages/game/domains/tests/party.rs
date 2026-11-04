@@ -73,7 +73,7 @@ fn projected_fellowship_state_updates_game_data() {
     let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
     let fellowship = holtburger_world::state::FellowshipState {
         name: "Raid Bus".to_string(),
-        leader_guid: Guid(0x50000001),
+        leader_guid: Some(Guid(0x50000001)),
         share_xp: true,
         even_share: false,
         open: true,
@@ -97,6 +97,7 @@ fn projected_fellowship_state_updates_game_data() {
     };
 
     let result = state.handle_view_event(ClientViewEvent::FellowshipStateUpdated {
+        player_guid: state.data.player_guid,
         fellowship: Some(fellowship.clone()),
     });
 
@@ -109,6 +110,7 @@ fn projected_fellowship_state_updates_game_data() {
 fn accepted_fellowship_invite_opens_party_tab_on_next_state_update() {
     let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
     state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+        request_id: 1,
         confirmation_type: ConfirmationType::Fellowship,
         context: 42,
         text: "Leader".to_string(),
@@ -120,13 +122,16 @@ fn accepted_fellowship_invite_opens_party_tab_on_next_state_update() {
     assert!(accept_result.commands.iter().any(|command| {
         matches!(
             command,
-            ClientCommand::RespondToConfirmation { accepted: true }
+            ClientCommand::RespondToConfirmation {
+                request_id: 1,
+                accepted: true
+            }
         )
     }));
 
     let fellowship = holtburger_world::state::FellowshipState {
         name: "Raid Bus".to_string(),
-        leader_guid: Guid(0x50000002),
+        leader_guid: Some(Guid(0x50000002)),
         share_xp: true,
         even_share: false,
         open: true,
@@ -150,6 +155,7 @@ fn accepted_fellowship_invite_opens_party_tab_on_next_state_update() {
     };
 
     let result = state.handle_view_event(ClientViewEvent::FellowshipStateUpdated {
+        player_guid: state.data.player_guid,
         fellowship: Some(fellowship.clone()),
     });
 

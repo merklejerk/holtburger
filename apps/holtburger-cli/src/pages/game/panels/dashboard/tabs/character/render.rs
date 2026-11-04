@@ -3,13 +3,16 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
-use holtburger_common::properties::EnchantmentTypeFlags;
 use holtburger_common::properties::PropertyFloat;
-use holtburger_dat::file_type::skill_table::{SkillFormula, SkillTable};
-use holtburger_protocol::messages::magic::Enchantment;
-use holtburger_world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
+use holtburger_core::{ClientProgressionEvaluation, ClientProgressionUnavailable};
+use holtburger_world::enchantments::{
+    AffectedStat, EnchantmentKind, EnchantmentOperation, ResolvedEnchantment,
+};
+use holtburger_world::progression::{ProgressionIntent, ProgressionUnavailable, StatTarget};
+use holtburger_world::stat_breakdown::{AttributeFormulaBreakdown, SkillFormulaBreakdown};
+use holtburger_world::stats::{AttributeType, TrainingLevel};
 
 use super::tab::CharacterTab;
 use crate::pages::game::{GameData, ViewState};
@@ -23,16 +26,34 @@ pub enum CharTabLine {
         label: String,
         value: String,
         formula: Option<String>,
-        xp_cost: Option<u64>,
-        sp_cost: Option<u32>,
-        has_xp: bool,
-        has_sp: bool,
+        progression: Option<ClientProgressionEvaluation>,
         stat_type: Option<StatType>,
         training: Option<TrainingLevel>,
     },
-    Enchantment(Enchantment),
-    Miscellaneous(Enchantment),
+    Enchantment(DisplayedEnchantment),
+    Miscellaneous(DisplayedEnchantment),
     Spacer,
+}
+
+#[derive(Clone)]
+pub struct DisplayedEnchantment {
+    instance: ResolvedEnchantment,
+    operation: EnchantmentOperation,
+    remaining_seconds: Option<f64>,
+    overridden: bool,
+}
+
+impl DisplayedEnchantment {
+    pub(super) fn key(&self) -> holtburger_world::enchantments::EnchantmentKey {
+        self.instance.key
+    }
+}
+
+/// Shared stat identity and its TUI rows, including overridden contributions.
+#[derive(Default)]
+struct StatEnchantments {
+    name: Option<String>,
+    rows: Vec<DisplayedEnchantment>,
 }
 
 pub fn render_character_tab(
@@ -136,10 +157,7 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 label,
                 value,
                 formula,
-                xp_cost,
-                sp_cost,
-                has_xp,
-                has_sp,
+                progression,
                 stat_type: _,
                 training,
             } => {
@@ -175,18 +193,27 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                     ),
                 ];
 
+                let (xp_cost, sp_cost, affordable) = progression_cost(*progression);
                 if let Some(c) = xp_cost {
                     spans.push(Span::raw(" ("));
                     spans.push(Span::styled(
-                        format_cost(*c),
-                        Style::default().fg(if *has_xp { Color::Green } else { Color::Yellow }),
+                        format_cost(c),
+                        Style::default().fg(if affordable {
+                            Color::Green
+                        } else {
+                            Color::Yellow
+                        }),
                     ));
                     spans.push(Span::raw(" XP)"));
                 } else if let Some(c) = sp_cost {
                     spans.push(Span::raw(" ("));
                     spans.push(Span::styled(
                         c.to_string(),
-                        Style::default().fg(if *has_sp { Color::Green } else { Color::Yellow }),
+                        Style::default().fg(if affordable {
+                            Color::Green
+                        } else {
+                            Color::Yellow
+                        }),
                     ));
                     spans.push(Span::raw(" SP)"));
                 }
@@ -208,30 +235,34 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 list_items.push(ListItem::new(Line::from(spans)).style(style));
             }
             CharTabLine::Enchantment(enchant) => {
-                let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
-                let beneficial = flags.contains(EnchantmentTypeFlags::BENEFICIAL);
-                let multiplicative = flags.contains(EnchantmentTypeFlags::MULTIPLICATIVE);
-
-                let color = if beneficial { Color::Green } else { Color::Red };
+                let color = if enchant.instance.kind == EnchantmentKind::Beneficial {
+                    Color::Green
+                } else {
+                    Color::Red
+                };
                 let highlight_fg = if highlight {
                     Color::White
                 } else {
                     Color::DarkGray
                 };
                 let val_color = if highlight { Color::Cyan } else { color };
-                let time_str = format_duration(enchant.start_time, enchant.duration);
+                let time_str = format_duration(enchant.remaining_seconds);
 
-                let spell_name = data.spell_name_or_fallback(enchant.spell_id as u32);
+                let spell_name = data.spell_name_or_fallback(enchant.instance.key.spell_id as u32);
 
-                let val_str = if multiplicative {
-                    format!("x{:.2}", enchant.stat_mod_value)
+                let val_str = if enchant.operation == EnchantmentOperation::Multiplicative {
+                    format!("x{:.2}", enchant.instance.stat_mod_value)
                 } else {
-                    format!("{:+.2}", enchant.stat_mod_value)
+                    format!("{:+.2}", enchant.instance.stat_mod_value)
                 };
 
                 list_items.push(
                     ListItem::new(Line::from(vec![
-                        Span::raw("    "),
+                        Span::raw(if enchant.overridden {
+                            "      ↳ "
+                        } else {
+                            "    "
+                        }),
                         Span::styled(
                             format!("{} ", spell_name),
                             Style::default()
@@ -248,26 +279,23 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 );
             }
             CharTabLine::Miscellaneous(enchant) => {
-                let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
-                let multiplicative = flags.contains(EnchantmentTypeFlags::MULTIPLICATIVE);
-
                 let highlight_fg = if highlight {
                     Color::White
                 } else {
                     Color::DarkGray
                 };
-                let name = data.spell_name_or_fallback(enchant.spell_id as u32);
-                let time_str = format_duration(enchant.start_time, enchant.duration);
+                let name = data.spell_name_or_fallback(enchant.instance.key.spell_id as u32);
+                let time_str = format_duration(enchant.remaining_seconds);
 
-                let val_str = if multiplicative {
-                    format!("x{:.2}", enchant.stat_mod_value)
+                let val_str = if enchant.operation == EnchantmentOperation::Multiplicative {
+                    format!("x{:.2}", enchant.instance.stat_mod_value)
                 } else {
-                    format!("{:+.2}", enchant.stat_mod_value)
+                    format!("{:+.2}", enchant.instance.stat_mod_value)
                 };
 
                 list_items.push(
                     ListItem::new(Line::from(vec![
-                        Span::raw("  "),
+                        Span::raw(if enchant.overridden { "    ↳ " } else { "  " }),
                         Span::styled(format!("{:<15} ", name), Style::default().fg(Color::Yellow)),
                         Span::styled(val_str, Style::default().fg(Color::Cyan)),
                         Span::styled(
@@ -287,114 +315,78 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
     list_items
 }
 
+fn progression_cost(
+    evaluation: Option<ClientProgressionEvaluation>,
+) -> (Option<u64>, Option<u32>, bool) {
+    match evaluation.map(|evaluation| evaluation.result) {
+        Some(Ok(quote)) if matches!(quote.quote.intent, ProgressionIntent::Train { .. }) => {
+            (None, Some(quote.quote.credits_spent), true)
+        }
+        Some(Ok(quote)) => (Some(u64::from(quote.quote.xp_spent)), None, true),
+        Some(Err(ClientProgressionUnavailable::World(
+            ProgressionUnavailable::InsufficientXp { required, .. },
+        ))) => (Some(u64::from(required)), None, false),
+        Some(Err(ClientProgressionUnavailable::World(
+            ProgressionUnavailable::InsufficientCredits { required, .. },
+        ))) => (None, Some(required), false),
+        _ => (None, None, false),
+    }
+}
+
 pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     let mut lines = Vec::new();
 
-    let resists_props = [
-        PropertyFloat::ResistSlash,
-        PropertyFloat::ResistPierce,
-        PropertyFloat::ResistBludgeon,
-        PropertyFloat::ResistFire,
-        PropertyFloat::ResistCold,
-        PropertyFloat::ResistAcid,
-        PropertyFloat::ResistElectric,
-        PropertyFloat::ResistNether,
-    ];
-    let resists_set: std::collections::HashSet<u32> =
-        resists_props.iter().map(|&p| p as u32).collect();
-
-    // Group enchantments
-    let mut vital_enchants: HashMap<VitalType, Vec<Enchantment>> = HashMap::new();
-    let mut attr_enchants: HashMap<AttributeType, Vec<Enchantment>> = HashMap::new();
-    let mut skill_enchants: HashMap<SkillType, Vec<Enchantment>> = HashMap::new();
-    let mut float_enchants: HashMap<u32, Vec<Enchantment>> = HashMap::new();
-    let mut armor_enchants: Vec<Enchantment> = Vec::new();
-    let mut vitae_enchants: Vec<Enchantment> = Vec::new();
-    let mut misc_enchants: Vec<Enchantment> = Vec::new();
-
-    for enchant in &data.player_enchantments {
-        let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
-        let mut categorized = true;
-
-        if flags.contains(EnchantmentTypeFlags::VITAE) {
-            vitae_enchants.push(*enchant);
-        } else if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
-            if let Some(at) = AttributeType::from_repr(enchant.stat_mod_key) {
-                attr_enchants.entry(at).or_default().push(*enchant);
-            } else {
-                categorized = false;
-            }
-        } else if flags.contains(EnchantmentTypeFlags::SKILL) {
-            if let Some(st) = SkillType::from_repr(enchant.stat_mod_key) {
-                skill_enchants.entry(st).or_default().push(*enchant);
-            } else {
-                categorized = false;
-            }
-        } else if flags.contains(EnchantmentTypeFlags::SECOND_ATT) {
-            let vt = match enchant.stat_mod_key {
-                1 | 2 => Some(VitalType::Health),
-                3 | 4 => Some(VitalType::Stamina),
-                5 | 6 => Some(VitalType::Mana),
-                _ => None,
+    let mut grouped: BTreeMap<AffectedStat, StatEnchantments> = BTreeMap::new();
+    let mut vitae_enchants = Vec::new();
+    if let Some(timed) = &data.resolved_enchantments {
+        let elapsed = timed.received_at.elapsed().as_secs_f64();
+        let instances: HashMap<_, _> = timed
+            .resolved
+            .instances
+            .iter()
+            .map(|instance| (instance.key, instance))
+            .collect();
+        let display =
+            |instance: &ResolvedEnchantment, operation, overridden| DisplayedEnchantment {
+                instance: instance.clone(),
+                operation,
+                remaining_seconds: instance
+                    .remaining_seconds
+                    .map(|seconds| (seconds - elapsed).max(0.0)),
+                overridden,
             };
-            if let Some(vt) = vt {
-                vital_enchants.entry(vt).or_default().push(*enchant);
-            } else {
-                categorized = false;
+        for instance in &timed.resolved.instances {
+            if instance.kind == EnchantmentKind::Vitae {
+                vitae_enchants.push(display(
+                    instance,
+                    EnchantmentOperation::Multiplicative,
+                    false,
+                ));
             }
-        } else if flags.contains(EnchantmentTypeFlags::FLOAT) {
-            if let Some(pf) = PropertyFloat::from_repr(enchant.stat_mod_key) {
-                if !pf.to_string().contains("WeaponAura")
-                    && resists_set.contains(&enchant.stat_mod_key)
-                {
-                    float_enchants
-                        .entry(enchant.stat_mod_key)
-                        .or_default()
-                        .push(*enchant);
-                } else {
-                    categorized = false;
-                }
-            } else {
-                categorized = false;
+        }
+        for group in &timed.resolved.groups {
+            let section = grouped
+                .entry(group.affected_stat)
+                .or_insert_with(|| StatEnchantments {
+                    name: group.stat_name.clone(),
+                    rows: Vec::new(),
+                });
+            let effective = instances
+                .get(&group.effective)
+                .expect("resolved group references a missing effective enchantment");
+            section
+                .rows
+                .push(display(effective, group.operation, false));
+            for key in &group.overridden {
+                let overridden = instances
+                    .get(key)
+                    .expect("resolved group references a missing overridden enchantment");
+                section
+                    .rows
+                    .push(display(overridden, group.operation, true));
             }
-        } else if flags.contains(EnchantmentTypeFlags::BODY_ARMOR_VALUE) {
-            armor_enchants.push(*enchant);
-        } else {
-            categorized = false;
-        }
-
-        if !categorized {
-            misc_enchants.push(*enchant);
         }
     }
-
-    let sort_enchants = |list: &mut Vec<Enchantment>| {
-        list.sort_by_key(|a| a.spell_id);
-    };
-    for v in vital_enchants.values_mut() {
-        sort_enchants(v);
-    }
-    for v in attr_enchants.values_mut() {
-        sort_enchants(v);
-    }
-    for v in skill_enchants.values_mut() {
-        sort_enchants(v);
-    }
-    for v in float_enchants.values_mut() {
-        sort_enchants(v);
-    }
-    sort_enchants(&mut armor_enchants);
-    sort_enchants(&mut vitae_enchants);
-
-    // Misc are sorted by name then ID
-    let sort_by_name = |list: &mut Vec<Enchantment>| {
-        list.sort_by(|a, b| {
-            let na = data.spell_name_or_fallback(a.spell_id as u32);
-            let nb = data.spell_name_or_fallback(b.spell_id as u32);
-            na.cmp(&nb).then(a.spell_id.cmp(&b.spell_id))
-        });
-    };
-    sort_by_name(&mut misc_enchants);
 
     // 1. Vitals
     lines.push(CharTabLine::Header("VITALS"));
@@ -405,14 +397,11 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             label: "Vitae Penalty".to_string(),
             value: format!("{:.0}%", penalty_pct),
             formula: None,
-            xp_cost: None,
-            sp_cost: None,
-            has_xp: false,
-            has_sp: false,
+            progression: None,
             stat_type: None,
             training: None,
         });
-        for &e in &vitae_enchants {
+        for e in vitae_enchants {
             lines.push(CharTabLine::Enchantment(e));
         }
     }
@@ -421,32 +410,25 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     vitals.sort_by_key(|a| a.vital_type.to_string());
     for v in vitals {
         let val = format!("{} / {}", v.current, v.buffed_max);
-        let xp_cost = v
-            .next_rank_xp
-            .map(|next| next.saturating_sub(v.spent_xp) as u64);
-
-        let has_xp = if let (Some(info), Some(cost)) = (&data.level_info, xp_cost) {
-            info.unspent_xp >= cost
-        } else {
-            false
-        };
-
         lines.push(CharTabLine::Stat {
             label: v.vital_type.to_string(),
             value: val,
             formula: None,
-            xp_cost,
-            sp_cost: None,
-            has_xp,
-            has_sp: false,
+            progression: progression_evaluation(
+                data,
+                ProgressionIntent::Raise {
+                    target: StatTarget::Vital(v.vital_type),
+                    ranks: 1,
+                },
+            ),
             stat_type: Some(StatType::Vital(v.vital_type)),
             training: None,
         });
-        if let Some(enchants) = vital_enchants.get(&v.vital_type) {
-            for &e in enchants {
-                lines.push(CharTabLine::Enchantment(e));
-            }
-        }
+        append_stat_enchantments(
+            &mut lines,
+            &mut grouped,
+            AffectedStat::Vital(v.vital_type as u32),
+        );
     }
     lines.push(CharTabLine::Spacer);
 
@@ -460,32 +442,25 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         } else {
             a.base.to_string()
         };
-        let xp_cost = a
-            .next_rank_xp
-            .map(|next| next.saturating_sub(a.spent_xp) as u64);
-
-        let has_xp = if let (Some(info), Some(cost)) = (&data.level_info, xp_cost) {
-            info.unspent_xp >= cost
-        } else {
-            false
-        };
-
         lines.push(CharTabLine::Stat {
             label: a.attr_type.to_string(),
             value: val,
             formula: None,
-            xp_cost,
-            sp_cost: None,
-            has_xp,
-            has_sp: false,
+            progression: progression_evaluation(
+                data,
+                ProgressionIntent::Raise {
+                    target: StatTarget::Attribute(a.attr_type),
+                    ranks: 1,
+                },
+            ),
             stat_type: Some(StatType::Attribute(a.attr_type)),
             training: None,
         });
-        if let Some(enchants) = attr_enchants.get(&a.attr_type) {
-            for &e in enchants {
-                lines.push(CharTabLine::Enchantment(e));
-            }
-        }
+        append_stat_enchantments(
+            &mut lines,
+            &mut grouped,
+            AffectedStat::Attribute(a.attr_type as u32),
+        );
     }
     lines.push(CharTabLine::Spacer);
 
@@ -496,7 +471,6 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         .values()
         .filter(|s| s.skill_type.is_eor())
         .collect();
-    let skill_table = data.skill_table();
 
     // Sort: (Specialized | Trained) > Untrained, then alphabetically within those two groups
     skills.sort_by(|a, b| {
@@ -521,70 +495,46 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             s.current.to_string()
         };
 
-        let mut xp_cost = None;
-        let mut sp_cost = None;
-
-        if s.training as u32 >= TrainingLevel::Trained as u32 {
-            xp_cost = s
-                .next_rank_xp
-                .map(|next| next.saturating_sub(s.spent_xp) as u64);
-        } else if s.training == TrainingLevel::Untrained {
-            // Check if we can train it
-            let cost = s.trained_cost;
-            if cost > 0 {
-                sp_cost = Some(cost);
-            }
-        }
-
-        let has_xp = if let (Some(info), Some(cost)) = (&data.level_info, xp_cost) {
-            info.unspent_xp >= cost
-        } else {
-            false
-        };
-
-        let has_sp = if let (Some(info), Some(cost)) = (&data.level_info, sp_cost) {
-            info.unspent_skill_points >= cost
-        } else {
-            false
+        let intent = match s.training {
+            TrainingLevel::Untrained => Some(ProgressionIntent::Train {
+                skill: s.skill_type,
+            }),
+            TrainingLevel::Trained | TrainingLevel::Specialized => Some(ProgressionIntent::Raise {
+                target: StatTarget::Skill(s.skill_type),
+                ranks: 1,
+            }),
+            TrainingLevel::Unusable => None,
         };
 
         lines.push(CharTabLine::Stat {
             label: s.skill_type.to_string(),
             value: val,
-            formula: skill_formula_text(skill_table.as_deref(), s.skill_type),
-            xp_cost,
-            sp_cost,
-            has_xp,
-            has_sp,
+            formula: skill_formula_text(&s.breakdown.formula),
+            progression: intent.and_then(|intent| progression_evaluation(data, intent)),
             stat_type: Some(StatType::Skill(s.skill_type)),
             training: Some(s.training),
         });
-        if let Some(enchants) = skill_enchants.get(&s.skill_type) {
-            for &e in enchants {
-                lines.push(CharTabLine::Enchantment(e));
-            }
-        }
+        append_stat_enchantments(
+            &mut lines,
+            &mut grouped,
+            AffectedStat::Skill(s.skill_type as u32),
+        );
     }
     lines.push(CharTabLine::Spacer);
 
     // 4. Resistances
     lines.push(CharTabLine::Header("RESISTANCES"));
-    if data.player_guid.is_some() {
+    if data.level_info.is_some() {
         // Armor always first in Resistances
         lines.push(CharTabLine::Stat {
             label: "Armor".to_string(),
             value: data.armor.to_string(),
             formula: None,
-            xp_cost: None,
-            sp_cost: None,
-            has_xp: false,
-            has_sp: false,
+            progression: None,
             stat_type: None,
             training: None,
         });
-        for &e in &armor_enchants {
-            lines.push(CharTabLine::Enchantment(e));
-        }
+        append_stat_enchantments(&mut lines, &mut grouped, AffectedStat::Armor);
 
         let mut resists = vec![
             (PropertyFloat::ResistSlash, data.resistances.slash),
@@ -603,28 +553,35 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
                 label: format!("{:?}", prop),
                 value: format!("{:.2}", val),
                 formula: None,
-                xp_cost: None,
-                sp_cost: None,
-                has_xp: false,
-                has_sp: false,
+                progression: None,
                 stat_type: None,
                 training: None,
             });
-            if let Some(enchants) = float_enchants.get(&(prop as u32)) {
-                for &e in enchants {
-                    lines.push(CharTabLine::Enchantment(e));
-                }
-            }
+            append_stat_enchantments(
+                &mut lines,
+                &mut grouped,
+                AffectedStat::FloatProperty(prop as u32),
+            );
         }
     }
 
     lines.push(CharTabLine::Spacer);
 
     // 5. Misc
-    if !misc_enchants.is_empty() {
+    if !grouped.is_empty() {
         lines.push(CharTabLine::Header("MISC"));
-        for e in misc_enchants {
-            lines.push(CharTabLine::Miscellaneous(e));
+        for (affected_stat, section) in grouped {
+            lines.push(CharTabLine::Stat {
+                label: affected_stat_label(affected_stat, section.name.as_deref()),
+                value: String::new(),
+                formula: None,
+                progression: None,
+                stat_type: None,
+                training: None,
+            });
+            for enchant in section.rows {
+                lines.push(CharTabLine::Miscellaneous(enchant));
+            }
         }
         lines.push(CharTabLine::Spacer);
     }
@@ -632,25 +589,60 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     lines
 }
 
-fn skill_formula_text(skill_table: Option<&SkillTable>, skill_type: SkillType) -> Option<String> {
-    let skill_table = skill_table?;
-    let skill_base = skill_table.skill_base_hash.get(&(skill_type as u32))?;
-    format_skill_formula(&skill_base.formula)
+fn progression_evaluation(
+    data: &GameData,
+    intent: ProgressionIntent,
+) -> Option<ClientProgressionEvaluation> {
+    data.progression.evaluations.get(&intent).copied()
 }
 
-fn format_skill_formula(formula: &SkillFormula) -> Option<String> {
-    if formula.x == 0 {
-        return None;
+fn append_stat_enchantments(
+    lines: &mut Vec<CharTabLine>,
+    grouped: &mut BTreeMap<AffectedStat, StatEnchantments>,
+    stat: AffectedStat,
+) {
+    if let Some(section) = grouped.remove(&stat) {
+        lines.extend(section.rows.into_iter().map(CharTabLine::Enchantment));
     }
+}
 
-    let first = attribute_abbreviation(formula.attr1)?;
-    let expression = match attribute_abbreviation(formula.attr2) {
+fn affected_stat_label(stat: AffectedStat, name: Option<&str>) -> String {
+    if let Some(name) = name {
+        return name.to_owned();
+    }
+    match stat {
+        AffectedStat::Attribute(key) => format!("Attribute {key}"),
+        AffectedStat::Vital(key) => format!("Vital {key}"),
+        AffectedStat::Skill(key) => format!("Skill {key}"),
+        AffectedStat::IntProperty(key) => format!("Integer property {key}"),
+        AffectedStat::FloatProperty(key) => format!("Float property {key}"),
+        AffectedStat::Armor => "Armor".to_string(),
+        AffectedStat::Damage => "Damage".to_string(),
+        AffectedStat::DamageVariance => "Damage variance".to_string(),
+        AffectedStat::Other(flags, key) => format!("Other effect {flags:#x} / {key}"),
+    }
+}
+
+fn skill_formula_text(formula: &SkillFormulaBreakdown) -> Option<String> {
+    match formula {
+        SkillFormulaBreakdown::Applied(formula) => format_skill_formula(formula),
+        SkillFormulaBreakdown::NoFormula | SkillFormulaBreakdown::Unusable => None,
+    }
+}
+
+fn format_skill_formula(formula: &AttributeFormulaBreakdown) -> Option<String> {
+    let first = attribute_abbreviation(formula.first.attribute as u32)?;
+    let expression = match formula
+        .second
+        .as_ref()
+        .and_then(|input| attribute_abbreviation(input.attribute as u32))
+    {
         Some(second) => format!("({}+{})", first, second),
         None => first.to_string(),
     };
 
-    if formula.z != 1 {
-        Some(format!("{}/{}", expression, formula.z))
+    if formula.divisor != 1 {
+        Some(format!("{}/{}", expression, formula.divisor))
     } else {
         Some(expression)
     }
@@ -667,11 +659,8 @@ fn attribute_abbreviation(attribute_id: u32) -> Option<&'static str> {
     })
 }
 
-fn format_duration(start: f64, duration: f64) -> String {
-    if duration < 0.0 {
-        "Inf".to_string()
-    } else {
-        let remain = start + duration;
+fn format_duration(remaining: Option<f64>) -> String {
+    if let Some(remain) = remaining {
         if remain <= 0.0 {
             "0s".to_string()
         } else if remain > 60.0 {
@@ -679,6 +668,8 @@ fn format_duration(start: f64, duration: f64) -> String {
         } else {
             format!("{}s", remain as u32)
         }
+    } else {
+        "Inf".to_string()
     }
 }
 
@@ -686,49 +677,34 @@ fn format_duration(start: f64, duration: f64) -> String {
 mod tests {
     use super::*;
     use holtburger_common::Guid;
-    use holtburger_dat::file_type::skill_table::{SkillBase, SkillFormula, SkillTable};
+    use holtburger_world::stat_breakdown::{FormulaAttributeInput, SkillBreakdown};
     use holtburger_world::stats::{AttributeType, Skill, SkillType, TrainingLevel};
-    use std::collections::HashMap;
-    use std::sync::Arc;
 
-    fn sample_skill_table() -> SkillTable {
-        SkillTable {
-            id: SkillTable::FILE_ID,
-            skill_base_hash: HashMap::from([(
-                SkillType::MeleeDefense as u32,
-                SkillBase {
-                    description: String::new(),
-                    _align1: (),
-                    name: "Melee Defense".to_string(),
-                    _align2: (),
-                    icon_id: 0,
-                    trained_cost: 0,
-                    specialized_cost: 0,
-                    category: 0,
-                    chargen_use: 1,
-                    min_level: 1,
-                    formula: SkillFormula {
-                        w: 0,
-                        x: 1,
-                        y: 0,
-                        z: 3,
-                        attr1: AttributeType::QuicknessAttr as u32,
-                        attr2: AttributeType::CoordinationAttr as u32,
-                    },
-                    upper_bound: 0.0,
-                    lower_bound: 0.0,
-                    learn_mod: 0.0,
-                },
-            )]),
+    fn formula_input(attribute: AttributeType) -> FormulaAttributeInput {
+        FormulaAttributeInput {
+            attribute,
+            base: 10,
+            effective: 10,
+            modifiers: Vec::new(),
         }
+    }
+
+    fn sample_formula() -> SkillFormulaBreakdown {
+        SkillFormulaBreakdown::Applied(AttributeFormulaBreakdown {
+            first: formula_input(AttributeType::QuicknessAttr),
+            second: Some(formula_input(AttributeType::CoordinationAttr)),
+            divisor: 3,
+            base_before_rounding: 20.0 / 3.0,
+            effective_before_rounding: 20.0 / 3.0,
+            base_result: 7,
+            effective_result: 7,
+        })
     }
 
     #[test]
     fn skill_formula_text_formats_attribute_shorthands() {
-        let table = sample_skill_table();
-
         assert_eq!(
-            skill_formula_text(Some(&table), SkillType::MeleeDefense),
+            skill_formula_text(&sample_formula()),
             Some("(Qu+Co)/3".to_string())
         );
     }
@@ -737,7 +713,6 @@ mod tests {
     fn get_char_tab_lines_includes_skill_formula_text() {
         let mut data = GameData::default();
         data.player_guid = Some(Guid(1));
-        data.skill_table = Some(Arc::new(sample_skill_table()));
         data.skills.insert(
             SkillType::MeleeDefense,
             Skill {
@@ -748,9 +723,13 @@ mod tests {
                 next_rank_xp: None,
                 base: 10,
                 current: 10,
-                training: TrainingLevel::Untrained,
+                training: TrainingLevel::Trained,
                 trained_cost: 0,
                 specialized_cost: 0,
+                breakdown: SkillBreakdown {
+                    formula: sample_formula(),
+                    ..Default::default()
+                },
             },
         );
 

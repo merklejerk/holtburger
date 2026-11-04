@@ -1,0 +1,694 @@
+import { describe, expect, it } from "vitest";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import {
+	areStaticObjectDrawsCompatible,
+	createObjectSubmissionPhases,
+	dynamicObjectPhase,
+	formAdjacentObjectInstanceRuns,
+	formGroupedObjectInstanceRuns,
+	objectBlendPolicy,
+	type PreparedStaticObjectDrawCompatibility,
+} from "./object-rendering-policy";
+import {
+	createObjectFragmentShader,
+	createPortalObjectFragmentShader,
+	createObjectVertexShader,
+} from "./webgl2-object-program";
+
+const TRANSPARENT_TUNING = SHARED_FRONTEND_TUNING.rendering.transparentObjects;
+
+describe("dynamicObjectPhase", () => {
+	it.each([
+		["opaque", "transparent", "opaque"],
+		["alpha-test", "opaque", "opaque"],
+		["transparent", "transparent", "transparent"],
+		["additive", "additive", "additive"],
+	] as const)(
+		"routes %s through opacity and retail visibility",
+		(ordering, partial, full) => {
+			expect(dynamicObjectPhase(ordering, 0, "normally-visible", false)).toBe(
+				"skip",
+			);
+			expect(dynamicObjectPhase(ordering, 0.5, "normally-visible", false)).toBe(
+				partial,
+			);
+			expect(dynamicObjectPhase(ordering, 1, "normally-visible", false)).toBe(
+				full,
+			);
+			expect(dynamicObjectPhase(ordering, 1, "degrade-hidden", false)).toBe(
+				"skip",
+			);
+			expect(dynamicObjectPhase(ordering, 0.5, "degrade-hidden", true)).toBe(
+				partial,
+			);
+			expect(dynamicObjectPhase(ordering, 0, "degrade-hidden", true)).toBe(
+				"skip",
+			);
+		},
+	);
+});
+
+describe("transparent submission ordering", () => {
+	it("sorts near objects by camera depth, breaks ties by identity and retains input ownership", () => {
+		const radius = TRANSPARENT_TUNING.nearDistance;
+		const objects = [
+			{ id: "radially-farther", distance: radius * 0.9, depth: 4 },
+			{ id: "z", distance: radius * 0.7, depth: 9 },
+			{ id: "a", distance: radius * 0.5, depth: 9 },
+			// The exact radius belongs to the near phase.
+			{ id: "boundary", distance: radius, depth: 2 },
+		].map((value) =>
+			Object.freeze({ ...value, ordering: "transparent" as const }),
+		);
+		Object.freeze(objects);
+		const phases = createObjectSubmissionPhases(
+			objects,
+			(value) => ({ distanceSquared: value.distance ** 2, stableId: value.id }),
+			() => {
+				throw new Error("Near objects must not derive a batch key.");
+			},
+			(value) => value.depth,
+		);
+		expect(phases.transparent.near).toEqual([
+			objects[2],
+			objects[1],
+			objects[0],
+			objects[3],
+		]);
+		expect(phases.transparent.far).toEqual([]);
+		const retained = [...phases.transparent.near];
+		createObjectSubmissionPhases(
+			objects.slice(0, 1),
+			(value) => ({ distanceSquared: value.distance ** 2, stableId: value.id }),
+			() => null,
+			(value) => value.depth,
+		);
+		expect(phases.transparent.near).toEqual(retained);
+	});
+
+	it("keeps far cohorts in first-seen order, including independent null-key objects", () => {
+		const objects = [
+			{ id: "a1", cohort: "a" },
+			{ id: "single1", cohort: null },
+			{ id: "b1", cohort: "b" },
+			{ id: "a2", cohort: "a" },
+			{ id: "single2", cohort: null },
+			{ id: "b2", cohort: "b" },
+		].map((value) =>
+			Object.freeze({ ...value, ordering: "transparent" as const }),
+		);
+		const batchCalls: string[] = [];
+		const phases = createObjectSubmissionPhases(
+			objects,
+			(value) => ({
+				distanceSquared: (TRANSPARENT_TUNING.nearDistance + 1) ** 2,
+				stableId: value.id,
+			}),
+			(value) => {
+				batchCalls.push(value.id);
+				return value.cohort;
+			},
+			() => {
+				throw new Error("Far objects must not derive camera depth.");
+			},
+		);
+		expect(phases.transparent.far.map(({ id }) => id)).toEqual([
+			"a1",
+			"a2",
+			"single1",
+			"b1",
+			"b2",
+			"single2",
+		]);
+		expect(phases.transparent.near).toEqual([]);
+		expect(batchCalls).toEqual(objects.map(({ id }) => id));
+	});
+
+	it.each([
+		{ label: "camera distance", distanceSquared: -1, stableId: "valid" },
+		{
+			label: "camera distance",
+			distanceSquared: Number.NaN,
+			stableId: "valid",
+		},
+		{ label: "stable identity", distanceSquared: 0, stableId: "" },
+	])("rejects invalid transparent $label", ({ label, ...facts }) => {
+		expect(() =>
+			createObjectSubmissionPhases(
+				[{ ordering: "transparent" }],
+				() => facts,
+				() => null,
+				() => 0,
+			),
+		).toThrow(`Transparent object ${label}`);
+	});
+
+	it("rejects non-finite camera depth for a near object", () => {
+		expect(() =>
+			createObjectSubmissionPhases(
+				[{ ordering: "transparent" }],
+				() => ({ distanceSquared: 0, stableId: "near" }),
+				() => null,
+				() => Number.NaN,
+			),
+		).toThrow("Transparent object camera depth");
+	});
+});
+
+describe("createObjectSubmissionPhases", () => {
+	it.each([
+		{ cameraOffset: -0.2, direction: 1, expected: [["a", "b"], "dynamic"] },
+		{ cameraOffset: 0, direction: 1, expected: [["b"], "dynamic", ["a"]] },
+		{ cameraOffset: 0.2, direction: 1, expected: [["b"], "dynamic", ["a"]] },
+		{ cameraOffset: 0.2, direction: -1, expected: [["a"], "dynamic", ["b"]] },
+	])(
+		"reclassifies static instances across the near boundary at $cameraOffset facing $direction",
+		({ cameraOffset, direction, expected }) => {
+			const radius = TRANSPARENT_TUNING.nearDistance;
+			const objects = [
+				{ id: "a", x: radius * 0.9, instanced: true },
+				{ id: "dynamic", x: radius * 0.95, instanced: false },
+				{ id: "b", x: radius * 1.1, instanced: true },
+			].map((value) => ({ ...value, ordering: "transparent" as const }));
+			const phases = createObjectSubmissionPhases(
+				objects,
+				(value) => ({
+					stableId: value.id,
+					distanceSquared: (value.x - cameraOffset * radius) ** 2,
+				}),
+				(value) => (value.instanced ? "shared" : null),
+				(value) => direction * (value.x - cameraOffset * radius),
+			);
+			// Far cohorts may regroup; near instances must not cross an intervening dynamic draw.
+			const submissions = [
+				phases.transparent.far,
+				phases.transparent.near,
+			].flatMap((ordered) =>
+				formAdjacentObjectInstanceRuns(
+					ordered,
+					(value) => value.instanced,
+					() => true,
+				),
+			);
+			expect(
+				submissions.map((submission) =>
+					submission.kind === "single"
+						? submission.value.id
+						: submission.values.map((value) => value.id),
+				),
+			).toEqual(expected);
+		},
+	);
+
+	it("keeps a merged dynamic range between compatible generated instances after near sorting", () => {
+		const objects = [
+			{ id: "near-static", depth: 2, drawKind: "instanced" },
+			{ id: "far-static", depth: 6, drawKind: "instanced" },
+			{ id: "dynamic", depth: 4, drawKind: "merged" },
+			{ id: "far-static-neighbor", depth: 5, drawKind: "instanced" },
+		].map((value) => ({ ...value, ordering: "transparent" as const }));
+		const phases = createObjectSubmissionPhases(
+			objects,
+			(object) => ({
+				stableId: object.id,
+				distanceSquared: (TRANSPARENT_TUNING.nearDistance / 2) ** 2,
+			}),
+			() => "shared-cohort",
+			(object) => object.depth,
+		);
+		const submissions = formAdjacentObjectInstanceRuns(
+			phases.transparent.near,
+			(object) => object.drawKind === "instanced",
+			() => true,
+		);
+		expect(
+			submissions.map((submission) =>
+				submission.kind === "single"
+					? submission.value.id
+					: submission.values.map((value) => value.id),
+			),
+		).toEqual([
+			["far-static", "far-static-neighbor"],
+			"dynamic",
+			["near-static"],
+		]);
+		expect(phases.transparent.far).toEqual([]);
+	});
+
+	it("partitions one physical population and globally orders transparency", () => {
+		const sortFactCalls: string[] = [];
+		const batchCalls: string[] = [];
+		const objects = [
+			{ cohort: null, distance: 0, id: "wall", ordering: "opaque" },
+			{
+				cohort: "glass",
+				distance: TRANSPARENT_TUNING.nearDistance + 2,
+				id: "far-glass-a",
+				ordering: "transparent",
+			},
+			{ cohort: null, distance: 0, id: "fence", ordering: "alpha-test" },
+			{
+				cohort: null,
+				distance: TRANSPARENT_TUNING.nearDistance - 1,
+				id: "near-glass",
+				ordering: "transparent",
+			},
+			{ cohort: null, distance: 0, id: "glow", ordering: "additive" },
+			{
+				cohort: "glass",
+				distance: TRANSPARENT_TUNING.nearDistance + 1,
+				id: "far-glass-b",
+				ordering: "transparent",
+			},
+		] as const;
+
+		const depthCalls: string[] = [];
+		const phases = createObjectSubmissionPhases(
+			objects,
+			(object) => {
+				sortFactCalls.push(object.id);
+				return {
+					distanceSquared: object.distance ** 2,
+					stableId: object.id,
+				};
+			},
+			(object) => {
+				batchCalls.push(object.id);
+				return object.cohort;
+			},
+			(object) => {
+				depthCalls.push(object.id);
+				return object.distance;
+			},
+		);
+
+		expect(phases.opaque.map(({ id }) => id)).toEqual(["wall", "fence"]);
+		expect(phases.transparent.far.map(({ id }) => id)).toEqual([
+			"far-glass-a",
+			"far-glass-b",
+		]);
+		expect(phases.transparent.near.map(({ id }) => id)).toEqual(["near-glass"]);
+		expect(phases.additive.map(({ id }) => id)).toEqual(["glow"]);
+		expect(sortFactCalls).toEqual(["far-glass-a", "near-glass", "far-glass-b"]);
+		expect(batchCalls).toEqual(["far-glass-a", "far-glass-b"]);
+		expect(depthCalls).toEqual(["near-glass"]);
+	});
+});
+
+describe("formAdjacentObjectInstanceRuns", () => {
+	it("coalesces only adjacent compatible frame instances after global ordering", () => {
+		const ordered = [
+			{ cohort: "a", frame: true, id: "a1" },
+			{ cohort: "a", frame: true, id: "a2" },
+			{ cohort: null, frame: false, id: "baked" },
+			{ cohort: "a", frame: true, id: "a3" },
+			{ cohort: "b", frame: true, id: "b1" },
+		];
+
+		const submissions = formAdjacentObjectInstanceRuns(
+			ordered,
+			(value) => value.frame,
+			(left, right) => left.cohort === right.cohort,
+		);
+
+		expect(
+			submissions.map((submission) =>
+				submission.kind === "single"
+					? submission.value.id
+					: submission.values.map(({ id }) => id),
+			),
+		).toEqual([["a1", "a2"], "baked", ["a3"], ["b1"]]);
+	});
+
+	it("does not reunite equal cohorts across an intervening frame cohort", () => {
+		const ordered = [
+			{ cohort: "a", id: "a1" },
+			{ cohort: "b", id: "b1" },
+			{ cohort: "a", id: "a2" },
+		];
+
+		const submissions = formAdjacentObjectInstanceRuns(
+			ordered,
+			() => true,
+			(left, right) => left.cohort === right.cohort,
+		);
+
+		expect(
+			submissions.map((submission) =>
+				submission.kind === "single"
+					? submission.value.id
+					: submission.values.map(({ id }) => id),
+			),
+		).toEqual([["a1"], ["b1"], ["a2"]]);
+	});
+
+	it("keeps identical part batches separated across render domains", () => {
+		const ordered = [
+			{ batch: "wing", domain: "outdoor", id: "a" },
+			{ batch: "wing", domain: "outdoor", id: "b" },
+			{ batch: "wing", domain: "cell:1", id: "c" },
+		];
+
+		expect(
+			formAdjacentObjectInstanceRuns(
+				ordered,
+				() => true,
+				(left, right) =>
+					left.batch === right.batch && left.domain === right.domain,
+			),
+		).toEqual([
+			{ kind: "frame-instance-run", values: ordered.slice(0, 2) },
+			{ kind: "frame-instance-run", values: ordered.slice(2) },
+		]);
+	});
+});
+
+describe("formGroupedObjectInstanceRuns", () => {
+	it("coalesces separated compatible cohorts in first-seen group order", () => {
+		const ordered = [
+			{ cohort: "a", compatible: "red", frame: true, id: "a1" },
+			{ cohort: null, compatible: "baked", frame: false, id: "baked" },
+			{ cohort: "b", compatible: "blue", frame: true, id: "b1" },
+			{ cohort: "a", compatible: "red", frame: true, id: "a2" },
+		];
+
+		const submissions = formGroupedObjectInstanceRuns(
+			ordered,
+			(value) => value.frame,
+			(value) => value.cohort ?? "",
+			(left, right) => left.compatible === right.compatible,
+		);
+
+		expect(
+			submissions.map((submission) =>
+				submission.kind === "single"
+					? submission.value.id
+					: submission.values.map(({ id }) => id),
+			),
+		).toEqual([["a1", "a2"], "baked", ["b1"]]);
+	});
+
+	it("splits a semantic cohort when exact compatibility differs", () => {
+		const ordered = [
+			{ cohort: "a", state: "red", id: "red-1" },
+			{ cohort: "a", state: "blue", id: "blue" },
+			{ cohort: "a", state: "red", id: "red-2" },
+		];
+
+		expect(
+			formGroupedObjectInstanceRuns(
+				ordered,
+				() => true,
+				(value) => value.cohort,
+				(left, right) => left.state === right.state,
+			),
+		).toEqual([
+			{ kind: "frame-instance-run", values: [ordered[0], ordered[2]] },
+			{ kind: "frame-instance-run", values: [ordered[1]] },
+		]);
+	});
+});
+
+describe("areStaticObjectDrawsCompatible", () => {
+	it("accepts equal consumed state despite unrelated fragment provenance", () => {
+		const compatibility = staticCompatibility();
+		const left = { compatibility, sourceNode: "cluster:a" };
+		const right = {
+			compatibility: { ...compatibility },
+			sourceNode: "cluster:b",
+		};
+
+		expect(
+			areStaticObjectDrawsCompatible(left.compatibility, right.compatibility),
+		).toBe(true);
+	});
+
+	it("rejects every changed draw-consumed compatibility field", () => {
+		const baseline = staticCompatibility();
+		const otherGeometry = identity("geometry:b");
+		const otherTexture = identity("texture:b");
+		const otherSampler = identity("sampler:b");
+		const incompatible: readonly AnyStaticCompatibility[] = [
+			{ ...baseline, geometry: otherGeometry },
+			{ ...baseline, indexStart: 4 },
+			{ ...baseline, indexCount: 9 },
+			{ ...baseline, cullFace: "front" },
+			{ ...baseline, wrapRepeat: true },
+			{ ...baseline, palettedClipMap: true },
+			{ ...baseline, alphaTest: 0 },
+			{ ...baseline, luminosity: 0.5 },
+			{
+				...baseline,
+				material: { ...baseline.material, kind: "index16" },
+			},
+			{
+				...baseline,
+				material: { ...baseline.material, color: [0.5, 1, 1, 1] },
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					base: { ...baseline.material.base, texture: otherTexture },
+				},
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					base: { ...baseline.material.base, sampler: otherSampler },
+				},
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					base: { ...baseline.material.base, rect: [1, 2, 4, 4] },
+				},
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					palette: { ...baseline.material.palette, texture: otherTexture },
+				},
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					palette: { ...baseline.material.palette, sampler: otherSampler },
+				},
+			},
+			{
+				...baseline,
+				material: {
+					...baseline.material,
+					palette: { ...baseline.material.palette, rect: [0, 0, 32, 1] },
+				},
+			},
+			{ ...baseline, detail: null },
+			{
+				...baseline,
+				detail: { ...baseline.detail, texture: otherTexture },
+			},
+			{
+				...baseline,
+				detail: { ...baseline.detail, sampler: otherSampler },
+			},
+			{
+				...baseline,
+				detail: { ...baseline.detail, rect: [0, 0, 0.5, 1] },
+			},
+			{ ...baseline, detail: { ...baseline.detail, tiling: 8 } },
+		];
+
+		for (const candidate of incompatible) {
+			expect(areStaticObjectDrawsCompatible(baseline, candidate)).toBe(false);
+		}
+	});
+
+	it("keeps solid-color compatibility independent from unused texture state", () => {
+		const baseline = staticCompatibility();
+		const solid = {
+			...baseline,
+			detail: null,
+			material: {
+				color: [0.25, 0.5, 0.75, 1] as const,
+				kind: "solid-color" as const,
+			},
+		};
+
+		expect(areStaticObjectDrawsCompatible(solid, { ...solid })).toBe(true);
+		expect(
+			areStaticObjectDrawsCompatible(solid, {
+				...solid,
+				material: { ...solid.material, color: [0.25, 0.5, 0.75, 0.5] },
+			}),
+		).toBe(false);
+	});
+});
+
+describe("object fragment variants", () => {
+	it("applies the scope envelope before sampling a portal-deferred material", () => {
+		const shader = createPortalObjectFragmentShader(false);
+		const visibility = shader.indexOf(
+			"if (!portalDeferredFragmentVisible()) discard;",
+		);
+		const material = shader.indexOf(
+			"vec4 color = sampleMaterial() * vInstanceColor;",
+		);
+
+		expect(shader).toContain("uniform uint uPortalRenderDomain;");
+		expect(shader).toContain("uScopes[uPortalRenderDomain]");
+		expect(shader).toContain("gl_FragCoord.z * 0.5 < envelopeDepth");
+		expect(visibility).toBeGreaterThan(-1);
+		expect(visibility).toBeLessThan(material);
+	});
+
+	it("guards every texture sample behind the material state that enables it", () => {
+		const shader = createObjectFragmentShader(false);
+		const solidReturn = shader.indexOf(
+			"if (uMaterialKind == 0) return uMaterialColor;",
+		);
+		const baseSample = shader.indexOf("sampleRepeatingPixelRect(uBase");
+		const directReturn = shader.indexOf("return direct;");
+		const paletteSample = shader.indexOf("sampleIndexedPaletteLinear(uv)");
+		const detailGuard = shader.indexOf("if (uUseDetail != 0)");
+		const detailSample = shader.indexOf(
+			"sampleRepeatingAtlasRect(\n\t\t\tuDetail",
+		);
+
+		expect(solidReturn).toBeGreaterThan(-1);
+		expect(solidReturn).toBeLessThan(baseSample);
+		expect(directReturn).toBeLessThan(paletteSample);
+		expect(detailGuard).toBeLessThan(detailSample);
+	});
+
+	it("omits fog uniforms and fog code from the blended program", () => {
+		expect(createObjectFragmentShader(false)).not.toContain("uFogEnabled");
+		expect(createObjectFragmentShader(false)).not.toContain("applyDistanceFog");
+		expect(createObjectFragmentShader(true)).toContain("uFogEnabled");
+		expect(createObjectVertexShader(false)).not.toContain(
+			"uCameraHorizontalPosition",
+		);
+	});
+
+	it("keeps uniform and attribute transform inputs structurally distinct", () => {
+		const baked = createObjectVertexShader(true, "uniform");
+		const instanced = createObjectVertexShader(true, "attribute");
+
+		expect(baked).toContain("uniform mat4 uLocalToLandblock;");
+		expect(baked).not.toContain("aSourceToLandblock");
+		expect(instanced).not.toContain("uLocalToLandblock");
+		expect(instanced).toContain(
+			"layout(location = 3) in mat4 aSourceToLandblock;",
+		);
+		expect(instanced).toContain("layout(location = 7) in vec4 aInstanceColor;");
+		expect(createObjectFragmentShader(true)).toContain(
+			"vec4 color = sampleMaterial() * vInstanceColor;",
+		);
+	});
+
+	it("composes static detail with retail destination-color blending", () => {
+		const shader = createObjectFragmentShader(false);
+		const luminosity = "color.rgb += vec3(max(uLuminosity, 0.0));";
+		const detailBlend = "color.rgb * (detail.rgb + (1.0 - detailAlpha))";
+
+		expect(shader).toContain("float detailAlpha = clamp(detail.a, 0.0, 1.0);");
+		expect(shader).toContain(detailBlend);
+		expect(shader).toContain("if (uUseDetail != 0)");
+		expect(shader).not.toContain("mix(color.rgb, detail.rgb, detail.a)");
+		expect(shader.indexOf(luminosity)).toBeLessThan(
+			shader.indexOf(detailBlend),
+		);
+	});
+});
+
+describe("objectBlendPolicy", () => {
+	it("preserves retail alpha, inverse-alpha, and additive factor variants", () => {
+		expect(objectBlendPolicy(0)).toEqual({
+			destination: "one-minus-src-alpha",
+			source: "src-alpha",
+		});
+		expect(objectBlendPolicy(0x100)).toEqual({
+			destination: "one-minus-src-alpha",
+			source: "src-alpha",
+		});
+		expect(objectBlendPolicy(0x200)).toEqual({
+			destination: "src-alpha",
+			source: "one-minus-src-alpha",
+		});
+		expect(objectBlendPolicy(0x10000)).toEqual({
+			destination: "one",
+			source: "one",
+		});
+		expect(objectBlendPolicy(0x10100)).toEqual({
+			destination: "one",
+			source: "src-alpha",
+		});
+		expect(objectBlendPolicy(0x10200)).toEqual({
+			destination: "one",
+			source: "one-minus-src-alpha",
+		});
+	});
+});
+
+interface TestIdentity {
+	readonly name: string;
+}
+
+type AnyStaticCompatibility = PreparedStaticObjectDrawCompatibility<
+	TestIdentity,
+	TestIdentity,
+	TestIdentity
+>;
+
+type StaticCompatibility = Omit<
+	AnyStaticCompatibility,
+	"detail" | "material"
+> & {
+	readonly material: Extract<
+		AnyStaticCompatibility["material"],
+		{ readonly palette: unknown }
+	>;
+	readonly detail: NonNullable<AnyStaticCompatibility["detail"]>;
+};
+
+function identity(name: string): TestIdentity {
+	return { name };
+}
+
+function staticCompatibility(): StaticCompatibility {
+	const sampler = identity("sampler:a");
+	return {
+		alphaTest: 200 / 255,
+		cullFace: "back",
+		detail: {
+			rect: [0, 0, 1, 1],
+			sampler,
+			texture: identity("texture:detail"),
+			tiling: 4,
+		},
+		geometry: identity("geometry:a"),
+		indexCount: 6,
+		indexStart: 0,
+		luminosity: 0,
+		material: {
+			base: {
+				rect: [0, 0, 4, 4],
+				sampler,
+				texture: identity("texture:base"),
+			},
+			color: [1, 1, 1, 1],
+			kind: "index8",
+			palette: {
+				rect: [0, 0, 16, 1],
+				sampler,
+				texture: identity("texture:palette"),
+			},
+		},
+		palettedClipMap: false,
+		wrapRepeat: false,
+	};
+}

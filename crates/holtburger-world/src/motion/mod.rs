@@ -1,0 +1,70 @@
+//! Authored motion semantics: what a motion command selects, how the resulting sequence
+//! advances, and what one tick of it contributes.
+//!
+//! This is the runtime half of the motion contract. `holtburger-content` projects raw motion
+//! tables and animations into `MotionSequenceCatalog`; this module turns a command plus elapsed
+//! time into a selection, a cursor, and one exactly-composed rigid offset. It models retail
+//! motion-table selection and sequence playback.
+//!
+//! Nothing here is a service. State is owned by the caller — a client `WorldState` entity or an
+//! Explorer registry entry — and every operation is a method on that state or a free function
+//! over contract values.
+
+#[cfg(test)]
+mod tests;
+
+mod actuation;
+mod directed;
+mod observed;
+mod rates;
+mod registry;
+mod selection;
+mod sequence;
+mod state;
+
+use holtburger_content::MotionAnimation;
+use std::sync::Arc;
+
+/// One projected animation, shared by every clip that references it.
+///
+/// The projection resolves references once, so a runtime clip can never hold an animation the
+/// archive does not contain.
+pub type MotionAnimationRef = Arc<MotionAnimation>;
+
+/// Retail creature backward commands play the forward cycle at this fraction of walking speed.
+pub const RETAIL_BACKWARD_SPEED_FACTOR: f32 = 0.65;
+
+pub use rates::PLAYER_LOCOMOTION_BASELINE_TABLE;
+pub(crate) use rates::{MotionRow, baseline_row, locomotion_row};
+
+pub use actuation::{authored_grounded_actuation, grounded_character_actuation};
+pub use directed::{
+    DirectedMotionSupport, DirectedMotionTravel, ServerDirectedMotionFailure,
+    ServerDirectedMotionResolution, ServerDirectedMotionState, ServerDirectedMotionStep,
+    ServerDirectedTarget, begin_server_directed_motion, resolve_server_directed_motion,
+};
+pub use observed::{
+    LocomotionPresentationSource, OBSERVED_ANGULAR_IDLE_RATE_RADIANS,
+    OBSERVED_LINEAR_IDLE_SPEED_MPS, OBSERVED_RUN_SPEED_MPS, OBSERVED_TURN_RATE_RADIANS,
+    OBSERVED_WALK_SPEED_MPS, ObservedCharacterMotion, observed_locomotion_order,
+};
+pub use registry::{
+    AuthoredCollisionPose, BodyMotionRuntime, LocalMotionFeedback, LocalMotionOutcome,
+    MAX_AUTHORED_ACTIONS, MotionActionEnqueueOutcome, MotionPlayback, MotionPlaybackLayer,
+    MotionPresentation, MotionRuntimeRegistry, OrdinaryMotionActivity, PlayingMotionClip,
+    RETAIL_RUN_FORWARD_BASE_SPEED_MPS, RemoteMotionSample, SettledMotionPose,
+};
+pub(crate) use registry::{
+    LocalMotionCommand, MotionCommandAdmissionOutcome, RemoteFramePolicy, RemoteMotionInput,
+};
+pub use selection::{
+    ActionSelectionOutcome, MotionSelectionOutcome, select_action, select_motion,
+    set_default_state, stop_completely, stop_motion,
+};
+pub use sequence::{
+    FiredMotionHook, MotionClipCompletion, MotionSequenceRuntime, SequenceNode, SequenceTick,
+};
+pub use state::{
+    ActiveMotion, CharacterMotionPresentation, MotionCommand, MotionContact, MotionGesture,
+    MotionOrder, MotionState, RestPosture,
+};

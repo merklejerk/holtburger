@@ -1,6 +1,6 @@
-use super::combat;
 use super::inventory;
 use super::*;
+use holtburger_core::client::trade::TradeRequest;
 use std::convert::TryFrom;
 
 fn checked_vendor_amount(amount: u32, result: &mut UpdateResult) -> Option<i32> {
@@ -21,21 +21,21 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
 
     match action {
         AppAction::OpenTrade { guid } => {
-            match combat::try_enter_combat_mode(state, CombatMode::NonCombat) {
-                combat::EnterCombatModeResult::Failed(res) => {
-                    result.merge(res);
-                }
-                combat::EnterCombatModeResult::Success(res) => {
-                    result.merge(res);
-                    state.runtime.last_trade_initiation = Some((Instant::now(), guid));
-                    result.commands.push(ClientCommand::OpenTrade(guid));
-                }
-            }
-        }
-        AppAction::AddToTrade { guid } => {
+            state.runtime.last_trade_initiation = Some((Instant::now(), guid));
             result
                 .commands
-                .push(ClientCommand::AddToTrade { item: guid });
+                .push(ClientCommand::Trade(TradeRequest::Open { partner: guid }));
+        }
+        AppAction::AddToTrade { guid } => {
+            if let Some(trade) = &state.data.trade {
+                result
+                    .commands
+                    .push(ClientCommand::Trade(TradeRequest::Add {
+                        partner: trade.partner_guid,
+                        revision: trade.revision,
+                        items: vec![guid],
+                    }));
+            }
         }
         AppAction::OpenShop { vendor } => {
             if state.data.trade.is_some() {
@@ -45,7 +45,10 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 });
             } else {
                 state.runtime.last_trade_initiation = Some((Instant::now(), vendor));
-                result.commands.push(ClientCommand::Use(vendor));
+                result.commands.push(ClientCommand::Use {
+                    guid: vendor,
+                    unrestricted: false,
+                });
             }
         }
         AppAction::SellToVendor {
@@ -80,17 +83,24 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 }],
             });
         }
-        AppAction::AcceptTrade => {
-            result.commands.push(ClientCommand::AcceptTrade);
-        }
-        AppAction::DeclineTrade => {
-            result.commands.push(ClientCommand::DeclineTrade);
-        }
-        AppAction::ResetTrade => {
-            result.commands.push(ClientCommand::ResetTrade);
-        }
-        AppAction::ExitTrade => {
-            result.commands.push(ClientCommand::CloseTrade);
+        AppAction::AcceptTrade
+        | AppAction::DeclineTrade
+        | AppAction::ResetTrade
+        | AppAction::ExitTrade => {
+            if let Some(trade) = &state.data.trade {
+                let partner = trade.partner_guid;
+                let request = match action {
+                    AppAction::AcceptTrade => TradeRequest::Accept {
+                        partner,
+                        revision: trade.revision,
+                    },
+                    AppAction::DeclineTrade => TradeRequest::Withdraw { partner },
+                    AppAction::ResetTrade => TradeRequest::Reset { partner },
+                    AppAction::ExitTrade => TradeRequest::Close { partner },
+                    _ => unreachable!(),
+                };
+                result.commands.push(ClientCommand::Trade(request));
+            }
         }
         AppAction::ClearVendor => {
             state.view.vendor = None;
@@ -106,21 +116,25 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     let mut result = UpdateResult::new();
 
     match event {
-        ClientViewEvent::VendorStateUpdated { vendor } => {
+        ClientViewEvent::VendorApproached { vendor } => {
             if state.data.trade.is_some() {
                 return result;
             }
-            let vendor_guid = vendor.as_ref().map(|v| v.vendor_guid);
-            state.view.vendor = vendor.clone();
-            if let Some(v_guid) = vendor_guid
-                && let Some((last_time, target_guid)) = state.runtime.last_trade_initiation
-                && target_guid == v_guid
+            state.view.vendor = Some(vendor.clone());
+            if let Some((last_time, target_guid)) = state.runtime.last_trade_initiation
+                && target_guid == vendor.vendor_guid
                 && last_time.elapsed() < std::time::Duration::from_secs(5)
             {
                 result
                     .actions
                     .push(AppUiAction::SetDashboardActiveTab(DashboardTab::Trade).into());
             }
+        }
+        ClientViewEvent::VendorStateUpdated { vendor }
+            if state.data.trade.is_none() && state.view.vendor.is_some() =>
+        {
+            // Recovery and appraisal catalogs refresh an open shop without undoing dismissal.
+            state.view.vendor = vendor.clone();
         }
         ClientViewEvent::VendorItemIdentified(item) => {
             if let Some(vendor) = state.view.vendor.as_mut()
@@ -131,7 +145,8 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
                 result.request_redraw(RedrawPriority::Immediate);
             }
         }
-        ClientViewEvent::TradeStateUpdated { trade } => {
+        ClientViewEvent::TradeStateUpdated(snapshot) => {
+            let trade = &snapshot.trade;
             let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
             state.view.vendor = None;
             state.data.trade = trade.clone();

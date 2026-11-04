@@ -1,0 +1,3010 @@
+import { CLIENT_TUNING } from "./client-tuning";
+import { autoMergePolicySchema } from "./client-inventory-contract";
+import barberFixture from "./fixtures/barber-wire.json";
+import { ClientBarberState } from "./client-barber-state";
+import {
+	barberSnapshotSchema,
+	barberPreviewSchema,
+	barberRequestSchema,
+	type BarberPreview,
+} from "./client-barber-contract";
+import gameplayPreferencesFixture from "../harness/browser/fixtures/gameplay-preferences.json";
+import { playerVisualCaptureSchema } from "./client-object-preview-contract";
+import previewFixture from "./fixtures/object-preview-wire.json";
+import { persistPlayerVisualCapture } from "./client-visual-capture";
+import {
+	resolvedJumpFixture,
+	predictedJumpFixture,
+} from "./client-precise-jump-fixtures";
+import type { PartySnapshot } from "./client-party-contract";
+import membershipFixture from "../harness/browser/fixtures/contract-membership.json";
+import { contractMembershipChangeSchema } from "./client-contracts-contract";
+import housingPreviewWireFixture from "./fixtures/housing-preview-wire.json";
+import housingManagementWireFixture from "./fixtures/housing-management-wire.json";
+import housingWireFixture from "./fixtures/housing-wire.json";
+import vendorFixture from "./fixtures/vendor-wire.json";
+import {
+	emptyHousing,
+	housingPreviewRequestSchema,
+	housingManagementRequestSchema,
+	housingSnapshotSchema,
+	type HousingSnapshot,
+} from "./client-housing-contract";
+import { ClientVendorState } from "./client-vendor-state";
+import { UiIconRepository } from "../app/ui-icon-repository";
+import { vendorRequestSchema } from "./client-vendor-contract";
+import {
+	entityFacts,
+	playerEntitySnapshot,
+} from "./client-entity-mirror.test-support";
+import { describe, expect, it, vi } from "vitest";
+import { EQUIPMENT_SLOTS } from "./client-inventory-equipment";
+import inspectionFixture from "./fixtures/object-inspection-wire.json";
+
+import { landblockVector3 } from "../lib/assets/ac-frame";
+import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
+import type {
+	ClientCurrentState,
+	ClientLifecycle,
+} from "./client-host-contract";
+import type { ResolvedEnchantments } from "./client-enchantments-contract";
+import {
+	ClientLifecycleSession,
+	type ClientLifecycleTransport,
+	type ClientLifecycleSessionEvent,
+} from "./client-lifecycle-session";
+
+class FakeClientTransport implements ClientLifecycleTransport {
+	readonly calls: string[] = [];
+	readonly invocations: Array<{
+		command: string;
+		args: Record<string, unknown> | undefined;
+	}> = [];
+	readonly handlers = new Map<string, Set<(payload: unknown) => void>>();
+	#currentState: ClientCurrentState = currentState(0x5000_0001);
+	#emitLaggedDeltaBeforeSnapshot = false;
+
+	async listen(
+		event: string,
+		handler: (payload: unknown) => void,
+	): Promise<() => void> {
+		this.calls.push(`listen:${event}`);
+		const handlers =
+			this.handlers.get(event) ?? new Set<(payload: unknown) => void>();
+		handlers.add(handler);
+		this.handlers.set(event, handlers);
+		return () => {
+			this.calls.push(`unlisten:${event}`);
+			handlers.delete(handler);
+			if (handlers.size === 0) this.handlers.delete(event);
+		};
+	}
+
+	async invoke(command: string, args?: Record<string, unknown>): Promise<void> {
+		this.calls.push(`invoke:${command}`);
+		this.invocations.push({ command, args });
+		if (command === "request_client_current_state") {
+			if (this.#emitLaggedDeltaBeforeSnapshot) {
+				this.emit("client-dynamic-entity", {
+					kind: "upserted",
+					entity: view(0x5000_0003),
+				});
+			}
+			this.emit("client-current-state", this.#currentState);
+		}
+		void args;
+	}
+
+	setCurrentState(state: ClientCurrentState): void {
+		this.#currentState = state;
+	}
+
+	setEmitLaggedDeltaBeforeSnapshot(enabled: boolean): void {
+		this.#emitLaggedDeltaBeforeSnapshot = enabled;
+	}
+
+	emit(event: string, payload: unknown): void {
+		for (const handler of this.handlers.get(event) ?? []) handler(payload);
+	}
+}
+
+describe("ClientLifecycleSession", () => {
+	it("retains terminal results across late snapshots and lifecycle updates", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState(currentState(9));
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const exit = {
+			cause: "server-disconnect",
+			diagnostic: "Session ended during maintenance.",
+		};
+		transport.emit("client-exit-requested", exit);
+		transport.emit("client-current-state", currentState(9));
+		transport.emit("client-lifecycle-changed", {
+			kind: "character-selection",
+			rejection: null,
+			maxSlots: 11,
+			characters: [],
+		});
+		expect(session.state().exit).toEqual(exit);
+		expect(session.state().lifecycle).toEqual({
+			kind: "exiting",
+			cause: exit.cause,
+		});
+		session.stop();
+	});
+
+	it("recovers an editor whose preview event was lost without losing its draft", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const snapshot = barberSnapshotSchema.parse(barberFixture.snapshot);
+		const state = { ...currentState(1), barber: snapshot };
+		transport.emit("client-current-state", state);
+		const presented: (BarberPreview | null)[] = [];
+		const editor = new ClientBarberState(
+			session,
+			async (preview) => {
+				presented.push(preview);
+			},
+			() => {},
+		);
+		const original = editor.read().choices;
+		if (original === null) throw new Error("Expected editable fixture.");
+		const choices = { ...original, body: { ...original.body, eyes: 2 } };
+		editor.change(choices);
+		// The host accepted the request, but its one-shot preview event was lost in resync.
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", state);
+		const request = transport.invocations
+			.filter((call) => call.command === "request_client_barber")
+			.at(-1);
+		expect(request?.args).toMatchObject({
+			request: { kind: "preview", draft: { revision: 3, choices } },
+		});
+		transport.emit("client-barber-preview", {
+			...barberPreviewSchema.parse(barberFixture.preview),
+			revision: 0,
+		});
+		expect(editor.read().canApply).toBe(false);
+		transport.emit("client-barber-preview", {
+			...barberPreviewSchema.parse(barberFixture.preview),
+			revision: 3,
+		});
+		// Recovery can also interrupt a renderer preparation, rather than a lost reply.
+		transport.emit("client-current-state", state);
+		expect(presented.at(-1)).toBeNull();
+		transport.emit("client-barber-preview", {
+			...barberPreviewSchema.parse(barberFixture.preview),
+			revision: 4,
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(editor.read().choices).toEqual(choices);
+		expect(editor.read().canApply).toBe(true);
+		await editor.destroy();
+		session.stop();
+	});
+
+	it("recovers barber state, delivers previews, and retires canceled interactions", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const snapshot = barberSnapshotSchema.parse(barberFixture.snapshot);
+		const events: ClientLifecycleSessionEvent[] = [];
+		session.subscribe((event) => events.push(event));
+		transport.emit("client-current-state", {
+			...currentState(1),
+			barber: snapshot,
+		});
+		expect(session.barberSnapshot()).toEqual(snapshot);
+		const preview = barberPreviewSchema.parse(barberFixture.preview);
+		transport.emit("client-barber-preview", preview);
+		expect(events.at(-1)).toEqual({ type: "barber-preview", result: preview });
+		const request = barberRequestSchema.parse(barberFixture.request);
+		await session.requestBarber(request);
+		expect(
+			transport.invocations.find(
+				(call) => call.command === "request_client_barber",
+			),
+		).toEqual({ command: "request_client_barber", args: { request } });
+		const retired = { ...snapshot, interaction: null };
+		transport.emit("client-barber-updated", retired);
+		expect(session.barberSnapshot()).toEqual(retired);
+		transport.emit("client-current-state", {
+			...currentState(1),
+			barber: retired,
+		});
+		expect(session.barberSnapshot().interaction).toBeNull();
+		session.stop();
+	});
+
+	it("starts authority only after listeners are installed and requests snapshots without relaunching", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const events: ClientLifecycleSessionEvent[] = [];
+		session.subscribe((event) => events.push(event));
+		const startAuthority = vi.fn(async () => {
+			expect(transport.handlers.has("client-dynamic-entity")).toBe(true);
+			expect(transport.handlers.has("client-lifecycle-changed")).toBe(true);
+			expect(transport.handlers.has("client-popup-string")).toBe(true);
+			expect(transport.handlers.has("client-exit-requested")).toBe(true);
+			expect(transport.invocations).toHaveLength(0);
+			transport.emit("client-lifecycle-changed", { kind: "authenticating" });
+		});
+		await session.start({ startAuthority });
+		expect(events).toContainEqual({
+			type: "lifecycle",
+			lifecycle: { kind: "authenticating" },
+		});
+		expect(transport.invocations[0]?.command).toBe(
+			"request_client_current_state",
+		);
+		await session.requestCurrentState();
+		expect(startAuthority).toHaveBeenCalledOnce();
+		session.stop();
+	});
+	it("retires every listener when explicit authority startup fails", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await expect(
+			session.start({
+				startAuthority: async () => {
+					throw new Error("Launch failed");
+				},
+			}),
+		).rejects.toThrow("Launch failed");
+		expect(transport.handlers.size).toBe(0);
+		expect(transport.invocations).toHaveLength(0);
+	});
+
+	it("forwards a one-time equipped visual delta and recovers it after stream loss without another gameplay change", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const stage = vi.fn().mockResolvedValue(undefined);
+		const failure = vi.fn();
+		session.subscribe((event) =>
+			persistPlayerVisualCapture(
+				event,
+				{ read: vi.fn(), stage, listenFailures: vi.fn() },
+				failure,
+			),
+		);
+		await session.start();
+		const capture = playerVisualCaptureSchema.parse({
+			guid: 1,
+			source: previewFixture.equipped.outcome.source,
+		});
+		transport.emit("client-player-visual-capture-changed", capture);
+		expect(session.state().playerVisualCapture).toEqual(capture);
+		expect(stage).toHaveBeenCalledWith(capture);
+		stage.mockClear();
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", {
+			...currentState(1),
+			playerVisualCapture: capture,
+		});
+		expect(session.state().playerVisualCapture).toEqual(capture);
+		expect(stage).toHaveBeenCalledExactlyOnceWith(capture);
+		transport.emit("client-player-visual-capture-changed", null);
+		expect(session.state().playerVisualCapture).toBeNull();
+		expect(stage).toHaveBeenCalledTimes(1);
+		expect(failure).not.toHaveBeenCalled();
+		session.stop();
+	});
+
+	it("recovers a creation result after its delta was lost during resync", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.emit("client-character-management-changed", {
+			kind: "creating",
+			name: "Amy",
+		});
+		expect(session.state().characterManagement).toEqual({
+			kind: "creating",
+			name: "Amy",
+		});
+		transport.emit("client-state-resyncing", null);
+		const result = {
+			kind: "rejected",
+			operation: "create",
+			message: "Name is already in use.",
+		} as const;
+		transport.emit("client-current-state", {
+			...currentState(1),
+			characterManagement: result,
+		});
+		expect(session.state().characterManagement).toEqual(result);
+		session.stop();
+	});
+	it("forwards typed membership activity without deriving it from snapshots or recovery", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const changes: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "contract-membership-change")
+				changes.push(event.change);
+		});
+		await session.start();
+		transport.emit("client-contracts-updated", {
+			contracts: { rows: [{ kind: "unresolved", id: 99 }] },
+		});
+		transport.emit("client-current-state", currentState(1));
+		expect(changes).toEqual([]);
+		for (const value of membershipFixture)
+			transport.emit("client-contract-membership-changed", value);
+		expect(changes).toEqual(
+			membershipFixture.map((value) =>
+				contractMembershipChangeSchema.parse(value),
+			),
+		);
+		expect(() =>
+			transport.emit("client-contract-membership-changed", {
+				kind: "removed",
+				id: -1,
+				name: null,
+			}),
+		).toThrow();
+		expect(() =>
+			transport.emit("client-contract-membership-changed", {
+				kind: "updated",
+				id: 1,
+				name: "Quest",
+			}),
+		).toThrow();
+		session.stop();
+	});
+	it("discards time observed during a failed startup before allowing a retry", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const invoke = vi
+			.spyOn(transport, "invoke")
+			.mockImplementationOnce(async () => {
+				transport.emit("client-server-time-updated", { time: 300 });
+				expect(session.readServerTime(performance.now())).not.toBeNull();
+				throw new Error("Snapshot request failed.");
+			});
+		try {
+			await expect(session.start()).rejects.toThrow("Snapshot request failed.");
+			expect(session.readServerTime(performance.now())).toBeNull();
+			await session.start();
+			expect(session.readServerTime(performance.now())).not.toBeNull();
+		} finally {
+			session.stop();
+			invoke.mockRestore();
+		}
+	});
+	it("anchors synchronized time at receipt, advances across late mounts, and clears on stop", async () => {
+		const now = vi.spyOn(performance, "now").mockReturnValue(1000);
+		try {
+			const transport = new FakeClientTransport();
+			const session = new ClientLifecycleSession(transport);
+			expect(session.readServerTime(1000)).toBeNull();
+			await session.start();
+			const baseline = session.readServerTime(1000);
+			if (baseline === null) throw new Error("Fixture time missing.");
+			expect(session.readServerTime(21_000)).toBe(baseline + 20);
+			now.mockReturnValue(21_000);
+			transport.emit("client-server-time-updated", { time: 300 });
+			expect(session.readServerTime(26_000)).toBe(305);
+			transport.setCurrentState({
+				...currentState(0x5000_0001),
+				serverTime: null,
+			});
+			await session.requestCurrentState();
+			expect(session.readServerTime(26_000)).toBeNull();
+			transport.emit("client-server-time-updated", { time: 400 });
+			session.stop();
+			expect(session.readServerTime(26_000)).toBeNull();
+		} finally {
+			now.mockRestore();
+		}
+	});
+	it("routes allegiance facts, preferences, commands, portal retention and character retirement", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const allegiance = {
+			playerGuid: 42,
+			profile: null,
+			refreshing: true,
+			canSwear: true,
+		};
+		transport.setCurrentState({
+			...currentState(42),
+			allegiance,
+			allegiancePreferences: { showLogons: false },
+		});
+		await session.start();
+		expect(session.allegiance.read().snapshot).toEqual(allegiance);
+		expect(session.allegiance.read().preferences).toEqual({
+			showLogons: false,
+		});
+		transport.emit("client-allegiance-updated", {
+			allegiance: { ...allegiance, refreshing: false },
+		});
+		await session.allegiance.request({ kind: "refresh" });
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "submit_client_allegiance",
+			args: { action: { kind: "refresh" } },
+		});
+		transport.emit("client-character-preferences-updated", {
+			appearance: { showHelmet: true, showCloak: true },
+			gameplay: gameplayPreferencesFixture,
+			party: { shareXp: true, shareLoot: false, ignoreRequests: false },
+			friends: { appearOffline: false },
+			allegiance: { showLogons: true },
+		});
+		expect(session.allegiance.read().preferences).toEqual({ showLogons: true });
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.allegiance.read().snapshot?.playerGuid).toBe(42);
+		expect(session.allegiance.read().enabled).toBe(false);
+		transport.emit("client-current-state", {
+			...currentState(42),
+			allegiance,
+			allegiancePreferences: { showLogons: true },
+		});
+		expect(session.allegiance.read().snapshot?.refreshing).toBe(true);
+		transport.emit("client-lifecycle-changed", {
+			kind: "entering-world",
+			characterGuid: 43,
+		});
+		expect(session.allegiance.read().snapshot).toBeNull();
+		await session.stop();
+	});
+
+	it("carries row-targeted previews and unused selected sources through the shared wire fixture", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const receipts: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "housing-payment-preview") receipts.push(event.result);
+		});
+		await session.start();
+		const request = housingPreviewRequestSchema.parse(
+			housingPreviewWireFixture.request,
+		);
+		await session.previewHousingPayment(request);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "preview_client_housing_payment",
+			args: { request },
+		});
+		transport.emit(
+			"client-housing-payment-preview",
+			housingPreviewWireFixture.result,
+		);
+		expect(receipts).toEqual([housingPreviewWireFixture.result]);
+		session.stop();
+	});
+
+	it("dispatches reviewed management and validates its receipt without another toast owner", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const receipts: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "housing-management-finished")
+				receipts.push(event.result);
+		});
+		await session.start();
+		const request = housingManagementRequestSchema.parse(
+			housingManagementWireFixture.request,
+		);
+		await session.submitHousingManagement(request);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "submit_client_housing_management",
+			args: { request },
+		});
+		transport.emit(
+			"client-housing-management-finished",
+			housingManagementWireFixture.result,
+		);
+		expect(receipts).toEqual([housingManagementWireFixture.result]);
+		expect(session.housingSnapshot()).toEqual(emptyHousing());
+		await expect(
+			session.submitHousingManagement({ ...request, sequence: -1 }),
+		).rejects.toThrow();
+		session.stop();
+	});
+
+	it("accepts the housing snapshot produced through the host projection", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const housing = housingSnapshotSchema.parse(housingWireFixture);
+		transport.setCurrentState({ ...currentState(1), housing });
+		await session.start();
+		expect(session.housingSnapshot()).toEqual(housingWireFixture);
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", { ...currentState(1), housing });
+		expect(session.housingSnapshot()).toEqual(housingWireFixture);
+		session.stop();
+	});
+
+	it("restores access/search loading without querying and dispatches explicit typed reads", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const housing: HousingSnapshot = {
+			...emptyHousing(),
+			access: {
+				generation: 5,
+				refreshing: true,
+				records: {
+					publicEntry: true,
+					guests: [{ character: 7, name: "Guest", storageAllowed: false }],
+					allegiance: null,
+					roommates: null,
+				},
+			},
+			search: {
+				pendingType: 1,
+				results: { houseType: 4, areas: [0x12340001], totalAvailable: 2 },
+			},
+		};
+		transport.setCurrentState({ ...currentState(1), housing });
+		await session.start();
+		expect(session.housingSnapshot()).toEqual(housing);
+		expect(
+			transport.invocations.filter(
+				(entry) =>
+					entry.command === "query_client_housing_access" ||
+					entry.command === "search_client_housing",
+			),
+		).toEqual([]);
+		await session.queryHousingAccess();
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "query_client_housing_access",
+			args: undefined,
+		});
+		await session.searchHousing(4);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "search_client_housing",
+			args: { houseType: 4 },
+		});
+		await expect(session.searchHousing(0)).rejects.toThrow();
+		await expect(session.searchHousing(1.5)).rejects.toThrow();
+		session.stop();
+		expect(session.housingSnapshot()).toEqual(emptyHousing());
+	});
+
+	it("retains pending housing payment through replacement and validates terminal feedback", async () => {
+		const transport = new FakeClientTransport();
+		const pendingPayment = {
+			sequence: 15,
+			crystal: 100,
+			purpose: "purchase",
+		} as const;
+		transport.setCurrentState({
+			...currentState(1),
+			housing: { ...emptyHousing(), pendingPayment },
+		});
+		const session = new ClientLifecycleSession(transport);
+		const results: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "housing-payment-finished") results.push(event.result);
+		});
+		await session.start();
+		expect(session.housingSnapshot().pendingPayment).toEqual(pendingPayment);
+		expect(
+			transport.calls.indexOf("listen:client-housing-payment-finished"),
+		).toBeLessThan(
+			transport.calls.indexOf("invoke:request_client_current_state"),
+		);
+		const result = {
+			sequence: 15,
+			crystal: 100,
+			outcome: { kind: "unresolved", reason: "No authoritative response" },
+			notify: true,
+		};
+		transport.emit("client-housing-payment-finished", result);
+		expect(results).toEqual([result]);
+		expect(() =>
+			transport.emit("client-housing-payment-finished", {
+				...result,
+				notify: "yes",
+			}),
+		).toThrow();
+		transport.emit("client-housing-updated", emptyHousing());
+		expect(session.housingSnapshot().pendingPayment).toBeNull();
+		session.stop();
+	});
+	it("validates housing preview commands and emits their correlated receipts without retaining opening intent", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const receipts: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "housing-payment-preview") receipts.push(event.result);
+		});
+		const request = {
+			sequence: 9,
+			draft: { crystal: 100, purpose: "maintenance", items: [11] },
+			operation: { kind: "fill", wcid: 273 },
+		} as const;
+		await session.previewHousingPayment({
+			...request,
+			draft: { ...request.draft, items: [...request.draft.items] },
+		});
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "preview_client_housing_payment",
+			args: { request },
+		});
+		const result = {
+			sequence: 9,
+			crystal: 100,
+			outcome: {
+				kind: "ready",
+				items: [11, 12],
+				quote: {
+					lines: [
+						{
+							wcid: 273,
+							sources: [11, 12],
+							consumption: [
+								{ item: 11, quantity: 3, value: 3 },
+								{ item: 12, quantity: 1, value: 10 },
+							],
+							credited: 13,
+							effectivePaid: 13,
+							shortfall: 0,
+							excess: 0,
+						},
+					],
+					complete: true,
+					contributes: true,
+				},
+				unavailable: [],
+			},
+		};
+		transport.emit("client-housing-payment-preview", result);
+		expect(receipts).toEqual([result]);
+		expect(session.housingSnapshot()).toEqual(emptyHousing());
+		await expect(
+			session.previewHousingPayment({
+				...request,
+				sequence: -1,
+				draft: { ...request.draft, items: [] },
+			}),
+		).rejects.toThrow();
+		session.stop();
+	});
+
+	it("retains housing through travel, replaces it on recovery, and clears it on stop", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const home: HousingSnapshot = {
+			...emptyHousing(),
+			home: { kind: "none" },
+		};
+		transport.setCurrentState({ ...currentState(1), housing: home });
+		const events: string[] = [];
+		session.subscribe((event) => events.push(event.type));
+		await session.start();
+		expect(session.housingSnapshot()).toEqual(home);
+		expect(
+			transport.calls.indexOf("listen:client-housing-updated"),
+		).toBeLessThan(
+			transport.calls.indexOf("invoke:request_client_current_state"),
+		);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.housingSnapshot()).toEqual(home);
+		await session.refreshHousing();
+		expect(transport.invocations.at(-1)?.command).toBe(
+			"refresh_client_housing",
+		);
+		transport.emit("client-housing-updated", { ...home, refreshing: true });
+		expect(session.housingSnapshot().refreshing).toBe(true);
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", {
+			...currentState(1),
+			housing: home,
+		});
+		expect(session.housingSnapshot()).toEqual(home);
+		expect(
+			events.filter((type) => type === "housing-crystal-received"),
+		).toEqual([]);
+		session.stop();
+		expect(session.housingSnapshot()).toEqual(emptyHousing());
+	});
+
+	it("retains connection samples independently of portal lifecycle and replaces them after loss", async () => {
+		const transport = new FakeClientTransport();
+		const baseline = {
+			health: "connected",
+			quality: "good",
+			reliability: {
+				receiveRepairShare: 0,
+				sendRepairShare: null,
+				receiveGap: false,
+			},
+			sampleAgeSeconds: 0,
+			receiveAgeSeconds: 0.2,
+			receiveBytesPerSecond: 120,
+			sendBytesPerSecond: 60,
+		} as const;
+		transport.setCurrentState({ ...currentState(1), connection: baseline });
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		expect(session.connectionSample()?.sample).toEqual(baseline);
+		const waiting = {
+			...baseline,
+			health: "waiting",
+			quality: "poor",
+			sampleAgeSeconds: 0,
+			receiveAgeSeconds: 10,
+			receiveBytesPerSecond: 0,
+		} as const;
+		transport.emit("client-connection-updated", waiting);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "teleport",
+		});
+		expect(session.connectionSample()?.sample).toEqual(waiting);
+		transport.emit("client-state-resyncing", null);
+		expect(session.connectionSample()).toBeNull();
+		transport.emit("client-current-state", {
+			...currentState(1),
+			connection: baseline,
+		});
+		expect(session.connectionSample()?.sample).toEqual(baseline);
+		session.stop();
+		expect(session.connectionSample()).toBeNull();
+		transport.setCurrentState(currentState(2));
+		await session.start();
+		expect(session.connectionSample()).toBeNull();
+		session.stop();
+	});
+
+	it("dispatches examination and emits the validated cold result", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.invocations.length = 0;
+		const results: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "object-inspection-result") results.push(event.result);
+		});
+
+		const receive = vi.fn();
+		await session.appraisals.request(inspectionFixture.item.guid, receive).sent;
+		expect(transport.invocations).toEqual([
+			{
+				command: "examine_client_entity",
+				args: { guid: inspectionFixture.item.guid },
+			},
+		]);
+		transport.emit("client-object-inspection-result", inspectionFixture.item);
+		expect(results).toEqual([inspectionFixture.item]);
+		expect(receive).toHaveBeenCalledWith(inspectionFixture.item);
+		await expect(
+			session.appraisals.request(-1, receive).sent,
+		).rejects.toThrow();
+		expect(transport.invocations).toHaveLength(1);
+		session.stop();
+	});
+
+	it("commits container access with pending contents and replaces it coherently after loss", async () => {
+		const transport = new FakeClientTransport();
+		const player = 1;
+		const root = 10;
+		const pack = 11;
+		const child = 12;
+		const contents = [
+			entityFacts(player),
+			entityFacts(root),
+			...[pack, child].map((guid) =>
+				entityFacts(guid, {
+					description: { kind: "pending" },
+					worldContainerContent: true,
+					location: {
+						kind: "contained",
+						parentGuid: guid === pack ? root : pack,
+						slot: { kind: "pending" },
+					},
+				}),
+			),
+		];
+		const opened: ClientCurrentState = {
+			...currentState(player),
+			entities: {
+				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
+				worldContainer: { kind: "open", root },
+				entities: contents,
+			},
+		};
+		transport.setCurrentState(opened);
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const initial = session.entities.read();
+		if (initial.kind !== "current")
+			throw new Error("Expected replacement baseline.");
+		expect(initial.level.worldContainer).toEqual({ kind: "open", root });
+		expect(initial.level.entities.get(child)?.description.kind).toBe("pending");
+		expect(initial.level.entities.get(child)?.canPickUp).toBe(false);
+		let coherentCloseNotifications = 0;
+		const unsubscribe = session.subscribe((event) => {
+			if (event.type !== "entities") return;
+			const read = session.entities.read();
+			if (read.kind !== "current") throw new Error("Expected committed delta.");
+			expect(read.level.worldContainer.kind).toBe("closed");
+			expect(read.level.entities.has(child)).toBe(false);
+			coherentCloseNotifications++;
+		});
+		transport.emit("client-entity-facts-changed", {
+			projectileSupply: { kind: "not-applicable" },
+			salvage: {
+				skills: {
+					salvagingSkill: 0,
+					tinkeringSkill: 0,
+					augmentationBonusSalvage: 0,
+				},
+			},
+			worldContainer: { kind: "closed" },
+			upserts: [],
+			removed: [pack, child],
+		});
+		expect(coherentCloseNotifications).toBe(1);
+		unsubscribe();
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-entity-facts-changed", {
+			projectileSupply: { kind: "not-applicable" },
+			salvage: {
+				skills: {
+					salvagingSkill: 0,
+					tinkeringSkill: 0,
+					augmentationBonusSalvage: 0,
+				},
+			},
+			worldContainer: { kind: "open", root },
+			upserts: contents,
+			removed: [],
+		});
+		expect(session.entities.read().kind).toBe("pending");
+		transport.emit("client-current-state", opened);
+		const recovered = session.entities.read();
+		if (recovered.kind !== "current")
+			throw new Error("Expected recovered baseline.");
+		expect(recovered.level.entities.get(child)?.description.kind).toBe(
+			"pending",
+		);
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", currentState(player));
+		const closed = session.entities.read();
+		if (closed.kind !== "current") throw new Error("Expected closed baseline.");
+		expect(closed.level.worldContainer.kind).toBe("closed");
+		expect(closed.level.entities.has(child)).toBe(false);
+		await session.closeContainer(root);
+		expect(
+			transport.invocations
+				.filter((call) => call.command === "close_client_container")
+				.at(-1),
+		).toEqual({
+			command: "close_client_container",
+			args: { guid: root },
+		});
+		session.stop();
+	});
+
+	it("keeps social readiness separate from combat mode and forwards correlated playback results", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const observed = vi.fn<(event: ClientLifecycleSessionEvent) => void>();
+		session.subscribe(observed);
+		await session.start();
+		transport.emit("client-social-motion-ready-updated", { ready: false });
+		transport.emit("client-combat-mode-updated", { mode: "peace" });
+		expect(session.state().socialMotionReady).toBe(false);
+		transport.emit("client-social-motion-ready-updated", { ready: true });
+		expect(session.state().socialMotionReady).toBe(true);
+		await session.sendChat({
+			kind: "soul-emote",
+			token: "wave",
+			requestId: 17,
+		});
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "send_client_chat",
+			args: { request: { kind: "soul-emote", token: "wave", requestId: 17 } },
+		});
+		const feedback = {
+			requestId: 17,
+			worldGeneration: 3,
+			outcome: "superseded",
+		};
+		transport.emit("client-local-motion-feedback", feedback);
+		expect(observed).toHaveBeenLastCalledWith({
+			type: "local-motion-feedback",
+			feedback,
+		});
+		session.stop();
+	});
+
+	it("casts only in confirmed magic and forwards each caller-owned aim", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const targeted = { kind: "normal", selection: 7 } as const;
+		await expect(session.castSpell(42, targeted)).rejects.toThrow(
+			"Spell session",
+		);
+		await session.start();
+		await expect(session.castSpell(42, targeted)).rejects.toThrow(
+			"magic stance",
+		);
+		transport.emit("client-combat-mode-updated", { mode: "magic" });
+		await session.castSpell(42, targeted);
+		await session.castSpell(42, { kind: "untargeted" });
+		expect(
+			transport.invocations.filter(
+				(call) => call.command === "cast_client_spell",
+			),
+		).toEqual([
+			{
+				command: "cast_client_spell",
+				args: { spellId: 42, aim: { kind: "normal", selection: 7 } },
+			},
+			{
+				command: "cast_client_spell",
+				args: { spellId: 42, aim: { kind: "untargeted" } },
+			},
+		]);
+		transport.emit("client-current-state", currentState(1));
+		await expect(session.castSpell(42, targeted)).rejects.toThrow(
+			"magic stance",
+		);
+		session.stop();
+		await expect(session.castSpell(42, targeted)).rejects.toThrow(
+			"Spell session",
+		);
+	});
+
+	it("toggles only in world and reconciles stance through events and replacement snapshots", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.toggleCombatMode();
+		expect(transport.calls).toEqual([]);
+		await session.start();
+		transport.emit("client-current-state", currentState(1));
+		transport.calls.length = 0;
+		await session.toggleCombatMode();
+		expect(
+			transport.calls.filter(
+				(call) => call === "invoke:toggle_client_combat_mode",
+			),
+		).toEqual(["invoke:toggle_client_combat_mode"]);
+		expect(session.state().combatMode).toBe("peace");
+		transport.emit("client-combat-mode-updated", { mode: "missile" });
+		expect(session.state().combatMode).toBe("missile");
+		transport.emit("client-current-state", {
+			...currentState(1),
+			combatMode: "magic",
+			socialMotionReady: false,
+		});
+		expect(session.state().combatMode).toBe("magic");
+		transport.emit("client-combat-mode-updated", { mode: "peace" });
+		expect(session.state().combatMode).toBe("peace");
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "teleport",
+		});
+		transport.calls.length = 0;
+		await session.toggleCombatMode();
+		expect(transport.calls).toEqual([]);
+		session.stop();
+	});
+
+	it("forwards silent posture targets and cancellation without optimistic stance changes", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await expect(session.setRestPosture("lying")).rejects.toThrow(
+			"unavailable",
+		);
+		await session.start();
+		transport.emit("client-current-state", {
+			...currentState(1),
+			combatMode: "magic",
+			socialMotionReady: false,
+		});
+		transport.invocations.length = 0;
+		await session.setRestPosture("lying");
+		await session.cancelRestPosture();
+		expect(
+			transport.invocations.filter(({ command }) =>
+				command.endsWith("rest_posture"),
+			),
+		).toEqual([
+			{ command: "set_client_rest_posture", args: { posture: "lying" } },
+			{ command: "cancel_client_rest_posture", args: undefined },
+		]);
+		expect(session.state().combatMode).toBe("magic");
+		session.stop();
+	});
+
+	it("requests peace explicitly and leaves confirmation to server events", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await expect(session.setCombatMode("peace")).rejects.toThrow("unavailable");
+		await session.start();
+		transport.emit("client-current-state", {
+			...currentState(1),
+			combatMode: "magic",
+			socialMotionReady: false,
+		});
+		transport.calls.length = 0;
+		await session.setCombatMode("peace");
+		expect(transport.calls).toContain("invoke:set_client_combat_mode");
+		expect(session.state().combatMode).toBe("magic");
+		transport.emit("client-combat-mode-updated", { mode: "peace" });
+		expect(session.state().combatMode).toBe("peace");
+		session.stop();
+	});
+
+	it("recovers known spells from snapshots and preserves them across portal updates", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		expect(session.state().knownSpells).toBeNull();
+		transport.emit("client-current-state", {
+			...currentState(0x50000001),
+			knownSpells: [1, 3],
+		});
+		expect(session.state().knownSpells).toEqual([1, 3]);
+		transport.emit("client-player-spells-updated", { spellIds: [3, 4] });
+		expect(session.state().knownSpells).toEqual([3, 4]);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.state().knownSpells).toEqual([3, 4]);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "initial-entry",
+		});
+		expect(session.state().knownSpells).toBeNull();
+		transport.emit("client-player-spells-updated", { spellIds: [] });
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "initial-entry",
+		});
+		expect(session.state().knownSpells).toEqual([]);
+		transport.emit("client-state-resyncing", null);
+		expect(session.state().knownSpells).toBeNull();
+		transport.emit("client-player-spells-updated", { spellIds: [1] });
+		session.stop();
+		expect(session.state().knownSpells).toBeNull();
+	});
+
+	it("retains resolved enchantments across teleport and clears them on character retirement", async () => {
+		const transport = new FakeClientTransport();
+		const key = { spellId: 10, layer: 2 };
+		const active: ResolvedEnchantments = {
+			cooldowns: [{ groupId: 213, remainingSeconds: 40 }],
+			instances: [
+				{
+					key,
+					spellCategory: 3,
+					powerLevel: 6,
+					kind: "beneficial",
+					remainingSeconds: 40,
+					statModType: 0x9001,
+					statModKey: 1,
+					statModValue: 10,
+				},
+			],
+			groups: [
+				{
+					affectedStat: { kind: "attribute", key: 1 },
+					operation: "additive",
+					channel: "ordinary",
+					spellCategory: 3,
+					effective: key,
+					overridden: [],
+				},
+			],
+		};
+		transport.setCurrentState({
+			...currentState(0x5000_0001),
+			enchantments: active,
+		});
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		expect(session.state().enchantments?.resolved).toEqual(active);
+		const firstAnchor = session.state().enchantments?.receivedAtMs;
+		expect(firstAnchor).toBeTypeOf("number");
+
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.state().enchantments?.receivedAtMs).toBe(firstAnchor);
+		expect(session.state().enchantments?.resolved.cooldowns).toEqual(
+			active.cooldowns,
+		);
+		transport.emit("client-player-enchantments-updated", {
+			cooldowns: [{ groupId: 213, remainingSeconds: 30 }],
+			instances: [],
+			groups: [],
+		});
+		expect(session.state().enchantments?.resolved.instances).toEqual([]);
+		expect(session.state().enchantments?.resolved.cooldowns).toEqual([
+			{ groupId: 213, remainingSeconds: 30 },
+		]);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "initial-entry",
+		});
+		expect(session.state().enchantments).toBeNull();
+		transport.emit("client-current-state", {
+			...currentState(0x5000_0002),
+			enchantments: active,
+		});
+		expect(session.state().enchantments?.resolved).toEqual(active);
+		transport.emit("client-state-resyncing", null);
+		expect(session.state().enchantments).toBeNull();
+		session.stop();
+		expect(session.state().enchantments).toBeNull();
+	});
+	it("submits numeric equipment primitives and retains missing-item names for failure feedback", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState({
+			...currentState(0x5000_0001),
+			worldGeneration: 4,
+		});
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const slot = EQUIPMENT_SLOTS.find(
+			(candidate) => candidate.label === "Left ring",
+		);
+		if (slot === undefined) throw new Error("Missing ring fixture slot");
+		const messages: string[] = [];
+		session.subscribe((event) => {
+			if (event.type === "action-feedback")
+				messages.push(event.feedback.message);
+		});
+		await session.applyEquipmentSet([
+			{ slot: slot.mask, item: 91, name: "Saved Silver Ring" },
+			{ slot: EQUIPMENT_SLOTS[0].mask, item: null, name: null },
+		]);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "apply_client_equipment_set",
+			args: {
+				bindings: [
+					{ item: 91, target: slot.mask },
+					{ item: null, target: EQUIPMENT_SLOTS[0].mask },
+				],
+			},
+		});
+		// An ignored older portal must not retire the current activation's saved names.
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			cause: "teleport",
+			worldGeneration: 3,
+		});
+		transport.emit("client-action-feedback", {
+			message: "The server rejected the equipment request",
+			tone: "warning",
+			equipment: [
+				{ item: 91, target: slot.mask },
+				{ item: null, target: EQUIPMENT_SLOTS[0].mask },
+			],
+		});
+		expect(messages).toEqual([
+			"Could not equip Saved Silver Ring to Left ring: The server rejected the equipment request",
+			"Could not clear Main hand: The server rejected the equipment request",
+		]);
+		session.stop();
+	});
+	it.each([false, true])(
+		"submits equipment identity and off-side preference %s",
+		async (alternate) => {
+			const transport = new FakeClientTransport();
+			const session = new ClientLifecycleSession(transport);
+			await session.equipItem(91, alternate);
+			expect(transport.invocations).toEqual([
+				{
+					command: "equip_client_item",
+					args: { guid: 91, alternate: alternate },
+				},
+			]);
+		},
+	);
+
+	it("snapshots auto-merge policy from client tuning and submits one container command", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.autoMergeContainer(7);
+		expect(transport.invocations).toEqual([
+			{
+				command: "auto_merge_client_container",
+				args: {
+					container: 7,
+					policy: { ...CLIENT_TUNING.inventory.autoMerge },
+				},
+			},
+		]);
+		const policy = { stepTimeoutMs: 200, operationTimeoutMs: 100 };
+		expect(autoMergePolicySchema.parse(policy)).toEqual(policy);
+		for (const invalid of [
+			0,
+			-1,
+			1.5,
+			Infinity,
+			NaN,
+			Number.MAX_SAFE_INTEGER + 1,
+		]) {
+			expect(() =>
+				autoMergePolicySchema.parse({ ...policy, stepTimeoutMs: invalid }),
+			).toThrow();
+			expect(() =>
+				autoMergePolicySchema.parse({ ...policy, operationTimeoutMs: invalid }),
+			).toThrow();
+		}
+	});
+
+	it("routes correlated inventory previews and submits semantic identities", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const results: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "inventory-preview") results.push(event.result);
+		});
+		await session.start();
+		const intent = { item: 3, target: { kind: "item" as const, guid: 7 } };
+		await session.previewInventory({ sequence: 8, intent });
+		transport.emit("client-inventory-preview", {
+			sequence: 8,
+			preview: { kind: "merge", amount: 10 },
+		});
+		expect(results).toEqual([
+			{ sequence: 8, preview: { kind: "merge", amount: 10 } },
+		]);
+		await session.submitInventory(intent);
+		expect(transport.invocations.slice(-2)).toEqual([
+			{
+				command: "preview_client_inventory",
+				args: { request: { sequence: 8, intent } },
+			},
+			{ command: "submit_client_inventory", args: { intent } },
+		]);
+		expect(() =>
+			transport.emit("client-inventory-preview", {
+				sequence: 8,
+				preview: { kind: "merge", amount: 0 },
+			}),
+		).toThrow();
+		await session.stop();
+		expect(transport.handlers.has("client-inventory-preview")).toBe(false);
+	});
+
+	it("delivers validated action feedback and detaches its listener on stop", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const feedback: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "action-feedback") feedback.push(event.feedback);
+		});
+		await session.start();
+		transport.emit("client-action-feedback", {
+			message: "You're too busy!",
+			tone: "warning",
+		});
+		transport.emit("client-action-feedback", {
+			message: "Using the Iron Chest",
+			tone: "progress",
+		});
+		expect(feedback).toEqual([
+			{ message: "You're too busy!", tone: "warning" },
+			{ message: "Using the Iron Chest", tone: "progress" },
+		]);
+		expect(() =>
+			transport.emit("client-action-feedback", {
+				message: "",
+				tone: "warning",
+			}),
+		).toThrow();
+		expect(() =>
+			transport.emit("client-action-feedback", {
+				message: "Invalid tone",
+				tone: "fatal",
+			}),
+		).toThrow();
+		session.stop();
+		transport.emit("client-action-feedback", {
+			message: "Late",
+			tone: "warning",
+		});
+		expect(feedback).toHaveLength(2);
+	});
+
+	it("installs every listener before requesting the initial replacement state", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+
+		await session.start();
+
+		const requestIndex = transport.calls.indexOf(
+			"invoke:request_client_current_state",
+		);
+		expect(requestIndex).toBeGreaterThan(0);
+		expect(
+			transport.calls
+				.slice(0, requestIndex)
+				.every((call) => call.startsWith("listen:")),
+		).toBe(true);
+		for (const name of [
+			"client-current-state",
+			"client-state-resyncing",
+			"client-entity-facts-changed",
+			"client-dynamic-entity",
+		]) {
+			expect(transport.handlers.has(name)).toBe(true);
+		}
+
+		expect(session.state().lifecycle).toEqual({
+			kind: "in-world",
+		});
+		expect(session.state().playerGuid).toBe(0x5000_0001);
+		expect(
+			session.mirror.entities().map((entity) => entity.identity.guid),
+		).toEqual([0x5000_0001]);
+	});
+
+	it("refreshes character purchases across portal lifecycle and snapshot recovery", async () => {
+		const transport = new FakeClientTransport();
+		const sheet = characterSheet(7);
+		const portalGeneration = currentState(7).worldGeneration + 1;
+		transport.setCurrentState({ ...currentState(7), characterSheet: sheet });
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const evaluations = () =>
+			transport.invocations.filter(
+				(call) => call.command === "evaluate_client_progression",
+			);
+		expect(evaluations()).toHaveLength(1);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			cause: "teleport",
+			worldGeneration: portalGeneration,
+		});
+		expect(session.characterSheet.read().sheet).toEqual(sheet);
+		expect(session.characterSheet.read().progressionUnavailable).toContain(
+			"portal travel",
+		);
+		transport.emit("client-lifecycle-changed", { kind: "in-world" });
+		transport.emit("client-character-sheet-updated", sheet);
+		expect(evaluations()).toHaveLength(2);
+		expect(session.characterSheet.read().progressionUnavailable).toBeNull();
+		transport.emit("client-current-state", {
+			...currentState(7),
+			characterSheet: sheet,
+			lifecycle: {
+				kind: "portal-space",
+				cause: "teleport",
+				worldGeneration: portalGeneration + 1,
+			},
+			worldGeneration: portalGeneration + 1,
+		});
+		expect(evaluations()).toHaveLength(2);
+		expect(session.characterSheet.read().progressionUnavailable).toContain(
+			"portal travel",
+		);
+		transport.emit("client-lifecycle-changed", { kind: "in-world" });
+		expect(evaluations()).toHaveLength(3);
+		transport.emit("client-state-resyncing", null);
+		expect(session.characterSheet.read().progressionUnavailable).not.toBeNull();
+		transport.emit("client-current-state", {
+			...currentState(7),
+			characterSheet: sheet,
+		});
+		expect(evaluations()).toHaveLength(4);
+		expect(session.characterSheet.read().progressionUnavailable).toBeNull();
+		session.stop();
+	});
+
+	it("restores a sheet from the snapshot and ignores retired character updates", async () => {
+		const transport = new FakeClientTransport();
+		const first = characterSheet(7);
+		transport.setCurrentState({ ...currentState(7), characterSheet: first });
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		expect(session.characterSheet.read().sheet?.character).toBe(7);
+
+		transport.emit("client-character-sheet-updated", {
+			...first,
+			level: { ...first.level, unspentXp: "42" },
+		});
+		expect(session.characterSheet.read().sheet?.level.unspentXp).toBe("42");
+
+		transport.emit("client-lifecycle-changed", {
+			kind: "exiting",
+			cause: "server-disconnect",
+		});
+		expect(session.characterSheet.read().sheet).toBeNull();
+		transport.emit("client-character-sheet-updated", first);
+		expect(session.characterSheet.read().sheet).toBeNull();
+
+		const second = characterSheet(8);
+		transport.emit("client-current-state", {
+			...currentState(8),
+			characterSheet: second,
+		});
+		expect(session.characterSheet.read().sheet?.character).toBe(8);
+		transport.emit("client-character-sheet-updated", first);
+		expect(session.characterSheet.read().sheet?.character).toBe(8);
+		session.stop();
+		expect(session.characterSheet.read().sheet).toBeNull();
+	});
+
+	it("publishes character purchase rejections as readable action warnings", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState({
+			...currentState(7),
+			characterSheet: characterSheet(7),
+		});
+		const session = new ClientLifecycleSession(transport);
+		const warnings: ClientLifecycleSessionEvent[] = [];
+		session.subscribe((event) => {
+			if (event.type === "action-feedback") warnings.push(event);
+		});
+		await session.start();
+		transport.emit("client-progression-feedback", {
+			Rejected: {
+				intent: { Raise: { target: { Attribute: "StrengthAttr" }, ranks: 1 } },
+				reason: "StaleQuote",
+			},
+		});
+		expect(warnings).toEqual([
+			{
+				type: "action-feedback",
+				feedback: {
+					tone: "warning",
+					message:
+						"Purchase was not sent: The purchase cost or character stats changed; please try again",
+				},
+			},
+		]);
+		session.stop();
+	});
+
+	it("accepts the completed character-entry baseline and subsequent inventory deltas", async () => {
+		const transport = new FakeClientTransport();
+		const startup = currentState(9);
+		startup.lifecycle = {
+			kind: "character-selection",
+			rejection: null,
+			maxSlots: 11,
+			characters: [],
+		};
+		startup.localPlayerGuid = null;
+		startup.entities = {
+			projectileSupply: { kind: "not-applicable" },
+			salvage: {
+				skills: {
+					salvagingSkill: 0,
+					tinkeringSkill: 0,
+					augmentationBonusSalvage: 0,
+				},
+			},
+			worldContainer: { kind: "closed" },
+			entities: [],
+		};
+		startup.dynamic.entities = [];
+		transport.setCurrentState(startup);
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		// Repeat entry with another character without restarting the transport.
+		for (const playerGuid of [9, 19]) {
+			transport.emit("client-lifecycle-changed", {
+				kind: "portal-space",
+				worldGeneration: playerGuid,
+				cause: "initial-entry",
+			});
+			transport.emit("client-local-player-established", { playerGuid });
+			const item = entityFacts(playerGuid + 1, {
+				ownedByPlayer: true,
+				location: {
+					kind: "contained",
+					parentGuid: playerGuid,
+					slot: { kind: "item", index: 0 },
+				},
+			});
+			const baseline = currentState(playerGuid);
+			baseline.entities.entities.push(item);
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: baseline.entities.entities,
+				removed: [],
+			});
+			expect(session.entities.read().kind).toBe("pending");
+			transport.emit("client-lifecycle-changed", { kind: "in-world" });
+			transport.emit("client-current-state", baseline);
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [
+					entityFacts(item.guid, {
+						...item,
+						description: {
+							kind: "known",
+							name: "Updated item",
+							healthQuery: "ineligible",
+							itemType: 0,
+							hasAlternateEquipSide: false,
+							builtInSpell: null,
+							mapCategory: "other",
+							objectFlags: 0,
+							wcid: null,
+							pyrealBalance: null,
+							aetheriaActivation: null,
+							burden: null,
+							equipLocations: null,
+							consumable: null,
+							useCapability: "direct" as const,
+							cooldown: null,
+							stackCount: null,
+							structure: { current: null, max: null },
+							icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+						},
+					}),
+				],
+				removed: [],
+			});
+			const read = session.entities.read();
+			if (read.kind !== "current")
+				throw new Error("Character entry did not establish inventory.");
+			expect(read.level.playerGuid).toBe(playerGuid);
+			expect([...read.level.entities.keys()]).toEqual([playerGuid, item.guid]);
+			expect(read.level.entities.get(item.guid)?.description).toEqual({
+				kind: "known",
+				name: "Updated item",
+				healthQuery: "ineligible",
+				itemType: 0,
+				hasAlternateEquipSide: false,
+				builtInSpell: null,
+				mapCategory: "other",
+				objectFlags: 0,
+				wcid: null,
+				pyrealBalance: null,
+				aetheriaActivation: null,
+				burden: null,
+				equipLocations: null,
+				consumable: null,
+				useCapability: "direct" as const,
+				cooldown: null,
+				stackCount: null,
+				structure: { current: null, max: null },
+				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+			});
+			// Leaving the character retains the cache until the next entry replaces it.
+			transport.emit("client-lifecycle-changed", { kind: "logging-out" });
+			transport.emit("client-lifecycle-changed", {
+				kind: "character-selection",
+				rejection: null,
+				maxSlots: 11,
+				characters: [],
+			});
+			expect(session.entities.read()).toBe(read);
+		}
+		session.stop();
+	});
+
+	it("replaces character identity and inventory together on logout before re-entry", async () => {
+		const transport = new FakeClientTransport();
+		const player = 9;
+		const item = player + 1;
+		const initial = currentState(player);
+		initial.entities.entities.push(
+			entityFacts(item, {
+				ownedByPlayer: true,
+				location: {
+					kind: "contained",
+					parentGuid: player,
+					slot: { kind: "item", index: 0 },
+				},
+			}),
+		);
+		transport.setCurrentState(initial);
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.emit("client-lifecycle-changed", { kind: "logging-out" });
+		const retired: ClientCurrentState = {
+			...initial,
+			lifecycle: { kind: "logging-out" },
+			worldGeneration: initial.worldGeneration + 1,
+			localPlayerGuid: null,
+			playerName: null,
+			entities: { ...initial.entities, entities: [] },
+			dynamic: { ...initial.dynamic, entities: [] },
+		};
+		transport.emit("client-current-state", retired);
+		const read = session.entities.read();
+		if (read.kind !== "current")
+			throw new Error("Logout must publish a complete baseline.");
+		expect(read.level.playerGuid).toBeNull();
+		expect([...read.level.entities.keys()]).toEqual([]);
+		expect(session.state().playerGuid).toBeNull();
+		transport.emit("client-current-state", {
+			...retired,
+			lifecycle: {
+				kind: "character-selection",
+				rejection: null,
+				maxSlots: 1,
+				characters: [],
+			},
+		});
+		transport.emit("client-current-state", {
+			...currentState(player),
+			worldGeneration: retired.worldGeneration + 1,
+		});
+		const entered = session.entities.read();
+		if (entered.kind !== "current")
+			throw new Error("Re-entry must establish the new character baseline.");
+		expect(entered.level.playerGuid).toBe(player);
+		expect([...entered.level.entities.keys()]).toEqual([player]);
+		session.stop();
+	});
+
+	it("retires semantic state on stop and accepts reused GUIDs only from a new baseline", async () => {
+		const transport = new FakeClientTransport();
+		const initial = currentState(9);
+		initial.entities.entities.push(
+			entityFacts(10, {
+				ownedByPlayer: true,
+				location: {
+					kind: "contained",
+					parentGuid: 9,
+					slot: { kind: "item", index: 0 },
+				},
+			}),
+		);
+		transport.setCurrentState(initial);
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		session.stop();
+		expect(session.entities.read()).toEqual({ kind: "pending" });
+		expect(transport.handlers.size).toBe(0);
+		const replacement = currentState(9);
+		replacement.entities = {
+			projectileSupply: { kind: "not-applicable" },
+			salvage: {
+				skills: {
+					salvagingSkill: 0,
+					tinkeringSkill: 0,
+					augmentationBonusSalvage: 0,
+				},
+			},
+			worldContainer: { kind: "closed" },
+			entities: [
+				entityFacts(9, {
+					description: {
+						kind: "known",
+						name: "New character",
+						healthQuery: "eligible",
+						itemType: 0,
+						hasAlternateEquipSide: false,
+						builtInSpell: null,
+						mapCategory: "other",
+						objectFlags: 0,
+						wcid: null,
+						pyrealBalance: null,
+						aetheriaActivation: null,
+						burden: null,
+						equipLocations: null,
+						consumable: null,
+						useCapability: "direct" as const,
+						cooldown: null,
+						stackCount: null,
+						structure: { current: null, max: null },
+						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+					},
+				}),
+			],
+		};
+		transport.setCurrentState(replacement);
+		await session.start();
+		const read = session.entities.read();
+		if (read.kind !== "current")
+			throw new Error("Restart did not establish a baseline.");
+		expect([...read.level.entities.keys()]).toEqual([9]);
+		expect(read.level.entities.get(9)?.description).toEqual({
+			kind: "known",
+			name: "New character",
+			healthQuery: "eligible",
+			itemType: 0,
+			hasAlternateEquipSide: false,
+			builtInSpell: null,
+			mapCategory: "other",
+			objectFlags: 0,
+			wcid: null,
+			pyrealBalance: null,
+			aetheriaActivation: null,
+			burden: null,
+			equipLocations: null,
+			consumable: null,
+			useCapability: "direct" as const,
+			cooldown: null,
+			stackCount: null,
+			structure: { current: null, max: null },
+			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+		});
+		session.stop();
+	});
+
+	it("keeps shell and both mirrors unchanged when replacement validation fails", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const before = session.entities.read();
+		const player = session.state().playerGuid;
+		const invalid = currentState(9);
+		invalid.dynamic.entities = [view(9), view(9)];
+		expect(() => transport.emit("client-current-state", invalid)).toThrow(
+			"duplicate GUID",
+		);
+		expect(session.state().playerGuid).toBe(player);
+		expect(session.entities.read()).toBe(before);
+		expect(
+			session.mirror.entities().map((record) => record.identity.guid),
+		).toEqual([player]);
+	});
+
+	it("marks recovery pending, gates both delta paths, and notifies only after replacement", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.emit("client-state-resyncing", null);
+		expect(session.entities.read().kind).toBe("pending");
+		transport.emit("client-entity-facts-changed", {
+			projectileSupply: null,
+			salvage: null,
+			worldContainer: null,
+			upserts: playerEntitySnapshot(9).entities,
+			removed: [],
+		});
+		transport.emit("client-dynamic-entity", {
+			kind: "upserted",
+			entity: view(9),
+		});
+		expect(session.entities.read().kind).toBe("pending");
+		const observed: number[] = [];
+		session.subscribe((event) => {
+			if (event.type !== "current-state" && event.type !== "dynamic") return;
+			const read = session.entities.read();
+			if (read.kind !== "current")
+				throw new Error("Replacement notified before semantic commit.");
+			expect(read.level.entities.has(9)).toBe(true);
+			expect(
+				session.mirror.entities().map((record) => record.identity.guid),
+			).toEqual([9]);
+			observed.push(9);
+		});
+		transport.emit("client-current-state", currentState(9));
+		expect(observed).toEqual([9, 9]);
+	});
+
+	it("submits and delivers correlated entity-selection queries without mutating state", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const delivered: unknown[] = [];
+		session.subscribe((event) => {
+			if (event.type === "entity-selection-query-result")
+				delivered.push(event.result);
+		});
+		await session.start();
+
+		await session.queryEntitySelectionCandidates({
+			camera: {
+				cameraGeneration: 2,
+				playerGuid: 0x5000_0001,
+				entityGeneration: 7,
+			},
+			sequence: 12,
+			anchor: 0xda55_ffff,
+			start: landblockVector3([10, 20, 4]),
+			direction: [0, 1, 0],
+			previousCell: null,
+		});
+		transport.emit("client-entity-selection-query-result", {
+			status: "available",
+			sequence: 12,
+			staticLimitDistance: 45,
+			candidateGuids: [0x7000_0001],
+		});
+
+		expect(transport.invocations.at(-1)?.command).toBe(
+			"query_client_entity_selection_candidates",
+		);
+		expect(delivered).toEqual([
+			{
+				status: "available",
+				sequence: 12,
+				staticLimitDistance: 45,
+				candidateGuids: [0x7000_0001],
+			},
+		]);
+		expect(session.state().playerGuid).toBe(0x5000_0001);
+	});
+
+	it("validates precise-jump commands and projects correlated results", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const events: string[] = [];
+		session.subscribe((event) => events.push(event.type));
+		await session.start();
+		events.length = 0;
+
+		const camera = {
+			cameraGeneration: 2,
+			playerGuid: 0x5000_0001,
+			entityGeneration: 7,
+		};
+		await session.setPreciseJumpAim({
+			camera,
+			sequence: 9,
+			power: 0.5,
+			anchor: 0xda55_ffff,
+			start: landblockVector3([10, 20, 4]),
+			direction: [0, 1, 0],
+			maximumDistance: 80,
+			previousCell: null,
+		});
+		await session.commitPreciseJump({
+			sequence: 3,
+			camera,
+			target: resolvedJumpFixture(camera, 9, 0.5).launch.target,
+			power: 0.5,
+		});
+		await session.cancelPreciseJump({ sequence: 4 });
+
+		transport.emit(
+			"client-precise-jump-evaluation",
+			predictedJumpFixture(resolvedJumpFixture(camera, 9, 0.5), "miss"),
+		);
+		transport.emit("client-precise-jump-transaction-feedback", {
+			sequence: 3,
+			outcome: { kind: "committed" },
+		});
+
+		expect(
+			transport.invocations.slice(-3).map(({ command }) => command),
+		).toEqual([
+			"set_client_precise_jump_aim",
+			"commit_client_precise_jump",
+			"cancel_client_precise_jump",
+		]);
+		expect(events).toEqual([
+			"precise-jump-evaluation",
+			"precise-jump-transaction-feedback",
+		]);
+		await expect(
+			session.setPreciseJumpAim({
+				camera,
+				sequence: 10,
+				power: 0.5,
+				anchor: 0xda55_ffff,
+				start: landblockVector3([Number.NaN, 0, 0]),
+				direction: [0, 1, 0],
+				maximumDistance: 80,
+				previousCell: null,
+			}),
+		).rejects.toThrow();
+	});
+
+	it("suppresses deltas during recovery and accepts only the replacement snapshot", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+
+		transport.setCurrentState(currentState(0x5000_0002));
+		transport.setEmitLaggedDeltaBeforeSnapshot(true);
+		await session.requestCurrentState();
+
+		expect(
+			session.mirror.entities().map((entity) => entity.identity.guid),
+		).toEqual([0x5000_0002]);
+	});
+
+	it("advances world generation atomically with portal lifecycle and rejects stale portals", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const lifecycles: ClientLifecycle[] = [];
+		session.subscribe((event) => {
+			if (event.type === "lifecycle") lifecycles.push(event.lifecycle);
+		});
+		await session.start();
+		lifecycles.length = 0;
+
+		const currentPortal: ClientLifecycle = {
+			kind: "portal-space",
+			cause: "teleport",
+			worldGeneration: 4,
+		};
+		transport.emit("client-lifecycle-changed", currentPortal);
+		expect(session.state()).toMatchObject({
+			lifecycle: currentPortal,
+			worldGeneration: 4,
+		});
+
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			cause: "teleport",
+			worldGeneration: 3,
+		});
+		expect(session.state()).toMatchObject({
+			lifecycle: currentPortal,
+			worldGeneration: 4,
+		});
+		expect(lifecycles).toEqual([currentPortal]);
+	});
+
+	it("resolves deletion identity to the current roster slot and restores by GUID", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.emit("client-lifecycle-changed", {
+			kind: "character-selection",
+			rejection: null,
+			maxSlots: 10,
+			characters: [
+				{ guid: 7, name: "Mira", slot: 3, deleteTime: 0 },
+				{ guid: 8, name: "Nox", slot: 5, deleteTime: 100 },
+			],
+		});
+		await session.deleteCharacter(7);
+		await session.restoreCharacter(8);
+		expect(transport.invocations.slice(-2)).toEqual([
+			{ command: "delete_client_character", args: { slot: 3 } },
+			{ command: "restore_client_character", args: { guid: 8 } },
+		]);
+		await expect(session.deleteCharacter(8)).rejects.toThrow(
+			"already pending deletion",
+		);
+		await expect(session.restoreCharacter(7)).rejects.toThrow(
+			"not pending deletion",
+		);
+		await expect(session.deleteCharacter(99)).rejects.toThrow(
+			"no longer in the server roster",
+		);
+		transport.emit("client-character-management-changed", { kind: "deleting" });
+		await expect(session.deleteCharacter(7)).rejects.toThrow("still pending");
+		transport.emit("client-character-management-changed", {
+			kind: "uncertain",
+			message: "Awaiting roster",
+		});
+		await expect(session.restoreCharacter(8)).rejects.toThrow("still pending");
+		transport.emit("client-lifecycle-changed", { kind: "logging-out" });
+		await expect(session.deleteCharacter(7)).rejects.toThrow(
+			"requires character selection",
+		);
+	});
+
+	it("projects strict lifecycle, time, correction, and terminal updates", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const events: string[] = [];
+		session.subscribe((event) => events.push(event.type));
+		await session.start();
+		transport.emit("client-local-player-established", { playerGuid: 9 });
+
+		const lifecycle: ClientLifecycle = {
+			kind: "character-selection",
+			rejection: null,
+			maxSlots: 11,
+			characters: [{ guid: 7, name: "Mira", slot: 3, deleteTime: 0 }],
+		};
+		transport.emit("client-lifecycle-changed", lifecycle);
+		transport.emit("client-server-time-updated", { time: 12.5 });
+		transport.emit("client-world-name-updated", { name: "Morningthaw" });
+		transport.emit("client-player-entered", { playerGuid: 9, name: "Mira" });
+		transport.emit("client-player-vitals-updated", {
+			vitals: [{ kind: "health", current: 80, maximum: 100 }],
+		});
+		transport.emit("client-chat-message", {
+			kind: "speech",
+			category: "speech",
+			sender: "Mira",
+			speakerKind: "player",
+			message: "Hello",
+		});
+		transport.emit("client-dynamic-script-cue", {
+			guid: 9,
+			generation: 3,
+			cue: 7,
+			intensity: 0.5,
+		});
+		transport.emit("client-server-controlled-motion", null);
+		transport.emit("client-presentation-discontinuity", {
+			worldGeneration: 4,
+			kind: "reset",
+		});
+		transport.emit("client-exit-requested", {
+			cause: "server-disconnect",
+			diagnostic: "server closed the session",
+		});
+
+		expect(session.state()).toMatchObject({
+			lifecycle: {
+				kind: "exiting",
+				cause: "server-disconnect",
+			},
+			worldGeneration: 4,
+			playerGuid: 9,
+			playerName: "Mira",
+			knownSpells: null,
+			enchantments: null,
+			combatMode: "peace",
+			socialMotionReady: true,
+			worldName: "Morningthaw",
+			vitals: [{ kind: "health", current: 80, maximum: 100 }],
+			exit: {
+				cause: "server-disconnect",
+				diagnostic: "server closed the session",
+			},
+		});
+		expect(events).toEqual([
+			"current-state",
+			"dynamic",
+			"local-player-established",
+			"lifecycle",
+			"server-time",
+			"world-name",
+			"player-entered",
+			"vitals",
+			"chat",
+			"dynamic-script-cue",
+			"server-controlled-motion",
+			"presentation-discontinuity",
+			"lifecycle",
+			"exit-requested",
+		]);
+	});
+
+	it("validates the renderer drive before crossing the host command seam", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.calls.length = 0;
+		transport.invocations.length = 0;
+
+		await session.replaceDrive({
+			kind: "acquire",
+			drive: {
+				gait: "run",
+				longitudinal: "forward",
+				lateral: "left",
+				turning: null,
+			},
+		});
+		expect(transport.calls).toEqual(["invoke:replace_client_drive"]);
+		await session.replaceDrive({ kind: "release" });
+		expect(transport.calls).toEqual([
+			"invoke:replace_client_drive",
+			"invoke:replace_client_drive",
+		]);
+		await expect(
+			session.replaceDrive({
+				kind: "acquire",
+				drive: {
+					gait: "sprint",
+					longitudinal: null,
+					lateral: null,
+					turning: null,
+				},
+			} as never),
+		).rejects.toThrow();
+		expect(transport.calls).toHaveLength(2);
+	});
+
+	it("validates and forwards ordered character-motion edges without reshaping them", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.calls.length = 0;
+		transport.invocations.length = 0;
+		const release = {
+			kind: "release-jump" as const,
+			sequence: 12,
+			drive: {
+				gait: "run" as const,
+				longitudinal: "forward" as const,
+				lateral: "right" as const,
+				turning: null,
+			},
+			extent: 0.625,
+		};
+
+		await session.queueCharacterMotionEvent(release);
+
+		expect(transport.invocations).toEqual([
+			{
+				command: "queue_client_character_motion_event",
+				args: { request: release },
+			},
+		]);
+		await expect(
+			session.queueCharacterMotionEvent({
+				...release,
+				sequence: 13,
+				extent: 1.1,
+			}),
+		).rejects.toThrow();
+		expect(transport.invocations).toHaveLength(1);
+	});
+
+	it("replaces charge timing and projects sequenced character-motion feedback", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const events: string[] = [];
+		session.subscribe((event) => events.push(event.type));
+		await session.start();
+		events.length = 0;
+
+		transport.emit("client-character-motion-capabilities-updated", {
+			fullChargeDurationMs: 800,
+		});
+		transport.emit("client-character-motion-feedback", {
+			sequence: 17,
+			outcome: { kind: "rejected", reason: "overburdened" },
+		});
+
+		expect(session.state().characterMotion).toEqual({
+			fullChargeDurationMs: 800,
+		});
+		expect(events).toEqual([
+			"character-motion-capabilities",
+			"character-motion-feedback",
+		]);
+	});
+
+	it("submits one exact character identity for an explicit enter action", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+
+		await session.enterWorld(0x5000_0002);
+		await session.enterWorld(0x5000_0002);
+
+		expect(transport.calls).toEqual(["invoke:select_client_character"]);
+	});
+
+	it("publishes membership and HUD presence independently without publishing vital churn", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState(currentState(1));
+		const session = new ClientLifecycleSession(transport);
+		const presence: boolean[] = [];
+		const membership: boolean[] = [];
+		session.subscribe((event) => {
+			if (event.type === "party-presence") {
+				presence.push(event.hudPresent);
+				membership.push(event.inParty);
+			}
+		});
+		await session.start();
+		const members: PartySnapshot["members"] = [1, 2].map((guid) => ({
+			guid,
+			name: `Member ${guid}`,
+			level: 10,
+			canManage: guid !== 1,
+			vitals: [10, 10, 10, 20, 20, 20],
+		}));
+		const party: PartySnapshot = {
+			name: "Raid",
+			leader: 1,
+			shareXp: true,
+			evenShare: true,
+			open: false,
+			locked: false,
+			capabilities: {
+				isLeader: true,
+				canRecruit: true,
+				canChangeOpenness: true,
+			},
+			members: members.slice(0, 1),
+		};
+		transport.emit("client-party-updated", { party });
+		expect(session.partyHudPresent()).toBe(false);
+		const joined = { ...party, members: members.slice(0, 2) };
+		transport.emit("client-party-updated", { party: joined });
+		expect(session.partyHudPresent()).toBe(true);
+		transport.emit("client-party-updated", {
+			party: {
+				...joined,
+				members: joined.members.map((member) => ({
+					...member,
+					vitals: [0, 0, 0, 100, 100, 100],
+				})),
+			},
+		});
+		expect(presence).toEqual([false, true]);
+		expect(membership).toEqual([true, true]);
+		transport.emit("client-party-updated", { party });
+		expect(presence).toEqual([false, true, false]);
+		transport.emit("client-party-updated", { party: joined });
+		session.stop();
+		expect(presence).toEqual([false, true, false, true, false]);
+		expect(membership).toEqual([true, true, true, true, false]);
+	});
+
+	it("recovers party without a sibling event, preserves early hydration through revelation, and retires it on stop", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const party: PartySnapshot = {
+			name: "Raid",
+			leader: 1,
+			shareXp: true,
+			evenShare: true,
+			open: false,
+			locked: false,
+			capabilities: {
+				isLeader: true,
+				canRecruit: true,
+				canChangeOpenness: true,
+			},
+			members: [
+				{
+					guid: 1,
+					name: "Player",
+					level: 10,
+					canManage: false,
+					vitals: [1, 2, 3, 4, 5, 6],
+				},
+			],
+		};
+		const preferences = {
+			shareXp: true,
+			shareLoot: false,
+			ignoreRequests: false,
+		};
+		transport.setCurrentState({
+			...currentState(1),
+			party,
+			partyPreferences: preferences,
+			friends: null,
+			contracts: null,
+			squelch: null,
+			allegiance: {
+				playerGuid: null,
+				profile: null,
+				refreshing: false,
+				canSwear: false,
+			},
+			allegiancePreferences: null,
+			friendsPreferences: null,
+		});
+		await session.start();
+		expect(session.partySnapshot()).toEqual(party);
+		expect(session.partyPreferences()).toEqual(preferences);
+		transport.emit("client-lifecycle-changed", {
+			kind: "entering-world",
+			characterGuid: 1,
+		});
+		expect(session.partySnapshot()).toBeNull();
+		transport.emit("client-party-updated", { party });
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "initial-entry",
+		});
+		expect(session.partySnapshot()).toEqual(party);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 4,
+			cause: "teleport",
+		});
+		expect(session.partySnapshot()).toEqual(party);
+		session.stop();
+		expect(session.partySnapshot()).toBeNull();
+		expect(session.partyPreferences()).toBeNull();
+	});
+
+	it("routes Ignores early delivery, recovery, portal retention, and retirement", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState(currentState(42));
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const squelch = {
+			entries: [
+				{
+					guid: 10,
+					name: "Amy",
+					account: true,
+					coverage: "all",
+					removalScope: "account",
+				},
+			],
+			legacyAccounts: [],
+			globalCoverage: "none",
+		};
+		transport.emit("client-squelch-updated", { squelch });
+		await session.squelch.request({
+			kind: "remove",
+			guid: 10,
+			scope: "account",
+		});
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "submit_client_squelch",
+			args: { action: { kind: "remove", guid: 10, scope: "account" } },
+		});
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.squelch.read().entries).toEqual(squelch.entries);
+		expect(session.squelch.read().enabled).toBe(false);
+		transport.emit("client-current-state", {
+			...currentState(42),
+			squelch: { entries: [], legacyAccounts: [], globalCoverage: "none" },
+		});
+		expect(session.squelch.read().pending).toBeNull();
+		expect(session.squelch.read().known).toBe(true);
+		transport.emit("client-lifecycle-changed", {
+			kind: "entering-world",
+			characterGuid: 99,
+		});
+		expect(session.squelch.read().known).toBe(false);
+		transport.emit("client-squelch-updated", { squelch });
+		transport.emit("client-local-player-established", { playerGuid: 99 });
+		expect(session.squelch.read().entries).toEqual(squelch.entries);
+		session.stop();
+		expect(session.squelch.read().known).toBe(false);
+	});
+
+	it("routes Friends facts, character recovery, and mirrored options", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState(currentState(42));
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const friends = { members: [{ guid: 10, name: "Amy", online: true }] };
+		transport.emit("client-friends-updated", { friends });
+		transport.emit("client-character-preferences-updated", {
+			appearance: { showHelmet: true, showCloak: true },
+			gameplay: gameplayPreferencesFixture,
+			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
+			friends: { appearOffline: false },
+			allegiance: { showLogons: false },
+		});
+		expect(session.friends.read().members).toEqual(friends.members);
+		await session.friends.request({ kind: "appearOffline", enabled: true });
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "submit_client_friends",
+			args: { action: { kind: "appearOffline", enabled: true } },
+		});
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.friends.read().known).toBe(true);
+		transport.emit("client-current-state", {
+			...currentState(42),
+			friends,
+			friendsPreferences: { appearOffline: true },
+		});
+		expect(session.friends.read().pending).toBeNull();
+		expect(session.friends.read().preferences).toEqual({ appearOffline: true });
+		transport.emit("client-lifecycle-changed", {
+			kind: "entering-world",
+			characterGuid: 99,
+		});
+		expect(session.friends.read().known).toBe(false);
+		transport.emit("client-friends-updated", { friends });
+		transport.emit("client-local-player-established", { playerGuid: 99 });
+		expect(session.friends.read().members).toEqual(friends.members);
+		session.stop();
+		expect(session.friends.read().known).toBe(false);
+	});
+
+	it("recovers Gameplay options, mirrors updates, and rejects edits outside active gameplay", async () => {
+		const transport = new FakeClientTransport();
+		const initial = { ...gameplayPreferencesFixture, craftSuccessDialog: true };
+		const snapshot = { ...currentState(42), gameplayPreferences: initial };
+		transport.setCurrentState(snapshot);
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		expect(session.state().gameplayPreferences).toEqual(initial);
+		await session.setGameplayOption("confirmRareUse", true);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "set_client_gameplay_option",
+			args: { option: "confirmRareUse", enabled: true },
+		});
+		// Queue acceptance alone must not invent a mirrored update.
+		expect(session.state().gameplayPreferences?.confirmRareUse).toBe(false);
+		const updated = { ...initial, confirmRareUse: true };
+		transport.emit("client-character-preferences-updated", {
+			appearance: { showHelmet: true, showCloak: true },
+			gameplay: updated,
+			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
+			friends: { appearOffline: false },
+			allegiance: { showLogons: false },
+		});
+		expect(session.state().gameplayPreferences).toEqual(updated);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.state().gameplayPreferences).toEqual(updated);
+		const before = transport.invocations.length;
+		await expect(
+			session.setGameplayOption("confirmRareUse", false),
+		).rejects.toThrow("active character");
+		expect(transport.invocations).toHaveLength(before);
+		transport.emit("client-state-resyncing", null);
+		expect(session.state().gameplayPreferences).toBeNull();
+		transport.emit("client-current-state", snapshot);
+		expect(session.state().gameplayPreferences).toEqual(initial);
+		transport.emit("client-lifecycle-changed", {
+			kind: "entering-world",
+			characterGuid: 99,
+		});
+		expect(session.state().gameplayPreferences).toBeNull();
+		session.stop();
+		expect(session.state().gameplayPreferences).toBeNull();
+	});
+
+	it("retains appearance updates and submits an appearance change", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+
+		transport.emit("client-character-preferences-updated", {
+			appearance: { showHelmet: false, showCloak: true },
+			gameplay: gameplayPreferencesFixture,
+			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
+			friends: { appearOffline: false },
+			allegiance: { showLogons: false },
+		});
+		expect(session.state().appearanceOptions).toEqual({
+			showHelmet: false,
+			showCloak: true,
+		});
+
+		await session.setAppearanceOption("helmet", true);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "set_client_appearance_option",
+			args: { option: "helmet", enabled: true },
+		});
+		session.stop();
+	});
+
+	it("restores appearance from snapshots, retains it during teleport, and retires it on character changes and resync", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const options = { showHelmet: false, showCloak: true };
+		const snapshot = {
+			...currentState(0x50000001),
+			appearanceOptions: options,
+		};
+		transport.setCurrentState(snapshot);
+		await session.start();
+		expect(session.state().appearanceOptions).toEqual(options);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.state().appearanceOptions).toEqual(options);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 3,
+			cause: "initial-entry",
+		});
+		expect(session.state().appearanceOptions).toBeNull();
+		transport.emit("client-character-preferences-updated", {
+			appearance: options,
+			gameplay: gameplayPreferencesFixture,
+			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
+			friends: { appearOffline: false },
+			allegiance: { showLogons: false },
+		});
+		transport.emit("client-state-resyncing", null);
+		expect(session.state().appearanceOptions).toBeNull();
+		transport.emit("client-current-state", snapshot);
+		expect(session.state().appearanceOptions).toEqual(options);
+		session.stop();
+		expect(session.state().appearanceOptions).toBeNull();
+	});
+
+	it("sends visible local speech and rejects empty input before transport", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+
+		await session.sendChat({ kind: "speech", message: "Hello world" });
+		expect(transport.calls).toEqual(["invoke:send_client_chat"]);
+		await expect(
+			session.sendChat({ kind: "speech", message: "   " }),
+		).rejects.toThrow("visible text");
+		expect(transport.calls).toHaveLength(1);
+	});
+
+	it("carries begin/stop identities through commands and unchanged idle status", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const profile = { kind: "melee", height: "medium", power: 0.5 } as const;
+		await session.beginCombatEngagement(7, profile, 31);
+		await session.updateCombatProfile(profile);
+		await session.stopCombatEngagement(32);
+		expect(transport.invocations.slice(-3)).toEqual([
+			{
+				command: "begin_client_combat_engagement",
+				args: { target: 7, profile, intentSequence: 31 },
+			},
+			{ command: "update_client_combat_profile", args: { profile } },
+			{
+				command: "stop_client_combat_engagement",
+				args: { intentSequence: 32 },
+			},
+		]);
+		const receipts: number[] = [];
+		session.subscribe((event) => {
+			if (event.type === "combat")
+				receipts.push(event.status.processedIntentSequence);
+		});
+		for (const processedIntentSequence of [31, 32]) {
+			transport.emit("client-combat-status-updated", {
+				desired: null,
+				state: "idle",
+				refill: null,
+				processedIntentSequence,
+			});
+		}
+		expect(receipts).toEqual([31, 32]);
+		expect(session.state().combat.processedIntentSequence).toBe(32);
+		await session.stop();
+		transport.emit("client-combat-status-updated", {
+			desired: null,
+			state: "idle",
+			refill: null,
+			processedIntentSequence: 31,
+		});
+		expect(session.state().combat.processedIntentSequence).toBe(32);
+		expect(receipts).toEqual([31, 32]);
+		const replacementSession = new ClientLifecycleSession(transport);
+		expect(replacementSession.state().combat.processedIntentSequence).toBe(0);
+	});
+
+	it("dispatches recall identities and recovers choices from replacement state", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const choices: string[][] = [];
+		session.subscribe((event) => {
+			if (event.type === "recall-destinations")
+				choices.push([...event.destinations]);
+			if (event.type === "current-state")
+				choices.push(event.state.recallDestinations);
+		});
+		transport.setCurrentState({
+			...currentState(1),
+			recallDestinations: ["lifestone", "marketplace"],
+		});
+		await session.start();
+		transport.emit("client-recall-destinations-changed", [
+			"lifestone",
+			"pk-arena",
+		]);
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", {
+			...currentState(1),
+			recallDestinations: ["lifestone", "house"],
+		});
+		expect(choices).toEqual([
+			["lifestone", "marketplace"],
+			["lifestone", "pk-arena"],
+			["lifestone", "house"],
+		]);
+		await session.recall("allegiance-hometown");
+		expect(
+			transport.invocations
+				.filter((call) => call.command === "recall_client")
+				.at(-1),
+		).toEqual({
+			command: "recall_client",
+			args: { destination: "allegiance-hometown" },
+		});
+		session.stop();
+	});
+
+	it("submits finite map points and forwards authoritative permission edges", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const permissions: boolean[] = [];
+		const unsubscribe = session.subscribe((event) => {
+			if (event.type === "map-teleport-capability")
+				permissions.push(event.allowed);
+			if (event.type === "current-state")
+				permissions.push(event.state.canTeleportFromMap);
+		});
+		transport.setCurrentState({ ...currentState(1), canTeleportFromMap: true });
+		await session.start();
+		transport.emit("client-map-teleport-capability-changed", false);
+		expect(permissions).toEqual([true, false]);
+		await session.teleportToMapPosition({ x: 42, z: -24 });
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "teleport_client_to_map_position",
+			args: { position: { x: 42, z: -24 } },
+		});
+		const count = transport.invocations.length;
+		await expect(
+			session.teleportToMapPosition({ x: NaN, z: -24 }),
+		).rejects.toThrow();
+		expect(transport.invocations).toHaveLength(count);
+		unsubscribe();
+		session.stop();
+	});
+});
+
+function characterSheet(
+	character: number,
+): NonNullable<ClientCurrentState["characterSheet"]> {
+	return {
+		character,
+		name: "Test Character",
+		title: null,
+		titleSelection: null,
+		maximumLuminance: null,
+		level: {
+			level: 10,
+			currentXp: "1000",
+			unspentXp: "200",
+			unspentSkillPoints: 2,
+			availableLuminance: "0",
+			nextLevelXp: "2000",
+			xpIntoLevel: "0",
+			xpForNextLevel: "1000",
+		},
+		attributes: [],
+		vitals: [],
+		skills: [],
+		armor: 0,
+		resistances: {
+			slash: 1,
+			pierce: 1,
+			bludgeon: 1,
+			fire: 1,
+			cold: 1,
+			acid: 1,
+			electric: 1,
+			nether: 1,
+		},
+		vitae: 1,
+		guardedTargets: [],
+	};
+}
+
+function currentState(playerGuid: number): ClientCurrentState {
+	return {
+		characterSheet: null,
+		barber: { interaction: null, result: null, particles: null },
+		trade: { trade: null, pending_items: [] },
+		lifecycle: { kind: "in-world" },
+		characterManagement: { kind: "idle" },
+		playerVisualCapture: null,
+		entityCollisionDisabled: false,
+		canTeleportFromMap: false,
+		recallDestinations: [],
+		housing: emptyHousing(),
+		localPlayerGuid: playerGuid,
+		entities: playerEntitySnapshot(playerGuid),
+		serverTime: 10,
+		worldGeneration: 2,
+		connection: null,
+		worldName: "Leafcull",
+		playerName: "Drudge",
+		knownSpells: null,
+		enchantments: null,
+		appearanceOptions: null,
+		gameplayPreferences: null,
+		party: null,
+		partyPreferences: null,
+		friends: null,
+		contracts: null,
+		squelch: null,
+		allegiance: {
+			playerGuid: null,
+			profile: null,
+			refreshing: false,
+			canSwear: false,
+		},
+		allegiancePreferences: null,
+		friendsPreferences: null,
+		combatMode: "peace",
+		socialMotionReady: true,
+		combat: {
+			desired: null,
+			state: "idle",
+			processedIntentSequence: 0,
+			refill: null,
+		},
+		spellCastTarget: null,
+		vitals: [],
+		characterMotion: null,
+		activeConfirmation: null,
+		dynamic: {
+			hostTime: { seconds: 10 },
+			entities: [view(playerGuid)],
+		},
+	};
+}
+
+function view(guid: number): DynamicEntityView {
+	return {
+		generation: 1,
+		identity: { guid, wcid: 42 },
+		display: { name: "Drudge", level: null },
+		presentation: {
+			placementFrame: 0,
+			entityClass: "other",
+			content: {
+				motionTableDid: null,
+				setupDid: 0x0200_0001,
+				soundTableDid: null,
+				physicsEffectTableDid: null,
+			},
+			appearance: {
+				paletteDid: null,
+				subPalettes: [],
+				textureChanges: [],
+				partChanges: [],
+			},
+			objectScale: 1,
+			radar: {
+				behavior: null,
+				category: "other",
+				obviousRange: null,
+			},
+		},
+		physics: {
+			semanticMask: 0,
+			participation: "pose-only",
+			noDraw: false,
+			hidden: false,
+			cloaked: false,
+			translucency: 0,
+			lighting: false,
+			defaultAnimation: false,
+			defaultScript: false,
+		},
+		placement: {
+			kind: "attached",
+			parent: 0,
+			parentLocation: "none",
+			placement: "default",
+		},
+		motion: null,
+	};
+}
+
+it.each([0, 3])(
+	"retires listener installer %i after stop without launching authority",
+	async (heldIndex) => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		let release: () => void = () => {
+			throw new Error("Gate not initialized.");
+		};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const original = transport.listen.bind(transport);
+		let installIndex = 0;
+		const listen = vi
+			.spyOn(transport, "listen")
+			.mockImplementation(async (event, handler) => {
+				if (installIndex++ === heldIndex) await gate;
+				return original(event, handler);
+			});
+		const launch = vi.fn(async () => {});
+		const cancelled = expect(
+			session.start({ startAuthority: launch }),
+		).rejects.toMatchObject({ name: "AbortError" });
+		await vi.waitFor(() => expect(listen).toHaveBeenCalledTimes(heldIndex + 1));
+		session.stop();
+		await cancelled;
+		release();
+		await vi.waitFor(() =>
+			expect(
+				transport.calls.filter((call) => call.startsWith("unlisten:")),
+			).toHaveLength(heldIndex + 1),
+		);
+		expect(transport.handlers.size).toBe(0);
+		expect(launch).not.toHaveBeenCalled();
+		expect(transport.invocations).toHaveLength(0);
+	},
+);
+it("cancels the local native-launch wait while retaining terminal observation for retirement", async () => {
+	const transport = new FakeClientTransport();
+	const session = new ClientLifecycleSession(transport);
+	let release: () => void = () => {
+		throw new Error("Gate not initialized.");
+	};
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const launch = vi.fn(() => gate);
+	const cancelled = expect(
+		session.start({ startAuthority: launch }),
+	).rejects.toMatchObject({ name: "AbortError" });
+	await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce());
+	session.cancelStartup();
+	await cancelled;
+	expect(transport.handlers.has("client-exit-requested")).toBe(true);
+	transport.emit("client-exit-requested", {
+		cause: "explicit-disconnect",
+		diagnostic: "Startup cancelled",
+	});
+	expect(session.state().exit?.diagnostic).toBe("Startup cancelled");
+	release();
+	await Promise.resolve();
+	expect(transport.invocations).toHaveLength(0);
+	session.stop();
+	expect(transport.handlers.size).toBe(0);
+});
+it("does not let a late retired installer stop a fresh attachment", async () => {
+	const transport = new FakeClientTransport();
+	const session = new ClientLifecycleSession(transport);
+	let release: () => void = () => {
+		throw new Error("Gate not initialized.");
+	};
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const original = transport.listen.bind(transport);
+	const listen = vi
+		.spyOn(transport, "listen")
+		.mockImplementationOnce(async (event, handler) => {
+			await gate;
+			return original(event, handler);
+		});
+	const cancelled = expect(session.start()).rejects.toMatchObject({
+		name: "AbortError",
+	});
+	await vi.waitFor(() => expect(listen).toHaveBeenCalledOnce());
+	session.stop();
+	await cancelled;
+	await session.start();
+	release();
+	await vi.waitFor(() =>
+		expect(transport.calls).toContain("unlisten:client-dynamic-entity"),
+	);
+	transport.emit("client-world-name-updated", { name: "Fresh attachment" });
+	expect(session.state().worldName).toBe("Fresh attachment");
+	expect(transport.handlers.has("client-dynamic-entity")).toBe(true);
+	session.stop();
+	expect(transport.handlers.size).toBe(0);
+});
+
+it("delivers host-projected vendor contracts through the real session into the draft owner", async () => {
+	const transport = new FakeClientTransport();
+	const session = new ClientLifecycleSession(transport);
+	await session.start();
+	const failures: string[] = [];
+	const icons = new UiIconRepository({
+		prepare: async (requests) =>
+			requests.map(({ key }) => ({
+				kind: "ready",
+				key,
+				image: new Uint8Array([1]),
+			})),
+		createImage: async () => "blob:fixture",
+		revokeImage: () => {},
+		report: () => {},
+	});
+	const model = new ClientVendorState(
+		session,
+		icons,
+		(message) => failures.push(message),
+		() => 0,
+	);
+	const latest = () => {
+		const args = transport.invocations.at(-1)?.args;
+		if (args === undefined) throw new Error("No vendor command");
+		return vendorRequestSchema.parse(args.request);
+	};
+	try {
+		transport.emit("client-vendor-approached", vendorFixture.snapshot.payload);
+		model.read();
+		const opening = latest();
+		transport.emit(vendorFixture.preview.event, {
+			...vendorFixture.preview.payload,
+			sequence: opening.sequence,
+			outcome: {
+				kind: "ready",
+				quote: { ...vendorFixture.preview.payload.outcome.quote, buys: [] },
+			},
+		});
+		model.queueBuy(1000);
+		model.confirmBuyQuantity(1000, 10);
+		const candidate = latest();
+		expect(candidate.draft).toEqual({
+			vendor: 100,
+			buys: [{ item: 1000, amount: 10 }],
+			sells: [],
+		});
+		transport.emit(vendorFixture.preview.event, {
+			...vendorFixture.preview.payload,
+			sequence: candidate.sequence,
+		});
+		expect(model.read()?.queue).toMatchObject([
+			{ name: "Food", amount: 10, total: 100 },
+		]);
+		expect(model.read()?.quote?.currencies).toHaveLength(2);
+		model.trade();
+		const submitted = latest();
+		expect(transport.invocations.at(-1)?.command).toBe("submit_client_vendor");
+		transport.emit(vendorFixture.phase.event, vendorFixture.phase.payload);
+		expect(model.read()?.phase).toBe("buying");
+		transport.emit(vendorFixture.failed.event, {
+			...vendorFixture.failed.payload,
+			sequence: submitted.sequence,
+		});
+		expect(failures).toEqual(["Purchase failed. Purchase refused"]);
+		expect(latest().draft.buys).toEqual(submitted.draft.buys);
+		model.close();
+		transport.emit(
+			vendorFixture.snapshot.event,
+			vendorFixture.snapshot.payload,
+		);
+		expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
+		expect(model.read()).toBeNull();
+		transport.emit("client-vendor-approached", vendorFixture.snapshot.payload);
+		expect(model.read()?.vendor).toBe(100);
+		transport.emit(vendorFixture.closed.event, vendorFixture.closed.payload);
+		expect(model.read()).toBeNull();
+	} finally {
+		model.destroy();
+		icons.dispose();
+		session.stop();
+	}
+});
+
+it.each(["incremental", "snapshot"])(
+	"releases same-character entry suppression on %s refusal",
+	async (delivery) => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		await session.enterWorld(7);
+		const lifecycle: ClientLifecycle = {
+			kind: "character-selection",
+			maxSlots: 11,
+			characters: [{ guid: 7, name: "Mira", slot: 0, deleteTime: 0 }],
+			rejection: "The character is still in the world.",
+		};
+		if (delivery === "incremental")
+			transport.emit("client-lifecycle-changed", lifecycle);
+		else {
+			transport.setCurrentState({ ...currentState(7), lifecycle });
+			await session.requestCurrentState();
+		}
+		expect(session.state().lifecycle).toEqual(lifecycle);
+		await session.enterWorld(7);
+		expect(
+			transport.calls.filter(
+				(call) => call === "invoke:select_client_character",
+			),
+		).toHaveLength(2);
+		await session.stop();
+	},
+);

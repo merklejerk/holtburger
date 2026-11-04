@@ -1,0 +1,834 @@
+import assert from "node:assert/strict";
+
+/** Drive the production selection, input, request owner, and floating window through real DOM events. */
+export async function probeObjectInspection(
+	client,
+	evaluateExpression,
+	onScreenshot,
+) {
+	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__";
+	const probe = api + ".objectInspectionProbe()";
+	const read = (expression) => evaluateExpression(client, expression);
+	const snapshot = () => read(probe + ".snapshot()");
+	const settle = (milliseconds = 300) =>
+		new Promise((resolve) => setTimeout(resolve, milliseconds));
+	const waitFor = async (predicate, diagnostic) => {
+		const deadline = Date.now() + 5_000;
+		for (;;) {
+			const value = await snapshot();
+			if (predicate(value)) return value;
+			if (Date.now() >= deadline)
+				throw new Error(`${diagnostic}: ${JSON.stringify(value)}`);
+			await settle(50);
+		}
+	};
+	const waitForSelector = async (selector, diagnostic) => {
+		const deadline = Date.now() + 5_000;
+		for (;;) {
+			if (
+				await read(
+					`document.querySelector(${JSON.stringify(selector)}) !== null`,
+				)
+			)
+				return;
+			if (Date.now() >= deadline) throw new Error(diagnostic);
+			await settle(50);
+		}
+	};
+	const point = (selector) =>
+		read(`(() => {
+			const element = document.querySelector(${JSON.stringify(selector)});
+			if (!element) throw new Error('Missing inspection target: ' + ${JSON.stringify(selector)});
+			const box = element.getBoundingClientRect();
+			return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+		})()`);
+	const click = async (selector) => {
+		const position = await point(selector);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...position,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			...position,
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+		});
+	};
+	const rightClick = async (selector) => {
+		const position = await point(selector);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...position,
+			button: "right",
+			buttons: 2,
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			...position,
+			button: "right",
+			buttons: 0,
+			clickCount: 1,
+		});
+	};
+	const drag = async (source, target) => {
+		const start = await point(source);
+		const end = await point(target);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...start,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			...end,
+			button: "left",
+			buttons: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			...end,
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+		});
+	};
+	const sendBinding = async (repeat = false) => {
+		const binding = await read(probe + ".binding");
+		const key = binding.key ?? "Unidentified";
+		const code = binding.code ?? "";
+		const modifiers =
+			(binding.alt ? 1 : 0) |
+			(binding.ctrl ? 2 : 0) |
+			(binding.meta ? 4 : 0) |
+			(binding.shift ? 8 : 0);
+		await client.send("Input.dispatchKeyEvent", {
+			type: "keyDown",
+			key,
+			code,
+			modifiers,
+			autoRepeat: repeat,
+		});
+		if (!repeat)
+			await client.send("Input.dispatchKeyEvent", {
+				type: "keyUp",
+				key,
+				code,
+				modifiers,
+			});
+	};
+	const select = async (guid) => {
+		await read(`${probe}.select(${guid === null ? "null" : guid})`);
+		await settle(300);
+	};
+	const respond = (kind, guid) =>
+		read(`${probe}.respond(${JSON.stringify(kind)}, ${guid})`);
+	const screenshot = async (name) => {
+		if (!onScreenshot) return;
+		const shot = await client.send("Page.captureScreenshot", {
+			format: "png",
+			captureBeyondViewport: false,
+		});
+		await onScreenshot(name, shot.data);
+	};
+
+	await read(probe + ".begin()");
+	try {
+		// Earlier HUD probes may intentionally leave a system window open. Representative
+		// inspection captures start clean; coexistence is exercised explicitly below.
+		await read(
+			"document.querySelector('button[aria-label=\"Close Inventory\"]')?.click()",
+		);
+		await settle(100);
+		// No selection is a strict no-op through the configured shortcut.
+		await sendBinding();
+		assert.equal((await snapshot()).commandCount, 0);
+
+		// Button captures the target, suppresses duplicates, and remains windowless while pending.
+		await select(7);
+		await click('button[aria-label="Examine"]');
+		let pending = await snapshot();
+		assert.equal(pending.commandCount, 1);
+		assert.deepEqual(pending.commands[0]?.args, { guid: 7 });
+		assert.deepEqual(pending.state, { kind: "pending", guid: 7 });
+		assert.equal(pending.window, null);
+		assert.equal(
+			await read(
+				"document.querySelector('button[aria-label=\"Examining selected entity\"]')?.disabled",
+			),
+			true,
+		);
+		await click('button[aria-label="Examining selected entity"]');
+		assert.equal((await snapshot()).commandCount, 1);
+
+		// Selection replacement cannot retarget an already captured request or resulting snapshot.
+		await read(probe + ".deferSpellReferences()");
+		await select(8);
+		await respond("item", 7);
+		let item = await waitFor(
+			(value) => value.window?.title?.startsWith("Ancient Atlan") === true,
+			"Item inspection did not open",
+		);
+		assert.equal(item.selectedGuid, 8);
+		assert.equal(item.state.guid, 7);
+		assert.equal(item.window.count, 1);
+		assert.deepEqual(
+			await read(`Array.from(document.querySelectorAll('[data-inspection-portal] dl > div'),
+                (row) => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()])`),
+			[
+				["Destination", "Holtburg (42.1N, 33.6E)."],
+				["Minimum level", "80"],
+				["Maximum level", "150"],
+				["Recall & tie", "Prohibited"],
+				["Summoning", "Prohibited"],
+			],
+		);
+		assert.deepEqual(
+			await read(
+				`Array.from(document.querySelectorAll('[data-inspection-use-requirements] li'), (row) => row.textContent.trim())`,
+			),
+			["Summoning: 570 (Specialized)", "Level: 180", "Self: 295"],
+		);
+
+		assert.deepEqual(
+			await read(`[
+				...document.querySelectorAll('.inspection-cantrip-pill'),
+			].map((pill) => pill.textContent.trim())`),
+			["Cantrips…"],
+		);
+
+		// Replacing the inspected item retires its pending spell join. Its late reply cannot
+		// publish pills into the replacement creature inspection.
+		await click('button[aria-label="Examine"]');
+		await respond("creature", 8);
+		await waitFor(
+			(value) => value.window?.title === "Holtmage",
+			"Replacement inspection did not open",
+		);
+		await read(probe + ".releaseSpellReferences()");
+		await settle(100);
+		assert.equal(
+			await read("document.querySelector('.inspection-cantrip-pill') === null"),
+			true,
+		);
+
+		// Reopen the item after the shared references settle for complete presentation checks.
+		await select(7);
+		await click('button[aria-label="Examine"]');
+		await respond("item", 7);
+		item = await waitFor(
+			(value) =>
+				value.window?.title?.startsWith("Ancient Atlan") === true &&
+				value.window.text.includes("Leg. ×2"),
+			"Resolved item inspection did not reopen",
+		);
+		assert.match(item.window.text, /Black Garnet/);
+		assert.match(item.window.text, /125,000/);
+		assert.match(item.window.text, /9,802 \/ 10,000/);
+		const spellGroups = await read(`[
+			...document.querySelectorAll('.inspection-item section'),
+		]
+			.filter((section) => ['Spells', 'Triggered effects', 'Active Spells'].includes(section.querySelector('h3')?.textContent))
+			.map((section) => ({
+				heading: section.querySelector('h3').textContent,
+				spells: [...section.querySelectorAll('.inspection-spell > summary')].map((summary) => summary.textContent.trim()),
+			}))`);
+		assert.deepEqual(spellGroups, [
+			{
+				heading: "Spells",
+				spells: [
+					"Impenetrability I",
+					"Spell 2002 Frost Protection Self",
+					"Spell 2003 Acid Protection Other",
+					"Spell 2004 Frost Protection Self",
+					"Spell 2005 Acid Protection Other",
+					"Spell 999999 (definition missing)",
+				],
+			},
+			{ heading: "Triggered effects", spells: ["Harm Other I"] },
+			{ heading: "Active Spells", spells: ["Harm Other I"] },
+		]);
+		const primaryFacts = await read(
+			`Array.from(document.querySelectorAll('[data-inspection-item-limits] dl > div, [data-inspection-gear-ratings] dl > div'), row => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()])`,
+		);
+		assert.deepEqual(primaryFacts, [
+			["Equipment set", "Soldier's"],
+			["Lifespan", "3h"],
+			["Remaining at appraisal", "1h"],
+			["Mana recovery efficiency", "80%"],
+			["Stone destruction chance", "0%"],
+			["Critical Damage rating", "3"],
+			["Maximum health", "25"],
+		]);
+		assert.equal(
+			await read(`document.querySelector('[data-inspection-details]').open`),
+			false,
+		);
+		await read(
+			`document.querySelector('[data-inspection-details]').open = true`,
+		);
+		assert.match(
+			await read(
+				`document.querySelector('[data-inspection-details]').textContent`,
+			),
+			/2 × Ruby/,
+		);
+		assert.match(
+			await read(
+				`document.querySelector('[data-inspection-details]').textContent`,
+			),
+			/Harness Tinker/,
+		);
+
+		assert.match(item.window.text, /definition missing/);
+		const cantripPills = await read(`[
+			...document.querySelectorAll('.inspection-cantrip-pill'),
+		].map((pill) => ({
+			text: pill.textContent.trim(),
+			label: pill.getAttribute('aria-label'),
+		}))`);
+		assert.deepEqual(cantripPills, [
+			{ text: "Maj.", label: "Major cantrip: 1" },
+			{ text: "Epic", label: "Epic cantrip: 1" },
+			{ text: "Leg. ×2", label: "Legendary cantrips: 2" },
+			{ text: "Other", label: "Other cantrip: 1" },
+			{ text: "Incomplete", label: null },
+		]);
+		assert.match(item.window.text, /\[See more\]/);
+		assert.doesNotMatch(item.window.text, /final archival sentence/);
+		await click(".inspection-description-toggle");
+		item = await snapshot();
+		assert.match(item.window.text, /final archival sentence/);
+		assert.match(item.window.text, /\[Hide\]/);
+		await click(".inspection-description-toggle");
+		item = await snapshot();
+		assert.doesNotMatch(item.window.text, /final archival sentence/);
+		assert.match(item.window.text, /\[See more\]/);
+		assert.ok(item.window.scrollHeight > item.window.clientHeight);
+		await settle(400);
+		item = await snapshot();
+		assert.equal(
+			await read(
+				"document.querySelector('.inspection-artwork img, .inspection-artwork .inspection-diagnostic') !== null",
+			),
+			true,
+		);
+		const equipmentPresentation = await read(`(() => {
+			const sections = [...document.querySelectorAll('.inspection-item section')];
+			const sectionFor = (label) => sections.find((section) => section.querySelector('h3')?.textContent === label);
+			return {
+				armorInCombat: sectionFor('Combat')?.textContent.includes('Armor') ?? false,
+				armorInProtections: sectionFor('Protections')?.textContent.includes('Armor') ?? false,
+				beneficial: document.querySelectorAll('.inspection-enchantment-beneficial').length,
+				harmful: document.querySelectorAll('.inspection-enchantment-harmful').length,
+				unbuffed: document.querySelectorAll('.inspection-unbuffed').length,
+			};
+		})()`);
+		assert.equal(equipmentPresentation.armorInCombat, false);
+		assert.equal(equipmentPresentation.armorInProtections, true);
+		assert.ok(equipmentPresentation.beneficial > 0);
+		assert.ok(equipmentPresentation.harmful > 0);
+		assert.ok(equipmentPresentation.unbuffed > 0);
+		assert.match(item.window.text, /Unenchantable/);
+		const progressionBar = () =>
+			read(`(() => {
+			const section = document.querySelector('[data-inspection-progression]');
+			const bar = section?.querySelector('progress');
+			return section === null ? null : {text: section.textContent, value: bar.value, max: bar.max, label: bar.getAttribute('aria-label'), description: bar.getAttribute('aria-valuetext'), exactQuantities: [...section.querySelectorAll('span[title]')].map((span) => span.title)};
+		})()`);
+		let progression = await progressionBar();
+		assert.equal(progression.value, 12.5);
+		assert.equal(progression.max, 100);
+		assert.equal(progression.label, "Item level experience");
+		assert.deepEqual(progression.exactQuantities, [
+			"350,000,000",
+			"700,000,000",
+		]);
+		await screenshot("inspection-item");
+
+		// Exercise refresh through the production request owner, retaining the same window.
+		for (const [kind, expected] of [
+			["item-zero", 0],
+			["item-maximum", 100],
+			["item-plain", null],
+		]) {
+			await read(`${probe}.select(7)`);
+			await click('button[aria-label="Examine"]');
+			await respond(kind, 7);
+			await settle(50);
+			progression = await progressionBar();
+			if (expected === null) assert.equal(progression, null);
+			else assert.equal(progression.value, expected);
+			if (kind === "item-maximum") {
+				assert.equal(progression.description, "Maximum level");
+			}
+		}
+		item = await snapshot();
+
+		const commandsBeforeClose = item.commandCount;
+		await click('button[aria-label^="Close Ancient Atlan Sword"]');
+		assert.equal((await snapshot()).window, null);
+		assert.equal((await snapshot()).selectedGuid, 7);
+		assert.equal((await snapshot()).commandCount, commandsBeforeClose);
+
+		// A failed artwork lease leaves the inspected identity and textual facts usable.
+		await read(probe + ".setArtworkFailure(true)");
+		await select(7);
+		await click('button[aria-label="Examine"]');
+		await respond("item", 7);
+		await waitFor(
+			(value) => value.window?.title?.startsWith("Ancient Atlan") === true,
+			"Artwork-failure inspection did not open",
+		);
+		await settle(400);
+		const artworkFailure = await snapshot();
+		assert.match(artworkFailure.window.text, /Artwork unavailable/);
+		assert.match(artworkFailure.window.text, /Ancient Atlan Sword/);
+		await click('button[aria-label^="Close Ancient Atlan Sword"]');
+		await read(probe + ".setArtworkFailure(false)");
+
+		// Shortcut uses the same action; an auto-repeat edge is ignored.
+		await select(8);
+		const commandsBeforeCreature = (await snapshot()).commandCount;
+		await sendBinding(true);
+		await sendBinding();
+		pending = await snapshot();
+		assert.equal(pending.commandCount, commandsBeforeCreature + 1);
+		assert.deepEqual(pending.commands.at(-1)?.args, { guid: 8 });
+		assert.equal(pending.window, null);
+		await respond("creature", 8);
+		let creature = await waitFor(
+			(value) => value.window?.title === "Holtmage",
+			"Creature inspection did not open",
+		);
+		assert.match(creature.window.text, /Creature vitals|Health/);
+		assert.match(creature.window.text, /attributes/i);
+		assert.match(creature.window.text, /Protection/i);
+		assert.match(creature.window.text, /\*484/);
+		assert.match(creature.window.text, /Combat ratings/i);
+		assert.match(creature.window.text, /Damage resistance\s*0/);
+		assert.match(creature.window.text, /Maximum health\s*25/);
+		assert.match(creature.window.text, /Test Allegiance/);
+		assert.match(creature.window.text, /Allegiance rank\s*Baroness \(3\)/);
+		assert.match(creature.window.text, /Deaths\s*Never/);
+		assert.doesNotMatch(creature.window.text, /Wield requirements/);
+		const previewIdentity = await read(`(() => {
+			const pane = document.querySelector('.inspection-preview-pane').getBoundingClientRect();
+			const metadata = document.querySelector('.inspection-preview-metadata');
+			const level = document.querySelector('.inspection-preview-level');
+			const title = document.querySelector('.inspection-preview-title');
+			const name = document.querySelector('.inspection-preview-identity h2');
+			const selectedName = document.querySelector('.selected-entity__heading strong');
+			const metadataRect = metadata.getBoundingClientRect();
+			const heritageRect = metadata.querySelector('p').getBoundingClientRect();
+			const status = metadata.querySelector('[data-player-killer-status]');
+			const statusRect = status.getBoundingClientRect();
+			return {
+				metadata: metadata.textContent.trim(),
+				level: level.textContent.trim(),
+				title: title.textContent.trim(),
+				titleStyle: getComputedStyle(title).fontStyle,
+				nameColor: getComputedStyle(name).color,
+				selectedNameColor: getComputedStyle(selectedName).color,
+				status: status.dataset.playerKillerStatus,
+				tooltip: status.getAttribute('title'),
+				bottomGap: pane.bottom - metadataRect.bottom,
+				rowAlignment: Math.abs(statusRect.bottom - metadataRect.bottom),
+				leftGap: heritageRect.left - metadataRect.left,
+				rightGap: metadataRect.right - statusRect.right,
+			};
+		})()`);
+		assert.equal(previewIdentity.level, "Level 126");
+		assert.equal(previewIdentity.title, "Adventurer");
+		assert.equal(previewIdentity.titleStyle, "italic");
+		assert.equal(previewIdentity.nameColor, previewIdentity.selectedNameColor);
+		assert.equal(previewIdentity.metadata, "Male Undead");
+		assert.equal(previewIdentity.status, "non-player-killer");
+		assert.equal(previewIdentity.tooltip, "Non-Player Killer");
+		assert.ok(
+			previewIdentity.bottomGap >= 0 && previewIdentity.bottomGap <= 20,
+		);
+		assert.ok(previewIdentity.rowAlignment <= 1);
+		assert.ok(previewIdentity.leftGap <= 1);
+		assert.ok(previewIdentity.rightGap <= 1);
+		const creatureEnhancements = await read(`({
+			beneficial: document.querySelectorAll('.inspection-creature .inspection-enchantment-beneficial').length,
+			harmful: document.querySelectorAll('.inspection-creature .inspection-enchantment-harmful').length,
+			unbuffed: document.querySelectorAll('.inspection-creature .inspection-unbuffed').length,
+		})`);
+		assert.deepEqual(creatureEnhancements, {
+			beneficial: 2,
+			harmful: 2,
+			unbuffed: 0,
+		});
+		await screenshot("inspection-creature");
+
+		// A newer target closes the old snapshot and filters the late prior response.
+		await select(7);
+		await click('button[aria-label="Examine"]');
+		await select(8);
+		await sendBinding();
+		const latestCount = (await snapshot()).commandCount;
+		await respond("item", 7);
+		pending = await snapshot();
+		assert.deepEqual(pending.state, { kind: "pending", guid: 8 });
+		assert.equal(pending.window, null);
+		await respond("creature", 8);
+		creature = await waitFor(
+			(value) => value.window?.title === "Holtmage",
+			"Latest inspection response did not win",
+		);
+		assert.equal(creature.commandCount, latestCount);
+
+		// Rejected and missing remain distinct user-visible failures and clear pending UI.
+		await select(7);
+		await click('button[aria-label="Examine"]');
+		await respond("rejected", 7);
+		let failure = await snapshot();
+		assert.equal(failure.failure, "You could not examine that object.");
+		assert.equal(failure.state.kind, "idle");
+		assert.equal(failure.window, null);
+		await click('button[aria-label="Examine"]');
+		await respond("missing", 7);
+		failure = await snapshot();
+		assert.equal(failure.failure, "That object is no longer available.");
+		assert.equal(failure.state.kind, "idle");
+		await click('button[aria-label="Examine"]');
+		await respond("unavailable", 7);
+		failure = await snapshot();
+		assert.equal(
+			failure.failure,
+			"Appraisal unavailable: unsupported item XP style: 3",
+		);
+		assert.equal(failure.state.kind, "idle");
+		assert.equal(failure.window, null);
+
+		// Re-open the long item, then exercise native drag and border resize.
+		await click('button[aria-label="Examine"]');
+		await respond("item", 7);
+		item = await waitFor(
+			(value) => value.window !== null,
+			"Geometry item inspection did not open",
+		);
+		const initialRectangle = item.window.rectangle;
+		const dragFrom = await point(
+			'section[aria-label^="Ancient Atlan"] .hud-window-titlebar',
+		);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...dragFrom,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: dragFrom.x - 90,
+			y: dragFrom.y - 55,
+			button: "left",
+			buttons: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			x: dragFrom.x - 90,
+			y: dragFrom.y - 55,
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+		});
+		let moved = await snapshot();
+		assert.notEqual(moved.window.rectangle.left, initialRectangle.left);
+		assert.notEqual(moved.window.rectangle.top, initialRectangle.top);
+
+		const resizeFrom = await point(
+			'section[aria-label^="Ancient Atlan"] .resize-border-bottom-left',
+		);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...resizeFrom,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: resizeFrom.x - 60,
+			y: resizeFrom.y + 45,
+			button: "left",
+			buttons: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			x: resizeFrom.x - 60,
+			y: resizeFrom.y + 45,
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+		});
+		const resized = await snapshot();
+		assert.ok(resized.window.rectangle.width > moved.window.rectangle.width);
+		assert.ok(resized.window.rectangle.height > moved.window.rectangle.height);
+
+		// Existing container and system windows remain mounted alongside inspection.
+		const debug = await read(
+			'document.querySelector(\'button[aria-label="Debug"]\')?.getAttribute("aria-pressed")',
+		);
+		if (debug !== "true") await click('button[aria-label="Debug"]');
+		const coexistence = await read(`({
+			inspection: document.querySelectorAll('.inspection-scroll').length,
+			worldContainer: document.querySelectorAll('.world-container-window').length,
+			debug: Array.from(document.querySelectorAll('section[aria-label]')).some((node) => node.getAttribute('aria-label') === 'Client diagnostics')
+		})`);
+		assert.deepEqual(coexistence, {
+			inspection: 1,
+			worldContainer: 1,
+			debug: true,
+		});
+		await click('button[aria-label="Debug"]');
+
+		// Smaller than authored minima: fitting may relax size but cannot strand controls.
+		await client.send("Emulation.setDeviceMetricsOverride", {
+			width: 360,
+			height: 320,
+			deviceScaleFactor: 1,
+			mobile: false,
+		});
+		await settle(350);
+		const narrow = await snapshot();
+		assert.ok(narrow.window.rectangle.left >= 0);
+		assert.ok(narrow.window.rectangle.top >= 0);
+		assert.ok(
+			narrow.window.rectangle.left + narrow.window.rectangle.width <= 360,
+		);
+		assert.ok(
+			narrow.window.rectangle.top + narrow.window.rectangle.height <= 320,
+		);
+		assert.equal(
+			await read(`getComputedStyle(
+				document.querySelector('.inspection-facts')
+			).gridTemplateColumns.split(' ').length`),
+			1,
+		);
+		await screenshot("inspection-small-viewport");
+		await client.send("Emulation.setDeviceMetricsOverride", {
+			width: 1280,
+			height: 720,
+			deviceScaleFactor: 1,
+			mobile: false,
+		});
+		await settle(350);
+
+		// Item and action cells inspect explicit identities without changing selection.
+		await read(
+			"document.querySelector('button[aria-label^=\"Close Ancient Atlan Sword\"]').click()",
+		);
+		await read(
+			"document.querySelector('button[aria-label=\"Inventory\"]').click()",
+		);
+		const inventoryItem =
+			'.client-inventory .contents-scroll .item-grid-cell[data-item-guid="300"]';
+		await waitForSelector(
+			inventoryItem,
+			"Inventory did not mount an authoritative item for right-click inspection",
+		);
+		await select(8);
+		const beforeInventoryCell = await snapshot();
+		await rightClick(inventoryItem);
+		const inventoryCell = await waitFor(
+			(value) => value.commandCount === beforeInventoryCell.commandCount + 1,
+			"Inventory cell right-click did not request inspection",
+		);
+		assert.equal(inventoryCell.selectedGuid, beforeInventoryCell.selectedGuid);
+		assert.deepEqual(inventoryCell.commands.at(-1)?.args, { guid: 300 });
+		await respond("missing", 300);
+
+		const emptyActionCell = ".action-cell:not([data-action-item])";
+		await drag(inventoryItem, emptyActionCell);
+		await waitForSelector(
+			'.action-cell[data-action-item="300"]',
+			"Authoritative item did not bind to the action cell",
+		);
+		await read(
+			"document.querySelector('button[aria-label=\"Close Inventory\"]').click()",
+		);
+		await select(8);
+		const beforeActionCell = await snapshot();
+		await rightClick('.action-cell[data-action-item="300"]');
+		const actionCell = await waitFor(
+			(value) => value.commandCount === beforeActionCell.commandCount + 1,
+			"Action cell right-click did not request inspection",
+		);
+		assert.equal(actionCell.selectedGuid, beforeActionCell.selectedGuid);
+		assert.deepEqual(actionCell.commands.at(-1)?.args, { guid: 300 });
+		await respond("missing", 300);
+
+		// Consumable effects share the retained window and spell-reference service.
+		for (const [kind, expected] of [
+			["consumable", "Restores 50 Stamina."],
+			["consumable-depletion", "Depletes 20 Stamina."],
+		]) {
+			// The preceding geometry checks leave the inspector over the HUD's Examine button.
+			await read(
+				"document.querySelector('button[aria-label=\"Close Harness Potion\"]')?.click()",
+			);
+			await select(7);
+			await click('button[aria-label="Examine"]');
+			await respond(kind, 7);
+			await waitFor(
+				(value) =>
+					value.window?.title === "Harness Potion" &&
+					value.window.text.includes(expected),
+				"Consumable effect did not render",
+			);
+			assert.equal(
+				await read(
+					"document.querySelector('[data-inspection-on-use] .inspection-spell > summary').textContent.trim()",
+				),
+				"Casts Impenetrability I",
+			);
+			assert.equal(
+				await read(
+					"[...document.querySelectorAll('.inspection-item section > h3')].some((heading) => heading.textContent === 'Spells')",
+				),
+				false,
+			);
+			await click("[data-inspection-on-use] .inspection-spell > summary");
+			assert.equal(
+				await read(
+					"document.querySelector('[data-inspection-on-use] .inspection-spell').open",
+				),
+				true,
+			);
+			assert.equal(
+				await read(
+					"document.querySelector('[data-inspection-on-use] .inspection-spell-description').textContent.trim()",
+				),
+				"Fixture spell description.",
+			);
+			assert.equal(
+				await read(
+					"document.querySelector('.inspection-cantrip-pill') === null",
+				),
+				true,
+			);
+		}
+
+		// Healing-kit modifiers use their own labels, without flat restoration wording.
+		await read(
+			"document.querySelector('button[aria-label=\"Close Harness Potion\"]').click()",
+		);
+		await select(7);
+		await click('button[aria-label="Examine"]');
+		await respond("healing-kit", 7);
+		await waitFor(
+			(value) => value.window?.title === "Harness Healing Kit",
+			"Healing kit inspection did not open",
+		);
+		assert.deepEqual(
+			await read(
+				"[...document.querySelectorAll('[data-inspection-on-use] .inspection-facts > div')].map((row) => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()])",
+			),
+			[
+				["Bonus to Healing Skill", "50"],
+				["Restoration Bonus", "130%"],
+			],
+		);
+		assert.equal(
+			await read(
+				"document.querySelector('[data-inspection-on-use]').textContent.includes('Restores')",
+			),
+			false,
+		);
+
+		// Numeric lock facts preserve a disclosed zero percent and disappear on replacement.
+		await read(
+			`document.querySelector('button[aria-label="Close Harness Healing Kit"]').click()`,
+		);
+		await select(7);
+		await click('button[aria-label="Examine"]');
+		await respond("locked", 7);
+		await waitFor(
+			(value) => value.window?.title === "Harness Locked Chest",
+			"Locked chest inspection did not open",
+		);
+		const lockRows = await read(`
+			[...document.querySelectorAll('.inspection-item .inspection-facts > div')]
+			.filter((row) => row.querySelector('dt').textContent.startsWith('Lockpick'))
+			.map((row) => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()])
+		`);
+		assert.deepEqual(lockRows, [["Lockpick difficulty", "250 / 0%"]]);
+		await sendBinding();
+		await respond("item-plain", 7);
+		await waitFor(
+			(value) =>
+				value.window !== null && !value.window.text.includes("Lockpick"),
+			"Replacement appraisal retained lockpicking rows",
+		);
+
+		// Lifecycle reset owns teardown; no selection mutation is required.
+		await read(probe + ".resync()");
+		const reset = await snapshot();
+		assert.equal(reset.window, null);
+		assert.equal(reset.state.kind, "idle");
+		await read(probe + ".restore()");
+		await settle(100);
+
+		// Right-click examines the viewport hit while preserving gameplay selection.
+		await select(8);
+		const beforeRightClick = await snapshot();
+		await rightClick(".client-canvas");
+		const rightClicked = await waitFor(
+			(value) => value.commandCount === beforeRightClick.commandCount + 1,
+			"Right-click did not request inspection",
+		);
+		assert.equal(rightClicked.selectedGuid, beforeRightClick.selectedGuid);
+		assert.deepEqual(rightClicked.commands.at(-1)?.args, { guid: 7 });
+
+		const crosstalk = await read(probe + ".crosstalk()");
+		assert.deepEqual(crosstalk, {
+			backgroundIsolation: true,
+			sharedCancellation: true,
+		});
+		return {
+			crosstalk,
+			buttonAndShortcutCommands: rightClicked.commandCount,
+			capturedTarget: { requested: 7, selectedAfterRequest: 8 },
+			coexistence,
+			item: {
+				scrollable: item.window.scrollHeight > item.window.clientHeight,
+				title: item.window.title,
+			},
+			creature: { title: creature.window.title },
+			creatureEnhancements,
+			failures: [
+				"You could not examine that object.",
+				"That object is no longer available.",
+			],
+			geometry: {
+				initial: initialRectangle,
+				moved: moved.window.rectangle,
+				resized: resized.window.rectangle,
+				narrow: narrow.window.rectangle,
+			},
+			latestTargetFiltered: true,
+			consumableEffects: [
+				"restoration",
+				"depletion",
+				"on-use spell",
+				"healing-kit bonuses",
+			],
+			lifecycleReset: true,
+			rightClickTargets: ["viewport", "inventory", "action"],
+		};
+	} finally {
+		await client.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+		await read(probe + ".end()");
+	}
+}

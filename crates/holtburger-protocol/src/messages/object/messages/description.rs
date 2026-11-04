@@ -12,9 +12,20 @@ use holtburger_common::properties::{
 };
 use holtburger_common::{Guid, Vector3};
 
+/// One child object a parent announces, possibly before the client has seen that child.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhysicsChildData {
     pub guid: Guid,
+    pub location_id: u32,
+}
+
+/// The object this one is attached to, plus which of its attach points carries it.
+///
+/// The `PARENT` flag writes both fields in one run, and ACE only sets the flag when it has both
+/// (`WorldObject_Networking.cs:488`), so neither is representable without the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhysicsDescParent {
+    pub id: Guid,
     pub location_id: u32,
 }
 
@@ -831,8 +842,7 @@ pub struct ObjectDescriptionData {
     pub stable_id: Option<u32>,
     pub petable_id: Option<u32>,
     pub csetup_id: Option<u32>,
-    pub parent_id: Option<Guid>,
-    pub parent_loc: Option<u32>,
+    pub parent: Option<PhysicsDescParent>,
     pub children: Option<Vec<PhysicsChildData>>,
     pub obj_scale: Option<f32>,
     pub friction: Option<f32>,
@@ -841,7 +851,8 @@ pub struct ObjectDescriptionData {
     pub velocity: Option<Vector3>,
     pub acceleration: Option<Vector3>,
     pub omega: Option<Vector3>,
-    pub default_script_id: Option<u32>,
+    /// Raw retail `PlayScript` cue resolved through the effective PhysicsScriptTable.
+    pub default_script_cue: Option<u32>,
     pub default_script_intensity: Option<f32>,
     pub sequences: [u16; 9],
     pub public_weenie_desc: PublicWeenieDescription,
@@ -861,8 +872,7 @@ impl Default for ObjectDescriptionData {
             stable_id: None,
             petable_id: None,
             csetup_id: None,
-            parent_id: None,
-            parent_loc: None,
+            parent: None,
             children: None,
             obj_scale: None,
             friction: None,
@@ -871,7 +881,7 @@ impl Default for ObjectDescriptionData {
             velocity: None,
             acceleration: None,
             omega: None,
-            default_script_id: None,
+            default_script_cue: None,
             default_script_intensity: None,
             sequences: [0; 9],
             public_weenie_desc: PublicWeenieDescription::default(),
@@ -972,15 +982,15 @@ impl ProtocolUnpack for ObjectDescriptionData {
             *offset += 4;
         }
 
-        let mut parent_id = None;
-        let mut parent_loc = None;
+        let mut parent = None;
         if physics_flags.contains(PhysicsDescriptionFlag::PARENT) {
-            parent_id = Some(Guid::unpack(data, offset)?);
+            let id = Guid::unpack(data, offset)?;
             if *offset + 4 > data.len() {
                 return None;
             }
-            parent_loc = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            let location_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
+            parent = Some(PhysicsDescParent { id, location_id });
         }
 
         let mut children = None;
@@ -1083,12 +1093,12 @@ impl ProtocolUnpack for ObjectDescriptionData {
             *offset += 12;
         }
 
-        let mut default_script_id = None;
+        let mut default_script_cue = None;
         if physics_flags.contains(PhysicsDescriptionFlag::DEFAULT_SCRIPT) {
             if *offset + 4 > data.len() {
                 return None;
             }
-            default_script_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            default_script_cue = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
             *offset += 4;
         }
 
@@ -1125,8 +1135,7 @@ impl ProtocolUnpack for ObjectDescriptionData {
             stable_id,
             petable_id,
             csetup_id,
-            parent_id,
-            parent_loc,
+            parent,
             children,
             obj_scale,
             friction,
@@ -1135,7 +1144,7 @@ impl ProtocolUnpack for ObjectDescriptionData {
             velocity,
             acceleration,
             omega,
-            default_script_id,
+            default_script_cue,
             default_script_intensity,
             sequences,
             public_weenie_desc,
@@ -1195,9 +1204,11 @@ impl ProtocolPack for ObjectDescriptionData {
                 .unwrap();
         }
         if self.physics_flags.contains(PhysicsDescriptionFlag::PARENT) {
-            self.parent_id.unwrap().pack(buf);
-            buf.write_u32::<LittleEndian>(self.parent_loc.unwrap_or(0))
-                .unwrap();
+            let parent = self
+                .parent
+                .expect("PARENT flag is set without a parent link");
+            parent.id.pack(buf);
+            buf.write_u32::<LittleEndian>(parent.location_id).unwrap();
         }
         if self
             .physics_flags
@@ -1267,7 +1278,7 @@ impl ProtocolPack for ObjectDescriptionData {
             .physics_flags
             .contains(PhysicsDescriptionFlag::DEFAULT_SCRIPT)
         {
-            buf.write_u32::<LittleEndian>(self.default_script_id.unwrap_or(0))
+            buf.write_u32::<LittleEndian>(self.default_script_cue.unwrap_or(0))
                 .unwrap();
         }
         if self
@@ -1335,7 +1346,7 @@ mod tests {
                 y: 8.0,
                 z: 7.0,
             }),
-            default_script_id: Some(0x33000001),
+            default_script_cue: Some(0x5A),
             default_script_intensity: Some(0.75),
             sequences: [1, 2, 3, 4, 5, 6, 7, 8, 9],
             public_weenie_desc: PublicWeenieDescription {

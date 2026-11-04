@@ -1,0 +1,578 @@
+//! Shared static-content capability and its mode-neutral command dispatcher.
+
+use std::sync::{Arc, Mutex};
+
+use anyhow::{Context, Result};
+use holtburger_content::{ContentDecodeCache, ContentRepository};
+use holtburger_core::{ContentAssetRuntime, ContentAssetService};
+use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, SpellTable, XpTable};
+use holtburger_world::WorldBootstrap;
+use serde::Deserialize;
+
+use crate::content_failure::resource_request_error;
+use crate::protocol::{HostResponse, ProtocolError, application_error, encode_json};
+use crate::{
+    LoadAnimationRequest, LoadAudioRequest, LoadLandblockProfileRequest,
+    LoadLandblockSourceBatchRequest, LoadParticleEmitterRequest, LoadParticleMeshesRequest,
+    LoadPhysicsScriptRequest, LoadPhysicsScriptTableRequest, LoadSetupVisualRequest,
+    LoadSoundTableRequest, LoadTexturePixelsRequest, MotionTableClosureRequest,
+};
+
+/// Static content discovered once and owned by the selected host composition.
+#[derive(Clone)]
+pub struct SharedHostContent {
+    /// App-local reporting for necessary reads before shared workers flatten error causes.
+    pub failures: crate::content_failure::ContentFailureReporter,
+    /// Async content service used by request handlers.
+    pub runtime: ContentAssetRuntime,
+    /// Immutable repository used by entity preparation and client bootstrap assembly.
+    pub repository: Arc<ContentRepository>,
+    /// Synchronous service used to realize collision products outside the fixed tick.
+    pub service: Arc<ContentAssetService>,
+    /// Motion-table projection shared by Explorer and client authorities.
+    pub motion_catalog: Arc<holtburger_content::MotionSequenceCatalog>,
+    /// Setup dimensions prepared with the motion catalog, reused by client bootstrap.
+    setup_dimensions: Arc<holtburger_content::SetupDimensionCatalog>,
+    /// Lazy map-image service, independent of client authority and scene residency.
+    pub world_map: Arc<crate::world_map::WorldMapService>,
+    /// Lazily parsed client bootstrap, cached at the content owner rather than in either mode.
+    client_bootstrap: Arc<Mutex<Option<Arc<WorldBootstrap>>>>,
+    /// One parsed emote catalog shared by bootstrap assembly and static discovery queries.
+    soul_emotes: Arc<Mutex<Option<Arc<holtburger_content::SoulEmoteCatalog>>>>,
+    /// One decoded spell table shared by bootstrap assembly and static queries.
+    spell_table: Arc<Mutex<Option<Arc<SpellTable>>>>,
+    /// Static creation calculator, shared by allocation requests.
+    pub creation_stats: Arc<crate::character_creation::CharacterCreationStatsService>,
+}
+
+impl SharedHostContent {
+    /// Builds a shared content owner from an injected repository for tests and diagnostics.
+    pub fn from_repository(repository: Arc<ContentRepository>) -> Result<Self> {
+        let service =
+            ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
+        let motion_reference = repository
+            .read_motion_reference_data()
+            .context("failed to project the motion contract from configured content")?;
+        let world_map = Arc::new(crate::world_map::WorldMapService::new(
+            Arc::clone(&repository),
+            std::env::var_os(crate::world_map::CACHE_ENV).map(std::path::PathBuf::from),
+            std::env::var_os(crate::world_map::IGNORE_CACHE_ENV).is_some_and(|value| value == "1"),
+        ));
+        Ok(Self {
+            failures: crate::content_failure::ContentFailureReporter::Detached,
+            world_map,
+            runtime: ContentAssetRuntime::new(service.clone()),
+            repository,
+            service: Arc::new(service),
+            motion_catalog: Arc::new(motion_reference.motion_sequences),
+            setup_dimensions: Arc::new(motion_reference.setup_dimensions),
+            client_bootstrap: Arc::new(Mutex::new(None)),
+            spell_table: Arc::new(Mutex::new(None)),
+            creation_stats: Arc::new(
+                crate::character_creation::CharacterCreationStatsService::default(),
+            ),
+            soul_emotes: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    /// Reuse the parsed table without giving static queries ownership of core state.
+    pub fn spell_table(&self) -> Result<Arc<SpellTable>> {
+        let mut cached = self
+            .spell_table
+            .lock()
+            .map_err(|_| anyhow::anyhow!("spell table cache lock poisoned"))?;
+        if let Some(table) = cached.as_ref() {
+            return Ok(Arc::clone(table));
+        }
+        let table = Arc::new(self.repository.read_asset::<SpellTable>("spell table")?);
+        *cached = Some(Arc::clone(&table));
+        Ok(table)
+    }
+
+    /// Static emote queries do not require unrelated XP, skill, or character bootstrap tables.
+    pub fn soul_emotes(&self) -> Result<Arc<holtburger_content::SoulEmoteCatalog>> {
+        let mut cached = self
+            .soul_emotes
+            .lock()
+            .map_err(|_| anyhow::anyhow!("soul-emote catalog cache lock poisoned"))?;
+        if let Some(catalog) = cached.as_ref() {
+            return Ok(Arc::clone(catalog));
+        }
+        let catalog = Arc::new(self.repository.read_soul_emote_catalog()?);
+        *cached = Some(Arc::clone(&catalog));
+        Ok(catalog)
+    }
+
+    /// Loads the client bootstrap once while keeping DAT policy out of the core client runtime.
+    pub fn client_world_bootstrap(&self) -> Result<Arc<WorldBootstrap>> {
+        let mut cached = self
+            .client_bootstrap
+            .lock()
+            .map_err(|_| anyhow::anyhow!("client bootstrap cache lock poisoned"))?;
+        if let Some(bootstrap) = cached.as_ref() {
+            return Ok(Arc::clone(bootstrap));
+        }
+
+        let skill_table = self
+            .repository
+            .read_asset::<SkillTable>("skill table")
+            .context("failed to load skill table for client bootstrap")?;
+        let secondary_attribute_table = self
+            .repository
+            .read_asset::<SecondaryAttributeTable>("secondary attribute table")
+            .context("failed to load secondary attribute table for client bootstrap")?;
+        let spell_table = self.spell_table()?.as_ref().clone();
+        let xp_table = self
+            .repository
+            .read_asset::<XpTable>("XP table")
+            .context("failed to load XP table for client bootstrap")?;
+        let character_titles = self
+            .repository
+            .read_character_title_catalog()
+            .context("failed to load character-title catalog for client bootstrap")?;
+        let motion_catalog = self.motion_catalog.as_ref().clone();
+        let contracts = self
+            .repository
+            .read_contract_catalog()
+            .context("failed to load contract catalog for client bootstrap")?;
+        let soul_emote_catalog = self
+            .soul_emotes()
+            .context("failed to load soul emote catalog for client bootstrap")?;
+        let bootstrap = WorldBootstrap {
+            skill_table: Arc::new(skill_table),
+            secondary_attribute_table: Arc::new(secondary_attribute_table),
+            spell_table: Arc::new(spell_table),
+            xp_table: Arc::new(xp_table),
+            character_titles: Arc::new(character_titles),
+            contracts: Arc::new(contracts),
+            motion_sequences: Arc::new(motion_catalog),
+            setup_dimensions: Arc::clone(&self.setup_dimensions),
+            soul_emote_catalog,
+        };
+        let bootstrap = Arc::new(bootstrap);
+        *cached = Some(Arc::clone(&bootstrap));
+        Ok(bootstrap)
+    }
+}
+
+/// Content and status commands available in every host mode.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "command", rename_all = "snake_case")]
+pub enum SharedContentCommand {
+    HostStatus,
+    /// Static pre-game choices; independent of character/world activation.
+    LoadCharacterCreationCatalog,
+    /// Starting allocations use static rules, independently of appearance resolution.
+    ResolveCharacterCreationStats {
+        request: crate::character_creation::CharacterCreationStatsRequest,
+    },
+    /// Static appearance resolution; does not require a completed submission draft.
+    ResolveCharacterCreationAppearance {
+        request: crate::character_creation::CharacterCreationAppearanceRequest,
+    },
+    /// Pose-grouped static chat vocabulary; no world state or UI categories.
+    LoadSoulEmotes,
+    OpenWorldMap {
+        request: crate::world_map::OpenWorldMapRequest,
+    },
+    ReadWorldMapTiles {
+        request: crate::world_map::ReadWorldMapTilesRequest,
+    },
+    LoadActiveRegionData,
+    LoadAnimation {
+        request: LoadAnimationRequest,
+    },
+    LoadSetupVisual {
+        request: LoadSetupVisualRequest,
+    },
+    LoadAudio {
+        request: LoadAudioRequest,
+    },
+    LoadSoundTable {
+        request: LoadSoundTableRequest,
+    },
+    LoadParticleEmitter {
+        request: LoadParticleEmitterRequest,
+    },
+    LoadParticleMeshes {
+        request: LoadParticleMeshesRequest,
+    },
+    LoadPhysicsScript {
+        request: LoadPhysicsScriptRequest,
+    },
+    LoadPhysicsScriptTable {
+        request: LoadPhysicsScriptTableRequest,
+    },
+    LoadLandblockSourceBatch {
+        request: LoadLandblockSourceBatchRequest,
+    },
+    LoadLandblockProfile {
+        request: LoadLandblockProfileRequest,
+    },
+    LoadSkySource,
+    /// Small static component dictionary, loaded lazily by inspectors.
+    LoadSpellComponents,
+    /// Static artwork shared by creation and progression.
+    LoadStatIcons,
+    LoadSpellReferences {
+        request: crate::spell_references::LoadSpellReferencesRequest,
+    },
+    PrepareUiIcons {
+        request: crate::ui_icons::PrepareUiIconsRequest,
+    },
+    LoadTexturePixels {
+        request: LoadTexturePixelsRequest,
+    },
+    LoadMotionTableClosure {
+        request: MotionTableClosureRequest,
+    },
+}
+
+/// Exact wire names owned by the shared-content dispatcher.
+pub const SHARED_CONTENT_COMMAND_NAMES: &[&str] = &[
+    "host_status",
+    "load_character_creation_catalog",
+    "resolve_character_creation_appearance",
+    "resolve_character_creation_stats",
+    "load_soul_emotes",
+    "open_world_map",
+    "read_world_map_tiles",
+    "load_active_region_data",
+    "load_animation",
+    "load_setup_visual",
+    "load_audio",
+    "load_sound_table",
+    "load_particle_emitter",
+    "load_particle_meshes",
+    "load_physics_script",
+    "load_physics_script_table",
+    "load_landblock_source_batch",
+    "load_landblock_profile",
+    "load_sky_source",
+    "load_texture_pixels",
+    "prepare_ui_icons",
+    "load_spell_references",
+    "load_spell_components",
+    "load_stat_icons",
+    "load_motion_table_closure",
+];
+
+/// Dispatches one shared-content command without exposing either authority's runtime.
+pub async fn dispatch_shared_content(
+    runtime: &crate::runtime::HostRuntime,
+    command: SharedContentCommand,
+) -> Result<HostResponse, ProtocolError> {
+    use SharedContentCommand::*;
+    let required_error = |error| runtime.content().failures.command_error(error);
+
+    match command {
+        HostStatus => encode_json(runtime.status()),
+        ResolveCharacterCreationStats { request } => encode_json(
+            runtime
+                .content()
+                .creation_stats
+                .resolve(request, &runtime.content().repository)
+                .map_err(required_error)?,
+        ),
+        ResolveCharacterCreationAppearance { request } => encode_json(
+            request
+                .resolve(&runtime.content().repository)
+                .map_err(required_error)?,
+        ),
+        LoadCharacterCreationCatalog => encode_json(
+            crate::character_creation::CharacterCreationCatalog::from_catalog(
+                &runtime
+                    .content()
+                    .repository
+                    .read_character_gen_catalog()
+                    .map_err(required_error)?,
+                &runtime.content().repository,
+            )
+            .map_err(required_error)?,
+        ),
+        OpenWorldMap { request } => encode_json(
+            runtime
+                .content()
+                .world_map
+                .open(request.intent)
+                .await
+                .map_err(application_error)?,
+        ),
+        ReadWorldMapTiles { request } => Ok(HostResponse::Binary(
+            runtime
+                .content()
+                .world_map
+                .read_tiles(request)
+                .await
+                .map_err(application_error)?,
+        )),
+        LoadActiveRegionData => Ok(HostResponse::Binary(
+            crate::load_active_region_data_bytes(&runtime.content().runtime)
+                .await
+                .map_err(required_error)?,
+        )),
+        LoadAnimation { request } => Ok(HostResponse::Binary(
+            crate::load_animation_bytes(&runtime.content().runtime, &request.animation_id)
+                .await
+                .map_err(resource_request_error)?,
+        )),
+        LoadSetupVisual { request } => Ok(HostResponse::Binary(
+            crate::setup_visual_source::load_setup_visual_source_bytes(
+                &runtime.content().runtime,
+                request.setup_did,
+                request.appearance,
+            )
+            .await
+            .map_err(resource_request_error)?,
+        )),
+        LoadAudio { request } => Ok(HostResponse::Binary(
+            crate::load_audio_bytes(&runtime.content().runtime, &request.sound_id)
+                .await
+                .map_err(resource_request_error)?,
+        )),
+        LoadSoundTable { request } => Ok(HostResponse::Binary(
+            crate::load_sound_table_bytes(&runtime.content().runtime, &request.sound_table_id)
+                .await
+                .map_err(resource_request_error)?,
+        )),
+        LoadParticleEmitter { request } => Ok(HostResponse::Binary(
+            crate::load_particle_emitter_bytes(
+                &runtime.content().runtime,
+                &request.emitter_info_id,
+            )
+            .await
+            .map_err(resource_request_error)?,
+        )),
+        LoadParticleMeshes { request } => Ok(HostResponse::Binary(
+            crate::load_particle_meshes_bytes(&runtime.content().runtime, &request.hw_gfx_obj_ids)
+                .await
+                .map_err(resource_request_error)?,
+        )),
+        LoadPhysicsScript { request } => Ok(HostResponse::Binary(
+            crate::load_physics_script_bytes(&runtime.content().runtime, &request.script_id)
+                .await
+                .map_err(resource_request_error)?,
+        )),
+        LoadPhysicsScriptTable { request } => Ok(HostResponse::Binary(
+            crate::load_physics_script_table_bytes(
+                &runtime.content().runtime,
+                &request.physics_script_table_id,
+            )
+            .await
+            .map_err(resource_request_error)?,
+        )),
+        LoadLandblockSourceBatch { request } => Ok(HostResponse::Binary(
+            crate::load_landblock_source_batch_bytes(
+                &runtime.content().runtime,
+                &request.landblock_id,
+                request.layers,
+            )
+            .await
+            .map_err(required_error)?,
+        )),
+        LoadLandblockProfile { request } => encode_json(
+            crate::load_landblock_profile_response(
+                &runtime.content().runtime,
+                &request.landblock_id,
+            )
+            .await
+            .map_err(required_error)?,
+        ),
+        LoadSkySource => Ok(HostResponse::Binary(
+            crate::load_sky_source_bytes(&runtime.content().runtime)
+                .await
+                .map_err(resource_request_error)?,
+        )),
+        LoadSoulEmotes => {
+            let content = runtime.content().clone();
+            let references = tokio::task::spawn_blocking(move || {
+                Ok::<_, anyhow::Error>(content.soul_emotes()?.references())
+            })
+            .await
+            .map_err(application_error)?
+            .map_err(application_error)?;
+            encode_json(references)
+        }
+        LoadStatIcons => {
+            let content = runtime.content().clone();
+            let references = tokio::task::spawn_blocking(move || {
+                crate::stat_icons::load_stat_icons(&content.repository)
+            })
+            .await
+            .map_err(application_error)?
+            .map_err(application_error)?;
+            encode_json(references)
+        }
+        LoadSpellComponents => {
+            let content = runtime.content().clone();
+            let results = tokio::task::spawn_blocking(move || {
+                crate::spell_references::load_spell_components(&content)
+            })
+            .await
+            .map_err(application_error)?
+            .map_err(application_error)?;
+            encode_json(results)
+        }
+        LoadSpellReferences { request } => {
+            request.validate().map_err(application_error)?;
+            let content = runtime.content().clone();
+            let results = tokio::task::spawn_blocking(move || {
+                crate::spell_references::load_spell_references(&content, &request)
+            })
+            .await
+            .map_err(application_error)?
+            .map_err(application_error)?;
+            encode_json(results)
+        }
+        PrepareUiIcons { request } => Ok(HostResponse::Binary(
+            crate::ui_icons::prepare_ui_icon_bytes(
+                Arc::clone(&runtime.content().repository),
+                request,
+            )
+            .await
+            .map_err(application_error)?,
+        )),
+        LoadTexturePixels { request } => Ok(HostResponse::Binary(
+            crate::load_texture_pixels_bytes(&runtime.content().runtime, request)
+                .await
+                .map_err(resource_request_error)?,
+        )),
+        LoadMotionTableClosure { request } => encode_json(
+            crate::load_motion_table_closure_ids(
+                &runtime.content().motion_catalog,
+                &request.motion_table_id,
+            )
+            .map_err(required_error)?,
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client_projection::{ClientExitCauseWire, ClientHostEvent, ClientLifecycleWire};
+    use crate::client_runtime::{ClientHostCommand, ClientHostRuntime};
+    use crate::host_event_sink::ClientEventSink;
+    use crate::host_mode::ClientLaunchConfiguration;
+    use crate::protocol::{HostCommand, dispatch};
+    use crate::runtime::HostRuntime;
+    use holtburger_core::client::connection::CONNECTION_TIMEOUT;
+    use tokio::sync::mpsc;
+
+    /// Retains authority events so startup and disconnect are checked through their real boundary.
+    struct EventSink(mpsc::UnboundedSender<ClientHostEvent>);
+
+    impl ClientEventSink for EventSink {
+        fn publish_client_event(&self, event: ClientHostEvent) -> Result<()> {
+            self.0.send(event).map_err(anyhow::Error::from)
+        }
+    }
+
+    #[tokio::test]
+    async fn presentation_rejection_preserves_resource_facts_without_native_escalation() {
+        let mut content = SharedHostContent::from_repository(Arc::new(
+            ContentRepository::from_mounts(Vec::new()),
+        ))
+        .unwrap();
+        let (reporter, native) = std::sync::mpsc::sync_channel(8);
+        content.failures = crate::content_failure::ContentFailureReporter::Stdio(reporter);
+        let (events, _receiver) = mpsc::unbounded_channel();
+        let runtime = HostRuntime::Client(ClientHostRuntime::from_content(
+            content,
+            Arc::new(EventSink(events)),
+        ));
+        let error = dispatch_shared_content(
+            &runtime,
+            SharedContentCommand::LoadAnimation {
+                request: LoadAnimationRequest {
+                    animation_id: "0x0300055b".into(),
+                },
+            },
+        )
+        .await
+        .unwrap_err();
+        let resource = error
+            .resource
+            .expect("source identity must survive the worker boundary");
+        assert_eq!(resource.file_id, 0x0300055b);
+        assert!(matches!(
+            resource.kind,
+            crate::content_failure::ResourceRequestFailureKind::Missing
+        ));
+        assert!(
+            native.try_recv().is_err(),
+            "optional presentation must not poison installation health"
+        );
+
+        assert!(
+            dispatch_shared_content(&runtime, SharedContentCommand::LoadActiveRegionData)
+                .await
+                .is_err()
+        );
+        assert!(matches!(
+            native.try_recv().unwrap(),
+            crate::protocol::ProtocolFrame::ContentFailed { .. }
+        ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn client_startup_and_disconnect_fit_the_default_worker_stack() {
+        // Keep this asset-independent, but exercise the actual dispatch/start/supervisor futures.
+        let content = SharedHostContent::from_repository(Arc::new(ContentRepository::from_mounts(
+            Vec::new(),
+        )))
+        .unwrap();
+        *content.client_bootstrap.lock().unwrap() = Some(Arc::new(WorldBootstrap::synthetic()));
+        let endpoint = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let port = endpoint.local_addr().unwrap().port();
+        let (sender, mut events) = mpsc::unbounded_channel();
+        let runtime = HostRuntime::Client(ClientHostRuntime::from_content(
+            content,
+            Arc::new(EventSink(sender)),
+        ));
+
+        // Poll the request on a Tokio worker, like stdio dispatch, rather than the test's root.
+        tokio::time::timeout(
+            CONNECTION_TIMEOUT,
+            tokio::spawn(async move {
+                dispatch(
+                    &runtime,
+                    HostCommand::Client(ClientHostCommand::StartClient {
+                        startup: ClientLaunchConfiguration {
+                            host: "127.0.0.1".into(),
+                            port,
+                            account: "startup-stack-test".into(),
+                            password: String::new(),
+                            melee_max_chase_distance: None,
+                        },
+                    }),
+                )
+                .await
+                .unwrap();
+                while !matches!(
+                    events.recv().await.unwrap(),
+                    ClientHostEvent::LifecycleChanged(ClientLifecycleWire::Authenticating)
+                ) {}
+
+                dispatch(
+                    &runtime,
+                    HostCommand::Client(ClientHostCommand::DisconnectClient),
+                )
+                .await
+                .unwrap();
+                loop {
+                    if let ClientHostEvent::ExitRequested(exit) = events.recv().await.unwrap() {
+                        assert!(matches!(
+                            exit.cause,
+                            ClientExitCauseWire::ExplicitDisconnect
+                        ));
+                        break;
+                    }
+                }
+            }),
+        )
+        .await
+        .expect("client startup/disconnect did not complete")
+        .unwrap();
+    }
+}

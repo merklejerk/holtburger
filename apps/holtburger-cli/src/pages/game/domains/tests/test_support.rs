@@ -1,4 +1,5 @@
 use super::*;
+use holtburger_core::client::movement_types::ClientDirectedCommand;
 use holtburger_core::client::movement_types::PlayerDriveIntent;
 
 pub(super) fn apply_queued_ui_action(state: &mut GameState, action: AppUiAction) -> UpdateResult {
@@ -18,10 +19,6 @@ pub(super) fn apply_queued_ui_action(state: &mut GameState, action: AppUiAction)
     result
 }
 
-pub(super) fn is_weapon_swap_active(state: &GameState) -> bool {
-    state.runtime.weapon_swap.is_active()
-}
-
 pub(super) fn has_active_approach(state: &GameState) -> bool {
     matches!(
         state.runtime.navigation.navigation_mode(),
@@ -32,12 +29,14 @@ pub(super) fn has_active_approach(state: &GameState) -> bool {
 pub(super) fn is_run_movement_command(command: &ClientCommand) -> bool {
     matches!(
         command,
-        ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(MotionState {
-            locomotion: Some(Locomotion::Forward),
+        ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(CharacterDrive {
+            longitudinal: Some(LongitudinalMotion::Forward),
+            lateral: None,
             ..
         })) | ClientCommand::DriveSelf(PlayerDriveIntent::ManualPulse {
-            state: MotionState {
-                locomotion: Some(Locomotion::Forward),
+            state: CharacterDrive {
+                longitudinal: Some(LongitudinalMotion::Forward),
+                lateral: None,
                 ..
             },
             ..
@@ -48,8 +47,9 @@ pub(super) fn is_run_movement_command(command: &ClientCommand) -> bool {
 pub(super) fn is_turn_movement_command(command: &ClientCommand) -> bool {
     matches!(
         command,
-        ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(MotionState {
-            locomotion: None,
+        ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(CharacterDrive {
+            longitudinal: None,
+            lateral: None,
             turning: Some(Turn::Left | Turn::Right),
             ..
         }))
@@ -63,9 +63,7 @@ pub(super) fn is_navigation_movement_command(command: &ClientCommand) -> bool {
 pub(super) fn is_navigation_drive_command(command: &ClientCommand) -> bool {
     matches!(
         command,
-        ClientCommand::DriveSelf(PlayerDriveIntent::Autonomous(_))
-            | ClientCommand::DriveSelf(PlayerDriveIntent::ArriveAtPose { .. })
-            | ClientCommand::DriveSelf(PlayerDriveIntent::Stop)
+        ClientCommand::DriveSelf(PlayerDriveIntent::ClientDirected(_))
     )
 }
 
@@ -73,23 +71,31 @@ pub(super) fn has_autonomous_navigation_command(result: &UpdateResult) -> bool {
     result.commands.iter().any(|command| {
         matches!(
             command,
-            ClientCommand::DriveSelf(PlayerDriveIntent::Autonomous(_))
+            ClientCommand::DriveSelf(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Acquire(_) | ClientDirectedCommand::Update(_)
+            ))
         )
     })
 }
 
 pub(super) fn has_stop_navigation_command(result: &UpdateResult) -> bool {
-    result
-        .commands
-        .iter()
-        .any(|command| matches!(command, ClientCommand::DriveSelf(PlayerDriveIntent::Stop)))
+    result.commands.iter().any(|command| {
+        matches!(
+            command,
+            ClientCommand::DriveSelf(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Settle | ClientDirectedCommand::Release
+            ))
+        )
+    })
 }
 
 pub(super) fn has_arrival_navigation_command(result: &UpdateResult) -> bool {
     result.commands.iter().any(|command| {
         matches!(
             command,
-            ClientCommand::DriveSelf(PlayerDriveIntent::ArriveAtPose { .. })
+            ClientCommand::DriveSelf(PlayerDriveIntent::ClientDirected(
+                ClientDirectedCommand::Settle
+            ))
         )
     })
 }
@@ -104,6 +110,7 @@ pub(super) fn runtime_body_view(
         authoritative_pose: Some(authoritative_pose),
         runtime_pose,
         velocity: Vector3::zero(),
+        acceleration: Vector3::zero(),
         omega: Vector3::zero(),
         motion_state: None,
         contact: holtburger_world::ContactState::Grounded,
@@ -136,6 +143,7 @@ pub(super) fn seed_navigation_motion_model(state: &mut GameState) {
             training: TrainingLevel::Trained,
             trained_cost: 0,
             specialized_cost: 0,
+            breakdown: Default::default(),
         },
     );
 }

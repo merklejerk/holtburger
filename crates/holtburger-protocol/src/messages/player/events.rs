@@ -7,7 +7,7 @@ use crate::traits::{ProtocolPack, ProtocolUnpack};
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::{PropertyString, WorldObjectProperties};
+use holtburger_common::properties::{InventoryEntryKind, PropertyString, WorldObjectProperties};
 use holtburger_common::{CharacterOptions1, CharacterOptions2, Guid};
 use std::collections::BTreeMap;
 
@@ -105,7 +105,7 @@ pub struct PlayerDescriptionEventData {
     pub pos: Option<WorldPosition>,
     /// All sparse properties (ints, floats, dids, etc.).
     pub properties: WorldObjectProperties,
-    /// Visual sub-positions for specific equipment slots or parts.
+    /// Character positions keyed by PositionType, including the saved last outdoor death.
     pub positions: BTreeMap<u32, WorldPosition>,
     /// Primary character attributes (Strength, Endurance, etc.).
     pub attributes: BTreeMap<u32, Attribute>,
@@ -131,13 +131,13 @@ pub struct PlayerDescriptionEventData {
     pub spellbook_filters: u32,
     /// Encapsulated gameplay options (e.g. CombatMode, AutoDecay).
     pub gameplay_options: Vec<u8>,
-    /// Complete list of items in the player's inventory (GUID + Weenie ID).
-    pub inventory: Vec<(Guid, u32)>,
+    /// Complete list of items in the player's inventory (GUID + server slot category).
+    pub inventory: Vec<(Guid, InventoryEntryKind)>,
     /// Detailed mapping of equipped items to slots and layering priority.
     pub equipped_objects: Vec<(Guid, u32, u32)>,
 }
 
-type InventoryVec = Vec<(Guid, u32)>;
+type InventoryVec = Vec<(Guid, InventoryEntryKind)>;
 type EquippedVec = Vec<(Guid, u32, u32)>;
 
 fn unpack_inventory_and_equipped_strict(
@@ -159,13 +159,10 @@ fn unpack_inventory_and_equipped_strict(
         if *offset + 4 > data.len() {
             return None;
         }
-        let wtype = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let kind =
+            InventoryEntryKind::from_repr(LittleEndian::read_u32(&data[*offset..*offset + 4]))?;
         *offset += 4;
-        // ACE writes a ContainerType enum here: NonContainer=0, Container=1, Foci=2
-        if wtype > 2 {
-            return None;
-        }
-        inventory.push((guid, wtype));
+        inventory.push((guid, kind));
     }
 
     if *offset + 4 > data.len() {
@@ -891,9 +888,9 @@ impl ProtocolPack for PlayerDescriptionEventData {
 
         buf.write_u32::<LittleEndian>(self.inventory.len() as u32)
             .unwrap();
-        for (guid, wtype) in &self.inventory {
+        for (guid, kind) in &self.inventory {
             guid.pack(buf);
-            buf.write_u32::<LittleEndian>(*wtype).unwrap();
+            buf.write_u32::<LittleEndian>(*kind as u32).unwrap();
         }
         buf.write_u32::<LittleEndian>(self.equipped_objects.len() as u32)
             .unwrap();
@@ -908,6 +905,75 @@ impl ProtocolPack for PlayerDescriptionEventData {
 impl ProtocolUnpack for PlayerDescriptionEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         Self::unpack(Guid(0), 0, data, offset)
+    }
+}
+
+/// Server-owned earned-title table (retail skips the version).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CharacterTitleEventData {
+    /// Wire version retained losslessly; retail does not reject unknown versions.
+    pub version: u32,
+    /// Currently displayed title; zero denotes no selected title.
+    pub selected_id: u32,
+    /// Earned title IDs, including IDs unknown to local content.
+    pub title_ids: Vec<u32>,
+}
+
+impl ProtocolUnpack for CharacterTitleEventData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let version = u32::unpack(data, offset)?;
+        let selected_id = u32::unpack(data, offset)?;
+        let count = u32::unpack(data, offset)? as usize;
+        // Bound the count before allocating or walking an untrusted list.
+        if count > data.len().checked_sub(*offset)? / 4 {
+            return None;
+        }
+        let title_ids = (0..count)
+            .map(|_| u32::unpack(data, offset))
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self {
+            version,
+            selected_id,
+            title_ids,
+        })
+    }
+}
+
+impl ProtocolPack for CharacterTitleEventData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.version.pack(writer);
+        self.selected_id.pack(writer);
+        u32::try_from(self.title_ids.len())
+            .expect("title count exceeds wire size")
+            .pack(writer);
+        for id in &self.title_ids {
+            id.pack(writer);
+        }
+    }
+}
+
+/// Earn a title and optionally display it (retail).
+#[derive(Debug, Clone, PartialEq)]
+pub struct UpdateTitleEventData {
+    /// Newly granted or selected title ID.
+    pub title_id: u32,
+    /// Wire boolean occupies a complete 32-bit word.
+    pub set_as_display: bool,
+}
+
+impl ProtocolUnpack for UpdateTitleEventData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        Some(Self {
+            title_id: u32::unpack(data, offset)?,
+            set_as_display: bool::unpack(data, offset)?,
+        })
+    }
+}
+
+impl ProtocolPack for UpdateTitleEventData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.title_id.pack(writer);
+        self.set_as_display.pack(writer);
     }
 }
 

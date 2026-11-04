@@ -1,0 +1,208 @@
+name: Native release package
+
+on:
+  workflow_call:
+    inputs:
+      commit:
+        type: string
+        required: true
+      kind:
+        type: string
+        required: true
+      matrix:
+        type: string
+        required: true
+      product:
+        type: string
+        default: both
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(inputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      PYTHONDONTWRITEBYTECODE: '1'
+      HOLTBURGER_SOURCE_REVISION: ${{ inputs.commit }}
+      HOLTBURGER_DISTRIBUTION: ${{ inputs.kind }}
+      HOLTBURGER_PRODUCT: ${{ inputs.product }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install release tooling dependencies
+        run: python -m pip install -r .github/scripts/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.1
+          cache: npm
+          cache-dependency-path: apps/holtburger-3d/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
+          targets: ${{ matrix.triple }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate and prepare distribution versions
+        run: |
+          if [ "$HOLTBURGER_DISTRIBUTION" = nightly ]; then cargo fetch --locked; fi
+          python .github/scripts/release_suite.py prepare-source --kind "$HOLTBURGER_DISTRIBUTION"
+          echo 'HOLTBURGER_SOURCE_MODIFIED=0' >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notices
+          path: .holtburger-local/release-notices
+      - name: Fetch pinned CLI content
+        if: inputs.product != '3d'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/fetch_cli_content.py .holtburger-local/cli-content
+      - name: Build selected executables together
+        run: |
+          PACKAGES=()
+          if [[ "$HOLTBURGER_PRODUCT" != '3d' ]]; then
+            PACKAGES+=(-p holtburger-cli --bin tui --bin content_bootstrap -p holtburger-tools --bin dat2hba --bin dat-tool)
+          fi
+          if [[ "$HOLTBURGER_PRODUCT" != 'cli' ]]; then
+            PACKAGES+=(-p holtburger-3d-host --bin holtburger-3d-host)
+          fi
+          cargo build --locked --release --target '${{ matrix.triple }}' "${PACKAGES[@]}"
+          SUFFIX=''
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
+          echo "HOLTBURGER_HOST_BIN=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
+          echo "HOLTBURGER_PACKAGE_HOST=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
+      - name: Verify CLI content and assemble its native archive
+        if: inputs.product != '3d'
+        run: |
+          SUFFIX=''
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
+          "target/${{ matrix.triple }}/release/content_bootstrap$SUFFIX" --content .holtburger-local/cli-content
+          python .github/scripts/release_suite.py assemble --product cli \
+            --target '${{ matrix.triple }}' --content .holtburger-local/cli-content \
+            --notices .holtburger-local/release-notices/THIRD_PARTY_NOTICES.html \
+            --output .holtburger-local/release-artifacts/cli
+      - uses: actions/upload-artifact@v4
+        if: inputs.product != '3d'
+        with:
+          name: release-cli-${{ matrix.triple }}
+          path: .holtburger-local/release-artifacts/cli/*
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux' && inputs.product != '3d'
+        with:
+          name: verification-linux-bootstrap
+          path: target/x86_64-unknown-linux-gnu/release/content_bootstrap
+          if-no-files-found: error
+      - name: Install frontend dependencies
+        if: inputs.product != 'cli'
+        working-directory: apps/holtburger-3d
+        run: npm ci
+      - name: Install and test Windows executable packaging tools
+        if: runner.os == 'Windows' && inputs.product != 'cli'
+        working-directory: apps/holtburger-3d
+        run: |
+          npm run setup:windows-packaging
+          npm run test:windows-packaging
+      - name: Check native branding generation
+        if: inputs.product != 'cli'
+        working-directory: apps/holtburger-3d
+        run: npm run check:branding
+      - name: Build and inspect the 3D application
+        if: inputs.product != 'cli'
+        working-directory: apps/holtburger-3d
+        run: |
+          npm run build
+          npm run build:electron:main
+          npm run package:built -- --platform=${{ matrix.platform }} --arch=${{ matrix.architecture }}
+          npm run check:package
+          npm run smoke:sidecar
+      - name: Install Linux virtual display
+        if: runner.os == 'Linux' && inputs.product != 'cli'
+        run: |
+          if ! command -v Xvfb >/dev/null || ! command -v xauth >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends xvfb xauth
+          fi
+      - name: Check packaged renderer, content recovery and update lifecycle
+        if: inputs.product != 'cli'
+        working-directory: apps/holtburger-3d
+        run: |
+          PACKAGE="$GITHUB_WORKSPACE/apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}"
+          case "$RUNNER_OS" in
+            macOS) EXECUTABLE="$PACKAGE/holtburger-3d.app/Contents/MacOS/holtburger-3d" ;;
+            Windows) EXECUTABLE="$PACKAGE/holtburger-3d.exe" ;;
+            Linux) EXECUTABLE="$PACKAGE/holtburger-3d" ;;
+            *) exit 1 ;;
+          esac
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then
+            xvfb-run --auto-servernum node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
+            xvfb-run --auto-servernum npm run probe:launcher -- --updates-only --package "$EXECUTABLE"
+            xvfb-run --auto-servernum npm run probe:launcher -- --updates-direct --package "$EXECUTABLE"
+          else
+            node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
+            npm run probe:launcher -- --updates-only --package "$EXECUTABLE"
+            npm run probe:launcher -- --updates-direct --package "$EXECUTABLE"
+          fi
+      - name: Assemble the 3D native archive
+        if: inputs.product != 'cli'
+        run: |
+          python .github/scripts/release_suite.py assemble --product 3d \
+            --target '${{ matrix.triple }}' \
+            --package 'apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}' \
+            --notices .holtburger-local/release-notices/THIRD_PARTY_NOTICES.html \
+            --output .holtburger-local/release-artifacts/3d
+      - uses: actions/upload-artifact@v4
+        if: inputs.product != 'cli'
+        with:
+          name: release-3d-${{ matrix.triple }}
+          path: .holtburger-local/release-artifacts/3d/*
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux' && inputs.product != 'cli'
+        with:
+          name: verification-linux-electron
+          path: apps/holtburger-3d/dist-electron/
+          if-no-files-found: error
+      - name: Install the Windows installer compiler
+        if: runner.os == 'Windows' && inputs.product != 'cli'
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          $package = @(choco list --exact innosetup --limit-output | Where-Object { $_ -match '^innosetup\|' })
+          if ($package.Count -ne 1) { throw 'Expected one installed Inno Setup package' }
+          $major = ($package[0].Split('|')[1]).Split('.')[0]
+          $candidates = @(@("${env:ProgramFiles(x86)}\Inno Setup $major\ISCC.exe", "$env:ProgramFiles\Inno Setup $major\ISCC.exe") | Where-Object { Test-Path $_ })
+          if ($candidates.Count -ne 1) { throw 'Expected one compiler for the installed Inno Setup package' }
+          "INNO_COMPILER=$($candidates[0])" >> $env:GITHUB_ENV
+          Write-Host "Inno Setup compiler: $($candidates[0])"
+      - name: Build and verify the desktop installer from the native archive
+        if: runner.os != 'Linux' && inputs.product != 'cli'
+        run: |
+          COMPILER=()
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then COMPILER=(--iscc "$INNO_COMPILER"); fi
+          python .github/scripts/desktop_installers.py \
+            --artifacts .holtburger-local/release-artifacts/3d \
+            --target '${{ matrix.triple }}' \
+            --output .holtburger-local/release-installers "${COMPILER[@]}"
+      - uses: actions/upload-artifact@v4
+        if: runner.os != 'Linux' && inputs.product != 'cli'
+        with:
+          name: release-3d-installer-${{ matrix.triple }}
+          path: .holtburger-local/release-installers/*
+          if-no-files-found: error
+          compression-level: 0

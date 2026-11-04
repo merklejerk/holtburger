@@ -1,0 +1,14 @@
+{
+	"craftSuccessDialog": false,
+	"confirmRareUse": false,
+	"allowItemGive": false,
+	"ignoreTradeRequests": false,
+	"ignoreAllegianceRequests": false,
+	"useDeception": false,
+	"shareBirthDate": false,
+	"shareAge": false,
+	"shareDeaths": false,
+	"shareTitles": false,
+	"shareChessRank": false,
+	"shareFishingSkill": false
+}

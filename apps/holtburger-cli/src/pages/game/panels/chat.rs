@@ -5,12 +5,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
 
 use crossterm::event::{KeyCode, KeyEvent};
-use holtburger_common::properties::DamageType;
 use holtburger_core::client::types::{
     ChatChannelInfo, ChatChannelKind, ChatChannelSource, CombatFeedback,
 };
+use holtburger_core::combat_feedback_message;
 use holtburger_protocol::errors::WeenieError;
-use holtburger_protocol::messages::combat::{AttackConditions, DamageLocation};
 use holtburger_protocol::messages::{ChatMessageType, ChatMessageTypeId};
 use holtburger_world::FellowshipActivity;
 use std::fs::File;
@@ -118,28 +117,43 @@ impl ChatState {
                 };
                 self.log_with_channel(None, chat_tags, msg.clone(), false);
             }
-            ClientViewEvent::ServerMessage { message, chat_type } => {
+            ClientViewEvent::EntityUseFeedback(feedback) => {
+                self.log(
+                    ChatMessageTags::system(),
+                    holtburger_core::errors::format_entity_use_feedback(feedback),
+                );
+            }
+            ClientViewEvent::TransientString { message }
+            | ClientViewEvent::PopupString { message } => {
+                self.log(ChatMessageTags::system(), message.clone());
+            }
+            ClientViewEvent::ChatError { message } => {
+                self.log(ChatMessageTags::warning(), message.clone());
+            }
+            ClientViewEvent::ServerMessage {
+                message, chat_type, ..
+            } => {
                 self.log(chat_message_tags(*chat_type), message.clone());
             }
             ClientViewEvent::Chat {
-                sender,
+                speaker,
                 message,
                 chat_type,
             } => {
                 self.log(
                     chat_message_tags(*chat_type),
-                    format!("{}: {}", sender, message),
+                    format!("{}: {}", speaker.name(), message),
                 );
             }
             ClientViewEvent::ChannelMessage {
                 channel,
-                sender,
+                speaker,
                 message,
             } => {
                 self.log_channel(
                     *channel,
                     channel_tags(*channel),
-                    format_channel_message(*channel, sender, message, local_player_name),
+                    format_channel_message(*channel, speaker.name(), message, local_player_name),
                 );
             }
             ClientViewEvent::FellowshipActivity { activity } => {
@@ -148,33 +162,31 @@ impl ChatState {
                     format_fellowship_activity(activity),
                 );
             }
-            ClientViewEvent::Tell { sender, message } => {
-                self.last_incoming_tell_sender = Some(sender.clone());
+            ClientViewEvent::Tell {
+                speaker, message, ..
+            } => {
+                self.last_incoming_tell_sender = Some(speaker.name().to_string());
                 self.log(
                     ChatMessageTags::tell(),
-                    format!("{} tells you: {}", sender, message),
+                    format!("{} tells you: {}", speaker.name(), message),
                 );
             }
-            ClientViewEvent::Emote { sender, text } => {
-                self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
+            ClientViewEvent::Emote { speaker, text } => {
+                self.log(
+                    ChatMessageTags::emote(),
+                    format!("{} {}", speaker.name(), text),
+                );
             }
-            ClientViewEvent::SoulEmote { sender, text, .. } => {
-                self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
+            ClientViewEvent::SoulEmote { speaker, text, .. } => {
+                self.log(
+                    ChatMessageTags::emote(),
+                    format!("{} {}", speaker.name(), text),
+                );
             }
             ClientViewEvent::CombatFeedback(feedback) => {
                 self.log_combat_feedback(feedback);
             }
-            ClientViewEvent::PingResponse
-            | ClientViewEvent::NetPulse { .. }
-            | ClientViewEvent::Disconnected => {}
-            ClientViewEvent::BootAccount(reason) => {
-                let message = if reason.trim().is_empty() {
-                    "Disconnected: Booted from server.".to_string()
-                } else {
-                    format!("Disconnected: Booted from server: {}", reason)
-                };
-                self.log(ChatMessageTags::error(), message);
-            }
+            ClientViewEvent::PingResponse | ClientViewEvent::ConnectionUpdated(_) => {}
             _ => {}
         }
     }
@@ -236,6 +248,12 @@ impl ChatState {
     }
 
     fn log_combat_feedback(&mut self, feedback: &CombatFeedback) {
+        if let Some(message) = combat_feedback_message(feedback) {
+            let (text, _) = message.into_text_and_emphasis();
+            self.log(ChatMessageTags::info().combat(), text);
+            return;
+        }
+
         match feedback {
             CombatFeedback::AttackDone { error } => {
                 if *error == WeenieError::None {
@@ -247,71 +265,7 @@ impl ChatState {
             CombatFeedback::AttackCommenced => {
                 log::info!("Attack sequence started.");
             }
-            CombatFeedback::AttackerNotification {
-                defender_name,
-                damage_type,
-                health_percent,
-                damage,
-                critical_hit,
-                attack_conditions,
-            } => {
-                self.log(
-                    ChatMessageTags::info().combat(),
-                    format!(
-                        "You hit {} for {} {} damage ({}).{}{}",
-                        defender_name,
-                        damage,
-                        format_damage_type(*damage_type),
-                        format_percent(*health_percent),
-                        if *critical_hit { " Critical hit." } else { "" },
-                        format_attack_conditions_suffix(*attack_conditions),
-                    ),
-                );
-            }
-            CombatFeedback::DefenderNotification {
-                attacker_name,
-                damage_type,
-                health_percent,
-                damage,
-                damage_location,
-                critical_hit,
-                attack_conditions,
-            } => {
-                self.log(
-                    ChatMessageTags::info().combat(),
-                    format!(
-                        "{} hit you for {} {} damage to your {} ({}).{}{}",
-                        attacker_name,
-                        damage,
-                        format_damage_type(*damage_type),
-                        format_damage_location(*damage_location),
-                        format_percent(*health_percent),
-                        if *critical_hit { " Critical hit." } else { "" },
-                        format_attack_conditions_suffix(*attack_conditions),
-                    ),
-                );
-            }
-            CombatFeedback::EvasionAttackerNotification { defender_name } => {
-                self.log(
-                    ChatMessageTags::info().combat(),
-                    format!("{} evaded your attack.", defender_name),
-                );
-            }
-            CombatFeedback::EvasionDefenderNotification { attacker_name } => {
-                self.log(
-                    ChatMessageTags::info().combat(),
-                    format!("You evaded {}'s attack.", attacker_name),
-                );
-            }
-            CombatFeedback::VictimNotification { death_message } => {
-                self.log(ChatMessageTags::info().combat(), death_message.clone());
-            }
-            CombatFeedback::KillerNotification { death_message } => {
-                self.log(ChatMessageTags::info().combat(), death_message.clone());
-            }
-            CombatFeedback::PlayerKilled { death_message, .. } => {
-                self.log(ChatMessageTags::info().combat(), death_message.clone());
-            }
+            _ => unreachable!("player-facing combat feedback returned no message"),
         }
     }
 
@@ -488,6 +442,11 @@ fn channel_label(channel: ChatChannelInfo) -> String {
         ChatChannelKind::Roleplay => "Roleplay".to_string(),
         ChatChannelKind::Society => "Society".to_string(),
         ChatChannelKind::Olthoi => "Olthoi".to_string(),
+        ChatChannelKind::FellowshipBroadcast => "Party Notice".to_string(),
+        ChatChannelKind::AllegianceBroadcast => "Allegiance Broadcast".to_string(),
+        ChatChannelKind::SocietyCelestialHand => "Celestial Hand".to_string(),
+        ChatChannelKind::SocietyEldrytchWeb => "Eldrytch Web".to_string(),
+        ChatChannelKind::SocietyRadiantBlood => "Radiant Blood".to_string(),
         ChatChannelKind::Unknown => match channel.source {
             ChatChannelSource::Legacy { channel } => format!("Legacy 0x{:08X}", channel.raw()),
             ChatChannelSource::Turbine { room_id, .. } => {
@@ -566,42 +525,6 @@ fn format_fellowship_activity(activity: &FellowshipActivity) -> String {
     }
 }
 
-fn format_damage_type(damage_type: DamageType) -> String {
-    let names: Vec<_> = damage_type.iter_display_names().collect();
-    if names.is_empty() {
-        "unknown".to_string()
-    } else {
-        names.join("/").to_ascii_lowercase()
-    }
-}
-
-fn format_percent(value: f64) -> String {
-    format!("{:.1}%", value * 100.0)
-}
-
-fn format_damage_location(location: DamageLocation) -> &'static str {
-    match location {
-        DamageLocation::Head => "head",
-        DamageLocation::Chest => "chest",
-        DamageLocation::Abdomen => "abdomen",
-        DamageLocation::UpperArm => "upper arm",
-        DamageLocation::LowerArm => "lower arm",
-        DamageLocation::Hand => "hand",
-        DamageLocation::UpperLeg => "upper leg",
-        DamageLocation::LowerLeg => "lower leg",
-        DamageLocation::Foot => "foot",
-    }
-}
-
-fn format_attack_conditions_suffix(attack_conditions: AttackConditions) -> String {
-    let names: Vec<_> = attack_conditions.iter_display_names().collect();
-    if names.is_empty() {
-        String::new()
-    } else {
-        format!(" [{}]", names.join(", "))
-    }
-}
-
 fn chat_message_tags(chat_type: ChatMessageTypeId) -> ChatMessageTags {
     match chat_type.known() {
         Some(ChatMessageType::Broadcast)
@@ -643,14 +566,20 @@ fn chat_message_tags(chat_type: ChatMessageTypeId) -> ChatMessageTags {
 
 fn channel_tags(channel: ChatChannelInfo) -> ChatMessageTags {
     match channel.kind {
-        ChatChannelKind::Fellowship => ChatMessageTags::PARTY,
+        ChatChannelKind::Fellowship | ChatChannelKind::FellowshipBroadcast => {
+            ChatMessageTags::PARTY
+        }
         ChatChannelKind::Allegiance
+        | ChatChannelKind::AllegianceBroadcast
         | ChatChannelKind::Vassals
         | ChatChannelKind::Patron
         | ChatChannelKind::Monarch
         | ChatChannelKind::CoVassals => ChatMessageTags::GUILD,
         ChatChannelKind::Trade => ChatMessageTags::TRADE,
-        ChatChannelKind::Society => ChatMessageTags::SOCIETY,
+        ChatChannelKind::Society
+        | ChatChannelKind::SocietyCelestialHand
+        | ChatChannelKind::SocietyEldrytchWeb
+        | ChatChannelKind::SocietyRadiantBlood => ChatMessageTags::SOCIETY,
         ChatChannelKind::General
         | ChatChannelKind::Lfg
         | ChatChannelKind::Roleplay
@@ -756,15 +685,29 @@ pub fn render_chat_pane(f: &mut Frame, chat: &ChatState, is_focused: bool, area:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::Guid;
+    use holtburger_common::properties::DamageType;
+    use holtburger_core::client::types::ChatSpeaker;
+    use holtburger_protocol::messages::combat::{AttackConditions, DamageLocation};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use std::cell::RefCell;
     use std::sync::Once;
 
     struct TestLogger;
 
     static TEST_LOGGER: TestLogger = TestLogger;
     static INIT_LOGGER: Once = Once::new();
-    static CAPTURED_LOGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    thread_local! {
+        /// Captured log records for the currently running test.
+        ///
+        /// The `log` facade allows exactly one process-wide logger, but capture must not be
+        /// process-wide: the test harness runs tests in parallel on separate threads, so a shared
+        /// buffer lets one test observe another's records. Keying capture to the emitting thread
+        /// gives each test its own view without serializing the suite.
+        static CAPTURED_LOGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
 
     impl log::Log for TestLogger {
         fn enabled(&self, metadata: &log::Metadata) -> bool {
@@ -773,10 +716,9 @@ mod tests {
 
         fn log(&self, record: &log::Record) {
             if self.enabled(record.metadata()) {
-                CAPTURED_LOGS
-                    .lock()
-                    .expect("test logger should lock")
-                    .push(format!("[{}] {}", record.level(), record.args()));
+                CAPTURED_LOGS.with_borrow_mut(|captured| {
+                    captured.push(format!("[{}] {}", record.level(), record.args()));
+                });
             }
         }
 
@@ -789,10 +731,12 @@ mod tests {
             log::set_max_level(log::LevelFilter::Info);
         });
 
-        CAPTURED_LOGS
-            .lock()
-            .expect("test logger should lock")
-            .clear();
+        CAPTURED_LOGS.with_borrow_mut(Vec::clear);
+    }
+
+    /// Snapshot this test's captured log records.
+    fn captured_logs() -> Vec<String> {
+        CAPTURED_LOGS.with_borrow(Clone::clone)
     }
 
     #[test]
@@ -804,7 +748,7 @@ mod tests {
                 channel: ChatChannelInfo::legacy(
                     holtburger_protocol::messages::ChatChannel::Fellow.into(),
                 ),
-                sender: String::new(),
+                speaker: ChatSpeaker::unknown(String::new()),
                 message: "party check".to_string(),
             },
             Some("Player"),
@@ -823,7 +767,7 @@ mod tests {
     }
 
     #[test]
-    fn channel_message_formats_guild_sender_with_label() {
+    fn channel_message_labels_allegiance_broadcast_without_flattening_it() {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
@@ -831,7 +775,7 @@ mod tests {
                 channel: ChatChannelInfo::legacy(
                     holtburger_protocol::messages::ChatChannel::AllegianceBroadcast.into(),
                 ),
-                sender: "Bestie".to_string(),
+                speaker: ChatSpeaker::unknown("Bestie".to_string()),
                 message: "guild check".to_string(),
             },
             Some("Player"),
@@ -846,7 +790,7 @@ mod tests {
         );
         assert!(message.chat_tags.contains(ChatMessageTags::CHAT));
         assert!(message.chat_tags.contains(ChatMessageTags::GUILD));
-        assert_eq!(message.text, "[Guild] Bestie: guild check");
+        assert_eq!(message.text, "[Allegiance Broadcast] Bestie: guild check");
     }
 
     #[test]
@@ -860,7 +804,7 @@ mod tests {
                     holtburger_protocol::messages::TurbineChatType::General.into(),
                     holtburger_protocol::messages::TurbineChatDispatchType::SendToRoomByName,
                 ),
-                sender: "Bestie".to_string(),
+                speaker: ChatSpeaker::from_guid("Bestie".to_string(), Guid(0x5000_0001)),
                 message: "world check".to_string(),
             },
             Some("Player"),
@@ -880,7 +824,7 @@ mod tests {
                 channel: ChatChannelInfo::legacy(
                     holtburger_protocol::messages::ChatChannel::Fellow.into(),
                 ),
-                sender: String::new(),
+                speaker: ChatSpeaker::unknown(String::new()),
                 message: "party check".to_string(),
             },
             None,
@@ -939,6 +883,7 @@ mod tests {
 
         chat.handle_event(
             &holtburger_core::ClientViewEvent::ServerMessage {
+                combat_outcome: None,
                 message: "You enter combat.".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Combat.into(),
             },
@@ -956,6 +901,7 @@ mod tests {
 
         chat.handle_event(
             &holtburger_core::ClientViewEvent::ServerMessage {
+                combat_outcome: None,
                 message: "Welcome to Asheron's Call.".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Broadcast.into(),
             },
@@ -975,6 +921,7 @@ mod tests {
 
         chat.handle_event(
             &holtburger_core::ClientViewEvent::ServerMessage {
+                combat_outcome: None,
                 message: "Buff Dude has granted you access to their home's storage.".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Tell.into(),
             },
@@ -997,7 +944,7 @@ mod tests {
 
         chat.handle_event(
             &holtburger_core::ClientViewEvent::SoulEmote {
-                sender: "Bestie".to_string(),
+                speaker: ChatSpeaker::from_guid("Bestie".to_string(), Guid(0x5000_0001)),
                 text: "waves.".to_string(),
             },
             Some("Player"),
@@ -1015,6 +962,11 @@ mod tests {
         chat.handle_event(
             &holtburger_core::ClientViewEvent::CombatFeedback(
                 CombatFeedback::AttackerNotification {
+                    context: holtburger_core::client::types::CombatOutcomeContext {
+                        world_generation: 0,
+                        attribution:
+                            holtburger_core::client::types::CombatOutcomeAttribution::Unplaced,
+                    },
                     defender_name: "Drudge".to_string(),
                     damage_type: DamageType::SLASH,
                     health_percent: 0.25,
@@ -1030,15 +982,10 @@ mod tests {
         let message = chat.messages.last().expect("combat feedback should log");
 
         assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
-        assert!(
-            message
-                .text
-                .contains("You hit Drudge for 37 slashing damage")
+        assert_eq!(
+            message.text,
+            "You hit Drudge for 37 slashing damage. Critical hit. [Recklessness, Sneak Attack]"
         );
-        assert!(message.text.contains("25.0%"));
-        assert!(message.text.contains("Critical hit."));
-        assert!(message.text.contains("Recklessness"));
-        assert!(message.text.contains("Sneak Attack"));
     }
 
     #[test]
@@ -1063,13 +1010,10 @@ mod tests {
         let message = chat.messages.last().expect("combat feedback should log");
 
         assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
-        assert!(
-            message
-                .text
-                .contains("Banderling hit you for 18 fire damage to your chest")
+        assert_eq!(
+            message.text,
+            "Banderling hit you for 18 fire damage to your chest. [Overpower]"
         );
-        assert!(message.text.contains("12.5%"));
-        assert!(message.text.contains("Overpower"));
     }
 
     #[test]
@@ -1098,7 +1042,7 @@ mod tests {
 
         chat.handle_event(
             &holtburger_core::ClientViewEvent::Chat {
-                sender: "Bestie".to_string(),
+                speaker: ChatSpeaker::from_guid("Bestie".to_string(), Guid(0x5000_0001)),
                 message: "hello world".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Speech.into(),
             },
@@ -1172,13 +1116,12 @@ mod tests {
         let mut chat = ChatState::new(None);
         chat.log(ChatMessageTags::chat(), "echo this chat line".to_string());
 
-        let captured = CAPTURED_LOGS.lock().expect("test logger should lock");
+        let captured = captured_logs();
         assert!(
             captured
                 .iter()
                 .any(|message| message.contains("echo this chat line")),
-            "expected chat line to be echoed into the debug log, got {:?}",
-            *captured
+            "expected chat line to be echoed into the debug log, got {captured:?}"
         );
     }
 
@@ -1192,11 +1135,10 @@ mod tests {
             None,
         );
 
-        let captured = CAPTURED_LOGS.lock().expect("test logger should lock");
+        let captured = captured_logs();
         assert!(
             captured.is_empty(),
-            "expected no echoed debug log entries, got {:?}",
-            *captured
+            "expected no echoed debug log entries, got {captured:?}"
         );
     }
 
@@ -1210,11 +1152,10 @@ mod tests {
             "captured logger line".to_string(),
         );
 
-        let captured = CAPTURED_LOGS.lock().expect("test logger should lock");
+        let captured = captured_logs();
         assert!(
             captured.is_empty(),
-            "expected no echoed debug log entries, got {:?}",
-            *captured
+            "expected no echoed debug log entries, got {captured:?}"
         );
     }
 }

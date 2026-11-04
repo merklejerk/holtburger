@@ -1,13 +1,15 @@
-use super::{ClientRuntime, types::*};
+use super::{ClientRuntime, ClientWorldActivationState, types::*};
 use anyhow::Result;
-use holtburger_common::ConfirmationType;
 use holtburger_common::properties::WorldObjectExt as _;
-use holtburger_protocol::errors::WeenieError;
+use holtburger_common::sequence::is_newer_u16;
+use holtburger_common::{ConfirmationType, Guid};
+use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::*;
+use holtburger_protocol::opcodes::GameOpcode;
 use holtburger_protocol::traits::ProtocolUnpack;
-use holtburger_world::RuntimeBodyResetCause;
-use holtburger_world::WorldEvent;
 use holtburger_world::entity::Entity;
+use holtburger_world::{AuthoritativePoseEffect, AuthoritativePoseResetCause, WorldEvent};
+use std::time::Instant;
 
 fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType) -> bool {
     matches!(
@@ -21,100 +23,339 @@ fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType)
 }
 
 impl ClientRuntime {
-    pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
-        let reset_events = self
-            .world
-            .suspend_runtime_bodies(RuntimeBodyResetCause::TeleportOrWorldReset);
-        for event in &reset_events {
-            self.handle_runtime_world_event(event);
+    /// Correlates object turns with an operation that already owns target-facing presentation.
+    fn suppresses_local_target_turn(&self, data: &MovementEventData) -> bool {
+        if data.guid != self.world.player.guid || data.is_autonomous {
+            return false;
         }
-        self.state = ClientState::EnteringWorld;
-        self.send_status_event();
+        let MovementTypeData::TurnToObject(turn) = &data.data else {
+            return false;
+        };
+        let casting_target = self.active_busy_operation.as_ref().and_then(|pending| {
+            if pending.deadline <= std::time::Instant::now() {
+                return None;
+            }
+            match pending.operation {
+                super::PendingOperation::SpellCast {
+                    target: Some(target),
+                } => Some(target),
+                _ => None,
+            }
+        });
+        let missile_target = self
+            .combat_engagement
+            .sent_engagement()
+            .filter(|engagement| matches!(engagement.profile, ClientAttackProfile::Missile { .. }))
+            .map(|engagement| engagement.target);
+        casting_target == Some(turn.target) || missile_target == Some(turn.target)
+    }
+
+    fn apply_local_position_authority(
+        &mut self,
+        position: holtburger_common::position::WorldPosition,
+        known_teleport_sequence: u16,
+        known_force_position_sequence: u16,
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+        discontinuity_already_handled: bool,
+    ) -> Vec<WorldEvent> {
+        // PlayerTeleport establishes the destination epoch before ACE sends its position. That
+        // makes the destination packet look same-epoch, even though portal activation requires
+        // one unconditional runtime reset to the destination pose.
+        let installs_teleport_destination = self.activation.as_ref().is_some_and(|activation| {
+            matches!(
+                activation.phase,
+                super::ClientWorldActivationPhase::TeleportAwaitingDestination
+            )
+        });
+        let reset_cause = if installs_teleport_destination
+            || is_newer_u16(teleport_sequence, known_teleport_sequence)
+        {
+            Some(AuthoritativePoseResetCause::Teleport)
+        } else if is_newer_u16(force_position_sequence, known_force_position_sequence) {
+            Some(AuthoritativePoseResetCause::ForcedReposition)
+        } else {
+            None
+        };
+        let effect = reset_cause.map_or(
+            AuthoritativePoseEffect::Confirm { pose: position },
+            |cause| AuthoritativePoseEffect::Reset {
+                pose: position,
+                cause,
+            },
+        );
+        let events = self.world.apply_player_pose_effect(effect);
+        if reset_cause.is_some() {
+            self.movement.reset_navigation_progress();
+        }
+
+        if installs_teleport_destination {
+            self.activation
+                .as_mut()
+                .expect("teleport destination requires an active activation")
+                .phase = super::ClientWorldActivationPhase::TeleportDestinationInstalled;
+        }
+        if reset_cause.is_some() && !discontinuity_already_handled && !installs_teleport_destination
+        {
+            self.reset_camera();
+            if let Some(coordinator) = self.collision_coordinator.as_mut() {
+                coordinator.invalidate();
+            }
+            self.bump_world_generation();
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::PresentationDiscontinuity {
+                    world_generation: self.world_generation,
+                    kind: ClientPresentationDiscontinuityKind::ForcedReposition,
+                });
+        }
+
+        events
+    }
+
+    pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
+        self.reset_barber();
+        let player_guid = self.character_selection.character_id.ok_or_else(|| {
+            anyhow::anyhow!("cannot enter the world without a selected character")
+        })?;
+        self.reset_friends();
+        self.begin_contracts();
+        self.begin_squelch();
+        self.reset_allegiance();
+        self.world.fellowship = None;
+        self.reset_housing();
+        if self.progression.clear() {
+            self.emit_progression_guards();
+        }
+        self.reset_container_access();
+        self.recent_deaths.clear();
+        self.clear_busy_operation();
+        // ACE Session.InitSessionForWorldLogin restarts this character's event stamps at one.
+        self.event_ordering = Some(super::event_ordering::GameEventOrdering::new(player_guid));
+        self.described_character = None;
+        self.world.player.character_titles = None;
+        self.refresh_spell_inspection_context();
+        self.start_world_activation_with_reset(
+            ClientWorldActivationState::InitialEntry,
+            player_guid,
+        );
         Ok(())
     }
 
     async fn enter_world(&mut self) -> Result<()> {
-        if self.state == ClientState::InWorld {
+        if self.state == ClientState::InWorld && self.activation.is_none() {
             return Ok(());
         }
 
+        // Synthetic/non-network callers may still feed StartGame directly. Real network entry
+        // remains gated by `try_complete_world_activation`; this fallback preserves the broad
+        // TUI authority API when no activation has been started.
+        if self.activation.is_some() {
+            return self.try_complete_world_activation().await;
+        }
+        self.establish_attack_repeat_policy().await?;
         self.state = ClientState::InWorld;
         self.send_status_event();
+        self.emit_current_application_snapshot();
         Ok(())
     }
 
-    async fn handle_world_events(&mut self, initial_events: Vec<WorldEvent>) -> Result<()> {
+    pub(super) async fn handle_world_events(
+        &mut self,
+        initial_events: Vec<WorldEvent>,
+    ) -> Result<()> {
         let mut pending_events = initial_events;
+        let mut sheet_changed = false;
 
         while !pending_events.is_empty() {
-            for event in &pending_events {
-                self.handle_runtime_world_event(event);
-            }
-
+            let teleport_batch = pending_events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::TeleportStarted { .. }));
+            let discontinuity_already_handled = pending_events.iter().any(|event| {
+                matches!(event, WorldEvent::RuntimeBodiesReset { .. } | WorldEvent::TeleportStarted { .. })
+                    || matches!(event, WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid)
+            });
+            let derived_vitals_in_batch = pending_events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::DerivedStatsUpdated(_)));
             let mut follow_up_events = Vec::new();
-            for event in pending_events {
+            // Packet-scoped authority/control effects must finish mutating the canonical runtime
+            // before any event in this batch projects a dynamic entity view. Otherwise an
+            // `EntityMoved` upsert can publish the newly authoritative pose before the local
+            // correction/reset effect has established its runtime consequence.
+            for event in &pending_events {
                 match event {
                     WorldEvent::SelfServerControlledMotion(data) => {
+                        if holtburger_world::entity::EntityMotionDirective::from_movement_event(
+                            data,
+                        )
+                        .is_some()
+                        {
+                            self.cancel_rest_posture();
+                        }
+                        if self.server_motion_interrupts_combat(data) {
+                            self.interrupt_combat_for_movement(std::time::Instant::now());
+                        }
                         self.movement
                             .record_server_control_sequence(data.server_control_sequence);
                         let world_events = {
                             let ClientRuntime {
-                                simulation,
                                 movement,
                                 world,
                                 session,
                                 ..
                             } = self;
-                            simulation
-                                .handle_server_controlled_movement(*data, movement, world, session)
-                                .await?
+                            super::simulation::handle_server_controlled_movement(
+                                data, movement, world, session,
+                            )
+                            .await?
                         };
                         follow_up_events.extend(world_events);
                     }
                     WorldEvent::SelfUpdatePosition {
+                        position,
+                        known_teleport_sequence,
+                        known_force_position_sequence,
+                        teleport_sequence,
                         force_position_sequence,
                         ..
                     } => {
                         self.movement
-                            .record_force_position_sequence(force_position_sequence);
+                            .record_force_position_sequence(*force_position_sequence);
+                        follow_up_events.extend(self.apply_local_position_authority(
+                            *position,
+                            *known_teleport_sequence,
+                            *known_force_position_sequence,
+                            *teleport_sequence,
+                            *force_position_sequence,
+                            discontinuity_already_handled,
+                        ));
                     }
                     WorldEvent::SelfAutonomousPosition {
+                        position,
+                        known_teleport_sequence,
+                        known_force_position_sequence,
                         teleport_sequence,
                         force_position_sequence,
                         server_control_sequence,
                     } => {
                         self.movement.record_autonomous_position_sequences(
-                            teleport_sequence,
-                            force_position_sequence,
-                            server_control_sequence,
+                            *teleport_sequence,
+                            *force_position_sequence,
+                            *server_control_sequence,
                         );
+                        follow_up_events.extend(self.apply_local_position_authority(
+                            *position,
+                            *known_teleport_sequence,
+                            *known_force_position_sequence,
+                            *teleport_sequence,
+                            *force_position_sequence,
+                            discontinuity_already_handled,
+                        ));
                     }
                     _ => {}
+                }
+            }
+
+            for event in &pending_events {
+                sheet_changed |= self.world_event_changes_character_sheet(event);
+                self.handle_runtime_world_event_with_context(
+                    event,
+                    teleport_batch,
+                    derived_vitals_in_batch,
+                );
+                let admitted_guid = match event {
+                    WorldEvent::EntitySpawned(entity) | WorldEvent::EntityReplaced(entity) => {
+                        Some(entity.guid)
+                    }
+                    WorldEvent::PlayerInfo(data) => Some(data.entity.guid),
+                    WorldEvent::EntityScenePlacementChanged {
+                        guid, placement, ..
+                    } if !matches!(
+                        placement,
+                        holtburger_world::ResolvedScenePlacement::Unresolved(_)
+                    ) =>
+                    {
+                        Some(*guid)
+                    }
+                    _ => None,
+                };
+                if let Some(guid) = admitted_guid {
+                    self.replay_entity_cues(guid)?;
                 }
             }
 
             pending_events = follow_up_events;
         }
 
+        self.finish_character_world_events(sheet_changed);
+        self.try_complete_world_activation().await?;
         Ok(())
     }
 
     pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
+        if self.state == ClientState::Disconnected {
+            return Ok(Vec::new());
+        }
+        #[cfg(feature = "runtime-fixture")]
+        if let Some(capture) = &mut self.runtime_fixture {
+            capture.record(super::runtime_fixture::RuntimeFixtureInput::Message(
+                data.to_vec(),
+            ));
+        }
         if let Some(ref dump_dir) = self.message_dump_dir {
             let path = dump_dir.join(format!("{:05}.bin", self.message_counter));
             std::fs::write(path, data)?;
             self.message_counter += 1;
         }
 
+        if data.starts_with(
+            &(holtburger_protocol::opcodes::GameOpcode::GameEvent as u32).to_le_bytes(),
+        ) {
+            let header = GameEventHeader::unpack(data, &mut 4)
+                .ok_or_else(|| anyhow::anyhow!("Truncated game-event ordering header"))?;
+            if let Some(ordering) = &mut self.event_ordering
+                && header.target == ordering.target()
+            {
+                let ready = ordering.receive(header.sequence, data, Instant::now())?;
+                let mut events = Vec::new();
+                for data in ready {
+                    events.extend(self.handle_ordered_message(&data).await?);
+                }
+                return Ok(events);
+            }
+        }
+        self.handle_ordered_message(data).await
+    }
+
+    /// Only ordered character events or independent messages may mutate client authority.
+    async fn handle_ordered_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
         let mut offset = 0;
         let message = <GameMessage as ProtocolUnpack>::unpack(data, &mut offset);
         if message.is_none() {
-            let opcode_str = if data.len() >= 4 {
-                let opcode = u32::from_le_bytes(data[0..4].try_into().unwrap_or([0; 4]));
-                format!("0x{:08X}", opcode)
-            } else {
-                "Unknown".to_string()
-            };
+            let opcode = data.first_chunk::<4>().copied().map(u32::from_le_bytes);
+            if let Some(opcode) = opcode
+                && matches!(
+                    GameOpcode::from_repr(opcode),
+                    Some(
+                        GameOpcode::CharacterError
+                            | GameOpcode::AccountBoot
+                            | GameOpcode::AccountBanned
+                    )
+                )
+            {
+                let diagnostic = format!("Malformed server lifecycle reply 0x{opcode:08X}");
+                self.fail_connection(
+                    super::ConnectionFailureCause::Local {
+                        operation: super::ConnectionOperation::ServerTraffic,
+                        diagnostic: diagnostic.clone(),
+                    },
+                    ClientExitCause::RuntimeFailure,
+                );
+                anyhow::bail!(diagnostic);
+            }
+            let opcode_str =
+                opcode.map_or_else(|| "Unknown".to_string(), |opcode| format!("0x{opcode:08X}"));
             log::warn!(
                 "Failed to unpack GameMessage {} ({} bytes): {:02X?}",
                 opcode_str,
@@ -124,38 +365,196 @@ impl ClientRuntime {
             return Ok(Vec::new());
         }
         let message = message.unwrap();
+        // After F653 retires the character, only account/lifecycle replies may cross the
+        // gap before ACE sends the refreshed roster. Late world packets cannot restore it.
+        if self.state == ClientState::LoggingOut
+            && self.world.player.guid == Guid::NULL
+            && !matches!(
+                message,
+                GameMessage::CharacterList(_)
+                    | GameMessage::ServerName(_)
+                    | GameMessage::CharacterError(_)
+                    | GameMessage::AccountBoot(_)
+                    | GameMessage::AccountBanned(_)
+            )
+        {
+            return Ok(Vec::new());
+        }
+
+        // ACE sends no world baseline after an entry refusal. Until a new entry is
+        // explicitly requested, late character traffic must not recreate activation/state.
+        if self.state == ClientState::CharacterSelection
+            && self.character_selection.entry_rejection.is_some()
+            && !matches!(
+                message,
+                GameMessage::CharacterList(_)
+                    | GameMessage::ServerName(_)
+                    | GameMessage::CharacterError(_)
+                    | GameMessage::AccountBoot(_)
+                    | GameMessage::AccountBanned(_)
+                    | GameMessage::CharacterCreateResponse(_)
+                    | GameMessage::CharacterDeleteResponse
+                    | GameMessage::ServerMessage(_)
+            )
+        {
+            return Ok(Vec::new());
+        }
 
         log::debug!("GameMessage: {:?}", message);
 
+        if !matches!(
+            self.state,
+            ClientState::EnteringWorld | ClientState::InWorld
+        ) && let GameMessage::GameEvent(event) = &message
+            && matches!(
+                event.event,
+                GameEvent::StartBarber(_)
+                    | GameEvent::SendClientContractTrackerTable(_)
+                    | GameEvent::SendClientContractTracker(_)
+                    | GameEvent::FriendsListUpdate(_)
+                    | GameEvent::SetSquelchDb(_)
+                    | GameEvent::AllegianceUpdate(_)
+                    | GameEvent::AllegianceUpdateDone(_)
+                    | GameEvent::AllegianceUpdateAborted(_)
+                    | GameEvent::AllegianceLoginNotification(_)
+                    | GameEvent::FellowshipFullUpdate(_)
+                    | GameEvent::FellowshipUpdateFellow(_)
+                    | GameEvent::FellowshipQuit(_)
+                    | GameEvent::FellowshipDismiss(_)
+                    | GameEvent::FellowshipDisband
+            )
+        {
+            return Ok(Vec::new());
+        }
+
+        // Housing replies have no request ID. Outside an active character lifetime,
+        // late replies cannot restore the previous character's replacement facts.
+        if !matches!(
+            self.state,
+            ClientState::EnteringWorld | ClientState::InWorld
+        ) && let GameMessage::GameEvent(event) = &message
+            && matches!(
+                event.event,
+                GameEvent::HouseData(_)
+                    | GameEvent::HouseProfile(_)
+                    | GameEvent::HouseStatus(_)
+                    | GameEvent::UpdateRentTime(_)
+                    | GameEvent::UpdateRentPayment(_)
+                    | GameEvent::UpdateHar(_)
+                    | GameEvent::HouseTransaction(_)
+                    | GameEvent::AvailableHouses(_)
+            )
+        {
+            log::debug!("Discarding housing reply outside a character lifetime");
+            return Ok(Vec::new());
+        }
+
         if let GameMessage::ServerName(data) = &message {
+            self.world_name = Some(data.name.clone());
             let _ = self
                 .client_view_event_tx
                 .send(ClientViewEvent::WorldNameUpdated(data.name.clone()));
         }
 
+        // A deletion can retire a missing-object placeholder before a create ever arrives.
+        if let GameMessage::ObjectDelete(data) = &message
+            && self.world.entities.get(data.guid).is_none()
+        {
+            self.entity_cue_inbox.remove(data.guid);
+        }
+
+        if let GameMessage::InventoryRemoveObject(data) = &message {
+            self.observe_auto_merge_removal(data.object_guid);
+        }
+        if let GameMessage::GameEvent(event) = &message
+            && let GameEvent::PlayerDescription(description) = &event.event
+            && description.guid != self.world.player.guid
+        {
+            self.clear_busy_operation();
+            self.reset_container_access();
+            self.recent_deaths.clear();
+        }
+        if let GameMessage::GameEvent(event) = &message {
+            self.observe_trade_reply(&event.event);
+            self.observe_allegiance_reply(&event.event);
+        }
+        let previous_container_root = self.world.world_container().root();
+
+        self.observe_death_count(&message);
+
         // Pass to world state for tracking positioning and spawning
-        let world_events = self.world.handle_message(&message);
+        let world_events = if let GameMessage::UpdateMotion(data) = &message
+            && self.suppresses_local_target_turn(data)
+        {
+            // RETAIL DIVERGENCE: installs non-autonomous motion. Installing these turns
+            // interrupts held movement/jump during casting or mobile missile fire. Scope is
+            // local TurnToObject packets matching an outstanding cast or sent missile target;
+            // no asset layout is involved.
+            if self.world.acknowledge_local_object_turn(data) {
+                self.movement
+                    .record_server_control_sequence(data.server_control_sequence);
+                self.movement
+                    .admit_server_gesture(std::time::Instant::now(), &mut self.world);
+            }
+            Vec::new()
+        } else {
+            self.world.handle_message(&message)
+        };
+        if let GameMessage::GameEvent(event) = &message
+            && let GameEvent::PlayerDescription(description) = &event.event
+        {
+            self.described_character = Some(description.guid);
+        }
         self.handle_world_events(world_events.clone()).await?;
+        if self.state == ClientState::InWorld && self.allegiance_refresh_required(&world_events) {
+            self.query_allegiance().await?;
+        }
+        if world_events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::HousingRefreshRequired))
+        {
+            self.query_home().await?;
+        }
+        self.observe_container_message(&message, previous_container_root)
+            .await?;
+        self.reconcile_housing_payment();
+        self.advance_housing_access_query(Instant::now()).await?;
 
         match message {
             GameMessage::UpdatePosition(_) => Ok(()),
             GameMessage::UpdateMotion(_) => Ok(()),
             GameMessage::AutonomousPosition(_) => Ok(()),
+            GameMessage::CharacterLogOff => {
+                // Retail ExecuteLogOff retires the character, retaining login. ACE
+                // Session.SendFinalLogOffMessages follows this ACK with a fresh roster.
+                if matches!(
+                    self.state,
+                    ClientState::InWorld | ClientState::EnteringWorld | ClientState::LoggingOut
+                ) {
+                    self.retire_logged_out_character();
+                }
+                Ok(())
+            }
             GameMessage::CharacterList(data) => {
-                self.character_selection.characters = data.characters.clone();
+                self.reset_barber();
+                self.event_ordering = None;
+                self.clear_busy_operation();
+                self.reset_housing();
+                self.described_character = None;
+                self.refresh_spell_inspection_context();
+                self.authenticating = false;
+                self.character_selection.replace_roster(&data);
                 self.turbine_chat.enabled = data.use_turbine_chat;
                 if !data.use_turbine_chat {
                     self.turbine_chat.channels = None;
                 }
-                self.character_selection.pending_character_operation = None;
 
                 log::info!("Character List for account: {}", data.account_name);
                 for (i, c) in self.character_selection.characters.iter().enumerate() {
                     log::info!("  [{}] {} (0x{:08X})", i + 1, c.name, c.guid);
                 }
 
-                self.state =
-                    ClientState::CharacterSelection(self.character_selection.characters.clone());
+                self.state = ClientState::CharacterSelection;
                 self.send_status_event();
                 let _ = self
                     .client_view_event_tx
@@ -165,7 +564,11 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterCreateResponse(data) => {
-                let operation = self.character_selection.take_pending_character_operation();
+                let operation = self.character_selection.accept_character_response(&data);
+                if operation.is_some() {
+                    self.emit_character_management();
+                    self.send_status_event();
+                }
                 let _ =
                     self.client_view_event_tx
                         .send(ClientViewEvent::CharacterManagementResponse {
@@ -175,19 +578,44 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterDeleteResponse => {
-                self.character_selection.take_pending_character_operation();
+                if matches!(
+                    self.character_selection.management,
+                    CharacterManagementState::Deleting
+                ) {
+                    self.character_selection.management = CharacterManagementState::Idle;
+                    self.emit_character_management();
+                }
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::CharacterDeleteResponse);
                 Ok(())
             }
             GameMessage::CharacterEnterWorldServerReady => {
+                if let Some(guid) = self.character_selection.character_id
+                    && !self.character_selection.enter_world_sent
+                {
+                    let account = self.character_selection.account_name.clone();
+                    self.character_selection
+                        .send_character_enter_world(guid, account, &mut self.session)
+                        .await
+                        .inspect_err(|error| {
+                            self.fail_connection(
+                                super::ConnectionFailureCause::Local {
+                                    operation: super::ConnectionOperation::ServerTraffic,
+                                    diagnostic: format!("{error:#}"),
+                                },
+                                ClientExitCause::RuntimeFailure,
+                            )
+                        })?;
+                    self.character_selection.enter_world_sent = true;
+                }
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::CharacterEnterWorldServerReady);
                 Ok(())
             }
             GameMessage::GameEvent(ev) => match &ev.event {
+                GameEvent::StartBarber(payload) => self.start_barber(payload),
                 GameEvent::PlayerDescription(_) | GameEvent::StartGame => {
                     if self.state == ClientState::EnteringWorld {
                         self.enter_world().await?;
@@ -203,8 +631,12 @@ impl ClientRuntime {
                 GameEvent::ViewContents(_data) => Ok(()),
                 GameEvent::Tell(data) => {
                     let _ = self.client_view_event_tx.send(ClientViewEvent::Tell {
-                        sender: data.sender_name.clone(),
+                        speaker: ChatSpeaker::from_guid(
+                            data.sender_name.clone(),
+                            Guid(data.sender_id),
+                        ),
                         message: data.message.clone(),
+                        chat_type: data.chat_type.into(),
                     });
                     Ok(())
                 }
@@ -213,7 +645,7 @@ impl ClientRuntime {
                         .client_view_event_tx
                         .send(ClientViewEvent::ChannelMessage {
                             channel: ChatChannelInfo::legacy(data.channel),
-                            sender: data.sender_name.clone(),
+                            speaker: ChatSpeaker::unknown(data.sender_name.clone()),
                             message: data.message.clone(),
                         });
                     Ok(())
@@ -225,18 +657,17 @@ impl ClientRuntime {
                 GameEvent::PopupString(data) => {
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::ServerMessage {
+                        .send(ClientViewEvent::PopupString {
                             message: data.message.clone(),
-                            chat_type: (ChatMessageType::System as u32).into(),
                         });
                     Ok(())
                 }
                 GameEvent::CharacterConfirmationRequest(data) => {
-                    self.active_confirmation = Some(ActiveCharacterConfirmation {
-                        confirmation_type: data.confirmation_type,
-                        context: data.context,
-                        text: data.text.clone(),
-                    });
+                    self.active_confirmation = Some(ActiveCharacterConfirmation::received(
+                        data.confirmation_type,
+                        data.context,
+                        data.text.clone(),
+                    ));
                     self.emit_active_character_confirmation_updated();
                     Ok(())
                 }
@@ -268,25 +699,28 @@ impl ClientRuntime {
                 GameEvent::CommunicationTransientString(data) => {
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::ServerMessage {
+                        .send(ClientViewEvent::TransientString {
                             message: data.message.clone(),
-                            chat_type: (ChatMessageType::System as u32).into(),
                         });
                     Ok(())
                 }
                 GameEvent::AttackDone(data) => {
+                    let feedback =
+                        crate::client::types::CombatFeedback::AttackDone { error: data.error };
+                    self.observe_combat_feedback(&feedback, Instant::now());
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::CombatFeedback(
-                            crate::client::types::CombatFeedback::AttackDone { error: data.error },
-                        ));
+                        .send(ClientViewEvent::CombatFeedback(feedback));
                     Ok(())
                 }
                 GameEvent::AttackerNotification(data) => {
+                    let context =
+                        self.attribute_combat_outcome(&data.defender_name, Instant::now());
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::CombatFeedback(
                             crate::client::types::CombatFeedback::AttackerNotification {
+                                context,
                                 defender_name: data.defender_name.clone(),
                                 damage_type: data.damage_type,
                                 health_percent: data.health_percent,
@@ -314,10 +748,13 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::EvasionAttackerNotification(data) => {
+                    let context =
+                        self.attribute_combat_outcome(&data.defender_name, Instant::now());
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::CombatFeedback(
                             crate::client::types::CombatFeedback::EvasionAttackerNotification {
+                                context,
                                 defender_name: data.defender_name.clone(),
                             },
                         ));
@@ -334,11 +771,11 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::CombatCommenceAttack => {
+                    let feedback = crate::client::types::CombatFeedback::AttackCommenced;
+                    self.observe_combat_feedback(&feedback, Instant::now());
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::CombatFeedback(
-                            crate::client::types::CombatFeedback::AttackCommenced,
-                        ));
+                        .send(ClientViewEvent::CombatFeedback(feedback));
                     Ok(())
                 }
                 GameEvent::VictimNotification(data) => {
@@ -377,23 +814,45 @@ impl ClientRuntime {
                     );
                     Ok(())
                 }
+                GameEvent::InventoryPutObjInContainer(data) => {
+                    self.observe_vendor_transfer(data.item_guid, data.container_guid);
+                    self.equipment_set.confirmed_removal(data.item_guid);
+                    Ok(())
+                }
+                GameEvent::WieldObject(data) => {
+                    self.equipment_set.confirmed_wield(data.object_guid);
+                    Ok(())
+                }
                 GameEvent::InventoryServerSaveFailed(data) => {
-                    self.emit_action_result(
-                        ActionResultSource::Wire,
-                        ActionResultReason::InventoryServerSaveFailed {
-                            item_guid: data.item_guid,
-                            error: data.error,
-                        },
-                    );
+                    self.observe_vendor_failure(data.item_guid, data.error);
+                    self.reject_equipment_item(data.item_guid);
+                    let inventory_owned =
+                        self.reject_inventory_operation_item(data.item_guid, data.error);
+                    if !inventory_owned
+                        && !self.reject_equipment_set_item(data.item_guid, data.error)
+                    {
+                        self.emit_action_result(
+                            ActionResultSource::Wire,
+                            ActionResultReason::InventoryServerSaveFailed {
+                                item_guid: data.item_guid,
+                                error: data.error,
+                            },
+                        );
+                    }
                     Ok(())
                 }
                 GameEvent::UseDone(data) => {
-                    self.finish_busy_operation_from_use_done(data.error);
-                    if data.error != WeenieError::None {
-                        self.emit_action_result(
-                            ActionResultSource::Wire,
-                            ActionResultReason::Weenie(data.error, None),
-                        );
+                    self.finish_busy_operation_from_use_done(data.error).await?;
+                    Ok(())
+                }
+                GameEvent::TradeFailure(data) => {
+                    if self.world.trade.is_some() {
+                        let message = if data.reason == WeenieError::None {
+                            "The server refused that trade item.".into()
+                        } else {
+                            crate::errors::format_weenie_error(data.reason, None)
+                        };
+                        self.report_trade_failure(message);
                     }
                     Ok(())
                 }
@@ -413,9 +872,60 @@ impl ClientRuntime {
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::ServerMessage {
+                            combat_outcome: None,
                             message: message.clone(),
                             chat_type: (ChatMessageType::System as u32).into(),
                         });
+                    Ok(())
+                }
+                GameEvent::SalvageOperationsResult(data) => {
+                    use holtburger_common::{properties::MaterialType, stats::SkillType};
+                    let skill = SkillType::from_repr(data.skill).map_or_else(
+                        || format!("skill {}", data.skill),
+                        |skill| skill.to_string(),
+                    );
+                    for row in &data.results {
+                        let material = MaterialType::from_repr(row.material).map_or_else(
+                            || format!("material {}", row.material),
+                            |material| material.to_string(),
+                        );
+                        let _ = self
+                            .client_view_event_tx
+                            .send(ClientViewEvent::ServerMessage {
+                                combat_outcome: None,
+                                message: format!(
+                                    "You obtain {} {} (workmanship {:.2}) using {}.",
+                                    row.units, material, row.workmanship, skill
+                                ),
+                                chat_type: (ChatMessageType::Salvaging as u32).into(),
+                            });
+                    }
+                    if data.augmentation_bonus > 0 {
+                        let _ = self
+                            .client_view_event_tx
+                            .send(ClientViewEvent::ServerMessage {
+                                combat_outcome: None,
+                                message: format!(
+                                    "Your augmentation has given you a return bonus of {}%!",
+                                    data.augmentation_bonus
+                                ),
+                                chat_type: (ChatMessageType::Salvaging as u32).into(),
+                            });
+                    }
+                    for guid in &data.rejected {
+                        let name = self
+                            .world
+                            .entities
+                            .get(*guid)
+                            .map_or_else(|| guid.to_string(), |item| item.name().to_string());
+                        let _ = self
+                            .client_view_event_tx
+                            .send(ClientViewEvent::ServerMessage {
+                                combat_outcome: None,
+                                message: format!("The {name} was not suitable for salvaging."),
+                                chat_type: (ChatMessageType::Salvaging as u32).into(),
+                            });
+                    }
                     Ok(())
                 }
                 GameEvent::QueryItemManaResponse(data) => {
@@ -433,6 +943,35 @@ impl ClientRuntime {
             GameMessage::PlayerCreate(data) => {
                 let player_id = data.guid;
                 self.world.player.guid = player_id;
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::LocalPlayerEstablished {
+                        player_guid: player_id,
+                    });
+
+                // Early fellowship packets can precede PlayerCreate. Refresh actor permissions
+                // with the retained roster instead of waiting for another server party update.
+                if self.world.fellowship.is_some() {
+                    self.emit_fellowship_state_updated();
+                }
+
+                if self.activation.is_none() {
+                    self.start_world_activation_with_reset(
+                        ClientWorldActivationState::InitialEntry,
+                        player_id,
+                    );
+                } else if let Some(activation) = self.activation.as_ref()
+                    && activation.player_guid != player_id
+                {
+                    // The server's PlayerCreate is the first exact local-player identity. Keep
+                    // the selected identity in the activation so a mismatched response cannot
+                    // silently retarget the barrier to a different character.
+                    log::error!(
+                        "PlayerCreate identity 0x{:08X} disagrees with activation character 0x{:08X}",
+                        player_id.0,
+                        activation.player_guid.0
+                    );
+                }
 
                 let name = self
                     .character_selection
@@ -461,8 +1000,7 @@ impl ClientRuntime {
                         name: name.clone(),
                     });
 
-                self.send_login_complete().await?;
-                self.enter_world().await?;
+                self.try_complete_world_activation().await?;
                 Ok(())
             }
             GameMessage::PlayerKilled(data) => {
@@ -482,39 +1020,131 @@ impl ClientRuntime {
                     "Portal transition started (seq: {})",
                     data.teleport_sequence
                 );
-                self.send_login_complete().await?;
+                // `WorldState::handle_message` already emitted the paired reset and
+                // `TeleportStarted` edge above. Its batch handler owns the one activation
+                // generation; starting another transition here would make a single server
+                // teleport observable as two generations.
                 Ok(())
             }
             GameMessage::PrivateUpdatePropertyInt(_) | GameMessage::PublicUpdatePropertyInt(_) => {
                 Ok(())
             }
+            GameMessage::PlaySound(data) => {
+                self.observe_lock_sound(data.target, data.sound_id);
+                self.route_entity_cue(
+                    data.target,
+                    super::entity_cues::PendingEntityCue::Sound {
+                        sound_id: data.sound_id,
+                        volume: data.volume,
+                    },
+                )
+            }
+            GameMessage::PlayScript(data) => self.route_entity_cue(
+                data.target,
+                super::entity_cues::PendingEntityCue::Script {
+                    cue: data.script_cue,
+                    intensity: data.intensity,
+                },
+            ),
             GameMessage::GameAction(data) => self.handle_game_action(&data.action).await,
             GameMessage::ServerMessage(data) => {
+                let combat_outcome = self.interpret_server_combat_text(
+                    data.chat_type.into(),
+                    &data.message,
+                    Instant::now(),
+                );
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ServerMessage {
+                        combat_outcome,
                         message: data.message.clone(),
                         chat_type: data.chat_type.into(),
                     });
                 Ok(())
             }
             GameMessage::CharacterError(data) => {
-                let error = self
-                    .character_selection
-                    .handle_character_error(data.error_id);
+                let error = super::CharacterErrorCode::from(data.error_id);
+                log::warn!("Server character error: {error}");
+                if error == super::CharacterErrorCode::Known(CharacterError::None) {
+                    return Ok(Vec::new());
+                }
+                if self.authenticating
+                    || matches!(
+                        error,
+                        super::CharacterErrorCode::Known(
+                            CharacterError::Logon
+                                | CharacterError::ServerCrash1
+                                | CharacterError::ServerCrash2
+                        )
+                    )
+                {
+                    self.fail_connection(
+                        super::ConnectionFailureCause::Character(error),
+                        ClientExitCause::ServerDisconnect,
+                    );
+                    return Ok(Vec::new());
+                }
+                let pending_initial_entry = self.state == ClientState::EnteringWorld
+                    && self.world.player.guid == Guid::NULL
+                    && self.activation.as_ref().is_some_and(|activation| {
+                        matches!(
+                            activation.phase,
+                            super::ClientWorldActivationPhase::InitialEntry
+                        )
+                    });
+                if pending_initial_entry {
+                    // ACE CharacterHandler refuses these before InitSessionForWorldLogin.
+                    if matches!(
+                        error,
+                        super::CharacterErrorCode::Known(
+                            CharacterError::LogonServerFull
+                                | CharacterError::EnterGameCharacterNotOwned
+                                | CharacterError::EnterGameCharacterInWorld
+                                | CharacterError::EnterGameGeneric
+                                | CharacterError::EnterGameCouldntPlaceCharacter
+                        )
+                    ) {
+                        self.reject_world_entry(error);
+                    } else {
+                        self.fail_connection(
+                            super::ConnectionFailureCause::Character(error),
+                            ClientExitCause::ServerDisconnect,
+                        );
+                    }
+                    return Ok(Vec::new());
+                }
+                if self.state == ClientState::CharacterSelection
+                    && let Some(operation) = self.character_selection.management.pending_operation()
+                {
+                    self.character_selection
+                        .reject(operation, error.to_string());
+                    self.emit_character_management();
+                }
                 self.emit_action_result(
                     ActionResultSource::Wire,
                     ActionResultReason::Character(error),
                 );
+                if error == super::CharacterErrorCode::Known(CharacterError::Logoff)
+                    && self.state == ClientState::LoggingOut
+                    && self.world.player.guid != Guid::NULL
+                {
+                    self.state = ClientState::InWorld;
+                    self.send_status_event();
+                }
                 Ok(())
             }
             GameMessage::AccountBoot(data) => {
-                let reason = self.character_selection.handle_boot_account(*data);
-                self.state = ClientState::Disconnected;
-                self.send_status_event();
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::BootAccount(reason.clone()));
+                self.fail_connection(
+                    super::ConnectionFailureCause::AccountBoot(data.reason),
+                    ClientExitCause::ServerDisconnect,
+                );
+                Ok(())
+            }
+            GameMessage::AccountBanned(data) => {
+                self.fail_connection(
+                    super::ConnectionFailureCause::AccountBanned(*data),
+                    ClientExitCause::ServerDisconnect,
+                );
                 Ok(())
             }
             GameMessage::DddInterrogation => {
@@ -523,7 +1153,15 @@ impl ClientRuntime {
                         language: 1,
                         lists: Vec::new(),
                     }));
-                self.session.send_message(&resp).await
+                self.session.send_message(&resp).await.inspect_err(|error| {
+                    self.fail_connection(
+                        super::ConnectionFailureCause::Local {
+                            operation: super::ConnectionOperation::ServerTraffic,
+                            diagnostic: format!("{error:#}"),
+                        },
+                        ClientExitCause::RuntimeFailure,
+                    )
+                })
             }
             GameMessage::ServerName(_data) => Ok(()),
             GameMessage::HearSpeech(data) => {
@@ -533,7 +1171,7 @@ impl ClientRuntime {
                     data.sender_name.clone()
                 };
                 let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
-                    sender: sender.clone(),
+                    speaker: ChatSpeaker::from_guid(sender, Guid(data.sender)),
                     message: data.message.clone(),
                     chat_type: data.chat_type.into(),
                 });
@@ -541,7 +1179,7 @@ impl ClientRuntime {
             }
             GameMessage::HearRangedSpeech(data) => {
                 let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
-                    sender: data.sender_name.clone(),
+                    speaker: ChatSpeaker::from_guid(data.sender_name.clone(), Guid(data.sender)),
                     message: data.message.clone(),
                     chat_type: data.chat_type.into(),
                 });
@@ -549,14 +1187,14 @@ impl ClientRuntime {
             }
             GameMessage::EmoteText(data) => {
                 let _ = self.client_view_event_tx.send(ClientViewEvent::Emote {
-                    sender: data.sender_name.clone(),
+                    speaker: ChatSpeaker::from_guid(data.sender_name.clone(), Guid(data.sender)),
                     text: data.text.clone(),
                 });
                 Ok(())
             }
             GameMessage::SoulEmote(data) => {
                 let _ = self.client_view_event_tx.send(ClientViewEvent::SoulEmote {
-                    sender: data.sender_name.clone(),
+                    speaker: ChatSpeaker::from_guid(data.sender_name.clone(), Guid(data.sender)),
                     text: data.text.clone(),
                 });
                 Ok(())
@@ -567,6 +1205,7 @@ impl ClientRuntime {
                     sender_name,
                     message,
                     chat_type,
+                    sender_id,
                     ..
                 } = &data.payload
                 {
@@ -576,7 +1215,7 @@ impl ClientRuntime {
                         .client_view_event_tx
                         .send(ClientViewEvent::ChannelMessage {
                             channel: channel_info,
-                            sender: sender_name.clone(),
+                            speaker: ChatSpeaker::from_guid(sender_name.clone(), Guid(*sender_id)),
                             message: message.clone(),
                         });
                 }
@@ -585,14 +1224,14 @@ impl ClientRuntime {
             _ => Ok(()),
         }?;
 
+        self.publish_entity_facts();
         Ok(world_events)
     }
 
-    async fn handle_game_action(&mut self, data: &GameAction) -> Result<()> {
-        if let GameAction::LoginComplete(_) = data {
-            self.state = ClientState::InWorld;
-            self.send_status_event();
-        }
+    async fn handle_game_action(&mut self, _data: &GameAction) -> Result<()> {
+        // `LoginComplete` is a client action (opcode 0x00A1), not a server completion echo. The
+        // active lifecycle is published by `try_complete_world_activation` after the outbound
+        // action succeeds; waiting for an inbound mirror would leave the client in portal space.
         Ok(())
     }
 }
@@ -600,13 +1239,20 @@ impl ClientRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{ClientState, builder};
+    use crate::DynamicEntityEvent;
+    use crate::client::{ClientState, PHYSICS_TICK_MS, PendingOperation, builder};
     use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{
+        PropertyInt64, PropertyString, PropertyUpdate, WorldObjectPropertyAccessorsMut,
+    };
     use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType, Quaternion};
     use holtburger_protocol::errors::WeenieError;
-    use holtburger_protocol::messages::movement::MotionStance;
+    use holtburger_protocol::messages::movement::{
+        MotionStance, TurnToHeading, TurnToObject, TurnToParameters,
+    };
     use holtburger_protocol::traits::ProtocolPack;
     use holtburger_world::WorldEvent;
+    use holtburger_world::player::PlayerCharacterOptions;
     use holtburger_world::stats::CharacterLevelInfo;
 
     fn build_test_client() -> ClientRuntime {
@@ -617,6 +1263,242 @@ mod tests {
         let mut encoded = Vec::new();
         message.pack(&mut encoded);
         encoded
+    }
+
+    #[tokio::test]
+    async fn relog_restores_wire_cooldowns_before_inventory_descriptions_arrive() {
+        use holtburger_common::properties::{
+            InventoryEntryKind, ItemType, ObjectDescriptionFlag, WeenieHeaderFlag,
+            WeenieHeaderFlag2,
+        };
+        use holtburger_protocol::messages::magic::Enchantment;
+        use holtburger_protocol::messages::{
+            DescriptionVectorFlag, EnchantmentMask, ObjectDescriptionData,
+        };
+        use holtburger_protocol::opcodes::GameEventOpcode;
+        use holtburger_world::{
+            entity_facts::EntityDescription, item_cooldowns::ItemCooldownDefinition,
+        };
+
+        let player = Guid(0x5000_0001);
+        let item = Guid(0x8000_0001);
+        let mut client = build_test_client();
+        for start_time in [-12.0, -20.0] {
+            client.character_selection.character_id = Some(player);
+            client.begin_world_entry_transition().await.unwrap();
+            let mut events = client.subscribe_client_view_events();
+            let cooldown = Enchantment {
+                spell_id: 0x8000 | 213,
+                layer: 1,
+                spell_category: 0x8000,
+                has_spell_set_id: 1,
+                spell_set_id: Some(0),
+                start_time,
+                duration: 45.0,
+                ..Default::default()
+            };
+            // Author ACE's login registry explicitly: PlayerDescription's existing packer
+            // writes an empty registry, so a roundtrip through it cannot test this path.
+            // ACE GameEventPlayerDescription.cs and Network/Structure/EnchantmentRegistry.cs.
+            let mut body = Vec::new();
+            for word in [
+                0u32,
+                1,
+                DescriptionVectorFlag::ENCHANTMENT.bits(),
+                1,
+                EnchantmentMask::COOLDOWN.bits(),
+                1,
+            ] {
+                word.pack(&mut body);
+            }
+            cooldown.pack(&mut body);
+            // Empty options, options1, spell list, spell filters, then the owned-item roster.
+            for word in [0u32, 0, 0, 0, 1] {
+                word.pack(&mut body);
+            }
+            item.pack(&mut body);
+            (InventoryEntryKind::Item as u32).pack(&mut body);
+            0u32.pack(&mut body); // No equipped objects.
+            let message = GameMessage::GameEvent(Box::new(GameEventMessage {
+                target: player,
+                sequence: 1,
+                event: GameEvent::Unknown(GameEventOpcode::PlayerDescription as u32, body),
+            }));
+            client
+                .handle_message(&encode_message(&message))
+                .await
+                .unwrap();
+            let restored = client.application_snapshot().enchantments.unwrap();
+            assert_eq!(restored.records, vec![cooldown]);
+            assert_eq!(restored.resolved.cooldowns.len(), 1);
+            let timer = restored.resolved.cooldowns[0];
+            assert_eq!(timer.group_id, 213);
+            assert!(
+                timer.remaining_seconds > 0.0
+                    && timer.remaining_seconds <= cooldown.duration + start_time
+            );
+            assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+                event, ClientViewEvent::PlayerEnchantmentsUpdated { resolved, .. } if resolved.cooldowns.len() == 1
+            )));
+
+            let mut description = ObjectDescriptionData::with_guid(item);
+            let public = &mut description.public_weenie_desc;
+            public.name = Some("Essence".into());
+            public.item_type = ItemType::FOOD.bits();
+            public.obj_desc_flags = ObjectDescriptionFlag::INCLUDES_SECOND_HEADER;
+            public.weenie_flags = WeenieHeaderFlag::CONTAINER;
+            public.weenie_flags2 =
+                WeenieHeaderFlag2::COOLDOWN | WeenieHeaderFlag2::COOLDOWN_DURATION;
+            public.container_id = Some(player);
+            public.cooldown = Some(213);
+            public.cooldown_duration = Some(45.0);
+            client
+                .handle_message(&encode_message(&GameMessage::ObjectCreate(Box::new(
+                    description,
+                ))))
+                .await
+                .unwrap();
+            let snapshot = client.application_snapshot();
+            let record = snapshot
+                .entities
+                .entities
+                .iter()
+                .find(|record| record.guid == item)
+                .unwrap();
+            let EntityDescription::Known { cooldown, .. } = record.description else {
+                panic!("known item");
+            };
+            assert_eq!(
+                cooldown,
+                Some(ItemCooldownDefinition {
+                    group_id: Some(213),
+                    duration_seconds: Some(45.0)
+                })
+            );
+            client.retire_logged_out_character();
+        }
+    }
+
+    #[tokio::test]
+    async fn fellowship_before_player_create_republishes_with_established_actor() {
+        use holtburger_protocol::messages::{
+            FellowshipFullUpdateEventData, FellowshipMemberData, PlayerCreateData,
+        };
+        let mut client = build_test_client();
+        let player = Guid(0x5000_0001);
+        client.character_selection.character_id = Some(player);
+        client.begin_world_entry_transition().await.unwrap();
+        client.state = ClientState::EnteringWorld;
+        let mut events = client.subscribe_client_view_events();
+        let early_party = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player,
+            sequence: 1,
+            event: GameEvent::FellowshipFullUpdate(Box::new(FellowshipFullUpdateEventData {
+                fellows: vec![FellowshipMemberData {
+                    guid: player,
+                    name: "Leader".to_string(),
+                    level: 1,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 0,
+                    max_stamina: 0,
+                    max_mana: 0,
+                    current_health: 0,
+                    current_stamina: 0,
+                    current_mana: 0,
+                    share_loot: 0,
+                }],
+                fellowship_name: "Early Raid".to_string(),
+                leader_guid: player,
+                share_xp: true,
+                even_share: true,
+                open: false,
+                is_locked: false,
+                departed_members: Vec::new(),
+                fellowship_locks: Vec::new(),
+            })),
+        })));
+        client.handle_message(&early_party).await.unwrap();
+        let mut saw_early = false;
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::FellowshipStateUpdated {
+                player_guid,
+                fellowship: Some(party),
+            } = event
+            {
+                assert_eq!(player_guid, None);
+                assert!(!party.capabilities(player_guid).is_leader);
+                saw_early = true;
+            }
+        }
+        assert!(saw_early);
+        let created = encode_message(&GameMessage::PlayerCreate(Box::new(PlayerCreateData {
+            guid: player,
+        })));
+        client.handle_message(&created).await.unwrap();
+        let mut saw_refresh = false;
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::FellowshipStateUpdated {
+                player_guid,
+                fellowship: Some(party),
+            } = event
+            {
+                assert_eq!(player_guid, Some(player));
+                assert_eq!(party.name, "Early Raid");
+                assert!(party.capabilities(player_guid).is_leader);
+                saw_refresh = true;
+            }
+        }
+        assert!(saw_refresh);
+    }
+
+    #[tokio::test]
+    async fn fellowship_recovery_retains_portal_facts_and_retires_character_facts() {
+        use holtburger_protocol::messages::FellowshipFullUpdateEventData;
+        let mut client = build_test_client();
+        let player = Guid(0x5000_0001);
+        client.world.player.guid = player;
+        client.state = ClientState::InWorld;
+        let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player,
+            sequence: 1,
+            event: GameEvent::FellowshipFullUpdate(Box::new(FellowshipFullUpdateEventData {
+                fellows: Vec::new(),
+                fellowship_name: "Raid".to_string(),
+                leader_guid: player,
+                share_xp: true,
+                even_share: true,
+                open: false,
+                is_locked: false,
+                departed_members: Vec::new(),
+                fellowship_locks: Vec::new(),
+            })),
+        })));
+        client.handle_message(&encoded).await.unwrap();
+        assert_eq!(
+            client
+                .application_snapshot()
+                .fellowship
+                .as_ref()
+                .unwrap()
+                .name,
+            "Raid"
+        );
+        client.bump_world_generation();
+        client.send_status_event();
+        assert!(client.application_snapshot().fellowship.is_some());
+
+        client.character_selection.character_id = Some(player);
+        client.begin_world_entry_transition().await.unwrap();
+        assert!(client.application_snapshot().fellowship.is_none());
+        client.state = ClientState::EnteringWorld;
+        client.handle_message(&encoded).await.unwrap();
+        assert!(client.application_snapshot().fellowship.is_some());
+        client.state = ClientState::Disconnected;
+        client.send_status_event();
+        assert!(client.application_snapshot().fellowship.is_none());
+        client.handle_message(&encoded).await.unwrap();
+        assert!(client.application_snapshot().fellowship.is_none());
     }
 
     fn server_controlled_motion(
@@ -671,6 +1553,7 @@ mod tests {
     async fn test_player_teleport_emits_teleport_started_view_event() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
+        let generation_before = client.world_generation;
 
         let encoded = encode_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
             teleport_sequence: 42,
@@ -687,6 +1570,130 @@ mod tests {
         }
 
         assert!(saw_teleport_started);
+        assert_eq!(client.world_generation, generation_before + 1);
+        assert!(matches!(
+            client.lifecycle(),
+            ClientLifecycleState::PortalSpace {
+                cause: ClientWorldActivationCause::Teleport,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn teleport_destination_position_replaces_the_pre_portal_runtime_pose() {
+        let mut client = build_test_client();
+        let guid = holtburger_common::Guid(0x5000_0001);
+        let outdoors = WorldPosition {
+            landblock_id: holtburger_common::Guid(0x7c65_0032),
+            coords: holtburger_common::Vector3::new(10.0, 10.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let dungeon = WorldPosition {
+            landblock_id: holtburger_common::Guid(0x01d9_0100),
+            // Keep the local-coordinate delta below the ordinary snap threshold. The portal edge,
+            // rather than incidental coordinate distance or grounded state, owns this reset.
+            coords: holtburger_common::Vector3::new(11.0, 10.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", outdoors);
+        let _ = client.world.set_local_player_runtime_pose(outdoors);
+        let teleport = encode_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
+            teleport_sequence: 42,
+        })));
+        client.handle_message(&teleport).await.unwrap();
+        let teleport_generation = client.world_generation;
+
+        let destination =
+            encode_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                guid,
+                pos: PositionPack {
+                    flags: UpdatePositionFlag::NONE,
+                    pos: dungeon,
+                    teleport_sequence: 42,
+                    ..PositionPack::default()
+                },
+            })));
+        client.handle_message(&destination).await.unwrap();
+
+        assert_eq!(client.world.local_player_runtime_pose(), Some(dungeon));
+        assert_eq!(client.world_generation, teleport_generation);
+        let runtime = client
+            .world
+            .runtime_body_view(holtburger_world::SpatialBodyId::LocalPlayer(guid))
+            .unwrap();
+        assert_eq!(runtime.velocity, holtburger_common::Vector3::zero());
+        assert_eq!(runtime.omega, holtburger_common::Vector3::zero());
+    }
+
+    #[tokio::test]
+    async fn five_self_position_echoes_confirm_without_replacing_runtime_pose() {
+        let mut client = build_test_client();
+        let guid = holtburger_common::Guid(0x5000_0002);
+        let authoritative = WorldPosition {
+            landblock_id: holtburger_common::Guid(0x7c65_0032),
+            coords: holtburger_common::Vector3::new(10.0, 10.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let runtime = WorldPosition {
+            coords: holtburger_common::Vector3::new(12.0, 10.0, 0.0),
+            ..authoritative
+        };
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", authoritative);
+        let player = client
+            .world
+            .entities
+            .get_mut(guid)
+            .expect("seeded player entity must exist");
+        player.wcid = Some(42);
+        player.set_did_prop(
+            holtburger_common::properties::PropertyDataId::Setup,
+            holtburger_common::Guid(0x0200_0001),
+        );
+        client.world.set_local_player_runtime_pose(runtime);
+        let mut events = client.subscribe_client_view_events();
+
+        let mut echoed = authoritative;
+        for position_sequence in 1..=5 {
+            echoed.coords.x = 10.0 + position_sequence as f32 * 0.1;
+            let update =
+                encode_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                    guid,
+                    pos: PositionPack {
+                        flags: UpdatePositionFlag::HAS_CONTACT,
+                        pos: echoed,
+                        position_sequence,
+                        ..PositionPack::default()
+                    },
+                })));
+            client.handle_message(&update).await.unwrap();
+            assert_eq!(client.world.local_player_runtime_pose(), Some(runtime));
+        }
+
+        let projected_poses = std::iter::from_fn(|| events.try_recv().ok())
+            .filter_map(|event| {
+                let ClientViewEvent::DynamicEntity(DynamicEntityEvent::Upserted { entity }) = event
+                else {
+                    return None;
+                };
+                if entity.identity.guid != guid {
+                    return None;
+                }
+                let crate::DynamicEntityPlacementView::World { pose, .. } = entity.placement else {
+                    return None;
+                };
+                Some(pose)
+            })
+            .collect::<Vec<_>>();
+
+        assert!(projected_poses.len() >= 5);
+        assert!(projected_poses.into_iter().all(|pose| pose == runtime));
+        assert_eq!(client.world.player_position(), Some(echoed));
+        assert_eq!(client.world.local_player_runtime_pose(), Some(runtime));
     }
 
     #[tokio::test]
@@ -728,24 +1735,25 @@ mod tests {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
 
-        client.world.soul_emote_catalog =
-            std::sync::Arc::new(holtburger_content::SoulEmoteCatalog {
-                tokens: std::collections::BTreeMap::from([(
-                    "wave".to_string(),
-                    holtburger_content::SoulEmoteToken {
-                        token: "wave".to_string(),
-                        pose: "Wave".to_string(),
-                    },
-                )]),
-                poses: std::collections::BTreeMap::from([(
-                    "Wave".to_string(),
-                    holtburger_content::SoulEmotePose {
-                        pose: "Wave".to_string(),
-                        my_emote: "wave.".to_string(),
-                        other_emote: "waves.".to_string(),
-                    },
-                )]),
-            });
+        client.world.soul_emote_catalog = std::sync::Arc::new(
+            holtburger_content::SoulEmoteCatalog::from_asset(
+                &holtburger_dat::file_type::ChatPoseTable {
+                    id: holtburger_dat::file_type::ChatPoseTable::FILE_ID,
+                    chat_pose_hash: std::collections::HashMap::from([(
+                        "wave".into(),
+                        "Wave".into(),
+                    )]),
+                    chat_emote_hash: std::collections::HashMap::from([(
+                        "Wave".into(),
+                        holtburger_dat::file_type::ChatEmoteData {
+                            my_emote: "wave.".into(),
+                            other_emote: "waves.".into(),
+                        },
+                    )]),
+                },
+            )
+            .unwrap(),
+        );
 
         let encoded = encode_message(&GameMessage::SoulEmote(Box::new(SoulEmoteData {
             sender: 0x5000_0002,
@@ -757,8 +1765,10 @@ mod tests {
 
         let mut saw_soul_emote = false;
         while let Ok(event) = events.try_recv() {
-            if let ClientViewEvent::SoulEmote { sender, text } = event {
-                assert_eq!(sender, "Fellow");
+            if let ClientViewEvent::SoulEmote { speaker, text } = event {
+                let (name, kind) = speaker.into_name_and_kind();
+                assert_eq!(name, "Fellow");
+                assert_eq!(kind, ChatSpeakerKind::Player);
                 assert_eq!(text, "wave.");
                 saw_soul_emote = true;
                 break;
@@ -783,8 +1793,10 @@ mod tests {
 
         let mut saw_soul_emote = false;
         while let Ok(event) = events.try_recv() {
-            if let ClientViewEvent::SoulEmote { sender, text } = event {
-                assert_eq!(sender, "Fellow");
+            if let ClientViewEvent::SoulEmote { speaker, text } = event {
+                let (name, kind) = speaker.into_name_and_kind();
+                assert_eq!(name, "Fellow");
+                assert_eq!(kind, ChatSpeakerKind::Player);
                 assert_eq!(text, "*mystery*");
                 saw_soul_emote = true;
                 break;
@@ -792,6 +1804,175 @@ mod tests {
         }
 
         assert!(saw_soul_emote);
+    }
+
+    #[tokio::test]
+    async fn cast_turn_correlation_preserves_authority_and_ends_with_operation() {
+        let mut client = build_test_client();
+        let guid = Guid(0x5000_0001);
+        let target = Guid(0x5000_0002);
+        client.world.seed_local_player_entity(
+            guid,
+            "Player",
+            WorldPosition {
+                landblock_id: Guid(0x0100_0001),
+                ..Default::default()
+            },
+        );
+        assert!(client.arm_busy_operation(PendingOperation::SpellCast {
+            target: Some(target)
+        }));
+        let params = TurnToParameters {
+            movement_parameters: 0,
+            speed: 1.0,
+            desired_heading: 180.0,
+        };
+        let mut turn = MovementEventData {
+            guid,
+            object_instance_sequence: client.world.player.instance_sequence,
+            movement_sequence: 20,
+            server_control_sequence: 10,
+            is_autonomous: false,
+            movement_type: MovementType::TurnToObject,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::TurnToObject(TurnToObject {
+                target,
+                desired_heading: 180.0,
+                params: params.clone(),
+            }),
+        };
+        assert!(client.suppresses_local_target_turn(&turn));
+        for unrelated in [
+            MovementEventData {
+                guid: target,
+                ..turn.clone()
+            },
+            MovementEventData {
+                is_autonomous: true,
+                ..turn.clone()
+            },
+            MovementEventData {
+                data: MovementTypeData::TurnToObject(TurnToObject {
+                    target: Guid(0x5000_0003),
+                    desired_heading: 180.0,
+                    params: params.clone(),
+                }),
+                ..turn.clone()
+            },
+            MovementEventData {
+                movement_type: MovementType::TurnToHeading,
+                data: MovementTypeData::TurnToHeading(TurnToHeading { params }),
+                ..turn.clone()
+            },
+        ] {
+            assert!(!client.suppresses_local_target_turn(&unrelated));
+        }
+        client
+            .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(
+                turn.clone(),
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(client.world.player.server_control_sequence, 10);
+        assert!(!client.movement.has_server_controlled_motion());
+        turn.server_control_sequence = 9;
+        turn.movement_sequence = 19;
+        client
+            .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(
+                turn.clone(),
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(client.world.player.server_control_sequence, 10);
+        assert_eq!(
+            client.world.player_entity().unwrap().movement_sequence(),
+            20
+        );
+
+        client.active_busy_operation.as_mut().unwrap().deadline = std::time::Instant::now();
+        assert!(!client.suppresses_local_target_turn(&turn));
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        assert!(!client.suppresses_local_target_turn(&turn));
+        turn.server_control_sequence = 11;
+        turn.movement_sequence = 21;
+        client
+            .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(
+                turn.clone(),
+            ))))
+            .await
+            .unwrap();
+        assert!(client.movement.has_server_controlled_motion());
+        assert!(
+            client.arm_busy_operation(crate::client::PendingOperation::SpellCast { target: None })
+        );
+        assert!(
+            !client.suppresses_local_target_turn(&turn),
+            "untargeted casts cannot correlate turns"
+        );
+        client.clear_busy_operation();
+        assert!(
+            client.arm_busy_operation(crate::client::PendingOperation::Use { source: Guid::NULL })
+        );
+        assert!(!client.suppresses_local_target_turn(&turn));
+    }
+
+    #[tokio::test]
+    async fn sent_missile_turn_preserves_manual_movement_authority() {
+        let mut client = build_test_client();
+        let guid = Guid(0x5000_0001);
+        let target = Guid(0x5000_0002);
+        client.world.seed_local_player_entity(
+            guid,
+            "Player",
+            WorldPosition {
+                landblock_id: Guid(0x0100_0001),
+                ..Default::default()
+            },
+        );
+        let now = Instant::now();
+        client.combat_engagement.begin(
+            target,
+            ClientAttackProfile::Missile {
+                height: holtburger_protocol::messages::combat::AttackHeight::Medium,
+                accuracy: 0.5,
+            },
+            now,
+            std::time::Duration::ZERO,
+        );
+        assert!(client.combat_engagement.next_effect(now, true).is_some());
+        let turn = MovementEventData {
+            guid,
+            object_instance_sequence: client.world.player.instance_sequence,
+            movement_sequence: 20,
+            server_control_sequence: 10,
+            is_autonomous: false,
+            movement_type: MovementType::TurnToObject,
+            motion_flags: 0,
+            current_style: MotionStance::BowCombat.interpreted(),
+            data: MovementTypeData::TurnToObject(TurnToObject {
+                target,
+                desired_heading: 180.0,
+                params: TurnToParameters {
+                    movement_parameters: 0,
+                    speed: 1.0,
+                    desired_heading: 180.0,
+                },
+            }),
+        };
+
+        assert!(client.suppresses_local_target_turn(&turn));
+        client
+            .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(turn))))
+            .await
+            .unwrap();
+
+        assert_eq!(client.world.player.server_control_sequence, 10);
+        assert!(!client.movement.has_server_controlled_motion());
+        assert!(client.combat_engagement.has_sent_sequence());
     }
 
     #[tokio::test]
@@ -831,12 +2012,12 @@ mod tests {
         client.handle_message(&encoded).await.unwrap();
 
         assert_eq!(client.state, ClientState::InWorld);
-        assert_eq!(client.session.game_action_sequence, 0);
-        assert_eq!(client.session.bytes_out, 0);
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
     }
 
     #[tokio::test]
-    async fn character_enter_world_server_ready_surfaces_view_event_without_auto_entering() {
+    async fn character_enter_world_server_ready_completes_entry_in_core() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
         client.character_selection.character_id = Some(holtburger_common::Guid(0x5000_0001));
@@ -854,7 +2035,8 @@ mod tests {
         }
 
         assert!(saw_ready);
-        assert_eq!(client.session.bytes_out, 0);
+        assert!(client.session.bytes_out > 0);
+        assert_eq!(client.session.packet_sequence, 2);
     }
 
     #[tokio::test]
@@ -877,7 +2059,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn server_controlled_move_to_position_flows_through_world_apply() {
+    async fn server_controlled_move_to_position_registers_authored_directive() {
         let mut client = build_test_client();
         let player_guid = holtburger_common::Guid(0x50000001);
         let start = WorldPosition {
@@ -913,48 +2095,387 @@ mod tests {
             .world
             .scene
             .body(holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
-            .expect("server-controlled movement should update the local runtime body");
-        assert_eq!(body.pose.landblock_id, destination.landblock_id);
-        assert_eq!(body.pose.coords, destination.coords);
-        assert!((body.pose.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 1e-5);
-        assert_eq!(client.session.packet_sequence, 2);
+            .expect("server-controlled movement should retain the local runtime body");
+        assert_eq!(body.pose, start);
+        assert!(client.movement.has_server_controlled_motion());
+        assert_eq!(
+            client.movement.current_local_drive_control(
+                &client.world,
+                std::time::Duration::from_millis(PHYSICS_TICK_MS),
+            ),
+            None,
+            "server directives must not leak into the autonomous velocity controller",
+        );
+        assert!(client.world.scene.apply_runtime_body_contact(
+            holtburger_world::SpatialBodyId::LocalPlayer(player_guid),
+            holtburger_world::ContactState::Grounded,
+        ));
+        assert!(client.movement.has_server_controlled_motion());
+        assert_eq!(client.session.packet_sequence, 1);
     }
 
     #[tokio::test]
-    async fn test_level_info_world_event_projects_directly() {
-        let client = build_test_client();
+    async fn external_stat_packets_publish_one_final_sheet_and_release_target_guard() {
+        use holtburger_common::properties::{PropertyFloat, PropertyInt, PropertyInt64};
+        use holtburger_world::progression::{
+            ProgressionIntent, ProgressionQuote, ProgressionTargetState, StatTarget,
+        };
+        use holtburger_world::stats::{AttributeType, SkillType, VitalType};
+
+        let mut client = build_test_client();
+        let character = Guid(0x5000_0001);
+        client
+            .world
+            .seed_local_player_entity(character, "Player", WorldPosition::default());
+        // The completed description makes the sheet available during ordinary play.
+        client.described_character = Some(character);
+        client.state = ClientState::InWorld;
         let mut events = client.subscribe_client_view_events();
 
-        client.handle_world_event(&WorldEvent::LevelInfoUpdated(CharacterLevelInfo {
-            level: 23,
-            current_xp: 1234,
-            unspent_xp: 456,
-            unspent_skill_points: 7,
-            available_luminance: 89,
-            next_level_xp: 9999,
-            xp_into_level: 111,
-            xp_for_next_level: 222,
-        }));
+        let attribute = |ranks, xp| {
+            GameMessage::PrivateUpdateAttribute(Box::new(PrivateUpdateAttributeData {
+                sequence: 1,
+                object_guid: None,
+                attribute: AttributeType::StrengthAttr as u32,
+                ranks,
+                start: 9809,
+                xp,
+            }))
+        };
+        client
+            .handle_message(&encode_message(&attribute(1, 100)))
+            .await
+            .unwrap();
+        while events.try_recv().is_ok() {}
 
-        let mut saw_level_info = false;
-        while let Ok(event) = events.try_recv() {
-            if matches!(
-                event,
-                ClientViewEvent::PlayerLevelInfoUpdated {
-                    level_info: CharacterLevelInfo { level: 23, .. }
-                }
-            ) {
-                saw_level_info = true;
-                break;
+        client.progression.guard(ProgressionQuote {
+            character,
+            intent: ProgressionIntent::Raise {
+                target: StatTarget::Attribute(AttributeType::StrengthAttr),
+                ranks: 1,
+            },
+            target_state: ProgressionTargetState {
+                training: None,
+                ranks: 1,
+                spent_xp: 100,
+            },
+            resulting_ranks: 2,
+            xp_spent: 1,
+            credits_spent: 0,
+            available_xp: 0,
+            available_credits: 0,
+        });
+        client
+            .handle_message(&encode_message(&attribute(190, 4_019_438_644)))
+            .await
+            .unwrap();
+        let projected: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+        let sheets: Vec<_> = projected
+            .iter()
+            .filter_map(|event| match event {
+                ClientViewEvent::CharacterSheetUpdated(Some(sheet)) => Some(sheet.as_ref()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sheets.len(), 1, "direct and derived events share one sheet");
+        let strength = &sheets[0].attributes[0];
+        assert_eq!(strength.ranks, 190);
+        assert_eq!(strength.spent_xp, 4_019_438_644);
+        assert!(sheets[0].guarded_targets.is_empty());
+        assert!(projected.iter().any(|event| matches!(
+            event,
+            ClientViewEvent::ProgressionGuardsUpdated { targets } if targets.is_empty()
+        )));
+
+        let messages = [
+            GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyInt::Level as u32,
+                value: 999,
+            })),
+            GameMessage::PrivateUpdatePropertyInt64(Box::new(PrivateUpdatePropertyInt64Data {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyInt64::TotalExperience as u32,
+                value: 191_226_310_247,
+            })),
+            GameMessage::PrivateUpdateSkill(Box::new(PrivateUpdateSkillData {
+                sequence: 1,
+                object_guid: None,
+                skill: SkillType::Jump as u32,
+                ranks: 226,
+                adjust_pp: 0,
+                status: 3,
+                xp: 4_100_490_438,
+                init: 5000,
+                resistance: 0,
+                last_used: 0.0,
+            })),
+            GameMessage::PrivateUpdateVital(Box::new(PrivateUpdateVitalData {
+                sequence: 1,
+                object_guid: None,
+                vital: VitalType::Health as u32,
+                ranks: 196,
+                start: 94_803,
+                xp: 4_285_430_197,
+                current: 95_000,
+            })),
+            GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyInt::ArmorLevel as u32,
+                value: 75,
+            })),
+            GameMessage::PrivateUpdatePropertyFloat(Box::new(PrivateUpdatePropertyFloatData {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyFloat::ResistFire as u32,
+                value: 0.8,
+            })),
+        ];
+        for message in messages {
+            while events.try_recv().is_ok() {}
+            client
+                .handle_message(&encode_message(&message))
+                .await
+                .unwrap();
+            let projected: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+            assert_eq!(
+                projected
+                    .iter()
+                    .filter(|event| matches!(event, ClientViewEvent::CharacterSheetUpdated(_)))
+                    .count(),
+                1,
+                "each authoritative packet publishes one sheet"
+            );
+            if matches!(message, GameMessage::PrivateUpdateVital(_)) {
+                assert_eq!(
+                    projected
+                        .iter()
+                        .filter(|event| matches!(
+                            event,
+                            ClientViewEvent::PlayerVitalsUpdated { .. }
+                        ))
+                        .count(),
+                    1,
+                    "a vital packet's direct and derived events share one HUD update"
+                );
             }
         }
+        let sheet = client.application_snapshot().character_sheet.unwrap();
+        assert_eq!(sheet.level.level, 999);
+        assert_eq!(sheet.level.current_xp, 191_226_310_247);
+        assert_eq!(sheet.skills[0].stat.spent_xp, 4_100_490_438);
+        assert_eq!(sheet.vitals[0].spent_xp, 4_285_430_197);
+        assert_eq!(sheet.armor, client.world.player_armor());
+        assert_eq!(sheet.resistances, client.world.player_resistances());
+        assert_eq!(sheet.vitae, client.world.player_vitae());
+    }
 
-        assert!(saw_level_info);
+    #[tokio::test]
+    async fn character_identity_and_luminance_capacity_packets_refresh_the_sheet() {
+        let mut client = build_test_client();
+        let character = Guid(0x5000_0001);
+        client
+            .world
+            .seed_local_player_entity(character, "Player", WorldPosition::default());
+        client.described_character = Some(character);
+        client.state = ClientState::InWorld;
+        let mut events = client.subscribe_client_view_events();
+        let messages = [
+            GameMessage::PrivateUpdatePropertyString(Box::new(PrivateUpdatePropertyStringData {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyString::Name as u32,
+                value: "Renamed Character".into(),
+            })),
+            GameMessage::PrivateUpdatePropertyString(Box::new(PrivateUpdatePropertyStringData {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyString::Template as u32,
+                value: "Adventurer".into(),
+            })),
+            GameMessage::PrivateUpdatePropertyInt64(Box::new(PrivateUpdatePropertyInt64Data {
+                sequence: 1,
+                guid: Guid::NULL,
+                property: PropertyInt64::MaximumLuminance as u32,
+                value: 1_000_000,
+            })),
+        ];
+        for message in messages {
+            client
+                .handle_message(&encode_message(&message))
+                .await
+                .unwrap();
+            assert_eq!(
+                std::iter::from_fn(|| events.try_recv().ok())
+                    .filter(|event| matches!(event, ClientViewEvent::CharacterSheetUpdated(_)))
+                    .count(),
+                1,
+            );
+        }
+        let sheet = client.application_snapshot().character_sheet.unwrap();
+        assert_eq!(sheet.name.as_deref(), Some("Renamed Character"));
+        assert_eq!(sheet.title.as_deref(), Some("Adventurer"));
+        assert_eq!(sheet.maximum_luminance, Some(1_000_000));
+        assert!(
+            !client.world_event_changes_character_sheet(&WorldEvent::PropertiesUpdated {
+                guid: Guid(character.0 + 1),
+                updates: vec![PropertyUpdate::String(PropertyString::Name, "Other".into())],
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn character_knowledge_requires_description_and_resets_on_character_entry() {
+        let mut client = build_test_client();
+        let player = Guid(0x50000001);
+        let mut events = client.subscribe_client_view_events();
+        client.world.player.add_spell(7, &mut Vec::new());
+        client.handle_world_event(&WorldEvent::SpellUpdated {
+            spell_id: 7,
+            name: None,
+            spell_ids: vec![7],
+        });
+        assert_eq!(client.application_snapshot().known_spells, None);
+        assert_eq!(client.application_snapshot().character_options, None);
+        assert!(
+            !std::iter::from_fn(|| events.try_recv().ok())
+                .any(|event| matches!(event, ClientViewEvent::PlayerSpellsUpdated { .. }))
+        );
+
+        let description = PlayerDescriptionEventData {
+            guid: player,
+            sequence: 0,
+            name: "Player".into(),
+            wee_type: 1,
+            pos: None,
+            properties: Default::default(),
+            positions: Default::default(),
+            attributes: Default::default(),
+            skills: Default::default(),
+            enchantments: Vec::new(),
+            spells: Default::default(),
+            has_health: true,
+            options1: Default::default(),
+            options2: Default::default(),
+            shortcuts: Vec::new(),
+            hotbar_spells: Vec::new(),
+            desired_comps: Vec::new(),
+            spellbook_filters: 0,
+            gameplay_options: Vec::new(),
+            inventory: Vec::new(),
+            equipped_objects: Vec::new(),
+        };
+        let message = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player,
+            sequence: 0,
+            event: GameEvent::PlayerDescription(Box::new(description)),
+        }));
+        client
+            .handle_message(&encode_message(&message))
+            .await
+            .unwrap();
+        assert_eq!(client.application_snapshot().known_spells, Some(vec![]));
+        assert!(
+            client
+                .application_snapshot()
+                .enchantments
+                .unwrap()
+                .records
+                .is_empty()
+        );
+        assert_eq!(
+            client.application_snapshot().character_options,
+            Some(PlayerCharacterOptions::default())
+        );
+        let flags = (holtburger_common::properties::EnchantmentTypeFlags::BODY_ARMOR_VALUE
+            | holtburger_common::properties::EnchantmentTypeFlags::ADDITIVE
+            | holtburger_common::properties::EnchantmentTypeFlags::BENEFICIAL)
+            .bits();
+        let effect = holtburger_protocol::messages::magic::Enchantment {
+            spell_id: 123,
+            spell_category: 7,
+            power_level: 5,
+            duration: -1.0,
+            stat_mod_type: flags,
+            stat_mod_value: 2.0,
+            ..Default::default()
+        };
+        client.world.player.enchantments.upsert(effect);
+        let snapshot_effects = client.application_snapshot().enchantments.unwrap();
+        assert_eq!(snapshot_effects.records, vec![effect]);
+        assert_eq!(snapshot_effects.resolved.instances[0].key.spell_id, 123);
+        let mut changes = Vec::new();
+        client.world.player.add_spell(3, &mut changes);
+        client.world.player.add_spell(1, &mut changes);
+        client.handle_world_events(changes).await.unwrap();
+        assert_eq!(client.application_snapshot().known_spells, Some(vec![1, 3]));
+        let mut changes = Vec::new();
+        client.world.player.remove_spell(1, &mut changes);
+        client.handle_world_events(changes).await.unwrap();
+        assert_eq!(client.application_snapshot().known_spells, Some(vec![3]));
+
+        // Home knowledge is retained independently of repeated player hydration and travel.
+        client.activation = None;
+        client.state = ClientState::InWorld;
+        client.query_home().await.unwrap();
+        let home_reply = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player,
+            sequence: 1,
+            event: GameEvent::HouseData(Box::new(HouseData {
+                buy_time: 100,
+                rent_time: 200,
+                house_type: 1,
+                maintenance_free: false,
+                buy: vec![],
+                rent: vec![],
+                position: Default::default(),
+            })),
+        }));
+        client
+            .handle_message(&encode_message(&home_reply))
+            .await
+            .unwrap();
+        let home = client.housing_snapshot();
+        let query_sequence = client.session.game_action_sequence;
+        let mut repeated_description = message.clone();
+        if let GameMessage::GameEvent(event) = &mut repeated_description
+            && let GameEvent::PlayerDescription(description) = &mut event.event
+        {
+            // Preserve the latest authoritative spell set in this repeated hydration fixture.
+            description.spells = std::collections::BTreeMap::from([(3, 1.0)]);
+        }
+        client
+            .handle_message(&encode_message(&repeated_description))
+            .await
+            .unwrap();
+        assert_eq!(client.housing_snapshot(), home);
+        assert_eq!(client.session.game_action_sequence, query_sequence);
+        // Scene replacement is independent of character knowledge.
+        client.start_world_activation(ClientWorldActivationState::Teleport, player);
+        assert_eq!(client.housing_snapshot(), home);
+        assert_eq!(client.session.game_action_sequence, query_sequence);
+        assert_eq!(client.application_snapshot().known_spells, Some(vec![3]));
+        assert!(client.application_snapshot().character_options.is_some());
+        client.character_selection.character_id = Some(Guid(0x50000002));
+        // PlayerCreate may already establish the selected identity before description hydration.
+        client.world.player.guid = Guid(0x50000002);
+        client.begin_world_entry_transition().await.unwrap();
+        assert_eq!(
+            client.housing_snapshot(),
+            super::super::housing::HousingSnapshot::default()
+        );
+        assert_eq!(client.application_snapshot().known_spells, None);
+        assert!(client.application_snapshot().enchantments.is_none());
+        assert_eq!(client.application_snapshot().character_options, None);
     }
 
     #[tokio::test]
     async fn test_spell_world_event_projects_supplied_snapshot() {
-        let client = build_test_client();
+        let mut client = build_test_client();
+        client.described_character = Some(client.world.player.guid);
         let mut events = client.subscribe_client_view_events();
 
         client.handle_world_event(&WorldEvent::SpellUpdated {
@@ -976,6 +2497,40 @@ mod tests {
         }
 
         assert!(saw_spell_snapshot);
+    }
+
+    #[tokio::test]
+    async fn server_text_preserves_channel_and_verbatim_content() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+        let message = "  The door is locked!\nTry another entrance.  ".to_string();
+        for (sequence, event) in [
+            GameEvent::CommunicationTransientString(Box::new(
+                CommunicationTransientStringEventData {
+                    message: message.clone(),
+                },
+            )),
+            GameEvent::PopupString(Box::new(PopupStringEventData {
+                message: message.clone(),
+            })),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+                target: Guid::NULL,
+                sequence: sequence as u32,
+                event,
+            })));
+            client.handle_message(&encoded).await.unwrap();
+        }
+        assert!(
+            matches!(events.try_recv().unwrap(), ClientViewEvent::TransientString { message: text } if text == message)
+        );
+        assert!(
+            matches!(events.try_recv().unwrap(), ClientViewEvent::PopupString { message: text } if text == message)
+        );
+        assert!(events.try_recv().is_err());
     }
 
     #[tokio::test]
@@ -1031,6 +2586,7 @@ mod tests {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
         client.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 0xDEADBEEF,
             text: "Craft this item?".to_string(),
@@ -1070,6 +2626,7 @@ mod tests {
     async fn test_confirmation_done_does_not_auto_respond_for_fellowship() {
         let mut client = build_test_client();
         client.active_confirmation = Some(ActiveCharacterConfirmation {
+            request_id: 1,
             confirmation_type: ConfirmationType::Fellowship,
             context: 0xDEADBEEF,
             text: "Join fellowship?".to_string(),
@@ -1096,8 +2653,9 @@ mod tests {
     async fn test_character_create_response_projects_pending_operation() {
         let mut client = build_test_client();
         let mut view_events = client.subscribe_client_view_events();
-        client.character_selection.pending_character_operation =
-            Some(CharacterManagementOperation::Create);
+        client.character_selection.management = CharacterManagementState::Creating {
+            name: "Bestie".into(),
+        };
 
         let encoded = encode_message(&GameMessage::CharacterCreateResponse(Box::new(
             CharacterCreateResponseData {
@@ -1130,11 +2688,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn selection_character_error_resolves_creation_in_the_recovery_snapshot() {
+        let mut client = build_test_client();
+        client.state = ClientState::CharacterSelection;
+        client.character_selection.management =
+            CharacterManagementState::Creating { name: "Amy".into() };
+        let encoded = encode_message(&GameMessage::CharacterError(Box::new(CharacterErrorData {
+            error_id: CharacterError::LogonServerFull as u32,
+        })));
+        client.handle_message(&encoded).await.unwrap();
+        assert_eq!(client.state, ClientState::CharacterSelection);
+        assert!(matches!(
+            client.application_snapshot().character_management,
+            CharacterManagementState::Rejected {
+                operation: CharacterManagementOperation::Create,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
     async fn test_character_delete_response_projects_event() {
         let mut client = build_test_client();
         let mut view_events = client.subscribe_client_view_events();
-        client.character_selection.pending_character_operation =
-            Some(CharacterManagementOperation::Delete);
+        client.character_selection.management = CharacterManagementState::Deleting;
 
         let encoded = encode_message(&GameMessage::CharacterDeleteResponse);
 
@@ -1154,8 +2731,9 @@ mod tests {
     async fn test_player_info_world_event_projects_player_options() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.world.player.options1 = CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG;
-        client.world.player.options2 = CharacterOptions2::SHOW_HELM;
+        client.world.player.character_options.options1 =
+            CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG;
+        client.world.player.character_options.options2 = CharacterOptions2::SHOW_HELM;
 
         client.handle_world_event(&WorldEvent::PlayerInfo(Box::new(
             holtburger_world::PlayerInfoData {
@@ -1208,7 +2786,9 @@ mod tests {
     async fn use_done_finishes_busy_operation_with_weenie_hint() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.arm_busy_operation(BusyOperationKind::Sell);
+        client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget {
+            spell_target: None,
+        });
 
         let encoded_error = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
             target: holtburger_common::Guid::NULL,
@@ -1235,7 +2815,7 @@ mod tests {
             if matches!(
                 event,
                 ClientViewEvent::BusyOperationFinished {
-                    operation: BusyOperationKind::Sell,
+                    operation: BusyOperationKind::UseWithTarget,
                     result: BusyOperationResult::Completed {
                         error: WeenieError::FullInventoryLocation,
                         parameter: None,
@@ -1254,7 +2834,9 @@ mod tests {
     async fn use_done_with_explicit_error_finishes_busy_operation_directly() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.arm_busy_operation(BusyOperationKind::Buy);
+        client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget {
+            spell_target: None,
+        });
 
         let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
             target: holtburger_common::Guid::NULL,
@@ -1270,7 +2852,7 @@ mod tests {
             if matches!(
                 event,
                 ClientViewEvent::BusyOperationFinished {
-                    operation: BusyOperationKind::Buy,
+                    operation: BusyOperationKind::UseWithTarget,
                     result: BusyOperationResult::Completed {
                         error: WeenieError::NoObject,
                         parameter: None,
@@ -1283,5 +2865,183 @@ mod tests {
         }
 
         assert!(saw_completion);
+    }
+
+    #[tokio::test]
+    async fn authentication_rejections_are_retained_and_terminal() {
+        for raw in [
+            CharacterError::Logon as u32,
+            CharacterError::AccountDoesntExist as u32,
+            0xfedc_ba98,
+        ] {
+            let mut client = build_test_client();
+            client.authenticating = true;
+            let encoded =
+                encode_message(&GameMessage::CharacterError(Box::new(CharacterErrorData {
+                    error_id: raw,
+                })));
+            client.handle_message(&encoded).await.unwrap();
+            let outcome = client.exit_outcome().unwrap().clone();
+            assert_eq!(client.state, ClientState::Disconnected);
+            assert_eq!(outcome.cause, ClientExitCause::ServerDisconnect);
+            assert_eq!(
+                outcome.failure.as_ref().unwrap().cause,
+                super::super::ConnectionFailureCause::Character(raw.into())
+            );
+            assert_eq!(
+                client.application_snapshot().lifecycle,
+                ClientLifecycleState::Exiting {
+                    outcome: outcome.clone()
+                }
+            );
+            client
+                .handle_message(&encode_message(&GameMessage::CharacterList(Box::new(
+                    CharacterListData {
+                        characters: vec![],
+                        max_slots: 11,
+                        account_name: "test".into(),
+                        use_turbine_chat: false,
+                        has_tod_expansion: true,
+                    },
+                ))))
+                .await
+                .unwrap();
+            assert_eq!(client.exit_outcome(), Some(&outcome));
+            assert_eq!(client.state, ClientState::Disconnected);
+        }
+    }
+
+    #[tokio::test]
+    async fn entry_refusal_restores_roster_and_blocks_late_world_traffic() {
+        let mut client = build_test_client();
+        client.state = ClientState::CharacterSelection;
+        let guid = Guid(0x5000_1234);
+        client.character_selection.characters.push(CharacterEntry {
+            guid,
+            name: "Amy".into(),
+            delete_time: 0,
+        });
+        client.character_selection.character_id = Some(guid);
+        client.begin_world_entry_transition().await.unwrap();
+        client
+            .handle_message(&encode_message(&GameMessage::CharacterError(Box::new(
+                CharacterErrorData {
+                    error_id: CharacterError::EnterGameCharacterInWorld as u32,
+                },
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(client.state, ClientState::CharacterSelection);
+        assert!(client.activation.is_none());
+        assert!(client.event_ordering.is_none());
+        assert!(client.exit_outcome().is_none());
+        assert!(client.character_selection.character_id.is_none());
+        let before = client.application_snapshot();
+        let sent = client.session.bytes_out;
+        client
+            .handle_message(&encode_message(
+                &GameMessage::CharacterEnterWorldServerReady,
+            ))
+            .await
+            .unwrap();
+        client
+            .handle_message(&encode_message(&GameMessage::PlayerCreate(Box::new(
+                PlayerCreateData { guid },
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(client.session.bytes_out, sent);
+        assert_eq!(client.world.player.guid, Guid::NULL);
+        assert_eq!(client.application_snapshot().lifecycle, before.lifecycle);
+        client
+            .handle_command(ClientCommand::SelectCharacter(guid))
+            .await
+            .unwrap();
+        assert!(client.character_selection.entry_rejection.is_none());
+        assert_eq!(client.state, ClientState::EnteringWorld);
+    }
+
+    #[tokio::test]
+    async fn ban_is_terminal_even_in_the_retired_character_logout_gap() {
+        let mut client = build_test_client();
+        client.state = ClientState::LoggingOut;
+        let data = AccountBannedData {
+            duration_seconds: 3600,
+            reason: Some(" - test reason".into()),
+        };
+        client
+            .handle_message(&encode_message(&GameMessage::AccountBanned(Box::new(
+                data.clone(),
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(
+            client
+                .exit_outcome()
+                .unwrap()
+                .failure
+                .as_ref()
+                .unwrap()
+                .cause,
+            super::super::ConnectionFailureCause::AccountBanned(data)
+        );
+        let diagnostic = client.exit_outcome().unwrap().diagnostic();
+        assert!(diagnostic.contains("3600 seconds"));
+        assert!(diagnostic.contains("test reason"));
+    }
+    #[tokio::test]
+    async fn boot_preserves_optional_reason_and_in_world_eviction_is_terminal() {
+        for reason in [
+            None,
+            Some(String::new()),
+            Some("custom server explanation".into()),
+        ] {
+            let mut client = build_test_client();
+            client.authenticating = true;
+            client
+                .handle_message(&encode_message(&GameMessage::AccountBoot(Box::new(
+                    BootAccountData {
+                        reason: reason.clone(),
+                    },
+                ))))
+                .await
+                .unwrap();
+            assert_eq!(
+                client
+                    .exit_outcome()
+                    .unwrap()
+                    .failure
+                    .as_ref()
+                    .unwrap()
+                    .cause,
+                super::super::ConnectionFailureCause::AccountBoot(reason)
+            );
+        }
+        for code in [CharacterError::Logon, CharacterError::ServerCrash1] {
+            let mut client = build_test_client();
+            client.state = ClientState::InWorld;
+            client
+                .handle_message(&encode_message(&GameMessage::CharacterError(Box::new(
+                    CharacterErrorData {
+                        error_id: code as u32,
+                    },
+                ))))
+                .await
+                .unwrap();
+            assert_eq!(client.state, ClientState::Disconnected);
+            assert!(client.exit_outcome().unwrap().failure.is_some());
+        }
+        let mut client = build_test_client();
+        client.authenticating = true;
+        client
+            .handle_message(&encode_message(&GameMessage::CharacterError(Box::new(
+                CharacterErrorData {
+                    error_id: CharacterError::None as u32,
+                },
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(client.state, ClientState::Connected);
+        assert!(client.exit_outcome().is_none());
     }
 }

@@ -1,0 +1,686 @@
+import { allocateItemUseOperation } from "./client-item-use-sequence";
+import { ClientConfirmationSuppression } from "./client-confirmation-suppression";
+import type {
+	LocalConfirmationRequest,
+	LocalDialogSource,
+} from "./client-dialogs";
+import {
+	bindingAction,
+	canInteractEquipment,
+	canInteractItem,
+} from "./client-action-item";
+import { wieldedCasterSpell } from "./client-inventory-equipment";
+import type { ClientEntitySelection } from "./client-entity-selection";
+import type { ClientEntityFacts } from "./client-entity-mirror";
+import type {
+	ClientLifecycleSession,
+	ClientLifecycleSessionEvent,
+} from "./client-lifecycle-session";
+import type {
+	ClientItemUseRequest,
+	ClientItemUseResult,
+} from "./client-item-use-contract";
+
+/** Cold state consumed by Notifications guidance and the local confirmation dialog. */
+export type ItemInteractionState =
+	| { readonly kind: "idle" }
+	| {
+			/** Giving retains identities only; core validates current facts on submission. */
+			readonly kind: "confirming-give";
+			readonly source: number;
+			readonly recipient: number;
+			readonly question: LocalConfirmationRequest;
+	  }
+	| {
+			readonly kind: "acquiring";
+			readonly source: number;
+			/** Source ownership captured for lifecycle invalidation. */
+			readonly sourceOwned: boolean;
+			readonly name: string;
+			readonly generation: number;
+			/** Only target transitions and authority replies update the cold cursor cue. */
+			readonly considered: {
+				readonly target: number;
+				readonly sequence: number;
+				readonly eligibility: "pending" | "eligible" | "ineligible";
+			} | null;
+	  }
+	| {
+			/** Await compatibility before choosing automatic use or explicit acquisition. */
+			readonly kind: "resolving";
+			readonly source: number;
+			readonly sourceOwned: boolean;
+			readonly target: number;
+			readonly sequence: number;
+	  }
+	| {
+			readonly kind: "submitting";
+			readonly request: ClientItemUseRequest;
+			readonly resume: Acquisition | null;
+	  }
+	| {
+			readonly kind: "confirming";
+			readonly request: ClientItemUseRequest;
+			readonly question: LocalConfirmationRequest;
+	  };
+type Acquisition = Extract<ItemInteractionState, { kind: "acquiring" }>;
+/** Mounted cell compatibility subscription; sequences retire stale authority replies. */
+interface TargetObservation {
+	/** Source captured from the acquisition that owns this subscription. */
+	readonly source: number;
+	/** Physical target shared by one or more mounted cells. */
+	readonly target: number;
+	/** Replaced whenever entity facts invalidate the outstanding query. */
+	sequence: number;
+	/** Null retires a previous verdict while refreshed authority is pending. */
+	readonly receive: (eligible: boolean | null) => void;
+}
+type Session = Pick<
+	ClientLifecycleSession,
+	| "entities"
+	| "state"
+	| "subscribe"
+	| "submitItemUse"
+	| "queryItemUseTarget"
+	| "equipItem"
+	| "submitInventory"
+>;
+
+/** Frontend item interactions. Rust evaluates consequences; this owner decides whether to ask. */
+export class ClientItemInteractions implements LocalDialogSource {
+	readonly #session: Session;
+	readonly #selection: Pick<
+		ClientEntitySelection,
+		"selectedGuid" | "lastGiveRecipientGuid" | "select"
+	>;
+	readonly #failure: (message: string) => void;
+	readonly #notice: (message: string) => void;
+	readonly #beginAcquisition: () => void;
+	readonly #beginSalvage: (tool: number) => void;
+	readonly #beginTrade: (partner: number) => void;
+	readonly #unsubscribe: () => void;
+	readonly #listeners = new Set<(state: ItemInteractionState) => void>();
+	readonly #targetObservations = new Set<TargetObservation>();
+	#state: ItemInteractionState = { kind: "idle" };
+	#destroyed = false;
+	/** A deadline needs no timer; each give checks expiry when it starts. */
+	readonly #giveConfirmation = new ClientConfirmationSuppression();
+
+	constructor(options: {
+		readonly session: Session;
+		readonly selection: Pick<
+			ClientEntitySelection,
+			"selectedGuid" | "lastGiveRecipientGuid" | "select"
+		>;
+		readonly reportFailure: (message: string) => void;
+		/** Ordinary local gameplay refusal, without warning severity. */
+		readonly reportNotice: (message: string) => void;
+		/** Retire mutually exclusive frontend modes before acquisition begins. */
+		readonly beginAcquisition: () => void;
+		/** Local Ust activation shared by inventory, selection, and bound actions. */
+		readonly beginSalvage: (tool: number) => void;
+		/** Player interaction initiates negotiations through the session-owned trade flow. */
+		readonly beginTrade: (partner: number) => void;
+	}) {
+		this.#session = options.session;
+		this.#selection = options.selection;
+		this.#failure = options.reportFailure;
+		this.#notice = options.reportNotice;
+		this.#beginAcquisition = options.beginAcquisition;
+		this.#beginTrade = options.beginTrade;
+		this.#beginSalvage = options.beginSalvage;
+		this.#unsubscribe = options.session.subscribe((event) =>
+			this.#receive(event),
+		);
+	}
+
+	snapshot(): ItemInteractionState {
+		return this.#state;
+	}
+	/** Item confirmation policy is owned here, independently of the modal presenter. */
+	question(): LocalConfirmationRequest | null {
+		const local = this.snapshot();
+		return local.kind === "confirming" || local.kind === "confirming-give"
+			? local.question
+			: null;
+	}
+
+	subscribe(listener: (state: ItemInteractionState) => void): () => void {
+		this.#listeners.add(listener);
+		return () => this.#listeners.delete(listener);
+	}
+
+	/** Interact uses selection as a target only while already acquiring. */
+	interactSelected(unrestricted: boolean): void {
+		const selected = this.#selection.selectedGuid();
+		if (selected === null) {
+			this.#failure("No target selected.");
+			return;
+		}
+		if (this.#state.kind === "acquiring")
+			this.target(selected, this.#state.generation);
+		else {
+			const item = this.#item(selected);
+			if (item !== null) this.#interact(item, unrestricted);
+		}
+	}
+
+	/** Viewport activation uses the accepted picked identity, independent of selection. */
+	interactIfPossible(source: number, unrestricted: boolean): void {
+		const item = this.#item(source);
+		if (item !== null && canInteractItem(item, unrestricted))
+			this.#interact(item, unrestricted);
+	}
+
+	#interact(item: ClientEntityFacts, unrestricted: boolean): void {
+		const source = item.guid;
+		if (item.canTrade) {
+			this.cancel();
+			this.#beginTrade(source);
+		} else if (item.canPickUp) {
+			this.cancel();
+			void this.#session
+				.submitInventory({
+					item: source,
+					target: { kind: "pickup", container: null },
+				})
+				.catch((error: unknown) => this.#failure(String(error)));
+		} else this.use(source, unrestricted);
+	}
+
+	/** Give to the latest selected eligible recipient, independent of intervening selections. */
+	giveSelected(): void {
+		if (this.#destroyed) return;
+		const source = this.#selection.selectedGuid();
+		// RETAIL DIVERGENCE: reads the immediately previous entity. Remembering an eligible
+		// recipient survives item browsing; this changes local target choice only, with the
+		// same explicit give request and server validation. Consumer census: Give was the sole
+		// production reader of the replaced history slot.
+		const recipient = this.#selection.lastGiveRecipientGuid();
+		if (source === null || recipient === null) {
+			this.cancel();
+			this.#notice("Select a recipient, then select the item to give.");
+			return;
+		}
+		this.give(source, recipient);
+	}
+
+	/** Keyboard and viewport drops share the same confirmation and suppression policy. */
+	give(source: number, recipient: number): void {
+		if (this.#destroyed) return;
+		this.cancel();
+		const read = this.#session.entities.read();
+		if (
+			read.kind === "pending" ||
+			this.#session.state().lifecycle?.kind !== "in-world"
+		) {
+			this.#notice("Giving requires current world information.");
+			return;
+		}
+		const item = read.level.entities.get(source);
+		const target = read.level.entities.get(recipient);
+		if (!item?.ownedByPlayer || item.description.kind !== "known") {
+			this.#notice("Select an item you are carrying or wearing to give.");
+			return;
+		}
+		if (!target?.canReceiveGive || target.description.kind !== "known") {
+			this.#notice("This recipient cannot receive an item.");
+			return;
+		}
+		if (this.#giveConfirmation.active) {
+			this.#sendGive(source, recipient);
+			return;
+		}
+		this.#set({
+			kind: "confirming-give",
+			source,
+			recipient,
+			question: {
+				requestId: `give-${allocateItemUseOperation()}`,
+				text: `Give ${item.description.name} to ${target.description.name}?${item.description.stackCount === null ? "" : " This gives the entire stack."}`,
+				acceptLabel: "Give",
+				cancelLabel: "Cancel",
+				suppressionLabel: "Suppress confirmation for the next hour",
+			},
+		});
+	}
+
+	#sendGive(source: number, recipient: number): void {
+		this.#set({ kind: "idle" });
+		void this.#session
+			.submitInventory({
+				item: source,
+				target: { kind: "give", guid: recipient },
+			})
+			.catch((error: unknown) => this.#failure(String(error)));
+		// Retail restores the recipient after attempting Give.
+		this.#selection.select(recipient);
+	}
+
+	/** Inventory supplies its clicked identity, independent of selection toggles. */
+	use(source: number, unrestricted: boolean): void {
+		this.cancel();
+		const item = this.#item(source);
+		if (item === null) return;
+		// Every ordinary equipment gesture follows confirmed storage state.
+		if (!unrestricted && canInteractEquipment(item)) {
+			this.#toggleEquipment(item, false);
+			return;
+		}
+		this.#useAuthored(source, unrestricted);
+	}
+
+	/** The alternate side matters only when equipping; worn gear always unequips. */
+	#toggleEquipment(item: ClientEntityFacts, alternate: boolean): void {
+		const operation =
+			item.location.kind === "equipped"
+				? this.#session.submitInventory({
+						item: item.guid,
+						target: { kind: "unequip" },
+					})
+				: this.#session.equipItem(item.guid, alternate);
+		void operation.catch((error: unknown) => this.#failure(String(error)));
+	}
+
+	/** Caster and targeted-action retries must bypass ordinary equipment gestures. */
+	#useAuthored(source: number, unrestricted: boolean): void {
+		this.cancel();
+		const item = this.#item(source);
+		if (item === null) return;
+		if (this.#tryBeginSalvage(item, unrestricted)) return;
+		const capability = item.description.useCapability;
+		if (capability === "targeted") {
+			this.#beginAcquisition();
+			this.#set({
+				kind: "acquiring",
+				source,
+				name: item.description.name,
+				sourceOwned: item.ownedByPlayer,
+				generation: allocateItemUseOperation(),
+				considered: null,
+			});
+		} else if (
+			capability === "direct" ||
+			((capability === "unsupported" || capability === "salvage-tool") &&
+				unrestricted)
+		) {
+			this.#submit({ kind: "direct", source, unrestricted }, null);
+		} else this.#failure("This item cannot currently be used.");
+	}
+
+	/** Retail's caster shortcut uses the selected recipient. */
+	castWieldedSpell(source: number): void {
+		this.cancel();
+		const item = this.#item(source);
+		if (item === null) return;
+		if (this.#session.state().combatMode !== "magic") {
+			this.#failure("Enter magic stance before casting.");
+			return;
+		}
+		if (wieldedCasterSpell(item) === null) {
+			this.#failure("The caster spell is no longer wielded.");
+			return;
+		}
+		this.#useTargeted(source, this.#selection.selectedGuid());
+	}
+
+	/** Bars toggle equipment; targeted actions try self/selection before target acquisition. */
+	activate(
+		source: number,
+		kind: "equipment" | "direct" | "targeted",
+		alternate: boolean,
+	): void {
+		this.cancel();
+		const item = this.#item(source);
+		if (item === null) return;
+		if (bindingAction(item)?.kind !== kind) {
+			this.#failure("Bound action is unavailable.");
+			return;
+		}
+		if (this.#tryBeginSalvage(item, false)) return;
+		if (kind === "equipment") {
+			this.#toggleEquipment(item, alternate);
+			return;
+		}
+		if (kind === "direct")
+			this.#submit({ kind: "direct", source, unrestricted: false }, null);
+		else {
+			const read = this.#session.entities.read();
+			const target = alternate
+				? this.#selection.selectedGuid()
+				: read.kind === "current"
+					? read.level.playerGuid
+					: null;
+			this.#useTargeted(source, target);
+		}
+	}
+
+	/** The shared semantic capability routes both ordinary and bound Ust activation locally. */
+	#tryBeginSalvage(item: ClientEntityFacts, unrestricted: boolean): boolean {
+		if (
+			unrestricted ||
+			item.description.kind !== "known" ||
+			item.description.useCapability !== "salvage-tool"
+		)
+			return false;
+		this.#beginSalvage(item.guid);
+		return true;
+	}
+
+	/** Share compatibility checks and acquisition across item and caster shortcuts. */
+	#useTargeted(source: number, target: number | null): void {
+		const item = this.#item(source);
+		if (item === null) return;
+		if (target === null) {
+			this.#useAuthored(source, false);
+			return;
+		}
+		const state: ItemInteractionState = {
+			kind: "resolving",
+			source,
+			sourceOwned: item.ownedByPlayer,
+			target,
+			sequence: allocateItemUseOperation(),
+		};
+		this.#set(state);
+		// Validating the player also checks the source's creature target mask in world.
+		void this.#session
+			.queryItemUseTarget({ sequence: state.sequence, source, target })
+			.catch((error: unknown) => {
+				if (this.#state !== state) return;
+				this.#useAuthored(source, false);
+				this.#failure(String(error));
+			});
+	}
+
+	/** Observe mounted-cell compatibility, refreshing when authoritative entity facts change. */
+	observeTarget(
+		target: number,
+		receive: (eligible: boolean | null) => void,
+	): () => void {
+		if (this.#state.kind !== "acquiring")
+			throw new Error("Target observation requires active item acquisition.");
+		const observation: TargetObservation = {
+			source: this.#state.source,
+			target,
+			sequence: allocateItemUseOperation(),
+			receive,
+		};
+		this.#targetObservations.add(observation);
+		this.#queryObservation(observation);
+		return () => this.#targetObservations.delete(observation);
+	}
+
+	#queryObservation(observation: TargetObservation): void {
+		const { sequence, source, target } = observation;
+		void this.#session
+			.queryItemUseTarget({ sequence, source, target })
+			.catch((error: unknown) => {
+				if (
+					this.#targetObservations.has(observation) &&
+					observation.sequence === sequence
+				)
+					this.#failure(String(error));
+			});
+	}
+
+	/** Hover checks never submit a use action or open a confirmation. */
+	consider(target: number | null): void {
+		const state = this.#state;
+		if (
+			state.kind !== "acquiring" ||
+			(state.considered?.target ?? null) === target
+		)
+			return;
+		if (target === null) this.#set({ ...state, considered: null });
+		else this.#queryTarget(state, target);
+	}
+
+	#queryTarget(state: Acquisition, target: number): void {
+		const sequence = allocateItemUseOperation();
+		this.#set({
+			...state,
+			considered: { target, sequence, eligibility: "pending" },
+		});
+		void this.#session
+			.queryItemUseTarget({ sequence, source: state.source, target })
+			.catch((error: unknown) => {
+				const current = this.#state;
+				if (
+					current.kind !== "acquiring" ||
+					current.considered?.sequence !== sequence
+				)
+					return;
+				this.#set({ ...current, considered: null });
+				this.#failure(String(error));
+			});
+	}
+
+	/** A stale pick cannot target a replacement operation. True consumes this target click. */
+	target(target: number | null, generation: number): boolean {
+		const state = this.#state;
+		if (state.kind !== "acquiring" || state.generation !== generation)
+			return false;
+		if (target !== null)
+			this.#submit(
+				{ kind: "targeted", source: state.source, target },
+				{ ...state, generation: allocateItemUseOperation(), considered: null },
+			);
+		return true;
+	}
+
+	/** Accept submits the displayed operation, never the current selection. */
+	respond(id: string, accepted: boolean, suppress?: boolean): void {
+		const state = this.#state;
+		if (state.kind === "confirming-give" && state.question.requestId === id) {
+			if (accepted) {
+				if (suppress === true) this.#giveConfirmation.suppressForHour();
+				this.#sendGive(state.source, state.recipient);
+			} else this.cancel();
+			return;
+		}
+		if (state.kind !== "confirming" || state.question.requestId !== id) return;
+		if (!accepted) {
+			this.cancel();
+			return;
+		}
+		this.#send(
+			{ ...state.request, sequence: allocateItemUseOperation() },
+			null,
+		);
+	}
+
+	/** Keyboard ownership changes retire targeting, including retries, without losing dispatched results. */
+	cancelTargeting(): void {
+		if (this.#state.kind === "acquiring" || this.#state.kind === "resolving")
+			this.cancel();
+		else if (this.#state.kind === "submitting" && this.#state.resume !== null)
+			this.#set({ ...this.#state, resume: null });
+	}
+
+	cancel(): boolean {
+		if (this.#state.kind === "idle") return false;
+		this.#set({ kind: "idle" });
+		return true;
+	}
+	destroy(): void {
+		this.cancel();
+		this.#destroyed = true;
+		this.#unsubscribe();
+		this.#listeners.clear();
+		this.#targetObservations.clear();
+	}
+
+	#item(source: number) {
+		if (this.#destroyed || this.#session.state().lifecycle?.kind !== "in-world")
+			return null;
+		const read = this.#session.entities.read();
+		const item =
+			read.kind === "current" ? read.level.entities.get(source) : undefined;
+		if (item === undefined || item.description.kind !== "known") {
+			this.#failure("Item is unavailable.");
+			return null;
+		}
+		return { ...item, description: item.description };
+	}
+
+	#submit(
+		intent: ClientItemUseRequest["intent"],
+		resume: Acquisition | null,
+	): void {
+		const read = this.#session.entities.read();
+		if (read.kind !== "current" || read.level.playerGuid === null) {
+			this.#failure("Player is unavailable.");
+			return;
+		}
+		const source = read.level.entities.get(intent.source);
+		if (source === undefined) {
+			this.#failure("Item is unavailable.");
+			return;
+		}
+		this.#send(
+			{
+				sequence: allocateItemUseOperation(),
+				player: read.level.playerGuid,
+				sourceOwned: source.ownedByPlayer,
+				intent,
+				expected: { kind: "ordinary" },
+			},
+			resume,
+		);
+	}
+	#send(request: ClientItemUseRequest, resume: Acquisition | null): void {
+		const state: ItemInteractionState = { kind: "submitting", request, resume };
+		this.#set(state);
+		void this.#session.submitItemUse(request).catch((error: unknown) => {
+			const current = this.#state;
+			if (
+				current.kind !== "submitting" ||
+				current.request.sequence !== request.sequence
+			)
+				return;
+			this.#set(current.resume ?? { kind: "idle" });
+			this.#failure(String(error));
+		});
+	}
+
+	#result(result: ClientItemUseResult): void {
+		const state = this.#state;
+		if (
+			state.kind !== "submitting" ||
+			state.request.sequence !== result.sequence
+		)
+			return;
+		const outcome = result.outcome;
+		if (outcome.kind === "executed") this.cancel();
+		else if (outcome.kind === "rejected") {
+			this.#set(state.resume ?? { kind: "idle" });
+			this.#failure(outcome.reason);
+		} else if (outcome.evaluation.kind === "destroy-item") {
+			const { target, amount, name } = outcome.evaluation;
+			this.#set({
+				kind: "confirming",
+				request: {
+					...state.request,
+					expected: { kind: "destroy-item", target, amount },
+				},
+				question: {
+					requestId: "item-use-" + allocateItemUseOperation(),
+					text:
+						"Using this mana stone will destroy " +
+						amount +
+						" × " +
+						name +
+						". Continue?",
+				},
+			});
+		} else {
+			// Changed semantics retire approval; do not retry a different operation automatically.
+			this.cancel();
+			this.#failure("The item's use has changed. Trigger it again.");
+		}
+	}
+	#receive(event: ClientLifecycleSessionEvent): void {
+		this.#giveConfirmation.receive(event);
+		if (event.type === "item-use-target-result") {
+			for (const observation of this.#targetObservations) {
+				if (observation.sequence === event.result.sequence)
+					observation.receive(event.result.eligible);
+			}
+			const state = this.#state;
+			if (
+				state.kind === "resolving" &&
+				state.sequence === event.result.sequence
+			) {
+				if (event.result.eligible)
+					this.#submit(
+						{ kind: "targeted", source: state.source, target: state.target },
+						null,
+					);
+				else this.#useAuthored(state.source, false);
+				return;
+			}
+			if (
+				state.kind === "acquiring" &&
+				state.considered?.sequence === event.result.sequence
+			)
+				this.#set({
+					...state,
+					considered: {
+						...state.considered,
+						eligibility: event.result.eligible ? "eligible" : "ineligible",
+					},
+				});
+			return;
+		}
+		if (event.type === "item-use-result") {
+			this.#result(event.result);
+			return;
+		}
+		if (
+			event.type === "resyncing" ||
+			event.type === "current-state" ||
+			(event.type === "lifecycle" && event.lifecycle.kind !== "in-world") ||
+			(event.type === "confirmation" && event.confirmation !== null)
+		) {
+			this.cancel();
+			return;
+		}
+		if (event.type === "entities" && this.#state.kind !== "idle") {
+			// Give has no acquisition lifecycle; authoritative submission validates its identities.
+			if (this.#state.kind === "confirming-give") return;
+			const source =
+				this.#state.kind === "acquiring" || this.#state.kind === "resolving"
+					? this.#state.source
+					: this.#state.request.intent.source;
+			const read = this.#session.entities.read();
+			const item =
+				read.kind === "current" ? read.level.entities.get(source) : undefined;
+			if (
+				item === undefined ||
+				(this.#state.kind === "acquiring" || this.#state.kind === "resolving"
+					? this.#state.sourceOwned !== item.ownedByPlayer
+					: this.#state.request.sourceOwned !== item.ownedByPlayer)
+			)
+				this.cancel();
+			else if (this.#state.kind === "acquiring") {
+				for (const observation of this.#targetObservations) {
+					observation.sequence = allocateItemUseOperation();
+					observation.receive(null);
+					this.#queryObservation(observation);
+				}
+				if (this.#state.considered !== null)
+					this.#queryTarget(this.#state, this.#state.considered.target);
+			}
+		}
+	}
+	#set(state: ItemInteractionState): void {
+		const sameAcquisition =
+			state.kind === "acquiring" &&
+			this.#state.kind === "acquiring" &&
+			state.generation === this.#state.generation;
+		if (!sameAcquisition) this.#targetObservations.clear();
+		this.#state = state;
+		for (const listener of this.#listeners) listener(state);
+	}
+}

@@ -1,0 +1,114 @@
+name: Holtburger 3D Portability Probes
+
+on:
+  push:
+    branches: [probe/3d-electron-portability]
+    paths:
+      - ".github/workflows/holtburger-3d-portability.yml"
+      - "apps/holtburger-3d/**"
+      - "assets/branding/**"
+      - "crates/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: holtburger-3d-portability-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-probe:
+    name: Package probe (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+            architecture: x64
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            platform: win32
+            architecture: x64
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            platform: darwin
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/holtburger-3d/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install frontend dependencies
+        working-directory: apps/holtburger-3d
+        run: npm ci
+      - name: Verify branding exports
+        working-directory: apps/holtburger-3d
+        run: npm run check:branding
+      - name: Test the Rust host
+        run: cargo test -p holtburger-3d-host --all-targets
+      - name: Check the frontend and Electron boundary
+        working-directory: apps/holtburger-3d
+        run: npm run check
+      - name: Lint TypeScript and Electron scripts
+        working-directory: apps/holtburger-3d
+        run: npm run lint:ts
+      - name: Test the frontend and Electron main process
+        working-directory: apps/holtburger-3d
+        run: npm run test:ts
+      - name: Install the virtual display for Linux Electron probes
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xvfb
+      - name: Build the native Electron package
+        working-directory: apps/holtburger-3d
+        run: npm run package
+      - name: Verify native themes and bundled font decoding
+        working-directory: apps/holtburger-3d
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run --auto-servernum npm run probe:user-themes:built
+          else
+            npm run probe:user-themes:built
+          fi
+      - name: Exercise the real sidecar protocol without production content
+        working-directory: apps/holtburger-3d
+        run: npm run smoke:sidecar
+      - name: Inspect packaged host and static resources
+        working-directory: apps/holtburger-3d
+        run: npm run check:package
+      - name: Archive the inspected package without rebuilding
+        working-directory: apps/holtburger-3d
+        run: npm run archive:package -- --platform=${{ matrix.platform }} --arch=${{ matrix.architecture }}
+      - name: Verify the downloadable archive round trip
+        working-directory: apps/holtburger-3d
+        run: npm run check:archive
+      - name: Record artifact limitations
+        if: always()
+        shell: bash
+        run: |
+          echo '### Experimental Holtburger 3D portability probe' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo 'This package is an unsupported, short-lived development artifact.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Hosted CI verifies build, protocol, package structure, native themes, and font decoding; real GPU, input, audio, display scaling, and user-facing OS launch behavior remain unverified.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload unsupported diagnostic package
+        uses: actions/upload-artifact@v4
+        with:
+          name: holtburger-3d-portability-${{ matrix.target }}-${{ github.sha }}
+          path: apps/holtburger-3d/out/make/zip/${{ matrix.platform }}/${{ matrix.architecture }}/*.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

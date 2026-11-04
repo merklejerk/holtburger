@@ -1,0 +1,13 @@
+#!/bin/sh
+# The caller supplies one D-Bus/display session for every portal and installed-app check.
+set -eu
+if [ "$#" -ne 0 ]; then
+  printf '%s\n' 'Usage: verify-installed' >&2
+  exit 1
+fi
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+export FLATPAK_USER_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/flatpak"
+HOLTBURGER_HOST_BIN="$repo_root/.github/flatpak/probe-host" \
+  node "$repo_root/apps/holtburger-3d/scripts/sidecar-smoke.mjs"
+python3 "$repo_root/.github/scripts/probe_flatpak_io.py" --product 3d
+node "$repo_root/apps/holtburger-3d/scripts/content-startup-probe.mjs" --flatpak --theme-check full

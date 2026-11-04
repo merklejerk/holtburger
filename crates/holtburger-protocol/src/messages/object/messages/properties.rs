@@ -205,26 +205,51 @@ impl ProtocolPack for ParentEventData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PickupEventData {
+    /// Object whose physics placement is withdrawn.
     pub guid: Guid,
-    pub success: bool,
+    /// Server object incarnation to which this pickup applies.
+    pub instance_sequence: u16,
+    /// Position timestamp shared with attachment and independent position transitions.
+    pub position_sequence: u16,
 }
 
 impl ProtocolUnpack for PickupEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        let guid = Guid::unpack(data, offset)?;
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let success = LittleEndian::read_u32(&data[*offset..*offset + 4]) != 0;
-        *offset += 4;
-        Some(PickupEventData { guid, success })
+        Some(Self {
+            guid: Guid::unpack(data, offset)?,
+            instance_sequence: u16::unpack(data, offset)?,
+            position_sequence: u16::unpack(data, offset)?,
+        })
     }
 }
 
 impl ProtocolPack for PickupEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.guid.pack(buf);
-        buf.write_u32::<LittleEndian>(if self.success { 1 } else { 0 })
-            .unwrap();
+        self.instance_sequence.pack(buf);
+        self.position_sequence.pack(buf);
+    }
+}
+
+#[cfg(test)]
+mod pickup_tests {
+    use super::*;
+
+    #[test]
+    fn pickup_decodes_distinct_instance_and_position_timestamps() {
+        // ACE GameMessagePickupEvent writes GUID, ObjectInstance (u16), ObjectPosition (u16).
+        let bytes = [0x96, 0x15, 0x00, 0x80, 0x34, 0x12, 0xcd, 0xab];
+        let mut offset = 0;
+        let pickup = PickupEventData::unpack(&bytes, &mut offset).unwrap();
+        assert_eq!(pickup.guid, Guid(0x80001596));
+        assert_eq!(pickup.instance_sequence, 0x1234);
+        assert_eq!(pickup.position_sequence, 0xabcd);
+        assert_eq!(offset, bytes.len());
+        let mut packed = Vec::new();
+        pickup.pack(&mut packed);
+        assert_eq!(packed, bytes);
+        for length in 0..bytes.len() {
+            assert!(PickupEventData::unpack(&bytes[..length], &mut 0).is_none());
+        }
     }
 }

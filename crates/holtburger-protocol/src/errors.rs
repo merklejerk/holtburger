@@ -290,6 +290,8 @@ pub enum WeenieError {
     YouMustSpecializeToUseItemMagic = 0x04CB,
     YouHaveBeenInPKBattleTooRecently = 0x04CC,
     TradeAiRefuseEmote = 0x04CD,
+    /// The NPC cannot accept gifts while its emote manager is busy.
+    AiRefuseItemDuringEmote = 0x04CE,
     CannotAcceptStackedItems = 0x04CF,
     YouFailToAlterSkill = 0x04D0,
     YourSkillMustBeTrained = 0x04D1,

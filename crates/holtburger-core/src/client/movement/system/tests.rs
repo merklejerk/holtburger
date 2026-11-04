@@ -1,21 +1,78 @@
 use super::super::common::{
-    AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, RUN_HELD_TURN_SPEED_RAD_PER_SEC,
     TURN_LEFT_MOTION_COMMAND, TURN_RIGHT_MOTION_COMMAND, WALK_FORWARD_MOTION_COMMAND,
-    build_autonomous_position, build_motion_state_raw_motion_state, player_run_rate_scalar,
+    build_autonomous_position, build_motion_state_raw_motion_state,
     raw_motion_state_with_motion_style,
 };
 use super::*;
-use crate::client::movement_types::Gait;
+use crate::client::movement_types::{Gait, LongitudinalMotion};
+use crate::client::test_support::captured_actions;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, Quaternion, Vector3};
-use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
-use holtburger_protocol::messages::movement::{HoldKey, MotionStance};
-use holtburger_session::Session;
-use holtburger_world::entity::Entity;
-use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, TrainingLevel};
-use holtburger_world::{
-    PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics, WorldState,
+use holtburger_common::properties::{
+    ItemType, PropertyDataId, PropertyInt, WorldObjectPropertyAccessorsMut,
 };
+use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_dat::file_type::MotionTable;
+use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, RawMotionState};
+use holtburger_protocol::messages::movement::{
+    HoldKey, MotionStance, MovementEventData, MovementInvalid, MovementType, MovementTypeData,
+};
+use holtburger_session::Session;
+use holtburger_world::entity::{
+    Entity, EntityMotionAdmission, EntityMotionDirective, EntityMotionSnapshot,
+    EntityMoveToParameters, EntityNetworkMotion, OrderedMotionPosition, OrderedMotionScalar,
+};
+use holtburger_world::motion::begin_server_directed_motion;
+use holtburger_world::state::motion_resolution::test_support::{
+    FIXTURE_STAND_COMMAND, FixtureCycle, explicit_motion_catalog,
+};
+use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, TrainingLevel};
+use holtburger_world::{AuthoritativePoseEffect, WorldState};
+
+const FIXTURE_MOTION_TABLE_ID: u32 = 0x0900_0020;
+
+#[test]
+fn navigation_policy_reports_jump_as_unsupported_without_waiting_for_body_facts() {
+    let world = WorldState::synthetic();
+    let movement = MovementSystem::with_policy(ClientMovementPolicy::Navigation);
+    assert_eq!(
+        movement.character_motion_readiness(&world),
+        CharacterMotionReadiness::Unsupported
+    );
+}
+
+#[test]
+fn dead_authority_advances_once_despite_held_manual_drive() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x7000_0001);
+    let pose = WorldPosition {
+        landblock_id: Guid(0xda55_0001),
+        ..WorldPosition::default()
+    };
+    world.seed_local_player_entity(guid, "Death fixture", pose);
+    let velocity = Vector3::new(2.0, 0.0, 0.0);
+    world.set_motion_sequences(explicit_motion_catalog(
+        FIXTURE_MOTION_TABLE_ID,
+        MotionStance::NonCombat as u32,
+        [FixtureCycle::moving(MotionCommand::DEAD.raw(), velocity)],
+        [],
+    ));
+    let entity = world.player_entity_mut().unwrap();
+    entity.set_did_prop(PropertyDataId::MotionTable, Guid(FIXTURE_MOTION_TABLE_ID));
+    entity.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        forward_command: Some(InterpretedMotionCommand::DEAD),
+        ..Default::default()
+    });
+    let mut movement = MovementSystem::new();
+    movement.acquire_manual_control(None);
+    assert!(movement.drives_local_authored_playback_this_tick());
+    let dt = Duration::from_millis(30);
+    crate::client::simulation::tick(Instant::now(), dt, &mut world, &mut movement, None).unwrap();
+    let runtime = world.motion_runtimes.get(guid).unwrap();
+    assert_eq!(runtime.state().substate, MotionCommand::DEAD);
+    assert!((runtime.tick().offset.translation.x - velocity.x * dt.as_secs_f32()).abs() < 0.0001);
+    assert_eq!(world.local_player_runtime_pose(), Some(pose));
+}
 
 fn seed_player_run_rate_scalar(world: &mut WorldState, run_skill: u32) -> f32 {
     world.player.attributes.insert(
@@ -28,6 +85,7 @@ fn seed_player_run_rate_scalar(world: &mut WorldState, run_skill: u32) -> f32 {
             next_rank_xp: None,
             base: 100,
             current: 100,
+            breakdown: Default::default(),
         },
     );
     world.player.skills.insert(
@@ -43,39 +101,426 @@ fn seed_player_run_rate_scalar(world: &mut WorldState, run_skill: u32) -> f32 {
             training: TrainingLevel::Trained,
             trained_cost: 0,
             specialized_cost: 0,
+            breakdown: Default::default(),
         },
     );
 
-    player_run_rate_scalar(world)
+    world.player_run_rate().expect("seeded player run rate")
 }
 
 fn seed_local_player(world: &mut WorldState, guid: Guid, position: WorldPosition) {
     world.seed_local_player_entity(guid, "Player", position);
+    let entity = world.player_entity_mut().unwrap();
+    entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+    entity
+        .physics
+        .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+            holtburger_common::properties::PhysicsState::GRAVITY,
+        ));
 }
 
-fn seed_self_movement_capabilities_override(
-    world: &mut WorldState,
-    run_rate_scalar: f32,
-    base_walk_speed: f32,
-    base_run_speed: f32,
-    turn_speed_rad_per_sec: f32,
-) -> SelfMovementCapabilities {
-    let capabilities = SelfMovementCapabilities {
-        kinematics: SelfMovementKinematics {
-            source: PlayerMotionTableSource::DirectProperty {
-                motion_table_id: 0x0900_0020,
-            },
-            motion_table_id: 0x0900_0020,
-            stance: MotionStance::NonCombat as u32,
-            base_walk_forward_velocity: Vector3::new(base_walk_speed, 0.0, 0.0),
-            base_run_forward_velocity: Vector3::new(base_run_speed, 0.0, 0.0),
-            base_turn_left_omega: Vector3::new(0.0, 0.0, -turn_speed_rad_per_sec),
-            base_turn_right_omega: Vector3::new(0.0, 0.0, turn_speed_rad_per_sec),
-        },
-        run_rate_scalar,
+fn install_manual_drive(
+    movement: &mut MovementSystem,
+    drive: CharacterDrive,
+    until: Option<Instant>,
+) {
+    movement.character_motion.replace_drive(drive);
+    movement.acquire_manual_control(until);
+}
+
+#[test]
+fn stale_character_motion_edges_do_not_mutate_outer_drive_state() {
+    let mut world = WorldState::synthetic();
+    let mut movement = MovementSystem::new();
+    let drive = CharacterDrive::builder().run().forward().build();
+
+    movement.enqueue_character_motion_event(SequencedCharacterMotionEvent {
+        sequence: CharacterMotionSequence(2),
+        event: CharacterMotionEvent::BeginJump { drive },
+    });
+    movement.process_control_commands(Instant::now(), &mut world, false);
+    assert!(matches!(
+        movement.active_movement,
+        Some(ActiveMovement::Manual)
+    ));
+    movement.take_character_motion_feedback();
+
+    movement.enqueue_character_motion_event(SequencedCharacterMotionEvent {
+        sequence: CharacterMotionSequence(1),
+        event: CharacterMotionEvent::Reset,
+    });
+    movement.process_control_commands(Instant::now(), &mut world, false);
+    assert!(matches!(
+        movement.active_movement,
+        Some(ActiveMovement::Manual)
+    ));
+    assert!(movement.take_character_motion_feedback().is_empty());
+
+    movement.enqueue_character_motion_event(SequencedCharacterMotionEvent {
+        sequence: CharacterMotionSequence(3),
+        event: CharacterMotionEvent::Reset,
+    });
+    movement.process_control_commands(Instant::now(), &mut world, false);
+    assert!(movement.active_movement.is_none());
+    movement.take_character_motion_feedback();
+
+    movement.enqueue_character_motion_event(SequencedCharacterMotionEvent {
+        sequence: CharacterMotionSequence(2),
+        event: CharacterMotionEvent::BeginJump { drive },
+    });
+    movement.process_control_commands(Instant::now(), &mut world, false);
+    assert!(movement.active_movement.is_none());
+    assert!(movement.take_character_motion_feedback().is_empty());
+}
+
+fn seed_authored_manual_motion_world(world: &mut WorldState, guid: Guid) {
+    let style = MotionStance::NonCombat as u32;
+    world.set_motion_sequences(explicit_motion_catalog(
+        FIXTURE_MOTION_TABLE_ID,
+        style,
+        [
+            FixtureCycle::moving(
+                MotionTable::WALK_FORWARD_COMMAND,
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+            FixtureCycle::moving(
+                MotionTable::RUN_FORWARD_COMMAND,
+                Vector3::new(2.0, 0.0, 0.0),
+            ),
+            FixtureCycle::moving(0x6500_000f, Vector3::new(0.0, 1.0, 0.0)),
+            FixtureCycle::moving(0x6500_0010, Vector3::new(0.0, -1.0, 0.0)),
+            FixtureCycle::turning(MotionTable::TURN_LEFT_COMMAND, Vector3::new(0.0, 0.0, -1.0)),
+            FixtureCycle::turning(MotionTable::TURN_RIGHT_COMMAND, Vector3::new(0.0, 0.0, 1.0)),
+            FixtureCycle::moving(MotionCommand::READY.raw(), Vector3::zero()),
+            FixtureCycle::moving(MotionCommand::FALLING.raw(), Vector3::zero()),
+        ],
+        [],
+    ));
+    world
+        .entities
+        .get_mut(guid)
+        .expect("seeded player should exist")
+        .properties
+        .set_did_prop(PropertyDataId::MotionTable, Guid(FIXTURE_MOTION_TABLE_ID));
+    seed_player_run_rate_scalar(world, 100);
+    assert!(
+        world
+            .scene
+            .apply_runtime_body_contact(SpatialBodyId::LocalPlayer(guid), ContactState::Grounded)
+    );
+}
+
+#[test]
+fn equivalent_local_remote_player_and_creature_directives_share_one_runtime_contract() {
+    let local_guid = Guid(0x5100_1001);
+    let remote_player_guid = Guid(0x5100_1002);
+    let creature_guid = Guid(0x5100_1003);
+    let target = WorldPosition {
+        landblock_id: Guid(0x1234_0001),
+        coords: Vector3::new(20.0, 0.0, 0.0),
+        rotation: Quaternion::identity(),
     };
-    world.set_self_movement_capabilities_override(capabilities.clone());
-    capabilities
+    let mut start = WorldPosition {
+        coords: Vector3::zero(),
+        ..target
+    };
+    start.rotation = Quaternion::from_heading(start.heading_to(&target));
+    let scalar = |value| OrderedMotionScalar::from_f32(value).unwrap();
+    let directive_for = |movement_sequence| EntityMotionDirective::MoveToPosition {
+        admission: EntityMotionAdmission {
+            object_instance_sequence: 1,
+            movement_sequence,
+            server_control_sequence: 3,
+            is_autonomous: false,
+        },
+        target: OrderedMotionPosition {
+            cell_id: target.landblock_id,
+            x: scalar(target.coords.x),
+            y: scalar(target.coords.y),
+            z: scalar(target.coords.z),
+        },
+        params: EntityMoveToParameters {
+            flags: 0x0000_0203,
+            distance_to_object: scalar(1.0),
+            min_distance: scalar(0.0),
+            fail_distance: scalar(100.0),
+            speed: scalar(1.0),
+            walk_run_threshold: scalar(5.0),
+            desired_heading_degrees: scalar(0.0),
+        },
+        run_rate: scalar(1.25),
+    };
+    let snapshot_for = |movement_sequence| EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        directive: Some(directive_for(movement_sequence)),
+        ..EntityMotionSnapshot::default()
+    };
+
+    let mut world = WorldState::synthetic();
+    world.player.guid = local_guid;
+    seed_local_player(&mut world, local_guid, start);
+    seed_authored_manual_motion_world(&mut world, local_guid);
+    for (guid, name, sequence) in [
+        (remote_player_guid, "Remote Player", 20),
+        (creature_guid, "Drudge", 21),
+    ] {
+        let mut entity = Entity::new(guid, name.to_string(), start);
+        entity
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(FIXTURE_MOTION_TABLE_ID));
+        entity.network_motion = EntityNetworkMotion::Initialized(snapshot_for(sequence));
+        world.add_entity(entity);
+        assert!(
+            world
+                .scene
+                .apply_runtime_body_contact(SpatialBodyId::Entity(guid), ContactState::Grounded,)
+        );
+    }
+    let local_directive = directive_for(19);
+    let mut movement = MovementSystem::new();
+    install_manual_drive(
+        &mut movement,
+        CharacterDrive::builder().run().forward().build(),
+        None,
+    );
+    movement.select_server_directive(Some(begin_server_directed_motion(
+        local_directive,
+        start,
+        None,
+    )));
+    let quantum = Duration::from_millis(100);
+
+    world.advance_authored_motion_except(quantum, Some(local_guid));
+    let local_offset = movement
+        .advance_local_authored_motion(&mut world, quantum)
+        .unwrap()
+        .expect("local directive should contribute authored root")
+        .offset;
+    let remote_player_offset = world
+        .resolve_body_projection_input(SpatialBodyId::Entity(remote_player_guid))
+        .and_then(|input| input.authored_offset)
+        .unwrap();
+    let creature_offset = world
+        .resolve_body_projection_input(SpatialBodyId::Entity(creature_guid))
+        .and_then(|input| input.authored_offset)
+        .unwrap();
+
+    assert_eq!(local_offset, remote_player_offset);
+    assert_eq!(local_offset, creature_offset);
+    let expected_substate = MotionCommand::RUN_FORWARD;
+    for guid in [local_guid, remote_player_guid, creature_guid] {
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            expected_substate
+        );
+    }
+    let projected_local = start.coords + start.rotation.rotate_vector(local_offset.translation);
+    let projected_remote = start.coords
+        + start
+            .rotation
+            .rotate_vector(remote_player_offset.translation);
+    let projected_creature =
+        start.coords + start.rotation.rotate_vector(creature_offset.translation);
+    assert_eq!(projected_local, projected_remote);
+    assert_eq!(projected_local, projected_creature);
+
+    assert!(world.scene.apply_runtime_body_pose(
+        SpatialBodyId::LocalPlayer(local_guid),
+        target,
+        holtburger_world::SpatialSampleMode::SimulatingMotionState,
+    ));
+    for guid in [remote_player_guid, creature_guid] {
+        assert!(world.scene.apply_runtime_body_pose(
+            SpatialBodyId::Entity(guid),
+            target,
+            holtburger_world::SpatialSampleMode::SimulatingMotionState,
+        ));
+    }
+    world.advance_authored_motion_except(quantum, Some(local_guid));
+    assert!(
+        movement
+            .advance_local_authored_motion(&mut world, quantum)
+            .unwrap()
+            .is_some(),
+        "local completion must advance the authored return-to-default transition",
+    );
+    assert!(!movement.has_server_controlled_motion());
+    assert!(
+        movement.active_movement.is_none(),
+        "completion must not resume displaced held input"
+    );
+    for guid in [local_guid, remote_player_guid, creature_guid] {
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            MotionCommand(FIXTURE_STAND_COMMAND),
+        );
+    }
+}
+
+#[test]
+fn manual_playback_selects_ready_falling_and_grounded_from_shared_support_state() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_3308);
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    world.player.guid = guid;
+    seed_local_player(&mut world, guid, pose);
+    seed_authored_manual_motion_world(&mut world, guid);
+    world.handle_message(&GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid,
+        object_instance_sequence: 1,
+        movement_sequence: 2,
+        server_control_sequence: 3,
+        is_autonomous: false,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: 0,
+        data: MovementTypeData::Invalid(MovementInvalid::default()),
+    })));
+    assert_eq!(
+        world
+            .player_entity()
+            .and_then(|entity| entity.network_motion.snapshot()),
+        Some(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            ..EntityMotionSnapshot::default()
+        }),
+        "the self authority adapter and generic body runtime must consume one admitted packet",
+    );
+    let body_id = SpatialBodyId::LocalPlayer(guid);
+    assert!(
+        world
+            .scene
+            .apply_runtime_body_contact(body_id, ContactState::Grounded)
+    );
+
+    let mut movement = MovementSystem::new();
+    let drive = CharacterDrive::default();
+    install_manual_drive(&mut movement, drive, None);
+    assert_eq!(
+        movement.character_motion.apply_event(
+            SequencedCharacterMotionEvent {
+                sequence: CharacterMotionSequence(1),
+                event: CharacterMotionEvent::BeginJump { drive },
+            },
+            CharacterMotionReadiness::Ready,
+        ),
+        CharacterMotionEventResult::ChargeAccepted
+    );
+
+    movement
+        .advance_local_authored_motion(&mut world, Duration::from_millis(30))
+        .expect("standing charge playback should resolve");
+    assert_eq!(
+        world.motion_runtimes.state(guid).unwrap().substate,
+        MotionCommand::READY
+    );
+
+    assert!(
+        world
+            .scene
+            .apply_runtime_body_contact(body_id, ContactState::Airborne)
+    );
+    movement
+        .advance_local_authored_motion(&mut world, Duration::from_millis(30))
+        .expect("airborne playback should resolve");
+    assert_eq!(
+        world.motion_runtimes.state(guid).unwrap().substate,
+        MotionCommand::FALLING
+    );
+
+    movement.character_motion.clear();
+    assert!(
+        world
+            .scene
+            .apply_runtime_body_contact(body_id, ContactState::Grounded)
+    );
+    movement
+        .advance_local_authored_motion(&mut world, Duration::ZERO)
+        .expect("landing playback should reconcile without advancing twice");
+    assert_eq!(
+        world.motion_runtimes.state(guid).unwrap().substate,
+        MotionCommand(FIXTURE_STAND_COMMAND)
+    );
+}
+
+#[test]
+fn manual_jump_retains_native_playback_when_falling_is_absent() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_3309);
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    world.player.guid = guid;
+    seed_local_player(&mut world, guid, pose);
+    const MOTION_TABLE_ID: u32 = 0x0900_0021;
+    world.set_motion_sequences(explicit_motion_catalog(
+        MOTION_TABLE_ID,
+        MotionStance::NonCombat as u32,
+        [FixtureCycle::moving(
+            MotionTable::RUN_FORWARD_COMMAND,
+            Vector3::new(2.0, 0.0, 0.0),
+        )],
+        [],
+    ));
+    world
+        .entities
+        .get_mut(guid)
+        .unwrap()
+        .properties
+        .set_did_prop(PropertyDataId::MotionTable, Guid(MOTION_TABLE_ID));
+    seed_player_run_rate_scalar(&mut world, 100);
+    assert!(
+        world
+            .scene
+            .apply_runtime_body_contact(SpatialBodyId::LocalPlayer(guid), ContactState::Grounded,)
+    );
+
+    let mut movement = MovementSystem::new();
+    let drive = CharacterDrive::default();
+    install_manual_drive(&mut movement, drive, None);
+    movement.character_motion.apply_event(
+        SequencedCharacterMotionEvent {
+            sequence: CharacterMotionSequence(1),
+            event: CharacterMotionEvent::BeginJump { drive },
+        },
+        CharacterMotionReadiness::Ready,
+    );
+    for contact in [
+        ContactState::Grounded,
+        ContactState::Airborne,
+        ContactState::Sliding,
+    ] {
+        assert!(
+            world
+                .scene
+                .apply_runtime_body_contact(SpatialBodyId::LocalPlayer(guid), contact,)
+        );
+        let tick = movement
+            .advance_local_authored_motion(&mut world, Duration::from_millis(30))
+            .expect("absent support animation must not terminate manual playback")
+            .unwrap();
+        assert_eq!(tick.offset.translation, Vector3::zero());
+        assert!(tick.hooks.is_empty());
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            MotionCommand::READY
+        );
+    }
+    movement.character_motion.clear();
+    assert!(
+        world
+            .scene
+            .apply_runtime_body_contact(SpatialBodyId::LocalPlayer(guid), ContactState::Grounded,)
+    );
+    movement
+        .advance_local_authored_motion(&mut world, Duration::ZERO)
+        .expect("landing reconciliation must remain nonfatal");
 }
 
 #[test]
@@ -104,7 +549,8 @@ fn autonomous_wire_motion_state_uses_forward_without_turn_when_moving() {
     .expect("moving autonomous drive should emit a wire motion state");
 
     assert_eq!(state.gait, Gait::Run);
-    assert_eq!(state.locomotion, Some(Locomotion::Forward));
+    assert_eq!(state.longitudinal, Some(LongitudinalMotion::Forward));
+    assert_eq!(state.lateral, None);
     assert_eq!(state.turning, None);
 }
 
@@ -134,7 +580,8 @@ fn autonomous_wire_motion_state_can_turn_in_place() {
     .expect("heading-only autonomous drive should still emit a turn edge");
 
     assert_eq!(state.gait, Gait::Walk);
-    assert_eq!(state.locomotion, None);
+    assert_eq!(state.longitudinal, None);
+    assert_eq!(state.lateral, None);
     assert_eq!(state.turning, Some(Turn::Right));
 }
 
@@ -181,7 +628,7 @@ async fn enqueue_drive_intent_exposes_autonomous_drive_for_current_tick_only() {
     let mut session = Session::new_test();
     let now = Instant::now();
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(AutonomousDriveIntent {
             desired_world_delta: Vector3::new(1.0, 2.0, 3.0),
             desired_heading: Some(0.75),
             target_hint: Some(WorldPosition {
@@ -191,7 +638,7 @@ async fn enqueue_drive_intent_exposes_autonomous_drive_for_current_tick_only() {
             }),
             gait: Gait::Run,
             force_grounded: true,
-        }),
+        })),
         now,
     );
 
@@ -250,17 +697,17 @@ async fn later_manual_drive_wins_over_queued_autonomous_drive() {
     let mut session = Session::new_test();
     let now = Instant::now();
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(AutonomousDriveIntent {
             desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
             desired_heading: None,
             target_hint: None,
             gait: Gait::Walk,
             force_grounded: false,
-        }),
+        })),
         now,
     );
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::ManualHeld(MotionState::builder().run().forward().build()),
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
         now,
     );
 
@@ -274,16 +721,14 @@ async fn later_manual_drive_wins_over_queued_autonomous_drive() {
         None
     );
     assert!(matches!(
-        movement.active_drive,
-        Some(ActiveDriveState {
-            intent: ActiveDriveIntent::Manual(MotionState {
-                gait: Gait::Run,
-                locomotion: Some(Locomotion::Forward),
-                ..
-            }),
-            ..
-        })
+        movement.active_movement,
+        Some(ActiveMovement::Manual)
     ));
+    assert_eq!(movement.character_motion.effective_drive().gait, Gait::Run);
+    assert_eq!(
+        movement.character_motion.effective_drive().longitudinal,
+        Some(LongitudinalMotion::Forward)
+    );
 }
 
 #[test]
@@ -375,7 +820,11 @@ fn motion_state_raw_motion_state_adds_right_turn_when_requested() {
 
     let raw_motion_state = build_motion_state_raw_motion_state(
         &world,
-        MotionState::builder().run().forward().turn_right().build(),
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_right()
+            .build(),
         MotionStyle::PreserveServer,
     );
 
@@ -389,42 +838,42 @@ fn motion_state_raw_motion_state_adds_right_turn_when_requested() {
             .flags
             .contains(RawMotionFlags::TURN_COMMAND)
     );
-    assert!(raw_motion_state.flags.contains(RawMotionFlags::TURN_SPEED));
+    assert!(!raw_motion_state.flags.contains(RawMotionFlags::TURN_SPEED));
     assert_eq!(
         raw_motion_state.turn_command,
         Some(TURN_RIGHT_MOTION_COMMAND)
     );
-    assert_eq!(
-        raw_motion_state.turn_speed,
-        Some(RUN_HELD_TURN_SPEED_RAD_PER_SEC)
-    );
+    assert_eq!(raw_motion_state.turn_speed, None);
 }
 
 #[test]
-fn motion_state_raw_motion_state_uses_player_run_rate_scalar_for_forward_speed() {
-    let mut world = WorldState::synthetic();
-    let expected_run_rate_scalar = seed_player_run_rate_scalar(&mut world, 300);
+fn forward_run_packet_leaves_actor_rate_to_hold_key_adjustment() {
+    for run_skill in [0, 100, 300, 800] {
+        let mut world = WorldState::synthetic();
+        let run_rate = seed_player_run_rate_scalar(&mut world, run_skill);
+        let drive = CharacterDrive::builder().run().forward().build();
+        let raw = build_motion_state_raw_motion_state(&world, drive, MotionStyle::PreserveServer);
 
-    let raw_motion_state = build_motion_state_raw_motion_state(
-        &world,
-        MotionState::builder().run().forward().build(),
-        MotionStyle::PreserveServer,
-    );
+        assert_eq!(raw.forward_command, Some(WALK_FORWARD_MOTION_COMMAND));
+        assert_eq!(raw.current_hold_key, Some(HoldKey::Run as u32));
+        assert_eq!(raw.forward_hold_key, Some(HoldKey::Run as u32));
+        assert_eq!(raw.forward_speed, Some(1.0));
+        assert!(raw.flags.contains(RawMotionFlags::FORWARD_HOLD_KEY));
+        assert!(raw.flags.contains(RawMotionFlags::FORWARD_SPEED));
 
-    assert_eq!(
-        raw_motion_state.forward_command,
-        Some(WALK_FORWARD_MOTION_COMMAND)
-    );
-    assert_eq!(raw_motion_state.forward_hold_key, Some(HoldKey::Run as u32));
-    assert_eq!(
-        raw_motion_state.forward_speed,
-        Some(expected_run_rate_scalar)
-    );
-    assert!(
-        raw_motion_state
-            .flags
-            .contains(RawMotionFlags::FORWARD_HOLD_KEY)
-    );
+        // ACE's Run-held WalkForward becomes RunForward at raw speed * actor rate
+        // (MotionInterp.apply_run_to_command).
+        let server_forward = raw
+            .forward_speed
+            .map(|speed| (MotionCommand::RUN_FORWARD, speed * run_rate));
+        let local_order = crate::motion_order_for_drive(
+            drive,
+            run_rate,
+            MotionCommand(MotionStance::NonCombat as u32),
+        )
+        .expect("valid running drive");
+        assert_eq!(server_forward, local_order.forward);
+    }
 }
 
 #[test]
@@ -433,7 +882,11 @@ fn motion_state_raw_motion_state_adds_left_turn_when_requested() {
 
     let raw_motion_state = build_motion_state_raw_motion_state(
         &world,
-        MotionState::builder().run().forward().turn_left().build(),
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_left()
+            .build(),
         MotionStyle::PreserveServer,
     );
 
@@ -446,10 +899,7 @@ fn motion_state_raw_motion_state_adds_left_turn_when_requested() {
         raw_motion_state.turn_command,
         Some(TURN_LEFT_MOTION_COMMAND)
     );
-    assert_eq!(
-        raw_motion_state.turn_speed,
-        Some(RUN_HELD_TURN_SPEED_RAD_PER_SEC)
-    );
+    assert_eq!(raw_motion_state.turn_speed, None);
     assert_eq!(raw_motion_state.turn_hold_key, Some(HoldKey::Run as u32));
     assert!(
         raw_motion_state
@@ -459,12 +909,31 @@ fn motion_state_raw_motion_state_adds_left_turn_when_requested() {
 }
 
 #[test]
+fn motion_state_raw_motion_state_encodes_explicit_turn_rate_before_run_adjustment() {
+    let world = WorldState::synthetic();
+
+    let raw_motion_state = build_motion_state_raw_motion_state(
+        &world,
+        CharacterDrive::builder()
+            .run()
+            .turn_right()
+            .with_turn_rate_scalar(0.75)
+            .build(),
+        MotionStyle::PreserveServer,
+    );
+
+    assert!(raw_motion_state.flags.contains(RawMotionFlags::TURN_SPEED));
+    assert_eq!(raw_motion_state.turn_speed, Some(0.5));
+    assert_eq!(raw_motion_state.turn_hold_key, Some(HoldKey::Run as u32));
+}
+
+#[test]
 fn motion_state_raw_motion_state_omits_turn_when_not_requested() {
     let world = WorldState::synthetic();
 
     let raw_motion_state = build_motion_state_raw_motion_state(
         &world,
-        MotionState::builder().run().forward().build(),
+        CharacterDrive::builder().run().forward().build(),
         MotionStyle::PreserveServer,
     );
 
@@ -479,86 +948,99 @@ fn motion_state_raw_motion_state_omits_turn_when_not_requested() {
 }
 
 #[test]
-fn current_local_solve_body_input_uses_shared_resolved_manual_run_speed() {
+fn manual_motion_resolves_one_authored_offset_for_diagonal_and_turning_axes() {
     let mut world = WorldState::synthetic();
-    let player_guid = Guid(0x50000123);
-    world.player.guid = player_guid;
-    let capabilities = seed_self_movement_capabilities_override(&mut world, 3.25, 1.0, 2.0, 1.25);
-    let expected_local_run_speed = capabilities.resolved_manual_run_speed();
-    let mut position = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(10.0, 20.0, 0.0),
-        rotation: Quaternion::identity(),
-    };
-    seed_local_player(&mut world, player_guid, position);
-
-    position.rotation = Quaternion::from_heading(90.0_f32.to_radians());
-    let _ = world.set_player_position(position);
-
-    let mut movement = MovementSystem::new();
-    movement.active_drive = Some(ActiveDriveState::manual(
-        MotionState::builder().run().forward().build(),
-        None,
-    ));
-
-    let body = movement
-        .current_local_solve_body_input(&world)
-        .expect("active manual drive should produce local solve input");
-    assert_eq!(body.body_id, SpatialBodyId::LocalPlayer(player_guid));
-    assert!(matches!(
-        body.basis,
-        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, omega })
-            if velocity.x.abs() < 1e-5
-                && (velocity.y - expected_local_run_speed).abs() < 1e-5
-                && omega == Vector3::zero()
-    ));
-}
-
-#[test]
-fn current_local_solve_body_input_uses_shared_turn_omega_for_turn_in_place() {
-    let mut world = WorldState::synthetic();
-    let player_guid = Guid(0x50000123);
-    world.player.guid = player_guid;
-    let capabilities = seed_self_movement_capabilities_override(&mut world, 3.25, 1.0, 2.0, 1.25);
+    let guid = Guid(0x5000_0124);
     let position = WorldPosition {
-        landblock_id: Guid(0x12340000),
+        landblock_id: Guid(0x1234_0000),
         coords: Vector3::new(10.0, 20.0, 0.0),
         rotation: Quaternion::identity(),
     };
-    seed_local_player(&mut world, player_guid, position);
+    seed_local_player(&mut world, guid, position);
+    seed_authored_manual_motion_world(&mut world, guid);
 
     let mut movement = MovementSystem::new();
-    movement.active_drive = Some(ActiveDriveState::manual(
-        MotionState::builder().walk().turn_left().build(),
-        None,
-    ));
+    let state = CharacterDrive::builder()
+        .run()
+        .forward()
+        .strafe_left()
+        .build();
+    install_manual_drive(&mut movement, state, None);
 
-    let body = movement
-        .current_local_solve_body_input(&world)
-        .expect("turn-in-place manual drive should produce local solve input");
-    assert!(matches!(
-        body.basis,
-        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, omega })
-            if velocity.length_squared() <= 1e-6
-                && omega == capabilities.kinematics().base_turn_left_omega
-    ));
+    let offset = movement
+        .advance_local_authored_motion(&mut world, Duration::from_millis(100))
+        .expect("authored manual motion should resolve")
+        .expect("active drive should produce one offset");
+    assert!(offset.offset.translation.length_squared() > 0.0);
+    assert_eq!(
+        world.motion_runtimes.authored_offset(guid),
+        Some(offset.offset)
+    );
+
+    install_manual_drive(
+        &mut movement,
+        CharacterDrive::builder().run().turn_right().build(),
+        None,
+    );
+    let turn = movement
+        .advance_local_authored_motion(&mut world, Duration::from_millis(100))
+        .expect("turn-only motion should resolve")
+        .expect("turn-only drive should produce an offset");
+    assert!(turn.offset.rotation.to_heading().abs() > 0.0);
+    assert_eq!(
+        world.motion_runtimes.authored_offset(guid),
+        Some(turn.offset)
+    );
+    assert!(world.has_manual_locomotion(guid));
 }
 
 #[test]
-fn current_local_solve_body_input_requires_authoritative_spawn_pose() {
+fn manual_motion_reversal_uses_the_same_table_without_a_fixed_backwards_speed() {
     let mut world = WorldState::synthetic();
-    world.player.guid = Guid(0x50000123);
+    let guid = Guid(0x5000_0125);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        coords: Vector3::new(10.0, 20.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    seed_local_player(&mut world, guid, position);
+    seed_authored_manual_motion_world(&mut world, guid);
 
-    let movement = MovementSystem::new();
+    let mut movement = MovementSystem::new();
+    install_manual_drive(
+        &mut movement,
+        CharacterDrive::builder().run().forward().build(),
+        None,
+    );
+    let forward = movement
+        .advance_local_authored_motion(&mut world, Duration::from_millis(100))
+        .expect("forward motion should resolve")
+        .expect("forward drive should produce an offset");
 
-    assert!(movement.current_local_solve_body_input(&world).is_none());
+    install_manual_drive(
+        &mut movement,
+        CharacterDrive::builder().run().backstep().build(),
+        None,
+    );
+    let backward = movement
+        .advance_local_authored_motion(&mut world, Duration::from_millis(100))
+        .expect("backward motion should resolve")
+        .expect("backward drive should produce an offset");
+
+    assert!(forward.offset.translation.length_squared() > 0.0);
+    assert!(backward.offset.translation.length_squared() > 0.0);
+    assert!(forward.offset.translation.x.signum() != backward.offset.translation.x.signum());
 }
 
 #[test]
 fn stop_pulse_is_still_required_when_server_motion_is_active() {
     let mut movement = MovementSystem::new();
-    movement.note_server_motion_sent(server_motion_intent(
-        MotionState::builder().run().forward().turn_right().build(),
+    movement.note_drive_published(published_drive(
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_right()
+            .build(),
         MotionStyle::PreserveServer,
     ));
 
@@ -566,35 +1048,48 @@ fn stop_pulse_is_still_required_when_server_motion_is_active() {
 }
 
 #[test]
-fn note_server_motion_cleared_resets_drive_tracking() {
+fn note_stop_published_resets_drive_tracking() {
     let mut movement = MovementSystem::new();
-    movement.note_server_motion_sent(server_motion_intent(
-        MotionState::builder().run().forward().turn_right().build(),
+    movement.note_drive_published(published_drive(
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_right()
+            .build(),
         MotionStyle::PreserveServer,
     ));
 
-    movement.note_server_motion_cleared();
+    movement.note_stop_published();
 
-    assert!(!movement.server_motion_active);
-    assert!(movement.last_server_motion_intent.is_none());
+    assert!(movement.published_motion.is_none());
 }
 
 #[test]
 fn unchanged_motion_intent_does_not_require_server_refresh() {
     let mut movement = MovementSystem::new();
-    movement.note_server_motion_sent(server_motion_intent(
-        MotionState::builder().run().forward().turn_right().build(),
+    movement.note_drive_published(published_drive(
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_right()
+            .build(),
         MotionStyle::PreserveServer,
     ));
 
-    assert!(!movement.should_send_motion_state_pulse(
-        MotionState::builder().run().forward().turn_right().build(),
-        MotionStyle::PreserveServer,
-    ));
+    assert!(
+        !movement.should_send_motion_state_pulse(
+            CharacterDrive::builder()
+                .run()
+                .forward()
+                .turn_right()
+                .build(),
+            MotionStyle::PreserveServer,
+        )
+    );
 }
 
 #[test]
-fn autonomous_position_heartbeat_defaults_to_grounded_when_contact_unknown() {
+fn autonomous_position_defaults_to_contact_when_unresolved() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
     let position = WorldPosition {
@@ -613,7 +1108,7 @@ fn autonomous_position_heartbeat_defaults_to_grounded_when_contact_unknown() {
     seed_local_player(&mut world, guid, position);
     world.entities.insert(entity);
 
-    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+    let (position_action, _) = build_autonomous_position(&world, MovementPacketMetadata::default())
         .expect("moving player should emit autonomous position action");
 
     assert_eq!(position_action.position, position);
@@ -625,7 +1120,7 @@ fn autonomous_position_heartbeat_defaults_to_grounded_when_contact_unknown() {
 }
 
 #[test]
-fn autonomous_position_uses_server_grounded_when_contact_unspecified() {
+fn autonomous_position_uses_packet_contact_when_runtime_contact_is_unknown() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
     let position = WorldPosition {
@@ -637,12 +1132,36 @@ fn autonomous_position_uses_server_grounded_when_contact_unspecified() {
     entity.velocity = Vector3::new(2.0, 0.0, 0.0);
 
     world.player.guid = guid;
-    world.player.last_server_grounded = Some(true);
+    world.player.last_server_contact = Some(true);
     seed_local_player(&mut world, guid, position);
     world.entities.insert(entity);
 
-    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+    let (position_action, _) = build_autonomous_position(&world, MovementPacketMetadata::default())
         .expect("moving player should emit autonomous position action");
+
+    assert_eq!(position_action.last_contact, 1);
+}
+
+#[test]
+fn autonomous_position_uses_typed_runtime_contact_before_packet_fallback() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(12.0, -4.0, 1.5),
+        rotation: Quaternion::identity(),
+    };
+    world.player.guid = guid;
+    world.player.last_server_contact = Some(false);
+    seed_local_player(&mut world, guid, position);
+    assert!(
+        world
+            .scene
+            .apply_runtime_body_contact(SpatialBodyId::LocalPlayer(guid), ContactState::Sliding,)
+    );
+
+    let (position_action, _) = build_autonomous_position(&world, MovementPacketMetadata::default())
+        .expect("placed player should emit autonomous position action");
 
     assert_eq!(position_action.last_contact, 1);
 }
@@ -661,9 +1180,10 @@ fn autonomous_position_can_be_built_for_turn_only_motion() {
 
     world.player.guid = guid;
     seed_local_player(&mut world, guid, position);
+    seed_authored_manual_motion_world(&mut world, guid);
     world.entities.insert(entity);
 
-    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+    let (position_action, _) = build_autonomous_position(&world, MovementPacketMetadata::default())
         .expect("turning player should emit autonomous position action");
 
     assert_eq!(position_action.position, position);
@@ -686,7 +1206,7 @@ fn autonomous_position_can_be_built_for_stationary_player() {
     world.player.force_position_sequence = 44;
     seed_local_player(&mut world, guid, position);
 
-    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+    let (position_action, _) = build_autonomous_position(&world, MovementPacketMetadata::default())
         .expect("autonomous position action should emit even when stationary");
 
     assert_eq!(position_action.position, position);
@@ -697,7 +1217,7 @@ fn autonomous_position_can_be_built_for_stationary_player() {
 }
 
 #[tokio::test]
-async fn stop_after_active_drive_sends_stop_pulse_then_final_position_sync() {
+async fn stop_after_active_movement_sends_stop_pulse_then_final_position_sync() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
     let position = WorldPosition {
@@ -716,7 +1236,7 @@ async fn stop_after_active_drive_sends_stop_pulse_then_final_position_sync() {
 
     movement
         .execute_motion_state_at(
-            MotionState::builder().run().forward().build(),
+            CharacterDrive::builder().run().forward().build(),
             &mut world,
             &mut session,
             Instant::now(),
@@ -742,7 +1262,7 @@ async fn stop_after_active_drive_sends_stop_pulse_then_final_position_sync() {
 }
 
 #[tokio::test]
-async fn stop_without_active_drive_does_not_send_final_position_sync() {
+async fn stop_without_active_movement_does_not_send_final_position_sync() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
     let position = WorldPosition {
@@ -756,8 +1276,12 @@ async fn stop_without_active_drive_does_not_send_final_position_sync() {
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
-    movement.note_server_motion_sent(server_motion_intent(
-        MotionState::builder().run().forward().turn_right().build(),
+    movement.note_drive_published(published_drive(
+        CharacterDrive::builder()
+            .run()
+            .forward()
+            .turn_right()
+            .build(),
         MotionStyle::PreserveServer,
     ));
 
@@ -791,7 +1315,11 @@ async fn unchanged_motion_state_requests_do_not_resend_motion_pulses() {
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
     let start = Instant::now();
-    let state = MotionState::builder().run().forward().turn_right().build();
+    let state = CharacterDrive::builder()
+        .run()
+        .forward()
+        .turn_right()
+        .build();
 
     movement
         .execute_motion_state_with_metadata_at(
@@ -819,9 +1347,8 @@ async fn unchanged_motion_state_requests_do_not_resend_motion_pulses() {
 }
 
 #[tokio::test]
-async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent() {
+async fn held_run_input_ticks_once_for_wire_without_reconstructing_local_vectors() {
     let mut world = WorldState::synthetic();
-    seed_self_movement_capabilities_override(&mut world, 2.25, 1.0, 2.0, 1.5);
     let guid = Guid(0x0102_0304);
     let position = WorldPosition {
         landblock_id: Guid(0x1000_0001),
@@ -837,7 +1364,7 @@ async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent()
     let start = Instant::now();
 
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::ManualHeld(MotionState::builder().run().forward().build()),
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
         start,
     );
 
@@ -846,14 +1373,6 @@ async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent()
         .await
         .expect("held run input should start moving");
 
-    let player = movement
-        .current_local_solve_body_input(&world)
-        .expect("held run input should produce local solve input");
-    assert!(matches!(
-        player.basis,
-        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, .. })
-            if velocity.x.abs() < 1e-5 && (velocity.y - 4.5).abs() < 1e-5
-    ));
     assert_eq!(session.packet_sequence, 2);
 
     movement
@@ -861,14 +1380,6 @@ async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent()
         .await
         .expect("steady held run should not resend unchanged motion intent");
 
-    let player = movement
-        .current_local_solve_body_input(&world)
-        .expect("steady held run should keep solve input active");
-    assert!(matches!(
-        player.basis,
-        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, .. })
-            if velocity.x.abs() < 1e-5 && (velocity.y - 4.5).abs() < 1e-5
-    ));
     assert_eq!(session.packet_sequence, 2);
 }
 
@@ -891,7 +1402,7 @@ async fn pulsed_run_input_expires_on_tick_and_sends_stop_transition() {
 
     movement.enqueue_drive_intent(
         PlayerDriveIntent::ManualPulse {
-            state: MotionState::builder().run().forward().build(),
+            state: CharacterDrive::builder().run().forward().build(),
             duration: Duration::from_millis(50),
         },
         start,
@@ -917,78 +1428,32 @@ async fn pulsed_run_input_expires_on_tick_and_sends_stop_transition() {
     assert_eq!(session.packet_sequence, 4);
 }
 
-#[tokio::test]
-async fn server_controlled_movement_suppresses_next_frontend_autonomous_wire_pulse() {
+#[test]
+fn admitted_server_control_supersedes_queued_manual_work() {
     let mut world = WorldState::synthetic();
-    let guid = Guid(0x0102_0304);
-    let position = WorldPosition {
-        landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
-    };
-
-    world.player.guid = guid;
-    seed_local_player(&mut world, guid, position);
-
     let mut movement = MovementSystem::new();
-    let mut session = Session::new_test();
     let now = Instant::now();
-
-    movement.note_server_controlled_movement_started();
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
-            desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
-            desired_heading: Some(0.0),
-            target_hint: None,
-            gait: Gait::Run,
-            force_grounded: true,
-        }),
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
         now,
     );
-
-    movement
-        .tick(now, &mut world, &mut session)
-        .await
-        .expect("server-controlled suppression tick should succeed");
-
-    assert!(movement.active_drive.is_none());
-    assert!(!movement.server_motion_active);
-}
-
-#[test]
-fn server_controlled_projection_uses_landblock_aware_global_delta() {
-    let mut world = WorldState::synthetic();
-    let guid = Guid(0x0102_0304);
-    let current_pose = WorldPosition {
-        landblock_id: Guid(0x1234_0001),
-        coords: Vector3::new(191.0, 64.0, 0.0),
-        rotation: Quaternion::from_heading(0.0),
-    };
-    let target_pose = WorldPosition {
-        landblock_id: Guid(0x1334_0001),
-        coords: Vector3::new(1.0, 64.0, 0.0),
-        rotation: Quaternion::from_heading(0.0),
-    };
-
-    world.player.guid = guid;
-    seed_local_player(&mut world, guid, current_pose);
-
-    let mut movement = MovementSystem::new();
-    movement.set_server_controlled_projection(ServerControlledProjection {
-        target_pose,
-        speed_mps: 2.0,
+    movement.enqueue_character_motion_event(SequencedCharacterMotionEvent {
+        sequence: CharacterMotionSequence(1),
+        event: CharacterMotionEvent::BeginJump {
+            drive: CharacterDrive::default(),
+        },
     });
+    movement.admit_server_controlled_motion(None, now, &mut world);
+    assert!(!movement.has_active_manual_drive());
+    assert!(!movement.character_motion.is_charging());
+    assert!(movement.queued_control_commands.is_empty());
 
-    let drive = movement
-        .current_local_drive_control(&world, Duration::from_secs(1))
-        .expect("server-controlled projection should expose a local drive");
-
-    assert_eq!(drive.desired_world_delta, Vector3::new(2.0, 0.0, 0.0));
-    assert_eq!(
-        drive.desired_heading,
-        Some(current_pose.heading_to(&target_pose))
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
+        now,
     );
-    assert_eq!(drive.target_hint, Some(target_pose));
+    movement.process_control_commands(now, &mut world, false);
+    assert!(movement.has_active_manual_drive());
 }
 
 #[tokio::test]
@@ -1009,7 +1474,7 @@ async fn stop_input_clears_held_run_and_sends_stop_transition() {
     let start = Instant::now();
 
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::ManualHeld(MotionState::builder().run().forward().build()),
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
         start,
     );
     movement
@@ -1050,13 +1515,13 @@ async fn autonomous_drive_gap_does_not_send_stop_pulse_without_explicit_stop() {
     let start = Instant::now();
 
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(AutonomousDriveIntent {
             desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
             desired_heading: None,
             target_hint: None,
             gait: Gait::Run,
             force_grounded: true,
-        }),
+        })),
         start,
     );
     movement
@@ -1092,13 +1557,13 @@ async fn explicit_stop_after_autonomous_drive_sends_stop_pulse() {
     let start = Instant::now();
 
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(AutonomousDriveIntent {
             desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
             desired_heading: None,
             target_hint: None,
             gait: Gait::Run,
             force_grounded: true,
-        }),
+        })),
         start,
     );
     movement
@@ -1116,7 +1581,7 @@ async fn explicit_stop_after_autonomous_drive_sends_stop_pulse() {
 }
 
 #[tokio::test]
-async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
+async fn authored_motion_reasserts_autonomous_locomotion_on_next_tick() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
     let position = WorldPosition {
@@ -1127,6 +1592,7 @@ async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
 
     world.player.guid = guid;
     seed_local_player(&mut world, guid, position);
+    seed_authored_manual_motion_world(&mut world, guid);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -1140,7 +1606,10 @@ async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
         force_grounded: true,
     };
 
-    movement.enqueue_drive_intent(PlayerDriveIntent::Autonomous(autonomous_intent), start);
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(autonomous_intent)),
+        start,
+    );
     movement
         .tick(start, &mut world, &mut session)
         .await
@@ -1149,17 +1618,17 @@ async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
     assert_eq!(session.game_action_sequence, 1);
 
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::Autonomous(autonomous_intent),
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(autonomous_intent)),
         start + Duration::from_millis(30),
     );
-    movement.enqueue_transient_motion(
+    movement.enqueue_authored_motion(
         holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087),
         MotionStyle::Explicit(MotionStance::NonCombat),
     );
     movement
         .tick(start + Duration::from_millis(30), &mut world, &mut session)
         .await
-        .expect("transient motion should replace the locomotion pulse for this tick");
+        .expect("authored motion command should replace the locomotion pulse for this tick");
 
     assert_eq!(
         movement.current_local_drive_control(&world, Duration::from_millis(33)),
@@ -1172,24 +1641,24 @@ async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
             force_grounded: true,
         })
     );
-    assert!(movement.server_motion_active);
-    assert!(movement.last_server_motion_intent.is_none());
+    assert_eq!(movement.published_motion, Some(PublishedMotion::Authored));
 
     assert_eq!(session.game_action_sequence, 2);
 
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::Autonomous(autonomous_intent),
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(autonomous_intent)),
         start + Duration::from_millis(60),
     );
     movement
         .tick(start + Duration::from_millis(60), &mut world, &mut session)
         .await
-        .expect("locomotion should be reasserted after the transient motion clears");
+        .expect("locomotion should be reasserted after the authored motion command clears");
 
     assert_eq!(
-        movement.last_server_motion_intent,
-        MovementSystem::autonomous_wire_motion_state(&world, autonomous_intent)
-            .map(|state| server_motion_intent(state, MotionStyle::PreserveServer))
+        movement.published_motion,
+        MovementSystem::autonomous_wire_motion_state(&world, autonomous_intent).map(|state| {
+            PublishedMotion::Drive(published_drive(state, MotionStyle::PreserveServer))
+        })
     );
 
     assert_eq!(session.game_action_sequence, 3);
@@ -1211,7 +1680,7 @@ async fn manual_motion_updates_server_motion_tracking_state() {
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
     let start = Instant::now();
-    let state = MotionState::builder().run().forward().build();
+    let state = CharacterDrive::builder().run().forward().build();
 
     movement.enqueue_drive_intent(PlayerDriveIntent::ManualHeld(state), start);
     movement
@@ -1219,124 +1688,103 @@ async fn manual_motion_updates_server_motion_tracking_state() {
         .await
         .expect("manual locomotion should update server motion tracking");
 
-    assert!(movement.server_motion_active);
+    assert!(movement.published_motion.is_some());
     assert_eq!(
-        movement.last_server_motion_intent,
-        Some(server_motion_intent(state, MotionStyle::PreserveServer))
+        movement.published_motion,
+        Some(PublishedMotion::Drive(published_drive(
+            state,
+            MotionStyle::PreserveServer
+        )))
     );
 }
 
-#[tokio::test]
-async fn server_controlled_projection_becomes_current_local_drive_control() {
+#[test]
+fn sequential_position_confirmations_preserve_manual_displacement() {
     let mut world = WorldState::synthetic();
-    let guid = Guid(0x0102_2304);
-    let current_pose = WorldPosition {
+    let guid = Guid(0x0102_3306);
+    let pose = WorldPosition {
         landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(0.0),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
     };
-    let target_pose = WorldPosition {
-        landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(16.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(0.0),
-    };
-
     world.player.guid = guid;
-    seed_local_player(&mut world, guid, current_pose);
+    seed_local_player(&mut world, guid, pose);
+    seed_authored_manual_motion_world(&mut world, guid);
 
     let mut movement = MovementSystem::new();
-    let mut session = Session::new_test();
-    let start = Instant::now();
-
-    movement.set_server_controlled_projection(ServerControlledProjection {
-        target_pose,
-        speed_mps: 2.0,
-    });
-    movement.note_server_controlled_movement_started();
-    movement.enqueue_drive_intent(
-        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
-            desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
-            desired_heading: Some(0.0),
-            target_hint: None,
-            gait: Gait::Run,
-            force_grounded: true,
-        }),
-        start,
+    install_manual_drive(
+        &mut movement,
+        CharacterDrive::builder().run().forward().build(),
+        None,
     );
+    let quantum = Duration::from_millis(100);
+    let first = movement
+        .advance_local_authored_motion(&mut world, quantum)
+        .expect("initial authored playback should resolve")
+        .expect("held forward input should produce an offset");
+    assert!(first.offset.translation.x > 0.0);
+    assert!(world.has_manual_locomotion(guid));
 
-    movement
-        .tick(start, &mut world, &mut session)
-        .await
-        .expect("server-controlled tick should expose a projected local drive");
+    for sample in 1..=5 {
+        let confirmed = WorldPosition {
+            coords: Vector3::new(sample as f32 * 0.1, 0.0, 0.0),
+            ..pose
+        };
+        let _ =
+            world.apply_player_pose_effect(AuthoritativePoseEffect::Confirm { pose: confirmed });
 
-    assert_eq!(
-        movement.current_local_drive_control(&world, Duration::from_secs(1)),
-        Some(LocalDriveControl {
-            body_id: SpatialBodyId::LocalPlayer(guid),
-            desired_world_delta: Vector3::new(2.0, 0.0, 0.0),
-            desired_heading: Some(current_pose.heading_to(&target_pose)),
-            target_hint: Some(target_pose),
-            gait: holtburger_world::spatial::LocalDriveGait::Run,
-            force_grounded: true,
-        })
-    );
-    assert!(!movement.server_motion_active);
+        assert!(movement.has_active_manual_drive());
+        assert!(world.motion_runtimes.get(guid).is_some());
+        let offset = movement
+            .advance_local_authored_motion(&mut world, quantum)
+            .expect("confirmation must not invalidate authored playback")
+            .expect("held forward input should continue after confirmation");
+        assert_eq!(offset.offset, first.offset);
+    }
 }
 
-#[tokio::test]
-async fn clearing_server_controlled_projection_reasserts_autonomous_motion_intent() {
+#[test]
+fn manual_stop_drives_the_same_world_cursor_to_authored_idle() {
     let mut world = WorldState::synthetic();
-    let guid = Guid(0x0102_3304);
-    let current_pose = WorldPosition {
+    let guid = Guid(0x0102_3307);
+    let pose = WorldPosition {
         landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(0.0),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
     };
-    let target_pose = WorldPosition {
-        landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(16.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(0.0),
-    };
-
     world.player.guid = guid;
-    seed_local_player(&mut world, guid, current_pose);
+    seed_local_player(&mut world, guid, pose);
+    seed_authored_manual_motion_world(&mut world, guid);
 
     let mut movement = MovementSystem::new();
-    let mut session = Session::new_test();
-    let start = Instant::now();
-    let autonomous_intent = AutonomousDriveIntent {
-        desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
-        desired_heading: Some(0.0),
-        target_hint: None,
-        gait: Gait::Run,
-        force_grounded: true,
-    };
-
-    movement.set_server_controlled_projection(ServerControlledProjection {
-        target_pose,
-        speed_mps: 2.0,
-    });
-    movement.note_server_controlled_movement_started();
-    movement.enqueue_drive_intent(PlayerDriveIntent::Autonomous(autonomous_intent), start);
-    movement
-        .tick(start, &mut world, &mut session)
-        .await
-        .expect("server-controlled takeover should succeed");
-
-    movement.clear_server_controlled_projection();
-    movement.enqueue_drive_intent(
-        PlayerDriveIntent::Autonomous(autonomous_intent),
-        start + Duration::from_millis(30),
+    install_manual_drive(
+        &mut movement,
+        CharacterDrive::builder().run().forward().build(),
+        None,
     );
+    let quantum = Duration::from_millis(100);
     movement
-        .tick(start + Duration::from_millis(30), &mut world, &mut session)
-        .await
-        .expect("autonomous handoff should restore locomotion emission");
+        .advance_local_authored_motion(&mut world, quantum)
+        .unwrap()
+        .expect("held drive should advance authored playback");
 
+    movement.ingest_drive_intent(PlayerDriveIntent::Stop, Instant::now());
+    assert!(movement.drives_local_authored_playback_this_tick());
+    world.advance_authored_motion_except(quantum, Some(guid));
+    movement
+        .advance_local_authored_motion(&mut world, quantum)
+        .unwrap()
+        .expect("stop should advance the authored transition to idle");
     assert_eq!(
-        movement.last_server_motion_intent,
-        MovementSystem::autonomous_wire_motion_state(&world, autonomous_intent)
-            .map(|state| server_motion_intent(state, MotionStyle::PreserveServer))
+        world.motion_runtimes.state(guid).unwrap().substate,
+        holtburger_world::motion::MotionCommand(FIXTURE_STAND_COMMAND)
+    );
+
+    world.advance_authored_motion(quantum);
+    assert_eq!(
+        world.motion_runtimes.state(guid).unwrap().substate,
+        holtburger_world::motion::MotionCommand(FIXTURE_STAND_COMMAND),
+        "an absent server snapshot must not delete the locally installed idle cursor"
     );
 }
 
@@ -1377,17 +1825,12 @@ async fn snap_facing_sends_autonomous_position_sync_with_updated_rotation() {
 }
 
 #[tokio::test]
-async fn arrival_pose_sync_updates_runtime_pose_and_clears_server_motion() {
+async fn controller_settlement_stops_once_at_the_committed_pose() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
     let position = WorldPosition {
         landblock_id: Guid(0x1000_0001),
         coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(0.0),
-    };
-    let arrival_pose = WorldPosition {
-        landblock_id: Guid(0x1000_0100),
-        coords: Vector3::new(12.0, -4.0, 7.25),
         rotation: Quaternion::from_heading(0.0),
     };
 
@@ -1399,13 +1842,13 @@ async fn arrival_pose_sync_updates_runtime_pose_and_clears_server_motion() {
     let start = Instant::now();
 
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(AutonomousDriveIntent {
             desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
             desired_heading: None,
             target_hint: None,
             gait: Gait::Run,
             force_grounded: true,
-        }),
+        })),
         start,
     );
     movement
@@ -1413,216 +1856,1206 @@ async fn arrival_pose_sync_updates_runtime_pose_and_clears_server_motion() {
         .await
         .expect("autonomous drive should emit a motion pulse");
 
+    let before_settlement = session.packet_sequence;
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::ArriveAtPose { pose: arrival_pose },
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle),
         start + Duration::from_millis(30),
     );
     movement
         .tick(start + Duration::from_millis(30), &mut world, &mut session)
         .await
-        .expect("arrival pose should sync and stop motion");
+        .expect("settlement should stop motion");
 
     let body = world
         .scene
         .body(SpatialBodyId::LocalPlayer(guid))
         .expect("local player runtime body should exist");
-    assert_eq!(body.pose, arrival_pose);
-    assert_eq!(session.packet_sequence, 4);
+    assert_eq!(body.pose, position);
+    assert_eq!(session.packet_sequence, before_settlement + 1);
     assert!(!movement.should_send_stop_pulse());
+
+    let repeated = start + Duration::from_millis(60);
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle),
+        repeated,
+    );
+    movement
+        .tick(repeated, &mut world, &mut session)
+        .await
+        .unwrap();
+    assert_eq!(session.packet_sequence, before_settlement + 1);
+    assert_eq!(world.local_player_runtime_pose(), Some(position));
 }
 
 #[tokio::test]
-async fn movement_heartbeat_arms_then_sends_for_stationary_player_with_valid_pose() {
+async fn position_publication_uses_accepted_pose_and_survives_stationary_ticks() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
-    let position = WorldPosition {
-        landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
-    };
-
     world.player.guid = guid;
-    seed_local_player(&mut world, guid, position);
-
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1000_0100),
+        ..WorldPosition::default()
+    };
+    seed_local_player(&mut world, guid, pose);
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
     let now = Instant::now();
-
-    let sent = movement
-        .maybe_send_autonomous_position_heartbeat(
-            now,
-            &world,
-            &mut session,
-            MovementPacketMetadata::default(),
-        )
-        .await
-        .expect("movement heartbeat should arm successfully");
-
-    assert!(!sent);
-    assert_eq!(session.game_action_sequence, 0);
-
-    let sent = movement
-        .maybe_send_autonomous_position_heartbeat(
-            now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL + Duration::from_millis(1),
-            &world,
-            &mut session,
-            MovementPacketMetadata::default(),
-        )
-        .await
-        .expect("movement heartbeat should send once armed");
-
-    assert!(sent);
-    assert_eq!(session.game_action_sequence, 1);
-    assert!(session.bytes_out > 0);
+    assert!(
+        movement
+            .publish_position_after_simulation(now, &world, &mut session, false)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !movement
+            .publish_position_after_simulation(now, &world, &mut session, false)
+            .await
+            .unwrap()
+    );
+    let mut accepted = pose;
+    accepted.landblock_id = Guid(0x1000_0101);
+    world.set_local_player_runtime_pose(accepted);
+    assert!(
+        movement
+            .publish_position_after_simulation(now, &world, &mut session, false)
+            .await
+            .unwrap()
+    );
+    let deadline = now + super::super::position_publication::POSITION_HEARTBEAT_INTERVAL;
+    assert!(
+        movement
+            .publish_position_after_simulation(deadline, &world, &mut session, false)
+            .await
+            .unwrap()
+    );
+    assert_eq!(session.game_action_sequence, 3);
+    movement.retire_movement_epoch();
+    assert!(
+        movement
+            .publish_position_after_simulation(deadline, &world, &mut session, false)
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test]
-async fn movement_heartbeat_skips_players_without_valid_runtime_pose() {
-    let world = WorldState::synthetic();
-    let mut movement = MovementSystem::new();
-    let mut session = Session::new_test();
-
-    let sent = movement
-        .maybe_send_autonomous_position_heartbeat(
-            Instant::now(),
-            &world,
-            &mut session,
-            MovementPacketMetadata::default(),
-        )
-        .await
-        .expect("stationary heartbeat check should succeed");
-
-    assert!(!sent);
-    assert_eq!(session.game_action_sequence, 0);
-    assert!(movement.next_autonomous_position_heartbeat_at.is_none());
-}
-
-#[tokio::test]
-async fn armed_movement_heartbeat_stays_armed_when_player_stops_moving() {
+async fn position_publication_requires_a_valid_player_and_resets_after_absence() {
     let mut world = WorldState::synthetic();
-    let guid = Guid(0x0102_0304);
-    let position = WorldPosition {
-        landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
-    };
-    let mut entity = Entity::new(guid, "Player".to_string(), position);
-    entity.velocity = Vector3::new(1.0, 0.0, 0.0);
-
-    world.player.guid = guid;
-    seed_local_player(&mut world, guid, position);
-    world.entities.insert(entity);
-
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
     let now = Instant::now();
-
-    let sent = movement
-        .maybe_send_autonomous_position_heartbeat(
-            now,
-            &world,
-            &mut session,
-            MovementPacketMetadata::default(),
-        )
-        .await
-        .expect("moving heartbeat check should arm successfully");
-
-    assert!(!sent);
-    assert!(movement.next_autonomous_position_heartbeat_at.is_some());
-
-    let stationary_entity = world
-        .entities
-        .get_mut(guid)
-        .expect("synthetic player entity should exist");
-    stationary_entity.velocity = Vector3::zero();
-    stationary_entity.omega = Vector3::zero();
-
-    let sent = movement
-        .maybe_send_autonomous_position_heartbeat(
-            now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL + Duration::from_millis(1),
-            &world,
-            &mut session,
-            MovementPacketMetadata::default(),
-        )
-        .await
-        .expect("armed heartbeat should send one final stationary sync");
-
-    assert!(sent);
-    assert_eq!(session.game_action_sequence, 1);
-    assert!(movement.next_autonomous_position_heartbeat_at.is_some());
+    assert!(
+        !movement
+            .publish_position_after_simulation(now, &world, &mut session, false)
+            .await
+            .unwrap()
+    );
+    let guid = Guid(0x0102_0304);
+    world.player.guid = guid;
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0x1000_0100),
+            ..WorldPosition::default()
+        },
+    );
+    assert!(
+        movement
+            .publish_position_after_simulation(now, &world, &mut session, false)
+            .await
+            .unwrap()
+    );
+    world.player.guid = Guid::NULL;
+    assert!(
+        !movement
+            .publish_position_after_simulation(now, &world, &mut session, false)
+            .await
+            .unwrap()
+    );
+    world.player.guid = guid;
+    assert!(
+        movement
+            .publish_position_after_simulation(now, &world, &mut session, false)
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test]
-async fn movement_tick_emits_autonomous_position_heartbeat_when_due() {
+async fn motion_packet_and_explicit_sync_share_the_routine_publication_baseline() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
-    let position = WorldPosition {
-        landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
-    };
-    let mut entity = Entity::new(guid, "Player".to_string(), position);
-    entity.velocity = Vector3::new(2.0, 0.0, 0.0);
-
     world.player.guid = guid;
-    seed_local_player(&mut world, guid, position);
-    world.entities.insert(entity);
-
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0x1000_0100),
+            ..WorldPosition::default()
+        },
+    );
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
-    let start = Instant::now();
-
+    let now = Instant::now();
     movement
-        .tick(start, &mut world, &mut session)
-        .await
-        .expect("first movement tick should arm the heartbeat");
-
-    assert_eq!(session.game_action_sequence, 0);
-
-    movement
-        .tick(
-            start + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL + Duration::from_millis(1),
+        .execute_motion_state_at(
+            CharacterDrive::builder().run().forward().build(),
             &mut world,
             &mut session,
+            now,
         )
         .await
-        .expect("second movement tick should emit the heartbeat");
-
+        .unwrap();
     assert_eq!(session.game_action_sequence, 1);
+    assert!(
+        !movement
+            .publish_position_after_simulation(now, &world, &mut session, false)
+            .await
+            .unwrap()
+    );
+    let later = now + super::super::position_publication::POSITION_HEARTBEAT_INTERVAL;
+    movement
+        .send_autonomous_position_sync(
+            later,
+            &world,
+            &mut session,
+            MovementPacketMetadata::default(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        !movement
+            .publish_position_after_simulation(later, &world, &mut session, false)
+            .await
+            .unwrap()
+    );
+    assert_eq!(session.game_action_sequence, 2);
+}
+
+#[test]
+fn client_directed_presentation_retains_idle_until_control_is_released() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_3390);
+    world.player.guid = guid;
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            ..WorldPosition::default()
+        },
+    );
+    seed_authored_manual_motion_world(&mut world, guid);
+    let mut movement = MovementSystem::new();
+    let now = Instant::now();
+    movement.ingest_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+            desired_heading: None,
+            target_hint: None,
+            gait: Gait::Run,
+            force_grounded: true,
+        })),
+        now,
+    );
+    assert_eq!(
+        movement
+            .client_directed_locomotion_order(&world)
+            .unwrap()
+            .unwrap()
+            .forward
+            .unwrap()
+            .0,
+        MotionCommand::RUN_FORWARD
+    );
+    movement.ingest_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle),
+        now,
+    );
+    let idle = movement
+        .client_directed_locomotion_order(&world)
+        .unwrap()
+        .unwrap();
+    assert_eq!(idle.forward, None);
+    assert_eq!(idle.sidestep, None);
+    assert_eq!(idle.turn, None);
+    movement.ingest_drive_intent(PlayerDriveIntent::Stop, now);
+    assert!(
+        movement
+            .client_directed_locomotion_order(&world)
+            .unwrap()
+            .is_none()
+    );
+    install_manual_drive(&mut movement, CharacterDrive::default(), None);
+    assert!(
+        movement
+            .client_directed_locomotion_order(&world)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn reset_and_drive_preserve_admission_order() {
+    let now = Instant::now();
+    let drive = CharacterDrive::builder().run().forward().build();
+    for reset_first in [true, false] {
+        let mut world = WorldState::synthetic();
+        let mut movement = MovementSystem::new();
+        let reset = QueuedControlCommand::CharacterMotion(SequencedCharacterMotionEvent {
+            sequence: CharacterMotionSequence(1),
+            event: CharacterMotionEvent::Reset,
+        });
+        let drive = QueuedControlCommand::Drive(PlayerDriveIntent::ManualHeld(drive));
+        movement.queued_control_commands.extend(if reset_first {
+            [reset, drive]
+        } else {
+            [drive, reset]
+        });
+        movement.process_control_commands(now, &mut world, false);
+        assert_eq!(movement.has_active_manual_drive(), reset_first);
+        assert_eq!(
+            movement.character_motion.effective_drive().is_stationary(),
+            !reset_first
+        );
+    }
+}
+
+#[test]
+fn jump_and_stop_preserve_admission_order() {
+    let now = Instant::now();
+    for stop_first in [true, false] {
+        let mut world = WorldState::synthetic();
+        let mut movement = MovementSystem::new();
+        let jump = QueuedControlCommand::CharacterMotion(SequencedCharacterMotionEvent {
+            sequence: CharacterMotionSequence(1),
+            event: CharacterMotionEvent::BeginJump {
+                drive: CharacterDrive::default(),
+            },
+        });
+        let stop = QueuedControlCommand::Drive(PlayerDriveIntent::Stop);
+        movement.queued_control_commands.extend(if stop_first {
+            [stop, jump]
+        } else {
+            [jump, stop]
+        });
+        movement.process_control_commands(now, &mut world, false);
+        assert_eq!(movement.has_active_manual_drive(), stop_first);
+        assert_eq!(
+            movement.character_motion.is_standing_long_jump(),
+            stop_first
+        );
+    }
+}
+
+/// Receipt-time approach state; the target remains distant throughout cancellation tests.
+fn test_server_approach(start: WorldPosition) -> ServerDirectedMotionState {
+    let scalar = |value| OrderedMotionScalar::from_f32(value).unwrap();
+    begin_server_directed_motion(
+        EntityMotionDirective::MoveToPosition {
+            admission: EntityMotionAdmission {
+                object_instance_sequence: 1,
+                movement_sequence: 1,
+                server_control_sequence: 1,
+                is_autonomous: false,
+            },
+            target: OrderedMotionPosition {
+                cell_id: start.landblock_id,
+                x: scalar(start.coords.x + 20.0),
+                y: scalar(start.coords.y),
+                z: scalar(start.coords.z),
+            },
+            params: EntityMoveToParameters {
+                flags: 0x0000_0203,
+                distance_to_object: scalar(1.0),
+                min_distance: scalar(0.0),
+                fail_distance: scalar(100.0),
+                speed: scalar(1.0),
+                walk_run_threshold: scalar(5.0),
+                desired_heading_degrees: scalar(0.0),
+            },
+            run_rate: scalar(1.0),
+        },
+        start,
+        None,
+    )
 }
 
 #[tokio::test]
-async fn stop_without_active_drive_keeps_autonomous_position_heartbeat_armed() {
+async fn server_approach_manual_takeover_bypasses_matching_publication_history() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
-    let position = WorldPosition {
+    let pose = WorldPosition {
         landblock_id: Guid(0x1000_0001),
-        coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        ..WorldPosition::default()
     };
-
-    world.player.guid = guid;
-    seed_local_player(&mut world, guid, position);
-
+    seed_local_player(&mut world, guid, pose);
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
     let now = Instant::now();
-    movement.note_server_motion_sent(server_motion_intent(
-        MotionState::builder().run().forward().turn_right().build(),
-        MotionStyle::PreserveServer,
+    let drive = CharacterDrive::builder().run().forward().build();
+    movement.note_drive_published(published_drive(drive, MotionStyle::PreserveServer));
+    movement.admit_server_controlled_motion(Some(test_server_approach(pose)), now, &mut world);
+    let before = session.packet_sequence;
+    movement.enqueue_drive_intent(PlayerDriveIntent::ManualHeld(drive), now);
+    movement.tick(now, &mut world, &mut session).await.unwrap();
+    assert!(movement.has_active_manual_drive());
+    assert!(!movement.has_server_controlled_motion());
+    assert!(session.packet_sequence > before);
+    assert!(!movement.movement_publication_required);
+    let after = session.packet_sequence;
+    movement.tick(now, &mut world, &mut session).await.unwrap();
+    assert_eq!(session.packet_sequence, after);
+}
+
+#[tokio::test]
+async fn server_only_approach_stop_publishes_cancellation() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        ..WorldPosition::default()
+    };
+    seed_local_player(&mut world, guid, pose);
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let now = Instant::now();
+    movement.admit_server_controlled_motion(Some(test_server_approach(pose)), now, &mut world);
+    assert!(movement.published_motion.is_none());
+    let before = session.packet_sequence;
+    movement.enqueue_drive_intent(PlayerDriveIntent::Stop, now);
+    movement.tick(now, &mut world, &mut session).await.unwrap();
+    assert!(movement.active_movement.is_none());
+    assert!(movement.pending_manual_playback_stop);
+    assert!(session.packet_sequence > before);
+    assert!(!movement.movement_publication_required);
+}
+
+#[test]
+fn passive_input_preserves_server_approach() {
+    let mut world = WorldState::synthetic();
+    let mut movement = MovementSystem::new();
+    let now = Instant::now();
+    movement.admit_server_controlled_motion(
+        Some(test_server_approach(WorldPosition::default())),
+        now,
+        &mut world,
+    );
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::SynchronizeHeld(CharacterDrive::default()),
+        now,
+    );
+    movement.enqueue_character_motion_event(SequencedCharacterMotionEvent {
+        sequence: CharacterMotionSequence(1),
+        event: CharacterMotionEvent::Reset,
+    });
+    movement.process_control_commands(now, &mut world, false);
+    assert!(movement.has_server_controlled_motion());
+    assert!(!movement.movement_publication_required);
+    assert!(!movement.pending_manual_playback_stop);
+}
+
+#[test]
+fn passive_drive_commands_preserve_local_emote_playback() {
+    let bow = MotionCommand(0x4300_00ec);
+    let drive = AutonomousDriveIntent {
+        desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+        desired_heading: None,
+        target_hint: None,
+        gait: Gait::Run,
+        force_grounded: true,
+    };
+    for intent in [
+        PlayerDriveIntent::ReleaseManual,
+        PlayerDriveIntent::SynchronizeHeld(CharacterDrive::default()),
+        PlayerDriveIntent::SynchronizeHeld(CharacterDrive::builder().run().forward().build()),
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Update(drive)),
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle),
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Release),
+    ] {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+        seed_local_player(&mut world, guid, WorldPosition::default());
+        world.set_motion_sequences(explicit_motion_catalog(
+            FIXTURE_MOTION_TABLE_ID,
+            MotionStance::NonCombat as u32,
+            [FixtureCycle::moving(bow.raw(), Vector3::zero())],
+            [],
+        ));
+        world
+            .player_entity_mut()
+            .unwrap()
+            .set_did_prop(PropertyDataId::MotionTable, Guid(FIXTURE_MOTION_TABLE_ID));
+        world
+            .submit_local_authored_motion_command(
+                InterpretedMotionCommand::from(bow.raw() as u16),
+                1.0,
+                1,
+                None,
+            )
+            .unwrap();
+        let mut movement = MovementSystem::new();
+        let now = Instant::now();
+        movement.enqueue_drive_intent(intent, now);
+        movement.process_control_commands(now, &mut world, false);
+
+        assert!(world.has_local_authored_motion(guid), "{intent:?}");
+        movement
+            .advance_local_authored_motion(&mut world, Duration::from_millis(30))
+            .unwrap()
+            .expect("emote must keep advancing after passive input");
+        assert_eq!(
+            world.motion_runtimes.get(guid).unwrap().state().substate,
+            bow
+        );
+
+        // A new movement acquisition must still supersede the emote retained by passive input.
+        movement.enqueue_drive_intent(
+            PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
+            now,
+        );
+        movement.process_control_commands(now, &mut world, false);
+        assert!(!world.has_local_authored_motion(guid));
+        assert!(movement.has_active_manual_drive());
+    }
+}
+
+#[test]
+fn manual_release_retires_only_the_manual_owner() {
+    let mut world = WorldState::synthetic();
+    let mut movement = MovementSystem::new();
+    let now = Instant::now();
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
+        now,
+    );
+    movement.process_control_commands(now, &mut world, false);
+    assert!(movement.has_active_manual_drive());
+
+    movement.enqueue_drive_intent(PlayerDriveIntent::ReleaseManual, now);
+    movement.process_control_commands(now, &mut world, false);
+    assert!(movement.active_movement.is_none());
+    assert!(movement.pending_manual_playback_stop);
+
+    movement.admit_server_controlled_motion(
+        Some(test_server_approach(WorldPosition::default())),
+        now,
+        &mut world,
+    );
+    movement.enqueue_drive_intent(PlayerDriveIntent::ReleaseManual, now);
+    movement.process_control_commands(now, &mut world, false);
+    assert!(movement.has_server_controlled_motion());
+}
+
+#[test]
+fn displaced_controller_cannot_steer_settle_or_release_the_new_source() {
+    let now = Instant::now();
+    let drive = AutonomousDriveIntent {
+        desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+        desired_heading: None,
+        target_hint: None,
+        gait: Gait::Run,
+        force_grounded: true,
+    };
+    for server_takes_control in [false, true] {
+        let mut world = WorldState::synthetic();
+        let mut movement = MovementSystem::new();
+        movement.ingest_client_directed_command(ClientDirectedCommand::Acquire(drive));
+        if server_takes_control {
+            movement.admit_server_controlled_motion(
+                Some(test_server_approach(WorldPosition::default())),
+                now,
+                &mut world,
+            );
+        } else {
+            movement.ingest_drive_intent(
+                PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
+                now,
+            );
+        }
+        let selected = movement.active_movement;
+        for command in [
+            ClientDirectedCommand::Update(drive),
+            ClientDirectedCommand::Settle,
+            ClientDirectedCommand::Release,
+        ] {
+            movement.ingest_client_directed_command(command);
+            assert_eq!(movement.active_movement, selected);
+        }
+    }
+}
+
+#[test]
+fn controller_retains_ownership_without_repeating_displacement() {
+    let now = Instant::now();
+    let mut movement = MovementSystem::new();
+    let drive = AutonomousDriveIntent {
+        desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+        desired_heading: None,
+        target_hint: None,
+        gait: Gait::Run,
+        force_grounded: true,
+    };
+    movement.ingest_client_directed_command(ClientDirectedCommand::Acquire(drive));
+    movement.expire_active_movement(now);
+    assert_eq!(
+        movement.active_movement,
+        Some(ActiveMovement::ClientDirected(None))
+    );
+    movement.ingest_client_directed_command(ClientDirectedCommand::Update(drive));
+    assert_eq!(
+        movement.active_movement,
+        Some(ActiveMovement::ClientDirected(Some(drive)))
+    );
+    movement.ingest_client_directed_command(ClientDirectedCommand::Settle);
+    assert_eq!(
+        movement.active_movement,
+        Some(ActiveMovement::ClientDirected(None))
+    );
+    movement.ingest_client_directed_command(ClientDirectedCommand::Update(drive));
+    assert_eq!(
+        movement.active_movement,
+        Some(ActiveMovement::ClientDirected(Some(drive)))
+    );
+}
+
+#[test]
+fn client_directed_updates_do_not_clear_existing_locomotion() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_3391);
+    world.player.guid = guid;
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            ..WorldPosition::default()
+        },
+    );
+    seed_authored_manual_motion_world(&mut world, guid);
+    let mut movement = MovementSystem::new();
+    let now = Instant::now();
+    let drive = AutonomousDriveIntent {
+        desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+        desired_heading: None,
+        target_hint: None,
+        gait: Gait::Run,
+        force_grounded: true,
+    };
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(drive)),
+        now,
+    );
+    movement.process_control_commands(now, &mut world, false);
+    let order = movement
+        .client_directed_locomotion_order(&world)
+        .unwrap()
+        .unwrap();
+    let table = world
+        .motion_sequences
+        .table(FIXTURE_MOTION_TABLE_ID)
+        .unwrap();
+    // This kinematic fixture has no animation assets, so use the observable manual authority as
+    // the cursor sentinel. `clear_locomotion` itself is intentionally authority-agnostic.
+    world.motion_runtimes.drive_manual(
+        table,
+        guid,
+        order,
+        CharacterMotionPresentation::Grounded,
+        0.1,
+    );
+    assert!(world.has_manual_locomotion(guid));
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Update(drive)),
+        now,
+    );
+    movement.process_control_commands(now, &mut world, false);
+    assert!(world.has_manual_locomotion(guid));
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::AcquireFacing { heading: 1.0 }),
+        now,
+    );
+    movement.process_control_commands(now, &mut world, false);
+    assert!(!world.has_manual_locomotion(guid));
+}
+
+#[tokio::test]
+async fn reduced_gap_packets_use_committed_pose_and_report_the_next_accepted_cell_immediately() {
+    use super::super::position_publication::POSITION_HEARTBEAT_INTERVAL;
+    use holtburger_common::Plane;
+    use holtburger_content::{
+        CellVolume, LandblockColliders, LandblockCollisionAsset, LandblockPlacement,
+        TerrainCollisionSurface,
+    };
+    use holtburger_world::{CollisionScene, PointPlacement};
+
+    let start = WorldPosition {
+        landblock_id: Guid(0x1234_0100),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    let destination = WorldPosition {
+        landblock_id: Guid(0x1234_0101),
+        coords: Vector3::new(10.0, 0.0, 0.0),
+        ..start
+    };
+    // Two half-spaces leave a known gap at x in (1,9); no intermediate cell is fabricated.
+    let volumes = [
+        (0x0100, Vector3::new(-1.0, 0.0, 0.0), 1.0),
+        (0x0101, Vector3::new(1.0, 0.0, 0.0), -9.0),
+    ]
+    .map(|(cell_selector, normal, d)| CellVolume {
+        visibility: holtburger_content::CellVisibility {
+            visible_cell_selectors: Vec::new(),
+            seen_outside: false,
+        },
+        cell_selector,
+        placement: LandblockPlacement {
+            origin: Vector3::zero(),
+            orientation: Quaternion::identity(),
+        },
+        planes: vec![Plane { normal, d }],
+        portals: Vec::new(),
+    });
+    let mut scene = CollisionScene::new();
+    scene
+        .insert(LandblockCollisionAsset {
+            landblock_id: 0x1234_ffff,
+            terrain: TerrainCollisionSurface::empty(),
+            static_geometry: LandblockColliders::new(Vec::new(), volumes.into()),
+        })
+        .unwrap();
+    let mut world = WorldState::synthetic();
+    seed_local_player(&mut world, Guid(0x5000_0001), start);
+    world.player.instance_sequence = 7;
+    world.player.server_control_sequence = 11;
+    world.player.teleport_sequence = 13;
+    world.player.force_position_sequence = 17;
+    let mut movement = MovementSystem::with_policy(ClientMovementPolicy::Navigation);
+    let mut session = Session::new_test();
+    let capture = tempfile::NamedTempFile::new().unwrap();
+    session
+        .set_capture(capture.path().to_str().unwrap())
+        .unwrap();
+    let now = Instant::now();
+    let dt = Duration::from_millis(20);
+    let drive = AutonomousDriveIntent {
+        desired_world_delta: Vector3::new(2.0, 0.0, 0.0),
+        desired_heading: None,
+        target_hint: Some(destination),
+        gait: Gait::Walk,
+        force_grounded: false,
+    };
+    let input = || LocalNavigationInput {
+        admitted_fraction: 1.0,
+        interval: dt,
+        facing_rotation: None,
+        authored_offset: None,
+        sticky_target: None,
+    };
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(drive)),
+        now,
+    );
+    movement.tick(now, &mut world, &mut session).await.unwrap();
+    movement
+        .advance_navigation(&mut world, &scene, input())
+        .unwrap();
+    assert_eq!(world.local_player_runtime_pose(), Some(start));
+    assert!(
+        movement
+            .publish_position_after_simulation(
+                now + POSITION_HEARTBEAT_INTERVAL,
+                &world,
+                &mut session,
+                false
+            )
+            .await
+            .unwrap()
+    );
+
+    let facing_at = now + POSITION_HEARTBEAT_INTERVAL * 2;
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Update(drive)),
+        facing_at,
+    );
+    movement.enqueue_drive_intent(PlayerDriveIntent::SnapFacing { heading: 0.3 }, facing_at);
+    movement
+        .tick(facing_at, &mut world, &mut session)
+        .await
+        .unwrap();
+    movement
+        .advance_navigation(&mut world, &scene, input())
+        .unwrap();
+    assert_eq!(
+        world.local_player_runtime_pose().unwrap().coords,
+        start.coords
+    );
+    let stopped_at = now + POSITION_HEARTBEAT_INTERVAL * 3;
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle),
+        stopped_at,
+    );
+    movement
+        .tick(stopped_at, &mut world, &mut session)
+        .await
+        .unwrap();
+
+    let resumed_at = now + POSITION_HEARTBEAT_INTERVAL * 4;
+    for step in 0..5 {
+        let at = resumed_at + dt * step;
+        let command = if step == 0 {
+            ClientDirectedCommand::Acquire(drive)
+        } else {
+            ClientDirectedCommand::Update(drive)
+        };
+        movement.enqueue_drive_intent(PlayerDriveIntent::ClientDirected(command), at);
+        movement.tick(at, &mut world, &mut session).await.unwrap();
+        movement
+            .advance_navigation(&mut world, &scene, input())
+            .unwrap();
+        let reported = movement
+            .publish_position_after_simulation(at, &world, &mut session, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            reported,
+            step == 4,
+            "accepted cell change must preempt the heartbeat"
+        );
+    }
+    let actions = captured_actions(&capture);
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, GameAction::MoveToState(_)))
+    );
+    assert!(actions.iter().any(|action| matches!(action, GameAction::AutonomousPosition(packet) if packet.position.landblock_id == destination.landblock_id)));
+    for action in actions {
+        let (position, sequences) = match action {
+            GameAction::MoveToState(packet) => (
+                packet.position,
+                [
+                    packet.instance_sequence,
+                    packet.server_control_sequence,
+                    packet.teleport_sequence,
+                    packet.force_position_sequence,
+                ],
+            ),
+            GameAction::AutonomousPosition(packet) => (
+                packet.position,
+                [
+                    packet.instance_sequence,
+                    packet.server_control_sequence,
+                    packet.teleport_sequence,
+                    packet.force_position_sequence,
+                ],
+            ),
+            other => panic!("unexpected gap fixture action: {other:?}"),
+        };
+        assert_eq!(sequences, [7, 11, 13, 17]);
+        assert!(position.coords == start.coords || position.coords == destination.coords);
+        let PointPlacement::Unique(classified) = scene.point_placement(position).unwrap() else {
+            panic!("packet position has no unique valid cell")
+        };
+        assert_eq!(classified.landblock_id, position.landblock_id);
+    }
+}
+
+#[tokio::test]
+async fn approach_cancellation_packet_preserves_current_pose_and_authority_sequences() {
+    for stop in [true, false] {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, 14.0, 3.0),
+            rotation: Quaternion::identity(),
+        };
+        seed_local_player(&mut world, guid, pose);
+        world.player.instance_sequence = 7;
+        world.player.server_control_sequence = 11;
+        world.player.teleport_sequence = 13;
+        world.player.force_position_sequence = 17;
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+        let capture = tempfile::NamedTempFile::new().unwrap();
+        session
+            .set_capture(capture.path().to_str().unwrap())
+            .unwrap();
+        let now = Instant::now();
+        movement.admit_server_controlled_motion(Some(test_server_approach(pose)), now, &mut world);
+        let drive = CharacterDrive::builder().walk().turn_left().build();
+        movement.enqueue_drive_intent(
+            if stop {
+                PlayerDriveIntent::Stop
+            } else {
+                PlayerDriveIntent::ManualHeld(drive)
+            },
+            now,
+        );
+        movement.tick(now, &mut world, &mut session).await.unwrap();
+        let actions = captured_actions(&capture);
+        let GameAction::MoveToState(packet) = &actions[0] else {
+            panic!("first takeover packet must be MoveToState");
+        };
+        assert_eq!(packet.position, pose);
+        assert_eq!(packet.instance_sequence, world.player.instance_sequence);
+        assert_eq!(
+            packet.server_control_sequence,
+            world.player.server_control_sequence
+        );
+        assert_eq!(packet.teleport_sequence, world.player.teleport_sequence);
+        assert_eq!(
+            packet.force_position_sequence,
+            world.player.force_position_sequence
+        );
+        if stop {
+            assert_eq!(packet.raw_motion_state.forward_command, None);
+            assert_eq!(packet.raw_motion_state.turn_command, None);
+        } else {
+            assert!(packet.raw_motion_state.turn_command.is_some());
+        }
+    }
+}
+
+#[test]
+fn stop_preserves_jump_sequence_history_until_epoch_retirement() {
+    let now = Instant::now();
+    let mut world = WorldState::synthetic();
+    let mut movement = MovementSystem::new();
+    let begin = SequencedCharacterMotionEvent {
+        sequence: CharacterMotionSequence(4),
+        event: CharacterMotionEvent::BeginJump {
+            drive: CharacterDrive::default(),
+        },
+    };
+    movement.enqueue_character_motion_event(begin);
+    movement.enqueue_drive_intent(PlayerDriveIntent::Stop, now);
+    movement.enqueue_character_motion_event(begin);
+    movement.process_control_commands(now, &mut world, false);
+    assert!(movement.active_movement.is_none());
+    assert!(!movement.character_motion.is_charging());
+    assert_eq!(movement.take_character_motion_feedback().len(), 1);
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
+        now,
+    );
+    movement.retire_movement_epoch();
+    movement.process_control_commands(now, &mut world, false);
+    assert!(movement.active_movement.is_none());
+    movement.enqueue_character_motion_event(begin);
+    movement.process_control_commands(now, &mut world, false);
+    assert!(movement.character_motion.is_charging());
+}
+
+#[test]
+fn manual_acquisition_retires_controller_facing() {
+    let now = Instant::now();
+    let mut movement = MovementSystem::new();
+    movement.ingest_client_directed_command(ClientDirectedCommand::AcquireFacing { heading: 1.0 });
+    movement.ingest_client_directed_command(ClientDirectedCommand::Settle);
+    movement.ingest_drive_intent(
+        PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
+        now,
+    );
+    assert!(movement.pending_facing.absolute_heading.is_none());
+    assert!(movement.has_active_manual_drive());
+}
+
+#[tokio::test]
+async fn gesture_packets_preserve_held_input_through_release_and_reach() {
+    use holtburger_protocol::messages::movement::{InterpretedMotionState, MovementStateFlags};
+    const RELEASE: u32 = 0x4000_002b;
+    const REACH: u32 = 0x4000_0018;
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_3010);
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            ..WorldPosition::default()
+        },
+    );
+    seed_authored_manual_motion_world(&mut world, guid);
+    world.set_motion_sequences(explicit_motion_catalog(
+        FIXTURE_MOTION_TABLE_ID,
+        MotionStance::NonCombat as u32,
+        [
+            FixtureCycle::moving(
+                MotionCommand::WALK_FORWARD.raw(),
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+            FixtureCycle::moving(RELEASE, Vector3::new(0.0, 0.5, 0.0)),
+            FixtureCycle::moving(REACH, Vector3::zero()),
+        ],
+        [],
     ));
-    movement.refresh_autonomous_position_heartbeat_schedule(now, &world);
-
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    install_manual_drive(
+        &mut movement,
+        CharacterDrive::builder().walk().forward().build(),
+        None,
+    );
     movement
-        .execute_stop_at(
-            now,
+        .advance_local_authored_motion(&mut world, Duration::from_millis(100))
+        .unwrap()
+        .unwrap();
+    assert!(world.has_manual_locomotion(guid));
+    // Retained manual playback resolves Ready to the stance's idle command.
+    for (sequence, command, expected_substate) in [
+        (1, RELEASE, RELEASE),
+        (2, MotionCommand::READY.raw(), FIXTURE_STAND_COMMAND),
+        (3, REACH, REACH),
+    ] {
+        let data = MovementEventData {
+            guid,
+            object_instance_sequence: 0,
+            movement_sequence: sequence,
+            server_control_sequence: sequence,
+            is_autonomous: false,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: MovementStateFlags::CURRENT_STYLE | MovementStateFlags::FORWARD_COMMAND,
+                    current_style: Some(MotionStance::NonCombat.interpreted()),
+                    forward_command: Some(InterpretedMotionCommand(command as u16)),
+                    ..Default::default()
+                },
+                sticky_object: None,
+            }),
+        };
+        let before_admission = session.game_action_sequence;
+        world.handle_message(&GameMessage::UpdateMotion(Box::new(data.clone())));
+        assert!(world.has_manual_locomotion(guid));
+        crate::client::simulation::handle_server_controlled_movement(
+            &data,
+            &mut movement,
             &mut world,
             &mut session,
-            MovementPacketMetadata::default(),
-            false,
         )
         .await
-        .expect("stop request should succeed");
+        .unwrap();
+        assert!(movement.has_active_manual_drive());
+        assert!(world.has_manual_locomotion(guid));
+        assert_eq!(
+            session.game_action_sequence, before_admission,
+            "admission itself sends no fabricated command"
+        );
+        movement
+            .tick(Instant::now(), &mut world, &mut session)
+            .await
+            .unwrap();
+        assert!(
+            session.game_action_sequence > before_admission,
+            "unchanged held drive must be republished after server control"
+        );
+        let published = session.game_action_sequence;
+        movement
+            .tick(Instant::now(), &mut world, &mut session)
+            .await
+            .unwrap();
+        assert_eq!(
+            session.game_action_sequence, published,
+            "ordinary unchanged ticks remain deduplicated"
+        );
+        let tick = movement
+            .advance_local_authored_motion(&mut world, Duration::from_millis(100))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            MotionCommand(expected_substate)
+        );
+        assert!(tick.offset.translation.x > 0.0);
+        assert_eq!(
+            tick.offset.translation.y, 0.0,
+            "gesture displacement must not be added to walking"
+        );
+    }
+    movement.admit_server_controlled_motion(None, Instant::now(), &mut world);
+    assert!(!movement.has_active_manual_drive());
+    assert!(!world.has_manual_locomotion(guid));
+}
 
-    assert!(movement.next_autonomous_position_heartbeat_at.is_some());
+#[test]
+fn gesture_admission_resumes_held_input_but_never_revives_an_expired_pulse() {
+    let mut world = WorldState::synthetic();
+    let now = Instant::now();
+    for (until, resumes) in [(None, true), (Some(now + Duration::from_millis(10)), false)] {
+        let mut movement = MovementSystem::new();
+        install_manual_drive(
+            &mut movement,
+            CharacterDrive::builder().walk().forward().build(),
+            until,
+        );
+        movement.admit_server_controlled_motion(None, now, &mut world);
+        assert!(!movement.has_active_manual_drive());
+        movement.admit_server_gesture(now + Duration::from_millis(20), &mut world);
+        assert_eq!(movement.has_active_manual_drive(), resumes);
+    }
+}
+
+#[tokio::test]
+async fn relative_facing_admission_preserves_jump_and_drive() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        rotation: Quaternion::from_heading(0.5),
+        ..WorldPosition::default()
+    };
+    seed_local_player(&mut world, guid, pose);
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let now = Instant::now();
+    let drive = CharacterDrive::builder()
+        .run()
+        .forward()
+        .strafe_left()
+        .turn_right()
+        .build();
+    movement.enqueue_character_motion_event(SequencedCharacterMotionEvent {
+        sequence: CharacterMotionSequence(1),
+        event: CharacterMotionEvent::BeginJump { drive },
+    });
+    movement.enqueue_drive_intent(PlayerDriveIntent::RotateFacing { delta_radians: 0.2 }, now);
+    movement.enqueue_drive_intent(PlayerDriveIntent::ManualHeld(drive), now);
+    movement.enqueue_drive_intent(PlayerDriveIntent::RotateFacing { delta_radians: 0.3 }, now);
+    let prepared = movement.prepare_tick(now, &mut world);
+    assert!(movement.character_motion.is_charging());
+    assert_eq!(movement.character_motion.effective_drive(), drive);
+    movement
+        .advance_tick(prepared, now, &mut world, &mut session)
+        .await
+        .unwrap();
+    assert!((movement.take_relative_facing_delta() - 0.5).abs() < 1e-5);
+    assert_eq!(movement.take_relative_facing_delta(), 0.0);
+    assert!(movement.character_motion.is_charging());
+    assert_eq!(movement.character_motion.effective_drive(), drive);
+}
+
+#[test]
+fn relative_facing_is_retired_by_reset_server_takeover_and_world_epoch() {
+    // Each cancellation boundary must discard admitted relative input before publication.
+    enum Cancellation {
+        Reset,
+        ServerTakeover,
+        WorldEpoch,
+    }
+    for cancellation in [
+        Cancellation::Reset,
+        Cancellation::ServerTakeover,
+        Cancellation::WorldEpoch,
+    ] {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            rotation: Quaternion::from_heading(0.5),
+            ..WorldPosition::default()
+        };
+        seed_local_player(&mut world, guid, pose);
+        let mut movement = MovementSystem::new();
+        let now = Instant::now();
+        movement.enqueue_drive_intent(PlayerDriveIntent::RotateFacing { delta_radians: 0.2 }, now);
+        match cancellation {
+            Cancellation::Reset => {
+                movement.enqueue_character_motion_event(SequencedCharacterMotionEvent {
+                    sequence: CharacterMotionSequence(1),
+                    event: CharacterMotionEvent::Reset,
+                })
+            }
+            Cancellation::ServerTakeover => movement.admit_server_controlled_motion(
+                Some(test_server_approach(pose)),
+                now,
+                &mut world,
+            ),
+            Cancellation::WorldEpoch => movement.retire_movement_epoch(),
+        }
+        movement.process_control_commands(now, &mut world, false);
+        assert_eq!(movement.take_relative_facing_delta(), 0.0);
+    }
+}
+
+#[tokio::test]
+async fn resting_packets_publish_forward_state_and_survive_replacing_a_stopped_pose() {
+    use holtburger_world::motion::RestPosture;
+    let postures = [
+        RestPosture::Crouching,
+        RestPosture::Sitting,
+        RestPosture::Lying,
+        RestPosture::Standing,
+    ];
+    let mut world = WorldState::synthetic();
+    let guid = Guid(1);
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            ..WorldPosition::default()
+        },
+    );
+    seed_authored_manual_motion_world(&mut world, guid);
+    world.set_motion_sequences(explicit_motion_catalog(
+        FIXTURE_MOTION_TABLE_ID,
+        MotionStance::NonCombat as u32,
+        postures.map(|posture| FixtureCycle {
+            command: posture.command().raw(),
+            velocity: None,
+            omega: None,
+        }),
+        [],
+    ));
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let capture = tempfile::NamedTempFile::new().unwrap();
+    session
+        .set_capture(capture.path().to_str().unwrap())
+        .unwrap();
+    let now = Instant::now();
+    let pose = world.local_player_runtime_pose().unwrap();
+    movement.admit_server_controlled_motion(Some(test_server_approach(pose)), now, &mut world);
+    for posture in postures {
+        movement.enqueue_drive_intent(PlayerDriveIntent::Stop, now);
+        movement.enqueue_authored_motion(
+            InterpretedMotionCommand(posture.command().raw() as u16),
+            MotionStyle::PreserveServer,
+        );
+        movement.tick(now, &mut world, &mut session).await.unwrap();
+        assert!(!movement.pending_manual_playback_stop);
+        assert!(world.has_local_authored_motion(guid));
+        movement
+            .advance_local_authored_motion(&mut world, Duration::from_millis(100))
+            .unwrap();
+        movement
+            .tick(now + Duration::from_millis(100), &mut world, &mut session)
+            .await
+            .unwrap();
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            posture.command()
+        );
+    }
+    let actions = captured_actions(&capture);
+    assert_eq!(actions.len(), postures.len());
+    for (action, posture) in actions.iter().zip(postures) {
+        let GameAction::MoveToState(packet) = action else {
+            panic!("resting must emit only movement");
+        };
+        assert_eq!(
+            packet.raw_motion_state.forward_command,
+            Some(posture.command().raw())
+        );
+        assert!(packet.raw_motion_state.commands.is_empty());
+    }
 }

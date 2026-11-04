@@ -28,6 +28,48 @@ impl ProtocolPack for LoginCompleteActionData {
     fn pack(&self, _buf: &mut Vec<u8>) {}
 }
 
+/// Payload-free built-in recall action.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TeleToHouseActionData;
+
+impl ProtocolUnpack for TeleToHouseActionData {
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(Self)
+    }
+}
+
+impl ProtocolPack for TeleToHouseActionData {
+    fn pack(&self, _buf: &mut Vec<u8>) {}
+}
+
+/// Payload-free built-in recall action.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TeleToPkArenaActionData;
+
+impl ProtocolUnpack for TeleToPkArenaActionData {
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(Self)
+    }
+}
+
+impl ProtocolPack for TeleToPkArenaActionData {
+    fn pack(&self, _buf: &mut Vec<u8>) {}
+}
+
+/// Payload-free built-in recall action.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecallAllegianceHometownActionData;
+
+impl ProtocolUnpack for RecallAllegianceHometownActionData {
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(Self)
+    }
+}
+
+impl ProtocolPack for RecallAllegianceHometownActionData {
+    fn pack(&self, _buf: &mut Vec<u8>) {}
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TeleToLifestoneActionData;
 
@@ -176,6 +218,32 @@ mod tests {
 
         let fixture = hex::decode("BEBAFECA750200000400000001EFCDAB01000000").unwrap();
         assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn additional_recall_actions_pack_and_unpack_ace_wire_layout() {
+        for (fixture, action) in [
+            (
+                "1111111162020000",
+                GameAction::TeleToHouse(Box::new(TeleToHouseActionData)),
+            ),
+            (
+                "1111111127000000",
+                GameAction::TeleToPkArena(Box::new(TeleToPkArenaActionData)),
+            ),
+            (
+                "11111111ab020000",
+                GameAction::RecallAllegianceHometown(Box::new(RecallAllegianceHometownActionData)),
+            ),
+        ] {
+            assert_pack_unpack_parity(
+                &hex::decode(fixture).unwrap(),
+                &GameActionMessage {
+                    sequence: 0x11111111,
+                    action,
+                },
+            );
+        }
     }
 
     #[test]

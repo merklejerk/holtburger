@@ -1,0 +1,291 @@
+import { describe, expect, it } from "vitest";
+import type { StaticObjectLayerArtifact } from "../commit/artifacts";
+import type { GeometryManager } from "../geometry/geometry-manager";
+import {
+	SceneGraph,
+	INCLUDE_ALL_SCENE_CULLING_GROUPS,
+	type SceneNodeId,
+	type SceneScope,
+} from "../scene";
+import { AABB3, Mat4, Vec3 } from "../math/types";
+import { StaticObjectSystem } from "./static-object-system";
+import { LandblockLayerKind } from "../runtime/scene-interest";
+import type { SceneInterestRevision } from "../runtime/scene-availability";
+
+describe("StaticObjectSystem", () => {
+	it("indexes one covered batch in both cells and retires all memberships on replacement and eviction", () => {
+		const scene = new SceneGraph();
+		const geometry = new FixtureGeometry();
+		const owner = {
+			kind: "env-cell",
+			landblockId: "0x0001ffff",
+			envCellId: "0x00010100",
+		} as const;
+		const neighbor = { ...owner, envCellId: "0x00010101" } as const;
+		for (const scope of [owner, neighbor])
+			scene.upsertEnvCellScope({
+				scope,
+				landblockBounds: new AABB3(
+					new Vec3(-10, -10, -10),
+					new Vec3(10, 10, 10),
+				),
+				containmentPlanes: new Float32Array(),
+				structureToLandblock: Mat4.identity(),
+				visibilityIslandId: "env-cell-island:static",
+				potentiallyVisibleEnvCellIds: new Set(),
+				seenOutside: false,
+			});
+		const system = new StaticObjectSystem<"interior", string>(
+			scene,
+			geometry as unknown as GeometryManager<string>,
+			(_, rev) => `resource:${rev}`,
+		);
+		const batch = (
+			scopes: readonly SceneScope[],
+		): StaticObjectLayerArtifact => ({
+			...artifact("covered"),
+			objects: [
+				{
+					placement: {
+						landblockId: owner.landblockId,
+						envCellId: owner.envCellId,
+						localTransform: Mat4.identity(),
+						spatialMembership: { scopes },
+					},
+					localBounds: new AABB3(new Vec3(-1, -1, -5), new Vec3(1, 1, -3)),
+					renderable: { drawUnits: [], frameStreamedInstances: [] },
+				},
+			],
+		});
+		const query = (scopes: readonly SceneScope[]) =>
+			scene.queryScopesFrustum(
+				{ cameraPosition: Vec3.zero(), planes: [] },
+				owner.landblockId,
+				scopes,
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+				null,
+			).entries;
+		system.replaceObjects(
+			"interior",
+			revision(1),
+			batch([owner, neighbor]),
+			"env-cell-static-residents",
+		);
+		const selected = [...query([neighbor])];
+		expect(selected).toHaveLength(1);
+		expect(query([owner, neighbor])).toEqual(selected);
+		expect(scene.getResolvedPlacement(selected[0]!)?.envCellId).toBe(
+			owner.envCellId,
+		);
+		expect(system.getDiagnostics().nodeCount).toBe(1);
+		system.replaceObjects(
+			"interior",
+			revision(2),
+			batch([owner]),
+			"env-cell-static-residents",
+		);
+		expect(query([neighbor])).toEqual([]);
+		expect(query([owner])).toHaveLength(1);
+		system.evict("interior", revision(1));
+		expect(query([owner])).toHaveLength(1);
+		system.removeExact("interior", revision(2));
+		expect(query([owner, neighbor])).toEqual([]);
+		expect(geometry.dropped).toEqual(["resource:1", "resource:2"]);
+	});
+	it("retains the visible revision when staging a replacement fails", () => {
+		const scene = new FixtureScene();
+		const geometry = new FixtureGeometry();
+		const system = new StaticObjectSystem<"buildings", string>(
+			scene as unknown as SceneGraph,
+			geometry as unknown as GeometryManager<string>,
+			(_, revision) => `resource:${revision}`,
+		);
+
+		system.replaceObjects(
+			"buildings",
+			revision(1),
+			artifact("first"),
+			LandblockLayerKind.Buildings,
+		);
+		scene.failNextCreate = true;
+
+		expect(() =>
+			system.replaceObjects(
+				"buildings",
+				revision(2),
+				artifact("second"),
+				LandblockLayerKind.Buildings,
+			),
+		).toThrow("scene create failed");
+
+		expect(scene.live).toEqual(["node:1"]);
+		expect(geometry.dropped).toEqual(["resource:2"]);
+	});
+
+	it("does not evict a later visible revision", () => {
+		const scene = new FixtureScene();
+		const geometry = new FixtureGeometry();
+		const system = new StaticObjectSystem<"buildings", string>(
+			scene as unknown as SceneGraph,
+			geometry as unknown as GeometryManager<string>,
+			(_, revision) => `resource:${revision}`,
+		);
+		system.replaceObjects(
+			"buildings",
+			revision(2),
+			artifact("current"),
+			LandblockLayerKind.Buildings,
+		);
+
+		system.evict("buildings", revision(1));
+
+		expect(scene.live).toEqual(["node:1"]);
+		expect(geometry.dropped).toEqual([]);
+	});
+
+	it("keeps all outdoor-static owners and culling groups independent", () => {
+		const scene = new FixtureScene();
+		const geometry = new FixtureGeometry();
+		const system = new StaticObjectSystem<
+			"buildings" | "objects" | "generated",
+			string
+		>(
+			scene as unknown as SceneGraph,
+			geometry as unknown as GeometryManager<string>,
+			(owner, revision) => `resource:${owner}:${revision}`,
+		);
+
+		system.replaceObjects(
+			"buildings",
+			revision(2),
+			artifact("buildings"),
+			LandblockLayerKind.Buildings,
+		);
+		system.replaceObjects(
+			"objects",
+			revision(1),
+			artifact("objects"),
+			LandblockLayerKind.Objects,
+		);
+		system.replaceObjects(
+			"generated",
+			revision(1),
+			artifact("generated"),
+			LandblockLayerKind.Generated,
+		);
+		system.evict("buildings", revision(1));
+
+		expect(scene.live).toEqual(["node:1", "node:2", "node:3"]);
+		system.evict("generated", revision(1));
+		expect(scene.live).toEqual(["node:1", "node:2"]);
+		system.evict("objects", revision(1));
+
+		expect(scene.cullingGroups).toEqual([
+			LandblockLayerKind.Buildings,
+			LandblockLayerKind.Objects,
+			LandblockLayerKind.Generated,
+		]);
+		expect(scene.live).toEqual(["node:1"]);
+		expect(geometry.dropped).toEqual([
+			"resource:generated:1",
+			"resource:objects:1",
+		]);
+	});
+
+	it("publishes and evicts every independently cullable object in one layer", () => {
+		const scene = new FixtureScene();
+		const geometry = new FixtureGeometry();
+		const system = new StaticObjectSystem<"generated", string>(
+			scene as unknown as SceneGraph,
+			geometry as unknown as GeometryManager<string>,
+			(_, revision) => `resource:${revision}`,
+		);
+		const clustered = artifact("clustered");
+		const object = clustered.objects[0]!;
+
+		system.replaceObjects(
+			"generated",
+			revision(1),
+			{ ...clustered, objects: [object, { ...object }] },
+			LandblockLayerKind.Generated,
+		);
+
+		expect(scene.live).toEqual(["node:1", "node:2"]);
+		expect(scene.cullingGroups).toEqual([
+			LandblockLayerKind.Generated,
+			LandblockLayerKind.Generated,
+		]);
+
+		system.evict("generated", revision(1));
+		expect(scene.live).toEqual([]);
+	});
+});
+
+function artifact(id: string): StaticObjectLayerArtifact {
+	return {
+		staticLights: [],
+		geometryDiagnostics: {
+			bakedRangeCount: 0,
+			bakedGeometryBytes: 0,
+			geometryWorkerDurationMs: 0,
+			instancedGeometryBytes: 0,
+			sourceMaterialSlotCount: 0,
+			sourcePartCount: 0,
+			sourceRangeCount: 0,
+			sourceResidentCount: 0,
+			transparentTemplateBytes: 0,
+			transparentTemplateCohortCount: 0,
+			transparentTemplateInstanceCount: 0,
+		},
+		geometry: [],
+		objects: [
+			{
+				localBounds:
+					{} as StaticObjectLayerArtifact["objects"][number]["localBounds"],
+				placement:
+					{} as StaticObjectLayerArtifact["objects"][number]["placement"],
+				renderable: { drawUnits: [], frameStreamedInstances: [] },
+			},
+		],
+		resourceNamespace:
+			`static-install:${id}` as StaticObjectLayerArtifact["resourceNamespace"],
+		textureRequirements: [],
+	};
+}
+
+function revision(value: number): SceneInterestRevision {
+	return value as SceneInterestRevision;
+}
+
+class FixtureScene {
+	readonly cullingGroups: string[] = [];
+	readonly live: string[] = [];
+	failNextCreate = false;
+	#createCount = 0;
+
+	createNode(input: { readonly cullingGroup: string }): SceneNodeId {
+		if (this.failNextCreate) {
+			this.failNextCreate = false;
+			throw new Error("scene create failed");
+		}
+		this.#createCount += 1;
+		const node = `node:${this.#createCount}` as SceneNodeId;
+		this.live.push(node);
+		this.cullingGroups.push(input.cullingGroup);
+		return node;
+	}
+
+	destroyNode(node: SceneNodeId): void {
+		const index = this.live.indexOf(node);
+		if (index >= 0) this.live.splice(index, 1);
+	}
+}
+
+class FixtureGeometry {
+	readonly dropped: string[] = [];
+	dropOwner(owner: string): void {
+		this.dropped.push(owner);
+	}
+	reserveKeys(): void {}
+	upsertGeometry(): void {}
+}

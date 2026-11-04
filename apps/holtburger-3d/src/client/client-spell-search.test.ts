@@ -1,0 +1,169 @@
+import { textSearchWords } from "../app/text-search";
+import { describe, expect, it } from "vitest";
+import {
+	matchesSpellSearch as matchesGroupedSpellSearch,
+	spellFilterGroups,
+	type SpellFilterTag,
+	type SpellSearchEntry,
+	spellSearchEntry,
+} from "./client-spell-search";
+import type { SpellDetails } from "../app/spell-references";
+
+function matchesSpellSearch(
+	entry: SpellSearchEntry,
+	terms: readonly string[],
+	tags: readonly SpellFilterTag[],
+) {
+	return matchesGroupedSpellSearch(entry, terms, spellFilterGroups(tags));
+}
+
+const details: SpellDetails = {
+	castingRoute: "self-target",
+	description: "",
+	school: 2,
+	usesProjectileHandler: false,
+	baseMana: 10,
+	manaPerTarget: 0,
+	durationSeconds: null,
+	cantripTier: null,
+	classification: {
+		beneficial: true,
+		level: 7,
+		recipient: "creature",
+		fellowship: true,
+		damage: "acid",
+	},
+};
+
+describe("spell discovery matching", () => {
+	it("filters casting routes independently from authored recipients", () => {
+		const selected = spellSearchEntry("Frost Blast", {
+			...details,
+			castingRoute: "selected-target",
+			classification: {
+				...details.classification,
+				recipient: null,
+				fellowship: false,
+			},
+		});
+		expect(matchesSpellSearch(selected, [], ["selected-target"])).toBe(true);
+		expect(matchesSpellSearch(selected, [], ["untargeted"])).toBe(false);
+		const untargeted = spellSearchEntry("Flame Wave", {
+			...details,
+			castingRoute: "untargeted",
+			classification: { ...details.classification, fellowship: false },
+		});
+		expect(matchesSpellSearch(untargeted, [], ["untargeted"])).toBe(true);
+		expect(matchesSpellSearch(untargeted, [], ["selected-target"])).toBe(false);
+		expect(
+			matchesSpellSearch(untargeted, [], ["untargeted", "fellowship"]),
+		).toBe(false);
+		expect(
+			matchesSpellSearch(untargeted, [], ["self-target", "untargeted"]),
+		).toBe(true);
+	});
+	it("unions Misc with elemental tags while excluding unclassified utility spells", () => {
+		const armor = spellSearchEntry("Armor Self", {
+			...details,
+			classification: { ...details.classification, damage: "misc" },
+		});
+		const utility = spellSearchEntry("Recall", {
+			...details,
+			classification: { ...details.classification, damage: null },
+		});
+		expect(matchesSpellSearch(armor, [], ["misc", "fire", "beneficial"])).toBe(
+			true,
+		);
+		expect(matchesSpellSearch(armor, [], ["misc", "harmful"])).toBe(false);
+		expect(matchesSpellSearch(utility, [], ["misc"])).toBe(false);
+		expect(
+			matchesSpellSearch(
+				spellSearchEntry("Acid Protection", details),
+				[],
+				["misc", "acid"],
+			),
+		).toBe(true);
+	});
+	it("combines Direct with damage alternatives and other categories", () => {
+		const entry = spellSearchEntry("Harm Other I", {
+			...details,
+			classification: {
+				...details.classification,
+				damage: "direct",
+				beneficial: false,
+				recipient: "creature",
+			},
+		});
+		expect(
+			matchesSpellSearch(entry, textSearchWords("harm"), [
+				"direct",
+				"acid",
+				"harmful",
+			]),
+		).toBe(true);
+		expect(matchesSpellSearch(entry, [], ["direct", "beneficial"])).toBe(false);
+	});
+	it("distinguishes caster debuffs from beneficial self spells", () => {
+		const buff = spellSearchEntry("Strength Self I", details);
+		const debuff = spellSearchEntry("Weakness Self I", {
+			...details,
+			classification: { ...details.classification, beneficial: false },
+		});
+		expect(matchesSpellSearch(buff, [], ["beneficial"])).toBe(true);
+		expect(matchesSpellSearch(debuff, [], ["beneficial"])).toBe(false);
+		expect(matchesSpellSearch(debuff, [], ["harmful"])).toBe(true);
+		expect(matchesSpellSearch(buff, [], ["beneficial", "harmful"])).toBe(true);
+	});
+	it("unions within categories and intersects categories and every search term", () => {
+		const entry = spellSearchEntry("Acid Protection VII", details);
+		expect(matchesSpellSearch(entry, [], ["acid", "frost", "school:2"])).toBe(
+			true,
+		);
+		expect(matchesSpellSearch(entry, [], ["acid", "frost", "school:1"])).toBe(
+			false,
+		);
+		expect(
+			matchesSpellSearch(entry, [], ["level:6", "level:7", "beneficial"]),
+		).toBe(true);
+		expect(matchesSpellSearch(entry, [], ["fire", "school:1"])).toBe(false);
+		expect(
+			matchesSpellSearch(entry, textSearchWords("frost"), ["acid", "school:2"]),
+		).toBe(false);
+		expect(matchesSpellSearch(entry, [], ["self-target", "harmful"])).toBe(
+			false,
+		);
+		expect(
+			matchesSpellSearch(entry, textSearchWords("PROT acid"), [
+				"school:2",
+				"level:7",
+				"acid",
+			]),
+		).toBe(true);
+		expect(matchesSpellSearch(entry, textSearchWords("acid zz"), [])).toBe(
+			false,
+		);
+		expect(matchesSpellSearch(entry, [], ["school:2", "school:1"])).toBe(true);
+		expect(matchesSpellSearch(entry, [], ["self-target", "fellowship"])).toBe(
+			true,
+		);
+	});
+	it("matches abbreviations within words and treats repeated terms as redundant", () => {
+		const entry = spellSearchEntry("Armor Other", null);
+		expect(matchesSpellSearch(entry, textSearchWords("amr oth"), [])).toBe(
+			true,
+		);
+		expect(matchesSpellSearch(entry, textSearchWords("armor armor"), [])).toBe(
+			true,
+		);
+		expect(matchesSpellSearch(entry, textSearchWords("armoth"), [])).toBe(
+			false,
+		);
+	});
+	it("handles punctuation, Unicode, empty input, and absent metadata", () => {
+		expect(textSearchWords(" Élan's—Acid! ")).toEqual(["élan", "s", "acid"]);
+		const entry = spellSearchEntry("Spell 999", null);
+		expect(matchesSpellSearch(entry, textSearchWords("..."), [])).toBe(true);
+		expect(matchesSpellSearch(entry, textSearchWords("99"), [])).toBe(true);
+		expect(matchesSpellSearch(entry, [], ["acid"])).toBe(false);
+	});
+});

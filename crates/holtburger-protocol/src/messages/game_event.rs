@@ -1,20 +1,45 @@
+pub use crate::messages::allegiance::*;
 pub use crate::messages::book::events::*;
+pub use crate::messages::character::barber::*;
 pub use crate::messages::chat::events::*;
 pub use crate::messages::chat::turbine::*;
 pub use crate::messages::combat::events::*;
+pub use crate::messages::contracts::*;
 pub use crate::messages::fellowship::events::*;
+pub use crate::messages::friends::*;
+pub use crate::messages::housing::*;
 pub use crate::messages::inventory::events::*;
 pub use crate::messages::magic::events::*;
 pub use crate::messages::misc::events::*;
 pub use crate::messages::network::events::*;
 pub use crate::messages::object::events::*;
 pub use crate::messages::player::events::*;
+pub use crate::messages::squelch::*;
 pub use crate::messages::trade::events::*;
 
 use crate::opcodes::GameEventOpcode;
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
+
+/// Ordering prefix shared by supported and unsupported game-event payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameEventHeader {
+    /// Object whose event stream owns this stamp; null targets are unordered.
+    pub target: Guid,
+    /// Server-assigned event stamp, independent of transport packet sequence.
+    pub sequence: u32,
+}
+
+impl ProtocolUnpack for GameEventHeader {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let target = Guid::unpack(data, offset)?;
+        let bytes = data.get(*offset..offset.checked_add(4)?)?;
+        let sequence = LittleEndian::read_u32(bytes);
+        *offset += 4;
+        Some(Self { target, sequence })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameEventMessage {
@@ -25,6 +50,33 @@ pub struct GameEventMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameEvent {
+    /// Server-granted appearance editing session and its original asset identities.
+    StartBarber(Box<BarberAppearanceData>),
+    /// Optional server salvage feedback, independent of inventory updates.
+    SalvageOperationsResult(Box<SalvageOperationsResultData>),
+    /// Contract registry wire operation.
+    SendClientContractTrackerTable(Box<ContractTrackerTable>),
+    /// Contract registry wire operation.
+    SendClientContractTracker(Box<ContractTrackerUpdate>),
+
+    AllegianceUpdate(Box<AllegianceUpdateEventData>),
+    /// Refresh completion error code; zero denotes success.
+    AllegianceUpdateDone(u32),
+    /// Refresh abortion error code (retail).
+    AllegianceUpdateAborted(u32),
+    AllegianceLoginNotification(Box<AllegianceLoginNotificationEventData>),
+    FriendsListUpdate(Box<FriendsListUpdateEventData>),
+    SetSquelchDb(Box<SetSquelchDbEventData>),
+    HouseProfile(Box<HouseProfileEventData>),
+    HouseData(Box<HouseData>),
+    HouseStatus(Box<HouseStatusEventData>),
+    UpdateRentTime(Box<HouseRentTimeEventData>),
+    UpdateRentPayment(Box<HouseRentPaymentEventData>),
+    HouseTransaction(Box<HouseTransactionEventData>),
+    UpdateHar(Box<HouseAccess>),
+    AvailableHouses(Box<HouseAvailableHouses>),
+    CharacterTitle(Box<CharacterTitleEventData>),
+    UpdateTitle(Box<UpdateTitleEventData>),
     PlayerDescription(Box<PlayerDescriptionEventData>),
     PingResponse(Box<PingResponseEventData>),
     ViewContents(Box<ViewContentsEventData>),
@@ -89,24 +141,43 @@ pub enum GameEvent {
 
 impl ProtocolUnpack for GameEventMessage {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        let target = Guid::unpack(data, offset)?;
-        if *offset + 8 > data.len() {
+        let GameEventHeader { target, sequence } = GameEventHeader::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
             return None;
         }
-        let sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let event_type_raw = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        *offset += 8;
+        let event_type_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
 
         let event_op = GameEventOpcode::from_repr(event_type_raw);
 
         let event = match event_op {
             Some(op) => match op {
+                GameEventOpcode::StartBarber => {
+                    GameEvent::StartBarber(Box::new(BarberAppearanceData::unpack(data, offset)?))
+                }
+                GameEventOpcode::SendClientContractTrackerTable => {
+                    GameEvent::SendClientContractTrackerTable(Box::new(
+                        ContractTrackerTable::unpack(data, offset)?,
+                    ))
+                }
+                GameEventOpcode::SendClientContractTracker => GameEvent::SendClientContractTracker(
+                    Box::new(ContractTrackerUpdate::unpack(data, offset)?),
+                ),
+                GameEventOpcode::CharacterTitle => GameEvent::CharacterTitle(Box::new(
+                    CharacterTitleEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::UpdateTitle => {
+                    GameEvent::UpdateTitle(Box::new(UpdateTitleEventData::unpack(data, offset)?))
+                }
                 GameEventOpcode::PlayerDescription => GameEvent::PlayerDescription(Box::new(
                     PlayerDescriptionEventData::unpack(target, sequence, data, offset)?,
                 )),
                 GameEventOpcode::PingResponse => {
                     GameEvent::PingResponse(Box::new(PingResponseEventData::unpack(data, offset)?))
                 }
+                GameEventOpcode::SalvageOperationsResult => GameEvent::SalvageOperationsResult(
+                    Box::new(SalvageOperationsResultData::unpack(data, offset)?),
+                ),
                 GameEventOpcode::ViewContents => {
                     GameEvent::ViewContents(Box::new(ViewContentsEventData::unpack(data, offset)?))
                 }
@@ -251,6 +322,26 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::QueryItemManaResponse => GameEvent::QueryItemManaResponse(
                     Box::new(QueryItemManaResponseEventData::unpack(data, offset)?),
                 ),
+                GameEventOpcode::AllegianceUpdate => GameEvent::AllegianceUpdate(Box::new(
+                    AllegianceUpdateEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::AllegianceAllegianceUpdateDone => {
+                    GameEvent::AllegianceUpdateDone(u32::unpack(data, offset)?)
+                }
+                GameEventOpcode::AllegianceUpdateAborted => {
+                    GameEvent::AllegianceUpdateAborted(u32::unpack(data, offset)?)
+                }
+                GameEventOpcode::AllegianceLoginNotification => {
+                    GameEvent::AllegianceLoginNotification(Box::new(
+                        AllegianceLoginNotificationEventData::unpack(data, offset)?,
+                    ))
+                }
+                GameEventOpcode::SetSquelchDb => {
+                    GameEvent::SetSquelchDb(Box::new(SetSquelchDbEventData::unpack(data, offset)?))
+                }
+                GameEventOpcode::FriendsListUpdate => GameEvent::FriendsListUpdate(Box::new(
+                    FriendsListUpdateEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::FellowshipFullUpdate => GameEvent::FellowshipFullUpdate(Box::new(
                     FellowshipFullUpdateEventData::unpack(data, offset)?,
                 )),
@@ -283,6 +374,30 @@ impl ProtocolUnpack for GameEventMessage {
                     GameEvent::TradeFailure(Box::new(TradeFailureEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::ClearTradeAcceptance => GameEvent::ClearTradeAcceptance,
+                GameEventOpcode::UpdateHar => {
+                    GameEvent::UpdateHar(Box::new(HouseAccess::unpack(data, offset)?))
+                }
+                GameEventOpcode::AvailableHouses => GameEvent::AvailableHouses(Box::new(
+                    HouseAvailableHouses::unpack(data, offset)?,
+                )),
+                GameEventOpcode::HouseProfile => {
+                    GameEvent::HouseProfile(Box::new(HouseProfileEventData::unpack(data, offset)?))
+                }
+                GameEventOpcode::HouseData => {
+                    GameEvent::HouseData(Box::new(HouseData::unpack(data, offset)?))
+                }
+                GameEventOpcode::HouseStatus => {
+                    GameEvent::HouseStatus(Box::new(HouseStatusEventData::unpack(data, offset)?))
+                }
+                GameEventOpcode::UpdateRentTime => GameEvent::UpdateRentTime(Box::new(
+                    HouseRentTimeEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::UpdateRentPayment => GameEvent::UpdateRentPayment(Box::new(
+                    HouseRentPaymentEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::HouseTransaction => GameEvent::HouseTransaction(Box::new(
+                    HouseTransactionEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::BookDataResponse => GameEvent::BookDataResponse(Box::new(
                     BookDataResponseEventData::unpack(data, offset)?,
                 )),
@@ -330,6 +445,26 @@ impl ProtocolPack for GameEventMessage {
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
         match &self.event {
+            GameEvent::StartBarber(data) => {
+                (GameEventOpcode::StartBarber as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::SendClientContractTrackerTable(data) => {
+                (GameEventOpcode::SendClientContractTrackerTable as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::SendClientContractTracker(data) => {
+                (GameEventOpcode::SendClientContractTracker as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::CharacterTitle(data) => {
+                (GameEventOpcode::CharacterTitle as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::UpdateTitle(data) => {
+                (GameEventOpcode::UpdateTitle as u32).pack(buf);
+                data.pack(buf);
+            }
             GameEvent::PlayerDescription(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::PlayerDescription as u32)
                     .unwrap();
@@ -338,6 +473,10 @@ impl ProtocolPack for GameEventMessage {
             GameEvent::PingResponse(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::PingResponse as u32)
                     .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::SalvageOperationsResult(data) => {
+                (GameEventOpcode::SalvageOperationsResult as u32).pack(buf);
                 data.pack(buf);
             }
             GameEvent::ViewContents(data) => {
@@ -534,6 +673,31 @@ impl ProtocolPack for GameEventMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameEvent::AllegianceUpdate(data) => {
+                (GameEventOpcode::AllegianceUpdate as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::AllegianceUpdateDone(error) => {
+                (GameEventOpcode::AllegianceAllegianceUpdateDone as u32).pack(buf);
+                error.pack(buf);
+            }
+            GameEvent::AllegianceUpdateAborted(error) => {
+                (GameEventOpcode::AllegianceUpdateAborted as u32).pack(buf);
+                error.pack(buf);
+            }
+            GameEvent::AllegianceLoginNotification(data) => {
+                (GameEventOpcode::AllegianceLoginNotification as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::SetSquelchDb(data) => {
+                (GameEventOpcode::SetSquelchDb as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::FriendsListUpdate(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::FriendsListUpdate as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameEvent::FellowshipFullUpdate(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::FellowshipFullUpdate as u32)
                     .unwrap();
@@ -591,6 +755,38 @@ impl ProtocolPack for GameEventMessage {
             GameEvent::ClearTradeAcceptance => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::ClearTradeAcceptance as u32)
                     .unwrap();
+            }
+            GameEvent::UpdateHar(data) => {
+                (GameEventOpcode::UpdateHar as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::AvailableHouses(data) => {
+                (GameEventOpcode::AvailableHouses as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::HouseProfile(data) => {
+                (GameEventOpcode::HouseProfile as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::HouseData(data) => {
+                (GameEventOpcode::HouseData as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::HouseStatus(data) => {
+                (GameEventOpcode::HouseStatus as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::UpdateRentTime(data) => {
+                (GameEventOpcode::UpdateRentTime as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::UpdateRentPayment(data) => {
+                (GameEventOpcode::UpdateRentPayment as u32).pack(buf);
+                data.pack(buf);
+            }
+            GameEvent::HouseTransaction(data) => {
+                (GameEventOpcode::HouseTransaction as u32).pack(buf);
+                data.pack(buf);
             }
             GameEvent::BookDataResponse(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::BookDataResponse as u32)

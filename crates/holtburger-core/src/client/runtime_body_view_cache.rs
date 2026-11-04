@@ -37,10 +37,18 @@ impl RuntimeBodyViewCache {
             ClientViewEvent::RuntimeBodyUpserted { body } => {
                 self.upsert_runtime_body(**body);
             }
+            ClientViewEvent::RuntimeBodiesAdvanced { bodies } => {
+                for body in bodies.iter().copied() {
+                    self.upsert_runtime_body(body);
+                }
+            }
             ClientViewEvent::RuntimeBodyRemoved { body_id } => {
                 self.bodies.remove(body_id);
             }
-            ClientViewEvent::RuntimeBodiesReset { .. } | ClientViewEvent::Disconnected => {
+            ClientViewEvent::RuntimeBodiesReset { .. }
+            | ClientViewEvent::LifecycleChanged(super::types::ClientLifecycleState::Exiting {
+                ..
+            }) => {
                 self.clear();
             }
             _ => {}
@@ -75,6 +83,7 @@ impl RuntimeBodyViewCache {
             authoritative_pose,
             projected_pose: view.runtime_pose,
             velocity: view.velocity,
+            acceleration: view.acceleration,
             omega: view.omega,
             motion_state: view.motion_state,
             projection_mode: view.sample_mode,
@@ -103,8 +112,9 @@ impl RuntimeBodyViewCache {
                 authoritative_pose: entity.position,
                 projected_pose: entity.position,
                 velocity: entity.velocity,
+                acceleration: entity.acceleration,
                 omega: entity.omega,
-                motion_state: entity.motion_snapshot,
+                motion_state: entity.network_motion.snapshot(),
                 projection_mode: SpatialSampleMode::AuthoritativeOnly,
             })
     }
@@ -162,6 +172,7 @@ mod tests {
             authoritative_pose: Some(make_position(x, y, 0.0)),
             runtime_pose: make_position(x + 1.0, y + 2.0, 0.25),
             velocity: Vector3::new(3.0, 0.0, 0.0),
+            acceleration: Vector3::zero(),
             omega: Vector3::new(0.0, 0.0, 1.0),
             motion_state: None,
             contact: holtburger_world::ContactState::Grounded,
@@ -202,6 +213,20 @@ mod tests {
             .spatial_sample(guid)
             .expect("entity should still exist");
         assert_eq!(updated.projected_pose, make_position(31.0, 42.0, 0.25));
+
+        system.handle_view_event(
+            &ClientViewEvent::RuntimeBodiesAdvanced {
+                bodies: vec![make_runtime_body(SpatialBodyId::Entity(guid), 50.0, 60.0)].into(),
+            },
+            start + Duration::from_millis(60),
+        );
+        assert_eq!(
+            system
+                .spatial_sample(guid)
+                .expect("batched entity should remain cached")
+                .projected_pose,
+            make_position(51.0, 62.0, 0.25)
+        );
 
         system.handle_view_event(
             &ClientViewEvent::RuntimeBodyRemoved {
@@ -264,5 +289,30 @@ mod tests {
             mirrored.projection_mode,
             SpatialSampleMode::SimulatingVelocity
         );
+    }
+    #[test]
+    fn terminal_lifecycle_retires_runtime_body_views() {
+        let guid = Guid(0x5000_0007);
+        let now = Instant::now();
+        let mut system = CacheHarness::new();
+        system.handle_view_event(
+            &ClientViewEvent::RuntimeBodySnapshot {
+                bodies: vec![make_runtime_body(SpatialBodyId::Entity(guid), 0.0, 0.0)].into(),
+            },
+            now,
+        );
+        assert!(system.spatial_sample(guid).is_some());
+        system.handle_view_event(
+            &ClientViewEvent::LifecycleChanged(
+                super::super::types::ClientLifecycleState::Exiting {
+                    outcome: super::super::ClientExitOutcome {
+                        cause: super::super::types::ClientExitCause::ExplicitDisconnect,
+                        failure: None,
+                    },
+                },
+            ),
+            now,
+        );
+        assert!(system.spatial_sample(guid).is_none());
     }
 }

@@ -1,0 +1,526 @@
+//! Narrow differential oracle for retail setup-volume collision.
+//!
+//! The oracle functions model retail's volume predicates and deliberately share no code with
+//! `volume_query`, so a mistake ported into production cannot manufacture parity here.
+
+use holtburger_common::position::WorldPosition;
+use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_content::{
+    ColliderScale, CollisionBall, CollisionCylinder, CollisionShape, LandblockColliders,
+    LandblockCollisionAsset, LandblockPlacement, PlacedCollider, StaticColliderPlacement,
+    TerrainCollisionSurface,
+};
+use std::sync::Arc;
+
+use super::{placed_ball_contact, placed_cylinder_contact};
+use crate::spatial::collision::CollisionScene;
+use crate::spatial::differential_fixtures::{
+    PATHWARDEN_CHEST_RADIUS, grounded_movement_body, movement_ground, movement_tick,
+};
+use crate::{
+    GroundState, GroundSupport, GroundedBodyActuation, GroundedBodySpheres, GroundedConfig,
+    PhysicalBodyActuation, PhysicalBodyInput, SpatialBody,
+};
+
+const LANDBLOCK: u32 = 0xe63e_ffff;
+/// Retail's contact epsilon; the decimal `0.00019999999` is this same f32 (0x3951B717).
+const RETAIL_EPSILON: f32 = 0.000_2;
+const TEST_EPSILON: f32 = 0.000_1;
+
+/// Retail cylinder/sphere collision.
+///
+/// `disp` is the sphere center minus the cylinder low point; `radsum` is the caller-shrunk
+/// radius sum.
+fn retail_cylsphere_collides(
+    cylinder_height: f32,
+    sphere_radius: f32,
+    disp: Vector3,
+    radsum: f32,
+) -> bool {
+    radsum * radsum >= disp.x * disp.x + disp.y * disp.y
+        && sphere_radius - RETAIL_EPSILON + cylinder_height * 0.5
+            >= (cylinder_height * 0.5 - disp.z).abs()
+}
+
+/// `CSphere` overlap as retail sphere intersects sphere computes it: 3D distance against the
+/// shrunk radius sum.
+fn retail_ball_collides(disp: Vector3, radsum: f32) -> bool {
+    radsum * radsum >= disp.x * disp.x + disp.y * disp.y + disp.z * disp.z
+}
+
+/// Cylinder rest height from retail cylinder step sphere down: the contact plane sits at the
+/// authored top, tangent sphere center one radius above.
+fn retail_cylinder_rest_z(low_z: f32, height: f32, sphere_radius: f32) -> f32 {
+    low_z + height + sphere_radius
+}
+
+/// Ball rest height from retail sphere step sphere down: the shrunk radius sum is un-shrunk
+/// (`radsuma = radsum + ε`) before solving the vertical tangency.
+fn retail_ball_rest_z(
+    ball_center: Vector3,
+    ball_radius: f32,
+    sphere_radius: f32,
+    center: Vector3,
+) -> f32 {
+    let radsum = (ball_radius + sphere_radius - RETAIL_EPSILON) + RETAIL_EPSILON;
+    let dx = center.x - ball_center.x;
+    let dy = center.y - ball_center.y;
+    ball_center.z + (radsum * radsum - (dx * dx + dy * dy)).sqrt()
+}
+
+/// Dispatch over the production variant entry points; fixtures only build volume shapes.
+fn volume_contact(
+    collider: &PlacedCollider,
+    center: Vector3,
+    radius: f32,
+) -> Option<super::super::bsp_query::ShapeContact> {
+    match &*collider.shape {
+        CollisionShape::Cylinder(cylinder) => {
+            placed_cylinder_contact(collider, cylinder, center, radius)
+        }
+        CollisionShape::Ball(ball) => placed_ball_contact(collider, ball, center, radius),
+        CollisionShape::Bsp(_) => unreachable!("volume fixtures never build BSP shapes"),
+    }
+}
+
+fn volume_support(
+    collider: &PlacedCollider,
+    center: Vector3,
+    radius: f32,
+    maximum_drop: f32,
+    maximum_rise: f32,
+) -> Option<super::super::bsp_query::ShapeSupport> {
+    let mut support = None;
+    super::visit_placed_shape_supports(
+        collider,
+        center,
+        radius,
+        super::SupportProbe::Column {
+            maximum_drop,
+            maximum_rise,
+        },
+        &mut |found| {
+            assert!(support.is_none(), "volume has one upper support surface");
+            support = Some(found);
+        },
+    );
+    support
+}
+
+fn cylinder_collider(low: Vector3, radius: f32, height: f32) -> PlacedCollider {
+    placed(Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+        low_point: low,
+        radius,
+        height,
+    })))
+}
+
+fn ball_collider(center: Vector3, radius: f32) -> PlacedCollider {
+    placed(Arc::new(CollisionShape::Ball(CollisionBall {
+        center,
+        radius,
+    })))
+}
+
+fn placed(shape: Arc<CollisionShape>) -> PlacedCollider {
+    PlacedCollider::new(
+        shape,
+        LandblockPlacement {
+            origin: Vector3::zero(),
+            orientation: Quaternion::identity(),
+        },
+        ColliderScale::uniform(1.0).unwrap(),
+        StaticColliderPlacement::OutdoorGenerated { source_index: 0 },
+    )
+    .unwrap()
+}
+
+/// Deterministic sweep: production contact presence must equal retail's overlap predicate at
+/// every sampled center, including just inside and outside the ε-shrunk boundaries.
+#[test]
+fn cylinder_contact_presence_matches_the_retail_overlap_predicate() {
+    let low = Vector3::new(50.0, 50.0, 10.0);
+    let (cyl_radius, cyl_height) = (0.85, 3.334);
+    let sphere_radius = 0.48;
+    let collider = cylinder_collider(low, cyl_radius, cyl_height);
+    let radsum = cyl_radius - RETAIL_EPSILON + sphere_radius;
+
+    let mut checked = 0usize;
+    let mut boundary_disagreements = Vec::new();
+    for x_step in -30i32..=30 {
+        for z_step in -12i32..=52 {
+            let center = low + Vector3::new(x_step as f32 * 0.05, 0.0, z_step as f32 * 0.1);
+            let retail = retail_cylsphere_collides(cyl_height, sphere_radius, center - low, radsum);
+            let ours = volume_contact(&collider, center, sphere_radius).is_some();
+            if retail != ours {
+                boundary_disagreements.push((center, retail, ours));
+            }
+            checked += 1;
+        }
+    }
+    assert!(
+        boundary_disagreements.is_empty(),
+        "{} of {checked} samples disagree with retail: {:?}",
+        boundary_disagreements.len(),
+        &boundary_disagreements[..boundary_disagreements.len().min(5)]
+    );
+}
+
+#[test]
+fn ball_contact_presence_matches_the_retail_overlap_predicate() {
+    let ball_center = Vector3::new(50.0, 50.0, 10.0);
+    let ball_radius = 1.0;
+    let sphere_radius = 0.48;
+    let collider = ball_collider(ball_center, ball_radius);
+    let radsum = ball_radius + sphere_radius - RETAIL_EPSILON;
+
+    let mut disagreements = 0usize;
+    for x_step in -35i32..=35 {
+        for z_step in -35i32..=35 {
+            let center =
+                ball_center + Vector3::new(x_step as f32 * 0.05, 0.02, z_step as f32 * 0.05);
+            let retail = retail_ball_collides(center - ball_center, radsum);
+            let ours = volume_contact(&collider, center, sphere_radius).is_some();
+            if retail != ours {
+                disagreements += 1;
+            }
+        }
+    }
+    assert_eq!(disagreements, 0);
+}
+
+/// The production settle height must equal retail's step-down rest plane wherever a support
+/// exists, and supports must cut off sharply at the shrunk radius sum with no edge feature.
+#[test]
+fn cylinder_support_rest_height_and_cutoff_match_retail() {
+    let low = Vector3::new(50.0, 50.0, 10.0);
+    let (cyl_radius, cyl_height) = (1.09, 23.02);
+    let sphere_radius = 0.48;
+    let collider = cylinder_collider(low, cyl_radius, cyl_height);
+    let radsum = cyl_radius + sphere_radius - RETAIL_EPSILON;
+    let rest_z = retail_cylinder_rest_z(low.z, cyl_height, sphere_radius);
+
+    for x_step in 0i32..=40 {
+        let dxy = x_step as f32 * 0.05;
+        let center = Vector3::new(low.x + dxy, low.y, rest_z + 0.4);
+        let support = volume_support(&collider, center, sphere_radius, 1.5, 0.6);
+        if dxy <= radsum {
+            let support = support.unwrap_or_else(|| panic!("no support at dxy {dxy}"));
+            assert!(
+                (support.height_delta - (rest_z - center.z)).abs() < TEST_EPSILON,
+                "rest height diverged at dxy {dxy}: {}",
+                support.height_delta
+            );
+            assert_eq!(support.normal, Vector3::new(0.0, 0.0, 1.0));
+        } else {
+            assert!(
+                support.is_none(),
+                "retail's square-edged solid admits no rim support at dxy {dxy}"
+            );
+        }
+    }
+}
+
+#[test]
+fn ball_support_rest_height_matches_retail_and_leans_radially() {
+    let ball_center = Vector3::new(50.0, 50.0, 10.0);
+    let ball_radius = 2.299;
+    let sphere_radius = 0.48;
+    let collider = ball_collider(ball_center, ball_radius);
+
+    for x_step in 0i32..=25 {
+        let dxy = x_step as f32 * 0.1;
+        let probe = Vector3::new(ball_center.x + dxy, ball_center.y, ball_center.z + 4.0);
+        let Some(support) = volume_support(&collider, probe, sphere_radius, 3.0, 0.6) else {
+            assert!(
+                dxy > ball_radius + sphere_radius - RETAIL_EPSILON,
+                "support vanished inside the cap at dxy {dxy}"
+            );
+            continue;
+        };
+        let rest_z = retail_ball_rest_z(ball_center, ball_radius, sphere_radius, probe);
+        assert!(
+            (support.height_delta - (rest_z - probe.z)).abs() < TEST_EPSILON,
+            "ball rest height diverged at dxy {dxy}"
+        );
+        // Retail's contact plane normal is the displacement over the un-shrunk radius sum.
+        let expected_normal_z = (rest_z - ball_center.z) / (ball_radius + sphere_radius);
+        assert!((support.normal.z - expected_normal_z).abs() < TEST_EPSILON);
+    }
+}
+
+/// Retail's cylinder gate uses relative displacement. Computing the top in world coordinates
+/// first can change admission at the exact step limit.
+#[test]
+fn cylinder_step_boundary_matches_retail_at_elevated_origins() {
+    let height = 0.6;
+    for (low_z, radius) in [(10.0, 0.5), (50.0, 0.48)] {
+        let low = Vector3::new(50.0, 50.0, low_z);
+        let center = low + Vector3::new(0.5, 0.0, radius);
+        let collider = cylinder_collider(low, 0.5, height);
+        let prepared = super::PreparedStaticSupport::new(&collider);
+        for step in [height - RETAIL_EPSILON, height, height + RETAIL_EPSILON] {
+            let retail = step >= radius + height - (center.z - low.z);
+            for probe in [
+                super::SupportProbe::Stair { height: step },
+                super::SupportProbe::Standing { maximum_rise: step },
+            ] {
+                let mut direct = Vec::new();
+                super::visit_placed_shape_supports(&collider, center, radius, probe, &mut |s| {
+                    direct.push(s);
+                });
+                let mut resident = Vec::new();
+                prepared.visit(center, radius, probe, &mut |s| resident.push(s));
+                assert_eq!(
+                    direct.len(),
+                    usize::from(retail),
+                    "{low_z}, {radius}, {probe:?}"
+                );
+                assert_eq!(resident.len(), direct.len());
+            }
+        }
+    }
+}
+
+// --- Production grounded solver scenarios over volume colliders ---
+
+fn scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
+    let mut scene = CollisionScene::new();
+    scene
+        .insert(LandblockCollisionAsset {
+            landblock_id: LANDBLOCK,
+            terrain: flat_terrain(),
+            static_geometry: LandblockColliders::new(colliders, Vec::new()),
+        })
+        .unwrap();
+    scene
+}
+
+fn flat_terrain() -> TerrainCollisionSurface {
+    crate::spatial::differential_fixtures::flat_terrain(LANDBLOCK)
+}
+
+fn grounded_config() -> GroundedConfig {
+    crate::spatial::differential_fixtures::retail_creature_config()
+}
+
+fn grounded_pair() -> GroundedBodySpheres {
+    crate::spatial::differential_fixtures::retail_creature_pair()
+}
+
+fn drive(scene: &CollisionScene, start: Vector3, velocity: Vector3, ticks: usize) -> SpatialBody {
+    drive_body(scene, start, velocity, ticks, true)
+}
+
+fn drive_body(
+    scene: &CollisionScene,
+    start: Vector3,
+    velocity: Vector3,
+    ticks: usize,
+    supported: bool,
+) -> SpatialBody {
+    let mut body = volume_body(start, supported, grounded_config());
+    for _ in 0..ticks {
+        body = movement_tick(
+            scene,
+            body,
+            PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                GroundedBodyActuation::drive(velocity).unwrap(),
+            )),
+        );
+    }
+    body
+}
+
+/// A human mover for volume scenarios, with caller-selected footing and edge policy.
+fn volume_body(start: Vector3, supported: bool, config: GroundedConfig) -> SpatialBody {
+    let pose = WorldPosition::from_outdoor_frame(Guid(LANDBLOCK), start, Quaternion::identity());
+    let ground = if supported {
+        GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0)))
+    } else {
+        GroundState::Airborne
+    };
+    grounded_movement_body(pose, grounded_pair(), config, Vector3::zero(), ground)
+}
+
+/// An airborne body dropped over a stump lands on its top at retail's rest height — the
+/// `land_on_cylinder` case (region).
+#[test]
+fn body_settles_grounded_on_a_stump_top() {
+    let low = Vector3::new(50.0, 50.0, 0.0);
+    let (radius, height) = (1.5, 0.9);
+    let scene = scene(vec![cylinder_collider(low, radius, height)]);
+    // Body reference is the foot point: support-sphere center 0.475 above it, radius 0.48.
+    // Rest: support center at top + 0.48 → reference z = low.z + H + 0.48 - 0.475.
+    let expected_z = retail_cylinder_rest_z(low.z, height, 0.48) - 0.475;
+    let settled = drive_body(
+        &scene,
+        Vector3::new(50.0, 50.0, expected_z + 0.3),
+        Vector3::zero(),
+        30,
+        false,
+    );
+    assert!(
+        movement_ground(&settled).walkable_support().is_some(),
+        "body never acquired stump support"
+    );
+    assert!(
+        (settled.pose.coords.z - expected_z).abs() < 0.01,
+        "settled at {} instead of retail's {expected_z}",
+        settled.pose.coords.z
+    );
+}
+
+/// A body walking into a trunk stops at the Minkowski wall and keeps its ground support.
+#[test]
+fn body_walking_into_a_trunk_stops_at_the_radial_wall() {
+    let low = Vector3::new(50.0, 50.0, -1.0);
+    let (radius, height) = (1.09, 23.0);
+    let scene = scene(vec![cylinder_collider(low, radius, height)]);
+    let stopped = drive(
+        &scene,
+        Vector3::new(56.0, 50.0, 0.0),
+        Vector3::new(-4.0, 0.0, 0.0),
+        90,
+    );
+    // The support sphere (r 0.48) stops where its center reaches the shrunk radius sum, plus the
+    // solver's fixed contact band.
+    let minimum_x = low.x + radius + 0.48 - RETAIL_EPSILON;
+    assert!(
+        stopped.pose.coords.x >= minimum_x - 0.001,
+        "body penetrated the trunk: {} < {minimum_x}",
+        stopped.pose.coords.x
+    );
+    assert!(
+        stopped.pose.coords.x < minimum_x + 0.3,
+        "body stopped implausibly far from the trunk: {}",
+        stopped.pose.coords.x
+    );
+    assert!(
+        movement_ground(&stopped).walkable_support().is_some(),
+        "body lost ground support at the trunk"
+    );
+}
+
+/// A low stump within the step-up budget is mounted like any low walkable step.
+#[test]
+fn body_steps_up_onto_a_low_stump() {
+    let low = Vector3::new(50.0, 50.0, 0.0);
+    let (radius, height) = (1.5, 0.4);
+    let scene = scene(vec![cylinder_collider(low, radius, height)]);
+    let mounted = drive(
+        &scene,
+        Vector3::new(53.0, 50.0, 0.0),
+        Vector3::new(-2.0, 0.0, 0.0),
+        60,
+    );
+    let expected_z = retail_cylinder_rest_z(low.z, height, 0.48) - 0.475;
+    assert!(
+        (mounted.pose.coords.z - expected_z).abs() < 0.01,
+        "body did not mount the stump: z {}",
+        mounted.pose.coords.z
+    );
+    assert!(movement_ground(&mounted).walkable_support().is_some());
+    assert!(
+        (mounted.pose.coords.x - 50.0).abs() < 1.0,
+        "body did not advance onto the stump: x {}",
+        mounted.pose.coords.x
+    );
+}
+
+/// WCID 33609 / setup 0x0200007C authors a sphere at z = r = 0.318. Retail tests clearance over
+/// its full top before searching the curved cap.
+#[test]
+fn pathwarden_chest_blocks_steps_above_the_human_step_limit() {
+    let pair = grounded_pair();
+    let floor_z = pair.support.radius - pair.support.center.z;
+    let chest = Vector3::new(50.0, 50.0, PATHWARDEN_CHEST_RADIUS);
+    let collision = scene(vec![ball_collider(chest, PATHWARDEN_CHEST_RADIUS)]);
+    for protection in [crate::EdgeProtection::None, crate::EdgeProtection::Creature] {
+        let config = GroundedConfig {
+            edge_protection: protection,
+            ..grounded_config()
+        };
+        for speed in [2.0, 4.0, 6.6, 10.0] {
+            let mut body = volume_body(Vector3::new(50.8, 50.0, floor_z), true, config);
+            for tick in 0..12 {
+                body = movement_tick(
+                    &collision,
+                    body,
+                    PhysicalBodyInput::autonomous(
+                        PhysicalBodyActuation::grounded_drive(Vector3::new(-speed, 0.0, 0.0))
+                            .unwrap(),
+                    ),
+                );
+                assert!(
+                    (body.pose.coords.z - floor_z).abs() < TEST_EPSILON,
+                    "speed {speed}, protection {protection:?}, tick {tick} climbed: {:?}",
+                    body.pose.coords
+                );
+                assert!(body.pose.coords.x > chest.x);
+                assert!(movement_ground(&body).walkable_support().is_some());
+            }
+        }
+    }
+}
+
+/// Step admission must not prevent jumping/falling onto the same chest.
+#[test]
+fn airborne_body_lands_on_the_pathwarden_chest() {
+    let pair = grounded_pair();
+    let chest_radius = PATHWARDEN_CHEST_RADIUS;
+    let center = Vector3::new(50.0, 50.0, chest_radius);
+    let collision = scene(vec![ball_collider(center, chest_radius)]);
+    let expected_z = center.z + chest_radius + pair.support.radius - pair.support.center.z;
+    let landed = drive_body(
+        &collision,
+        Vector3::new(center.x, center.y, expected_z + 0.3),
+        Vector3::zero(),
+        30,
+        false,
+    );
+    assert!((landed.pose.coords.z - expected_z).abs() < TEST_EPSILON);
+    assert!(movement_ground(&landed).walkable_support().is_some());
+}
+
+#[test]
+fn body_steps_onto_a_ball_whose_full_top_is_within_reach() {
+    let radius = 0.2;
+    let center = Vector3::new(50.0, 50.0, radius);
+    let collision = scene(vec![ball_collider(center, radius)]);
+    let pair = grounded_pair();
+    let floor_z = pair.support.radius - pair.support.center.z;
+    let mounted = drive(
+        &collision,
+        Vector3::new(50.8, 50.0, floor_z),
+        Vector3::new(-6.6, 0.0, 0.0),
+        3,
+    );
+    assert!(mounted.pose.coords.z > floor_z + radius);
+    assert!(movement_ground(&mounted).walkable_support().is_some());
+}
+
+/// Walking off the stump finds terrain below through ordinary step-down — the square-edged solid
+/// offers no rim support to cling to.
+#[test]
+fn body_walks_off_a_stump_onto_the_terrain_below() {
+    let low = Vector3::new(50.0, 50.0, 0.0);
+    let (radius, height) = (1.5, 0.9);
+    let scene = scene(vec![cylinder_collider(low, radius, height)]);
+    let top_z = retail_cylinder_rest_z(low.z, height, 0.48) - 0.475;
+    let departed = drive(
+        &scene,
+        Vector3::new(50.0, 50.0, top_z),
+        Vector3::new(2.0, 0.0, 0.0),
+        90,
+    );
+    assert!(
+        departed.pose.coords.z < 0.01,
+        "body failed to step down off the stump: z {}",
+        departed.pose.coords.z
+    );
+    assert!(
+        movement_ground(&departed).walkable_support().is_some(),
+        "body lost terrain support after departure"
+    );
+}

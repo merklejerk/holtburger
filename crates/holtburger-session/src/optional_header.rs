@@ -1,3 +1,4 @@
+use anyhow::{Result, anyhow};
 use byteorder::{ByteOrder, LittleEndian};
 use holtburger_protocol::messages::transport::{self, packet_flags};
 
@@ -18,12 +19,12 @@ impl<'a> OptionalHeaderCursor<'a> {
     /// Returns the offset to the actual payload (fragments or handshake data)
     /// by skipping all optional headers.
     pub fn payload_offset(&self) -> usize {
-        let mut offset = 0;
+        let mut offset: usize = 0;
         self.iterate(|flag, size, _| {
             // We skip all optional headers EXCEPT those that are considered the primary payload
             // (CONNECT_REQUEST and LOGIN_REQUEST).
             if flag != packet_flags::CONNECT_REQUEST && flag != packet_flags::LOGIN_REQUEST {
-                offset += size;
+                offset = offset.saturating_add(size);
             }
             true // Continue
         });
@@ -31,15 +32,25 @@ impl<'a> OptionalHeaderCursor<'a> {
     }
 
     /// Returns the bytes that should be included in the header hash.
-    pub fn hash_bytes(&self) -> Vec<u8> {
+    pub fn hash_bytes(&self) -> Result<Vec<u8>> {
         let mut bytes = Vec::new();
-        self.iterate(|_, size, current_offset| {
-            if current_offset + size <= self.data.len() {
-                bytes.extend_from_slice(&self.data[current_offset..current_offset + size]);
+        let mut truncated = None;
+        self.iterate(|flag, size, current_offset| {
+            if let Some(end) = current_offset
+                .checked_add(size)
+                .filter(|end| *end <= self.data.len())
+            {
+                bytes.extend_from_slice(&self.data[current_offset..end]);
+                true
+            } else {
+                truncated = Some(flag);
+                false
             }
-            true
         });
-        bytes
+        match truncated {
+            Some(flag) => Err(anyhow!("Truncated optional header 0x{flag:X}")),
+            None => Ok(bytes),
+        }
     }
 
     /// Finds the offset of a specific optional header.
@@ -79,23 +90,31 @@ impl<'a> OptionalHeaderCursor<'a> {
         check_flag!(packet_flags::SERVER_SWITCH, transport::SERVER_SWITCH_SIZE);
 
         // 2. Request Retransmit (4 + n*4 bytes)
-        if self.flags & packet_flags::REQUEST_RETRANSMIT != 0 && offset + 4 <= self.data.len() {
+        if self.flags & packet_flags::REQUEST_RETRANSMIT != 0 {
+            if offset + 4 > self.data.len() {
+                f(packet_flags::REQUEST_RETRANSMIT, 4, offset);
+                return;
+            }
             let count = LittleEndian::read_u32(&self.data[offset..offset + 4]) as usize;
-            let size = 4 + (count * 4);
+            let size = count.saturating_mul(4).saturating_add(4);
             if !f(packet_flags::REQUEST_RETRANSMIT, size, offset) {
                 return;
             }
-            offset += size;
+            offset = offset.saturating_add(size);
         }
 
         // 3. Reject Retransmit (4 + n*4 bytes)
-        if self.flags & packet_flags::REJECT_RETRANSMIT != 0 && offset + 4 <= self.data.len() {
+        if self.flags & packet_flags::REJECT_RETRANSMIT != 0 {
+            if offset + 4 > self.data.len() {
+                f(packet_flags::REJECT_RETRANSMIT, 4, offset);
+                return;
+            }
             let count = LittleEndian::read_u32(&self.data[offset..offset + 4]) as usize;
-            let size = 4 + (count * 4);
+            let size = count.saturating_mul(4).saturating_add(4);
             if !f(packet_flags::REJECT_RETRANSMIT, size, offset) {
                 return;
             }
-            offset += size;
+            offset = offset.saturating_add(size);
         }
 
         // 4. Ack Sequence (4 bytes)
@@ -113,7 +132,7 @@ impl<'a> OptionalHeaderCursor<'a> {
             if !f(packet_flags::LOGIN_REQUEST, size, offset) {
                 return;
             }
-            offset += size;
+            offset = offset.saturating_add(size);
         }
 
         // 7. Connect Response (8 bytes)

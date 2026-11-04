@@ -1,9 +1,18 @@
-use crate::client::movement_types::PlayerDriveIntent;
-use holtburger_common::properties::DamageType;
-use holtburger_common::{
-    CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
+use crate::client::camera::{
+    ClientCameraClearanceRequest, ClientCameraIdentity, ClientCameraIntentRequest,
+    ClientCameraStartRequest,
 };
-use holtburger_protocol::errors::{CharacterError, WeenieError};
+use crate::client::character_motion::SequencedCharacterMotionEvent;
+use crate::client::movement_types::PlayerDriveIntent;
+use crate::client::precise_jump_runtime::{
+    PreciseJumpAimRequest, PreciseJumpCancelRequest, PreciseJumpCommitRequest, PreciseJumpProgress,
+    PreciseJumpTransactionFeedback,
+};
+use crate::client::recall::RecallDestination;
+use crate::client::selection_query::{EntitySelectionQueryRequest, EntitySelectionQueryResult};
+use holtburger_common::properties::DamageType;
+use holtburger_common::{CharacterOption, ConfirmationType, Guid};
+use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::{
     AttackConditions, AttackHeight, CombatMode, DamageLocation,
 };
@@ -19,11 +28,11 @@ use holtburger_protocol::messages::{
 use holtburger_world::FellowshipActivity;
 use holtburger_world::SelfMovementKinematics;
 use holtburger_world::book::BookData;
-use holtburger_world::entity::{Entity, EntityMotionSnapshot};
-use holtburger_world::state::{FellowshipState, TradeState};
-use holtburger_world::stats::{
-    Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
-};
+use holtburger_world::entity::{Entity, EntityNetworkMotion};
+use holtburger_world::player::PlayerCharacterOptions;
+use holtburger_world::progression::StatTarget;
+use holtburger_world::state::FellowshipState;
+use holtburger_world::stats::{Vital, VitalType};
 use holtburger_world::vendor::VendorState;
 use holtburger_world::{RuntimeBodyResetCause, RuntimeSpatialBodyView, SpatialBodyId};
 use serde::{Deserialize, Serialize};
@@ -31,12 +40,52 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::{DynamicEntityEvent, DynamicEntitySnapshot};
+
 pub use holtburger_world::WorldEvent;
+
+/// Caller intent for a spellbook cast; normal casting resolves spell semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum SpellCastAim {
+    /// Selection captured at submission; self and naturally untargeted spells ignore it.
+    Normal { selection: Option<Guid> },
+    /// Deliberately cast without a recipient, even for normally targeted spells.
+    Untargeted,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChatChannelKind {
     Fellowship,
+    /// Receive-only fellowship notification, distinct from ordinary party conversation.
+    FellowshipBroadcast,
     Allegiance,
+    /// Privileged legacy broadcast, distinct from the ordinary Turbine allegiance room.
+    AllegianceBroadcast,
+    Vassals,
+    Patron,
+    Monarch,
+    CoVassals,
+    General,
+    Trade,
+    Lfg,
+    Roleplay,
+    Society,
+    /// Specific society identities remain observable even when ACE sends generic Society type.
+    SocietyCelestialHand,
+    SocietyEldrytchWeb,
+    SocietyRadiantBlood,
+    Olthoi,
+    Unknown,
+}
+
+/// Sendable channel destinations; notifications and unknown receive IDs cannot be submitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ChatChannelDestination {
+    Fellowship,
+    Allegiance,
+    AllegianceBroadcast,
     Vassals,
     Patron,
     Monarch,
@@ -47,7 +96,152 @@ pub enum ChatChannelKind {
     Roleplay,
     Society,
     Olthoi,
+}
+
+/// Authoritative speaker category derived from the protocol sender GUID when available.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChatSpeakerKind {
+    Player,
+    NonPlayer,
     Unknown,
+}
+
+/// Address carried by a tell intent; NPC identity must survive selection changes and replies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ChatTellTarget {
+    /// Player names support long-distance communication through the Tell action.
+    Player { name: String },
+    /// NPC display name is retained for previews/logging; only the entity ID controls routing.
+    Npc { guid: Guid, name: String },
+}
+
+/// Producer-resolved addressability; consumers never classify raw sender IDs or strip names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ChatSpeakerAddress {
+    Player(String),
+    Npc(Guid),
+    Unknown,
+}
+
+/// A chat speaker whose display name and known identity category travel together.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatSpeaker {
+    /// Server-authored display name, including any suffix.
+    name: String,
+    /// The protocol sender's address, resolved once alongside the display name.
+    address: ChatSpeakerAddress,
+}
+
+impl ChatSpeaker {
+    pub fn from_guid(name: String, guid: Guid) -> Self {
+        let address = if guid.is_player() {
+            // ACE Player_Properties.cs:GetNameWithSuffix and.
+            ChatSpeakerAddress::Player(name.trim_end_matches(['^', '&']).to_string())
+        } else if guid.is_static_object() || guid.is_dynamic_object() {
+            ChatSpeakerAddress::Npc(guid)
+        } else {
+            ChatSpeakerAddress::Unknown
+        };
+        Self { name, address }
+    }
+
+    pub fn unknown(name: String) -> Self {
+        Self {
+            name,
+            address: ChatSpeakerAddress::Unknown,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn into_name_and_kind(self) -> (String, ChatSpeakerKind) {
+        let kind = self.kind();
+        (self.name, kind)
+    }
+
+    /// Presentation classification follows the already resolved address variant.
+    pub fn kind(&self) -> ChatSpeakerKind {
+        match self.address {
+            ChatSpeakerAddress::Player(_) => ChatSpeakerKind::Player,
+            ChatSpeakerAddress::Npc(_) => ChatSpeakerKind::NonPlayer,
+            ChatSpeakerAddress::Unknown => ChatSpeakerKind::Unknown,
+        }
+    }
+
+    /// Structured reply address when the server supplied an identifiable speaker.
+    pub fn tell_target(&self) -> Option<ChatTellTarget> {
+        match &self.address {
+            ChatSpeakerAddress::Player(name) => Some(ChatTellTarget::Player { name: name.clone() }),
+            ChatSpeakerAddress::Npc(guid) => Some(ChatTellTarget::Npc {
+                guid: *guid,
+                name: self.name.clone(),
+            }),
+            ChatSpeakerAddress::Unknown => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod chat_speaker_tests {
+    use super::*;
+
+    #[test]
+    fn speaker_kind_uses_authoritative_guid_ranges_without_guessing_unknown_ids() {
+        assert_eq!(
+            ChatSpeaker::from_guid("Player".to_string(), Guid(0x5000_0001)).kind(),
+            ChatSpeakerKind::Player
+        );
+        assert_eq!(
+            ChatSpeaker::from_guid("Drudge".to_string(), Guid(0x7000_0001)).kind(),
+            ChatSpeakerKind::NonPlayer
+        );
+        assert_eq!(
+            ChatSpeaker::from_guid("Merchant".to_string(), Guid(0x8000_0001)).kind(),
+            ChatSpeakerKind::NonPlayer
+        );
+        assert_eq!(
+            ChatSpeaker::from_guid("Unknown".to_string(), Guid::NULL).kind(),
+            ChatSpeakerKind::Unknown
+        );
+        assert_eq!(
+            ChatSpeaker::from_guid("Invalid".to_string(), Guid(1)).kind(),
+            ChatSpeakerKind::Unknown
+        );
+        assert_eq!(
+            ChatSpeaker::from_guid("Reserved".to_string(), Guid(0x5000_0000)).kind(),
+            ChatSpeakerKind::Unknown
+        );
+    }
+
+    #[test]
+    fn reply_addresses_preserve_npc_identity_and_normalize_only_player_speech_suffixes() {
+        for name in ["Player", "+Admin", "Olthoi^", "Olthoi&"] {
+            let speaker = ChatSpeaker::from_guid(name.to_string(), Guid(0x5000_0001));
+            assert_eq!(speaker.name(), name);
+            assert_eq!(
+                speaker.tell_target(),
+                Some(ChatTellTarget::Player {
+                    name: name.trim_end_matches(['^', '&']).to_string(),
+                })
+            );
+        }
+        let guid = Guid(0x8000_0001);
+        let npc = ChatSpeaker::from_guid("Professor".to_string(), guid);
+        assert_eq!(
+            npc.tell_target(),
+            Some(ChatTellTarget::Npc {
+                guid,
+                name: "Professor".to_string()
+            })
+        );
+        assert_eq!(
+            ChatSpeaker::unknown("Unknown".to_string()).tell_target(),
+            None
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -71,9 +265,13 @@ pub struct ChatChannelInfo {
 impl ChatChannelInfo {
     pub fn legacy(channel: ChatChannelId) -> Self {
         let kind = match channel {
-            ChatChannelId::Known(ChatChannel::Fellow)
-            | ChatChannelId::Known(ChatChannel::FellowBroadcast) => ChatChannelKind::Fellowship,
-            ChatChannelId::Known(ChatChannel::AllegianceBroadcast) => ChatChannelKind::Allegiance,
+            ChatChannelId::Known(ChatChannel::Fellow) => ChatChannelKind::Fellowship,
+            ChatChannelId::Known(ChatChannel::FellowBroadcast) => {
+                ChatChannelKind::FellowshipBroadcast
+            }
+            ChatChannelId::Known(ChatChannel::AllegianceBroadcast) => {
+                ChatChannelKind::AllegianceBroadcast
+            }
             ChatChannelId::Known(ChatChannel::Vassals) => ChatChannelKind::Vassals,
             ChatChannelId::Known(ChatChannel::Patron) => ChatChannelKind::Patron,
             ChatChannelId::Known(ChatChannel::Monarch) => ChatChannelKind::Monarch,
@@ -113,10 +311,10 @@ fn chat_kind_from_turbine(
         Some(TurbineChatType::Trade) => ChatChannelKind::Trade,
         Some(TurbineChatType::Lfg) => ChatChannelKind::Lfg,
         Some(TurbineChatType::Roleplay) => ChatChannelKind::Roleplay,
-        Some(TurbineChatType::Society)
-        | Some(TurbineChatType::SocietyCelHan)
-        | Some(TurbineChatType::SocietyEldWeb)
-        | Some(TurbineChatType::SocietyRadBlo) => ChatChannelKind::Society,
+        Some(TurbineChatType::SocietyCelHan) => ChatChannelKind::SocietyCelestialHand,
+        Some(TurbineChatType::SocietyEldWeb) => ChatChannelKind::SocietyEldrytchWeb,
+        Some(TurbineChatType::SocietyRadBlo) => ChatChannelKind::SocietyRadiantBlood,
+        Some(TurbineChatType::Society) => society_kind_from_room(room_id),
         Some(TurbineChatType::Olthoi) => ChatChannelKind::Olthoi,
         Some(TurbineChatType::Undef) | None => match room_id.known() {
             Some(TurbineChatChannel::Allegiance) => ChatChannelKind::Allegiance,
@@ -127,15 +325,111 @@ fn chat_kind_from_turbine(
             Some(TurbineChatChannel::Society)
             | Some(TurbineChatChannel::SocietyCelestialHand)
             | Some(TurbineChatChannel::SocietyEldrytchWeb)
-            | Some(TurbineChatChannel::SocietyRadiantBlood) => ChatChannelKind::Society,
+            | Some(TurbineChatChannel::SocietyRadiantBlood) => society_kind_from_room(room_id),
             Some(TurbineChatChannel::Olthoi) => ChatChannelKind::Olthoi,
             None => ChatChannelKind::Unknown,
         },
     }
 }
 
+/// Generic Society packets still disclose the actual room in ACE's negotiated assignment.
+fn society_kind_from_room(room_id: TurbineChatChannelId) -> ChatChannelKind {
+    match room_id.known() {
+        Some(TurbineChatChannel::SocietyCelestialHand) => ChatChannelKind::SocietyCelestialHand,
+        Some(TurbineChatChannel::SocietyEldrytchWeb) => ChatChannelKind::SocietyEldrytchWeb,
+        Some(TurbineChatChannel::SocietyRadiantBlood) => ChatChannelKind::SocietyRadiantBlood,
+        _ => ChatChannelKind::Society,
+    }
+}
+
+#[cfg(test)]
+mod chat_channel_tests {
+    use super::*;
+
+    #[test]
+    fn generic_society_uses_the_received_room_without_hiding_specific_types() {
+        for (room, expected) in [
+            (
+                TurbineChatChannel::SocietyCelestialHand,
+                ChatChannelKind::SocietyCelestialHand,
+            ),
+            (
+                TurbineChatChannel::SocietyEldrytchWeb,
+                ChatChannelKind::SocietyEldrytchWeb,
+            ),
+            (
+                TurbineChatChannel::SocietyRadiantBlood,
+                ChatChannelKind::SocietyRadiantBlood,
+            ),
+            (TurbineChatChannel::Society, ChatChannelKind::Society),
+        ] {
+            for chat_type in [TurbineChatType::Society, TurbineChatType::Undef] {
+                let info = ChatChannelInfo::turbine(
+                    room.into(),
+                    chat_type.into(),
+                    TurbineChatDispatchType::SendToRoomById,
+                );
+                assert_eq!(info.kind, expected);
+            }
+        }
+        assert_eq!(
+            chat_kind_from_turbine(
+                TurbineChatType::SocietyEldWeb.into(),
+                TurbineChatChannel::SocietyCelestialHand.into()
+            ),
+            ChatChannelKind::SocietyEldrytchWeb
+        );
+        assert_eq!(
+            chat_kind_from_turbine(
+                TurbineChatType::Society.into(),
+                TurbineChatChannelId::from_raw(0xCAFE)
+            ),
+            ChatChannelKind::Society
+        );
+    }
+
+    #[test]
+    fn broadcasts_and_unknown_channel_namespaces_remain_distinct() {
+        assert_eq!(
+            ChatChannelInfo::legacy(ChatChannel::FellowBroadcast.into()).kind,
+            ChatChannelKind::FellowshipBroadcast
+        );
+        assert_eq!(
+            ChatChannelInfo::legacy(ChatChannel::AllegianceBroadcast.into()).kind,
+            ChatChannelKind::AllegianceBroadcast
+        );
+        let legacy = ChatChannelInfo::legacy(ChatChannelId::from_raw(0xCAFE));
+        assert_eq!(legacy.kind, ChatChannelKind::Unknown);
+        assert_eq!(
+            legacy.source,
+            ChatChannelSource::Legacy {
+                channel: ChatChannelId::from_raw(0xCAFE)
+            }
+        );
+        let turbine = ChatChannelInfo::turbine(
+            TurbineChatChannelId::from_raw(0xCAFE),
+            TurbineChatTypeId::from_raw(0xBEEF),
+            TurbineChatDispatchType::SendToRoomById,
+        );
+        assert_eq!(turbine.kind, ChatChannelKind::Unknown);
+        assert_eq!(
+            turbine.source,
+            ChatChannelSource::Turbine {
+                room_id: TurbineChatChannelId::from_raw(0xCAFE),
+                chat_type: TurbineChatTypeId::from_raw(0xBEEF),
+                dispatch_type: TurbineChatDispatchType::SendToRoomById
+            }
+        );
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetSlot {
+    /// Select the main/off hand or left/right jewelry side using current equipment facts.
+    PreferredSide {
+        /// Prefer off hand when valid, or force right-side jewelry; false uses normal selection.
+        alternate: bool,
+    },
     EquipMask(EquipMask),
     MainHand,
     OffHand,
@@ -159,26 +453,443 @@ pub enum ActionResultSource {
 #[derive(Debug, PartialEq, Clone, Eq)]
 pub enum ActionResultReason {
     Weenie(WeenieError, Option<String>),
-    InventoryServerSaveFailed { item_guid: Guid, error: WeenieError },
-    Character(CharacterError),
+    InventoryServerSaveFailed {
+        item_guid: Guid,
+        error: WeenieError,
+    },
+    /// Lossless interpretation of the server character error.
+    Character(super::CharacterErrorCode),
+    /// Matched lock rejection after direct-use completion; broadcast evidence is best effort.
+    Locked {
+        /// Completed guarded direct-use identity; admission has already been released.
+        sequence: u32,
+        /// Captured direct-use identity, never inferred from current selection.
+        target: Guid,
+        /// Captured label used by shared feedback formatting.
+        name: String,
+    },
     General(String),
     Transport(String),
+    /// Equipment requests affected by a local or attributed server refusal.
+    EquipmentSet {
+        /// Original item/target pairs consumed by frontend slot-specific feedback.
+        bindings: Vec<super::equipment_set::EquipmentBinding>,
+        /// Shared explanation; saved names and slot labels remain frontend-owned.
+        message: String,
+    },
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ClientState {
     Connected,
-    CharacterSelection(Vec<CharacterEntry>),
+    CharacterSelection,
     EnteringWorld,
     InWorld,
+    /// Character logout is awaiting the server acknowledgement and refreshed roster.
+    LoggingOut,
     Disconnected,
 }
 
+/// The small lifecycle vocabulary a client shell can render and reconstruct.
+///
+/// The broad [`ClientState`] remains the authority-facing API used by the TUI. This value is the
+/// deliberate, lossless-enough phase projection used by other shells. Exact local-player identity
+/// is an independent session fact because it is established later by the server's `PlayerCreate`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClientLifecycleState {
+    Connecting,
+    Authenticating,
+    CharacterSelection {
+        /// Entry refusal retained until a new entry request or character retirement.
+        rejection: Option<super::ConnectionFailure>,
+        /// Advertised server capacity; pending deletion entries still occupy roster slots.
+        max_slots: u32,
+        characters: Vec<ClientCharacterSummary>,
+    },
+    EnteringWorld {
+        character_guid: Guid,
+    },
+    /// The authority has accepted an initial entry or teleport and is hydrating the destination
+    /// behind the 3D application's portal-space presentation. Controls remain withdrawn until
+    /// the core activation conjunction sends ACE's `LoginComplete` action.
+    PortalSpace {
+        /// One generation shared by world, collision, presentation, and handoff currentness.
+        world_generation: u64,
+        /// Why this replacement destination superseded the previous active scene.
+        cause: ClientWorldActivationCause,
+    },
+    InWorld,
+    /// The login connection remains alive while the character leaves the world.
+    LoggingOut,
+    Exiting {
+        /// Terminal explanation and ownership captured before teardown.
+        outcome: super::ClientExitOutcome,
+    },
+}
+
+/// Replacement activation causes proven by the protocol/retail trace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientWorldActivationCause {
+    InitialEntry,
+    Teleport,
+}
+
+/// Existing-character identity needed by the first-cut selection screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientCharacterSummary {
+    /// Server-assigned character identity used for world entry.
+    pub guid: Guid,
+    /// Server-provided character name.
+    pub name: String,
+    /// Stable ordinal in the server-provided character list.
+    pub slot: u32,
+    /// Server deletion timestamp; zero denotes an active character.
+    pub delete_time: u32,
+}
+
+/// Terminal cause retained for diagnostics and client lifecycle presentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientExitCause {
+    ExplicitDisconnect,
+    ServerDisconnect,
+    StartupFailure,
+    RuntimeFailure,
+    HostShutdown,
+}
+
+/// Non-portal presentation edge that invalidates interpolation and camera history.
+///
+/// Portal replacement is represented by [`ClientLifecycleState::PortalSpace`] and never crosses
+/// this event surface. Keeping only the two in-place producers here makes the host contract honest:
+/// a consumer may discard presentation history without mistaking it for a destination activation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientPresentationDiscontinuityKind {
+    ForcedReposition,
+    Reset,
+}
+
+/// Original player effects and their shared interpretation, replaced together after event loss.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientPlayerEnchantmentsSnapshot {
+    /// Original server records needed for TUI spell details and debug inspection.
+    pub records: Vec<holtburger_protocol::messages::magic::Enchantment>,
+    /// Shared winner and overridden interpretation used by character presentation.
+    pub resolved: holtburger_world::enchantments::ResolvedEnchantments,
+}
+
+/// One atomic, core-owned replacement level for client shells.
+///
+/// Runtime bodies stay in the core value for the existing TUI and authority tests. Desktop
+/// adapters deliberately project only local-player identity, the focused dynamic snapshot,
+/// lifecycle, time, and generation rather than putting the broad body representation on their wire.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClientApplicationSnapshot {
+    /// Active barber opening and local Apply consequences, recovered atomically after event loss.
+    pub barber: super::barber::BarberSnapshot,
+    /// Retained character-management progress/result, recoverable after event loss.
+    pub character_management: CharacterManagementState,
+    /// Latest complete capture for this character lifetime; partial updates retain it.
+    pub player_visual_capture: Option<super::player_visual::PlayerVisualCapture>,
+    /// Retained fellowship facts, including vital detail for independent consumers.
+    pub fellowship: Option<FellowshipState>,
+    /// Retained friend facts; absent until initial delivery or after retirement.
+    pub friends: Option<holtburger_world::state::friends::FriendsState>,
+    /// Resolved contract journal, with durations aged at snapshot production.
+    pub contracts: Option<holtburger_world::state::contracts::ContractsSnapshot>,
+    /// Retained replacement-only ignore database.
+    pub squelch: Option<holtburger_world::state::squelch::SquelchState>,
+    /// Retained partial allegiance facts and outstanding read progress.
+    pub allegiance: super::allegiance::AllegianceSnapshot,
+    /// Retained housing and pending query state for replacement recovery.
+    pub housing: super::housing::HousingSnapshot,
+    /// Current character may request map teleport; includes in-world lifecycle admission.
+    pub can_teleport_from_map: bool,
+    /// Recall choices filtered only by disclosed permanent prerequisites.
+    pub recall_destinations: Vec<RecallDestination>,
+    /// Latest transport rates and live health; absent before the first interval.
+    pub connection: Option<super::connection::ConnectionSample>,
+    /// Complete P2P negotiation level recovered with its semantic item records.
+    pub trade: super::trade::TradeSnapshot,
+    /// None until initial description; an empty collection is a complete empty spellbook.
+    pub known_spells: Option<Vec<u32>>,
+    /// Complete effect records and shared interpretation, absent until player description.
+    pub enchantments: Option<ClientPlayerEnchantmentsSnapshot>,
+    /// None until PlayerDescription establishes the active character's complete option masks.
+    pub character_options: Option<PlayerCharacterOptions>,
+    /// Server-confirmed stance, undefined before the local player is established.
+    pub combat_mode: CombatMode,
+    /// Both server mode and accepted motion stance permit a social command.
+    pub social_motion_ready: bool,
+    /// Shared desired attack and server-repeat lifecycle.
+    pub combat: ClientCombatStatus,
+    /// Resolved non-self recipient of the pending spell cast, absent for self/untargeted casts.
+    pub spell_cast_target: Option<Guid>,
+    /// Complete shell-facing lifecycle level.
+    pub lifecycle: ClientLifecycleState,
+    /// Accepted local-player debug override; never changes server physics flags.
+    pub entity_collision_disabled: bool,
+    /// Exact local-player identity established by the server's `PlayerCreate` message.
+    pub local_player_guid: Option<Guid>,
+    /// Synchronized server time, absent before the first time-sync event.
+    pub server_time: Option<f64>,
+    /// Monotonic presentation generation invalidating pre-discontinuity history.
+    pub world_generation: u64,
+    /// Latest server-provided world name, absent before the server-name message arrives.
+    pub world_name: Option<String>,
+    /// Current local-player display name, absent before its authoritative entity exists.
+    pub player_name: Option<String>,
+    /// Complete current/max local-player vitals used by client HUDs.
+    pub vitals: HashMap<VitalType, Vital>,
+    /// Complete progression facts, absent before this character's description.
+    pub character_sheet: Option<Box<super::ClientCharacterSheet>>,
+    /// Current renderer-consumed jump timing, absent until authoritative capability is complete.
+    pub character_motion: Option<ClientCharacterMotionCapabilities>,
+    /// Pending server interaction; recoverable independently of world presentation.
+    pub active_confirmation: Option<ActiveCharacterConfirmation>,
+    /// Complete focused dynamic-entity replacement level.
+    pub dynamic: DynamicEntitySnapshot,
+    /// Complete retained entity/storage facts for non-rendering consumers.
+    pub entities: super::entity_facts::ClientEntitySnapshot,
+    /// Broad runtime-body replacement retained for authority-facing clients such as the TUI.
+    pub runtime_bodies: Arc<[RuntimeSpatialBodyView]>,
+}
+
+/// Parameters ACE applies to one targeted attack sequence.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClientAttackProfile {
+    Melee {
+        /// Requested vertical strike band.
+        height: AttackHeight,
+        /// Requested melee charge in the inclusive zero-to-one range.
+        power: f32,
+    },
+    Missile {
+        /// Requested vertical strike band.
+        height: AttackHeight,
+        /// Requested missile accuracy in the inclusive zero-to-one range.
+        accuracy: f32,
+    },
+}
+
+impl ClientAttackProfile {
+    /// Combat stance required by this attack family.
+    pub const fn combat_mode(self) -> CombatMode {
+        match self {
+            Self::Melee { .. } => CombatMode::Melee,
+            Self::Missile { .. } => CombatMode::Missile,
+        }
+    }
+
+    /// Normalizes UI input before it reaches protocol messages or timing decisions.
+    pub fn normalized(self) -> Self {
+        match self {
+            Self::Melee { height, power } => Self::Melee {
+                height,
+                power: power.clamp(0.0, 1.0),
+            },
+            Self::Missile { height, accuracy } => Self::Missile {
+                height,
+                accuracy: accuracy.clamp(0.0, 1.0),
+            },
+        }
+    }
+
+    /// Retail's initial request-producing fill scales with the selected control value.
+    pub fn initial_charge_fraction(self) -> f32 {
+        match self.normalized() {
+            Self::Melee { power, .. } => power,
+            Self::Missile { accuracy, .. } => accuracy,
+        }
+    }
+}
+
+/// One explicit, frontend-owned target preference retained across recoverable interruptions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClientCombatEngagement {
+    pub target: Guid,
+    pub profile: ClientAttackProfile,
+}
+
+/// Coarse lifecycle exposed to presentation without leaking reducer bookkeeping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientCombatControlState {
+    Idle,
+    Charging,
+    WaitingForReadiness,
+    Active,
+    Retiring,
+}
+
+/// Event-aligned estimate for a server-owned repeat refill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientCombatRefillEstimate {
+    pub started_at: Instant,
+    pub duration: Duration,
+}
+
+/// Atomic projection of desired combat and the control state that owns wire requests.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClientCombatStatus {
+    /// Highest processed begin/stop sequence; superseded requests cannot change intent. Zero is initial.
+    pub processed_intent_sequence: u64,
+    pub desired: Option<ClientCombatEngagement>,
+    pub state: ClientCombatControlState,
+    pub refill: Option<ClientCombatRefillEstimate>,
+}
+
+impl Default for ClientCombatStatus {
+    fn default() -> Self {
+        Self {
+            processed_intent_sequence: 0,
+            desired: None,
+            state: ClientCombatControlState::Idle,
+            refill: None,
+        }
+    }
+}
+
+/// Renderer-consumed timing facts derived from authoritative character motion state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientCharacterMotionCapabilities {
+    /// Current retail full-charge duration; stance changes may replace it during a charge.
+    pub full_charge_duration: Duration,
+}
+
+/// One ordered character-motion lifecycle outcome projected to the current input owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientCharacterMotionFeedback {
+    /// Originating renderer sequence, used to ignore feedback for an older optimistic gesture.
+    pub sequence: crate::client::character_motion::CharacterMotionSequence,
+    /// Authority outcome without exposing the gameplay facts used to reach it.
+    pub outcome: ClientCharacterMotionOutcome,
+}
+
+/// Renderer-reconstructible character-motion lifecycle outcomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientCharacterMotionOutcome {
+    ChargeAccepted,
+    ChargeContinues,
+    JumpCommitted,
+    Reset,
+    Rejected(ClientCharacterMotionRejection),
+}
+
+/// Stable renderer-facing reasons why a jump edge could not proceed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientCharacterMotionRejection {
+    ChargeNotActive,
+    Airborne,
+    Unsupported,
+    Overburdened,
+    CapabilityUnavailable,
+    BodyUnavailable,
+    CollisionUnavailable,
+    LaunchRejected,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum CharacterManagementOperation {
     Create,
     Delete,
     Restore,
+}
+
+/// One uncorrelatable server operation at a time, plus its latest recoverable result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum CharacterManagementState {
+    /// No management operation has been submitted in this session.
+    Idle,
+    /// The exact submitted name is retained until creation is confirmed or rejected.
+    Creating {
+        /// Submitted name, also used to distinguish a repeated known creation identity.
+        name: String,
+    },
+    /// Deletion awaits its acknowledgment; a subsequent roster supplies deletion metadata.
+    Deleting,
+    /// Restoration awaits its character response.
+    Restoring {
+        /// Expected restored identity; a repeated response for another character is stale.
+        guid: Guid,
+    },
+    /// Server-confirmed creation; retained until the next operation.
+    Created {
+        /// Server-confirmed roster identity.
+        guid: Guid,
+        /// Server-confirmed display name.
+        name: String,
+    },
+    /// A proven rejection or local send failure permits a deliberate retry.
+    Rejected {
+        /// Operation whose proven failure permits another submission.
+        operation: CharacterManagementOperation,
+        /// Human-readable shared failure explanation.
+        message: String,
+    },
+    /// The operation may have succeeded; a fresh session must establish the resulting roster.
+    Uncertain {
+        /// Explanation of the missing confirmation or identity.
+        message: String,
+    },
+}
+
+impl CharacterManagementState {
+    /// Pending operations cannot overlap because the wire has no request identifier.
+    pub fn pending_operation(&self) -> Option<CharacterManagementOperation> {
+        match self {
+            Self::Creating { .. } => Some(CharacterManagementOperation::Create),
+            Self::Deleting => Some(CharacterManagementOperation::Delete),
+            Self::Restoring { .. } => Some(CharacterManagementOperation::Restore),
+            _ => None,
+        }
+    }
+
+    /// An uncertain result also blocks entry/retry until the session is replaced.
+    pub fn blocks_submission(&self) -> bool {
+        self.pending_operation().is_some() || matches!(self, Self::Uncertain { .. })
+    }
+}
+
+/// Best-effort identity correlation for name-only outgoing server feedback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum CombatOutcomeAttribution {
+    /// Exactly one distinct target in relevant successful attack/cast history matches the name.
+    Attributed { target: Guid },
+    /// Feedback is confirmed, but relevant history has no unique matching target.
+    Unplaced,
+}
+
+/// Producer-stamped context travels with outgoing outcomes; consumers never rederive it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CombatOutcomeContext {
+    /// World generation in which core received this outcome.
+    pub world_generation: u64,
+    /// Best-effort correlation computed by the combat attribution owner.
+    pub attribution: CombatOutcomeAttribution,
+}
+
+/// Confirmed outgoing health damage or explicit resistance interpreted from server text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServerTextCombatOutcomeKind {
+    /// Server-reported amount; only a leading critical token establishes critical styling.
+    Damage { amount: u32, critical_hit: bool },
+    /// Explicit outgoing spell resistance, independent of whether it dealt damage.
+    Resisted,
+}
+
+/// Host-consumed semantic companion to the unchanged server chat message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServerTextCombatOutcome {
+    /// Attribution and generation computed once at network receipt.
+    pub context: CombatOutcomeContext,
+    /// Confirmed cosmetic facts, independent of attribution availability.
+    pub kind: ServerTextCombatOutcomeKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -188,6 +899,8 @@ pub enum CombatFeedback {
     },
     AttackCommenced,
     AttackerNotification {
+        /// Correlation and lifecycle identity for this outgoing outcome.
+        context: CombatOutcomeContext,
         defender_name: String,
         damage_type: DamageType,
         health_percent: f64,
@@ -205,6 +918,8 @@ pub enum CombatFeedback {
         attack_conditions: AttackConditions,
     },
     EvasionAttackerNotification {
+        /// Correlation and lifecycle identity for this outgoing outcome.
+        context: CombatOutcomeContext,
         defender_name: String,
     },
     EvasionDefenderNotification {
@@ -223,17 +938,40 @@ pub enum CombatFeedback {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PlayerCharacterOptions {
-    pub options1: CharacterOptions1,
-    pub options2: CharacterOptions2,
-}
-
+/// One pending server request and the receipt that authorizes answering this occurrence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveCharacterConfirmation {
+    /// Process-unique receipt, independent of reusable server type/context pairs.
+    pub request_id: u64,
+    /// Wire confirmation family required by the response.
     pub confirmation_type: ConfirmationType,
+    /// Server-issued context echoed unchanged in the response.
     pub context: u32,
+    /// Server-authored question presented to the player.
     pub text: String,
+}
+
+impl ActiveCharacterConfirmation {
+    /// Receipts survive world resets and cannot collide across runtimes in this process.
+    pub(super) fn received(
+        confirmation_type: ConfirmationType,
+        context: u32,
+        text: String,
+    ) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_RECEIPT: AtomicU64 = AtomicU64::new(1);
+        let request_id = NEXT_RECEIPT
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                value.checked_add(1)
+            })
+            .expect("confirmation receipt space exhausted");
+        Self {
+            request_id,
+            confirmation_type,
+            context,
+            text,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -244,10 +982,20 @@ pub enum BusyOperationKind {
     SpellCast,
     Buy,
     Sell,
+    /// Purchase reconciled from item consumption and matching ownership.
+    HousingPurchase,
+    /// Maintenance reconciled from item consumption and matching credited progress.
+    HousingMaintenance,
+    /// Serialized implicit-home administration; abandonment also removes the deed.
+    HousingManagement,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BusyOperationResult {
+    /// Explicit refusal or incomplete vendor receipt, including reasonless wire failures.
+    Failed {
+        message: String,
+    },
     Completed {
         error: WeenieError,
         parameter: Option<String>,
@@ -255,20 +1003,110 @@ pub enum BusyOperationResult {
     TimedOut,
 }
 
+/// Server effect sound bound to both the source incarnation and world lifetime.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDynamicSoundCue {
+    /// Emitting object's authoritative identity.
+    pub guid: Guid,
+    /// Instance sequence resolved when the source is admitted.
+    pub generation: u64,
+    /// World discontinuity generation; old-world sounds are never replayed in the next world.
+    pub world_generation: u64,
+    /// Key in the emitting object's sound table, not an audio asset DID.
+    pub sound_id: u32,
+    /// Explicit gain supplied by the packet, replacing the table candidate's authored gain.
+    pub volume: f32,
+}
+
+/// One transient high-level script cue bound to the exact entity generation that received it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDynamicScriptCue {
+    pub guid: Guid,
+    pub generation: u64,
+    /// Raw retail `PlayScript` cue resolved through the entity's effective table by each domain.
+    pub cue: u32,
+    pub intensity: f32,
+}
+
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Confirmed container-consolidation progress and terminal outcome.
+    AutoMergeFinished(super::container_auto_merge::AutoMergeResult),
+    /// Target-local server lock evidence, independent of request completion and scene admission.
+    LockFeedback(super::lock_feedback::LockFeedback),
+    /// Complete cold barber interaction and committed local particle state.
+    BarberUpdated(super::barber::BarberSnapshot),
+    /// Resolved candidate for the exact frontend draft revision.
+    BarberPreview(super::barber::BarberPreviewResult),
+    /// Requested historical locations, never a claim about remaining corpses.
+    DeathLocations(super::corpse::DeathLocationResult),
+    /// Replacement housing facts; this event never requests opening a window.
+    HousingUpdated(super::housing::HousingSnapshot),
+    /// Full accepted crystal receipt; the frontend owns whether to open its HUD.
+    HousingCrystalReceived(super::housing::HousingCrystalView),
+    /// Complete current character facts after a relevant authoritative mutation.
+    CharacterSheetUpdated(Option<Box<super::ClientCharacterSheet>>),
+    /// Batched read-only advancement quotes for one frontend request.
+    ProgressionEvaluated {
+        request_id: u32,
+        evaluations: Vec<super::progression::ClientProgressionEvaluation>,
+    },
+    /// A local advancement send or rejection; never a server purchase receipt.
+    ProgressionFeedback(super::progression::ClientProgressionFeedback),
+    /// Current row-local duplicate guards after submission or authoritative updates.
+    ProgressionGuardsUpdated {
+        targets: Vec<StatTarget>,
+    },
+    /// Character input invalidation for independent spell inspectors.
+    SpellInspectionContext(super::spell_inspection::SpellInspectionContext),
+    /// Correlated read-only spell inspection result.
+    SpellInspectionResult(super::spell_inspection::SpellInspectionResult),
+    /// Read-only salvage evaluation for the originating draft.
+    SalvagePreview(super::salvage::SalvagePreviewResult),
+    /// Correlated local dispatch result, distinct from server processing.
+    SalvageSubmitted(super::salvage::SalvageSubmitResult),
+    /// Correlated guarded-use evaluation or dispatch result.
+    ItemUseResult(super::item_use::ItemUseResult),
+    /// Terminal receipt for a guarded individual use.
+    ItemUseFinished(super::item_use::ItemUseFinished),
+    /// Read-only considered-target compatibility result.
+    ItemUseTargetResult(super::item_use::ItemUseTargetResult),
+    /// Shared inventory interpretation for one frontend drag target.
+    InventoryPreview(super::inventory_plan::InventoryPreviewResult),
+    /// Acknowledges the accepted local-player entity response policy.
+    EntityCollisionDisabled(bool),
+    /// Complete application-level replacement state for a shell remount or receiver recovery.
+    ApplicationSnapshot(Box<ClientApplicationSnapshot>),
+    /// Accepted semantic record changes, independent of renderer residency.
+    EntityFactsChanged(super::entity_facts::ClientEntityDelta),
+    /// Complete normalized player visual or character retirement, recoverable in snapshots.
+    PlayerVisualCaptureChanged(Option<super::player_visual::PlayerVisualCapture>),
+    /// Source-neutral lifecycle projection emitted whenever the authoritative client state changes.
+    LifecycleChanged(ClientLifecycleState),
+    /// Character permission or lifecycle changed map-teleport admission.
+    MapTeleportCapabilityChanged(bool),
+    /// Replacement list of recall choices after character facts or lifecycle change.
+    RecallDestinationsChanged(Vec<RecallDestination>),
+    /// Ordered jump gesture result used only to reconcile optimistic client presentation.
+    CharacterMotionFeedback(ClientCharacterMotionFeedback),
+    /// Latest correlated precise-jump hover evaluation; older pointer samples are replaceable.
+    PreciseJumpEvaluation(PreciseJumpProgress),
+    /// Ordered result of an explicit precise-jump commit or cancellation request.
+    PreciseJumpTransactionFeedback(PreciseJumpTransactionFeedback),
+    /// Correlated broad-phase response for one renderer selection action.
+    EntitySelectionQueryResult(EntitySelectionQueryResult),
+    /// Replacement timing capability emitted when authoritative stance/completeness changes.
+    CharacterMotionCapabilitiesUpdated {
+        capabilities: Option<ClientCharacterMotionCapabilities>,
+    },
+    /// First exact local-player identity established by the server for this world session.
+    LocalPlayerEstablished {
+        player_guid: Guid,
+    },
     StatusUpdate {
         state: ClientState,
-    },
-    PlayerStatsSkillsUpdated {
-        attributes: HashMap<AttributeType, Attribute>,
-        skills: HashMap<SkillType, Skill>,
-        resistances: Resistances,
-        armor: i32,
-        vitae: f32,
-    },
-    PlayerLevelInfoUpdated {
-        level_info: CharacterLevelInfo,
     },
     PlayerVitalsUpdated {
         vitals: HashMap<VitalType, Vital>,
@@ -281,9 +1119,15 @@ pub enum ClientViewEvent {
     },
     PlayerEnchantmentsUpdated {
         enchantments: Vec<Enchantment>,
+        resolved: holtburger_world::enchantments::ResolvedEnchantments,
     },
     ActiveCharacterConfirmationUpdated {
         confirmation: Option<ActiveCharacterConfirmation>,
+    },
+    /// Replacement level derived from the current spell operation, cleared on every terminal path.
+    SpellCastTargetUpdated {
+        /// Resolved non-self recipient; never inferred from current selection.
+        target: Option<Guid>,
     },
     BusyStateUpdated {
         busy: Option<BusyOperationKind>,
@@ -306,6 +1150,16 @@ pub enum ClientViewEvent {
         guid: Guid,
         health_fraction: f32,
     },
+    /// Full book receipt; a frontend may open its reader.
+    EntityBookOpened {
+        /// Book object that supplied the full response.
+        guid: Guid,
+        /// Name captured when world accepted the response.
+        name: String,
+        /// Full page state for this opening.
+        book: Box<BookData>,
+    },
+    /// Subsequent page text merged into an existing book.
     EntityBookUpdated {
         guid: Guid,
         book: Box<BookData>,
@@ -313,6 +1167,10 @@ pub enum ClientViewEvent {
     EntityIdentified {
         entity: Box<Entity>,
     },
+    /// Cold appraisal result; intentionally absent from reconstructible client snapshots.
+    ObjectInspectionResult(holtburger_world::inspection::ObjectInspectionResult),
+    /// Creature visual identity captured independently from appraisal presentation.
+    ObjectPreviewResult(super::object_preview::ObjectPreviewResult),
     EntityPropertiesUpdated {
         guid: Guid,
         updates: Vec<holtburger_common::properties::PropertyUpdate>,
@@ -328,7 +1186,7 @@ pub enum ClientViewEvent {
     },
     EntityMotionUpdated {
         guid: Guid,
-        snapshot: Option<EntityMotionSnapshot>,
+        motion: EntityNetworkMotion,
     },
     RuntimeBodySnapshot {
         bodies: Arc<[RuntimeSpatialBodyView]>,
@@ -336,11 +1194,38 @@ pub enum ClientViewEvent {
     RuntimeBodyUpserted {
         body: Box<RuntimeSpatialBodyView>,
     },
+    /// Complete runtime-body levels committed by one fixed tick, in stable body order.
+    RuntimeBodiesAdvanced {
+        bodies: Arc<[RuntimeSpatialBodyView]>,
+    },
     RuntimeBodyRemoved {
         body_id: SpatialBodyId,
     },
     RuntimeBodiesReset {
         cause: RuntimeBodyResetCause,
+    },
+    /// Focused reconstructible entity presentation feed carried inside the broader client surface.
+    DynamicEntity(DynamicEntityEvent),
+    /// Transient presentation input; intentionally absent from replacement snapshots.
+    DynamicScriptCue(ClientDynamicScriptCue),
+    /// Transient positional sound; never replayed from application snapshots.
+    DynamicSoundCue(ClientDynamicSoundCue),
+    /// Cached local feedback for a successfully submitted Use, not its server outcome.
+    EntityUseFeedback(holtburger_world::interaction::EntityUseFeedback),
+    /// Settled camera placement published during world activation, outside ordinary physics ticks.
+    Camera(crate::client::ClientCameraTick),
+    /// One physics interval, published atomically for coherent character/camera playback.
+    PresentationTick {
+        /// Entity paths and levels accepted in this physics interval.
+        dynamic: Option<crate::DynamicEntityTickBatch>,
+        /// Camera path solved against that same interval, when registered and ready.
+        camera: Option<crate::ClientCameraTick>,
+    },
+    /// Receipt for a newly registered client camera generation.
+    CameraStarted(crate::client::ClientCameraStartReceipt),
+    PresentationDiscontinuity {
+        world_generation: u64,
+        kind: ClientPresentationDiscontinuityKind,
     },
     PlayerGroundedUpdated {
         grounded: bool,
@@ -365,49 +1250,112 @@ pub enum ClientViewEvent {
     ServerTimeUpdated {
         time: f64,
     },
+    /// Readiness shared by social command admission and frontend stance automation.
+    SocialMotionReadyUpdated {
+        /// Both gameplay mode and accepted motion stance permit social commands.
+        ready: bool,
+    },
+    /// Result of a correlated local emote, scoped to its submitting world generation.
+    LocalMotionFeedback {
+        /// Original caller identity, independent of wire sequence stamps.
+        request_id: u32,
+        /// Placement lifetime that accepted the request.
+        world_generation: u64,
+        /// Result supplied by command admission or the playback owner.
+        outcome: holtburger_world::motion::LocalMotionOutcome,
+    },
     CombatModeUpdated {
         mode: CombatMode,
     },
+    /// Replacement level for the shared targeted-attack owner.
+    CombatStatusUpdated(ClientCombatStatus),
+    /// Server ApproachVendor response; frontends may open the supplied interaction.
+    VendorApproached {
+        vendor: VendorState,
+    },
+    /// Retained catalog replacement or retirement, without an instruction to open a window.
     VendorStateUpdated {
         vendor: Option<VendorState>,
     },
+    /// Terminal vendor receipt used to retire fulfilled draft sources.
+    VendorTradeFinished(super::vendor_transaction::VendorTradeResult),
+    /// Shared quote for a candidate vendor draft.
+    VendorDraftPreview(super::vendor_transaction::VendorPreviewResult),
+    /// Candidate housing quote; no inventory is transferred or reserved.
+    HousingPaymentPreview(super::housing_payment::HousingPreviewResult),
+    /// Payment fulfillment or bounded uncertainty, correlated to its local submission.
+    HousingPaymentFinished(super::housing_execution::HousingPaymentResult),
+    /// Administrative evidence or uncertainty, independent of panel lifetime.
+    HousingManagementFinished(super::housing_management::HousingManagementResult),
     VendorItemIdentified(Box<holtburger_world::vendor::CoreVendorItem>),
+    /// Shared allegiance facts and bounded refresh progress changed.
+    AllegianceUpdated(super::allegiance::AllegianceSnapshot),
+    /// Complete ignore replacement, including retirement.
+    SquelchStateUpdated {
+        /// Current character database.
+        squelch: Option<holtburger_world::state::squelch::SquelchState>,
+    },
+    /// Journal replacement facts after a tracker mutation or lifecycle change.
+    ContractsStateUpdated {
+        /// None outside character lifetime; active empty is a snapshot with no rows.
+        contracts: Option<holtburger_world::state::contracts::ContractsSnapshot>,
+    },
+    /// Live registry activity; login, recovery, and retirement do not replay it.
+    ContractMembershipChanged(holtburger_world::state::contracts::ContractMembershipChange),
+    /// Replacement projection of the character-owned friend list.
+    FriendsStateUpdated {
+        /// None denotes unknown/retired rather than a confirmed empty list.
+        friends: Option<holtburger_world::state::friends::FriendsState>,
+    },
     FellowshipStateUpdated {
+        /// Actor identity captured with the roster for consistent capability projection.
+        player_guid: Option<Guid>,
         fellowship: Option<FellowshipState>,
     },
     FellowshipActivity {
         activity: FellowshipActivity,
     },
-    TradeStateUpdated {
-        trade: Option<TradeState>,
-    },
-    ContainerOpened {
-        guid: Guid,
-    },
-    ContainerClosed {
-        guid: Guid,
-    },
+    /// Confirmed P2P offers plus the shared pending-addition level.
+    TradeStateUpdated(super::trade::TradeSnapshot),
     ItemManaResponse {
         target: Guid,
         mana: f32,
         success: u32,
     },
+    /// Brief server notice, distinct from ordinary chat.
+    TransientString {
+        /// Unmodified server-provided text.
+        message: String,
+    },
+    /// Server text requiring explicit presentation dismissal.
+    PopupString {
+        /// Unmodified server-provided text.
+        message: String,
+    },
     ServerMessage {
         message: String,
         chat_type: ChatMessageTypeId,
+        /// Network-only interpretation consumed by the 3D host; local messages use None.
+        combat_outcome: Option<ServerTextCombatOutcome>,
     },
     Chat {
-        sender: String,
+        speaker: ChatSpeaker,
         message: String,
         chat_type: ChatMessageTypeId,
     },
     ChannelMessage {
         channel: ChatChannelInfo,
-        sender: String,
+        speaker: ChatSpeaker,
         message: String,
     },
     Tell {
-        sender: String,
+        speaker: ChatSpeaker,
+        message: String,
+        /// Server-authored tell category, including administrative or unknown types.
+        chat_type: ChatMessageTypeId,
+    },
+    /// Expected chat refusal, retained by frontends independently of display filters.
+    ChatError {
         message: String,
     },
     WeenieError {
@@ -415,6 +1363,8 @@ pub enum ClientViewEvent {
         parameter: Option<String>,
     },
     CharacterList(Vec<CharacterEntry>),
+    /// Complete management level, also present in application snapshots.
+    CharacterManagementChanged(CharacterManagementState),
     CharacterManagementResponse {
         operation: Option<CharacterManagementOperation>,
         response: CharacterCreateResponseData,
@@ -427,56 +1377,96 @@ pub enum ClientViewEvent {
     },
     WorldNameUpdated(String),
     Emote {
-        sender: String,
+        speaker: ChatSpeaker,
         text: String,
     },
     SoulEmote {
-        sender: String,
+        speaker: ChatSpeaker,
         text: String,
     },
     PingResponse,
     LogMessage(String),
     CombatFeedback(CombatFeedback),
-    BootAccount(String),
     EntityDebugInfoSnapshot {
         entity: Box<Entity>,
     },
-    NetPulse {
-        bytes_in: u64,
-        bytes_out: u64,
-    },
-    Disconnected,
+    /// Completed shared transport observation.
+    ConnectionUpdated(super::connection::ConnectionSample),
 }
 
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
+    /// Character-bound barber candidate, submission, or local cancellation.
+    Barber(super::barber::BarberRequest),
+    /// Apply exact equipment bindings after one confirmed-peace prerequisite when needed.
+    ApplyEquipmentSet(Vec<super::equipment_set::EquipmentBinding>),
+    /// Explicit refresh of the active character/account effective home.
+    RefreshHousing,
+    /// Read named access records after effective-home initialization completes.
+    QueryHousingAccess,
+    /// Search available areas by a known HouseType, independently of home ownership.
+    SearchHousing {
+        house_type: u32,
+    },
+    /// Read-only character-bound spell examination.
+    QuerySpellInspection(super::spell_inspection::SpellInspectionQuery),
+    /// Evaluate a proposed salvage draft without sending a game action.
+    PreviewSalvage(super::salvage::SalvagePreviewRequest),
+    /// Revalidate the exact reviewed batch before dispatch.
+    SubmitSalvage(super::salvage::SalvageSubmitRequest),
+    /// Evaluate and dispatch only if the expected consequence still matches.
+    SubmitItemUse(super::item_use::ItemUseRequest),
+    /// Evaluate one considered target without dispatch or busy admission.
+    QueryItemUseTarget(super::item_use::ItemUseTargetQuery),
+    /// Evaluate the current drag target without issuing inventory mutations.
+    PreviewInventory(super::inventory_plan::InventoryPreviewRequest),
+    /// Re-evaluate and execute an identity-based inventory gesture.
+    SubmitInventory(super::inventory_plan::InventoryIntent),
+    /// Consolidate direct partial stacks using an explicit frontend timeout policy.
+    AutoMergeContainer {
+        /// Player root or a directly carried real bag.
+        container: Guid,
+        /// Finite application-chosen execution budgets.
+        policy: super::container_auto_merge::AutoMergePolicy,
+    },
+    /// Changes only the local player's response to peer entities.
+    SetEntityCollisionDisabled(bool),
     Login(String),
     SelectCharacter(Guid),
-    SendCharacterEnterWorld {
-        guid: Guid,
-        account: String,
-    },
     CreateCharacter(Box<CharacterCreateRequestData>),
     DeleteCharacter {
         slot: u32,
     },
     RestoreCharacter(Guid),
-    EnterWorld,
+    /// Ordinary chat text after frontend-owned command parsing.
     Talk(String),
+    /// Read death locations without sending a game action.
+    QueryDeathLocations(super::corpse::DeathLocationQuery),
+    /// Manage permissions received from other corpse owners.
+    ManageCorpseConsent(super::corpse::CorpseConsentAction),
     Tell {
-        target: String,
+        /// Name-addressed player or entity-addressed NPC, independent of current selection.
+        target: ChatTellTarget,
         message: String,
     },
     ChannelMessage {
-        channel: ChatChannelKind,
+        channel: ChatChannelDestination,
         message: String,
     },
     Emote(String),
-    SoulEmote(String),
-    RecallLifestone,
-    TeleportToPklArena,
-    TeleportToMarketplace,
-    RecallAllegianceHousing,
+    /// Catalog emote; optional caller identity receives authoritative local playback outcomes.
+    SoulEmote {
+        /// Catalog alias resolved by core.
+        token: String,
+        /// Caller-scoped correlation, absent for callers that only need ordinary action feedback.
+        request_id: Option<u32>,
+    },
+    /// Attempt one standard recall; ACE decides final acceptance.
+    Recall(RecallDestination),
+    /// Privileged outdoor map request; ACE supplies destination height and building placement.
+    TeleportToMapPosition(holtburger_common::position::WorldPosition),
+    /// Fetch a fresh partial allegiance profile.
+    QueryAllegiance,
     SwearAllegiance {
         target: Guid,
     },
@@ -486,17 +1476,35 @@ pub enum ClientCommand {
     Suicide,
     EnterPkLite,
     Ping,
-    RequestInitialViewState,
+    RequestCurrentApplicationState,
+    /// Supplies the presentation-owned first-pure-destination acknowledgement for one
+    /// generation. Non-rendering compositions use the immediate adapter and need not send it.
+    AcknowledgeClientWorldReveal {
+        world_generation: u64,
+    },
+    /// Gracefully leave the character and retain the authenticated session.
+    Logout,
+    Disconnect,
     SetFellowshipUpdatesSubscribed {
         enabled: bool,
     },
     Identify(Guid),
+    /// Request one page for the character that opened the reader.
     ReadBookPage {
+        /// Character identity checked before sending the wire action.
+        player: Guid,
+        /// Book containing the page.
         book: Guid,
+        /// Zero-based page identity from the full response.
         page_index: u32,
     },
     QueryHealth(Guid),
-    Use(Guid),
+    Use {
+        /// Entity receiving the direct use request.
+        guid: Guid,
+        /// Explicit diagnostic override of authored useability; server and busy checks still apply.
+        unrestricted: bool,
+    },
     Drop(Guid),
     Get(Guid),
     Stack {
@@ -524,27 +1532,42 @@ pub enum ClientCommand {
         amount: u32,
     },
     DriveSelf(PlayerDriveIntent),
-    RaiseAttribute {
-        attribute: AttributeType,
-        xp_spent: u32,
+    /// Applies one ordered, non-coalescible character-motion lifecycle edge.
+    ControlCharacter(SequencedCharacterMotionEvent),
+    /// Replaces any queued precise-jump hover sample for the same active camera generation.
+    SetPreciseJumpAim(PreciseJumpAimRequest),
+    /// Runs one finite portal-aware entity-selection broad phase.
+    QueryEntitySelectionCandidates(EntitySelectionQueryRequest),
+    /// Requests a fresh authoritative solve for one previously reachable evaluation.
+    CommitPreciseJump(PreciseJumpCommitRequest),
+    /// Explicitly leaves precise-jump mode without launching.
+    CancelPreciseJump(PreciseJumpCancelRequest),
+    StartClientCamera(ClientCameraStartRequest),
+    SetClientCameraIntent(ClientCameraIntentRequest),
+    SetClientCameraClearance(ClientCameraClearanceRequest),
+    StopClientCamera(ClientCameraIdentity),
+    /// Evaluate multiple advancement intents against one current runtime scope.
+    EvaluateProgression {
+        request_id: u32,
+        intents: Vec<holtburger_world::progression::ProgressionIntent>,
     },
-    RaiseVital {
-        vital: VitalType,
-        xp_spent: u32,
-    },
-    RaiseSkill {
-        skill: SkillType,
-        xp_spent: u32,
-    },
-    TrainSkill {
-        skill: SkillType,
-        credits: u32,
-    },
+    /// Submit the exact consequence shown by a shared progression evaluation.
+    SubmitProgression(super::progression::ClientProgressionQuote),
     GiveObjectRequest {
         target: Guid,
         item: Guid,
         amount: u32,
     },
+    /// Execute an optional sale followed by an optional purchase under one busy owner.
+    VendorTrade(super::vendor_transaction::VendorTradeRequest),
+    /// Evaluate a draft without changing inventory or sending a server action.
+    PreviewVendorTrade(super::vendor_transaction::VendorTradeRequest),
+    /// Evaluate or auto-fill a housing draft without submitting payment.
+    PreviewHousingPayment(super::housing_payment::HousingPreviewRequest),
+    /// Submit reviewed housing consumption through the shared mutation owner.
+    SubmitHousingPayment(super::housing_execution::HousingPaymentRequest),
+    /// Reviewed implicit-home administrative request.
+    SubmitHousingManagement(super::housing_management::HousingManagementRequest),
     Buy {
         vendor: Guid,
         items: Vec<ItemProfileActionData>,
@@ -553,14 +1576,8 @@ pub enum ClientCommand {
         vendor: Guid,
         items: Vec<ItemProfileActionData>,
     },
-    OpenTrade(Guid),
-    CloseTrade,
-    AcceptTrade,
-    DeclineTrade,
-    ResetTrade,
-    AddToTrade {
-        item: Guid,
-    },
+    /// Shared P2P negotiation command with explicit session/offer guards.
+    Trade(super::trade::TradeRequest),
     CreateParty {
         name: String,
     },
@@ -572,6 +1589,35 @@ pub enum ClientCommand {
         target: Guid,
     },
     LeaveParty,
+    /// Add a server-resolved all-channel ignore.
+    AddIgnore {
+        name: String,
+        scope: holtburger_world::state::squelch::SquelchScope,
+    },
+    /// Remove only the explicit scope from the retained entry.
+    RemoveIgnore {
+        guid: Guid,
+        scope: holtburger_world::state::squelch::SquelchScope,
+    },
+    /// Add a friend by server-resolved character name.
+    AddFriend {
+        name: String,
+    },
+    /// Remove tracking without resetting quest progress.
+    AbandonContract {
+        /// Stable registry identity.
+        id: u32,
+    },
+    /// Remove a friend by retained identity.
+    RemoveFriend {
+        guid: Guid,
+    },
+    /// End the active fellowship; the server restricts this to its leader.
+    DisbandParty,
+    /// Explicit enrollment policy for the active fellowship.
+    SetPartyOpenness {
+        open: bool,
+    },
     UninviteFromParty {
         target: Guid,
     },
@@ -584,12 +1630,24 @@ pub enum ClientCommand {
         tool: Guid,
         items: Vec<Guid>,
     },
-    CastTargetedSpell {
-        target: Guid,
+    /// Submit one spellbook cast with explicit recipient intent.
+    CastSpell {
         spell_id: u32,
+        aim: SpellCastAim,
     },
-    CastUntargetedSpell {
-        spell_id: u32,
+    /// Starts or explicitly retargets the shared server-repeat engagement.
+    BeginCombatEngagement {
+        /// Caller-owned begin/stop identity echoed even when this request is refused.
+        intent_sequence: u64,
+        target: Guid,
+        profile: ClientAttackProfile,
+    },
+    /// Coalesces controls for the desired engagement without changing its target.
+    UpdateCombatProfile(ClientAttackProfile),
+    /// Clears desired engagement and retires any server attack sequence.
+    StopCombatEngagement {
+        /// Caller-owned begin/stop identity; profile-only updates retain the current identity.
+        intent_sequence: u64,
     },
     TargetedMeleeAttack {
         target: Guid,
@@ -600,6 +1658,13 @@ pub enum ClientCommand {
         target: Guid,
         attack_height: AttackHeight,
         accuracy_level: f32,
+    },
+    /// Optimistically select a title for the captured character; the server owns eligibility.
+    SetCharacterTitle {
+        /// Character identity used for lifecycle admission.
+        character: Guid,
+        /// Requested title ID without client ownership validation.
+        title_id: u32,
     },
     SetCharacterOption {
         option: CharacterOption,
@@ -612,8 +1677,16 @@ pub enum ClientCommand {
         player_name: String,
     },
     RespondToConfirmation {
+        /// Receipt of the displayed request; never answer a replacement implicitly.
+        request_id: u64,
         accepted: bool,
     },
+    /// Toggle peace and the equipped default stance using current authoritative facts.
+    /// Silent gameplay posture; core establishes peace before entering a resting pose.
+    SetRestPosture(holtburger_world::motion::RestPosture),
+    /// Invalidate a posture request still waiting for its prerequisite.
+    CancelRestPosture,
+    ToggleCombatMode,
     SetCombatMode(CombatMode),
     CancelAttack,
     QueryEntityDebugInfo(Guid),

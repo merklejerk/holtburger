@@ -1,18 +1,68 @@
+use super::stats_calc::{SkillAugmentations, SkillCalculationContext};
 use super::*;
 use crate::WorldEvent;
 use crate::WorldState;
-use crate::entity::{Entity, EntityMotionDirective, EntityMotionSnapshot, OrderedMotionSpeed};
+use crate::entity::{
+    Entity, EntityMotionDirective, EntityMotionSnapshot, EntityNetworkMotion, OrderedMotionScalar,
+};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
+use holtburger_dat::file_type::skill_table::{SkillBase as DatSkillBase, SkillFormula};
+use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable};
 use holtburger_protocol::messages::movement::VectorUpdateData;
 use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 use holtburger_protocol::messages::{
     GameMessage, InterpretedMotionState, MovementEventData, MovementInvalid, MovementStateFlags,
     MovementType, MovementTypeData,
 };
+
+fn test_skill_context(table: &SkillTable) -> SkillCalculationContext<'_> {
+    SkillCalculationContext {
+        table,
+        augmentations: SkillAugmentations::default(),
+        vitae: 1.0,
+    }
+}
+
+fn test_skill_table() -> SkillTable {
+    let mut table = SkillTable::default();
+    for (skill, first, second, divisor) in [
+        (stats::SkillType::MeleeDefense, 3, 4, 3),
+        (stats::SkillType::Run, 3, 0, 1),
+        (stats::SkillType::HeavyWeapons, 1, 4, 3),
+    ] {
+        table.skill_base_hash.insert(
+            skill as u32,
+            DatSkillBase {
+                description: String::new(),
+                name: skill.to_string(),
+                _align1: (),
+                _align2: (),
+                icon_id: 0,
+                trained_cost: 0,
+                specialized_cost: 0,
+                category: 0,
+                chargen_use: 0,
+                min_level: 1,
+                formula: SkillFormula {
+                    w: 0,
+                    x: 1,
+                    y: u32::from(second != 0),
+                    z: divisor,
+                    attr1: first,
+                    attr2: second,
+                },
+                upper_bound: 0.0,
+                lower_bound: 0.0,
+                learn_mod: 0.0,
+            },
+        );
+    }
+    table
+}
 
 fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
     player.attributes.insert(
@@ -25,6 +75,7 @@ fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
             next_rank_xp: None,
             base: val,
             current: val,
+            breakdown: Default::default(),
         },
     );
 }
@@ -32,6 +83,8 @@ fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
 #[test]
 fn test_stat_calculations() {
     let mut player = PlayerState::new();
+    let vitals = SecondaryAttributeTable::synthetic();
+    let skills = test_skill_table();
 
     // Setup attributes
     set_attr(&mut player, stats::AttributeType::StrengthAttr, 100);
@@ -43,15 +96,15 @@ fn test_stat_calculations() {
 
     // Test Vital Bonuses
     assert_eq!(
-        player.calculate_vital_attribute_contribution(stats::VitalType::Health, false),
+        player.calculate_vital_attribute_contribution(stats::VitalType::Health, false, &vitals),
         50
     );
     assert_eq!(
-        player.calculate_vital_attribute_contribution(stats::VitalType::Stamina, false),
+        player.calculate_vital_attribute_contribution(stats::VitalType::Stamina, false, &vitals),
         100
     );
     assert_eq!(
-        player.calculate_vital_attribute_contribution(stats::VitalType::Mana, false),
+        player.calculate_vital_attribute_contribution(stats::VitalType::Mana, false, &vitals),
         100
     );
 
@@ -63,17 +116,417 @@ fn test_stat_calculations() {
             start: 0,
         },
     );
-    assert_eq!(player.calculate_vital_base(stats::VitalType::Health), 100);
+    assert_eq!(
+        player.calculate_vital_base(stats::VitalType::Health, &vitals),
+        100
+    );
 
     // Test Skill Math
     assert_eq!(
-        player.derive_skill_value(stats::SkillType::MeleeDefense, 10, 4, false),
+        player.derive_skill_value(
+            stats::SkillType::MeleeDefense,
+            10,
+            4,
+            stats::TrainingLevel::Trained,
+            false,
+            test_skill_context(&skills),
+        ),
         81
     );
     assert_eq!(
-        player.derive_skill_value(stats::SkillType::Run, 5, 0, false),
+        player.derive_skill_value(
+            stats::SkillType::Run,
+            5,
+            0,
+            stats::TrainingLevel::Trained,
+            false,
+            test_skill_context(&skills),
+        ),
         105
     );
+}
+
+#[test]
+fn authored_formulas_and_skill_usability_control_attribute_contributions() {
+    let mut player = PlayerState::new();
+    set_attr(&mut player, stats::AttributeType::EnduranceAttr, 100);
+    set_attr(&mut player, stats::AttributeType::FocusAttr, 42);
+    set_attr(&mut player, stats::AttributeType::QuicknessAttr, 60);
+
+    let mut vitals = SecondaryAttributeTable::synthetic();
+    vitals.max_health.attr1 = stats::AttributeType::FocusAttr as u32;
+    assert_eq!(
+        player.calculate_vital_attribute_contribution(stats::VitalType::Health, false, &vitals),
+        21,
+    );
+
+    let mut skills = test_skill_table();
+    let run = skills
+        .skill_base_hash
+        .get_mut(&(stats::SkillType::Run as u32))
+        .unwrap();
+    run.min_level = 2;
+    assert_eq!(
+        player.derive_skill_value(
+            stats::SkillType::Run,
+            5,
+            0,
+            stats::TrainingLevel::Untrained,
+            false,
+            test_skill_context(&skills),
+        ),
+        5,
+    );
+    assert_eq!(
+        player.derive_skill_value(
+            stats::SkillType::Run,
+            5,
+            0,
+            stats::TrainingLevel::Trained,
+            false,
+            test_skill_context(&skills),
+        ),
+        65,
+    );
+    skills
+        .skill_base_hash
+        .get_mut(&(stats::SkillType::Run as u32))
+        .unwrap()
+        .formula
+        .x = 0;
+    assert_eq!(
+        player.derive_skill_value(
+            stats::SkillType::Run,
+            5,
+            0,
+            stats::TrainingLevel::Trained,
+            false,
+            test_skill_context(&skills),
+        ),
+        5,
+    );
+}
+
+#[test]
+fn skill_augmentations_follow_ace_base_and_current_order() {
+    let mut player = PlayerState::new();
+    set_attr(&mut player, stats::AttributeType::StrengthAttr, 90);
+    set_attr(&mut player, stats::AttributeType::CoordinationAttr, 90);
+    let augmentations = SkillAugmentations {
+        all_skills: 5,
+        skilled_melee: 1,
+        enlightenment: 2,
+        jack_of_all_trades: 1,
+        specialized_luminance: 2,
+        ..SkillAugmentations::default()
+    };
+    let table = test_skill_table();
+    let base = player.derive_skill_value(
+        stats::SkillType::HeavyWeapons,
+        10,
+        0,
+        stats::TrainingLevel::Specialized,
+        false,
+        SkillCalculationContext {
+            table: &table,
+            augmentations,
+            vitae: 0.5,
+        },
+    );
+    assert_eq!(base, 87); // 60 from attributes + 10 ranks + 5 + 10 + 2 base bonuses.
+    let current = player.derive_skill_value(
+        stats::SkillType::HeavyWeapons,
+        10,
+        0,
+        stats::TrainingLevel::Specialized,
+        true,
+        SkillCalculationContext {
+            table: &table,
+            augmentations,
+            vitae: 0.5,
+        },
+    );
+    assert_eq!(current, 53); // Round((87 * 0.5) + 5 Jack + 4 specialized luminance).
+}
+
+#[test]
+fn skilled_augmentation_groups_only_affect_their_ace_skill_classes() {
+    use crate::stat_breakdown::SkillBonusSource;
+
+    let player = PlayerState::new();
+    let mut table = test_skill_table();
+    let definition = table.skill_base_hash[&(stats::SkillType::HeavyWeapons as u32)].clone();
+    for skill in [stats::SkillType::MissileWeapons, stats::SkillType::WarMagic] {
+        table
+            .skill_base_hash
+            .insert(skill as u32, definition.clone());
+    }
+    for (skill, expected) in [
+        (
+            stats::SkillType::HeavyWeapons,
+            Some(SkillBonusSource::SkilledMelee),
+        ),
+        (
+            stats::SkillType::MissileWeapons,
+            Some(SkillBonusSource::SkilledMissile),
+        ),
+        (
+            stats::SkillType::WarMagic,
+            Some(SkillBonusSource::SkilledMagic),
+        ),
+        (stats::SkillType::Run, None),
+    ] {
+        let (base, _, breakdown) = player.evaluate_skill(
+            skill,
+            0,
+            0,
+            stats::TrainingLevel::Trained,
+            SkillCalculationContext {
+                table: &table,
+                augmentations: SkillAugmentations {
+                    skilled_melee: 1,
+                    skilled_missile: 1,
+                    skilled_magic: 1,
+                    ..SkillAugmentations::default()
+                },
+                vitae: 1.0,
+            },
+        );
+        let group_bonuses: Vec<_> = breakdown
+            .base_bonuses
+            .iter()
+            .filter(|bonus| {
+                matches!(
+                    bonus.source,
+                    SkillBonusSource::SkilledMelee
+                        | SkillBonusSource::SkilledMissile
+                        | SkillBonusSource::SkilledMagic
+                )
+            })
+            .map(|bonus| bonus.source)
+            .collect();
+        assert_eq!(group_bonuses, expected.into_iter().collect::<Vec<_>>());
+        let without_augmentation = player.derive_skill_value(
+            skill,
+            0,
+            0,
+            stats::TrainingLevel::Trained,
+            false,
+            test_skill_context(&table),
+        );
+        assert_eq!(
+            base - without_augmentation,
+            u32::from(expected.is_some()) * 10
+        );
+    }
+}
+
+#[test]
+fn skill_breakdown_reconciles_formula_bonuses_and_selected_modifiers() {
+    use crate::enchantments::{EnchantmentChannel, EnchantmentOperation};
+    use crate::stat_breakdown::{SkillBonusSource, SkillFormulaBreakdown};
+
+    let mut player = PlayerState::new();
+    set_attr(&mut player, stats::AttributeType::StrengthAttr, 90);
+    set_attr(&mut player, stats::AttributeType::CoordinationAttr, 90);
+    let attribute_flags = EnchantmentTypeFlags::ATTRIBUTE
+        | EnchantmentTypeFlags::SINGLE_STAT
+        | EnchantmentTypeFlags::ADDITIVE;
+    for (spell_id, power, value) in [(1, 100, 20.0), (2, 50, 10.0)] {
+        player.enchantments.push(Enchantment {
+            spell_id,
+            spell_category: 1,
+            power_level: power,
+            stat_mod_type: attribute_flags.bits(),
+            stat_mod_key: stats::AttributeType::StrengthAttr as u32,
+            stat_mod_value: value,
+            ..Default::default()
+        });
+    }
+    player.enchantments.push(Enchantment {
+        spell_id: 3,
+        spell_category: 2,
+        power_level: 100,
+        stat_mod_type: (EnchantmentTypeFlags::SKILL
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::MULTIPLICATIVE)
+            .bits(),
+        stat_mod_key: stats::SkillType::HeavyWeapons as u32,
+        stat_mod_value: 1.1,
+        ..Default::default()
+    });
+    player.enchantments.push(Enchantment {
+        spell_id: 4,
+        spell_category: 3,
+        power_level: 100,
+        stat_mod_type: (EnchantmentTypeFlags::SKILL
+            | EnchantmentTypeFlags::ATTACK_SKILLS
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
+        stat_mod_key: 0,
+        stat_mod_value: 3.5,
+        ..Default::default()
+    });
+
+    let attribute = player.evaluate_attribute(stats::AttributeType::StrengthAttr, 90);
+    assert_eq!(attribute.finalization.result, 110);
+    assert_eq!(attribute.modifiers.contributions.len(), 1);
+    assert_eq!(attribute.modifiers.contributions[0].effective.spell_id, 1);
+    assert_eq!(
+        attribute.modifiers.contributions[0].overridden[0].spell_id,
+        2
+    );
+
+    let table = test_skill_table();
+    let (base, current, breakdown) = player.evaluate_skill(
+        stats::SkillType::HeavyWeapons,
+        10,
+        0,
+        stats::TrainingLevel::Specialized,
+        SkillCalculationContext {
+            table: &table,
+            augmentations: SkillAugmentations {
+                all_skills: 5,
+                skilled_melee: 1,
+                enlightenment: 2,
+                jack_of_all_trades: 1,
+                specialized_luminance: 2,
+                ..SkillAugmentations::default()
+            },
+            vitae: 0.5,
+        },
+    );
+    let SkillFormulaBreakdown::Applied(formula) = breakdown.formula else {
+        panic!("trained skill should apply its authored formula");
+    };
+    assert_eq!((formula.base_result, formula.effective_result), (60, 67));
+    assert_eq!((formula.first.base, formula.first.effective), (90, 110));
+    assert_eq!(formula.first.modifiers[0].effective.spell_id, 1);
+    assert_eq!(formula.first.modifiers[0].overridden[0].spell_id, 2);
+    assert_eq!(base, 87);
+    assert_eq!(breakdown.base_bonuses.len(), 3);
+    assert_eq!(
+        breakdown.base_bonuses[0].source,
+        SkillBonusSource::AllSkills
+    );
+    assert_eq!(breakdown.current_bonuses.len(), 2);
+    assert_eq!(
+        breakdown.modifiers.contributions[0].operation,
+        EnchantmentOperation::Multiplicative
+    );
+    assert_eq!(
+        breakdown.wide_modifiers[0].channel,
+        EnchantmentChannel::AttackSkills
+    );
+    assert_eq!(breakdown.wide_additive_rounded, 4.0);
+    assert_eq!(current, breakdown.finalization.result);
+    assert_eq!(current, 65);
+}
+
+#[test]
+fn stat_mutation_events_store_the_same_breakdowns_as_cached_values() {
+    use super::mutations::{SkillUpdateParams, VitalUpdateParams};
+    use crate::stat_breakdown::SkillFormulaBreakdown;
+    use holtburger_dat::file_type::XpTable;
+
+    let mut player = PlayerState::new();
+    let xp_table = XpTable::default();
+    let skill_table = test_skill_table();
+    let vital_table = SecondaryAttributeTable::synthetic();
+    let mut events = Vec::new();
+    for (attribute, start) in [
+        (stats::AttributeType::StrengthAttr, 90),
+        (stats::AttributeType::CoordinationAttr, 90),
+        (stats::AttributeType::EnduranceAttr, 100),
+    ] {
+        player.update_attribute(attribute as u32, 0, start, 0, &xp_table, &mut events);
+        let cached = &player.attributes[&attribute];
+        assert_eq!(cached.current, cached.breakdown.finalization.result);
+    }
+    player.update_vital(
+        VitalUpdateParams {
+            vital_id: stats::VitalType::Health as u32,
+            ranks: 1,
+            start: 100,
+            current: 150,
+            xp: 0,
+            xp_table: &xp_table,
+            secondary_attribute_table: &vital_table,
+        },
+        &mut events,
+    );
+    let health = &player.vitals[&stats::VitalType::Health];
+    assert_eq!(health.base, 151);
+    assert_eq!(health.buffed_max, health.breakdown.finalization.result);
+    assert_eq!(health.breakdown.formula.as_ref().unwrap().base_result, 50);
+
+    player.update_skill(
+        SkillUpdateParams {
+            skill_id: stats::SkillType::HeavyWeapons as u32,
+            ranks: 10,
+            status: stats::TrainingLevel::Trained as u32,
+            init: 0,
+            xp: 0,
+            xp_table: &xp_table,
+            calculation: test_skill_context(&skill_table),
+        },
+        &mut events,
+    );
+    let skill = &player.skills[&stats::SkillType::HeavyWeapons];
+    assert_eq!(skill.base, 70);
+    assert_eq!(skill.current, skill.breakdown.finalization.result);
+    assert!(matches!(
+        skill.breakdown.formula,
+        SkillFormulaBreakdown::Applied(_)
+    ));
+    let event_skill = events.iter().find_map(|event| match event {
+        WorldEvent::SkillUpdated(updated) => Some(updated),
+        _ => None,
+    });
+    assert_eq!(event_skill, Some(skill));
+}
+
+#[test]
+fn overridden_enchantment_change_publishes_breakdown_without_value_change() {
+    let mut state = WorldState::synthetic();
+    state.seed_local_player_entity(Guid(0x5000_0001), "Player", WorldPosition::default());
+    set_attr(&mut state.player, stats::AttributeType::StrengthAttr, 100);
+    let mut events = Vec::new();
+    state.emit_player_derived_stats(&mut events);
+    events.clear();
+
+    let flags = EnchantmentTypeFlags::ATTRIBUTE
+        | EnchantmentTypeFlags::SINGLE_STAT
+        | EnchantmentTypeFlags::ADDITIVE;
+    for (spell_id, power, value) in [(1, 100, 20.0), (2, 50, 10.0)] {
+        state.player.enchantments.push(Enchantment {
+            spell_id,
+            spell_category: 1,
+            power_level: power,
+            stat_mod_type: flags.bits(),
+            stat_mod_key: stats::AttributeType::StrengthAttr as u32,
+            stat_mod_value: value,
+            ..Default::default()
+        });
+        state.emit_player_derived_stats(&mut events);
+        if spell_id == 1 {
+            events.clear();
+        }
+    }
+
+    let attribute = &state.player.attributes[&stats::AttributeType::StrengthAttr];
+    assert_eq!(attribute.current, 120);
+    assert_eq!(
+        attribute.breakdown.modifiers.contributions[0]
+            .overridden
+            .len(),
+        1
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::DerivedStatsUpdated(stats)
+            if stats.attributes.iter().any(|value| value == attribute)
+    )));
 }
 
 #[test]
@@ -150,20 +603,32 @@ fn test_character_option_helpers_read_and_update_both_masks() {
     assert!(player.character_option_enabled(CharacterOption::ShowYourHelmOrHeadGear));
     assert!(
         player
+            .character_options
             .options1
             .contains(CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG)
     );
-    assert!(player.options2.contains(CharacterOptions2::SHOW_HELM));
+    assert!(
+        player
+            .character_options
+            .options2
+            .contains(CharacterOptions2::SHOW_HELM)
+    );
 
     player.set_character_option_enabled(CharacterOption::UseCraftingChanceOfSuccessDialog, false);
 
     assert!(!player.character_option_enabled(CharacterOption::UseCraftingChanceOfSuccessDialog,));
     assert!(
         !player
+            .character_options
             .options1
             .contains(CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG)
     );
-    assert!(player.options2.contains(CharacterOptions2::SHOW_HELM));
+    assert!(
+        player
+            .character_options
+            .options2
+            .contains(CharacterOptions2::SHOW_HELM)
+    );
 }
 
 #[test]
@@ -185,7 +650,10 @@ fn test_stat_floors() {
         degrade_modifier: 0.0,
         degrade_limit: -666.0,
         last_time_degraded: 0.0,
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::StrengthAttr as u32,
         stat_mod_value: -200.0,
         spell_set_id: None,
@@ -209,7 +677,10 @@ fn test_stat_floors() {
         degrade_modifier: 0.0,
         degrade_limit: -666.0,
         last_time_degraded: 0.0,
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::EnduranceAttr as u32,
         stat_mod_value: -100.0,
         spell_set_id: None,
@@ -243,12 +714,21 @@ fn test_stat_floors() {
         degrade_modifier: 0.0,
         degrade_limit: -666.0,
         last_time_degraded: 0.0,
-        stat_mod_type: (EnchantmentTypeFlags::SECOND_ATT | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::SECOND_ATT
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::VitalType::Health as u32,
         stat_mod_value: -200.0,
         spell_set_id: None,
     });
-    assert_eq!(player.calculate_vital_current(stats::VitalType::Health), 5);
+    assert_eq!(
+        player.calculate_vital_current(
+            stats::VitalType::Health,
+            &SecondaryAttributeTable::synthetic(),
+        ),
+        5
+    );
 
     // 3. Skill floor check (0)
     player.skill_bases.insert(
@@ -275,13 +755,23 @@ fn test_stat_floors() {
         degrade_modifier: 0.0,
         degrade_limit: -666.0,
         last_time_degraded: 0.0,
-        stat_mod_type: (EnchantmentTypeFlags::SKILL | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::SKILL
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::SkillType::MeleeDefense as u32,
         stat_mod_value: -200.0,
         spell_set_id: None,
     });
     assert_eq!(
-        player.derive_skill_value(stats::SkillType::MeleeDefense, 100, 0, true),
+        player.derive_skill_value(
+            stats::SkillType::MeleeDefense,
+            100,
+            0,
+            stats::TrainingLevel::Trained,
+            true,
+            test_skill_context(&test_skill_table()),
+        ),
         0
     );
 
@@ -329,7 +819,10 @@ fn test_buff_calculations() {
     player.enchantments.push(Enchantment {
         spell_category: 1, // strength group
         power_level: 100,
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::StrengthAttr as u32,
         stat_mod_value: 20.0,
         ..Default::default()
@@ -339,7 +832,10 @@ fn test_buff_calculations() {
     player.enchantments.push(Enchantment {
         spell_category: 2, // axe group
         power_level: 100,
-        stat_mod_type: (EnchantmentTypeFlags::SKILL | EnchantmentTypeFlags::MULTIPLICATIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::SKILL
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::MULTIPLICATIVE)
+            .bits(),
         stat_mod_key: stats::SkillType::Axe as u32,
         stat_mod_value: 1.10,
         ..Default::default()
@@ -359,14 +855,24 @@ fn test_buff_calculations() {
         SkillBase { ranks: 10, init: 0 },
     );
 
-    let val = player.derive_skill_value(stats::SkillType::HeavyWeapons, 10, 0, true);
+    let val = player.derive_skill_value(
+        stats::SkillType::HeavyWeapons,
+        10,
+        0,
+        stats::TrainingLevel::Trained,
+        true,
+        test_skill_context(&test_skill_table()),
+    );
     assert_eq!(val, 73 + 10); // 83
 
     // Test Stacking: Add a weaker Strength buff
     player.enchantments.push(Enchantment {
         spell_category: 1, // same strength group
         power_level: 50,   // Lower power
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::StrengthAttr as u32,
         stat_mod_value: 10.0,
         ..Default::default()
@@ -382,7 +888,10 @@ fn test_buff_calculations() {
     player.enchantments.push(Enchantment {
         spell_category: 1, // same group
         power_level: 200,  // Higher power
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::StrengthAttr as u32,
         stat_mod_value: 30.0,
         ..Default::default()
@@ -410,7 +919,10 @@ fn test_health_rounding() {
         },
     );
 
-    let health_base = player.calculate_vital_base(stats::VitalType::Health);
+    let health_base = player.calculate_vital_base(
+        stats::VitalType::Health,
+        &SecondaryAttributeTable::synthetic(),
+    );
     assert_eq!(
         health_base, 151,
         "Base Health contribution from 101 Endurance should be 51 (rounded)"
@@ -419,7 +931,10 @@ fn test_health_rounding() {
     // Add an Endurance buff of +10 (Total 111)
     player.enchantments.push(Enchantment {
         spell_category: 3, // endurance group
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::EnduranceAttr as u32,
         stat_mod_value: 10.0,
         power_level: 100,
@@ -428,7 +943,10 @@ fn test_health_rounding() {
 
     // Current Endurance should be 111. 111 / 2 = 55.5 -> 56.
     // Total health should be 100 (start) + 56 (bonus) = 156.
-    let health_current = player.calculate_vital_current(stats::VitalType::Health);
+    let health_current = player.calculate_vital_current(
+        stats::VitalType::Health,
+        &SecondaryAttributeTable::synthetic(),
+    );
     assert_eq!(
         health_current, 156,
         "Current Health with 111 Endurance should be 156 (111/2=55.5 rounded to 56)"
@@ -446,6 +964,7 @@ fn test_vector_update_routing() {
 
     let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x50000001);
+    state.player.instance_sequence = 123;
     state.entities.insert(Entity::new(
         state.player.guid,
         "Player".to_string(),
@@ -463,13 +982,14 @@ fn test_vector_update_routing() {
     let msg = GameMessage::VectorUpdate(Box::new(data));
     let events = state.handle_message(&msg);
 
-    assert_eq!(events.len(), 2);
+    assert_eq!(events.len(), 1);
     assert_eq!(state.player.instance_sequence, 123);
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::RuntimeBodyChanged { body_id }
-            if *body_id == crate::SpatialBodyId::LocalPlayer(Guid(0x50000001))
-    )));
+    assert_eq!(state.player.vector_sequence, 456);
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::RuntimeBodyChanged { .. }))
+    );
     assert!(events.iter().any(|event| matches!(
         event,
         WorldEvent::EntityVectorUpdated { guid, velocity, omega }
@@ -507,7 +1027,10 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
         spell_id: 200,
         layer: 1,
         spell_category: 200,
-        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+        stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
         stat_mod_key: stats::AttributeType::StrengthAttr as u32,
         stat_mod_value: -10.0,
         ..Default::default()
@@ -651,6 +1174,7 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
     let guid = Guid(0x60000001);
 
     let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
+    entity.sequences[8] = 7;
     entity.health_fraction = Some(0.42);
     state.add_entity(entity);
 
@@ -680,7 +1204,7 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
     let snapshot = state
         .entities
         .get(guid)
-        .and_then(|entity| entity.motion_snapshot)
+        .and_then(|entity| entity.network_motion.snapshot())
         .expect("expected motion snapshot to be cached");
 
     assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
@@ -698,10 +1222,10 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
     );
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::EntityMotionUpdated { guid: target, snapshot }
+        WorldEvent::EntityMotionUpdated { guid: target, motion }
             if *target == guid
-            && snapshot.as_ref().is_some_and(|snapshot| snapshot.current_style == Some(MotionStance::NonCombat))
-            && snapshot.as_ref().is_some_and(|snapshot| snapshot.motion_command() == Some(InterpretedMotionCommand::DEAD))
+            && motion.snapshot().is_some_and(|snapshot| snapshot.current_style == Some(MotionStance::NonCombat))
+            && motion.snapshot().is_some_and(|snapshot| snapshot.motion_command() == Some(InterpretedMotionCommand::DEAD))
     )));
     assert!(events.iter().any(|event| matches!(
         event,
@@ -713,12 +1237,13 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
 }
 
 #[test]
-fn test_update_motion_clears_remote_entity_motion_snapshot_and_emits_event() {
+fn test_empty_update_motion_initializes_remote_entity_idle_and_emits_event() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
 
     let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
-    entity.motion_snapshot = Some(EntityMotionSnapshot {
+    entity.sequences[8] = 1;
+    entity.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         forward_command: Some(InterpretedMotionCommand::WALK_FORWARD),
         sidestep_command: None,
@@ -745,13 +1270,52 @@ fn test_update_motion_clears_remote_entity_motion_snapshot_and_emits_event() {
         state
             .entities
             .get(guid)
-            .and_then(|entity| entity.motion_snapshot),
-        None
+            .and_then(|entity| entity.network_motion.snapshot())
+            .map(|snapshot| snapshot.current_style),
+        Some(Some(MotionStance::NonCombat))
     );
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::EntityMotionUpdated { guid: target, snapshot }
-            if *target == guid && snapshot.is_none()
+        WorldEvent::EntityMotionUpdated { guid: target, motion }
+            if *target == guid
+            && motion.snapshot().is_some_and(|snapshot| {
+                snapshot.current_style == Some(MotionStance::NonCombat)
+                    && snapshot.motion_command().is_none()
+            })
+    )));
+}
+
+#[test]
+fn autonomous_jump_echo_preserves_local_combat_stance() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x5000_0001);
+    state.seed_local_player_entity(guid, "Player", WorldPosition::default());
+    let motion = EntityMotionSnapshot {
+        current_style: Some(MotionStance::TwoHandedSwordCombat),
+        ..Default::default()
+    };
+    state.player_entity_mut().unwrap().network_motion = EntityNetworkMotion::Initialized(motion);
+    // ACE HandleActionJump constructs MovementData with zero outer style and an empty
+    // MovementInvalid payload, then broadcasts it as autonomous movement.
+    let events = state.handle_message(&GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid,
+        object_instance_sequence: 1,
+        movement_sequence: 2,
+        server_control_sequence: 3,
+        is_autonomous: true,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: 0,
+        data: MovementTypeData::Invalid(MovementInvalid::default()),
+    })));
+    assert_eq!(
+        state.player_entity().unwrap().network_motion.snapshot(),
+        Some(motion)
+    );
+    assert_eq!(state.player.server_control_sequence, 3);
+    assert!(!events.iter().any(|event| matches!(event,
+        WorldEvent::EntityMotionUpdated { guid: changed, .. }
+        | WorldEvent::EntityMotionPlaybackChanged { guid: changed } if *changed == guid
     )));
 }
 
@@ -760,11 +1324,9 @@ fn test_update_motion_retains_interpreted_motion_speeds() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
 
-    state.add_entity(Entity::new(
-        guid,
-        "Drudge".to_string(),
-        WorldPosition::default(),
-    ));
+    let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
+    entity.sequences[8] = 7;
+    state.add_entity(entity);
 
     let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
         guid,
@@ -797,25 +1359,25 @@ fn test_update_motion_retains_interpreted_motion_speeds() {
     let snapshot = state
         .entities
         .get(guid)
-        .and_then(|entity| entity.motion_snapshot)
+        .and_then(|entity| entity.network_motion.snapshot())
         .expect("expected motion snapshot to be cached");
 
     assert_eq!(
         snapshot.forward_command,
         Some(InterpretedMotionCommand::RUN_FORWARD)
     );
-    assert_eq!(snapshot.forward_speed, OrderedMotionSpeed::from_f32(3.5));
+    assert_eq!(snapshot.forward_speed, OrderedMotionScalar::from_f32(3.5));
     assert_eq!(
         snapshot.turn_command,
         Some(InterpretedMotionCommand::TURN_RIGHT)
     );
-    assert_eq!(snapshot.turn_speed, OrderedMotionSpeed::from_f32(1.25));
+    assert_eq!(snapshot.turn_speed, OrderedMotionScalar::from_f32(1.25));
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::EntityMotionUpdated { guid: target, snapshot }
+        WorldEvent::EntityMotionUpdated { guid: target, motion }
             if *target == guid
-            && snapshot.as_ref().is_some_and(|snapshot| snapshot.forward_speed == OrderedMotionSpeed::from_f32(3.5))
-            && snapshot.as_ref().is_some_and(|snapshot| snapshot.turn_speed == OrderedMotionSpeed::from_f32(1.25))
+            && motion.snapshot().is_some_and(|snapshot| snapshot.forward_speed == OrderedMotionScalar::from_f32(3.5))
+            && motion.snapshot().is_some_and(|snapshot| snapshot.turn_speed == OrderedMotionScalar::from_f32(1.25))
     )));
 }
 
@@ -824,11 +1386,9 @@ fn test_update_motion_retains_turn_to_heading_directive() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
 
-    state.add_entity(Entity::new(
-        guid,
-        "Drudge".to_string(),
-        WorldPosition::default(),
-    ));
+    let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
+    entity.sequences[8] = 7;
+    state.add_entity(entity);
 
     let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
         guid,
@@ -856,25 +1416,51 @@ fn test_update_motion_retains_turn_to_heading_directive() {
     let snapshot = state
         .entities
         .get(guid)
-        .and_then(|entity| entity.motion_snapshot)
+        .and_then(|entity| entity.network_motion.snapshot())
         .expect("expected motion snapshot to be cached");
 
     assert_eq!(
         snapshot.directive,
         Some(EntityMotionDirective::TurnToHeading {
-            desired_heading: OrderedMotionSpeed::from_f32(0.75).expect("finite desired heading"),
-            speed: OrderedMotionSpeed::from_f32(1.5).expect("finite speed"),
+            admission: crate::entity::EntityMotionAdmission {
+                object_instance_sequence: 7,
+                movement_sequence: 8,
+                server_control_sequence: 9,
+                is_autonomous: false,
+            },
+            params: crate::entity::EntityTurnToParameters {
+                flags: 0,
+                desired_heading_degrees: OrderedMotionScalar::from_f32(0.75)
+                    .expect("finite desired heading"),
+                speed: OrderedMotionScalar::from_f32(1.5).expect("finite speed"),
+            },
         })
     );
 }
 
 #[test]
-fn test_vector_update_applies_self_velocity_and_omega() {
+fn self_vector_update_records_server_facts_without_replacing_runtime_vectors() {
     let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x50000001);
+    state.player.instance_sequence = 11;
 
-    let start = WorldPosition::default();
+    let start = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        ..WorldPosition::default()
+    };
     state.seed_local_player_entity(state.player.guid, "Player", start);
+    let body_id = crate::SpatialBodyId::LocalPlayer(state.player.guid);
+    let local_velocity = holtburger_common::Vector3::new(4.0, 5.0, 6.0);
+    let local_omega = holtburger_common::Vector3::new(0.0, 0.0, 0.75);
+    assert!(state.scene.apply_authoritative_body_vectors(
+        body_id,
+        crate::AuthoritativeBodyVectors {
+            velocity: local_velocity,
+            acceleration: holtburger_common::Vector3::zero(),
+            omega: local_omega,
+        },
+        std::time::Instant::now(),
+    ));
 
     let msg = GameMessage::VectorUpdate(Box::new(VectorUpdateData {
         guid: state.player.guid,
@@ -887,6 +1473,7 @@ fn test_vector_update_applies_self_velocity_and_omega() {
     let events = state.handle_message(&msg);
 
     assert_eq!(state.player.instance_sequence, 11);
+    assert_eq!(state.player.vector_sequence, 12);
     assert_eq!(
         state
             .entities
@@ -910,10 +1497,40 @@ fn test_vector_update_applies_self_velocity_and_omega() {
             && *velocity == holtburger_common::Vector3::new(0.0, 0.0, 0.0)
             && *omega == holtburger_common::Vector3::new(0.0, 0.0, 1.25)
     )));
+    let body = state
+        .scene
+        .body(body_id)
+        .expect("player body should remain");
+    assert_eq!(body.retained.velocity, local_velocity);
+    assert_eq!(body.retained.omega, local_omega);
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::RuntimeBodyChanged { .. }))
+    );
+
+    let stale = GameMessage::VectorUpdate(Box::new(VectorUpdateData {
+        guid: state.player.guid,
+        velocity: holtburger_common::Vector3::new(9.0, 9.0, 9.0),
+        omega: holtburger_common::Vector3::new(8.0, 8.0, 8.0),
+        instance_sequence: 11,
+        vector_sequence: 11,
+    }));
+    assert!(state.handle_message(&stale).is_empty());
+    assert_eq!(state.player.vector_sequence, 12);
+    let entity = state
+        .entities
+        .get(state.player.guid)
+        .expect("player entity should remain");
+    assert_eq!(entity.velocity, holtburger_common::Vector3::zero());
+    assert_eq!(
+        entity.omega,
+        holtburger_common::Vector3::new(0.0, 0.0, 1.25)
+    );
 }
 
 #[test]
-fn test_magic_purge_enchantments_preserves_vitae_only() {
+fn test_magic_purge_enchantments_preserves_vitae() {
     use crate::state::WorldState;
     use holtburger_protocol::messages::{
         GameEvent, GameEventMessage, GameMessage, MagicPurgeEnchantmentsEventData,
@@ -982,7 +1599,33 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
 }
 
 #[test]
-fn test_update_position_from_server_caches_grounded_state() {
+fn death_purges_preserve_group_cooldown_clocks_and_permanent_item_effects() {
+    for keep_bad in [false, true] {
+        let mut player = PlayerState::new();
+        player.guid = Guid(1);
+        let cooldown = Enchantment {
+            spell_id: 0x8000 | 213,
+            layer: 1,
+            duration: 45.0,
+            start_time: -10.0,
+            ..Default::default()
+        };
+        let permanent = Enchantment {
+            spell_id: 12,
+            duration: -1.0,
+            ..Default::default()
+        };
+        player.enchantments.replace(&[cooldown, permanent]);
+        let now = std::time::Instant::now();
+        let before = player.enchantments.resolved(now);
+        assert!(player.purge_enchantments(player.guid, keep_bad, &mut Vec::new()));
+        assert_eq!(player.enchantments.resolved(now), before);
+        assert_eq!(player.enchantments.wire(), vec![cooldown, permanent]);
+    }
+}
+
+#[test]
+fn test_update_position_from_server_caches_packet_contact() {
     let mut player = PlayerState::new();
     player.guid = Guid(0x50000001);
 
@@ -1005,7 +1648,7 @@ fn test_update_position_from_server_caches_grounded_state() {
         },
         &mut events,
     );
-    assert_eq!(player.last_server_grounded, Some(false));
+    assert_eq!(player.last_server_contact, Some(false));
 
     player.update_position_from_server(
         &PositionPack {
@@ -1014,12 +1657,12 @@ fn test_update_position_from_server_caches_grounded_state() {
             position_sequence: 6,
             teleport_sequence: 7,
             force_position_sequence: 4,
-            flags: UpdatePositionFlag::IS_GROUNDED,
+            flags: UpdatePositionFlag::HAS_CONTACT,
             ..Default::default()
         },
         &mut events,
     );
-    assert_eq!(player.last_server_grounded, Some(true));
+    assert_eq!(player.last_server_contact, Some(true));
 }
 
 #[test]

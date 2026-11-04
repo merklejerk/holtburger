@@ -1,636 +1,1145 @@
-use crate::pages::game::GameData;
-use crate::utils::{format_duration, wrap_text};
-use holtburger_common::properties::{ItemType, WorldObjectExt};
-use holtburger_world::assessment::{
-    Assessment, AttunedStatus, BondedStatus, Effect, WieldRequirement,
+use crate::utils::wrap_text;
+use holtburger_common::properties::AttunedStatus;
+use holtburger_world::inspection::{
+    BondedStatus, BonusKind, CreatureIdentity, CreatureInspection, Effect, GearRatingKind,
+    InspectionSpellRole, InspectionUseEffect, ItemInspection, ItemManaKind, ObjectInspection,
+    ObjectInspectionDetails, PortalMaximumLevel, PortalRestriction, RemainingLifetime,
+    SkillActivationRequirement, UseRequirement, WieldRequirement,
 };
-use holtburger_world::context::WorldContextExt;
-use holtburger_world::inspect::InspectableObject;
+use holtburger_world::item_progression::ItemAdvancement;
 use holtburger_world::spell::SpellCatalog;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 const LABEL_COLOR: Color = Color::Gray;
 
-fn format_wield_requirement(req: &WieldRequirement) -> String {
-    use holtburger_world::assessment::WieldRequirement::*;
+fn format_wield_requirement(requirement: &WieldRequirement) -> String {
+    use WieldRequirement::*;
 
-    match req {
-        Skill { skill, difficulty } => format!("{}: {}", skill, difficulty),
-        RawSkill { skill, difficulty } => format!("Base {}: {}", skill, difficulty),
+    match requirement {
+        Skill { skill, difficulty } => format!("{skill}: {difficulty}"),
+        RawSkill { skill, difficulty } => format!("Base {skill}: {difficulty}"),
         Attribute {
             attribute,
             difficulty,
-        } => format!("{}: {}", attribute, difficulty),
+        } => format!("{attribute}: {difficulty}"),
         RawAttribute {
             attribute,
             difficulty,
-        } => format!("Base {}: {}", attribute, difficulty),
-        Vital { vital, difficulty } => format!("{}: {}", vital, difficulty),
-        RawVital { vital, difficulty } => format!("Base {}: {}", vital, difficulty),
-        Level { level } => format!("Level: {}", level),
-        Training { skill, level } => format!("{}: {}", skill, level),
-        IntStat { property, value } => format!("PropertyInt {:?}: {}", property, value),
-        BoolStat { property, value } => format!("PropertyBool {:?}: {}", property, value),
-        CreatureType { creature_type } => format!("Creature Type: {}", creature_type),
-        Heritage { heritage } => format!("Heritage: {}", heritage),
+        } => format!("Base {attribute}: {difficulty}"),
+        Vital { vital, difficulty } => format!("{vital}: {difficulty}"),
+        RawVital { vital, difficulty } => format!("Base {vital}: {difficulty}"),
+        Level { level } => format!("Level: {level}"),
+        Training { skill, level } => format!("{skill}: {level}"),
+        IntStat { property, value } => format!("PropertyInt {property:?}: {value}"),
+        BoolStat { property, value } => format!("PropertyBool {property:?}: {value}"),
+        CreatureType { creature_type } => format!("Creature Type: {creature_type}"),
+        Heritage { heritage } => format!("Heritage: {heritage}"),
+        Owner { name } => format_owner_requirement(name.as_deref()),
     }
 }
 
-/// Generates a list of strings representing human-friendly assessment information for an object.
-pub fn get_assess_info(
-    data: &GameData,
-    object: &InspectableObject<'_>,
-    spell_lookup: Option<&SpellCatalog>,
-) -> Vec<Line<'static>> {
-    let assess = Assessment::from_object(object);
-    let is_mana_stone = object
-        .item_type()
-        .is_some_and(|item_type| item_type.contains(ItemType::MANA_STONE));
-    let mut lines = Vec::new();
+fn format_owner_requirement(name: Option<&str>) -> String {
+    match name.filter(|name| !name.is_empty()) {
+        Some(name) => format!("Restricted to {name}"),
+        None => "Original owner only".to_owned(),
+    }
+}
 
-    // Header - Prominent
+fn format_use_requirement(requirement: &UseRequirement) -> String {
+    match requirement {
+        UseRequirement::Skill { skill, requirement } => {
+            let value = match requirement {
+                SkillActivationRequirement::Minimum { minimum } => minimum.to_string(),
+                SkillActivationRequirement::Training { training, minimum } => match minimum {
+                    Some(minimum) => format!("{minimum} ({training})"),
+                    None => training.to_string(),
+                },
+            };
+            format!("{skill}: {value}")
+        }
+        UseRequirement::Level { level } => format!("Level: {level}"),
+        UseRequirement::Attribute { attribute, minimum } => format!("{attribute}: {minimum}"),
+        UseRequirement::Vital { vital, minimum } => format!("{vital}: {minimum}"),
+        UseRequirement::Heritage { heritage } => format!("Heritage: {heritage}"),
+        UseRequirement::AllegianceRank { rank } => format!("Allegiance rank: {rank}"),
+        UseRequirement::Owner { name } => format_owner_requirement(name.as_deref()),
+    }
+}
+
+fn gear_rating_label(kind: GearRatingKind) -> &'static str {
+    match kind {
+        GearRatingKind::Damage => "Damage rating",
+        GearRatingKind::DamageResistance => "Damage resistance rating",
+        GearRatingKind::Critical => "Critical rating",
+        GearRatingKind::CriticalResistance => "Critical resistance rating",
+        GearRatingKind::CriticalDamage => "Critical damage rating",
+        GearRatingKind::CriticalDamageResistance => "Critical damage resistance rating",
+        GearRatingKind::HealingBoost => "Healing boost rating",
+        GearRatingKind::NetherResistance => "Nether resistance rating",
+        GearRatingKind::LifeResistance => "Life resistance rating",
+        GearRatingKind::MaxHealth => "Maximum health",
+        GearRatingKind::PlayerKillerDamage => "Player killer damage rating",
+        GearRatingKind::PlayerKillerDamageResistance => "Player killer damage resistance rating",
+        GearRatingKind::Overpower => "Overpower rating",
+        GearRatingKind::OverpowerResistance => "Overpower resistance rating",
+    }
+}
+
+fn push_labeled(lines: &mut Vec<Line<'static>>, label: &str, value: impl ToString, color: Color) {
     lines.push(Line::from(vec![
+        Span::styled(format!("{label}:  "), Style::default().fg(LABEL_COLOR)),
+        Span::styled(value.to_string(), Style::default().fg(color)),
+    ]));
+}
+
+fn push_section(lines: &mut Vec<Line<'static>>, title: &str) {
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("{title}:"),
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
+}
+
+/// Format one already-populated shared inspection for the TUI context pane.
+pub fn get_assess_info(
+    inspection: &ObjectInspection,
+    spell_lookup: Option<&SpellCatalog>,
+    cooldown_seconds: Option<f64>,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![
         Span::styled("─── ", Style::default().fg(Color::Yellow)),
         Span::styled(
-            assess.name.to_uppercase(),
+            inspection.name.to_uppercase(),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
                 .add_modifier(Modifier::UNDERLINED),
         ),
         Span::styled(" ───", Style::default().fg(Color::Yellow)),
-    ]));
+    ])];
     lines.push(Line::from(""));
 
-    // Description
-    if let Some(desc) = &assess.description {
-        for line in wrap_text(desc, 40) {
-            lines.push(Line::from(line));
-        }
+    if let Some(description) = &inspection.description {
+        lines.extend(wrap_text(description, 40).into_iter().map(Line::from));
         lines.push(Line::from(""));
     }
 
-    // Basic Stats
-    if assess.value > 0 {
-        lines.push(Line::from(vec![
-            Span::styled("Value:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                format!("{}", assess.value),
-                Style::default().fg(Color::White),
-            ),
-        ]));
-    }
-    if assess.level.is_some() || assess.creature.is_some() {
-        let level_display = assess
-            .level
-            .map_or_else(|| "?".to_string(), |level| level.to_string());
-        let level_display = if let Some(creature_type) = assess
-            .creature
-            .as_ref()
-            .and_then(|creature| creature.creature_type)
-        {
-            format!("{} ({})", level_display, creature_type)
-        } else {
-            level_display
-        };
-
-        lines.push(Line::from(vec![
-            Span::styled("Level:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(level_display, Style::default().fg(Color::White)),
-        ]));
-    }
-    if let Some(burden) = assess.burden {
-        lines.push(Line::from(vec![
-            Span::styled("Burden:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(format!("{}bu", burden), Style::default().fg(Color::White)),
-        ]));
-    }
-
-    // Material and Workmanship
-    if let Some(mat) = &assess.material {
-        lines.push(Line::from(vec![
-            Span::styled("Material:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                mat.material_type.to_string(),
-                Style::default().fg(Color::White),
-            ),
-            Span::styled(
-                format!(" ({:.1})", mat.workmanship),
-                Style::default().fg(Color::White),
-            ),
-        ]));
-    }
-
-    // Tinkering
-    if let Some(tink) = &assess.tinkering {
-        lines.push(Line::from(vec![
-            Span::styled("Tinkered:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                format!("{} times", tink.count),
-                Style::default().fg(Color::White),
-            ),
-        ]));
-    }
-
-    // Spellcraft
-    if let Some(sc) = assess.spellcraft {
-        lines.push(Line::from(vec![
-            Span::styled("Spellcraft:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(format!("{}", sc), Style::default().fg(Color::Cyan)),
-        ]));
-    }
-
-    // Item Mana
-    if let Some(mana) = &assess.mana {
-        let time_left = mana.seconds_left.map(format_duration);
-        let label = if is_mana_stone { "Charge" } else { "Mana" };
-        let value = if let Some(max) = mana.max {
-            format!("{}/{}", mana.current, max)
-        } else {
-            mana.current.to_string()
-        };
-
-        lines.push(Line::from(vec![
-            Span::styled(format!("{}:  ", label), Style::default().fg(LABEL_COLOR)),
-            Span::styled(value, Style::default().fg(Color::Blue)),
-            if let Some(t) = time_left {
-                Span::styled(format!(" ({} left)", t), Style::default().fg(Color::Blue))
-            } else {
-                Span::raw("")
-            },
-        ]));
-    }
-
-    // Item Status/Bonding
-    let mut status_spans = Vec::new();
-
-    if let Some(bonded) = assess.bonded
-        && bonded != BondedStatus::Normal
-    {
-        status_spans.push(Span::styled(
-            bonded.to_string(),
-            Style::default().fg(Color::Magenta),
-        ));
-    }
-
-    if let Some(attuned) = assess.attuned
-        && attuned != AttunedStatus::Normal
-    {
-        status_spans.push(Span::styled(
-            attuned.to_string(),
-            Style::default().fg(Color::Magenta),
-        ));
-    }
-
-    if let Some(is_open) = assess.is_open {
-        status_spans.push(Span::styled(
-            if is_open { "Open" } else { "Closed" },
-            Style::default().fg(if is_open { Color::Green } else { Color::Red }),
-        ));
-    }
-
-    if assess.is_retained {
-        status_spans.push(Span::styled(
-            "Retained",
-            Style::default().fg(Color::Magenta),
-        ));
-    }
-    if let Some(is_locked) = assess.is_locked {
-        status_spans.push(Span::styled(
-            if is_locked { "Locked" } else { "Unlocked" },
-            Style::default().fg(if is_locked { Color::Red } else { Color::Green }),
-        ));
-    }
-    if !assess.is_sellable {
-        status_spans.push(Span::styled(
-            "Not sellable",
-            Style::default().fg(Color::Red),
-        ));
-    }
-    if assess.is_ivoryable {
-        status_spans.push(Span::styled("Ivoryable", Style::default().fg(Color::Green)));
-    }
-
-    if !status_spans.is_empty() {
-        let mut line = vec![Span::styled("Status:  ", Style::default().fg(LABEL_COLOR))];
-        for (i, span) in status_spans.into_iter().enumerate() {
-            if i > 0 {
-                line.push(Span::styled(", ", Style::default().fg(LABEL_COLOR)));
-            }
-            line.push(span);
-        }
-        lines.push(Line::from(line));
-    }
-
-    // Stack
-    if let Some(stack) = &assess.stack {
-        lines.push(Line::from(vec![
-            Span::styled("Count:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                format!("{}/{}", stack.current, stack.max),
-                Style::default().fg(Color::White),
-            ),
-        ]));
-    }
-
-    // Structure
-    if let Some(uses) = &assess.uses {
-        lines.push(Line::from(vec![
-            Span::styled("Uses:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                format!("{}/{}", uses.current, uses.max),
-                Style::default().fg(Color::White),
-            ),
-        ]));
-    }
-
-    // Only show these for non-creatures.
-    if object
-        .item_type()
-        .is_none_or(|t| !t.contains(ItemType::CREATURE))
-    {
-        let is_player = Some(object.guid) == data.player_guid;
-        let player_storage = is_player.then(|| data.storage_usage(object.guid)).flatten();
-
-        // Item Capacity
-        if let Some(item_capacity) = assess.item_capacity
-            && item_capacity > 0
-        {
-            lines.push(Line::from(vec![
-                Span::styled("Item Cap:  ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(
-                    if is_player {
-                        format!(
-                            "{}/{}",
-                            player_storage.map(|usage| usage.item_used).unwrap_or(0),
-                            item_capacity
-                        )
-                    } else {
-                        item_capacity.to_string()
-                    },
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-        }
-
-        // Container Capacity
-        if let Some(container_capacity) = assess.container_capacity
-            && container_capacity > 0
-        {
-            lines.push(Line::from(vec![
-                Span::styled("Cont Cap:  ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(
-                    if is_player {
-                        format!(
-                            "{}/{}",
-                            player_storage
-                                .map(|usage| usage.container_used)
-                                .unwrap_or(0),
-                            container_capacity
-                        )
-                    } else {
-                        container_capacity.to_string()
-                    },
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-        }
-    }
-
-    // Armor
-    if let Some(armor) = assess.armor {
-        lines.push(Line::from(vec![
-            Span::styled("Armor:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(format!("{}", armor), Style::default().fg(Color::Green)),
-        ]));
-    }
-
-    // Weapon
-    if let Some(weapon) = &assess.weapon {
-        let damage_type_display = weapon
-            .damage_type
-            .iter_display_names()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>()
-            .join(" / ");
-        let display = if weapon.damage_min.round() == weapon.damage_max.round() {
-            format!("{:.1} {}", weapon.damage_max, damage_type_display)
-        } else {
-            format!(
-                "{:.1} - {:.1} {}",
-                weapon.damage_min, weapon.damage_max, damage_type_display
-            )
-        };
-
-        lines.push(Line::from(vec![
-            Span::styled("Damage: ", Style::default().fg(Color::Gray)),
-            Span::styled(display, Style::default().fg(Color::Red)),
-        ]));
-
-        lines.push(Line::from(vec![
-            Span::styled("Speed:  ", Style::default().fg(Color::Gray)),
-            Span::styled(
-                format!("{}", weapon.speed),
-                Style::default().fg(Color::White),
-            ),
-        ]));
-
-        if let Some(skill) = weapon.weapon_skill {
-            lines.push(Line::from(vec![
-                Span::styled("Weapon Skill: ", Style::default().fg(Color::Gray)),
-                Span::styled(skill.to_string(), Style::default().fg(Color::Cyan)),
-            ]));
-        }
-
-        if let Some(wt) = weapon.weapon_type
-            && wt != holtburger_common::properties::WeaponType::Undef
-        {
-            lines.push(Line::from(vec![
-                Span::styled("Type:   ", Style::default().fg(Color::Gray)),
-                Span::styled(wt.to_string(), Style::default().fg(Color::White)),
-            ]));
-        }
-    }
-
-    // Wield Requirements
-    if !assess.wield_requirements.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Wield Requirements:",
-            Style::default().add_modifier(Modifier::BOLD),
-        )));
-        for req in &assess.wield_requirements {
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format_wield_requirement(req),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-        }
-    }
-
-    // Bonuses
-    if !assess.bonuses.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Bonuses:",
-            Style::default().add_modifier(Modifier::BOLD),
-        )));
-        for bonus in &assess.bonuses {
-            let value_display = format!("{:+}%", (bonus.value * 100.0).round());
-
-            let color = match bonus.name.as_str() {
-                "Attack Bonus"
-                | "Defense Bonus"
-                | "Missile Defense Bonus"
-                | "Magic Defense Bonus" => Color::Green,
-                "Mana Conv" => Color::Cyan,
-                "Crit Rate" => Color::Yellow,
-                "Elemental Damage" => Color::Magenta,
-                _ => Color::White,
-            };
-
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {}:  ", bonus.name),
-                    Style::default().fg(Color::Gray),
-                ),
-                Span::styled(value_display, Style::default().fg(color)),
-            ]));
-        }
-    }
-
-    if !assess.imbued_effects.is_empty() || !assess.effects.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Effects:",
-            Style::default().add_modifier(Modifier::BOLD),
-        )));
-
-        for name in &assess.imbued_effects {
-            lines.push(Line::from(vec![
-                Span::styled("  - ", Style::default().fg(Color::Gray)),
-                Span::styled(name.clone(), Style::default().fg(Color::LightBlue)),
-            ]));
-        }
-
-        for effect in &assess.effects {
-            let label = effect.to_string();
-            let value = match effect {
-                Effect::BitingStrike(v) => Some(format!("{:.1}%", v * 100.0)),
-                Effect::CrushingBlow(v) => Some(format!("{:.1}%", v * 100.0)),
-                Effect::Slayer {
-                    creature_type,
-                    bonus,
-                } => Some(format!("{} ({:.1}%)", creature_type, bonus * 100.0)),
-                Effect::Cleaving(v) => Some(format!("{}", v)),
-                _ => None,
-            };
-
-            let mut spans = vec![
-                Span::styled("  - ", Style::default().fg(Color::Gray)),
-                Span::styled(label, Style::default().fg(Color::LightCyan)),
-            ];
-
-            if let Some(v) = value {
-                spans.push(Span::styled(": ", Style::default().fg(Color::Gray)));
-                spans.push(Span::styled(v, Style::default().fg(Color::White)));
-            }
-
-            lines.push(Line::from(spans));
-        }
-    }
-
-    // Creature Info
-    if let Some(creature) = &assess.creature {
-        lines.push(Line::from(vec![
-            Span::styled("Health:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                format!("{}/{}", creature.health, creature.health_max),
-                Style::default().fg(Color::Red),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("Stamina: ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                format!("{}/{}", creature.stamina, creature.stamina_max),
-                Style::default().fg(Color::Yellow),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("Mana:    ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                format!("{}/{}", creature.mana, creature.mana_max),
-                Style::default().fg(Color::Blue),
-            ),
-        ]));
-
-        if let Some(attr) = &creature.attributes {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "Attributes:",
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(vec![
-                Span::styled("  Strength:     ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(
-                    format!("{}", attr.strength),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  Endurance:    ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(
-                    format!("{}", attr.endurance),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  Coordination: ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(
-                    format!("{}", attr.coordination),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  Quickness:    ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(
-                    format!("{}", attr.quickness),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  Focus:        ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(format!("{}", attr.focus), Style::default().fg(Color::White)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("  Self:         ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(
-                    format!("{}", attr.self_attr),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-        }
-    }
-
-    // Armor Protections
-    if let Some(profile) = &assess.protections {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Protections:",
-            Style::default().add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(format!(
-            "  Slashing:    {:.2}",
-            profile.slashing
-        )));
-        lines.push(Line::from(format!(
-            "  Piercing:    {:.2}",
-            profile.piercing
-        )));
-        lines.push(Line::from(format!(
-            "  Bludgeoning: {:.2}",
-            profile.bludgeoning
-        )));
-        lines.push(Line::from(format!("  Fire:        {:.2}", profile.fire)));
-        lines.push(Line::from(format!("  Cold:        {:.2}", profile.cold)));
-        lines.push(Line::from(format!("  Acid:        {:.2}", profile.acid)));
-        lines.push(Line::from(format!(
-            "  Lightning:   {:.2}",
-            profile.lightning
-        )));
-        lines.push(Line::from(format!("  Nether:      {:.2}", profile.nether)));
-    }
-
-    // Use info
-    if let Some(use_msg) = &assess.use_info {
-        lines.push(Line::from(vec![Span::styled(
-            "Use:    ",
-            Style::default().fg(LABEL_COLOR),
-        )]));
-        for wrapped in wrap_text(use_msg, 36) {
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(wrapped, Style::default().fg(Color::White)),
-            ]));
-        }
-    }
-
-    // Spellbook
-    if !assess.spells.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Spells:",
-            Style::default().add_modifier(Modifier::BOLD),
-        )));
-
-        for spell_id in &assess.spells {
-            if let Some(lookup) = spell_lookup
-                && let Some(info) = lookup.get(*spell_id)
+    match &inspection.details {
+        ObjectInspectionDetails::Item(item) => {
+            if let Some(duration) = item
+                .cooldown
+                .and_then(|definition| definition.duration_seconds)
             {
-                lines.push(Line::from(vec![
-                    Span::styled("  - ", Style::default().fg(LABEL_COLOR)),
-                    Span::styled(info.name.clone(), Style::default().fg(Color::Cyan)),
-                ]));
-                continue;
+                push_labeled(
+                    &mut lines,
+                    "Cooldown when used (shared)",
+                    format!("{duration}s"),
+                    Color::White,
+                );
             }
-            lines.push(Line::from(vec![
-                Span::styled("  - ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    format!("Unknown Spell ({})", spell_id),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]));
+            if let Some(seconds) = cooldown_seconds {
+                push_labeled(
+                    &mut lines,
+                    "Cooldown remaining",
+                    format!("{:.0}s", seconds.ceil()),
+                    Color::White,
+                );
+            }
+            if let Some(level) = inspection.level {
+                push_labeled(&mut lines, "Level", level, Color::White);
+            }
+            push_item_info(&mut lines, item, spell_lookup);
         }
-    }
-
-    // Inscriptions
-    if let Some(ins) = &assess.inscriptions {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Inscription:",
-            Style::default().add_modifier(Modifier::BOLD),
-        )));
-
-        for wrapped in wrap_text(&ins.text, 36) {
-            lines.push(Line::from(vec![
-                Span::styled("  ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(
-                    wrapped.to_string(),
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::ITALIC),
-                ),
-            ]));
-        }
-
-        if let Some(scribe) = &ins.scribe
-            && !scribe.is_empty()
-        {
-            lines.push(Line::from(vec![Span::styled(
-                format!("      -- {}", scribe),
-                Style::default().fg(Color::Gray),
-            )]));
+        ObjectInspectionDetails::Creature(creature) => {
+            let level = inspection
+                .level
+                .map_or_else(|| "?".to_string(), |value| value.to_string());
+            let level = creature
+                .identity
+                .lineage()
+                .map_or(level.clone(), |lineage| format!("{level} ({lineage})"));
+            push_labeled(&mut lines, "Level", level, Color::White);
+            if let CreatureIdentity::Character {
+                role,
+                player_killer_status,
+                ..
+            } = &creature.identity
+            {
+                if let Some(role) = role {
+                    push_labeled(&mut lines, "Role", role, Color::White);
+                }
+                push_labeled(&mut lines, "PK Status", player_killer_status, Color::White);
+            }
+            push_creature_info(&mut lines, creature);
         }
     }
 
     lines
 }
 
+fn push_item_on_use(
+    lines: &mut Vec<Line<'static>>,
+    item: &ItemInspection,
+    spell_lookup: Option<&SpellCatalog>,
+) {
+    if item.use_effect.is_some()
+        || item
+            .spells
+            .iter()
+            .any(|spell| spell.role == InspectionSpellRole::OnUse)
+    {
+        push_section(lines, "On use");
+        if let Some(effect) = &item.use_effect {
+            match effect {
+                InspectionUseEffect::VitalChange { vital, amount } => {
+                    let verb = if *amount < 0 { "Depletes" } else { "Restores" };
+                    lines.push(Line::from(format!(
+                        "  {verb} {} {}.",
+                        amount.unsigned_abs(),
+                        vital
+                    )));
+                }
+                InspectionUseEffect::HealingKit {
+                    skill_bonus,
+                    restoration_multiplier,
+                } => {
+                    if let Some(bonus) = skill_bonus {
+                        push_labeled(lines, "Bonus to Healing Skill", bonus, Color::White);
+                    }
+                    if let Some(multiplier) = restoration_multiplier {
+                        push_labeled(
+                            lines,
+                            "Restoration Bonus",
+                            format!("{:.0}%", multiplier * 100.0),
+                            Color::White,
+                        );
+                    }
+                }
+            }
+        }
+        for spell in item
+            .spells
+            .iter()
+            .filter(|spell| spell.role == InspectionSpellRole::OnUse)
+        {
+            if let Some(info) = spell_lookup.and_then(|catalog| catalog.get(spell.id)) {
+                lines.push(Line::from(format!("  Casts {}", info.name)));
+                let description = if info.description.is_empty() {
+                    "No description available."
+                } else {
+                    &info.description
+                };
+                lines.extend(
+                    wrap_text(description, 36)
+                        .into_iter()
+                        .map(|line| Line::from(format!("  {line}"))),
+                );
+            } else {
+                lines.push(Line::from(format!(
+                    "  Casts spell {} (definition unavailable)",
+                    spell.id
+                )));
+            }
+        }
+    }
+}
+
+fn push_item_info(
+    lines: &mut Vec<Line<'static>>,
+    item: &ItemInspection,
+    spell_lookup: Option<&SpellCatalog>,
+) {
+    if let Some(levels) = &item.portal_levels {
+        push_section(lines, "Portal");
+        if let Some(minimum) = levels.minimum {
+            push_labeled(lines, "Minimum level", minimum, Color::White);
+        }
+        if let Some(maximum) = &levels.maximum {
+            let value = match maximum {
+                PortalMaximumLevel::Unlimited => "No upper limit".to_owned(),
+                PortalMaximumLevel::Level { level } => level.to_string(),
+            };
+            push_labeled(lines, "Maximum level", value, Color::White);
+        }
+    }
+    if let Some(set) = &item.equipment_set {
+        let name = set
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("Unknown set ({})", set.id));
+        push_labeled(lines, "Equipment set", name, Color::Cyan);
+    }
+    if let Some(lifetime) = &item.lifetime {
+        if let Some(seconds) = lifetime.lifespan_seconds {
+            push_labeled(
+                lines,
+                "Lifespan",
+                format_inspection_duration(f64::from(seconds)),
+                Color::White,
+            );
+        }
+        if let Some(remaining) = &lifetime.remaining {
+            let value = match remaining {
+                RemainingLifetime::Expired => "Expired".to_owned(),
+                RemainingLifetime::Remaining { seconds } => {
+                    format_inspection_duration(f64::from(*seconds))
+                }
+            };
+            push_labeled(lines, "Remaining at appraisal", value, Color::Yellow);
+        }
+    }
+    if let Some(stone) = &item.mana_stone {
+        if let Some(efficiency) = stone.efficiency {
+            push_labeled(
+                lines,
+                "Mana recovery efficiency",
+                format!("{:.0}%", efficiency * 100.0),
+                Color::White,
+            );
+        }
+        if let Some(chance) = stone.destruction_chance {
+            push_labeled(
+                lines,
+                "Stone destruction chance",
+                format!("{:.0}%", chance * 100.0),
+                Color::Yellow,
+            );
+        }
+    }
+    if let Some(restrictions) = &item.portal_restrictions {
+        for restriction in restrictions {
+            let text = match restriction {
+                PortalRestriction::NoPlayerKillers => "Player Killers may not use this portal.",
+                PortalRestriction::NoLitePlayerKillers => {
+                    "Lite Player Killers may not use this portal."
+                }
+                PortalRestriction::NoNonPlayerKillers => {
+                    "Non-Player Killers may not use this portal."
+                }
+                PortalRestriction::NoRecallOrTie => "This portal cannot be recalled nor linked to.",
+                PortalRestriction::NoSummon => "This portal cannot be summoned.",
+            };
+            lines.extend(wrap_text(text, 40).into_iter().map(Line::from));
+        }
+    }
+    push_item_on_use(lines, item, spell_lookup);
+    if let Some(progression) = &item.progression {
+        push_labeled(
+            lines,
+            "Item Level",
+            format!("{} / {}", progression.level, progression.max_level),
+            Color::Cyan,
+        );
+        let threshold = match progression.advancement {
+            ItemAdvancement::Advancing { next_level_xp, .. } => next_level_xp,
+            ItemAdvancement::Maximum { max_level_xp } => max_level_xp,
+        };
+        push_labeled(
+            lines,
+            "Item XP",
+            format!("{} / {}", progression.total_xp, threshold),
+            Color::White,
+        );
+    }
+    if let Some(value) = item.value.filter(|value| *value > 0) {
+        push_labeled(lines, "Value", value, Color::White);
+    }
+    if let Some(burden) = item.burden {
+        push_labeled(lines, "Burden", format!("{burden}bu"), Color::White);
+    }
+    if let Some(material) = &item.material {
+        push_labeled(
+            lines,
+            "Material",
+            format!("{} ({:.1})", material.material_type, material.workmanship),
+            Color::White,
+        );
+    }
+    if let Some(tinkering) = &item.tinkering {
+        push_labeled(
+            lines,
+            "Tinkered",
+            format!("{} times", tinkering.count),
+            Color::White,
+        );
+    }
+    if let Some(spellcraft) = item.spellcraft {
+        push_labeled(lines, "Spellcraft", spellcraft, Color::Cyan);
+    }
+    if let Some(mana) = &item.mana {
+        let label = match mana.kind {
+            ItemManaKind::Mana => "Mana",
+            ItemManaKind::Charge => "Charge",
+        };
+        let mut value = mana.max.map_or_else(
+            || mana.current.to_string(),
+            |maximum| format!("{}/{}", mana.current, maximum),
+        );
+        if let Some(seconds) = mana.seconds_left {
+            value.push_str(&format!(" ({} left)", format_inspection_duration(seconds)));
+        }
+        push_labeled(lines, label, value, Color::Blue);
+    }
+
+    push_item_status(lines, item);
+    if let Some(lockpicking) = item.lockpicking {
+        let value = [
+            lockpicking.difficulty.map(|value| value.to_string()),
+            lockpicking.success_percent.map(|value| format!("{value}%")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" / ");
+        push_labeled(lines, "Lockpick difficulty", value, Color::Cyan);
+    }
+
+    if let Some(stack) = item.stack {
+        push_labeled(
+            lines,
+            "Count",
+            format!(
+                "{}/{}",
+                stack
+                    .current
+                    .map_or_else(|| "?".to_string(), |value| value.to_string()),
+                stack.max
+            ),
+            Color::White,
+        );
+    }
+    if let Some(uses) = item.uses {
+        push_labeled(
+            lines,
+            "Uses",
+            format!(
+                "{}/{}",
+                uses.current
+                    .map_or_else(|| "?".to_string(), |value| value.to_string()),
+                uses.max
+            ),
+            Color::White,
+        );
+    }
+    if let Some(capacity) = item.capacity.items.filter(|value| *value > 0) {
+        push_labeled(lines, "Item Cap", capacity, Color::White);
+    }
+    if let Some(capacity) = item.capacity.containers.filter(|value| *value > 0) {
+        push_labeled(lines, "Cont Cap", capacity, Color::White);
+    }
+    if let Some(armor) = item.armor {
+        push_labeled(lines, "Armor", armor.effective, Color::Green);
+    }
+
+    if let Some(weapon) = &item.weapon {
+        let damage_type = weapon
+            .damage_type
+            .iter_display_names()
+            .collect::<Vec<_>>()
+            .join(" / ");
+        let effective_damage = weapon.damage.effective;
+        let damage = if effective_damage.min.round() == effective_damage.max.round() {
+            format!("{:.1} {damage_type}", effective_damage.max)
+        } else {
+            format!(
+                "{:.1} - {:.1} {damage_type}",
+                effective_damage.min, effective_damage.max
+            )
+        };
+        push_labeled(lines, "Damage", damage, Color::Red);
+        if let Some(speed) = weapon.speed {
+            push_labeled(lines, "Speed", speed.effective, Color::White);
+        }
+        if let Some(skill) = weapon.weapon_skill {
+            push_labeled(lines, "Weapon Skill", skill, Color::Cyan);
+        }
+        if let Some(kind) = weapon
+            .weapon_type
+            .filter(|kind| *kind != holtburger_common::properties::WeaponType::Undef)
+        {
+            push_labeled(lines, "Type", kind, Color::White);
+        }
+    }
+
+    if !item.wield_requirements.is_empty() {
+        push_section(lines, "Wield Requirements");
+        for requirement in &item.wield_requirements {
+            lines.push(Line::from(format!(
+                "  {}",
+                format_wield_requirement(requirement)
+            )));
+        }
+    }
+
+    if !item.use_requirements.is_empty() {
+        push_section(lines, "Use Requirements");
+        for requirement in &item.use_requirements {
+            let text = format_use_requirement(requirement);
+            lines.push(Line::from(format!("  {text}")));
+        }
+    }
+
+    if !item.gear_ratings.is_empty() {
+        push_section(lines, "Gear ratings");
+        for rating in &item.gear_ratings {
+            push_labeled(
+                lines,
+                gear_rating_label(rating.kind),
+                rating.value,
+                Color::White,
+            );
+        }
+    }
+
+    if !item.bonuses.is_empty() {
+        push_section(lines, "Bonuses");
+        for bonus in &item.bonuses {
+            let (label, color) = match bonus.kind {
+                BonusKind::Attack => ("Attack Bonus", Color::Green),
+                BonusKind::Defense => ("Defense Bonus", Color::Green),
+                BonusKind::MissileDefense => ("Missile Defense Bonus", Color::Green),
+                BonusKind::MagicDefense => ("Magic Defense Bonus", Color::Green),
+                BonusKind::ElementalDamage => ("Elemental Damage", Color::Magenta),
+                BonusKind::ManaConversion => ("Mana Conv", Color::Cyan),
+                BonusKind::CriticalFrequency => ("Crit Rate", Color::Yellow),
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {label}:  "), Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{:+}%", (bonus.value.effective * 100.0).round()),
+                    Style::default().fg(color),
+                ),
+            ]));
+        }
+    }
+
+    if !item.imbued_effects.is_empty() || !item.effects.is_empty() {
+        push_section(lines, "Effects");
+        for name in item.imbued_effects.iter_display_names() {
+            lines.push(Line::from(format!("  - {name}")));
+        }
+        for effect in &item.effects {
+            let value = match effect {
+                Effect::BitingStrike(value) | Effect::CrushingBlow(value) => {
+                    Some(format!("{:.1}%", value * 100.0))
+                }
+                Effect::Slayer {
+                    creature_type,
+                    bonus,
+                } => Some(format!("{creature_type} ({:.1}%)", bonus * 100.0)),
+                Effect::Cleaving(value) => Some(value.to_string()),
+                _ => None,
+            };
+            lines.push(Line::from(match value {
+                Some(value) => format!("  - {effect}: {value}"),
+                None => format!("  - {effect}"),
+            }));
+        }
+    }
+
+    if let Some(protections) = &item.protections {
+        push_section(lines, "Protections");
+        for (label, value) in [
+            ("Slashing", protections.slashing),
+            ("Piercing", protections.piercing),
+            ("Bludgeoning", protections.bludgeoning),
+            ("Fire", protections.fire),
+            ("Cold", protections.cold),
+            ("Acid", protections.acid),
+            ("Lightning", protections.lightning),
+            ("Nether", protections.nether),
+        ] {
+            lines.push(Line::from(format!("  {label}: {:.2}", value.effective)));
+        }
+    }
+
+    if let Some(use_text) = &item.use_text {
+        push_labeled(lines, "Use", "", Color::White);
+        for wrapped in wrap_text(use_text, 36) {
+            lines.push(Line::from(format!("  {wrapped}")));
+        }
+    }
+
+    for (heading, role) in [
+        ("Spells", InspectionSpellRole::Item),
+        ("Triggered effects", InspectionSpellRole::Triggered),
+        ("Active spells", InspectionSpellRole::ActiveEnchantment),
+    ] {
+        if !item.spells.iter().any(|spell| spell.role == role) {
+            continue;
+        }
+        push_section(lines, heading);
+        for spell in item.spells.iter().filter(|spell| spell.role == role) {
+            let name = spell_lookup
+                .and_then(|catalog| catalog.get(spell.id))
+                .map(|info| info.name.clone())
+                .unwrap_or_else(|| format!("Unknown Spell ({})", spell.id));
+            lines.push(Line::from(format!("  - {name}")));
+        }
+    }
+
+    if let Some(inscription) = &item.inscription {
+        push_section(lines, "Inscription");
+        for wrapped in wrap_text(&inscription.text, 36) {
+            lines.push(Line::from(format!("  {wrapped}")));
+        }
+        if let Some(scribe) = inscription
+            .scribe
+            .as_deref()
+            .filter(|name| !name.is_empty())
+        {
+            lines.push(Line::from(format!("      -- {scribe}")));
+        }
+    }
+    if item.gems.is_some() || item.attribution.is_some() {
+        push_section(lines, "Details");
+        if let Some(gems) = &item.gems {
+            push_labeled(
+                lines,
+                "Embedded gems",
+                format!("{} × {}", gems.count, gems.material),
+                Color::White,
+            );
+        }
+        if let Some(attribution) = &item.attribution {
+            for (label, value) in [
+                ("Craftsman", &attribution.craftsman),
+                ("Tinker", &attribution.tinker),
+                ("Imbuer", &attribution.imbuer),
+                ("Plating", &attribution.plating),
+            ] {
+                if let Some(value) = value {
+                    push_labeled(lines, label, value, Color::White);
+                }
+            }
+        }
+    }
+}
+
+fn format_inspection_duration(seconds: f64) -> String {
+    let rounded = seconds.round() as i64;
+    let sign = if rounded < 0 { "-" } else { "" };
+    let total = rounded.unsigned_abs();
+    let hours = total / 3_600;
+    let minutes = total % 3_600 / 60;
+    let remainder = total % 60;
+    let mut parts = Vec::new();
+    if hours > 0 {
+        parts.push(format!("{hours}h"));
+        if minutes > 0 {
+            parts.push(format!("{minutes}m"));
+        }
+    } else {
+        if minutes > 0 {
+            parts.push(format!("{minutes}m"));
+        }
+        if remainder > 0 || parts.is_empty() {
+            parts.push(format!("{remainder}s"));
+        }
+    }
+    format!("{sign}{}", parts.join(" "))
+}
+
+fn push_item_status(lines: &mut Vec<Line<'static>>, item: &ItemInspection) {
+    let mut statuses = Vec::new();
+    if let Some(bonded) = item
+        .status
+        .bonded
+        .filter(|value| *value != BondedStatus::Normal)
+    {
+        statuses.push(bonded.to_string());
+    }
+    if let Some(attuned) = item
+        .status
+        .attuned
+        .filter(|value| *value != AttunedStatus::Normal)
+    {
+        statuses.push(attuned.to_string());
+    }
+    if let Some(open) = item.status.is_open {
+        statuses.push(if open { "Open" } else { "Closed" }.to_string());
+    }
+    if item.status.retained == Some(true) {
+        statuses.push("Retained".to_string());
+    }
+    if let Some(locked) = item.status.is_locked {
+        statuses.push(if locked { "Locked" } else { "Unlocked" }.to_string());
+    }
+    if item.status.sellable == Some(false) {
+        statuses.push("Not sellable".to_string());
+    }
+    if item.status.dyeable == Some(true) {
+        statuses.push("Dyeable".to_string());
+    }
+    if item.status.ivoryable == Some(true) {
+        statuses.push("Ivoryable".to_string());
+    }
+    if item.status.unenchantable == Some(true) {
+        statuses.push("Unenchantable".to_string());
+    }
+    if !statuses.is_empty() {
+        push_labeled(lines, "Status", statuses.join(", "), Color::Magenta);
+    }
+}
+
+fn push_creature_info(lines: &mut Vec<Line<'static>>, creature: &CreatureInspection) {
+    push_labeled(
+        lines,
+        "Health",
+        format!(
+            "{}/{}",
+            creature.health.effective.current, creature.health.effective.max
+        ),
+        Color::Red,
+    );
+    if let Some(profile) = &creature.attributes_and_vitals {
+        push_labeled(
+            lines,
+            "Stamina",
+            format!(
+                "{}/{}",
+                profile.stamina.effective.current, profile.stamina.effective.max
+            ),
+            Color::Yellow,
+        );
+        push_labeled(
+            lines,
+            "Mana",
+            format!(
+                "{}/{}",
+                profile.mana.effective.current, profile.mana.effective.max
+            ),
+            Color::Blue,
+        );
+        push_section(lines, "Attributes");
+        for (label, value) in [
+            ("Strength", profile.attributes.strength),
+            ("Endurance", profile.attributes.endurance),
+            ("Coordination", profile.attributes.coordination),
+            ("Quickness", profile.attributes.quickness),
+            ("Focus", profile.attributes.focus),
+            ("Self", profile.attributes.self_attr),
+        ] {
+            lines.push(Line::from(format!("  {label}: {}", value.effective)));
+        }
+    }
+
+    if let Some(armor) = &creature.armor_coverage {
+        push_section(lines, "Protection");
+        let mut has_unenchantable = false;
+        for (label, value) in [
+            ("Head", armor.head),
+            ("Chest", armor.chest),
+            ("Abdomen", armor.abdomen),
+            ("Upper Arm", armor.upper_arm),
+            ("Lower Arm", armor.lower_arm),
+            ("Hand", armor.hand),
+            ("Upper Leg", armor.upper_leg),
+            ("Lower Leg", armor.lower_leg),
+            ("Foot", armor.foot),
+        ] {
+            has_unenchantable |= !value.enchantable;
+            lines.push(Line::from(format!(
+                "  {label}: {}{}",
+                if value.enchantable { "" } else { "*" },
+                value.level
+            )));
+        }
+        if has_unenchantable {
+            lines.push(Line::from("  * Unenchantable"));
+        }
+    }
+
+    if let Some(ratings) = &creature.ratings {
+        let combat_ratings = [
+            ("Damage Rating", ratings.damage_rating),
+            ("Damage Resistance", ratings.damage_resistance_rating),
+            ("Critical Rating", ratings.critical_rating),
+            ("Critical Damage", ratings.critical_damage_rating),
+            ("Critical Resistance", ratings.critical_resistance_rating),
+            (
+                "Critical Damage Resistance",
+                ratings.critical_damage_resistance_rating,
+            ),
+            ("PK Damage Rating", ratings.player_killer_damage_rating),
+            (
+                "PK Damage Resistance",
+                ratings.player_killer_damage_resistance_rating,
+            ),
+            ("Healing Boost", ratings.healing_boost_rating),
+            ("Nether Resistance", ratings.nether_resistance_rating),
+            ("DoT Resistance", ratings.damage_over_time_resistance_rating),
+            (
+                "Life Magic Resistance",
+                ratings.life_magic_resistance_rating,
+            ),
+        ];
+        if combat_ratings.iter().any(|(_, value)| value.is_some())
+            || ratings.overpower_chance_percent.is_some()
+            || ratings.overpower_resistance_percent.is_some()
+        {
+            push_section(lines, "Combat Ratings");
+            for (label, value) in combat_ratings {
+                if let Some(value) = value {
+                    push_labeled(lines, label, value, Color::White);
+                }
+            }
+            if let Some(value) = ratings.overpower_chance_percent {
+                push_labeled(lines, "Overpower Chance", format!("{value}%"), Color::White);
+            }
+            if let Some(value) = ratings.overpower_resistance_percent {
+                push_labeled(
+                    lines,
+                    "Overpower Resistance",
+                    format!("{value}%"),
+                    Color::White,
+                );
+            }
+        }
+    }
+    if let Some(value) = creature.max_health_bonus {
+        push_section(lines, "Bonuses");
+        push_labeled(lines, "Maximum Health", value, Color::White);
+    }
+
+    if let Some(details) = &creature.character_details {
+        let affiliations = [
+            ("Allegiance", details.allegiance_name.as_deref()),
+            ("Monarch", details.monarch.as_deref()),
+            ("Patron", details.patron.as_deref()),
+            ("Fellowship", details.fellowship.as_deref()),
+        ];
+        if affiliations.iter().any(|(_, value)| value.is_some())
+            || details.allegiance_followers.is_some()
+        {
+            push_section(lines, "Affiliation");
+            for (label, value) in affiliations {
+                if let Some(value) = value {
+                    push_labeled(lines, label, value, Color::White);
+                }
+            }
+            if let Some(value) = details.allegiance_followers {
+                push_labeled(lines, "Followers", value, Color::White);
+            }
+        }
+
+        let has_personal_details = details.arrived_in_dereth.is_some()
+            || details.age_seconds.is_some()
+            || details.deaths.is_some()
+            || details.titles_earned.is_some()
+            || details.chess_rank.is_some()
+            || details.fishing_skill.is_some()
+            || details.enlightenment.is_some();
+        if has_personal_details {
+            push_section(lines, "Character Details");
+            if let Some(value) = &details.arrived_in_dereth {
+                push_labeled(lines, "Arrived in Dereth", value, Color::White);
+            }
+            if let Some(value) = details.age_seconds {
+                push_labeled(
+                    lines,
+                    "Time in Dereth",
+                    format_character_age(value),
+                    Color::White,
+                );
+            }
+            if let Some(value) = details.deaths {
+                push_labeled(
+                    lines,
+                    "Deaths",
+                    if value == 0 {
+                        "Never".to_owned()
+                    } else {
+                        value.to_string()
+                    },
+                    Color::White,
+                );
+            }
+            for (label, value) in [
+                ("Titles Earned", details.titles_earned),
+                ("Chess Rank", details.chess_rank),
+                ("Fishing Skill", details.fishing_skill),
+                ("Enlightenment", details.enlightenment),
+            ] {
+                if let Some(value) = value {
+                    push_labeled(lines, label, value, Color::White);
+                }
+            }
+        }
+    }
+}
+
+fn format_character_age(seconds: i32) -> String {
+    let total = i64::from(seconds).unsigned_abs();
+    let days = total / 86_400;
+    let hours = total % 86_400 / 3_600;
+    let minutes = total % 3_600 / 60;
+    let sign = if seconds < 0 { "-" } else { "" };
+    format!("{sign}{days}d {hours}h {minutes}m")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pages::game::data::GameData;
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
-        PropertyBool, PropertyInt, WorldObjectPropertyAccessorsMut,
+        ObjectDescriptionFlag, PropertyBool, PropertyInt, PropertyString,
+        WorldObjectPropertyAccessorsMut,
     };
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::entity::Entity;
-    use holtburger_world::inspect::InspectableObject;
+    use holtburger_world::inspection::{
+        ArmorCoverage, ArmorCoverageValue, CharacterDetails, CreatureRatings, InspectionSupplement,
+    };
+
+    fn inspect_entity(entity: &Entity) -> ObjectInspection {
+        let titles = holtburger_content::CharacterTitleCatalog::default();
+        ObjectInspection::from_entity(
+            entity,
+            holtburger_world::inspection::InspectionContext::new(&titles),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn item_appraisal_displays_primary_facts_and_finishes_with_secondary_details() {
+        use holtburger_common::properties::{MaterialType, PropertyDataId};
+        let mut entity = Entity::new(Guid(1), "Equipment".into(), WorldPosition::default());
+        for (property, value) in [
+            (PropertyInt::EquipmentSetId, 13),
+            (PropertyInt::GearCritDamage, 3),
+            (PropertyInt::Lifespan, 10800),
+            (PropertyInt::RemainingLifespan, 3600),
+            (
+                PropertyInt::ItemAttributeLimit,
+                holtburger_world::inspection::AttributeType::SelfAttr as i32,
+            ),
+            (PropertyInt::ItemAttributeLevelLimit, 295),
+            (PropertyInt::MinLevel, 80),
+            (PropertyInt::MaxLevel, 0),
+            (PropertyInt::GemCount, 2),
+            (PropertyInt::GemType, MaterialType::Ruby as i32),
+        ] {
+            entity.set_int_prop(property, value);
+        }
+        entity.set_bool_prop(PropertyBool::Dyable, true);
+        entity.set_did_prop(PropertyDataId::ProcSpell, Guid(42));
+        entity.spell_book = vec![42];
+        entity.set_string_prop(PropertyString::TinkerName, "Test Tinker".into());
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for expected in [
+            "Soldier's",
+            "Critical damage rating:  3",
+            "Remaining at appraisal:  1h",
+            "No upper limit",
+            "Dyeable",
+            "Self: 295",
+            "Triggered effects:",
+            "2 × Ruby",
+            "Test Tinker",
+        ] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        assert!(text.find("Triggered effects:").unwrap() < text.find("Details:").unwrap());
+    }
+
+    #[test]
+    fn summoning_inspection_displays_activation_requirements() {
+        let mut entity = Entity::new(Guid(1), "Essence".into(), WorldPosition::default());
+        entity.set_int_prop(
+            PropertyInt::UseRequiresSkillSpec,
+            holtburger_common::stats::SkillType::Summoning as i32,
+        );
+        entity.set_int_prop(PropertyInt::UseRequiresSkillLevel, 570);
+        entity.set_int_prop(PropertyInt::UseRequiresLevel, 180);
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Use Requirements:"));
+        assert!(text.contains("Summoning: 570 (Specialized)"));
+        assert!(text.contains("Level: 180"));
+    }
+
+    #[test]
+    fn portal_inspection_displays_all_disclosed_prohibitions() {
+        let mut entity = Entity::new(Guid(1), "Portal".into(), WorldPosition::default());
+        entity.inspection_supplement = Some(InspectionSupplement {
+            portal_restrictions: Some(vec![
+                PortalRestriction::NoPlayerKillers,
+                PortalRestriction::NoLitePlayerKillers,
+                PortalRestriction::NoNonPlayerKillers,
+                PortalRestriction::NoRecallOrTie,
+                PortalRestriction::NoSummon,
+            ]),
+            ..Default::default()
+        });
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for warning in [
+            "Player Killers may not use this portal.",
+            "Lite Player Killers may not use this portal.",
+            "Non-Player Killers may not use this portal.",
+            "This portal cannot be recalled nor linked to.",
+            "This portal cannot be summoned.",
+        ] {
+            assert!(text.contains(warning), "missing {warning}: {text}");
+        }
+    }
+
+    #[test]
+    fn item_inspection_combines_configured_and_live_shared_cooldown() {
+        let mut entity = Entity::new(Guid(1), "Essence".into(), WorldPosition::default());
+        entity.set_int_prop(PropertyInt::SharedCooldown, 213);
+        entity.set_float_prop(
+            holtburger_common::properties::PropertyFloat::CooldownDuration,
+            45.0,
+        );
+        let lines = get_assess_info(&inspect_entity(&entity), None, Some(22.2));
+        let text = lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(text.contains("Cooldown when used (shared): 45s"));
+        assert!(text.contains("Cooldown remaining: 23s"));
+    }
+
+    #[test]
+    fn assess_output_explains_consumable_use_effects_and_spells_once() {
+        use holtburger_common::properties::PropertyDataId;
+        use holtburger_dat::file_type::spell_table::SpellBase;
+        let mut entity = Entity::new(Guid(1), "Potion".into(), WorldPosition::default());
+        entity.flags = ObjectDescriptionFlag::FOOD;
+        entity.set_int_prop(PropertyInt::BoosterEnum, 4);
+        entity.set_did_prop(PropertyDataId::Spell, Guid(42));
+        entity.spell_book = vec![42];
+        let catalog = SpellCatalog {
+            spells: [(
+                42,
+                SpellBase {
+                    name: "Test Restoration".into(),
+                    description: "Restores your vitality.".into(),
+                    ..Default::default()
+                }
+                .into(),
+            )]
+            .into(),
+            ..Default::default()
+        };
+        for (amount, expected) in [
+            (50, "Restores 50 Stamina."),
+            (-20, "Depletes 20 Stamina."),
+            (i32::MIN, "Depletes 2147483648 Stamina."),
+        ] {
+            entity.set_int_prop(PropertyInt::BoostValue, amount);
+            let text = get_assess_info(&inspect_entity(&entity), Some(&catalog), None)
+                .iter()
+                .map(Line::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("On use:"));
+            assert!(text.contains(expected));
+            assert!(text.contains("Restores your vitality."));
+            assert_eq!(text.matches("Test Restoration").count(), 1);
+        }
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Casts spell 42 (definition unavailable)"));
+    }
+
+    #[test]
+    fn assess_output_shows_healing_kit_skill_and_restoration_bonuses() {
+        use holtburger_common::properties::PropertyFloat;
+        let mut entity = Entity::new(Guid(1), "Healing Kit".into(), WorldPosition::default());
+        entity.flags = ObjectDescriptionFlag::HEALER;
+        entity.set_int_prop(PropertyInt::BoostValue, 50);
+        for (multiplier, percent) in [(1.3, "130%"), (1.1, "110%")] {
+            entity.set_float_prop(PropertyFloat::HealkitMod, multiplier);
+            let text = get_assess_info(&inspect_entity(&entity), None, None)
+                .iter()
+                .map(Line::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("Bonus to Healing Skill:  50"));
+            assert!(text.contains(&format!("Restoration Bonus:  {percent}")));
+        }
+    }
+
+    #[test]
+    fn assess_output_shows_item_progression_and_maximum_level() {
+        use holtburger_common::properties::PropertyInt64;
+        let mut entity = Entity::new(
+            Guid(0x60000001),
+            "Test Cloak".into(),
+            WorldPosition::default(),
+        );
+        entity.set_int_prop(PropertyInt::ItemXpStyle, 2);
+        entity.set_int_prop(PropertyInt::ItemMaxLevel, 3);
+        entity.set_int64_prop(PropertyInt64::ItemBaseXp, 100);
+        entity.set_int64_prop(PropertyInt64::ItemTotalXp, 350);
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Item Level:  2 / 3"));
+        assert!(text.contains("Item XP:  350 / 700"));
+        entity.set_int64_prop(PropertyInt64::ItemTotalXp, 700);
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Item Level:  3 / 3"));
+        assert!(text.contains("Item XP:  700 / 700"));
+    }
+
+    #[test]
+    fn assess_output_shows_disclosed_lockpicking_values_including_zero() {
+        use holtburger_world::inspection::{InspectionSupplement, LockpickingInfo};
+
+        for (difficulty, success_percent, expected) in [
+            (Some(250), Some(73), "250 / 73%"),
+            (Some(0), Some(0), "0 / 0%"),
+            (None, Some(100), "100%"),
+            (Some(250), None, "250"),
+        ] {
+            let mut entity =
+                Entity::new(Guid(0x6000_0002), "Door".into(), WorldPosition::default());
+            entity.set_bool_prop(PropertyBool::Locked, true);
+            entity.inspection_supplement = Some(InspectionSupplement {
+                lockpicking: Some(LockpickingInfo {
+                    difficulty,
+                    success_percent,
+                }),
+                ..Default::default()
+            });
+            let text = get_assess_info(&inspect_entity(&entity), None, None)
+                .into_iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains(&format!("Lockpick difficulty:  {expected}")));
+        }
+    }
 
     #[test]
     fn assess_output_shows_open_and_locked_status() {
@@ -641,21 +1150,29 @@ mod tests {
         );
         entity.set_bool_prop(PropertyBool::Open, true);
         entity.set_bool_prop(PropertyBool::Locked, false);
+        let inspection = inspect_entity(&entity);
 
-        let data = GameData::new(Guid::NULL, "Player".to_string(), "World".to_string());
-        let object = InspectableObject::from_entity(&entity);
-        let lines = get_assess_info(&data, &object, None);
+        let text = get_assess_info(&inspection, None, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
 
-        assert!(lines.iter().any(|line| line.to_string().contains("Open")));
-        assert!(
-            lines
-                .iter()
-                .any(|line| line.to_string().contains("Unlocked"))
-        );
+        assert!(text.contains("Open"));
+        assert!(text.contains("Unlocked"));
     }
 
     #[test]
-    fn assess_output_shows_creature_type_for_creatures() {
+    fn inspection_duration_omits_seconds_at_one_hour_and_above() {
+        assert_eq!(format_inspection_duration(27_450.0), "7h 37m");
+        assert_eq!(format_inspection_duration(3_630.0), "1h");
+        assert_eq!(format_inspection_duration(3_599.0), "59m 59s");
+        assert_eq!(format_inspection_duration(2_220.0), "37m");
+        assert_eq!(format_inspection_duration(30.0), "30s");
+    }
+
+    #[test]
+    fn assess_output_does_not_fabricate_missing_creature_vitals() {
         let mut entity = Entity::new(
             Guid(0x60000003),
             "Test Creature".to_string(),
@@ -672,18 +1189,114 @@ mod tests {
             attributes: None,
             buffs: None,
         });
+        let inspection = inspect_entity(&entity);
 
-        let data = GameData::new(Guid::NULL, "Player".to_string(), "World".to_string());
-        let object = InspectableObject::from_entity(&entity);
-        let lines = get_assess_info(&data, &object, None);
+        let text = get_assess_info(&inspection, None, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
 
-        let level_line = lines
-            .iter()
-            .find(|line| line.to_string().contains("Level:"))
-            .expect("expected level line for creature assessment");
-        let level_text = level_line.to_string();
+        assert!(text.contains("Level:  ? (Olthoi)"));
+        assert!(text.contains("Health:  50/50"));
+        assert!(!text.contains("Stamina:"));
+        assert!(!text.contains("Mana:"));
+    }
 
-        assert!(level_text.contains("?"));
-        assert!(level_text.contains("Olthoi"));
+    #[test]
+    fn assess_output_surfaces_supplemental_creature_appraisal_facts() {
+        let mut entity = Entity::new(
+            Guid(0x60000005),
+            "Test Character".to_string(),
+            WorldPosition::default(),
+        );
+        entity.set_string_prop(PropertyString::Template, "Adventurer".to_owned());
+        entity.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 100,
+            health_max: 100,
+            attributes: None,
+            buffs: None,
+        });
+        let armor = ArmorCoverageValue {
+            level: 312,
+            enchantable: true,
+        };
+        entity.inspection_supplement = Some(InspectionSupplement {
+            lockpicking: None,
+            equipment_unenchantable: None,
+            portal_restrictions: None,
+            armor_coverage: Some(ArmorCoverage {
+                head: ArmorCoverageValue {
+                    level: 103,
+                    enchantable: false,
+                },
+                chest: armor,
+                abdomen: armor,
+                upper_arm: armor,
+                lower_arm: armor,
+                hand: armor,
+                upper_leg: armor,
+                lower_leg: armor,
+                foot: armor,
+            }),
+            ratings: Some(CreatureRatings {
+                damage_rating: Some(5),
+                damage_resistance_rating: Some(0),
+                ..CreatureRatings::default()
+            }),
+            max_health_bonus: None,
+            character_details: Some(CharacterDetails {
+                fellowship: Some("Test Fellowship".to_owned()),
+                deaths: Some(0),
+                ..CharacterDetails::default()
+            }),
+        });
+
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Protection:"));
+        assert!(text.contains("Head: *103"));
+        assert!(text.contains("Damage Rating:  5"));
+        assert!(text.contains("Damage Resistance:  0"));
+        assert!(text.contains("Fellowship:  Test Fellowship"));
+        assert!(text.contains("Deaths:  Never"));
+    }
+
+    #[test]
+    fn assess_output_uses_shared_character_identity() {
+        let mut entity = Entity::new(
+            Guid(0x60000004),
+            "Drawohan the Gem Seller".to_string(),
+            WorldPosition::default(),
+        );
+        entity.set_string_prop(PropertyString::Template, "Gem Seller".to_owned());
+        entity.set_int_prop(
+            PropertyInt::CreatureType,
+            holtburger_common::stats::CreatureType::Lugian as i32,
+        );
+        entity.flags = ObjectDescriptionFlag::VENDOR;
+        entity.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 100,
+            health_max: 100,
+            attributes: None,
+            buffs: None,
+        });
+        let inspection = inspect_entity(&entity);
+
+        let text = get_assess_info(&inspection, None, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Level:  ? (Lugian)"));
+        assert!(text.contains("Role:  Gem Seller"));
+        assert!(text.contains("PK Status:  Non-Player Killer"));
     }
 }

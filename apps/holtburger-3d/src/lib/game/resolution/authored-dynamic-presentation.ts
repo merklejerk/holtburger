@@ -1,0 +1,42 @@
+import { RESTING_PLACEMENT_KEY } from "./presentation";
+import type { AuthoredDynamicSource } from "./landblock-layer";
+import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
+import { scopeFor } from "../scene/scope";
+
+/** Remove authored-layer residency from the source-neutral dynamic presentation contract. */
+export function adaptAuthoredDynamicPresentation(
+	authored: AuthoredDynamicSource,
+): PlacedDynamicPresentationSource {
+	return {
+		playback: { kind: "source-owned" },
+		initialPresentationState: {
+			cloaked: false,
+			hidden: false,
+			lighting: false,
+			noDraw: false,
+			translucency: 0,
+		},
+		placement: {
+			...authored.placement,
+			spatialMembership: {
+				scopes: [
+					scopeFor(
+						authored.placement.landblockId,
+						authored.placement.envCellId,
+					),
+				],
+			},
+		},
+		source: {
+			entityClass: "other",
+			nameplate: null,
+			behavior: authored.behavior,
+			identity: authored.identity.sourceId,
+			localBounds: authored.localBounds,
+			presentation: authored.presentation,
+			placementFrame: RESTING_PLACEMENT_KEY,
+			scale: authored.scale,
+			setupId: authored.setupId,
+		},
+	};
+}

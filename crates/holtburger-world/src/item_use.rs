@@ -1,0 +1,672 @@
+//! Public item-use semantics. Confirmation and targeting gestures belong to frontends.
+
+use holtburger_common::{
+    Guid,
+    properties::{
+        ItemType, ObjectDescriptionFlag, PropertyBool, PropertyString, WorldObjectExt,
+        WorldObjectPropertyAccessors,
+    },
+    stats::SkillType,
+};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    context::{WorldContext, WorldContextExt},
+    entity::Entity,
+};
+
+/// Authored use shape, independent of the current target and character busy state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ItemUseCapability {
+    /// Required public description facts have not arrived.
+    Unavailable,
+    /// Public useability explicitly disallows use.
+    Unsupported,
+    /// Use the source without a second object.
+    Direct,
+    /// Authored Ust interaction; each frontend opens its own salvage workflow.
+    SalvageTool,
+    /// A separate compatible target is required.
+    Targeted,
+}
+
+/// Template-equivalent consumables; quantities and remaining uses are instance state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConsumableCategory {
+    /// Food and drink with template-defined effects.
+    Food,
+    /// Healing kits with template-defined bonuses.
+    HealingKit,
+    /// A mana source, never an empty stone's destructive drain action.
+    ChargedManaStone,
+}
+
+/// Stable public identity retained by consumers after an instance disappears.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsumableIdentity {
+    /// Server template ID; ordinary ACE consumables are not loot-mutated.
+    pub wcid: u32,
+    /// Semantic family, independent of the generic use action shape.
+    pub category: ConsumableCategory,
+}
+
+/// Whether an instance can still supply its consumable behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConsumableAvailability {
+    /// Remaining-use facts have not arrived.
+    Pending,
+    /// The instance has not exhausted its consumable behavior.
+    Ready,
+    /// Remaining uses or charge have been exhausted.
+    Exhausted,
+}
+
+/// Public consumable semantics; replacement and clearing policies belong to the frontend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsumableFacts {
+    /// Template equivalence excludes remaining quantity, uses, and mana amount.
+    pub identity: ConsumableIdentity,
+    /// Current supply state, not a server use-success prediction.
+    pub availability: ConsumableAvailability,
+}
+
+/// The public charge signal used by retail and ACE ManaStone.cs.
+fn mana_stone_charged(entity: &Entity) -> bool {
+    entity.ui_effects().unwrap_or(0) & 1 != 0
+}
+
+/// ACE LootGenerationFactory.cs leaves these mundane categories unmutated.
+/// Empty stones retain the category but are exhausted as mana sources; explicitly binding
+/// an empty stone still selects its ordinary exact-instance drain action.
+pub fn consumable_facts(entity: &Entity) -> Option<ConsumableFacts> {
+    use ConsumableAvailability::{Exhausted, Pending, Ready};
+    let (category, availability) = if entity.item_type()?.intersects(ItemType::MANA_STONE) {
+        (
+            ConsumableCategory::ChargedManaStone,
+            if mana_stone_charged(entity) {
+                Ready
+            } else {
+                Exhausted
+            },
+        )
+    } else if entity.flags.contains(ObjectDescriptionFlag::HEALER) {
+        (
+            ConsumableCategory::HealingKit,
+            match entity.structure() {
+                Some(0) => Exhausted,
+                Some(_) => Ready,
+                None => Pending,
+            },
+        )
+    } else if entity.flags.contains(ObjectDescriptionFlag::FOOD) {
+        (
+            ConsumableCategory::Food,
+            if entity.is_stackable() && entity.stack_size() == 0 {
+                Exhausted
+            } else {
+                Ready
+            },
+        )
+    } else {
+        return None;
+    };
+    Some(ConsumableFacts {
+        identity: ConsumableIdentity {
+            wcid: entity.wcid?,
+            category,
+        },
+        availability,
+    })
+}
+
+/// Classify from public semantics without restricting bindings to an item-type allowlist.
+pub fn item_use_capability(entity: &Entity) -> ItemUseCapability {
+    if entity.get_string_prop(PropertyString::Name).is_none() || entity.item_type().is_none() {
+        return ItemUseCapability::Unavailable;
+    }
+    if crate::crafting::salvage::is_salvage_tool(entity) {
+        return ItemUseCapability::SalvageTool;
+    }
+    let usable = entity.usable_flags();
+    if !usable.allows_direct_use() {
+        ItemUseCapability::Unsupported
+    } else if !usable.target_flags().is_empty() {
+        if entity.target_item_type().is_some() && !usable.target_flags().location_flags().is_empty()
+        {
+            ItemUseCapability::Targeted
+        } else {
+            ItemUseCapability::Unavailable
+        }
+    } else {
+        ItemUseCapability::Direct
+    }
+}
+
+/// One explicit use operation; target selection and diagnostic policy are frontend decisions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ItemUseIntent {
+    /// Ordinary non-targeted use; unrestricted retains the existing diagnostic override.
+    Direct { source: Guid, unrestricted: bool },
+    /// Use a source on exactly this target, regardless of later selection changes.
+    Targeted { source: Guid, target: Guid },
+}
+
+/// Semantic execution precondition, not evidence that a user saw or accepted a question.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum ItemUseConsequence {
+    /// No known destructive mana-drain consequence; normal consumption may still occur.
+    Ordinary,
+    /// Draining consumes one unit of the target, including a whole non-stackable item.
+    DestroyItem { target: Guid, amount: u32 },
+}
+
+/// Evaluated facts supplied to frontend policy; only destruction has an affected name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ItemUseEvaluation {
+    /// No known destructive mana drain.
+    Ordinary,
+    /// One unit of the named target is destroyed by draining it.
+    DestroyItem {
+        target: Guid,
+        amount: u32,
+        name: String,
+    },
+}
+
+impl ItemUseEvaluation {
+    /// Strip display-only facts before checking an execution expectation.
+    pub fn consequence(&self) -> ItemUseConsequence {
+        match self {
+            Self::Ordinary => ItemUseConsequence::Ordinary,
+            Self::DestroyItem { target, amount, .. } => ItemUseConsequence::DestroyItem {
+                target: *target,
+                amount: *amount,
+            },
+        }
+    }
+}
+
+/// Evaluate cached compatibility and known consequences; the server still decides success.
+pub fn evaluate_item_use(
+    world: &impl WorldContextExt,
+    intent: &ItemUseIntent,
+) -> Result<ItemUseEvaluation, String> {
+    let source = match intent {
+        ItemUseIntent::Direct { source, .. } | ItemUseIntent::Targeted { source, .. } => *source,
+    };
+    let entity = world
+        .get_entity(source)
+        .ok_or("Source item is unavailable.")?;
+    let capability = item_use_capability(entity);
+    match intent {
+        ItemUseIntent::Direct { unrestricted, .. } => {
+            // The override permits direct NO use only; it never converts targeted use into direct use.
+            if capability == ItemUseCapability::Targeted {
+                return Err("This item requires a target.".into());
+            }
+            if capability == ItemUseCapability::Unavailable {
+                return Err("Source item description is unavailable.".into());
+            }
+            if !unrestricted && !world.can_use(source) {
+                return Err("This item cannot be used from its current location.".into());
+            }
+        }
+        ItemUseIntent::Targeted { target, .. } => {
+            if capability != ItemUseCapability::Targeted {
+                return Err("This item does not support targeted use.".into());
+            }
+            let affected = world
+                .get_entity(*target)
+                .ok_or("Target item is unavailable.")?;
+            if !world.can_use_with(source, *target) {
+                return Err("This item cannot be used on that target.".into());
+            }
+            // Retail uses public MANA_STONE and magical effect bit 1, not assessment-only mana
+            // totals. ACE ManaStone.cs broadcasts this effect on charge changes.
+            if entity
+                .item_type()
+                .is_some_and(|kind| kind.intersects(ItemType::MANA_STONE))
+                && !mana_stone_charged(entity)
+            {
+                if Some(*target) == world.get_player_guid() {
+                    return Err("An empty mana stone cannot be used on yourself.".into());
+                }
+                if !world.is_owned_by_player(*target) {
+                    return Err("Mana stones can only drain items you own.".into());
+                }
+                if affected.flags.contains(ObjectDescriptionFlag::RETAINED) {
+                    return Err("A retained item cannot be drained.".into());
+                }
+                return Ok(ItemUseEvaluation::DestroyItem {
+                    target: *target,
+                    amount: 1,
+                    name: affected.name().to_owned(),
+                });
+            }
+        }
+    }
+    Ok(ItemUseEvaluation::Ordinary)
+}
+
+impl crate::WorldState {
+    /// Estimate from retained target appraisal and current skill. ACE Lock.cs uses template
+    /// LockpickMod; unknown templates deliberately assume +0. Instance overrides and
+    /// changes since the appraisal cannot be observed.
+    pub fn estimate_lockpick_success_percent(&self, source: Guid, target: Guid) -> Option<f64> {
+        let pick = self.get_visible_entity(source)?;
+        if !pick.flags.contains(ObjectDescriptionFlag::LOCKPICK) {
+            return None;
+        }
+        let target = self.get_visible_entity(target)?;
+        if target.get_bool_prop_opt(PropertyBool::Locked) != Some(true) {
+            return None;
+        }
+        let difficulty = target
+            .inspection_supplement
+            .as_ref()?
+            .lockpicking?
+            .difficulty?;
+        let skill = self.get_player_skill_current(SkillType::Lockpick)?;
+        let bonus = pick
+            .wcid
+            .and_then(holtburger_content::lockpick_bonus)
+            .unwrap_or(0);
+        Some(lockpick_success_percent(skill, bonus, difficulty))
+    }
+}
+
+/// ACE Lock.cs rejects these locks before making a skill roll.
+const UNPICKABLE_LOCK_DIFFICULTY: i32 = 9999;
+
+/// ACE SkillCheck.cs promotes its float32 factor to double. Effective skill has a zero floor.
+fn lockpick_success_percent(skill: u32, bonus: i32, difficulty: i32) -> f64 {
+    if difficulty >= UNPICKABLE_LOCK_DIFFICULTY {
+        return 0.0;
+    }
+    let effective_skill = (f64::from(skill) + f64::from(bonus)).max(0.0);
+    let delta = effective_skill - f64::from(difficulty.max(0));
+    (1.0 - 1.0 / (1.0 + (f64::from(0.03_f32) * delta).exp())) * 100.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::WorldState;
+    use holtburger_common::{
+        position::WorldPosition,
+        properties::{PropertyInt, Usable},
+    };
+
+    fn item(id: u32, kind: ItemType, usable: Usable) -> Entity {
+        let mut entity = Entity::new(Guid(id), format!("Item {id}"), WorldPosition::default());
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, kind.bits() as i32);
+        entity
+            .properties
+            .ints
+            .insert(PropertyInt::ItemUseable, usable.bits() as i32);
+        entity
+    }
+
+    fn targeted_world(kind: ItemType, effects: Option<i32>) -> WorldState {
+        let mut world = WorldState::synthetic();
+        world.player.guid = Guid(1);
+        world.add_entity(item(1, ItemType::CREATURE, Usable::NO));
+        let mut source = item(2, kind, Usable::SOURCE_CONTAINED_TARGET_SELF_OR_CONTAINED);
+        source.properties.ints.insert(
+            PropertyInt::TargetType,
+            (ItemType::CREATURE | ItemType::ARMOR).bits() as i32,
+        );
+        if let Some(effects) = effects {
+            source
+                .properties
+                .ints
+                .insert(PropertyInt::UiEffects, effects);
+        }
+        world.add_entity(source);
+        world.add_entity(item(3, ItemType::ARMOR, Usable::NO));
+        world.storage.announce_container(Guid(2), Guid(1));
+        world.storage.announce_container(Guid(3), Guid(1));
+        world
+    }
+
+    #[test]
+    fn consumable_identity_excludes_remaining_supply_and_requires_template() {
+        let mut food = item(2, ItemType::FOOD, Usable::CONTAINED);
+        food.flags.insert(ObjectDescriptionFlag::FOOD);
+        assert_eq!(consumable_facts(&food), None);
+        food.wcid = Some(42);
+        food.properties.ints.insert(PropertyInt::MaxStackSize, 10);
+        food.properties.ints.insert(PropertyInt::StackSize, 3);
+        let full = consumable_facts(&food).unwrap();
+        assert_eq!(full.availability, ConsumableAvailability::Ready);
+        food.properties.ints.insert(PropertyInt::StackSize, 0);
+        let empty = consumable_facts(&food).unwrap();
+        assert_eq!(empty.identity, full.identity);
+        assert_eq!(empty.availability, ConsumableAvailability::Exhausted);
+
+        let mut kit = item(3, ItemType::MISC, Usable::CONTAINED);
+        kit.wcid = Some(43);
+        kit.flags.insert(ObjectDescriptionFlag::HEALER);
+        assert_eq!(
+            consumable_facts(&kit).unwrap().availability,
+            ConsumableAvailability::Pending
+        );
+        for (remaining, expected) in [
+            (5, ConsumableAvailability::Ready),
+            (0, ConsumableAvailability::Exhausted),
+        ] {
+            kit.properties
+                .ints
+                .insert(PropertyInt::Structure, remaining);
+            assert_eq!(consumable_facts(&kit).unwrap().availability, expected);
+        }
+    }
+
+    #[test]
+    fn mana_supply_tracks_public_charge_not_assessed_mana_amount() {
+        let mut stone = item(2, ItemType::MANA_STONE, Usable::CONTAINED);
+        stone.wcid = Some(44);
+        let empty = consumable_facts(&stone).unwrap();
+        stone.properties.ints.insert(PropertyInt::UiEffects, 1);
+        let charged = consumable_facts(&stone).unwrap();
+        assert_eq!(empty.identity, charged.identity);
+        assert_eq!(empty.availability, ConsumableAvailability::Exhausted);
+        assert_eq!(charged.availability, ConsumableAvailability::Ready);
+        let ordinary = item(3, ItemType::ARMOR, Usable::CONTAINED);
+        assert_eq!(consumable_facts(&ordinary), None);
+    }
+
+    #[test]
+    fn direct_capability_does_not_depend_on_current_location() {
+        let mut world = WorldState::synthetic();
+        world.player.guid = Guid(1);
+        let food = item(2, ItemType::FOOD, Usable::CONTAINED);
+        assert_eq!(item_use_capability(&food), ItemUseCapability::Direct);
+        world.add_entity(food);
+        let intent = ItemUseIntent::Direct {
+            source: Guid(2),
+            unrestricted: false,
+        };
+        assert!(evaluate_item_use(&world, &intent).is_err());
+        world.storage.announce_container(Guid(2), Guid(1));
+        assert_eq!(
+            evaluate_item_use(&world, &intent).unwrap().consequence(),
+            ItemUseConsequence::Ordinary
+        );
+    }
+
+    #[test]
+    fn undefined_useability_is_direct_but_no_is_unsupported() {
+        assert_eq!(
+            item_use_capability(&item(2, ItemType::FOOD, Usable::empty())),
+            ItemUseCapability::Direct
+        );
+        assert_eq!(
+            item_use_capability(&item(2, ItemType::FOOD, Usable::NO)),
+            ItemUseCapability::Unsupported
+        );
+        let incomplete = item(
+            2,
+            ItemType::MANA_STONE,
+            Usable::SOURCE_CONTAINED_TARGET_SELF_OR_CONTAINED,
+        );
+        assert_eq!(
+            item_use_capability(&incomplete),
+            ItemUseCapability::Unavailable
+        );
+    }
+
+    #[test]
+    fn public_magical_effect_distinguishes_drain_from_recharge() {
+        let intent = ItemUseIntent::Targeted {
+            source: Guid(2),
+            target: Guid(3),
+        };
+        for effects in [None, Some(0), Some(2)] {
+            let world = targeted_world(ItemType::MANA_STONE, effects);
+            assert_eq!(
+                evaluate_item_use(&world, &intent).unwrap(),
+                ItemUseEvaluation::DestroyItem {
+                    target: Guid(3),
+                    amount: 1,
+                    name: "Item 3".into()
+                }
+            );
+        }
+        let charged = targeted_world(ItemType::MANA_STONE, Some(1));
+        assert_eq!(
+            evaluate_item_use(&charged, &intent).unwrap().consequence(),
+            ItemUseConsequence::Ordinary
+        );
+        assert!(
+            evaluate_item_use(
+                &charged,
+                &ItemUseIntent::Targeted {
+                    source: Guid(2),
+                    target: Guid(1)
+                }
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn invalid_drain_targets_do_not_produce_a_destructive_evaluation() {
+        let mut world = targeted_world(ItemType::MANA_STONE, None);
+        assert!(
+            evaluate_item_use(
+                &world,
+                &ItemUseIntent::Targeted {
+                    source: Guid(2),
+                    target: Guid(1)
+                }
+            )
+            .is_err()
+        );
+        let mut retained = item(3, ItemType::ARMOR, Usable::NO);
+        retained.flags.insert(ObjectDescriptionFlag::RETAINED);
+        world.add_entity(retained);
+        assert!(
+            evaluate_item_use(
+                &world,
+                &ItemUseIntent::Targeted {
+                    source: Guid(2),
+                    target: Guid(3)
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            evaluate_item_use(
+                &world,
+                &ItemUseIntent::Targeted {
+                    source: Guid(2),
+                    target: Guid(99)
+                }
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn player_target_requires_creature_mask_even_when_self_location_is_allowed() {
+        let mut world = targeted_world(ItemType::MISC, None);
+        let intent = ItemUseIntent::Targeted {
+            source: Guid(2),
+            target: Guid(1),
+        };
+        let mut source = world.entities.get(Guid(2)).unwrap().clone();
+        source
+            .properties
+            .ints
+            .insert(PropertyInt::TargetType, ItemType::ARMOR.bits() as i32);
+        world.add_entity(source.clone());
+        assert!(evaluate_item_use(&world, &intent).is_err());
+        source
+            .properties
+            .ints
+            .insert(PropertyInt::TargetType, ItemType::CREATURE.bits() as i32);
+        world.add_entity(source);
+        assert_eq!(
+            evaluate_item_use(&world, &intent).unwrap(),
+            ItemUseEvaluation::Ordinary
+        );
+    }
+
+    #[test]
+    fn non_mana_tools_use_target_semantics_without_a_destructive_consequence() {
+        let world = targeted_world(ItemType::MISC, None);
+        assert_eq!(
+            evaluate_item_use(
+                &world,
+                &ItemUseIntent::Targeted {
+                    source: Guid(2),
+                    target: Guid(1)
+                }
+            )
+            .unwrap(),
+            ItemUseEvaluation::Ordinary
+        );
+    }
+
+    #[test]
+    fn targeted_source_cannot_use_the_direct_diagnostic_override() {
+        let world = targeted_world(ItemType::MANA_STONE, None);
+        assert!(
+            evaluate_item_use(
+                &world,
+                &ItemUseIntent::Direct {
+                    source: Guid(2),
+                    unrestricted: true
+                }
+            )
+            .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod lockpick_chance_tests {
+    use super::{UNPICKABLE_LOCK_DIFFICULTY, lockpick_success_percent};
+
+    #[test]
+    fn estimates_require_appraised_target_and_skill_but_unknown_pick_bonus_is_zero() {
+        use crate::{
+            WorldState,
+            entity::Entity,
+            inspection::{InspectionSupplement, LockpickingInfo},
+            stats::{Skill, SkillType, TrainingLevel},
+        };
+        use holtburger_common::{
+            Guid,
+            position::WorldPosition,
+            properties::{ObjectDescriptionFlag, PropertyBool, WorldObjectPropertyAccessorsMut},
+        };
+        let mut world = WorldState::synthetic();
+        let mut pick = Entity::new(Guid(2), "Pick".into(), WorldPosition::default());
+        pick.flags.insert(ObjectDescriptionFlag::LOCKPICK);
+        pick.wcid = Some(999);
+        world.entities.insert(pick);
+        let mut target = Entity::new(Guid(3), "Lock".into(), WorldPosition::default());
+        target.set_bool_prop(PropertyBool::Locked, true);
+        world.entities.insert(target);
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(2), Guid(3)),
+            None
+        );
+        world
+            .entities
+            .get_mut(Guid(3))
+            .expect("target")
+            .inspection_supplement = Some(InspectionSupplement {
+            lockpicking: Some(LockpickingInfo {
+                difficulty: Some(200),
+                success_percent: Some(1),
+            }),
+            ..Default::default()
+        });
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(2), Guid(3)),
+            None
+        );
+        world.player.skills.insert(
+            SkillType::Lockpick,
+            Skill {
+                skill_type: SkillType::Lockpick,
+                ranks: 0,
+                init: 200,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 200,
+                current: 200,
+                training: TrainingLevel::Trained,
+                trained_cost: 0,
+                specialized_cost: 0,
+                breakdown: Default::default(),
+            },
+        );
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(2), Guid(3)),
+            Some(50.0)
+        );
+        world.entities.get_mut(Guid(2)).expect("pick").wcid = Some(516);
+        assert!(
+            world
+                .estimate_lockpick_success_percent(Guid(2), Guid(3))
+                .expect("known bonus")
+                > 64.0
+        );
+        world.entities.get_mut(Guid(2)).expect("pick").wcid = Some(999);
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(2), Guid(3)),
+            Some(50.0)
+        );
+        world
+            .player
+            .skills
+            .get_mut(&SkillType::Lockpick)
+            .expect("skill")
+            .current = 220;
+        assert!(
+            world
+                .estimate_lockpick_success_percent(Guid(2), Guid(3))
+                .expect("current skill")
+                > 64.0
+        );
+        world
+            .entities
+            .get_mut(Guid(3))
+            .expect("target")
+            .set_bool_prop(PropertyBool::Locked, false);
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(2), Guid(3)),
+            None
+        );
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(99), Guid(3)),
+            None
+        );
+    }
+
+    #[test]
+    fn ace_chances_include_bonus_skill_floor_and_unpickable_locks() {
+        assert_eq!(lockpick_success_percent(200, 0, 200), 50.0);
+        assert_eq!(lockpick_success_percent(200, 20, 220), 50.0);
+        assert_eq!(lockpick_success_percent(5, -10, 0), 50.0);
+        assert_eq!(
+            lockpick_success_percent(200, 0, UNPICKABLE_LOCK_DIFFICULTY),
+            0.0
+        );
+        assert!((lockpick_success_percent(200, 20, 200) - 64.56563).abs() < 0.00001);
+        assert!((lockpick_success_percent(200, -10, 200) - 42.55575).abs() < 0.00001);
+    }
+}

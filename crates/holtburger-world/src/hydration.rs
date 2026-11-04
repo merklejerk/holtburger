@@ -41,6 +41,13 @@ pub fn decode_vendor_item_supply(packed_stack_size: u32) -> Option<u32> {
 
 impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
     fn hydrate_from_pwd(&mut self, pwd: &PublicWeenieDescription) {
+        // Vendor offers and spatial entities carry the same mandatory item-type field.
+        self.ints
+            .insert(PropertyInt::ItemType, pwd.item_type as i32);
+        // Base art is mandatory in public descriptions, including explicit zero.
+        // Store it alongside updates so recreation and property deltas share one source.
+        self.dids
+            .insert(PropertyDataId::Icon, holtburger_common::Guid(pwd.icon_id));
         let flags = pwd.obj_desc_flags;
         if flags.contains(ObjectDescriptionFlag::STUCK) {
             self.bools.insert(PropertyBool::Stuck, true);
@@ -152,9 +159,8 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
         if let Some(v) = pwd.radar_behavior {
             self.ints.insert(PropertyInt::ShowableOnRadar, v as i32);
         }
-        if let Some(v) = pwd.workmanship {
-            self.ints.insert(PropertyInt::ItemWorkmanship, v as i32);
-        }
+        // Public workmanship is an average float, not the raw integer total.
+        // Entity/vendor public evidence retains it separately from appraisal properties.
         if let Some(v) = pwd.house_owner {
             self.iids.insert(PropertyInstanceId::HouseOwner, v);
         }
@@ -212,12 +218,8 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
             self.dids
                 .insert(PropertyDataId::Setup, holtburger_common::Guid(v));
         }
-        if let Some(v) = odd.parent_id {
-            self.iids.insert(PropertyInstanceId::Wielder, v); // Note: Could be Container contextually, but Wielder is common for parent
-        }
-        if let Some(v) = odd.parent_loc {
-            self.ints.insert(PropertyInt::ParentLocation, v as i32);
-        }
+        // The physics parent link is not a property. It hydrates into `Entity::attachment`, which
+        // says what it is instead of guessing at `Wielder` versus `Container`.
         if let Some(v) = odd.obj_scale {
             self.floats.insert(PropertyFloat::DefaultScale, v as f64);
         }
@@ -230,7 +232,9 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
         if let Some(v) = odd.translucency {
             self.floats.insert(PropertyFloat::Translucency, v as f64);
         }
-        if let Some(v) = odd.default_script_id {
+        if let Some(v) = odd.default_script_cue {
+            // ACE retains the `PlayScript` cue in the historical PhysicsScript data-id property.
+            // The typed accessor exposes the semantic u32 rather than pretending it is a DID.
             self.dids
                 .insert(PropertyDataId::PhysicsScript, holtburger_common::Guid(v));
         }
@@ -242,6 +246,11 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
 
     fn hydrate_from_vendor_item(&mut self, data: &VendorItemEventData) {
         self.hydrate_from_pwd(&data.description);
+        // Retail behavior: public descriptions default omitted value to zero. ACE omits zero
+        // values from vendor descriptions; pricing still applies its minimum.
+        if data.description.value.is_none() {
+            self.ints.insert(PropertyInt::Value, 0);
+        }
     }
 
     fn hydrate_from_physics_state(&mut self, pstate: PhysicsState) {
@@ -315,7 +324,26 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
 
 #[cfg(test)]
 mod tests {
-    use super::decode_vendor_item_supply;
+    use holtburger_common::properties::{PropertyFloat, WorldObjectProperties};
+    use holtburger_protocol::messages::object::messages::description::ObjectDescriptionData;
+
+    use super::{WorldObjectPropertiesHydrationExt as _, decode_vendor_item_supply};
+
+    #[test]
+    fn object_description_hydrates_authored_translucency() {
+        let mut properties = WorldObjectProperties::default();
+        let description = ObjectDescriptionData {
+            translucency: Some(0.5),
+            ..ObjectDescriptionData::default()
+        };
+
+        properties.hydrate_from_odd(&description);
+
+        assert_eq!(
+            properties.floats.get(&PropertyFloat::Translucency),
+            Some(&0.5)
+        );
+    }
 
     #[test]
     fn decode_vendor_item_supply_handles_unlimited_stock() {

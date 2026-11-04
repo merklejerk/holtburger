@@ -1,0 +1,506 @@
+import { describe, expect, it } from "vitest";
+
+import {
+	cellId,
+	decodeDynamicEntityEvent,
+	decodeDynamicEntitySnapshot,
+	decodeDynamicEntityTickBatch,
+	decodeDynamicEntityView,
+	DynamicEntityMirror,
+	type DynamicEntityEvent,
+	type DynamicEntityView,
+	type DynamicEntityWorldPlacement,
+} from "./dynamic-entity-feed";
+
+function entity(
+	guid: number,
+	generation: number,
+): DynamicEntityView & { placement: DynamicEntityWorldPlacement } {
+	return {
+		generation,
+		motion: null,
+		identity: { guid, wcid: 42 },
+		display: { name: "Drudge", level: null },
+		presentation: {
+			placementFrame: 0,
+			entityClass: "other",
+			content: {
+				motionTableDid: null,
+				setupDid: 0x02000001,
+				soundTableDid: null,
+				physicsEffectTableDid: null,
+			},
+			appearance: {
+				paletteDid: null,
+				subPalettes: [],
+				textureChanges: [],
+				partChanges: [],
+			},
+			objectScale: 1,
+			radar: {
+				behavior: null,
+				category: "other",
+				obviousRange: null,
+			},
+		},
+		physics: {
+			semanticMask: 0,
+			participation: "pose-only",
+			noDraw: false,
+			hidden: false,
+			cloaked: false,
+			translucency: 0,
+			lighting: false,
+			defaultAnimation: false,
+			defaultScript: false,
+		},
+		placement: {
+			kind: "world",
+			spatialMembership: {
+				reachesOutdoors: true,
+				reachedEnvCellIds: [],
+			},
+			pose: {
+				landblockId: cellId(0xda550001),
+				coords: { x: 1, y: 2, z: 3 },
+				rotation: { w: 1, x: 0, y: 0, z: 0 },
+			},
+			contact: "unknown",
+			sampleMode: "authoritative-only",
+		},
+	};
+}
+
+function snapshot(...entities: DynamicEntityView[]): DynamicEntityEvent {
+	return {
+		kind: "snapshot",
+		snapshot: { hostTime: { seconds: 1 }, entities },
+	};
+}
+
+function upserted(value: DynamicEntityView): DynamicEntityEvent {
+	return {
+		kind: "upserted",
+		entity: value,
+	};
+}
+
+function ticked(
+	value: DynamicEntityView & { placement: DynamicEntityWorldPlacement },
+	hostSeconds: number,
+): Extract<DynamicEntityEvent, { kind: "ticked" }> {
+	return {
+		kind: "ticked",
+		batch: {
+			hostTime: { seconds: hostSeconds },
+			durationMs: 1000 / 30,
+			advances: [
+				{
+					// The host always sends this field; `null` means "keep playing whatever you have".
+					entity: value,
+					kind: "integrated",
+					path: {
+						initial: {
+							pose: value.placement.pose,
+							spatialMembership: value.placement.spatialMembership,
+						},
+						legs: [
+							{
+								endFraction: 1,
+								end: {
+									pose: value.placement.pose,
+									spatialMembership: value.placement.spatialMembership,
+								},
+							},
+						],
+					},
+				},
+			],
+			updates: [],
+		},
+	};
+}
+
+function updated(
+	value: DynamicEntityView,
+	hostSeconds: number,
+): Extract<DynamicEntityEvent, { kind: "ticked" }> {
+	return {
+		kind: "ticked",
+		batch: {
+			hostTime: { seconds: hostSeconds },
+			durationMs: 1000 / 30,
+			advances: [],
+			updates: [value],
+		},
+	};
+}
+
+function worldPlacement(value: DynamicEntityView): DynamicEntityWorldPlacement {
+	if (value.placement.kind !== "world")
+		throw new Error("test fixture unexpectedly became attached");
+	return value.placement;
+}
+
+describe("dynamic-entity view contract", () => {
+	it.each(["", " \t\n"])(
+		"normalizes unnamed display text at every delivery boundary for %j",
+		(name) => {
+			const source = entity(0x7c5a9007, 1);
+			source.display.name = name;
+			const expected = {
+				...source,
+				display: { ...source.display, name: "[Unnamed · 0x7C5A9007]" },
+			};
+			expect(decodeDynamicEntityView(source)).toEqual(expected);
+			expect(
+				decodeDynamicEntitySnapshot({
+					hostTime: { seconds: 1 },
+					entities: [source],
+				}).entities,
+			).toEqual([expected]);
+			expect(decodeDynamicEntityEvent(upserted(source))).toEqual(
+				upserted(expected),
+			);
+			expect(decodeDynamicEntityEvent(snapshot(source))).toEqual(
+				snapshot(expected),
+			);
+			const advance = ticked(source, 2);
+			expect(decodeDynamicEntityEvent(advance)).toEqual(ticked(expected, 2));
+			expect(decodeDynamicEntityTickBatch(advance.batch)).toEqual(
+				ticked(expected, 2).batch,
+			);
+			const update = updated(source, 3);
+			expect(decodeDynamicEntityEvent(update)).toEqual(updated(expected, 3));
+			expect(decodeDynamicEntityTickBatch(update.batch)).toEqual(
+				updated(expected, 3).batch,
+			);
+			expect(source.display.name).toBe(name);
+		},
+	);
+
+	it("preserves authored display text and already-normalized labels", () => {
+		for (const name of [
+			"Drudge",
+			"Unnamed entity",
+			"  Drudge  ",
+			"[Unnamed · 0x7C5A9007]",
+		]) {
+			const source = entity(0x7c5a9007, 1);
+			source.display.name = name;
+			expect(decodeDynamicEntityView(source)).toEqual(source);
+		}
+	});
+
+	it("requires a finite unit-interval object translucency level", () => {
+		for (const translucency of [0, 0.5, 1]) {
+			const view = entity(1, 1);
+			view.physics.translucency = translucency;
+			expect(decodeDynamicEntityView(view).physics.translucency).toBe(
+				translucency,
+			);
+		}
+
+		for (const translucency of [
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			-0.01,
+			1.01,
+		]) {
+			const view = entity(1, 1);
+			view.physics.translucency = translucency;
+			expect(() => decodeDynamicEntityView(view)).toThrow();
+		}
+
+		const view = entity(1, 1);
+		const { translucency: omitted, ...physicsWithoutTranslucency } =
+			view.physics;
+		expect(omitted).toBe(0);
+		expect(() =>
+			decodeDynamicEntityView({ ...view, physics: physicsWithoutTranslucency }),
+		).toThrow();
+	});
+
+	it.each(["gesture", "reach"] as const)(
+		"preserves independent tracks and an exact settled %s pose",
+		(activity) => {
+			const motion = {
+				ordinary: {
+					playbackId: "9007199254740993",
+					clip: { kind: "settled", animationId: 0x03000559, frame: 31 },
+				},
+				locomotion: {
+					playbackId: "2",
+					clip: {
+						kind: "playing",
+						animationId: 0x03000001,
+						lowFrame: 0,
+						highFrame: 7,
+						framerate: 30,
+						completion: "loop",
+					},
+				},
+				restPosture: null,
+				locomotionCommandActive: true,
+				activity,
+			};
+			expect(
+				decodeDynamicEntityView({ ...entity(1, 1), motion }).motion,
+			).toEqual(motion);
+		},
+	);
+
+	it("requires and preserves the producer-resolved presentation class", () => {
+		const view = entity(1, 1);
+		expect(decodeDynamicEntityView(view).presentation.entityClass).toBe(
+			"other",
+		);
+		expect(() =>
+			decodeDynamicEntityView({
+				...view,
+				presentation: { ...view.presentation, entityClass: "vendor" },
+			}),
+		).toThrow();
+		const { entityClass, ...presentationWithoutClass } = view.presentation;
+		expect(entityClass).toBe("other");
+		expect(() =>
+			decodeDynamicEntityView({
+				...view,
+				presentation: presentationWithoutClass,
+			}),
+		).toThrow();
+	});
+
+	it("requires and preserves the producer-resolved map blip category", () => {
+		const view = entity(1, 1);
+		const lifestone = {
+			...view,
+			presentation: {
+				...view.presentation,
+				radar: { ...view.presentation.radar, category: "lifestone" },
+			},
+		} as const;
+		expect(decodeDynamicEntityView(lifestone).presentation.radar.category).toBe(
+			"lifestone",
+		);
+		expect(() =>
+			decodeDynamicEntityView({
+				...view,
+				presentation: {
+					...view.presentation,
+					radar: { ...view.presentation.radar, category: "bindstone" },
+				},
+			}),
+		).toThrow();
+		const { category, ...radarWithoutCategory } = view.presentation.radar;
+		expect(category).toBe("other");
+		expect(() =>
+			decodeDynamicEntityView({
+				...view,
+				presentation: {
+					...view.presentation,
+					radar: radarWithoutCategory,
+				},
+			}),
+		).toThrow();
+	});
+
+	it("preserves absent and zero display levels and rejects negative levels", () => {
+		const view = entity(1, 1);
+		expect(decodeDynamicEntityView(view).display.level).toBeNull();
+		expect(
+			decodeDynamicEntityView({
+				...view,
+				display: { ...view.display, level: 0 },
+			}).display.level,
+		).toBe(0);
+		expect(() =>
+			decodeDynamicEntityView({
+				...view,
+				display: { ...view.display, level: -1 },
+			}),
+		).toThrow();
+	});
+
+	it("decodes the attached arm and rejects mixed world-motion facts", () => {
+		const attached = {
+			...entity(2, 1),
+			placement: {
+				kind: "attached" as const,
+				parent: 1,
+				parentLocation: "right-hand" as const,
+				placement: "right-hand-combat" as const,
+			},
+		};
+		expect(decodeDynamicEntityView(attached).placement).toEqual(
+			attached.placement,
+		);
+		expect(() =>
+			decodeDynamicEntityView({
+				...attached,
+				placement: {
+					...attached.placement,
+					pose: entity(1, 1).placement.pose,
+				},
+			}),
+		).toThrow();
+	});
+
+	it("rejects path advances for an attached entity", () => {
+		const worldAdvance = ticked(entity(2, 1), 2);
+		const attached = {
+			...entity(2, 1),
+			placement: {
+				kind: "attached" as const,
+				parent: 1,
+				parentLocation: "right-hand" as const,
+				placement: "right-hand-combat" as const,
+			},
+		};
+		expect(() =>
+			decodeDynamicEntityEvent({
+				...worldAdvance,
+				batch: {
+					...worldAdvance.batch,
+					advances: worldAdvance.batch.advances.map((advance) => ({
+						...advance,
+						entity: attached,
+					})),
+				},
+			}),
+		).toThrow("advance targets attached GUID");
+	});
+
+	it("carries the motion table and still drops fields the contract does not declare", () => {
+		// The motion-table identity is now part of the contract: an entity names the table it
+		// animates from, and the frontend stages that table's closure before activation. The
+		// capability boundary that used to strip it was removed with possession.
+		//
+		// What has not changed is that this is a contract, not a passthrough. A host that emits a
+		// field this schema does not declare cannot deliver it past this boundary.
+		const view = entity(1, 1);
+		const decoded = decodeDynamicEntityView({
+			...view,
+			undeclaredField: { forwardCommand: 3 },
+			presentation: {
+				...view.presentation,
+				content: { ...view.presentation.content, motionTableDid: 0x09000001 },
+			},
+		});
+		expect(Object.keys(decoded).sort()).toEqual([
+			"display",
+			"generation",
+			"identity",
+			"motion",
+			"physics",
+			"placement",
+			"presentation",
+		]);
+		expect(decoded.presentation.content.motionTableDid).toBe(0x09000001);
+		expect(Object.keys(decoded.presentation.content).sort()).toEqual([
+			"motionTableDid",
+			"physicsEffectTableDid",
+			"setupDid",
+			"soundTableDid",
+		]);
+	});
+});
+
+describe("DynamicEntityMirror", () => {
+	it("applies path-stable updates and rejects duplicate tick identities", () => {
+		const mirror = new DynamicEntityMirror();
+		mirror.apply(snapshot(entity(7, 2)));
+		const next = entity(7, 2);
+		next.placement.contact = "grounded";
+		expect(mirror.apply(updated(next, 2))).toBe(true);
+		expect(worldPlacement(mirror.entities()[0]!).contact).toBe("grounded");
+
+		const duplicate = ticked(entity(7, 2), 3);
+		duplicate.batch.updates.push(entity(7, 2));
+		expect(() => decodeDynamicEntityEvent(duplicate)).toThrow("duplicate GUID");
+	});
+
+	it("accepts zero-duration correction snaps but not zero-duration integration", () => {
+		const value = entity(7, 2);
+		const correction = ticked(value, 2);
+		correction.batch.durationMs = 0;
+		correction.batch.advances[0]!.kind = "correction-snap";
+		expect(decodeDynamicEntityEvent(correction)).toEqual(correction);
+
+		const integrated = ticked(value, 3);
+		integrated.batch.durationMs = 0;
+		expect(() => decodeDynamicEntityEvent(integrated)).toThrow(
+			"duration must be positive",
+		);
+	});
+
+	it("reconstructs atomically and ignores deltas while awaiting a snapshot", () => {
+		const mirror = new DynamicEntityMirror(() => 10);
+		mirror.apply(upserted(entity(1, 1)));
+		expect(mirror.entities()).toEqual([]);
+
+		mirror.apply(snapshot(entity(2, 1), entity(1, 1)));
+		expect(mirror.entities().map((value) => value.identity.guid)).toEqual([
+			1, 2,
+		]);
+		expect(mirror.entity(2, 1)).toEqual(entity(2, 1));
+		expect(mirror.entity(2, 2)).toBeNull();
+		expect(mirror.isAwaitingSnapshot()).toBe(false);
+		expect(mirror.hostTimeSeconds(12)).toBe(3);
+
+		mirror.awaitSnapshot();
+		expect(mirror.hostTimeSeconds()).toBeNull();
+		mirror.apply(upserted(entity(3, 1)));
+		expect(mirror.entities().map((value) => value.identity.guid)).toEqual([
+			1, 2,
+		]);
+		mirror.apply(snapshot(entity(4, 1)));
+		expect(mirror.entities()).toEqual([entity(4, 1)]);
+	});
+
+	it("uses instance generation to reject late upserts and removals", () => {
+		const mirror = new DynamicEntityMirror();
+		mirror.apply(snapshot(entity(7, 2)));
+		mirror.apply(upserted(entity(7, 1)));
+		mirror.apply({
+			kind: "removed",
+			guid: 7,
+			generation: 1,
+		});
+		expect(mirror.entities()).toEqual([entity(7, 2)]);
+
+		mirror.apply({
+			kind: "removed",
+			guid: 7,
+			generation: 2,
+		});
+		expect(mirror.entities()).toEqual([]);
+	});
+
+	it("rejects duplicate identities before replacing the current population", () => {
+		const mirror = new DynamicEntityMirror();
+		mirror.apply(snapshot(entity(1, 1)));
+		expect(() => mirror.apply(snapshot(entity(2, 1), entity(2, 2)))).toThrow(
+			"duplicate GUID",
+		);
+		expect(mirror.entities()).toEqual([entity(1, 1)]);
+	});
+
+	it("accepts only newer exact-generation tick batches", () => {
+		const mirror = new DynamicEntityMirror();
+		mirror.apply(snapshot(entity(7, 2)));
+		const stale = entity(7, 1);
+		stale.placement.pose.coords.x = 9;
+		expect(mirror.apply(ticked(stale, 2))).toBe(false);
+
+		const current = entity(7, 2);
+		current.placement.pose.coords.x = 10;
+		expect(mirror.apply(ticked(current, 3))).toBe(true);
+		expect(worldPlacement(mirror.entities()[0]!).pose.coords.x).toBe(10);
+
+		const late = entity(7, 2);
+		late.placement.pose.coords.x = 11;
+		expect(mirror.apply(ticked(late, 2.5))).toBe(false);
+		expect(worldPlacement(mirror.entities()[0]!).pose.coords.x).toBe(10);
+	});
+});

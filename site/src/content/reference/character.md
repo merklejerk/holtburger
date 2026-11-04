@@ -24,7 +24,7 @@ To train a skill, choose **Train**, review the cost, and confirm. Check the skil
 
 ## Understand defenses
 
-Open **Defenses** to spot resistances and vulnerabilities. Check your armor and active [enchantments](/holtburger/3d/spells/) alongside these values when choosing gear for a fight.
+Open **Defenses** to inspect your character’s innate armor and damage resistances, including active [spell effects](/holtburger/3d/spells/). Protection from worn armor is separate.
 
 ## Choose a title
 

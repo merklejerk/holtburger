@@ -28,6 +28,8 @@ Matches ignore capitalization. In a glob, `*` matches any text and `?` matches o
 
 Check the editor's preview against nearby names, then save the rule.
 
+Click the linked name in a chat alert to select the creature or object. Hold **Control** (**Command** on macOS) while clicking, or enable [chat-history interaction](/holtburger/3d/chat/#use-links-in-chat).
+
 <Media id="nearby-alerts" />
 
 ## Manage your alerts

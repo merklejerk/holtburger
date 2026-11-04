@@ -203,7 +203,7 @@
 			"session": "controls",
 			"setup": "A known nearby name and a repeatable matching encounter.",
 			"framing": "Show the rule editor/pattern preview, then the list and resulting notice.",
-			"expected": "The glob matches expected names and produces one useful encounter notification.",
+			"expected": "The glob matches expected names and produces one useful encounter notification. Click the linked alert name in chat to select the matching entity, with history interaction enabled.",
 			"priority": "later"
 		},
 		"chat": {
@@ -211,7 +211,7 @@
 			"session": "setup",
 			"setup": "Sample conversation with coordinates and harmless text.",
 			"framing": "Keep the chat history, its interaction toggle and part of the world visible. Show modifier keys; omit private conversations.",
-			"expected": "Start with click-through live messages. Hold Control (Command on macOS) to scroll and select text; release to resume live messages. Toggle history interaction for longer reading, then turn it off. Show Enter to compose and sending to return to play. Type a partial command, show suggestions with syntax and descriptions, then choose and accept one.",
+			"expected": "Start with click-through live messages. Hold Control (Command on macOS) to scroll and select text; release to resume live messages. Toggle history interaction for longer reading, then turn it off. Show Enter to compose and sending to return to play. Type a partial command, show suggestions with syntax and descriptions, then choose and accept one. With history interaction enabled, click coordinates to set a waypoint and an alert name to select its entity.",
 			"priority": "later"
 		},
 		"emotes": {

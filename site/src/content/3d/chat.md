@@ -28,6 +28,13 @@ For longer reading, use **Interact with chat history** to keep the history activ
 
 Typing also makes the history interactive. Clicking the history switches from typing to reading; press **Enter** to return to your message. **Escape** leaves the history or clears the message you are editing and returns control to the game. If command suggestions are open, the first Escape dismisses them.
 
+## Use links in chat
+
+Hold **Control** (**Command** on macOS), or enable **Interact with chat history**, then click:
+
+- **Coordinates** to set a [waypoint](/holtburger/3d/maps-travel/#follow-a-waypoint).
+- **A linked name in an entity alert** to select that creature or object. You can then [inspect it](/holtburger/3d/inspecting/) or interact as usual.
+
 ## Filter the noise
 
 Use message and channel filters to keep relevant conversations visible. The timestamp control adds or removes times beside messages.

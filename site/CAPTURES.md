@@ -87,7 +87,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Setup: A known nearby name and a repeatable matching encounter.
 - Frame: Show the rule editor/pattern preview, then the list and resulting notice.
 - Action/purpose: Create an alert using a glob, show its match preview, then show a real matching encounter notification.
-- Expected result: The glob matches expected names and produces one useful encounter notification.
+- Expected result: The glob matches expected names and produces one useful encounter notification. Click the linked alert name in chat to select the matching entity, with history interaction enabled.
 - Used in: [3d/nearby/#add-a-name-alert](https://merklejerk.github.io/holtburger/3d/nearby/#add-a-name-alert)
 
 ### Choose an emote
@@ -329,7 +329,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Setup: Sample conversation with coordinates and harmless text.
 - Frame: Keep the chat history, its interaction toggle and part of the world visible. Show modifier keys; omit private conversations.
 - Action/purpose: Show command autocomplete with syntax and descriptions, then temporary history interaction and returning to play.
-- Expected result: Start with click-through live messages. Hold Control (Command on macOS) to scroll and select text; release to resume live messages. Toggle history interaction for longer reading, then turn it off. Show Enter to compose and sending to return to play. Type a partial command, show suggestions with syntax and descriptions, then choose and accept one.
+- Expected result: Start with click-through live messages. Hold Control (Command on macOS) to scroll and select text; release to resume live messages. Toggle history interaction for longer reading, then turn it off. Show Enter to compose and sending to return to play. Type a partial command, show suggestions with syntax and descriptions, then choose and accept one. With history interaction enabled, click coordinates to set a waypoint and an alert name to select its entity.
 - Used in: [3d/chat/#filter-the-noise](https://merklejerk.github.io/holtburger/3d/chat/#filter-the-noise)
 
 ### Inspect an item

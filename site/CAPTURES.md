@@ -312,15 +312,15 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Expected result: Immediate improvement cost and separately confirmed training are distinguishable.
 - Used in: [reference/character/#improve-a-stat-or-train-a-skill](https://merklejerk.github.io/holtburger/reference/character/#improve-a-stat-or-train-a-skill)
 
-### Read and copy chat
+### From playing to reading chat
 
-**Later · user · pending · still** — ID: `chat`
+**Later · user · pending · clip** — ID: `chat`
 
 - Setup: Sample conversation with coordinates and harmless text.
-- Frame: Show timestamps, filters and selected history text; omit private conversations.
-- Action/purpose: Show channel filters, timestamps, and selected text with chat history interaction enabled.
-- Expected result: History interaction makes copying/coordinate links visible.
-- Used in: [3d/interface/#read-select-and-copy](https://merklejerk.github.io/holtburger/3d/interface/#read-select-and-copy)
+- Frame: Keep the chat history, its interaction toggle and part of the world visible. Show modifier keys; omit private conversations.
+- Action/purpose: Show click-through chat, temporary history interaction, scrolling and copying, then return to live messages.
+- Expected result: Start with click-through live messages. Hold Control (Command on macOS) to scroll and select text; release to resume live messages. Toggle history interaction for longer reading, then turn it off. Show Enter to compose and sending to return to play.
+- Used in: [3d/interface/#read-older-messages](https://merklejerk.github.io/holtburger/3d/interface/#read-older-messages)
 
 ### Inspect an item
 

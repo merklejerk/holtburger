@@ -245,10 +245,10 @@ export const media = {
 			'Create an alert using a glob, show its match preview, then show a real matching encounter notification.'
 	},
 	chat: {
-		kind: 'planned-image',
-		title: 'Read and copy chat',
+		kind: 'planned-video',
+		title: 'From playing to reading chat',
 		brief:
-			'Show channel filters, timestamps, and selected text with chat history interaction enabled.'
+			'Show click-through chat, temporary history interaction, scrolling and copying, then return to live messages.'
 	},
 	emotes: {
 		kind: 'planned-video',

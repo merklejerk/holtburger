@@ -210,8 +210,8 @@
 			"owner": "user",
 			"session": "setup",
 			"setup": "Sample conversation with coordinates and harmless text.",
-			"framing": "Show timestamps, filters and selected history text; omit private conversations.",
-			"expected": "History interaction makes copying/coordinate links visible.",
+			"framing": "Keep the chat history, its interaction toggle and part of the world visible. Show modifier keys; omit private conversations.",
+			"expected": "Start with click-through live messages. Hold Control (Command on macOS) to scroll and select text; release to resume live messages. Toggle history interaction for longer reading, then turn it off. Show Enter to compose and sending to return to play.",
 			"priority": "later"
 		},
 		"emotes": {

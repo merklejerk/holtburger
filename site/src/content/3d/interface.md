@@ -36,13 +36,19 @@ Your preferences are saved on this computer. Action-bar contents, spell bindings
 
 ## Send a message
 
-Press **Enter** to open chat. Choose the chat destination, type your message, and send it. Use the command completions and input history to avoid retyping familiar commands.
+Press **Enter** to type a message. Choose the destination, type, and send; sending returns you to the game. If a command suggestion is highlighted, Enter accepts that suggestion first.
+
+Use command completions and input history to avoid retyping familiar commands.
 
 Type `/help` for the command list or `/help COMMAND` for one command. Both `/` and `@` can introduce commands. Chat commands also include utilities such as waypoints, recalls and corpse permissions.
 
-## Read, select and copy
+## Read older messages
 
-Enable **Interact with chat history** when you want to select text, copy messages, or click coordinate links. Turn it off when you want the history to stay out of the way of ordinary game input.
+Chat normally follows new messages and lets you click through the history into the world. To scroll back, select text or click a coordinate link, hold **Control** (**Command** on macOS) while using the history. Release it to return to live messages.
+
+For longer reading, use **Interact with chat history** to keep the history active. It holds your place while you scroll back. Turn the toggle off when finished to resume following new messages.
+
+Typing also makes the history interactive. Clicking the history switches from typing to reading; press **Enter** to return to your message. **Escape** leaves the history or clears the message you are editing and returns control to the game. If command suggestions are open, the first Escape dismisses them.
 
 Use message and channel filters to keep relevant conversations visible. The timestamp control adds or removes times beside messages.
 

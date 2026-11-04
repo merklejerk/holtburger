@@ -132,7 +132,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Frame: Close view of Items to salvage and Estimated output; retain all quantities.
 - Action/purpose: Show two materials, their estimated outputs, and one queued stack with its full quantity.
 - Expected result: Whole-stack inclusion and separate material output rows are visible.
-- Used in: [3d/crafting/#check-the-estimate](https://merklejerk.github.io/holtburger/3d/crafting/#check-the-estimate)
+- Used in: [3d/crafting/#review-the-salvage-output](https://merklejerk.github.io/holtburger/3d/crafting/#review-the-salvage-output)
 
 ### Open a locked container
 
@@ -142,7 +142,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Frame: Show the locked object and helper; keep estimate and result text readable.
 - Action/purpose: Show the key action and lockpick estimate at a real locked chest, with the outcome visible.
 - Expected result: The key attempt and available lockpick action/result can be understood.
-- Used in: [3d/crafting/#pick-the-lock](https://merklejerk.github.io/holtburger/3d/crafting/#pick-the-lock)
+- Used in: [3d/locks/#pick-the-lock](https://merklejerk.github.io/holtburger/3d/locks/#pick-the-lock)
 
 ### Buy and sell
 
@@ -152,7 +152,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Frame: Show stock, queue quantities, balances and Trade feedback.
 - Action/purpose: Queue a purchase and a sale, adjust quantities, review balances, and show the completed trade.
 - Expected result: A reviewed purchase/sale completes and the resulting balances/items are visible.
-- Used in: [3d/crafting/#buy-or-sell-at-a-vendor](https://merklejerk.github.io/holtburger/3d/crafting/#buy-or-sell-at-a-vendor)
+- Used in: [3d/trading/#buy-or-sell-at-a-vendor](https://merklejerk.github.io/holtburger/3d/trading/#buy-or-sell-at-a-vendor)
 
 ### Pack and equip
 
@@ -206,7 +206,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 - Frame: Frame the whole trade window with both participants and confirmation/reset controls.
 - Action/purpose: Show both trade offers, acceptance status, and the withdraw/reset controls using sample participants.
 - Expected result: Both offers and acceptance states are readable; no valuable exchange is required.
-- Used in: [3d/crafting/#trade-with-another-player](https://merklejerk.github.io/holtburger/3d/crafting/#trade-with-another-player)
+- Used in: [3d/trading/#trade-with-another-player](https://merklejerk.github.io/holtburger/3d/trading/#trade-with-another-player)
 
 ### Mark the next stop
 

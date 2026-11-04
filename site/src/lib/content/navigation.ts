@@ -95,8 +95,16 @@ export const navigation = [
 				label: 'Spells & enchantments'
 			},
 			{
+				slug: '3d/trading',
+				label: 'Buying & trading'
+			},
+			{
 				slug: '3d/crafting',
-				label: 'Crafting, trading & salvage'
+				label: 'Crafting & salvage'
+			},
+			{
+				slug: '3d/locks',
+				label: 'Locks & keys'
 			},
 			{
 				slug: '3d/chat',

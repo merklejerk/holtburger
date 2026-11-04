@@ -45,6 +45,8 @@ Select a container or corpse and press **R** to open it. Use its contents to mov
 
 Use [Smart Tab and interaction](/holtburger/3d/combat/) for the rest of the selection controls, or [item actions](/holtburger/3d/inventory/) to examine and give what you find.
 
+For locked doors and containers, use the [key and lockpick helper](/holtburger/3d/locks/). To clear unwanted gear, [sell it](/holtburger/3d/trading/#buy-or-sell-at-a-vendor) or [salvage it](/holtburger/3d/crafting/#salvaging-items).
+
 ## Use or pick up
 
 Select something and press **R** to interact. For a loose item, that means picking it up; for an item you carry, it can mean using or equipping it. Containers and other world objects open their relevant interaction.
@@ -62,6 +64,8 @@ Open an [appraisal](/holtburger/3d/inspecting/) to check an item’s requirement
 3. Press **G** and review any confirmation.
 
 Holtburger remembers the selected recipient while you browse items, so you can choose another item without selecting the recipient again. Check the recipient shown before confirming.
+
+For an exchange of offers, use [player trading](/holtburger/3d/trading/#trade-with-another-player).
 
 To hand over part of a stack, [split it first](/holtburger/3d/inventory/#split-a-stack).
 

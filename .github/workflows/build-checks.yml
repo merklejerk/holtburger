@@ -84,6 +84,10 @@ jobs:
           toolchain: 1.95.0
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # Cache cleanup removes V8's native archive in target/debug/gn_out while
+      # retaining build metadata. Rebuild V8 so its archive is downloaded again.
+      - name: Rebuild V8 to restore its native library
+        run: cargo clean --locked --package v8
       - name: Install frontend dependencies
         if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d

@@ -55,7 +55,7 @@
 			"priority": "first"
 		},
 		"spells": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "gear",
 			"setup": "Known spells in several schools/levels and an empty spell-bar cell.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Keep search, filters and destination bar readable.",
@@ -327,7 +327,7 @@
 			"priority": "first"
 		},
 		"chat-completion": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "Chat input with a partial command and multiple suggestions.",
 			"framing": "Crop to the composer and suggestions. Show syntax and descriptions, then accept a suggestion.",

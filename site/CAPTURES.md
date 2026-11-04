@@ -2,7 +2,7 @@
 
 Generated from `authoring/captures.json`, the media catalog and actual page placements. Edit those sources rather than this report.
 
-The website works without these captures. This is the final-session shot list, not a prerequisite to writing or deployment. Start with the **First** shots; the rest can be collected when convenient. The agent owns static component crops, including live-client panels staged on the local test server. The user owns motion and natural-control clips, plus all interactive TUI capture. The user reviews the first static samples before bulk capture. Fixture images must be labeled as UI illustrations, never as gameplay evidence.
+The website works without these captures. This is the final-session shot list, not a prerequisite to writing or deployment. Start with the **First** shots; the rest can be collected when convenient. The agent owns static component crops and the assigned scripted UI clips, using the local test server. The user owns movement, combat, camera and natural-control clips, plus all interactive TUI capture. The user reviews the first static samples before bulk capture. Fixture images must be labeled as UI illustrations, never as gameplay evidence.
 
 Keep originals outside Git and publish processed files through [MEDIA.md](MEDIA.md). Record the client version, use readable text scale, hide credentials, and leave a second of stillness before/after each action. Prefer short clips over one long recording.
 
@@ -156,7 +156,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Find a spell and bind it
 
-**First · user · pending · clip** — ID: `spells`
+**First · agent · pending · clip** — ID: `spells`
 
 - Setup: Known spells in several schools/levels and an empty spell-bar cell.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Keep search, filters and destination bar readable.
@@ -364,7 +364,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Find a command as you type
 
-**First · user · pending · clip** — ID: `chat-completion`
+**First · agent · pending · clip** — ID: `chat-completion`
 
 - Setup: Chat input with a partial command and multiple suggestions.
 - Frame: Crop to the composer and suggestions. Show syntax and descriptions, then accept a suggestion.

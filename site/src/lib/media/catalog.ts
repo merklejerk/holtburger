@@ -197,8 +197,7 @@ export const media = {
 	hud: {
 		kind: 'planned-image',
 		title: 'Make room for your HUD',
-		brief:
-			'Show an unlocked HUD component with its move and resize controls.'
+		brief: 'Show an unlocked HUD component with its move and resize controls.'
 	},
 	launcher: {
 		kind: 'planned-image',

@@ -6,11 +6,11 @@ section: 'Get started'
 
 ## Get comfortable
 
-The movement defaults use **A/D to turn** and **Z/C to strafe**. Adjust them in **Settings → Input** if your hands expect something else. The [full keymap](/holtburger/reference/3d-controls/) is there when you need it.
+Use **WASD** to move and turn, with **Z/C** for strafing. Adjust them in **Settings → Input** if your hands expect something else. The [full keymap](/holtburger/reference/3d-controls/) is there when you need it.
 
 ## Pick a fight
 
-**Tap Tab** to cycle targets, or **hold it** to acquire an immediate target. **Shift+Tab** reverses cycling. Enter combat with **Backquote (`)** and choose **Start attack** on the combat bar.
+**Tap Tab** to cycle targets, or **hold it** to acquire an immediate target. **Shift+Tab** reverses cycling. Enter combat with **Backquote (`)**. The [combat HUD](/holtburger/3d/combat/#your-attack-controls) puts power/accuracy on an outer arc, attack height inside it, and **▶** below to start attacking. The attack button changes to a pause control while you fight.
 
 For spells, open **Spells**, search for what you need, and drag it onto your spell bar. [Spell filters](/holtburger/3d/spells/) make a large spellbook easier to work with.
 

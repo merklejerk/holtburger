@@ -40,15 +40,15 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Expected result: Orbit leaves facing alone; right-hold steers, and middle/both buttons move forward.
 - Used in: [3d/movement-camera/#look-around-or-steer](https://merklejerk.github.io/holtburger/3d/movement-camera/#look-around-or-steer)
 
-### Choose an attack
+### The combat HUD
 
-**Later · user · pending · clip** — ID: `combat-controls`
+**First · user · pending · clip** — ID: `combat-controls`
 
 - Setup: A safe target, melee weapon and optional ranged weapon/ammunition.
-- Frame: Show target, combat bar, gauge/height and Start/Cancel attack.
-- Action/purpose: Show target selection, stance, power or accuracy, attack height, Start attack and Cancel attack.
-- Expected result: Selection and attack start are distinct; changing controls and canceling are clear.
-- Used in: [3d/combat/#adjust-the-attack](https://merklejerk.github.io/holtburger/3d/combat/#adjust-the-attack)
+- Frame: Close enough to read the curved power/accuracy arc, height buttons, play/pause icon and ammunition; keep the selected target visible.
+- Action/purpose: Show the curved power/accuracy arc, height buttons and play/pause control, then use them through a short melee and missile encounter.
+- Expected result: The new layout is recognizable, with adjustment and start/cancel shown in melee and missile stances.
+- Used in: [3d/#keep-attack-controls-within-reach](https://merklejerk.github.io/holtburger/3d/#keep-attack-controls-within-reach), [3d/combat/#your-attack-controls](https://merklejerk.github.io/holtburger/3d/combat/#your-attack-controls)
 
 ### Watch for a name
 

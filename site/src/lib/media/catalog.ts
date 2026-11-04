@@ -150,9 +150,9 @@ export const media = {
 	},
 	'combat-controls': {
 		kind: 'planned-video',
-		title: 'Choose an attack',
+		title: 'The combat HUD',
 		brief:
-			'Show target selection, stance, power or accuracy, attack height, Start attack and Cancel attack.'
+			'Show the curved power/accuracy arc, height buttons and play/pause control, then use them through a short melee and missile encounter.'
 	},
 	locks: {
 		kind: 'planned-video',

@@ -106,9 +106,9 @@
 			"owner": "user",
 			"session": "controls",
 			"setup": "A safe target, melee weapon and optional ranged weapon/ammunition.",
-			"framing": "Show target, combat bar, gauge/height and Start/Cancel attack.",
-			"expected": "Selection and attack start are distinct; changing controls and canceling are clear.",
-			"priority": "later"
+			"framing": "Close enough to read the curved power/accuracy arc, height buttons, play/pause icon and ammunition; keep the selected target visible.",
+			"expected": "The new layout is recognizable, with adjustment and start/cancel shown in melee and missile stances.",
+			"priority": "first"
 		},
 		"locks": {
 			"owner": "user",

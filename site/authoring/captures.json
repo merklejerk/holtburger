@@ -150,20 +150,12 @@
 			"expected": "Immediate improvement cost and separately confirmed training are distinguishable.",
 			"priority": "later"
 		},
-		"enchantments": {
-			"owner": "user",
-			"session": "setup",
-			"setup": "Real effects with one weaker spell overridden by a stronger effect on the same stat.",
-			"framing": "Crop the Enchantments panel with the group expanded and timers visible.",
-			"expected": "Effective and overridden spells have coherent names, stats and durations.",
-			"priority": "first"
-		},
 		"waypoints": {
 			"owner": "user",
 			"session": "world",
 			"setup": "An outdoor character and open World map/chat.",
 			"framing": "Show command input, coordinate link and map pin without a full-screen chat zoom.",
-			"expected": "A coordinate becomes the expected pin, and clear removes it.",
+			"expected": "Set a waypoint from chat coordinates; show its world map pin and minimap direction and distance while traveling, then clear it.",
 			"priority": "later"
 		},
 		"housing-payments": {
@@ -293,6 +285,30 @@
 			"framing": "Crop the relevant controls and Copy hardware info, without dumping the full report into the image.",
 			"expected": "The troubleshooting action is easy to locate.",
 			"priority": "later"
+		},
+		"target-indicators": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "Use several nearby creatures or objects. Start an attack, then select another object while the attack continues.",
+			"framing": "Keep the character, targets and input display visible.",
+			"expected": "Show the bold selected-object outline and the separate reticle on an active combat target.",
+			"priority": "first"
+		},
+		"mobile-combat": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "Use a character with a caster, bow and ammunition in a safe fight.",
+			"framing": "Keep the character, targets and input display visible.",
+			"expected": "Show running while casting, then archery while moving, with normal movement keys visible.",
+			"priority": "first"
+		},
+		"minimap": {
+			"owner": "user",
+			"session": "world",
+			"setup": "Use an outdoor route and a dungeon entrance.",
+			"framing": "Keep the minimap readable beside the surrounding scene.",
+			"expected": "Show outdoor terrain, buildings, impassable areas and elevation, then a dungeon layout.",
+			"priority": "first"
 		}
 	}
 }

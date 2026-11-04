@@ -28,6 +28,18 @@ Choose your target, then start your attack or cast. Use the displayed key hints 
 
 <Media id="smart-tab" />
 
+## Keep track of your target
+
+A bold outline traces your selected creature or object, making it easier to pick out in a crowd than retail’s corner reticle. A separate combat reticle marks the target you are actively attacking or casting at, so you can distinguish selection from the ongoing fight.
+
+<Media id="target-indicators" />
+
+## Fight on the move
+
+Keep running while casting or firing a bow. Movement continues through the windup with your normal movement controls—no sliding key combinations to learn. Reposition between enemies or keep your distance while attacking.
+
+<Media id="mobile-combat" />
+
 ## Pick something specific
 
 Click a particular object when you know what you want. Use **R** to interact and **E** to examine; right-clicking also selects and examines.
@@ -36,4 +48,4 @@ An appraisal stays on the object you examined while you move on to another targe
 
 ## Between fights
 
-Use [loadouts](/holtburger/3d/equipment-loadouts/) for planned gear changes, and check [enchantments](/holtburger/3d/spells/#effective-and-overridden) when a buff or debuff changes your effective stats.
+Use [loadouts](/holtburger/3d/equipment-loadouts/) for planned gear changes, and ready your [spell bars](/holtburger/3d/spells/) for the next encounter.

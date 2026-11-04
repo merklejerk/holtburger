@@ -88,6 +88,24 @@ export const media = {
 		width: 1055,
 		height: 818
 	},
+	'target-indicators': {
+		kind: 'planned-video',
+		title: 'Selection and combat at a glance',
+		brief:
+			'Show the bold selected-object outline and the separate reticle on an active combat target.'
+	},
+	'mobile-combat': {
+		kind: 'planned-video',
+		title: 'Keep moving through the windup',
+		brief:
+			'Show running while casting, then archery while moving, with normal movement keys visible.'
+	},
+	minimap: {
+		kind: 'planned-video',
+		title: 'Read the ground ahead',
+		brief:
+			'Show outdoor terrain, buildings, impassable areas and elevation, then a dungeon layout.'
+	},
 	'smart-tab': {
 		kind: 'planned-video',
 		title: 'Smart Tab in action',
@@ -184,17 +202,11 @@ export const media = {
 		brief:
 			'Show a skill detail and its cost, plus the separate confirmation for training a new skill.'
 	},
-	enchantments: {
-		kind: 'planned-image',
-		title: 'Find the effect that counts',
-		brief:
-			'Show effective and overridden spells affecting the same stat, with durations readable.'
-	},
 	waypoints: {
 		kind: 'planned-video',
 		title: 'Mark the next stop',
 		brief:
-			'Set a waypoint from coordinates in chat, show the map pin, then clear it.'
+			'Set a waypoint from chat coordinates, then follow its direction and distance on the minimap.'
 	},
 	'housing-payments': {
 		kind: 'planned-image',

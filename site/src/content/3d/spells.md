@@ -1,6 +1,6 @@
 ---
 title: 'Spells & enchantments'
-description: 'Find spells, prepare your bars, and see which effects count.'
+description: 'Find spells, prepare your bars, and cast on the move.'
 section: '3D client'
 ---
 
@@ -22,6 +22,10 @@ Enter magic stance, choose the appropriate target, and press **Cast** beside the
 
 For targeted spells, use [Smart Tab](/holtburger/3d/combat/) to select your target, or **X** to select yourself.
 
+## Cast on the move
+
+Keep moving through spell windups using your normal movement controls. You can reposition while casting without retail’s sliding key combinations.
+
 ## Build your spell bars
 
 Drag a spell from the list into a spell-bar cell. Use the tabs to group spells for different tasks. There are ten tabs; the first ten positions on each tab have keyboard shortcuts, with room for additional cells beyond them.
@@ -39,14 +43,6 @@ Supported non-Life projectile spells can fire forward when you have no selection
 Open **Enchantments** to inspect active spells and their remaining time. Effects are grouped by the stats they affect.
 
 The beneficial and harmful effect trays reflect effects currently contributing to your stats. Vitae appears with harmful effects.
-
-## Effective and overridden
-
-A spell can still be present while a stronger effect overrides it. Expand an effect's overridden-spell group to see those other spells and their durations.
-
-Use this when you want to know why a familiar buff is not changing a stat, or what may remain after another effect expires.
-
-<Media id="enchantments" />
 
 ## Find the effect you need
 

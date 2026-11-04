@@ -50,6 +50,26 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Expected result: The new layout is recognizable, with adjustment and start/cancel shown in melee and missile stances.
 - Used in: [3d/#keep-attack-controls-within-reach](https://merklejerk.github.io/holtburger/3d/#keep-attack-controls-within-reach), [3d/combat/#your-attack-controls](https://merklejerk.github.io/holtburger/3d/combat/#your-attack-controls)
 
+### Selection and combat at a glance
+
+**First · user · pending · clip** — ID: `target-indicators`
+
+- Setup: Use several nearby creatures or objects. Start an attack, then select another object while the attack continues.
+- Frame: Keep the character, targets and input display visible.
+- Action/purpose: Show the bold selected-object outline and the separate reticle on an active combat target.
+- Expected result: Show the bold selected-object outline and the separate reticle on an active combat target.
+- Used in: [3d/combat/#keep-track-of-your-target](https://merklejerk.github.io/holtburger/3d/combat/#keep-track-of-your-target)
+
+### Keep moving through the windup
+
+**First · user · pending · clip** — ID: `mobile-combat`
+
+- Setup: Use a character with a caster, bow and ammunition in a safe fight.
+- Frame: Keep the character, targets and input display visible.
+- Action/purpose: Show running while casting, then archery while moving, with normal movement keys visible.
+- Expected result: Show running while casting, then archery while moving, with normal movement keys visible.
+- Used in: [3d/#stay-mobile](https://merklejerk.github.io/holtburger/3d/#stay-mobile), [3d/combat/#fight-on-the-move](https://merklejerk.github.io/holtburger/3d/combat/#fight-on-the-move)
+
 ### Watch for a name
 
 **Later · user · pending · clip** — ID: `nearby-alerts`
@@ -158,6 +178,16 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 Group location-dependent work together: a party member for trade/party, an owned or permitted house, an active contract, an outdoor death location when convenient, and your server’s barber service. These shots can wait until the relevant state occurs naturally.
 
+### Read the ground ahead
+
+**First · user · pending · clip** — ID: `minimap`
+
+- Setup: Use an outdoor route and a dungeon entrance.
+- Frame: Keep the minimap readable beside the surrounding scene.
+- Action/purpose: Show outdoor terrain, buildings, impassable areas and elevation, then a dungeon layout.
+- Expected result: Show outdoor terrain, buildings, impassable areas and elevation, then a dungeon layout.
+- Used in: [3d/#read-the-route-ahead](https://merklejerk.github.io/holtburger/3d/#read-the-route-ahead), [3d/maps-travel/#navigate-with-the-minimap](https://merklejerk.github.io/holtburger/3d/maps-travel/#navigate-with-the-minimap)
+
 ### Review both offers
 
 **Later · user · pending · still** — ID: `player-trade`
@@ -174,9 +204,9 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 - Setup: An outdoor character and open World map/chat.
 - Frame: Show command input, coordinate link and map pin without a full-screen chat zoom.
-- Action/purpose: Set a waypoint from coordinates in chat, show the map pin, then clear it.
-- Expected result: A coordinate becomes the expected pin, and clear removes it.
-- Used in: [3d/maps-travel/#set-a-waypoint](https://merklejerk.github.io/holtburger/3d/maps-travel/#set-a-waypoint)
+- Action/purpose: Set a waypoint from chat coordinates, then follow its direction and distance on the minimap.
+- Expected result: Set a waypoint from chat coordinates; show its world map pin and minimap direction and distance while traveling, then clear it.
+- Used in: [3d/maps-travel/#follow-a-waypoint](https://merklejerk.github.io/holtburger/3d/maps-travel/#follow-a-waypoint)
 
 ### Prepare a house payment
 
@@ -261,16 +291,6 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Action/purpose: Show the launcher server entry and Play action using sample connection details.
 - Expected result: Readers can identify each step used by the connection guide.
 - Used in: [startup/servers/#add-your-account](https://merklejerk.github.io/holtburger/startup/servers/#add-your-account)
-
-### Find the effect that counts
-
-**First · user · pending · still** — ID: `enchantments`
-
-- Setup: Real effects with one weaker spell overridden by a stronger effect on the same stat.
-- Frame: Crop the Enchantments panel with the group expanded and timers visible.
-- Action/purpose: Show effective and overridden spells affecting the same stat, with durations readable.
-- Expected result: Effective and overridden spells have coherent names, stats and durations.
-- Used in: [3d/spells/#effective-and-overridden](https://merklejerk.github.io/holtburger/3d/spells/#effective-and-overridden)
 
 ### Choose your game data
 

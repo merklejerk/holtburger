@@ -8,6 +8,12 @@ section: '3D client'
 import Media from '#lib/components/Media.svelte';
 </script>
 
+## Navigate with the minimap
+
+The minimap puts the surrounding terrain under your radar markers: buildings, elevation and impassable areas help you read the route ahead. Inside dungeons, it shows the dungeon layout so you can follow passages and keep your bearings.
+
+<Media id="minimap" />
+
 ## Read the world map
 
 Open **World** and use the map to explore Dereth. Drag to pan and scroll to zoom. **Reset view** returns to the whole-world view.
@@ -16,7 +22,9 @@ Use **Map visibility** to show or hide town names, contracts, waypoints and hous
 
 <Media id="map" />
 
-## Set a waypoint
+## Follow a waypoint
+
+Mark your next stop and follow its direction and distance on the minimap. The world map keeps the destination pinned while you travel.
 
 Use the map's context menu to mark a destination, or enter coordinates in chat:
 

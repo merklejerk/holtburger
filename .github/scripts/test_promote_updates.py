@@ -62,6 +62,27 @@ class UpdatePromotionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.output = Path(temporary.name) / "site"
 
+    def test_feed_reconciliation_preserves_existing_website(self):
+        self.output.mkdir()
+        website = {"index.html": b"<h1>Holtburger</h1>",
+                   "gallery/index.html": b"<h1>Gallery</h1>",
+                   "pagefind/pagefind.js": b"search index"}
+        for name, content in website.items():
+            destination = self.output / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content)
+        release, data = release_fixture("0.2.0", "beta", "a" * 40, 1)
+        for releases in ([release], []):
+            generate_feeds(releases, lambda _identifier: data, self.output)
+            for name, content in website.items():
+                self.assertEqual((self.output / name).read_bytes(), content)
+            feed = self.output / "updates/beta.json"
+            if releases:
+                self.assertEqual(json.loads(feed.read_text()),
+                                 {"schemaVersion": 1, "version": "0.2.0", "tag": "v0.2.0"})
+            else:
+                self.assertFalse(feed.exists())
+
     def test_highest_beta_wins_regardless_of_publication_order(self):
         older, older_data = release_fixture("0.2.0", "beta", "a" * 40, 1)
         newer, newer_data = release_fixture("0.2.1", "beta", "b" * 40, 2)

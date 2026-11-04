@@ -1,0 +1,5 @@
+.svelte-kit/
+build/
+static/assets/
+src/lib/generated/
+package-lock.json

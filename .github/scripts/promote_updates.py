@@ -63,11 +63,6 @@ def generate_feeds(releases: list[dict], load_manifest: Callable[[int], bytes], 
         path.unlink(missing_ok=True)
     for retired in ("alpha.json", "nightly.json"):
         (updates / retired).unlink(missing_ok=True)
-    (output / "index.html").write_text(
-        '<!doctype html><html lang="en"><meta charset="utf-8">'
-        '<title>Holtburger updates</title><h1>Holtburger updates</h1>'
-        '<p><a href="https://github.com/merklejerk/holtburger/releases">Downloads</a></p></html>\n'
-    )
 
 
 def github(*arguments: str) -> bytes:

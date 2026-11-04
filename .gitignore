@@ -38,6 +38,7 @@ node_modules/
 
 # Machine-local references and working notes
 /local/
+/local
 
 # Python test bytecode
 __pycache__/

@@ -36,10 +36,6 @@ Chat settings can also suppress your own evasion/resist notices and spell incant
 
 <Media id="chat" />
 
-## Speak to an NPC
-
-Interact with the NPC and use the offered dialogue or reply controls when available. Keep the conversation visible while choosing a response.
-
 ## Use an emote
 
 Hold **T** to open the emote wheel. Click an emote, or select it with **Space** or **Enter**. Releasing T dismisses the wheel. Recent choices make repeated gestures easier to find.

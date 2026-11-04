@@ -237,10 +237,6 @@ export const navigation = [
 				label: 'Gallery'
 			},
 			{
-				slug: 'support',
-				label: 'Help'
-			},
-			{
 				slug: 'about/design',
 				label: 'Design philosophy'
 			},

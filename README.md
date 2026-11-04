@@ -26,11 +26,11 @@ systems that now also power the 3D client.
 
 ## Design and compatibility
 
-Holtburger's architecture and interfaces are designed from the ground up. Its
-physics, rendering, and user experience intentionally depart from retail's design,
-so differences in movement, visuals, and interaction are expected. The UX in
-particular follows its own direction, including interface layouts, controls, and
-workflows.
+Holtburger's architecture and interfaces are designed from the ground up. The 3D
+client keeps routine setup short with quick targeting, saved gear changes, and
+searchable spells. Its controls and layouts depart from retail to keep those
+workflows close at hand. Physics and rendering also take their own direction, so movement and
+visuals will differ from retail.
 
 Retail research provides targeted corrections to asset formats, presentation, and
 physics where compatibility requires them. The goal is to work with the existing

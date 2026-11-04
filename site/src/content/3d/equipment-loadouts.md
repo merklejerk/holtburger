@@ -16,8 +16,6 @@ import Media from '#lib/components/Media.svelte';
 4. Optionally choose a name and icon.
 5. Drag the result icon onto an action-bar cell to save it.
 
-A loadout remembers the particular items you captured. It does not search for other equipment with the same name.
-
 ## Choose what changes
 
 | Slot in the builder   | Result when activated |

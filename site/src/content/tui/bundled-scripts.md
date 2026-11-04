@@ -41,6 +41,6 @@ The arrays accept spell IDs or spell key names from the script's data. Preferred
 
 Check feedback, equipment, spell knowledge and supplies before leaving a run to continue. Use `/unrun` to stop the script.
 
-These scripts are starting points for automation. Trade services, buff services, specialized routes and other behavior may need a script of your own. Retail plugin profiles and metas are not imported.
+For trade services, buffing or specialized routes, write a script tailored to those tasks.
 
 For the authoring workflow and API, start with [your first script](/holtburger/scripting/).

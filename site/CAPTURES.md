@@ -48,7 +48,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Frame: Full body and an N key-press display; keep the camera still.
 - Action/purpose: Cycle resting crouch/kneel → sit → lie down → stand, with the key press visible.
 - Expected result: Four deliberate presses show kneel/crouch, sit, lie, and stand.
-- Used in: [3d/movement-camera/#rest-with-n](https://merklejerk.github.io/holtburger/3d/movement-camera/#rest-with-n)
+- Used in: [3d/movement-camera/#rest-between-fights](https://merklejerk.github.io/holtburger/3d/movement-camera/#rest-between-fights)
 
 ### Choose an attack
 

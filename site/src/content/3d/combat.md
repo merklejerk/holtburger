@@ -12,7 +12,7 @@ import Media from '#lib/components/Media.svelte';
 
 Equip your weapon or caster, then press **Backquote (`)** to switch between peace and combat. Your equipped weapon determines the available combat stance and controls.
 
-Use [Smart Tab](/holtburger/3d/selection-interaction/) to choose a target. Holding Tab acquires an immediate target; tapping cycles through targets. Selecting a creature does not start an attack.
+Choose your target with [Smart Tab](/holtburger/3d/selection-interaction/), then start the attack when you are ready.
 
 ## Start or stop attacking
 

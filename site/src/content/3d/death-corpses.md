@@ -14,7 +14,7 @@ Use `/corpse` to show your saved last outdoor death location. `/corpses` lists a
 
 Enable **Interact with chat history** and click the coordinates to set a waypoint. Follow it using the [world map](/holtburger/3d/maps-travel/), then use **V** or **Shift+V** to cycle through unopened corpses nearby.
 
-Treat recorded locations as a starting point: they can be approximate or stale, and they do not tell you whether the corpse or its items are still there. Session history from `/corpses` clears when the character session ends.
+Use the coordinates to reach the area, then look for your corpse. The `/corpses` history clears when the character session ends.
 
 <Media id="corpse-recovery" />
 
@@ -40,5 +40,3 @@ To manage permissions other people grant you:
 ## Check vitae
 
 Open [Enchantments](/holtburger/3d/enchantments/) to inspect vitae alongside other harmful effects.
-
-`/die` (alias `/rip`) kills your character after confirmation. It can cause item drops and vitae; it is not a recall shortcut.

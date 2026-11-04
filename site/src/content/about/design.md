@@ -12,15 +12,15 @@ The architecture and interfaces were independently designed. Retail research lat
 
 ## Active play in 3D
 
-Holtburger 3D integrates quality of life improvements around playing the game yourself: finding targets, preparing equipment, navigating spells, and arranging useful information.
+Holtburger 3D is built to keep routine setup short: fast target changes, saved gear swaps, and searchable spells. Its controls and layout keep those workflows close at hand.
 
-Its controls and UX follow their own direction. Rendering and physics also differ from retail. Compatibility with the game does not mean reproducing every retail interaction or visual detail.
+Rendering and physics also take their own direction, so movement and visuals will differ from retail.
 
 ## Automation in a terminal
 
 The TUI provides gameplay and scripting without running a full 3D interface. It is the preferred form factor for automation and bots.
 
-These priorities describe the clients, not how people ought to play. h3d has no plugin system today; plugins and scripting are planned, without a promised release date.
+Plugin and scripting support for h3d is planned.
 
 ## Still evolving
 

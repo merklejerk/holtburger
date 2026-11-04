@@ -27,5 +27,3 @@ Holtburger appraises missing item details as needed. If an item cannot be apprai
 ## Confirm
 
 Check the queued items, then press **Salvage** and review the destruction confirmation. Salvaged items are consumed. The output rows are estimates; check the resulting bags in inventory afterward.
-
-Temporarily suppressing the confirmation does not make salvage automatic: you still prepare each batch and press **Salvage**.

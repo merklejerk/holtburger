@@ -20,13 +20,11 @@ Hold **Space** to charge, then release to jump. Watch the jump-power display whi
 4. Inspect the target and trajectory preview.
 5. Click to launch the chosen jump. Press **Escape** to cancel instead.
 
-While aiming, W and S adjust jump power rather than moving you forward or backward. The mouse wheel still zooms unless you hold Shift.
-
 <Media id="jump" />
 
 ## Read the preview
 
-Adjust power and watch how the path changes. A target does not guarantee a landing: the chosen jump may fall short or hit something on the way.
+Adjust power until the path reaches your intended landing. Look for obstacles along the arc and leave room to land.
 
 Holtburger's movement and physics have their own feel. Try a few low-risk jumps before relying on a familiar retail route.
 

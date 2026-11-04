@@ -29,7 +29,7 @@ You can also reorder ordinary packs. Main Pack stays first and spell foci stay l
 
 Select the stack and press **Y**, or use **Split stack** in the selected-item actions. Choose the amount using the number field or slider.
 
-You need space for the new stack. Holtburger tries the source pack first, then other available packs. Choosing the whole stack does not split it.
+Leave a free inventory slot for the new stack.
 
 ## Auto-merge a bag
 

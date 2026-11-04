@@ -32,6 +32,6 @@ Interact with the NPC and use the offered dialogue or reply controls when availa
 
 Hold **T** to open the emote wheel. Click an emote, or select it with **Space** or **Enter**. Releasing T dismisses the wheel. Recent choices make repeated gestures easier to find.
 
-When an emote requires peace, Holtburger can switch temporarily and restore the previous combat stance afterward. The social kneel emote is separate from the **N** resting posture cycle.
+When an emote requires peace, Holtburger can switch temporarily and restore the previous combat stance afterward.
 
 <Media id="emotes" />

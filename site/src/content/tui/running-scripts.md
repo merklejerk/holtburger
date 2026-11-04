@@ -20,7 +20,7 @@ Enter the world, then use:
 
 `/scripts` shows script status, any queued startup, your local directory, and discovered scripts. `/run NAME` starts `NAME.js`; `/unrun` stops it and clears queued startup.
 
-**Only one script runs at a time.** Starting another replaces the current script. Manual `/run` before the character is ready is ignored with a warning.
+**Only one script runs at a time.** Starting another replaces the current script.
 
 Use `/script MESSAGE` to send a command to the active script. What the message means depends on that script.
 
@@ -44,6 +44,6 @@ Run `/run hello`, without the extension. A local script with the same basename a
 
 Add `--character NAME --run fighter` to your usual connection command. Use `--run-args 'TEXT'` when the script accepts startup arguments. Startup waits until the character is ready.
 
-For a supervised process, `-Q` / `--auto-quit` exits on disconnect so an external supervisor can restart it. It does not provide a headless mode or reconnect policy by itself.
+For a supervised process, `-Q` / `--auto-quit` exits on disconnect so an external supervisor can restart it.
 
 See the [launch options](/holtburger/reference/tui-options/) for logging and connection flags, or [write your first script](/holtburger/scripting/).

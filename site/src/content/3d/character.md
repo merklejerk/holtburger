@@ -24,10 +24,8 @@ To train a skill, choose **Train**, review the cost, and confirm. Check the skil
 
 ## Understand defenses
 
-The **Defenses** view groups your defensive values for easier inspection. Resistance values can show a reduction or a vulnerability, but they are only part of what determines damage; armor and the attack also matter.
-
-Use [Enchantments](/holtburger/3d/enchantments/) to see which effects are currently helping or hurting those stats.
+Open **Defenses** to spot resistances and vulnerabilities. Check your armor and active [enchantments](/holtburger/3d/enchantments/) alongside these values when choosing gear for a fight.
 
 ## Choose a title
 
-Use the title control to choose from the titles your character has earned. Title changes are separate from spending experience or training skills.
+Choose a title your character has earned from the title control.

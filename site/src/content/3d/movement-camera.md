@@ -20,9 +20,7 @@ import Media from '#lib/components/Media.svelte';
 | Charged jump        | Hold and release Space |
 | Precise jump mode   | Ctrl+Space             |
 
-**A and D turn; Z and C strafe.** These are Holtburger defaults. Change them under **Settings → Input** if you prefer another arrangement.
-
-For a normal jump, hold Space to charge and release to leap. [Precise jumping](/holtburger/3d/jumping/) gives you a target and trajectory preview instead.
+Use [precise jumping](/holtburger/3d/jumping/) to plan a leap with a target and trajectory preview.
 
 <Media id="movement-keys" />
 
@@ -33,15 +31,11 @@ For a normal jump, hold Space to charge and release to leap. [Precise jumping](/
 - **Hold the middle button or both buttons** to move forward, with mouse movement enabled.
 - **Scroll** to zoom the camera.
 
-Camera orbit lets you look somewhere without turning your character. Mouse steering turns the character as well.
-
 <Media id="camera" />
 
-## Rest with N
+## Rest between fights
 
-Press **N** to cycle through resting crouch/kneel → sit → lie down → stand. You can press again to advance to the next posture.
-
-This is the resting kneel, separate from the social kneel emote.
+Resting speeds up health and stamina recovery. Press **N** to cycle through kneeling → sitting → lying down → standing. Lying down gives the fastest recovery.
 
 <Media id="postures" />
 

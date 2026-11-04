@@ -39,6 +39,6 @@ Layout controls let you move and rotate bars. The last bar cannot be deleted.
 
 A consumable binding can switch to an equivalent item in your inventory when the original is exhausted. Keep replacements on hand and check feedback if a binding cannot be used.
 
-Equipment and loadouts still refer to their captured items. Replacing your weapon with another copy does not update those bindings automatically.
+Rebind equipment and rebuild loadouts when you replace their saved items.
 
 Action-bar contents and loadouts are saved per character. Spell tabs have their own [spell bar](/holtburger/3d/spells/).

@@ -10,11 +10,9 @@ import Media from '#lib/components/Media.svelte';
 
 ## Start with Smart Tab
 
-**Tap Tab to cycle targets. Hold it to acquire the immediate target.** Use Shift+Tab to cycle in reverse; holding it also acquires the immediate target.
+Use Smart Tab for everyday targeting: cycle to compare targets, or acquire an immediate target and get straight to your next action.
 
-Use Smart Tab for everyday targeting. Your stance, fellowship and targeting settings affect what it selects. Attack or interact after choosing your target.
-
-Use the hostile-only and in-view options to narrow what Smart Tab selects.
+Your stance and fellowship affect the selection. Use the hostile-only and in-view options to narrow it further.
 
 | Action                       | Default control       |
 | ---------------------------- | --------------------- |
@@ -31,11 +29,9 @@ Use the hostile-only and in-view options to narrow what Smart Tab selects.
 
 ## Select, use, examine
 
-These are separate actions:
-
-- **Select** something to make it your current target.
-- **Interact** with R to use it, pick it up, or begin the appropriate interaction.
-- **Examine** with E for appraisal details. Right-clicking an object or item also selects and examines it.
+- **Select** a target for your next action.
+- **Interact** to use it, pick it up, or start a conversation.
+- **Examine** for appraisal details. Right-clicking an object or item also selects and examines it.
 
 The appraisal window stays on the object you examined, even when you select something else.
 
@@ -64,16 +60,16 @@ Click something when you know exactly what you want. Use these keys to cycle thr
 | Open chat                 | Enter                  |
 | Cancel the active context | Escape                 |
 
-**N cycles resting kneel/crouch → sit → lie down → stand.** This is a resting posture, distinct from the social kneel emote.
+Rest between fights to recover health and stamina faster. The posture cycle moves through kneeling → sitting → lying down → standing, with lying down giving the fastest recovery.
 
 <Media id="posture-diagram" />
 
 ## Camera and text input
 
-Drag with the left mouse button to look around. With mouse steering enabled, hold the right button to turn your character and tilt the camera. Hold the middle button or both buttons to move forward.
+[Camera controls](/holtburger/3d/movement-camera/#look-around-or-steer) let you look around freely or steer your character with the mouse.
 
 You can keep using movement keys after clicking ordinary HUD buttons. While typing or using a dialog, those keys go to that control instead.
 
-Change bindings and mouse preferences under **Settings → Input**. These are Holtburger defaults, so expect your retail muscle memory to need some adjustment.
+Change bindings and mouse preferences under **Settings → Input**.
 
 <Media id="camera" />

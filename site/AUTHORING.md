@@ -26,9 +26,16 @@ manifesto. Avoid padded introductions, repeated pitches, implementation essays a
 closing recaps. Preserve consequential limitations and exact syntax; brevity is
 not permission to omit what a player needs.
 
-Prefer “Press N to cycle through kneeling, sitting, lying down and standing” to
-an introduction about posture systems. Teach Smart Tab first, then explain the
-situations where clicking or a dedicated selector is useful.
+Tables own keybindings; prose explains purpose, choices and workflow. Do not
+restate a table in the following paragraph. A binding can appear in a task step
+when it helps the reader perform that step. Explain what resting achieves before
+listing its postures. Teach Smart Tab first, then situational selectors.
+
+Let concrete workflow benefits carry the comparison with retail: quicker target
+changes, saved gear swaps, less panel hunting. Avoid unsupported superiority
+claims and repeated declarations that the UX is different. Keep a caveat when it
+changes a decision, prevents item loss, or explains a real migration limitation;
+omit speculative reassurance and implementation distinctions.
 
 ## Evidence and product boundaries
 

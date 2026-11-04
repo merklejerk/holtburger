@@ -28,14 +28,14 @@ The default bindings differ from retail. Rebind them in **Settings → Input**; 
 | Understand buffs                     | Effective and overridden enchantment views    |
 | Fit the interface to your screen     | Movable HUD, UI/text scaling and themes       |
 
-These are integrated workflows, not Decal plugin compatibility. Existing plugin profiles, DLLs and metas are not supported imports.
+These tools are built into the client. Existing Decal plugins and profiles cannot be imported.
 
 ## What about macros?
 
-Use the [terminal client](/holtburger/tui/) for the current scripting environment and bundled fighter/mage scripts. It is not a complete replacement for every retail macro or service bot.
+The [terminal client](/holtburger/tui/) includes scripting and bundled fighter/mage automation. Trade and buff services need scripts tailored to those tasks.
 
 h3d prioritizes active play. It has no plugin system yet; scripting and plugins are future direction.
 
 ## What will feel different?
 
-Selection, examination, camera movement, action bars, and inventory organization follow Holtburger's own interaction model. Physics and rendering also intentionally differ.
+The controls and layout favor quick target changes and keeping useful actions close. Physics and rendering also differ, so take a few minutes to get a feel for movement.

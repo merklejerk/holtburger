@@ -32,4 +32,4 @@ Use `/fps` to toggle the FPS display when adjusting graphics. For startup or ren
 
 ## Save the right things
 
-Layout and general interface preferences belong to your local installation. Action-bar contents, spell bindings and alert rules are character-specific. They are not automatically synchronized to another computer.
+Your preferences are saved on this computer. Action-bar contents, spell bindings and alert rules are saved separately for each character.

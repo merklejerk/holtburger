@@ -39,7 +39,7 @@ See [movement](/holtburger/3d/movement-camera/) and [jumping](/holtburger/3d/jum
 | Give selected item to remembered recipient | G                                |
 | Split selected stack                       | Y                                |
 
-[Smart Tab](/holtburger/3d/selection-interaction/) is the everyday starting point. Selecting, interacting and attacking are separate actions.
+Start with [Smart Tab](/holtburger/3d/selection-interaction/) for everyday targeting.
 
 ## Combat and bars
 
@@ -70,8 +70,8 @@ Number-key actions depend on the current controls and focused bar. Use the displ
 | Page chat history                 | PageUp / PageDown when chat has focus |
 | Cancel current action or context  | Escape                                |
 
-N cycles resting crouch/kneel → sit → lie down → stand. It is separate from the social kneel emote.
+[Resting](/holtburger/3d/movement-camera/#rest-between-fights) speeds health and stamina recovery. The cycle moves through kneeling, sitting, lying down and standing.
 
 ## Change bindings
 
-Open **Settings → Input** for bindings, mouse steering and axis inversion. These are Holtburger defaults; a retail preset is not supplied. While typing or using a dialog, keys go to that control instead of the game.
+Open **Settings → Input** for bindings, mouse steering and axis inversion. While typing or using a dialog, keys go to that control instead of the game.

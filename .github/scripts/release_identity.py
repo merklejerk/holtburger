@@ -81,8 +81,9 @@ def validate_prepared_source(root: Path, distribution: Distribution) -> None:
         raise ValueError("Distribution differs from the checked-out source identity")
     if git(root, "diff", "--cached", "--name-only"):
         raise ValueError("Build preparation cannot contain staged changes")
-    if git(root, "ls-files", "--others", "--exclude-standard"):
-        raise ValueError("Build preparation cannot contain untracked source files")
+    untracked = git(root, "ls-files", "--others", "--exclude-standard")
+    if untracked:
+        raise ValueError(f"Build preparation contains untracked source files:\n{untracked}")
     if git(root, "diff", "HEAD", "--summary"):
         raise ValueError("Build preparation cannot change file modes or paths")
     changed = set(git(root, "diff", "HEAD", "--name-only").splitlines())

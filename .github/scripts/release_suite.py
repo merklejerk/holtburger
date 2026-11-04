@@ -610,7 +610,9 @@ def require_flatpak_release(info: dict) -> None:
     """Admit only an inspected Linux package with the current release identity."""
     if info["target"] != "x86_64-unknown-linux-gnu":
         raise ValueError("The release Flatpaks require Linux x86-64 inputs")
-    commit, _ = source_identity()
+    commit, modified = source_identity()
+    if modified:
+        raise ValueError("Flatpak source checkout contains unexpected modifications")
     if (info["commit"], info["version"], info["modified"]) != (commit, check_versions(), False):
         raise ValueError("Flatpak input does not match the clean release identity")
 

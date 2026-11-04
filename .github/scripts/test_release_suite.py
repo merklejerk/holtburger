@@ -18,7 +18,7 @@ import zipfile
 from release_suite import (
     TARGETS, INSTALLER_TARGETS, archive_bundle, digest, executable_architecture, extract_bundle,
     assemble, manifest, plan, stage, validate_tag, verify_bundle, already_published,
-    record_flatpak, flatpak_manifest,
+    record_flatpak, flatpak_manifest, require_flatpak_release,
     flatpak_runtime_ref, THREED_FLATPAK_RECIPE,
 )
 from cli_content_input import CONTENT_FILES, unpack_cli_content
@@ -99,7 +99,6 @@ class ReleasePlanTests(unittest.TestCase):
         self.assertTrue(documentation_only("README.md"))
         for path in ("release/CLI_QUICKSTART.md", "release/3D_QUICKSTART.md"):
             self.assertFalse(documentation_only(path))
-
 
 class PublishedDistributionTests(unittest.TestCase):
     """Skipping expensive builds requires complete verified publication evidence."""
@@ -410,6 +409,13 @@ class ReleaseManifestTests(unittest.TestCase):
 
 class ProductFlatpakTests(unittest.TestCase):
     """Both formats preserve the selected native product's identity and payload bytes."""
+
+    def test_verified_native_metadata_cannot_excuse_a_changed_flatpak_source(self):
+        info = {"target": next(target.triple for target in TARGETS if target.platform == "linux"),
+                "version": check_versions(), "commit": "a" * 40, "modified": False}
+        with patch("release_suite.source_identity", return_value=(info["commit"], True)):
+            with self.assertRaisesRegex(ValueError, "source checkout"):
+                require_flatpak_release(info)
 
     def setUp(self):
         self.commit = "a" * 40

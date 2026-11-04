@@ -192,7 +192,7 @@ jobs:
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         if: needs.plan.outputs.product != '3d'
         with:
-          bundle: holtburger-cli.flatpak
+          bundle: .holtburger-local/holtburger-cli.flatpak
           build-dir: .holtburger-local/flatpak-cli-build
           repo-dir: .holtburger-local/flatpak-cli-repo
           state-dir: .holtburger-local/flatpak-cli-state
@@ -203,12 +203,12 @@ jobs:
       - name: Probe and record CLI Flatpak
         if: needs.plan.outputs.product != '3d'
         run: |
-          flatpak install --user --noninteractive --assumeyes --reinstall holtburger-cli.flatpak
+          flatpak install --user --noninteractive --assumeyes --reinstall .holtburger-local/holtburger-cli.flatpak
           chmod +x .holtburger-local/release-linux-probes/content_bootstrap
           dbus-run-session -- .github/flatpak/verify-cli-installed "$GITHUB_WORKSPACE/.holtburger-local/release-linux-probes/content_bootstrap"
           mkdir -p .holtburger-local/release-artifacts/cli
           BUNDLE='.holtburger-local/release-artifacts/cli/holtburger-cli-${{ needs.plan.outputs.version }}-x86_64.flatpak'
-          cp holtburger-cli.flatpak "$BUNDLE"
+          cp .holtburger-local/holtburger-cli.flatpak "$BUNDLE"
           LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-cli)
           python .github/scripts/release_suite.py record-flatpak --files "$LOCATION/files" \
             --native "$HOLTBURGER_CLI_NATIVE" --bundle "$BUNDLE" \
@@ -229,7 +229,7 @@ jobs:
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         if: needs.plan.outputs.product != 'cli'
         with:
-          bundle: holtburger-3d.flatpak
+          bundle: .holtburger-local/holtburger-3d.flatpak
           build-dir: .holtburger-local/flatpak-3d-build
           repo-dir: .holtburger-local/flatpak-3d-repo
           state-dir: .holtburger-local/flatpak-3d-state
@@ -240,11 +240,11 @@ jobs:
       - name: Probe and record 3D Flatpak
         if: needs.plan.outputs.product != 'cli'
         run: |
-          flatpak install --user --noninteractive --assumeyes --reinstall holtburger-3d.flatpak
+          flatpak install --user --noninteractive --assumeyes --reinstall .holtburger-local/holtburger-3d.flatpak
           xvfb-run --auto-servernum dbus-run-session -- .github/flatpak/verify-installed
           mkdir -p .holtburger-local/release-artifacts/3d
           BUNDLE='.holtburger-local/release-artifacts/3d/holtburger-3d-${{ needs.plan.outputs.version }}-x86_64.flatpak'
-          cp holtburger-3d.flatpak "$BUNDLE"
+          cp .holtburger-local/holtburger-3d.flatpak "$BUNDLE"
           LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-3d)
           python .github/scripts/release_suite.py record-flatpak --files "$LOCATION/files" \
             --native "$HOLTBURGER_3D_NATIVE" --bundle "$BUNDLE" \

@@ -263,7 +263,6 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
-      actions: read
     env:
       HOLTBURGER_SOURCE_REVISION: ${{ needs.plan.outputs.commit }}
       HOLTBURGER_DISTRIBUTION: ${{ needs.plan.outputs.kind }}

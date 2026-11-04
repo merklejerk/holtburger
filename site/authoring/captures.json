@@ -307,7 +307,7 @@
 			"session": "world",
 			"setup": "Use an outdoor route and a dungeon entrance.",
 			"framing": "Keep the minimap readable beside the surrounding scene.",
-			"expected": "Show outdoor terrain, buildings, impassable areas and elevation, then a dungeon layout.",
+			"expected": "Show outdoor terrain, buildings, impassable areas and elevation, then walk a winding dungeon passage and retrace part of the visible breadcrumb trail.",
 			"priority": "first"
 		}
 	}

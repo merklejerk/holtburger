@@ -184,8 +184,8 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 - Setup: Use an outdoor route and a dungeon entrance.
 - Frame: Keep the minimap readable beside the surrounding scene.
-- Action/purpose: Show outdoor terrain, buildings, impassable areas and elevation, then a dungeon layout.
-- Expected result: Show outdoor terrain, buildings, impassable areas and elevation, then a dungeon layout.
+- Action/purpose: Show outdoor terrain, buildings, impassable areas and elevation, then follow a dungeon passage with the breadcrumb trail visible.
+- Expected result: Show outdoor terrain, buildings, impassable areas and elevation, then walk a winding dungeon passage and retrace part of the visible breadcrumb trail.
 - Used in: [3d/#read-the-route-ahead](https://merklejerk.github.io/holtburger/3d/#read-the-route-ahead), [3d/maps-travel/#navigate-with-the-minimap](https://merklejerk.github.io/holtburger/3d/maps-travel/#navigate-with-the-minimap)
 
 ### Review both offers

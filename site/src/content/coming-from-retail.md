@@ -16,7 +16,7 @@ The default bindings differ from retail. Rebind them in **Settings → Input**; 
 <tbody>
 <tr><td>Keep track of targets</td><td><a href="/holtburger/3d/combat/#keep-track-of-your-target">Bold selection outline and a separate active combat reticle</a></td></tr>
 <tr><td>Reposition during a fight</td><td><a href="/holtburger/3d/combat/#fight-on-the-move">Run-casting and archery with normal movement controls</a></td></tr>
-<tr><td>Navigate terrain and dungeons</td><td><a href="/holtburger/3d/maps-travel/#navigate-with-the-minimap">Detailed minimap with buildings, elevation and impassable areas</a></td></tr>
+<tr><td>Navigate terrain and dungeons</td><td><a href="/holtburger/3d/maps-travel/#navigate-with-the-minimap">Detailed minimap with terrain, dungeon layouts and breadcrumb trails</a></td></tr>
 <tr><td>Reach a destination</td><td><a href="/holtburger/3d/maps-travel/#follow-a-waypoint">Waypoints with direction and distance on the minimap</a></td></tr>
 <tr><td>Change equipment together</td><td><a href="/holtburger/3d/equipment-loadouts/#capture-your-current-gear">Selected-slot loadouts on action bars</a></td></tr>
 <tr><td>Find a spell</td><td><a href="/holtburger/3d/spells/#find-a-spell">Name search and filters, then cast or bind it</a></td></tr>

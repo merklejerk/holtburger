@@ -104,7 +104,7 @@ export const media = {
 		kind: 'planned-video',
 		title: 'Read the ground ahead',
 		brief:
-			'Show outdoor terrain, buildings, impassable areas and elevation, then a dungeon layout.'
+			'Show outdoor terrain, buildings, impassable areas and elevation, then follow a dungeon passage with the breadcrumb trail visible.'
 	},
 	'smart-tab': {
 		kind: 'planned-video',

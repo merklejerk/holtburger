@@ -91,6 +91,10 @@ export const navigation = [
 				label: 'Crafting, trading & salvage'
 			},
 			{
+				slug: '3d/chat',
+				label: 'Chat & emotes'
+			},
+			{
 				slug: '3d/interface',
 				label: 'Make the interface yours'
 			},

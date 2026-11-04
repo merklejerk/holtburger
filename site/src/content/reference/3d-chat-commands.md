@@ -47,7 +47,7 @@ For example, `/f ready` speaks to your party. **In h3d, `/p` means patron; in th
 
 Type `*wave*` to perform a named social emote. Typing `*` offers completions; Tab or Enter accepts a suggestion, and Enter submits the completed input.
 
-Local speech can include gestures, such as `Hello *wave*`. Explicit tells, channel messages and `/emote` bodies keep their text literal. The [emote wheel](/holtburger/3d/interface/#use-an-emote) is another way to choose gestures.
+Local speech can include gestures, such as `Hello *wave*`. Explicit tells, channel messages and `/emote` bodies keep their text literal. The [emote wheel](/holtburger/3d/chat/#use-an-emote) is another way to choose gestures.
 
 ## Waypoint and recalls
 

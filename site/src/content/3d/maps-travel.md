@@ -103,4 +103,4 @@ Use **Allegiance** to inspect your patron, vassals and membership information. R
 
 In **Ignores**, enter a name and choose **Ignore character** or **Ignore account**. Account ignores also cover the target’s other characters. Search the list to remove an ignore later. Under party invitation preferences, **Ignore party invitations** lets you decline invitations while you are busy.
 
-Use [chat filters](/holtburger/3d/interface/) when you want to reduce message categories rather than ignore a person.
+Use [chat filters](/holtburger/3d/chat/#filter-the-noise) when you want to reduce message categories rather than ignore a person.

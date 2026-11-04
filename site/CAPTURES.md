@@ -88,7 +88,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Frame: Show the T wheel, selection and full character gesture.
 - Action/purpose: Open the T emote wheel, perform an emote, and show the previous combat stance returning.
 - Expected result: The emote plays and the previous combat stance returns; release-to-dismiss can be a separate beat.
-- Used in: [3d/interface/#use-an-emote](https://merklejerk.github.io/holtburger/3d/interface/#use-an-emote)
+- Used in: [3d/chat/#use-an-emote](https://merklejerk.github.io/holtburger/3d/chat/#use-an-emote)
 
 ## Equipment, inventory and spells
 
@@ -320,7 +320,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Frame: Keep the chat history, its interaction toggle and part of the world visible. Show modifier keys; omit private conversations.
 - Action/purpose: Show command autocomplete with syntax and descriptions, then temporary history interaction and returning to play.
 - Expected result: Start with click-through live messages. Hold Control (Command on macOS) to scroll and select text; release to resume live messages. Toggle history interaction for longer reading, then turn it off. Show Enter to compose and sending to return to play. Type a partial command, show suggestions with syntax and descriptions, then choose and accept one.
-- Used in: [3d/interface/#read-older-messages](https://merklejerk.github.io/holtburger/3d/interface/#read-older-messages)
+- Used in: [3d/chat/#filter-the-noise](https://merklejerk.github.io/holtburger/3d/chat/#filter-the-noise)
 
 ### Inspect an item
 

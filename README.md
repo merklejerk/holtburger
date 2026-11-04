@@ -1,284 +1,163 @@
+<h1><img src="assets/branding/portal-static.svg" width="64" height="64" align="middle" alt="Holtburger portal logo" /> Holtburger</h1>
+
+**The Asheron's Call client, reengineered.**
+
+Built from the protocol up: a Rust core, a 3D interface, and a scriptable terminal client.
+
+[![Holtburger 3D in Holtburg, with nearby players, character appraisal, and the world map](assets/screenshots/3d-holtburg.webp)](assets/screenshots/3d-holtburg.webp)
+
 <p align="center">
-  <img src="assets/branding/portal-static.svg" width="160" height="160" alt="Holtburger portal logo" />
+  <a href="assets/screenshots/3d-outdoors.webp"><img src="assets/screenshots/3d-outdoors-thumb.webp" width="130" alt="Outdoor gameplay with a selected creature and inventory open" /></a>
+  <a href="assets/screenshots/3d-world-map.webp"><img src="assets/screenshots/3d-world-map-thumb.webp" width="130" alt="3D landscape with character details and world map" /></a>
+  <a href="assets/screenshots/3d-combat.webp"><img src="assets/screenshots/3d-combat-thumb.webp" width="130" alt="Dungeon combat with spell effects and character skills" /></a>
+  <a href="assets/screenshots/3d-precise-jump.webp"><img src="assets/screenshots/3d-precise-jump-thumb.webp" width="130" alt="Precise jump aiming with a trajectory preview between forest platforms" /></a>
+  <a href="assets/screenshots/3d-character-selection.webp"><img src="assets/screenshots/3d-character-selection-thumb.webp" width="130" alt="3D character selection" /></a>
+  <a href="assets/screenshots/tui.webp"><img src="assets/screenshots/tui-thumb.webp" width="130" alt="Terminal gameplay with nearby creatures, item appraisal, and combat feedback" /></a>
 </p>
 
-# Holtburger
+*3D gameplay, precise jump aiming, character selection, and the terminal client. Click an image to view it at full size.*
 
-Holtburger is a modern, cross-platform, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for a new generation of clients and bots. The TUI client already covers a meaningful set of gameplay, automation, and data-projection workflows, and the stack keeps expanding.
+Holtburger is an independently designed, open-source client for Asheron's Call.
+It began as a terminal client built against [ACEmulator (ACE)](https://github.com/ACEmulator/ACE).
+That work established the shared protocol, networking, world-state, and gameplay
+systems that now also power the 3D client.
+
+## Design and compatibility
+
+Holtburger's architecture and interfaces are designed from the ground up. Its
+physics, rendering, and user experience intentionally depart from retail's design,
+so differences in movement, visuals, and interaction are expected. The UX in
+particular follows its own direction, including interface layouts, controls, and
+workflows.
+
+Retail research provides targeted corrections to asset formats, presentation, and
+physics where compatibility requires them. The goal is to work with the existing
+game and its content while allowing the client experience to evolve independently.
+
+The shared Rust layers separate wire messages, transport, content access, world
+state, and reusable client behavior. Each frontend owns its presentation and
+controls. That separation lets the graphical and terminal clients offer different
+ways to interact with the same game without maintaining separate implementations
+of the shared systems.
+
+Compatibility remains ongoing work. Both clients are under active development,
+and feature coverage and behavior differ between them. The terminal client uses
+simplified movement and physics. Much of the implementation is developed with AI
+coding assistance; it should not be treated as an authoritative protocol reference.
 
 > [!IMPORTANT]
-> Holtburger is being developed against the ACE server implementation, not GDLE. It will likely be very unstable on GDLE servers.
+> Holtburger is developed against ACE. GDLE compatibility is unverified and may be unstable.
 
-![tui client screenshot](assets/screenshots/tui.png)
+## Clients
 
-## The Ecosystem
+- **3D client:** an Electron application with a Svelte interface and WebGL2 renderer,
+  backed by the Rust client runtime. Connect through the server launcher and select
+  or create a character. Bring your own Asheron's Call game files.
+- **Terminal client (CLI):** a text interface for gameplay and automation, with
+  JavaScript scripting through Deno Core. Release bundles include the reference
+  and navigation data it needs.
 
-For a detailed breakdown of how these components interact, check out the [Architecture Overview](ARCHITECTURE.md).
+## Download and connect
 
-Holtburger is comprised of several specialized crates:
+Get beta and nightly builds for Windows, macOS, and Linux from
+[GitHub Releases](https://github.com/merklejerk/holtburger/releases).
+Each bundle includes a self-contained `QUICKSTART.md` with installation,
+connection, and troubleshooting instructions.
 
-- **[`holtburger-common`](crates/holtburger-common)**: The bedrock layer. Shared types, utilities, and constants used across the entire workspace.
-- **[`holtburger-protocol`](crates/holtburger-protocol)**: The language of the world. Handles the deterministic serialization and deserialization of Asheron's Call packets, opcodes, and complex game messages.
-- **[`holtburger-dat`](crates/holtburger-dat)**: A specialized library for parsing and querying Asheron's Call `.dat`, `.hba`, and other binary asset formats.
-- **[`holtburger-content`](crates/holtburger-content)**: The content pipeline seam. Owns HBA discovery, mount policy, and typed asset access over mounted content sources.
-- **[`holtburger-session`](crates/holtburger-session)**: The pure networking layer. Handles UDP fragment reassembly, packet sequencing, and stream encryption.
-- **[`holtburger-world`](crates/holtburger-world)**: The state authority. Tracks the live data graph of the 3D world, entity locations, and physics in memory.
-- **[`holtburger-core`](crates/holtburger-core)**: The primary engine orchestrator. Manages client state, translates network messages into authoritative states, and broadcasts UI-safe delta streams.
-- **[`holtburger-scripting`](crates/holtburger-scripting)**: The scripting runtime. Owns the Deno-based host, shared script boundary types, and the frontend-owned projection seam used by automation. See the [Scripting Guide](crates/holtburger-scripting/SCRIPTING_GUIDE.md) for a quickstart and API reference.
-- **[`holtburger-cli`](apps/holtburger-cli)**: A Terminal User Interface (TUI) client built on the Holtburger stack, designed for interaction, automation, and power users.
-- **[`holtburger-tools`](apps/holtburger-tools)**: A collection of auxiliary command-line utilities for data extraction and protocol analysis.
+| Platform | 3D client | Terminal client |
+| --- | --- | --- |
+| Windows x86-64 | [Setup or ZIP](release/quickstarts/3d/win32.md) | [ZIP](release/quickstarts/cli/win32.md) |
+| macOS Apple Silicon | [DMG or ZIP](release/quickstarts/3d/darwin.md) | [ZIP](release/quickstarts/cli/darwin.md) |
+| Linux x86-64 | [Flatpak or tar.gz](release/quickstarts/3d/linux.md) | [Flatpak or tar.gz](release/quickstarts/cli/linux.md) |
 
-## Current Capabilities vs Retail Client
+Beta and nightly builds share the same installation and settings; installing one
+replaces the other.
 
-Because Holtburger is a terminal-first client, its current feature set emphasizes protocol accuracy, authoritative world tracking, and functional gameplay systems rather than graphical rendering. Here is a high-level matrix of what is implemented today compared to the classic retail 3D experience:
+## Architecture and tools
 
-| Feature | Retail Client | Holtburger TUI | Notes |
-| :--- | :---: | :---: | :--- |
-| **3D Graphics & Sound** | 🟢 | 🔴 | Intentional limitation. TUI relies on text and data projection. |
-| **Login & Auth** | 🟢 | 🟢 | Full multi-stage GLS and world server handshake. |
-| **Character Selection** | 🟢 | 🟢 | Login via terminal UI or CLI arguments. |
-| **Character Creation** | 🟢 | 🟢 | Full character management flow-- Essential creation properties (minus appearance choices), delete, restore. |
-| **Spatial Radar** | 🟢 | 🟢 | Live positional tracking of nearby entities. |
-| **Movement & Physics** | 🟢 | 🟡 | Turn-to, locomotion primitives, sticky pursuit, approach/follow, and server-driven reposition handling work. Full 3D collision-aware navigation is still future-client territory. |
-| **Chat & Messaging** | 🟢 | 🟢 | Full parsing of chat channels, server messages, and emotes. |
-| **Leveling and Progression** | 🟢 | 🟢 | Comprehensive attribute and skill management with XP/Luminance tracking. |
-| **Inventory & Equipping** | 🟢 | 🟢 | Move, stack, split, drop, and equip items. |
-| **Vendors & Trade** | 🟢 | 🟢 | Full merchant interaction including alternate currencies. |
-| **Crafting** | 🟢 | 🟢 | Item combine flows, success prompts, and salvage preview/execution are implemented. |
-| **Magic System** | 🟢 | 🟢 | Spell catalog loading, spellbook/enchantment tracking, and targeted or untargeted casting are implemented. In the TUI, this is effectively the ceiling without scripting or a richer frontend. |
-| **Melee & Missile Combat** | 🟢 | 🟢 | Manual targeted melee and missile attacks work, and the TUI can drive shared combat-facing and sticky-melee helpers. This is the practical ceiling for the terminal client unless scripting is introduced. |
-| **Social Gameplay** | 🟢 | 🟡 | Basic fellowship + allegiance interactions. TUI party HUD. |
-| **Scripting / Automation** | 🟡 | 🟢 | JavaScript scripting runtime built on Deno Core and the `holtburger-scripting` crate. |
+The [architecture overview](ARCHITECTURE.md) describes the shared crates and their
+boundaries. The main layers are:
 
-## Roadmap
+| Layer | Responsibility |
+| --- | --- |
+| [`protocol`](crates/holtburger-protocol) and [`session`](crates/holtburger-session) | Wire formats, UDP transport, sequencing, fragmentation, and encryption |
+| [`dat`](crates/holtburger-dat) and [`content`](crates/holtburger-content) | Asset decoding, content discovery, and static reference data |
+| [`world`](crates/holtburger-world) and [`core`](crates/holtburger-core) | World state, simulation, client lifecycle, and reusable gameplay behavior |
+| [`scripting`](crates/holtburger-scripting) | JavaScript runtime and typed script integration boundaries |
+| [`3D`](apps/holtburger-3d) and [`CLI`](apps/holtburger-cli) | Frontend presentation, input, and interaction policy |
 
-Holtburger is being built in phases, and the current TUI client is intentionally serving two roles at once:
+The 3D app also includes an offline Explorer for inspecting environments, assets,
+and simulation behavior. [Command-line tools](apps/holtburger-tools) and the
+[debug harness](crates/holtburger-debug-harness) support asset conversion, protocol
+investigation, and focused diagnostics.
 
-- It is the first usable client for the stack today.
-- It is the proving ground for the shared protocol, session, world, and core layers that a future 3D client will rely on.
+For terminal scripting, see the [Scripting Guide](crates/holtburger-scripting/SCRIPTING_GUIDE.md)
+and the bundled [example scripts](assets/scripts).
 
-The long-term goal is not to stop at a terminal client. The TUI is how we validate the full client stack quickly, iterate on gameplay and automation semantics, and de-risk the architecture before investing in a richer frontend.
+## Development
 
-Current focus: Phase 2 and 3.
-
-### Phase 1: TUI and Stack Buildout
-
-The current phase is feature buildout. The goal here is to keep expanding protocol coverage and client behavior until the stack supports as much practical retail-client parity as makes sense in a terminal UI.
-
-That includes work such as:
-
-- login and character flows
-- world-state fidelity and movement behavior
-- inventory, vendors, crafting, and magic systems
-- combat helpers and automation-oriented control surfaces
-- shared client abstractions that will still make sense for a future 3D frontend
-
-### Phase 2: Scripting Runtime
-
-This is the current phase of work. The runtime already exists as the `holtburger-scripting` crate; the remaining work is expanding host APIs, tightening integration with the CLI, and smoothing the authoring workflow.
-
-That should turn the TUI into a lightweight alternative to hosting bots while still sitting on the same shared client foundation. It also creates a much better environment for automation, experimentation, and custom workflows before the 3D client arrives.
-
-### Phase 3: Consolidation
-
-Once the TUI and shared stack are sufficiently built out, the focus shifts to consolidation:
-
-- refactors and cleanup
-- hardening APIs and crate boundaries
-- reducing duplication and patchwork logic
-- improving maintainability, testability, and architectural clarity
-
-This phase matters because the TUI is not the end state, but the underlying stack needs to be clean and stable enough to support multiple frontends without dragging terminal-specific assumptions forward.
-
-### Phase 4: 3D Client
-
-With the stack proven out and scripting in place, work can begin on a full 3D client as a fast follow. The current implementation uses an Electron shell with a classic visual style, backed by a modern, scriptable, and more extensible UI model.
-
-The TUI is therefore not a side project or disposable prototype. It is the shortest path to validating the complete client architecture, and it should continue to produce useful standalone value even after the 3D client exists.
-
-## Project branding
-
-The portal is Holtburger's project logo. Its [canonical animated SVG](assets/branding/portal.svg)
-also supplies the client loading animation. The [static mark](assets/branding/portal-static.svg),
-PNG, Windows ICO, and macOS ICNS in `assets/branding/` are generated from its still geometry,
-centered on a square canvas. Browser favicons and the CLI Flatpak icon are generated copies.
-To update the artwork, edit the animated source, then run `npm ci` and
-`npm run generate:branding` from `apps/holtburger-3d`. Commit the resulting assets;
-`npm run check:branding` verifies they match the source. Normal builds use the checked-in exports.
-
-## Disclaimers
-
-Holtburger is **highly experimental**. APIs are unstable and subject to frequent breaking changes. Much of this code is heavily developed with the assistance of AI coding agents, so don't treat its implementation as authoritative.
-
-## Installation and First Run
-
-Nightly builds and archives for Windows, Mac, and Linux are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. All bundles ship with a minimal (`micro`) assets file, `assets.hba`, so they're ready to run immediately.
-
-The TUI client is a command-line application, so you must launch it from a terminal. On Windows, use a modern terminal emulator such as Windows Terminal; the legacy Command Prompt and classic PowerShell console cannot render it.
-
-### Windows Install
-
-1. Download the Windows archive.
-2. Extract it.
-3. Open a terminal and launch the executable from the extracted folder:
-
-```powershell
-holtburger-cli.exe --help
-```
-
-Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
-
-### MacOS Install
-
-1. Download the MacOS archive.
-2. Extract it.
-3. Open a terminal and launch the binary from the extracted folder:
-
-```bash
-# see help
-./holtburger-cli --help
-# connect
-./holtburger-cli -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
-```
-
-Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
-
-### Linux Flatpak (recommended)
-
-Download the Flatpak from releases, then install it with
-`flatpak install --user --reinstall ./holtburger-cli-VERSION-x86_64.flatpak`
-(substitute the downloaded version).
-The app ID is `io.github.merklejerk.holtburger-cli`, displayed as **Holtburger CLI**.
-Beta and nightly share the same installation and settings; installing either replaces the
-other. See the [Linux CLI quickstart](release/quickstarts/cli/linux.md) for its commands.
-
-```bash
-# see help
-flatpak run io.github.merklejerk.holtburger-cli --help
-# connect
-flatpak run io.github.merklejerk.holtburger-cli -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
-```
-
-By default the Flatpak bundle sets `SCRIPT_DIR` to the writable per-app data tree inside the sandbox (`/var/data/holtburger/scripts`, which Flatpak maps to `~/.var/app/$FLATPAK_ID/data/holtburger/scripts` on the host). You can store custom scripts there.
-
-### Linux Tarball
-
-1. Download the Linux archive.
-2. Extract it.
-3. Open a terminal and launch the binary from the extracted folder:
-
-```bash
-# see help
-./holtburger-cli --help
-# connect
-./holtburger-cli -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
-```
-
-Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
-
-### Source / Local Development
-
-Building from source is mainly for local development.
-
-**Prerequisite:** [Rust](https://www.rust-lang.org/tools/install) (latest stable or nightly)
+Install a current stable Rust toolchain. The 3D client also requires Node.js 22.12
+or newer and npm. Start by cloning the repository:
 
 ```bash
 git clone https://github.com/merklejerk/holtburger.git
 cd holtburger
-cargo build --release
 ```
 
-For day-to-day development, launch the TUI through Cargo from a terminal:
+### 3D client
+
+From the repository root:
 
 ```bash
-# see help
+cd apps/holtburger-3d
+npm ci
+npm run dev:client
+```
+
+This builds the Rust host, starts Vite, and opens the Electron launcher. Add your
+server and credentials there. When prompted for content, choose your retail game
+folder containing `client_portal.dat`, `client_cell_1.dat`, and
+`client_local_English.dat`; `client_highres.dat` is optional. A full HBA archive
+is also supported.
+
+Use `npm run dev:client:release` for an optimized Rust host. For launch arguments,
+renderer diagnostics, and offline Explorer development, see the
+[3D development guide](apps/holtburger-3d/README.md#development).
+
+### Terminal client
+
+Source builds require generated reference and navigation data. Place
+`navigation.hnav` and either `bootstrap.hba` or `assets.hba` in `local/content/`.
+Retail DATs or a full HBA alone do not replace the CLI navigation data. See the
+[CLI content configuration](apps/holtburger-cli/README.md#data-file-configuration)
+for discovery rules and local provisioning guidance.
+
+From the repository root:
+
+```bash
 ./apps/holtburger-cli/dev.sh --help
-# connect (pass --release first for an optimized build)
-./apps/holtburger-cli/dev.sh -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
+./apps/holtburger-cli/dev.sh --host SERVER --port 9000 --account ACCOUNT --password PASSWORD
 ```
 
-The development runner selects `local/scripts/` for writable scripts and preferences,
-and `assets/scripts/` for the checked-in fighter/mage scripts and sidecars. Local scripts
-take precedence over shipped scripts with the same basename. The runtime default remains
-`./scripts/` when `SCRIPT_DIR` is unset; installed bundles retain their `scripts/` layout.
+Replace SERVER, ACCOUNT, and PASSWORD with your server address and credentials.
+Pass `--release` first for an optimized build. The runner uses `local/scripts/`
+for personal scripts and preferences, alongside the bundled scripts in
+`assets/scripts/`.
 
-Script storage:
+See the [CLI development guide](apps/holtburger-cli/README.md) for scripting paths,
+manual Windows launches, and supervised bot runs.
 
-- Source development local script directory: `local/scripts/` (through the development runner)
-- Custom scripts: `<SCRIPT_DIR>/<BASENAME>.js`
-- Script data: `<SCRIPT_DIR>/<BASENAME>.data.json`
-- Script config: `<SCRIPT_DIR>/.config/<BASENAME>.config.json`
+### Shared Rust crates
 
-Unlike the release builds and Flatpak, source builds do **not** bundle client data automatically. See [Data File Configuration](#data-file-configuration).
-
-## Running the TUI Client
-
-Use the launch command that matches how you installed Holtburger:
-
-- Release archive: `./holtburger-cli [ARGS]`
-- Flatpak: `flatpak run io.github.merklejerk.holtburger-cli [ARGS]`
-- Local development: `./apps/holtburger-cli/dev.sh [ARGS]`
-
-The Windows-specific terminal guidance above still applies when launching any of those binaries.
-
-> [!TIP]
-> If you get an error about missing `VCRuntime140.dll`, install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe). You may also need to allow the executable through Windows Defender by running it once, choosing "More info", and then selecting "Run anyway".
-
-## Durable Bot Runs
-
-If you want Holtburger to keep running as a bot, launch it under something that can restart the process after a disconnect.
-
-Use `-Q` when the restart policy is exit-based. In that setup, `-Q` turns a disconnect into a process exit, which is what the supervisor needs to trigger a restart.
-
-On Linux, `systemd` is the cleanest option because it can supervise the process and restart it automatically:
+Work on protocol, content, world state, and reusable client behavior in the
+[shared crates](#architecture-and-tools). A plain `cargo build` builds the default
+workspace member, the CLI; it does not build the graphical application.
+Use explicit package selection when working on a shared crate, for example:
 
 ```bash
-systemd-run --user --unit=holtburger-bot \
-    --property=Restart=always \
-    --property=RestartSec=5s \
-    --working-directory="$PWD" \
-    ./holtburger-cli -Q -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
+cargo test -p holtburger-protocol
+cargo clippy -p holtburger-protocol --all-targets -- -D warnings
 ```
-
-If you want a lightweight fallback without a full service unit, a shell loop also works:
-
-```bash
-while true; do
-    ./holtburger-cli -Q -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
-    sleep 5
-done
-```
-
-## Data File Configuration
-
-The TUI uses an HBA for bootstrap/reference facts and `navigation.hnav` for geometry. An HBA
-may contain reduced bootstrap data or full retail resources; either uses the same reduced
-TUI simulation. There is no baked `holtburger/core` asset and no runtime full-HBA geometry path.
-
-`--content DIR` selects an installation directory explicitly. Without it, automatic discovery
-starts at `HOLTBURGER_DEFAULT_CONTENT` when configured, otherwise executable-adjacent `content/`,
-then tries the platform data directory. Working-directory content is not searched. Missing or
-insufficient candidates may fall through; corrupt or unreadable content is reported.
-
-The CLI requires `navigation.hnav` alongside `bootstrap.hba` (preferred when present) or
-`assets.hba`. The environment setting changes discovery only; it never overrides `--content`.
-
-Development runners default to ignored `local/content/`. Machine-local provisioning and
-archive-generation instructions belong in `local/AGENTS.md`, when available. For a manual
-PowerShell development launch, set absolute paths before running Cargo:
-
-```powershell
-$env:HOLTBURGER_DEFAULT_CONTENT = Join-Path $PWD 'local/content'
-$env:SCRIPT_DIR = Join-Path $PWD 'local/scripts'
-$env:SCRIPT_BUNDLE_DIR = Join-Path $PWD 'assets/scripts'
-cargo run --bin tui -- [ARGS]
-```
-
-CLI native/Flatpak bundles include the generated reference and navigation data. Source builds
-need generated data compatible with the current navigation format. For packaged clients,
-see the [CLI quickstarts](release/quickstarts/cli).
-A full HBA alone does not replace navigation data. h3d separately supports full retail DATs or
-HBAs through its own content selection; see the [3D quickstarts](release/quickstarts/3d).
 
 ## License
 

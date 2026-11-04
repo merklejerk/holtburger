@@ -63,7 +63,7 @@
 			"priority": "first"
 		},
 		"hud": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "Several HUD elements in a normal gameplay view; choose one small and one larger text size.",
 			"framing": "Two matched stills or one comparison image with the world visible.",
@@ -71,7 +71,7 @@
 			"priority": "first"
 		},
 		"launcher": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "A sample server/profile with account filled and password hidden.",
 			"framing": "Frame server/profile choices, account and Play; omit private machine details.",
@@ -79,7 +79,7 @@
 			"priority": "first"
 		},
 		"content-picker": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "First-launch folder selection with a complete retail DAT folder available.",
 			"framing": "Show the folder-level choice and enough file names to identify the correct directory; use a neutral path.",
@@ -119,7 +119,7 @@
 			"priority": "later"
 		},
 		"salvage": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "gear",
 			"setup": "Two expendable materials, including a stack; prepare but do not submit the batch.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Close view of Items to salvage and Estimated output; retain all quantities.",
@@ -135,7 +135,7 @@
 			"priority": "later"
 		},
 		"player-trade": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "world",
 			"setup": "A consenting second player with a small sample offer on each side.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Frame the whole trade window with both participants and confirmation/reset controls.",
@@ -143,7 +143,7 @@
 			"priority": "later"
 		},
 		"character-progression": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "A character sheet with a trainable skill and an affordable improvement quote; do not buy unintentionally.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Show the skill and cost, with a second still for the Train confirmation.",
@@ -159,7 +159,7 @@
 			"priority": "later"
 		},
 		"housing-payments": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "world",
 			"setup": "A house crystal with a real purchase/maintenance requirement and suitable carried items.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Show eligibility/payment rows and Auto-fill; stop before payment unless desired.",
@@ -167,7 +167,7 @@
 			"priority": "later"
 		},
 		"housing-access": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "world",
 			"setup": "An owned/permitted house and sample guest entries.",
 			"framing": "Show Access & guests with separate entry/storage controls and names safe to publish.",
@@ -175,7 +175,7 @@
 			"priority": "later"
 		},
 		"journal": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "world",
 			"setup": "An in-progress or repeatable contract with a contact/quest location.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Show filtered contract details, a timer and its map destination; use two stills if needed.",
@@ -191,7 +191,7 @@
 			"priority": "later"
 		},
 		"party": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "world",
 			"setup": "A small party with a leader and another visible member.",
 			"framing": "Show the roster/recruitment controls and party HUD together at a readable scale.",
@@ -223,7 +223,7 @@
 			"priority": "later"
 		},
 		"barber": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "world",
 			"setup": "Your server’s barber interaction, with heritage-specific choices available.",
 			"framing": "Crop Barbershop with appearance choices and Apply/Cancel.",
@@ -239,7 +239,7 @@
 			"priority": "later"
 		},
 		"item-appraisal": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "An ordinary item with requirements, effects and effective combat values.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Crop the appraisal window with title and relevant fields; no test errors or missing artwork.",
@@ -279,7 +279,7 @@
 			"priority": "later"
 		},
 		"hardware-info": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "Launcher App settings open to graphics; machine details safe to show.",
 			"framing": "Crop the relevant controls and Copy hardware info, without dumping the full report into the image.",
@@ -319,7 +319,7 @@
 			"priority": "first"
 		},
 		"selected-hud": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "controls",
 			"setup": "A selected player with several available actions.",
 			"framing": "Crop only the selected-entity HUD and its open menu; keep labels readable.",
@@ -335,7 +335,7 @@
 			"priority": "first"
 		},
 		"chat-links": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "controls",
 			"setup": "A coordinate message and a real entity alert in the same chat buffer.",
 			"framing": "Crop to the two linked messages and the history-interaction control.",
@@ -343,7 +343,7 @@
 			"priority": "later"
 		},
 		"nearby-list": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "controls",
 			"setup": "Several nearby creatures or objects with distinguishable names.",
 			"framing": "Crop the Nearby panel with an active search and a short result list.",
@@ -351,7 +351,7 @@
 			"priority": "later"
 		},
 		"treestats-import": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "Open Import from TreeStats with a recognizable public server search.",
 			"framing": "Crop the import dialog; retain search, software, population and the import control.",
@@ -359,7 +359,7 @@
 			"priority": "first"
 		},
 		"profile-content": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "A sample launcher profile with its Advanced controls expanded.",
 			"framing": "Crop the content-folder choice and save-profile action; use a neutral sample path.",
@@ -367,7 +367,7 @@
 			"priority": "later"
 		},
 		"crafting-confirmation": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "gear",
 			"setup": "A crafting attempt with success-chance confirmation enabled.",
 			"framing": "Crop the confirmation and enough item context to identify the attempt.",
@@ -375,7 +375,7 @@
 			"priority": "later"
 		},
 		"world-map-controls": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "world",
 			"setup": "Open the World map with a recognizable location and its visibility controls.",
 			"framing": "Crop to the map panel; keep labels and layer controls readable.",
@@ -383,7 +383,7 @@
 			"priority": "first"
 		},
 		"jump-preview": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "controls",
 			"setup": "A safe jump with a visible landing and precise jump mode active.",
 			"framing": "Crop to the character, complete arc, landing target and power control; omit unrelated HUD panels.",
@@ -391,7 +391,7 @@
 			"priority": "first"
 		},
 		"character-roster": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "The character selection screen with a sample roster and a selected character.",
 			"framing": "Keep the roster and selected-character preview together with the enter-world control; omit unused background.",

@@ -130,6 +130,12 @@ layout overviews. Existing showcase screenshots belong on the home page and in
 the gallery; guide placements need captures framed for the task being explained. Place compact media with `<Media id="..." detail />`; it fits
 within the reading column without stretching a small component across the page.
 
+The agent captures static panels and component crops using the local test server;
+the user captures motion and natural-control clips, and all interactive TUI footage.
+Review a small batch of static samples with the user before bulk capture. Use real
+client state for gameplay evidence; fixture illustrations must be labeled. Keep
+capture work separate from media publication until the samples are reviewed.
+
 Media IDs and capture briefs live in `src/lib/media/catalog.ts`. Place a capture
 with the `Media` component in Markdown; reuse its ID across tours and guides.
 Planned entries render a screenshot/clip label and brief. Replace the catalog

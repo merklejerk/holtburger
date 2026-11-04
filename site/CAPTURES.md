@@ -2,7 +2,7 @@
 
 Generated from `authoring/captures.json`, the media catalog and actual page placements. Edit those sources rather than this report.
 
-The website works without these captures. This is the final-session shot list, not a prerequisite to writing or deployment. Start with the **First** shots; the rest can be collected when convenient. All footage involving live characters, special account/server state, or an interactive TUI belongs to the user. Fixture images must be labeled as UI illustrations, never as gameplay evidence.
+The website works without these captures. This is the final-session shot list, not a prerequisite to writing or deployment. Start with the **First** shots; the rest can be collected when convenient. The agent owns static component crops, including live-client panels staged on the local test server. The user owns motion and natural-control clips, plus all interactive TUI capture. The user reviews the first static samples before bulk capture. Fixture images must be labeled as UI illustrations, never as gameplay evidence.
 
 Keep originals outside Git and publish processed files through [MEDIA.md](MEDIA.md). Record the client version, use readable text scale, hide credentials, and leave a second of stillness before/after each action. Prefer short clips over one long recording.
 
@@ -82,7 +82,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 
 ### Selected-entity actions
 
-**First · user · pending · still** — ID: `selected-hud`
+**First · agent · pending · still** — ID: `selected-hud`
 
 - Setup: A selected player with several available actions.
 - Frame: Crop only the selected-entity HUD and its open menu; keep labels readable.
@@ -92,7 +92,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 
 ### Read the jump preview
 
-**First · user · pending · still** — ID: `jump-preview`
+**First · agent · pending · still** — ID: `jump-preview`
 
 - Setup: A safe jump with a visible landing and precise jump mode active.
 - Frame: Crop to the character, complete arc, landing target and power control; omit unrelated HUD panels.
@@ -122,7 +122,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 
 ### A message becomes a destination or target
 
-**Later · user · pending · still** — ID: `chat-links`
+**Later · agent · pending · still** — ID: `chat-links`
 
 - Setup: A coordinate message and a real entity alert in the same chat buffer.
 - Frame: Crop to the two linked messages and the history-interaction control.
@@ -132,7 +132,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 
 ### Find something nearby
 
-**Later · user · pending · still** — ID: `nearby-list`
+**Later · agent · pending · still** — ID: `nearby-list`
 
 - Setup: Several nearby creatures or objects with distinguishable names.
 - Frame: Crop the Nearby panel with an active search and a short result list.
@@ -166,7 +166,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Review a mixed salvage batch
 
-**First · user · pending · still** — ID: `salvage`
+**First · agent · pending · still** — ID: `salvage`
 
 - Setup: Two expendable materials, including a stack; prepare but do not submit the batch.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Close view of Items to salvage and Estimated output; retain all quantities.
@@ -226,7 +226,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Review a crafting attempt
 
-**Later · user · pending · still** — ID: `crafting-confirmation`
+**Later · agent · pending · still** — ID: `crafting-confirmation`
 
 - Setup: A crafting attempt with success-chance confirmation enabled.
 - Frame: Crop the confirmation and enough item context to identify the attempt.
@@ -250,7 +250,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 ### Read the world map
 
-**First · user · pending · still** — ID: `world-map-controls`
+**First · agent · pending · still** — ID: `world-map-controls`
 
 - Setup: Open the World map with a recognizable location and its visibility controls.
 - Frame: Crop to the map panel; keep labels and layer controls readable.
@@ -260,7 +260,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 ### Review both offers
 
-**Later · user · pending · still** — ID: `player-trade`
+**Later · agent · pending · still** — ID: `player-trade`
 
 - Setup: A consenting second player with a small sample offer on each side.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Frame the whole trade window with both participants and confirmation/reset controls.
@@ -280,7 +280,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 ### Prepare a house payment
 
-**Later · user · pending · still** — ID: `housing-payments`
+**Later · agent · pending · still** — ID: `housing-payments`
 
 - Setup: A house crystal with a real purchase/maintenance requirement and suitable carried items.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Show eligibility/payment rows and Auto-fill; stop before payment unless desired.
@@ -290,7 +290,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 ### Separate entry from storage
 
-**Later · user · pending · still** — ID: `housing-access`
+**Later · agent · pending · still** — ID: `housing-access`
 
 - Setup: An owned/permitted house and sample guest entries.
 - Frame: Show Access & guests with separate entry/storage controls and names safe to publish.
@@ -300,7 +300,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 ### Track a contract
 
-**Later · user · pending · still** — ID: `journal`
+**Later · agent · pending · still** — ID: `journal`
 
 - Setup: An in-progress or repeatable contract with a contact/quest location.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Show filtered contract details, a timer and its map destination; use two stills if needed.
@@ -320,7 +320,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 ### Keep the party in view
 
-**Later · user · pending · still** — ID: `party`
+**Later · agent · pending · still** — ID: `party`
 
 - Setup: A small party with a leader and another visible member.
 - Frame: Show the roster/recruitment controls and party HUD together at a readable scale.
@@ -330,7 +330,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 ### A change of appearance
 
-**Later · user · pending · still** — ID: `barber`
+**Later · agent · pending · still** — ID: `barber`
 
 - Setup: Your server’s barber interaction, with heritage-specific choices available.
 - Frame: Crop Barbershop with appearance choices and Apply/Cancel.
@@ -344,7 +344,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Make room for your HUD
 
-**First · user · pending · still** — ID: `hud`
+**First · agent · pending · still** — ID: `hud`
 
 - Setup: Several HUD elements in a normal gameplay view; choose one small and one larger text size.
 - Frame: Two matched stills or one comparison image with the world visible.
@@ -354,7 +354,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Add your server
 
-**First · user · pending · still** — ID: `launcher`
+**First · agent · pending · still** — ID: `launcher`
 
 - Setup: A sample server/profile with account filled and password hidden.
 - Frame: Frame server/profile choices, account and Play; omit private machine details.
@@ -374,7 +374,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Choose a public server
 
-**First · user · pending · still** — ID: `treestats-import`
+**First · agent · pending · still** — ID: `treestats-import`
 
 - Setup: Open Import from TreeStats with a recognizable public server search.
 - Frame: Crop the import dialog; retain search, software, population and the import control.
@@ -384,7 +384,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Choose a character
 
-**First · user · pending · still** — ID: `character-roster`
+**First · agent · pending · still** — ID: `character-roster`
 
 - Setup: The character selection screen with a sample roster and a selected character.
 - Frame: Keep the roster and selected-character preview together with the enter-world control; omit unused background.
@@ -394,7 +394,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Choose your game data
 
-**Later · user · pending · still** — ID: `content-picker`
+**Later · agent · pending · still** — ID: `content-picker`
 
 - Setup: First-launch folder selection with a complete retail DAT folder available.
 - Frame: Show the folder-level choice and enough file names to identify the correct directory; use a neutral path.
@@ -404,7 +404,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Plan a skill improvement
 
-**Later · user · pending · still** — ID: `character-progression`
+**Later · agent · pending · still** — ID: `character-progression`
 
 - Setup: A character sheet with a trainable skill and an affordable improvement quote; do not buy unintentionally.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Show the skill and cost, with a second still for the Train confirmation.
@@ -424,7 +424,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Inspect an item
 
-**Later · user · pending · still** — ID: `item-appraisal`
+**Later · agent · pending · still** — ID: `item-appraisal`
 
 - Setup: An ordinary item with requirements, effects and effective combat values.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Crop the appraisal window with title and relevant fields; no test errors or missing artwork.
@@ -444,7 +444,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Graphics troubleshooting
 
-**Later · user · pending · still** — ID: `hardware-info`
+**Later · agent · pending · still** — ID: `hardware-info`
 
 - Setup: Launcher App settings open to graphics; machine details safe to show.
 - Frame: Crop the relevant controls and Copy hardware info, without dumping the full report into the image.
@@ -454,7 +454,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Save a DAT folder with a profile
 
-**Later · user · pending · still** — ID: `profile-content`
+**Later · agent · pending · still** — ID: `profile-content`
 
 - Setup: A sample launcher profile with its Advanced controls expanded.
 - Frame: Crop the content-folder choice and save-profile action; use a neutral sample path.

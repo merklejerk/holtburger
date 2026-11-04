@@ -1,34 +1,13 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { pages } from '#lib/content/registry.ts';
+	import { navigation } from '#lib/content/navigation.ts';
 	import type { PageData } from './$types';
 	let { data }: { data: PageData } = $props();
-	const sections = [
-		{
-			title: 'Begin your journey',
-			links: [
-				{ slug: 'coming-from-retail', label: 'Coming from retail & Decal' },
-				{ slug: 'start', label: 'Start playing' }
-			]
-		},
-		{
-			title: 'The 3D client',
-			links: [
-				{ slug: '3d', label: 'A new way to play' },
-				{ slug: '3d/selection-interaction', label: 'Selection & interaction' }
-			]
-		},
-		{
-			title: 'Other paths',
-			links: [
-				{ slug: 'tui', label: 'Terminal client' },
-				{ slug: 'gallery', label: 'Gallery' },
-				{ slug: 'reference', label: 'Controls & reference' },
-				{ slug: 'support', label: 'Help' },
-				{ slug: 'about/design', label: 'Design philosophy' }
-			]
-		}
-	];
+	const sections = $derived(
+		navigation.filter((section) =>
+			section.scopes.includes(data.slug.split('/')[0])
+		)
+	);
 </script>
 
 <svelte:head
@@ -43,14 +22,16 @@
 			aria-label="Guide navigation"
 		>
 			<a class="back-link" href={resolve('/')}>← Holtburger</a>
-			{#each sections as section}<section>
-					<h2>{section.title}</h2>
-					{#each section.links.filter( (link) => pages.some((page) => page.slug === link.slug) ) as link}<a
+			{#each sections as section}<details
+					open={section.links.some((link) => link.slug === data.slug)}
+				>
+					<summary><h2>{section.title}</h2></summary>
+					{#each section.links as link}<a
 							href={resolve('/[...slug]', { slug: link.slug })}
 							aria-current={data.slug === link.slug ? 'page' : undefined}
 							>{link.label}</a
 						>{/each}
-				</section>{/each}
+				</details>{/each}
 		</aside>{/if}
 	<main id="main" class="guide-main" data-pagefind-body>
 		<div class="eyebrow">{data.section}</div>

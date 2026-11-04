@@ -601,8 +601,15 @@ figcaption a {
 	display: block;
 	margin-bottom: 2rem;
 }
-.guide-sidebar section {
+.guide-sidebar details {
 	margin-bottom: 1.8rem;
+}
+.guide-sidebar summary {
+	cursor: pointer;
+	color: var(--copper);
+}
+.guide-sidebar summary h2 {
+	display: inline;
 }
 .guide-sidebar h2 {
 	font-size: 1.04rem;
@@ -612,7 +619,7 @@ figcaption a {
 	padding-bottom: 0.5rem;
 	margin-bottom: 0.65rem;
 }
-.guide-sidebar section > a {
+.guide-sidebar details > a {
 	display: block;
 	font-size: 0.78rem;
 	text-decoration: none;
@@ -826,6 +833,10 @@ figcaption a {
 	}
 }
 @media (max-width: 720px) {
+	.guide-sidebar details[open] {
+		order: -1;
+	}
+
 	.gallery-grid {
 		grid-template-columns: minmax(0, 1fr);
 	}
@@ -977,14 +988,14 @@ figcaption a {
 	.guide-sidebar .back-link {
 		display: none;
 	}
-	.guide-sidebar section {
+	.guide-sidebar details {
 		margin: 0;
 		flex: 0 0 175px;
 	}
 	.guide-sidebar h2 {
 		font-size: 0.9rem;
 	}
-	.guide-sidebar section > a {
+	.guide-sidebar details > a {
 		font-size: 0.73rem;
 	}
 	.guide-main h1 {

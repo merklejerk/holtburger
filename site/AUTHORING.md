@@ -52,12 +52,38 @@ compiled with mdsvex and can import Svelte components when needed. Every guide
 requires `title`, `description` and `section` frontmatter. The layout renders its
 H1 from the title; begin the body with H2 sections.
 
+The preparation script renders the six installation pages from
+`release/quickstarts/{3d,cli}/{linux,win32,darwin}.md`, replacing only the opening
+H1 with website metadata. Edit those release sources to change installation
+instructions; do not edit generated files under `src/content/start/{3d,tui}/`.
+Generated Markdown and its build copies stay ignored. Bundled quickstarts remain
+standalone, including their factual channel/update notes. Older archives retain
+their release-time quickstart; the site follows the maintained release sources.
+
+Runnable script examples live in `examples/`, are embedded in guides using raw
+imports, and are copied for download by asset preparation. `npm run check:examples`
+checks those same files against the scripting crate's declaration file. Edit the
+canonical examples rather than maintaining separate snippets. The site publishes
+the existing declaration file without inventing another API type model.
+
+`npm run dev` watches authored pages, release quickstarts, the media catalog,
+`authoring/captures.json`, and reused assets. It refreshes metadata/headings,
+generated quickstarts and copied assets without a restart. Generated-file changes
+do not feed back into preparation. Invalid source metadata is reported in the dev
+server and browser error overlay.
+
 The preparation script produces route metadata and heading links. Generated files
 are ignored. Keep each topic canonical; tours link to task guides and task guides
 link to precise reference entries. Separate 3D and TUI chat command references.
 
 Explain project origins on the design page. Keep the shared footer functional;
 do not repeat the project pitch in hero labels, sidebars and footer copy.
+
+The [capture handoff](CAPTURES.md) is generated from
+`authoring/captures.json`, catalog IDs and actual page placements. Add the capture
+owner, session, setup, framing and expected result there when adding a planned
+entry; preparation rejects missing briefs or unused placements. See [MEDIA.md](MEDIA.md)
+for snapshot publication, processing and hosted checks.
 
 Take inspiration from Traveler’s Kit: leather, stitching, copper fittings and
 field-guide layouts. Use recessed stitched seams for structural dividers, copper
@@ -76,14 +102,14 @@ where a screenshot or clip is planned so placement and scope can be reviewed.
 Media IDs and capture briefs live in `src/lib/media/catalog.ts`. Place a capture
 with the `Media` component in Markdown; reuse its ID across tours and guides.
 Planned entries render a screenshot/clip label and brief. Replace the catalog
-entry with an external image URL and dimensions, or a `youtube` entry with its
+entry with an image's `remote` source URL and dimensions, or a `youtube` entry with its
 video ID, when the capture is ready. YouTube players load after a deliberate
 click; screenshots link to the full image. Gallery selections use the same catalog.
 Do not use dummy video IDs or present a planned capture as working footage.
 
 ## Work locally
 
-From `site/`:
+Use Node.js 24.13.1 or newer for the website. From `site/`:
 
 ```sh
 npm ci
@@ -103,9 +129,7 @@ stay outside Git. Format with `npm run format`; check with
 ## Publication
 
 The public destination is [merklejerk.github.io/holtburger](https://merklejerk.github.io/holtburger/).
-The current implementation is a partial preview; the full content inventory
-remains in progress. Check the workflow run and public pages to confirm which
-revision is live.
+Check the workflow run and public pages to confirm which revision is live.
 
 `.github/workflows/promote-updates.yml` is the sole website and update-feed
 publisher. It runs for relevant pushes to main, release publication and manual
@@ -125,10 +149,6 @@ uv run --with-requirements .github/scripts/requirements.txt python -m unittest d
 ```
 
 After publication, check Home, a guide deep link, Gallery, search and
-`updates/beta.json` at the public project URL. A successful local build does not
+`updates/beta.json` at the public project URL. Changes to the quickstart sources also trigger publication.
+A successful local build does not
 prove the public deployment is current.
-
-The current implementation is an early visual review. The full guide inventory,
-installation-source reuse, complete reference, media publishing and combined
-website/update-feed deployment remain in the master plan under `local/plans/`.
-Do not create a second Pages deployment that overwrites the existing update feed.

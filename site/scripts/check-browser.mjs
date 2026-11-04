@@ -1,6 +1,7 @@
 import { chromium } from 'playwright-core';
 import { mkdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
+import catalog from '../src/lib/generated/pages.json' with { type: 'json' };
 
 const origin =
 	process.env.SITE_PREVIEW_URL ?? 'http://127.0.0.1:4178/holtburger/';
@@ -21,6 +22,12 @@ try {
 	for (const [path, name] of [
 		['', 'home'],
 		['gallery/', 'gallery'],
+		['start/3d/linux/', 'installation'],
+		['start/characters/', 'characters'],
+		['3d/jumping/', 'jumping'],
+		['reference/3d-chat-commands/', 'commands'],
+		['tui/basics/', 'terminal'],
+		['scripting/integrations/', 'scripting'],
 		['3d/selection-interaction/', 'guide']
 	]) {
 		const response = await page.goto(new URL(path, origin).href);
@@ -87,6 +94,20 @@ try {
 		.getByRole('link', { name: /Selection & interaction/ })
 		.last()
 		.waitFor();
+	await search.press('Escape');
+	await page.setViewportSize({ width: 390, height: 844 });
+	for (const entry of catalog) {
+		const response = await page.goto(new URL(`${entry.slug}/`, origin).href);
+		assert.equal(response?.status(), 200, `Route ${entry.slug}`);
+		assert.equal(await page.locator('h1').textContent(), entry.title);
+		assert.equal(
+			await page.evaluate(
+				() => document.documentElement.scrollWidth <= window.innerWidth
+			),
+			true,
+			`${entry.slug}: horizontal mobile overflow`
+		);
+	}
 	const missing = await page.goto(new URL('missing-guide/', origin).href);
 	assert.equal(missing?.status(), 404);
 	const plain = await browser.newContext({ javaScriptEnabled: false });
@@ -102,7 +123,19 @@ try {
 		await reader
 			.getByRole('heading', { name: 'Start with Smart Tab', exact: true })
 			.waitFor();
-		assert.equal(await reader.locator('table').count(), 3);
+		await reader
+			.getByRole('cell', { name: 'Interact with selection', exact: true })
+			.waitFor();
+		await reader
+			.locator('summary')
+			.filter({ hasText: 'Items & equipment' })
+			.click();
+		await reader
+			.getByRole('link', { name: 'Equipment loadouts', exact: true })
+			.click();
+		await reader
+			.getByRole('heading', { name: 'Equipment loadouts', level: 1 })
+			.waitFor();
 	} finally {
 		await plain.close();
 	}

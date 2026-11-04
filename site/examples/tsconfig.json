@@ -1,0 +1,16 @@
+{
+	"compilerOptions": {
+		"allowJs": true,
+		"checkJs": true,
+		"noEmit": true,
+		"strict": true,
+		"target": "ES2020",
+		"module": "NodeNext",
+		"types": []
+	},
+	"files": [
+		"../../crates/holtburger-scripting/holtburger.d.ts",
+		"hello.js",
+		"status.js"
+	]
+}

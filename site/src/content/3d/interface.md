@@ -1,0 +1,35 @@
+---
+title: 'Arrange your interface'
+description: 'Make room for the world while keeping the controls you use close.'
+section: '3D client · Interface & chat'
+---
+
+<script>
+import Media from '#lib/components/Media.svelte';
+</script>
+
+## Move and resize the HUD
+
+Choose **Unlock UI layout** to edit the layout. Move the HUD elements and use the available resize controls, then choose **Lock UI layout** when finished.
+
+Give frequently used controls comfortable positions before a fight. You can arrange windows and bars separately; leave room for chat, targeting and the world view.
+
+If you want to start over, use **Settings → HUD layout → Reset HUD placements**.
+
+<Media id="hud" />
+
+## Scale controls and text separately
+
+Use overall UI scale to change control sizes, and text scale to adjust readability. Start with the text size you can comfortably read, then fit the controls around it.
+
+Appearance settings also let you choose fonts and themes. Traveler's Kit provides the leather-and-copper treatment used as inspiration for this site.
+
+## Keep useful information visible
+
+Vital warnings, progression feedback and the selected-target HUD help you notice changes without opening another panel. [Nearby alerts](/holtburger/3d/nearby-alerts/) can call attention to names you are watching for.
+
+Use `/fps` to toggle the FPS display when adjusting graphics. For startup or rendering trouble, see [Help](/holtburger/support/).
+
+## Save the right things
+
+Layout and general interface preferences belong to your local installation. Action-bar contents, spell bindings and alert rules are character-specific. They are not automatically synchronized to another computer.

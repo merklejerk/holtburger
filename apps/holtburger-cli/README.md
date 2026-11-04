@@ -1,5 +1,10 @@
 # Holtburger CLI development
 
+Player guides: [TUI basics](https://merklejerk.github.io/holtburger/tui/basics/),
+[installation](https://merklejerk.github.io/holtburger/start/),
+[running scripts](https://merklejerk.github.io/holtburger/tui/running-scripts/), and
+[scripting API](https://merklejerk.github.io/holtburger/scripting/reference/).
+
 Run commands below from the repository root. Install a current stable Rust toolchain
 and prepare the client data described under [Data File Configuration](#data-file-configuration).
 

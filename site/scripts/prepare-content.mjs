@@ -4,14 +4,26 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import { toString } from 'mdast-util-to-string';
 import GithubSlugger from 'github-slugger';
+import { prepareQuickstarts } from './prepare-quickstarts.mjs';
+import { prepareCaptures } from './prepare-captures.mjs';
+
+await prepareQuickstarts();
+await prepareCaptures();
 
 // Compute cold page metadata once; Markdown parsers and raw prose never ship to readers.
 const root = new URL('../src/content/', import.meta.url);
 const files = (await readdir(root, { recursive: true }))
+	.map((file) => file.replaceAll('\\', '/'))
 	.filter((path) => path.endsWith('.md'))
 	.sort();
 const pages = [];
 for (const file of files) {
+	if (
+		['updates', 'assets', 'pagefind', 'media-index.json'].includes(
+			file.split('/')[0].replace(/\.md$/, '')
+		)
+	)
+		throw new Error(`Reserved publication path: ${file}`);
 	const source = await readFile(new URL(file, root), 'utf8');
 	const compiled = await compile(source);
 	const metadata = compiled?.data?.fm;

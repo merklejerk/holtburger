@@ -1,23 +1,38 @@
-import { asset } from '$app/paths';
+import type { asset } from '$app/paths';
+
+/** Local assets resolve during rendering; remote media retains its published URL. */
+type ImageSource =
+	| { kind: 'local'; path: Parameters<typeof asset>[0] }
+	| { kind: 'remote'; url: string };
 
 /** Available media and planned captures share stable IDs across tours and guides. */
-export type MediaAsset =
+export type MediaAsset = { title: string } & (
 	| {
 			kind: 'image';
-			title: string;
-			src: string;
+			source: ImageSource;
 			alt: string;
 			width: number;
 			height: number;
 	  }
-	| { kind: 'youtube'; title: string; videoId: string }
-	| { kind: 'planned-image' | 'planned-video'; title: string; brief: string };
+	| {
+			kind: 'video';
+			src: string;
+			poster: string;
+			width: number;
+			height: number;
+			/** Required for instructional audio; null for a silent demonstration. */
+			captions: { src: string; language: string; label: string } | null;
+	  }
+	| { kind: 'youtube'; videoId: string }
+	| { kind: 'planned-image'; brief: string }
+	| { kind: 'planned-video'; brief: string }
+);
 
-const media = {
+export const media = {
 	holtburg: {
 		kind: 'image',
 		title: 'An afternoon in Holtburg',
-		src: asset('assets/screenshots/3d-holtburg.webp'),
+		source: { kind: 'local', path: 'assets/screenshots/3d-holtburg.webp' },
 		alt: 'Holtburg with nearby players, character appraisal and the world map.',
 		width: 1740,
 		height: 1189
@@ -25,7 +40,7 @@ const media = {
 	outdoors: {
 		kind: 'image',
 		title: 'Out in Dereth',
-		src: asset('assets/screenshots/3d-outdoors.webp'),
+		source: { kind: 'local', path: 'assets/screenshots/3d-outdoors.webp' },
 		alt: 'Outdoor gameplay with a selected creature and inventory open.',
 		width: 1740,
 		height: 1174
@@ -33,7 +48,7 @@ const media = {
 	map: {
 		kind: 'image',
 		title: 'Getting your bearings',
-		src: asset('assets/screenshots/3d-world-map.webp'),
+		source: { kind: 'local', path: 'assets/screenshots/3d-world-map.webp' },
 		alt: 'A 3D landscape with character details and the world map.',
 		width: 1740,
 		height: 1186
@@ -41,7 +56,7 @@ const media = {
 	combat: {
 		kind: 'image',
 		title: 'Into the dungeon',
-		src: asset('assets/screenshots/3d-combat.webp'),
+		source: { kind: 'local', path: 'assets/screenshots/3d-combat.webp' },
 		alt: 'Dungeon combat with spell effects and character skills.',
 		width: 1740,
 		height: 1189
@@ -49,7 +64,7 @@ const media = {
 	jump: {
 		kind: 'image',
 		title: 'Plan the leap',
-		src: asset('assets/screenshots/3d-precise-jump.webp'),
+		source: { kind: 'local', path: 'assets/screenshots/3d-precise-jump.webp' },
 		alt: 'Precise jump aiming with a trajectory preview between forest platforms.',
 		width: 1740,
 		height: 1189
@@ -57,7 +72,10 @@ const media = {
 	characters: {
 		kind: 'image',
 		title: 'Choose your adventurer',
-		src: asset('assets/screenshots/3d-character-selection.webp'),
+		source: {
+			kind: 'local',
+			path: 'assets/screenshots/3d-character-selection.webp'
+		},
 		alt: 'The 3D character selection screen.',
 		width: 1740,
 		height: 1189
@@ -65,10 +83,43 @@ const media = {
 	terminal: {
 		kind: 'image',
 		title: 'Dereth in a terminal',
-		src: asset('assets/screenshots/tui.webp'),
+		source: { kind: 'local', path: 'assets/screenshots/tui.webp' },
 		alt: 'Terminal gameplay with nearby creatures, item appraisal and combat feedback.',
 		width: 1055,
 		height: 818
+	},
+	'movement-keys': {
+		kind: 'image',
+		title: 'Movement defaults · control illustration',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/movement-keys-v1.svg'
+		},
+		alt: 'Default keys: W/S move, A/D turn, Z/C strafe, X selects self, Shift walks, Q toggles autorun and N cycles resting postures.',
+		width: 840,
+		height: 330
+	},
+	'targeting-diagram': {
+		kind: 'image',
+		title: 'Smart Tab · control illustration',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/smart-tab-v1.svg'
+		},
+		alt: 'Tap Tab to cycle targets; hold to acquire the immediate target. Shift reverses cycling. Then interact with R, examine with E, or start attacking from the combat bar.',
+		width: 840,
+		height: 350
+	},
+	'posture-diagram': {
+		kind: 'image',
+		title: 'N posture cycle · control illustration',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/posture-cycle-v1.svg'
+		},
+		alt: 'Press N to advance from standing through resting kneel or crouch, sitting and lying down, then return to standing.',
+		width: 880,
+		height: 240
 	},
 	'smart-tab': {
 		kind: 'planned-video',
@@ -141,6 +192,144 @@ const media = {
 		title: 'Run a bundled script',
 		brief:
 			'Start a fighter or mage, show its feedback, then stop it and resume manual control.'
+	},
+	'combat-controls': {
+		kind: 'planned-video',
+		title: 'Choose an attack',
+		brief:
+			'Show target selection, stance, power or accuracy, attack height, Start attack and Cancel attack.'
+	},
+	locks: {
+		kind: 'planned-video',
+		title: 'Open a locked container',
+		brief:
+			'Show the key action and lockpick estimate at a real locked chest, with the outcome visible.'
+	},
+	salvage: {
+		kind: 'planned-image',
+		title: 'Review a mixed salvage batch',
+		brief:
+			'Show two materials, their estimated outputs, and one queued stack with its full quantity.'
+	},
+	vendor: {
+		kind: 'planned-video',
+		title: 'Buy and sell',
+		brief:
+			'Queue a purchase and a sale, adjust quantities, review balances, and show the completed trade.'
+	},
+	'player-trade': {
+		kind: 'planned-image',
+		title: 'Review both offers',
+		brief:
+			'Show both trade offers, acceptance status, and the withdraw/reset controls using sample participants.'
+	},
+	'character-progression': {
+		kind: 'planned-image',
+		title: 'Plan a skill improvement',
+		brief:
+			'Show a skill detail and its cost, plus the separate confirmation for training a new skill.'
+	},
+	enchantments: {
+		kind: 'planned-image',
+		title: 'Find the effect that counts',
+		brief:
+			'Show effective and overridden spells affecting the same stat, with durations readable.'
+	},
+	waypoints: {
+		kind: 'planned-video',
+		title: 'Mark the next stop',
+		brief:
+			'Set a waypoint from coordinates in chat, show the map pin, then clear it.'
+	},
+	'housing-payments': {
+		kind: 'planned-image',
+		title: 'Prepare a house payment',
+		brief:
+			'Show a house crystal requirement, carried payment items, Auto-fill and the prepared amounts.'
+	},
+	'housing-access': {
+		kind: 'planned-image',
+		title: 'Separate entry from storage',
+		brief:
+			'Show guest entry and storage permissions with sample names and the current house owner.'
+	},
+	journal: {
+		kind: 'planned-image',
+		title: 'Track a contract',
+		brief:
+			'Show a filtered contract with progress, repeat or deadline timer, and its map destination.'
+	},
+	'corpse-recovery': {
+		kind: 'planned-video',
+		title: 'Find your way back',
+		brief:
+			'Show a real outdoor death location, /corpse output, a coordinate link becoming a waypoint, and nearby corpse cycling.'
+	},
+	party: {
+		kind: 'planned-image',
+		title: 'Keep the party in view',
+		brief:
+			'Show the party roster and in-world party HUD, including leader and recruitment controls.'
+	},
+	'nearby-alerts': {
+		kind: 'planned-video',
+		title: 'Watch for a name',
+		brief:
+			'Create an alert using a glob, show its match preview, then show a real matching encounter notification.'
+	},
+	chat: {
+		kind: 'planned-image',
+		title: 'Read and copy chat',
+		brief:
+			'Show channel filters, timestamps, and selected text with chat history interaction enabled.'
+	},
+	emotes: {
+		kind: 'planned-video',
+		title: 'Choose an emote',
+		brief:
+			'Open the T emote wheel, perform an emote, and show the previous combat stance returning.'
+	},
+	barber: {
+		kind: 'planned-image',
+		title: 'A change of appearance',
+		brief:
+			'Show the Barbershop appearance controls, heritage-specific choices and Apply/Cancel actions.'
+	},
+	'tui-gameplay': {
+		kind: 'planned-video',
+		title: 'A task through the TUI',
+		brief:
+			'Move an inventory item, inspect its details, and show a quantity prompt or vendor review with the changing footer actions.'
+	},
+	'item-appraisal': {
+		kind: 'planned-image',
+		title: 'Inspect an item',
+		brief:
+			'Show item requirements and effective values in a readable appraisal window.'
+	},
+	'inventory-moves': {
+		kind: 'planned-video',
+		title: 'Pack and equip',
+		brief:
+			'Use Native sorting to move an item between packs, merge a stack, equip and unequip.'
+	},
+	'inventory-merge': {
+		kind: 'planned-video',
+		title: 'Make space in a bag',
+		brief:
+			'Split a stack with Y, then request bag Auto-merge and show the resulting stack and freed-slot feedback.'
+	},
+	'action-bars': {
+		kind: 'planned-video',
+		title: 'Build a useful action bar',
+		brief:
+			'Bind an item and a loadout, clone and rotate a bar, then focus it and activate a cell by keyboard.'
+	},
+	'character-creation': {
+		kind: 'planned-video',
+		title: 'Create an adventurer',
+		brief:
+			'Show appearance, Skills & Stats, and review; finish at the selected new character before entering the world.'
 	},
 	'hardware-info': {
 		kind: 'planned-image',

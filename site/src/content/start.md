@@ -12,13 +12,13 @@ import Media from '#lib/components/Media.svelte';
 
 [Open the beta release downloads](https://github.com/merklejerk/holtburger/releases/latest).
 
-| Platform            | 3D client         | Terminal client   |
-| ------------------- | ----------------- | ----------------- |
-| Windows x86-64      | Setup or ZIP      | ZIP               |
-| macOS Apple Silicon | DMG or ZIP        | ZIP               |
-| Linux x86-64        | Flatpak or tar.gz | Flatpak or tar.gz |
+| Platform            | 3D client                                        | Terminal client                                   |
+| ------------------- | ------------------------------------------------ | ------------------------------------------------- |
+| Windows x86-64      | [Setup or ZIP](/holtburger/start/3d/windows/)    | [ZIP](/holtburger/start/tui/windows/)             |
+| macOS Apple Silicon | [DMG or ZIP](/holtburger/start/3d/macos/)        | [ZIP](/holtburger/start/tui/macos/)               |
+| Linux x86-64        | [Flatpak or tar.gz](/holtburger/start/3d/linux/) | [Flatpak or tar.gz](/holtburger/start/tui/linux/) |
 
-Each bundle includes a platform-specific **QUICKSTART.md** with installation, connection and troubleshooting steps. Extract the entire portable bundle rather than moving just the executable.
+Each archive includes **QUICKSTART.md** with installation, connection and troubleshooting steps. Extract the entire portable bundle rather than moving just the executable.
 
 ## 3D client
 
@@ -32,6 +32,8 @@ The folder needs `client_portal.dat`, `client_cell_1.dat` and `client_local_Engl
 <Media id="launcher" />
 
 <Media id="content-picker" />
+
+For the full walkthrough, see [connection](/holtburger/start/connect/), [game data](/holtburger/start/content/), and [character selection](/holtburger/start/characters/).
 
 Start with the [controls guide](/holtburger/3d/selection-interaction/), especially if you played retail.
 

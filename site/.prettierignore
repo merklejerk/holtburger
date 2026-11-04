@@ -3,3 +3,6 @@ build/
 static/assets/
 src/lib/generated/
 package-lock.json
+
+src/content/start/3d/
+src/content/start/tui/

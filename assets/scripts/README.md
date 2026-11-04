@@ -8,4 +8,6 @@ in [src/mage](src/mage/README.md).
 For source development, set `SCRIPT_BUNDLE_DIR` to this directory and `SCRIPT_DIR`
 to a writable location such as `local/scripts/`. Custom scripts and `.config/`
 preferences belong in that writable directory; local scripts override bundled
-scripts with the same basename. See the repository README for launch commands.
+scripts with the same basename. See [running scripts](https://merklejerk.github.io/holtburger/tui/running-scripts/)
+for player setup, [the bundled scripts guide](https://merklejerk.github.io/holtburger/tui/bundled-scripts/)
+for usage, and [scripting](https://merklejerk.github.io/holtburger/scripting/) for authoring.

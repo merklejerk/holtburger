@@ -17,6 +17,8 @@ Built from the protocol up: a Rust core, a 3D interface, and a scriptable termin
 
 *3D gameplay, precise jump aiming, character selection, and the terminal client. Click an image to view it at full size.*
 
+Visit the [website](https://merklejerk.github.io/holtburger/) for the [3D tour](https://merklejerk.github.io/holtburger/3d/), [retail migration guide](https://merklejerk.github.io/holtburger/coming-from-retail/), and [gallery](https://merklejerk.github.io/holtburger/gallery/).
+
 Holtburger is an independently designed, open-source client for Asheron's Call.
 It began as a terminal client built against [ACEmulator (ACE)](https://github.com/ACEmulator/ACE).
 That work established the shared protocol, networking, world-state, and gameplay
@@ -59,16 +61,17 @@ coding assistance; it should not be treated as an authoritative protocol referen
 
 ## Download and connect
 
-Get beta and nightly builds for Windows, macOS, and Linux from
-[GitHub Releases](https://github.com/merklejerk/holtburger/releases).
+Get the beta for Windows, macOS, and Linux from
+[GitHub Releases](https://github.com/merklejerk/holtburger/releases/latest), or use
+the [installation guides](https://merklejerk.github.io/holtburger/start/).
 Each bundle includes a self-contained `QUICKSTART.md` with installation,
 connection, and troubleshooting instructions.
 
 | Platform | 3D client | Terminal client |
 | --- | --- | --- |
-| Windows x86-64 | [Setup or ZIP](release/quickstarts/3d/win32.md) | [ZIP](release/quickstarts/cli/win32.md) |
-| macOS Apple Silicon | [DMG or ZIP](release/quickstarts/3d/darwin.md) | [ZIP](release/quickstarts/cli/darwin.md) |
-| Linux x86-64 | [Flatpak or tar.gz](release/quickstarts/3d/linux.md) | [Flatpak or tar.gz](release/quickstarts/cli/linux.md) |
+| Windows x86-64 | [Setup or ZIP](https://merklejerk.github.io/holtburger/start/3d/windows/) | [ZIP](https://merklejerk.github.io/holtburger/start/tui/windows/) |
+| macOS Apple Silicon | [DMG or ZIP](https://merklejerk.github.io/holtburger/start/3d/macos/) | [ZIP](https://merklejerk.github.io/holtburger/start/tui/macos/) |
+| Linux x86-64 | [Flatpak or tar.gz](https://merklejerk.github.io/holtburger/start/3d/linux/) | [Flatpak or tar.gz](https://merklejerk.github.io/holtburger/start/tui/linux/) |
 
 Beta and nightly builds share the same installation and settings; installing one
 replaces the other.
@@ -91,10 +94,12 @@ and simulation behavior. [Command-line tools](apps/holtburger-tools) and the
 [debug harness](crates/holtburger-debug-harness) support asset conversion, protocol
 investigation, and focused diagnostics.
 
-For terminal scripting, see the [Scripting Guide](crates/holtburger-scripting/SCRIPTING_GUIDE.md)
+For terminal scripting, see [your first script](https://merklejerk.github.io/holtburger/scripting/)
 and the bundled [example scripts](assets/scripts).
 
 ## Development
+
+Website authoring and local preview are covered in [site/AUTHORING.md](site/AUTHORING.md).
 
 Install a current stable Rust toolchain. The 3D client also requires Node.js 22.12
 or newer and npm. Start by cloning the repository:

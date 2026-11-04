@@ -1,8 +1,14 @@
 <img src="../../assets/branding/portal-static.svg" width="96" height="96" alt="Holtburger portal logo" />
 
-# Holtburger 3D
+# Holtburger 3D development
 
-Electron-backed development surface for Holtburger's replacement 3D client. Authoritative app-local
+Player guides: [3D client tour](https://merklejerk.github.io/holtburger/3d/),
+[installation](https://merklejerk.github.io/holtburger/start/), and
+[controls/reference](https://merklejerk.github.io/holtburger/reference/3d-controls/).
+
+The sections below cover development, implementation details, and diagnostics.
+
+Electron application for Holtburger's 3D client and offline Explorer. Authoritative app-local
 content and simulation behavior runs in the `holtburger-3d-host` Rust sidecar; the renderer reaches
 it through the context-isolated Electron preload boundary.
 
@@ -50,11 +56,9 @@ Before packaging on Windows, install Python 3.12 or newer and run
 `npm run setup:windows-packaging`; `npm run test:windows-packaging` checks synthetic PE fixtures.
 Release CI installs the pinned build dependency and runs these checks automatically.
 
-The Explorer runs the shared content, scene, runtime, and WebGL2 rendering architecture against real
-client data. Client mode is a separate first-cut composition: `ClientRuntime` owns the network,
-world, collision, movement, and camera authorities, while the renderer consumes the focused dynamic
-feed and collision-safe third-person camera path. Its UI intentionally remains a small lifecycle and
-in-world shell rather than a TUI feature mirror.
+The live client and offline Explorer share content, scene, runtime and WebGL2 rendering
+infrastructure. In client mode, `ClientRuntime` owns network, world, collision and movement
+behavior; the frontend owns camera presentation, gameplay panels and interaction policy.
 
 Explorer weenie discovery remains app-local: the Rust host lazily indexes the optional offline
 catalog and returns bounded ranked identity results to the Entities picker. The browser commits one
@@ -459,8 +463,8 @@ range and ordered formula components. One spell expands at a time. Range matches
 retail inspection and ACE's ordinary spellbook casting rule (ranks plus initial
 skill bonus, capped at 75 metres). Formula selection uses the account-customized
 recipe or the school's foci/infused-augmentation recipe. Inventory readiness and
-component lookup failures remain explicit. Casting and spell-bar bindings are
-separate follow-up features.
+component lookup failures remain explicit. The panel supports casting in magic stance and dragging spells into character-specific spell-bar
+bindings. The [spell guide](https://merklejerk.github.io/holtburger/3d/spells/) explains the player workflow.
 
 Core snapshots and `PlayerSpellsUpdated` supply complete knowledge after the initial
 character description. Static `load_spell_references` queries are independent of that
@@ -469,7 +473,7 @@ host selects the complete artwork recipe. Spell icons use the same `prepare_ui_i
 pipeline as inventory, with their own composition order. `SpellReferences` caches
 definitions for the content lifetime. `ClientSpellState` lazily retains requested
 known-spell artwork until removal or character/session teardown, so closing and
-reopening the panel reuses prepared images. Each panel or future bar also holds
+reopening the panel reuses prepared images. Each panel or bar also holds
 independent display leases until its displayed images are replaced.
 
 The browser HUD harness exercises a large spell list, missing definitions, updates

@@ -25,6 +25,8 @@ Use the hostile-only and in-view options to narrow what Smart Tab selects.
 | Interact with selection      | R                     |
 | Examine selection            | E                     |
 
+<Media id="targeting-diagram" />
+
 <Media id="smart-tab" />
 
 ## Select, use, examine
@@ -64,7 +66,7 @@ Click something when you know exactly what you want. Use these keys to cycle thr
 
 **N cycles resting kneel/crouch → sit → lie down → stand.** This is a resting posture, distinct from the social kneel emote.
 
-<Media id="postures" />
+<Media id="posture-diagram" />
 
 ## Camera and text input
 

@@ -2,9 +2,12 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve, relative, sep } from 'node:path';
 import { parse } from 'parse5';
+import { catalogFiles } from './media-catalog.mjs';
 
 const root = fileURLToPath(new URL('../build/', import.meta.url));
 const origin = new URL('https://merklejerk.github.io/holtburger/');
+// The media Pages site shares a host, but its catalog URLs are separate deployments.
+const externalMedia = new Set((await catalogFiles()).map((file) => file.url));
 const pages = (await readdir(root, { recursive: true })).filter((path) =>
 	path.endsWith('.html')
 );
@@ -42,7 +45,7 @@ for (const [page, document] of documents) {
 	const pageUrl = new URL(page.replace(/index\.html$/, ''), origin);
 	for (const link of document.links) {
 		const url = new URL(link, pageUrl);
-		if (url.origin !== origin.origin) continue;
+		if (url.origin !== origin.origin || externalMedia.has(url.href)) continue;
 		if (!url.pathname.startsWith(origin.pathname))
 			throw new Error(`${page}: link leaves project base: ${link}`);
 		const pathname = decodeURIComponent(

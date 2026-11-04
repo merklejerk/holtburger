@@ -1,0 +1,342 @@
+{
+	"sessions": {
+		"controls": {
+			"title": "3D controls and active play",
+			"setup": "Use a safe outdoor area with several nearby creatures or objects, a short practice jump, and enough health/stamina. Keep movement and targeting defaults for the demonstration. Record short clips with key presses visible."
+		},
+		"gear": {
+			"title": "Equipment, inventory and spells",
+			"setup": "Use a character with two gear choices, stackable supplies, an Ust, two expendable salvage materials, a usable spellbook/caster, and a vendor nearby. Save valuables outside the salvage batch."
+		},
+		"world": {
+			"title": "World, party and character states",
+			"setup": "Group location-dependent work together: a party member for trade/party, an owned or permitted house, an active contract, an outdoor death location when convenient, and your server’s barber service. These shots can wait until the relevant state occurs naturally."
+		},
+		"setup": {
+			"title": "Launcher, setup and UI stills",
+			"setup": "Use sample server/account names. Hide passwords and personal paths. Choose a comfortable UI/text scale; frame the relevant panel closely enough that its controls are readable."
+		},
+		"terminal": {
+			"title": "TUI gameplay and scripts",
+			"setup": "Use a real terminal session with a prepared character and the shipped scripts. Show pane focus and the footer; choose a large enough terminal font for the final website size. All interactive TUI capture belongs to the user."
+		},
+		"illustrations": {
+			"title": "Agent control illustrations",
+			"setup": "Code-native SVG diagrams prepared from the verified default controls. These are instructional diagrams, not screenshots or evidence of live gameplay. Publish through the same external media workflow."
+		}
+	},
+	"captures": {
+		"smart-tab": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "Several eligible targets; show peace/combat stance and targeting preferences.",
+			"framing": "Keep the target HUD, a few candidates and the key display in frame.",
+			"expected": "A hold acquires a target; taps and Shift+Tab cycle; interaction/attack is a separate deliberate action.",
+			"priority": "first"
+		},
+		"jump-demo": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "A repeatable, safe short jump with the landing visible.",
+			"framing": "Show the character, target, trajectory and power bar together.",
+			"expected": "The chosen preview and executed landing are visible in one continuous clip.",
+			"priority": "first"
+		},
+		"postures": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "A standing character on flat ground.",
+			"framing": "Full body and an N key-press display; keep the camera still.",
+			"expected": "Four deliberate presses show kneel/crouch, sit, lie, and stand.",
+			"priority": "later"
+		},
+		"camera": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "Open ground with a landmark to compare character facing.",
+			"framing": "Keep the character and landmark visible; label mouse buttons.",
+			"expected": "Orbit leaves facing alone; right-hold steers, and middle/both buttons move forward.",
+			"priority": "first"
+		},
+		"loadouts": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Two weapon/gear arrangements, with one slot intentionally omitted and an empty included slot.",
+			"framing": "Capture the builder, result icon/bar cell, and equipment changes; split into short steps if needed.",
+			"expected": "Included, omitted and cleared slots have visibly different outcomes.",
+			"priority": "first"
+		},
+		"spells": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Known spells in several schools/levels and an empty spell-bar cell.",
+			"framing": "Keep search, filters and destination bar readable.",
+			"expected": "A found spell is inspected and dragged to its bar, then used with the correct target.",
+			"priority": "first"
+		},
+		"hud": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "Several HUD elements in a normal gameplay view; choose one small and one larger text size.",
+			"framing": "Two matched stills or one comparison image with the world visible.",
+			"expected": "Panel placement and UI/text scale differences are clear without cropping controls.",
+			"priority": "first"
+		},
+		"input-settings": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "Open Settings → Input with the default movement and selection groups visible.",
+			"framing": "Crop the settings panel, retaining its tab/title and relevant bindings.",
+			"expected": "W/S, A/D, Z/C and Smart Tab bindings can be read at website size.",
+			"priority": "first"
+		},
+		"launcher": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "A sample server/profile with account filled and password hidden.",
+			"framing": "Frame server/profile choices, account and Play; omit private machine details.",
+			"expected": "Readers can identify each step used by the connection guide.",
+			"priority": "first"
+		},
+		"content-picker": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "First-launch folder selection with a complete retail DAT folder available.",
+			"framing": "Show the folder-level choice and enough file names to identify the correct directory; use a neutral path.",
+			"expected": "The reader can distinguish selecting the folder from selecting one DAT file.",
+			"priority": "later"
+		},
+		"tui-workflow": {
+			"owner": "user",
+			"session": "terminal",
+			"setup": "Normal gameplay with nearby targets and carried items.",
+			"framing": "Keep dashboard, context and footer visible; record Tab focus changes.",
+			"expected": "Pane focus, tab selection and Assess results are legible.",
+			"priority": "first"
+		},
+		"tui-script": {
+			"owner": "user",
+			"session": "terminal",
+			"setup": "A prepared fighter or mage, with appropriate supplies and a safe test encounter.",
+			"framing": "Show /scripts, /run, useful script feedback, and /unrun without long idle time.",
+			"expected": "The script starts, makes a visible decision, then stops so manual control resumes.",
+			"priority": "first"
+		},
+		"combat-controls": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "A safe target, melee weapon and optional ranged weapon/ammunition.",
+			"framing": "Show target, combat bar, gauge/height and Start/Cancel attack.",
+			"expected": "Selection and attack start are distinct; changing controls and canceling are clear.",
+			"priority": "later"
+		},
+		"locks": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "A real locked chest/door, at least one key, trained Lockpick and a usable pick.",
+			"framing": "Show the locked object and helper; keep estimate and result text readable.",
+			"expected": "The key attempt and available lockpick action/result can be understood.",
+			"priority": "later"
+		},
+		"salvage": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Two expendable materials, including a stack; prepare but do not submit the batch.",
+			"framing": "Close view of Items to salvage and Estimated output; retain all quantities.",
+			"expected": "Whole-stack inclusion and separate material output rows are visible.",
+			"priority": "first"
+		},
+		"vendor": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "A nearby vendor, enough currency, one purchase and one expendable sale.",
+			"framing": "Show stock, queue quantities, balances and Trade feedback.",
+			"expected": "A reviewed purchase/sale completes and the resulting balances/items are visible.",
+			"priority": "later"
+		},
+		"player-trade": {
+			"owner": "user",
+			"session": "world",
+			"setup": "A consenting second player with a small sample offer on each side.",
+			"framing": "Frame the whole trade window with both participants and confirmation/reset controls.",
+			"expected": "Both offers and acceptance states are readable; no valuable exchange is required.",
+			"priority": "later"
+		},
+		"character-progression": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "A character sheet with a trainable skill and an affordable improvement quote; do not buy unintentionally.",
+			"framing": "Show the skill and cost, with a second still for the Train confirmation.",
+			"expected": "Immediate improvement cost and separately confirmed training are distinguishable.",
+			"priority": "later"
+		},
+		"enchantments": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "Real effects with one weaker spell overridden by a stronger effect on the same stat.",
+			"framing": "Crop the Enchantments panel with the group expanded and timers visible.",
+			"expected": "Effective and overridden spells have coherent names, stats and durations.",
+			"priority": "first"
+		},
+		"waypoints": {
+			"owner": "user",
+			"session": "world",
+			"setup": "An outdoor character and open World map/chat.",
+			"framing": "Show command input, coordinate link and map pin without a full-screen chat zoom.",
+			"expected": "A coordinate becomes the expected pin, and clear removes it.",
+			"priority": "later"
+		},
+		"housing-payments": {
+			"owner": "user",
+			"session": "world",
+			"setup": "A house crystal with a real purchase/maintenance requirement and suitable carried items.",
+			"framing": "Show eligibility/payment rows and Auto-fill; stop before payment unless desired.",
+			"expected": "Prepared amounts and remaining requirements are readable.",
+			"priority": "later"
+		},
+		"housing-access": {
+			"owner": "user",
+			"session": "world",
+			"setup": "An owned/permitted house and sample guest entries.",
+			"framing": "Show Access & guests with separate entry/storage controls and names safe to publish.",
+			"expected": "Entry permission is visibly separate from storage permission.",
+			"priority": "later"
+		},
+		"journal": {
+			"owner": "user",
+			"session": "world",
+			"setup": "An in-progress or repeatable contract with a contact/quest location.",
+			"framing": "Show filtered contract details, a timer and its map destination; use two stills if needed.",
+			"expected": "Progress/timing and the useful destination are clear.",
+			"priority": "later"
+		},
+		"corpse-recovery": {
+			"owner": "user",
+			"session": "world",
+			"setup": "A naturally available outdoor death location and recoverable nearby corpse; no deliberate death required.",
+			"framing": "Show /corpse, the coordinate link, map waypoint and V cycling in short connected steps.",
+			"expected": "The recorded location helps navigation without implying the record proves current contents.",
+			"priority": "later"
+		},
+		"party": {
+			"owner": "user",
+			"session": "world",
+			"setup": "A small party with a leader and another visible member.",
+			"framing": "Show the roster/recruitment controls and party HUD together at a readable scale.",
+			"expected": "The leader, membership and selected member can be identified.",
+			"priority": "later"
+		},
+		"nearby-alerts": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "A known nearby name and a repeatable matching encounter.",
+			"framing": "Show the rule editor/pattern preview, then the list and resulting notice.",
+			"expected": "The glob matches expected names and produces one useful encounter notification.",
+			"priority": "later"
+		},
+		"chat": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "Sample conversation with coordinates and harmless text.",
+			"framing": "Show timestamps, filters and selected history text; omit private conversations.",
+			"expected": "History interaction makes copying/coordinate links visible.",
+			"priority": "later"
+		},
+		"emotes": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "A character able to perform a standard emote, starting in combat stance.",
+			"framing": "Show the T wheel, selection and full character gesture.",
+			"expected": "The emote plays and the previous combat stance returns; release-to-dismiss can be a separate beat.",
+			"priority": "later"
+		},
+		"barber": {
+			"owner": "user",
+			"session": "world",
+			"setup": "Your server’s barber interaction, with heritage-specific choices available.",
+			"framing": "Crop Barbershop with appearance choices and Apply/Cancel.",
+			"expected": "The choices and explicit Apply action are clear; applying is optional.",
+			"priority": "later"
+		},
+		"tui-gameplay": {
+			"owner": "user",
+			"session": "terminal",
+			"setup": "An inventory task plus a quantity prompt or vendor trade.",
+			"framing": "Keep changing footer actions and resulting items/quantities visible.",
+			"expected": "The reader can follow a multi-step task without guessing which pane has focus.",
+			"priority": "later"
+		},
+		"item-appraisal": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "An ordinary item with requirements, effects and effective combat values.",
+			"framing": "Crop the appraisal window with title and relevant fields; no test errors or missing artwork.",
+			"expected": "A reader can find requirements and effective values at website size.",
+			"priority": "later"
+		},
+		"inventory-moves": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Two packs, mergeable stacks and an equippable item; Native sorting selected.",
+			"framing": "Keep source and destination plus the equipment strip visible.",
+			"expected": "Reordering/transfers, merging and equip/unequip have clear visible results.",
+			"priority": "later"
+		},
+		"inventory-merge": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Several partially filled compatible stacks in one bag, with free space for a split.",
+			"framing": "Show the Y quantity prompt, bag Auto-merge action and completion feedback.",
+			"expected": "The split amount, merged stacks and freed-slot feedback are readable.",
+			"priority": "later"
+		},
+		"action-bars": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Usable item and saved loadout, plus room to clone a bar.",
+			"framing": "Keep drag sources, bar menu/layout controls and keyboard focus hints in view.",
+			"expected": "Binding, cloning, rotation and keyboard activation are understandable.",
+			"priority": "later"
+		},
+		"character-creation": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "An unused character slot and a server on which creating a sample character is acceptable.",
+			"framing": "Show appearance, Skills & Stats and review in separate short beats.",
+			"expected": "Creation finishes on the selected new roster entry before explicit world entry.",
+			"priority": "later"
+		},
+		"hardware-info": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "Launcher App settings open to graphics; machine details safe to show.",
+			"framing": "Crop the relevant controls and Copy hardware info, without dumping the full report into the image.",
+			"expected": "The troubleshooting action is easy to locate.",
+			"priority": "later"
+		},
+		"movement-keys": {
+			"owner": "agent",
+			"session": "illustrations",
+			"setup": "Movement defaults from the current input defaults.",
+			"framing": "Use the complete vector diagram; keep the text/table instructions beside it.",
+			"expected": "Key positions and their default movement actions are readable.",
+			"priority": "first"
+		},
+		"targeting-diagram": {
+			"owner": "agent",
+			"session": "illustrations",
+			"setup": "Smart Tab from the current input defaults.",
+			"framing": "Use the complete vector diagram; keep the text/table instructions beside it.",
+			"expected": "Tap/hold choices lead to selection, followed by a deliberate action.",
+			"priority": "first"
+		},
+		"posture-diagram": {
+			"owner": "agent",
+			"session": "illustrations",
+			"setup": "Rest posture cycle from the current input defaults.",
+			"framing": "Use the complete vector diagram; keep the text/table instructions beside it.",
+			"expected": "Standing, kneel/crouch, sit, lie and the return to standing are unambiguous.",
+			"priority": "first"
+		}
+	}
+}

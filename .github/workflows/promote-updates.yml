@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'site/**'
+      - 'release/quickstarts/**'
+      - 'crates/holtburger-scripting/holtburger.d.ts'
       - 'assets/branding/**'
       - 'assets/screenshots/**'
       - 'apps/holtburger-3d/public/fonts/**'
@@ -55,7 +57,10 @@ jobs:
         run: npm run format:check && npm run check
         working-directory: site
       - name: Build and validate website
-        run: npm run build && npm run check:links
+        run: npm run build && npm run check:links && npm run check:media -- --remote
+        working-directory: site
+      - name: Check media snapshot publisher
+        run: npm run check:media-publisher
         working-directory: site
       - name: Reconcile accepted published releases
         env:

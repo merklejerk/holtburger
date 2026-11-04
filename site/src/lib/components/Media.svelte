@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { asset } from '$app/paths';
 	import { getMedia, type MediaId } from '#lib/media/catalog.ts';
 	let { id }: { id: MediaId } = $props();
 	const entry = $derived(getMedia(id));
@@ -7,19 +8,48 @@
 
 <figure class="media-figure">
 	{#if entry.kind === 'image'}
+		{@const src =
+			entry.source.kind === 'local'
+				? asset(entry.source.path)
+				: entry.source.url}
 		<a
 			class="media-mount"
-			href={entry.src}
+			href={src}
 			aria-label={`View ${entry.title} at full size`}
 		>
 			<img
-				src={entry.src}
+				{src}
 				alt={entry.alt}
 				width={entry.width}
 				height={entry.height}
 				loading="lazy"
 			/>
 		</a>
+	{:else if entry.kind === 'video'}
+		<div class="media-mount">
+			<video
+				class="media-video"
+				controls
+				muted
+				preload="none"
+				poster={entry.poster}
+				width={entry.width}
+				height={entry.height}
+				style:aspect-ratio={`${entry.width} / ${entry.height}`}
+				crossorigin="anonymous"
+				aria-label={entry.title}
+			>
+				<source src={entry.src} type="video/mp4" />
+				{#if entry.captions !== null}<track
+						kind="captions"
+						src={entry.captions.src}
+						srclang={entry.captions.language}
+						label={entry.captions.label}
+						default
+					/>{/if}
+				<a href={entry.src}>Download clip</a>
+			</video>
+		</div>
 	{:else if entry.kind === 'youtube'}
 		<div class="media-mount">
 			{#if playing}
@@ -43,13 +73,14 @@
 			<span class="media-status"
 				>{entry.kind === 'planned-video'
 					? 'Clip to come'
-					: 'Screenshot to come'}</span
+					: 'Image to come'}</span
 			>
 			<strong>{entry.title}</strong>
 			<p>{entry.brief}</p>
 		</div>
 	{/if}
-	{#if entry.kind === 'image' || entry.kind === 'youtube'}<figcaption>
+	{#if entry.kind === 'image' || entry.kind === 'video' || entry.kind === 'youtube'}<figcaption
+		>
 			{entry.title}{#if entry.kind === 'youtube'}
 				· <a
 					href={`https://www.youtube.com/watch?v=${encodeURIComponent(entry.videoId)}`}

@@ -1,4 +1,4 @@
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { cp, mkdir, readdir, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 // Existing checked-in media is reused at build time; generated copies stay ignored.
@@ -21,6 +21,18 @@ for (const family of ['gelasio', 'arimo']) {
 		new URL(`fonts/${family}/`, destination),
 		{ recursive: true }
 	);
+}
+// Script examples and types have one maintained source and an ignored download copy.
+await mkdir(new URL('scripting/', destination), { recursive: true });
+await cp(
+	new URL('../../crates/holtburger-scripting/holtburger.d.ts', import.meta.url),
+	new URL('scripting/holtburger.d.ts', destination)
+);
+const examples = new URL('../examples/', import.meta.url);
+for (const file of (await readdir(examples)).filter((name) =>
+	name.endsWith('.js')
+)) {
+	await cp(new URL(file, examples), new URL(`scripting/${file}`, destination));
 }
 // Reuse the client's authored materials without coupling site behavior to app styles.
 await mkdir(new URL('theme/', destination), { recursive: true });

@@ -26,6 +26,14 @@ Use **Copy hardware info** from the launcher graphics settings when reporting re
 
 <Media id="hardware-info" />
 
+[More graphics and startup help](/holtburger/support/graphics/).
+
+## A script will not start
+
+Enter the world before using `/run`. Use `/scripts` to check the active script, local directory and discovered names. A local script overrides a bundled one with the same basename.
+
+For the mage, keep the bundled data sidecars with the script. See [running scripts](/holtburger/tui/running-scripts/) for file layout and [runtime limits](/holtburger/scripting/runtime/) if a custom script expects Node or Deno APIs.
+
 ## Report a problem
 
-[Open an issue on GitHub](https://github.com/merklejerk/holtburger/issues). Remove account credentials from screenshots and logs before attaching them.
+[Report a problem](/holtburger/support/reporting/) with the version, reproduction steps and relevant evidence. Remove account credentials from screenshots and logs before attaching them.

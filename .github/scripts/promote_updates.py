@@ -50,14 +50,14 @@ def generate_feeds(releases: list[dict], load_manifest: Callable[[int], bytes], 
                     raise ValueError(f"Unsupported published asset digest: {asset['name']}")
                 if expected_digest is not None and digest != f"sha256:{expected_digest}":
                     raise ValueError(f"Published asset digest differs from its manifest: {asset['name']}")
-        distributions.append((Version.parse(inventory.version), inventory.channel, release["tag_name"]))
+        distributions.append((Version.parse(inventory.version), release["tag_name"]))
     # Validate everything before mutating output, so a malformed release cannot create a partial site.
     output.mkdir(parents=True, exist_ok=True)
     updates = output / "updates"
     updates.mkdir(exist_ok=True)
     path = updates / "beta.json"
     if distributions:
-        version, _, tag = max(distributions, key=lambda item: item[0])
+        version, tag = max(distributions, key=lambda item: item[0])
         write_json(path, {"schemaVersion": 1, "version": str(version), "tag": tag})
     else:
         path.unlink(missing_ok=True)

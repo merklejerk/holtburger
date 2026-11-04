@@ -433,7 +433,6 @@ class ReleaseInventory:
     """Validated public release identity and expected downloadable file digests."""
 
     version: str  # SemVer compared by the feed generator.
-    channel: str  # Explicit audience used by channel selection.
     commit: str  # Full source commit checked against the public release tag.
     assets: dict[str, str]  # Exact downloadable payload names and expected SHA-256 values.
     kind: str  # Distribution policy validated together with its version and source.
@@ -510,7 +509,7 @@ def validate_manifest(document: dict) -> ReleaseInventory:
     for checksum in [*expected_assets.values(), content["contentSha256"], *content["contentFiles"].values()]:
         if re.fullmatch(r"[0-9a-f]{64}", checksum) is None:
             raise ValueError("Release manifest contains an invalid SHA-256 digest")
-    return ReleaseInventory(version, channel, commit, expected_assets, document["kind"])
+    return ReleaseInventory(version, commit, expected_assets, document["kind"])
 
 
 def manifest(artifacts: Path) -> list[Path]:

@@ -290,8 +290,10 @@ nightly release and superseded drafts/tags; cleanup of them is a separate action
 ## Update feed and Pages
 
 GitHub Pages uses GitHub Actions as its source. The `github-pages` environment must allow
-main, since promotion checks out trusted main tooling and deploys from that ref. Promotion
-needs `contents: read`; deployment needs `pages: write` and `id-token: write`.
+manual promotion from main and release events from `v0.*.*` tags. Deployment protection
+matches the event ref, even though promotion checks out trusted main tooling; checking out
+main does not change the release event’s tag ref. Promotion needs `contents: read`;
+deployment needs `pages: write` and `id-token: write`.
 
 `Promote Update Feeds` reconciles the complete published release inventory after publication
 or manual dispatch. It accepts only unsuffixed `v0.x.y` tags with complete schema 2 beta

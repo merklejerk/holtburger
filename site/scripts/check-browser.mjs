@@ -1,6 +1,7 @@
 import { chromium } from 'playwright-core';
 import { mkdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
+import { navigation } from '../src/lib/content/navigation.ts';
 import catalog from '../src/lib/generated/pages.json' with { type: 'json' };
 
 const origin =
@@ -148,6 +149,13 @@ try {
 		const response = await page.goto(new URL(`${entry.slug}/`, origin).href);
 		assert.equal(response?.status(), 200, `Route ${entry.slug}`);
 		assert.equal(await page.locator('h1').textContent(), entry.title);
+		if (entry.slug !== 'gallery') {
+			assert.deepEqual(
+				await page.locator('.guide-sidebar summary').allTextContents(),
+				navigation.map((section) => section.title),
+				`${entry.slug}: sidebar sections changed`
+			);
+		}
 		assert.equal(
 			await page.evaluate(
 				() => document.documentElement.scrollWidth <= window.innerWidth

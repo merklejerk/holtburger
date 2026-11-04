@@ -88,6 +88,9 @@ generated quickstarts and copied assets without a restart. Generated-file change
 do not feed back into preparation. Invalid source metadata is reported in the dev
 server and browser error overlay.
 
+Guide sidebars show the same chapters in the same order on every guide; only
+the current chapter opens by default. Do not hide chapters based on the route.
+
 The preparation script produces route metadata and heading links. Generated files
 are ignored. Keep each topic canonical; tours link to task guides and task guides
 link to precise reference entries. Separate 3D and TUI chat command references.

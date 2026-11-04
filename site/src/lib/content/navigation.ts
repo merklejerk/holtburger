@@ -1,8 +1,7 @@
-/** Contextual chapters keep onboarding, task guides and reference separate. */
+/** Stable chapters keep onboarding, task guides and reference discoverable. */
 export const navigation = [
 	{
 		title: 'Get started',
-		scopes: ['start', 'startup', '3d', 'coming-from-retail'],
 		links: [
 			{
 				slug: 'start',
@@ -20,7 +19,6 @@ export const navigation = [
 	},
 	{
 		title: 'Startup',
-		scopes: ['startup', 'start', '3d'],
 		links: [
 			{
 				slug: 'startup/servers',
@@ -46,7 +44,6 @@ export const navigation = [
 	},
 	{
 		title: 'Installation',
-		scopes: ['start', 'startup'],
 		links: [
 			{
 				slug: 'start/3d/windows',
@@ -64,7 +61,6 @@ export const navigation = [
 	},
 	{
 		title: '3D client',
-		scopes: ['3d'],
 		links: [
 			{
 				slug: '3d',
@@ -106,7 +102,6 @@ export const navigation = [
 	},
 	{
 		title: '3D reference',
-		scopes: ['3d', 'reference'],
 		links: [
 			{
 				slug: 'reference',
@@ -144,7 +139,6 @@ export const navigation = [
 	},
 	{
 		title: 'Terminal client',
-		scopes: ['tui'],
 		links: [
 			{
 				slug: 'tui',
@@ -174,7 +168,6 @@ export const navigation = [
 	},
 	{
 		title: 'TUI scripting',
-		scopes: ['tui'],
 		links: [
 			{
 				slug: 'tui/scripting',
@@ -196,7 +189,6 @@ export const navigation = [
 	},
 	{
 		title: 'TUI reference',
-		scopes: ['tui'],
 		links: [
 			{
 				slug: 'tui/reference/controls',
@@ -214,7 +206,6 @@ export const navigation = [
 	},
 	{
 		title: 'Help',
-		scopes: ['support'],
 		links: [
 			{
 				slug: 'support',
@@ -232,17 +223,6 @@ export const navigation = [
 	},
 	{
 		title: 'Other paths',
-		scopes: [
-			'start',
-			'startup',
-			'3d',
-			'reference',
-			'tui',
-			'coming-from-retail',
-			'support',
-			'about',
-			'tools'
-		],
 		links: [
 			{
 				slug: 'gallery',

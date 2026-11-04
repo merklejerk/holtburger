@@ -3,11 +3,6 @@
 	import { navigation } from '#lib/content/navigation.ts';
 	import type { PageData } from './$types';
 	let { data }: { data: PageData } = $props();
-	const sections = $derived(
-		navigation.filter((section) =>
-			section.scopes.includes(data.slug.split('/')[0])
-		)
-	);
 </script>
 
 <svelte:head
@@ -22,7 +17,7 @@
 			aria-label="Guide navigation"
 		>
 			<a class="back-link" href={resolve('/')}>← Holtburger</a>
-			{#each sections as section}<details
+			{#each navigation as section}<details
 					open={section.links.some((link) => link.slug === data.slug)}
 				>
 					<summary><h2>{section.title}</h2></summary>

@@ -20,6 +20,7 @@ import {
 	CLIENT_GRAPHICS_RANGES,
 	CLIENT_TEXT_SCALE,
 	CLIENT_UI_SCALE,
+	CLIENT_HUD_WINDOW_OPACITY,
 } from "./client-settings-values.js";
 import { clientInputSettingsSchema } from "./client-input-settings.js";
 import {
@@ -238,6 +239,11 @@ export const clientUiSettingsSchema = z
 			.min(CLIENT_UI_SCALE.minimum)
 			.max(CLIENT_UI_SCALE.maximum)
 			.default(CLIENT_UI_SCALE.initial),
+		/** Floating-window background opacity; old profiles retain the existing tint. */
+		hudWindowOpacity: finiteNumber
+			.min(CLIENT_HUD_WINDOW_OPACITY.minimum)
+			.max(CLIENT_HUD_WINDOW_OPACITY.maximum)
+			.default(CLIENT_HUD_WINDOW_OPACITY.initial),
 		/** Profiles without warnings get the same thresholds as first-run settings. */
 		vitalWarningThresholds: clientVitalWarningThresholdsSchema.default(
 			CLIENT_VITAL_WARNING_THRESHOLDS,

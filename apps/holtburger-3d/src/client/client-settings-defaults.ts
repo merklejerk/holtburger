@@ -4,6 +4,7 @@ import {
 	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_TEXT_SCALE,
 	CLIENT_UI_SCALE,
+	CLIENT_HUD_WINDOW_OPACITY,
 	CLIENT_VITAL_WARNING_THRESHOLDS,
 } from "./client-settings-values.js";
 import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance.js";
@@ -85,6 +86,7 @@ export function createDefaultClientUserSections(
 			useUnlockHelper: true,
 			textScale: CLIENT_TEXT_SCALE.initial,
 			uiScale: CLIENT_UI_SCALE.initial,
+			hudWindowOpacity: CLIENT_HUD_WINDOW_OPACITY.initial,
 			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
 			themeId: CLIENT_DEFAULT_THEME_ID,
 			fonts: { body: "theme", heading: "theme", mono: "theme" },

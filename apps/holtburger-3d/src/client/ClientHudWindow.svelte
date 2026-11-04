@@ -222,6 +222,8 @@
 <style>
 	@layer components {
 		.hud-window {
+			/* Window tint is user-owned; text, icons and neighboring HUD remain opaque. */
+			--ui-panel-opacity: var(--ui-hud-window-opacity);
 			/* Absolute children start inside ui-panel's 1px border. Include it so
 			 * targets reach the outermost frame paint while keeping their inner reach. */
 			--ui-resize-outset: calc(var(--ui-window-frame-outset) + 1px);

@@ -2514,6 +2514,7 @@
 	use:observeCombatAppearance
 	style:--ui-text-scale={userSettings.ui.textScale}
 	style:--ui-scale={userSettings.ui.uiScale}
+	style:--ui-hud-window-opacity={userSettings.ui.hudWindowOpacity}
 	style:--ui-font-body={fontCss(userSettings.ui.fonts.body)}
 	style:--ui-font-heading={fontCss(userSettings.ui.fonts.heading)}
 	style:--ui-font-mono={fontCss(userSettings.ui.fonts.mono)}

@@ -27,6 +27,14 @@ export const CLIENT_UI_SCALE = {
 	step: 0.05,
 } as const;
 
+/** Background opacity for floating gameplay windows; foreground content stays opaque. */
+export const CLIENT_HUD_WINDOW_OPACITY = {
+	initial: 0.74,
+	minimum: 0,
+	maximum: 1,
+	step: 0.01,
+} as const;
+
 /** Closed font choices for each client UI role; Theme default inherits the active theme. */
 export const CLIENT_FONT_FAMILY_OPTIONS = [
 	"theme",

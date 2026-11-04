@@ -7,6 +7,7 @@
 		CLIENT_FONT_FAMILY_OPTIONS,
 		CLIENT_TEXT_SCALE,
 		CLIENT_UI_SCALE,
+		CLIENT_HUD_WINDOW_OPACITY,
 		type ClientFontFamily,
 	} from "./client-settings-values";
 	import "./client-settings-controls.css";
@@ -88,6 +89,26 @@
 						onUiChange({
 							...ui,
 							textScale: event.currentTarget.valueAsNumber,
+						})}
+				/>
+			</label>
+		</div>
+	</details>
+	<details class="ui-disclosure ui-disclosure-section" open>
+		<summary>HUD windows</summary>
+		<div class="settings-section ui-disclosure-body">
+			<label
+				>Window background opacity: {Math.round(ui.hudWindowOpacity * 100)}%
+				<UiRange
+					aria-label="Window background opacity"
+					min={CLIENT_HUD_WINDOW_OPACITY.minimum}
+					max={CLIENT_HUD_WINDOW_OPACITY.maximum}
+					step={CLIENT_HUD_WINDOW_OPACITY.step}
+					value={ui.hudWindowOpacity}
+					oninput={(event) =>
+						onUiChange({
+							...ui,
+							hudWindowOpacity: event.currentTarget.valueAsNumber,
 						})}
 				/>
 			</label>

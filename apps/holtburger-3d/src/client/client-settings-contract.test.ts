@@ -27,11 +27,44 @@ import {
 	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_TEXT_SCALE,
 	CLIENT_UI_SCALE,
+	CLIENT_HUD_WINDOW_OPACITY,
 } from "./client-settings-values";
 
 const viewport = { width: 1440, height: 900 };
 
 describe("current client settings values", () => {
+	it("loads window opacity for older profiles and preserves its supported range", () => {
+		const { hudWindowOpacity, ...older } = createDefaultClientUserSettings(
+			viewport,
+			0,
+			"windows",
+		).ui;
+		expect(clientUiSettingsSchema.parse(older).hudWindowOpacity).toBe(
+			CLIENT_HUD_WINDOW_OPACITY.initial,
+		);
+		for (const value of [
+			CLIENT_HUD_WINDOW_OPACITY.minimum,
+			hudWindowOpacity,
+			CLIENT_HUD_WINDOW_OPACITY.maximum,
+		]) {
+			expect(
+				clientUiSettingsSchema.parse({ ...older, hudWindowOpacity: value })
+					.hudWindowOpacity,
+			).toBe(value);
+		}
+		for (const value of [
+			CLIENT_HUD_WINDOW_OPACITY.minimum - CLIENT_HUD_WINDOW_OPACITY.step,
+			CLIENT_HUD_WINDOW_OPACITY.maximum + CLIENT_HUD_WINDOW_OPACITY.step,
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+		]) {
+			expect(
+				clientUiSettingsSchema.safeParse({ ...older, hudWindowOpacity: value })
+					.success,
+			).toBe(false);
+		}
+	});
+
 	it("loads older UI profiles with FPS hidden and preserves explicit visibility", () => {
 		const ui = createDefaultClientUserSettings(viewport, 0, "windows").ui;
 		const { showFps, ...older } = ui;
@@ -80,6 +113,7 @@ describe("current client settings values", () => {
 			fonts,
 			textScale: CLIENT_TEXT_SCALE.initial,
 			uiScale: CLIENT_UI_SCALE.initial,
+			hudWindowOpacity: CLIENT_HUD_WINDOW_OPACITY.initial,
 			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
 		});
 	});
@@ -96,6 +130,7 @@ describe("current client settings values", () => {
 			...older,
 			textScale: CLIENT_TEXT_SCALE.initial,
 			uiScale: CLIENT_UI_SCALE.initial,
+			hudWindowOpacity: CLIENT_HUD_WINDOW_OPACITY.initial,
 		});
 		for (const textScale of [
 			CLIENT_TEXT_SCALE.minimum,
@@ -110,6 +145,7 @@ describe("current client settings values", () => {
 				...older,
 				textScale,
 				uiScale: CLIENT_UI_SCALE.initial,
+				hudWindowOpacity: CLIENT_HUD_WINDOW_OPACITY.initial,
 			});
 		}
 		for (const textScale of [

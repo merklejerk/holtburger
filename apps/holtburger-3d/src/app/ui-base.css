@@ -606,7 +606,8 @@
 			--ui-panel-background,
 			color-mix(
 				in srgb,
-				var(--ui-color-surface) calc(var(--ui-surface-opacity) * 100%),
+				var(--ui-color-surface)
+					calc(var(--ui-panel-opacity, var(--ui-surface-opacity)) * 100%),
 				transparent
 			)
 		);

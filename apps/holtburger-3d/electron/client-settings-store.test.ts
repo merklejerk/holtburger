@@ -22,6 +22,7 @@ import { loadoutActionContentSchema } from "../src/client/client-loadout";
 import { bindActionCell } from "../src/client/client-action-bar-state";
 import {
 	CLIENT_UI_SCALE,
+	CLIENT_HUD_WINDOW_OPACITY,
 	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_TEXT_SCALE,
 } from "../src/client/client-settings-values";
@@ -352,6 +353,7 @@ describe("ClientSettingsStore", () => {
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.initial,
 				uiScale: CLIENT_UI_SCALE.initial,
+				hudWindowOpacity: CLIENT_HUD_WINDOW_OPACITY.initial,
 			});
 			const ui = {
 				themeId: "Midnight 雪",
@@ -362,6 +364,7 @@ describe("ClientSettingsStore", () => {
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.maximum,
 				uiScale: CLIENT_UI_SCALE.minimum,
+				hudWindowOpacity: CLIENT_HUD_WINDOW_OPACITY.maximum,
 			};
 			await store.saveUserPatch({ sections: { ui } });
 			await store.saveCharacterPatch("example:9000/0x50000001", {

@@ -132,7 +132,7 @@ within the reading column without stretching a small component across the page.
 
 The agent captures static panels and component crops using the local test server;
 the user captures motion and natural-control clips, and all interactive TUI footage.
-Review a small batch of static samples with the user before bulk capture. Use real
+Review a small batch of static samples with the user before bulk capture. Set HUD window background opacity to 100% for captures and close unrelated windows; avoid overlapping transparent panels. Use real
 client state for gameplay evidence; fixture illustrations must be labeled. Keep
 capture work separate from media publication until the samples are reviewed.
 

@@ -69,6 +69,22 @@ remembered locations, and recovery UI remain outside this crate.
 EnvCells, Environments, RegionDesc, Scenes, SetupModels, GfxObjs, palettes, and other recurring
 records. Cache hits return the same `Arc` allocation.
 
+The shared record-cache primitive uses a bounded LRU index and independent per-key initialization.
+Loaders run outside the index lock; concurrent callers for a retained key share initialization,
+while failed loads remain retryable. Eviction releases cache ownership without invalidating values
+held by callers. A key requested again after eviction may initialize concurrently with an old caller.
+The content service owns its decoded-record cache for one selected repository.
+
+Material definitions, texture facts and palettes belong to the selected `ContentRepository`.
+Definitions retain scalar fields and source identities; texture facts retain authored level ordering
+and validated default-palette decisions. Resolving these facts validates every available level and
+its required palette, preserving malformed-content errors while skipping optional missing/pruned
+levels. Definitions and texture facts each retain at most 4,096 entries; the shared palette pool
+retains at most 8,192. Material, palette-composition and content-service palette queries share that
+pool. Explicit pixel conversion keeps its full source levels transient rather than retaining pixels
+for recipe-only consumers. Cache dependencies flow from definition to texture facts to palette.
+These are entry bounds, not byte budgets or limits on values held by callers after eviction.
+
 ### Landblock Foundation ([src/landblock.rs](src/landblock.rs))
 
 `LandblockAsset` is the complete filter-free shallow projection of one CellLandblock, its

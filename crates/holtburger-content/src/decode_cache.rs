@@ -1,7 +1,7 @@
-use std::collections::{HashMap, VecDeque};
-use std::hash::Hash;
+use crate::record_cache::RecordCache;
+use once_cell::sync::OnceCell;
 use std::io::Cursor;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use holtburger_dat::file_type::{
@@ -24,51 +24,41 @@ const ENVIRONMENT_CAPACITY: usize = 1_024;
 const SCENE_CAPACITY: usize = 512;
 const SETUP_MODEL_CAPACITY: usize = 4_096;
 const GFX_OBJ_CAPACITY: usize = 8_192;
-const PALETTE_CAPACITY: usize = 8_192;
 
 #[derive(Debug, Default)]
 pub struct ContentDecodeCache {
     pinned: PinnedContentCache,
-    lru: LruDecodedRecordCache,
+    records: DecodedRecordCaches,
 }
 
 #[derive(Debug, Default)]
 struct PinnedContentCache {
-    region_desc: Mutex<Option<Arc<RegionDesc>>>,
+    region_desc: OnceCell<Arc<RegionDesc>>,
 }
 
 #[derive(Debug)]
-struct LruDecodedRecordCache {
-    animations: Mutex<SimpleLru<u32, Arc<Animation>>>,
-    cell_landblocks: Mutex<SimpleLru<u32, Arc<CellLandblock>>>,
-    landblock_infos: Mutex<SimpleLru<u32, Arc<LandblockInfo>>>,
-    env_cells: Mutex<SimpleLru<u32, Arc<EnvCell>>>,
-    environments: Mutex<SimpleLru<u32, Arc<Environment>>>,
-    scenes: Mutex<SimpleLru<u32, Arc<Scene>>>,
-    setup_models: Mutex<SimpleLru<u32, Arc<SetupModel>>>,
-    gfx_objs: Mutex<SimpleLru<u32, Arc<GfxObj>>>,
-    palettes: Mutex<SimpleLru<u32, Arc<Palette>>>,
+struct DecodedRecordCaches {
+    animations: RecordCache<Animation>,
+    cell_landblocks: RecordCache<CellLandblock>,
+    landblock_infos: RecordCache<LandblockInfo>,
+    env_cells: RecordCache<EnvCell>,
+    environments: RecordCache<Environment>,
+    scenes: RecordCache<Scene>,
+    setup_models: RecordCache<SetupModel>,
+    gfx_objs: RecordCache<GfxObj>,
 }
 
-#[derive(Debug)]
-struct SimpleLru<K, V> {
-    capacity: usize,
-    values: HashMap<K, V>,
-    order: VecDeque<K>,
-}
-
-impl Default for LruDecodedRecordCache {
+impl Default for DecodedRecordCaches {
     fn default() -> Self {
         Self {
-            animations: Mutex::new(SimpleLru::new(ANIMATION_CAPACITY)),
-            cell_landblocks: Mutex::new(SimpleLru::new(CELL_LANDBLOCK_CAPACITY)),
-            landblock_infos: Mutex::new(SimpleLru::new(LANDBLOCK_INFO_CAPACITY)),
-            env_cells: Mutex::new(SimpleLru::new(ENV_CELL_CAPACITY)),
-            environments: Mutex::new(SimpleLru::new(ENVIRONMENT_CAPACITY)),
-            scenes: Mutex::new(SimpleLru::new(SCENE_CAPACITY)),
-            setup_models: Mutex::new(SimpleLru::new(SETUP_MODEL_CAPACITY)),
-            gfx_objs: Mutex::new(SimpleLru::new(GFX_OBJ_CAPACITY)),
-            palettes: Mutex::new(SimpleLru::new(PALETTE_CAPACITY)),
+            animations: RecordCache::new(ANIMATION_CAPACITY),
+            cell_landblocks: RecordCache::new(CELL_LANDBLOCK_CAPACITY),
+            landblock_infos: RecordCache::new(LANDBLOCK_INFO_CAPACITY),
+            env_cells: RecordCache::new(ENV_CELL_CAPACITY),
+            environments: RecordCache::new(ENVIRONMENT_CAPACITY),
+            scenes: RecordCache::new(SCENE_CAPACITY),
+            setup_models: RecordCache::new(SETUP_MODEL_CAPACITY),
+            gfx_objs: RecordCache::new(GFX_OBJ_CAPACITY),
         }
     }
 }
@@ -83,7 +73,7 @@ impl ContentDecodeCache {
         content: &ContentRepository,
         landblock_id: u32,
     ) -> Result<Arc<CellLandblock>> {
-        load_lru_record(&self.lru.cell_landblocks, landblock_id, || {
+        self.records.cell_landblocks.load(landblock_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id))
                 .with_context(|| {
@@ -94,7 +84,6 @@ impl ContentDecodeCache {
                 })?;
             resource
                 .decode(|bytes| Ok(CellLandblock::unpack(&bytes)?))
-                .map(Arc::new)
                 .with_context(|| format!("Could not decode CellLandblock 0x{landblock_id:08X}"))
         })
     }
@@ -104,7 +93,7 @@ impl ContentDecodeCache {
         content: &ContentRepository,
         landblock_info_id: u32,
     ) -> Result<Arc<LandblockInfo>> {
-        load_lru_record(&self.lru.landblock_infos, landblock_info_id, || {
+        self.records.landblock_infos.load(landblock_info_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_info_id))
                 .with_context(|| {
@@ -115,7 +104,6 @@ impl ContentDecodeCache {
                 })?;
             resource
                 .decode(|bytes| Ok(LandblockInfo::unpack(&bytes)?))
-                .map(Arc::new)
                 .with_context(|| {
                     format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}")
                 })
@@ -123,7 +111,7 @@ impl ContentDecodeCache {
     }
 
     pub fn env_cell(&self, content: &ContentRepository, env_cell_id: u32) -> Result<Arc<EnvCell>> {
-        load_lru_record(&self.lru.env_cells, env_cell_id, || {
+        self.records.env_cells.load(env_cell_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id))
                 .with_context(|| {
@@ -134,7 +122,6 @@ impl ContentDecodeCache {
                 })?;
             resource
                 .decode(|bytes| Ok(EnvCell::unpack(&mut Cursor::new(bytes))?))
-                .map(Arc::new)
                 .with_context(|| format!("Could not decode EnvCell 0x{env_cell_id:08X}"))
         })
     }
@@ -144,7 +131,7 @@ impl ContentDecodeCache {
         content: &ContentRepository,
         environment_id: u32,
     ) -> Result<Arc<Environment>> {
-        load_lru_record(&self.lru.environments, environment_id, || {
+        self.records.environments.load(environment_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id))
                 .with_context(|| {
@@ -155,43 +142,18 @@ impl ContentDecodeCache {
                 })?;
             resource
                 .decode(|bytes| Ok(Environment::unpack(&mut Cursor::new(bytes))?))
-                .map(Arc::new)
                 .with_context(|| format!("Could not decode Environment 0x{environment_id:08X}"))
         })
     }
 
     pub fn region_desc(&self, content: &ContentRepository) -> Result<Arc<RegionDesc>> {
-        if let Some(region) = self
-            .pinned
-            .region_desc
-            .lock()
-            .expect("region desc cache lock should not be poisoned")
-            .clone()
-        {
-            return Ok(region);
-        }
-
-        let resource = content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID))
-            .with_context(|| {
-                format!(
-                    "Could not read {}:0x{REGION_DESC_FILE_ID:08X} from content repository",
-                    EOR_PORTAL_NAMESPACE
-                )
-            })?;
-        let region = Arc::new(
-            resource
-                .decode(|bytes| Ok(RegionDesc::unpack(&bytes)?))
-                .with_context(|| {
-                    format!("Could not decode RegionDesc 0x{REGION_DESC_FILE_ID:08X}")
-                })?,
-        );
-        *self
-            .pinned
-            .region_desc
-            .lock()
-            .expect("region desc cache lock should not be poisoned") = Some(region.clone());
-        Ok(region)
+        self.pinned.region_desc.get_or_try_init(|| {
+            let resource = content.read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID))
+                .with_context(|| format!("Could not read {EOR_PORTAL_NAMESPACE}:0x{REGION_DESC_FILE_ID:08X} from content repository"))?;
+            resource.decode(|bytes| Ok(RegionDesc::unpack(&bytes)?))
+                .map(Arc::new)
+                .with_context(|| format!("Could not decode RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))
+        }).map(Arc::clone)
     }
 
     /// Loads the complete static record for the repository-selected active region.
@@ -200,7 +162,7 @@ impl ContentDecodeCache {
     }
 
     pub fn scene(&self, content: &ContentRepository, scene_id: u32) -> Result<Arc<Scene>> {
-        load_lru_record(&self.lru.scenes, scene_id, || {
+        self.records.scenes.load(scene_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, scene_id))
                 .with_context(|| {
@@ -211,7 +173,6 @@ impl ContentDecodeCache {
                 })?;
             resource
                 .decode(|bytes| Ok(Scene::unpack(&bytes)?))
-                .map(Arc::new)
                 .with_context(|| format!("Could not decode Scene 0x{scene_id:08X}"))
         })
     }
@@ -227,7 +188,7 @@ impl ContentDecodeCache {
         content: &ContentRepository,
         animation_id: u32,
     ) -> Result<Arc<Animation>> {
-        load_lru_record(&self.lru.animations, animation_id, || {
+        self.records.animations.load(animation_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, animation_id))
                 .with_context(|| {
@@ -238,7 +199,6 @@ impl ContentDecodeCache {
                 })?;
             resource
                 .decode(|bytes| Ok(Animation::read(&mut Cursor::new(bytes))?))
-                .map(Arc::new)
                 .with_context(|| format!("Could not decode Animation 0x{animation_id:08X}"))
         })
     }
@@ -248,7 +208,7 @@ impl ContentDecodeCache {
         content: &ContentRepository,
         setup_model_id: u32,
     ) -> Result<Arc<SetupModel>> {
-        load_lru_record(&self.lru.setup_models, setup_model_id, || {
+        self.records.setup_models.load(setup_model_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id))
                 .with_context(|| {
@@ -259,13 +219,12 @@ impl ContentDecodeCache {
                 })?;
             resource
                 .decode(|bytes| Ok(SetupModel::unpack(&mut Cursor::new(bytes))?))
-                .map(Arc::new)
                 .with_context(|| format!("Could not decode SetupModel 0x{setup_model_id:08X}"))
         })
     }
 
     pub fn gfx_obj(&self, content: &ContentRepository, gfx_obj_id: u32) -> Result<Arc<GfxObj>> {
-        load_lru_record(&self.lru.gfx_objs, gfx_obj_id, || {
+        self.records.gfx_objs.load(gfx_obj_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id))
                 .with_context(|| {
@@ -276,89 +235,20 @@ impl ContentDecodeCache {
                 })?;
             resource
                 .decode(|bytes| Ok(GfxObj::unpack(&mut Cursor::new(bytes))?))
-                .map(Arc::new)
                 .with_context(|| format!("Could not decode GfxObj 0x{gfx_obj_id:08X}"))
         })
     }
 
+    /// Material and pixel consumers share the repository's validated palette pool.
     pub fn palette(&self, content: &ContentRepository, palette_id: u32) -> Result<Arc<Palette>> {
-        load_lru_record(&self.lru.palettes, palette_id, || {
-            content.read_palette(palette_id).map(Arc::new)
-        })
-    }
-}
-
-fn load_lru_record<V>(
-    cache: &Mutex<SimpleLru<u32, V>>,
-    key: u32,
-    load: impl FnOnce() -> Result<V>,
-) -> Result<V>
-where
-    V: Clone,
-{
-    if let Some(value) = cache
-        .lock()
-        .expect("decode cache lock should not be poisoned")
-        .get(&key)
-    {
-        return Ok(value);
-    }
-
-    let value = load()?;
-    cache
-        .lock()
-        .expect("decode cache lock should not be poisoned")
-        .insert(key, value.clone());
-    Ok(value)
-}
-
-impl<K, V> SimpleLru<K, V>
-where
-    K: Clone + Eq + Hash,
-    V: Clone,
-{
-    fn new(capacity: usize) -> Self {
-        Self {
-            capacity,
-            values: HashMap::new(),
-            order: VecDeque::new(),
-        }
-    }
-
-    fn get(&mut self, key: &K) -> Option<V> {
-        let value = self.values.get(key).cloned()?;
-        self.touch(key);
-        Some(value)
-    }
-
-    fn insert(&mut self, key: K, value: V) {
-        if self.capacity == 0 {
-            return;
-        }
-
-        if self.values.insert(key.clone(), value).is_some() {
-            self.touch(&key);
-            return;
-        }
-
-        self.order.push_back(key.clone());
-        while self.values.len() > self.capacity {
-            let Some(evicted_key) = self.order.pop_front() else {
-                break;
-            };
-            self.values.remove(&evicted_key);
-        }
-    }
-
-    fn touch(&mut self, key: &K) {
-        self.order.retain(|existing_key| existing_key != key);
-        self.order.push_back(key.clone());
+        content.read_palette(palette_id)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     use crate::test_support::CountingSource;
@@ -428,19 +318,5 @@ mod tests {
         assert_eq!(second.id, palette_id);
         assert_eq!(second.colors_argb, vec![0xff11_2233, 0x8044_5566]);
         assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, palette_id), 1);
-    }
-
-    #[test]
-    fn simple_lru_evicts_least_recently_used_record() {
-        let mut lru = SimpleLru::new(2);
-        lru.insert(1, "one");
-        lru.insert(2, "two");
-
-        assert_eq!(lru.get(&1), Some("one"));
-        lru.insert(3, "three");
-
-        assert_eq!(lru.get(&1), Some("one"));
-        assert_eq!(lru.get(&2), None);
-        assert_eq!(lru.get(&3), Some("three"));
     }
 }

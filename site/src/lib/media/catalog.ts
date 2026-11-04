@@ -248,7 +248,7 @@ export const media = {
 		kind: 'planned-video',
 		title: 'From playing to reading chat',
 		brief:
-			'Show click-through chat, temporary history interaction, scrolling and copying, then return to live messages.'
+			'Show command autocomplete with syntax and descriptions, then temporary history interaction and returning to play.'
 	},
 	emotes: {
 		kind: 'planned-video',

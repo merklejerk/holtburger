@@ -211,7 +211,7 @@
 			"session": "setup",
 			"setup": "Sample conversation with coordinates and harmless text.",
 			"framing": "Keep the chat history, its interaction toggle and part of the world visible. Show modifier keys; omit private conversations.",
-			"expected": "Start with click-through live messages. Hold Control (Command on macOS) to scroll and select text; release to resume live messages. Toggle history interaction for longer reading, then turn it off. Show Enter to compose and sending to return to play.",
+			"expected": "Start with click-through live messages. Hold Control (Command on macOS) to scroll and select text; release to resume live messages. Toggle history interaction for longer reading, then turn it off. Show Enter to compose and sending to return to play. Type a partial command, show suggestions with syntax and descriptions, then choose and accept one.",
 			"priority": "later"
 		},
 		"emotes": {

@@ -38,7 +38,11 @@ Your preferences are saved on this computer. Action-bar contents, spell bindings
 
 Press **Enter** to type a message. Choose the destination, type, and send; sending returns you to the game. If a command suggestion is highlighted, Enter accepts that suggestion first.
 
-Use command completions and input history to avoid retyping familiar commands.
+## Discover commands as you type
+
+Start typing a command to see matching suggestions, their syntax and a short description. Browse with the arrow keys and accept with **Tab** or **Enter**—handy for finding a command without leaving the game to look it up.
+
+Input history lets you reuse commands you have already sent.
 
 Type `/help` for the command list or `/help COMMAND` for one command. Both `/` and `@` can introduce commands. Chat commands also include utilities such as waypoints, recalls and corpse permissions.
 

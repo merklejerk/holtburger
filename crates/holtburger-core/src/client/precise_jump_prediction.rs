@@ -273,9 +273,9 @@ pub enum PreciseJumpFlightOutcome {
         contact_point: Vector3,
         /// Walkable contact normal used to place the landing marker.
         normal: Vector3,
-        /// Cell containing the contact, or outdoors.
+        /// Cell containing the landing support-sphere center, or outdoors.
         committed_cell: Option<Guid>,
-        /// Core-owned proximity and walkability classification of the desired target.
+        /// Core-owned surface-contact proximity and target walkability classification.
         matches_target: bool,
     },
     Incomplete(PreciseJumpPredictionIncompleteReason),
@@ -471,8 +471,9 @@ fn selected_landing(
         contact_point,
         normal,
         committed_cell,
+        // A surface ray and a landing sphere can occupy opposite sides of the same cell
+        // boundary. Their committed cells retain placement scope, rather than surface identity.
         matches_target: target.view.normal.z >= walkable_normal_z
-            && committed_cell == target.view.committed_cell
             && contact_point.distance(&target.view.point) <= tolerance,
     }
 }
@@ -554,11 +555,12 @@ pub(in crate::client) mod tests {
     use std::sync::Arc;
 
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::{Quaternion, Sphere};
+    use holtburger_common::{Plane, Quaternion, Sphere};
     use holtburger_content::{
-        BspSolid, CellVolume, ColliderScale, CollisionBox, CollisionPolygon, CollisionShape,
-        LandblockColliders, LandblockCollisionAsset, LandblockPlacement, LandblockTerrain,
-        PlacedCollider, StaticColliderPlacement, TerrainCellDiagonals, TerrainCollisionSurface,
+        BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
+        CollisionBox, CollisionPolygon, CollisionShape, LandblockColliders,
+        LandblockCollisionAsset, LandblockPlacement, LandblockTerrain, PlacedCollider,
+        StaticColliderPlacement, TerrainCellDiagonals, TerrainCollisionSurface,
     };
     use holtburger_dat::physics::{BspLeaf, BspNode};
     use holtburger_world::state::SelfJumpCapabilities;
@@ -781,6 +783,127 @@ pub(in crate::client) mod tests {
                 .iter()
                 .any(|segment| segment.end.x < segment.start.x
                     && segment.end.y > segment.start.y + 0.001)
+        );
+    }
+
+    #[test]
+    fn selected_flight_matches_a_floor_on_a_shared_cell_boundary() {
+        let upper = Guid(OWNER.0 & 0xffff_0000 | 0x0100);
+        let lower = Guid(upper.0 + 1);
+        let up = Vector3::new(0.0, 0.0, 1.0);
+        let vertices = vec![
+            Vector3::new(108.0, 92.0, 0.0),
+            Vector3::new(124.0, 92.0, 0.0),
+            Vector3::new(124.0, 100.0, 0.0),
+            Vector3::new(108.0, 100.0, 0.0),
+        ];
+        let mut floor = polygon_collider(vertices.clone(), up, 0);
+        floor.source_placement = StaticColliderPlacement::EnvCellShell { cell_id: lower.0 };
+        // The ray reaches the lower cell's surface, while the support sphere's center stays
+        // above the same horizontal portal. The cells describe different reference points.
+        let cells = [(upper, lower, up, false), (lower, upper, up * -1.0, true)]
+            .into_iter()
+            .map(|(cell, target, inward, positive_side)| CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: vec![target.0 as u16],
+                    seen_outside: false,
+                },
+                cell_selector: cell.0 as u16,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: inward,
+                    d: 0.0,
+                }],
+                portals: vec![CellCollisionPortal {
+                    plane: Plane { normal: up, d: 0.0 },
+                    aperture_vertices: vertices.clone(),
+                    reciprocal_visibility_vertices: None,
+                    positive_side,
+                    target: CellCollisionPortalTarget::EnvCell(target.0 as u16),
+                    outdoor_building: None,
+                }],
+            })
+            .collect::<Vec<_>>();
+        let mut disconnected_cells = cells.clone();
+        for cell in &mut disconnected_cells {
+            cell.portals.clear();
+        }
+        let mut disconnected = CollisionScene::new();
+        disconnected
+            .insert(LandblockCollisionAsset {
+                landblock_id: OWNER.0,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::new(vec![floor.clone()], disconnected_cells),
+            })
+            .unwrap();
+        let mut collision = CollisionScene::new();
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: OWNER.0,
+                terrain: TerrainCollisionSurface::empty(),
+                static_geometry: LandblockColliders::new(vec![floor], cells),
+            })
+            .unwrap();
+        let now = Instant::now();
+        let (scene, id) = body_scene_in_cell(
+            &collision,
+            upper,
+            Vector3::new(120.0, 96.0, 0.005),
+            Some(upper),
+            now,
+        );
+        let target =
+            downward_target_in_cell(&collision, Vector3::new(114.0, 96.0, 0.0), Some(upper));
+        assert_eq!(target.view().committed_cell, Some(lower));
+        let flight = selected_flight(
+            &scene,
+            &collision,
+            id,
+            &target,
+            JumpExtent::MAXIMUM,
+            160,
+            now,
+        );
+        let PreciseJumpFlightOutcome::Landed {
+            contact_point,
+            committed_cell,
+            matches_target,
+            ..
+        } = flight.outcome
+        else {
+            panic!("shared floor must yield a landing");
+        };
+        assert_eq!(committed_cell, Some(upper));
+        let radius = scene
+            .body(id)
+            .unwrap()
+            .physical
+            .as_ref()
+            .unwrap()
+            .definition
+            .spheres()
+            .primary()
+            .radius;
+        assert!(contact_point.distance(&target.view().point) < radius);
+        assert!(matches_target);
+
+        // At identical coordinates, a floor in an unconnected cell cannot become a cursor
+        // target: domain-scoped ray traversal excludes it before landing classification.
+        assert!(
+            disconnected
+                .cast_static_surface_ray(StaticSurfaceRayRequest {
+                    anchor: OWNER,
+                    start: target.view().point + up * 5.0,
+                    direction: up * -1.0,
+                    maximum_distance: 10.0,
+                    previous_cell: Some(upper),
+                    filter: PhysicalCollisionFilter::ALL,
+                })
+                .unwrap()
+                .is_none()
         );
     }
 

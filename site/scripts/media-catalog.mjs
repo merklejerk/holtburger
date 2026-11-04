@@ -1,23 +1,7 @@
 import { stat } from 'node:fs/promises';
-import { z } from 'zod';
 import { media } from '../src/lib/media/catalog.ts';
 
-/** Serialized references in a deployed website; pruning checks these before removing files. */
-export const mediaIndexSchema = z
-	.object({
-		schemaVersion: z.literal(1),
-		files: z.array(
-			z
-				.object({
-					url: z.url(),
-					contentType: z.enum(['image/', 'video/mp4', 'text/vtt'])
-				})
-				.strict()
-		)
-	})
-	.strict();
-
-/** Published remote URLs and their expected response type, shared by checks and publishing. */
+/** Collect remote media references for local link checks and optional hosting checks. */
 export async function catalogFiles() {
 	/** @type {{url: string; contentType: string}[]} */
 	const files = [];

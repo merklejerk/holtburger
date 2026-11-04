@@ -1,16 +1,10 @@
 import { parseArgs } from 'node:util';
-import { writeFile } from 'node:fs/promises';
 import { catalogFiles } from './media-catalog.mjs';
 
 const { values } = parseArgs({
-	options: { remote: { type: 'boolean' }, 'write-index': { type: 'boolean' } }
+	options: { remote: { type: 'boolean' } }
 });
 const files = await catalogFiles();
-if (values['write-index'])
-	await writeFile(
-		new URL('../build/media-index.json', import.meta.url),
-		`${JSON.stringify({ schemaVersion: 1, files }, null, 2)}\n`
-	);
 if (values.remote) {
 	for (const file of files) {
 		const response = await fetch(file.url, {

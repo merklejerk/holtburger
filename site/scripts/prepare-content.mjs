@@ -19,7 +19,7 @@ const files = (await readdir(root, { recursive: true }))
 const pages = [];
 for (const file of files) {
 	if (
-		['updates', 'assets', 'pagefind', 'media-index.json'].includes(
+		['updates', 'assets', 'pagefind'].includes(
 			file.split('/')[0].replace(/\.md$/, '')
 		)
 	)

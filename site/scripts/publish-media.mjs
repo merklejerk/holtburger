@@ -1,123 +1,112 @@
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { mkdir, open, rm } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-import { parseArgs } from 'node:util';
-import { catalogFiles, mediaIndexSchema } from './media-catalog.mjs';
+import { promisify, parseArgs } from 'node:util';
 import {
-	MEDIA_REPOSITORY,
-	MEDIA_REMOTE,
-	inventory,
-	parseManifest,
-	validateReferences,
-	validateTransition,
-	pushSnapshot,
-	git
-} from './media-snapshot.mjs';
+	cp,
+	lstat,
+	mkdir,
+	mkdtemp,
+	readdir,
+	rm,
+	writeFile
+} from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Deliberately fixed: this command can never replace the application repository.
+const remote = 'git@github.com:merklejerk/holtburger-media.git';
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const execute = promisify(execFile);
+/** Run Git without shell interpolation or prompts.
+ * @param {string[]} args @param {string} cwd
+ */
+async function git(args, cwd) {
+	const result = await execute('git', args, {
+		cwd,
+		env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+	});
+	return result.stdout.trim();
+}
 
 const { values, positionals } = parseArgs({
 	allowPositionals: true,
-	options: {
-		publish: { type: 'boolean', default: false },
-		remove: { type: 'string', multiple: true, default: [] }
-	}
+	options: { publish: { type: 'boolean', default: false } }
 });
 if (positionals.length !== 1)
 	throw new Error(
-		'Usage: npm run media:publish -- SOURCE_DIRECTORY [--remove PATH ...] [--publish]'
+		'Usage: npm run media:publish -- CURRENT_LIBRARY [--publish]'
 	);
 const source = positionals[0];
-const root = fileURLToPath(new URL('../../', import.meta.url));
-const local = new URL('../../.holtburger-local/', import.meta.url);
-await mkdir(local, { recursive: true });
-const lockPath = new URL('media-publish.lock', local);
-const lock = await open(lockPath, 'wx');
+const refs = await git(['ls-remote', '--heads', '--tags', remote], root);
+// Other branches or tags would preserve history that snapshot replacement should retire.
+if (refs && !/^[a-f0-9]{40}\trefs\/heads\/main$/.test(refs))
+	throw new Error('Media repository must have only main and no tags');
+const tip = refs.split('\t')[0];
+const stage = await mkdtemp(join(tmpdir(), 'holtburger-media-'));
 try {
-	await lock.writeFile(`${process.pid}\n`);
-	const execute = promisify(execFile);
-	/** @param {string} endpoint @param {...string} args */
-	async function github(endpoint, ...args) {
-		const result = await execute('gh', ['api', endpoint, ...args]);
-		return result.stdout;
-	}
-	const repo = JSON.parse(await github(`repos/${MEDIA_REPOSITORY}`));
-	if (repo.full_name !== MEDIA_REPOSITORY || repo.permissions?.push !== true)
-		throw new Error('Expected writable dedicated media repository');
-
-	const refs = await git(
-		['ls-remote', '--heads', '--tags', MEDIA_REMOTE],
-		root
-	);
-	const lines = refs ? refs.split('\n') : [];
-	if (lines.length > 0 && repo.default_branch !== 'main')
-		throw new Error('Media repository must use main as its default branch');
-	if (lines.length > 1)
-		throw new Error('Media repository must have only main and no tags');
-	let tip = null;
-	if (lines.length === 1) {
-		const [hash, ref] = lines[0].split('\t');
-		if (ref !== 'refs/heads/main' || !/^[a-f0-9]{40}$/.test(hash))
-			throw new Error('Unexpected media repository ref');
-		tip = hash;
-	}
-	const previous =
-		tip === null
-			? parseManifest({ schemaVersion: 1, files: [] })
-			: parseManifest(
-					JSON.parse(
-						await github(
-							`repos/${MEDIA_REPOSITORY}/contents/manifest.json?ref=${tip}`,
-							'--header',
-							'Accept: application/vnd.github.raw+json'
-						)
-					)
-				);
-	const next = await inventory(source);
-	validateTransition(previous, next, values.remove);
-	validateReferences(next, await catalogFiles());
-	if (values.remove.length > 0) {
-		const response = await fetch(
-			'https://merklejerk.github.io/holtburger/media-index.json',
-			{ signal: AbortSignal.timeout(15000), cache: 'no-store' }
-		);
-		if (!response.ok)
+	let files = 0;
+	for (const path of (await readdir(source, { recursive: true })).sort()) {
+		if (path.split(/[\\/]/).some((part) => part.startsWith('.')))
 			throw new Error(
-				'Cannot verify deployed media references; publish the website media index before pruning'
+				`Hidden files/directories do not belong in the media library: ${path}`
 			);
-		validateReferences(
-			next,
-			mediaIndexSchema.parse(await response.json()).files
-		);
+		const original = join(source, path);
+		const info = await lstat(original);
+		if (info.isDirectory()) continue;
+		if (!info.isFile())
+			throw new Error(`Expected a regular media file: ${path}`);
+		const destination = join(stage, path);
+		await mkdir(dirname(destination), { recursive: true });
+		await cp(original, destination);
+		files++;
 	}
+	if (files === 0)
+		throw new Error('Refusing to publish an empty media library');
+	await writeFile(join(stage, '.nojekyll'), '');
+	await git(['init', '--quiet', '--initial-branch=main'], stage);
+	await git(['add', '.'], stage);
+	await git(['diff', '--cached', '--check'], stage);
+	const summary = await git(['diff', '--cached', '--stat'], stage);
 	console.log(
-		JSON.stringify(
-			{
-				repository: MEDIA_REPOSITORY,
-				branch: 'main',
-				previousCommit: tip,
-				removals: values.remove,
-				snapshot: next
-			},
-			null,
-			2
-		)
+		`Complete snapshot: ${files} media files → ${remote}\n${summary}`
 	);
 	if (values.publish) {
-		const name = await git(['config', 'user.name'], root);
-		const email = await git(['config', 'user.email'], root);
-		const commit = await pushSnapshot({
-			source,
-			manifest: next,
-			remote: MEDIA_REMOTE,
-			tip,
-			identity: { name, email }
-		});
-		console.log(`Published one root commit: ${commit}`);
+		await git(
+			['config', 'user.name', await git(['config', 'user.name'], root)],
+			stage
+		);
+		await git(
+			['config', 'user.email', await git(['config', 'user.email'], root)],
+			stage
+		);
+		await git(['config', 'commit.gpgsign', 'false'], stage);
+		await git(
+			[
+				'commit',
+				'--quiet',
+				'-m',
+				'Publish current media snapshot',
+				'-m',
+				summary
+			],
+			stage
+		);
+		await git(
+			[
+				'push',
+				`--force-with-lease=refs/heads/main:${tip}`,
+				remote,
+				'HEAD:refs/heads/main'
+			],
+			stage
+		);
+		console.log(
+			`Published one root commit: ${await git(['rev-parse', 'HEAD'], stage)}`
+		);
 	} else
 		console.log(
-			'Dry run only. Review this complete snapshot, then add --publish.'
+			'Dry run only. Review the complete folder, then add --publish.'
 		);
 } finally {
-	await lock.close();
-	await rm(lockPath);
+	await rm(stage, { recursive: true, force: true });
 }

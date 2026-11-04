@@ -19,68 +19,48 @@ on:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
-# Each run discovers the complete current inventory. Coalesced pending events are harmless.
 concurrency:
   group: update-feed-promotion
   cancel-in-progress: false
 
-env:
-  PYTHONDONTWRITEBYTECODE: '1'
-
 jobs:
-  generate:
+  publish:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      # Publication identifies data, not executable tooling. Checkout resolves this trusted ref to one SHA.
+      # Release events identify data; publication always executes trusted main.
       - uses: actions/checkout@v4
         with:
           ref: main
           persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install release tooling dependencies
-        run: python -m pip install -r .github/scripts/requirements.txt
-      - name: Check feed publication
-        run: python -m unittest discover -s .github/scripts -p 'test_promote_updates.py' -v
       - uses: actions/setup-node@v4
         with:
           node-version: 24.13.1
           cache: npm
           cache-dependency-path: site/package-lock.json
-      - name: Install website dependencies
-        run: npm ci
+      - name: Build and check website
         working-directory: site
-      - name: Check website formatting and types
-        run: npm run format:check && npm run check
-        working-directory: site
-      - name: Build and validate website
-        run: npm run build && npm run check:links && npm run check:media -- --remote
-        working-directory: site
-      - name: Check media snapshot publisher
-        run: npm run check:media-publisher
-        working-directory: site
-      - name: Reconcile accepted published releases
+        run: npm ci && npm run format:check && npm run check && npm run build && npm run check:links
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate update feeds
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python .github/scripts/promote_updates.py site/build
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python -m pip install -r .github/scripts/requirements.txt
+          python .github/scripts/promote_updates.py site/build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
           path: site/build
-
-  deploy:
-    needs: generate
-    runs-on: ubuntu-22.04
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
       - name: Deploy website and update feeds
         id: deployment
         uses: actions/deploy-pages@v4

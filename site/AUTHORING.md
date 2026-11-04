@@ -136,8 +136,8 @@ publisher. It runs for relevant pushes to main, release publication and manual
 dispatch, always checking out trusted main. It installs the site lockfile, checks
 formatting/types, builds the site and Pagefind, and checks local links/assets and
 anchors. The feed generator then writes only `build/updates/`; it cannot replace
-Home. One Pages artifact contains both website and feeds. Any failed build,
-validation or feed generation prevents publication.
+Home. A single job publishes one Pages artifact containing website and feeds.
+Media is published separately; no remote media or publisher tests gate deployment.
 
 For a local publication check, run `npm run format:check`, `npm run check`,
 `npm run build`, and `npm run check:links`, in that order. With the production
@@ -147,6 +147,10 @@ reading/navigation without JavaScript. Feed tests run from the repository root:
 ```sh
 uv run --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts -p 'test_promote_updates.py' -v
 ```
+
+Use localhost for iteration and visual review; rebuild after edits when using the
+production preview. Publish reviewed batches rather than waiting on Pages during
+local iteration. Feed tests above are maintainer checks, not deployment steps.
 
 After publication, check Home, a guide deep link, Gallery, search and
 `updates/beta.json` at the public project URL. Changes to the quickstart sources also trigger publication.

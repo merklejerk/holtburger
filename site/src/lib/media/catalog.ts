@@ -92,7 +92,7 @@ export const media = {
 		kind: 'planned-video',
 		title: 'Selection and combat at a glance',
 		brief:
-			'Show the bold selected-object outline and the separate reticle on an active combat target.'
+			'Show selection and combat indicators alongside the selected-entity HUD and its changing player/item actions.'
 	},
 	'mobile-combat': {
 		kind: 'planned-video',

@@ -28,6 +28,12 @@ Choose your target, then start your attack or cast. Use the displayed key hints 
 
 <Media id="smart-tab" />
 
+## Use the selected-entity HUD
+
+The selected-entity HUD keeps the name, health bar and relevant actions together. The magnifying glass opens [inspection](/holtburger/3d/inspecting/).
+
+Open **Selected entity actions** beside the name for actions suited to your selection. A player can offer Tell, Trade or Invite to party; an item can offer Split stack or Salvage.
+
 ## Keep track of your target
 
 A bold outline traces your selected creature or object, making it easier to pick out in a crowd than retail’s corner reticle. A separate combat reticle marks the target you are actively attacking or casting at, so you can distinguish selection from the ongoing fight.

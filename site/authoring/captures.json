@@ -290,8 +290,8 @@
 			"owner": "user",
 			"session": "controls",
 			"setup": "Use several nearby creatures or objects. Start an attack, then select another object while the attack continues.",
-			"framing": "Keep the character, targets and input display visible.",
-			"expected": "Show the bold selected-object outline and the separate reticle on an active combat target.",
+			"framing": "Keep the character, targets and selected-entity HUD readable. Open its actions menu for a player, then an item.",
+			"expected": "Show the bold selected-object outline and the separate reticle on an active combat target. Show the selected-entity name, health bar and magnifying glass, then how the actions change between player and item selections.",
 			"priority": "first"
 		},
 		"mobile-combat": {

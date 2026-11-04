@@ -55,9 +55,9 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 **First · user · pending · clip** — ID: `target-indicators`
 
 - Setup: Use several nearby creatures or objects. Start an attack, then select another object while the attack continues.
-- Frame: Keep the character, targets and input display visible.
-- Action/purpose: Show the bold selected-object outline and the separate reticle on an active combat target.
-- Expected result: Show the bold selected-object outline and the separate reticle on an active combat target.
+- Frame: Keep the character, targets and selected-entity HUD readable. Open its actions menu for a player, then an item.
+- Action/purpose: Show selection and combat indicators alongside the selected-entity HUD and its changing player/item actions.
+- Expected result: Show the bold selected-object outline and the separate reticle on an active combat target. Show the selected-entity name, health bar and magnifying glass, then how the actions change between player and item selections.
 - Used in: [3d/combat/#keep-track-of-your-target](https://merklejerk.github.io/holtburger/3d/combat/#keep-track-of-your-target)
 
 ### Keep moving through the windup

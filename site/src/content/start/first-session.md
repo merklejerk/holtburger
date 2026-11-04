@@ -12,7 +12,7 @@ Use **WASD** to move and turn, with **Z/C** for strafing. Adjust them in **Setti
 
 **Tap Tab** to cycle targets, or **hold it** to acquire an immediate target. **Shift+Tab** reverses cycling. Enter combat with **Backquote (`)**. The [combat HUD](/holtburger/3d/combat/#your-attack-controls) puts power/accuracy on an outer arc, attack height inside it, and **▶** below to start attacking. The attack button changes to a pause control while you fight.
 
-Your selection has a bold outline; a separate combat reticle marks your active attack target. You can keep moving while casting or shooting, using the same movement controls through the windup.
+Your selection has a bold outline; a separate combat reticle marks your active attack target. The [selected-entity HUD](/holtburger/3d/combat/#use-the-selected-entity-hud) puts inspection and relevant actions beside the selected name. You can keep moving while casting or shooting, using the same movement controls through the windup.
 
 For spells, open **Spells**, search for what you need, and drag it onto your spell bar. [Spell filters](/holtburger/3d/spells/) make a large spellbook easier to work with.
 

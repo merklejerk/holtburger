@@ -618,7 +618,7 @@
 			>
 			{#if remaining !== null && profile.kind === "missile"}
 				<div
-					class="projectile-supply"
+					class="projectile-supply ui-readout"
 					role="img"
 					aria-label={remaining === "∞"
 						? "Unlimited projectiles"

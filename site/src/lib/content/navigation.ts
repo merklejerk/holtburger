@@ -71,6 +71,10 @@ export const navigation = [
 				label: 'Targeting & fighting'
 			},
 			{
+				slug: '3d/nearby',
+				label: 'Finding creatures & objects'
+			},
+			{
 				slug: '3d/movement-camera',
 				label: 'Movement & jumping'
 			},

@@ -78,7 +78,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Frame: Show the rule editor/pattern preview, then the list and resulting notice.
 - Action/purpose: Create an alert using a glob, show its match preview, then show a real matching encounter notification.
 - Expected result: The glob matches expected names and produces one useful encounter notification.
-- Used in: [3d/interface/#add-a-name-alert](https://merklejerk.github.io/holtburger/3d/interface/#add-a-name-alert)
+- Used in: [3d/nearby/#add-a-name-alert](https://merklejerk.github.io/holtburger/3d/nearby/#add-a-name-alert)
 
 ### Choose an emote
 

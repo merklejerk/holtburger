@@ -159,6 +159,12 @@ cargo test -p holtburger-protocol
 cargo clippy -p holtburger-protocol --all-targets -- -D warnings
 ```
 
+## Contributing
+
+Issues are encouraged. External pull requests, including documentation and typo
+fixes, are not being accepted while the codebase matures. See
+[Contributing](CONTRIBUTING.md) for the policy and client-specific reporting guidance.
+
 ## License
 
 Holtburger is licensed under the [GNU Affero General Public License v3.0](LICENSE.md).

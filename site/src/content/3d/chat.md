@@ -20,6 +20,8 @@ Input history lets you reuse commands you have already sent.
 
 Type `/help` for the command list or `/help COMMAND` for one command. Both `/` and `@` can introduce commands. Chat commands also include utilities such as waypoints, recalls and corpse permissions.
 
+<Media id="chat-completion" detail />
+
 ## Read older messages
 
 Chat normally follows new messages and lets you click through the history into the world. To scroll back, select text or click a coordinate link, hold **Control** (**Command** on macOS) while using the history. Release it to return to live messages.
@@ -28,6 +30,8 @@ For longer reading, use **Interact with chat history** to keep the history activ
 
 Typing also makes the history interactive. Clicking the history switches from typing to reading; press **Enter** to return to your message. **Escape** leaves the history or clears the message you are editing and returns control to the game. If command suggestions are open, the first Escape dismisses them.
 
+<Media id="chat" detail />
+
 ## Use links in chat
 
 Hold **Control** (**Command** on macOS), or enable **Interact with chat history**, then click:
@@ -35,13 +39,13 @@ Hold **Control** (**Command** on macOS), or enable **Interact with chat history*
 - **Coordinates** to set a [waypoint](/holtburger/3d/maps-travel/#follow-a-waypoint).
 - **A linked name in an entity alert** to select that creature or object. You can then [inspect it](/holtburger/3d/inspecting/) or interact as usual.
 
+<Media id="chat-links" detail />
+
 ## Filter the noise
 
 Use message and channel filters to keep relevant conversations visible. The timestamp control adds or removes times beside messages.
 
 Chat settings can also suppress your own evasion/resist notices and spell incantations when those messages crowd the history.
-
-<Media id="chat" />
 
 ## Use an emote
 
@@ -49,4 +53,4 @@ Hold **T** to open the emote wheel. Click an emote, or select it with **Space** 
 
 When an emote requires peace, Holtburger can switch temporarily and restore the previous combat stance afterward.
 
-<Media id="emotes" />
+<Media id="emotes" detail />

@@ -106,6 +106,47 @@ export const media = {
 		brief:
 			'Show outdoor terrain, buildings, impassable areas and elevation, then follow a dungeon passage with the breadcrumb trail visible.'
 	},
+	'selected-hud': {
+		kind: 'planned-image',
+		title: 'Selected-entity actions',
+		brief:
+			'Show a tight crop of the selected name, health bar, magnifying glass and open actions menu.'
+	},
+	'chat-completion': {
+		kind: 'planned-video',
+		title: 'Find a command as you type',
+		brief:
+			'Type a partial command, browse suggestions and accept one. Keep the input and suggestion list in frame.'
+	},
+	'chat-links': {
+		kind: 'planned-image',
+		title: 'A message becomes a destination or target',
+		brief:
+			'Show coordinate and entity-alert links in the chat buffer with history interaction enabled.'
+	},
+	'nearby-list': {
+		kind: 'planned-image',
+		title: 'Find something nearby',
+		brief: 'Show the Nearby name search, useful filters and matching results.'
+	},
+	'treestats-import': {
+		kind: 'planned-image',
+		title: 'Choose a public server',
+		brief:
+			'Show the TreeStats search results, server software and import action.'
+	},
+	'profile-content': {
+		kind: 'planned-image',
+		title: 'Save a DAT folder with a profile',
+		brief:
+			'Show the profile’s content-folder control and the action that saves the change.'
+	},
+	'crafting-confirmation': {
+		kind: 'planned-image',
+		title: 'Review a crafting attempt',
+		brief:
+			'Show the target, success chance and confirmation for a crafting attempt.'
+	},
 	'smart-tab': {
 		kind: 'planned-video',
 		title: 'Smart Tab in action',

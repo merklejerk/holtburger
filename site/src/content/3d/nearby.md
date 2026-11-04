@@ -14,6 +14,8 @@ Open **Nearby** to browse entities around you. Search names and use the category
 
 Select a result to make it your current target, then [inspect it](/holtburger/3d/inspecting/) or interact using your usual [target controls](/holtburger/3d/combat/#pick-something-specific). For everyday combat selection, [Smart Tab](/holtburger/3d/combat/) is usually the quicker starting point.
 
+<Media id="nearby-list" detail />
+
 ## Add a name alert
 
 Use the name-alert control on a nearby entry for an exact match, or create a rule in the alert editor. Choose how the name should match:
@@ -30,7 +32,7 @@ Check the editor's preview against nearby names, then save the rule.
 
 Click the linked name in a chat alert to select the creature or object. Hold **Control** (**Command** on macOS) while clicking, or enable [chat-history interaction](/holtburger/3d/chat/#use-links-in-chat).
 
-<Media id="nearby-alerts" />
+<Media id="nearby-alerts" detail />
 
 ## Manage your alerts
 

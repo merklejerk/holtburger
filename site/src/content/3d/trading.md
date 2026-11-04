@@ -16,7 +16,7 @@ Check quantities, available stock, and the projected currency balances. Remove u
 
 Wait for the result before preparing another trade. If the price, stock, range or inventory changes, review the updated feedback and adjust your queue.
 
-<Media id="vendor" />
+<Media id="vendor" detail />
 
 ## Trade with another player
 
@@ -26,7 +26,7 @@ Use **Confirm trade** when your side is ready. Both players' acceptance is shown
 
 If either offer changes, check the contents again before accepting. Wait for the completed transfer before leaving the window.
 
-<Media id="player-trade" />
+<Media id="player-trade" detail />
 
 ## Give a single item
 

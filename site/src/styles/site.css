@@ -748,6 +748,13 @@ figcaption a {
 	margin: 1.5rem 0;
 	min-width: 0;
 }
+.media-figure--detail {
+	max-width: 30rem;
+}
+.media-figure--detail .media-placeholder {
+	min-height: 120px;
+	padding: 1rem;
+}
 .gallery-grid .media-figure {
 	margin: 0;
 }

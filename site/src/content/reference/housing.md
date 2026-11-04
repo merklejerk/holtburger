@@ -20,7 +20,7 @@ Interact with the house crystal to see ownership, eligibility, and purchase or m
 
 Prepare the requested items in the payment area. **Auto-fill** helps choose items you carry for a requirement; review the prepared amounts before submitting the purchase or maintenance payment.
 
-<Media id="housing-payments" />
+<Media id="housing-payments" detail />
 
 ## Manage access
 

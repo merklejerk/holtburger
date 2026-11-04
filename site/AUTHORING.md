@@ -122,6 +122,13 @@ owner and destination. User captures come at the end. Guides must remain useful
 without optional media. During site development, insert a labeled capture placeholder
 where a screenshot or clip is planned so placement and scope can be reviewed.
 
+Prefer tight component crops beside the relevant instructions. Use a still to
+identify a control or read a panel; use a short clip for one interaction or state
+change. Keep enough surrounding context to orient the reader, and preserve readable
+text at the displayed size. Reserve full gameplay frames for spatial tasks or
+layout overviews. Place compact media with `<Media id="..." detail />`; it fits
+within the reading column without stretching a small component across the page.
+
 Media IDs and capture briefs live in `src/lib/media/catalog.ts`. Place a capture
 with the `Media` component in Markdown; reuse its ID across tours and guides.
 Planned entries render a screenshot/clip label and brief. Replace the catalog

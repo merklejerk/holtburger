@@ -26,7 +26,7 @@ import Media from '#lib/components/Media.svelte';
 
 For example, include only your weapon slots to swap weapons while leaving your armor and jewelry untouched. Include an empty slot when the gear change should explicitly clear it.
 
-<Media id="loadouts" />
+<Media id="loadouts" detail />
 
 ## Activate and check
 
@@ -59,7 +59,7 @@ You can keep up to ten action bars, with ten cells each. Use the bar menu:
 
 Layout controls let you move and rotate bars. The last bar cannot be deleted.
 
-<Media id="action-bars" />
+<Media id="action-bars" detail />
 
 ## Consumables
 

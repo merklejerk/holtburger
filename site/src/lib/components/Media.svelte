@@ -1,12 +1,19 @@
 <script lang="ts">
 	import { asset } from '$app/paths';
 	import { getMedia, type MediaId } from '#lib/media/catalog.ts';
-	let { id }: { id: MediaId } = $props();
+	let {
+		id,
+		detail = false
+	}: {
+		id: MediaId;
+		/** Keep a component crop compact instead of filling the reading column. */
+		detail?: boolean;
+	} = $props();
 	const entry = $derived(getMedia(id));
 	let playing = $state(false);
 </script>
 
-<figure class="media-figure">
+<figure class="media-figure" class:media-figure--detail={detail}>
 	{#if entry.kind === 'image'}
 		{@const src =
 			entry.source.kind === 'local'

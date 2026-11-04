@@ -20,6 +20,8 @@ With **Confirm crafting attempts with success chance** enabled in gameplay setti
 
 Read the result in chat and inspect the resulting item. For breaking items down into materials, use [salvage](#salvaging-items).
 
+<Media id="crafting-confirmation" detail />
+
 ## Salvaging items
 
 ### Choose items to salvage
@@ -36,7 +38,7 @@ Holtburger appraises missing item details as needed. If an item cannot be apprai
 
 **Whole stacks are included.** Split a stack first if you only want to salvage part of it.
 
-<Media id="salvage" />
+<Media id="salvage" detail />
 
 ### Salvage the selected items
 

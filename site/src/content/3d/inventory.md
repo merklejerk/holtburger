@@ -23,7 +23,7 @@ Use the sort control to cycle **Native**, **Alphabetical**, and **Item type**. A
 
 You can also reorder ordinary packs. Main Pack stays first and spell foci stay last.
 
-<Media id="inventory-moves" />
+<Media id="inventory-moves" detail />
 
 ## Split a stack
 
@@ -37,7 +37,7 @@ Open the bag's context menu and choose **Auto-merge** to combine its compatible 
 
 Auto-merge applies to the chosen bag when requested. If it stops after merging some stacks, those completed merges remain in place; inspect the bag before retrying.
 
-<Media id="inventory-merge" />
+<Media id="inventory-merge" detail />
 
 ## Loot and world containers
 

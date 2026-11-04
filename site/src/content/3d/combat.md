@@ -18,7 +18,7 @@ Equip your weapon and press **Backquote (`)** to enter combat. Holtburger groups
 
 With a missile weapon, ammunition supply appears alongside the attack control. In magic stance, use your [spellbook or spell bars](/holtburger/3d/spells/) to cast.
 
-<Media id="combat-controls" />
+<Media id="combat-controls" detail />
 
 ## Use Smart Tab in combat
 
@@ -33,6 +33,8 @@ Choose your target, then start your attack or cast. Use the displayed key hints 
 The selected-entity HUD keeps the name, health bar and relevant actions together. The magnifying glass opens [inspection](/holtburger/3d/inspecting/).
 
 Open **Selected entity actions** beside the name for actions suited to your selection. A player can offer Tell, Trade or Invite to party; an item can offer Split stack or Salvage.
+
+<Media id="selected-hud" detail />
 
 ## Keep track of your target
 

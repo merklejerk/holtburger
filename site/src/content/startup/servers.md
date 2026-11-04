@@ -14,6 +14,8 @@ Choose **Import from TreeStats** in the launcher. Search for your server, or fil
 
 Holtburger is developed against **ACE**. **GDLE compatibility is unverified**; check the server software before choosing.
 
+<Media id="treestats-import" detail />
+
 ## Add your account
 
 Select the imported server and enter your account credentials. **Save to new profile** keeps a connection ready for next time; profiles let you switch between accounts without retyping the details. Each can also remember [its own DAT folder](/holtburger/startup/settings/#keep-server-specific-dats-separate).
@@ -22,7 +24,7 @@ Accounts belong to the server. Follow its account-creation instructions if you n
 
 Press **Play**, choose your [game-data folder](/holtburger/startup/settings/) if prompted, and [choose your character](/holtburger/startup/characters/).
 
-<Media id="launcher" />
+<Media id="launcher" detail />
 
 ## Enter a server manually
 

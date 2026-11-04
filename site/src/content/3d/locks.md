@@ -26,4 +26,4 @@ The helper presents the best usable pick for your trained lockpicking skill. Che
 
 Keep an eye on pick uses and cooldowns. If the attempt fails, read the result before trying again or changing tools. You can cancel the workflow when you want to move on.
 
-<Media id="locks" />
+<Media id="locks" detail />

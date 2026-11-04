@@ -32,7 +32,7 @@ Drag a spell from the list into a spell-bar cell. Use the tabs to group spells f
 
 The spell bar supports single and double display layouts. Its spell bindings follow the character; the display shape is a general interface preference.
 
-<Media id="spells" />
+<Media id="spells" detail />
 
 ## Casting without a selection
 

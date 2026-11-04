@@ -28,4 +28,4 @@ Check a creature’s level, vitals, attributes and protection when sizing up a f
 
 Read requirements, combat values, effects, descriptions and inscriptions before equipping, trading or using an item.
 
-<Media id="item-appraisal" />
+<Media id="item-appraisal" detail />

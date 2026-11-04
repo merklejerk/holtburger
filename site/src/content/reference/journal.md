@@ -14,7 +14,7 @@ Open **Journal** and search by contract name. Use the status filters to narrow t
 
 Select an entry to read its status, progress and available details. Timed contracts show remaining time; repeatable contracts can show when they become available again.
 
-<Media id="journal" />
+<Media id="journal" detail />
 
 ## Plan the trip
 

@@ -20,7 +20,7 @@ Choose the improvement beside the stat you want to raise. Read unavailable-actio
 
 To train a skill, choose **Train**, review the cost, and confirm. Check the skill's new state afterward.
 
-<Media id="character-progression" />
+<Media id="character-progression" detail />
 
 ## Understand defenses
 

@@ -599,7 +599,9 @@ def flatpak_recipe_path(product: str) -> Path:
 def flatpak_recipe(product: str) -> dict:
     """Expand one product recipe, using the suite's shared Freedesktop runtime generation."""
     path = flatpak_recipe_path(product)
-    recipe = json.loads(run("flatpak-builder", "--show-manifest", str(path)))
+    # Manifest inspection still creates disabled ccache state. Keep that state outside source.
+    with tempfile.TemporaryDirectory(prefix="holtburger-flatpak-manifest-") as temporary:
+        recipe = json.loads(run("flatpak-builder", "--show-manifest", str(path), cwd=Path(temporary)))
     runtime = json.loads(THREED_FLATPAK_RECIPE.read_text())
     for key in ("runtime", "runtime-version", "sdk"):
         recipe[key] = runtime[key]

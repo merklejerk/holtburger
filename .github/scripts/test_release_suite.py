@@ -18,7 +18,7 @@ import zipfile
 from release_suite import (
     TARGETS, INSTALLER_TARGETS, archive_bundle, digest, executable_architecture, extract_bundle,
     assemble, manifest, plan, stage, validate_tag, verify_bundle, already_published,
-    record_flatpak, flatpak_manifest, require_flatpak_release,
+    record_flatpak, flatpak_manifest, flatpak_recipe, require_flatpak_release,
     flatpak_runtime_ref, THREED_FLATPAK_RECIPE,
 )
 from cli_content_input import CONTENT_FILES, unpack_cli_content
@@ -409,6 +409,21 @@ class ReleaseManifestTests(unittest.TestCase):
 
 class ProductFlatpakTests(unittest.TestCase):
     """Both formats preserve the selected native product's identity and payload bytes."""
+
+    def test_manifest_inspection_isolates_and_retires_generated_builder_state(self):
+        locations = []
+        def inspect_manifest(*_arguments, cwd):
+            self.assertNotEqual(cwd.resolve(), Path.cwd().resolve())
+            locations.append(cwd)
+            cache = cwd / ".flatpak-builder/ccache/disabled/ccache.conf"
+            cache.parent.mkdir(parents=True)
+            cache.write_text("disable = true\n")
+            return json.dumps({"id": "io.github.merklejerk.holtburger-cli", "modules": []})
+        with patch("release_suite.run", side_effect=inspect_manifest):
+            recipe = flatpak_recipe("cli")
+        self.assertEqual(recipe["id"], "io.github.merklejerk.holtburger-cli")
+        self.assertTrue(locations)
+        self.assertTrue(all(not location.exists() for location in locations))
 
     def test_verified_native_metadata_cannot_excuse_a_changed_flatpak_source(self):
         info = {"target": next(target.triple for target in TARGETS if target.platform == "linux"),

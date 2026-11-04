@@ -19,6 +19,41 @@ try {
 	/** @type {string[]} */
 	const failures = [];
 	page.on('pageerror', (error) => failures.push(error.message));
+	// Exercise real clicks with JavaScript enabled, including non-page destinations.
+	await page.goto(origin);
+	const screenshot = page.locator('.hero-caption');
+	const imageHref = await screenshot.getAttribute('href');
+	if (imageHref === null) throw new Error('Screenshot has no destination');
+	const imageUrl = new URL(imageHref, page.url()).href;
+	const imageResponse = page.waitForResponse(
+		(response) =>
+			response.url() === imageUrl && response.request().isNavigationRequest()
+	);
+	await screenshot.click();
+	assert.equal((await imageResponse).status(), 200);
+	assert.match((await imageResponse).headers()['content-type'], /^image\//);
+	await page.waitForURL(imageUrl);
+	assert.equal(await page.locator('h1').count(), 0);
+	await page.goBack();
+	await screenshot.waitFor();
+	assert.equal(page.url(), origin);
+	for (const { slug, label } of [
+		{ slug: '3d', label: '3D client' },
+		{ slug: 'tui', label: 'TUI client' }
+	]) {
+		const entry = catalog.find((entry) => entry.slug === slug);
+		if (!entry) throw new Error(`Missing guide: ${slug}`);
+		await page
+			.getByRole('navigation', { name: 'Main navigation' })
+			.getByRole('link', { name: label, exact: true })
+			.click();
+		await page.getByRole('heading', { name: entry.title, level: 1 }).waitFor();
+		assert.equal(page.url(), new URL(`${slug}/`, origin).href);
+	}
+	await page.goBack();
+	assert.equal(page.url(), new URL('3d/', origin).href);
+	await page.goForward();
+	assert.equal(page.url(), new URL('tui/', origin).href);
 	for (const [path, name] of [
 		['', 'home'],
 		['gallery/', 'gallery'],

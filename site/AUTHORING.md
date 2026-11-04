@@ -76,6 +76,10 @@ The preparation script produces route metadata and heading links. Generated file
 are ignored. Keep each topic canonical; tours link to task guides and task guides
 link to precise reference entries. Separate 3D and TUI chat command references.
 
+Pages are prerendered HTML and use normal browser navigation, including screenshot
+links and browser history. The HTML shell disables SvelteKit's client-side link
+routing; Svelte still hydrates search, theme switching and media controls.
+
 Explain project origins on the design page. Keep the shared footer functional;
 do not repeat the project pitch in hero labels, sidebars and footer copy.
 

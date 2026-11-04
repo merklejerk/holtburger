@@ -22,7 +22,7 @@ Run the bundled fighter or mage, or write JavaScript against structured state, e
 
 <Media id="tui-script" />
 
-Start with [running scripts](/holtburger/tui/running-scripts/) and the [bundled fighter and mage](/holtburger/tui/bundled-scripts/), or [write your own](/holtburger/scripting/).
+Start with [running scripts](/holtburger/tui/running-scripts/) and the [bundled fighter and mage](/holtburger/tui/bundled-scripts/), or [write your own](/holtburger/tui/scripting/).
 
 ## Set expectations
 
@@ -32,4 +32,4 @@ The TUI uses simplified movement and physics. Supervise scripts through difficul
 
 Release bundles include prepared content and scripts, so you can connect straight from the terminal. Supply your connection details at launch.
 
-[Get the beta](/holtburger/start/) for your platform.
+[Get the beta](/holtburger/tui/connect/) for your platform.

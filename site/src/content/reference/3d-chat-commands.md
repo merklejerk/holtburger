@@ -47,7 +47,7 @@ For example, `/f ready` speaks to your party. **In h3d, `/p` means patron; in th
 
 Type `*wave*` to perform a named social emote. Typing `*` offers completions; Tab or Enter accepts a suggestion, and Enter submits the completed input.
 
-Local speech can include gestures, such as `Hello *wave*`. Explicit tells, channel messages and `/emote` bodies keep their text literal. The [emote wheel](/holtburger/3d/chat-emotes/#use-an-emote) is another way to choose gestures.
+Local speech can include gestures, such as `Hello *wave*`. Explicit tells, channel messages and `/emote` bodies keep their text literal. The [emote wheel](/holtburger/3d/interface/#use-an-emote) is another way to choose gestures.
 
 ## Waypoint and recalls
 
@@ -76,7 +76,7 @@ Example: `/waypoint 42.3N, 12.7E`. See [maps and travel](/holtburger/3d/maps-tra
 | `/consent remove PLAYER`, `/consent clear` | Discard one or all received permissions       |
 | `/die`, `/rip`                             | Kill your character after confirmation        |
 
-Death may drop items and cause vitae. For recovery and location limitations, see [corpse recovery](/holtburger/3d/death-corpses/).
+Death may drop items and cause vitae. For recovery and location limitations, see [corpse recovery](/holtburger/3d/maps-travel/).
 
 ## Local utilities
 

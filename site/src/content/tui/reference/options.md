@@ -56,7 +56,7 @@ Note that `-h` is the host option; use **`--help`** for help. Review logs and ca
 | `--script-fetch-timeout-ms NUMBER`         | Request timeout; defaults to 5000 ms                      |
 | `--script-fetch-max-response-bytes NUMBER` | Response size limit; defaults to 262144 bytes             |
 
-Without explicit allow-host options, only `localhost:9999` is allowed. See [HTTP integrations](/holtburger/scripting/integrations/) for usage.
+Without explicit allow-host options, only `localhost:9999` is allowed. See [HTTP integrations](/holtburger/tui/scripting/integrations/) for usage.
 
 ## Script directories
 

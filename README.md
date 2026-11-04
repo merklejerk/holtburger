@@ -69,9 +69,9 @@ connection, and troubleshooting instructions.
 
 | Platform | 3D client | Terminal client |
 | --- | --- | --- |
-| Windows x86-64 | [Setup or ZIP](https://merklejerk.github.io/holtburger/start/3d/windows/) | [ZIP](https://merklejerk.github.io/holtburger/start/tui/windows/) |
-| macOS Apple Silicon | [DMG or ZIP](https://merklejerk.github.io/holtburger/start/3d/macos/) | [ZIP](https://merklejerk.github.io/holtburger/start/tui/macos/) |
-| Linux x86-64 | [Flatpak or tar.gz](https://merklejerk.github.io/holtburger/start/3d/linux/) | [Flatpak or tar.gz](https://merklejerk.github.io/holtburger/start/tui/linux/) |
+| Windows x86-64 | [Setup or ZIP](https://merklejerk.github.io/holtburger/start/3d/windows/) | [ZIP](https://merklejerk.github.io/holtburger/tui/install/windows/) |
+| macOS Apple Silicon | [DMG or ZIP](https://merklejerk.github.io/holtburger/start/3d/macos/) | [ZIP](https://merklejerk.github.io/holtburger/tui/install/macos/) |
+| Linux x86-64 | [Flatpak or tar.gz](https://merklejerk.github.io/holtburger/start/3d/linux/) | [Flatpak or tar.gz](https://merklejerk.github.io/holtburger/tui/install/linux/) |
 
 Beta and nightly builds share the same installation and settings; installing one
 replaces the other.
@@ -94,7 +94,7 @@ and simulation behavior. [Command-line tools](apps/holtburger-tools) and the
 [debug harness](crates/holtburger-debug-harness) support asset conversion, protocol
 investigation, and focused diagnostics.
 
-For terminal scripting, see [your first script](https://merklejerk.github.io/holtburger/scripting/)
+For terminal scripting, see [your first script](https://merklejerk.github.io/holtburger/tui/scripting/)
 and the bundled [example scripts](assets/scripts).
 
 ## Development

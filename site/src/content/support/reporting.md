@@ -21,6 +21,6 @@ For rendering problems, add **Copy hardware info** from the launcher. For connec
 
 ## Logs and captures
 
-The TUI can write chat/system messages with `--log` and debug output with `--debug-log`. See [launch options](/holtburger/reference/tui-options/) for levels and capture options.
+The TUI can write chat/system messages with `--log` and debug output with `--debug-log`. See [launch options](/holtburger/tui/reference/options/) for levels and capture options.
 
 Share the relevant portion rather than a large unrelated log. Remove passwords, account credentials and private messages before attaching files. Never post a launcher profile or command line with a real password in it.

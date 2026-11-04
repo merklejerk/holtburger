@@ -19,7 +19,7 @@ function authoringRefresh(): Plugin {
 	const content = path('./src/content/');
 	const generated = [
 		path('./src/content/start/3d/'),
-		path('./src/content/start/tui/')
+		path('./src/content/tui/install/')
 	];
 	const quickstarts = path('../release/quickstarts/');
 	const catalog = path('./src/lib/media/catalog.ts');

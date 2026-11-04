@@ -43,4 +43,4 @@ Check feedback, equipment, spell knowledge and supplies before leaving a run to 
 
 For trade services, buffing or specialized routes, write a script tailored to those tasks.
 
-For the authoring workflow and API, start with [your first script](/holtburger/scripting/).
+For the authoring workflow and API, start with [your first script](/holtburger/tui/scripting/).

@@ -14,7 +14,7 @@ The [Windows](/holtburger/start/3d/windows/#optional-offline-explorer), [macOS](
 
 Terminal-client bundles also include `dat-tool` and `dat2hba`. Use their `--help` output for available inspection and conversion commands. Ordinary TUI play uses the prepared data in the bundle; ordinary 3D play can use a retail installation directly.
 
-On Linux Flatpak, external input/output folders need explicit grants. The [terminal quickstart](/holtburger/start/tui/linux/#optional-scripts-and-tools) includes the command pattern.
+On Linux Flatpak, external input/output folders need explicit grants. The [terminal quickstart](/holtburger/tui/install/linux/#optional-scripts-and-tools) includes the command pattern.
 
 ## Development
 

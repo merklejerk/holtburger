@@ -5,7 +5,7 @@ section: 'Scripting'
 ---
 
 <script>
-import hello from '../../examples/hello.js?raw';
+import hello from '../../../examples/hello.js?raw';
 </script>
 
 ## Say hello
@@ -30,7 +30,7 @@ Handle startup for setup and tick events for repeated decisions. Check for missi
 
 ## Choose your next step
 
-- [Runtime and persistence](/holtburger/scripting/runtime/): events, sidecar files, TypeScript and bundling.
-- [API reference](/holtburger/scripting/reference/): state helpers, actions and exact types.
-- [HTTP integrations](/holtburger/scripting/integrations/): communicate with a JSON service.
+- [Runtime and persistence](/holtburger/tui/scripting/runtime/): events, sidecar files, TypeScript and bundling.
+- [API reference](/holtburger/tui/scripting/reference/): state helpers, actions and exact types.
+- [HTTP integrations](/holtburger/tui/scripting/integrations/): communicate with a JSON service.
 - [Bundled scripts](/holtburger/tui/bundled-scripts/): larger examples already shipped with the client.

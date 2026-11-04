@@ -18,7 +18,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Frame: Keep the target HUD, a few candidates and the key display in frame.
 - Action/purpose: Hold to acquire a target, tap to cycle, then interact or attack. Show selection separately from the action.
 - Expected result: A hold acquires a target; taps and Shift+Tab cycle; interaction/attack is a separate deliberate action.
-- Used in: [3d/#keep-your-attention-on-the-game](https://merklejerk.github.io/holtburger/3d/#keep-your-attention-on-the-game), [3d/selection-interaction/#start-with-smart-tab](https://merklejerk.github.io/holtburger/3d/selection-interaction/#start-with-smart-tab), [gallery/#clips](https://merklejerk.github.io/holtburger/gallery/#clips)
+- Used in: [3d/#keep-your-attention-on-the-game](https://merklejerk.github.io/holtburger/3d/#keep-your-attention-on-the-game), [3d/combat/#use-smart-tab-in-combat](https://merklejerk.github.io/holtburger/3d/combat/#use-smart-tab-in-combat), [gallery/#clips](https://merklejerk.github.io/holtburger/gallery/#clips)
 
 ### From preview to landing
 
@@ -28,7 +28,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Frame: Show the character, target, trajectory and power bar together.
 - Action/purpose: Choose a target and power, inspect the jump trajectory, then execute the leap.
 - Expected result: The chosen preview and executed landing are visible in one continuous clip.
-- Used in: [3d/jumping/#read-the-preview](https://merklejerk.github.io/holtburger/3d/jumping/#read-the-preview), [gallery/#clips](https://merklejerk.github.io/holtburger/gallery/#clips)
+- Used in: [3d/movement-camera/#read-the-preview](https://merklejerk.github.io/holtburger/3d/movement-camera/#read-the-preview), [gallery/#clips](https://merklejerk.github.io/holtburger/gallery/#clips)
 
 ### Camera and mouse steering
 
@@ -38,17 +38,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Frame: Keep the character and landmark visible; label mouse buttons.
 - Action/purpose: Compare left-drag orbit, right-drag turning, and mouse-button movement.
 - Expected result: Orbit leaves facing alone; right-hold steers, and middle/both buttons move forward.
-- Used in: [3d/movement-camera/#look-around-or-steer](https://merklejerk.github.io/holtburger/3d/movement-camera/#look-around-or-steer), [3d/selection-interaction/#camera-and-text-input](https://merklejerk.github.io/holtburger/3d/selection-interaction/#camera-and-text-input)
-
-### The N posture cycle
-
-**Later · user · pending · clip** — ID: `postures`
-
-- Setup: A standing character on flat ground.
-- Frame: Full body and an N key-press display; keep the camera still.
-- Action/purpose: Cycle resting crouch/kneel → sit → lie down → stand, with the key press visible.
-- Expected result: Four deliberate presses show kneel/crouch, sit, lie, and stand.
-- Used in: [3d/movement-camera/#rest-between-fights](https://merklejerk.github.io/holtburger/3d/movement-camera/#rest-between-fights)
+- Used in: [3d/movement-camera/#look-around-or-steer](https://merklejerk.github.io/holtburger/3d/movement-camera/#look-around-or-steer)
 
 ### Choose an attack
 
@@ -68,7 +58,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Frame: Show the rule editor/pattern preview, then the list and resulting notice.
 - Action/purpose: Create an alert using a glob, show its match preview, then show a real matching encounter notification.
 - Expected result: The glob matches expected names and produces one useful encounter notification.
-- Used in: [3d/nearby-alerts/#add-a-name-alert](https://merklejerk.github.io/holtburger/3d/nearby-alerts/#add-a-name-alert)
+- Used in: [3d/interface/#add-a-name-alert](https://merklejerk.github.io/holtburger/3d/interface/#add-a-name-alert)
 
 ### Choose an emote
 
@@ -78,7 +68,7 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Frame: Show the T wheel, selection and full character gesture.
 - Action/purpose: Open the T emote wheel, perform an emote, and show the previous combat stance returning.
 - Expected result: The emote plays and the previous combat stance returns; release-to-dismiss can be a separate beat.
-- Used in: [3d/chat-emotes/#use-an-emote](https://merklejerk.github.io/holtburger/3d/chat-emotes/#use-an-emote)
+- Used in: [3d/interface/#use-an-emote](https://merklejerk.github.io/holtburger/3d/interface/#use-an-emote)
 
 ## Equipment, inventory and spells
 
@@ -112,7 +102,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Frame: Close view of Items to salvage and Estimated output; retain all quantities.
 - Action/purpose: Show two materials, their estimated outputs, and one queued stack with its full quantity.
 - Expected result: Whole-stack inclusion and separate material output rows are visible.
-- Used in: [3d/salvage/#check-the-estimate](https://merklejerk.github.io/holtburger/3d/salvage/#check-the-estimate)
+- Used in: [3d/crafting/#check-the-estimate](https://merklejerk.github.io/holtburger/3d/crafting/#check-the-estimate)
 
 ### Open a locked container
 
@@ -122,7 +112,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Frame: Show the locked object and helper; keep estimate and result text readable.
 - Action/purpose: Show the key action and lockpick estimate at a real locked chest, with the outcome visible.
 - Expected result: The key attempt and available lockpick action/result can be understood.
-- Used in: [3d/locks/#pick-the-lock](https://merklejerk.github.io/holtburger/3d/locks/#pick-the-lock)
+- Used in: [3d/crafting/#pick-the-lock](https://merklejerk.github.io/holtburger/3d/crafting/#pick-the-lock)
 
 ### Buy and sell
 
@@ -132,7 +122,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Frame: Show stock, queue quantities, balances and Trade feedback.
 - Action/purpose: Queue a purchase and a sale, adjust quantities, review balances, and show the completed trade.
 - Expected result: A reviewed purchase/sale completes and the resulting balances/items are visible.
-- Used in: [3d/vendors-trading/#buy-or-sell-at-a-vendor](https://merklejerk.github.io/holtburger/3d/vendors-trading/#buy-or-sell-at-a-vendor)
+- Used in: [3d/crafting/#buy-or-sell-at-a-vendor](https://merklejerk.github.io/holtburger/3d/crafting/#buy-or-sell-at-a-vendor)
 
 ### Pack and equip
 
@@ -162,7 +152,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Frame: Keep drag sources, bar menu/layout controls and keyboard focus hints in view.
 - Action/purpose: Bind an item and a loadout, clone and rotate a bar, then focus it and activate a cell by keyboard.
 - Expected result: Binding, cloning, rotation and keyboard activation are understandable.
-- Used in: [3d/action-bars/#arrange-and-manage](https://merklejerk.github.io/holtburger/3d/action-bars/#arrange-and-manage)
+- Used in: [3d/equipment-loadouts/#arrange-and-manage](https://merklejerk.github.io/holtburger/3d/equipment-loadouts/#arrange-and-manage)
 
 ## World, party and character states
 
@@ -176,7 +166,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 - Frame: Frame the whole trade window with both participants and confirmation/reset controls.
 - Action/purpose: Show both trade offers, acceptance status, and the withdraw/reset controls using sample participants.
 - Expected result: Both offers and acceptance states are readable; no valuable exchange is required.
-- Used in: [3d/vendors-trading/#trade-with-another-player](https://merklejerk.github.io/holtburger/3d/vendors-trading/#trade-with-another-player)
+- Used in: [3d/crafting/#trade-with-another-player](https://merklejerk.github.io/holtburger/3d/crafting/#trade-with-another-player)
 
 ### Mark the next stop
 
@@ -196,7 +186,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 - Frame: Show eligibility/payment rows and Auto-fill; stop before payment unless desired.
 - Action/purpose: Show a house crystal requirement, carried payment items, Auto-fill and the prepared amounts.
 - Expected result: Prepared amounts and remaining requirements are readable.
-- Used in: [3d/housing/#inspect-a-house-crystal](https://merklejerk.github.io/holtburger/3d/housing/#inspect-a-house-crystal)
+- Used in: [reference/housing/#inspect-a-house-crystal](https://merklejerk.github.io/holtburger/reference/housing/#inspect-a-house-crystal)
 
 ### Separate entry from storage
 
@@ -206,7 +196,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 - Frame: Show Access & guests with separate entry/storage controls and names safe to publish.
 - Action/purpose: Show guest entry and storage permissions with sample names and the current house owner.
 - Expected result: Entry permission is visibly separate from storage permission.
-- Used in: [3d/housing/#manage-access](https://merklejerk.github.io/holtburger/3d/housing/#manage-access)
+- Used in: [reference/housing/#manage-access](https://merklejerk.github.io/holtburger/reference/housing/#manage-access)
 
 ### Track a contract
 
@@ -216,7 +206,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 - Frame: Show filtered contract details, a timer and its map destination; use two stills if needed.
 - Action/purpose: Show a filtered contract with progress, repeat or deadline timer, and its map destination.
 - Expected result: Progress/timing and the useful destination are clear.
-- Used in: [3d/journal/#find-a-contract](https://merklejerk.github.io/holtburger/3d/journal/#find-a-contract)
+- Used in: [reference/journal/#find-a-contract](https://merklejerk.github.io/holtburger/reference/journal/#find-a-contract)
 
 ### Find your way back
 
@@ -226,7 +216,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 - Frame: Show /corpse, the coordinate link, map waypoint and V cycling in short connected steps.
 - Action/purpose: Show a real outdoor death location, /corpse output, a coordinate link becoming a waypoint, and nearby corpse cycling.
 - Expected result: The recorded location helps navigation without implying the record proves current contents.
-- Used in: [3d/death-corpses/#find-your-way-back](https://merklejerk.github.io/holtburger/3d/death-corpses/#find-your-way-back)
+- Used in: [3d/maps-travel/#find-your-way-back](https://merklejerk.github.io/holtburger/3d/maps-travel/#find-your-way-back)
 
 ### Keep the party in view
 
@@ -236,7 +226,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 - Frame: Show the roster/recruitment controls and party HUD together at a readable scale.
 - Action/purpose: Show the party roster and in-world party HUD, including leader and recruitment controls.
 - Expected result: The leader, membership and selected member can be identified.
-- Used in: [3d/social/#form-a-party](https://merklejerk.github.io/holtburger/3d/social/#form-a-party)
+- Used in: [3d/maps-travel/#form-a-party](https://merklejerk.github.io/holtburger/3d/maps-travel/#form-a-party)
 
 ### A change of appearance
 
@@ -246,7 +236,7 @@ Group location-dependent work together: a party member for trade/party, an owned
 - Frame: Crop Barbershop with appearance choices and Apply/Cancel.
 - Action/purpose: Show the Barbershop appearance controls, heritage-specific choices and Apply/Cancel actions.
 - Expected result: The choices and explicit Apply action are clear; applying is optional.
-- Used in: [start/characters/#change-your-appearance-later](https://merklejerk.github.io/holtburger/start/characters/#change-your-appearance-later)
+- Used in: [reference/appearance/#barbershop](https://merklejerk.github.io/holtburger/reference/appearance/#barbershop)
 
 ## Launcher, setup and UI stills
 
@@ -262,16 +252,6 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Expected result: Panel placement and UI/text scale differences are clear without cropping controls.
 - Used in: [3d/#make-the-interface-yours](https://merklejerk.github.io/holtburger/3d/#make-the-interface-yours), [3d/interface/#move-and-resize-the-hud](https://merklejerk.github.io/holtburger/3d/interface/#move-and-resize-the-hud)
 
-### Rebind the familiar actions
-
-**First · user · pending · still** — ID: `input-settings`
-
-- Setup: Open Settings → Input with the default movement and selection groups visible.
-- Frame: Crop the settings panel, retaining its tab/title and relevant bindings.
-- Action/purpose: Show Settings → Input with movement, selection and interaction bindings in view.
-- Expected result: W/S, A/D, Z/C and Smart Tab bindings can be read at website size.
-- Used in: [3d/movement-camera/#when-keys-go-to-the-interface](https://merklejerk.github.io/holtburger/3d/movement-camera/#when-keys-go-to-the-interface), [coming-from-retail/#learn-the-controls-first](https://merklejerk.github.io/holtburger/coming-from-retail/#learn-the-controls-first)
-
 ### Add your server
 
 **First · user · pending · still** — ID: `launcher`
@@ -280,7 +260,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Frame: Frame server/profile choices, account and Play; omit private machine details.
 - Action/purpose: Show the launcher server entry and Play action using sample connection details.
 - Expected result: Readers can identify each step used by the connection guide.
-- Used in: [start/#3d-client](https://merklejerk.github.io/holtburger/start/#3d-client), [start/connect/#in-the-3d-client](https://merklejerk.github.io/holtburger/start/connect/#in-the-3d-client)
+- Used in: [startup/servers/#add-your-account](https://merklejerk.github.io/holtburger/startup/servers/#add-your-account)
 
 ### Find the effect that counts
 
@@ -290,7 +270,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Frame: Crop the Enchantments panel with the group expanded and timers visible.
 - Action/purpose: Show effective and overridden spells affecting the same stat, with durations readable.
 - Expected result: Effective and overridden spells have coherent names, stats and durations.
-- Used in: [3d/enchantments/#effective-and-overridden](https://merklejerk.github.io/holtburger/3d/enchantments/#effective-and-overridden)
+- Used in: [3d/spells/#effective-and-overridden](https://merklejerk.github.io/holtburger/3d/spells/#effective-and-overridden)
 
 ### Choose your game data
 
@@ -300,7 +280,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Frame: Show the folder-level choice and enough file names to identify the correct directory; use a neutral path.
 - Action/purpose: Show the first-launch folder picker with a complete retail DAT folder selected.
 - Expected result: The reader can distinguish selecting the folder from selecting one DAT file.
-- Used in: [start/#3d-client](https://merklejerk.github.io/holtburger/start/#3d-client), [start/content/#for-the-3d-client](https://merklejerk.github.io/holtburger/start/content/#for-the-3d-client)
+- Used in: [startup/settings/#need-the-dats](https://merklejerk.github.io/holtburger/startup/settings/#need-the-dats)
 
 ### Plan a skill improvement
 
@@ -310,7 +290,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Frame: Show the skill and cost, with a second still for the Train confirmation.
 - Action/purpose: Show a skill detail and its cost, plus the separate confirmation for training a new skill.
 - Expected result: Immediate improvement cost and separately confirmed training are distinguishable.
-- Used in: [3d/character/#improve-a-stat-or-train-a-skill](https://merklejerk.github.io/holtburger/3d/character/#improve-a-stat-or-train-a-skill)
+- Used in: [reference/character/#improve-a-stat-or-train-a-skill](https://merklejerk.github.io/holtburger/reference/character/#improve-a-stat-or-train-a-skill)
 
 ### Read and copy chat
 
@@ -320,7 +300,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Frame: Show timestamps, filters and selected history text; omit private conversations.
 - Action/purpose: Show channel filters, timestamps, and selected text with chat history interaction enabled.
 - Expected result: History interaction makes copying/coordinate links visible.
-- Used in: [3d/chat-emotes/#read-select-and-copy](https://merklejerk.github.io/holtburger/3d/chat-emotes/#read-select-and-copy)
+- Used in: [3d/interface/#read-select-and-copy](https://merklejerk.github.io/holtburger/3d/interface/#read-select-and-copy)
 
 ### Inspect an item
 
@@ -330,7 +310,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Frame: Crop the appraisal window with title and relevant fields; no test errors or missing artwork.
 - Action/purpose: Show item requirements and effective values in a readable appraisal window.
 - Expected result: A reader can find requirements and effective values at website size.
-- Used in: [3d/items/#examine](https://merklejerk.github.io/holtburger/3d/items/#examine)
+- Used in: [3d/inventory/#examine](https://merklejerk.github.io/holtburger/3d/inventory/#examine)
 
 ### Create an adventurer
 
@@ -340,7 +320,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Frame: Show appearance, Skills & Stats and review in separate short beats.
 - Action/purpose: Show appearance, Skills & Stats, and review; finish at the selected new character before entering the world.
 - Expected result: Creation finishes on the selected new roster entry before explicit world entry.
-- Used in: [start/characters/#create-a-character](https://merklejerk.github.io/holtburger/start/characters/#create-a-character)
+- Used in: [startup/creation/#review-and-create](https://merklejerk.github.io/holtburger/startup/creation/#review-and-create)
 
 ### Graphics troubleshooting
 
@@ -385,34 +365,3 @@ Use a real terminal session with a prepared character and the shipped scripts. S
 - Action/purpose: Move an inventory item, inspect its details, and show a quantity prompt or vendor review with the changing footer actions.
 - Expected result: The reader can follow a multi-step task without guessing which pane has focus.
 - Used in: [tui/gameplay/#trading-and-salvage](https://merklejerk.github.io/holtburger/tui/gameplay/#trading-and-salvage)
-
-## Agent control illustrations
-
-Code-native SVG diagrams prepared from the verified default controls. These are instructional diagrams, not screenshots or evidence of live gameplay. Publish through the same external media workflow.
-
-### Movement defaults · control illustration
-
-**First · agent · available · still** — ID: `movement-keys`
-
-- Setup: Movement defaults from the current input defaults.
-- Frame: Use the complete vector diagram; keep the text/table instructions beside it.
-- Expected result: Key positions and their default movement actions are readable.
-- Used in: [3d/movement-camera/#get-moving](https://merklejerk.github.io/holtburger/3d/movement-camera/#get-moving)
-
-### Smart Tab · control illustration
-
-**First · agent · available · still** — ID: `targeting-diagram`
-
-- Setup: Smart Tab from the current input defaults.
-- Frame: Use the complete vector diagram; keep the text/table instructions beside it.
-- Expected result: Tap/hold choices lead to selection, followed by a deliberate action.
-- Used in: [3d/selection-interaction/#start-with-smart-tab](https://merklejerk.github.io/holtburger/3d/selection-interaction/#start-with-smart-tab)
-
-### N posture cycle · control illustration
-
-**First · agent · available · still** — ID: `posture-diagram`
-
-- Setup: Rest posture cycle from the current input defaults.
-- Frame: Use the complete vector diagram; keep the text/table instructions beside it.
-- Expected result: Standing, kneel/crouch, sit, lie and the return to standing are unambiguous.
-- Used in: [3d/selection-interaction/#your-first-session-controls](https://merklejerk.github.io/holtburger/3d/selection-interaction/#your-first-session-controls)

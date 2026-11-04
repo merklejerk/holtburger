@@ -1,21 +1,18 @@
 ---
-title: 'Controls & reference'
-description: 'Look up a binding, command, setting, or scripting method.'
-section: 'Reference'
+title: '3D reference'
+description: 'Look up controls, commands, settings and other game interfaces.'
+section: '3D reference'
 ---
 
-## 3D client
+## Controls and settings
 
-- [Controls](/holtburger/reference/3d-controls/): movement, targeting, bars, chat and posture defaults.
-- [Chat commands](/holtburger/reference/3d-chat-commands/): messages, travel, corpse permissions and utilities.
-- [Settings](/holtburger/reference/3d-settings/): where preferences live and which are character-specific.
+- [Controls](/holtburger/reference/3d-controls/): the complete default keymap.
+- [Chat commands](/holtburger/reference/3d-chat-commands/): messaging, travel, corpse permissions and utilities.
+- [Settings](/holtburger/reference/3d-settings/): input, appearance and saved preferences.
 
-## Terminal client
+## Other game interfaces
 
-- [Controls](/holtburger/reference/tui-controls/): panes, dashboard tabs and contextual actions.
-- [Chat commands](/holtburger/reference/tui-chat-commands/): messaging, gameplay, party and scripts.
-- [Launch options](/holtburger/reference/tui-options/): connection, logging, startup and HTTP policy.
-
-## Scripting
-
-[API reference](/holtburger/scripting/reference/) groups the available helpers and actions, with the shared declaration file for exact types. Begin with [your first script](/holtburger/scripting/) for a runnable example.
+- [Character progression and titles](/holtburger/reference/character/).
+- [Housing payments and permissions](/holtburger/reference/housing/).
+- [Journal and contracts](/holtburger/reference/journal/).
+- [Barber and appearance](/holtburger/reference/appearance/).

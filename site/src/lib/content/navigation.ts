@@ -1,157 +1,265 @@
-/** Guide groups stay compact; only the current topic opens by default. */
+/** Contextual chapters keep onboarding, task guides and reference separate. */
 export const navigation = [
 	{
-		title: 'Begin your journey',
-		scopes: [
-			'start',
-			'3d',
-			'tui',
-			'about',
-			'support',
-			'reference',
-			'scripting',
-			'coming-from-retail'
-		],
+		title: 'Get started',
+		scopes: ['start', 'startup', '3d', 'coming-from-retail'],
 		links: [
-			{ slug: 'coming-from-retail', label: 'Coming from retail & Decal' },
-			{ slug: 'start', label: 'Start playing' },
-			{ slug: 'start/content', label: 'Game data' },
-			{ slug: 'start/connect', label: 'Connect' },
-			{ slug: 'start/characters', label: 'Characters' }
+			{
+				slug: 'start',
+				label: 'Install & connect'
+			},
+			{
+				slug: 'start/first-session',
+				label: 'Your first session'
+			},
+			{
+				slug: 'coming-from-retail',
+				label: 'Coming from retail & Decal'
+			}
+		]
+	},
+	{
+		title: 'Startup',
+		scopes: ['startup', 'start', '3d'],
+		links: [
+			{
+				slug: 'startup/servers',
+				label: 'Servers & accounts'
+			},
+			{
+				slug: 'startup/settings',
+				label: 'Game data & launch settings'
+			},
+			{
+				slug: 'startup/characters',
+				label: 'Character selection'
+			},
+			{
+				slug: 'startup/creation',
+				label: 'Character creation'
+			},
+			{
+				slug: 'startup/switching',
+				label: 'Switch characters or accounts'
+			}
 		]
 	},
 	{
 		title: 'Installation',
-		scopes: ['start'],
+		scopes: ['start', 'startup'],
 		links: [
-			{ slug: 'start/3d/windows', label: '3D · Windows' },
-			{ slug: 'start/3d/macos', label: '3D · macOS' },
-			{ slug: 'start/3d/linux', label: '3D · Linux' },
-			{ slug: 'start/tui/windows', label: 'TUI · Windows' },
-			{ slug: 'start/tui/macos', label: 'TUI · macOS' },
-			{ slug: 'start/tui/linux', label: 'TUI · Linux' }
+			{
+				slug: 'start/3d/windows',
+				label: 'Windows'
+			},
+			{
+				slug: 'start/3d/macos',
+				label: 'macOS'
+			},
+			{
+				slug: 'start/3d/linux',
+				label: 'Linux'
+			}
 		]
 	},
 	{
-		title: 'Movement & interaction',
+		title: '3D client',
 		scopes: ['3d'],
 		links: [
-			{ slug: '3d', label: 'The 3D client' },
-			{ slug: '3d/selection-interaction', label: 'Selection & interaction' },
-			{ slug: '3d/movement-camera', label: 'Movement & camera' },
-			{ slug: '3d/jumping', label: 'Jumping' }
-		]
-	},
-	{
-		title: 'Items & equipment',
-		scopes: ['3d'],
-		links: [
-			{ slug: '3d/items', label: 'Item actions' },
-			{ slug: '3d/inventory', label: 'Inventory & containers' },
-			{ slug: '3d/equipment-loadouts', label: 'Equipment loadouts' },
-			{ slug: '3d/action-bars', label: 'Action bars' },
-			{ slug: '3d/locks', label: 'Keys & lockpicks' },
-			{ slug: '3d/salvage', label: 'Salvaging' },
-			{ slug: '3d/vendors-trading', label: 'Vendors & trading' }
-		]
-	},
-	{
-		title: 'Magic & combat',
-		scopes: ['3d'],
-		links: [
-			{ slug: '3d/spells', label: 'Spells & spell bars' },
-			{ slug: '3d/combat', label: 'Combat' },
-			{ slug: '3d/enchantments', label: 'Enchantments' },
-			{ slug: '3d/character', label: 'Character & progression' }
-		]
-	},
-	{
-		title: 'World & social',
-		scopes: ['3d'],
-		links: [
-			{ slug: '3d/maps-travel', label: 'Maps & travel' },
-			{ slug: '3d/housing', label: 'Housing' },
-			{ slug: '3d/journal', label: 'Journal & contracts' },
-			{ slug: '3d/death-corpses', label: 'Corpse recovery' },
-			{ slug: '3d/social', label: 'Party & friends' }
-		]
-	},
-	{
-		title: 'Interface & chat',
-		scopes: ['3d'],
-		links: [
-			{ slug: '3d/interface', label: 'Arrange the interface' },
-			{ slug: '3d/nearby-alerts', label: 'Nearby & alerts' },
-			{ slug: '3d/chat-emotes', label: 'Chat & emotes' }
-		]
-	},
-	{
-		title: 'Terminal client',
-		scopes: ['tui', 'scripting'],
-		links: [
-			{ slug: 'tui', label: 'The terminal client' },
-			{ slug: 'tui/basics', label: 'Find your way around' },
-			{ slug: 'tui/gameplay', label: 'Gameplay' },
-			{ slug: 'tui/running-scripts', label: 'Run scripts' },
-			{ slug: 'tui/bundled-scripts', label: 'Fighter & mage' }
-		]
-	},
-	{
-		title: 'Scripting',
-		scopes: ['tui', 'scripting'],
-		links: [
-			{ slug: 'scripting', label: 'Your first script' },
-			{ slug: 'scripting/runtime', label: 'Runtime & persistence' },
-			{ slug: 'scripting/reference', label: 'API reference' },
-			{ slug: 'scripting/integrations', label: 'HTTP integrations' }
+			{
+				slug: '3d',
+				label: 'Feature tour'
+			},
+			{
+				slug: '3d/combat',
+				label: 'Targeting & fighting'
+			},
+			{
+				slug: '3d/movement-camera',
+				label: 'Movement & jumping'
+			},
+			{
+				slug: '3d/inventory',
+				label: 'Inventory & equipment'
+			},
+			{
+				slug: '3d/equipment-loadouts',
+				label: 'Loadouts & action bars'
+			},
+			{
+				slug: '3d/spells',
+				label: 'Spells & enchantments'
+			},
+			{
+				slug: '3d/crafting',
+				label: 'Crafting, trading & salvage'
+			},
+			{
+				slug: '3d/interface',
+				label: 'Make the interface yours'
+			},
+			{
+				slug: '3d/maps-travel',
+				label: 'World & community'
+			}
 		]
 	},
 	{
 		title: '3D reference',
 		scopes: ['3d', 'reference'],
 		links: [
-			{ slug: 'reference/3d-controls', label: 'Controls' },
-			{ slug: 'reference/3d-chat-commands', label: '3D chat commands' },
-			{ slug: 'reference/3d-settings', label: 'Settings' }
+			{
+				slug: 'reference',
+				label: 'Reference index'
+			},
+			{
+				slug: 'reference/3d-controls',
+				label: 'Controls'
+			},
+			{
+				slug: 'reference/3d-chat-commands',
+				label: 'Chat commands'
+			},
+			{
+				slug: 'reference/3d-settings',
+				label: 'Settings'
+			},
+			{
+				slug: 'reference/character',
+				label: 'Progression & titles'
+			},
+			{
+				slug: 'reference/housing',
+				label: 'Housing'
+			},
+			{
+				slug: 'reference/journal',
+				label: 'Journal & contracts'
+			},
+			{
+				slug: 'reference/appearance',
+				label: 'Barber & appearance'
+			}
+		]
+	},
+	{
+		title: 'Terminal client',
+		scopes: ['tui'],
+		links: [
+			{
+				slug: 'tui',
+				label: 'Overview'
+			},
+			{
+				slug: 'tui/connect',
+				label: 'Install & connect'
+			},
+			{
+				slug: 'tui/basics',
+				label: 'Find your way around'
+			},
+			{
+				slug: 'tui/gameplay',
+				label: 'Everyday gameplay'
+			},
+			{
+				slug: 'tui/running-scripts',
+				label: 'Run scripts'
+			},
+			{
+				slug: 'tui/bundled-scripts',
+				label: 'Fighter & mage'
+			}
+		]
+	},
+	{
+		title: 'TUI scripting',
+		scopes: ['tui'],
+		links: [
+			{
+				slug: 'tui/scripting',
+				label: 'Your first script'
+			},
+			{
+				slug: 'tui/scripting/runtime',
+				label: 'Runtime & persistence'
+			},
+			{
+				slug: 'tui/scripting/reference',
+				label: 'API reference'
+			},
+			{
+				slug: 'tui/scripting/integrations',
+				label: 'HTTP integrations'
+			}
 		]
 	},
 	{
 		title: 'TUI reference',
-		scopes: ['tui', 'reference'],
+		scopes: ['tui'],
 		links: [
-			{ slug: 'reference/tui-controls', label: 'Controls' },
-			{ slug: 'reference/tui-chat-commands', label: 'TUI chat commands' },
-			{ slug: 'reference/tui-options', label: 'Launch options' }
+			{
+				slug: 'tui/reference/controls',
+				label: 'Controls'
+			},
+			{
+				slug: 'tui/reference/chat-commands',
+				label: 'Chat commands'
+			},
+			{
+				slug: 'tui/reference/options',
+				label: 'Launch options'
+			}
 		]
 	},
 	{
 		title: 'Help',
 		scopes: ['support'],
 		links: [
-			{ slug: 'support', label: 'Help on the road' },
-			{ slug: 'support/graphics', label: 'Graphics & startup' },
-			{ slug: 'support/reporting', label: 'Report a problem' }
+			{
+				slug: 'support',
+				label: 'Help'
+			},
+			{
+				slug: 'support/graphics',
+				label: 'Graphics & startup'
+			},
+			{
+				slug: 'support/reporting',
+				label: 'Report a problem'
+			}
 		]
 	},
 	{
 		title: 'Other paths',
 		scopes: [
 			'start',
+			'startup',
 			'3d',
-			'tui',
-			'about',
-			'support',
 			'reference',
-			'scripting',
+			'tui',
 			'coming-from-retail',
+			'support',
+			'about',
 			'tools'
 		],
 		links: [
-			{ slug: 'gallery', label: 'Gallery' },
-			{ slug: 'reference', label: 'Controls & reference' },
-			{ slug: 'support', label: 'Help' },
-			{ slug: 'about/design', label: 'Design philosophy' },
-			{ slug: 'tools', label: 'Explorer & tools' }
+			{
+				slug: 'gallery',
+				label: 'Gallery'
+			},
+			{
+				slug: 'support',
+				label: 'Help'
+			},
+			{
+				slug: 'about/design',
+				label: 'Design philosophy'
+			},
+			{
+				slug: 'tools',
+				label: 'Explorer & tools'
+			}
 		]
 	}
 ];

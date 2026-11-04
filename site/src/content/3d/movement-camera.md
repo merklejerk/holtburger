@@ -1,52 +1,35 @@
 ---
-title: 'Movement & camera'
-description: 'Move your character, look around, and get comfortable with the defaults.'
-section: '3D client · Movement & interaction'
+title: 'Movement & jumping'
+description: 'Mouse steering and a preview for the jumps worth planning.'
+section: '3D client'
 ---
 
 <script>
 import Media from '#lib/components/Media.svelte';
 </script>
 
-## Get moving
-
-| Action              | Default control        |
-| ------------------- | ---------------------- |
-| Forward / backward  | W / S                  |
-| Turn left / right   | A / D                  |
-| Strafe left / right | Z / C                  |
-| Walk                | Hold Shift             |
-| Toggle autorun      | Q                      |
-| Charged jump        | Hold and release Space |
-| Precise jump mode   | Ctrl+Space             |
-
-Use [precise jumping](/holtburger/3d/jumping/) to plan a leap with a target and trajectory preview.
-
-<Media id="movement-keys" />
-
 ## Look around or steer
 
-- **Drag with the left button** to orbit the camera around your character.
-- **Hold the right button** to steer your character and tilt the camera, with mouse movement enabled.
-- **Hold the middle button or both buttons** to move forward, with mouse movement enabled.
-- **Scroll** to zoom the camera.
+Left-drag orbits the camera without turning your character. With mouse movement enabled, hold the right button to steer; hold the middle button or both buttons to move forward.
 
 <Media id="camera" />
 
-## Rest between fights
+## Precise jumping
 
-Resting speeds up health and stamina recovery. Press **N** to cycle through kneeling → sitting → lying down → standing. Lying down gives the fastest recovery.
+1. Press **Ctrl+Space** to enter precise jump mode.
+2. Point at the place you want to jump toward.
+3. Use **W** to increase power or **S** to decrease it. You can also adjust the power bar or use **Shift+scroll**.
+4. Inspect the target and trajectory preview.
+5. Click to launch the chosen jump. Press **Escape** to cancel instead.
 
-<Media id="postures" />
+<Media id="jump" />
 
-## When keys go to the interface
+## Read the preview
 
-Clicking an ordinary HUD button leaves movement keys available. While typing or using a dialog, those keys go to that control instead. Finish or leave that control before moving again.
+Adjust power until the path reaches your intended landing. Look for obstacles along the arc and leave room to land.
 
-Adjust bindings, mouse steering, and axis inversion under **Settings → Input**.
+Holtburger's movement and physics have their own feel. Try a few low-risk jumps before relying on a familiar retail route.
 
-<Media id="input-settings" />
+<Media id="jump-demo" />
 
-## Next
-
-[Learn Smart Tab and interaction](/holtburger/3d/selection-interaction/) to select, use and examine what is around you.
+See the [controls reference](/holtburger/reference/3d-controls/) for other movement bindings, or adjust them in **Settings → Input**.

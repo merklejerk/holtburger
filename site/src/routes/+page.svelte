@@ -49,8 +49,7 @@
 				<dl class="feature-notes">
 					<div>
 						<dt>
-							<a href={guide('3d/selection-interaction')}>Smart Tab targeting</a
-							>
+							<a href={guide('3d/combat')}>Smart Tab targeting</a>
 						</dt>
 						<dd>
 							Tap to cycle targets. Hold to acquire an immediate candidate, then
@@ -135,9 +134,7 @@
 			<a class="index-link" href={guide('coming-from-retail')}
 				>Coming from retail & Decal</a
 			>
-			<a class="index-link" href={guide('3d/selection-interaction')}
-				>Learn the new controls</a
-			>
+			<a class="index-link" href={guide('3d/combat')}>Learn the new controls</a>
 			<a class="button primary" href={guide('start')}>Download the beta</a>
 			<p class="platform-note">
 				Windows · macOS · Linux<br />Bring your own game files for 3D.

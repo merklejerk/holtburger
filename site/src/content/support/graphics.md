@@ -26,7 +26,7 @@ Use `/fps` to show the frame-rate display while comparing settings. Render scale
 
 ## If content is missing
 
-Check the [game-data folder](/holtburger/start/content/), particularly if the terminal client's compact content was selected by mistake. `/assets` shows the current content location.
+Check the [game-data folder](/holtburger/startup/settings/), particularly if the terminal client's compact content was selected by mistake. `/assets` shows the current content location.
 
 Use `/assets retry` to retry failed loading after a temporary problem. If you replace mounted archives or repair the installation itself, restart with the repaired folder.
 

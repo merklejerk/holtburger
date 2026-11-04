@@ -1,7 +1,7 @@
 ---
-title: 'Inventory & containers'
-description: 'Move items between packs, split stacks, and free up space.'
-section: '3D client · Items & equipment'
+title: 'Inventory & equipment'
+description: 'Keep your packs organized and useful items within reach.'
+section: '3D client'
 ---
 
 <script>
@@ -43,4 +43,32 @@ Auto-merge applies to the chosen bag when requested. If it stops after merging s
 
 Select a container or corpse and press **R** to open it. Use its contents to move items into your inventory. **V** cycles unopened corpses; **Shift+V** cycles in reverse.
 
-Use [Smart Tab and interaction](/holtburger/3d/selection-interaction/) for the rest of the selection controls, or [item actions](/holtburger/3d/items/) to examine and give what you find.
+Use [Smart Tab and interaction](/holtburger/3d/combat/) for the rest of the selection controls, or [item actions](/holtburger/3d/inventory/) to examine and give what you find.
+
+## Use or pick up
+
+Select something and press **R** to interact. For a loose item, that means picking it up; for an item you carry, it can mean using or equipping it. Containers and other world objects open their relevant interaction.
+
+Some items need a target. Activate the item first, then choose what to use it on. Follow the targeting prompt; **Escape** cancels.
+
+## Examine
+
+Press **E**, right-click the item, or use the magnifying-glass action to open its appraisal. Look here for requirements, combat values, effects, descriptions and inscriptions.
+
+The appraisal window stays on the item you examined when your selection changes. Examine another object to replace it. You can move and resize the window.
+
+<Media id="item-appraisal" />
+
+## Give an item
+
+1. Select the person or NPC receiving the item.
+2. Select the item you want to give.
+3. Press **G** and review any confirmation.
+
+Holtburger remembers the selected recipient while you browse items, so you can choose another item without selecting the recipient again. Check the recipient shown before confirming.
+
+To hand over part of a stack, [split it first](/holtburger/3d/inventory/#split-a-stack).
+
+## Keep frequently used items close
+
+Drag usable items onto an [action bar](/holtburger/3d/equipment-loadouts/) for quick access. Use [equipment loadouts](/holtburger/3d/equipment-loadouts/) when you want to change several slots together.

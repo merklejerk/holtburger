@@ -40,4 +40,4 @@ Salvage actions prepare a batch for review. Check the items and stack quantities
 
 **Party** shows the roster and member actions. Commands such as `/create-party`, `/invite PLAYER`, and `/leave` are also available.
 
-Use `/help death` for corpse recovery and permissions, and `/help ls` for lifestone recall. The [TUI command reference](/holtburger/reference/tui-chat-commands/) has the full command groups.
+Use `/help death` for corpse recovery and permissions, and `/help ls` for lifestone recall. The [TUI command reference](/holtburger/tui/reference/chat-commands/) has the full command groups.

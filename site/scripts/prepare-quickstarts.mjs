@@ -1,10 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
-/** Render the same installation instructions shipped inside each release bundle. */
+/** Render bundled platform instructions with website-owned 3D connection guidance. */
 export async function prepareQuickstarts() {
 	const products = [
-		{ source: '3d', route: '3d', title: 'Holtburger 3D' },
-		{ source: 'cli', route: 'tui', title: 'Holtburger TUI' }
+		{ source: '3d', route: 'start/3d', title: 'Holtburger 3D' },
+		{ source: 'cli', route: 'tui/install', title: 'Holtburger TUI' }
 	];
 	const platforms = [
 		{ source: 'linux', route: 'linux', title: 'Linux (x86-64)' },
@@ -13,7 +13,7 @@ export async function prepareQuickstarts() {
 	];
 	for (const product of products) {
 		const destination = new URL(
-			`../src/content/start/${product.route}/`,
+			`../src/content/${product.route}/`,
 			import.meta.url
 		);
 		await mkdir(destination, { recursive: true });
@@ -25,7 +25,14 @@ export async function prepareQuickstarts() {
 			);
 			if (!/^# [^\r\n]+\r?\n/.test(source))
 				throw new Error(`${path} requires an opening title`);
-			const body = source.replace(/^# [^\r\n]+\r?\n+/, '');
+			let body = source.replace(/^# [^\r\n]+\r?\n+/, '');
+			// Web onboarding owns connection; bundled quickstarts remain self-contained.
+			if (product.source === '3d') {
+				body = body.replace(
+					/## Connect\r?\n[\s\S]*?(?=\r?\n## )/,
+					'## Connect\n\n[Import your server from TreeStats and enter the world](/holtburger/start/).\n'
+				);
+			}
 			const title = `${product.title} for ${platform.title}`;
 			const description =
 				'Install, connect, update, and troubleshoot your release bundle.';

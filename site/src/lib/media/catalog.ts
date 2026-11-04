@@ -88,39 +88,6 @@ export const media = {
 		width: 1055,
 		height: 818
 	},
-	'movement-keys': {
-		kind: 'image',
-		title: 'Movement defaults · control illustration',
-		source: {
-			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/movement-keys-v1.svg'
-		},
-		alt: 'Default keys: W/S move, A/D turn, Z/C strafe, X selects self, Shift walks, Q toggles autorun and N cycles resting postures.',
-		width: 840,
-		height: 330
-	},
-	'targeting-diagram': {
-		kind: 'image',
-		title: 'Smart Tab · control illustration',
-		source: {
-			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/smart-tab-v1.svg'
-		},
-		alt: 'Tap Tab to cycle targets; hold to acquire the immediate target. Shift reverses cycling. Then interact with R, examine with E, or start attacking from the combat bar.',
-		width: 840,
-		height: 350
-	},
-	'posture-diagram': {
-		kind: 'image',
-		title: 'N posture cycle · control illustration',
-		source: {
-			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/posture-cycle-v1.svg'
-		},
-		alt: 'Press N to advance from standing through resting kneel or crouch, sitting and lying down, then return to standing.',
-		width: 880,
-		height: 240
-	},
 	'smart-tab': {
 		kind: 'planned-video',
 		title: 'Smart Tab in action',
@@ -132,12 +99,6 @@ export const media = {
 		title: 'From preview to landing',
 		brief:
 			'Choose a target and power, inspect the jump trajectory, then execute the leap.'
-	},
-	postures: {
-		kind: 'planned-video',
-		title: 'The N posture cycle',
-		brief:
-			'Cycle resting crouch/kneel → sit → lie down → stand, with the key press visible.'
 	},
 	camera: {
 		kind: 'planned-video',
@@ -162,12 +123,6 @@ export const media = {
 		title: 'Make room for your HUD',
 		brief:
 			'Show rearranged panels and the difference between UI scaling and text scaling.'
-	},
-	'input-settings': {
-		kind: 'planned-image',
-		title: 'Rebind the familiar actions',
-		brief:
-			'Show Settings → Input with movement, selection and interaction bindings in view.'
 	},
 	launcher: {
 		kind: 'planned-image',

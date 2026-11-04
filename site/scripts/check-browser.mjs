@@ -59,11 +59,11 @@ try {
 		['gallery/', 'gallery'],
 		['start/3d/linux/', 'installation'],
 		['start/characters/', 'characters'],
-		['3d/jumping/', 'jumping'],
+		['3d/movement-camera/', 'jumping'],
 		['reference/3d-chat-commands/', 'commands'],
 		['tui/basics/', 'terminal'],
-		['scripting/integrations/', 'scripting'],
-		['3d/selection-interaction/', 'guide']
+		['tui/scripting/integrations/', 'scripting'],
+		['3d/combat/', 'guide']
 	]) {
 		const response = await page.goto(new URL(path, origin).href);
 		assert.equal(response?.status(), 200);
@@ -122,7 +122,7 @@ try {
 			`Missing heading ${anchor}`
 		);
 	}
-	for (const route of ['', '3d/selection-interaction/']) {
+	for (const route of ['', '3d/combat/']) {
 		await page.goto(new URL(route, origin).href);
 		assert.equal(
 			await page.locator('pagefind-config').getAttribute('bundle-path'),
@@ -132,14 +132,14 @@ try {
 		const search = page.getByRole('searchbox');
 		await search.fill('Smart Tab');
 		const result = page
-			.getByRole('link', { name: /Selection & interaction/ })
+			.getByRole('link', { name: /Targeting & fighting/ })
 			.last();
 		await result.waitFor();
 		const href = await result.getAttribute('href');
 		if (href === null) throw new Error('Search result has no destination');
 		assert.equal(
 			new URL(href, page.url()).pathname.replace(/\/$/, ''),
-			new URL('3d/selection-interaction/', origin).pathname.replace(/\/$/, '')
+			new URL('3d/combat/', origin).pathname.replace(/\/$/, '')
 		);
 		await search.press('Escape');
 	}
@@ -167,22 +167,22 @@ try {
 			.getByRole('heading', { name: 'Views from Dereth', level: 1 })
 			.waitFor();
 		assert.equal(await reader.locator('.gallery-grid img').count(), 7);
-		await reader.goto(new URL('3d/selection-interaction/', origin).href);
+		await reader.goto(new URL('3d/combat/', origin).href);
 		await reader
-			.getByRole('heading', { name: 'Start with Smart Tab', exact: true })
+			.getByRole('heading', { name: 'Use Smart Tab in combat', exact: true })
 			.waitFor();
+		await reader.locator('summary').filter({ hasText: 'Startup' }).click();
 		await reader
-			.getByRole('cell', { name: 'Interact with selection', exact: true })
-			.waitFor();
-		await reader
-			.locator('summary')
-			.filter({ hasText: 'Items & equipment' })
+			.getByRole('link', {
+				name: 'Servers & accounts',
+				exact: true
+			})
 			.click();
 		await reader
-			.getByRole('link', { name: 'Equipment loadouts', exact: true })
-			.click();
-		await reader
-			.getByRole('heading', { name: 'Equipment loadouts', level: 1 })
+			.getByRole('heading', {
+				name: 'Servers & accounts',
+				level: 1
+			})
 			.waitFor();
 	} finally {
 		await plain.close();

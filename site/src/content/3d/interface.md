@@ -1,7 +1,7 @@
 ---
-title: 'Arrange your interface'
-description: 'Make room for the world while keeping the controls you use close.'
-section: '3D client · Interface & chat'
+title: 'Make the interface yours'
+description: 'Arrange the HUD and keep useful information close.'
+section: '3D client'
 ---
 
 <script>
@@ -26,10 +26,66 @@ Appearance settings also let you choose fonts and themes. Traveler's Kit provide
 
 ## Keep useful information visible
 
-Vital warnings, progression feedback and the selected-target HUD help you notice changes without opening another panel. [Nearby alerts](/holtburger/3d/nearby-alerts/) can call attention to names you are watching for.
+Vital warnings, progression feedback and the selected-target HUD help you notice changes without opening another panel. [Nearby alerts](/holtburger/3d/interface/) can call attention to names you are watching for.
 
 Use `/fps` to toggle the FPS display when adjusting graphics. For startup or rendering trouble, see [Help](/holtburger/support/).
 
 ## Save the right things
 
 Your preferences are saved on this computer. Action-bar contents, spell bindings and alert rules are saved separately for each character.
+
+## Send a message
+
+Press **Enter** to open chat. Choose the chat destination, type your message, and send it. Use the command completions and input history to avoid retyping familiar commands.
+
+Type `/help` for the command list or `/help COMMAND` for one command. Both `/` and `@` can introduce commands. Chat commands also include utilities such as waypoints, recalls and corpse permissions.
+
+## Read, select and copy
+
+Enable **Interact with chat history** when you want to select text, copy messages, or click coordinate links. Turn it off when you want the history to stay out of the way of ordinary game input.
+
+Use message and channel filters to keep relevant conversations visible. The timestamp control adds or removes times beside messages.
+
+Chat settings can also suppress your own evasion/resist notices and spell incantations when those messages crowd the history.
+
+<Media id="chat" />
+
+## Speak to an NPC
+
+Interact with the NPC and use the offered dialogue or reply controls when available. Keep the conversation visible while choosing a response.
+
+## Use an emote
+
+Hold **T** to open the emote wheel. Click an emote, or select it with **Space** or **Enter**. Releasing T dismisses the wheel. Recent choices make repeated gestures easier to find.
+
+When an emote requires peace, Holtburger can switch temporarily and restore the previous combat stance afterward.
+
+<Media id="emotes" />
+
+## Narrow the nearby list
+
+Open **Nearby** to browse entities around you. Search names and use the category, tracked-name and sorting controls to reduce the list to what you need.
+
+Select an entry when you want a particular target. For everyday combat selection, [Smart Tab](/holtburger/3d/combat/) is usually the quicker starting point.
+
+## Add a name alert
+
+Use the name-alert control on a nearby entry for an exact match, or create a rule in the alert editor. Choose how the name should match:
+
+| Match      | Example          | Matches                              |
+| ---------- | ---------------- | ------------------------------------ |
+| Exact name | `Drudge Prowler` | That full name                       |
+| Substring  | `Drudge`         | Names containing that text           |
+| Name glob  | `Drudge *`       | A full name beginning with `Drudge ` |
+
+Matches ignore capitalization. In a glob, `*` matches any text and `?` matches one character. Use a backslash to match a literal `*`, `?`, or backslash.
+
+Check the editor's preview against nearby names, then save the rule.
+
+<Media id="nearby-alerts" />
+
+## Tune the list
+
+Enable or disable individual rules as needed, and delete rules you no longer use. Rules are saved for the character.
+
+Alerts notify you about matching nearby encounters without repeating the same notice continuously. Choose patterns specific enough that the notifications stay useful.

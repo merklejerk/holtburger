@@ -70,4 +70,4 @@ All helpers below are methods of **HB** (`Holtburger` is an alias). State can be
 | `loadData()`, `loadDataBin()`        | Read local-or-bundled JSON or binary sidecars                              |
 | `postJson(request)`                  | Allowlisted JSON POST; returns a Promise                                   |
 
-See [runtime and persistence](/holtburger/scripting/runtime/) for file layout and event handling, and [HTTP integrations](/holtburger/scripting/integrations/) for request limits and error handling.
+See [runtime and persistence](/holtburger/tui/scripting/runtime/) for file layout and event handling, and [HTTP integrations](/holtburger/tui/scripting/integrations/) for request limits and error handling.

@@ -10,11 +10,9 @@ import Media from '#lib/components/Media.svelte';
 
 ## Learn the controls first
 
-Start with [Smart Tab and the first-session controls](/holtburger/3d/selection-interaction/). Tap to cycle, hold to acquire an immediate target, then interact or attack deliberately.
+Start with [your first session](/holtburger/start/first-session/). Tap to cycle, hold to acquire an immediate target, then interact or attack deliberately.
 
 The default bindings differ from retail. Rebind them in **Settings → Input**; there is no retail preset to import.
-
-<Media id="input-settings" />
 
 ## What is built in?
 

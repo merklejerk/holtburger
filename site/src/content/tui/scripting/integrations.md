@@ -5,7 +5,7 @@ section: 'Scripting'
 ---
 
 <script>
-import status from '../../../examples/status.js?raw';
+import status from '../../../../examples/status.js?raw';
 </script>
 
 ## Allow the destination at launch

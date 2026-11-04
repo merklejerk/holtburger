@@ -3,6 +3,15 @@
 The website introduces the clients and helps players use them. Lead with h3d and
 active play; give the TUI a substantial gameplay and automation identity.
 
+## Audience and emphasis
+
+Assume the primary reader knows retail AC. Get them through h3d startup and into
+play quickly. Before writing a feature, compare the player workflow with retail
+and common Decal use: major changes deserve a benefit-led explanation, small
+changes a short note, familiar behavior concise instructions. Avoid basic MMORPG
+primers, duplicate keymaps, input-ownership explanations and diagrams for trivial
+controls. TUI setup and reference belong in its own secondary section.
+
 ## Voice
 
 Be pithy, concrete and welcoming. Put the useful fact or action first. Keep
@@ -60,9 +69,9 @@ requires `title`, `description` and `section` frontmatter. The layout renders it
 H1 from the title; begin the body with H2 sections.
 
 The preparation script renders the six installation pages from
-`release/quickstarts/{3d,cli}/{linux,win32,darwin}.md`, replacing only the opening
-H1 with website metadata. Edit those release sources to change installation
-instructions; do not edit generated files under `src/content/start/{3d,tui}/`.
+`release/quickstarts/{3d,cli}/{linux,win32,darwin}.md`, adding website metadata and pointing 3D connection steps to the canonical web
+onboarding. Bundled source instructions remain self-contained. Edit those release sources to change installation
+instructions; do not edit generated files under `src/content/start/3d/` or `src/content/tui/install/`.
 Generated Markdown and its build copies stay ignored. Bundled quickstarts remain
 standalone, including their factual channel/update notes. Older archives retain
 their release-time quickstart; the site follows the maintained release sources.

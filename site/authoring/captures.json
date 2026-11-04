@@ -19,10 +19,6 @@
 		"terminal": {
 			"title": "TUI gameplay and scripts",
 			"setup": "Use a real terminal session with a prepared character and the shipped scripts. Show pane focus and the footer; choose a large enough terminal font for the final website size. All interactive TUI capture belongs to the user."
-		},
-		"illustrations": {
-			"title": "Agent control illustrations",
-			"setup": "Code-native SVG diagrams prepared from the verified default controls. These are instructional diagrams, not screenshots or evidence of live gameplay. Publish through the same external media workflow."
 		}
 	},
 	"captures": {
@@ -41,14 +37,6 @@
 			"framing": "Show the character, target, trajectory and power bar together.",
 			"expected": "The chosen preview and executed landing are visible in one continuous clip.",
 			"priority": "first"
-		},
-		"postures": {
-			"owner": "user",
-			"session": "controls",
-			"setup": "A standing character on flat ground.",
-			"framing": "Full body and an N key-press display; keep the camera still.",
-			"expected": "Four deliberate presses show kneel/crouch, sit, lie, and stand.",
-			"priority": "later"
 		},
 		"camera": {
 			"owner": "user",
@@ -80,14 +68,6 @@
 			"setup": "Several HUD elements in a normal gameplay view; choose one small and one larger text size.",
 			"framing": "Two matched stills or one comparison image with the world visible.",
 			"expected": "Panel placement and UI/text scale differences are clear without cropping controls.",
-			"priority": "first"
-		},
-		"input-settings": {
-			"owner": "user",
-			"session": "setup",
-			"setup": "Open Settings → Input with the default movement and selection groups visible.",
-			"framing": "Crop the settings panel, retaining its tab/title and relevant bindings.",
-			"expected": "W/S, A/D, Z/C and Smart Tab bindings can be read at website size.",
 			"priority": "first"
 		},
 		"launcher": {
@@ -313,30 +293,6 @@
 			"framing": "Crop the relevant controls and Copy hardware info, without dumping the full report into the image.",
 			"expected": "The troubleshooting action is easy to locate.",
 			"priority": "later"
-		},
-		"movement-keys": {
-			"owner": "agent",
-			"session": "illustrations",
-			"setup": "Movement defaults from the current input defaults.",
-			"framing": "Use the complete vector diagram; keep the text/table instructions beside it.",
-			"expected": "Key positions and their default movement actions are readable.",
-			"priority": "first"
-		},
-		"targeting-diagram": {
-			"owner": "agent",
-			"session": "illustrations",
-			"setup": "Smart Tab from the current input defaults.",
-			"framing": "Use the complete vector diagram; keep the text/table instructions beside it.",
-			"expected": "Tap/hold choices lead to selection, followed by a deliberate action.",
-			"priority": "first"
-		},
-		"posture-diagram": {
-			"owner": "agent",
-			"session": "illustrations",
-			"setup": "Rest posture cycle from the current input defaults.",
-			"framing": "Use the complete vector diagram; keep the text/table instructions beside it.",
-			"expected": "Standing, kneel/crouch, sit, lie and the return to standing are unambiguous.",
-			"priority": "first"
 		}
 	}
 }

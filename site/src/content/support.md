@@ -14,7 +14,7 @@ Check the server address, port and account. Holtburger is developed against ACE;
 
 ## Game data is missing
 
-For h3d, select a complete retail DAT folder or a supported full HBA archive. The compact terminal-client content is not sufficient for 3D rendering.
+For h3d, choose the folder containing your retail DATs. [Game data & launch settings](/holtburger/startup/settings/) includes a download if you need the files.
 
 For the terminal client, extract the full release bundle. Retail DATs alone do not replace its prepared navigation data.
 
@@ -32,7 +32,7 @@ Use **Copy hardware info** from the launcher graphics settings when reporting re
 
 Enter the world before using `/run`. Use `/scripts` to check the active script, local directory and discovered names. A local script overrides a bundled one with the same basename.
 
-For the mage, keep the bundled data sidecars with the script. See [running scripts](/holtburger/tui/running-scripts/) for file layout and [runtime limits](/holtburger/scripting/runtime/) if a custom script expects Node or Deno APIs.
+For the mage, keep the bundled data sidecars with the script. See [running scripts](/holtburger/tui/running-scripts/) for file layout and [runtime limits](/holtburger/tui/scripting/runtime/) if a custom script expects Node or Deno APIs.
 
 ## Report a problem
 

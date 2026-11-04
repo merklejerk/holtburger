@@ -23,7 +23,7 @@ section: 'Reference · 3D client'
 | Move forward with mouse          | Hold middle or both buttons, with mouse movement enabled |
 | Zoom                             | Scroll                                                   |
 
-See [movement](/holtburger/3d/movement-camera/) and [jumping](/holtburger/3d/jumping/) for the full workflows.
+See [movement](/holtburger/3d/movement-camera/) and [jumping](/holtburger/3d/movement-camera/) for the full workflows.
 
 ## Select and interact
 
@@ -39,7 +39,7 @@ See [movement](/holtburger/3d/movement-camera/) and [jumping](/holtburger/3d/jum
 | Give selected item to remembered recipient | G                                |
 | Split selected stack                       | Y                                |
 
-Start with [Smart Tab](/holtburger/3d/selection-interaction/) for everyday targeting.
+Start with [Smart Tab](/holtburger/3d/combat/) for everyday targeting.
 
 ## Combat and bars
 
@@ -70,7 +70,7 @@ Number-key actions depend on the current controls and focused bar. Use the displ
 | Page chat history                 | PageUp / PageDown when chat has focus |
 | Cancel current action or context  | Escape                                |
 
-[Resting](/holtburger/3d/movement-camera/#rest-between-fights) speeds health and stamina recovery. The cycle moves through kneeling, sitting, lying down and standing.
+[Resting](/holtburger/reference/3d-controls/#chat-emotes-and-resting) speeds health and stamina recovery. The cycle moves through kneeling, sitting, lying down and standing.
 
 ## Change bindings
 

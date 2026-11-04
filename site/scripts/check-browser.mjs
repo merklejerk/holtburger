@@ -87,14 +87,27 @@ try {
 			`Missing heading ${anchor}`
 		);
 	}
-	await page.locator('pagefind-modal-trigger').click();
-	const search = page.getByRole('searchbox');
-	await search.fill('Smart Tab');
-	await page
-		.getByRole('link', { name: /Selection & interaction/ })
-		.last()
-		.waitFor();
-	await search.press('Escape');
+	for (const route of ['', '3d/selection-interaction/']) {
+		await page.goto(new URL(route, origin).href);
+		assert.equal(
+			await page.locator('pagefind-config').getAttribute('bundle-path'),
+			new URL('pagefind/', origin).pathname
+		);
+		await page.locator('pagefind-modal-trigger').click();
+		const search = page.getByRole('searchbox');
+		await search.fill('Smart Tab');
+		const result = page
+			.getByRole('link', { name: /Selection & interaction/ })
+			.last();
+		await result.waitFor();
+		const href = await result.getAttribute('href');
+		if (href === null) throw new Error('Search result has no destination');
+		assert.equal(
+			new URL(href, page.url()).pathname.replace(/\/$/, ''),
+			new URL('3d/selection-interaction/', origin).pathname.replace(/\/$/, '')
+		);
+		await search.press('Escape');
+	}
 	await page.setViewportSize({ width: 390, height: 844 });
 	for (const entry of catalog) {
 		const response = await page.goto(new URL(`${entry.slug}/`, origin).href);

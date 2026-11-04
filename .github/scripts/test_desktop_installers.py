@@ -7,14 +7,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from candidate_release import digest, target_named, verify_host_origin, verify_payload
+from release_suite import digest, target_named, verify_host_origin, verify_payload
 from desktop_installers import dmg_documents, dmg_layout, numeric_version, verify_dmg
 
 
 class InstallerContracts(unittest.TestCase):
     """The same verified payload must survive each platform's different delivery layout."""
     def test_installer_numeric_version_preserves_semver_display_separately(self):
-        self.assertEqual(numeric_version("1.2.3-alpha.4"), "1.2.3.0")
+        self.assertEqual(numeric_version("0.2.0-nightly-" + "a" * 40), "0.2.0.0")
         self.assertEqual(numeric_version("0.2.0"), "0.2.0.0")
         with self.assertRaisesRegex(ValueError, "resource limits"):
             numeric_version("65536.0.0")

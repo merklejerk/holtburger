@@ -11,15 +11,15 @@ import subprocess
 import sys
 import tempfile
 
-from candidate_release import (
+from release_suite import (
     APP, INSTALLER_TARGETS, digest, extract_bundle, target_named, verify_bundle,
     verify_payload, write_json,
 )
 from release_version import validate_version
 
 # Stable across versions; the recipe and native verifier consume the same identity.
-WINDOWS_APP_ID = "io.github.merklejerk.holtburger-3d-alpha"
-WINDOWS_APP_NAME = "Holtburger 3D Alpha"
+WINDOWS_APP_ID = "io.github.merklejerk.holtburger-3d"
+WINDOWS_APP_NAME = "Holtburger 3D"
 
 
 def numeric_version(version: str) -> str:
@@ -156,6 +156,8 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
     uninstaller = install / "unins000.exe"
     profile = work / "retained profile"
     server = profile_fixture("seed", profile)["serverName"]
+    info = json.loads((native / "build-info.json").read_text())
+    version = info["version"]
     quiet = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
     # Keep operation logs outside disposable payload cleanup; CI monitoring can
     # retain reader handles to a failed operation's log after it has been printed.
@@ -171,21 +173,21 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
             print(log.read_text(encoding="utf-8-sig"), flush=True)
         return result
 
-    def setup(path: Path, select_destination: bool) -> None:
+    def setup(path: Path, select_destination: bool, display_version: str) -> None:
         destination = [f"/DIR={install}"] if select_destination else []
         run_installer(path, destination).check_returncode()
         verify_payload(native, payload)
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_name) as key:
             if Path(winreg.QueryValueEx(key, "InstallLocation")[0]) != install:
                 raise ValueError("Installer registry location differs from its destination")
-            if winreg.QueryValueEx(key, "DisplayVersion")[0] != json.loads((native / "build-info.json").read_text())["version"]:
+            if winreg.QueryValueEx(key, "DisplayVersion")[0] != display_version:
                 raise ValueError("Installer registry version differs from its payload")
         if not shortcut.is_file():
             raise ValueError("Installer did not create its Start menu shortcut")
         probe_installed(payload / "h3d/holtburger-3d.exe", profile, server)
 
     try:
-        setup(installer, True)
+        setup(installer, True, version)
         run_installer(uninstaller, []).check_returncode()
         profile_fixture("verify", profile)
         if payload.exists() or shortcut.exists():
@@ -200,11 +202,20 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
         run_installer(predecessor, [f"/DIR={install}"]).check_returncode()
         verify_payload(previous, payload)
         probe_installed(payload / "h3d/holtburger-3d.exe", profile, server)
-        setup(installer, False)
+        setup(installer, False, version)
         # Repair must replace same-version files and remove obsolete payload entries.
         (payload / "QUICKSTART.md").write_text("damaged repair fixture")
         (payload / "obsolete-repair-fixture.txt").write_text("obsolete")
-        setup(installer, False)
+        setup(installer, False, version)
+        # Exercise both ordering directions with the production recipe and current payload.
+        # Only the alternate installer's display version differs; native runtime identity
+        # remains the verified current build. Actual beta/nightly builds are probed separately.
+        base = version.split("-", 1)[0]
+        alternate_version = f"{base}-nightly-{info['commit']}" if info["kind"] == "release" else base
+        alternate = work / "alternate-distribution.exe"
+        compile_windows(native, alternate_version, alternate, compiler)
+        setup(alternate, False, alternate_version)
+        setup(installer, False, version)
         for executable in ["h3d/holtburger-3d.exe", "h3d/resources/holtburger-3d-host.exe"]:
             for program, options, label in [(installer, [f"/DIR={install}"], "Installer"),
                                             (uninstaller, [], "Uninstaller")]:
@@ -260,7 +271,7 @@ def build(artifacts: Path, triple: str, output: Path, compiler: Path | None) -> 
             staging = work / "dmg"
             staging.mkdir()
             dmg_layout(native, staging)
-            subprocess.run(["hdiutil", "create", "-volname", "Holtburger 3D Alpha", "-srcfolder", str(staging),
+            subprocess.run(["hdiutil", "create", "-volname", "Holtburger 3D", "-srcfolder", str(staging),
                             "-format", "UDZO", str(destination)], check=True)
             subprocess.run(["hdiutil", "verify", str(destination)], check=True)
             with mounted_dmg(destination, work / "mounted") as mounted:

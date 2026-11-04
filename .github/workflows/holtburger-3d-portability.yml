@@ -19,33 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  release-boundary:
-    name: Canonical release boundary
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Install the repository-pinned cargo-dist
-        shell: bash
-        run: |
-          DIST_VERSION="$(sed -n 's/^cargo-dist-version = "\([^"]*\)"/\1/p' Cargo.toml)"
-          test -n "$DIST_VERSION"
-          curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/axodotdev/cargo-dist/releases/download/v${DIST_VERSION}/cargo-dist-installer.sh" | sh
-      - name: Reject standalone 3D host release artifacts
-        shell: bash
-        run: |
-          dist plan --output-format=json > "$RUNNER_TEMP/dist-plan.json"
-          jq -e '
-            ([.releases[].app_name] | index("holtburger-3d-host") == null) and
-            ([.artifacts | keys[] | select(startswith("holtburger-3d-host"))] | length == 0) and
-            (.announcement_github_body | contains("# holtburger-3d-host") | not)
-          ' "$RUNNER_TEMP/dist-plan.json"
-
   package-probe:
     name: Package probe (${{ matrix.target }})
-    needs: release-boundary
     strategy:
       fail-fast: false
       matrix:

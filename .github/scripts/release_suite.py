@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Allocate, assemble, inspect and stage a release candidate without publishing it."""
+"""Plan, assemble, inspect, and stage an immutable suite distribution."""
 
 import argparse
 import configparser
@@ -18,8 +18,11 @@ import tarfile
 import tempfile
 import zipfile
 
-from release_version import ROOT, bump, check_versions, release_channel, validate_channel_version
-from candidate_allocation import RELEASE_BRANCH, allocate_candidate, validate_tagged_candidate
+from release_version import ROOT, check_versions, release_channel, validate_channel_version
+from release_identity import (
+    Distribution, RELEASE_BRANCH, prepare_source, source_distribution,
+    validate_prepared_source, validate_tag as validate_source_tag,
+)
 from cli_content_input import CONTENT_FILES, verify_staged_content
 
 
@@ -42,7 +45,7 @@ TARGETS = (
 
 @dataclass(frozen=True)
 class InstallerTarget:
-    """One desktop format required by complete-candidate staging."""
+    """One desktop format required by complete distribution staging."""
 
     triple: str  # Native archive identity consumed by the installer generator.
     format: str  # Explicit packaging format recorded in the release manifest.
@@ -59,9 +62,8 @@ INSTALLER_TARGETS = (
 SCRIPTS = ("fighter.js", "mage.js", "mage.data.json", "mage.data.bin")
 TOOLS = ("holtburger-cli", "dat2hba", "dat-tool")
 APP = ROOT / "apps/holtburger-3d"
-THREED_FLATPAK_RECIPE = ROOT / ".github/flatpak/io.github.merklejerk.holtburger-3d-alpha.json"
-CLI_FLATPAK_RECIPE = ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli-alpha.yaml"
-CLI_NIGHTLY_FLATPAK_RECIPE = ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml"
+THREED_FLATPAK_RECIPE = ROOT / ".github/flatpak/io.github.merklejerk.holtburger-3d.json"
+CLI_FLATPAK_RECIPE = ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml"
 CLI_CONTENT_DESCRIPTOR = ROOT / ".github/cli-content.json"
 PRODUCTS = ("cli", "3d")
 
@@ -84,57 +86,117 @@ def target_named(triple: str) -> NativeTarget:
     return next(target for target in TARGETS if target.triple == triple)
 
 
+def distribution_kind() -> str:
+    """Build preparation selects the kind; local and ordinary package builds are releases."""
+    kind = os.environ.get("HOLTBURGER_DISTRIBUTION", "release")
+    if kind not in ("release", "nightly"):
+        raise ValueError("Distribution kind must be release or nightly")
+    return kind
+
+
 def source_identity() -> tuple[str, bool]:
     commit = run("git", "rev-parse", "HEAD")
     supplied = os.environ.get("HOLTBURGER_SOURCE_REVISION")
     if supplied is not None and supplied != commit:
         raise ValueError("Source revision does not match the checked-out commit")
+    if distribution_kind() == "nightly":
+        identity = source_distribution(ROOT, "nightly")
+        validate_prepared_source(ROOT, identity)
+        return commit, False
     modified = os.environ.get("HOLTBURGER_SOURCE_MODIFIED")
-    if modified is not None:
-        if modified not in ("0", "1"):
-            raise ValueError("HOLTBURGER_SOURCE_MODIFIED must be 0 or 1")
-        return commit, modified == "1"
-    return commit, bool(run("git", "status", "--porcelain", "--ignore-submodules=none"))
+    if modified is not None and modified not in ("0", "1"):
+        raise ValueError("HOLTBURGER_SOURCE_MODIFIED must be 0 or 1")
+    return commit, modified == "1" or bool(run("git", "status", "--porcelain", "--ignore-submodules=none"))
 
 
-def validate_tag(tag: str, commit: str) -> None:
-    """New candidates use source identity tags outside the generic SemVer publisher."""
-    match = re.fullmatch(r"candidate-[0-9]{8}-([0-9a-f]{7,40})", tag)
-    if match is None:
-        raise ValueError("Candidate tag must be candidate-YYYYMMDD-<source-commit-prefix>")
-    if not commit.startswith(match.group(1)):
-        raise ValueError("Candidate tag commit prefix does not match the source checkout")
+def validate_tag(tag: str, version: str, commit: str, kind: str) -> None:
+    """Public tag and version must describe exactly the same distribution."""
+    identity = Distribution(kind, version, commit)
+    if tag != identity.tag:
+        raise ValueError("Release tag must equal v followed by the distribution version")
 
 
-def plan(product: str, target: str, purpose: str, requested_version: str | None) -> None:
-    """Resolve exactly one immutable source before selecting any validation/build matrix."""
+def release_records(tag: str) -> list[dict]:
+    """Include drafts so retries distinguish incomplete staging from publication."""
+    lines = run("gh", "api", "repos/merklejerk/holtburger/releases", "--paginate", "--jq",
+                f".[] | select(.tag_name == {json.dumps(tag)}) | @json")
+    records = [json.loads(line) for line in lines.splitlines()]
+    if len(records) > 1:
+        raise ValueError("Expected at most one release for the immutable tag")
+    return records
+
+
+def already_published(identity: Distribution) -> bool:
+    """Skip builds only after checking the complete published inventory and provenance."""
+    records = release_records(identity.tag)
+    if not records:
+        return False
+    record = records[0]
+    if record["target_commitish"] != identity.commit:
+        raise ValueError("Existing release belongs to another source commit")
+    if record["draft"]:
+        return False
+    if record["prerelease"] != (identity.kind == "nightly"):
+        raise ValueError("Published release has conflicting distribution policy")
+    descriptions = [asset for asset in record["assets"] if asset["name"] == "release-manifest.json"]
+    if len(descriptions) != 1:
+        raise ValueError("Published release requires exactly one release manifest")
+    data = subprocess.check_output([
+        "gh", "api", f"repos/merklejerk/holtburger/releases/assets/{descriptions[0]['id']}",
+        "--header", "Accept: application/octet-stream",
+    ])
+    inventory = validate_manifest(json.loads(data))
+    if (inventory.version, inventory.commit, inventory.kind) != (identity.version, identity.commit, identity.kind):
+        raise ValueError("Published manifest differs from the requested distribution")
+    expected = {**inventory.assets, "release-manifest.json": hashlib.sha256(data).hexdigest()}
+    assets = record["assets"]
+    if len(assets) != len(expected) + 1 or {asset["name"] for asset in assets} != {*expected, "SHA256SUMS"}:
+        raise ValueError("Published release asset inventory is incomplete or unexpected")
+    for asset in assets:
+        if asset["state"] != "uploaded" or asset["size"] <= 0:
+            raise ValueError("Published release asset is not ready")
+        if asset["name"] in expected and asset["digest"] != f"sha256:{expected[asset['name']]}":
+            raise ValueError("Published release asset digest differs from its manifest")
+    return True
+
+
+def plan(product: str, target: str, purpose: str) -> None:
+    """Resolve the immutable main source before selecting the shared native matrix."""
     version = check_versions()
     commit, modified = source_identity()
     if modified:
         raise ValueError("Release planning requires a clean source checkout")
     tagged = os.environ.get("GITHUB_REF_TYPE") == "tag"
-    candidate = tagged or purpose == "candidate"
-    if candidate and (product != "both" or target != "all"):
-        raise ValueError("Candidates require both products and every supported native target")
+    if purpose != "diagnostic" and (product != "both" or target != "all"):
+        raise ValueError("Releases require both products and every supported native target")
+    kind = "nightly" if purpose == "nightly" else "release"
+    identity = source_distribution(ROOT, kind)
     tag = ""
     if tagged:
-        tag = os.environ["GITHUB_REF_NAME"]
-        validate_tag(tag, commit)
-        validate_tagged_candidate(ROOT, tag, commit)
+        if purpose != "release":
+            raise ValueError("Tag events only build stable releases")
+        validate_tag(os.environ["GITHUB_REF_NAME"], version, commit, kind)
+        validate_source_tag(ROOT, identity)
+        tag = identity.tag
+    elif purpose != "diagnostic":
+        if os.environ.get("GITHUB_REF") != f"refs/heads/{RELEASE_BRANCH}":
+            raise ValueError(f"Run release builds on the {RELEASE_BRANCH} branch")
         subprocess.run(["git", "merge-base", "--is-ancestor", commit,
                         f"origin/{RELEASE_BRANCH}"], cwd=ROOT, check=True)
-    elif candidate:
-        if os.environ.get("GITHUB_REF") != f"refs/heads/{RELEASE_BRANCH}":
-            raise ValueError(f"Run the candidate workflow on the {RELEASE_BRANCH} branch")
-        if not requested_version:
-            raise ValueError("Candidate dispatch requires an explicit suite version")
-        allocated = allocate_candidate(ROOT, requested_version, lambda value: bump(value, ROOT))
-        version, commit, tag = allocated.version, allocated.commit, allocated.tag
-    elif requested_version:
-        raise ValueError("Diagnostic builds cannot allocate a release version")
+        tag = identity.tag
+        existing = subprocess.run(["git", "show-ref", "--verify", "--quiet", f"refs/tags/{tag}"], cwd=ROOT)
+        if existing.returncode == 0:
+            validate_source_tag(ROOT, identity)
+        elif existing.returncode == 1:
+            run("git", "tag", tag, commit)
+            run("git", "push", "origin", f"refs/tags/{tag}")
+        else:
+            existing.check_returncode()
+    published = bool(tag) and already_published(identity)
     selected = [entry for entry in TARGETS if target == "all" or entry.triple == target]
     result = {
-        "version": version, "commit": commit, "product": product, "tag": tag,
+        "version": identity.version, "commit": commit, "kind": kind, "product": product, "tag": tag,
+        "skip": str(published).lower(),
         "linux_enabled": str(any(entry.platform == "linux" for entry in selected)).lower(),
         "desktop_enabled": str(any(entry.platform != "linux" for entry in selected)).lower(),
         "linux_matrix": {"include": [asdict(entry) for entry in selected if entry.platform == "linux"]},
@@ -192,7 +254,8 @@ def verify_bundle(bundle: Path) -> dict:
     if sys.platform != target.platform:
         raise ValueError("Bundle inspection must run on its native platform")
     product = info["product"]
-    validate_channel_version(info["channel"], info["version"])
+    validate_channel_version(info["channel"], info["version"], info["kind"])
+    Distribution(info["kind"], info["version"], info["commit"])
     if product not in PRODUCTS:
         raise ValueError(f"Unsupported native product: {product}")
     expected = {"QUICKSTART.md", "LICENSE.md", "build-info.json", "THIRD_PARTY_NOTICES.html"}
@@ -231,8 +294,8 @@ def verify_bundle(bundle: Path) -> dict:
             raise ValueError(f"Bundle symlink escapes the installation: {path}")
     if product == "3d":
         renderer = json.loads(run("node", "scripts/verify-electron-package.mjs", str((bundle / "h3d").resolve()), cwd=APP))
-        if (renderer["version"], renderer["revision"], renderer["modified"], renderer["channel"]) != (
-            info["version"], info["commit"][:8], info["modified"], info["channel"]
+        if (renderer["version"], renderer["revision"], renderer["modified"], renderer["channel"], renderer["kind"]) != (
+            info["version"], info["commit"][:8], info["modified"], info["channel"], info["kind"]
         ):
             raise ValueError("3D build identity differs from the packaged renderer")
     return info
@@ -312,7 +375,7 @@ def assemble(arguments) -> None:
     commit, modified = source_identity()
     product = arguments.product
     channel = release_channel(ROOT)
-    validate_channel_version(channel, version)
+    validate_channel_version(channel, version, distribution_kind())
     if product == "cli" and arguments.content is None:
         raise ValueError("CLI assembly requires --content staging")
     if product == "3d" and arguments.package is None:
@@ -326,7 +389,7 @@ def assemble(arguments) -> None:
         binaries = ROOT / "target" / target.triple / "release"
         suffix = ".exe" if target.platform == "win32" else ""
         info = {
-            "version": version, "commit": commit, "modified": modified, "channel": channel,
+            "version": version, "commit": commit, "modified": modified, "channel": channel, "kind": distribution_kind(),
             "product": product, "target": target.triple,
             "noticesSha256": digest(arguments.notices),
         }
@@ -371,21 +434,21 @@ class ReleaseInventory:
 
     version: str  # SemVer compared by the feed generator.
     channel: str  # Explicit audience used by channel selection.
-    commit: str  # Full source commit checked against the public candidate tag.
+    commit: str  # Full source commit checked against the public release tag.
     assets: dict[str, str]  # Exact downloadable payload names and expected SHA-256 values.
+    kind: str  # Distribution policy validated together with its version and source.
 
 
 def validate_manifest(document: dict) -> ReleaseInventory:
     """Validate complete inventory without needing native packages or the current checkout."""
-    if document["schemaVersion"] != 1:
+    if document["schemaVersion"] != 2:
         raise ValueError("Unsupported managed release manifest schema")
     version, channel, commit = document["version"], document["channel"], document["commit"]
-    validate_channel_version(channel, version)
-    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
-        raise ValueError("Release manifest requires a full source commit")
+    validate_channel_version(channel, version, document["kind"])
+    Distribution(document["kind"], version, commit)
     notices_digest = document["noticesSha256"]
     identity = {"version": version, "channel": channel, "commit": commit,
-                "modified": False, "noticesSha256": notices_digest}
+                "modified": False, "noticesSha256": notices_digest, "kind": document["kind"]}
     expected_assets = {"THIRD_PARTY_NOTICES.html": notices_digest}
     native = document["native"]
     pairs = [(item["product"], item["target"]) for item in native]
@@ -413,8 +476,8 @@ def validate_manifest(document: dict) -> ReleaseInventory:
     runtime = flatpaks[0]["runtime"]
     if re.fullmatch(r"org\.freedesktop\.Platform/x86_64/[0-9.]+", runtime) is None:
         raise ValueError("Flatpak runtime is outside the supported runtime family")
-    app_ids = {"cli": "io.github.merklejerk.holtburger-cli-alpha",
-               "3d": "io.github.merklejerk.holtburger-3d-alpha"}
+    app_ids = {"cli": "io.github.merklejerk.holtburger-cli",
+               "3d": "io.github.merklejerk.holtburger-3d"}
     for record in flatpaks:
         product = record["product"]
         expected = {**identity, "target": "x86_64-unknown-linux-gnu",
@@ -447,7 +510,7 @@ def validate_manifest(document: dict) -> ReleaseInventory:
     for checksum in [*expected_assets.values(), content["contentSha256"], *content["contentFiles"].values()]:
         if re.fullmatch(r"[0-9a-f]{64}", checksum) is None:
             raise ValueError("Release manifest contains an invalid SHA-256 digest")
-    return ReleaseInventory(version, channel, commit, expected_assets)
+    return ReleaseInventory(version, channel, commit, expected_assets, document["kind"])
 
 
 def manifest(artifacts: Path) -> list[Path]:
@@ -467,7 +530,7 @@ def manifest(artifacts: Path) -> list[Path]:
     assets = [{"name": notices.name, "sha256": digest(notices)}]
     assets.extend({"name": record["archive"], "sha256": record["sha256"]} for record in [*native, *flatpaks])
     assets.extend({"name": record["installer"], "sha256": record["sha256"]} for record in installers)
-    document = {"schemaVersion": 1, "channel": channel, "version": version, "commit": commit,
+    document = {"schemaVersion": 2, "channel": channel, "version": version, "commit": commit, "kind": distribution_kind(),
                 "noticesSha256": digest(notices), "native": native, "flatpaks": flatpaks,
                 "installers": installers, "assets": assets}
     inventory = validate_manifest(document)
@@ -496,24 +559,23 @@ def manifest(artifacts: Path) -> list[Path]:
 def stage(artifacts: Path, tag: str) -> None:
     files = manifest(artifacts)
     commit, _ = source_identity()
-    validate_tag(tag, commit)
+    validate_tag(tag, check_versions(), commit, distribution_kind())
     # Query drafts as well as published releases. A rerun may fill a partial matching draft.
-    lines = run("gh", "api", "repos/merklejerk/holtburger/releases", "--paginate", "--jq",
-                f".[] | select(.tag_name == {json.dumps(tag)}) | @json")
-    releases = [json.loads(line) for line in lines.splitlines()]
+    releases = release_records(tag)
     if not releases:
         remote = run("gh", "api", f"repos/merklejerk/holtburger/commits/{tag}", "--jq", ".sha")
         if remote != commit:
-            raise ValueError("Remote candidate tag does not point to the candidate commit")
+            raise ValueError("Remote release tag does not point to the release commit")
         # The create response owns the draft identity. A fresh list can omit the new draft.
         created = run("gh", "api", "repos/merklejerk/holtburger/releases", "--method", "POST",
                       "--raw-field", f"tag_name={tag}", "--raw-field", f"target_commitish={commit}",
                       "--raw-field", f"name=Holtburger {check_versions()}",
-                      "--field", "draft=true", "--field", "prerelease=true",
+                      "--field", "draft=true", "--field", f"prerelease={str(distribution_kind() == 'nightly').lower()}",
+                      "--raw-field", "make_latest=false",
                       "--field", f"body=@{ROOT / 'release/RELEASE_NOTES.md'}")
         releases = [json.loads(created)]
     if len(releases) != 1:
-        raise ValueError("Expected exactly one candidate draft release")
+        raise ValueError("Expected exactly one draft release")
     release = releases[0]
     if not release["draft"] or release["target_commitish"] != commit:
         raise ValueError("Refusing to modify a published release or a draft for another commit")
@@ -524,24 +586,20 @@ def stage(artifacts: Path, tag: str) -> None:
     for path in files:
         if path.name in uploaded:
             if uploaded[path.name] != f"sha256:{digest(path)}":
-                raise ValueError(f"Draft asset conflicts with verified candidate: {path.name}")
+                raise ValueError(f"Draft asset conflicts with verified release: {path.name}")
         else:
             run("gh", "release", "upload", tag, str(path), "--repo", "merklejerk/holtburger")
     print(f"Draft staged for final user verification: {release['html_url']}")
 
 
-def flatpak_recipe_path(product: str, *, nightly_cli: bool = False) -> Path:
-    """Keep main's CLI installation separate from the alpha products."""
-    if nightly_cli:
-        if product != "cli":
-            raise ValueError("The nightly CLI recipe requires a CLI native package")
-        return CLI_NIGHTLY_FLATPAK_RECIPE
+def flatpak_recipe_path(product: str) -> Path:
+    """Both distributions share one installation identity per product."""
     return CLI_FLATPAK_RECIPE if product == "cli" else THREED_FLATPAK_RECIPE
 
 
-def flatpak_recipe(product: str, *, nightly_cli: bool = False) -> dict:
-    """Expand one product recipe, using the alpha's shared Freedesktop runtime generation."""
-    path = flatpak_recipe_path(product, nightly_cli=nightly_cli)
+def flatpak_recipe(product: str) -> dict:
+    """Expand one product recipe, using the suite's shared Freedesktop runtime generation."""
+    path = flatpak_recipe_path(product)
     recipe = json.loads(run("flatpak-builder", "--show-manifest", str(path)))
     runtime = json.loads(THREED_FLATPAK_RECIPE.read_text())
     for key in ("runtime", "runtime-version", "sdk"):
@@ -549,17 +607,17 @@ def flatpak_recipe(product: str, *, nightly_cli: bool = False) -> dict:
     return recipe
 
 
-def require_flatpak_candidate(info: dict) -> None:
-    """Admit only an inspected Linux package with the current candidate identity."""
+def require_flatpak_release(info: dict) -> None:
+    """Admit only an inspected Linux package with the current release identity."""
     if info["target"] != "x86_64-unknown-linux-gnu":
-        raise ValueError("The candidate Flatpaks require Linux x86-64 inputs")
+        raise ValueError("The release Flatpaks require Linux x86-64 inputs")
     commit, _ = source_identity()
     if (info["commit"], info["version"], info["modified"]) != (commit, check_versions(), False):
-        raise ValueError("Flatpak input does not match the clean candidate identity")
+        raise ValueError("Flatpak input does not match the clean release identity")
 
 
 def flatpak_runtime_ref(recipe: dict) -> str:
-    """Canonical runtime identity for the candidate's supported Linux x86-64 architecture."""
+    """Canonical runtime identity for the release's supported Linux x86-64 architecture."""
     return f"{recipe['runtime']}/x86_64/{recipe['runtime-version']}"
 
 
@@ -575,13 +633,13 @@ def installed_flatpak_runtime(files: Path, recipe: dict) -> str:
     return runtime
 
 
-def flatpak_manifest(native: Path, output: Path, *, nightly_cli: bool = False) -> None:
+def flatpak_manifest(native: Path, output: Path) -> None:
     """Package one inspected native inventory without rebuilding or duplicating its receipt."""
     info = verify_bundle(native)
-    require_flatpak_candidate(info)
+    require_flatpak_release(info)
     product = info["product"]
-    recipe_path = flatpak_recipe_path(product, nightly_cli=nightly_cli)
-    recipe = flatpak_recipe(product, nightly_cli=nightly_cli)
+    recipe_path = flatpak_recipe_path(product)
+    recipe = flatpak_recipe(product)
     module = next(module for module in recipe["modules"] if module["name"] == f"holtburger-{product}")
     payload = next(source for source in module["sources"] if source.get("dest") == "bundle")
     payload["path"] = str(native.resolve())
@@ -593,10 +651,10 @@ def flatpak_manifest(native: Path, output: Path, *, nightly_cli: bool = False) -
     write_json(output, recipe)
 
 
-def prepare_flatpak(artifacts: Path, product: str, output: Path, *, nightly_cli: bool = False) -> Path:
+def prepare_flatpak(artifacts: Path, product: str, output: Path) -> Path:
     """Extract the selected verified Linux archive as its Flatpak's immutable input."""
     record = json.loads((artifacts / f"metadata-{product}-x86_64-unknown-linux-gnu.json").read_text())
-    require_flatpak_candidate(record)
+    require_flatpak_release(record)
     if record["product"] != product:
         raise ValueError("Flatpak input product differs from the requested product")
     archive = artifacts / record["archive"]
@@ -609,7 +667,7 @@ def prepare_flatpak(artifacts: Path, product: str, output: Path, *, nightly_cli:
     for key in info:
         if info[key] != record[key]:
             raise ValueError(f"Flatpak archive metadata differs from its native input: {key}")
-    flatpak_manifest(native, output, nightly_cli=nightly_cli)
+    flatpak_manifest(native, output)
     return native.resolve()
 
 
@@ -639,7 +697,7 @@ def record_flatpak(files: Path, native: Path, bundle: Path, output: Path) -> Non
     installed = files / "lib/holtburger"
     if json.loads((installed / "build-info.json").read_text()) != info:
         raise ValueError("Installed Flatpak identity differs from its native input")
-    require_flatpak_candidate(info)
+    require_flatpak_release(info)
     verify_payload(native, installed)
     helper_identity = {}
     if info["product"] == "cli":
@@ -673,10 +731,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     planning = commands.add_parser("plan")
-    planning.add_argument("--purpose", choices=("candidate", "diagnostic"), default="candidate")
+    planning.add_argument("--purpose", choices=("release", "nightly", "diagnostic"), default="release")
     planning.add_argument("--product", choices=("both", *PRODUCTS), default="both")
     planning.add_argument("--target", choices=("all", *(entry.triple for entry in TARGETS)), default="all")
-    planning.add_argument("--version")
+    preparation = commands.add_parser("prepare-source")
+    preparation.add_argument("--kind", choices=("release", "nightly"), required=True)
     build = commands.add_parser("assemble")
     build.add_argument("--product", choices=PRODUCTS, required=True)
     build.add_argument("--target", choices=[target.triple for target in TARGETS], required=True)
@@ -695,8 +754,6 @@ def main() -> None:
     flatpak.add_argument("--native", type=Path, required=True)
     flatpak.add_argument("--output", type=Path, required=True)
     prepare = commands.add_parser("prepare-flatpak")
-    prepare.add_argument("--nightly-cli", action="store_true",
-                         help="Keep the main CLI Flatpak identity instead of the alpha identity")
     prepare.add_argument("--product", choices=PRODUCTS, required=True)
     prepare.add_argument("--artifacts", type=Path, required=True)
     prepare.add_argument("--output", type=Path, required=True)
@@ -707,7 +764,9 @@ def main() -> None:
     record.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args()
     if arguments.command == "plan":
-        plan(arguments.product, arguments.target, arguments.purpose, arguments.version)
+        plan(arguments.product, arguments.target, arguments.purpose)
+    elif arguments.command == "prepare-source":
+        prepare_source(ROOT, source_distribution(ROOT, arguments.kind))
     elif arguments.command == "assemble":
         assemble(arguments)
     elif arguments.command == "verify":
@@ -717,8 +776,7 @@ def main() -> None:
     elif arguments.command == "flatpak-manifest":
         flatpak_manifest(arguments.native.resolve(), arguments.output)
     elif arguments.command == "prepare-flatpak":
-        print(prepare_flatpak(arguments.artifacts.resolve(), arguments.product, arguments.output.resolve(),
-                              nightly_cli=arguments.nightly_cli))
+        print(prepare_flatpak(arguments.artifacts.resolve(), arguments.product, arguments.output.resolve()))
     elif arguments.command == "record-flatpak":
         record_flatpak(arguments.files.resolve(), arguments.native.resolve(),
                        arguments.bundle.resolve(), arguments.output)

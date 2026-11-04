@@ -25,8 +25,7 @@ class ReleaseIdentityTests(unittest.TestCase):
                 validate_version(version)
 
     def test_beta_accepts_only_unsuffixed_zero_major_versions(self):
-        validate_channel_version("alpha", "0.1.4-alpha.1")
-        validate_channel_version("alpha", "0.1.4")
+        validate_channel_version("beta", "0.2.0-nightly-" + "a" * 40, "nightly")
         validate_channel_version("beta", "0.1.4")
         for version in ("0.1.4-beta.1", "1.0.0"):
             with self.subTest(version=version), self.assertRaisesRegex(ValueError, "unsuffixed"):
@@ -37,10 +36,10 @@ class ReleaseIdentityTests(unittest.TestCase):
             root = Path(directory)
             (root / "release").mkdir()
             path = root / "release/channel.json"
-            for channel in ("alpha", "beta"):
+            for channel in ("beta",):
                 path.write_text(json.dumps(channel))
                 self.assertEqual(release_channel(root), channel)
-            for invalid in ("stable", {"channel": "alpha"}, None):
+            for invalid in ("alpha", "stable", {"channel": "beta"}, None):
                 path.write_text(json.dumps(invalid))
                 with self.subTest(value=invalid), self.assertRaisesRegex(ValueError, "channel"):
                     release_channel(root)

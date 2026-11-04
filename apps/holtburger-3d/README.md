@@ -48,7 +48,7 @@ bytes; package/archive inspection requires both hints. This selected the dedicat
 OpenGL test on an NVIDIA/Intel hybrid laptop, but is not a guarantee across drivers or machines.
 Before packaging on Windows, install Python 3.12 or newer and run
 `npm run setup:windows-packaging`; `npm run test:windows-packaging` checks synthetic PE fixtures.
-Alpha CI installs the pinned build dependency and runs these checks automatically.
+Release CI installs the pinned build dependency and runs these checks automatically.
 
 The Explorer runs the shared content, scene, runtime, and WebGL2 rendering architecture against real
 client data. Client mode is a separate first-cut composition: `ClientRuntime` owns the network,
@@ -582,7 +582,7 @@ sidecar and asset setup, then connects; highlighting a profile does not start th
 returns to the launcher in the same window. Character logout keeps the connection and returns to
 character selection. Complete CLI account/connection arguments bypass the launcher initially;
 `--account` remains required for a direct connection. Use an explicit `explorer` argument for offline
-exploration. Both clients use `-p` for port and `-P` for password. See the [alpha quickstart](../../release/QUICKSTART.md) for native
+exploration. Both clients use `-p` for port and `-P` for password. See the [product quickstart](../../release/QUICKSTART.md) for native
 paths, retail-content selection, and bundle layout.
 
 Add `--no-launcher` with `--account` for a direct session that exits on disconnect, cancellation,
@@ -972,11 +972,12 @@ interactive Explorer verification. Do not advertise another platform as supporte
 packaged application has been exercised on that operating system.
 
 The branch-scoped `holtburger-3d-portability.yml` workflow is diagnostic only: it has read-only
-permissions, retains artifacts briefly, and cannot publish a GitHub release. The cargo-dist
-release workflow remains CLI-only. The separate `candidate-release.yml` workflow builds suites
-from `3d-next` and stages draft GitHub prereleases for final user verification. See
-[release preparation](../../release/RELEASING.md); automated packaging checks do
-not replace the final native-bundle acceptance step.
+permissions, retains artifacts briefly, and cannot publish a GitHub release. The shared
+`release.yml` workflow builds both products from main, stages beta drafts for native
+acceptance, and publishes verified nightlies as prereleases. Both use the same installation
+identities. Nightly builds do not check for updates. See
+[release preparation](../../release/RELEASING.md); automated packaging checks do not replace
+native acceptance.
 
 ## Security and dependency maintenance
 
@@ -992,7 +993,7 @@ branch portability probe and a fresh manual smoke check on available hardware. U
 remain manual.
 
 The packaged resources contain Holtburger's AGPLv3 license alongside the Electron and Chromium
-notices supplied by Electron. The alpha suite adds download checksums, build identity, and
+notices supplied by Electron. The release suite adds download checksums, build identity, and
 documented build/publication instructions in `release/RELEASING.md`.
 
 The WebGL2 backend has one flat-frame schedule: opaque scene color and depth are

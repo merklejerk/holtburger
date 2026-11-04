@@ -1,4 +1,4 @@
-# Holtburger 3D alpha
+# Holtburger 3D
 
 Choose the Windows x86-64 setup executable, macOS Apple Silicon DMG, or a portable
 archive for Linux x86-64, Windows x86-64, or macOS Apple Silicon. For portable use,
@@ -114,13 +114,17 @@ See the release notes for which native targets were actually verified.
 ## Flatpak
 
 Install `holtburger-3d-VERSION-x86_64.flatpak`. The 3D application ID is
-`io.github.merklejerk.holtburger-3d-alpha`:
+`io.github.merklejerk.holtburger-3d`:
+
+Beta and nightly share installation locations and profiles. Install the downloaded bundle
+with `flatpak install --user --reinstall ./holtburger-3d-VERSION-x86_64.flatpak` to replace
+either build with the other. Nightlies do not check for updates.
 
 ```sh
-flatpak install --user ./holtburger-3d-VERSION-x86_64.flatpak
-flatpak run --filesystem=/path/to/retail:ro io.github.merklejerk.holtburger-3d-alpha \
+flatpak install --user --reinstall ./holtburger-3d-VERSION-x86_64.flatpak
+flatpak run --filesystem=/path/to/retail:ro io.github.merklejerk.holtburger-3d \
   --host SERVER --port 9000 --account ACCOUNT --password PASSWORD --content /path/to/retail
-flatpak run --filesystem=/path/to/retail:ro io.github.merklejerk.holtburger-3d-alpha \
+flatpak run --filesystem=/path/to/retail:ro io.github.merklejerk.holtburger-3d \
   explorer --content /path/to/retail
 ```
 
@@ -128,9 +132,5 @@ Use absolute paths and quote paths containing spaces. The asset picker can obtai
 through the desktop's document portal, which requires a working portal backend. Saved
 portal selections retain their grants. An explicit override requires its filesystem grant
 on each invocation. Settings/cache live under
-`~/.var/app/io.github.merklejerk.holtburger-3d-alpha/`. Graphics and audio use the desktop's
+`~/.var/app/io.github.merklejerk.holtburger-3d/`. Graphics and audio use the desktop's
 Wayland/X11, GPU, and audio services.
-
-This application ID replaces the earlier 3D alpha ID. Flatpak treats it as a separate
-installation with a new settings directory; earlier settings and portal grants are not
-migrated automatically.

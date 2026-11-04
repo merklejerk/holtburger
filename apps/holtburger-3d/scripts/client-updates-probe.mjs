@@ -44,7 +44,7 @@ export async function probeClientUpdates(client, evaluate, consoleMessages) {
 	await wait(`${updates} && ${app}?.read().gates.connection.waiting > 0`);
 	assert.equal(await read(`${icon} === null`), true);
 	await read(
-		`${updates}.publish({kind: 'available', version: '0.2.0', tag: 'candidate-20261103-abcdef123'})`,
+		`${updates}.publish({kind: 'available', version: '0.2.0', tag: 'v0.2.0'})`,
 	);
 	const surfaces = [await check("loading")];
 	await read(`${icon}.click()`);

@@ -1,5 +1,5 @@
 {
-  "id": "io.github.merklejerk.holtburger-3d-alpha",
+  "id": "io.github.merklejerk.holtburger-3d",
   "runtime": "org.freedesktop.Platform",
   "runtime-version": "26.08",
   "sdk": "org.freedesktop.Sdk",
@@ -24,9 +24,9 @@
         "mkdir -p /app/lib/holtburger /app/bin",
         "cp -a bundle/. /app/lib/holtburger/",
         "install -Dm755 holtburger-3d /app/bin/holtburger-3d",
-        "install -Dm644 io.github.merklejerk.holtburger-3d-alpha.desktop /app/share/applications/io.github.merklejerk.holtburger-3d-alpha.desktop",
-        "install -Dm644 io.github.merklejerk.holtburger-3d-alpha.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-3d-alpha.metainfo.xml",
-        "install -Dm644 icon.png /app/share/icons/hicolor/512x512/apps/io.github.merklejerk.holtburger-3d-alpha.png"
+        "install -Dm644 io.github.merklejerk.holtburger-3d.desktop /app/share/applications/io.github.merklejerk.holtburger-3d.desktop",
+        "install -Dm644 io.github.merklejerk.holtburger-3d.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-3d.metainfo.xml",
+        "install -Dm644 icon.png /app/share/icons/hicolor/512x512/apps/io.github.merklejerk.holtburger-3d.png"
       ],
       "sources": [
         {
@@ -35,11 +35,11 @@
         },
         {
           "type": "file",
-          "path": "io.github.merklejerk.holtburger-3d-alpha.desktop"
+          "path": "io.github.merklejerk.holtburger-3d.desktop"
         },
         {
           "type": "file",
-          "path": "io.github.merklejerk.holtburger-3d-alpha.metainfo.xml"
+          "path": "io.github.merklejerk.holtburger-3d.metainfo.xml"
         },
         {
           "type": "file",

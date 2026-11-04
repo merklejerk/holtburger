@@ -1,9 +1,9 @@
 {
 	"name": "holtburger-3d",
 	"private": true,
-	"version": "0.1.5-alpha",
+	"version": "0.2.0",
 	"license": "AGPL-3.0-only",
-	"desktopName": "io.github.merklejerk.holtburger-3d-alpha.desktop",
+	"desktopName": "io.github.merklejerk.holtburger-3d.desktop",
 	"type": "module",
 	"main": "dist-electron/electron/main.js",
 	"engines": {

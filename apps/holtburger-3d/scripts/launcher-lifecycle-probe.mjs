@@ -374,10 +374,21 @@ async function runProbe() {
 			`(async () => {
 			const require = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json');
 			const { app, BrowserWindow } = require('electron');
-			const { AppUpdates } = require(require('node:path').join(app.getAppPath(), 'dist-electron/electron/app-updates.js'));
+			const { AppUpdates, loadUpdateBuild } = require(require('node:path').join(app.getAppPath(), 'dist-electron/electron/app-updates.js'));
 			const { APP_UPDATE_TUNING } = require(require('node:path').join(app.getAppPath(), 'dist-electron/src/app/app-tuning.js'));
-			const probe = { requests: [], opened: [], clock: 0, feed: { schemaVersion: 1, version: '0.1.4', tag: 'candidate-20261103-abcdef123' } };
-			const owner = new AppUpdates({ development: false, modified: false, version: '0.1.4-alpha.1', channel: 'alpha', revision: 'abcdef12' }, {
+			const metadataPath = require('node:path').join(app.getAppPath(), 'dist/build-info.json');
+			const metadata = JSON.parse(require('node:fs').readFileSync(metadataPath, 'utf8'));
+			if (metadata.kind === 'nightly') {
+				if (loadUpdateBuild(metadataPath, console.error) !== null) throw new Error('Packaged nightly admitted update checking');
+				let requests = 0;
+				const nightly = new AppUpdates(metadata, { request: async () => { requests++; throw new Error('Nightly requested updates'); }, now: () => 0, publish: () => {}, report: console.error, openExternal: async () => {} });
+				nightly.start(); nightly.setWindowVisible(true); nightly.registerPregame(true);
+				await new Promise((resolve) => setTimeout(resolve, 0));
+				if (requests !== 0) throw new Error('Packaged nightly requested updates');
+				nightly.stop();
+			}
+			const probe = { requests: [], opened: [], clock: 0, feed: { schemaVersion: 1, version: '0.1.4', tag: 'v0.1.4' } };
+			const owner = new AppUpdates({ development: false, modified: false, version: '0.1.3', channel: 'beta', kind: 'release', revision: 'abcdef12' }, {
 				request: async (url) => { probe.requests.push(url); return Response.json(probe.feed); },
 				now: () => probe.clock,
 				publish: (snapshot) => BrowserWindow.getAllWindows()[0].webContents.send('updates:state', snapshot),
@@ -474,7 +485,7 @@ async function runProbe() {
 		);
 		await evaluate(
 			inspector,
-			`__updatesProbe.feed.version = '0.1.4-alpha.1'; __updatesProbe.advance()`,
+			`__updatesProbe.feed.version = '0.1.3'; __updatesProbe.feed.tag = 'v0.1.3'; __updatesProbe.advance()`,
 		);
 		await waitFor(
 			() => evaluate(page, `${updateIcon} === null`),

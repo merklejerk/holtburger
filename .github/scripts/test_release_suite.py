@@ -15,29 +15,36 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-from candidate_release import (
+from release_suite import (
     TARGETS, INSTALLER_TARGETS, archive_bundle, digest, executable_architecture, extract_bundle,
-    assemble, manifest, plan, stage, validate_tag, verify_bundle,
+    assemble, manifest, plan, stage, validate_tag, verify_bundle, already_published,
     record_flatpak, flatpak_manifest,
     flatpak_runtime_ref, THREED_FLATPAK_RECIPE,
 )
 from cli_content_input import CONTENT_FILES, unpack_cli_content
 from test_cli_content_input import archive as cli_archive, components as cli_components
+from test_promote_updates import release_fixture
 from release_version import check_versions, validate_version
-from candidate_changes import documentation_only
+from release_identity import Distribution
+from build_changes import documentation_only
 
 
 class ReleasePlanTests(unittest.TestCase):
     """Manual selections stay bounded; release tags retain the complete product/target contract."""
 
+    def setUp(self):
+        identity = patch("release_suite.source_distribution", return_value=Distribution("release", check_versions(), "a" * 40))
+        identity.start()
+        self.addCleanup(identity.stop)
+
     def test_manual_selection_emits_only_the_requested_native_matrix(self):
         for product, target in (("both", "all"), ("cli", TARGETS[0].triple), ("3d", TARGETS[-1].triple)):
             with self.subTest(product=product, target=target), \
                  patch.dict("os.environ", {"GITHUB_REF_TYPE": "branch"}, clear=True), \
-                 patch("candidate_release.source_identity", return_value=("a" * 40, False)):
+                 patch("release_suite.source_identity", return_value=("a" * 40, False)):
                 output = io.StringIO()
                 with redirect_stdout(output):
-                    plan(product, target, "diagnostic", None)
+                    plan(product, target, "diagnostic")
                 result = json.loads(output.getvalue())
                 selected = result["linux_matrix"]["include"] + result["desktop_matrix"]["include"]
                 self.assertEqual(result["product"], product)
@@ -48,24 +55,24 @@ class ReleasePlanTests(unittest.TestCase):
     def test_partial_release_tag_selection_is_refused(self):
         for product, target in (("cli", "all"), ("both", TARGETS[0].triple)):
             with self.subTest(product=product), \
-                 patch.dict("os.environ", {"GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": "candidate-20261028-aaaaaaaa"}, clear=True), \
-                 patch("candidate_release.source_identity", return_value=("a" * 40, False)), \
-                 patch("candidate_release.subprocess.run"):
+                 patch.dict("os.environ", {"GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": "release-20261028-aaaaaaaa"}, clear=True), \
+                 patch("release_suite.source_identity", return_value=("a" * 40, False)), \
+                 patch("release_suite.subprocess.run"):
                 with self.assertRaisesRegex(ValueError, "both products and every supported native target"):
-                    plan(product, target, "diagnostic", None)
+                    plan(product, target, "release")
 
-    def test_diagnostic_dispatch_has_no_candidate_tag_or_release_ancestry_work(self):
+    def test_diagnostic_dispatch_has_no_release_tag_or_release_ancestry_work(self):
         with (
             patch.dict(os.environ, {
                 "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF_TYPE": "branch",
                 "GITHUB_REF": "refs/heads/feature-navigation",
             }, clear=True),
-            patch("candidate_release.source_identity", return_value=("a" * 40, False)),
-            patch("candidate_release.run") as external,
-            patch("candidate_release.subprocess.run") as ancestry,
+            patch("release_suite.source_identity", return_value=("a" * 40, False)),
+            patch("release_suite.run") as external,
+            patch("release_suite.subprocess.run") as ancestry,
             redirect_stdout(io.StringIO()) as output,
         ):
-            plan("cli", TARGETS[0].triple, "diagnostic", None)
+            plan("cli", TARGETS[0].triple, "diagnostic")
         result = json.loads(output.getvalue())
         self.assertEqual(result["tag"], "")
         self.assertEqual(result["product"], "cli")
@@ -73,25 +80,48 @@ class ReleasePlanTests(unittest.TestCase):
         external.assert_not_called()
         ancestry.assert_not_called()
 
-    def test_partial_manual_candidate_is_refused_before_deriving_or_creating_a_tag(self):
+    def test_partial_manual_release_is_refused_before_deriving_or_creating_a_tag(self):
         for product, target in (("3d", "all"), ("both", TARGETS[0].triple)):
             with (
                 self.subTest(product=product, target=target),
                 patch.dict(os.environ, {
                     "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF_TYPE": "branch",
-                    "GITHUB_REF": "refs/heads/3d-next",
+                    "GITHUB_REF": "refs/heads/main",
                 }, clear=True),
-                patch("candidate_release.source_identity", return_value=("a" * 40, False)),
-                patch("candidate_release.run") as external,
+                patch("release_suite.source_identity", return_value=("a" * 40, False)),
+                patch("release_suite.run") as external,
             ):
                 with self.assertRaisesRegex(ValueError, "both products and every supported native target"):
-                    plan(product, target, "candidate", "0.1.5")
+                    plan(product, target, "release")
                 external.assert_not_called()
 
     def test_shipped_product_quickstarts_are_build_inputs(self):
         self.assertTrue(documentation_only("README.md"))
         for path in ("release/CLI_QUICKSTART.md", "release/3D_QUICKSTART.md"):
             self.assertFalse(documentation_only(path))
+
+
+class PublishedDistributionTests(unittest.TestCase):
+    """Skipping expensive builds requires complete verified publication evidence."""
+
+    def test_complete_nightly_skips_but_incomplete_or_conflicting_publications_fail(self):
+        commit = "a" * 40
+        identity = Distribution("nightly", "0.2.0-nightly-" + commit, commit)
+        record, data = release_fixture(identity.version, "beta", commit, 1, "nightly")
+        record.update(target_commitish=commit, prerelease=True)
+        with patch("release_suite.release_records", return_value=[record]), \
+             patch("release_suite.subprocess.check_output", return_value=data):
+            self.assertTrue(already_published(identity))
+            record["draft"] = True
+            self.assertFalse(already_published(identity))
+            record["draft"] = False
+            record["assets"][0]["digest"] = "sha256:" + "b" * 64
+            with self.assertRaisesRegex(ValueError, "digest differs"):
+                already_published(identity)
+            record["target_commitish"] = "b" * 40
+            with self.assertRaisesRegex(ValueError, "another source"):
+                already_published(identity)
+
 
 
 class NativeArchiveTests(unittest.TestCase):
@@ -157,7 +187,7 @@ class NativeProductTests(unittest.TestCase):
         binaries = root / "target" / target.triple / "release"
         binaries.mkdir(parents=True)
         (root / "release").mkdir()
-        (root / "release/channel.json").write_text(json.dumps("alpha"))
+        (root / "release/channel.json").write_text(json.dumps("beta"))
         (root / f"release/{product.upper()}_QUICKSTART.md").write_text("Product instructions")
         (root / "LICENSE.md").write_text("License")
         notices = root / "notices.html"
@@ -190,13 +220,13 @@ class NativeProductTests(unittest.TestCase):
             executable(package / "resources/holtburger-3d-host")
         args = Namespace(product=product, target=target.triple, content=content,
                          package=package, notices=notices, output=root / "output")
-        with patch("candidate_release.ROOT", root), \
-             patch("candidate_release.CLI_CONTENT_DESCRIPTOR", descriptor), \
-             patch("candidate_release.sys.platform", "linux"), \
-             patch("candidate_release.check_versions", return_value=version), \
-             patch("candidate_release.source_identity", return_value=(commit, False)), \
-             patch("candidate_release.inspect_linkage", return_value={}), \
-             patch("candidate_release.run", return_value=json.dumps({"version": version, "revision": commit[:8], "modified": False, "channel": "alpha"})) as command:
+        with patch("release_suite.ROOT", root), \
+             patch("release_suite.CLI_CONTENT_DESCRIPTOR", descriptor), \
+             patch("release_suite.sys.platform", "linux"), \
+             patch("release_suite.check_versions", return_value=version), \
+             patch("release_suite.source_identity", return_value=(commit, False)), \
+             patch("release_suite.inspect_linkage", return_value={}), \
+             patch("release_suite.run", return_value=json.dumps({"version": version, "revision": commit[:8], "modified": False, "channel": "beta", "kind": "release"})) as command:
             assemble(args)
             if product == "cli":
                 command.assert_not_called()
@@ -244,13 +274,13 @@ class ReleaseVersionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid suite SemVer"):
             validate_version("0.1.0-alpha.01")
         with self.assertRaisesRegex(ValueError, "Invalid suite SemVer"):
-            validate_version("candidate-20261026")
+            validate_version("release-20261026")
         commit = "a" * 40
-        validate_tag("candidate-20261026-" + commit[:8], commit)
-        with self.assertRaisesRegex(ValueError, "Candidate tag must"):
-            validate_tag("v0.1.0-alpha.1", commit)
-        with self.assertRaisesRegex(ValueError, "does not match"):
-            validate_tag("candidate-20261026-" + "b" * 8, commit)
+        validate_tag("v0.2.0", "0.2.0", commit, "release")
+        with self.assertRaisesRegex(ValueError, "must equal"):
+            validate_tag("v0.2.1", "0.2.0", commit, "release")
+        with self.assertRaises(ValueError):
+            validate_tag("v0.2.0-nightly-" + "b" * 40, "0.2.0-nightly-" + "b" * 40, commit, "nightly")
 
     def test_checker_detects_a_manifest_lockfile_disagreement(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -288,7 +318,7 @@ class ReleaseManifestTests(unittest.TestCase):
             notices.write_text("original notices")
             content = {"contentSha256": "c" * 64,
                        "contentFiles": {name: hashlib.sha256(name.encode()).hexdigest() for name in CONTENT_FILES}}
-            identity = {"commit": commit, "version": version, "modified": False, "channel": "alpha",
+            identity = {"commit": commit, "version": version, "modified": False, "channel": "beta", "kind": "release",
                         "noticesSha256": digest(notices)}
             for product in ("cli", "3d"):
                 for target in TARGETS:
@@ -304,7 +334,7 @@ class ReleaseManifestTests(unittest.TestCase):
                 bundle.write_bytes(product.encode())
                 record = {**identity, "product": product,
                           "target": next(target.triple for target in TARGETS if target.platform == "linux"),
-                          "appId": f"io.github.merklejerk.holtburger-{'cli-alpha' if product == 'cli' else '3d-alpha'}",
+                          "appId": f"io.github.merklejerk.holtburger-{product}",
                           "archive": bundle.name, "sha256": digest(bundle),
                           "runtime": flatpak_runtime_ref(json.loads(THREED_FLATPAK_RECIPE.read_text()))}
                 if product == "cli":
@@ -320,8 +350,8 @@ class ReleaseManifestTests(unittest.TestCase):
                          "format": installer.format, "installer": path.name,
                          "sha256": digest(path), "nativeArchiveSha256": native["sha256"]}
                 (root / f"metadata-3d-installer-{installer.triple}.json").write_text(json.dumps(write))
-            with patch("candidate_release.source_identity", return_value=(commit, False)), \
-                 patch("candidate_release.CLI_CONTENT_DESCRIPTOR", descriptor):
+            with patch("release_suite.source_identity", return_value=(commit, False)), \
+                 patch("release_suite.CLI_CONTENT_DESCRIPTOR", descriptor):
                 files = manifest(root)
                 expected_downloads = {notices.name, "release-manifest.json", "SHA256SUMS"}
                 expected_downloads.update(record["archive"] for record in json.loads((root / "release-manifest.json").read_text())["native"])
@@ -358,7 +388,7 @@ class ReleaseManifestTests(unittest.TestCase):
                 receipt = root / "metadata-3d-flatpak.json"
                 record = json.loads(receipt.read_text())
                 for change in ({"commit": "b" * 40}, {"runtime": "org.example.Other/x86_64/test"},
-                               {"appId": "io.github.merklejerk.holtburger-3d"}):
+                               {"appId": "io.github.merklejerk.wrong"}):
                     receipt.write_text(json.dumps({**record, **change}))
                     with self.subTest(change=change), self.assertRaisesRegex(ValueError, "Flatpak release identity mismatch"):
                         manifest(root)
@@ -384,7 +414,7 @@ class ProductFlatpakTests(unittest.TestCase):
     def setUp(self):
         self.commit = "a" * 40
         self.info = {
-            "commit": self.commit, "version": check_versions(), "modified": False, "channel": "alpha",
+            "commit": self.commit, "version": check_versions(), "modified": False, "channel": "beta", "kind": "release",
             "target": next(target.triple for target in TARGETS if target.platform == "linux"),
             "product": "3d",
         }
@@ -401,9 +431,9 @@ class ProductFlatpakTests(unittest.TestCase):
             with self.subTest(product=product), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 native, output = root / "inspected native", root / "generated/manifest.json"
-                with patch("candidate_release.verify_bundle", return_value={**self.info, "product": product}), \
-                     patch("candidate_release.source_identity", return_value=(self.commit, False)), \
-                     patch("candidate_release.flatpak_recipe", return_value=recipe):
+                with patch("release_suite.verify_bundle", return_value={**self.info, "product": product}), \
+                     patch("release_suite.source_identity", return_value=(self.commit, False)), \
+                     patch("release_suite.flatpak_recipe", return_value=recipe):
                     flatpak_manifest(native, output)
                 modules = json.loads(output.read_text())["modules"]
                 self.assertTrue(Path(modules[0]["sources"][0]["path"]).is_absolute())
@@ -414,9 +444,9 @@ class ProductFlatpakTests(unittest.TestCase):
     def test_wrong_commit_modified_input_and_wrong_platform_are_refused(self):
         for change in ({"commit": "b" * 40}, {"modified": True}, {"target": "other-target"}):
             with self.subTest(change=change), \
-                 patch("candidate_release.verify_bundle", return_value={**self.info, **change}), \
-                 patch("candidate_release.source_identity", return_value=(self.commit, False)), \
-                 patch("candidate_release.flatpak_recipe") as recipe:
+                 patch("release_suite.verify_bundle", return_value={**self.info, **change}), \
+                 patch("release_suite.source_identity", return_value=(self.commit, False)), \
+                 patch("release_suite.flatpak_recipe") as recipe:
                 with self.assertRaises(ValueError):
                     flatpak_manifest(Path("native"), Path("manifest.json"))
                 recipe.assert_not_called()
@@ -432,8 +462,8 @@ class ProductFlatpakTests(unittest.TestCase):
             (installed / "build-info.json").write_text(json.dumps(self.info))
             (native / "executable").write_bytes(b"inspected native executable")
             (installed / "executable").write_bytes(b"changed executable")
-            with patch("candidate_release.verify_bundle", return_value=self.info), \
-                 patch("candidate_release.source_identity", return_value=(self.commit, False)):
+            with patch("release_suite.verify_bundle", return_value=self.info), \
+                 patch("release_suite.source_identity", return_value=(self.commit, False)):
                 with self.assertRaisesRegex(ValueError, "payload file differs"):
                     record_flatpak(files, native, root / "bundle", root / "receipt")
 
@@ -447,15 +477,15 @@ class ProductFlatpakTests(unittest.TestCase):
             (files / "bin").mkdir()
             for tool in ("holtburger-cli", "dat2hba", "dat-tool"):
                 (files / "bin" / tool).symlink_to(f"/app/lib/holtburger/{tool}")
-            recipe = {"id": "io.github.merklejerk.holtburger-cli-alpha",
+            recipe = {"id": "io.github.merklejerk.holtburger-cli",
                       "runtime": "org.freedesktop.Platform", "runtime-version": "26.08"}
             runtime = flatpak_runtime_ref(recipe)
             (files.parent / "metadata").write_text(f"[Application]\nname={recipe['id']}\nruntime={runtime}\n")
             bundle = root / "cli.flatpak"
             bundle.write_bytes(b"synthetic Flatpak container")
             output = root / "record.json"
-            with patch("candidate_release.source_identity", return_value=(self.commit, False)), \
-                 patch("candidate_release.flatpak_recipe", return_value=recipe):
+            with patch("release_suite.source_identity", return_value=(self.commit, False)), \
+                 patch("release_suite.flatpak_recipe", return_value=recipe):
                 record_flatpak(files, native, bundle, output)
                 record = json.loads(output.read_text())
                 self.assertEqual(record["product"], "cli")
@@ -468,7 +498,7 @@ class ProductFlatpakTests(unittest.TestCase):
                     record_flatpak(files, native, bundle, output)
                 executable.chmod(0o755)
                 metadata = files.parent / "metadata"
-                for field, value, message in (("name", "io.github.merklejerk.holtburger-3d-alpha", "application ID"),
+                for field, value, message in (("name", "io.github.merklejerk.holtburger-3d", "application ID"),
                                                ("runtime", "org.example.Wrong/x86_64/test", "runtime differs")):
                     values = {"name": recipe["id"], "runtime": runtime, field: value}
                     metadata.write_text(f"[Application]\nname={values['name']}\nruntime={values['runtime']}\n")
@@ -485,10 +515,10 @@ class DraftPublicationTests(unittest.TestCase):
 
     def test_created_draft_response_is_used_when_release_lists_remain_empty(self):
         commit = "a" * 40
-        tag = "candidate-20261027-" + commit[:8]
+        tag = f"v{check_versions()}"
         with tempfile.TemporaryDirectory() as temporary:
             artifact = Path(temporary) / "bundle.zip"
-            artifact.write_bytes(b"verified candidate")
+            artifact.write_bytes(b"verified release")
             calls = []
 
             def github(*arguments):
@@ -499,26 +529,26 @@ class DraftPublicationTests(unittest.TestCase):
                     return commit
                 if arguments[:3] == ("gh", "api", "repos/merklejerk/holtburger/releases"):
                     self.assertIn("draft=true", arguments)
-                    self.assertIn("prerelease=true", arguments)
+                    self.assertIn("prerelease=false", arguments)
                     return json.dumps({"draft": True, "target_commitish": commit,
                                        "assets": [], "html_url": "https://example.invalid/draft"})
                 self.assertEqual(arguments[:3], ("gh", "release", "upload"))
                 return ""
 
-            with patch("candidate_release.manifest", return_value=[artifact]), \
-                 patch("candidate_release.source_identity", return_value=(commit, False)), \
-                 patch("candidate_release.run", side_effect=github):
+            with patch("release_suite.manifest", return_value=[artifact]), \
+                 patch("release_suite.source_identity", return_value=(commit, False)), \
+                 patch("release_suite.run", side_effect=github):
                 stage(Path(temporary), tag)
             self.assertEqual(sum("--paginate" in call for call in calls), 1)
             self.assertEqual(sum(call[:3] == ("gh", "release", "upload") for call in calls), 1)
 
     def test_remote_tag_for_another_commit_is_refused_before_creating_a_draft(self):
         commit = "a" * 40
-        with patch("candidate_release.manifest", return_value=[]), \
-             patch("candidate_release.source_identity", return_value=(commit, False)), \
-             patch("candidate_release.run", side_effect=["", "b" * 40]) as command:
-            with self.assertRaisesRegex(ValueError, "Remote candidate tag"):
-                stage(Path("artifacts"), "candidate-20261027-" + commit[:8])
+        with patch("release_suite.manifest", return_value=[]), \
+             patch("release_suite.source_identity", return_value=(commit, False)), \
+             patch("release_suite.run", side_effect=["", "b" * 40]) as command:
+            with self.assertRaisesRegex(ValueError, "Remote release tag"):
+                stage(Path("artifacts"), f"v{check_versions()}")
             self.assertEqual(command.call_count, 2)
 
     def test_existing_matching_asset_is_reused_and_only_missing_asset_is_uploaded(self):
@@ -542,10 +572,10 @@ class DraftPublicationTests(unittest.TestCase):
                 self.assertEqual(arguments[:3], ("gh", "release", "upload"))
                 return ""
 
-            with patch("candidate_release.manifest", return_value=[existing, missing]), \
-                 patch("candidate_release.source_identity", return_value=(commit, False)), \
-                 patch("candidate_release.run", side_effect=github):
-                stage(root, "candidate-20261026-" + commit[:8])
+            with patch("release_suite.manifest", return_value=[existing, missing]), \
+                 patch("release_suite.source_identity", return_value=(commit, False)), \
+                 patch("release_suite.run", side_effect=github):
+                stage(root, f"v{check_versions()}")
             uploads = [call for call in calls if call[:3] == ("gh", "release", "upload")]
             self.assertEqual(len(uploads), 1)
             self.assertIn(str(missing), uploads[0])
@@ -556,20 +586,20 @@ class DraftPublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             artifact = root / "bundle.zip"
-            artifact.write_bytes(b"verified candidate")
+            artifact.write_bytes(b"verified release")
             for draft, asset_digest, diagnostic in (
                 (False, None, "published release"),
-                (True, "sha256:" + "0" * 64, "conflicts with verified candidate"),
+                (True, "sha256:" + "0" * 64, "conflicts with verified release"),
             ):
                 release = {
                     "draft": draft, "target_commitish": commit,
                     "assets": [{"name": artifact.name, "digest": asset_digest}],
                 }
-                with patch("candidate_release.manifest", return_value=[artifact]), \
-                     patch("candidate_release.source_identity", return_value=(commit, False)), \
-                     patch("candidate_release.run", return_value=json.dumps(release)) as github:
+                with patch("release_suite.manifest", return_value=[artifact]), \
+                     patch("release_suite.source_identity", return_value=(commit, False)), \
+                     patch("release_suite.run", return_value=json.dumps(release)) as github:
                     with self.assertRaisesRegex(ValueError, diagnostic):
-                        stage(root, "candidate-20261026-" + commit[:8])
+                        stage(root, f"v{check_versions()}")
                     self.assertEqual(github.call_count, 1)
 
 

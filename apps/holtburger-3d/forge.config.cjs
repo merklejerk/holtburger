@@ -73,7 +73,7 @@ module.exports = {
 		},
 	},
 	packagerConfig: {
-		appBundleId: "io.github.merklejerk.holtburger-3d-alpha",
+		appBundleId: "io.github.merklejerk.holtburger-3d",
 		asar: true,
 		icon: resolve(__dirname, "../../assets/branding/icon"),
 		extendInfo: { CFBundleIconFile: "holtburger.icns" },

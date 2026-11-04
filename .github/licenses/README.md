@@ -1,4 +1,4 @@
-# Alpha native notices
+# Native notices
 
 These are original notice files from the exact native dependency revisions recorded in
 `../native-notices.json`. Preserve the original bytes, including the Windows-1252 encoding

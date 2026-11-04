@@ -14,6 +14,16 @@ import {
 } from "../src/app/app-update-contract.js";
 import { formatError } from "../src/lib/format-error.js";
 
+/** One native admission policy covers metadata loading and direct owner construction. */
+function checkingBuild(build: AppBuild | null): AppBuild | null {
+	return build === null ||
+		build.development ||
+		build.modified ||
+		build.kind === "nightly"
+		? null
+		: build;
+}
+
 /** Optional update metadata failures must never prevent the installed app from starting. */
 export function loadUpdateBuild(
 	path: string,
@@ -21,7 +31,7 @@ export function loadUpdateBuild(
 ): AppBuild | null {
 	try {
 		const build = appBuildSchema.parse(JSON.parse(readFileSync(path, "utf8")));
-		return build.development || build.modified ? null : build;
+		return checkingBuild(build);
 	} catch (error) {
 		report(
 			`Update checking disabled: invalid packaged build identity: ${formatError(error)}`,
@@ -97,7 +107,7 @@ export class AppUpdates {
 	#stopped = false;
 
 	constructor(build: AppBuild | null, dependencies: UpdateDependencies) {
-		this.#build = build;
+		this.#build = checkingBuild(build);
 		this.#dependencies = dependencies;
 	}
 

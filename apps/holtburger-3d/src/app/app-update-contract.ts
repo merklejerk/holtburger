@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { releaseVersionSchema } from "./app-build-contract.js";
 
-/** Candidate identity stays within one fixed repository's release URL namespace. */
-const updateTagSchema = z.string().regex(/^candidate-\d{8}-[0-9a-f]{7,40}$/);
+/** Release identity stays within one fixed repository's release URL namespace. */
+const updateTagSchema = z
+	.string()
+	.regex(/^v0\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/);
 
 /** Small public Pages document projected from a complete published release manifest. */
 export const updateFeedSchema = z
@@ -14,7 +16,11 @@ export const updateFeedSchema = z
 		/** Identifies the confirmed downloads page without accepting arbitrary URLs. */
 		tag: updateTagSchema,
 	})
-	.strict();
+	.strict()
+	.refine(
+		(feed) => feed.tag === `v${feed.version}`,
+		"Update tag must match its version",
+	);
 
 /** Validated feed document consumed only by the native comparison owner. */
 export type UpdateFeed = z.infer<typeof updateFeedSchema>;

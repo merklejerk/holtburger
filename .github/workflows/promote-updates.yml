@@ -22,10 +22,9 @@ jobs:
     timeout-minutes: 10
     steps:
       # Publication identifies data, not executable tooling. Checkout resolves this trusted ref to one SHA.
-      # Change together with candidate_allocation.RELEASE_BRANCH at the authorized beta merge.
       - uses: actions/checkout@v4
         with:
-          ref: 3d-next
+          ref: main
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:

@@ -9,14 +9,15 @@ import { AppUpdates, loadUpdateBuild } from "./app-updates.js";
 const build: AppBuild = {
 	development: false,
 	modified: false,
-	version: "0.1.4-alpha.1",
-	channel: "alpha",
+	version: "0.1.3",
+	channel: "beta",
+	kind: "release",
 	revision: "abcdef12",
 };
 const feed = {
 	schemaVersion: 1,
 	version: "0.1.4",
-	tag: "candidate-20261103-abcdef123",
+	tag: "v0.1.4",
 };
 
 function fixture(identity: AppBuild | null) {
@@ -54,7 +55,7 @@ describe("application update ownership", () => {
 		await vi.advanceTimersByTimeAsync(0);
 		expect(request).toHaveBeenCalledOnce();
 		expect(request.mock.calls[0][0]).toBe(
-			`${APP_UPDATE_TUNING.feedRootUrl}/alpha.json`,
+			`${APP_UPDATE_TUNING.feedRootUrl}/beta.json`,
 		);
 		expect(updates.snapshot.availability).toEqual({
 			kind: "available",
@@ -140,7 +141,11 @@ describe("application update ownership", () => {
 		expect(updates.snapshot.availability.kind).toBe("available");
 		expect(updates.snapshot).toEqual(confirmed);
 		request.mockResolvedValueOnce(
-			Response.json({ ...feed, version: build.version }),
+			Response.json({
+				...feed,
+				version: build.version,
+				tag: `v${build.version}`,
+			}),
 		);
 		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		expect(updates.snapshot.availability.kind).toBe("current");
@@ -214,14 +219,37 @@ describe("application update ownership", () => {
 		updates.stop();
 	});
 
+	it("nightly builds ignore every update scheduling trigger", async () => {
+		const { updates, request } = fixture({
+			...build,
+			kind: "nightly",
+			version: `0.2.0-nightly-${"a".repeat(40)}`,
+		});
+		updates.start();
+		updates.setWindowVisible(true);
+		const token = updates.registerPregame(true);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs * 2);
+		updates.setWindowVisible(false);
+		updates.setWindowVisible(true);
+		updates.setPregameVisible(token, false);
+		updates.setPregameVisible(token, true);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
+		expect(request).not.toHaveBeenCalled();
+		expect(vi.getTimerCount()).toBe(0);
+		updates.stop();
+	});
+
 	it("beta uses its explicit feed and equal or older versions remain current", async () => {
 		for (const version of ["0.1.4", "0.1.3"]) {
 			const { updates, request } = fixture({
 				...build,
 				version: "0.1.4",
 				channel: "beta",
+				kind: "release",
 			});
-			request.mockResolvedValueOnce(Response.json({ ...feed, version }));
+			request.mockResolvedValueOnce(
+				Response.json({ ...feed, version, tag: `v${version}` }),
+			);
 			updates.start();
 			await vi.advanceTimersByTimeAsync(0);
 			expect(request.mock.calls[0][0]).toBe(
@@ -257,6 +285,7 @@ it("loads only valid, clean packaged metadata for the checking owner", () => {
 		for (const overrides of [
 			{ development: true },
 			{ modified: true },
+			{ kind: "nightly", version: `0.2.0-nightly-${"a".repeat(40)}` },
 			{ channel: "unknown" },
 		]) {
 			writeFileSync(path, JSON.stringify({ ...build, ...overrides }));

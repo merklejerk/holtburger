@@ -18,7 +18,7 @@ MIN_FILE_CHOOSER_PORTAL_VERSION = 3
 
 def probe_cli_tools(inputs: Path, outputs: Path) -> None:
     """CLI utilities use explicit input/output grants and need no graphical portal backend."""
-    app_id = "io.github.merklejerk.holtburger-cli-alpha"
+    app_id = "io.github.merklejerk.holtburger-cli"
     dat = str(inputs / "client_portal.dat")
     converted = outputs / "converted.hba"
     prefix = ["flatpak", "run", "--user", f"--filesystem={inputs}:ro", f"--filesystem={outputs}:rw"]
@@ -47,7 +47,7 @@ def probe_cli_tools(inputs: Path, outputs: Path) -> None:
 
 def probe_3d_portal(inputs: Path) -> None:
     """Check document-portal access in the 3D app's own sandbox without CLI utilities."""
-    recipe = json.loads((ROOT / ".github/flatpak/io.github.merklejerk.holtburger-3d-alpha.json").read_text())
+    recipe = json.loads((ROOT / ".github/flatpak/io.github.merklejerk.holtburger-3d.json").read_text())
     app_id = recipe["id"]
     version = json.loads(subprocess.check_output([
         "busctl", "--user", "--json=short", "get-property", "org.freedesktop.portal.Desktop",

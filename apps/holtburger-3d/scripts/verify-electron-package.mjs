@@ -112,6 +112,8 @@ export async function verifyElectronPackage(packageRoot) {
 	const sourceChannel = JSON.parse(
 		await readFile(resolve(appRoot, "../../release/channel.json"), "utf8"),
 	);
+	if (buildMetadata.kind !== (process.env.HOLTBURGER_DISTRIBUTION ?? "release"))
+		throw new Error("Packaged distribution kind differs from the build policy");
 	if (buildMetadata.channel !== sourceChannel)
 		throw new Error("Packaged release channel differs from the source channel");
 	if (
@@ -175,6 +177,7 @@ export async function verifyElectronPackage(packageRoot) {
 		architecture: process.arch,
 		version: buildMetadata.version,
 		channel: buildMetadata.channel,
+		kind: buildMetadata.kind,
 		revision: buildMetadata.revision,
 		modified: buildMetadata.modified,
 		packageRoot: normalizedPackageRoot,

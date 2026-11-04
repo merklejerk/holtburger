@@ -60,6 +60,7 @@ describe("release build identity", () => {
 			expect(readAppBuild(app, false)).toEqual({
 				version: "0.2.0",
 				channel: "beta",
+				kind: "release",
 				revision: "abcdef12",
 				modified: false,
 				development: false,
@@ -74,6 +75,7 @@ describe("release build identity", () => {
 			appBuildSchema.safeParse({
 				version: "0.2.0-beta.1",
 				channel: "beta",
+				kind: "release",
 				revision: "abcdef12",
 				modified: false,
 				development: false,

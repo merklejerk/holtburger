@@ -1,4 +1,4 @@
-Experimental Holtburger alpha built from `3d-next`, with separate CLI and 3D products.
+Holtburger beta builds from `main`, with separate CLI and 3D products.
 
 CLI includes the terminal client, `dat2hba`, `dat-tool`, fighter/mage scripts and derived
 sidecars, and prepared bootstrap/navigation content. 3D includes the h3d client/Explorer and
@@ -7,10 +7,9 @@ are not distributed.
 
 Both products have native Linux x86-64, Windows x86-64, and macOS Apple Silicon archives,
 and separate Linux x86-64 Flatpaks using Freedesktop 26.08. The 3D Flatpak uses
-`io.github.merklejerk.holtburger-3d-alpha`, matching the Windows installer and macOS bundle ID.
-This replaces the earlier 3D Flatpak ID and creates a separate installation and settings
-directory; earlier settings and portal grants are not migrated automatically. Its download is named
-`holtburger-3d`; CLI uses `io.github.merklejerk.holtburger-cli-alpha`. Archive utilities belong to
+`io.github.merklejerk.holtburger-3d`, matching the Windows installer and macOS bundle ID.
+Beta and nightly share installation locations and profiles. Installing either replaces the
+other. CLI uses `io.github.merklejerk.holtburger-cli`. Archive utilities belong to
 CLI, including its Flatpak's `--command=dat-tool` and `--command=dat2hba` entries.
 
 3D also offers a per-user Windows setup executable and a macOS DMG. Quit before
@@ -43,7 +42,9 @@ remain unverified.
 Automated build/resource/identity/startup and installer checks do
 not establish GPU, audio, input, scaling, Gatekeeper, or SmartScreen acceptance.
 
-This draft awaits final user acceptance. Record actual tested targets and remaining
-limitations before publication; earlier alpha.3 testing does not verify these new bytes.
-Publish the frozen draft without rebuilding. `release-manifest.json` and `SHA256SUMS`
-identify the candidate's products and checksums.
+Beta drafts require final user acceptance. Record tested targets and remaining limitations
+before beta publication; earlier testing does not verify these new bytes. Publish the accepted
+draft without rebuilding. Nightly builds publish automatically after the same automated
+packaging checks, use the current version plus a source-hash suffix, and never check for
+updates. Beta and nightly share installation locations and replace each other. `release-manifest.json` and `SHA256SUMS`
+identify the distribution's products and checksums.

@@ -1,4 +1,4 @@
-# Holtburger CLI alpha
+# Holtburger CLI
 
 Extract the complete archive for Linux x86-64, Windows x86-64, or macOS Apple Silicon.
 It includes the terminal client, `dat2hba`, `dat-tool`, fighter/mage scripts and sidecars,
@@ -53,12 +53,14 @@ read-only. Run `./dat-tool --help` or `./dat2hba --help` for the shipped utiliti
 
 ## Flatpak
 
-Install `holtburger-cli-VERSION-x86_64.flatpak`. It appears as **Holtburger CLI Alpha**
-and can coexist with main/nightly **Holtburger CLI**, with separate settings and writable
-scripts. No settings are migrated automatically. Then run:
+Install `holtburger-cli-VERSION-x86_64.flatpak`. It appears as **Holtburger CLI**
+and uses the same installation/settings as the nightly build; installing either replaces
+the other. Use `flatpak install --user --reinstall ./holtburger-cli-VERSION-x86_64.flatpak`
+with the downloaded version to replace an existing installation. Nightlies do not check for
+updates. Then run:
 
 ```sh
-flatpak run io.github.merklejerk.holtburger-cli-alpha \
+flatpak run io.github.merklejerk.holtburger-cli \
   --host SERVER --port 9000 --account ACCOUNT --password PASSWORD
 ```
 
@@ -66,14 +68,11 @@ The CLI Flatpak has the same client, utilities, scripts, and prepared content. T
 utility, set its command before the application ID:
 
 ```sh
-flatpak run --command=dat-tool io.github.merklejerk.holtburger-cli-alpha --help
-flatpak run --command=dat2hba io.github.merklejerk.holtburger-cli-alpha --help
+flatpak run --command=dat-tool io.github.merklejerk.holtburger-cli --help
+flatpak run --command=dat2hba io.github.merklejerk.holtburger-cli --help
 ```
 
 Grant external input/output directories explicitly with `--filesystem=/absolute/input:ro`
 and `--filesystem=/absolute/output:rw` before the application ID. Quote paths containing
 spaces. Flatpak settings and writable preferences live under
-`~/.var/app/io.github.merklejerk.holtburger-cli-alpha/`.
-
-The frozen alpha.6 draft predates this identity change and still uses
-`io.github.merklejerk.holtburger-cli`. The new ID applies to the next candidate.
+`~/.var/app/io.github.merklejerk.holtburger-cli/`.

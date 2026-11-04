@@ -26,22 +26,28 @@ def validate_version(version: str) -> None:
         raise ValueError("Suite release versions cannot contain build metadata")
 
 
-def release_channel(root: Path = ROOT) -> Literal["alpha", "beta"]:
+def release_channel(root: Path = ROOT) -> Literal["beta"]:
     """Read the source-owned audience without inferring it from version suffixes."""
     channel = json.loads((root / "release/channel.json").read_text())
-    if channel not in ("alpha", "beta"):
-        raise ValueError("Release channel must be alpha or beta")
+    if channel != "beta":
+        raise ValueError("Release channel must be beta")
     return channel
 
 
-def validate_channel_version(channel: str, version: str) -> None:
-    """The initial beta series uses ordinary unsuffixed 0.x.y suite versions."""
+def validate_channel_version(channel: str, version: str, kind: str = "release") -> None:
+    """Beta distributions use an ordinary version or an exact source-stamped nightly."""
     validate_version(version)
-    if channel not in ("alpha", "beta"):
-        raise ValueError("Release channel must be alpha or beta")
-    parsed = Version.parse(version)
-    if channel == "beta" and (parsed.major != 0 or parsed.prerelease is not None):
-        raise ValueError("Beta releases require an unsuffixed 0.x.y version")
+    if channel != "beta":
+        raise ValueError("Release channel must be beta")
+    base = r"0\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    if kind == "release":
+        pattern = base
+    elif kind == "nightly":
+        pattern = base + r"-nightly-[0-9a-f]{40}"
+    else:
+        raise ValueError("Distribution kind must be release or nightly")
+    if re.fullmatch(pattern, version) is None:
+        raise ValueError("Beta distributions require an unsuffixed 0.x.y or source-stamped nightly version")
 
 
 def check_versions(root: Path = ROOT) -> str:

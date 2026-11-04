@@ -19,7 +19,7 @@ class FlatpakIoTests(unittest.TestCase):
 
             def run_tool(arguments, *, check):
                 self.assertTrue(check)
-                self.assertIn("io.github.merklejerk.holtburger-cli-alpha", arguments)
+                self.assertIn("io.github.merklejerk.holtburger-cli", arguments)
                 self.assertIn(f"--filesystem={inputs}:ro", arguments)
                 self.assertIn(f"--filesystem={outputs}:rw", arguments)
                 if "--command=dat-tool" in arguments:
@@ -30,7 +30,7 @@ class FlatpakIoTests(unittest.TestCase):
             commands = {argument for call in run.call_args_list for argument in call.args[0] if argument.startswith("--command=")}
             self.assertEqual(commands, {"--command=sh", "--command=dat2hba", "--command=dat-tool"})
 
-    def test_3d_document_grant_is_read_in_the_alpha_app_sandbox_and_retired(self):
+    def test_3d_document_grant_is_read_in_the_app_sandbox_and_retired(self):
         with tempfile.TemporaryDirectory() as temporary:
             inputs = Path(temporary) / "input 雪"
             inputs.mkdir()
@@ -39,8 +39,8 @@ class FlatpakIoTests(unittest.TestCase):
                 json.dumps({"data": MIN_FILE_CHOOSER_PORTAL_VERSION}), portal,
             ]) as query, patch("probe_flatpak_io.subprocess.run") as run:
                 probe_3d_portal(inputs)
-            self.assertIn("--app=io.github.merklejerk.holtburger-3d-alpha", query.call_args_list[1].args[0])
-            self.assertIn("io.github.merklejerk.holtburger-3d-alpha", run.call_args_list[0].args[0])
+            self.assertIn("--app=io.github.merklejerk.holtburger-3d", query.call_args_list[1].args[0])
+            self.assertIn("io.github.merklejerk.holtburger-3d", run.call_args_list[0].args[0])
             self.assertIn("--command=sh", run.call_args_list[0].args[0])
             self.assertEqual(run.call_args_list[-1].args[0], ["flatpak", "document-unexport", "--doc-id", "probe-document"])
 

@@ -1,4 +1,4 @@
-"""Explicit candidates always receive full validation, without push-only event fields."""
+"""Explicit releases always receive full validation, without push-only event fields."""
 
 import os
 from pathlib import Path
@@ -6,14 +6,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from candidate_changes import main
+from build_changes import main
 
 
-class CandidateChangeTests(unittest.TestCase):
-    """Both candidate entry points bypass the ordinary changed-file classifier."""
+class ReleaseChangeTests(unittest.TestCase):
+    """Both release entry points bypass the ordinary changed-file classifier."""
 
-    def test_explicit_candidates_validate_even_without_a_push_base(self):
-        for event_name, ref_type in (("workflow_dispatch", "branch"), ("push", "tag")):
+    def test_explicit_releases_validate_even_without_a_push_base(self):
+        for event_name, ref_type in (("workflow_dispatch", "branch"), ("push", "tag"), ("schedule", "branch")):
             with self.subTest(event=event_name), tempfile.TemporaryDirectory() as temporary:
                 event = Path(temporary) / "event.json"
                 event.write_text("{}")
@@ -25,7 +25,7 @@ class CandidateChangeTests(unittest.TestCase):
                         "GITHUB_EVENT_PATH": str(event),
                         "GITHUB_OUTPUT": str(output),
                     }, clear=True),
-                    patch("candidate_changes.subprocess.check_output") as changes,
+                    patch("build_changes.subprocess.check_output") as changes,
                 ):
                     main()
                 changes.assert_not_called()

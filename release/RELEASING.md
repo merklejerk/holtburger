@@ -1,34 +1,29 @@
 # Preparing and announcing a release
 
-Candidates currently build `3d-next` and stage a draft GitHub release.
-The explicit audience in `release/channel.json` is independent of SemVer suffixes and
-GitHub prerelease/latest flags. Beta uses ordinary unsuffixed `0.x.y` versions. The release has
-separate CLI and 3D products, each on Linux x86-64, Windows x86-64, and macOS Apple Silicon,
-plus one Flatpak per product. The 3D product also has a Windows setup executable and a
-macOS DMG. Intel macOS is not supported. Both products share one app
-version and source commit. Publication promotes the frozen draft after final user acceptance;
-it does not build new artifacts.
+Development and release tooling live on `main`. Beta starts at `0.2.0` and uses
+ordinary unsuffixed `0.x.y` versions with immutable `v0.x.y` tags. Releases contain separate
+CLI and 3D products on Linux x86-64, Windows x86-64, and macOS Apple Silicon, plus a Flatpak
+per product. 3D also includes a Windows setup executable and macOS DMG. Intel macOS is not
+supported. Both products share one version and original source commit.
 
-The frozen `0.1.0-alpha.3` draft and published `0.1.0-alpha.4` are historical combined-package
-baselines. These split products require a fresh candidate. Preserve existing releases, tags,
-and drafts and their bytes.
-The new local packaging/workflow checks are not evidence that a new candidate has run.
+The release workflow stages the complete beta draft for native acceptance. Publishing that
+accepted draft does not rebuild its assets. Nightlies use the same builders and automatically
+publish as prerelease/non-latest after checks succeed. Historical tags, drafts, and release
+assets remain unchanged; the new pipeline does not migrate them.
 
 ## Version and content inputs
 
-Select the next suite SemVer explicitly when requesting a candidate. Candidate CI applies it
-with `release_version.py`, records a version-only commit, and atomically pushes that commit
-and its immutable candidate tag before any build. The requested version must be greater than
-all allocated candidates, including unpublished or failed ones. Retries of the same workflow
-reuse the original source/version; a different source needs a new version. Gaps are expected.
-Build metadata (`+...`) is not a release version increment and is rejected.
+Record suite version bumps as ordinary reviewed changes on main. Use `release_version.py
+bump VERSION` to update the Cargo workspace, Electron manifest, and both lockfiles; protocol,
+archive, settings, and navigation compatibility versions remain independent. The checked-in
+version must be unsuffixed and `release/channel.json` must contain `"beta"`. Build metadata
+(`+...`) is rejected. A version bump alone does not require regenerating navigation content.
 
-The suite version covers Cargo workspace packages, Electron's manifest and both lockfiles.
-Navigation format, protocol, archive and settings compatibility versions remain independent.
-A version bump alone does not require regenerating navigation content. The next channel is
-recorded in `release/channel.json` before requesting its candidate; CI never guesses channel
-from a version suffix. If branch protection later prevents bot allocation, use a reviewed
-version PR and adapt the allocation entry point; do not bypass protection.
+Tag the reviewed source `vVERSION`, or manually dispatch Release from main to create that tag
+and continue the build in the same run. Existing tags must resolve to the same source commit;
+annotated and lightweight tags are accepted. A tagged merge commit is valid. Never move a tag
+or reuse a release version for changed source. Rerun a failed workflow at its original source;
+main advancing does not invalidate a retry of an existing reachable tag.
 
 Local release tooling uses the resolved dependencies in `.github/scripts/requirements.txt`:
 
@@ -41,8 +36,7 @@ uv run --no-project --with-requirements .github/scripts/requirements.txt \
 The current input contains exactly `bootstrap.hba` and `navigation.hnav`; the descriptor is
 the source of truth for its asset URL and digest. The production fetcher and headless
 bootstrap probe validate the downloaded input. HNAV has no runtime bootstrap digest binding.
-Older input assets and alpha.5's application assets remain frozen. The older `micro-hba.zip`
-remains available for legacy consumers; this CLI release path does not fetch it.
+Existing content assets remain frozen. This path does not fetch legacy micro archives.
 For future updates, store approved bytes as a fresh asset
 on the repository's public, non-latest content prerelease. Read-only CI tokens cannot retrieve
 draft release assets. Keep existing input assets available and do not replace their bytes.
@@ -93,12 +87,12 @@ packaged client/Explorer, private host/runtime/resources, metadata, license/noti
 3D quickstart. Each assembler can run with the other product's inputs absent:
 
 ```sh
-python3 .github/scripts/candidate_release.py assemble --product cli \
+python3 .github/scripts/release_suite.py assemble --product cli \
   --target x86_64-unknown-linux-gnu --content .holtburger-local/cli-content \
-  --notices .github/licenses/THIRD_PARTY_NOTICES.html --output .holtburger-local/candidate-artifacts
-python3 .github/scripts/candidate_release.py assemble --product 3d \
+  --notices .github/licenses/THIRD_PARTY_NOTICES.html --output .holtburger-local/release-artifacts
+python3 .github/scripts/release_suite.py assemble --product 3d \
   --target x86_64-unknown-linux-gnu --package apps/holtburger-3d/out/holtburger-3d-linux-x64 \
-  --notices .github/licenses/THIRD_PARTY_NOTICES.html --output .holtburger-local/candidate-artifacts
+  --notices .github/licenses/THIRD_PARTY_NOTICES.html --output .holtburger-local/release-artifacts
 ```
 
 These commands require the corresponding native target build outputs. Forge receives the
@@ -128,75 +122,76 @@ accounts must explicitly set `HOLTBURGER_DISPOSABLE_INSTALL_TESTS=1`; an existin
 registration or shortcut is refused. A temporary destination alone is not isolation.
 
 The checks cover install, repair, a generated predecessor upgrade, obsolete-file
-removal, retained launcher credentials, locked files, and uninstall/replacement. Mac
+removal, retained launcher credentials, locked files, and uninstall/replacement. Windows
+also switches both ways between beta/nightly installer version headers over the current
+verified payload. This proves installer ordering behavior, while each actual distribution
+receives its own runtime probes; it does not substitute for testing two real releases. Mac
 checks also require rejection of a mutated sealed resource. The predecessor is a
 synthetic installation fixture, not proof of compatibility with every historical
 settings schema. Finder, browser-download quarantine, and visual acceptance remain
 user-owned. No update server or application updater is installed.
 
-## Candidate builds and diagnostic selection
+## Release, nightly, and diagnostic builds
 
-`Candidate checks` validates pushes/PRs on `3d-next` on Linux. Prose-only changes outside
-shipped documentation skip compilation while retaining the final `Candidate validation`
-status. Candidate validation and native package jobs explicitly check out the allocated
-version commit, rather than the older dispatch event commit. Shared correctness/lint checks
-run once; each native job packages and probes its own platform. Packaged update probes cover launcher-first
-and direct client startup with temporary profiles and intercepted browser opening; no retail
-assets are required for these native boundary checks.
+`Build checks` validates main pushes/PRs and supplies reusable release validation. Root prose
+changes outside shipped inputs can skip compilation while retaining the final `Validation`
+status. Tag, schedule, and manual release builds receive full validation. Native jobs build
+and probe each platform, including launcher-first and direct-client update lifecycle checks
+with temporary profiles and intercepted browser opening.
 
-Manual **Actions → Release Candidate → Run workflow** selects `3d-next`,
-`purpose=candidate`, `product=both`, `target=all`, and an explicit greater `version`:
+After committing the version bump and merging it into main, create the immutable stable tag:
 
 ```sh
-gh workflow run candidate-release.yml --repo merklejerk/holtburger --ref 3d-next \
-  -f purpose=candidate -f product=both -f target=all -f version=NEXT_VERSION
+git tag v0.2.0
+git push origin refs/tags/v0.2.0
 ```
 
-The workflow serializes allocations, requires the dispatch commit still to be the release
-branch head, records the version commit, and derives
-`candidate-YYYYMMDD-COMMITPREFIX` from that commit. Branch advancement rejects the request
-instead of silently selecting new application code. Branch and tag push atomically; neither
-is force-updated. The workflow continues its own builds without relying on a bot push to
-trigger another run. Rerun a failed candidate workflow to reuse its allocation; starting a
-fresh request from changed source requires another greater version.
+Alternatively, dispatch **Actions → Release** on main with `purpose=release`, `product=both`,
+and `target=all`. There is no requested-version input and no automatic version commit:
 
-For diagnostics, select `purpose=diagnostic`, leave `version` empty and choose one or both
-products and selected targets. Diagnostics never bump versions, create tags, stage drafts
-or announce updates. Complete candidates always require both products and all targets.
+```sh
+gh workflow run release.yml --repo merklejerk/holtburger --ref main \
+  -f purpose=release -f product=both -f target=all
+```
 
-GitHub needs the manual workflow registered on the default branch. Before beta, a small
-workflow-only registration on `main` is sufficient; dispatch explicitly with `--ref 3d-next`
-to execute the actual implementation there. Registration must not merge application work or
-select `main` as the release source. Promotion tooling also stays on `3d-next` until the
-separately authorized beta merge. At that merge, resolve any registration-stub add/add
-conflicts by retaining the full workflow implementations. Keep default-branch registration stubs small and make an
-accidental dispatch at `main` fail with an instruction to select the supported ref.
+The nightly wrapper runs every eight hours or by manual dispatch, always from main. It reads
+the current checked-in base version and appends `-nightly-FULL_SOURCE_SHA`, for example
+`0.2.0-nightly-0123456789abcdef0123456789abcdef01234567`. Its tag is `v` plus that complete
+version, pointing to original main source. There is no floating nightly tag. Hashes identify
+builds and are not ordered for update discovery.
 
-Explicit candidate tag pushes can rebuild an already allocated immutable candidate. Do not
-create another tag for the same suite version or move an existing tag. The date/hash tag
-namespace avoids the separate cargo-dist workflow that publishes SemVer-shaped tags.
-Historical `alpha-*` tags remain unchanged and participate in allocation's previous-version
-comparison, but new candidates use only `candidate-*` tags.
+Each disposable nightly build/assembly checkout stamps only the four suite version files.
+Preparation verifies an initially clean source and permits only the exact version-field delta,
+including lockfiles. All binaries, package metadata, installers, archives, and manifests use
+the resulting effective version while provenance retains original main's commit. These
+changes are never committed to main. A complete matching published build is checked and
+skipped before rebuilding; matching drafts may resume, but conflicting bytes/identities fail.
+Neither retries nor publication overwrite an existing asset.
 
-The aggregator requires both products on every native target, both Flatpaks, Windows setup,
-macOS DMG, matching notices/content/source/version/channel and exact file digests/names. It
-writes schema-versioned `release-manifest.json` plus `SHA256SUMS`. The same pure inventory
-validator is used later by promotion; local staging additionally checks every payload byte.
+Beta and nightly use the same app IDs, install locations, shortcuts, and user profiles.
+Installing either replaces the other; there are no side-by-side nightly installations.
+Nightly builds have no update checks or update feed, including startup and focus/resume.
+A current-version nightly sorts below that version's beta even when built later.
+
+Diagnostics select `purpose=diagnostic` and one or both products/targets. They do not create
+tags, stage drafts, or publish. Complete release/nightly builds require both products and
+all supported targets. The old cargo-dist and CLI-only nightly publishers are retired.
+
+The aggregator requires every native target, both Flatpaks, Windows setup, macOS DMG, matching
+notices/content/source/version/channel/kind, and exact file digests/names. It writes schema 2
+`release-manifest.json` and `SHA256SUMS`. Promotion uses the same inventory validator; staging
+additionally checks every payload byte. A partially successful build cannot publish.
 
 ## Flatpak and CI cost
 
 The Flatpaks reuse their already-built Linux native archives. One job shares tooling/runtime
 setup, with separate cached builder state per product. The CLI has networking but no graphical
 sockets or Electron. The 3D recipe retains graphics/audio/network and the pinned Zypak helper;
-it uses `io.github.merklejerk.holtburger-3d-alpha`, matching the Windows installer and macOS
+it uses `io.github.merklejerk.holtburger-3d`, matching the Windows installer and macOS
 bundle ID, while the download is
-named `holtburger-3d-VERSION-x86_64.flatpak`. CLI uses `io.github.merklejerk.holtburger-cli-alpha`.
-The alpha CLI appears as **Holtburger CLI Alpha** and has separate settings from main/nightly
-`io.github.merklejerk.holtburger-cli`. Nightly preparation explicitly selects `--nightly-cli`.
-Both alpha products use Freedesktop 26.08. The generated alpha recipe selects that runtime
-from the 3D recipe; the checked-in CLI recipe remains independently usable for staging.
-The 3D ID replaces the earlier alpha Flatpak ID. It creates a separate installation and
-settings directory; earlier settings and portal grants are not migrated automatically.
+named `holtburger-3d-VERSION-x86_64.flatpak`. CLI uses `io.github.merklejerk.holtburger-cli`.
+Both products use the runtime generation selected by the 3D recipe (currently Freedesktop
+26.08). Each product has one canonical recipe shared by beta and nightly.
 
 Portable native Linux builds use Ubuntu 22.04; Flatpak builds use headless Ubuntu 24.04 and
 its newer builder. No desktop distribution or persistent runner fleet is required. A virtual
@@ -212,24 +207,19 @@ infrastructure. The Flatpak apt setup removes the Azure mirror preference while 
 official Ubuntu archive/security mirrors. Required SVG/AppStream helpers are explicit with
 recommended packages disabled. Zypak/nickle original notices remain installed with the 3D app.
 
-Main nightly consumers use the same CLI content/assembly contract after this branch reaches
-main. Their Flatpak job reuses the Linux native output rather than compiling the client a
-second time. They no longer publish separate micro assets. The older micro helper remains
-only for the existing main/dev DAT test fixture fetch, outside the CLI release content path.
-
 ## Dependency notices
 
 Rust/native notices are generated locally and committed as
 `.github/licenses/THIRD_PARTY_NOTICES.html`, with a generated
 `THIRD_PARTY_NOTICES.inputs.json` freshness record beside it. CI runs
 `python3 .github/scripts/generate_notices.py check` without installing cargo-about or
-accessing license sources. Failures emit a warning in both branch validation and candidate
-planning; they do not block CI or candidate creation. The local `check` command still exits
+accessing license sources. Failures emit a warning in both branch validation and release
+planning; they do not block CI or release creation. The local `check` command still exits
 nonzero to report stale inputs/output. Its whole-file fingerprints include Cargo versions,
 so a shared application version bump may warn but does not require regeneration to release.
 Ordinary application source changes do not invalidate notices.
 
-The candidate job uploads that committed HTML for all three native target graphs.
+The release job uploads that committed HTML for all three native target graphs.
 The same file is included in every native bundle and both Flatpaks, and uploaded separately for
 review. Product metadata and the final manifest pin its digest. Electron/Chromium and font
 notices remain inside h3d through the existing package checks.
@@ -278,10 +268,10 @@ checksums, known limitations, and which automatic/manual checks actually ran:
 3. 3D: supply full retail data, launch the default client and explicit Explorer, and check
    gameplay, graphics/audio/input, window scaling, and OS launch behavior.
 4. On Linux, install the two separate Flatpaks. Check CLI utility permissions and 3D portal
-   selection across restarts. The renamed 3D app starts with a separate settings directory.
+   selection across restarts. Beta and nightly deliberately share installation/profile locations; exercise replacement in both directions.
 
-Record unavailable native targets explicitly. Old alpha.3 acceptance does not establish the
-new split candidate's behavior. A fix requires a new identified candidate and affected checks;
+Record unavailable native targets explicitly. Previous release acceptance does not establish the
+new distribution's behavior. A fix requires a new identified release and affected checks;
 never silently replace frozen artifacts. Developer ID signing/notarization remains deferred;
 ad-hoc integrity signing does not remove the quarantine limitation in the quickstart.
 
@@ -289,67 +279,47 @@ After final acceptance and explicit publication authorization, publish the exist
 without rebuilding or altering application assets:
 
 ```sh
-gh release edit candidate-YYYYMMDD-COMMITPREFIX \
-  --repo merklejerk/holtburger --verify-tag \
-  --draft=false --prerelease --latest=false
+gh release edit v0.2.0 \
+  --repo merklejerk/holtburger \
+  --draft=false --prerelease=false --latest=true
 ```
 
 Verify the public asset list and representative downloaded checksums. Preserve the existing
 nightly release and superseded drafts/tags; cleanup of them is a separate action.
 
-## Update feeds and Pages rollout
+## Update feed and Pages
 
-Enable GitHub Pages with **GitHub Actions** as its source. The repository-level
-`github-pages` environment must permit candidate tag deployments and manual promotion from
-`3d-next`; review existing environment rules before changing them. The promotion workflow
-needs `contents: read`, and its deployment job needs `pages: write` plus `id-token: write`.
-The initial rollout must verify the repository's actual Pages URL matches the two fixed
-endpoints compiled into H3D:
+GitHub Pages uses GitHub Actions as its source. The `github-pages` environment must allow
+main, since promotion checks out trusted main tooling and deploys from that ref. Promotion
+needs `contents: read`; deployment needs `pages: write` and `id-token: write`.
 
-- `https://merklejerk.github.io/holtburger/updates/alpha.json`
-- `https://merklejerk.github.io/holtburger/updates/beta.json`
+`Promote Update Feeds` reconciles the complete published release inventory after publication
+or manual dispatch. It accepts only unsuffixed `v0.x.y` tags with complete schema 2 beta
+release manifests, exact tag/version agreement, and verified public asset inventories.
+Historical alpha/candidate tags, nightlies, and drafts are excluded before manifest loading.
+Malformed managed stable releases fail visibly. The highest eligible SemVer selects:
 
-`Promote Update Feeds` runs after an accepted candidate is published. It uses trusted tooling
-from `3d-next`, resolves that checkout to one commit, discovers all published releases with
-pagination, and validates complete managed-candidate manifests and public asset inventories.
-It ignores unrelated release families and drafts. A malformed published managed candidate
-fails visibly rather than silently disappearing from the selection.
+`https://merklejerk.github.io/holtburger/updates/beta.json`
 
-The highest SemVer wins. The alpha feed accepts alpha or beta releases so checking-capable
-alpha installations can discover beta. The beta feed accepts beta only. GitHub's latest and
-prerelease badges do not control routing. A channel with no eligible release has no feed
-file; clients treat its 404 as an unavailable check, not proof they are current. Old
-installations that lack checking cannot discover this feature retroactively; ship an alpha
-bridge first if that transition is desired.
+There is no alpha or nightly projection. Each deployment uploads a complete generated site.
+With no eligible stable release, beta.json is absent; a failed check is not proof the app is
+current. Generation failure leaves the prior deployment intact. Delivery is eventually
+consistent: verify served JSON and its release link after publication.
 
-Promotion uploads/deploys one complete Pages site containing both channel projections. It
-never publishes a draft, rebuilds accepted packages, or downloads every installer to repeat
-native acceptance. A failed generation/deployment leaves the previous deployed site intact.
-Pages delivery is eventually consistent; verify the served JSON and release links after
-initial deployment, and allow ordinary propagation time.
-
-For repair or after withdrawing/deleting a release, explicitly reconcile:
+Repair after a failed promotion or release withdrawal:
 
 ```sh
-gh workflow run promote-updates.yml --repo merklejerk/holtburger --ref 3d-next
+gh workflow run promote-updates.yml --repo merklejerk/holtburger --ref main
 ```
 
-Rerunning a promotion also reconciles the current full inventory; an older event cannot
-replace a newer release while that inventory is unchanged. If future publication uses
-`GITHUB_TOKEN`, explicitly dispatch promotion because token-generated events generally do
-not trigger another workflow. A corrective release must have a greater SemVer. Clients
-retain a previously confirmed update on check failure; this is not an urgent recall system.
+Older events cannot replace a newer release while the full inventory is unchanged. Publishing
+with workflow credentials must explicitly arrange promotion rather than assume an automated
+release event triggers another workflow. A corrective release needs a greater version; the
+memory-only client cache is not an urgent recall mechanism.
 
-H3D checks once asynchronously at native startup, then at most hourly while a launcher or
-pregame footer is visible. Focus/system resume reevaluates due work, minimizing/hiding
-suppresses follow-up checks, and gameplay starts none. A request already underway may finish.
-The five-second deadline includes body reading. Results survive document replacement and
-remain memory-only. Unpackaged, modified, development and Explorer runs do not check.
-The footer opens the confirmed release's downloads page in the system browser; it performs
-no installation. Optional network work is aborted without delaying application shutdown.
-
-At the authorized beta merge, change `candidate_allocation.RELEASE_BRANCH` and promotion's
-trusted checkout ref to `main`, update dispatch examples, push/PR branch filters and Pages
-environment allowlists together, and verify a complete candidate and promotion repair from
-`main`. The beta audience alone never changes the source ref. Retain existing desktop and
-Flatpak IDs/settings locations: their alpha spelling preserves installations across versions.
+Packaged clean beta client builds check once asynchronously at startup and at most hourly
+while launcher/pregame footers are visible. Focus/resume reevaluates due work; hidden windows
+and gameplay do not start follow-up checks. The bounded request includes body reading and is
+aborted on shutdown. Results survive document replacement. Nightly, development, modified,
+unpackaged, and Explorer builds do not check. The footer opens the confirmed version-tag
+release downloads page; installation remains manual.

@@ -14,8 +14,8 @@ def documentation_only(path: str) -> bool:
 
 def main() -> None:
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-    # Tags explicitly request candidates and must validate even a prose-only source change.
-    if os.environ.get("GITHUB_REF_TYPE") == "tag" or os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+    # Tags explicitly request releases and must validate even a prose-only source change.
+    if os.environ.get("GITHUB_REF_TYPE") == "tag" or os.environ.get("GITHUB_EVENT_NAME") in ("workflow_dispatch", "schedule"):
         relevant = True
     else:
         base = event["pull_request"]["base"]["sha"] if "pull_request" in event else event["before"]

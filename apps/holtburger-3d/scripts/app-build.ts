@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import {
 	appBuildSchema,
+	distributionKindSchema,
 	releaseChannelSchema,
 	type AppBuild,
 } from "../src/app/app-build-contract.js";
@@ -46,6 +47,9 @@ export function readAppBuild(appRoot: string, development: boolean): AppBuild {
 		development,
 		version,
 		channel,
+		kind: distributionKindSchema.parse(
+			process.env.HOLTBURGER_DISTRIBUTION ?? "release",
+		),
 		revision,
 		modified: status === null ? modified === "1" : status.length > 0,
 	});

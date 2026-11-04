@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { access, copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+	access,
+	copyFile,
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,12 +58,14 @@ const contentDirectory = await mkdtemp(
 	join(tmpdir(), "holtburger-3d-sidecar-smoke-"),
 );
 async function smokeMode(mode, family) {
-	const contentPath = join(contentDirectory, `smoke.${family}`);
+	const installation = join(contentDirectory, `${mode}-${family}`);
+	await mkdir(installation);
+	const contentPath = join(installation, `smoke.${family}`);
 	await copyFile(
 		join(appRoot, `scripts/fixtures/minimal-content.${family}.fixture`),
 		contentPath,
 	);
-	const child = spawn(hostPath, [`--mode=${mode}`, "--content", contentPath], {
+	const child = spawn(hostPath, [`--mode=${mode}`, "--content", installation], {
 		env: { ...process.env },
 		stdio: "pipe",
 		windowsHide: true,

@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Holtburger 3D Alpha
+Name=Holtburger 3D
 Comment=Experimental Asheron's Call 3D client; account arguments required
 Exec=holtburger-3d
-Icon=io.github.merklejerk.holtburger-3d-alpha
+Icon=io.github.merklejerk.holtburger-3d
 Terminal=true
 Categories=Game;RolePlaying;
 Keywords=asheron;ac;client;3d;explorer;

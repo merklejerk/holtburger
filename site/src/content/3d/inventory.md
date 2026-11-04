@@ -53,11 +53,7 @@ Some items need a target. Activate the item first, then choose what to use it on
 
 ## Examine
 
-Press **E**, right-click the item, or use the magnifying-glass action to open its appraisal. Look here for requirements, combat values, effects, descriptions and inscriptions.
-
-The appraisal window stays on the item you examined when your selection changes. Examine another object to replace it. You can move and resize the window.
-
-<Media id="item-appraisal" />
+Open an [appraisal](/holtburger/3d/inspecting/) to check an item’s requirements, combat values, effects and inscriptions. It stays open while you select something else.
 
 ## Give an item
 

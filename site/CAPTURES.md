@@ -70,6 +70,16 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Expected result: Show running while casting, then archery while moving, with normal movement keys visible.
 - Used in: [3d/#stay-mobile](https://merklejerk.github.io/holtburger/3d/#stay-mobile), [3d/combat/#fight-on-the-move](https://merklejerk.github.io/holtburger/3d/combat/#fight-on-the-move)
 
+### Keep inspecting while targets change
+
+**First · user · pending · clip** — ID: `creature-appraisal`
+
+- Setup: A nearby creature and a player with a distinctive appearance; several selectable objects.
+- Frame: Keep the appraisal model, selected-target HUD and world visible.
+- Action/purpose: Rotate a creature or player preview, then change selection while keeping the appraisal open.
+- Expected result: Examine a creature or player, rotate the preview, then select another target while the original appraisal stays open. Show the available creature and player details.
+- Used in: [3d/inspecting/#turn-the-model-around](https://merklejerk.github.io/holtburger/3d/inspecting/#turn-the-model-around)
+
 ### Watch for a name
 
 **Later · user · pending · clip** — ID: `nearby-alerts`
@@ -330,7 +340,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Frame: Crop the appraisal window with title and relevant fields; no test errors or missing artwork.
 - Action/purpose: Show item requirements and effective values in a readable appraisal window.
 - Expected result: A reader can find requirements and effective values at website size.
-- Used in: [3d/inventory/#examine](https://merklejerk.github.io/holtburger/3d/inventory/#examine)
+- Used in: [3d/inspecting/#items](https://merklejerk.github.io/holtburger/3d/inspecting/#items)
 
 ### Create an adventurer
 

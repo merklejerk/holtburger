@@ -12,7 +12,7 @@ import Media from '#lib/components/Media.svelte';
 
 Open **Nearby** to browse entities around you. Search names and use the category, tracked-name and sorting controls to reduce the list to what you need.
 
-Select a result to make it your current target, then examine or interact with it using your usual [target controls](/holtburger/3d/combat/#pick-something-specific). For everyday combat selection, [Smart Tab](/holtburger/3d/combat/) is usually the quicker starting point.
+Select a result to make it your current target, then [inspect it](/holtburger/3d/inspecting/) or interact using your usual [target controls](/holtburger/3d/combat/#pick-something-specific). For everyday combat selection, [Smart Tab](/holtburger/3d/combat/) is usually the quicker starting point.
 
 ## Add a name alert
 

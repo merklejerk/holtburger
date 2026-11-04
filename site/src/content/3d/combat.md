@@ -44,7 +44,7 @@ Keep running while casting or firing a bow. Movement continues through the windu
 
 Click a particular object when you know what you want, or find it in the [Nearby list](/holtburger/3d/nearby/). Use **R** to interact and **E** to examine; right-clicking also selects and examines.
 
-An appraisal stays on the object you examined while you move on to another target. For looting, the [controls reference](/holtburger/reference/3d-controls/#select-and-interact) includes dedicated object and unopened-corpse cyclers.
+[Inspection is separate from selection](/holtburger/3d/inspecting/): keep an appraisal open while you move on to another target. For looting, the [controls reference](/holtburger/reference/3d-controls/#select-and-interact) includes dedicated object and unopened-corpse cyclers.
 
 ## Between fights
 

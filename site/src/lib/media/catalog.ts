@@ -268,6 +268,12 @@ export const media = {
 		brief:
 			'Move an inventory item, inspect its details, and show a quantity prompt or vendor review with the changing footer actions.'
 	},
+	'creature-appraisal': {
+		kind: 'planned-video',
+		title: 'Keep inspecting while targets change',
+		brief:
+			'Rotate a creature or player preview, then change selection while keeping the appraisal open.'
+	},
 	'item-appraisal': {
 		kind: 'planned-image',
 		title: 'Inspect an item',

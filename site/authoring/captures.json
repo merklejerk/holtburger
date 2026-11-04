@@ -309,6 +309,14 @@
 			"framing": "Keep the minimap readable beside the surrounding scene.",
 			"expected": "Show outdoor terrain, buildings, impassable areas and elevation, then walk a winding dungeon passage and retrace part of the visible breadcrumb trail.",
 			"priority": "first"
+		},
+		"creature-appraisal": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "A nearby creature and a player with a distinctive appearance; several selectable objects.",
+			"framing": "Keep the appraisal model, selected-target HUD and world visible.",
+			"expected": "Examine a creature or player, rotate the preview, then select another target while the original appraisal stays open. Show the available creature and player details.",
+			"priority": "first"
 		}
 	}
 }

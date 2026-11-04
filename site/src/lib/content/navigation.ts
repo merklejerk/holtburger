@@ -75,6 +75,10 @@ export const navigation = [
 				label: 'Finding creatures & objects'
 			},
 			{
+				slug: '3d/inspecting',
+				label: 'Inspecting'
+			},
+			{
 				slug: '3d/movement-camera',
 				label: 'Movement & jumping'
 			},

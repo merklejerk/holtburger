@@ -582,8 +582,8 @@ sidecar and asset setup, then connects; highlighting a profile does not start th
 returns to the launcher in the same window. Character logout keeps the connection and returns to
 character selection. Complete CLI account/connection arguments bypass the launcher initially;
 `--account` remains required for a direct connection. Use an explicit `explorer` argument for offline
-exploration. Both clients use `-p` for port and `-P` for password. See the [product quickstart](../../release/QUICKSTART.md) for native
-paths, retail-content selection, and bundle layout.
+exploration. Both clients use `-p` for port and `-P` for password. See the
+[3D quickstarts](../../release/quickstarts/3d) for platform-specific installation and launch instructions.
 
 Add `--no-launcher` with `--account` for a direct session that exits on disconnect, cancellation,
 or connection/startup failure. This flag takes no value. Without it, direct CLI sessions return to

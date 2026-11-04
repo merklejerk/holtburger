@@ -84,7 +84,11 @@ it does not scan the full source corpus or apply a size gate.
 CLI includes `holtburger-cli`, `dat2hba`, `dat-tool`, fighter/mage scripts and sidecars,
 `content/`, metadata, license/notices, and its CLI quickstart. 3D includes `h3d/` with the
 packaged client/Explorer, private host/runtime/resources, metadata, license/notices, and its
-3D quickstart. Each assembler can run with the other product's inputs absent:
+3D quickstart. Assembly selects `release/quickstarts/PRODUCT/PLATFORM.md` for the
+target and ships it as the bundle's only `QUICKSTART.md`. Each guide stands alone;
+Linux guides cover portable and Flatpak installation, and 3D Windows/macOS guides
+cover installer and portable installation. Installers and Flatpaks retain the guide from
+their native input. Each assembler can run with the other product's inputs absent:
 
 ```sh
 python3 .github/scripts/release_suite.py assemble --product cli \
@@ -172,6 +176,11 @@ Beta and nightly use the same app IDs, install locations, shortcuts, and user pr
 Installing either replaces the other; there are no side-by-side nightly installations.
 Nightly builds have no update checks or update feed, including startup and focus/resume.
 A current-version nightly sorts below that version's beta even when built later.
+
+Before a beta, edit `release/RELEASE_NOTES.md` with user-facing changes, known issues,
+and upgrade instructions. Nightly descriptions are generated from the source commit.
+Both descriptions append installation links pinned to that commit. Descriptions are
+set when a draft is created; retries preserve any edits made to the existing draft.
 
 Diagnostics select `purpose=diagnostic` and one or both products/targets. They do not create
 tags, stage drafts, or publish. Complete release/nightly builds require both products and

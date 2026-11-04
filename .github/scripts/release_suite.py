@@ -410,7 +410,7 @@ def assemble(arguments) -> None:
         else:
             shutil.copytree(arguments.package, bundle / "h3d", symlinks=True)
             verify_host_origin(bundle, binaries / f"holtburger-3d-host{suffix}", target)
-        shutil.copy2(ROOT / f"release/{product.upper()}_QUICKSTART.md", bundle / "QUICKSTART.md")
+        shutil.copy2(ROOT / f"release/quickstarts/{product}/{target.platform}.md", bundle / "QUICKSTART.md")
         shutil.copy2(ROOT / "LICENSE.md", bundle / "LICENSE.md")
         shutil.copy2(arguments.notices, bundle / "THIRD_PARTY_NOTICES.html")
         write_json(bundle / "build-info.json", info)
@@ -555,6 +555,32 @@ def manifest(artifacts: Path) -> list[Path]:
     return files + [sums]
 
 
+def release_description(kind: str, commit: str) -> str:
+    """Describe the build for users and link to installation guides from its exact source."""
+    repository = "https://github.com/merklejerk/holtburger"
+    source = f"{repository}/blob/{commit}/release/quickstarts"
+    if kind == "nightly":
+        notes = (
+            f"Development build from [{commit[:8]}]({repository}/commit/{commit}). "
+            "It may contain unfinished changes.\n\n"
+            "Nightlies replace an installed beta and share its saved settings. "
+            "They do not check for updates."
+        )
+    else:
+        notes = (ROOT / "release/RELEASE_NOTES.md").read_text().strip()
+    return notes + "\n\n" + (
+        "## Install\n\n"
+        "Choose a download from Assets below. Installation instructions:\n\n"
+        "| Platform | 3D client | Terminal client (CLI) |\n"
+        "| --- | --- | --- |\n"
+        f"| Windows x86-64 | [Setup or ZIP]({source}/3d/win32.md) | [ZIP]({source}/cli/win32.md) |\n"
+        f"| macOS Apple Silicon | [DMG or ZIP]({source}/3d/darwin.md) | [ZIP]({source}/cli/darwin.md) |\n"
+        f"| Linux x86-64 | [Flatpak or tar.gz]({source}/3d/linux.md) | [Flatpak or tar.gz]({source}/cli/linux.md) |\n"
+        "\nEach bundle includes its instructions as `QUICKSTART.md`. "
+        "The 3D client requires your own Asheron's Call game files; CLI game data is included.\n"
+    )
+
+
 def stage(artifacts: Path, tag: str) -> None:
     files = manifest(artifacts)
     commit, _ = source_identity()
@@ -571,7 +597,7 @@ def stage(artifacts: Path, tag: str) -> None:
                       "--raw-field", f"name=Holtburger {check_versions()}",
                       "--field", "draft=true", "--field", f"prerelease={str(distribution_kind() == 'nightly').lower()}",
                       "--raw-field", "make_latest=false",
-                      "--field", f"body=@{ROOT / 'release/RELEASE_NOTES.md'}")
+                      "--raw-field", f"body={release_description(distribution_kind(), commit)}")
         releases = [json.loads(created)]
     if len(releases) != 1:
         raise ValueError("Expected exactly one draft release")

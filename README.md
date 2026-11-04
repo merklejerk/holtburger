@@ -150,7 +150,7 @@ Download the Flatpak from releases, then install it with
 (substitute the downloaded version).
 The app ID is `io.github.merklejerk.holtburger-cli`, displayed as **Holtburger CLI**.
 Beta and nightly share the same installation and settings; installing either replaces the
-other. See the [CLI quickstart](release/CLI_QUICKSTART.md) for its commands.
+other. See the [Linux CLI quickstart](release/quickstarts/cli/linux.md) for its commands.
 
 ```bash
 # see help
@@ -275,10 +275,10 @@ cargo run --bin tui -- [ARGS]
 ```
 
 CLI native/Flatpak bundles include the generated reference and navigation data. Source builds
-need generated data compatible with the current navigation format; see the
-[CLI quickstart](release/CLI_QUICKSTART.md).
+need generated data compatible with the current navigation format. For packaged clients,
+see the [CLI quickstarts](release/quickstarts/cli).
 A full HBA alone does not replace navigation data. h3d separately supports full retail DATs or
-HBAs through its own content selection; see the [3D quickstart](release/3D_QUICKSTART.md).
+HBAs through its own content selection; see the [3D quickstarts](release/quickstarts/3d).
 
 ## License
 

@@ -19,7 +19,7 @@ from release_suite import (
     TARGETS, INSTALLER_TARGETS, archive_bundle, digest, executable_architecture, extract_bundle,
     assemble, manifest, plan, stage, validate_tag, verify_bundle, already_published,
     record_flatpak, flatpak_manifest, flatpak_recipe, require_flatpak_release,
-    flatpak_runtime_ref, THREED_FLATPAK_RECIPE,
+    flatpak_runtime_ref, THREED_FLATPAK_RECIPE, release_description,
 )
 from cli_content_input import CONTENT_FILES, unpack_cli_content
 from test_cli_content_input import archive as cli_archive, components as cli_components
@@ -97,8 +97,9 @@ class ReleasePlanTests(unittest.TestCase):
 
     def test_shipped_product_quickstarts_are_build_inputs(self):
         self.assertTrue(documentation_only("README.md"))
-        for path in ("release/CLI_QUICKSTART.md", "release/3D_QUICKSTART.md"):
-            self.assertFalse(documentation_only(path))
+        for product in ("cli", "3d"):
+            for target in TARGETS:
+                self.assertFalse(documentation_only(f"release/quickstarts/{product}/{target.platform}.md"))
 
 class PublishedDistributionTests(unittest.TestCase):
     """Skipping expensive builds requires complete verified publication evidence."""
@@ -187,7 +188,10 @@ class NativeProductTests(unittest.TestCase):
         binaries.mkdir(parents=True)
         (root / "release").mkdir()
         (root / "release/channel.json").write_text(json.dumps("beta"))
-        (root / f"release/{product.upper()}_QUICKSTART.md").write_text("Product instructions")
+        quickstarts = root / "release/quickstarts" / product
+        quickstarts.mkdir(parents=True)
+        instructions = f"{product} instructions for {target.platform}"
+        (quickstarts / f"{target.platform}.md").write_text(instructions)
         (root / "LICENSE.md").write_text("License")
         notices = root / "notices.html"
         notices.write_text("Notices")
@@ -236,6 +240,7 @@ class NativeProductTests(unittest.TestCase):
             extracted.mkdir()
             bundle = extract_bundle(args.output / metadata["archive"], extracted)
             self.assertEqual(verify_bundle(bundle)["product"], product)
+            self.assertEqual((bundle / "QUICKSTART.md").read_text(), instructions)
         return bundle
 
     def test_cli_archive_has_complete_content_tools_and_scripts_without_electron(self):
@@ -533,6 +538,41 @@ class ProductFlatpakTests(unittest.TestCase):
 
 class DraftPublicationTests(unittest.TestCase):
     """Reruns must reuse matching bytes and must never modify a published release."""
+
+    def test_beta_description_preserves_authored_notes_and_pins_installation_links(self):
+        commit = "a" * 40
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "release").mkdir()
+            notes = "A new beta.\n\n- Fixes a connection problem."
+            (root / "release/RELEASE_NOTES.md").write_text(notes + "\n")
+            with patch("release_suite.ROOT", root):
+                body = release_description("release", commit)
+        self.assertTrue(body.startswith(notes + "\n\n"))
+        for product in ("cli", "3d"):
+            for target in TARGETS:
+                self.assertIn(f"/blob/{commit}/release/quickstarts/{product}/{target.platform}.md", body)
+
+    def test_nightly_creation_uses_generated_notes_and_prerelease_flag(self):
+        commit = "b" * 40
+        version = f"{check_versions()}-nightly-{commit}"
+        created = {"draft": True, "target_commitish": commit,
+                   "assets": [], "html_url": "https://example.invalid/nightly"}
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch("release_suite.ROOT", Path(temporary)), \
+             patch("release_suite.manifest", return_value=[]), \
+             patch("release_suite.check_versions", return_value=version), \
+             patch("release_suite.distribution_kind", return_value="nightly"), \
+             patch("release_suite.source_identity", return_value=(commit, False)), \
+             patch("release_suite.release_records", return_value=[]), \
+             patch("release_suite.run", side_effect=[commit, json.dumps(created)]) as github:
+            stage(Path(temporary), f"v{version}")
+        arguments = github.call_args.args
+        self.assertIn("prerelease=true", arguments)
+        body = next(argument.removeprefix("body=") for argument in arguments if argument.startswith("body="))
+        self.assertIn(f"Development build from [{commit[:8]}]", body)
+        self.assertIn(f"/commit/{commit}", body)
+        self.assertIn(f"/blob/{commit}/release/quickstarts/3d/win32.md", body)
 
     def test_created_draft_response_is_used_when_release_lists_remain_empty(self):
         commit = "a" * 40

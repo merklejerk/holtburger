@@ -8,7 +8,7 @@
 		new URL(resolve('pagefind/'), page.url.href).pathname
 	);
 	onMount(() => {
-		// Pagefind is generated after prerendering; the local production preview includes it.
+		// Pagefind is generated after prerendering; dev serves the latest built index.
 		const stylesheet = document.createElement('link');
 		stylesheet.rel = 'stylesheet';
 		stylesheet.href = resolve('pagefind/pagefind-component-ui.css');

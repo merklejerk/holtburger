@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { sveltekit } from '@sveltejs/kit/vite';
 import adapter from '@sveltejs/adapter-static';
 import { mdsvex } from 'mdsvex';
+import sirv from 'sirv';
 import { headingIds } from './scripts/heading-ids.ts';
+
+const base = '/holtburger';
 
 /** Source edits refresh build-owned metadata and copies; generated writes never retrigger it. */
 function authoringRefresh(): Plugin {
@@ -33,6 +36,11 @@ function authoringRefresh(): Plugin {
 	return {
 		name: 'holtburger-authoring-refresh',
 		configureServer(server) {
+			// Search uses the latest production index while source pages reload live.
+			server.middlewares.use(
+				`${base}/pagefind`,
+				sirv(path('./build/pagefind/'), { dev: true })
+			);
 			let queue = Promise.resolve();
 			server.watcher.add([quickstarts, catalog, captures, ...assets]);
 			const refresh = (event: string, changed: string) => {
@@ -91,7 +99,7 @@ export default defineConfig({
 			adapter: adapter(),
 			extensions: ['.svelte', '.md'],
 			preprocess: mdsvex({ extensions: ['.md'], remarkPlugins: [headingIds] }),
-			paths: { base: '/holtburger' }
+			paths: { base }
 		})
 	]
 });

@@ -124,11 +124,16 @@ Use Node.js 24.13.1 or newer for the website. From `site/`:
 
 ```sh
 npm ci
+npm run build
 npm run dev
 npm run check
-npm run build
 npm run preview
 ```
+
+Use `npm run dev` for automatic reload during editing. Search uses the last
+production index; rebuild when you want search results to reflect new content.
+The initial build supplies that index. `npm run preview` serves a fixed build
+without automatic reload.
 
 The production preview serves `site/build/` at
 `http://127.0.0.1:4178/holtburger/`, including generated Pagefind search.

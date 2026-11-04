@@ -20,9 +20,13 @@ Keep the folder somewhere permanent, outside the Holtburger application director
 
 <Media id="content-picker" />
 
-## Change the folder
+## Keep server-specific DATs separate
 
-In the launcher, expand **Advanced** and choose **Browse content folder**. **Use application default** clears the selected profile's override.
+Each launcher profile can remember its own DAT folder. Keep a server’s custom files in a separate folder, and switching profiles brings the right files with you.
+
+Select the profile, open **Advanced → Browse content folder**, then choose **Overwrite profile** to save the change. Use **Save to new profile** to keep another setup alongside it.
+
+To return a profile to the default folder, choose **Use application default** and save the profile.
 
 For Linux Flatpak folder-access problems, see the [Linux installation guide](/holtburger/start/3d/linux/#troubleshooting).
 

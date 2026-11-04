@@ -16,7 +16,7 @@ Holtburger is developed against **ACE**. **GDLE compatibility is unverified**; c
 
 ## Add your account
 
-Select the imported server and enter your account credentials. **Save to new profile** keeps a connection ready for next time; profiles let you switch between accounts without retyping the details.
+Select the imported server and enter your account credentials. **Save to new profile** keeps a connection ready for next time; profiles let you switch between accounts without retyping the details. Each can also remember [its own DAT folder](/holtburger/startup/settings/#keep-server-specific-dats-separate).
 
 Accounts belong to the server. Follow its account-creation instructions if you need a new one.
 

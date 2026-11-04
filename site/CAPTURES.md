@@ -228,10 +228,10 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 **Later · agent · pending · still** — ID: `crafting-confirmation`
 
-- Setup: A crafting attempt with success-chance confirmation enabled.
-- Frame: Crop the confirmation and enough item context to identify the attempt.
-- Action/purpose: Show the target, success chance and confirmation for a crafting attempt.
-- Expected result: Show the target, success chance and confirmation for a crafting attempt.
+- Setup: A trained Cooking skill, Flour and Water, with crafting-chance confirmation enabled.
+- Frame: Crop the real chance-confirmation dialog. Identify the attempted recipe in its caption or surrounding guide text.
+- Action/purpose: Show a real crafting chance confirmation with its accept and decline controls.
+- Expected result: The server-reported chance and explicit accept/decline controls are readable.
 - Used in: [3d/crafting/#review-the-attempt](https://merklejerk.github.io/holtburger/3d/crafting/#review-the-attempt)
 
 ## World, party and character states
@@ -346,10 +346,10 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 **First · agent · pending · still** — ID: `hud`
 
-- Setup: Several HUD elements in a normal gameplay view; choose one small and one larger text size.
-- Frame: Two matched stills or one comparison image with the world visible.
-- Action/purpose: Show rearranged panels and the difference between UI scaling and text scaling.
-- Expected result: Panel placement and UI/text scale differences are clear without cropping controls.
+- Setup: Unlock UI layout in a real gameplay scene.
+- Frame: Crop one HUD component with its actual move and resize handles visible; omit unrelated windows.
+- Action/purpose: Show an unlocked HUD component with its move and resize controls.
+- Expected result: The component’s layout-editing affordances are clear at guide size.
 - Used in: [3d/#make-the-interface-yours](https://merklejerk.github.io/holtburger/3d/#make-the-interface-yours), [3d/interface/#move-and-resize-the-hud](https://merklejerk.github.io/holtburger/3d/interface/#move-and-resize-the-hud)
 
 ### Add your server
@@ -387,19 +387,19 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 **First · agent · pending · still** — ID: `character-roster`
 
 - Setup: The character selection screen with a sample roster and a selected character.
-- Frame: Keep the roster and selected-character preview together with the enter-world control; omit unused background.
-- Action/purpose: Crop the roster, selected-character preview and enter-world control.
-- Expected result: Crop the roster, selected-character preview and enter-world control.
+- Frame: Crop the roster, selected entry and Enter World/Create character controls for readable text.
+- Action/purpose: Crop the roster, selected entry and enter-world control.
+- Expected result: The selected character and the explicit entry action are clear; omit the broad background.
 - Used in: [startup/characters/#choose-your-character](https://merklejerk.github.io/holtburger/startup/characters/#choose-your-character)
 
 ### Choose your game data
 
 **Later · agent · pending · still** — ID: `content-picker`
 
-- Setup: First-launch folder selection with a complete retail DAT folder available.
-- Frame: Show the folder-level choice and enough file names to identify the correct directory; use a neutral path.
-- Action/purpose: Show the first-launch folder picker with a complete retail DAT folder selected.
-- Expected result: The reader can distinguish selecting the folder from selecting one DAT file.
+- Setup: A launcher profile using an actual retail DAT folder.
+- Frame: Crop the content-folder field and Browse/Use application default controls. Native OS file-picker chrome is outside this capture.
+- Action/purpose: Show the launcher’s content-folder selection controls with a real DAT folder selected.
+- Expected result: The reader can locate the application’s folder selection control and see a selected DAT folder.
 - Used in: [startup/settings/#need-the-dats](https://merklejerk.github.io/holtburger/startup/settings/#need-the-dats)
 
 ### Plan a skill improvement

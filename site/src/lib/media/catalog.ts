@@ -145,7 +145,7 @@ export const media = {
 		kind: 'planned-image',
 		title: 'Review a crafting attempt',
 		brief:
-			'Show the target, success chance and confirmation for a crafting attempt.'
+			'Show a real crafting chance confirmation with its accept and decline controls.'
 	},
 	'world-map-controls': {
 		kind: 'planned-image',
@@ -162,8 +162,7 @@ export const media = {
 	'character-roster': {
 		kind: 'planned-image',
 		title: 'Choose a character',
-		brief:
-			'Crop the roster, selected-character preview and enter-world control.'
+		brief: 'Crop the roster, selected entry and enter-world control.'
 	},
 	'smart-tab': {
 		kind: 'planned-video',
@@ -199,7 +198,7 @@ export const media = {
 		kind: 'planned-image',
 		title: 'Make room for your HUD',
 		brief:
-			'Show rearranged panels and the difference between UI scaling and text scaling.'
+			'Show an unlocked HUD component with its move and resize controls.'
 	},
 	launcher: {
 		kind: 'planned-image',
@@ -211,7 +210,7 @@ export const media = {
 		kind: 'planned-image',
 		title: 'Choose your game data',
 		brief:
-			'Show the first-launch folder picker with a complete retail DAT folder selected.'
+			'Show the launcher’s content-folder selection controls with a real DAT folder selected.'
 	},
 	'tui-workflow': {
 		kind: 'planned-video',

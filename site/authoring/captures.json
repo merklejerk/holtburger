@@ -65,9 +65,9 @@
 		"hud": {
 			"owner": "agent",
 			"session": "setup",
-			"setup": "Several HUD elements in a normal gameplay view; choose one small and one larger text size.",
-			"framing": "Two matched stills or one comparison image with the world visible.",
-			"expected": "Panel placement and UI/text scale differences are clear without cropping controls.",
+			"setup": "Unlock UI layout in a real gameplay scene.",
+			"framing": "Crop one HUD component with its actual move and resize handles visible; omit unrelated windows.",
+			"expected": "The component’s layout-editing affordances are clear at guide size.",
 			"priority": "first"
 		},
 		"launcher": {
@@ -81,9 +81,9 @@
 		"content-picker": {
 			"owner": "agent",
 			"session": "setup",
-			"setup": "First-launch folder selection with a complete retail DAT folder available.",
-			"framing": "Show the folder-level choice and enough file names to identify the correct directory; use a neutral path.",
-			"expected": "The reader can distinguish selecting the folder from selecting one DAT file.",
+			"setup": "A launcher profile using an actual retail DAT folder.",
+			"framing": "Crop the content-folder field and Browse/Use application default controls. Native OS file-picker chrome is outside this capture.",
+			"expected": "The reader can locate the application’s folder selection control and see a selected DAT folder.",
 			"priority": "later"
 		},
 		"tui-workflow": {
@@ -369,9 +369,9 @@
 		"crafting-confirmation": {
 			"owner": "agent",
 			"session": "gear",
-			"setup": "A crafting attempt with success-chance confirmation enabled.",
-			"framing": "Crop the confirmation and enough item context to identify the attempt.",
-			"expected": "Show the target, success chance and confirmation for a crafting attempt.",
+			"setup": "A trained Cooking skill, Flour and Water, with crafting-chance confirmation enabled.",
+			"framing": "Crop the real chance-confirmation dialog. Identify the attempted recipe in its caption or surrounding guide text.",
+			"expected": "The server-reported chance and explicit accept/decline controls are readable.",
 			"priority": "later"
 		},
 		"world-map-controls": {
@@ -394,8 +394,8 @@
 			"owner": "agent",
 			"session": "setup",
 			"setup": "The character selection screen with a sample roster and a selected character.",
-			"framing": "Keep the roster and selected-character preview together with the enter-world control; omit unused background.",
-			"expected": "Crop the roster, selected-character preview and enter-world control.",
+			"framing": "Crop the roster, selected entry and Enter World/Create character controls for readable text.",
+			"expected": "The selected character and the explicit entry action are clear; omit the broad background.",
 			"priority": "first"
 		}
 	}

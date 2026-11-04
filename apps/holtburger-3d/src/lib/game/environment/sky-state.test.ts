@@ -7,7 +7,7 @@ import {
 } from "./sky-state";
 
 /**
- * The shipped region's first day group ("Sunny"), transcribed from a census of `dats/assets.hba`.
+ * The shipped region's first day group ("Sunny"), transcribed from a census of the full content archive.
  * Its authored values drive these tests so the resolver is checked against real content rather
  * than invented shapes: replacements at object indices 0, 1, and 4 of a seven-object list, a sun
  * with a bounded window, an always-visible Setup-family object, and a scrolling cloud layer.

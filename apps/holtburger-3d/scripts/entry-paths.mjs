@@ -344,3 +344,35 @@ function parseLongArgument(argument) {
 				: withoutPrefix.slice(separatorIndex + 1),
 	};
 }
+
+/** Resolve only when discovery starts; unused invalid defaults never defeat a selection. */
+export function defaultContentRoot(
+	configured,
+	invocationDirectory,
+	installedRoot,
+) {
+	if (configured === undefined) return installedRoot;
+	if (configured.length === 0)
+		throw new Error("HOLTBURGER_DEFAULT_CONTENT requires a nonempty directory");
+	return resolve(invocationDirectory, configured);
+}
+
+/** Development launchers supply a workspace default without turning it into --content. */
+export function developmentContentEnvironment(
+	environment,
+	invocationDirectory,
+	workspace,
+) {
+	const configured = environment.HOLTBURGER_DEFAULT_CONTENT;
+	return {
+		...environment,
+		HOLTBURGER_DEFAULT_CONTENT:
+			configured === ""
+				? ""
+				: defaultContentRoot(
+						configured,
+						invocationDirectory,
+						resolve(workspace, "local/content"),
+					),
+	};
+}

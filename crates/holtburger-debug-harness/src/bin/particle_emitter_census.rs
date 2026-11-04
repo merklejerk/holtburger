@@ -26,6 +26,7 @@ const RETAIL_FRAME_SECONDS: f64 = 1.0 / 60.0;
 #[derive(Parser)]
 #[command(about = "Census authored particle emitter definitions for the GPU-emission design")]
 struct Args {
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
@@ -49,7 +50,8 @@ struct EmitterFacts {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
 
     let mut total = 0u32;
     let mut decode_failures = 0u32;

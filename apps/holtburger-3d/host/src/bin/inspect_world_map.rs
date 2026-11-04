@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
         args.next().is_none(),
         "unexpected world-map diagnostic argument"
     );
-    let repository = Arc::new(ContentRepository::discover(None)?);
+    let repository = Arc::new(ContentRepository::select_installation(None)?);
     let source_blocks = (0..BLOCKS_PER_AXIS)
         .flat_map(|east| {
             (0..BLOCKS_PER_AXIS)

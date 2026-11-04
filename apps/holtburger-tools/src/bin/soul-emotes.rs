@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use holtburger_content::ContentRepository;
 use std::path::PathBuf;
@@ -10,8 +10,9 @@ use std::path::PathBuf;
     about = "Inspect the resolved soul-emote catalog from mounted HBA content"
 )]
 struct Cli {
-    /// HBA directory or single HBA archive to inspect
-    path: PathBuf,
+    /// Installation directory to inspect; otherwise use default discovery.
+    #[arg(long)]
+    content: Option<PathBuf>,
     /// Optional soul-emote token to resolve directly, such as wave
     #[arg(long)]
     token: Option<String>,
@@ -20,20 +21,10 @@ struct Cli {
     limit: usize,
 }
 
-fn open_repository(path: &PathBuf) -> Result<ContentRepository> {
-    if path.is_dir() {
-        return ContentRepository::from_hba_dir(path)
-            .with_context(|| format!("failed to open HBA directory {}", path.display()));
-    }
-
-    ContentRepository::from_hba_path(path)
-        .with_context(|| format!("failed to open HBA path {}", path.display()))
-}
-
 fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
-    let repository = open_repository(&cli.path)?;
+    let repository = ContentRepository::select_installation(cli.content)?;
     let catalog = repository.read_soul_emote_catalog()?;
 
     if let Some(token) = cli.token.as_deref() {

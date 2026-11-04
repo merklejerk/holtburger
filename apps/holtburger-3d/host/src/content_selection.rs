@@ -29,7 +29,7 @@ pub fn resolve(selection: HostContentSelection) -> Result<ResolvedContent> {
             ResolvedContent::discover(root, accepts).context(CONTENT_GUIDANCE)
         }
         HostContentSelection::Explicit(path) => {
-            let resolved = ResolvedContent::open_preferred(path, accepts)?;
+            let resolved = ResolvedContent::open_directory(&path, accepts)?;
             if !accepts(&resolved.repository) {
                 return Err(ContentResourceError {
                     kind: ContentResourceErrorKind::Missing,
@@ -64,7 +64,7 @@ mod tests {
             )
             .unwrap();
         writer.write(&path).unwrap();
-        let resolved = resolve(HostContentSelection::Explicit(path)).unwrap();
+        let resolved = resolve(HostContentSelection::Explicit(directory.path().into())).unwrap();
         assert!(accepts(&resolved.repository));
         let bootstrap = directory.path().join("bootstrap.hba");
         let mut small = HbaWriter::new();
@@ -83,7 +83,14 @@ mod tests {
         ] {
             assert!(accepts(&resolve(selection).unwrap().repository));
         }
-        assert!(resolve(HostContentSelection::Explicit(bootstrap)).is_err());
+        let error = resolve(HostContentSelection::Explicit(bootstrap)).unwrap_err();
+        assert!(matches!(
+            crate::content_failure::ContentFailure::from_error(&error),
+            Some(crate::content_failure::ContentFailure::Selection {
+                reason: crate::content_failure::SelectionFailureReason::Invalid,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -100,7 +107,7 @@ mod tests {
             )
             .unwrap();
         writer.write(&path).unwrap();
-        let error = resolve(HostContentSelection::Explicit(path)).unwrap_err();
+        let error = resolve(HostContentSelection::Explicit(directory.path().into())).unwrap_err();
         assert!(matches!(
             crate::content_failure::ContentFailure::from_error(&error),
             Some(crate::content_failure::ContentFailure::Resource { file_id, .. })

@@ -10,6 +10,6 @@
 		"types": ["node"],
 		"resolveJsonModule": true
 	},
-	"files": ["../../../crates/holtburger-scripting/holtburger.d.ts"],
+	"files": ["../../../../crates/holtburger-scripting/holtburger.d.ts"],
 	"include": ["src/**/*.ts"]
 }

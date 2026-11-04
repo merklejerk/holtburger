@@ -296,7 +296,7 @@ struct Args {
     #[arg(
         long,
         value_name = "DIR",
-        help = "Content directory containing bootstrap.hba or assets.hba, plus navigation.hnav (overrides HOLTBURGER_CONTENT)"
+        help = "Content directory containing bootstrap.hba or assets.hba, plus navigation.hnav (overrides automatic discovery)"
     )]
     content: Option<std::path::PathBuf>,
     #[arg(

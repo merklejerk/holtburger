@@ -27,7 +27,7 @@ struct Args {
     #[arg(long)]
     content: Option<PathBuf>,
     /// Offline template catalog used to find a matching browser model.
-    #[arg(long, default_value = "dats/weenies.hwc")]
+    #[arg(long, default_value = "weenies.hwc")]
     catalog: PathBuf,
     /// Optional MessagePack levels for the browser harness's motion-playback fixture.
     #[arg(long)]
@@ -51,7 +51,7 @@ struct Sample {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content)?;
+    let content = ContentRepository::select_installation(args.content)?;
     let motion_reference = content.read_motion_reference_data()?;
     let motions = Arc::new(motion_reference.motion_sequences);
     let bootstrap = WorldBootstrap {

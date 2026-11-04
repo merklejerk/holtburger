@@ -36,7 +36,7 @@ struct Args {
     /// Normalized outdoor owner containing the benchmark start.
     #[arg(long, default_value = "0xda55ffff", value_parser = parse_did)]
     landblock: u32,
-    /// Optional HBA file or directory; normal content discovery is used when omitted.
+    /// Optional installation directory; default/platform discovery is used when omitted.
     #[arg(long)]
     content: Option<PathBuf>,
     /// Body-reference start coordinates formatted as X,Y,Z.
@@ -84,8 +84,9 @@ fn main() -> Result<()> {
         );
     }
 
-    let repository =
-        Arc::new(ContentRepository::discover(args.content).context("content discovery failed")?);
+    let repository = Arc::new(
+        ContentRepository::select_installation(args.content).context("content discovery failed")?,
+    );
     let service =
         ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
     let landblock = service

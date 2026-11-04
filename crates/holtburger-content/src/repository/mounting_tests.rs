@@ -27,10 +27,10 @@ fn discovery_skips_absence_but_stops_at_a_broken_installation() {
         false,
     );
     let candidates = vec![root.path().join("absent"), empty.clone(), valid.clone()];
-    let selection = ResolvedContent::discover_candidates(candidates.clone(), |_| true).unwrap();
+    let selection = discover_candidates(candidates.clone(), |_| true).unwrap();
     assert_eq!(selection.location, fs::canonicalize(valid).unwrap());
     fs::write(empty.join("broken.hba"), b"broken").unwrap();
-    let error = ResolvedContent::discover_candidates(candidates, |_| true).unwrap_err();
+    let error = discover_candidates(candidates, |_| true).unwrap_err();
     assert!(matches!(
         error.downcast_ref::<ContentSelectionError>(),
         Some(ContentSelectionError::Archive { .. })
@@ -40,24 +40,31 @@ fn discovery_skips_absence_but_stops_at_a_broken_installation() {
 #[test]
 fn discovery_continues_after_application_rejection_and_reports_exhaustion() {
     let root = tempdir().unwrap();
-    let rejected = root.path().join("small.hba");
-    let accepted = root.path().join("suitable.hba");
+    let rejected = root.path().join("small");
+    let accepted = root.path().join("suitable");
+    fs::create_dir(&rejected).unwrap();
+    fs::create_dir(&accepted).unwrap();
     let key = ResourceKey::new(EOR_PORTAL_NAMESPACE, 0x0100_0001);
     write_hba(
-        &rejected,
+        &rejected.join("small.hba"),
         EOR_PORTAL_NAMESPACE,
         key.file_id + 1,
         b"small",
         false,
     );
-    write_hba(&accepted, key.namespace, key.file_id, b"suitable", false);
-    let selection = ResolvedContent::discover_candidates(
-        vec![rejected.clone(), accepted.clone()],
-        |repository| repository.resource_metadata(key).is_some(),
-    )
+    write_hba(
+        &accepted.join("suitable.hba"),
+        key.namespace,
+        key.file_id,
+        b"suitable",
+        false,
+    );
+    let selection = discover_candidates(vec![rejected.clone(), accepted.clone()], |repository| {
+        repository.resource_metadata(key).is_some()
+    })
     .unwrap();
     assert_eq!(selection.location, fs::canonicalize(accepted).unwrap());
-    let error = ResolvedContent::discover_candidates(vec![rejected], |_| false).unwrap_err();
+    let error = discover_candidates(vec![rejected], |_| false).unwrap_err();
     assert!(matches!(
         error.downcast_ref::<ContentSelectionError>(),
         Some(ContentSelectionError::NotDiscovered { .. })
@@ -141,8 +148,7 @@ fn consumer_admission_selects_one_suitable_family_with_hba_precedence() {
                 full_hba
             );
         }
-        let discovered =
-            ResolvedContent::discover_candidates(vec![root.path().to_path_buf()], admits);
+        let discovered = discover_candidates(vec![root.path().to_path_buf()], admits);
         assert_eq!(discovered.is_ok(), expected.is_some());
     }
 }
@@ -536,4 +542,15 @@ fn empty_and_unrecognized_selections_fail_explicitly() {
             .downcast_ref::<ContentSelectionError>(),
         Some(ContentSelectionError::Archive { .. })
     ));
+}
+
+// Inject candidate locations so these tests never inspect the machine's platform data.
+fn discover_candidates(
+    paths: Vec<std::path::PathBuf>,
+    accepts: impl Fn(&ContentRepository) -> bool,
+) -> anyhow::Result<ResolvedContent> {
+    crate::installation::discover_candidates(paths, |path| {
+        let selection = ResolvedContent::open_directory(path, &accepts)?;
+        Ok(accepts(&selection.repository).then_some(selection))
+    })
 }

@@ -12,7 +12,8 @@ const TOPOLOGY_PROBE_OWNER: u32 = 0x8602_ffff;
 /// Reads the actual CLI bootstrap, creation catalog, and prepared/model-free navigation source.
 #[derive(Parser)]
 struct Arguments {
-    /// Optional CLI content directory; otherwise use normal dev/bundle discovery.
+    /// Optional CLI content directory; otherwise use normal default/platform discovery.
+    #[arg(long)]
     content: Option<PathBuf>,
 }
 

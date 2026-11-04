@@ -176,9 +176,9 @@ class NativeProductTests(unittest.TestCase):
         if product == "cli":
             for binary in ("tui", "dat2hba", "dat-tool"):
                 executable(binaries / binary)
-            (root / "scripts").mkdir()
+            (root / "assets" / "scripts").mkdir(parents=True)
             for name in ("fighter.js", "mage.js", "mage.data.json", "mage.data.bin"):
-                (root / "scripts" / name).write_bytes(b"script or sidecar")
+                (root / "assets" / "scripts" / name).write_bytes(b"script or sidecar")
             data, checksum = cli_archive(cli_components())
             content = root / "staged-content"
             unpack_cli_content(data, checksum, content)

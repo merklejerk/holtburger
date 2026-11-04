@@ -19,6 +19,18 @@ mod tests;
 /// Selection failures remain distinguishable from resource failures after mounting.
 #[derive(Debug, Error)]
 pub enum ContentSelectionError {
+    /// An installation selection cannot be an individual archive.
+    #[error("Content location must be a directory: {}", path.display())]
+    NotDirectory {
+        /// Invalid installation path.
+        path: PathBuf,
+    },
+    /// An installation is readable but lacks the consuming application's requirements.
+    #[error("Content directory lacks required resources: {}", path.display())]
+    Unsuitable {
+        /// Directory rejected by the consumer.
+        path: PathBuf,
+    },
     /// Automatic candidates were absent, empty, or rejected by the consumer's admission rule.
     #[error("No suitable content archives found in discovery locations: {paths:?}")]
     NotDiscovered {
@@ -114,41 +126,22 @@ impl ResolvedContent {
     /// Tries each mountable installation until the consuming application admits its content.
     /// Rejection permits another candidate; malformed or unreadable archives remain errors.
     pub fn discover(
-        portable_root: PathBuf,
+        default_root: PathBuf,
         accepts: impl Fn(&ContentRepository) -> bool,
     ) -> Result<Self> {
-        let mut paths = vec![portable_root];
-        if let Some(platform) = super::platform_content_path()
-            && !paths.contains(&platform)
-        {
-            paths.push(platform);
-        }
-        Self::discover_candidates(paths, accepts)
+        crate::installation::discover_content_directories(Some(default_root), |path| {
+            let selection = Self::open_directory(path, &accepts)?;
+            Ok(accepts(&selection.repository).then_some(selection))
+        })
     }
 
-    fn discover_candidates(
-        paths: Vec<PathBuf>,
+    /// Open an installation directory while retaining exact-file APIs for artifact consumers.
+    pub fn open_directory(
+        path: &Path,
         accepts: impl Fn(&ContentRepository) -> bool,
     ) -> Result<Self> {
-        for path in &paths {
-            match Self::open_preferred(path, &accepts) {
-                Ok(selection) => {
-                    if accepts(&selection.repository) {
-                        return Ok(selection);
-                    }
-                }
-                Err(error) => match error.downcast_ref::<ContentSelectionError>() {
-                    Some(ContentSelectionError::Empty { .. }) => continue,
-                    Some(ContentSelectionError::Unavailable { source, .. })
-                        if source.kind() == std::io::ErrorKind::NotFound =>
-                    {
-                        continue;
-                    }
-                    _ => return Err(error),
-                },
-            }
-        }
-        Err(ContentSelectionError::NotDiscovered { paths }.into())
+        crate::installation::require_directory(path)?;
+        Self::open_preferred(path.to_path_buf(), accepts)
     }
 }
 

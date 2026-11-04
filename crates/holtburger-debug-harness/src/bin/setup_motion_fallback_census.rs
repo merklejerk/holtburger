@@ -18,8 +18,9 @@ const SETUP_MODEL_TYPE: u32 = 0x02;
 #[derive(Parser)]
 #[command(about = "Census the setup-model motion-table fallback across the weenie catalog")]
 struct Args {
-    #[arg(long, default_value = "dats/weenies.hwc")]
+    #[arg(long, default_value = "weenies.hwc")]
     catalog: std::path::PathBuf,
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
     /// Print this many representative templates that resolve through their setup model.
@@ -29,7 +30,8 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let catalog = WeenieCatalog::open(&args.catalog).context("catalog open failed")?;
 
     let mut default_table_by_setup: HashMap<u32, u32> = HashMap::new();

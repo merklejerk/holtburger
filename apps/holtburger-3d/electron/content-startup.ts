@@ -28,7 +28,8 @@ interface Dependencies<T extends StartupHost> {
 	readonly noContentSearch: boolean;
 	/** Explicitly forget the saved selection before applying ordinary launch precedence. */
 	readonly clearContent: boolean;
-	readonly portableRoot: string;
+	/** Evaluated only after explicit/saved selection and search restrictions. */
+	readonly defaultDiscoveryRoot: () => string;
 	readonly launch: (selection: HostContentSelection) => T;
 	readonly admit: (host: T) => Promise<void>;
 	readonly pickFolder: (previous: string | null) => Promise<string | null>;
@@ -150,7 +151,7 @@ export class ContentStartup<T extends StartupHost> {
 			return;
 		}
 		await this.#trySelection(
-			{ kind: "automatic", root: this.#dependencies.portableRoot },
+			{ kind: "automatic", root: this.#dependencies.defaultDiscoveryRoot() },
 			false,
 		);
 	}
@@ -276,7 +277,10 @@ export class ContentStartup<T extends StartupHost> {
 				error.failure.reason === "absent"
 			) {
 				await this.#trySelection(
-					{ kind: "automatic", root: this.#dependencies.portableRoot },
+					{
+						kind: "automatic",
+						root: this.#dependencies.defaultDiscoveryRoot(),
+					},
 					false,
 				);
 				return;

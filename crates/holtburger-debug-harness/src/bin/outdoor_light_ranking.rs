@@ -23,6 +23,7 @@ fn is_setup(id: u32) -> bool {
 #[derive(Parser)]
 #[command(about = "Rank outdoor landblocks by authored static light count")]
 struct Args {
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
     /// How many of the most-lit landblocks to print.
@@ -32,7 +33,8 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let cache = ContentDecodeCache::new();
 
     let light_count = |did: u32| -> usize {

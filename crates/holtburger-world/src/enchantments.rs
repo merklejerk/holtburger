@@ -412,7 +412,7 @@ impl EnchantmentRules {
                 // RETAIL DIVERGENCE: hides unknown spell IDs. Retaining their wire
                 // classification keeps server-only effects inspectable; matching retail would
                 // hide them. Census: all 30 distinct IDs in the 2026-10-28 login capture exist
-                // in scripts/src/mage/spells.json (6,266 definitions), so none need this
+                // in the inspected spell export (6,266 definitions), so none need this
                 // fallback against that reference export. This does not establish coverage of
                 // other servers or installed DATs.
                 Some(

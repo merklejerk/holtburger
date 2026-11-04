@@ -52,7 +52,7 @@ struct Args {
     /// Normalized or cell-qualified landblock DID.
     #[arg(long, default_value = "0xda55ffff", value_parser = parse_did)]
     landblock: u32,
-    /// Optional HBA file or directory; normal content discovery is used when omitted.
+    /// Optional installation directory; default/platform discovery is used when omitted.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
     /// Restrict physical-fly and grounded portal traces to one full EnvCell DID.
@@ -116,8 +116,9 @@ fn ground_label(body: &SpatialBody) -> &'static str {
 fn main() -> Result<()> {
     let args = Args::parse();
     let explicit_grounded_route = grounded_route_spec(&args, args.landblock)?;
-    let repository =
-        Arc::new(ContentRepository::discover(args.content).context("content discovery failed")?);
+    let repository = Arc::new(
+        ContentRepository::select_installation(args.content).context("content discovery failed")?,
+    );
     let decode_cache = Arc::new(ContentDecodeCache::new());
     let service = ContentAssetService::new(Arc::clone(&repository), Arc::clone(&decode_cache));
     let landblock = service

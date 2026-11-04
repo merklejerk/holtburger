@@ -7,6 +7,8 @@ pub mod contracts;
 pub mod decode_cache;
 pub mod equipment_sets;
 pub mod generated_scenery;
+/// Shared installation-directory selection and discovery contracts.
+pub mod installation;
 pub mod interior;
 pub mod landblock;
 mod lockpick;

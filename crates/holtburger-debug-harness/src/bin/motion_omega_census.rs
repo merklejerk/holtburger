@@ -18,13 +18,15 @@ use std::io::Cursor;
 #[derive(Parser)]
 #[command(about = "Census motion-table physical omega by magnitude and axis")]
 struct Args {
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let index: Vec<_> = content
         .resource_index()
         .iter()

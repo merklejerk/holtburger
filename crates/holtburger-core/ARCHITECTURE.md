@@ -356,7 +356,7 @@ sequenceDiagram
 
 ### Adding a new Message Handler
 
-1. **Identify**: Find the opcode in the ACE Server source (ground truth).
+1. **Identify**: Establish the opcode and wire contract from verified protocol evidence.
 2. **Update Protocol**: Add the message structure to `holtburger-protocol`.
 3. **Handle in Core**: Add a case to the core loop in [src/client/messages.rs](src/client/messages.rs).
 4. **Update State**: If the message changes the world, add a method to `holtburger-world` and emit a `WorldEvent`.

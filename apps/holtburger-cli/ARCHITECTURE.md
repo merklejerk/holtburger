@@ -4,15 +4,15 @@ This crate is the primary interactive interface for Holtburger. It is a Terminal
 
 ## 🏗️ Project Structure
 
-The TUI owns content selection in `installation.rs`: explicit `--content`, then
-`HOLTBURGER_CONTENT`, then working-directory `dats/`, then executable-adjacent `content/`.
-Both overrides accept directories only. A directory selects `bootstrap.hba` when present,
-otherwise `assets.hba`, and always requires `navigation.hnav`. There is no archive
-profile inference, runtime HBA geometry projection, platform search, or automatic format fallback.
-The frontend opens the HBA repository and navigation archive independently, loads bootstrap/
-creation facts, and passes a `PreparedNavigationSource` through core's storage-independent
-`SceneContentSource` and `SetupContentSource` contracts. It explicitly selects reduced
-movement behavior independently of these providers. The content layer owns decoding, not path precedence.
+The TUI owns content requirements in `installation.rs`. Explicit `--content DIR` bypasses
+discovery; otherwise `HOLTBURGER_DEFAULT_CONTENT` replaces the executable-adjacent `content/`
+root before shared platform fallback. All installation paths are directories. A directory
+selects `bootstrap.hba` when present, otherwise `assets.hba`, and requires `navigation.hnav`.
+Missing requirements permit automatic candidate rejection; malformed existing inputs fail.
+The frontend opens the HBA repository and navigation archive independently and passes a
+`PreparedNavigationSource` through core's storage-independent scene/setup contracts.
+Shared `holtburger-content::installation` owns candidate iteration; frontend admission owns
+HNAV and bootstrap requirements. Development runner policy stays outside the installed client.
 Prepared cells preserve the authored directed visibility lists and SeenOutside flags alongside
 containment geometry. Both reduced and full scene products supply those facts to shared world
 retention; the TUI does not infer entity lifetime from its display or geometric distance.

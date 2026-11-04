@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
 	extractContentArguments,
+	defaultContentRoot,
+	developmentContentEnvironment,
 	extractEntryArguments,
 	buildEntryPath,
 	collapseRendererArguments,
@@ -463,5 +465,45 @@ describe("Electron launch arguments", () => {
 	it("keeps zero as the random-port sentinel and honors an explicit port", async () => {
 		expect(parseVitePort("0")).toBe(0);
 		await expect(resolveVitePort("1432", "0")).resolves.toBe(1432);
+	});
+});
+
+describe("default content roots", () => {
+	it("resolves configured roots without treating them as explicit selections", () => {
+		expect(defaultContentRoot("content", "/invocation", "/installed")).toBe(
+			resolve("/invocation/content"),
+		);
+		expect(defaultContentRoot(undefined, "/invocation", "/installed")).toBe(
+			"/installed",
+		);
+		expect(() => defaultContentRoot("", "/invocation", "/installed")).toThrow(
+			"nonempty directory",
+		);
+	});
+	it("injects workspace defaults while preserving caller configuration and unrelated values", () => {
+		expect(
+			developmentContentEnvironment(
+				{ OTHER: "kept" },
+				"/invocation",
+				"/workspace",
+			),
+		).toEqual({
+			OTHER: "kept",
+			HOLTBURGER_DEFAULT_CONTENT: resolve("/workspace/local/content"),
+		});
+		expect(
+			developmentContentEnvironment(
+				{ HOLTBURGER_DEFAULT_CONTENT: "chosen" },
+				"/invocation",
+				"/workspace",
+			).HOLTBURGER_DEFAULT_CONTENT,
+		).toBe(resolve("/invocation/chosen"));
+		expect(
+			developmentContentEnvironment(
+				{ HOLTBURGER_DEFAULT_CONTENT: "" },
+				"/invocation",
+				"/workspace",
+			).HOLTBURGER_DEFAULT_CONTENT,
+		).toBe("");
 	});
 });

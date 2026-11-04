@@ -60,15 +60,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Fetch HBA files
-        shell: bash
-        run: |
-          if [ -n "${{ vars.HBA_MICRO_LATEST_URL }}" ]; then
-            HBA_MICRO_LATEST_URL="${{ vars.HBA_MICRO_LATEST_URL }}" \
-              bash .github/scripts/fetch_micro_hba.sh
-          else
-            echo "HBA_MICRO_LATEST_URL not set, skipping HBA fetch"
-          fi
-        continue-on-error: true
+      - name: Test CLI development runner
+        run: python3 -m unittest discover -s apps/holtburger-cli/tests -p 'test_*.py' -v
       - name: Run Tests
         run: cargo test --workspace --all-targets --all-features

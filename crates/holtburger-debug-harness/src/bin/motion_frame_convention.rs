@@ -21,6 +21,7 @@ const MOTION_TABLE_TYPE: u32 = 0x09;
 #[derive(Parser)]
 #[command(about = "Compare explicit motion-data velocity against authored root translation")]
 struct Args {
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
@@ -40,7 +41,8 @@ fn dominant_axis(vector: Vector3) -> &'static str {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let index: Vec<_> = content
         .resource_index()
         .iter()

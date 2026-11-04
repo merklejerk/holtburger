@@ -2,7 +2,7 @@
 
 import { probeLiveSoulEmotes } from "./live-soul-emote-probe.mjs";
 import { spawn } from "node:child_process";
-import { extractContentArguments } from "./entry-paths.mjs";
+import { extractContentArguments, defaultContentRoot } from "./entry-paths.mjs";
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -532,7 +532,7 @@ async function main() {
 	}
 	await access(hostPath, constants.X_OK);
 	const environment = { ...process.env };
-	delete environment.HOLTBURGER_DATS;
+	delete environment.HOLTBURGER_DEFAULT_CONTENT;
 	const content = extractContentArguments(
 		process.argv.slice(2),
 		process.env.INIT_CWD ?? process.cwd(),
@@ -545,7 +545,14 @@ async function main() {
 		throw new Error(`Unsupported probe arguments: ${content.args.join(" ")}`);
 	const selection =
 		content.contentPath === null
-			? ["--discovery-root", join(workspaceRoot, "dats")]
+			? [
+					"--discovery-root",
+					defaultContentRoot(
+						process.env.HOLTBURGER_DEFAULT_CONTENT,
+						process.env.INIT_CWD ?? process.cwd(),
+						join(workspaceRoot, "local/content"),
+					),
+				]
 			: ["--content", content.contentPath];
 	const child = spawn(hostPath, ["--mode=client", ...selection], {
 		env: environment,

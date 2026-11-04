@@ -65,4 +65,4 @@ We will ship a static script data JSON file `mage.data.json` plus a binary resis
 - Map of all skills indexed by debug string id (e.g., `life`, `healing`, `war`, `void`) to their skill id.
 
 ## Bootstrapping
-We can bootstrap the JSON spell table by looking at the spell and skill data tables that we normally extract as part of our micro HBA profile. `dats/assets.hba` already has those tables inside of it and the `holtburger-dat` and `holtburger-tools` crates can provide reference and tooling for parsing them. The resist binary comes from `weenie-resists`, which already exports a sorted compact `.bin` format keyed by weenie id.
+We can bootstrap the JSON spell table by looking at the spell and skill data tables that we normally extract as part of our micro HBA profile. An explicitly selected full HBA has those tables inside of it and the `holtburger-dat` and `holtburger-tools` crates can provide reference and tooling for parsing them. The resist binary comes from `weenie-resists`, which already exports a sorted compact `.bin` format keyed by weenie id.

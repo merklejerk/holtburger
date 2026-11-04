@@ -34,8 +34,9 @@ const MOBILE_WEENIE_TYPES: [i32; 4] = [10, 11, 12, 15];
 #[derive(Parser)]
 #[command(about = "Census per-entity camera pivot height candidates across the weenie catalog")]
 struct Args {
-    #[arg(long, default_value = "dats/weenies.hwc")]
+    #[arg(long, default_value = "weenies.hwc")]
     catalog: std::path::PathBuf,
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
@@ -58,7 +59,8 @@ struct Row {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let catalog = WeenieCatalog::open(&args.catalog).context("catalog open failed")?;
     let setups = read_setups(&content)?;
     println!("setups decoded: {}", setups.len());

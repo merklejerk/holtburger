@@ -1,6 +1,5 @@
 The ultimate goal of this project is to develop a third-party client for Asheron's Call.
-- Reverse engineer the Asheron's Call protocol and file formats, recording established behavior in source types, codec comments, and focused tests. Treat the ACE Server code as the ultimate source of truth.
-- Included in this repository are submodules for the [ACE Server](ACE/) and the [AC DAT viewer](ACViewer/), which we should use as ground truth references. Do not guess; establish behavior from the available references. You may modify ACE and ACViewer for diagnostics and tests.
+- Reverse engineer the Asheron's Call protocol and file formats, recording established behavior in source types, codec comments, and focused tests. Do not guess; establish behavior from available evidence and preserve uncertainty where evidence is incomplete.
 - DO NOT RUN THE TUI CLIENT for diagnostics/testing. It is interactive so will just hang. That's for me to use. You can just write your own bespoke client in the [harness](crates/holtburger-debug-harness/) if you need live data.
 - Temporary planning docs can go into the [local plan folder](local/plans/). Plan docs are working notes, not durable project artifacts. Non-active plans do not need to be maintained or retroactively updated when the code changes unless explicitly requested; stale plans may be removed during routine cleanup.
 
@@ -52,7 +51,7 @@ Both need a self-contained description of the retail behavior, the consequence o
 - Do not leave logic in the TUI just because the TUI is the only current consumer if that logic represents authoritative world semantics or reusable client behavior.
 - Prefer extensible, lossless shared representations. A frontend can ignore detail it does not need; adding missing shared detail later is harder.
 - If a change weakens crate separation, call that out explicitly and choose a cleaner design or explain the tradeoff.
-- Use the per-crate architecture docs for details, but treat the code and ACE/ACViewer references as the final source of truth when docs lag.
+- Use the per-crate architecture docs for details, but treat the code and established behavior as the final source of truth when docs lag.
 - Do not retain tests that depend on runtime assets which do not get checked in with the repo. It's fine to create them temporarily for debugging or investigation, but they should be removed afterwards.
 
 # Lint Rules
@@ -68,5 +67,7 @@ direct implementation filenames, line citations, or executable addresses.
 ## Machine-local guidance
 
 Before working, read the repository-root @local/AGENTS.md if it exists. It contains additional
-machine-local guidance. If it is absent, follow the checked-in instructions and
+machine-local guidance, including instructions for optional unchecked references and
+local dependencies. Keep instructions that depend on those resources there. If it is
+absent, follow the checked-in instructions and
 establish behavior from the available references before making uncertain changes.

@@ -110,7 +110,7 @@ fn capture(
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content)?;
+    let content = ContentRepository::select_installation(args.content)?;
     let motion_reference = content.read_motion_reference_data()?;
     let bootstrap = WorldBootstrap {
         skill_table: Arc::new(content.read_asset("skills")?),

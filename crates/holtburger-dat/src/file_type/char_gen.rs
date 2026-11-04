@@ -315,13 +315,7 @@ impl Gear {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::HbaReader;
     use std::io::Cursor;
-    use std::path::PathBuf;
-
-    fn repo_assets_hba_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
-    }
 
     #[test]
     fn char_gen_static_resource_key_uses_portal_namespace() {
@@ -330,68 +324,20 @@ mod tests {
     }
 
     #[test]
-    fn char_gen_parses_repo_micro_fixture_when_present() {
-        let source_path = repo_assets_hba_path();
-        if !source_path.is_file() {
-            eprintln!(
-                "skipping char gen fixture test; missing repo-local {}",
-                source_path.display()
-            );
-            return;
-        }
-
-        let archive = HbaReader::open(&source_path)
-            .expect("repo assets.hba should be a valid HBA v2 fixture");
-        let bytes = archive
-            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, CharGen::FILE_ID)
-            .expect("repo assets.hba should contain the raw CharGen table");
-
-        let char_gen =
-            CharGen::read(&mut Cursor::new(bytes)).expect("raw CharGen table should parse");
-
-        assert_eq!(char_gen.id, CharGen::FILE_ID);
-        assert!(
-            char_gen
-                .starter_areas
-                .iter()
-                .any(|area| area.name == "Holtburg")
-        );
-        assert!(
-            char_gen
-                .starter_areas
-                .iter()
-                .any(|area| area.name == "Shoushi")
-        );
-        assert!(
-            char_gen
-                .starter_areas
-                .iter()
-                .all(|area| !area.locations.is_empty())
-        );
-        assert!(char_gen.heritage_groups.len() >= 11);
-        assert!(
-            char_gen
-                .heritage_groups
-                .values()
-                .all(|group| !group.templates.is_empty())
-        );
-        assert!(
-            char_gen
-                .heritage_groups
-                .values()
-                .all(|group| !group.genders.is_empty())
-        );
-        assert!(char_gen.heritage_groups.values().all(|group| {
-            group
-                .genders
-                .values()
-                .all(|gender| !gender.hair_style_list.is_empty())
-        }));
-        assert!(char_gen.heritage_groups.values().all(|group| {
-            group
-                .genders
-                .values()
-                .all(|gender| !gender.eye_strip_list.is_empty())
-        }));
+    fn starter_areas_decode_names_and_empty_location_lists() {
+        let mut bytes = Vec::from(CharGen::FILE_ID.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes()); // Reserved header word.
+        bytes.push(1); // One compressed-count starter area.
+        bytes.push(4); // .NET string byte length.
+        bytes.extend_from_slice(b"Test");
+        bytes.push(0); // No locations.
+        bytes.push(0); // Reserved byte between collections.
+        bytes.push(0); // No heritage groups.
+        let decoded = CharGen::read(&mut Cursor::new(bytes)).unwrap();
+        assert_eq!(decoded.id, CharGen::FILE_ID);
+        assert_eq!(decoded.starter_areas.len(), 1);
+        assert_eq!(decoded.starter_areas[0].name, "Test");
+        assert!(decoded.starter_areas[0].locations.is_empty());
+        assert!(decoded.heritage_groups.is_empty());
     }
 }

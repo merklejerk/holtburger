@@ -289,6 +289,7 @@ fn write_zip(content: &Path, output: &Path) -> Result<()> {
 
 /// Opens the two archives and prints block counts without a separate metadata receipt.
 pub fn inspect(content: &Path) -> Result<()> {
+    holtburger_content::installation::require_directory(content)?;
     ContentRepository::from_hba_path(content.join(BOOTSTRAP_FILE))?;
     let archive = NavigationArchive::open(content.join(NAVIGATION_FILE))?;
     let mut owners = 0;

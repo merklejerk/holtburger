@@ -31,7 +31,7 @@ const SELECTED_ENV_CELLS: [u32; 6] = [
 fn main() -> Result<()> {
     let archive_path = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "dats/assets.hba".to_owned());
+        .unwrap_or_else(|| "assets.hba".to_owned());
     let archive = HbaReader::open(&archive_path)
         .with_context(|| format!("failed to open HBA archive {archive_path}"))?;
     let mut environments = HashMap::new();

@@ -60,7 +60,7 @@ For tooling, the flow is similar except the source backend is usually `DatDataba
 ## 🛠️ Developer Onboarding
 
 ### Validating Asset Queries
-New parsers and derived assets should be validated against ACE or ACViewer ground truth. Retail DAT fixtures remain valuable for parser tests, while runtime-facing assets should also be validated through HBA-backed integration tests where possible.
+New parsers and derived assets should preserve established format behavior. Parser fixtures and runtime HBA fixtures used by committed tests must be checked in; optional machine-local reference validation is described in `local/AGENTS.md`.
 
 ## Dependencies
 - **`holtburger-common`**: Shared math and data types used in parsed outputs.

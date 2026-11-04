@@ -10,7 +10,7 @@ use holtburger_weenie_catalog::WeenieCatalog;
 #[derive(Parser)]
 #[command(about = "List catalog templates that carry a motion table")]
 struct Args {
-    #[arg(long, default_value = "dats/weenies.hwc")]
+    #[arg(long, default_value = "weenies.hwc")]
     catalog: std::path::PathBuf,
     /// Stop after this many matches.
     #[arg(long, default_value_t = 20)]

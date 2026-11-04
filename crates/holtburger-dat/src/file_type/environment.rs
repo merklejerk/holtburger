@@ -99,17 +99,8 @@ fn read_polygon_map<R: Read + Seek>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaReader, file_type::EnvCell,
-    };
     use binrw::BinWrite;
     use std::io::{Cursor, Seek, Write};
-    use std::path::PathBuf;
-
-    fn repo_assets_hba_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
-    }
-
     #[test]
     fn environment_decodes_empty_cell_structure_body() {
         let cell_structure_id = 0x12u32;
@@ -153,97 +144,5 @@ mod tests {
             reader.stream_position().unwrap(),
             reader.get_ref().len() as u64
         );
-    }
-
-    #[test]
-    fn environment_parses_repo_fixture_selected_by_env_cell_when_present() {
-        let source_path = repo_assets_hba_path();
-        if !source_path.is_file() {
-            eprintln!(
-                "skipping environment fixture test; missing repo-local {}",
-                source_path.display()
-            );
-            return;
-        }
-
-        let archive = HbaReader::open(&source_path)
-            .expect("repo assets.hba should be a valid HBA v2 fixture");
-        let Some((env_cell_id, env_cell, environment)) = find_env_cell_environment_pair(&archive)
-        else {
-            panic!(
-                "repo assets.hba should contain at least one EnvCell with a resolvable Environment"
-            );
-        };
-
-        let selected_cell_structure_id = u32::from(env_cell.cell_structure);
-        let selected_cell_structure = environment
-            .cells
-            .get(&selected_cell_structure_id)
-            .unwrap_or_else(|| {
-                panic!(
-                    "Environment 0x{:08X} should contain EnvCell 0x{env_cell_id:08X}'s selected CellStruct 0x{selected_cell_structure_id:04X}",
-                    environment.id,
-                )
-            });
-
-        assert_eq!(
-            environment.id,
-            0x0D00_0000 | u32::from(env_cell.environment_id)
-        );
-        assert!(!environment.cells.is_empty());
-        assert!(
-            !selected_cell_structure.polygons.is_empty(),
-            "selected CellStruct 0x{selected_cell_structure_id:04X} should expose drawing polygons"
-        );
-        assert!(
-            !selected_cell_structure.vertex_array.vertices.is_empty(),
-            "selected CellStruct 0x{selected_cell_structure_id:04X} should expose reusable vertex data"
-        );
-    }
-
-    fn find_env_cell_environment_pair(archive: &HbaReader) -> Option<(u32, EnvCell, Environment)> {
-        for entry in archive
-            .entries()
-            .collect::<crate::Result<Vec<_>>>()
-            .expect("repo assets.hba entries should be readable")
-        {
-            if entry
-                .namespace_id()
-                .expect("listed HBA entry should have a valid namespace")
-                .as_str()
-                != EOR_CELL_NAMESPACE
-            {
-                continue;
-            }
-            if DatFileType::from_id(entry.file_id) != DatFileType::IndoorCell {
-                continue;
-            }
-
-            let env_cell_bytes = archive
-                .get_file_in_namespace(EOR_CELL_NAMESPACE, entry.file_id)
-                .expect("listed HBA cell entry should be readable");
-            let env_cell = EnvCell::unpack(&mut Cursor::new(env_cell_bytes))
-                .expect("repo indoor cell fixture should decode as EnvCell");
-            if env_cell.environment_id == 0 {
-                continue;
-            }
-
-            let environment_id = 0x0D00_0000 | u32::from(env_cell.environment_id);
-            let Ok(environment_bytes) =
-                archive.get_file_in_namespace(EOR_PORTAL_NAMESPACE, environment_id)
-            else {
-                continue;
-            };
-            let environment = Environment::unpack(&mut Cursor::new(environment_bytes))
-                .expect("repo Environment referenced by an EnvCell should decode");
-            if environment
-                .cells
-                .contains_key(&u32::from(env_cell.cell_structure))
-            {
-                return Some((entry.file_id, env_cell, environment));
-            }
-        }
-
-        None
     }
 }

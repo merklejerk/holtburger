@@ -21,15 +21,17 @@ const MOTION_TABLE_TYPE: u32 = 0x09;
 #[derive(Parser)]
 #[command(about = "Size what warming a whole motion table would cost a frontend")]
 struct Args {
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
-    #[arg(long, default_value = "dats/weenies.hwc")]
+    #[arg(long, default_value = "weenies.hwc")]
     catalog: std::path::PathBuf,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let index: Vec<_> = content
         .resource_index()
         .iter()

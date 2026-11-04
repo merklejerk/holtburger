@@ -3,7 +3,7 @@ import { probeInlineTags } from "./client-inline-tag-probe.mjs";
 import { probeClientEmotes } from "./client-emote-probe.mjs";
 import { probeBarber } from "./client-barber-probe.mjs";
 import { probeCellTooltips } from "./cell-tooltip-probe.mjs";
-import { extractContentArguments } from "./entry-paths.mjs";
+import { extractContentArguments, defaultContentRoot } from "./entry-paths.mjs";
 import { probeCombatBar } from "./client-combat-bar-probe.mjs";
 import { probeSalvage } from "./client-salvage-probe.mjs";
 import { probeUserThemeLifecycle } from "./user-theme-lifecycle-probe.mjs";
@@ -74,12 +74,12 @@ const TEXTURE_FILTERING_OPTIONS = [
 	{ minimumAnisotropy: 4, policy: "anisotropic-4x" },
 	{ minimumAnisotropy: 8, policy: "anisotropic-8x" },
 ];
-const workspaceDats = resolve(
+const workspaceContent = resolve(
 	fileURLToPath(new URL("../../../", import.meta.url)),
-	"dats",
+	"local/content",
 );
 const childEnvironment = { ...process.env };
-delete childEnvironment.HOLTBURGER_DATS;
+delete childEnvironment.HOLTBURGER_DEFAULT_CONTENT;
 const content = extractContentArguments(
 	process.argv.slice(2),
 	process.env.INIT_CWD ?? process.cwd(),
@@ -4659,7 +4659,14 @@ async function startContentHost() {
 		"--port",
 		"0",
 		...(content.contentPath === null
-			? ["--discovery-root", workspaceDats]
+			? [
+					"--discovery-root",
+					defaultContentRoot(
+						process.env.HOLTBURGER_DEFAULT_CONTENT,
+						process.env.INIT_CWD ?? process.cwd(),
+						workspaceContent,
+					),
+				]
 			: ["--content", content.contentPath]),
 	]);
 	return waitForReadyLine(child, (line) => {

@@ -960,7 +960,7 @@ fn parse_args() -> anyhow::Result<Args> {
         host: DEFAULT_HOST.to_owned(),
         port: 0,
         content: holtburger_3d_host::host_mode::HostContentSelection::Automatic(
-            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../dats"),
+            std::env::current_exe()?.with_file_name("dats"),
         ),
     };
     let mut content_args = vec!["--mode=explorer".to_owned()];
@@ -986,6 +986,12 @@ fn parse_args() -> anyhow::Result<Args> {
     }
     if content_args.len() > 1 {
         args.content = holtburger_3d_host::host_mode::HostLaunch::parse(content_args)?.content;
+    } else if let Some(root) = holtburger_content::installation::default_content_root(
+        std::env::var_os(holtburger_content::installation::DEFAULT_CONTENT_ENV),
+        &std::env::current_dir()?,
+        None,
+    )? {
+        args.content = holtburger_3d_host::host_mode::HostContentSelection::Automatic(root);
     }
     Ok(args)
 }

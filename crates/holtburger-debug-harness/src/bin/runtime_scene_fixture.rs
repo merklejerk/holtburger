@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
         .target(env_logger::Target::Stderr)
         .init();
     let args = Args::parse();
-    let repository = Arc::new(ContentRepository::discover(args.content)?);
+    let repository = Arc::new(ContentRepository::select_installation(args.content)?);
     let service = Arc::new(ContentAssetService::new(
         Arc::clone(&repository),
         Arc::new(ContentDecodeCache::new()),

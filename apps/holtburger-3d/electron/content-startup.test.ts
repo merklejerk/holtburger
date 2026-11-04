@@ -84,6 +84,7 @@ function fixture(
 	hosts: FakeHost[],
 	overridePath: string | null,
 	policy = { noContentSearch: false, clearContent: false },
+	defaultDiscoveryRoot = () => "/portable",
 ) {
 	const path = join(root, "selection.json");
 	const store = new ContentPreferenceStore(path);
@@ -100,7 +101,7 @@ function fixture(
 		store,
 		overridePath,
 		...policy,
-		portableRoot: "/portable",
+		defaultDiscoveryRoot,
 		launch,
 		admit,
 		pickFolder,
@@ -393,7 +394,7 @@ describe("content startup", () => {
 			overridePath: null,
 			noContentSearch: false,
 			clearContent: false,
-			portableRoot: "/portable",
+			defaultDiscoveryRoot: () => "/portable",
 			launch,
 			admit: async () => {},
 			pickFolder: async () => null,
@@ -541,4 +542,30 @@ describe("content startup", () => {
 			health: { kind: "needs_attention", failure: requiredFailure },
 		});
 	});
+});
+
+describe("default root evaluation", () => {
+	it.each(["explicit", "saved", "disabled"])(
+		"does not evaluate unused invalid default with %s selection",
+		async (kind) => {
+			const root = vi.fn(() => {
+				throw new Error("invalid default");
+			});
+			const selected =
+				kind === "disabled" ? [] : [new FakeHost("/selected", "ready")];
+			const f = fixture(
+				selected,
+				kind === "explicit" ? "/selected" : null,
+				{ noContentSearch: kind === "disabled", clearContent: false },
+				root,
+			);
+			if (kind === "saved") await f.store.select("/selected");
+			await f.startup.start();
+			expect(root).not.toHaveBeenCalled();
+			expect(f.startup.snapshot.phase.kind).toBe(
+				kind === "disabled" ? "needs_assets" : "ready",
+			);
+			await f.startup.close();
+		},
+	);
 });

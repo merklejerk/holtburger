@@ -29,6 +29,6 @@ modules:
         path: io.github.merklejerk.holtburger-cli.svg
 finish-args:
   - --share=network
-  - --env=HOLTBURGER_CONTENT=/app/lib/holtburger/content
+  - --env=HOLTBURGER_DEFAULT_CONTENT=/app/lib/holtburger/content
   - --env=SCRIPT_DIR=/var/data/holtburger/scripts
   - --env=SCRIPT_BUNDLE_DIR=/app/lib/holtburger/scripts

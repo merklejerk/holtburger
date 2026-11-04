@@ -13,7 +13,7 @@ fn main() -> Result<()> {
             .context("provide output directory")?,
     );
     std::fs::create_dir_all(&directory)?;
-    let repository = ContentRepository::discover(Some("dats".into()))?;
+    let repository = ContentRepository::select_installation(None)?;
     let item = |base, kind: ItemType, effects, overlay, underlay| UiIconSpec::Item {
         base: NonZeroU32::new(base),
         item_type: kind.bits(),

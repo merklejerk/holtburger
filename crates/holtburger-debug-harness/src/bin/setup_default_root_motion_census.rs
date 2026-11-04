@@ -20,8 +20,9 @@ use std::io::Cursor;
 #[derive(Parser)]
 #[command(about = "Census setup-default animations that carry root motion, by collidability")]
 struct Args {
-    #[arg(long, default_value = "dats/weenies.hwc")]
+    #[arg(long, default_value = "weenies.hwc")]
     catalog: std::path::PathBuf,
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
@@ -64,7 +65,8 @@ fn semantic_mask(template: &WeenieTemplate) -> PhysicsState {
 fn main() -> Result<()> {
     let args = Args::parse();
     let catalog = WeenieCatalog::open(&args.catalog).context("catalog open failed")?;
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let read = |id: u32| -> Result<Vec<u8>> {
         Ok(content
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, id))

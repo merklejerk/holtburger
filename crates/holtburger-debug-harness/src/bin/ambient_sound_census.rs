@@ -16,13 +16,15 @@ use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 #[derive(Parser)]
 #[command(about = "Census region ambient sound descriptors")]
 struct Args {
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let cache = ContentDecodeCache::new();
     let region = cache
         .region_desc(&content)

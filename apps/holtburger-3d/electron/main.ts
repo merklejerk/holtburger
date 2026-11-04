@@ -48,6 +48,7 @@ import {
 	buildEntryPath,
 	requireEntry,
 	extractContentArguments,
+	defaultContentRoot,
 	extractEntryArguments,
 	extractElectronLaunchArguments,
 } from "../scripts/entry-paths.mjs";
@@ -324,7 +325,7 @@ function hostEnvironment(ignoreWorldMapCache: boolean): NodeJS.ProcessEnv {
 		"world-map",
 	);
 	// Content is supplied explicitly in the host launch contract, never inherited as an override.
-	delete environment.HOLTBURGER_DATS;
+	delete environment.HOLTBURGER_DEFAULT_CONTENT;
 	return environment;
 }
 
@@ -380,10 +381,12 @@ function createContentStartup(
 		overridePath,
 		noContentSearch: entry.noContentSearch,
 		clearContent,
-		portableRoot: join(
-			app.isPackaged ? dirname(process.execPath) : workspaceRoot(),
-			"dats",
-		),
+		defaultDiscoveryRoot: () =>
+			defaultContentRoot(
+				process.env.HOLTBURGER_DEFAULT_CONTENT,
+				process.cwd(),
+				join(dirname(process.execPath), "dats"),
+			),
 		launch: (selection) =>
 			launchHost(entry.mode, entry.ignoreWorldMapCache, selection),
 		admit: async (client) => {

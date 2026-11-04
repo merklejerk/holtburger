@@ -21,7 +21,7 @@ Exposes the helpers and mock environments needed to spoof credentials, generate 
 Because the TUI client is highly interactive, using it to capture discrete traffic can be noisy. `holtburger-debug-harness` can be programmed to log in, perform one atomic action (like picking up an item), save the raw packet capture out, and disconnect.
 
 ### Regression Testing
-When a developer modifies a core engine translation loop, it can trigger automated network assertions through this crate against a running local ACE container.
+When a developer modifies a core engine translation loop, it can trigger automated network assertions through this crate against an available test server. Machine-local server setup belongs in `local/AGENTS.md`.
 
 ## 🛠️ Developer Onboarding
 

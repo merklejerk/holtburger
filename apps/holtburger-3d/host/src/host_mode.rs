@@ -51,9 +51,9 @@ impl HostMode {
 /// Host startup chooses an exact installation or a bounded, environment-free search.
 #[derive(Debug)]
 pub enum HostContentSelection {
-    /// Explicit archive/directory supplied by the native startup coordinator.
+    /// Explicit installation directory supplied by the native startup coordinator.
     Explicit(PathBuf),
-    /// Portable root followed by the shared platform content directory.
+    /// Caller-selected default root followed by the shared platform content directory.
     Automatic(PathBuf),
 }
 

@@ -61,8 +61,8 @@ Generate and inspect locally when the data or format changes:
 cargo run --locked --release -p holtburger-tools --bin cli-content -- generate \
   --source /path/to/full/assets.hba --output /path/to/new-output
 cargo run --locked --release -p holtburger-tools --bin cli-content -- info \
-  --content /path/to/new-output/content
-cargo run --locked -p holtburger-cli --bin content_bootstrap -- /path/to/new-output/content
+  --source /path/to/new-output/content
+cargo run --locked -p holtburger-cli --bin content_bootstrap -- --content /path/to/new-output/content
 ```
 
 The ZIP has exactly `bootstrap.hba` and `navigation.hnav` at its root. Generation prints

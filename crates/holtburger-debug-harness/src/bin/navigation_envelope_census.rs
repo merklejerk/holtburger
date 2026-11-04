@@ -14,7 +14,7 @@ use serde::Serialize;
 struct Args {
     /// Full or bootstrap HBA containing setup records.
     #[arg(long)]
-    content: PathBuf,
+    source: PathBuf,
 }
 
 /// Distinguishes authored envelopes from the existing retail dummy and invalid authored geometry.
@@ -36,7 +36,7 @@ struct InvalidEnvelope {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::from_hba_path(args.content)?;
+    let content = ContentRepository::from_hba_path(args.source)?;
     let mut census = Census::default();
     for entry in content
         .resource_index()

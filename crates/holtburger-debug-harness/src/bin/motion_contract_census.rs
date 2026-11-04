@@ -21,6 +21,7 @@ const SIMULATION_HOOK_TYPES: [u32; 3] = [3, 5, 6];
 #[derive(Parser)]
 #[command(about = "Census the field shapes the MotionSequence contract must model")]
 struct Args {
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
@@ -41,7 +42,8 @@ fn dominant_axis(vector: holtburger_common::Vector3) -> &'static str {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
 
     let index: Vec<_> = content
         .resource_index()

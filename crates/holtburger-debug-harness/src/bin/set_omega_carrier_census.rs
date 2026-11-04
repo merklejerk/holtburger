@@ -20,15 +20,17 @@ const SET_OMEGA_HOOK: u32 = 22;
 #[derive(Parser)]
 #[command(about = "Census SetOmega hook carriers and whether any is a spawnable body")]
 struct Args {
-    #[arg(long, default_value = "dats/weenies.hwc")]
+    #[arg(long, default_value = "weenies.hwc")]
     catalog: std::path::PathBuf,
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let read = |id: u32| -> Result<Vec<u8>> {
         Ok(content
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, id))

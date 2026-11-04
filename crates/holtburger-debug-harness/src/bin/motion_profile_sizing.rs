@@ -27,6 +27,7 @@ struct Args {
     /// Directory the candidate archives are written to.
     #[arg(long)]
     out_dir: PathBuf,
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<PathBuf>,
 }
@@ -58,7 +59,8 @@ const CANDIDATES: [Candidate; 3] = [
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     std::fs::create_dir_all(&args.out_dir).context("output directory")?;
 
     let index: Vec<_> = content

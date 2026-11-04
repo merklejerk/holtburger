@@ -16,19 +16,14 @@ struct Cli {
     /// Offline `.hwc` catalog to survey.
     #[arg(long, default_value = DEFAULT_WEENIE_CATALOG_PATH)]
     catalog: PathBuf,
-    /// HBA directory or single HBA archive used for setup/GfxObj facts.
-    #[arg(long, default_value = "dats")]
-    content: PathBuf,
+    /// Installation directory used for setup/GfxObj facts; otherwise use default discovery.
+    #[arg(long)]
+    content: Option<PathBuf>,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let content = if cli.content.is_dir() {
-        ContentRepository::from_hba_dir(&cli.content)
-    } else {
-        ContentRepository::from_hba_path(&cli.content)
-    }
-    .with_context(|| format!("could not open content at {}", cli.content.display()))?;
+    let content = ContentRepository::select_installation(cli.content)?;
     let survey = survey_weenie_catalog(&cli.catalog, &content)?;
     serde_json::to_writer_pretty(std::io::stdout().lock(), &survey)
         .context("could not write survey JSON")?;
@@ -41,10 +36,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_to_the_canonical_content_layout() {
+    fn defaults_catalog_and_leaves_content_to_discovery() {
         let cli = Cli::try_parse_from(["survey-weenie-catalog"]).unwrap();
 
         assert_eq!(cli.catalog, PathBuf::from(DEFAULT_WEENIE_CATALOG_PATH));
-        assert_eq!(cli.content, PathBuf::from("dats"));
+        assert!(cli.content.is_none());
     }
 }

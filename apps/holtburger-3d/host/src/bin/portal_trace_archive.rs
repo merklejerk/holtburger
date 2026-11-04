@@ -279,7 +279,7 @@ async fn main() -> anyhow::Result<()> {
 async fn export_portal_census(
     runtime: &holtburger_core::ContentAssetRuntime,
 ) -> anyhow::Result<PortalCensusExport> {
-    let repository = ContentRepository::discover(None)?;
+    let repository = ContentRepository::select_installation(None)?;
     let landblock_ids = repository
         .resource_index()
         .iter()

@@ -17,6 +17,7 @@ use std::time::Instant;
 #[derive(Parser)]
 #[command(about = "Measure the in-memory footprint and build cost of the motion contract")]
 struct Args {
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
@@ -96,7 +97,8 @@ fn whole_catalog_estimate(content: &ContentRepository) -> Result<()> {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
 
     let started = Instant::now();
     let catalog = content

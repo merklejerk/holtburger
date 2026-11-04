@@ -29,11 +29,11 @@ const CONTAINMENT_EPSILON: f32 = 0.000_1;
 #[derive(Parser)]
 #[command(about = "Measure static selection-envelope coverage over shipped Client visuals")]
 struct Args {
-    /// HBA file/directory; normal repository discovery is used when omitted.
+    /// Installation directory; default/platform discovery is used when omitted.
     #[arg(long)]
     content: Option<PathBuf>,
     /// Offline ACE World template catalog used for actual appearance and motion-table overrides.
-    #[arg(long, default_value = "dats/weenies.hwc")]
+    #[arg(long, default_value = "weenies.hwc")]
     catalog: PathBuf,
     /// Number of worst escaping profile/animation examples to print.
     #[arg(long, default_value_t = 20)]
@@ -148,7 +148,8 @@ struct ModeledMembershipAvailableResult {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let catalog = WeenieCatalog::open(&args.catalog).context("catalog open failed")?;
 
     let setups = read_setups(&content)?;

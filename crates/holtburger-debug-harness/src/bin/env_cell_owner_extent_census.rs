@@ -18,7 +18,7 @@ const BOUNDARY_EPSILON: f32 = 0.001;
 #[derive(Debug, Parser)]
 #[command(about = "Census EnvCell extents outside their authored owner's 192-metre square")]
 struct Args {
-    /// Optional HBA file or directory; normal content discovery is used when omitted.
+    /// Optional installation directory; default/platform discovery is used when omitted.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
@@ -156,7 +156,8 @@ impl Census {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let cache = ContentDecodeCache::new();
     let active_region = cache
         .active_region_data(&content)

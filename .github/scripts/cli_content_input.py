@@ -47,7 +47,7 @@ def archive_components(data: bytes, expected_sha256: str) -> dict[str, bytes]:
 def unpack_cli_content(data: bytes, expected_sha256: str, output: Path) -> None:
     """Stage validated components and the original pinned input for package receipts."""
     components = archive_components(data, expected_sha256)
-    # Dev dats/ may already contain a full HBA. Add only these managed inputs, never replace
+    # A development content directory may already contain a full HBA. Add only managed inputs; never replace
     # an existing companion (including a broken symlink) or touch unrelated retail data.
     files = {**components, "cli-content.zip": data}
     for name in files:

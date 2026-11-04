@@ -338,7 +338,7 @@ def assemble(arguments) -> None:
                 shutil.copy2(binaries / f"{source}{suffix}", bundle / f"{published}{suffix}")
             (bundle / "scripts").mkdir()
             for script in SCRIPTS:
-                shutil.copy2(ROOT / "scripts" / script, bundle / "scripts" / script)
+                shutil.copy2(ROOT / "assets" / "scripts" / script, bundle / "scripts" / script)
             (bundle / "content").mkdir()
             for filename in CONTENT_FILES:
                 shutil.copy2(content / filename, bundle / "content" / filename)

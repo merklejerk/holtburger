@@ -5,7 +5,7 @@ use holtburger_dat::file_type::{CharGen, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use std::io::Cursor;
 fn main() -> Result<()> {
-    let content = ContentRepository::discover(None)?;
+    let content = ContentRepository::select_installation(None)?;
     let read = |id| -> Result<Vec<u8>> {
         Ok(content
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, id))?

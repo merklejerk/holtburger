@@ -19,7 +19,7 @@ const NONCOMBAT: u32 = 0x8000_003d;
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content)?;
+    let content = ContentRepository::select_installation(args.content)?;
     let catalog = content.read_motion_reference_data()?.motion_sequences;
     let mut tables: Vec<_> = catalog.tables().collect();
     tables.sort_by_key(|table| table.id);

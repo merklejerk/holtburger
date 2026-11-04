@@ -768,8 +768,8 @@ Explorer sink traits; the stdio writer is the only adapter that implements both.
 
 ### Client assets and startup
 
-Both desktop modes accept `--content <path>` (or `--content=<path>`) to select an exact archive or
-asset directory for that launch:
+Both desktop modes accept `--content <directory>` (or `--content=<directory>`) to select an
+installation directory for that launch. Individual archives are artifact-tool inputs:
 
 ```bash
 npm run dev:explorer -- --content "/path/to/Asherons Call"
@@ -777,8 +777,7 @@ npm run dev:client -- --account example --content "/path/to/Asherons Call"
 ```
 
 The client launcher has an optional Content path override field inside its initially collapsed
-Advanced section. Leave it empty to use the application default. Browse selects a folder, and an
-exact HBA path may also be entered. Selecting a profile restores
+Advanced section. Leave it empty to use the application default. Browse selects an installation folder; individual archive paths are rejected. Selecting a profile restores
 its path and credentials. Play uses the current form; Save to new profile or Overwrite profile
 persists it. Explicit session paths never replace the application default in `content-selection.json`.
 
@@ -808,11 +807,13 @@ Client accepts the same flags alongside its usual launch arguments. With `--clea
 These flags do not delete archives or clear other settings. The disabled-search policy is not saved.
 Standalone browser/live diagnostics do not own desktop preferences and reject these desktop flags.
 
-Without an override, startup tries the last successful location, then `dats` beside the packaged
-executable (the repository `dats` directory in development), then the platform Holtburger data
-directory. Absent candidates are skipped. An existing installation that cannot initialize is
-reported. Paths supplied through npm are resolved from the invocation directory; packaged default
-discovery does not depend on process working directory.
+Without an override, startup first uses the saved selection. Automatic discovery starts at
+`HOLTBURGER_DEFAULT_CONTENT` when supplied, otherwise `dats/` beside the executable, then tries
+the platform Holtburger data directory. Development runners supply absolute workspace
+`local/content/` as the default. Missing, empty, and unsuitable automatic candidates may fall
+through; corrupt or unreadable content is reported. The default is consulted only when search
+is needed and does not override `--no-content-search`. Paths supplied through npm are resolved
+from the invocation directory; installed discovery is independent of working directory.
 
 The app shows the existing pregame loading page before constructing Client or Explorer. Its bundled
 portal animation and theme need no game assets. The startup shell feeds native asset-initialization

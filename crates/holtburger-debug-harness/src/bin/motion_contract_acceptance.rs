@@ -22,13 +22,15 @@ const STANDARD_STYLE: u32 = 0x8000_003D;
 #[derive(Parser)]
 #[command(about = "Verify the motion contract against the mounted archive")]
 struct Args {
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
 
     let started = Instant::now();
     let catalog = content

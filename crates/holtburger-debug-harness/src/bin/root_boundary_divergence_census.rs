@@ -15,6 +15,7 @@ const MOTION_TABLE_TYPE: u32 = 0x09;
 
 #[derive(Parser)]
 struct Args {
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
@@ -84,8 +85,8 @@ fn exact_boundary(leaving: &AnimData, animations: &HashMap<u32, Animation>) -> R
 }
 
 fn main() -> Result<()> {
-    let content =
-        ContentRepository::discover(Args::parse().content).context("content discovery failed")?;
+    let content = ContentRepository::select_installation(Args::parse().content)
+        .context("content discovery failed")?;
     let read = |id: u32| -> Result<Vec<u8>> {
         Ok(content
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, id))?

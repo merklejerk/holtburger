@@ -198,13 +198,15 @@ fn motion_data_bytes(data: &holtburger_dat::file_type::motion_table::MotionData)
 #[derive(Parser)]
 #[command(about = "Size the raw motion content every archive profile carries")]
 struct Args {
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
 
     let index: Vec<_> = content
         .resource_index()

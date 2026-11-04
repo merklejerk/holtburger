@@ -27,7 +27,7 @@ struct Args {
     /// ACE port.
     #[arg(long, default_value_t = 9000)]
     port: u16,
-    /// Optional normal content-discovery override.
+    /// Optional explicit installation directory; bypasses automatic discovery.
     #[arg(long)]
     content: Option<PathBuf>,
     /// Maximum seconds for each login/read phase.
@@ -135,7 +135,9 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let account = secret("HOLTBURGER_PROBE_ACCOUNT")?;
     let password = secret("HOLTBURGER_PROBE_PASSWORD")?;
-    let repository = Arc::new(ContentRepository::discover(args.content.clone())?);
+    let repository = Arc::new(ContentRepository::select_installation(
+        args.content.clone(),
+    )?);
     let service = Arc::new(ContentAssetService::new(
         Arc::clone(&repository),
         Arc::new(ContentDecodeCache::new()),

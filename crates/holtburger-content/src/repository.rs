@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, anyhow};
 use binrw::{BinRead, Endian};
-use directories::ProjectDirs;
 use holtburger_dat::{
     EOR_PORTAL_NAMESPACE, LayeredResourceResolver, ResourceKey, ResourceSource, StaticResourceKey,
     file_type::{Animation, ChatPoseTable, DatFileType, MotionTable, SetupModel},
@@ -25,59 +24,6 @@ pub struct MotionReferenceData {
 mod mounting;
 
 pub use mounting::{ContentSelectionError, ResolvedContent};
-
-const HOLTBURGER_DATS_ENV: &str = "HOLTBURGER_DATS";
-
-fn platform_content_path() -> Option<PathBuf> {
-    ProjectDirs::from("io.github", "merklejerk", "holtburger")
-        .map(|dirs| dirs.data_dir().join("dats"))
-}
-
-/// Ordered candidate locations used to discover installed or portable HBA content.
-///
-/// Explicit application configuration wins, followed by the package/environment override, a
-/// portable `./dats` directory, and the platform project-data directory. The candidates are kept
-/// separate from repository mounts so callers can inject an already-constructed repository in
-/// tests and alternate hosts.
-#[derive(Clone, Debug)]
-struct ContentRepositoryDiscovery {
-    explicit_path: Option<PathBuf>,
-    environment_path: Option<PathBuf>,
-    portable_path: PathBuf,
-    /// Caller-owned portable installation, after the invocation directory and before user data.
-    bundled_path: Option<PathBuf>,
-    platform_data_path: Option<PathBuf>,
-}
-
-impl ContentRepositoryDiscovery {
-    fn from_system(explicit_path: Option<PathBuf>) -> Self {
-        Self {
-            explicit_path,
-            environment_path: std::env::var_os(HOLTBURGER_DATS_ENV).map(PathBuf::from),
-            portable_path: PathBuf::from("./dats"),
-            bundled_path: None,
-            platform_data_path: platform_content_path(),
-        }
-    }
-
-    fn resolve_path(&self) -> PathBuf {
-        self.explicit_path
-            .clone()
-            .or_else(|| self.environment_path.clone())
-            .unwrap_or_else(|| {
-                if self.portable_path.exists() {
-                    self.portable_path.clone()
-                } else {
-                    self.bundled_path
-                        .as_ref()
-                        .filter(|path| path.exists())
-                        .cloned()
-                        .or_else(|| self.platform_data_path.clone())
-                        .unwrap_or_else(|| self.portable_path.clone())
-                }
-            })
-    }
-}
 
 /// Filesystem revision of an archive captured from its opened handle at mounting.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,33 +100,12 @@ impl std::fmt::Debug for ContentRepository {
 }
 
 impl ContentRepository {
-    /// Discovers and opens client content using Holtburger's shared installation policy.
-    ///
-    /// The optional path is an application-supplied override. Without one, discovery checks
-    /// `HOLTBURGER_DATS`, `./dats`, then the platform data directory. A selected directory mounts
-    /// every HBA in that directory; any other selected path resolves as an HBA file or base path.
-    pub fn discover(explicit_path: Option<PathBuf>) -> Result<Self> {
-        Self::open_discovered(ContentRepositoryDiscovery::from_system(explicit_path))
-    }
-
-    /// Adds an app-supplied portable directory after explicit/environment/working-directory paths.
-    /// Executable layout is owned by the frontend, not the shared content layer.
-    pub fn discover_with_portable(
-        explicit_path: Option<PathBuf>,
-        bundled_path: PathBuf,
-    ) -> Result<Self> {
-        let mut discovery = ContentRepositoryDiscovery::from_system(explicit_path);
-        discovery.bundled_path = Some(bundled_path);
-        Self::open_discovered(discovery)
-    }
-
-    fn open_discovered(discovery: ContentRepositoryDiscovery) -> Result<Self> {
-        let path = discovery.resolve_path();
-        if path.is_dir() {
-            Self::from_hba_dir(path)
-        } else {
-            Self::from_hba_path(path)
-        }
+    /// Select an installation directory using an explicit path or default/platform discovery.
+    /// Frontends with an installed bundle root use `installation::select_content_directory`.
+    pub fn select_installation(explicit: Option<PathBuf>) -> Result<Self> {
+        crate::installation::select_content_directory(explicit, None, |path| {
+            Ok(Some(Self::open_selected(path.to_path_buf())?))
+        })
     }
 
     /// Opens exactly the selected file, or a directory with HBA-first family selection.
@@ -414,7 +339,6 @@ mod tests {
     use super::*;
     use holtburger_common::properties::GfxObjFlags;
     use holtburger_common::{Sphere, Vector3};
-    use holtburger_dat::HbaReader;
     use holtburger_dat::file_type::{
         AnimationPartChange, CharGen, ChatPoseTable, EnvCell, GfxObj, ObjDesc, SkillTable,
         SpellTable, SubPalette, TextureMapChange, XpTable,
@@ -479,41 +403,6 @@ mod tests {
             );
             assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, id), 1);
         }
-    }
-
-    fn repo_assets_hba_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
-    }
-
-    #[test]
-    fn content_discovery_preserves_cli_precedence() {
-        let root = tempdir().expect("tempdir should be created");
-        let portable_path = root.path().join("portable-dats");
-        let platform_data_path = root.path().join("platform-dats");
-        let explicit_path = root.path().join("explicit.hba");
-        let environment_path = root.path().join("environment.hba");
-        let bundled_path = root.path().join("bundle/dats");
-
-        let mut discovery = ContentRepositoryDiscovery {
-            explicit_path: Some(explicit_path.clone()),
-            environment_path: Some(environment_path.clone()),
-            portable_path: portable_path.clone(),
-            bundled_path: Some(bundled_path.clone()),
-            platform_data_path: Some(platform_data_path.clone()),
-        };
-        assert_eq!(discovery.resolve_path(), explicit_path);
-
-        discovery.explicit_path = None;
-        assert_eq!(discovery.resolve_path(), environment_path);
-
-        discovery.environment_path = None;
-        assert_eq!(discovery.resolve_path(), platform_data_path);
-
-        std::fs::create_dir_all(&bundled_path).unwrap();
-        assert_eq!(discovery.resolve_path(), bundled_path);
-
-        std::fs::create_dir(&portable_path).expect("portable directory should be created");
-        assert_eq!(discovery.resolve_path(), portable_path);
     }
 
     #[test]
@@ -668,32 +557,18 @@ mod tests {
         writer.write(path).expect("test HBA should be written");
     }
 
-    fn write_hba(path: &Path, ids: &[u32], include_cell_namespace: bool) -> bool {
-        let source_path = repo_assets_hba_path();
-        if !source_path.is_file() {
-            eprintln!(
-                "skipping content repository fixture test; missing repo-local {}",
-                source_path.display()
-            );
-            return false;
-        }
-
-        let source = match HbaReader::open(&source_path) {
-            Ok(source) => source,
-            Err(error) => panic!(
-                "content repository fixture test requires repo-local {} to be a valid HBA v2 fixture: {}",
-                source_path.display(),
-                error
-            ),
-        };
-
+    fn write_hba(path: &Path, ids: &[u32], include_cell_namespace: bool) {
         let mut writer = HbaWriter::new();
         writer.set_compression(false);
 
         for id in ids {
-            let data = source
-                .get_file_in_namespace(EOR_PORTAL_NAMESPACE, *id)
-                .unwrap_or_else(|_| panic!("repo assets.hba should contain eor/portal:0x{id:08X}"));
+            // Namespace/index tests need opaque records, not an unchecked retail corpus.
+            // CharGen is decoded by the loader test and has empty authored collections.
+            let mut data = id.to_le_bytes().to_vec();
+            if *id == CharGen::FILE_ID {
+                data.extend_from_slice(&0u32.to_le_bytes());
+                data.extend_from_slice(&[0, 0, 0]); // Starter count, reserved byte, heritage count.
+            }
             writer
                 .add(
                     EOR_PORTAL_NAMESPACE,
@@ -716,8 +591,6 @@ mod tests {
         }
 
         writer.write(path).expect("test HBA should be written");
-
-        true
     }
 
     fn write_malformed_static_asset_hba(path: &Path) {
@@ -1259,7 +1132,7 @@ mod tests {
     #[test]
     fn read_asset_loads_char_gen_from_repository() {
         let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
+        write_hba(
             &dir.path().join("bundle.hba"),
             &[
                 CharGen::FILE_ID,
@@ -1268,9 +1141,7 @@ mod tests {
                 XpTable::FILE_ID,
             ],
             false,
-        ) {
-            return;
-        }
+        );
 
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
@@ -1278,8 +1149,9 @@ mod tests {
             .read_asset::<CharGen>("character generator table")
             .expect("char gen should resolve from content repository");
 
-        assert!(!char_gen.starter_areas.is_empty());
-        assert!(!char_gen.heritage_groups.is_empty());
+        assert_eq!(char_gen.id, CharGen::FILE_ID);
+        assert!(char_gen.starter_areas.is_empty());
+        assert!(char_gen.heritage_groups.is_empty());
     }
 
     #[test]
@@ -1301,13 +1173,11 @@ mod tests {
     #[test]
     fn from_hba_dir_discovers_namespaces_from_archive_contents() {
         let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
+        write_hba(
             &dir.path().join("anything.hba"),
             &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
             true,
-        ) {
-            return;
-        }
+        );
 
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
@@ -1321,13 +1191,11 @@ mod tests {
     #[test]
     fn read_resource_loads_dynamic_key_from_repository() {
         let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
+        write_hba(
             &dir.path().join("bundle.hba"),
             &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
             true,
-        ) {
-            return;
-        }
+        );
 
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
@@ -1348,13 +1216,11 @@ mod tests {
     #[test]
     fn read_asset_fails_when_spell_table_is_missing() {
         let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
+        write_hba(
             &dir.path().join("bundle.hba"),
             &[SkillTable::FILE_ID, XpTable::FILE_ID],
             false,
-        ) {
-            return;
-        }
+        );
 
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
@@ -1368,13 +1234,11 @@ mod tests {
     #[test]
     fn read_resource_fails_when_dynamic_key_is_missing() {
         let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
+        write_hba(
             &dir.path().join("bundle.hba"),
             &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
             false,
-        ) {
-            return;
-        }
+        );
 
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
@@ -1557,43 +1421,6 @@ mod tests {
         assert_eq!(
             surface_texture.render_surface_ids,
             vec![0x0600_4040, 0x0600_0040]
-        );
-    }
-
-    #[test]
-    fn repo_assets_preserve_surface_texture_source_levels_with_missing_first_texture() {
-        use crate::{ResolvedMaterialSource, ResolvedTextureMaterial};
-
-        let source_path = repo_assets_hba_path();
-        if !source_path.is_file() {
-            eprintln!(
-                "skipping repo material candidate test; missing repo-local {}",
-                source_path.display()
-            );
-            return;
-        }
-
-        let repository = ContentRepository::from_hba_path(source_path)
-            .expect("repo assets.hba should load as content repository");
-        let recipe = repository
-            .resolve_material_recipe(0x0800_11FC)
-            .expect("repo material should preserve surface texture source levels");
-        let surface_texture = repository
-            .resolve_surface_texture(0x0500_2862)
-            .expect("repo surface texture should preserve source levels");
-
-        assert_eq!(
-            recipe.source,
-            ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
-                surface_texture_id: 0x0500_2862,
-                render_surface_ids: vec![0x0600_41BF, 0x0600_41C0],
-                palette_id: None,
-                palette_composite: None,
-            })
-        );
-        assert_eq!(
-            surface_texture.render_surface_ids,
-            vec![0x0600_41BF, 0x0600_41C0]
         );
     }
 

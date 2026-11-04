@@ -83,11 +83,10 @@ installers = ["shell", "powershell"]
 include = [
     "assets/branding/portal-static.svg",
     "assets/branding/icon.png",
-    "dats/README.md",
-    "scripts/fighter.js",
-    "scripts/mage.js",
-    "scripts/mage.data.json",
-    "scripts/mage.data.bin",
+    "assets/scripts/fighter.js",
+    "assets/scripts/mage.js",
+    "assets/scripts/mage.data.json",
+    "assets/scripts/mage.data.bin",
 ]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]

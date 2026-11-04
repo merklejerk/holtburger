@@ -25,8 +25,9 @@ enum Command {
     },
     /// Inspect the content/ archives and print navigation block counts.
     Info {
+        /// Generated CLI content directory to inspect as an exact artifact.
         #[arg(long)]
-        content: PathBuf,
+        source: PathBuf,
     },
 }
 
@@ -34,7 +35,7 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     match Args::parse().command {
         Command::Generate { source, output } => cli_content::generate(&source, &output)?,
-        Command::Info { content } => cli_content::inspect(&content)?,
+        Command::Info { source } => cli_content::inspect(&source)?,
     };
     Ok(())
 }

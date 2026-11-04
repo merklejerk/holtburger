@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use holtburger_content::navigation_bundle::{BOOTSTRAP_FILE, NAVIGATION_FILE, NavigationArchive};
 use holtburger_content::{ContentRepository, NavigationSceneSource, PreparedNavigationSource};
 
@@ -22,62 +22,63 @@ pub fn bundled_resource_path(directory: &str) -> PathBuf {
     path
 }
 
-/// Explicit CLI selection wins over the environment; otherwise use dev dats or bundled content.
+/// An explicit installation wins; otherwise search the default root and platform data.
 pub fn content(explicit: Option<PathBuf>) -> Result<CliContent> {
-    if let Some(path) =
-        explicit.or_else(|| std::env::var_os("HOLTBURGER_CONTENT").map(PathBuf::from))
-    {
-        return open_content(&path);
-    }
-    discover_content(&std::env::current_dir()?, &bundled_resource_path("content"))
+    holtburger_content::installation::select_content_directory(
+        explicit,
+        Some(bundled_resource_path("content")),
+        open_candidate,
+    ).context("CLI content requires bootstrap.hba or assets.hba and navigation.hnav; select --content DIR")
 }
 
-fn discover_content(working: &Path, bundled: &Path) -> Result<CliContent> {
-    for path in [working.join("dats"), bundled.to_path_buf()] {
-        match path.symlink_metadata() {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("inspect CLI content {}", path.display()));
-            }
-            Ok(_) => return open_content(&path),
-        }
-    }
-    bail!(
-        "CLI content not found: put an HBA and navigation.hnav in dats/ or executable-adjacent content/, or select --content DIR"
-    )
-}
-
-/// A content directory uses bootstrap.hba when present, otherwise assets.hba, and always
-/// requires navigation.hnav in that same directory.
+/// Open exactly one CLI installation without environment or search fallback.
 pub fn open_content(directory: &Path) -> Result<CliContent> {
-    if !directory.is_dir() {
-        bail!("CLI content must be a directory: {}", directory.display());
+    holtburger_content::installation::open_content_directory(directory, open_candidate)
+}
+
+fn present(path: &Path) -> Result<bool> {
+    match path.symlink_metadata() {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("inspect CLI content {}", path.display())),
     }
-    let bootstrap = directory.join(BOOTSTRAP_FILE);
-    let hba = match bootstrap.symlink_metadata() {
-        Ok(_) => bootstrap,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => directory.join("assets.hba"),
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("inspect bootstrap {}", bootstrap.display()));
-        }
+}
+
+fn open_candidate(directory: &Path) -> Result<Option<CliContent>> {
+    let bootstrap_path = directory.join(BOOTSTRAP_FILE);
+    let hba = if present(&bootstrap_path)? {
+        bootstrap_path
+    } else {
+        directory.join("assets.hba")
     };
-    let bootstrap = Arc::new(
-        ContentRepository::from_hba_path(&hba)
-            .with_context(|| format!("open CLI bootstrap HBA {}", hba.display()))?,
-    );
     let nav_path = directory.join(NAVIGATION_FILE);
-    let archive = NavigationArchive::open(&nav_path)
-        .with_context(|| format!("open required CLI navigation {}", nav_path.display()))?;
-    let navigation = Arc::new(PreparedNavigationSource::new(
-        Arc::clone(&bootstrap),
-        NavigationSceneSource::new(archive),
-    ));
-    Ok(CliContent {
-        bootstrap,
-        navigation,
-    })
+    // Validate every existing companion even if another is missing: corruption must not be
+    // hidden by classifying this installation as merely insufficient.
+    let bootstrap = if present(&hba)? {
+        Some(Arc::new(
+            ContentRepository::from_hba_path(&hba)
+                .with_context(|| format!("open CLI bootstrap HBA {}", hba.display()))?,
+        ))
+    } else {
+        None
+    };
+    let navigation = if present(&nav_path)? {
+        Some(
+            NavigationArchive::open(&nav_path)
+                .with_context(|| format!("open CLI navigation {}", nav_path.display()))?,
+        )
+    } else {
+        None
+    };
+    Ok(bootstrap
+        .zip(navigation)
+        .map(|(bootstrap, navigation)| CliContent {
+            navigation: Arc::new(PreparedNavigationSource::new(
+                Arc::clone(&bootstrap),
+                NavigationSceneSource::new(navigation),
+            )),
+            bootstrap,
+        }))
 }
 
 #[cfg(test)]
@@ -158,30 +159,18 @@ mod tests {
     }
 
     #[test]
-    fn dev_dats_precedes_executable_content_and_absent_dev_path_uses_bundle() {
+    fn missing_companions_are_insufficient_but_present_corruption_is_an_error() {
         let temp = TempDir::new().unwrap();
-        let working = temp.path().join("work");
-        let bundle = temp.path().join("bundle/content");
-        std::fs::create_dir_all(&bundle).unwrap();
-        hba(&bundle.join(BOOTSTRAP_FILE), b"bundle");
-        nav(&bundle);
-        assert_eq!(
-            marker(discover_content(&working, &bundle).unwrap()),
-            b"bundle"
-        );
-        let dats = working.join("dats");
-        std::fs::create_dir_all(&dats).unwrap();
-        hba(&dats.join("assets.hba"), b"dev");
-        nav(&dats);
-        assert_eq!(marker(discover_content(&working, &bundle).unwrap()), b"dev");
-        std::fs::remove_file(dats.join(NAVIGATION_FILE)).unwrap();
-        assert!(
-            discover_content(&working, &bundle)
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("required CLI navigation")
-        );
+        hba(&temp.path().join(BOOTSTRAP_FILE), b"bootstrap");
+        assert!(open_candidate(temp.path()).unwrap().is_none());
+        std::fs::write(temp.path().join(NAVIGATION_FILE), b"invalid navigation").unwrap();
+        assert!(open_candidate(temp.path()).is_err());
+        std::fs::remove_file(temp.path().join(NAVIGATION_FILE)).unwrap();
+        nav(temp.path());
+        assert!(open_candidate(temp.path()).unwrap().is_some());
+        std::fs::write(temp.path().join(BOOTSTRAP_FILE), b"invalid HBA").unwrap();
+        std::fs::remove_file(temp.path().join(NAVIGATION_FILE)).unwrap();
+        assert!(open_candidate(temp.path()).is_err());
     }
 
     #[test]

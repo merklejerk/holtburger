@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
     } else {
         password.clone()
     };
-    let content = ContentRepository::discover(args.content)?;
+    let content = ContentRepository::select_installation(args.content)?;
     let mut builder = ClientRuntimeBuilder::new(account.clone()).server(args.host, args.port);
     builder.load_assets(&content)?;
     let mut client = builder.connect().await?;

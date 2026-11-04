@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import {
 	buildEntryPath,
 	extractContentArguments,
+	developmentContentEnvironment,
 	collapseRendererArguments,
 	extractElectronLaunchArguments,
 	extractVitePortArguments,
@@ -70,6 +71,11 @@ const release = rawArgs.includes("--release");
 
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const workspaceRoot = resolve(appRoot, "../..");
+const developmentEnvironment = developmentContentEnvironment(
+	process.env,
+	process.env.INIT_CWD ?? process.cwd(),
+	workspaceRoot,
+);
 const hostBinary = resolve(
 	workspaceRoot,
 	"target",
@@ -130,7 +136,7 @@ const vite = spawn(
 	],
 	{
 		cwd: appRoot,
-		env: { ...process.env },
+		env: developmentEnvironment,
 		stdio: "inherit",
 		shell: false,
 	},
@@ -197,7 +203,7 @@ function startElectron() {
 		{
 			cwd: appRoot,
 			env: {
-				...process.env,
+				...developmentEnvironment,
 				HOLTBURGER_ELECTRON_DEV_ORIGIN: `http://127.0.0.1:${vitePort}`,
 				HOLTBURGER_HOST_BIN: hostBinary,
 				HOLTBURGER_ELECTRON_SUPERVISED: "1",

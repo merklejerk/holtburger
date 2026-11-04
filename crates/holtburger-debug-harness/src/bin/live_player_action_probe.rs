@@ -74,7 +74,8 @@ async fn main() -> Result<()> {
     let phase_timeout = Duration::from_secs(args.timeout_seconds);
 
     let repository = Arc::new(
-        ContentRepository::discover(args.content.clone()).context("content discovery failed")?,
+        ContentRepository::select_installation(args.content.clone())
+            .context("content discovery failed")?,
     );
     let service = Arc::new(ContentAssetService::new(
         Arc::clone(&repository),

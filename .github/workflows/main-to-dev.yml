@@ -31,7 +31,7 @@ jobs:
           
           # PROTECT THE VIBE 🛡️
           # Restore dev's version of everything that 'main' wants to delete
-          git checkout HEAD -- ACE/ ACViewer/ ace-root/ crates/holtburger-debug-harness/ .gitmodules Cargo.toml
+          git checkout HEAD -- crates/holtburger-debug-harness/ Cargo.toml
           
           # Stage fixes
           git add .

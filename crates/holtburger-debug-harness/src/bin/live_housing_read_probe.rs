@@ -47,7 +47,9 @@ async fn main() -> Result<()> {
     let account = secret("HOLTBURGER_PROBE_ACCOUNT")?;
     let password = secret("HOLTBURGER_PROBE_PASSWORD")?;
     let duration = Duration::from_secs(args.timeout_seconds);
-    let repository = Arc::new(ContentRepository::discover(args.content.clone())?);
+    let repository = Arc::new(ContentRepository::select_installation(
+        args.content.clone(),
+    )?);
     let service = Arc::new(ContentAssetService::new(
         Arc::clone(&repository),
         Arc::new(ContentDecodeCache::new()),

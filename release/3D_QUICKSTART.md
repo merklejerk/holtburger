@@ -83,6 +83,10 @@ user-supplied. A full HBA installation takes precedence in a selected directory.
 HBAs contain only compact CLI data, h3d tries the retail DAT installation in that directory.
 Corrupt HBAs remain errors; h3d never combines HBA and DAT families.
 
+`--content DIR` accepts installation directories only. Without an explicit or saved selection,
+`HOLTBURGER_DEFAULT_CONTENT` replaces the initial executable-adjacent `dats/` discovery root;
+platform data is the next candidate. The setting never overrides a saved or explicit selection.
+
 ## Native requirements
 
 Linux requires a graphical desktop and Electron system libraries, including GTK 3, NSS,

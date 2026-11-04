@@ -38,10 +38,14 @@ or sibling-extension probing, returning a repository and canonical selection ide
 `ResolvedContent::open_preferred` applies a frontend admission predicate to the preferred HBA
 installation before trying the same directory's DAT installation; the frontend still validates
 the returned repository and reports its missing resource. Exact files never switch sources.
-`ResolvedContent::discover` uses this preference when trying an app-supplied portable directory followed by the shared platform
-data directory. Missing locations and directories without archives are skipped; invalid selected
-archives fail explicitly. Legacy `ContentRepository::discover` retains HBA/environment discovery
-for tooling consumers; h3d uses the explicit selection APIs and TUI owns its HBA/HNAV selection in the frontend.
+`installation` owns directory-only selection and ordered candidate iteration. An explicit
+installation never falls through; automatic selection can skip missing, empty, or insufficient
+content but surfaces corruption and access failures. Adapters lazily interpret
+`HOLTBURGER_DEFAULT_CONTENT` as a replacement initial root, after explicit/saved selection.
+`ResolvedContent` retains canonical location identity and archive-family admission. Exact HBA/DAT
+opening APIs remain available to artifact consumers, independently of installation policy.
+The TUI retains ownership of its HBA/HNAV admission; the 3D host owns visual admission.
+
 
 Retail role identification uses header dataset/subset, allowing one base portal, optional highres
 portal, cell, and language archive per installation. Highres shares `eor/portal` and takes precedence

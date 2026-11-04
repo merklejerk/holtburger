@@ -16,8 +16,9 @@ use std::io::Cursor;
 #[derive(Parser)]
 #[command(about = "Report the template and animation facts behind the Bats divergence")]
 struct Args {
-    #[arg(long, default_value = "dats/weenies.hwc")]
+    #[arg(long, default_value = "weenies.hwc")]
     catalog: std::path::PathBuf,
+    /// Explicit installation directory; otherwise use default/platform discovery.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
     #[arg(long, default_value_t = 36449)]
@@ -76,7 +77,8 @@ fn main() -> Result<()> {
         println!("\nno setup; nothing further to report");
         return Ok(());
     };
-    let content = ContentRepository::discover(args.content).context("content discovery failed")?;
+    let content =
+        ContentRepository::select_installation(args.content).context("content discovery failed")?;
     let read = |id: u32| -> Result<Vec<u8>> {
         Ok(content
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, id))

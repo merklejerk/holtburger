@@ -81,7 +81,7 @@ jobs:
         run: |
           SUFFIX=''
           if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
-          "target/${{ matrix.triple }}/release/content_bootstrap$SUFFIX" .holtburger-local/cli-content
+          "target/${{ matrix.triple }}/release/content_bootstrap$SUFFIX" --content .holtburger-local/cli-content
           python .github/scripts/candidate_release.py assemble --product cli \
             --target '${{ matrix.triple }}' --content .holtburger-local/cli-content \
             --notices .holtburger-local/candidate-notices/THIRD_PARTY_NOTICES.html \

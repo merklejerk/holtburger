@@ -39,7 +39,7 @@ fn main() -> Result<()> {
         args.phases > 0 && args.ticks > 0,
         "phase and tick counts must be positive"
     );
-    let repository = Arc::new(ContentRepository::discover(None)?);
+    let repository = Arc::new(ContentRepository::select_installation(None)?);
     let service =
         ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
     let center = service

@@ -31,7 +31,7 @@ use std::{
 
 #[derive(Parser)]
 struct Args {
-    /// Opened content archive/directory; canonical discovery is used when omitted.
+    /// Installation directory; default/platform discovery is used when omitted.
     #[arg(long)]
     content: Option<std::path::PathBuf>,
     /// Output provenance label; movement always executes the compiled current solver.
@@ -307,7 +307,7 @@ fn main() -> Result<()> {
     );
     ensure!(args.routes_per_owner > 0, "route limit must be positive");
     ensure!(args.ticks > 0, "tick count must be positive");
-    let repository = Arc::new(ContentRepository::discover(args.content)?);
+    let repository = Arc::new(ContentRepository::select_installation(args.content)?);
     let service =
         ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
     let owners = repository

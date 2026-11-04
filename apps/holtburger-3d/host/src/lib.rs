@@ -116,7 +116,7 @@ const ACTIVE_REGION_BINARY_MAGIC: &[u8; 4] = b"HBAR";
 
 /// Discover the app's configured static-content runtime for a non-desktop diagnostic host.
 pub fn discover_content_runtime() -> Result<ContentAssetRuntime> {
-    let repository = Arc::new(ContentRepository::discover(None)?);
+    let repository = Arc::new(ContentRepository::select_installation(None)?);
     let service = ContentAssetService::new(repository, Arc::new(ContentDecodeCache::new()));
     Ok(ContentAssetRuntime::new(service))
 }

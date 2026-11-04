@@ -10,12 +10,11 @@ use tempfile::NamedTempFile;
 const SYNTHETIC_NAMESPACE_ENTRIES: u32 = 4096;
 
 fn bench_providers(c: &mut Criterion) {
-    let dat_path = match holtburger_dat::utils::get_portal_dat_path() {
-        Some(path) => path,
-        None => return,
+    let Some(dat_path) = std::env::var_os("HOLTBURGER_PORTAL_DAT") else {
+        eprintln!("Set HOLTBURGER_PORTAL_DAT to benchmark an explicitly selected DAT corpus");
+        return;
     };
-
-    let dat_db = DatDatabase::new(&dat_path).expect("Failed to open DAT");
+    let dat_db = DatDatabase::new(std::path::Path::new(&dat_path)).expect("Failed to open DAT");
 
     // Select 50 file IDs to cycle through
     let ids: Vec<u32> = dat_db

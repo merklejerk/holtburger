@@ -60,3 +60,17 @@ export function extractVitePortArguments(
 	options?: { readonly allowPortAlias?: boolean },
 ): { args: string[]; vitePort?: string };
 export function requireEntry(value: string | undefined): EntryPath;
+
+/** Resolve a default only when automatic discovery is actually needed. */
+export function defaultContentRoot(
+	configured: string | undefined,
+	invocationDirectory: string,
+	installedRoot: string,
+): string;
+
+/** Inject an absolute development default while preserving caller environment overrides. */
+export function developmentContentEnvironment(
+	environment: Readonly<Record<string, string | undefined>>,
+	invocationDirectory: string,
+	workspace: string,
+): Record<string, string | undefined>;

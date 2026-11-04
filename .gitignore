@@ -1,10 +1,6 @@
 # Rust
 target/
 
-# Dats
-dats/*
-!dats/README.md
-
 # Logs
 logs/
 *.log
@@ -42,3 +38,6 @@ node_modules/
 
 # Machine-local references and working notes
 /local/
+
+# Python test bytecode
+__pycache__/

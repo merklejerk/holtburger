@@ -163,7 +163,9 @@ fn main() -> Result<()> {
         args.walkable_allowance.is_finite() && (0.0..=1.0).contains(&args.walkable_allowance),
         "allowance must be in 0..=1"
     );
-    let repository = Arc::new(ContentRepository::discover(args.content.clone())?);
+    let repository = Arc::new(ContentRepository::select_installation(
+        args.content.clone(),
+    )?);
     let cache = Arc::new(ContentDecodeCache::new());
     let service = ContentAssetService::new(Arc::clone(&repository), cache);
     let landblock = service

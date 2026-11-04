@@ -627,6 +627,9 @@ export class ResidentTextureAtlas<TOwner extends string> {
 		const physical = this.#physical;
 		if (physical === null || this.#destroyed) return null;
 		const epoch = this.#purposeEpochs.get(purpose) ?? 0;
+		// Concurrent requirement callers can queue behind the same unpublished epoch. Recheck
+		// after entering the lane: an earlier rebuild may already have published their work.
+		if (this.#publishedPurposeEpochs.get(purpose) === epoch) return null;
 		const nextPageGeneration = this.#nextPageGeneration.get(purpose) ?? 0;
 		const entries = [...this.#sources.values()]
 			.filter((source) => source.purpose === purpose)

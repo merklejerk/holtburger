@@ -19,6 +19,7 @@ pub mod navigation_bundle;
 pub mod navigation_scene;
 pub mod navigation_source;
 pub mod object_collision;
+mod record_cache;
 pub mod render_surface_pixels;
 pub mod repository;
 mod resource_error;

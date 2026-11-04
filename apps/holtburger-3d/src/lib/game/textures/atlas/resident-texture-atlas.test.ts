@@ -89,6 +89,88 @@ describe("ResidentTextureAtlas", () => {
 		});
 	});
 
+	it("publishes one layout for concurrent owners sharing one source epoch", async () => {
+		const planner = new CountingLayoutPlanner(FIXTURE_PAGE_SIZE);
+		const resources = new FixtureRendererResources();
+		const atlas = new ResidentTextureAtlas<string>(new ImmediatePreparer(), {
+			layoutPlanner: planner,
+			pageBuilder: new FixturePageBuilder(),
+			pageSize: FIXTURE_PAGE_SIZE,
+			renderResources: resources,
+		});
+		const building = atlas.prepareOwnerRequirements("buildings", revision(1), [
+			DIRECT_COLOR,
+		]);
+		const handles = [
+			building,
+			...["objects", "entity"].map((owner) =>
+				atlas.prepareOwnerRequirements(owner, revision(1), [DIRECT_COLOR]),
+			),
+		];
+		await expect(
+			Promise.all(handles.map((handle) => handle.completion)),
+		).resolves.toEqual(handles.map(() => "ready"));
+		expect(planner.planCount).toBe(1);
+		expect(resources.uploads).toHaveLength(1);
+		const binding = atlas.getAtlasBinding(DIRECT_COLOR.key);
+		expect(binding).not.toBeNull();
+		await atlas.withdrawOwnerRevision(building);
+		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).toEqual(binding);
+		expect(planner.planCount).toBe(1);
+	});
+
+	it("converges to a newer source epoch while the first layout is pending", async () => {
+		const planner = new DeferredFirstLayoutPlanner();
+		const atlas = new ResidentTextureAtlas<string>(new ImmediatePreparer(), {
+			layoutPlanner: planner,
+			pageBuilder: new FixturePageBuilder(),
+			pageSize: FIXTURE_PAGE_SIZE,
+			renderResources: new FixtureRendererResources(),
+		});
+		const first = atlas.prepareOwnerRequirements("first", revision(1), [
+			DIRECT_COLOR,
+		]);
+		await planner.firstRequest;
+		const second = atlas.prepareOwnerRequirements("second", revision(1), [
+			SECOND_DIRECT,
+		]);
+		planner.resolveFirst();
+		await expect(
+			Promise.all([first.completion, second.completion]),
+		).resolves.toEqual(["ready", "ready"]);
+		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).not.toBeNull();
+		expect(atlas.getAtlasBinding(SECOND_DIRECT.key)).not.toBeNull();
+		expect(atlas.getDiagnostics().staleTransactionCount).toBeGreaterThan(0);
+	});
+
+	it("retries publication after the first layout fails", async () => {
+		const planner = new SizedLayoutPlanner(FIXTURE_PAGE_SIZE);
+		const plan = vi
+			.spyOn(planner, "plan")
+			.mockRejectedValueOnce(new Error("Synthetic layout failure."));
+		const atlas = new ResidentTextureAtlas<string>(new ImmediatePreparer(), {
+			layoutPlanner: planner,
+			pageBuilder: new FixturePageBuilder(),
+			pageSize: FIXTURE_PAGE_SIZE,
+			renderResources: new FixtureRendererResources(),
+		});
+		const first = atlas.prepareOwnerRequirements("building", revision(1), [
+			DIRECT_COLOR,
+		]);
+		const queued = atlas.prepareOwnerRequirements("entity", revision(1), [
+			DIRECT_COLOR,
+		]);
+		await expect(first.completion).resolves.toMatchObject({ kind: "failed" });
+		// This claim keeps the source epoch alive, so its queued retry uses the failed epoch.
+		await expect(queued.completion).resolves.toBe("ready");
+		const retry = atlas.prepareOwnerRequirements("building", revision(2), [
+			DIRECT_COLOR,
+		]);
+		await expect(retry.completion).resolves.toBe("ready");
+		expect(atlas.getAtlasBinding(DIRECT_COLOR.key)).not.toBeNull();
+		expect(plan).toHaveBeenCalledTimes(2);
+	});
+
 	it("retains the published revision until explicit replacement activation", async () => {
 		const preparer = new ImmediatePreparer();
 		const atlas = new ResidentTextureAtlas<"building">(preparer);

@@ -38,6 +38,8 @@ pub struct MountedContentSource {
 
 pub struct ContentRepository {
     mounts: Vec<Arc<dyn ResourceSource>>,
+    /// Validated immutable material facts follow this selected repository, never a frontend scene.
+    pub(crate) material_facts: crate::material_graph::MaterialFacts,
     mounted_sources: Vec<MountedContentSource>,
     resource_index: Vec<RepositoryResourceIndexEntry>,
     /// Sorted, unique archived EnvCell IDs grouped by normalized landblock owner.
@@ -140,6 +142,7 @@ impl ContentRepository {
     pub fn from_mounts(mounts: Vec<Arc<dyn ResourceSource>>) -> Self {
         Self {
             mounts,
+            material_facts: crate::material_graph::MaterialFacts::default(),
             mounted_sources: Vec::new(),
             resource_index: Vec::new(),
             env_cells_by_landblock: HashMap::new(),
@@ -402,6 +405,195 @@ mod tests {
                 })
             );
             assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, id), 1);
+        }
+    }
+
+    #[test]
+    fn material_facts_share_validation_without_retaining_pixel_payloads() {
+        use crate::test_support::CountingSource;
+        let surface = 0x0800_0040;
+        let texture = 0x0500_0040;
+        let missing = 0x0600_4040;
+        let level = 0x0600_0040;
+        let palette = 0x0400_0040;
+        let source = Arc::new(CountingSource::new(HashMap::from([
+            (
+                (EOR_PORTAL_NAMESPACE.into(), surface),
+                textured_csurface_bytes(texture, palette),
+            ),
+            (
+                (EOR_PORTAL_NAMESPACE.into(), texture),
+                surface_texture_bytes(texture, &[missing, level]),
+            ),
+            (
+                (EOR_PORTAL_NAMESPACE.into(), level),
+                render_surface_bytes(level, PixelFormatId::P8, &[0, 1, 0, 1], Some(palette)),
+            ),
+            (
+                (EOR_PORTAL_NAMESPACE.into(), palette),
+                palette_bytes(palette),
+            ),
+        ])));
+        let repository = ContentRepository::from_mounts(vec![source.clone()]);
+        let first = repository.resolve_material_recipe(surface).unwrap();
+        for _ in 0..3 {
+            assert_eq!(repository.resolve_material_recipe(surface).unwrap(), first);
+            assert_eq!(
+                repository
+                    .resolve_surface_texture(texture)
+                    .unwrap()
+                    .render_surface_ids,
+                vec![missing, level]
+            );
+        }
+        let direct_palette = repository.read_palette(palette).unwrap();
+        let decoded_palette = crate::ContentDecodeCache::default()
+            .palette(&repository, palette)
+            .unwrap();
+        assert!(Arc::ptr_eq(&direct_palette, &decoded_palette));
+        for id in [surface, texture, level, palette] {
+            assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, id), 1);
+        }
+        // Explicit pixel conversion is a separate consumer; its payload is never cached as facts.
+        let error = repository
+            .resolve_surface_texture_pixels(texture, crate::TexturePixelFormat::Rgba8)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("P8 cannot provide RGBA8 pixels"));
+        assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, level), 2);
+        assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, palette), 1);
+    }
+
+    #[test]
+    fn material_validation_retries_corrupt_later_levels_even_with_a_usable_first_level() {
+        use crate::test_support::CountingSource;
+        let surface = 0x0800_0040;
+        let texture = 0x0500_0040;
+        let good = 0x0600_0040;
+        let broken = 0x0600_0041;
+        let source = Arc::new(CountingSource::new(HashMap::from([
+            (
+                (EOR_PORTAL_NAMESPACE.into(), surface),
+                textured_csurface_bytes(texture, 0),
+            ),
+            (
+                (EOR_PORTAL_NAMESPACE.into(), texture),
+                surface_texture_bytes(texture, &[good, broken]),
+            ),
+            (
+                (EOR_PORTAL_NAMESPACE.into(), good),
+                render_surface_bytes(good, PixelFormatId::A8R8G8B8, &[0; 16], None),
+            ),
+            ((EOR_PORTAL_NAMESPACE.into(), broken), vec![0xff]),
+        ])));
+        let repository = ContentRepository::from_mounts(vec![source.clone()]);
+        for _ in 0..2 {
+            let error = repository.resolve_material_recipe(surface).unwrap_err();
+            let resource = error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<ContentResourceError>())
+                .unwrap();
+            assert_eq!(resource.file_id, broken);
+            assert_eq!(resource.kind, ContentResourceErrorKind::Invalid);
+        }
+        assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, broken), 2);
+    }
+
+    #[test]
+    fn cached_materials_keep_authored_and_overridden_default_palettes_distinct() {
+        use crate::test_support::CountingSource;
+        let setup_id = 0x0200_0040;
+        let gfx_id = 0x0100_0040;
+        let surfaces = [0x0800_0040, 0x0800_0041];
+        let textures = [0x0500_0040, 0x0500_0041];
+        let palettes = [0x0400_0040, 0x0400_0041];
+        let mut setup = Cursor::new(Vec::new());
+        test_setup_model(setup_id, &[gfx_id])
+            .pack(&mut setup)
+            .unwrap();
+        let mut gfx = Cursor::new(Vec::new());
+        test_gfx_obj(gfx_id, &surfaces).pack(&mut gfx).unwrap();
+        let mut files = HashMap::from([
+            ((EOR_PORTAL_NAMESPACE.into(), setup_id), setup.into_inner()),
+            ((EOR_PORTAL_NAMESPACE.into(), gfx_id), gfx.into_inner()),
+            (
+                (EOR_PORTAL_NAMESPACE.into(), surfaces[0]),
+                textured_csurface_bytes(textures[0], 0),
+            ),
+            (
+                (EOR_PORTAL_NAMESPACE.into(), surfaces[1]),
+                textured_csurface_bytes(textures[0], palettes[0]),
+            ),
+        ]);
+        for (index, texture) in textures.into_iter().enumerate() {
+            let level = 0x0600_0040 + index as u32;
+            files.insert(
+                (EOR_PORTAL_NAMESPACE.into(), texture),
+                surface_texture_bytes(texture, &[level]),
+            );
+            files.insert(
+                (EOR_PORTAL_NAMESPACE.into(), level),
+                render_surface_bytes(
+                    level,
+                    PixelFormatId::P8,
+                    &[0, 1, 0, 1],
+                    Some(palettes[index]),
+                ),
+            );
+            files.insert(
+                (EOR_PORTAL_NAMESPACE.into(), palettes[index]),
+                palette_bytes(palettes[index]),
+            );
+        }
+        let repository = ContentRepository::from_mounts(vec![Arc::new(CountingSource::new(files))]);
+        // Alternate base/override/base so a retained definition cannot capture one appearance.
+        for replacement in [textures[0], textures[1], textures[0]] {
+            let appearance = repository
+                .resolve_setup_appearance(
+                    setup_id,
+                    crate::MaterialAppearanceInput {
+                        obj_desc: Some(ObjDesc {
+                            texture_changes: vec![TextureMapChange {
+                                part_index: 0,
+                                old_texture: textures[0],
+                                new_texture: replacement,
+                            }],
+                            palette_id: None,
+                            sub_palettes: Vec::new(),
+                            anim_part_changes: Vec::new(),
+                        }),
+                    },
+                )
+                .unwrap();
+            let slots = &appearance.parts[0].material_slots;
+            for (index, slot) in slots.iter().enumerate() {
+                let crate::ResolvedMaterialSource::Texture(texture) = &slot.material.source else {
+                    panic!("textured fixture");
+                };
+                assert_eq!(texture.surface_texture_id, replacement);
+                let expected_palette = if index == 1 || replacement == textures[0] {
+                    palettes[0]
+                } else {
+                    palettes[1]
+                };
+                assert_eq!(texture.palette_id, Some(expected_palette));
+            }
+        }
+    }
+
+    #[test]
+    fn material_facts_are_isolated_by_repository() {
+        use crate::test_support::CountingSource;
+        let surface = 0x0800_0040;
+        for color in [0xff00_ff00, 0xff00_00ff] {
+            let source = Arc::new(CountingSource::new(HashMap::from([(
+                (EOR_PORTAL_NAMESPACE.into(), surface),
+                solid_csurface_bytes(color),
+            )])));
+            let repository = ContentRepository::from_mounts(vec![source]);
+            assert_eq!(
+                repository.resolve_material_recipe(surface).unwrap().source,
+                crate::ResolvedMaterialSource::SolidColor(color)
+            );
         }
     }
 

@@ -1,4 +1,6 @@
+use crate::record_cache::RecordCache;
 use std::io::Cursor;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use holtburger_dat::file_type::{
@@ -210,38 +212,151 @@ pub struct ResolvedTerrainRoadAlphaMap {
     pub alpha_texture_id: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ParsedRenderSurfaceDependency {
-    pub render_surface: RenderSurface,
-    pub default_palette: Option<Palette>,
+// Definitions and texture facts are small ID/scalar products. Pixel payloads stay transient.
+const MATERIAL_DEFINITION_CAPACITY: usize = 4_096;
+const MATERIAL_TEXTURE_CAPACITY: usize = 4_096;
+// Preserve the former decoded-record palette capacity while unifying its two access paths.
+const MATERIAL_PALETTE_CAPACITY: usize = 8_192;
+
+/// Repository-owned validated definitions, shared by appearance, terrain and pixel consumers.
+#[derive(Debug)]
+pub(crate) struct MaterialFacts {
+    /// Scalar CSurface products shared across appearance queries.
+    definitions: RecordCache<MaterialDefinition>,
+    /// Texture headers and validated palette decisions, without source pixels.
+    textures: RecordCache<SurfaceTextureFacts>,
+    /// Palette payloads shared by material, composition and content-service queries.
+    palettes: RecordCache<Palette>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ParsedSurfaceTextureDependency {
-    pub surface_texture: SurfaceTexture,
-    pub render_surfaces: Vec<ParsedRenderSurfaceDependency>,
+impl Default for MaterialFacts {
+    fn default() -> Self {
+        Self {
+            definitions: RecordCache::new(MATERIAL_DEFINITION_CAPACITY),
+            textures: RecordCache::new(MATERIAL_TEXTURE_CAPACITY),
+            palettes: RecordCache::new(MATERIAL_PALETTE_CAPACITY),
+        }
+    }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ParsedMaterialDependency {
-    pub surface_id: u32,
-    pub c_surface: CSurface,
-    pub surface_texture: Option<ParsedSurfaceTextureDependency>,
-    pub palette: Option<Palette>,
+/// Validated scalar material data; the source variant owns all of its required dependencies.
+#[derive(Debug)]
+struct MaterialDefinition {
+    /// Requested CSurface identity used by recipe consumers.
+    surface_id: u32,
+    /// Authored rendering flags.
+    surface_type: SurfaceType,
+    /// Validated dependencies appropriate to this source kind.
+    source: MaterialSourceDefinition,
+    /// Authored translucency coefficient.
+    translucency: f32,
+    /// Authored luminosity coefficient.
+    luminosity: f32,
+    /// Authored diffuse coefficient.
+    diffuse: f32,
+}
+
+/// Solid colors cannot carry texture or palette dependencies.
+#[derive(Debug)]
+enum MaterialSourceDefinition {
+    /// Authored packed color, with no texture dependencies.
+    SolidColor(u32),
+    /// Original texture and optional explicit palette selected by the surface.
+    Texture {
+        /// Original source identity; validated facts are looked up without pinning another cache entry.
+        original_texture_id: u32,
+        /// An authored palette wins over the effective texture's default palette.
+        authored_palette_id: Option<u32>,
+    },
+}
+
+/// Small validated texture facts; no decoded RenderSurface pixel buffers are retained.
+#[derive(Debug)]
+struct SurfaceTextureFacts {
+    /// Requested identity, kept distinct from the authored header identity.
+    requested_id: u32,
+    /// Authored source-level ordering, including unavailable optional levels.
+    texture: SurfaceTexture,
+    /// First available level that supplies a default palette, resolved during validation.
+    default_palette_id: Option<u32>,
+}
+
+/// Transient full levels used during validation and explicit pixel conversion.
+struct SurfaceTextureData {
+    /// Full authored ordering, including unavailable optional level identities.
+    texture: SurfaceTexture,
+    /// Available levels in authored order, with required palettes validated.
+    levels: Vec<RenderSurface>,
 }
 
 impl ContentRepository {
-    /// Read a decoded palette through repository availability policy and verify its resource identity.
-    pub fn read_palette(&self, palette_id: u32) -> Result<Palette> {
-        let resource = read_available_resource(self, EOR_PORTAL_NAMESPACE, palette_id)?;
-        resource.decode(|bytes| {
-            let palette = Palette::unpack(&mut Cursor::new(bytes))
-                .with_context(|| format!("failed to parse Palette 0x{palette_id:08X}"))?;
-            anyhow::ensure!(
-                palette.id == palette_id,
-                "Palette identity differs from 0x{palette_id:08X}"
-            );
-            Ok(palette)
+    fn material_definition(&self, surface_id: u32) -> Result<Arc<MaterialDefinition>> {
+        self.material_facts
+            .definitions
+            .load(surface_id, || {
+                let surface = read_c_surface(self, surface_id)?;
+                let source = match surface.source {
+                    CSurfaceSource::SolidColor(color) => {
+                        MaterialSourceDefinition::SolidColor(color)
+                    }
+                    CSurfaceSource::Texture {
+                        orig_texture_id,
+                        orig_palette_id,
+                    } => {
+                        self.surface_texture_facts(orig_texture_id)?;
+                        let authored_palette_id = if orig_palette_id == 0 {
+                            None
+                        } else {
+                            // Preserve required palette validation without retaining an unused payload.
+                            self.read_palette(orig_palette_id)?;
+                            Some(orig_palette_id)
+                        };
+                        MaterialSourceDefinition::Texture {
+                            original_texture_id: orig_texture_id,
+                            authored_palette_id,
+                        }
+                    }
+                };
+                Ok(MaterialDefinition {
+                    surface_id,
+                    surface_type: surface.surface_type,
+                    source,
+                    translucency: surface.translucency,
+                    luminosity: surface.luminosity,
+                    diffuse: surface.diffuse,
+                })
+            })
+            .with_context(|| format!("failed to resolve material 0x{surface_id:08X}"))
+    }
+
+    fn surface_texture_facts(&self, id: u32) -> Result<Arc<SurfaceTextureFacts>> {
+        self.material_facts.textures.load(id, || {
+            let data = read_surface_texture_data(self, id)?;
+            let default_palette_id = data
+                .levels
+                .iter()
+                .find_map(|level| level.default_palette_id);
+            Ok(SurfaceTextureFacts {
+                requested_id: id,
+                texture: data.texture,
+                default_palette_id,
+            })
+        })
+    }
+
+    /// Read a shared palette through repository availability policy and verify its resource identity.
+    pub fn read_palette(&self, palette_id: u32) -> Result<Arc<Palette>> {
+        self.material_facts.palettes.load(palette_id, || {
+            let resource = read_available_resource(self, EOR_PORTAL_NAMESPACE, palette_id)?;
+            resource.decode(|bytes| {
+                let palette = Palette::unpack(&mut Cursor::new(bytes))
+                    .with_context(|| format!("failed to parse Palette 0x{palette_id:08X}"))?;
+                anyhow::ensure!(
+                    palette.id == palette_id,
+                    "Palette identity differs from 0x{palette_id:08X}"
+                );
+                Ok(palette)
+            })
         })
     }
 
@@ -293,12 +408,12 @@ impl ContentRepository {
         &self,
         surface_texture_id: u32,
     ) -> Result<ResolvedSurfaceTexture> {
-        let dependency = read_surface_texture_dependency(self, surface_texture_id)?;
+        let facts = self.surface_texture_facts(surface_texture_id)?;
         Ok(ResolvedSurfaceTexture {
-            surface_texture_id: dependency.surface_texture.id,
-            texture_type: dependency.surface_texture.texture_type,
-            unknown: dependency.surface_texture.unknown,
-            render_surface_ids: dependency.surface_texture.render_surface_ids,
+            surface_texture_id: facts.texture.id,
+            texture_type: facts.texture.texture_type,
+            unknown: facts.texture.unknown,
+            render_surface_ids: facts.texture.render_surface_ids.clone(),
         })
     }
 
@@ -312,28 +427,30 @@ impl ContentRepository {
         surface_texture_id: u32,
         output_format: TexturePixelFormat,
     ) -> Result<ResolvedSurfaceTexturePixels> {
-        let dependency = read_surface_texture_dependency(self, surface_texture_id)?;
-        let render_surface = dependency.render_surfaces.first().ok_or_else(|| crate::ContentResourceError {
+        let dependency = read_surface_texture_data(self, surface_texture_id)?;
+        let render_surface = dependency.levels.first().ok_or_else(|| crate::ContentResourceError {
             kind: crate::ContentResourceErrorKind::Invalid,
             namespace: EOR_PORTAL_NAMESPACE.to_owned(),
             file_id: surface_texture_id,
             source_description: self.source_description().map(str::to_owned),
             source: anyhow!("SurfaceTexture 0x{surface_texture_id:08X} has no available RenderSurface levels"),
         })?;
-        let pixels = decode_render_surface_pixels(&render_surface.render_surface, output_format)
-            .map_err(|source| crate::ContentResourceError {
-                kind: crate::ContentResourceErrorKind::Invalid,
-                namespace: EOR_PORTAL_NAMESPACE.to_owned(),
-                file_id: render_surface.render_surface.id,
-                source_description: self.source_description().map(str::to_owned),
-                source,
+        let pixels =
+            decode_render_surface_pixels(render_surface, output_format).map_err(|source| {
+                crate::ContentResourceError {
+                    kind: crate::ContentResourceErrorKind::Invalid,
+                    namespace: EOR_PORTAL_NAMESPACE.to_owned(),
+                    file_id: render_surface.id,
+                    source_description: self.source_description().map(str::to_owned),
+                    source,
+                }
             })?;
         Ok(ResolvedSurfaceTexturePixels {
-            surface_texture_id: dependency.surface_texture.id,
-            render_surface_id: render_surface.render_surface.id,
+            surface_texture_id: dependency.texture.id,
+            render_surface_id: render_surface.id,
             format: output_format,
-            width: render_surface.render_surface.width,
-            height: render_surface.render_surface.height,
+            width: render_surface.width,
+            height: render_surface.height,
             pixels,
         })
     }
@@ -374,9 +491,8 @@ impl ContentRepository {
     }
 
     pub fn resolve_material_recipe(&self, surface_id: u32) -> Result<ResolvedMaterialRecipe> {
-        let dependency = parse_material_dependency(self, surface_id)
-            .with_context(|| format!("failed to resolve material 0x{surface_id:08X}"))?;
-        material_recipe_from_dependency(self, dependency, None)
+        let definition = self.material_definition(surface_id)?;
+        material_recipe_from_definition(self, &definition, None)
     }
 
     pub fn resolve_terrain_material_table(
@@ -639,12 +755,17 @@ impl ContentRepository {
             .into_iter()
             .enumerate()
             .map(|(slot_index, surface_id)| {
-                let dependency = parse_material_dependency(self, surface_id)
-                    .with_context(|| format!("failed to resolve material 0x{surface_id:08X}"))?;
-                let texture_override = texture_override_for_material(&dependency, texture_changes);
+                let definition = self.material_definition(surface_id)?;
+                let texture_override = match &definition.source {
+                    MaterialSourceDefinition::SolidColor(_) => None,
+                    MaterialSourceDefinition::Texture {
+                        original_texture_id,
+                        ..
+                    } => texture_override_for_material(*original_texture_id, texture_changes),
+                };
                 Ok(ResolvedMaterialSlot {
                     slot_index,
-                    material: material_recipe_from_dependency(self, dependency, texture_override)?,
+                    material: material_recipe_from_definition(self, &definition, texture_override)?,
                 })
             })
             .collect()
@@ -694,35 +815,6 @@ fn road_terrain_texture_id(terrain_types: &[ResolvedTerrainMaterialType]) -> u32
         .unwrap_or(0)
 }
 
-pub(crate) fn parse_material_dependency(
-    content: &ContentRepository,
-    surface_id: u32,
-) -> Result<ParsedMaterialDependency> {
-    let c_surface = read_c_surface(content, surface_id)?;
-    let (surface_texture, palette) = match &c_surface.source {
-        CSurfaceSource::SolidColor(_) => (None, None),
-        CSurfaceSource::Texture {
-            orig_texture_id,
-            orig_palette_id,
-        } => {
-            let surface_texture = read_surface_texture_dependency(content, *orig_texture_id)?;
-            let palette = if *orig_palette_id == 0 {
-                None
-            } else {
-                Some(content.read_palette(*orig_palette_id)?)
-            };
-            (Some(surface_texture), palette)
-        }
-    };
-
-    Ok(ParsedMaterialDependency {
-        surface_id,
-        c_surface,
-        surface_texture,
-        palette,
-    })
-}
-
 fn read_c_surface(content: &ContentRepository, surface_id: u32) -> Result<CSurface> {
     let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, surface_id)?;
     resource
@@ -730,10 +822,10 @@ fn read_c_surface(content: &ContentRepository, surface_id: u32) -> Result<CSurfa
         .with_context(|| format!("failed to parse CSurface 0x{surface_id:08X}"))
 }
 
-fn read_surface_texture_dependency(
+fn read_surface_texture_data(
     content: &ContentRepository,
     surface_texture_id: u32,
-) -> Result<ParsedSurfaceTextureDependency> {
+) -> Result<SurfaceTextureData> {
     let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, surface_texture_id)?;
     let surface_texture = resource
         .decode(|bytes| Ok(SurfaceTexture::unpack(&mut Cursor::new(bytes))?))
@@ -741,36 +833,31 @@ fn read_surface_texture_dependency(
 
     let mut render_surfaces = Vec::with_capacity(surface_texture.render_surface_ids.len());
     for render_surface_id in &surface_texture.render_surface_ids {
-        match read_render_surface_dependency(content, *render_surface_id) {
+        match read_render_surface(content, *render_surface_id) {
             Ok(render_surface) => render_surfaces.push(render_surface),
             Err(error) if is_missing_or_pruned_resource_error(&error) => {}
             Err(error) => return Err(error),
         }
     }
 
-    Ok(ParsedSurfaceTextureDependency {
-        surface_texture,
-        render_surfaces,
+    Ok(SurfaceTextureData {
+        texture: surface_texture,
+        levels: render_surfaces,
     })
 }
 
-fn read_render_surface_dependency(
+fn read_render_surface(
     content: &ContentRepository,
     render_surface_id: u32,
-) -> Result<ParsedRenderSurfaceDependency> {
+) -> Result<RenderSurface> {
     let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, render_surface_id)?;
     let render_surface = resource
         .decode(|bytes| Ok(RenderSurface::unpack(&mut Cursor::new(bytes))?))
         .with_context(|| format!("failed to parse RenderSurface 0x{render_surface_id:08X}"))?;
-    let default_palette = match render_surface.default_palette_id {
-        Some(palette_id) => Some(content.read_palette(palette_id)?),
-        None => None,
-    };
-
-    Ok(ParsedRenderSurfaceDependency {
-        render_surface,
-        default_palette,
-    })
+    if let Some(palette_id) = render_surface.default_palette_id {
+        content.read_palette(palette_id)?;
+    }
+    Ok(render_surface)
 }
 
 fn read_available_resource(
@@ -796,70 +883,49 @@ fn is_missing_or_pruned_resource_error(error: &anyhow::Error) -> bool {
     })
 }
 
-fn material_recipe_from_dependency(
+fn material_recipe_from_definition(
     content: &ContentRepository,
-    dependency: ParsedMaterialDependency,
+    definition: &MaterialDefinition,
     texture_override: Option<u32>,
 ) -> Result<ResolvedMaterialRecipe> {
-    let source = match dependency.c_surface.source {
-        CSurfaceSource::SolidColor(color) => ResolvedMaterialSource::SolidColor(color),
-        CSurfaceSource::Texture {
-            orig_texture_id,
-            orig_palette_id,
+    let source = match &definition.source {
+        MaterialSourceDefinition::SolidColor(color) => ResolvedMaterialSource::SolidColor(*color),
+        MaterialSourceDefinition::Texture {
+            original_texture_id,
+            authored_palette_id,
         } => {
-            let surface_texture_id = texture_override.unwrap_or(orig_texture_id);
-            let surface_texture = if surface_texture_id == orig_texture_id {
-                dependency
-                    .surface_texture
-                    .expect("textured material dependency should contain a surface texture")
-            } else {
-                read_surface_texture_dependency(content, surface_texture_id)?
+            let effective_texture_id = match texture_override {
+                Some(id) => id,
+                None => *original_texture_id,
             };
-            // Retail backfills a surface that authors no palette from its texture's own
-            // palette while loading it, and stores that as the surface's original palette.
-            // Every later decision reads the one result: what the shader samples, and which
-            // parts an ObjDesc recolours.
-            let palette_id = if orig_palette_id != 0 {
-                Some(orig_palette_id)
-            } else {
-                surface_texture
-                    .render_surfaces
-                    .iter()
-                    .find_map(|dependency| dependency.render_surface.default_palette_id)
+            let texture = content.surface_texture_facts(effective_texture_id)?;
+            let palette_id = match authored_palette_id {
+                Some(id) => Some(*id),
+                None => texture.default_palette_id,
             };
-
             ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
-                surface_texture_id,
-                render_surface_ids: surface_texture.surface_texture.render_surface_ids,
+                surface_texture_id: texture.requested_id,
+                render_surface_ids: texture.texture.render_surface_ids.clone(),
                 palette_id,
-                // The owning setup part decides this; a material resolved on its own has no
-                // ObjDesc to select it.
+                // The owning setup part alone decides ObjDesc palette composition.
                 palette_composite: None,
             })
         }
     };
-
     Ok(ResolvedMaterialRecipe {
-        surface_id: dependency.surface_id,
-        surface_type: dependency.c_surface.surface_type,
+        surface_id: definition.surface_id,
+        surface_type: definition.surface_type,
         source,
-        translucency: dependency.c_surface.translucency,
-        luminosity: dependency.c_surface.luminosity,
-        diffuse: dependency.c_surface.diffuse,
+        translucency: definition.translucency,
+        luminosity: definition.luminosity,
+        diffuse: definition.diffuse,
     })
 }
 
 fn texture_override_for_material(
-    dependency: &ParsedMaterialDependency,
+    original_texture_id: u32,
     texture_changes: &[TextureMapChange],
 ) -> Option<u32> {
-    let CSurfaceSource::Texture {
-        orig_texture_id, ..
-    } = dependency.c_surface.source
-    else {
-        return None;
-    };
-
     // Last match wins. Layered clothing appends one change list per garment in paint order, and a
     // lower layer commonly restores the body texture with an identity change that a higher layer
     // then covers; taking the first match would let that identity shadow the garment above it and
@@ -868,7 +934,7 @@ fn texture_override_for_material(
     texture_changes
         .iter()
         .rev()
-        .find(|change| change.old_texture == orig_texture_id)
+        .find(|change| change.old_texture == original_texture_id)
         .map(|change| change.new_texture)
 }
 
@@ -1067,24 +1133,6 @@ mod texture_override_tests {
         }
     }
 
-    fn textured(orig_texture_id: u32) -> ParsedMaterialDependency {
-        ParsedMaterialDependency {
-            surface_id: 0x0800_0001,
-            c_surface: CSurface {
-                surface_type: SurfaceType::BASE1_IMAGE,
-                source: CSurfaceSource::Texture {
-                    orig_texture_id,
-                    orig_palette_id: 0,
-                },
-                translucency: 0.0,
-                luminosity: 0.0,
-                diffuse: 0.0,
-            },
-            surface_texture: None,
-            palette: None,
-        }
-    }
-
     /// Layered clothing appends one change list per garment in paint order. A lower layer often
     /// restores the body texture with an identity change that a higher layer then covers, so the
     /// final write must win; taking the first match rendered bare skin under clothing.
@@ -1095,7 +1143,7 @@ mod texture_override_tests {
             change(0x0500_0BB0, 0x0500_025D),
         ];
 
-        let selected = texture_override_for_material(&textured(0x0500_0BB0), &changes);
+        let selected = texture_override_for_material(0x0500_0BB0, &changes);
 
         assert_eq!(selected, Some(0x0500_025D));
     }
@@ -1104,10 +1152,7 @@ mod texture_override_tests {
     fn an_unmatched_texture_change_leaves_the_material_alone() {
         let changes = [change(0x0500_0001, 0x0500_0002)];
 
-        assert_eq!(
-            texture_override_for_material(&textured(0x0500_0BB0), &changes),
-            None
-        );
+        assert_eq!(texture_override_for_material(0x0500_0BB0, &changes), None);
     }
 }
 

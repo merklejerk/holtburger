@@ -1,4 +1,5 @@
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { writeIfChanged } from './write-if-changed.mjs';
+import { readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { format, resolveConfig } from 'prettier';
 import GithubSlugger from 'github-slugger';
@@ -137,7 +138,7 @@ export async function prepareCaptures() {
 		}
 	}
 	const destination = new URL('../CAPTURES.md', import.meta.url);
-	await writeFile(
+	await writeIfChanged(
 		destination,
 		await format(output, {
 			...(await resolveConfig(fileURLToPath(destination))),

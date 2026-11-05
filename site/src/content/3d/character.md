@@ -1,7 +1,7 @@
 ---
 title: 'Character & progression'
 description: 'Review your stats, spend experience, and inspect your defenses.'
-section: '3D client · Magic & combat'
+section: '3D client'
 ---
 
 <script>
@@ -29,3 +29,5 @@ Open **Defenses** to inspect your character’s innate armor and damage resistan
 ## Choose a title
 
 Choose a title your character has earned from the title control.
+
+<Media id="character-title" detail />

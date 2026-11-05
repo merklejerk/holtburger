@@ -1,7 +1,7 @@
 ---
 title: '3D chat commands'
 description: 'Messages, emotes, travel, corpse permissions, and local utilities.'
-section: 'Reference · 3D client'
+section: '3D client'
 ---
 
 ## Help and syntax
@@ -84,6 +84,7 @@ Death may drop items and cause vitae. For recovery and location limitations, see
 | --------------- | ---------------------------------------------------------------- |
 | `/version`      | Show client version and build revision                           |
 | `/fps`          | Toggle the FPS display                                           |
+| `/ui-showcase`  | Toggle conditional HUD previews without layout editing controls  |
 | `/assets`       | Show the active content location                                 |
 | `/assets retry` | Retry failed content loading                                     |
 | `/loc`          | Print and copy character/camera location details for diagnostics |

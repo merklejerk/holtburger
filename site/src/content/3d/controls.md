@@ -1,7 +1,7 @@
 ---
 title: '3D controls'
 description: 'Default gameplay bindings, grouped by what you want to do.'
-section: 'Reference · 3D client'
+section: '3D client'
 ---
 
 ## Movement and camera
@@ -33,6 +33,7 @@ See [movement](/holtburger/3d/movement-camera/) and [jumping](/holtburger/3d/mov
 | Acquire immediate target                   | Hold Tab or Shift+Tab            |
 | Cycle world objects                        | Ctrl+Tab / Ctrl+Shift+Tab        |
 | Cycle unopened corpses                     | V / Shift+V                      |
+| Open Nearby entities and alerts            | Ctrl+F                           |
 | Select self                                | X                                |
 | Interact with selection                    | R                                |
 | Examine                                    | E or right-click the object/item |
@@ -70,7 +71,7 @@ Number-key actions depend on the current controls and focused bar. Use the displ
 | Page chat history                 | PageUp / PageDown when chat has focus |
 | Cancel current action or context  | Escape                                |
 
-[Resting](/holtburger/reference/3d-controls/#chat-emotes-and-resting) speeds health and stamina recovery. The cycle moves through kneeling, sitting, lying down and standing.
+[Resting](/holtburger/3d/controls/#chat-emotes-and-resting) speeds health and stamina recovery. The cycle moves through kneeling, sitting, lying down and standing.
 
 ## Change bindings
 

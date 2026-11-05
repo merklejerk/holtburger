@@ -24,6 +24,4 @@ If you prefer this to happen when you encounter a lock, enable **Automatically t
 
 The helper presents the best usable pick for your trained lockpicking skill. Check the pick and the success estimate when one is available, then activate the pick action.
 
-Keep an eye on pick uses and cooldowns. If the attempt fails, read the result before trying again or changing tools. You can cancel the workflow when you want to move on.
-
 <Media id="locks" detail />

@@ -32,4 +32,4 @@ The TUI uses simplified movement and physics. Supervise scripts through difficul
 
 Release bundles include prepared content and scripts, so you can connect straight from the terminal. Supply your connection details at launch.
 
-[Get the beta](/holtburger/tui/connect/) for your platform.
+[Download the terminal client](/holtburger/tui/connect/) for your platform.

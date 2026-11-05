@@ -1,6 +1,6 @@
 ---
-title: 'Game data & launch settings'
-description: 'Point Holtburger at your AC files and choose your graphics settings.'
+title: 'Game data'
+description: 'Use your AC DAT files and keep server-specific folders with each profile.'
 section: 'Startup'
 ---
 
@@ -9,6 +9,8 @@ import Media from '#lib/components/Media.svelte';
 </script>
 
 ## Use your existing AC files
+
+Holtburger looks for your game data automatically. If it cannot find your DATs, it asks you to choose their folder when you launch the client.
 
 Choose the folder containing `client_portal.dat`, `client_cell_1.dat`, and `client_local_English.dat`. Keep `client_highres.dat` alongside them if you have it.
 
@@ -31,9 +33,3 @@ To return a profile to the default folder, choose **Use application default** an
 For Linux Flatpak folder-access problems, see the [Linux installation guide](/holtburger/start/3d/linux/#troubleshooting).
 
 <Media id="profile-content" detail />
-
-## Launch settings
-
-Open **App settings** in the launcher to choose a graphics backend and enable or disable **Synchronize frames with the display (VSync)**. Apply the changes with the restart action.
-
-For rendering problems, see [graphics troubleshooting](/holtburger/support/graphics/).

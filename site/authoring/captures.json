@@ -10,7 +10,7 @@
 		},
 		"world": {
 			"title": "World, party and character states",
-			"setup": "Group location-dependent work together: a party member for trade/party, an owned or permitted house, an active contract, an outdoor death location when convenient, and your server’s barber service. These shots can wait until the relevant state occurs naturally."
+			"setup": "Group location-dependent work together: a party member for trade/party, an owned or permitted house, an active contract, an outdoor death location when convenient, and your server\u2019s barber service. These shots can wait until the relevant state occurs naturally."
 		},
 		"setup": {
 			"title": "Launcher, setup and UI stills",
@@ -67,7 +67,7 @@
 			"session": "setup",
 			"setup": "Unlock UI layout in a real gameplay scene.",
 			"framing": "Crop one HUD component with its actual move and resize handles visible; omit unrelated windows.",
-			"expected": "The component’s layout-editing affordances are clear at guide size.",
+			"expected": "The component\u2019s layout-editing affordances are clear at guide size.",
 			"priority": "first"
 		},
 		"launcher": {
@@ -83,7 +83,7 @@
 			"session": "setup",
 			"setup": "A launcher profile using an actual retail DAT folder.",
 			"framing": "Crop the content-folder field and Browse/Use application default controls. Native OS file-picker chrome is outside this capture.",
-			"expected": "The reader can locate the application’s folder selection control and see a selected DAT folder.",
+			"expected": "The reader can locate the application\u2019s folder selection control and see a selected DAT folder.",
 			"priority": "later"
 		},
 		"tui-workflow": {
@@ -166,14 +166,6 @@
 			"expected": "Prepared amounts and remaining requirements are readable.",
 			"priority": "later"
 		},
-		"housing-access": {
-			"owner": "agent",
-			"session": "world",
-			"setup": "An owned/permitted house and sample guest entries.",
-			"framing": "Show Access & guests with separate entry/storage controls and names safe to publish.",
-			"expected": "Entry permission is visibly separate from storage permission.",
-			"priority": "later"
-		},
 		"journal": {
 			"owner": "agent",
 			"session": "world",
@@ -198,14 +190,6 @@
 			"expected": "The leader, membership and selected member can be identified.",
 			"priority": "later"
 		},
-		"nearby-alerts": {
-			"owner": "agent",
-			"session": "controls",
-			"setup": "An alert rule with its match preview and a real matching notification.",
-			"framing": "Show the compact alert controls and the linked notification.",
-			"expected": "The reader recognizes a name pattern and the resulting alert.",
-			"priority": "later"
-		},
 		"chat": {
 			"owner": "agent",
 			"session": "setup",
@@ -225,7 +209,7 @@
 		"barber": {
 			"owner": "agent",
 			"session": "world",
-			"setup": "Your server’s barber interaction, with heritage-specific choices available.",
+			"setup": "Your server\u2019s barber interaction, with heritage-specific choices available.",
 			"framing": "Crop Barbershop with appearance choices and Apply/Cancel.",
 			"expected": "The choices and explicit Apply action are clear; applying is optional.",
 			"priority": "later"
@@ -277,14 +261,6 @@
 			"framing": "Crop the relevant controls and Copy hardware info, without dumping the full report into the image.",
 			"expected": "The troubleshooting action is easy to locate.",
 			"priority": "later"
-		},
-		"target-indicators": {
-			"owner": "user",
-			"session": "controls",
-			"setup": "A selected object and a different active combat target.",
-			"framing": "Show both entities, their outline/reticle and enough scene context.",
-			"expected": "The still distinguishes selection from the active fight.",
-			"priority": "first"
 		},
 		"minimap": {
 			"owner": "agent",
@@ -347,7 +323,7 @@
 			"session": "setup",
 			"setup": "A sample launcher profile with its Advanced controls expanded.",
 			"framing": "Crop the content-folder choice and save-profile action; use a neutral sample path.",
-			"expected": "Show the profile’s content-folder control and the action that saves the change.",
+			"expected": "Show the profile\u2019s content-folder control and the action that saves the change.",
 			"priority": "later"
 		},
 		"crafting-confirmation": {
@@ -366,20 +342,12 @@
 			"expected": "Crop the World map with its visibility controls, a useful destination and pan/zoom context.",
 			"priority": "first"
 		},
-		"jump-preview": {
-			"owner": "agent",
-			"session": "controls",
-			"setup": "A safe jump with a visible landing and precise jump mode active.",
-			"framing": "Crop to the character, complete arc, landing target and power control; omit unrelated HUD panels.",
-			"expected": "Show the landing target, trajectory arc and power control together in a focused world-view crop.",
-			"priority": "first"
-		},
 		"character-roster": {
-			"owner": "agent",
+			"owner": "user",
 			"session": "setup",
-			"setup": "The character selection screen with a sample roster and a selected character.",
-			"framing": "Crop the roster, selected entry and Enter World/Create character controls for readable text.",
-			"expected": "The selected character and the explicit entry action are clear; omit the broad background.",
+			"setup": "A character selected in a populated roster, with the equipped 3D preview visible.",
+			"framing": "Use the complete character-selection screen, including the roster, 3D character and scene backdrop.",
+			"expected": "The reader recognizes the full character-selection experience and can find Enter World and Create character.",
 			"priority": "first"
 		},
 		"inventory-overview": {
@@ -462,20 +430,140 @@
 			"expected": "The character continues moving throughout the windup and the completed spell is visible.",
 			"priority": "first"
 		},
-		"moving-archery": {
-			"owner": "user",
-			"session": "controls",
-			"setup": "A bow, ammunition and safe target.",
-			"framing": "Keep the moving character, windup, released shot and target in frame.",
-			"expected": "The character can reposition while preparing and releasing a shot.",
-			"priority": "first"
-		},
 		"enchantments": {
-			"owner": "agent",
+			"owner": "user",
 			"session": "gear",
 			"setup": "Several real active effects with readable remaining durations.",
-			"framing": "Crop only the Enchantments window; show groups, remaining time, search and filter controls.",
+			"framing": "Crop only the populated Enchantments window; wait for all visible spell icons to load and show groups, remaining time and search/filter controls.",
 			"expected": "The reader recognizes the effect groups and can find durations and filtering controls.",
+			"priority": "first"
+		},
+		"hud-showcase": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "Enable /ui-showcase in a real gameplay scene.",
+			"framing": "Full viewport with the HUD components visible and no layout controls.",
+			"expected": "Introduce the HUD and connect each component to its player guide.",
+			"priority": "first"
+		},
+		"spell-list": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Open the Spells tab with filters and one spell expanded.",
+			"framing": "Crop the full panel, keeping filters, details and Cast buttons visible.",
+			"expected": "Show spell discovery and direct casting from the list.",
+			"priority": "first"
+		},
+		"spell-bar": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Populate a spell tab with several spells.",
+			"framing": "Crop the spell bar, including tab selectors and shortcut hints.",
+			"expected": "Introduce the spell bar before explaining how to populate it.",
+			"priority": "first"
+		},
+		"action-bar-intro": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Populate an action bar and hover a targeted item shortcut.",
+			"framing": "Crop the bar and tooltip, keeping the Shift-click alternate action readable.",
+			"expected": "Introduce direct item shortcuts, default self-use and alternate targeting.",
+			"priority": "first"
+		},
+		"inventory-currencies": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Carry several alternate currencies and open the currency popup.",
+			"framing": "Crop the inventory footer and readable alternate-currency totals.",
+			"expected": "Show the currency summary across carried packs.",
+			"priority": "first"
+		},
+		"chat-overview": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "Show the chat buffer with messages and its controls.",
+			"framing": "Crop the full chat panel, including activation icon, filters and composer.",
+			"expected": "Introduce the chat panel and identify its controls.",
+			"priority": "first"
+		},
+		"recall-menu": {
+			"owner": "user",
+			"session": "world",
+			"setup": "Open Recall destinations on the world map.",
+			"framing": "Crop the menu and its trigger with destination labels readable.",
+			"expected": "Show the map\u2019s recall destination menu.",
+			"priority": "first"
+		},
+		"party-hud": {
+			"owner": "user",
+			"session": "world",
+			"setup": "Show the party HUD with a full roster.",
+			"framing": "Crop the teammate cards and vital bars.",
+			"expected": "Show the compact party HUD and its member vitals.",
+			"priority": "first"
+		},
+		"allegiance": {
+			"owner": "user",
+			"session": "world",
+			"setup": "Open Social\u2019s Allegiance tab with relationship details visible.",
+			"framing": "Crop the panel with membership, relationships and contributed XP readable.",
+			"expected": "Show allegiance relationships and membership details.",
+			"priority": "first"
+		},
+		"character-title": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Open the earned-title selector in Character \u2192 Progression.",
+			"framing": "Crop the character header and expanded title list.",
+			"expected": "Show how to choose an earned character title.",
+			"priority": "first"
+		},
+		"housing-map": {
+			"owner": "user",
+			"session": "world",
+			"setup": "Enable a housing search overlay on the world map.",
+			"framing": "Show the map with house markers distributed across the results.",
+			"expected": "Show housing search results as a world-map overlay.",
+			"priority": "first"
+		},
+		"housing-management": {
+			"owner": "user",
+			"session": "world",
+			"setup": "Open the Housing tab for an owned home with maintenance and property details expanded.",
+			"framing": "Crop the tab with access, decoration and advanced sections visible.",
+			"expected": "Introduce the house management controls and maintenance summary.",
+			"priority": "first"
+		},
+		"appearance-toggles": {
+			"owner": "user",
+			"session": "gear",
+			"setup": "Show helmet and cloak visibility controls in Inventory.",
+			"framing": "Crop the controls beneath the equipment strip.",
+			"expected": "Locate the helmet and cloak appearance toggles.",
+			"priority": "first"
+		},
+		"selection-outline": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "Select or attack a creature in the world.",
+			"framing": "Crop the creature and enough scene context to identify its indicator.",
+			"expected": "Show the selected outline through an obstruction.",
+			"priority": "first"
+		},
+		"combat-reticle": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "Select or attack a creature in the world.",
+			"framing": "Crop the creature and enough scene context to identify its indicator.",
+			"expected": "Show the reticle marking the active combat target.",
+			"priority": "first"
+		},
+		"nearby-button": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "Show the minimap\u2019s Nearby button.",
+			"framing": "Crop the button with its minimap rim for orientation.",
+			"expected": "Locate the control that opens the entity list and alerts.",
 			"priority": "first"
 		}
 	}

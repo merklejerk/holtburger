@@ -10,9 +10,13 @@ import Media from '#lib/components/Media.svelte';
 
 ## Narrow the nearby list
 
-Open **Nearby** to browse entities around you. Search names and use the category, tracked-name and sorting controls to reduce the list to what you need.
+Click **Nearby entities and alerts** on the minimap’s lower-left rim, or press **Ctrl+F**, to open the entity list.
 
-Select a result to make it your current target, then [inspect it](/holtburger/3d/inspecting/) or interact using your usual [target controls](/holtburger/3d/combat/#pick-something-specific). For everyday combat selection, [Smart Tab](/holtburger/3d/combat/) is usually the quicker starting point.
+<Media id="nearby-button" detail />
+
+Search names and use the category, tracked-name and sorting controls to reduce the list to what you need.
+
+Select a result to make it your current target, then [inspect it](/holtburger/3d/inspecting/) or interact using your usual [target controls](/holtburger/3d/interactions/#pick-something-specific). For everyday combat selection, [Smart Tab](/holtburger/3d/combat/) is usually the quicker starting point.
 
 <Media id="nearby-list" detail />
 
@@ -31,8 +35,6 @@ Matches ignore capitalization. In a glob, `*` matches any text and `?` matches o
 Check the editor's preview against nearby names, then save the rule.
 
 Click the linked name in a chat alert to select the creature or object. Hold **Control** (**Command** on macOS) while clicking, or enable [chat-history interaction](/holtburger/3d/chat/#use-links-in-chat).
-
-<Media id="nearby-alerts" detail />
 
 ## Manage your alerts
 

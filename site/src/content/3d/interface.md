@@ -1,6 +1,6 @@
 ---
-title: 'Make the interface yours'
-description: 'Arrange the HUD and keep useful information close.'
+title: 'Layout & theming'
+description: 'Arrange your HUD, tune readability and choose its appearance.'
 section: '3D client'
 ---
 
@@ -24,13 +24,27 @@ Use overall UI scale to change control sizes, and text scale to adjust readabili
 
 Use **Settings → UI → HUD windows → Window background opacity** to make floating windows more solid while keeping text and icons clear.
 
-Appearance settings also let you choose fonts and themes. Traveler's Kit provides the leather-and-copper treatment used as inspiration for this site.
+## Choose fonts and themes
+
+h3d is an Electron desktop app with a browser-based interface. Its UI uses HTML and CSS, giving themes the expressive range of web interfaces: custom typography, textures, gradients, transparency and animation.
+
+Open **Settings → UI** to choose **Traveler’s Kit**, **Base** or an installed custom theme. Body text, headings and monospace text each have a font choice; **Theme default** follows the theme’s typography.
+
+Themes can change much more than colors: window textures and frames, buttons, tabs, fonts, HUD styling and feedback animations. A theme can give the interface a different visual character while keeping the same controls and gameplay.
+
+## Install or make a theme
+
+Choose **Open themes folder** in the theme settings. Put the theme’s folder there, click **Refresh list**, then select it. Each theme is a folder containing `theme.css`, with any accompanying images and fonts.
+
+For your own theme, start with a few CSS overrides or build a fuller skin. Use **Reload theme** to see edits without restarting the client. HUD placement stays under your layout controls; your explicit font choices override the theme’s defaults.
+
+The [theme authoring guide](https://github.com/merklejerk/holtburger/blob/main/apps/holtburger-3d/UI_STYLE_GUIDE.md#installing-and-using-local-themes) covers the folder structure and styling hooks.
 
 ## Keep useful information visible
 
 Vital warnings, progression feedback and the selected-target HUD help you notice changes without opening another panel.
 
-Use `/fps` to toggle the FPS display when adjusting graphics. For startup or rendering trouble, see [Help](/holtburger/support/).
+Use `/fps` to toggle the FPS display when adjusting graphics. For startup or rendering trouble, see [Help](/holtburger/3d/help/).
 
 ## Save the right things
 

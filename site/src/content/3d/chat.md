@@ -8,6 +8,23 @@ section: '3D client'
 import Media from '#lib/components/Media.svelte';
 </script>
 
+## Your chat panel
+
+The chat panel combines message history, channel filters and a message composer. **Chat** and **Combat** toggle those message groups; the dropdown filters individual channels and the clock toggles timestamps. The destination button beside the message field chooses where you send.
+
+<Media id="chat-overview" detail />
+
+## Keep the world clickable
+
+Chat history is **click-through by default**. You can see messages while selecting, steering and interacting with the world behind them, so the buffer does not take that space away from play.
+
+Activate the history when you want to scroll, select text or follow a link:
+
+- **Hold Control** (**Command** on macOS) for temporary interaction. Release it to let clicks through again.
+- Click **Interact with chat history** to keep it interactive; toggle it off or press **Escape** when finished.
+
+<Media id="chat" detail />
+
 ## Send a message
 
 Press **Enter** to type a message. Choose the destination, type, and send; sending returns you to the game. If a command suggestion is highlighted, Enter accepts that suggestion first.
@@ -22,19 +39,9 @@ Type `/help` for the command list or `/help COMMAND` for one command. Both `/` a
 
 <Media id="chat-completion" detail />
 
-## Keep the world clickable
-
-Inactive chat lets clicks pass through to the world. You can select, steer and interact in the space behind the chat buffer without moving it out of the way.
-
-Hold **Control** (**Command** on macOS) when you want to scroll, select text or click a chat link. Release it to make that space clickable in the world again. Use the **Interact with chat history** icon to leave chat interactive until you toggle it off.
-
-Typing also activates chat. **Enter** opens the composer; sending returns control to the game. **Escape** leaves history interaction or clears the message you are editing. If command suggestions are open, the first Escape dismisses them.
-
-<Media id="chat" detail />
-
 ## Use links in chat
 
-Hold **Control** (**Command** on macOS), or enable **Interact with chat history**, then click:
+With chat history interactive, click:
 
 - **Coordinates** to set a [waypoint](/holtburger/3d/maps-travel/#follow-a-waypoint).
 - **A linked name in an entity alert** to select that creature or object. You can then [inspect it](/holtburger/3d/inspecting/) or interact as usual.

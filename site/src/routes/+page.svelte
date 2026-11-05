@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { asset, resolve } from '$app/paths';
+	import MediaCarousel from '#lib/components/MediaCarousel.svelte';
 	const guide = (slug: string) => resolve('/[...slug]', { slug });
 </script>
 
@@ -28,8 +29,8 @@
 				scriptable terminal client.
 			</p>
 			<div class="hero-actions">
-				<a class="button" href={guide('start')}>Download the beta</a><a
-					href={guide('coming-from-retail')}>Coming from retail & Decal →</a
+				<a class="button" href={guide('start')}>Download Holtburger</a><a
+					href={guide('coming-from-retail')}>Coming from retail?</a
 				>
 			</div>
 		</div>
@@ -40,73 +41,62 @@
 	<div class="home-spread">
 		<div class="home-body">
 			<section class="field-entry">
-				<h2>A client for active play</h2>
+				<h2>Keep Dereth. Rethink the client.</h2>
 				<p>
-					Holtburger 3D brings its own interface to Dereth, with quality of life
-					tools built in. Find targets, prepare equipment, organize spells, and
-					keep useful information close at hand.
+					You know the world. The interface should help you play it. Holtburger
+					brings a fresh client to the existing game, with room to question the
+					layouts, controls and workarounds you have lived with for years.
 				</p>
-				<dl class="feature-notes">
-					<div>
-						<dt>
-							<a href={guide('3d/combat')}>Smart Tab targeting</a>
-						</dt>
-						<dd>
-							Tap to cycle targets. Hold to acquire an immediate candidate, then
-							choose your next action.
-						</dd>
-					</div>
-					<div>
-						<dt>Equipment & spells</dt>
-						<dd>
-							Save selected equipment slots as a loadout. Search your spellbook
-							and arrange your bars around the way you play.
-						</dd>
-					</div>
-					<div>
-						<dt>Your field of view</dt>
-						<dd>
-							Move and resize the HUD, scale text independently, and set alerts
-							for nearby entities you care about.
-						</dd>
-					</div>
-				</dl>
-				<p><a href={guide('3d')}>Explore the 3D client →</a></p>
+				<MediaCarousel
+					label="Holtburger 3D screenshots"
+					images={[
+						'outdoors',
+						'combat',
+						'jump',
+						'map',
+						'characters',
+						'holtburg'
+					]}
+				/>
 			</section>
 
-			<section class="field-entry jump-entry">
-				<h2>Before you leap</h2>
-				<figure class="margin-plate">
-					<a
-						href={asset('assets/screenshots/3d-precise-jump.webp')}
-						aria-label="View the precise jumping screenshot at full size"
-						><img
-							src={asset('assets/screenshots/3d-precise-jump.webp')}
-							alt="A jump trajectory and power preview between forest platforms"
-							width="1740"
-							height="1189"
-							loading="lazy"
-						/></a
-					>
-					<figcaption>Precise jump targeting.</figcaption>
-				</figure>
+			<section class="field-entry">
+				<h2>Built for the player at the keyboard</h2>
 				<p>
-					Choose your power and inspect the trajectory before committing to a
-					jump. The preview helps you judge the attempt; it doesn't guarantee a
-					landing.
+					A long-running game accumulates friction. Plugins fill the gaps,
+					windows crowd the view, and familiar workarounds become muscle memory.
+					A new client is a chance to make those everyday interactions work
+					together.
 				</p>
 				<p>
-					Manual charged jumping is still available. Holtburger's physics and
-					controls have their own feel.
+					h3d puts active play first: less time arranging the interface or
+					digging through it, more attention on the fight, the route and the
+					people beside you. Its compact HUD and integrated tools are designed
+					around that goal.
+				</p>
+			</section>
+
+			<section class="field-entry">
+				<h2>Reengineered, from the protocol up</h2>
+				<p>
+					Holtburger began with a Rust client core built against ACE. Its
+					interface, renderer and physics were designed from the ground up, with
+					retail research used to align behavior where compatibility requires
+					it.
+				</p>
+				<p>
+					That leaves room for the client to evolve with today’s tools. A
+					browser-based desktop interface makes expressive themes possible; a
+					shared core supports different ways to play the same game.
 				</p>
 			</section>
 
 			<section class="field-entry terminal-entry">
-				<h2>Another way into Dereth</h2>
+				<h2>A lighter form for a different job</h2>
 				<p>
-					The TUI puts gameplay and automation in a terminal. Run the bundled
-					fighter or mage, or write your own JavaScript against structured game
-					state and actions.
+					Automation does not need a rendered world. The terminal client uses
+					the same core in a form suited to scripts and bots, with JavaScript
+					access to game state and actions.
 				</p>
 				<figure class="terminal-plate">
 					<a
@@ -120,42 +110,15 @@
 							loading="lazy"
 						/></a
 					>
-					<figcaption>
-						The terminal client, with inventory and combat information.
-					</figcaption>
+					<figcaption>The terminal client.</figcaption>
 				</figure>
+				<p>
+					h3d’s focus on active play is a design direction. Plugins and
+					scripting are planned there too; the TUI already gives automation its
+					own home.
+				</p>
 				<p><a href={guide('tui')}>Explore the terminal client →</a></p>
 			</section>
 		</div>
-
-		<aside class="field-index" aria-label="Begin your journey">
-			<h2>Begin here</h2>
-			<p>Returning to Dereth?</p>
-			<a class="index-link" href={guide('coming-from-retail')}
-				>Coming from retail & Decal</a
-			>
-			<a class="index-link" href={guide('3d/combat')}>Learn the new controls</a>
-			<a class="button primary" href={guide('start')}>Download the beta</a>
-			<p class="platform-note">
-				Windows · macOS · Linux<br />Bring your own game files for 3D.
-			</p>
-			<h2>In this kit</h2>
-			<ol class="chapter-index">
-				<li><a href={guide('3d')}>The 3D client</a></li>
-				<li><a href={guide('tui')}>The terminal client</a></li>
-				<li><a href={guide('gallery')}>Screenshots & clips</a></li>
-				<li><a href={guide('reference')}>Controls & reference</a></li>
-				<li><a href={guide('support')}>Help on the road</a></li>
-			</ol>
-			<h2>A work in progress</h2>
-			<p>
-				Both clients are in active development against ACE. GDLE compatibility
-				is unverified.
-			</p>
-			<p>h3d has no plugin system yet. The TUI provides scripting today.</p>
-			<a class="index-link" href={guide('about/design')}
-				>Why we built it this way</a
-			>
-		</aside>
 	</div>
 </main>

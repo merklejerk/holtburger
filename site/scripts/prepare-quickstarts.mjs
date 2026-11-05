@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { writeIfChanged } from './write-if-changed.mjs';
+import { mkdir, readFile } from 'node:fs/promises';
 
 /** Render bundled platform instructions with website-owned 3D connection guidance. */
 export async function prepareQuickstarts() {
@@ -36,7 +37,7 @@ export async function prepareQuickstarts() {
 			const title = `${product.title} for ${platform.title}`;
 			const description =
 				'Install, connect, update, and troubleshoot your release bundle.';
-			await writeFile(
+			await writeIfChanged(
 				new URL(`${platform.route}.md`, destination),
 				`---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(description)}\nsection: 'Installation'\n---\n\n${body}`
 			);

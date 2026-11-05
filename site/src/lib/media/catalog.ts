@@ -106,15 +106,38 @@ export const media = {
 		width: 1055,
 		height: 818
 	},
-	'target-indicators': {
-		kind: 'planned-image',
-		title: 'Selection and combat at a glance',
-		brief: 'Show both entities, their outline/reticle and enough scene context.'
+	'selection-outline': {
+		kind: 'image',
+		title: 'Keep your selection in sight',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/selection-outline-v1.webp'
+		},
+		alt: 'Selected Unconquered Drudge outlined through an obstructing tree trunk.',
+		width: 534,
+		height: 490
+	},
+	'combat-reticle': {
+		kind: 'image',
+		title: 'Your active combat target',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/combat-reticle-v1.webp'
+		},
+		alt: 'Combat target marked by a four-point reticle during a spell cast.',
+		width: 367,
+		height: 342
 	},
 	minimap: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Terrain under your radar',
-		brief: 'Crop the minimap at a readable scale.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/minimap-v1.webp'
+		},
+		alt: 'Outdoor minimap showing terrain, elevation contours, impassable areas and nearby radar markers.',
+		width: 244,
+		height: 254
 	},
 	'selected-hud': {
 		kind: 'image',
@@ -148,16 +171,28 @@ export const media = {
 		width: 400,
 		height: 32
 	},
+	'nearby-button': {
+		kind: 'image',
+		title: 'Open Nearby',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/nearby-button-v1.webp'
+		},
+		alt: 'Nearby entities and alerts button on the lower-left rim of the minimap.',
+		width: 94,
+		height: 90
+	},
+
 	'nearby-list': {
 		kind: 'image',
 		title: 'Find something nearby',
 		source: {
 			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/nearby-list-v1.webp'
+			url: 'https://merklejerk.github.io/holtburger-media/3d/nearby-list-v2.webp'
 		},
-		alt: 'Nearby entities filtered by Guard, with category and alert controls.',
-		width: 396,
-		height: 431
+		alt: 'Nearby window with Entities, Tracked and Alerts tabs, name search, category filters, distance sorting and entity results.',
+		width: 322,
+		height: 569
 	},
 	'treestats-import': {
 		kind: 'image',
@@ -203,45 +238,46 @@ export const media = {
 		width: 587,
 		height: 587
 	},
-	'jump-preview': {
-		kind: 'image',
-		title: 'Read the jump preview',
-		source: {
-			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/jump-preview-v1.webp'
-		},
-		alt: 'Precise-jump trajectory and landing preview in the 3D world.',
-		width: 562,
-		height: 544
-	},
 	'character-roster': {
 		kind: 'image',
 		title: 'Choose a character',
 		source: {
 			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/character-roster-v1.webp'
+			url: 'https://merklejerk.github.io/holtburger-media/3d/character-roster-v2.webp'
 		},
-		alt: 'Character roster with a selected character and Enter World and Create character controls.',
-		width: 337,
-		height: 449
+		alt: 'Full character-selection screen with the roster, selected character’s equipped 3D preview, and Enter World and Create character controls.',
+		width: 1279,
+		height: 848
 	},
 	'smart-tab': {
-		kind: 'planned-video',
+		kind: 'video',
 		title: 'Smart Tab in action',
-		brief:
-			'Hold to acquire a target, tap to cycle, then interact or attack. Show selection separately from the action.'
+		src: 'https://merklejerk.github.io/holtburger-media/3d/smart-tab-v1.mp4',
+		poster:
+			'https://merklejerk.github.io/holtburger-media/3d/smart-tab-poster-v1.webp',
+		width: 714,
+		height: 752,
+		captions: null
 	},
 	'jump-demo': {
-		kind: 'planned-video',
+		kind: 'video',
 		title: 'From preview to landing',
-		brief:
-			'Choose a target and power, inspect the jump trajectory, then execute the leap.'
+		src: 'https://merklejerk.github.io/holtburger-media/3d/precise-jump-v1.mp4',
+		poster:
+			'https://merklejerk.github.io/holtburger-media/3d/precise-jump-poster-v1.webp',
+		width: 718,
+		height: 552,
+		captions: null
 	},
 	camera: {
-		kind: 'planned-video',
+		kind: 'video',
 		title: 'Camera and mouse steering',
-		brief:
-			'Compare left-drag orbit, right-drag turning, and mouse-button movement.'
+		src: 'https://merklejerk.github.io/holtburger-media/3d/camera-v1.mp4',
+		poster:
+			'https://merklejerk.github.io/holtburger-media/3d/camera-poster-v1.webp',
+		width: 648,
+		height: 606,
+		captions: null
 	},
 	loadouts: {
 		kind: 'video',
@@ -253,16 +289,88 @@ export const media = {
 		height: 506,
 		captions: null
 	},
+	'chat-overview': {
+		kind: 'image',
+		title: 'Chat history and controls',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/chat-overview-v1.webp'
+		},
+		alt: 'Chat panel with message history, the interaction toggle, Chat and Combat filters, timestamp control and Say message composer.',
+		width: 435,
+		height: 426
+	},
+
+	'inventory-currencies': {
+		kind: 'image',
+		title: 'Alternate currency totals',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/inventory-currencies-v1.webp'
+		},
+		alt: 'Inventory currency popup totaling Ancient Mhoire Coins, Small Olthoi Venom Sacs and trade notes.',
+		width: 348,
+		height: 251
+	},
+
+	'action-bar-intro': {
+		kind: 'image',
+		title: 'Item shortcuts with alternate actions',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/action-bar-intro-v1.webp'
+		},
+		alt: 'Action bar with an Eternal Mana Charge tooltip showing its shortcut and Shift-click alternate action to use it on the selected target.',
+		width: 437,
+		height: 123
+	},
+
+	'spell-bar': {
+		kind: 'image',
+		title: 'Your spell shortcuts',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/spell-bar-v1.webp'
+		},
+		alt: 'Spell bar with tab selectors above numbered shortcut cells and their key hints.',
+		width: 436,
+		height: 95
+	},
+
+	'spell-list': {
+		kind: 'image',
+		title: 'Find a spell or cast from the list',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/spell-list-v1.webp'
+		},
+		alt: 'Spells tab with search and filters expanded, a Shock Wave spell’s details and Cast buttons beside the spell list.',
+		width: 364,
+		height: 728
+	},
+
 	spells: {
 		kind: 'video',
 		title: 'Find a spell and bind it',
-		src: 'https://merklejerk.github.io/holtburger-media/3d/spells-v2.mp4',
+		src: 'https://merklejerk.github.io/holtburger-media/3d/spells-v3.mp4',
 		poster:
-			'https://merklejerk.github.io/holtburger-media/3d/spells-poster-v2.webp',
-		width: 452,
-		height: 484,
+			'https://merklejerk.github.io/holtburger-media/3d/spells-poster-v3.webp',
+		width: 500,
+		height: 700,
 		captions: null
 	},
+	'hud-showcase': {
+		kind: 'image',
+		title: 'Your HUD at a glance',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/hud-showcase-v1.webp'
+		},
+		alt: 'Holtburger in Holtburg, showing player vitals and party members on the left, selected entity at the top, minimap and waypoint on the right, jump power in the center, and chat and shortcut bars below.',
+		width: 1291,
+		height: 850
+	},
+
 	hud: {
 		kind: 'image',
 		title: 'Make room for your HUD',
@@ -276,14 +384,14 @@ export const media = {
 	},
 	launcher: {
 		kind: 'image',
-		title: 'Add your server',
+		title: 'Choose your world',
 		source: {
 			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/launcher-v1.webp'
+			url: 'https://merklejerk.github.io/holtburger-media/3d/launcher-v2.webp'
 		},
 		alt: 'Launcher with a selected server and profile, account field, masked password and Play button.',
-		width: 418,
-		height: 444
+		width: 1024,
+		height: 640
 	},
 	'content-picker': {
 		kind: 'image',
@@ -308,9 +416,15 @@ export const media = {
 			'Start a fighter or mage, show its feedback, then stop it and resume manual control.'
 	},
 	'combat-controls': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Melee combat HUD',
-		brief: 'Crop the curved HUD with power, height and start/stop controls.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/combat-controls-v1.webp'
+		},
+		alt: 'Melee HUD with the power arc, three attack-height choices, shortcut hints and Cancel attack control.',
+		width: 347,
+		height: 239
 	},
 	locks: {
 		kind: 'video',
@@ -355,22 +469,64 @@ export const media = {
 		width: 413,
 		height: 314
 	},
-	'character-progression': {
+	'character-title': {
 		kind: 'image',
-		title: 'Plan a skill improvement',
+		title: 'Choose your title',
 		source: {
 			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/character-progression-v1.webp'
+			url: 'https://merklejerk.github.io/holtburger-media/3d/character-title-v1.webp'
 		},
-		alt: 'Character progression panel with an attribute expanded to show its values and advancement controls.',
-		width: 450,
-		height: 531
+		alt: 'Character progression panel with the earned-title dropdown expanded.',
+		width: 456,
+		height: 312
 	},
+
+	'character-progression': {
+		kind: 'image',
+		title: 'Improve a stat',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/character-progression-v2.webp'
+		},
+		alt: 'Progression tab with Focus expanded, showing improvement buttons, XP cost, skill contributions, starting value and spell bonus.',
+		width: 366,
+		height: 736
+	},
+	'recall-menu': {
+		kind: 'image',
+		title: 'Recall destinations',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/recall-menu-v1.webp'
+		},
+		alt: 'World map recall menu listing Lifestone, Marketplace, House, Allegiance Housing and Allegiance Hometown.',
+		width: 244,
+		height: 243
+	},
+
 	waypoints: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Your destination on the map',
-		brief: 'Crop the destination pin and enough map labels to orient it.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/waypoints-v1.webp'
+		},
+		alt: 'World map close-up with a destination pin and the player’s position arrow.',
+		width: 134,
+		height: 141
 	},
+	'housing-map': {
+		kind: 'image',
+		title: 'Search for housing on the map',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/housing-map-v1.webp'
+		},
+		alt: 'World map with housing search results marked by house icons across Dereth.',
+		width: 585,
+		height: 673
+	},
+
 	'housing-payments': {
 		kind: 'image',
 		title: 'Prepare a house payment',
@@ -382,16 +538,16 @@ export const media = {
 		width: 413,
 		height: 486
 	},
-	'housing-access': {
+	'housing-management': {
 		kind: 'image',
-		title: 'Separate entry from storage',
+		title: 'Manage your house',
 		source: {
 			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/housing-access-v1.webp'
+			url: 'https://merklejerk.github.io/holtburger-media/3d/housing-management-v1.webp'
 		},
-		alt: 'House guest permissions with separate entry and storage access controls.',
-		width: 565,
-		height: 324
+		alt: 'Housing tab showing home location, maintenance payments, property details, access and guests, decorations and advanced controls.',
+		width: 402,
+		height: 729
 	},
 	journal: {
 		kind: 'image',
@@ -405,10 +561,40 @@ export const media = {
 		height: 432
 	},
 	'corpse-recovery': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Find your way back',
-		brief: 'Crop the chat output and clickable coordinates.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/corpse-recovery-v1.webp'
+		},
+		alt: 'Chat output showing the last outdoor death location as clickable coordinates.',
+		width: 424,
+		height: 53
 	},
+	allegiance: {
+		kind: 'image',
+		title: 'Your allegiance',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/allegiance-v1.webp'
+		},
+		alt: 'Allegiance tab showing membership totals, patron and vassal relationships, contributed experience and presence settings.',
+		width: 336,
+		height: 561
+	},
+
+	'party-hud': {
+		kind: 'image',
+		title: 'Party vitals at a glance',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/party-hud-v1.webp'
+		},
+		alt: 'Compact party HUD showing eight teammates with health, stamina and mana bars in two columns.',
+		width: 238,
+		height: 263
+	},
+
 	party: {
 		kind: 'image',
 		title: 'Keep the party in view',
@@ -419,11 +605,6 @@ export const media = {
 		alt: 'A two-member party with recruitment and experience-sharing controls.',
 		width: 414,
 		height: 432
-	},
-	'nearby-alerts': {
-		kind: 'planned-image',
-		title: 'Watch for a name',
-		brief: 'Show the compact alert controls and the linked notification.'
 	},
 	chat: {
 		kind: 'image',
@@ -437,10 +618,28 @@ export const media = {
 		height: 40
 	},
 	emotes: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Choose an emote',
-		brief: 'Crop the wheel with its choices and recent emotes.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/emotes-v1.webp'
+		},
+		alt: 'Radial emote menu with Greetings, Reactions, Signals, Attitude, Relax and play, and Recent categories.',
+		width: 449,
+		height: 432
 	},
+	'appearance-toggles': {
+		kind: 'image',
+		title: 'Helmet and cloak visibility',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/appearance-toggles-v1.webp'
+		},
+		alt: 'Helmet and cloak visibility buttons beneath the inventory equipment strip.',
+		width: 107,
+		height: 116
+	},
+
 	barber: {
 		kind: 'image',
 		title: 'A change of appearance',
@@ -589,37 +788,58 @@ export const media = {
 		height: 646
 	},
 	'combat-controls-missile': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Missile combat HUD',
-		brief: 'Crop the curved HUD with accuracy, height and ammunition.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/combat-controls-missile-v1.webp'
+		},
+		alt: 'Missile HUD with the accuracy arc, attack-height choices, Cancel attack control and ammunition count.',
+		width: 347,
+		height: 239
 	},
 	'minimap-dungeon': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Dungeon map and breadcrumbs',
-		brief: 'Crop the minimap with passages and breadcrumb trail visible.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/minimap-dungeon-v1.webp'
+		},
+		alt: 'Dungeon minimap showing rooms, passages, radar markers and a breadcrumb trail, with a lever identified by its tooltip.',
+		width: 244,
+		height: 254
 	},
 	'waypoint-minimap': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Follow the waypoint',
-		brief: 'Crop the minimap with direction and distance visible.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/waypoint-minimap-v1.webp'
+		},
+		alt: 'Minimap with a waypoint direction arrow and destination coordinates and distance beneath it.',
+		width: 242,
+		height: 291
 	},
 	'run-casting': {
-		kind: 'planned-video',
+		kind: 'video',
 		title: 'Cast on the run',
-		brief:
-			'Keep the character, spell windup and completed cast visible while running normally. Close the spellbook and unrelated windows before recording.'
-	},
-	'moving-archery': {
-		kind: 'planned-video',
-		title: 'Shoot on the move',
-		brief:
-			'Show the character moving through a bow windup and releasing the shot, with the target in view.'
+		src: 'https://merklejerk.github.io/holtburger-media/3d/run-casting-v1.mp4',
+		poster:
+			'https://merklejerk.github.io/holtburger-media/3d/run-casting-poster-v1.webp',
+		width: 660,
+		height: 650,
+		captions: null
 	},
 	enchantments: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Your active enchantments',
-		brief:
-			'Crop the populated Enchantments window with effect groups, durations, search and filters visible.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/enchantments-v2.webp'
+		},
+		alt: 'Enchantments window with loaded spell icons, grouped effects, durations and an expanded armor description.',
+		width: 347,
+		height: 524
 	}
 } satisfies Record<string, MediaAsset>;
 

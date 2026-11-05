@@ -11,7 +11,6 @@
 		{ path: 'tui', label: 'TUI client' },
 		{ path: 'gallery', label: 'Gallery' },
 		{ path: 'start', label: 'Start playing' },
-		{ path: 'reference', label: 'Reference' },
 		{ path: 'support', label: 'Help' }
 	];
 </script>
@@ -54,9 +53,7 @@
 {@render children()}
 <footer class="site-footer">
 	<div>
-		<a href={resolve('/[...slug]', { slug: 'about/design' })}
-			>Design philosophy</a
-		><a href="https://github.com/merklejerk/holtburger">Source on GitHub</a><a
+		<a href="https://github.com/merklejerk/holtburger">Source on GitHub</a><a
 			href="https://github.com/merklejerk/holtburger/issues">Report an issue</a
 		>
 	</div>

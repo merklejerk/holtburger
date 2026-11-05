@@ -11,13 +11,20 @@
 		content={data.description}
 	/></svelte:head
 >
-<div class="guide-shell" class:gallery-shell={data.slug === 'gallery'}>
-	{#if data.slug !== 'gallery'}<aside
-			class="guide-sidebar"
-			aria-label="Guide navigation"
-		>
-			<a class="back-link" href={resolve('/')}>← Holtburger</a>
-			{#each navigation as section}<details
+<div class="guide-shell">
+	<aside class="guide-sidebar" aria-label="Guide navigation">
+		<a class="back-link" href={resolve('/')}>← Holtburger</a>
+		{#each navigation as section}
+			{#if section.links.length === 1}
+				{#each section.links as link}
+					<a
+						class="guide-direct-link"
+						href={resolve('/[...slug]', { slug: link.slug })}
+						aria-current={data.slug === link.slug ? 'page' : undefined}
+						>{link.label}</a
+					>
+				{/each}
+			{:else}<details
 					open={section.links.some((link) => link.slug === data.slug)}
 				>
 					<summary><h2>{section.title}</h2></summary>
@@ -26,8 +33,8 @@
 							aria-current={data.slug === link.slug ? 'page' : undefined}
 							>{link.label}</a
 						>{/each}
-				</details>{/each}
-		</aside>{/if}
+				</details>{/if}{/each}
+	</aside>
 	<main id="main" class="guide-main" data-pagefind-body>
 		<div class="eyebrow">{data.section}</div>
 		<h1>{data.title}</h1>
@@ -35,14 +42,4 @@
 		<div class="ornament" aria-hidden="true">◆</div>
 		<article class="prose"><data.Content /></article>
 	</main>
-	{#if data.headings.length && data.slug !== 'gallery'}<aside
-			class="on-this-page"
-		>
-			<h2>On this page</h2>
-			<nav aria-label="On this page">
-				{#each data.headings as heading}<a href={`#${heading.id}`}
-						>{heading.text}</a
-					>{/each}
-			</nav>
-		</aside>{/if}
 </div>

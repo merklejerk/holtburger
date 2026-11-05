@@ -46,4 +46,4 @@ Add `--character NAME --run fighter` to your usual connection command. Use `--ru
 
 For a supervised process, `-Q` / `--auto-quit` exits on disconnect so an external supervisor can restart it.
 
-See the [launch options](/holtburger/tui/reference/options/) for logging and connection flags, or [write your first script](/holtburger/tui/scripting/).
+See the [launch options](/holtburger/tui/options/) for logging and connection flags, or [write your first script](/holtburger/tui/scripting/).

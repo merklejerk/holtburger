@@ -1,7 +1,7 @@
 ---
 title: 'TUI controls'
 description: 'Keys depend on the focused pane and the selected entry.'
-section: 'Reference · Terminal client'
+section: 'Terminal client'
 ---
 
 ## Pane and input controls

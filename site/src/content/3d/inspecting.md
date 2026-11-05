@@ -1,6 +1,6 @@
 ---
 title: 'Inspecting'
-description: 'Keep an appraisal open while changing targets, and rotate creature and player previews in 3D.'
+description: 'Read stats, check equipment and take a closer look with 3D model previews.'
 section: '3D client'
 ---
 

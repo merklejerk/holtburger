@@ -329,9 +329,7 @@ em {
 .home-hero::after {
 	bottom: 0;
 }
-.field-index::before,
-.guide-sidebar::before,
-.on-this-page::before {
+.guide-sidebar::before {
 	content: '';
 	position: absolute;
 	top: 0;
@@ -352,10 +350,6 @@ em {
 			var(--groove)
 		);
 	box-shadow: 1px 0 0 #e4bc7930;
-}
-.field-index::before,
-.on-this-page::before {
-	left: 0;
 }
 .guide-sidebar::before {
 	right: 0;
@@ -406,8 +400,9 @@ em {
 }
 .hero-actions {
 	display: flex;
-	align-items: center;
-	gap: 1.3rem;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 0.8rem;
 	flex-wrap: wrap;
 	margin-top: 2rem;
 }
@@ -431,18 +426,18 @@ em {
 }
 .home-spread {
 	display: grid;
-	grid-template-columns: minmax(0, 1fr) 225px;
+	grid-template-columns: minmax(0, 1fr);
+	max-width: 56rem;
+	margin: 0 auto;
 	gap: 2rem;
 	padding: 2rem 2.5rem 3rem;
 }
 .home-body {
 	min-width: 0;
 }
-.margin-plate,
 .terminal-plate {
 	margin: 0;
 }
-.margin-plate > a,
 .terminal-plate > a,
 .media-mount,
 .media-carousel {
@@ -499,59 +494,14 @@ figcaption a {
 	color: var(--muted);
 	font-size: 0.87rem;
 }
-.jump-entry::after {
-	content: '';
-	display: table;
-	clear: both;
-}
-.margin-plate {
-	float: right;
-	width: 46%;
-	margin: 0.25rem 0 0.8rem 1.4rem;
-}
 .terminal-plate {
 	width: 86%;
 	margin: 1.3rem auto 0.5rem;
-}
-.field-index {
-	padding-left: 1.5rem;
-	position: relative;
-}
-.field-index h2 {
-	font-size: 1.3rem;
-	padding-bottom: 0.45rem;
-	border-bottom: 0;
-	background: var(--metal-rule) left bottom / 100% 5px no-repeat;
-	margin: 1.7rem 0 0.9rem;
-	color: var(--copper);
-}
-.field-index h2:first-of-type {
-	margin-top: 0;
-}
-.field-index p {
-	font-size: 0.81rem;
-	color: var(--muted);
-}
-.field-index .button {
-	width: 100%;
-	margin: 1rem 0;
-}
-.field-index .platform-note {
-	font-size: 0.69rem;
-	line-height: 1.9;
 }
 .index-link {
 	display: block;
 	font-size: 0.82rem;
 	margin: 0.7rem 0;
-}
-.chapter-index {
-	padding-left: 1.25rem;
-	font-size: 0.83rem;
-	font-family: Gelasio, Georgia, serif;
-}
-.chapter-index li {
-	padding: 0.4rem 0;
 }
 .site-footer {
 	max-width: 1180px;
@@ -573,7 +523,7 @@ figcaption a {
 }
 .guide-shell {
 	display: grid;
-	grid-template-columns: 210px minmax(0, 1fr) 155px;
+	grid-template-columns: 210px minmax(0, 1fr);
 	gap: 2rem;
 	padding: 2rem 1.8rem 4rem;
 	min-height: 75vh;
@@ -589,6 +539,16 @@ figcaption a {
 }
 .guide-sidebar details {
 	margin-bottom: 1.8rem;
+}
+.guide-direct-link {
+	display: block;
+	margin-bottom: 1.8rem;
+	padding: 0.35rem 0.6rem;
+	border-left: 2px solid transparent;
+	font-family: Gelasio, Georgia, serif;
+	font-size: 1.04rem;
+	color: var(--copper);
+	text-decoration: none;
 }
 .guide-sidebar summary {
 	cursor: pointer;
@@ -717,28 +677,6 @@ figcaption a {
 .prose blockquote p:last-child {
 	margin: 0;
 }
-.on-this-page {
-	align-self: start;
-	position: sticky;
-	top: 7rem;
-	position: relative;
-	padding-left: 0.9rem;
-}
-.on-this-page h2 {
-	font-size: 1rem;
-	color: var(--copper);
-}
-.on-this-page a {
-	display: block;
-	margin: 0.7rem 0;
-	font-size: 0.73rem;
-	line-height: 1.5;
-	text-decoration: none;
-}
-.guide-shell.gallery-shell {
-	grid-template-columns: minmax(0, 1fr);
-	padding: 2.5rem;
-}
 .gallery-grid {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -754,6 +692,11 @@ figcaption a {
 }
 .media-figure--detail:has(img) {
 	width: fit-content;
+}
+/* A caption can be wider than its crop without stretching the image frame. */
+.media-figure > .media-mount:has(img) {
+	width: fit-content;
+	max-width: 100%;
 }
 .media-figure--detail .media-placeholder {
 	min-height: 120px;
@@ -810,9 +753,6 @@ figcaption a {
 		grid-template-columns: 185px minmax(0, 1fr);
 		gap: 1.5rem;
 	}
-	.on-this-page {
-		display: none;
-	}
 	.header-inner {
 		gap: 1rem;
 	}
@@ -825,7 +765,7 @@ figcaption a {
 	.home-spread {
 		padding: 1.5rem;
 		gap: 1.5rem;
-		grid-template-columns: minmax(0, 1fr) 200px;
+		grid-template-columns: minmax(0, 1fr);
 	}
 }
 @media (max-width: 720px) {
@@ -836,11 +776,7 @@ figcaption a {
 	.gallery-grid {
 		grid-template-columns: minmax(0, 1fr);
 	}
-	.guide-shell.gallery-shell {
-		padding: 1.2rem 1rem 2rem;
-	}
 
-	.field-index::before,
 	.guide-sidebar::before {
 		content: none;
 	}
@@ -923,37 +859,7 @@ figcaption a {
 		padding: 1rem;
 		gap: 1rem;
 	}
-	.field-index {
-		border-left: 0;
-		border-bottom: 0;
-		background: var(--metal-rule) left bottom / 100% 5px no-repeat;
-		padding: 0 0 1rem;
-	}
 
-	.field-index > h2:first-of-type {
-		font-size: 1.3rem;
-		border: 0;
-		margin: 0;
-		padding: 0;
-	}
-	.field-index .button {
-		width: auto;
-		margin: 0.6rem 0;
-	}
-	.field-index .platform-note {
-		margin-bottom: 0;
-	}
-	.field-index .index-link {
-		margin: 0.5rem 0;
-	}
-	.field-index p {
-		margin-bottom: 0.5rem;
-	}
-	.margin-plate {
-		float: none;
-		width: 100%;
-		margin: 0.7rem 0;
-	}
 	.terminal-plate {
 		width: 100%;
 	}

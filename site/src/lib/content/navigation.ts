@@ -1,19 +1,11 @@
-/** Stable chapters keep onboarding, task guides and reference discoverable. */
+/** One navigation group per client keeps feature guides and lookups together. */
 export const navigation = [
 	{
 		title: 'Get started',
 		links: [
 			{
 				slug: 'start',
-				label: 'Install & connect'
-			},
-			{
-				slug: 'start/first-session',
-				label: 'Your first session'
-			},
-			{
-				slug: 'coming-from-retail',
-				label: 'Coming from retail & Decal'
+				label: 'Get started'
 			}
 		]
 	},
@@ -21,24 +13,16 @@ export const navigation = [
 		title: 'Startup',
 		links: [
 			{
-				slug: 'startup/servers',
-				label: 'Servers & accounts'
+				slug: 'startup/launcher',
+				label: 'Launcher'
 			},
 			{
-				slug: 'startup/settings',
-				label: 'Game data & launch settings'
+				slug: 'startup/game-data',
+				label: 'Game data'
 			},
 			{
 				slug: 'startup/characters',
-				label: 'Character selection'
-			},
-			{
-				slug: 'startup/creation',
-				label: 'Character creation'
-			},
-			{
-				slug: 'startup/switching',
-				label: 'Switch characters or accounts'
+				label: 'Choose or create a character'
 			}
 		]
 	},
@@ -63,8 +47,12 @@ export const navigation = [
 		title: '3D client',
 		links: [
 			{
+				slug: 'coming-from-retail',
+				label: 'Coming from retail?'
+			},
+			{
 				slug: '3d',
-				label: 'Feature tour'
+				label: 'The Game HUD'
 			},
 			{
 				slug: '3d/combat',
@@ -73,6 +61,10 @@ export const navigation = [
 			{
 				slug: '3d/nearby',
 				label: 'Finding creatures & objects'
+			},
+			{
+				slug: '3d/interactions',
+				label: 'Interactions'
 			},
 			{
 				slug: '3d/inspecting',
@@ -87,8 +79,12 @@ export const navigation = [
 				label: 'Inventory & equipment'
 			},
 			{
+				slug: '3d/action-bars',
+				label: 'Action bars'
+			},
+			{
 				slug: '3d/equipment-loadouts',
-				label: 'Loadouts & action bars'
+				label: 'Equipment loadouts'
 			},
 			{
 				slug: '3d/spells',
@@ -112,48 +108,47 @@ export const navigation = [
 			},
 			{
 				slug: '3d/interface',
-				label: 'Make the interface yours'
+				label: 'Layout & theming'
 			},
 			{
 				slug: '3d/maps-travel',
-				label: 'World & community'
-			}
-		]
-	},
-	{
-		title: '3D reference',
-		links: [
-			{
-				slug: 'reference',
-				label: 'Reference index'
+				label: 'Maps & travel'
 			},
 			{
-				slug: 'reference/3d-controls',
+				slug: '3d/community',
+				label: 'Community'
+			},
+			{
+				slug: '3d/controls',
 				label: 'Controls'
 			},
 			{
-				slug: 'reference/3d-chat-commands',
+				slug: '3d/chat-commands',
 				label: 'Chat commands'
 			},
 			{
-				slug: 'reference/3d-settings',
+				slug: '3d/settings',
 				label: 'Settings'
 			},
 			{
-				slug: 'reference/character',
+				slug: '3d/character',
 				label: 'Progression & titles'
 			},
 			{
-				slug: 'reference/housing',
+				slug: '3d/housing',
 				label: 'Housing'
 			},
 			{
-				slug: 'reference/journal',
+				slug: '3d/journal',
 				label: 'Journal & contracts'
 			},
 			{
-				slug: 'reference/appearance',
+				slug: '3d/appearance',
 				label: 'Barber & appearance'
+			},
+			{
+				slug: '3d/help',
+				label: 'Help'
 			}
 		]
 	},
@@ -183,12 +178,7 @@ export const navigation = [
 			{
 				slug: 'tui/bundled-scripts',
 				label: 'Fighter & mage'
-			}
-		]
-	},
-	{
-		title: 'TUI scripting',
-		links: [
+			},
 			{
 				slug: 'tui/scripting',
 				label: 'Your first script'
@@ -204,40 +194,22 @@ export const navigation = [
 			{
 				slug: 'tui/scripting/integrations',
 				label: 'HTTP integrations'
-			}
-		]
-	},
-	{
-		title: 'TUI reference',
-		links: [
+			},
 			{
-				slug: 'tui/reference/controls',
+				slug: 'tui/controls',
 				label: 'Controls'
 			},
 			{
-				slug: 'tui/reference/chat-commands',
+				slug: 'tui/chat-commands',
 				label: 'Chat commands'
 			},
 			{
-				slug: 'tui/reference/options',
+				slug: 'tui/options',
 				label: 'Launch options'
-			}
-		]
-	},
-	{
-		title: 'Help',
-		links: [
+			},
 			{
-				slug: 'support',
+				slug: 'tui/help',
 				label: 'Help'
-			},
-			{
-				slug: 'support/graphics',
-				label: 'Graphics & startup'
-			},
-			{
-				slug: 'support/reporting',
-				label: 'Report a problem'
 			}
 		]
 	},
@@ -247,10 +219,6 @@ export const navigation = [
 			{
 				slug: 'gallery',
 				label: 'Gallery'
-			},
-			{
-				slug: 'about/design',
-				label: 'Design philosophy'
 			},
 			{
 				slug: 'tools',

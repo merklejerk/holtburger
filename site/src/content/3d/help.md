@@ -1,12 +1,16 @@
 ---
-title: 'Graphics & startup help'
-description: 'Find the right settings, tune the view, and collect useful hardware details.'
-section: 'Help · 3D client'
+title: '3D client help'
+description: 'Connection, game data, graphics and reporting problems.'
+section: '3D client'
 ---
 
 <script>
 import Media from '#lib/components/Media.svelte';
 </script>
+
+## Cannot connect
+
+Check the server address, port and account in the [launcher](/holtburger/startup/launcher/). Holtburger is developed against ACE; GDLE compatibility is unverified.
 
 ## Before the game opens
 
@@ -26,7 +30,7 @@ Use `/fps` to show the frame-rate display while comparing settings. Render scale
 
 ## If content is missing
 
-Check the [game-data folder](/holtburger/startup/settings/), particularly if the terminal client's compact content was selected by mistake. `/assets` shows the current content location.
+Check the [game-data folder](/holtburger/startup/game-data/). That guide includes a DAT download if you need the files. `/assets` shows the current content location.
 
 Use `/assets retry` to retry failed loading after a temporary problem. If you replace mounted archives or repair the installation itself, restart with the repaired folder.
 
@@ -36,4 +40,8 @@ Choose **Copy hardware info** in the launcher's graphics settings. Include it wi
 
 <Media id="hardware-info" />
 
-[Report the problem](/holtburger/support/reporting/) with steps someone else can follow.
+## Report a problem
+
+[Open a GitHub issue](https://github.com/merklejerk/holtburger/issues) with your version from `/version`, platform, reproduction steps, expected result and what happened. Add relevant errors, a screenshot or a short clip. Include server software for connection issues and **Copy hardware info** for rendering issues.
+
+Remove account credentials and private messages from anything you attach.

@@ -1,6 +1,6 @@
 ---
 title: 'Spells & enchantments'
-description: 'Find spells, prepare your bars, and cast on the move.'
+description: 'Prepare your spell bar, cast on the move and keep track of your enchantments.'
 section: '3D client'
 ---
 
@@ -8,48 +8,46 @@ section: '3D client'
 import Media from '#lib/components/Media.svelte';
 </script>
 
-## Find a spell
+## Cast from your spell bar
 
-Open **Spells** to browse the spells your character knows. Type part of a name, or expand **Filters** to narrow by school, level, damage type, beneficial/harmful effect, target type, or fellowship.
+Select a target by clicking it or using [Smart Tab](/holtburger/3d/combat/); **X** selects yourself. In magic stance, click a spell or press **1–0** to cast from the displayed tab.
 
-You can select several choices in a category. For example, choosing two schools shows either school; adding a level restricts both to that level. **Reset** clears the search and filters.
+<Media id="spell-bar" detail />
 
-Select a spell's name to expand its details: description, mana, range, duration where applicable, and formula components.
+| Default shortcut | Action                                           |
+| ---------------- | ------------------------------------------------ |
+| **1–0**          | Cast the corresponding cell; **0** is the tenth. |
+| **Shift+1–0**    | Switch spell tabs.                               |
+| **Ctrl+Shift+1** | Cast your wielded caster’s spell.                |
 
-## Cast from the list
+### Set up your bar
 
-Enter magic stance, choose the appropriate target, and press **Cast** beside the spell. If Cast is disabled, check your stance and the spell's details.
-
-For targeted spells, use [Smart Tab](/holtburger/3d/combat/) to select your target, or **X** to select yourself.
-
-## Cast on the move
-
-Keep moving through spell windups using your normal movement controls. You can reposition while casting without retail’s sliding key combinations.
-
-<Media id="run-casting" />
-
-## Build your spell bars
-
-Drag a spell from the list into a spell-bar cell. Use the tabs to group spells for different tasks. There are ten tabs; the first ten positions on each tab have keyboard shortcuts, with room for additional cells beyond them.
-
-The spell bar supports single and double display layouts. Its spell bindings follow the character; the display shape is a general interface preference.
+Drag spells from **Spells** into cells. Use the ten tabs to group your regular casts, with shortcuts for the first ten cells on each tab. Choose a single or double display layout to fit your HUD.
 
 <Media id="spells" detail />
 
-## Casting without a selection
+Spell bindings are saved per character. Customize shortcuts in **Settings → Input**.
 
-Supported non-Life projectile spells can fire forward when you have no selection. Face where you want to cast. Life spells and other targeted spells still need their normal target.
+## Browse your spellbook
+
+Search by name or combine filters for school, level, damage type and targeting. Select a spell’s name for its description, mana cost, range and components.
+
+Unlike retail, you can **cast directly from the list**. In magic stance, select your target and press **Cast** beside a spell—useful for an occasional cast you have not put on a bar.
+
+<Media id="spell-list" detail />
+
+## Cast on the move
+
+Keep moving through spell windups with your normal controls. Reposition without retail’s sliding key combinations.
+
+<Media id="run-casting" />
+
+Supported non-Life projectile spells can also fire forward without a selection. Face where you want to cast; Life spells and other targeted spells still need their normal target.
 
 ## Read your current effects
 
-Open **Enchantments** to inspect active spells and their remaining time. Effects are grouped by the stats they affect.
+Open **Enchantments**, or click a buff/debuff tray icon, to inspect active effects grouped by the stats they affect. Vitae appears with harmful effects.
 
-The beneficial and harmful effect trays reflect effects currently contributing to your stats. Vitae appears with harmful effects.
+Search by spell or stat name and filter the list. Sort by **Name**, **Power** or **Duration**; duration puts the effects expiring soonest first.
 
 <Media id="enchantments" detail />
-
-## Find the effect you need
-
-Search by spell or stat name and use the filters to narrow the list. The sort control cycles between **Name**, **Power, strongest first**, and **Duration, soonest first**.
-
-Sort by duration to see what is running out. Use **Reset** to clear your search and filters.

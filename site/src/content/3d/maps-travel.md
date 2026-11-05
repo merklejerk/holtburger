@@ -1,6 +1,6 @@
 ---
-title: 'Getting around & playing together'
-description: 'Plan your route, group up, and stay connected.'
+title: 'Maps & travel'
+description: 'Read the terrain, follow waypoints and find your way back.'
 section: '3D client'
 ---
 
@@ -22,9 +22,18 @@ A breadcrumb trail marks where you have recently walked, helping you retrace you
 
 Open **World** and use the map to explore Dereth. Drag to pan and scroll to zoom. **Reset view** returns to the whole-world view.
 
-Use **Map visibility** to show or hide town names, contracts, waypoints and housing. Keep the layers useful for your current trip; contract and housing searches add their own destinations.
+The map does more than retail’s overview: switch on overlays to plan a quest run or look for a home without piecing destinations together elsewhere. Open **Map visibility** to choose:
+
+- **Town names** for settlement labels across the map.
+- **Contracts** for contact locations and quest areas from your [Journal](/holtburger/3d/journal/).
+- **Waypoints** to keep your chosen destination visible alongside the other layers.
+- **Housing** to search for available cottages, villas or mansions and see the results on the map. See [Housing](/holtburger/3d/housing/) for the next steps.
+
+Combine the overlays for your trip, or hide them to simplify the view.
 
 <Media id="world-map-controls" detail />
+
+<Media id="housing-map" detail />
 
 ## Follow a waypoint
 
@@ -50,63 +59,24 @@ Open **Recall destinations** on the map to see the destinations available to you
 
 Use the destination that fits your trip. House and allegiance recalls depend on your character's home or allegiance arrangements.
 
+<Media id="recall-menu" detail />
+
 ## Find a specific destination
 
-Use the [Journal](/holtburger/reference/journal/) for contract contacts and quest areas, [Housing](/holtburger/reference/housing/) for house searches, and [corpse recovery](/holtburger/3d/maps-travel/) after a death.
+Use the [Journal](/holtburger/3d/journal/) for contract contacts and quest areas, [Housing](/holtburger/3d/housing/) for house searches, and [corpse recovery](/holtburger/3d/maps-travel/) after a death.
 
 ## Find your way back
 
 Use `/corpse` to show your saved last outdoor death location. `/corpses` lists approximate deaths observed during the current session.
 
-Enable **Interact with chat history** and click the coordinates to set a waypoint. Follow it using the [world map](/holtburger/3d/maps-travel/), then use **V** or **Shift+V** to cycle through unopened corpses nearby.
+Enable **Interact with chat history** and click the coordinates to set a waypoint. Follow it using the world map, then [find and open your corpse](/holtburger/3d/interactions/#loot-and-world-containers).
 
 Use the coordinates to reach the area, then look for your corpse. The `/corpses` history clears when the character session ends.
 
 <Media id="corpse-recovery" detail />
 
-## Let someone help
-
-Grant a player access to your corpse:
-
-```text
-/permit Best Friend
-```
-
-Revoke that grant with `/unpermit Best Friend`.
-
-To manage permissions other people grant you:
-
-| Command                        | Action                            |
-| ------------------------------ | --------------------------------- |
-| `/consent on` / `/consent off` | Accept or decline incoming grants |
-| `/consent who`                 | List received permissions         |
-| `/consent remove PLAYER`       | Discard one received permission   |
-| `/consent clear`               | Discard all received permissions  |
+To let another player recover your items, use [corpse permissions](/holtburger/3d/community/#corpse-permissions).
 
 ## Check vitae
 
 Open [Enchantments](/holtburger/3d/spells/) to inspect vitae alongside other harmful effects.
-
-## Form a party
-
-Open **Social → Party** and choose **Create Party**. Review the party's name, XP/luminance arrangement, recruitment settings and roster.
-
-Select a player and choose **Invite to party** in the selected-target actions. Leaders can manage recruitment, let members invite, dismiss members, or transfer leadership. Members can leave; the leader also has a disband action.
-
-The party HUD keeps member information close while you play. Selecting a member helps you quickly choose someone for a targeted action or spell.
-
-<Media id="party" />
-
-## Friends
-
-In **Friends**, enter a character name and choose **Add Friend**. Search and the online filter help you find someone when the list is long. Use the Tell action beside a friend to start a message; the remove action takes them off your list.
-
-## Allegiance
-
-Use **Allegiance** to inspect your patron, vassals and membership information. Relationship actions let you break from a patron or dismiss a vassal after confirmation; review the named character before confirming. Recall destinations connected to your allegiance appear with the other [travel options](/holtburger/3d/maps-travel/).
-
-## Control interruptions
-
-In **Ignores**, enter a name and choose **Ignore character** or **Ignore account**. Account ignores also cover the target’s other characters. Search the list to remove an ignore later. Under party invitation preferences, **Ignore party invitations** lets you decline invitations while you are busy.
-
-Use [chat filters](/holtburger/3d/chat/#filter-the-noise) when you want to reduce message categories rather than ignore a person.

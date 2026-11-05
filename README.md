@@ -17,47 +17,24 @@ Built from the protocol up: a Rust core, a 3D interface, and a scriptable termin
 
 *3D gameplay, precise jump aiming, character selection, and the terminal client. Click an image to view it at full size.*
 
-Visit the [website](https://merklejerk.github.io/holtburger/) for the [3D tour](https://merklejerk.github.io/holtburger/3d/), [retail migration guide](https://merklejerk.github.io/holtburger/coming-from-retail/), and [gallery](https://merklejerk.github.io/holtburger/gallery/).
+Visit the [website](https://merklejerk.github.io/holtburger/) for [The Game HUD](https://merklejerk.github.io/holtburger/3d/), [Coming from retail?](https://merklejerk.github.io/holtburger/coming-from-retail/), and the [gallery](https://merklejerk.github.io/holtburger/gallery/).
 
 Holtburger is an independently designed, open-source client for Asheron's Call.
-It began as a terminal client built against [ACEmulator (ACE)](https://github.com/ACEmulator/ACE).
-That work established the shared protocol, networking, world-state, and gameplay
-systems that now also power the 3D client.
-
-## Design and compatibility
-
-Holtburger's architecture and interfaces are designed from the ground up. The 3D
-client keeps routine setup short with quick targeting, saved gear changes, and
-searchable spells. Its controls and layouts depart from retail to keep those
-workflows close at hand. Physics and rendering also take their own direction, so movement and
-visuals will differ from retail.
-
-Retail research provides targeted corrections to asset formats, presentation, and
-physics where compatibility requires them. The goal is to work with the existing
-game and its content while allowing the client experience to evolve independently.
-
-The shared Rust layers separate wire messages, transport, content access, world
-state, and reusable client behavior. Each frontend owns its presentation and
-controls. That separation lets the graphical and terminal clients offer different
-ways to interact with the same game without maintaining separate implementations
-of the shared systems.
-
-Compatibility remains ongoing work. Both clients are under active development,
-and feature coverage and behavior differ between them. The terminal client uses
-simplified movement and physics. Much of the implementation is developed with AI
-coding assistance; it should not be treated as an authoritative protocol reference.
-
-> [!IMPORTANT]
-> Holtburger is developed against ACE. GDLE compatibility is unverified and may be unstable.
+It began as a terminal client built against [ACEmulator (ACE)](https://github.com/ACEmulator/ACE),
+establishing the shared Rust systems that now power both clients.
 
 ## Clients
 
-- **3D client:** an Electron application with a Svelte interface and WebGL2 renderer,
-  backed by the Rust client runtime. Connect through the server launcher and select
-  or create a character. Bring your own Asheron's Call game files.
-- **Terminal client (CLI):** a text interface for gameplay and automation, with
-  JavaScript scripting through Deno Core. Release bundles include the reference
-  and navigation data it needs.
+- **Holtburger 3D:** an Electron desktop app with a Svelte interface and WebGL2
+  renderer, backed by the Rust client runtime. Designed for active play, with a
+  compact HUD and integrated tools that keep routine setup short. Bring your own
+  Asheron's Call game files.
+- **Terminal client (TUI):** gameplay and JavaScript scripting through Deno Core,
+  without rendering a 3D world. The preferred form factor for automation and bots.
+  Release bundles include prepared reference/navigation data and fighter/mage scripts.
+
+h3d has no plugin system yet. Plugins and scripting are planned, including
+support for automation. Existing Decal plugins and profiles cannot be imported.
 
 ## Download and connect
 
@@ -75,6 +52,21 @@ connection, and troubleshooting instructions.
 
 Beta and nightly builds share the same installation and settings; installing one
 replaces the other.
+
+## Design and compatibility
+
+Holtburger's systems and interfaces are designed from the ground up. Retail
+research provides targeted corrections to asset formats, presentation and physics
+where compatibility requires them. The goal is to work with the existing game
+and content while leaving room to rethink the client experience.
+
+UX, rendering and physics intentionally take their own direction. Expect
+differences in movement, management and interaction. The terminal client uses
+simplified movement and physics; feature coverage differs between the clients.
+Both are under active development, with substantial AI coding assistance.
+
+> [!IMPORTANT]
+> Holtburger is developed against ACE. GDLE compatibility is unverified and may be unstable.
 
 ## Architecture and tools
 

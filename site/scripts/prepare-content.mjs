@@ -1,14 +1,13 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { writeIfChanged } from './write-if-changed.mjs';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { compile } from 'mdsvex';
-import { unified } from 'unified';
-import remarkParse from 'remark-parse';
-import { toString } from 'mdast-util-to-string';
-import GithubSlugger from 'github-slugger';
 import { prepareQuickstarts } from './prepare-quickstarts.mjs';
 import { prepareCaptures } from './prepare-captures.mjs';
 
-await prepareQuickstarts();
-await prepareCaptures();
+const metadataOnly = process.argv.includes('--metadata-only');
+if (!metadataOnly || process.argv.includes('--quickstarts'))
+	await prepareQuickstarts();
+if (!metadataOnly) await prepareCaptures();
 
 // Compute cold page metadata once; Markdown parsers and raw prose never ship to readers.
 const root = new URL('../src/content/', import.meta.url);
@@ -30,27 +29,17 @@ for (const file of files) {
 	const title = requiredText(metadata, 'title', file);
 	const description = requiredText(metadata, 'description', file);
 	const section = requiredText(metadata, 'section', file);
-	const body = source.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
-	const slugger = new GithubSlugger();
-	const headings = [];
-	for (const node of unified().use(remarkParse).parse(body).children) {
-		if (node.type !== 'heading') continue;
-		const text = toString(node);
-		const id = slugger.slug(text);
-		if (node.depth === 2) headings.push({ id, text });
-	}
 	pages.push({
 		path: `/src/content/${file}`,
 		slug: file.slice(0, -3),
 		title,
 		description,
-		section,
-		headings
+		section
 	});
 }
 const destination = new URL('../src/lib/generated/', import.meta.url);
 await mkdir(destination, { recursive: true });
-await writeFile(
+await writeIfChanged(
 	new URL('pages.json', destination),
 	`${JSON.stringify(pages, null, 2)}\n`
 );

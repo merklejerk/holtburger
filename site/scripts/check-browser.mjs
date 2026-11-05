@@ -64,9 +64,9 @@ try {
 		['', 'home'],
 		['gallery/', 'gallery'],
 		['start/3d/linux/', 'installation'],
-		['start/characters/', 'characters'],
+		['startup/characters/', 'characters'],
 		['3d/movement-camera/', 'jumping'],
-		['reference/3d-chat-commands/', 'commands'],
+		['3d/chat-commands/', 'commands'],
 		['tui/basics/', 'terminal'],
 		['tui/scripting/integrations/', 'scripting'],
 		['3d/combat/', 'guide']
@@ -126,16 +126,6 @@ try {
 		});
 		await page.setViewportSize({ width: 1440, height: 1000 });
 	}
-	for (const anchor of await page
-		.locator('.on-this-page a')
-		.evaluateAll((links) => links.map((link) => link.getAttribute('href')))) {
-		if (anchor === null) throw new Error('Missing heading link');
-		assert.equal(
-			await page.locator(anchor).count(),
-			1,
-			`Missing heading ${anchor}`
-		);
-	}
 	for (const route of ['', '3d/combat/']) {
 		await page.goto(new URL(route, origin).href);
 		assert.equal(
@@ -162,13 +152,14 @@ try {
 		const response = await page.goto(new URL(`${entry.slug}/`, origin).href);
 		assert.equal(response?.status(), 200, `Route ${entry.slug}`);
 		assert.equal(await page.locator('h1').textContent(), entry.title);
-		if (entry.slug !== 'gallery') {
-			assert.deepEqual(
-				await page.locator('.guide-sidebar summary').allTextContents(),
-				navigation.map((section) => section.title),
-				`${entry.slug}: sidebar sections changed`
-			);
-		}
+		assert.deepEqual(
+			await page.locator('.guide-sidebar summary').allTextContents(),
+			navigation
+				.filter((section) => section.links.length > 1)
+				.map((section) => section.title),
+			`${entry.slug}: sidebar sections changed`
+		);
+
 		assert.equal(
 			await page.evaluate(
 				() => document.documentElement.scrollWidth <= window.innerWidth
@@ -198,13 +189,13 @@ try {
 		await reader.locator('summary').filter({ hasText: 'Startup' }).click();
 		await reader
 			.getByRole('link', {
-				name: 'Servers & accounts',
+				name: 'Launcher',
 				exact: true
 			})
 			.click();
 		await reader
 			.getByRole('heading', {
-				name: 'Servers & accounts',
+				name: 'Launcher',
 				level: 1
 			})
 			.waitFor();

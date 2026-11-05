@@ -30,4 +30,4 @@ If either offer changes, check the contents again before accepting. Wait for the
 
 ## Give a single item
 
-For a direct handoff to a player or NPC, use [Give](/holtburger/3d/inventory/#give-an-item): select the recipient, select the item, then press **G**.
+For a direct handoff to a player or NPC, use [Give](/holtburger/3d/interactions/#give-an-item): select the recipient, select the item, then press **G**.

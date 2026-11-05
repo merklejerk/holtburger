@@ -30,8 +30,8 @@ precise.
 | Reference       | Answer a specific question quickly            |
 | Troubleshooting | Start with the symptom and remedy             |
 
-Explain philosophy on its canonical page. Link to it instead of repeating a
-manifesto. Avoid padded introductions, repeated pitches, implementation essays and
+Keep the project pitch and design rationale on Home. The migration page owns
+the grouped feature comparison and plugin/scripting direction. Avoid padded introductions, repeated pitches, implementation essays and
 closing recaps. Preserve consequential limitations and exact syntax; brevity is
 not permission to omit what a player needs.
 
@@ -48,12 +48,12 @@ omit speculative reassurance and implementation distinctions.
 
 ## Evidence and product boundaries
 
-- Check the implemented workflow and beta availability before describing it.
+- Check the implemented workflow and release availability before describing it.
 - Distinguish retail behavior, common plugin workflows and Holtburger behavior.
 - No unsupported uniqueness, superiority, plugin parity or profile-import claims.
 - h3d prioritizes active play. The TUI suits automation. Neither is a judgment
   about how people play; future h3d scripting is direction, not current support.
-- Publish beta download calls to action. Mention nightlies only where necessary
+- Label download calls to action without a release-channel qualifier. Mention nightlies only where necessary
   for support or development.
 - Keep implementation details in developer material unless they explain a useful
   player decision. Describe what players see, press or change, rather than scene
@@ -82,24 +82,30 @@ checks those same files against the scripting crate's declaration file. Edit the
 canonical examples rather than maintaining separate snippets. The site publishes
 the existing declaration file without inventing another API type model.
 
-`npm run dev` watches authored pages, release quickstarts, the media catalog,
-`authoring/captures.json`, and reused assets. It refreshes metadata/headings,
-generated quickstarts and copied assets without a restart. Generated-file changes
-do not feed back into preparation. Invalid source metadata is reported in the dev
-server and browser error overlay.
+`npm run dev` uses Vite’s normal hot reload for pages, components, styles and
+catalog changes. A batched metadata refresh tracks page additions, removals and
+frontmatter edits; unchanged output is not rewritten and no blanket browser
+reload is sent. Release quickstart edits also refresh their generated pages.
+Run `npm run prepare:assets` after changing reused source assets, and
+`npm run prepare:content` after editing capture briefs. Invalid source metadata
+appears in the dev server and browser error overlay.
+
+Stop the dev server before building: development and production share SvelteKit’s
+generated directory. Restart it after the build, or serve production output with
+`npm run preview`.
 
 Guide sidebars show the same chapters in the same order on every guide; only
 the current chapter opens by default. Do not hide chapters based on the route.
 
-The preparation script produces route metadata and heading links. Generated files
-are ignored. Keep each topic canonical; tours link to task guides and task guides
+The preparation script produces route metadata. Generated files
+are ignored. Keep each topic canonical; the migration table links to task guides and task guides
 link to precise reference entries. Separate 3D and TUI chat command references.
 
 Pages are prerendered HTML and use normal browser navigation, including screenshot
 links and browser history. The HTML shell disables SvelteKit's client-side link
 routing; Svelte still hydrates search, theme switching and media controls.
 
-Explain project origins on the design page. Keep the shared footer functional;
+Explain project origins on Home. Keep the shared footer functional;
 do not repeat the project pitch in hero labels, sidebars and footer copy.
 
 The [capture handoff](CAPTURES.md) is generated from
@@ -137,7 +143,7 @@ within the reading column without stretching a small component across the page.
 The agent captures static panels, component crops and assigned scripted UI clips
 using the local test server. The user captures movement, combat, camera and natural-control
 clips, and all interactive TUI footage.
-Review a small batch of static samples with the user before bulk capture. Set HUD window background opacity to 100% for captures and close unrelated windows; avoid overlapping transparent panels. Use real
+Review a small batch of static samples with the user before bulk capture. Wait for visible icons and model previews to finish loading; never capture placeholder artwork. Set HUD window background opacity to 100% for captures and close unrelated windows; avoid overlapping transparent panels. Use real
 client state for gameplay evidence; fixture illustrations must be labeled. Keep
 capture work separate from media publication until the samples are reviewed.
 

@@ -1,7 +1,7 @@
 ---
 title: 'TUI launch options'
 description: 'Connection, startup scripts, logs, content, and HTTP policy.'
-section: 'Reference · Terminal client'
+section: 'Terminal client'
 ---
 
 ## Connect

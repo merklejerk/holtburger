@@ -1,7 +1,7 @@
 ---
 title: 'Journal & contracts'
 description: 'Keep track of contract progress, repeat timers, and destinations.'
-section: '3D client · World & social'
+section: '3D client'
 ---
 
 <script>
@@ -22,4 +22,4 @@ Check the contract's contact location and quest area. Enable **Contracts** on th
 
 ## Clean up the list
 
-Use **Remove from journal** on an entry you no longer want to track. If an entry has unresolved or missing information, keep its identifier and status when reporting the problem through [Help](/holtburger/support/).
+Use **Remove from journal** on an entry you no longer want to track. If an entry has unresolved or missing information, keep its identifier and status when reporting the problem through [Help](/holtburger/3d/help/).

@@ -1,7 +1,7 @@
 ---
 title: '3D settings'
 description: 'Find the setting you need and know which preferences follow a character.'
-section: 'Reference · 3D client'
+section: '3D client'
 ---
 
 ## Where to look
@@ -16,7 +16,7 @@ section: 'Reference · 3D client'
 | Chat controls/settings | Destinations, message/channel filters, timestamps and message suppression                     |
 | Launcher App settings  | Graphics backend and display synchronization before entering the game                         |
 
-Use [interface layout](/holtburger/3d/interface/) to arrange the HUD, and [graphics help](/holtburger/support/graphics/) for tuning or startup trouble.
+Use [interface layout](/holtburger/3d/interface/) to arrange the HUD, and [graphics help](/holtburger/3d/help/#before-the-game-opens) for tuning or startup trouble.
 
 ## General and character preferences
 

@@ -46,10 +46,6 @@
 	let selectedProfileId = $state("");
 	let account = $state("");
 	let password = $state("");
-	/** Cold launch draft, restored on profile selection and saved only by explicit profile actions. */
-	let contentPath = $state("");
-	/** Empty means default; preserve path characters supplied by the native folder picker. */
-	const draftContentPath = $derived(contentPath === "" ? null : contentPath);
 	/** Baseline for the selected preset; null also allows repairing missing or unreadable credentials. */
 	let savedProfileCredentials = $state<LauncherCredentials | null>(null);
 	/** Revealing a password is local to the current credential draft. */
@@ -68,8 +64,7 @@
 		profile !== null &&
 			(savedProfileCredentials === null ||
 				account !== savedProfileCredentials.account ||
-				password !== savedProfileCredentials.password ||
-				draftContentPath !== profile.contentPath),
+				password !== savedProfileCredentials.password),
 	);
 	type Editor =
 		| {
@@ -80,6 +75,8 @@
 				name: string;
 				host: string;
 				port: number;
+				/** Empty inherits the application default; edits persist only on Save. */
+				contentPath: string;
 		  }
 		| { kind: "delete-server"; value: LauncherServer }
 		| { kind: "delete-profile"; value: LauncherProfileView }
@@ -97,8 +94,6 @@
 		savedProfileCredentials = null;
 		passwordVisible = false;
 		selectedProfileId = id;
-		contentPath =
-			snapshot?.profiles.find((value) => value.id === id)?.contentPath ?? "";
 		account = "";
 		password = "";
 		const serverId = selectedServerId;
@@ -167,6 +162,7 @@
 						id: value.id,
 						name: value.name,
 						endpoint: { host: value.host, port: value.port },
+						contentPath: value.contentPath === "" ? null : value.contentPath,
 					});
 					if (value.mode === "add") {
 						selectedServerId = value.id;
@@ -205,7 +201,6 @@
 			id,
 			serverId,
 			name,
-			contentPath: draftContentPath,
 			credentials: { account, password },
 		});
 		await refresh();
@@ -219,7 +214,6 @@
 			await transport.play({
 				serverId,
 				profileId: profile?.id ?? null,
-				contentPath: draftContentPath,
 				credentials: { account, password },
 			});
 			password = "";
@@ -231,15 +225,9 @@
 			await refresh();
 			selectedServerId =
 				snapshot?.lastSelection?.serverId ?? snapshot?.servers[0]?.id ?? "";
-			const initial = await transport.takeInitialContentPath();
-			try {
-				await chooseProfile(
-					snapshot?.lastProfileByServer[selectedServerId] ?? "",
-				);
-			} finally {
-				// Saved credentials can be unreadable independently of an explicit CLI content selection.
-				if (initial !== null) contentPath = initial;
-			}
+			await chooseProfile(
+				snapshot?.lastProfileByServer[selectedServerId] ?? "",
+			);
 		});
 		return unmount;
 	});
@@ -353,6 +341,7 @@
 												mode: "edit",
 												id: item.id,
 												name: item.name,
+												contentPath: item.contentPath ?? "",
 												...item.endpoint,
 											})}
 										><span class="pregame-icon" aria-hidden="true"
@@ -387,6 +376,7 @@
 									name: "",
 									host: "",
 									port: 9000,
+									contentPath: "",
 								})}>Add server</button
 						>
 						<button
@@ -479,41 +469,7 @@
 							>
 						</div>
 					</div>
-					<details
-						class="launcher-advanced ui-disclosure ui-disclosure-section"
-					>
-						<summary>Advanced</summary>
-						<div class="launcher-advanced-content ui-disclosure-body ui-inset">
-							<label
-								>Content path override<input
-									class="ui-input"
-									bind:value={contentPath}
-									placeholder="Use application default"
-									disabled={busy || !server}
-								/></label
-							>
-							<div class="launcher-actions">
-								<button
-									class="pregame-action ui-button"
-									type="button"
-									disabled={busy || !server}
-									onclick={() =>
-										void run(async () => {
-											const selected =
-												await transport.chooseContentPath(draftContentPath);
-											if (selected !== null) contentPath = selected;
-										})}>Browse content folder</button
-								>
-								<button
-									class="pregame-action ui-button"
-									type="button"
-									disabled={busy || !server || !contentPath}
-									onclick={() => (contentPath = "")}
-									>Use application default</button
-								>
-							</div>
-						</div>
-					</details>
+
 					<div class="launcher-actions">
 						{#if profile}<button
 								class="pregame-action ui-button"
@@ -649,6 +605,55 @@
 							disabled={busy}
 						/></label
 					>
+					<details class="ui-disclosure ui-disclosure-section">
+						<summary>Advanced</summary>
+						<div class="launcher-advanced-content ui-disclosure-body ui-inset">
+							<div class="launcher-content-field">
+								<label for="server-content-path">Content path override</label>
+								<div class="launcher-content-input">
+									<input
+										id="server-content-path"
+										class="ui-input"
+										bind:value={editor.contentPath}
+										placeholder="Use application default"
+										disabled={busy}
+									/>
+									<div class="launcher-content-actions">
+										{#if editor.contentPath}
+											<button
+												class="ui-button ui-icon-button pregame-quiet"
+												type="button"
+												aria-label="Clear content path"
+												title="Clear content path"
+												disabled={busy}
+												onclick={() => {
+													if (editor?.kind === "server")
+														editor.contentPath = "";
+												}}>×</button
+											>
+										{/if}
+										<button
+											class="ui-button ui-icon-button pregame-quiet"
+											aria-label="Browse content folder"
+											title="Browse content folder"
+											type="button"
+											disabled={busy}
+											onclick={() => {
+												const draft = editor;
+												if (draft?.kind !== "server") return;
+												void run(async () => {
+													const selected = await transport.chooseContentPath(
+														draft.contentPath === "" ? null : draft.contentPath,
+													);
+													if (selected !== null) draft.contentPath = selected;
+												});
+											}}>…</button
+										>
+									</div>
+								</div>
+							</div>
+						</div>
+					</details>
 				{:else if editor.kind === "new-profile"}
 					<label
 						>Profile name<input
@@ -812,6 +817,25 @@
 		.launcher-advanced-content {
 			display: grid;
 			gap: 16px;
+		}
+		.launcher-content-field {
+			display: grid;
+			gap: 6px;
+		}
+		.launcher-content-input {
+			position: relative;
+		}
+		.launcher-content-input .ui-input {
+			padding-inline-end: 54px;
+		}
+		.launcher-content-actions {
+			display: flex;
+			position: absolute;
+			inset-block: 2px;
+			inset-inline-end: 2px;
+		}
+		.launcher-content-actions .ui-icon-button {
+			width: 24px;
 		}
 		.launcher-profile-picker,
 		.launcher-password {

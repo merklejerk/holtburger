@@ -291,7 +291,6 @@
 			};
 			window.holtburgerLauncher = {
 				enabled: true,
-				takeInitialContentPath: async () => null,
 				chooseContentPath: async () => null,
 				snapshot: unavailableLauncherOperation,
 				appSettings: unavailableLauncherOperation,

@@ -117,7 +117,7 @@ export class ServerDirectoryCatalog {
 				"Selected server is no longer in the TreeStats directory. Refresh and add it again.",
 			);
 		return launcherServerSchema
-			.omit({ id: true })
+			.omit({ id: true, contentPath: true })
 			.parse({ name: server.name, endpoint: server.endpoint });
 	}
 	#requireCatalog() {

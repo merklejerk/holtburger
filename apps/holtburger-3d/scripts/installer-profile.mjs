@@ -27,13 +27,13 @@ if (operation === "seed") {
 	const server = {
 		id: randomUUID(),
 		name: "Installer retained server",
+		contentPath: null,
 		endpoint: { host: "retained.invalid", port: 9 },
 	};
 	const preset = {
 		id: randomUUID(),
 		name: "Installer retained profile",
 		serverId: server.id,
-		contentPath: null,
 		credentials: { account: "upgrade-probe", password: "synthetic-password" },
 	};
 	await store.saveServer(server);

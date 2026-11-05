@@ -35,6 +35,7 @@ describe("TreeStats server directory", () => {
 		const saved = {
 			id: "existing",
 			name: "My label",
+			contentPath: null,
 			endpoint: { host: "PLAY.EXAMPLE.ORG", port: 9000 },
 		};
 		expect(catalog.view([saved])).toEqual({

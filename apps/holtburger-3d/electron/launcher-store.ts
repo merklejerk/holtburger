@@ -11,7 +11,6 @@ import {
 import { formatError } from "../src/lib/format-error.js";
 import {
 	launcherSettingsSchema,
-	decodeLauncherSettings,
 	launcherServerSchema,
 	profileSaveSchema,
 	launcherPlaySchema,
@@ -50,7 +49,7 @@ export class LauncherStore {
 	}
 	#empty(): LauncherSettings {
 		return {
-			version: 5,
+			version: 6,
 			serverCredentials: {},
 			servers: [],
 			profiles: [],
@@ -61,15 +60,9 @@ export class LauncherStore {
 	}
 	async load(): Promise<void> {
 		try {
-			this.#document = decodeLauncherSettings(
+			this.#document = launcherSettingsSchema.parse(
 				JSON.parse(await readFile(this.#path, "utf8")),
 			);
-			// Older catalogs only recorded the last selection, so recover that known ordering.
-			if (this.#document.lastSelection !== null)
-				this.#document.servers = mostRecentServerFirst(
-					this.#document.servers,
-					this.#document.lastSelection.serverId,
-				);
 		} catch (error) {
 			if (error instanceof Error && "code" in error && error.code === "ENOENT")
 				return;
@@ -97,7 +90,6 @@ export class LauncherStore {
 					id: profile.id,
 					name: profile.name,
 					serverId: profile.serverId,
-					contentPath: profile.contentPath,
 					credentialStatus,
 				};
 			}),
@@ -152,7 +144,12 @@ export class LauncherStore {
 		return operation;
 	}
 	saveServer(input: unknown): Promise<void> {
-		const server = launcherServerSchema.parse(input);
+		const parsed = launcherServerSchema.parse(input);
+		const server = {
+			...parsed,
+			contentPath:
+				parsed.contentPath === null ? null : resolve(parsed.contentPath),
+		};
 		return this.#write((value) => {
 			const endpoint = clientServerScope(server.endpoint);
 			const duplicate = value.servers.find(
@@ -174,7 +171,9 @@ export class LauncherStore {
 	}
 	/** Add one directory server durably; matching endpoints preserve existing identities and credentials. */
 	async importServer(input: unknown): Promise<string | null> {
-		const candidate = launcherServerSchema.omit({ id: true }).parse(input);
+		const candidate = launcherServerSchema
+			.omit({ id: true, contentPath: true })
+			.parse(input);
 		let added: string | null = null;
 		await this.#write((value) => {
 			const key = clientServerScope(candidate.endpoint);
@@ -187,7 +186,10 @@ export class LauncherStore {
 			added = randomUUID();
 			return {
 				...value,
-				servers: [...value.servers, { ...candidate, id: added }],
+				servers: [
+					...value.servers,
+					{ ...candidate, id: added, contentPath: null },
+				],
 			};
 		});
 		return added;
@@ -233,8 +235,6 @@ export class LauncherStore {
 						name: edit.name,
 						serverId: edit.serverId,
 						credentials: encryptCredentials(edit.id, edit.credentials),
-						contentPath:
-							edit.contentPath === null ? null : resolve(edit.contentPath),
 					},
 				],
 			};
@@ -320,8 +320,7 @@ export class LauncherStore {
 		return {
 			...server.endpoint,
 			...selection.credentials,
-			contentPath:
-				selection.contentPath === null ? null : resolve(selection.contentPath),
+			contentPath: server.contentPath,
 		};
 	}
 	updateWindow(window: ClientWindowSettings): Promise<void> {

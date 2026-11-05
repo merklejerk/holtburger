@@ -27,7 +27,7 @@ const { values } = parseArgs({
 		"quit-during-attempt": { type: "boolean" },
 		"tree-stats": { type: "boolean" },
 		"connection-failure-only": { type: "boolean" },
-		"profile-content-only": { type: "boolean" },
+		"server-content-only": { type: "boolean" },
 		"app-settings-only": { type: "boolean" },
 		"dev-restart-only": { type: "boolean" },
 		"updates-only": { type: "boolean" },
@@ -59,55 +59,54 @@ const initialPreference = {
 	},
 };
 await writeFile(preference, JSON.stringify(initialPreference));
-const contentProfiles = {
+const contentFixture = {
 	serverId: randomUUID(),
 	firstId: randomUUID(),
 	secondId: randomUUID(),
-	firstPath: join(directory, "profile-a "),
-	secondPath: join(directory, "profile-b"),
+	firstPath: join(directory, "server-a "),
+	secondPath: join(directory, "server-b"),
 };
-if (values["profile-content-only"]) {
+if (values["server-content-only"]) {
 	await writeFile(
 		join(userData, "launcher-settings.json"),
 		JSON.stringify({
-			version: 5,
+			version: 6,
 			servers: [
 				{
-					id: contentProfiles.serverId,
+					id: contentFixture.serverId,
 					name: "Content probe",
+					contentPath: contentFixture.firstPath,
 					endpoint: { host: "127.0.0.1", port: 1 },
 				},
 			],
 			profiles: [
 				{
-					id: contentProfiles.firstId,
+					id: contentFixture.firstId,
 					name: "Content A",
-					serverId: contentProfiles.serverId,
-					// Unreadable credentials must not prevent initialization of the CLI content draft.
+					serverId: contentFixture.serverId,
+					// Unreadable credentials must not prevent using the server editor.
 					credentials: {
 						version: 1,
 						nonce: "",
 						ciphertext: "",
 						authenticationTag: "",
 					},
-					contentPath: contentProfiles.firstPath,
 				},
 				{
-					id: contentProfiles.secondId,
+					id: contentFixture.secondId,
 					name: "Content B",
-					serverId: contentProfiles.serverId,
+					serverId: contentFixture.serverId,
 					credentials: null,
-					contentPath: contentProfiles.secondPath,
 				},
 			],
 			serverCredentials: {},
 			window: { normalBounds: { width: 1100, height: 850 }, maximized: false },
 			lastSelection: {
-				serverId: contentProfiles.serverId,
-				profileId: contentProfiles.firstId,
+				serverId: contentFixture.serverId,
+				profileId: contentFixture.firstId,
 			},
 			lastProfileByServer: {
-				[contentProfiles.serverId]: contentProfiles.firstId,
+				[contentFixture.serverId]: contentFixture.firstId,
 			},
 		}),
 	);
@@ -311,7 +310,7 @@ async function runProbe() {
 					"probe-secret",
 				]
 			: []),
-		...(values["profile-content-only"]
+		...(values["server-content-only"]
 			? ["--no-content-search"]
 			: ["--clear-content"]),
 		"--content",
@@ -459,11 +458,11 @@ async function runProbe() {
 		const serverId = randomUUID();
 		await evaluate(
 			page,
-			`window.holtburgerLauncher.saveServer(${JSON.stringify({ id: serverId, name: "Update probe", endpoint: { host: "127.0.0.1", port: 1 } })})`,
+			`window.holtburgerLauncher.saveServer(${JSON.stringify({ id: serverId, name: "Update probe", contentPath: assets, endpoint: { host: "127.0.0.1", port: 1 } })})`,
 		);
 		await evaluate(
 			page,
-			`window.holtburgerLauncher.play(${JSON.stringify({ serverId, profileId: null, contentPath: assets, credentials: { account: "update-probe", password: "probe-secret" } })})`,
+			`window.holtburgerLauncher.play(${JSON.stringify({ serverId, profileId: null, credentials: { account: "update-probe", password: "probe-secret" } })})`,
 		);
 		await attach("client");
 		await waitFor(
@@ -757,11 +756,11 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 		const serverId = randomUUID();
 		await evaluate(
 			page,
-			`window.holtburgerLauncher.saveServer(${JSON.stringify({ id: serverId, name: "Connection failure probe", endpoint: { host: "127.0.0.1", port: 1 } })})`,
+			`window.holtburgerLauncher.saveServer(${JSON.stringify({ id: serverId, name: "Connection failure probe", contentPath: assets, endpoint: { host: "127.0.0.1", port: 1 } })})`,
 		);
 		await evaluate(
 			page,
-			`window.holtburgerLauncher.play(${JSON.stringify({ serverId, profileId: null, contentPath: assets, credentials: { account: "launcher-probe", password: "probe-secret" } })})`,
+			`window.holtburgerLauncher.play(${JSON.stringify({ serverId, profileId: null, credentials: { account: "launcher-probe", password: "probe-secret" } })})`,
 		);
 		await attach("client");
 		await attach("launcher");
@@ -843,7 +842,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 		);
 		await evaluate(
 			page,
-			`window.holtburgerLauncher.play(${JSON.stringify({ serverId, profileId: null, contentPath: assets, credentials: { account: "launcher-probe", password: "probe-secret" } })})`,
+			`window.holtburgerLauncher.play(${JSON.stringify({ serverId, profileId: null, credentials: { account: "launcher-probe", password: "probe-secret" } })})`,
 		);
 		await attach("client");
 		await attach("launcher");
@@ -889,9 +888,9 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 	const fill = (scope, label, value) =>
 		evaluate(
 			page,
-			`(() => { const row = [...document.querySelectorAll(${JSON.stringify(scope + " label")})].find((value) => value.textContent.trim() === ${JSON.stringify(label)}); const input = row?.querySelector('input'); if (!input) throw new Error('Missing input: ' + ${JSON.stringify(label)}); input.closest('details:not([open])')?.querySelector('summary').click(); input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`,
+			`(() => { const row = [...document.querySelectorAll(${JSON.stringify(scope + " label")})].find((value) => value.textContent.trim() === ${JSON.stringify(label)}); const input = row?.control; if (!input) throw new Error('Missing input: ' + ${JSON.stringify(label)}); input.closest('details:not([open])')?.querySelector('summary').click(); input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`,
 		);
-	if (values["profile-content-only"]) {
+	if (values["server-content-only"]) {
 		const input =
 			"document.querySelector('input[placeholder=\"Use application default\"]')";
 		const ready = () =>
@@ -910,100 +909,61 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 			);
 			await ready();
 		};
+		const editContent = async (path, save) => {
+			await click("Edit Content probe");
+			await fill(".launcher-editor-form", "Content path override", path);
+			await click(save ? "Save" : "Cancel");
+			await ready();
+		};
 		await ready();
+		await selectProfile(contentFixture.secondId);
+		await editContent(contentFixture.secondPath, false);
 		requireCondition(
-			await evaluate(
-				page,
-				`!document.querySelector('.launcher-advanced').open && !${input}.checkVisibility()`,
-			),
-			"Advanced controls did not start collapsed",
+			(await evaluate(page, "window.holtburgerLauncher.snapshot()")).servers[0]
+				.contentPath === contentFixture.firstPath,
+			"Cancel changed saved server content",
 		);
-		await evaluate(
-			page,
-			"document.querySelector('.launcher-advanced summary').focus()",
-		);
-		await pressEnter();
-		requireCondition(
-			await evaluate(
-				page,
-				"document.querySelector('.launcher-advanced').open && getComputedStyle(document.querySelector('.launcher-advanced-content')).borderTopWidth !== '0px'",
-			),
-			"Advanced did not expand with a visible frame",
-		);
-		await pressEnter();
-		requireCondition(
-			await evaluate(
-				page,
-				"!document.querySelector('.launcher-advanced').open",
-			),
-			"Advanced did not collapse by keyboard",
-		);
-		requireCondition(
-			await evaluate(page, `${input}.value === ${JSON.stringify(assets)}`),
-			"CLI content did not initialize the remembered profile draft",
-		);
-		await selectProfile(contentProfiles.secondId);
-		requireCondition(
-			await evaluate(
-				page,
-				`${input}.value === ${JSON.stringify(contentProfiles.secondPath)}`,
-			),
-			"Profile B did not replace CLI content",
-		);
-		await selectProfile(contentProfiles.firstId);
-		await fill(".launcher-profile", "Account", "content-probe");
-		await click("Overwrite profile");
-		await ready();
-		const overwriteDisabled =
-			"[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Overwrite profile').disabled";
-		requireCondition(
-			await evaluate(page, overwriteDisabled),
-			"Saved profile baseline remained dirty",
-		);
-		await fill(
-			".launcher-profile",
-			"Content path override",
-			contentProfiles.secondPath,
-		);
-		requireCondition(
-			!(await evaluate(page, overwriteDisabled)),
-			"Path-only change did not enable Overwrite",
-		);
-		await fill(
-			".launcher-profile",
-			"Content path override",
-			contentProfiles.firstPath,
-		);
-		requireCondition(
-			await evaluate(page, overwriteDisabled),
-			"Reverted path remained dirty",
-		);
-		await click("Use application default");
-		await click("Overwrite profile");
-		await ready();
-		requireCondition(
-			(
-				await evaluate(page, "window.holtburgerLauncher.snapshot()")
-			).profiles.find((profile) => profile.id === contentProfiles.firstId)
-				.contentPath === null,
-			"Clearing a profile did not persist the default selection",
-		);
-		await fill(
-			".launcher-profile",
-			"Content path override",
-			contentProfiles.firstPath,
-		);
-		await click("Overwrite profile");
-		await ready();
 		let expectedPreference = await readFile(preference, "utf8");
-		for (const [profileId, location, useDefault] of [
-			[contentProfiles.firstId, contentProfiles.firstPath, false],
-			[contentProfiles.firstId, initialPreference.selection.location, true],
-			[contentProfiles.secondId, contentProfiles.secondPath, false],
+		let savedPath = contentFixture.firstPath;
+		for (const [profileId, contentPath, location] of [
+			[contentFixture.secondId, contentFixture.firstPath, assets],
+			[
+				contentFixture.firstId,
+				contentFixture.firstPath,
+				contentFixture.firstPath,
+			],
+			[
+				contentFixture.secondId,
+				contentFixture.firstPath,
+				contentFixture.firstPath,
+			],
+			[null, null, initialPreference.selection.location],
+			[
+				contentFixture.secondId,
+				contentFixture.secondPath,
+				contentFixture.secondPath,
+			],
 		]) {
-			await selectProfile(profileId);
+			await click("Edit Content probe");
+			requireCondition(
+				await evaluate(
+					page,
+					`${input}.value === ${JSON.stringify(savedPath ?? "")}`,
+				),
+				"Editor did not restore saved server content",
+			);
+			if (contentPath === null) await click("Clear content path");
+			else
+				await fill(
+					".launcher-editor-form",
+					"Content path override",
+					contentPath,
+				);
+			await click("Save");
+			await ready();
+			savedPath = contentPath;
+			await selectProfile(profileId ?? "");
 			await fill(".launcher-profile", "Account", "content-probe");
-			if (useDefault) await click("Use application default");
 			await click("Play");
 			await attach("client");
 			await waitFor(
@@ -1015,7 +975,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 				"attempt selected expected content",
 			);
 			const currentPreference = await readFile(preference, "utf8");
-			if (useDefault) {
+			if (contentPath === null) {
 				requireCondition(
 					JSON.parse(currentPreference).selection.location ===
 						initialPreference.selection.location,
@@ -1025,31 +985,21 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 			} else
 				requireCondition(
 					currentPreference === expectedPreference,
-					"Profile attempt changed global content preferences",
+					"Server attempt changed global content preferences",
 				);
-			const longDiagnostic =
-				profileId === contentProfiles.secondId
-					? "Content diagnostic with a long path and details.\n".repeat(100)
-					: null;
 			await evaluate(
 				page,
-				`window.holtburgerLauncher.back(${JSON.stringify(longDiagnostic)})`,
+				`window.holtburgerLauncher.back(${JSON.stringify("Content diagnostic with a long path and details.\n".repeat(100))})`,
 			);
 			await attach("launcher");
 			await ready();
-			const expectedPath =
-				profileId === contentProfiles.firstId
-					? contentProfiles.firstPath
-					: contentProfiles.secondPath;
 			requireCondition(
-				await evaluate(
-					page,
-					`${input}.value === ${JSON.stringify(expectedPath)}`,
-				),
-				"Returning to launcher did not restore the remembered profile path",
+				(await evaluate(page, "window.holtburgerLauncher.snapshot()"))
+					.servers[0].contentPath === contentPath,
+				"Returning changed saved server content",
 			);
 			requireCondition(
-				(await snapshot("profile content attempt retired")).native.children
+				(await snapshot("server content attempt retired")).native.children
 					.length === 0,
 				"Retired content host survived",
 			);
@@ -1133,8 +1083,8 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 			);
 		}
 		report.scenarios.push(
-			"Advanced starts collapsed, supports keyboard toggling, and frames content overrides; long errors truncate and open full scrollable details without changing form geometry at desktop and narrow widths",
-			"CLI initializes once despite unreadable credentials; profile paths preserve whitespace, dirty/revert, saved clearing, A/default/B attempts, recovery isolation, and launcher restoration pass",
+			"Server editor cancels drafts, saves and clears content overrides; long errors preserve form geometry at desktop and narrow widths",
+			"CLI applies once; server content persists across profiles and profile-free launches, preserves whitespace, inherits defaults, and leaves application preferences isolated",
 		);
 		await quitAndReport();
 		return;
@@ -1506,6 +1456,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 		),
 		"Shift+Tab did not reverse pregame dialog navigation",
 	);
+	await fill("dialog", "Content path override", assets);
 	await fill("dialog", "Name", "Probe");
 	await fill("dialog", "Host", "127.0.0.1");
 	await fill("dialog", "Port", "1");
@@ -1638,7 +1589,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 	report.scenarios.push(
 		"Play shine runs once per enable, resets on disable, excludes pointer input, and respects reduced motion",
 	);
-	await fill(".launcher-profile", "Content path override", assets);
+
 	await fill(".launcher-profile", "Password", "initial-secret");
 	await click("Show password");
 	requireCondition(
@@ -1846,11 +1797,11 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 	const secondProfileId = randomUUID();
 	await evaluate(
 		page,
-		`window.holtburgerLauncher.saveServer(${JSON.stringify({ id: secondServerId, name: "Second server", endpoint: { host: "127.0.0.1", port: 2 } })})`,
+		`window.holtburgerLauncher.saveServer(${JSON.stringify({ id: secondServerId, name: "Second server", contentPath: assets, endpoint: { host: "127.0.0.1", port: 2 } })})`,
 	);
 	await evaluate(
 		page,
-		`window.holtburgerLauncher.saveProfile(${JSON.stringify({ id: secondProfileId, name: "Second account", serverId: secondServerId, contentPath: assets, credentials: { account: "launcher-probe", password: "probe-secret" } })})`,
+		`window.holtburgerLauncher.saveProfile(${JSON.stringify({ id: secondProfileId, name: "Second account", serverId: secondServerId, credentials: { account: "launcher-probe", password: "probe-secret" } })})`,
 	);
 	const visual = JSON.parse(
 		await readFile(
@@ -1873,7 +1824,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 		} else
 			await evaluate(
 				page,
-				`window.holtburgerLauncher.play({ serverId: ${JSON.stringify(secondServerId)}, profileId: ${JSON.stringify(secondProfileId)}, contentPath: ${JSON.stringify(assets)}, credentials: {account:"launcher-probe",password:"probe-secret"} })`,
+				`window.holtburgerLauncher.play({ serverId: ${JSON.stringify(secondServerId)}, profileId: ${JSON.stringify(secondProfileId)}, credentials: {account:"launcher-probe",password:"probe-secret"} })`,
 			);
 		await attach("client");
 		requireCondition(
@@ -2098,7 +2049,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 	);
 	await fill(".launcher-profile", "Account", "profile-free-account");
 	await fill(".launcher-profile", "Password", "profile-free-password");
-	await fill(".launcher-profile", "Content path override", assets);
+
 	await evaluate(
 		page,
 		"document.querySelector('input[autocomplete=current-password]').focus()",
@@ -2167,7 +2118,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 	if (values.assets) {
 		await evaluate(
 			page,
-			`window.holtburgerLauncher.play({ serverId: ${JSON.stringify(serverId)}, profileId: ${JSON.stringify(profileId)}, contentPath: ${JSON.stringify(assets)}, credentials: {account:"launcher-probe",password:"probe-secret"} })`,
+			`window.holtburgerLauncher.play({ serverId: ${JSON.stringify(serverId)}, profileId: ${JSON.stringify(profileId)}, credentials: {account:"launcher-probe",password:"probe-secret"} })`,
 		);
 		await attach("client");
 		await waitFor(
@@ -2201,7 +2152,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 	);
 	await evaluate(
 		page,
-		`window.holtburgerLauncher.play({ serverId: ${JSON.stringify(serverId)}, profileId: ${JSON.stringify(profileId)}, contentPath: ${JSON.stringify(assets)}, credentials: {account:"launcher-probe",password:"probe-secret"} })`,
+		`window.holtburgerLauncher.play({ serverId: ${JSON.stringify(serverId)}, profileId: ${JSON.stringify(profileId)}, credentials: {account:"launcher-probe",password:"probe-secret"} })`,
 	);
 	await waitFor(
 		() =>
@@ -2219,7 +2170,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 		);
 		await evaluate(
 			page,
-			`window.holtburgerLauncher.play({ serverId: ${JSON.stringify(serverId)}, profileId: ${JSON.stringify(profileId)}, contentPath: ${JSON.stringify(assets)}, credentials: {account:"launcher-probe",password:"probe-secret"} })`,
+			`window.holtburgerLauncher.play({ serverId: ${JSON.stringify(serverId)}, profileId: ${JSON.stringify(profileId)}, credentials: {account:"launcher-probe",password:"probe-secret"} })`,
 		);
 		await attach("client");
 	}

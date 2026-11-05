@@ -49,7 +49,6 @@ contextBridge.exposeInMainWorld("holtburgerLauncher", {
 	saveAppSettings: (value: unknown) =>
 		invoke("launcher:save-app-settings", value),
 	restart: () => invoke("launcher:restart"),
-	takeInitialContentPath: () => invoke("launcher:initial-content-path"),
 	chooseContentPath: (previous: string | null) =>
 		invoke("launcher:choose-content-path", previous),
 	directory: (refresh: boolean) => invoke("launcher:directory", refresh),

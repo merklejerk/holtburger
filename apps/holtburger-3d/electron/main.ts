@@ -961,7 +961,7 @@ void (async () => {
 	await launcher.load();
 	let clearContent = entry.clearContent;
 	const gamePath = entry.path;
-	// CLI content initializes only the first interactive draft or the direct launch.
+	// CLI content overrides only the first interactive attempt or the direct launch.
 	let initialContentPath =
 		entry.clientStartup === undefined ? entry.contentPath : null;
 	const showPicker = async (diagnostic: string | null) => {
@@ -1205,11 +1205,7 @@ void (async () => {
 		await owner.quit();
 	});
 	const directory = new ServerDirectoryCatalog(fetch);
-	handle("launcher:initial-content-path", "picker", () => {
-		const path = initialContentPath;
-		initialContentPath = null;
-		return path;
-	});
+
 	handle(
 		"launcher:choose-content-path",
 		"picker",
@@ -1244,7 +1240,12 @@ void (async () => {
 	);
 	handle("launcher:recover", "picker", () => launcher.recover());
 	handle("launcher:play", "picker", (_event, selection: unknown) =>
-		owner.play(() => launcher.select(selection)),
+		owner.play(async () => {
+			const startup = await launcher.select(selection);
+			const contentPath = initialContentPath ?? startup.contentPath;
+			initialContentPath = null;
+			return { ...startup, contentPath };
+		}),
 	);
 	ipcMain.handle("client:request-close", (event, identity: unknown) => {
 		requireApplicationFrame(event, window);

@@ -6,6 +6,8 @@ export const launcherServerSchema = z
 	.object({
 		id: z.string().uuid(),
 		name: z.string().trim().min(1),
+		/** Null inherits the application default for every account on this server. */
+		contentPath: z.string().min(1).nullable(),
 		endpoint: z
 			.object({
 				host: z.string().trim().min(1),
@@ -23,7 +25,7 @@ const encryptedCredentialsSchema = z
 		authenticationTag: z.string(),
 	})
 	.strict();
-/** A saved credential preset refers to one server; null credentials occur only in incomplete legacy profiles. */
+/** A saved credential preset refers to one server; null credentials represent incomplete presets. */
 const launcherProfileSchema = z
 	.object({
 		id: z.string().uuid(),
@@ -45,76 +47,66 @@ export const launcherSelectionSchema = z
 		profileId: z.string().uuid().nullable(),
 	})
 	.strict();
-const launcherCatalogSchema = z.object({
-	servers: z.array(launcherServerSchema),
-	profiles: z.array(launcherProfileSchema),
-	window: clientWindowSettingsSchema,
-});
-/** Shared reference validation applies before upgrading an older on-disk document. */
-function validateCatalog(
-	value: z.infer<typeof launcherCatalogSchema>,
-	context: z.RefinementCtx,
-): void {
-	const servers = new Set(value.servers.map((server) => server.id));
-	const profiles = new Set(value.profiles.map((profile) => profile.id));
-	if (servers.size !== value.servers.length)
-		context.addIssue({ code: "custom", message: "Duplicate server identity" });
-	if (profiles.size !== value.profiles.length)
-		context.addIssue({ code: "custom", message: "Duplicate profile identity" });
-	if (value.profiles.some((profile) => !servers.has(profile.serverId)))
-		context.addIssue({
-			code: "custom",
-			message: "Profile references an unknown server",
-		});
-}
-/** Independent launcher document; profile-free logins retain server selection without creating a named preset. */
-const selectedLauncherCatalogSchema = launcherCatalogSchema
-	.extend({
+/** Version six keeps server content and credential presets in one validated launcher catalog. */
+export const launcherSettingsSchema = z
+	.object({
+		version: z.literal(6),
+		servers: z.array(launcherServerSchema),
+		profiles: z.array(launcherProfileSchema),
+		window: clientWindowSettingsSchema,
 		lastSelection: launcherSelectionSchema.nullable(),
-	})
-	.strict()
-	.superRefine((value, context) => {
-		validateCatalog(value, context);
-		const selection = value.lastSelection;
-		if (selection === null) return;
-		if (!value.servers.some((server) => server.id === selection.serverId))
-			context.addIssue({
-				code: "custom",
-				message: "Last selection references an unknown server",
-			});
-		if (
-			selection.profileId !== null &&
-			!value.profiles.some(
-				(profile) =>
-					profile.id === selection.profileId &&
-					profile.serverId === selection.serverId,
-			)
-		)
-			context.addIssue({
-				code: "custom",
-				message: "Last selection references an unknown profile for this server",
-			});
-	});
-/** Version two retained only one global launch selection. */
-const previousLauncherSettingsSchema = selectedLauncherCatalogSchema.safeExtend(
-	{
-		version: z.literal(2),
-	},
-);
-/** Per-server launch choices survive using another server; null remembers a profile-free launch. */
-const profileMemoryCatalogSchema = selectedLauncherCatalogSchema
-	.safeExtend({
+		/** Null remembers a profile-free launch; missing means this server has no history. */
 		lastProfileByServer: z.record(
 			z.string().uuid(),
 			z.string().uuid().nullable(),
 		),
+		/** Profile-free credentials never overwrite named presets. */
+		serverCredentials: z.record(z.string().uuid(), encryptedCredentialsSchema),
 	})
 	.strict()
 	.superRefine((value, context) => {
+		const servers = new Set(value.servers.map((server) => server.id));
+		const profiles = new Set(value.profiles.map((profile) => profile.id));
+		if (servers.size !== value.servers.length)
+			context.addIssue({
+				code: "custom",
+				message: "Duplicate server identity",
+			});
+		if (profiles.size !== value.profiles.length)
+			context.addIssue({
+				code: "custom",
+				message: "Duplicate profile identity",
+			});
+		if (value.profiles.some((profile) => !servers.has(profile.serverId)))
+			context.addIssue({
+				code: "custom",
+				message: "Profile references an unknown server",
+			});
+		const selection = value.lastSelection;
+		if (selection !== null) {
+			if (!servers.has(selection.serverId))
+				context.addIssue({
+					code: "custom",
+					message: "Last selection references an unknown server",
+				});
+			if (
+				selection.profileId !== null &&
+				!value.profiles.some(
+					(profile) =>
+						profile.id === selection.profileId &&
+						profile.serverId === selection.serverId,
+				)
+			)
+				context.addIssue({
+					code: "custom",
+					message:
+						"Last selection references an unknown profile for this server",
+				});
+		}
 		for (const [serverId, profileId] of Object.entries(
 			value.lastProfileByServer,
 		)) {
-			if (!value.servers.some((server) => server.id === serverId))
+			if (!servers.has(serverId))
 				context.addIssue({
 					code: "custom",
 					message: "Remembered profile references an unknown server",
@@ -131,114 +123,13 @@ const profileMemoryCatalogSchema = selectedLauncherCatalogSchema
 					message: "Remembered profile does not belong to its server",
 				});
 		}
-	});
-/** Version three stored credential envelopes only in named profiles. */
-const profileMemorySettingsSchema = profileMemoryCatalogSchema.safeExtend({
-	version: z.literal(3),
-});
-/** Profile-free credentials belong to their server and never overwrite a named preset. */
-const credentialMemoryCatalogSchema = profileMemoryCatalogSchema
-	.safeExtend({
-		serverCredentials: z.record(z.string().uuid(), encryptedCredentialsSchema),
-	})
-	.superRefine((value, context) => {
-		if (
-			Object.keys(value.serverCredentials).some(
-				(id) => !value.servers.some((server) => server.id === id),
-			)
-		)
+		if (Object.keys(value.serverCredentials).some((id) => !servers.has(id)))
 			context.addIssue({
 				code: "custom",
 				message: "Saved credentials reference an unknown server",
 			});
 	});
-const credentialMemorySettingsSchema = credentialMemoryCatalogSchema.safeExtend(
-	{ version: z.literal(4) },
-);
-/** Version five stores each preset's optional session content selection. */
-export const launcherSettingsSchema = credentialMemoryCatalogSchema.safeExtend({
-	version: z.literal(5),
-	profiles: z.array(
-		launcherProfileSchema.extend({
-			/** Null inherits the application default; explicit selections never rewrite it. */
-			contentPath: z.string().min(1).nullable(),
-		}),
-	),
-});
 
-/** Preserve encrypted credentials while giving older profiles the application default. */
-function upgradeContentPaths(
-	value: z.infer<typeof credentialMemoryCatalogSchema>,
-): LauncherSettings {
-	return launcherSettingsSchema.parse({
-		...value,
-		version: 5,
-		profiles: value.profiles.map((profile) => ({
-			...profile,
-			contentPath: null,
-		})),
-	});
-}
-/** Only the load boundary accepts older documents. */
-const legacyLauncherSettingsSchema = launcherCatalogSchema
-	.extend({
-		version: z.literal(1),
-		lastProfileId: z.string().uuid().nullable(),
-	})
-	.strict()
-	.superRefine((value, context) => {
-		validateCatalog(value, context);
-		if (
-			value.lastProfileId !== null &&
-			!value.profiles.some((profile) => profile.id === value.lastProfileId)
-		)
-			context.addIssue({
-				code: "custom",
-				message: "Last selection references an unknown profile",
-			});
-	})
-	.transform((value) => {
-		const profile = value.profiles.find(
-			(profile) => profile.id === value.lastProfileId,
-		);
-		return {
-			version: 2 as const,
-			servers: value.servers,
-			profiles: value.profiles,
-			window: value.window,
-			lastSelection:
-				profile === undefined
-					? null
-					: { serverId: profile.serverId, profileId: profile.id },
-		};
-	});
-/** Upgrade selection metadata without changing server IDs, profiles, or encrypted credential envelopes. */
-export function decodeLauncherSettings(input: unknown): LauncherSettings {
-	const current = launcherSettingsSchema.safeParse(input);
-	if (current.success) return current.data;
-	const credentialMemory = credentialMemorySettingsSchema.safeParse(input);
-	if (credentialMemory.success)
-		return upgradeContentPaths(credentialMemory.data);
-	const profileMemory = profileMemorySettingsSchema.safeParse(input);
-	if (profileMemory.success)
-		return upgradeContentPaths({
-			...profileMemory.data,
-			serverCredentials: {},
-		});
-	const previous = z
-		.union([previousLauncherSettingsSchema, legacyLauncherSettingsSchema])
-		.parse(input);
-	return upgradeContentPaths({
-		...previous,
-		serverCredentials: {},
-		lastProfileByServer:
-			previous.lastSelection === null
-				? {}
-				: {
-						[previous.lastSelection.serverId]: previous.lastSelection.profileId,
-					},
-	});
-}
 export type LauncherServer = z.infer<typeof launcherServerSchema>;
 export type LauncherCredentials = z.infer<typeof launcherCredentialsSchema>;
 export type EncryptedCredentials = z.infer<typeof encryptedCredentialsSchema>;
@@ -254,8 +145,6 @@ export interface LauncherProfileView {
 	readonly name: string;
 	/** Reference to one catalog server, never a game settings/cache key. */
 	readonly serverId: string;
-	/** Optional preset content folder or archive; null uses the application default. */
-	readonly contentPath: string | null;
 	/** Main-owned decryption result; consumers never infer readiness from ciphertext. */
 	readonly credentialStatus: "absent" | "saved" | "unavailable";
 }
@@ -282,16 +171,12 @@ export const profileSaveSchema = z
 		id: z.string().uuid(),
 		name: z.string().trim().min(1),
 		serverId: z.string().uuid(),
-		/** Explicit draft selection; null uses the application default. */
-		contentPath: z.string().min(1).nullable(),
 		credentials: launcherCredentialsSchema,
 	})
 	.strict();
 /** Play uses the current form values and never creates or overwrites a saved profile. */
 export const launcherPlaySchema = launcherSelectionSchema
 	.extend({
-		/** Explicit draft selection; null uses the application default. */
-		contentPath: z.string().min(1).nullable(),
 		credentials: launcherCredentialsSchema,
 	})
 	.strict();

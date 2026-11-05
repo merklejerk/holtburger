@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { LauncherStore } from "./launcher-store";
-import type { LauncherSettings } from "../src/launcher/launcher-contract";
 import { encryptCredentials, decryptCredentials } from "./launcher-credentials";
 
 const directories: string[] = [];
@@ -21,25 +20,17 @@ async function setup() {
 	const server = {
 		id: randomUUID(),
 		name: "Test",
+		contentPath: null,
 		endpoint: { host: "test.local", port: 9000 },
 	};
 	const profile = {
 		id: randomUUID(),
 		name: "Account",
-		contentPath: null,
+
 		serverId: server.id,
 		credentials: { account: "secret-account", password: "secret-password" },
 	};
 	return { store, path, server, profile };
-}
-/** Older catalogs contain only these profile fields; content overrides are introduced by migration. */
-function credentialProfile({
-	id,
-	name,
-	serverId,
-	credentials,
-}: LauncherSettings["profiles"][number]) {
-	return { id, name, serverId, credentials };
 }
 afterEach(async () => {
 	await Promise.all(
@@ -73,96 +64,63 @@ describe("launcher credentials", () => {
 	});
 });
 describe("independent launcher persistence", () => {
-	it("keeps profile paths independent, launches the current draft, and clears overrides explicitly", async () => {
+	it("persists independent server content selections across profiles, profile-free launches, and reopen", async () => {
 		const app = await setup();
-		await app.store.saveServer(app.server);
 		const first = {
-			...app.profile,
+			...app.server,
 			contentPath: join(dirname(app.path), "first "),
 		};
 		const second = {
-			...app.profile,
+			...app.server,
 			id: randomUUID(),
+			endpoint: { host: "second.local", port: 9000 },
 			contentPath: join(dirname(app.path), "second"),
 		};
-		await app.store.saveProfile(first);
-		await app.store.saveProfile(second);
+		await app.store.saveServer(first);
+		await app.store.saveServer(second);
+		const otherProfile = { ...app.profile, id: randomUUID() };
+		await app.store.saveProfile(app.profile);
+		await app.store.saveProfile(otherProfile);
 		const reopened = new LauncherStore(app.path, geometry);
 		await reopened.load();
-		expect(
-			reopened
-				.snapshot(null, true)
-				.profiles.map((profile) => profile.contentPath),
-		).toEqual([first.contentPath, second.contentPath]);
-		for (const contentPath of [
-			first.contentPath,
-			null,
-			second.contentPath,
-			join(dirname(app.path), "unsaved"),
-		]) {
+		expect(reopened.snapshot(null, true).servers).toEqual([first, second]);
+		for (const profileId of [app.profile.id, otherProfile.id, null]) {
 			await expect(
 				reopened.select({
-					serverId: app.server.id,
-					profileId: first.id,
-					credentials: first.credentials,
-					contentPath,
+					serverId: first.id,
+					profileId,
+					credentials: app.profile.credentials,
 				}),
-			).resolves.toMatchObject({ contentPath });
+			).resolves.toMatchObject({ contentPath: first.contentPath });
 		}
-		// Play uses the draft without overwriting either saved preset.
-		expect(
-			reopened
-				.snapshot(null, true)
-				.profiles.map((profile) => profile.contentPath),
-		).toEqual([first.contentPath, second.contentPath]);
-		await reopened.saveProfile({ ...first, contentPath: null });
-		expect(
-			reopened
-				.snapshot(null, true)
-				.profiles.find((profile) => profile.id === first.id)?.contentPath,
-		).toBeNull();
-	});
-	it.each([3, 4])(
-		"upgrades version %i profiles to the default without changing credential envelopes",
-		async (version) => {
-			const app = await setup();
-			await app.store.saveServer(app.server);
-			await app.store.saveProfile(app.profile);
-			await app.store.select({
-				contentPath: null,
-				serverId: app.server.id,
+		await expect(
+			reopened.select({
+				serverId: second.id,
+				profileId: null,
+				credentials: app.profile.credentials,
+			}),
+		).resolves.toMatchObject({ contentPath: second.contentPath });
+		await reopened.saveServer({ ...first, contentPath: null });
+		await expect(
+			reopened.select({
+				serverId: first.id,
 				profileId: app.profile.id,
 				credentials: app.profile.credentials,
-			});
-			const legacy = JSON.parse(await readFile(app.path, "utf8"));
-			legacy.version = version;
-			for (const profile of legacy.profiles) delete profile.contentPath;
-			if (version === 3) delete legacy.serverCredentials;
-			await writeFile(app.path, JSON.stringify(legacy));
-			const reopened = new LauncherStore(app.path, geometry);
-			await reopened.load();
-			expect(reopened.snapshot(null, true).recoveryRequired).toBe(false);
-			expect(reopened.snapshot(null, true).lastSelection).toEqual(
-				legacy.lastSelection,
-			);
-			expect(reopened.snapshot(null, true).lastProfileByServer).toEqual(
-				legacy.lastProfileByServer,
-			);
-			expect(reopened.snapshot(null, true).profiles[0]?.contentPath).toBeNull();
-			expect(
-				reopened.credentials({
-					serverId: app.server.id,
-					profileId: app.profile.id,
-				}),
-			).toEqual(app.profile.credentials);
-			await reopened.updateWindow(geometry);
-			const upgraded = JSON.parse(await readFile(app.path, "utf8"));
-			expect(upgraded.version).toBe(5);
-			expect(upgraded.profiles[0].credentials).toEqual(
-				legacy.profiles[0].credentials,
-			);
-		},
-	);
+			}),
+		).resolves.toMatchObject({ contentPath: null });
+		const cleared = new LauncherStore(app.path, geometry);
+		await cleared.load();
+		expect(
+			cleared
+				.snapshot(null, true)
+				.servers.find((server) => server.id === first.id)?.contentPath,
+		).toBeNull();
+		expect(
+			cleared
+				.snapshot(null, true)
+				.servers.find((server) => server.id === second.id)?.contentPath,
+		).toBe(second.contentPath);
+	});
 
 	it("keeps profile-free credentials isolated by server and independent of named profiles", async () => {
 		const app = await setup();
@@ -181,13 +139,11 @@ describe("independent launcher persistence", () => {
 			[other.id, second],
 		] as const)
 			await app.store.select({
-				contentPath: null,
 				serverId,
 				profileId: null,
 				credentials,
 			});
 		await app.store.select({
-			contentPath: null,
 			serverId: app.server.id,
 			profileId: app.profile.id,
 			credentials: app.profile.credentials,
@@ -207,7 +163,6 @@ describe("independent launcher persistence", () => {
 		).toEqual(app.profile.credentials);
 		await expect(
 			app.store.select({
-				contentPath: null,
 				serverId: other.id,
 				profileId: app.profile.id,
 				credentials: first,
@@ -217,7 +172,6 @@ describe("independent launcher persistence", () => {
 			app.store.credentials({ serverId: other.id, profileId: app.profile.id }),
 		).toThrow("different server");
 		await app.store.select({
-			contentPath: null,
 			serverId: app.server.id,
 			profileId: null,
 			credentials: second,
@@ -248,7 +202,6 @@ describe("independent launcher persistence", () => {
 			reopened.credentials({ serverId: app.server.id, profileId: null }),
 		).toThrow();
 		await reopened.select({
-			contentPath: null,
 			serverId: app.server.id,
 			profileId: null,
 			credentials: app.profile.credentials,
@@ -283,13 +236,11 @@ describe("independent launcher persistence", () => {
 			await app.store.saveServer(server);
 		await app.store.saveProfile(app.profile);
 		await app.store.select({
-			contentPath: null,
 			serverId: second.id,
 			profileId: null,
 			credentials: app.profile.credentials,
 		});
 		await app.store.select({
-			contentPath: null,
 			serverId: app.server.id,
 			profileId: app.profile.id,
 			credentials: app.profile.credentials,
@@ -308,7 +259,6 @@ describe("independent launcher persistence", () => {
 			app.server.id,
 		);
 		await reopened.select({
-			contentPath: null,
 			serverId: second.id,
 			profileId: null,
 			credentials: app.profile.credentials,
@@ -340,7 +290,6 @@ describe("independent launcher persistence", () => {
 			await app.store.saveProfile(profile);
 		for (const profile of [app.profile, second, otherProfile])
 			await app.store.select({
-				contentPath: null,
 				serverId: profile.serverId,
 				profileId: profile.id,
 				credentials: profile.credentials,
@@ -353,7 +302,6 @@ describe("independent launcher persistence", () => {
 			[other.id]: otherProfile.id,
 		});
 		await reopened.select({
-			contentPath: null,
 			serverId: app.server.id,
 			profileId: null,
 			credentials: app.profile.credentials,
@@ -371,41 +319,7 @@ describe("independent launcher persistence", () => {
 			[app.server.id]: null,
 		});
 	});
-	it("upgrades version-two selection to per-server memory without changing encrypted credentials", async () => {
-		const app = await setup();
-		await app.store.saveServer(app.server);
-		await app.store.saveProfile(app.profile);
-		const saved = JSON.parse(await readFile(app.path, "utf8"));
-		await writeFile(
-			app.path,
-			JSON.stringify({
-				version: 2,
-				servers: saved.servers,
-				profiles: saved.profiles.map(credentialProfile),
-				window: {
-					...geometry,
-					normalBounds: { ...geometry.normalBounds, x: 250, y: 350 },
-				},
-				lastSelection: { serverId: app.server.id, profileId: app.profile.id },
-			}),
-		);
-		const reopened = new LauncherStore(app.path, geometry);
-		await reopened.load();
-		expect(reopened.window).toEqual(geometry);
-		expect(reopened.snapshot(null, true).lastProfileByServer).toEqual({
-			[app.server.id]: app.profile.id,
-		});
-		expect(
-			reopened.credentials({
-				serverId: app.server.id,
-				profileId: app.profile.id,
-			}),
-		).toEqual(app.profile.credentials);
-		await reopened.updateWindow(geometry);
-		expect(JSON.parse(await readFile(app.path, "utf8")).profiles).toEqual(
-			saved.profiles,
-		);
-	});
+
 	it("requires recovery for remembered choices with unknown servers or profiles belonging to another server", async () => {
 		const app = await setup();
 		await app.store.saveServer(app.server);
@@ -453,7 +367,10 @@ describe("independent launcher persistence", () => {
 		expect(id).toEqual(expect.any(String));
 		const after = JSON.parse(await readFile(app.path, "utf8"));
 		expect(after.profiles).toEqual(before.profiles);
-		expect(after.servers).toEqual([app.server, { ...candidate, id }]);
+		expect(after.servers).toEqual([
+			app.server,
+			{ ...candidate, id, contentPath: null },
+		]);
 		expect(
 			await app.store.importServer({
 				...candidate,
@@ -474,7 +391,6 @@ describe("independent launcher persistence", () => {
 		await app.store.saveProfile(app.profile);
 		expect(
 			await app.store.select({
-				contentPath: null,
 				serverId: app.server.id,
 				profileId: app.profile.id,
 				credentials: app.profile.credentials,
@@ -496,7 +412,6 @@ describe("independent launcher persistence", () => {
 				name: "Account",
 				serverId: app.server.id,
 				credentialStatus: "saved",
-				contentPath: null,
 			},
 		]);
 		expect(reopened.snapshot(null, true).lastSelection).toEqual({
@@ -534,15 +449,14 @@ describe("independent launcher persistence", () => {
 		};
 		await expect(
 			app.store.select({
-				contentPath: null,
 				serverId: app.server.id,
 				profileId: null,
 				credentials,
 			}),
 		).resolves.toEqual({
 			...app.server.endpoint,
-			...credentials,
 			contentPath: null,
+			...credentials,
 		});
 		const text = await readFile(app.path, "utf8");
 		expect(text).not.toContain("unsaved-account");
@@ -568,7 +482,6 @@ describe("independent launcher persistence", () => {
 		};
 		await expect(
 			app.store.select({
-				contentPath: null,
 				serverId: app.server.id,
 				profileId: app.profile.id,
 				credentials,
@@ -591,7 +504,6 @@ describe("independent launcher persistence", () => {
 		await app.store.saveServer(other);
 		await expect(
 			app.store.select({
-				contentPath: null,
 				serverId: other.id,
 				profileId: app.profile.id,
 				credentials,
@@ -604,71 +516,7 @@ describe("independent launcher persistence", () => {
 			}),
 		).toThrow();
 	});
-	it("upgrades version-one selection metadata without changing encrypted profiles, including incomplete legacy presets", async () => {
-		const app = await setup();
-		await app.store.saveServer(app.server);
-		await app.store.saveProfile(app.profile);
-		const saved = JSON.parse(await readFile(app.path, "utf8"));
-		const catalog = {
-			servers: saved.servers,
-			window: saved.window,
-		};
-		const incomplete = {
-			...saved.profiles[0],
-			id: randomUUID(),
-			name: "Incomplete",
-			credentials: null,
-		};
-		const legacy = {
-			...catalog,
-			version: 1,
-			lastProfileId: app.profile.id,
-			profiles: [...saved.profiles, incomplete].map(credentialProfile),
-		};
-		await writeFile(app.path, JSON.stringify(legacy));
-		const reopened = new LauncherStore(app.path, geometry);
-		await reopened.load();
-		expect(reopened.snapshot(null, true).lastSelection).toEqual({
-			serverId: app.server.id,
-			profileId: app.profile.id,
-		});
-		expect(
-			reopened.credentials({
-				serverId: app.server.id,
-				profileId: app.profile.id,
-			}),
-		).toEqual(app.profile.credentials);
-		expect(
-			reopened.credentials({
-				serverId: app.server.id,
-				profileId: incomplete.id,
-			}),
-		).toBeNull();
-		await reopened.updateWindow(geometry);
-		const upgraded = JSON.parse(await readFile(app.path, "utf8"));
-		expect(upgraded.version).toBe(5);
-		expect(upgraded.profiles).toEqual(
-			legacy.profiles.map((profile: Record<string, unknown>) => ({
-				...profile,
-				contentPath: null,
-			})),
-		);
-		await reopened.deleteProfile(app.profile.id);
-		expect(reopened.snapshot(null, true).lastSelection).toEqual({
-			serverId: app.server.id,
-			profileId: null,
-		});
-		await reopened.saveProfile({
-			id: incomplete.id,
-			name: incomplete.name,
-			serverId: app.server.id,
-			contentPath: null,
-			credentials: app.profile.credentials,
-		});
-		expect(reopened.snapshot(null, true).profiles[0]?.credentialStatus).toBe(
-			"saved",
-		);
-	});
+
 	it("preserves saved credentials through server renames and endpoint edits, and removes profiles on deletion", async () => {
 		const app = await setup();
 		await app.store.saveServer(app.server);
@@ -694,7 +542,6 @@ describe("independent launcher persistence", () => {
 		await reopened.load();
 		await expect(
 			reopened.select({
-				contentPath: null,
 				serverId: app.server.id,
 				profileId: app.profile.id,
 				credentials: app.profile.credentials,
@@ -706,7 +553,6 @@ describe("independent launcher persistence", () => {
 			password: "secret-password",
 		});
 		await app.store.select({
-			contentPath: null,
 			serverId: app.server.id,
 			profileId: app.profile.id,
 			credentials: { account: "temporary", password: "ephemeral" },
@@ -739,6 +585,7 @@ describe("independent launcher persistence", () => {
 			app.store.saveServer({
 				id: randomUUID(),
 				name: "Duplicate",
+				contentPath: null,
 				endpoint: duplicateEndpoint,
 			}),
 		).rejects.toThrow("already exists");
@@ -767,6 +614,7 @@ describe("independent launcher persistence", () => {
 				...app.server,
 				id: randomUUID(),
 				name: "Duplicate",
+				contentPath: null,
 			}),
 		]);
 		expect(results.map((result) => result.status)).toEqual([

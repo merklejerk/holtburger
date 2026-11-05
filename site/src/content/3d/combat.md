@@ -20,6 +20,8 @@ With a missile weapon, ammunition supply appears alongside the attack control. I
 
 <Media id="combat-controls" detail />
 
+<Media id="combat-controls-missile" detail />
+
 ## Use Smart Tab in combat
 
 Tap **Tab** to cycle targets, or hold it to acquire an immediate target. **Shift+Tab** cycles in reverse. Use the hostile-only and in-view options to keep the selection useful for your current fight.

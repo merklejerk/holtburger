@@ -14,7 +14,9 @@ The minimap puts the surrounding terrain under your radar markers: buildings, el
 
 A breadcrumb trail marks where you have recently walked, helping you retrace your steps through winding passages.
 
-<Media id="minimap" />
+<Media id="minimap" detail />
+
+<Media id="minimap-dungeon" detail />
 
 ## Read the world map
 
@@ -38,7 +40,9 @@ Use the map's context menu to mark a destination, or enter coordinates in chat:
 
 Coordinate links in chat can also set a map pin. Enable **Interact with chat history** before clicking a coordinate link.
 
-<Media id="waypoints" />
+<Media id="waypoints" detail />
+
+<Media id="waypoint-minimap" detail />
 
 ## Recall
 
@@ -58,7 +62,7 @@ Enable **Interact with chat history** and click the coordinates to set a waypoin
 
 Use the coordinates to reach the area, then look for your corpse. The `/corpses` history clears when the character session ends.
 
-<Media id="corpse-recovery" />
+<Media id="corpse-recovery" detail />
 
 ## Let someone help
 

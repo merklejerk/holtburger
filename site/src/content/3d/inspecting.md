@@ -18,7 +18,7 @@ Select a creature, player or item and press **E**, or right-click it to select a
 
 Creature and player appraisals include a rotatable 3D model. Drag horizontally across the preview to see it from another angle. You can inspect someone’s appearance without circling them in the world.
 
-<Media id="creature-appraisal" />
+<Media id="creature-appraisal" detail />
 
 ## Creatures and players
 

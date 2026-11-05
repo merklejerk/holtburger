@@ -32,7 +32,10 @@ export const media = {
 	holtburg: {
 		kind: 'image',
 		title: 'An afternoon in Holtburg',
-		source: { kind: 'local', path: 'assets/screenshots/3d-holtburg.webp' },
+		source: {
+			kind: 'local',
+			path: 'assets/screenshots/3d-holtburg.webp'
+		},
 		alt: 'Holtburg with nearby players, character appraisal and the world map.',
 		width: 1740,
 		height: 1189
@@ -40,7 +43,10 @@ export const media = {
 	outdoors: {
 		kind: 'image',
 		title: 'Out in Dereth',
-		source: { kind: 'local', path: 'assets/screenshots/3d-outdoors.webp' },
+		source: {
+			kind: 'local',
+			path: 'assets/screenshots/3d-outdoors.webp'
+		},
 		alt: 'Outdoor gameplay with a selected creature and inventory open.',
 		width: 1740,
 		height: 1174
@@ -48,7 +54,10 @@ export const media = {
 	map: {
 		kind: 'image',
 		title: 'Getting your bearings',
-		source: { kind: 'local', path: 'assets/screenshots/3d-world-map.webp' },
+		source: {
+			kind: 'local',
+			path: 'assets/screenshots/3d-world-map.webp'
+		},
 		alt: 'A 3D landscape with character details and the world map.',
 		width: 1740,
 		height: 1186
@@ -56,7 +65,10 @@ export const media = {
 	combat: {
 		kind: 'image',
 		title: 'Into the dungeon',
-		source: { kind: 'local', path: 'assets/screenshots/3d-combat.webp' },
+		source: {
+			kind: 'local',
+			path: 'assets/screenshots/3d-combat.webp'
+		},
 		alt: 'Dungeon combat with spell effects and character skills.',
 		width: 1740,
 		height: 1189
@@ -64,7 +76,10 @@ export const media = {
 	jump: {
 		kind: 'image',
 		title: 'Plan the leap',
-		source: { kind: 'local', path: 'assets/screenshots/3d-precise-jump.webp' },
+		source: {
+			kind: 'local',
+			path: 'assets/screenshots/3d-precise-jump.webp'
+		},
 		alt: 'Precise jump aiming with a trajectory preview between forest platforms.',
 		width: 1740,
 		height: 1189
@@ -83,16 +98,18 @@ export const media = {
 	terminal: {
 		kind: 'image',
 		title: 'Dereth in a terminal',
-		source: { kind: 'local', path: 'assets/screenshots/tui.webp' },
+		source: {
+			kind: 'local',
+			path: 'assets/screenshots/tui.webp'
+		},
 		alt: 'Terminal gameplay with nearby creatures, item appraisal and combat feedback.',
 		width: 1055,
 		height: 818
 	},
 	'target-indicators': {
-		kind: 'planned-video',
+		kind: 'planned-image',
 		title: 'Selection and combat at a glance',
-		brief:
-			'Show selection and combat indicators alongside the selected-entity HUD and its changing player/item actions.'
+		brief: 'Show both entities, their outline/reticle and enough scene context.'
 	},
 	'mobile-combat': {
 		kind: 'planned-video',
@@ -101,10 +118,9 @@ export const media = {
 			'Show running while casting, then archery while moving, with normal movement keys visible.'
 	},
 	minimap: {
-		kind: 'planned-video',
-		title: 'Read the ground ahead',
-		brief:
-			'Show outdoor terrain, buildings, impassable areas and elevation, then follow a dungeon passage with the breadcrumb trail visible.'
+		kind: 'planned-image',
+		title: 'Terrain under your radar',
+		brief: 'Crop the minimap at a readable scale.'
 	},
 	'selected-hud': {
 		kind: 'image',
@@ -237,7 +253,7 @@ export const media = {
 		kind: 'planned-video',
 		title: 'Equipment loadouts',
 		brief:
-			'Choose which slots a loadout includes, bind it, and show the resulting equipment change.'
+			'Show choosing included slots, naming the preset and dragging its icon to an action bar. Stop after saving.'
 	},
 	spells: {
 		kind: 'video',
@@ -283,10 +299,9 @@ export const media = {
 		height: 238
 	},
 	'tui-workflow': {
-		kind: 'planned-video',
-		title: 'Around the terminal dashboard',
-		brief:
-			'Move between nearby entities, inventory and appraisal; show focus and the available footer actions.'
+		kind: 'planned-image',
+		title: 'The TUI at a glance',
+		brief: 'Keep pane boundaries, focus and footer shortcuts legible.'
 	},
 	'tui-script': {
 		kind: 'planned-video',
@@ -295,10 +310,9 @@ export const media = {
 			'Start a fighter or mage, show its feedback, then stop it and resume manual control.'
 	},
 	'combat-controls': {
-		kind: 'planned-video',
-		title: 'The combat HUD',
-		brief:
-			'Show the curved power/accuracy arc, height buttons and play/pause control, then use them through a short melee and missile encounter.'
+		kind: 'planned-image',
+		title: 'Melee combat HUD',
+		brief: 'Crop the curved HUD with power, height and start/stop controls.'
 	},
 	locks: {
 		kind: 'planned-video',
@@ -318,10 +332,10 @@ export const media = {
 		height: 395
 	},
 	vendor: {
-		kind: 'planned-video',
-		title: 'Buy and sell',
+		kind: 'planned-image',
+		title: 'Review a vendor exchange',
 		brief:
-			'Queue a purchase and a sale, adjust quantities, review balances, and show the completed trade.'
+			'Crop the vendor window with stock, both queued items and the balance.'
 	},
 	'player-trade': {
 		kind: 'image',
@@ -346,10 +360,9 @@ export const media = {
 		height: 531
 	},
 	waypoints: {
-		kind: 'planned-video',
-		title: 'Mark the next stop',
-		brief:
-			'Set a waypoint from chat coordinates, then follow its direction and distance on the minimap.'
+		kind: 'planned-image',
+		title: 'Your destination on the map',
+		brief: 'Crop the destination pin and enough map labels to orient it.'
 	},
 	'housing-payments': {
 		kind: 'image',
@@ -385,10 +398,9 @@ export const media = {
 		height: 432
 	},
 	'corpse-recovery': {
-		kind: 'planned-video',
+		kind: 'planned-image',
 		title: 'Find your way back',
-		brief:
-			'Show a real outdoor death location, /corpse output, a coordinate link becoming a waypoint, and nearby corpse cycling.'
+		brief: 'Crop the chat output and clickable coordinates.'
 	},
 	party: {
 		kind: 'image',
@@ -402,22 +414,19 @@ export const media = {
 		height: 432
 	},
 	'nearby-alerts': {
-		kind: 'planned-video',
+		kind: 'planned-image',
 		title: 'Watch for a name',
-		brief:
-			'Create an alert using a glob, show its match preview, then show a real matching encounter notification.'
+		brief: 'Show the compact alert controls and the linked notification.'
 	},
 	chat: {
-		kind: 'planned-video',
-		title: 'From playing to reading chat',
-		brief:
-			'Hold Ctrl to scroll and select chat history, release to return to live messages, then demonstrate the persistent history toggle.'
+		kind: 'planned-image',
+		title: 'Activate chat history',
+		brief: 'Close up on the activation icon and a little surrounding chat.'
 	},
 	emotes: {
-		kind: 'planned-video',
+		kind: 'planned-image',
 		title: 'Choose an emote',
-		brief:
-			'Open the T emote wheel, perform an emote, and show the previous combat stance returning.'
+		brief: 'Crop the wheel with its choices and recent emotes.'
 	},
 	barber: {
 		kind: 'image',
@@ -431,16 +440,14 @@ export const media = {
 		height: 326
 	},
 	'tui-gameplay': {
-		kind: 'planned-video',
-		title: 'A task through the TUI',
-		brief:
-			'Move an inventory item, inspect its details, and show a quantity prompt or vendor review with the changing footer actions.'
+		kind: 'planned-image',
+		title: 'A TUI quantity prompt',
+		brief: 'Show the prompt with relevant item and footer actions.'
 	},
 	'creature-appraisal': {
-		kind: 'planned-video',
-		title: 'Keep inspecting while targets change',
-		brief:
-			'Rotate a creature or player preview, then change selection while keeping the appraisal open.'
+		kind: 'planned-image',
+		title: 'A closer look',
+		brief: 'Crop the appraisal window; show the model and identity clearly.'
 	},
 	'item-appraisal': {
 		kind: 'image',
@@ -474,29 +481,21 @@ export const media = {
 		width: 77,
 		height: 283
 	},
-	'inventory-moves': {
-		kind: 'planned-video',
-		title: 'Pack and equip',
-		brief:
-			'Use Native sorting to reorder items, move an item between bags, equip and unequip.'
-	},
 	'inventory-merge': {
-		kind: 'planned-video',
-		title: 'Make space in a bag',
-		brief:
-			'Split a stack with Y, then request bag Auto-merge and show the resulting stack and freed-slot feedback.'
+		kind: 'planned-image',
+		title: 'Auto-merge a bag',
+		brief: 'Crop the bag control and popup, with Auto-merge readable.'
 	},
 	'action-bars': {
-		kind: 'planned-video',
-		title: 'Build a useful action bar',
-		brief:
-			'Bind an item and a loadout, clone and rotate a bar, then focus it and activate a cell by keyboard.'
+		kind: 'planned-image',
+		title: 'Action-bar menu',
+		brief: 'Frame just the bar and popup; all four menu actions are readable.'
 	},
 	'character-creation': {
-		kind: 'planned-video',
-		title: 'Create an adventurer',
+		kind: 'planned-image',
+		title: 'Race',
 		brief:
-			'Show appearance, Skills & Stats, and review; finish at the selected new character before entering the world.'
+			'Capture the creation page and preview, omitting unrelated application chrome.'
 	},
 	'hardware-info': {
 		kind: 'image',
@@ -508,6 +507,41 @@ export const media = {
 		alt: 'Graphics settings showing current graphics information and Copy hardware info.',
 		width: 418,
 		height: 421
+	},
+	'inventory-split': {
+		kind: 'planned-image',
+		title: 'Split a stack',
+		brief: 'Crop the modal with item name, amount, slider and Split button.'
+	},
+	'creation-appearance': {
+		kind: 'planned-image',
+		title: 'Appearance',
+		brief: 'Keep the preview and appearance choices visible.'
+	},
+	'creation-build': {
+		kind: 'planned-image',
+		title: 'Skills & Stats',
+		brief: 'Show the combined attributes, starting vitals and skill groups.'
+	},
+	'creation-review': {
+		kind: 'planned-image',
+		title: 'Review',
+		brief: 'Show the final build, starting town and Create character action.'
+	},
+	'combat-controls-missile': {
+		kind: 'planned-image',
+		title: 'Missile combat HUD',
+		brief: 'Crop the curved HUD with accuracy, height and ammunition.'
+	},
+	'minimap-dungeon': {
+		kind: 'planned-image',
+		title: 'Dungeon map and breadcrumbs',
+		brief: 'Crop the minimap with passages and breadcrumb trail visible.'
+	},
+	'waypoint-minimap': {
+		kind: 'planned-image',
+		title: 'Follow the waypoint',
+		brief: 'Crop the minimap with direction and distance visible.'
 	}
 } satisfies Record<string, MediaAsset>;
 

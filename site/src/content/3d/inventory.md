@@ -32,13 +32,13 @@ Helmet and cloak visibility controls sit below the strip, alongside **Create loa
 
 You can also reorder ordinary packs. Main Pack stays first and spell foci stay last.
 
-<Media id="inventory-moves" detail />
-
 ## Split a stack
 
 Select the stack and press **Y**, or use **Split stack** in the selected-item actions. Choose the amount using the number field or slider.
 
 Leave a free inventory slot for the new stack.
+
+<Media id="inventory-split" detail />
 
 ## Auto-merge a bag
 

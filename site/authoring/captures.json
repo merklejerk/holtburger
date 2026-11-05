@@ -50,8 +50,8 @@
 			"owner": "agent",
 			"session": "gear",
 			"setup": "Two weapon/gear arrangements, with one slot intentionally omitted and an empty included slot.",
-			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Capture the builder, result icon/bar cell, and equipment changes; split into short steps if needed.",
-			"expected": "Included, omitted and cleared slots have visibly different outcomes.",
+			"framing": "Crop the builder and destination bar. Stop once the preset is saved; do not demonstrate gear changes.",
+			"expected": "The reader can create and save a loadout; prose explains what applying it changes.",
 			"priority": "first"
 		},
 		"spells": {
@@ -89,9 +89,9 @@
 		"tui-workflow": {
 			"owner": "user",
 			"session": "terminal",
-			"setup": "Normal gameplay with nearby targets and carried items.",
-			"framing": "Keep dashboard, context and footer visible; record Tab focus changes.",
-			"expected": "Pane focus, tab selection and Assess results are legible.",
+			"setup": "A focused dashboard with an assessed entity and context pane.",
+			"framing": "Keep pane boundaries, focus and footer shortcuts legible.",
+			"expected": "The reader recognizes the dashboard, context and input areas.",
 			"priority": "first"
 		},
 		"tui-script": {
@@ -103,19 +103,19 @@
 			"priority": "first"
 		},
 		"combat-controls": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "controls",
-			"setup": "A safe target, melee weapon and optional ranged weapon/ammunition.",
-			"framing": "Crop to the curved combat HUD, keeping power/accuracy, attack height, play/pause and ammunition readable. Include only enough world context to connect the control to the attack.",
-			"expected": "The new layout is recognizable, with adjustment and start/cancel shown in melee and missile stances.",
+			"setup": "A melee weapon equipped in combat stance.",
+			"framing": "Crop the curved HUD with power, height and start/stop controls.",
+			"expected": "The unfamiliar layout and its controls are recognizable.",
 			"priority": "first"
 		},
 		"locks": {
 			"owner": "agent",
 			"session": "gear",
 			"setup": "A real locked chest/door, at least one key, trained Lockpick and a usable pick.",
-			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Show the locked object and helper; keep estimate and result text readable.",
-			"expected": "The key attempt and available lockpick action/result can be understood.",
+			"framing": "Keep the locked entity and the unlock helper in frame together, with the viewport feedback animation visible.",
+			"expected": "The reader sees the key/lockpick actions and their success or failure overlay on the actual target.",
 			"priority": "later"
 		},
 		"salvage": {
@@ -129,9 +129,9 @@
 		"vendor": {
 			"owner": "agent",
 			"session": "gear",
-			"setup": "A nearby vendor, enough currency, one purchase and one expendable sale.",
-			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Show stock, queue quantities, balances and Trade feedback.",
-			"expected": "A reviewed purchase/sale completes and the resulting balances/items are visible.",
+			"setup": "One purchase and one sale queued at a vendor.",
+			"framing": "Crop the vendor window with stock, both queued items and the balance.",
+			"expected": "The reader recognizes the reviewed exchange and Trade button.",
 			"priority": "later"
 		},
 		"player-trade": {
@@ -151,11 +151,11 @@
 			"priority": "later"
 		},
 		"waypoints": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "world",
-			"setup": "An outdoor character and open World map/chat.",
-			"framing": "Show command input, coordinate link and map pin without a full-screen chat zoom.",
-			"expected": "Set a waypoint from chat coordinates; show its world map pin and minimap direction and distance while traveling, then clear it.",
+			"setup": "A waypoint set on the world map.",
+			"framing": "Crop the destination pin and enough map labels to orient it.",
+			"expected": "The reader recognizes a marked destination.",
 			"priority": "later"
 		},
 		"housing-payments": {
@@ -185,9 +185,9 @@
 		"corpse-recovery": {
 			"owner": "user",
 			"session": "world",
-			"setup": "A naturally available outdoor death location and recoverable nearby corpse; no deliberate death required.",
-			"framing": "Show /corpse, the coordinate link, map waypoint and V cycling in short connected steps.",
-			"expected": "The recorded location helps navigation without implying the record proves current contents.",
+			"setup": "A real saved outdoor death location shown by /corpse.",
+			"framing": "Crop the chat output and clickable coordinates.",
+			"expected": "The reader can locate the saved death coordinates; prose explains setting a waypoint.",
 			"priority": "later"
 		},
 		"party": {
@@ -199,27 +199,27 @@
 			"priority": "later"
 		},
 		"nearby-alerts": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "controls",
-			"setup": "A known nearby name and a repeatable matching encounter.",
-			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Show the rule editor/pattern preview, then the list and resulting notice.",
-			"expected": "The glob matches expected names and produces one useful encounter notification. Click the linked alert name in chat to select the matching entity, with history interaction enabled.",
+			"setup": "An alert rule with its match preview and a real matching notification.",
+			"framing": "Show the compact alert controls and the linked notification.",
+			"expected": "The reader recognizes a name pattern and the resulting alert.",
 			"priority": "later"
 		},
 		"chat": {
 			"owner": "agent",
 			"session": "setup",
-			"setup": "Sample conversation with coordinates and harmless text.",
-			"framing": "Crop to the compact chat buffer and its interaction control. Identify the held Ctrl key in the accompanying caption.",
-			"expected": "With history interaction enabled, scroll back and select text. Release temporary interaction to resume live messages; demonstrate toggling interaction for longer reading.",
+			"setup": "Inactive chat with its history activation button visible.",
+			"framing": "Close up on the activation icon and a little surrounding chat.",
+			"expected": "The reader can locate the control that makes chat accept pointer input.",
 			"priority": "later"
 		},
 		"emotes": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "controls",
-			"setup": "A character able to perform a standard emote, starting in combat stance.",
-			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Show the T wheel, selection and full character gesture.",
-			"expected": "The emote plays and the previous combat stance returns; release-to-dismiss can be a separate beat.",
+			"setup": "The emote wheel open.",
+			"framing": "Crop the wheel with its choices and recent emotes.",
+			"expected": "The reader can recognize and choose from the wheel.",
 			"priority": "later"
 		},
 		"barber": {
@@ -233,9 +233,9 @@
 		"tui-gameplay": {
 			"owner": "user",
 			"session": "terminal",
-			"setup": "An inventory task plus a quantity prompt or vendor trade.",
-			"framing": "Keep changing footer actions and resulting items/quantities visible.",
-			"expected": "The reader can follow a multi-step task without guessing which pane has focus.",
+			"setup": "A real inventory or vendor quantity prompt.",
+			"framing": "Show the prompt with relevant item and footer actions.",
+			"expected": "The reader recognizes how a multi-step inventory task is presented.",
 			"priority": "later"
 		},
 		"item-appraisal": {
@@ -246,36 +246,28 @@
 			"expected": "A reader can find requirements and effective values at website size.",
 			"priority": "later"
 		},
-		"inventory-moves": {
-			"owner": "agent",
-			"session": "gear",
-			"setup": "Two packs and an equippable item; Native sorting selected.",
-			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Keep source and destination plus the equipment strip visible.",
-			"expected": "Reordering, bag transfers and equip/unequip have clear visible results.",
-			"priority": "later"
-		},
 		"inventory-merge": {
 			"owner": "agent",
 			"session": "gear",
-			"setup": "Several partially filled compatible stacks in one bag, with free space for a split.",
-			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Show the Y quantity prompt, bag Auto-merge action and completion feedback.",
-			"expected": "The split amount, merged stacks and freed-slot feedback are readable.",
+			"setup": "An inventory pack-strip or bag-header context menu open.",
+			"framing": "Crop the bag control and popup, with Auto-merge readable.",
+			"expected": "The reader can find the Auto-merge action.",
 			"priority": "later"
 		},
 		"action-bars": {
 			"owner": "agent",
 			"session": "gear",
-			"setup": "Usable item and saved loadout, plus room to clone a bar.",
-			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Keep drag sources, bar menu/layout controls and keyboard focus hints in view.",
-			"expected": "Binding, cloning, rotation and keyboard activation are understandable.",
+			"setup": "A filled action bar with its menu expanded.",
+			"framing": "Frame just the bar and popup; all four menu actions are readable.",
+			"expected": "The reader can locate Clear, Cycle, Clone and Delete.",
 			"priority": "later"
 		},
 		"character-creation": {
 			"owner": "agent",
 			"session": "setup",
-			"setup": "An unused character slot and a server on which creating a sample character is acceptable.",
-			"framing": "Show appearance, Skills & Stats and review in separate short beats.",
-			"expected": "Creation finishes on the selected new roster entry before explicit world entry.",
+			"setup": "A new character draft on the Race page.",
+			"framing": "Capture the creation page and preview, omitting unrelated application chrome.",
+			"expected": "The reader recognizes the race choices and character preview.",
 			"priority": "later"
 		},
 		"hardware-info": {
@@ -289,9 +281,9 @@
 		"target-indicators": {
 			"owner": "user",
 			"session": "controls",
-			"setup": "Use several nearby creatures or objects. Start an attack, then select another object while the attack continues.",
-			"framing": "Keep the selected outline and active combat target visible in a small world-view crop; omit unrelated HUD panels.",
-			"expected": "Show the bold selected-object outline and the separate reticle on an active combat target.",
+			"setup": "A selected object and a different active combat target.",
+			"framing": "Show both entities, their outline/reticle and enough scene context.",
+			"expected": "The still distinguishes selection from the active fight.",
 			"priority": "first"
 		},
 		"mobile-combat": {
@@ -303,19 +295,19 @@
 			"priority": "first"
 		},
 		"minimap": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "world",
-			"setup": "Use an outdoor route and a dungeon entrance.",
-			"framing": "Keep the minimap readable beside the surrounding scene.",
-			"expected": "Show outdoor terrain, buildings, impassable areas and elevation, then walk a winding dungeon passage and retrace part of the visible breadcrumb trail.",
+			"setup": "Outdoor minimap with useful terrain, buildings and impassable zones.",
+			"framing": "Crop the minimap at a readable scale.",
+			"expected": "The reader sees the terrain information available around them.",
 			"priority": "first"
 		},
 		"creature-appraisal": {
 			"owner": "agent",
 			"session": "controls",
-			"setup": "A nearby creature and a player with a distinctive appearance; several selectable objects.",
-			"framing": "Keep the appraisal model and selected-target HUD visible in a compact crop, with enough world context to orient the reader.",
-			"expected": "Examine a creature or player, rotate the preview, then select another target while the original appraisal stays open. Show the available creature and player details.",
+			"setup": "A player appraisal with a loaded 3D model and useful character details.",
+			"framing": "Crop the appraisal window; show the model and identity clearly.",
+			"expected": "The reader recognizes the model preview; prose explains rotation and independent selection.",
 			"priority": "first"
 		},
 		"selected-hud": {
@@ -413,6 +405,62 @@
 			"framing": "Crop only the equipment strip: equipped slots, scroll controls and helmet/cloak/loadout toolbar. Exclude adjacent bag contents.",
 			"expected": "The reader recognizes the equipment slots and can locate the visibility and loadout controls.",
 			"priority": "first"
+		},
+		"inventory-split": {
+			"owner": "agent",
+			"session": "gear",
+			"setup": "A carried stack with the split quantity dialog open.",
+			"framing": "Crop the modal with item name, amount, slider and Split button.",
+			"expected": "The quantity choice is clear without showing the whole inventory.",
+			"priority": "later"
+		},
+		"creation-appearance": {
+			"owner": "agent",
+			"session": "setup",
+			"setup": "The same draft on the Appearance page.",
+			"framing": "Keep the preview and appearance choices visible.",
+			"expected": "The reader recognizes the appearance controls and clothing reroll.",
+			"priority": "later"
+		},
+		"creation-build": {
+			"owner": "agent",
+			"session": "setup",
+			"setup": "The same draft with attributes and skills allocated.",
+			"framing": "Show the combined attributes, starting vitals and skill groups.",
+			"expected": "The reader sees the build together in one place.",
+			"priority": "later"
+		},
+		"creation-review": {
+			"owner": "agent",
+			"session": "setup",
+			"setup": "The same draft on the final Review page.",
+			"framing": "Show the final build, starting town and Create character action.",
+			"expected": "The reader can recognize the final review before creation.",
+			"priority": "later"
+		},
+		"combat-controls-missile": {
+			"owner": "agent",
+			"session": "controls",
+			"setup": "A bow equipped with ammunition, in combat stance.",
+			"framing": "Crop the curved HUD with accuracy, height and ammunition.",
+			"expected": "The reader recognizes the missile variation and ammunition display.",
+			"priority": "later"
+		},
+		"minimap-dungeon": {
+			"owner": "user",
+			"session": "world",
+			"setup": "A dungeon minimap after walking a winding route.",
+			"framing": "Crop the minimap with passages and breadcrumb trail visible.",
+			"expected": "The reader can distinguish the passage layout and their recent route.",
+			"priority": "later"
+		},
+		"waypoint-minimap": {
+			"owner": "agent",
+			"session": "world",
+			"setup": "The same waypoint visible on the minimap.",
+			"framing": "Crop the minimap with direction and distance visible.",
+			"expected": "The reader recognizes the guidance toward the destination.",
+			"priority": "later"
 		}
 	}
 }

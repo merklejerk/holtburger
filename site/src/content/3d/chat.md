@@ -1,6 +1,6 @@
 ---
 title: 'Chat & emotes'
-description: 'Find commands as you type, catch up on messages, and get back to playing.'
+description: 'Chat that stays out of the way, with command suggestions and useful links.'
 section: '3D client'
 ---
 
@@ -22,13 +22,13 @@ Type `/help` for the command list or `/help COMMAND` for one command. Both `/` a
 
 <Media id="chat-completion" detail />
 
-## Read older messages
+## Keep the world clickable
 
-Chat normally follows new messages and lets you click through the history into the world. To scroll back, select text or click a coordinate link, hold **Control** (**Command** on macOS) while using the history. Release it to return to live messages.
+Inactive chat lets clicks pass through to the world. You can select, steer and interact in the space behind the chat buffer without moving it out of the way.
 
-For longer reading, use **Interact with chat history** to keep the history active. It holds your place while you scroll back. Turn the toggle off when finished to resume following new messages.
+Hold **Control** (**Command** on macOS) when you want to scroll, select text or click a chat link. Release it to make that space clickable in the world again. Use the **Interact with chat history** icon to leave chat interactive until you toggle it off.
 
-Typing also makes the history interactive. Clicking the history switches from typing to reading; press **Enter** to return to your message. **Escape** leaves the history or clears the message you are editing and returns control to the game. If command suggestions are open, the first Escape dismisses them.
+Typing also activates chat. **Enter** opens the composer; sending returns control to the game. **Escape** leaves history interaction or clears the message you are editing. If command suggestions are open, the first Escape dismisses them.
 
 <Media id="chat" detail />
 

@@ -126,7 +126,7 @@ Prefer tight component crops beside the relevant instructions. Use a still to
 identify a control or read a panel. Default to stills for menus, modals, maps
 and previews; explain routine results in prose. Use a short clip when movement,
 timing or a viewport animation is the feature. Keep loadout footage to creation
-and saving. Use manually selected screenshots for multi-page builders. Keep enough surrounding context to orient the reader, and preserve readable
+and saving. Use screenshot carousels for multi-page builders. Keep enough surrounding context to orient the reader, and preserve readable
 text at the displayed size. Resize the actual window to fit the demonstrated task
 before cropping; avoid exposing extra inventory rows or empty space. Stock only
 the items needed to make the interaction clear. Reserve full gameplay frames for

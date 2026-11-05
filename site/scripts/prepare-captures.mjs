@@ -68,12 +68,24 @@ export async function prepareCaptures() {
 		let anchor = '';
 		for (const node of unified().use(remarkParse).parse(source).children) {
 			if (node.type === 'heading') anchor = slugger.slug(toString(node));
-			if (node.type !== 'html') continue;
-			for (const match of node.value.matchAll(/<Media\s+id="([^"]+)"/g)) {
+			if (node.type !== 'html' && node.type !== 'paragraph') continue;
+			// Component props with Svelte expressions are paragraph text to CommonMark.
+			const markup = node.type === 'html' ? node.value : toString(node);
+			for (const match of markup.matchAll(/<Media\s+id="([^"]+)"/g)) {
 				const id = match[1];
 				if (!Object.hasOwn(media, id))
 					throw new Error(`Unknown media placement: ${id}`);
 				place(id, `${path.slice(0, -3)}/${anchor ? `#${anchor}` : ''}`);
+			}
+			for (const match of markup.matchAll(
+				/<MediaCarousel\s+[^>]*images=\{\[([^\]]+)\]\}/g
+			)) {
+				for (const item of match[1].matchAll(/['"]([^'"]+)['"]/g)) {
+					const id = item[1];
+					if (!Object.hasOwn(media, id))
+						throw new Error(`Unknown carousel media: ${id}`);
+					place(id, `${path.slice(0, -3)}/${anchor ? `#${anchor}` : ''}`);
+				}
 			}
 		}
 	}

@@ -444,7 +444,8 @@ em {
 }
 .margin-plate > a,
 .terminal-plate > a,
-.media-mount {
+.media-mount,
+.media-carousel {
 	display: block;
 	padding: 8px;
 	background:
@@ -1010,30 +1011,65 @@ figcaption a {
 	}
 }
 
-/* Native radios keep screenshot navigation usable before client scripts load. */
-.media-sequence-controls {
+.media-carousel {
+	position: relative;
+	min-width: 0;
+	margin: 1.5rem 0;
+}
+.media-carousel-viewport {
 	display: flex;
-	flex-wrap: wrap;
-	gap: 0.5rem;
+	overflow-x: auto;
+	scroll-snap-type: x mandatory;
+	overscroll-behavior-x: contain;
+	scrollbar-width: none;
 }
-.media-sequence-controls label:has(input:checked) {
-	outline: 2px solid var(--link);
-	outline-offset: 2px;
+.media-carousel-slide {
+	flex: 0 0 100%;
+	min-width: 0;
+	scroll-snap-align: start;
+	scroll-snap-stop: always;
 }
-
-.media-sequence-controls label {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.4rem;
-	cursor: pointer;
+.media-carousel-slide .media-figure {
+	margin: 0;
 }
-.media-sequence-page {
+/* The shared carousel frame stays still while its unframed images slide. */
+.media-carousel-slide .media-mount {
+	padding: 0;
+	background: none;
+	border: 0;
+	border-image: none;
+	box-shadow: none;
+}
+.media-carousel-slide figcaption {
 	display: none;
 }
-.media-sequence:has(input[value='race']:checked) [data-media-page='race'],
-.media-sequence:has(input[value='appearance']:checked)
-	[data-media-page='appearance'],
-.media-sequence:has(input[value='build']:checked) [data-media-page='build'],
-.media-sequence:has(input[value='review']:checked) [data-media-page='review'] {
-	display: block;
+.media-carousel-arrow {
+	background: none;
+	border: 0;
+	box-shadow: none;
+	color: inherit;
+	cursor: pointer;
+	position: absolute;
+	top: 50%;
+	transform: translateY(-50%);
+	display: grid;
+	place-items: center;
+	width: 2rem;
+	height: 2rem;
+	padding: 0;
+	font-size: 1.6rem;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 150ms;
+}
+.media-carousel-previous {
+	left: 0.5rem;
+}
+.media-carousel-next {
+	right: 0.5rem;
+}
+.media-carousel:hover .media-carousel-arrow,
+.media-carousel:focus-within .media-carousel-arrow {
+	opacity: 1;
+	pointer-events: auto;
 }

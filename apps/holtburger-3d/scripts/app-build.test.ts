@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	appBuildSchema,
 	releaseVersionSchema,
+	SOURCE_REVISION_LENGTH,
 } from "../src/app/app-build-contract";
 import { readAppBuild } from "./app-build";
 
@@ -81,5 +82,30 @@ describe("release build identity", () => {
 				development: false,
 			}).success,
 		).toBe(false);
+	});
+
+	it("admits nightly versions only when their short hash matches the captured revision", () => {
+		const revision = "a".repeat(SOURCE_REVISION_LENGTH);
+		const build = {
+			version: `0.2.0-nightly-${revision}`,
+			channel: "beta",
+			kind: "nightly",
+			revision,
+			modified: false,
+			development: false,
+		};
+		expect(appBuildSchema.parse(build)).toEqual(build);
+		for (const suffix of [
+			"b".repeat(SOURCE_REVISION_LENGTH),
+			revision.slice(1),
+			`${revision}b`,
+			"a".repeat(40),
+		])
+			expect(
+				appBuildSchema.safeParse({
+					...build,
+					version: `0.2.0-nightly-${suffix}`,
+				}).success,
+			).toBe(false);
 	});
 });

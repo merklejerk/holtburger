@@ -223,7 +223,7 @@ describe("application update ownership", () => {
 		const { updates, request } = fixture({
 			...build,
 			kind: "nightly",
-			version: `0.2.0-nightly-${"a".repeat(40)}`,
+			version: `0.2.0-nightly-${build.revision}`,
 		});
 		updates.start();
 		updates.setWindowVisible(true);
@@ -285,7 +285,7 @@ it("loads only valid, clean packaged metadata for the checking owner", () => {
 		for (const overrides of [
 			{ development: true },
 			{ modified: true },
-			{ kind: "nightly", version: `0.2.0-nightly-${"a".repeat(40)}` },
+			{ kind: "nightly", version: `0.2.0-nightly-${build.revision}` },
 			{ channel: "unknown" },
 		]) {
 			writeFileSync(path, JSON.stringify({ ...build, ...overrides }));

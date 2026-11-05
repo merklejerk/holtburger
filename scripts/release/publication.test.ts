@@ -28,7 +28,7 @@ import {
 } from "./publication.ts";
 import { publishFrozenRelease } from "./publishing.ts";
 import { createManifestFixture, createSourceFixture } from "./test-fixtures.ts";
-import { bumpVersion } from "./version.ts";
+import { NIGHTLY_HASH_LENGTH, bumpVersion } from "./version.ts";
 import { TARGETS } from "./contracts.ts";
 
 /** Complete synthetic GitHub inventory over an independently constructed release manifest. */
@@ -117,7 +117,7 @@ test("draft and historical/nightly tags never request manifests", (t) => {
         "nightly",
         "candidate-20261103-abcdef123",
         "alpha-20261103-abcdef123",
-        `v0.2.0-nightly-${"a".repeat(40)}`,
+        `v0.2.0-nightly-${"a".repeat(NIGHTLY_HASH_LENGTH)}`,
       ].map((tag_name) => ({ draft: false, tag_name })),
     ],
     () => {
@@ -350,7 +350,7 @@ test("publication uploads before making the complete distribution public and rej
       root,
       distribution(
         "nightly",
-        `0.2.0-nightly-${identity.commit}`,
+        `0.2.0-nightly-${identity.commit.slice(0, NIGHTLY_HASH_LENGTH)}`,
         identity.commit,
       ),
     ).includes("They do not check for updates"),
@@ -390,7 +390,11 @@ test("nightlies and older beta retries never replace the newest beta as latest",
   );
   for (const identity of [
     distribution("release", "0.2.1", "a".repeat(40)),
-    distribution("nightly", `0.3.0-nightly-${"c".repeat(40)}`, "c".repeat(40)),
+    distribution(
+      "nightly",
+      `0.3.0-nightly-${"c".repeat(NIGHTLY_HASH_LENGTH)}`,
+      "c".repeat(40),
+    ),
   ]) {
     const api: GitHub = (args) => {
       if (args.includes("--slurp"))

@@ -24,7 +24,7 @@ import { withDeleteLock } from "./windows-native.ts";
 
 test("installer resources keep SemVer display separate from unsigned 16-bit numeric version", () => {
 	assert.equal(numericVersion("0.2.1"), "0.2.1.0");
-	assert.equal(numericVersion("0.2.1-nightly-abcdef"), "0.2.1.0");
+	assert.equal(numericVersion("0.2.1-nightly-abcdef12"), "0.2.1.0");
 	assert.throws(() => numericVersion("65536.0.0"), /limits/);
 	assert.throws(() => numericVersion("0.2.1+metadata"), /metadata/);
 });

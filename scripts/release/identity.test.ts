@@ -14,6 +14,7 @@ import {
   validateSourceTag,
 } from "./identity.ts";
 import {
+  NIGHTLY_HASH_LENGTH,
   checkVersions,
   readChannel,
   validateChannelVersion,
@@ -42,7 +43,20 @@ test("strict suite SemVer matches the shared frontend precedence corpus", () => 
   ])
     assert.throws(() => validateVersion(invalid));
   validateChannelVersion("beta", "0.2.0", "release");
-  validateChannelVersion("beta", `0.2.0-nightly-${"a".repeat(40)}`, "nightly");
+  validateChannelVersion(
+    "beta",
+    `0.2.0-nightly-${"a".repeat(NIGHTLY_HASH_LENGTH)}`,
+    "nightly",
+  );
+  for (const suffix of [
+    "a".repeat(NIGHTLY_HASH_LENGTH - 1),
+    "a".repeat(NIGHTLY_HASH_LENGTH + 1),
+    "a".repeat(40),
+    "G".repeat(NIGHTLY_HASH_LENGTH),
+  ])
+    assert.throws(() =>
+      validateChannelVersion("beta", `0.2.0-nightly-${suffix}`, "nightly"),
+    );
   for (const invalid of ["1.0.0", "0.2.0-beta.1", "0.2.0-nightly-abcdef"])
     assert.throws(() => validateChannelVersion("beta", invalid, "release"));
 });
@@ -73,7 +87,10 @@ test("real npm/Cargo nightly preparation preserves source and root tooling on re
   const identity = sourceDistribution(root, "nightly");
   const release = sourceDistribution(root, "release");
   assert.equal(release.tag, "v0.2.0");
-  assert.equal(identity.tag, `v0.2.0-nightly-${identity.commit}`);
+  assert.equal(
+    identity.tag,
+    `v0.2.0-nightly-${identity.commit.slice(0, NIGHTLY_HASH_LENGTH)}`,
+  );
   prepareSource(root, identity);
   prepareSource(root, identity);
   assert.equal(git(root, "rev-parse", "HEAD"), identity.commit);
@@ -82,7 +99,22 @@ test("real npm/Cargo nightly preparation preserves source and root tooling on re
   assert.equal(readFileSync(join(root, "package-lock.json"), "utf8"), rootLock);
   assert.throws(
     () => distribution("nightly", identity.version, "b".repeat(40)),
-    /full source SHA/,
+    /short source SHA/,
+  );
+});
+
+test("nightly short-hash tags still bind the full source commit", (t) => {
+  const root = createSourceFixture(t);
+  const identity = sourceDistribution(root, "nightly");
+  git(root, "tag", identity.tag);
+  validateSourceTag(root, identity);
+  const otherCommit =
+    identity.commit.slice(0, -1) + (identity.commit.endsWith("a") ? "b" : "a");
+  const conflicting = distribution("nightly", identity.version, otherCommit);
+  assert.equal(conflicting.tag, identity.tag);
+  assert.throws(
+    () => validateSourceTag(root, conflicting),
+    /another source commit/,
   );
 });
 

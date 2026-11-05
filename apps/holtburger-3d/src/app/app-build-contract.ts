@@ -14,6 +14,8 @@ export const releaseVersionSchema = z
 
 /** Distribution kind controls version validation and native update eligibility. */
 export const distributionKindSchema = z.enum(["release", "nightly"]);
+/** The source prefix used in displayed revisions and nightly version suffixes. */
+export const SOURCE_REVISION_LENGTH = 8;
 
 /** The packaged renderer and native update owner consume the same captured identity. */
 export const appBuildSchema = z
@@ -27,7 +29,9 @@ export const appBuildSchema = z
 		/** Release builds check for updates; nightly builds never do. */
 		kind: distributionKindSchema,
 		/** Abbreviated source commit displayed beside the version. */
-		revision: z.string().regex(/^[0-9a-f]{8}$/),
+		revision: z
+			.string()
+			.regex(new RegExp(`^[0-9a-f]{${SOURCE_REVISION_LENGTH}}$`)),
 		/** Captures tracked, untracked and submodule changes at build time. */
 		modified: z.boolean(),
 	})
@@ -36,7 +40,7 @@ export const appBuildSchema = z
 		(value) =>
 			(value.kind === "release"
 				? /^0\.\d+\.\d+$/
-				: /^0\.\d+\.\d+-nightly-[0-9a-f]{40}$/
+				: new RegExp(`^0\\.\\d+\\.\\d+-nightly-${value.revision}$`)
 			).test(value.version),
 		"Distribution version must match its release or nightly kind",
 	)

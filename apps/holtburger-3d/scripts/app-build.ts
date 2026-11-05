@@ -6,6 +6,7 @@ import {
 	appBuildSchema,
 	distributionKindSchema,
 	releaseChannelSchema,
+	SOURCE_REVISION_LENGTH,
 	type AppBuild,
 } from "../src/app/app-build-contract.js";
 
@@ -20,7 +21,7 @@ export function readAppBuild(appRoot: string, development: boolean): AppBuild {
 			cwd: appRoot,
 			encoding: "utf8",
 		}).trim()
-	).slice(0, 8);
+	).slice(0, SOURCE_REVISION_LENGTH);
 	const modified = process.env.HOLTBURGER_SOURCE_MODIFIED;
 	if (modified !== undefined && modified !== "0" && modified !== "1")
 		throw new Error("HOLTBURGER_SOURCE_MODIFIED must be 0 or 1");

@@ -13,6 +13,7 @@ import {
   cargoWorkspace,
   checkVersions,
   distributionKind,
+  NIGHTLY_HASH_LENGTH,
   validateChannelVersion,
   validateReleaseIncrement,
 } from "./version.ts";
@@ -58,8 +59,11 @@ export function distribution(
   const selected = distributionKind.parse(kind);
   commitSchema.parse(commit);
   validateChannelVersion("beta", version, selected);
-  if (selected === "nightly" && !version.endsWith(`-nightly-${commit}`))
-    throw new Error("Nightly version must end with its full source SHA");
+  if (
+    selected === "nightly" &&
+    !version.endsWith(`-nightly-${commit.slice(0, NIGHTLY_HASH_LENGTH)}`)
+  )
+    throw new Error("Nightly version must end with its short source SHA");
   return { kind: selected, version, commit, tag: `v${version}` };
 }
 
@@ -72,7 +76,9 @@ export function sourceDistribution(root: string, kind: string): Distribution {
   validateChannelVersion("beta", base, "release");
   return distribution(
     kind,
-    kind === "nightly" ? `${base}-nightly-${commit}` : base,
+    kind === "nightly"
+      ? `${base}-nightly-${commit.slice(0, NIGHTLY_HASH_LENGTH)}`
+      : base,
     commit,
   );
 }

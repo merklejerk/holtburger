@@ -11,6 +11,8 @@ export const distributionKind = z.enum(["release", "nightly"]);
 export const releaseChannel = z.literal("beta");
 /** Automation and manual overrides can choose only the next patch or minor. */
 export const releaseBump = z.enum(["patch", "minor"]);
+/** Nightly versions carry a fixed short prefix; provenance retains the full commit. */
+export const NIGHTLY_HASH_LENGTH = 8;
 
 /** Compute the next zero-major release; callers never accept an AI-supplied version. */
 export function nextReleaseVersion(current: string, bump: string): string {
@@ -73,7 +75,7 @@ export function validateVersion(version: string): void {
     throw new Error(`Invalid suite SemVer: ${version}`);
 }
 
-/** Beta accepts unsuffixed zero-major releases or an exact full-SHA nightly suffix. */
+/** Beta accepts unsuffixed zero-major releases or a short source-hash nightly suffix. */
 export function validateChannelVersion(
   channel: string,
   version: string,
@@ -84,7 +86,9 @@ export function validateChannelVersion(
   const selected = distributionKind.parse(kind);
   const base = "0\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)";
   const pattern =
-    selected === "release" ? base : `${base}-nightly-[0-9a-f]{40}`;
+    selected === "release"
+      ? base
+      : `${base}-nightly-[0-9a-f]{${NIGHTLY_HASH_LENGTH}}`;
   if (!new RegExp(`^${pattern}$`).test(version))
     throw new Error(
       "Beta distributions require an unsuffixed 0.x.y or source-stamped nightly version",

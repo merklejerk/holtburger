@@ -214,10 +214,11 @@ and probe each platform, including launcher-first and direct-client update lifec
 with temporary profiles and intercepted browser opening.
 
 The nightly wrapper runs every eight hours or by manual dispatch, always from main. It reads
-the current checked-in base version and appends `-nightly-FULL_SOURCE_SHA`, for example
-`0.2.0-nightly-0123456789abcdef0123456789abcdef01234567`. Its tag is `v` plus that complete
+the current checked-in base version and appends `-nightly-SHORT_SOURCE_SHA`, using the first
+eight hexadecimal characters, for example `0.2.0-nightly-01234567`. Its tag is `v` plus that complete
 version, pointing to original main source. There is no floating nightly tag. Hashes identify
-builds and are not ordered for update discovery.
+builds and are not ordered for update discovery. Manifests and provenance retain the full
+40-character source commit. An existing short-hash tag for another commit is rejected.
 
 Each disposable nightly build/assembly checkout stamps only the four suite version files.
 Preparation verifies an initially clean source and permits only the exact version-field delta,

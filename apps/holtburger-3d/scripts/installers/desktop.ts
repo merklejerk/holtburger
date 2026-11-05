@@ -24,6 +24,7 @@ import { verifyElectronPackage } from "../verify-electron-package.mjs";
 import {
 	distributionKindSchema,
 	releaseVersionSchema,
+	SOURCE_REVISION_LENGTH,
 } from "../../src/app/app-build-contract.ts";
 import {
 	APP_ROOT,
@@ -340,7 +341,9 @@ async function verifyWindowsInstaller(
 		setup(installer, false, info.version);
 		const base = info.version.split("-", 1)[0],
 			alternateVersion =
-				info.kind === "release" ? `${base}-nightly-${info.commit}` : base,
+				info.kind === "release"
+					? `${base}-nightly-${info.commit.slice(0, SOURCE_REVISION_LENGTH)}`
+					: base,
 			alternate = join(work, "alternate-distribution.exe");
 		compileWindows(appRoot, native, alternateVersion, alternate, compiler);
 		setup(alternate, false, alternateVersion);

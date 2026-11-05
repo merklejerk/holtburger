@@ -55,6 +55,10 @@ jobs:
           toolchain: 1.95.0
           targets: ${{ matrix.triple }}
       - uses: Swatinem/rust-cache@v2
+      # Cache cleanup removes V8's native archive in the target release profile
+      # while retaining build metadata. Rebuild V8 to download its archive again.
+      - name: Rebuild V8 to restore its native library
+        run: cargo clean --locked --release --target '${{ matrix.triple }}' --package v8
       - name: Validate and prepare distribution versions
         run: |
           if [ "$HOLTBURGER_DISTRIBUTION" = nightly ]; then cargo fetch --locked; fi

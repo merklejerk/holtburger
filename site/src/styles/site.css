@@ -751,6 +751,9 @@ figcaption a {
 .media-figure--detail {
 	max-width: 30rem;
 }
+.media-figure--detail:has(img) {
+	width: fit-content;
+}
 .media-figure--detail .media-placeholder {
 	min-height: 120px;
 	padding: 1rem;

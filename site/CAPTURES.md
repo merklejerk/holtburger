@@ -82,21 +82,19 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 
 ### Selected-entity actions
 
-**First · agent · pending · still** — ID: `selected-hud`
+**First · agent · available · still** — ID: `selected-hud`
 
 - Setup: A selected player with several available actions.
 - Frame: Crop only the selected-entity HUD and its open menu; keep labels readable.
-- Action/purpose: Show a tight crop of the selected name, health bar, magnifying glass and open actions menu.
 - Expected result: Show a tight crop of the selected name, health bar, magnifying glass and open actions menu.
 - Used in: [3d/combat/#use-the-selected-entity-hud](https://merklejerk.github.io/holtburger/3d/combat/#use-the-selected-entity-hud)
 
 ### Read the jump preview
 
-**First · agent · pending · still** — ID: `jump-preview`
+**First · agent · available · still** — ID: `jump-preview`
 
 - Setup: A safe jump with a visible landing and precise jump mode active.
 - Frame: Crop to the character, complete arc, landing target and power control; omit unrelated HUD panels.
-- Action/purpose: Show the landing target, trajectory arc and power control together in a focused world-view crop.
 - Expected result: Show the landing target, trajectory arc and power control together in a focused world-view crop.
 - Used in: [3d/movement-camera/#precise-jumping](https://merklejerk.github.io/holtburger/3d/movement-camera/#precise-jumping)
 
@@ -122,21 +120,19 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 
 ### A message becomes a destination or target
 
-**Later · agent · pending · still** — ID: `chat-links`
+**Later · agent · available · still** — ID: `chat-links`
 
 - Setup: A coordinate message and a real entity alert in the same chat buffer.
 - Frame: Crop to the two linked messages and the history-interaction control.
-- Action/purpose: Show coordinate and entity-alert links in the chat buffer with history interaction enabled.
 - Expected result: Show coordinate and entity-alert links in the chat buffer with history interaction enabled.
 - Used in: [3d/chat/#use-links-in-chat](https://merklejerk.github.io/holtburger/3d/chat/#use-links-in-chat)
 
 ### Find something nearby
 
-**Later · agent · pending · still** — ID: `nearby-list`
+**Later · agent · available · still** — ID: `nearby-list`
 
 - Setup: Several nearby creatures or objects with distinguishable names.
 - Frame: Crop the Nearby panel with an active search and a short result list.
-- Action/purpose: Show the Nearby name search, useful filters and matching results.
 - Expected result: Show the Nearby name search, useful filters and matching results.
 - Used in: [3d/nearby/#narrow-the-nearby-list](https://merklejerk.github.io/holtburger/3d/nearby/#narrow-the-nearby-list)
 
@@ -156,41 +152,37 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Find a spell and bind it
 
-**First · agent · pending · clip** — ID: `spells`
+**First · agent · available · clip** — ID: `spells`
 
 - Setup: Known spells in several schools/levels and an empty spell-bar cell.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Keep search, filters and destination bar readable.
-- Action/purpose: Search and filter the spellbook, then drag a spell into an action bar.
 - Expected result: A found spell is inspected and dragged to its bar, then used with the correct target.
 - Used in: [3d/#prepare-your-next-move](https://merklejerk.github.io/holtburger/3d/#prepare-your-next-move), [3d/spells/#build-your-spell-bars](https://merklejerk.github.io/holtburger/3d/spells/#build-your-spell-bars)
 
 ### Review a mixed salvage batch
 
-**First · agent · pending · still** — ID: `salvage`
+**First · agent · available · still** — ID: `salvage`
 
 - Setup: Two expendable materials, including a stack; prepare but do not submit the batch.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Close view of Items to salvage and Estimated output; retain all quantities.
-- Action/purpose: Show two materials, their estimated outputs, and one queued stack with its full quantity.
 - Expected result: Whole-stack inclusion and separate material output rows are visible.
 - Used in: [3d/crafting/#review-the-salvage-output](https://merklejerk.github.io/holtburger/3d/crafting/#review-the-salvage-output)
 
 ### All your packs in one view
 
-**First · agent · pending · clip** — ID: `inventory-overview`
+**First · agent · available · clip** — ID: `inventory-overview`
 
 - Setup: Two populated packs with varied item names and types; equipment visible alongside contents.
 - Frame: Crop the inventory panel. Show both bag headings in the shared scroll view, jump using a pack icon, then cycle Native, Alphabetical and Item type sorting.
-- Action/purpose: Show the shared inventory view, jump between bags and cycle Native, Alphabetical and Item type sorting.
 - Expected result: The reader understands that bags share a scrolling view and sorting reorganizes each bag visually without moving items.
 - Used in: [3d/inventory/#see-your-packs-together](https://merklejerk.github.io/holtburger/3d/inventory/#see-your-packs-together)
 
 ### The equipment strip
 
-**First · agent · pending · still** — ID: `equipment-strip`
+**First · agent · available · still** — ID: `equipment-strip`
 
 - Setup: A few equipped items, with the strip scrolled to its top and its toolbar visible.
 - Frame: Crop only the equipment strip: equipped slots, scroll controls and helmet/cloak/loadout toolbar. Exclude adjacent bag contents.
-- Action/purpose: Show only the equipment strip, with equipped slots, scroll controls and the helmet, cloak and loadout controls.
 - Expected result: The reader recognizes the equipment slots and can locate the visibility and loadout controls.
 - Used in: [3d/inventory/#equipment-at-a-glance](https://merklejerk.github.io/holtburger/3d/inventory/#equipment-at-a-glance)
 
@@ -246,11 +238,10 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Review a crafting attempt
 
-**Later · agent · pending · still** — ID: `crafting-confirmation`
+**Later · agent · available · still** — ID: `crafting-confirmation`
 
 - Setup: A trained Cooking skill, Flour and Water, with crafting-chance confirmation enabled.
 - Frame: Crop the real chance-confirmation dialog. Identify the attempted recipe in its caption or surrounding guide text.
-- Action/purpose: Show a real crafting chance confirmation with its accept and decline controls.
 - Expected result: The server-reported chance and explicit accept/decline controls are readable.
 - Used in: [3d/crafting/#review-the-attempt](https://merklejerk.github.io/holtburger/3d/crafting/#review-the-attempt)
 
@@ -270,21 +261,19 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 ### Read the world map
 
-**First · agent · pending · still** — ID: `world-map-controls`
+**First · agent · available · still** — ID: `world-map-controls`
 
 - Setup: Open the World map with a recognizable location and its visibility controls.
 - Frame: Crop to the map panel; keep labels and layer controls readable.
-- Action/purpose: Crop the World map with its visibility controls, a useful destination and pan/zoom context.
 - Expected result: Crop the World map with its visibility controls, a useful destination and pan/zoom context.
 - Used in: [3d/maps-travel/#read-the-world-map](https://merklejerk.github.io/holtburger/3d/maps-travel/#read-the-world-map)
 
 ### Review both offers
 
-**Later · agent · pending · still** — ID: `player-trade`
+**Later · agent · available · still** — ID: `player-trade`
 
 - Setup: A consenting second player with a small sample offer on each side.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Frame the whole trade window with both participants and confirmation/reset controls.
-- Action/purpose: Show both trade offers, acceptance status, and the withdraw/reset controls using sample participants.
 - Expected result: Both offers and acceptance states are readable; no valuable exchange is required.
 - Used in: [3d/trading/#trade-with-another-player](https://merklejerk.github.io/holtburger/3d/trading/#trade-with-another-player)
 
@@ -300,31 +289,28 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 ### Prepare a house payment
 
-**Later · agent · pending · still** — ID: `housing-payments`
+**Later · agent · available · still** — ID: `housing-payments`
 
 - Setup: A house crystal with a real purchase/maintenance requirement and suitable carried items.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Show eligibility/payment rows and Auto-fill; stop before payment unless desired.
-- Action/purpose: Show a house crystal requirement, carried payment items, Auto-fill and the prepared amounts.
 - Expected result: Prepared amounts and remaining requirements are readable.
 - Used in: [reference/housing/#inspect-a-house-crystal](https://merklejerk.github.io/holtburger/reference/housing/#inspect-a-house-crystal)
 
 ### Separate entry from storage
 
-**Later · agent · pending · still** — ID: `housing-access`
+**Later · agent · available · still** — ID: `housing-access`
 
 - Setup: An owned/permitted house and sample guest entries.
 - Frame: Show Access & guests with separate entry/storage controls and names safe to publish.
-- Action/purpose: Show guest entry and storage permissions with sample names and the current house owner.
 - Expected result: Entry permission is visibly separate from storage permission.
 - Used in: [reference/housing/#manage-access](https://merklejerk.github.io/holtburger/reference/housing/#manage-access)
 
 ### Track a contract
 
-**Later · agent · pending · still** — ID: `journal`
+**Later · agent · available · still** — ID: `journal`
 
 - Setup: An in-progress or repeatable contract with a contact/quest location.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Show filtered contract details, a timer and its map destination; use two stills if needed.
-- Action/purpose: Show a filtered contract with progress, repeat or deadline timer, and its map destination.
 - Expected result: Progress/timing and the useful destination are clear.
 - Used in: [reference/journal/#find-a-contract](https://merklejerk.github.io/holtburger/reference/journal/#find-a-contract)
 
@@ -340,21 +326,19 @@ Group location-dependent work together: a party member for trade/party, an owned
 
 ### Keep the party in view
 
-**Later · agent · pending · still** — ID: `party`
+**Later · agent · available · still** — ID: `party`
 
 - Setup: A small party with a leader and another visible member.
 - Frame: Show the roster/recruitment controls and party HUD together at a readable scale.
-- Action/purpose: Show the party roster and in-world party HUD, including leader and recruitment controls.
 - Expected result: The leader, membership and selected member can be identified.
 - Used in: [3d/maps-travel/#form-a-party](https://merklejerk.github.io/holtburger/3d/maps-travel/#form-a-party)
 
 ### A change of appearance
 
-**Later · agent · pending · still** — ID: `barber`
+**Later · agent · available · still** — ID: `barber`
 
 - Setup: Your server’s barber interaction, with heritage-specific choices available.
 - Frame: Crop Barbershop with appearance choices and Apply/Cancel.
-- Action/purpose: Show the Barbershop appearance controls, heritage-specific choices and Apply/Cancel actions.
 - Expected result: The choices and explicit Apply action are clear; applying is optional.
 - Used in: [reference/appearance/#barbershop](https://merklejerk.github.io/holtburger/reference/appearance/#barbershop)
 
@@ -364,71 +348,64 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Make room for your HUD
 
-**First · agent · pending · still** — ID: `hud`
+**First · agent · available · still** — ID: `hud`
 
 - Setup: Unlock UI layout in a real gameplay scene.
 - Frame: Crop one HUD component with its actual move and resize handles visible; omit unrelated windows.
-- Action/purpose: Show an unlocked HUD component with its move and resize controls.
 - Expected result: The component’s layout-editing affordances are clear at guide size.
 - Used in: [3d/#make-the-interface-yours](https://merklejerk.github.io/holtburger/3d/#make-the-interface-yours), [3d/interface/#move-and-resize-the-hud](https://merklejerk.github.io/holtburger/3d/interface/#move-and-resize-the-hud)
 
 ### Add your server
 
-**First · agent · pending · still** — ID: `launcher`
+**First · agent · available · still** — ID: `launcher`
 
 - Setup: A sample server/profile with account filled and password hidden.
 - Frame: Frame server/profile choices, account and Play; omit private machine details.
-- Action/purpose: Show the launcher server entry and Play action using sample connection details.
 - Expected result: Readers can identify each step used by the connection guide.
 - Used in: [startup/servers/#add-your-account](https://merklejerk.github.io/holtburger/startup/servers/#add-your-account)
 
 ### Find a command as you type
 
-**First · agent · pending · clip** — ID: `chat-completion`
+**First · agent · available · clip** — ID: `chat-completion`
 
 - Setup: Chat input with a partial command and multiple suggestions.
 - Frame: Crop to the composer and suggestions. Show syntax and descriptions, then accept a suggestion.
-- Action/purpose: Type a partial command, browse suggestions and accept one. Keep the input and suggestion list in frame.
 - Expected result: Type a partial command, browse suggestions and accept one. Keep the input and suggestion list in frame.
 - Used in: [3d/chat/#discover-commands-as-you-type](https://merklejerk.github.io/holtburger/3d/chat/#discover-commands-as-you-type)
 
 ### Choose a public server
 
-**First · agent · pending · still** — ID: `treestats-import`
+**First · agent · available · still** — ID: `treestats-import`
 
 - Setup: Open Import from TreeStats with a recognizable public server search.
 - Frame: Crop the import dialog; retain search, software, population and the import control.
-- Action/purpose: Show the TreeStats search results, server software and import action.
 - Expected result: Show the TreeStats search results, server software and import action.
 - Used in: [startup/servers/#import-your-server](https://merklejerk.github.io/holtburger/startup/servers/#import-your-server)
 
 ### Choose a character
 
-**First · agent · pending · still** — ID: `character-roster`
+**First · agent · available · still** — ID: `character-roster`
 
 - Setup: The character selection screen with a sample roster and a selected character.
 - Frame: Crop the roster, selected entry and Enter World/Create character controls for readable text.
-- Action/purpose: Crop the roster, selected entry and enter-world control.
 - Expected result: The selected character and the explicit entry action are clear; omit the broad background.
 - Used in: [startup/characters/#choose-your-character](https://merklejerk.github.io/holtburger/startup/characters/#choose-your-character)
 
 ### Choose your game data
 
-**Later · agent · pending · still** — ID: `content-picker`
+**Later · agent · available · still** — ID: `content-picker`
 
 - Setup: A launcher profile using an actual retail DAT folder.
 - Frame: Crop the content-folder field and Browse/Use application default controls. Native OS file-picker chrome is outside this capture.
-- Action/purpose: Show the launcher’s content-folder selection controls with a real DAT folder selected.
 - Expected result: The reader can locate the application’s folder selection control and see a selected DAT folder.
 - Used in: [startup/settings/#need-the-dats](https://merklejerk.github.io/holtburger/startup/settings/#need-the-dats)
 
 ### Plan a skill improvement
 
-**Later · agent · pending · still** — ID: `character-progression`
+**Later · agent · available · still** — ID: `character-progression`
 
 - Setup: A character sheet with a trainable skill and an affordable improvement quote; do not buy unintentionally.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Show the skill and cost, with a second still for the Train confirmation.
-- Action/purpose: Show a skill detail and its cost, plus the separate confirmation for training a new skill.
 - Expected result: Immediate improvement cost and separately confirmed training are distinguishable.
 - Used in: [reference/character/#improve-a-stat-or-train-a-skill](https://merklejerk.github.io/holtburger/reference/character/#improve-a-stat-or-train-a-skill)
 
@@ -444,11 +421,10 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Inspect an item
 
-**Later · agent · pending · still** — ID: `item-appraisal`
+**Later · agent · available · still** — ID: `item-appraisal`
 
 - Setup: An ordinary item with requirements, effects and effective combat values.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Crop the appraisal window with title and relevant fields; no test errors or missing artwork.
-- Action/purpose: Show item requirements and effective values in a readable appraisal window.
 - Expected result: A reader can find requirements and effective values at website size.
 - Used in: [3d/inspecting/#items](https://merklejerk.github.io/holtburger/3d/inspecting/#items)
 
@@ -464,21 +440,19 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Graphics troubleshooting
 
-**Later · agent · pending · still** — ID: `hardware-info`
+**Later · agent · available · still** — ID: `hardware-info`
 
 - Setup: Launcher App settings open to graphics; machine details safe to show.
 - Frame: Crop the relevant controls and Copy hardware info, without dumping the full report into the image.
-- Action/purpose: Show the launcher graphics settings and Copy hardware info action.
 - Expected result: The troubleshooting action is easy to locate.
 - Used in: [support/#graphics-or-startup-trouble](https://merklejerk.github.io/holtburger/support/#graphics-or-startup-trouble), [support/graphics/#report-a-rendering-problem](https://merklejerk.github.io/holtburger/support/graphics/#report-a-rendering-problem)
 
 ### Save a DAT folder with a profile
 
-**Later · agent · pending · still** — ID: `profile-content`
+**Later · agent · available · still** — ID: `profile-content`
 
 - Setup: A sample launcher profile with its Advanced controls expanded.
 - Frame: Crop the content-folder choice and save-profile action; use a neutral sample path.
-- Action/purpose: Show the profile’s content-folder control and the action that saves the change.
 - Expected result: Show the profile’s content-folder control and the action that saves the change.
 - Used in: [startup/settings/#keep-server-specific-dats-separate](https://merklejerk.github.io/holtburger/startup/settings/#keep-server-specific-dats-separate)
 

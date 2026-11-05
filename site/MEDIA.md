@@ -39,7 +39,8 @@ its MP4 URL, poster, dimensions and captions: use `null` for a silent demonstrat
 or `{ src, language, label }` for a VTT track. A YouTube entry uses its video ID.
 Keep capture IDs stable when replacing planned entries.
 
-Clips have native controls, start muted and use `preload="none"`. YouTube loads
+Clips have native controls, start muted and use `preload="none"`. Silent
+demonstrations loop and play inline on mobile. YouTube loads
 only after a click. Labeled briefs remain where captures are pending.
 
 `npm run check:media` validates the local catalog. Run

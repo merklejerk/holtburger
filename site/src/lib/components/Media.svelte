@@ -38,6 +38,8 @@
 				class="media-video"
 				controls
 				muted
+				playsinline
+				loop={entry.captions === null}
 				preload="none"
 				poster={entry.poster}
 				width={entry.width}

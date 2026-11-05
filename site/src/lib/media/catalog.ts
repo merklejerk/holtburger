@@ -107,62 +107,113 @@ export const media = {
 			'Show outdoor terrain, buildings, impassable areas and elevation, then follow a dungeon passage with the breadcrumb trail visible.'
 	},
 	'selected-hud': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Selected-entity actions',
-		brief:
-			'Show a tight crop of the selected name, health bar, magnifying glass and open actions menu.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/selected-hud-v1.webp'
+		},
+		alt: 'Selected player HUD with character details and social and trade actions.',
+		width: 351,
+		height: 246
 	},
 	'chat-completion': {
-		kind: 'planned-video',
+		kind: 'video',
 		title: 'Find a command as you type',
-		brief:
-			'Type a partial command, browse suggestions and accept one. Keep the input and suggestion list in frame.'
+		src: 'https://merklejerk.github.io/holtburger-media/3d/chat-completion-v2.mp4',
+		poster:
+			'https://merklejerk.github.io/holtburger-media/3d/chat-completion-poster-v2.webp',
+		width: 424,
+		height: 182,
+		captions: null
 	},
 	'chat-links': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'A message becomes a destination or target',
-		brief:
-			'Show coordinate and entity-alert links in the chat buffer with history interaction enabled.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/chat-links-v1.webp'
+		},
+		alt: 'Clickable coordinates and an entity name in chat.',
+		width: 400,
+		height: 32
 	},
 	'nearby-list': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Find something nearby',
-		brief: 'Show the Nearby name search, useful filters and matching results.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/nearby-list-v1.webp'
+		},
+		alt: 'Nearby entities filtered by Guard, with category and alert controls.',
+		width: 396,
+		height: 431
 	},
 	'treestats-import': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Choose a public server',
-		brief:
-			'Show the TreeStats search results, server software and import action.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/treestats-import-v1.webp'
+		},
+		alt: 'TreeStats server search with an expanded public server entry.',
+		width: 560,
+		height: 445
 	},
 	'profile-content': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Save a DAT folder with a profile',
-		brief:
-			'Show the profile’s content-folder control and the action that saves the change.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/profile-content-v1.webp'
+		},
+		alt: 'Profile-specific game data folder and profile save controls.',
+		width: 378,
+		height: 273
 	},
 	'crafting-confirmation': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Review a crafting attempt',
-		brief:
-			'Show a real crafting chance confirmation with its accept and decline controls.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/crafting-confirmation-v1.webp'
+		},
+		alt: 'Flour and Water crafting confirmation showing a 100 percent success chance.',
+		width: 420,
+		height: 122
 	},
 	'world-map-controls': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Read the world map',
-		brief:
-			'Crop the World map with its visibility controls, a useful destination and pan/zoom context.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/world-map-controls-v1.webp'
+		},
+		alt: 'World map with navigation, search and waypoint controls.',
+		width: 587,
+		height: 587
 	},
 	'jump-preview': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Read the jump preview',
-		brief:
-			'Show the landing target, trajectory arc and power control together in a focused world-view crop.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/jump-preview-v1.webp'
+		},
+		alt: 'Precise-jump trajectory and landing preview in the 3D world.',
+		width: 562,
+		height: 544
 	},
 	'character-roster': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Choose a character',
-		brief: 'Crop the roster, selected entry and enter-world control.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/character-roster-v1.webp'
+		},
+		alt: 'Character roster with a selected character and Enter World and Create character controls.',
+		width: 337,
+		height: 449
 	},
 	'smart-tab': {
 		kind: 'planned-video',
@@ -189,27 +240,47 @@ export const media = {
 			'Choose which slots a loadout includes, bind it, and show the resulting equipment change.'
 	},
 	spells: {
-		kind: 'planned-video',
+		kind: 'video',
 		title: 'Find a spell and bind it',
-		brief:
-			'Search and filter the spellbook, then drag a spell into an action bar.'
+		src: 'https://merklejerk.github.io/holtburger-media/3d/spells-v2.mp4',
+		poster:
+			'https://merklejerk.github.io/holtburger-media/3d/spells-poster-v2.webp',
+		width: 452,
+		height: 484,
+		captions: null
 	},
 	hud: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Make room for your HUD',
-		brief: 'Show an unlocked HUD component with its move and resize controls.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/hud-v1.webp'
+		},
+		alt: 'Unlocked minimap with move and resize handles.',
+		width: 215,
+		height: 214
 	},
 	launcher: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Add your server',
-		brief:
-			'Show the launcher server entry and Play action using sample connection details.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/launcher-v1.webp'
+		},
+		alt: 'Launcher with a selected server and profile, account field, masked password and Play button.',
+		width: 418,
+		height: 444
 	},
 	'content-picker': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Choose your game data',
-		brief:
-			'Show the launcher’s content-folder selection controls with a real DAT folder selected.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/content-picker-v1.webp'
+		},
+		alt: 'Game data folder field with Browse and Use application default controls.',
+		width: 378,
+		height: 238
 	},
 	'tui-workflow': {
 		kind: 'planned-video',
@@ -236,10 +307,15 @@ export const media = {
 			'Show the key action and lockpick estimate at a real locked chest, with the outcome visible.'
 	},
 	salvage: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Review a mixed salvage batch',
-		brief:
-			'Show two materials, their estimated outputs, and one queued stack with its full quantity.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/salvage-v1.webp'
+		},
+		alt: 'Salvage review listing items and estimated Steel and Sapphire output.',
+		width: 341,
+		height: 395
 	},
 	vendor: {
 		kind: 'planned-video',
@@ -248,16 +324,26 @@ export const media = {
 			'Queue a purchase and a sale, adjust quantities, review balances, and show the completed trade.'
 	},
 	'player-trade': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Review both offers',
-		brief:
-			'Show both trade offers, acceptance status, and the withdraw/reset controls using sample participants.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/player-trade-v1.webp'
+		},
+		alt: 'Player trade window showing Bread and Cup offers on opposite sides.',
+		width: 413,
+		height: 314
 	},
 	'character-progression': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Plan a skill improvement',
-		brief:
-			'Show a skill detail and its cost, plus the separate confirmation for training a new skill.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/character-progression-v1.webp'
+		},
+		alt: 'Character progression panel with an attribute expanded to show its values and advancement controls.',
+		width: 450,
+		height: 531
 	},
 	waypoints: {
 		kind: 'planned-video',
@@ -266,22 +352,37 @@ export const media = {
 			'Set a waypoint from chat coordinates, then follow its direction and distance on the minimap.'
 	},
 	'housing-payments': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Prepare a house payment',
-		brief:
-			'Show a house crystal requirement, carried payment items, Auto-fill and the prepared amounts.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/housing-payments-v1.webp'
+		},
+		alt: 'Cottage purchase requirements filled with pyreals, a Writ of Refuge and an Iron Heart.',
+		width: 413,
+		height: 486
 	},
 	'housing-access': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Separate entry from storage',
-		brief:
-			'Show guest entry and storage permissions with sample names and the current house owner.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/housing-access-v1.webp'
+		},
+		alt: 'House guest permissions with separate entry and storage access controls.',
+		width: 565,
+		height: 324
 	},
 	journal: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Track a contract',
-		brief:
-			'Show a filtered contract with progress, repeat or deadline timer, and its map destination.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/journal-v1.webp'
+		},
+		alt: 'Expanded Find the Barkeeper contract with its status and contact details.',
+		width: 450,
+		height: 432
 	},
 	'corpse-recovery': {
 		kind: 'planned-video',
@@ -290,10 +391,15 @@ export const media = {
 			'Show a real outdoor death location, /corpse output, a coordinate link becoming a waypoint, and nearby corpse cycling.'
 	},
 	party: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Keep the party in view',
-		brief:
-			'Show the party roster and in-world party HUD, including leader and recruitment controls.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/party-v1.webp'
+		},
+		alt: 'A two-member party with recruitment and experience-sharing controls.',
+		width: 414,
+		height: 432
 	},
 	'nearby-alerts': {
 		kind: 'planned-video',
@@ -314,10 +420,15 @@ export const media = {
 			'Open the T emote wheel, perform an emote, and show the previous combat stance returning.'
 	},
 	barber: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'A change of appearance',
-		brief:
-			'Show the Barbershop appearance controls, heritage-specific choices and Apply/Cancel actions.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/barber-v1.webp'
+		},
+		alt: 'Barbershop appearance choices with Apply and Cancel controls.',
+		width: 359,
+		height: 326
 	},
 	'tui-gameplay': {
 		kind: 'planned-video',
@@ -332,22 +443,36 @@ export const media = {
 			'Rotate a creature or player preview, then change selection while keeping the appraisal open.'
 	},
 	'item-appraisal': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Inspect an item',
-		brief:
-			'Show item requirements and effective values in a readable appraisal window.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/item-appraisal-v1.webp'
+		},
+		alt: 'Item appraisal with requirements, combat values and enchantments.',
+		width: 379,
+		height: 587
 	},
 	'inventory-overview': {
-		kind: 'planned-video',
+		kind: 'video',
 		title: 'All your packs in one view',
-		brief:
-			'Show the shared inventory view, jump between bags and cycle Native, Alphabetical and Item type sorting.'
+		src: 'https://merklejerk.github.io/holtburger-media/3d/inventory-overview-v3.mp4',
+		poster:
+			'https://merklejerk.github.io/holtburger-media/3d/inventory-overview-poster-v3.webp',
+		width: 378,
+		height: 338,
+		captions: null
 	},
 	'equipment-strip': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'The equipment strip',
-		brief:
-			'Show only the equipment strip, with equipped slots, scroll controls and the helmet, cloak and loadout controls.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/equipment-strip-v4.webp'
+		},
+		alt: 'Equipment strip with worn slots, scroll controls and helmet, cloak and loadout buttons.',
+		width: 77,
+		height: 283
 	},
 	'inventory-moves': {
 		kind: 'planned-video',
@@ -374,9 +499,15 @@ export const media = {
 			'Show appearance, Skills & Stats, and review; finish at the selected new character before entering the world.'
 	},
 	'hardware-info': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Graphics troubleshooting',
-		brief: 'Show the launcher graphics settings and Copy hardware info action.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/hardware-info-v1.webp'
+		},
+		alt: 'Graphics settings showing current graphics information and Copy hardware info.',
+		width: 418,
+		height: 421
 	}
 } satisfies Record<string, MediaAsset>;
 

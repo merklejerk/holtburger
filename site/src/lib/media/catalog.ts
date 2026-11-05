@@ -337,6 +337,18 @@ export const media = {
 		brief:
 			'Show item requirements and effective values in a readable appraisal window.'
 	},
+	'inventory-overview': {
+		kind: 'planned-video',
+		title: 'All your packs in one view',
+		brief:
+			'Show the shared inventory view, jump between bags and cycle Native, Alphabetical and Item type sorting.'
+	},
+	'equipment-strip': {
+		kind: 'planned-image',
+		title: 'Equipment beside your packs',
+		brief:
+			'Show worn gear in the equipment strip, compatible-item highlighting and the visibility and loadout controls.'
+	},
 	'inventory-moves': {
 		kind: 'planned-video',
 		title: 'Pack and equip',

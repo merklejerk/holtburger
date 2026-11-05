@@ -8,18 +8,27 @@ section: '3D client'
 import Media from '#lib/components/Media.svelte';
 </script>
 
-## Browse your packs
+## See your packs together
 
-Open **Inventory** and select a pack to see its contents. The equipment area shows what you are wearing; the summary shows your burden.
+Inventory puts your main pack and bags in one scrolling view, with a heading for each bag. Click a pack icon to jump straight to its contents instead of opening bags one at a time.
 
-Use the sort control to cycle **Native**, **Alphabetical**, and **Item type**. Alphabetical and type sorting change the view, so switch back to **Native** when arranging your actual inventory order.
+Cycle the sort control through **Native**, **Alphabetical**, and **Item type** to find things within each bag. Sorting changes the view without moving your items; return to **Native** when arranging their actual order.
 
-## Move and equip
+<Media id="inventory-overview" detail />
+
+## Equipment at a glance
+
+The equipment strip keeps worn gear beside your pack contents. Hover a slot to dim items that cannot go there; drag an item to narrow the strip to compatible slots. Drop it onto a slot to equip it, or drag worn gear back into a bag to unequip it.
+
+Helmet and cloak visibility controls sit below the strip, alongside **Create loadout** for [saved gear swaps](/holtburger/3d/equipment-loadouts/).
+
+<Media id="equipment-strip" detail />
+
+## Move items
 
 - Drag an item onto a compatible stack to merge them.
 - In **Native** sorting, drag an item onto another item to place it before that item when they cannot merge.
 - In **Native** sorting, drag items to pack headers to move them between packs.
-- Drag an item onto an equipment slot to equip it. Drag worn equipment back into contents to unequip it.
 
 You can also reorder ordinary packs. Main Pack stays first and spell foci stay last.
 

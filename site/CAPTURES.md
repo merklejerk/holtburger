@@ -174,6 +174,26 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Expected result: Whole-stack inclusion and separate material output rows are visible.
 - Used in: [3d/crafting/#review-the-salvage-output](https://merklejerk.github.io/holtburger/3d/crafting/#review-the-salvage-output)
 
+### All your packs in one view
+
+**First · agent · pending · clip** — ID: `inventory-overview`
+
+- Setup: Two populated packs with varied item names and types; equipment visible alongside contents.
+- Frame: Crop the inventory panel. Show both bag headings in the shared scroll view, jump using a pack icon, then cycle Native, Alphabetical and Item type sorting.
+- Action/purpose: Show the shared inventory view, jump between bags and cycle Native, Alphabetical and Item type sorting.
+- Expected result: The reader understands that bags share a scrolling view and sorting reorganizes each bag visually without moving items.
+- Used in: [3d/inventory/#see-your-packs-together](https://merklejerk.github.io/holtburger/3d/inventory/#see-your-packs-together)
+
+### Equipment beside your packs
+
+**First · agent · pending · still** — ID: `equipment-strip`
+
+- Setup: Equipped gear beside several equippable items, with a slot hovered to show compatibility dimming.
+- Frame: Crop the equipment strip and adjacent inventory, retaining slot labels, dimmed incompatible items and visibility/loadout controls.
+- Action/purpose: Show worn gear in the equipment strip, compatible-item highlighting and the visibility and loadout controls.
+- Expected result: The reader recognizes the equipment strip and can locate compatible gear and its controls.
+- Used in: [3d/inventory/#equipment-at-a-glance](https://merklejerk.github.io/holtburger/3d/inventory/#equipment-at-a-glance)
+
 ### Open a locked container
 
 **Later · user · pending · clip** — ID: `locks`
@@ -202,7 +222,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Keep source and destination plus the equipment strip visible.
 - Action/purpose: Use Native sorting to move an item between packs, merge a stack, equip and unequip.
 - Expected result: Reordering/transfers, merging and equip/unequip have clear visible results.
-- Used in: [3d/inventory/#move-and-equip](https://merklejerk.github.io/holtburger/3d/inventory/#move-and-equip)
+- Used in: [3d/inventory/#move-items](https://merklejerk.github.io/holtburger/3d/inventory/#move-items)
 
 ### Make space in a bag
 

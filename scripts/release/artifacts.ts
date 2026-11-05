@@ -293,11 +293,13 @@ export function verifyBundle(bundle: string, root: string): BundleInfo {
       );
     if (target.platform !== "win32") accessSync(path, constants.X_OK);
   }
+  // Canonicalize both sides: macOS temporary paths can traverse /var -> /private/var.
+  const canonicalBundle = realpathSync(bundle);
   for (const path of walk(bundle)) {
     if (info.product === "3d" && /\.(hba|hwc)$/i.test(path))
       throw new Error(`Unexpected content archive in h3d: ${path}`);
     if (lstatSync(path).isSymbolicLink()) {
-      const rel = relative(resolve(bundle), realpathSync(path));
+      const rel = relative(canonicalBundle, realpathSync(path));
       if (rel === ".." || rel.startsWith(`..${sep}`))
         throw new Error(`Bundle symlink escapes installation: ${path}`);
     }

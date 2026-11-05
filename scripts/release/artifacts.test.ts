@@ -175,7 +175,7 @@ test("executable inspection reads ELF64, PE and thin Mach-O machine fields", (t)
   );
 });
 
-test("native CLI admission requires exact content/scripts, notices and executable permissions", (t) => {
+test("native CLI admission requires exact content/scripts, notices, executable permissions and contained symlinks", (t) => {
   const root = scratch(t),
     bundle = join(root, "bundle");
   mkdirSync(join(bundle, "content"), { recursive: true });
@@ -226,6 +226,24 @@ test("native CLI admission requires exact content/scripts, notices and executabl
     );
     chmodSync(join(bundle, TOOLS[0]), 0o644);
     assert.throws(() => verifyBundle(bundle, root));
+    chmodSync(join(bundle, TOOLS[0]), 0o755);
+
+    // Model macOS temporary directories reached through a symlinked parent.
+    symlinkSync(".", join(root, "alias"), "dir");
+    const aliasedBundle = join(root, "alias/bundle"),
+      script = join(bundle, "scripts/fixture.js");
+    rmSync(script);
+    symlinkSync("fixture.data.json", script);
+    assert.equal(verifyBundle(aliasedBundle, root).product, "cli");
+
+    // A sibling with the bundle's name as a prefix still lies outside it.
+    writeFileSync(join(root, "bundle-outside.js"), "outside");
+    rmSync(script);
+    symlinkSync("../../bundle-outside.js", script);
+    assert.throws(
+      () => verifyBundle(aliasedBundle, root),
+      /Bundle symlink escapes installation/,
+    );
   }
 });
 

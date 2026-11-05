@@ -209,7 +209,7 @@ function probeInstalled(
 			"scripts/content-startup-probe.mjs",
 			"--package",
 			executable,
-			"--profile-appRoot",
+			"--profile-root",
 			profile,
 			"--expected-server",
 			server,

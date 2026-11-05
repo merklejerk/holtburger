@@ -1,4 +1,4 @@
-<h1><img src="assets/branding/portal-static.svg" width="64" height="64" align="middle" alt="Holtburger portal logo" /> Holtburger</h1>
+<h1><img src="assets/branding/portal-docs.png" width="64" height="64" align="middle" alt="Holtburger portal logo" /> Holtburger</h1>
 
 **The Asheron's Call client, reengineered.**
 
@@ -87,7 +87,7 @@ and simulation behavior. [Command-line tools](apps/holtburger-tools) and the
 investigation, and focused diagnostics.
 
 For terminal scripting, see [your first script](https://merklejerk.github.io/holtburger/tui/scripting/)
-and the bundled [example scripts](assets/scripts).
+and the bundled [example scripts](apps/holtburger-cli/scripts).
 
 ## Development
 
@@ -100,6 +100,25 @@ or newer and npm. Start by cloning the repository:
 git clone https://github.com/merklejerk/holtburger.git
 cd holtburger
 ```
+
+### Repository automation
+
+Repository automation uses Node.js 24.13.1 and npm 11.8.0. Install its dependencies
+with `npm ci` at the repository root. Use `npm run check:tooling`,
+`npm run test:tooling`, and `npm run check:branding` for repository checks;
+`npm run generate:branding` refreshes the checked-in app/docs icons.
+
+The root package delegates frontend commands to independent h3d and website
+packages. Install their dependencies in their own directories; there are no npm
+workspaces. Root commands such as `npm run build:3d` and `npm run check:site` do
+not install application dependencies. Cargo owns the TUI build. Its bundled game
+scripts and mage's nested npm compiler belong to `apps/holtburger-cli/scripts/`;
+see the [TUI script build instructions](apps/holtburger-cli/scripts/src/mage/README.md).
+
+Release, content, notices, and update-feed commands also live at the root; see
+[release maintenance](release/RELEASING.md). General automation runs as typed
+TypeScript directly in Node. Python remains app-local for LIEF binary inspection,
+Windows installer API checks, and the optional font fixture generator.
 
 ### 3D client
 
@@ -139,7 +158,7 @@ From the repository root:
 Replace SERVER, ACCOUNT, and PASSWORD with your server address and credentials.
 Pass `--release` first for an optimized build. The runner uses `local/scripts/`
 for personal scripts and preferences, alongside the bundled scripts in
-`assets/scripts/`.
+`apps/holtburger-cli/scripts/`.
 
 See the [CLI development guide](apps/holtburger-cli/README.md) for scripting paths,
 manual Windows launches, and supervised bot runs.

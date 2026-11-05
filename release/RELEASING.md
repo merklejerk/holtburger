@@ -6,6 +6,12 @@ CLI and 3D products on Linux x86-64, Windows x86-64, and macOS Apple Silicon, pl
 per product. 3D also includes a Windows setup executable and macOS DMG. Intel macOS is not
 supported. Both products share one version and original source commit.
 
+h3d owns installer construction and native acceptance through its app-local
+`package:installer` command (`--native DIR --output FILE [--iscc PATH]`). Root
+`release:installers` admits/extracts the source archive, invokes that command, then
+hashes the installer and writes its suite receipt. From `apps/holtburger-3d/`, run
+`npm run check:installers` and `npm run test:installers` for tooling checks.
+
 The release workflow stages the complete beta draft for native acceptance. Publishing that
 accepted draft does not rebuild its assets. Nightlies use the same builders and automatically
 publish as prerelease/non-latest after checks succeed. Historical tags, drafts, and release
@@ -13,8 +19,7 @@ assets remain unchanged; the new pipeline does not migrate them.
 
 ## Version and content inputs
 
-Record suite version bumps as ordinary reviewed changes on main. Use `release_version.py
-bump VERSION` to update the Cargo workspace, Electron manifest, and both lockfiles; protocol,
+Record suite version bumps as ordinary reviewed changes on main. Use `npm run version:bump -- VERSION` to update the Cargo workspace, Electron manifest, and both lockfiles; protocol,
 archive, settings, and navigation compatibility versions remain independent. The checked-in
 version must be unsuffixed and `release/channel.json` must contain `"beta"`. Build metadata
 (`+...`) is rejected. A version bump alone does not require regenerating navigation content.
@@ -25,11 +30,12 @@ annotated and lightweight tags are accepted. A tagged merge commit is valid. Nev
 or reuse a release version for changed source. Rerun a failed workflow at its original source;
 main advancing does not invalidate a retry of an existing reachable tag.
 
-Local release tooling uses the resolved dependencies in `.github/scripts/requirements.txt`:
+Local release tooling uses Node.js 24.13.1 and npm 11.8.0 with the independent
+repository-root lockfile. App dependencies still install inside the app:
 
 ```sh
-uv run --no-project --with-requirements .github/scripts/requirements.txt \
-  python .github/scripts/release_version.py check
+npm ci
+npm run version:check
 ```
 
 `.github/cli-content.json` owns the approved generated ZIP SHA-256 and GitHub API asset URL.
@@ -68,9 +74,9 @@ representative scene through the production probe before approving a new input.
 Fetch the approved input, or stage its exact local bytes before remote storage is ready:
 
 ```sh
-python3 .github/scripts/fetch_cli_content.py .holtburger-local/cli-content
+npm run --silent content:fetch -- .holtburger-local/cli-content
 # Local alternative: use the SHA-256 recorded in .github/cli-content.json.
-python3 .github/scripts/cli_content_input.py /path/to/cli-content.zip \
+npm run --silent content:stage -- /path/to/cli-content.zip \
   --sha256 APPROVED_SHA256 --output .holtburger-local/cli-content
 ```
 
@@ -80,6 +86,11 @@ with the retained input ZIP. Runtime uses the content crate's codec validation;
 it does not scan the full source corpus or apply a size gate.
 
 ## Product assembly
+
+The TUI owns bundled scripts under `apps/holtburger-cli/scripts/`, including mage's
+nested compiler. Build validation checks its committed export; release assembly copies
+the files selected by the TUI's `scripts/bundle.json` into the native bundle's
+`scripts/` directory.
 
 CLI includes `holtburger-cli`, `dat2hba`, `dat-tool`, fighter/mage scripts and sidecars,
 `content/`, metadata, license/notices, and its CLI quickstart. 3D includes `h3d/` with the
@@ -91,10 +102,10 @@ cover installer and portable installation. Installers and Flatpaks retain the gu
 their native input. Each assembler can run with the other product's inputs absent:
 
 ```sh
-python3 .github/scripts/release_suite.py assemble --product cli \
+npm run --silent release -- assemble --product cli \
   --target x86_64-unknown-linux-gnu --content .holtburger-local/cli-content \
   --notices .github/licenses/THIRD_PARTY_NOTICES.html --output .holtburger-local/release-artifacts
-python3 .github/scripts/release_suite.py assemble --product 3d \
+npm run --silent release -- assemble --product 3d \
   --target x86_64-unknown-linux-gnu --package apps/holtburger-3d/out/holtburger-3d-linux-x64 \
   --notices .github/licenses/THIRD_PARTY_NOTICES.html --output .holtburger-local/release-artifacts
 ```
@@ -105,7 +116,15 @@ Assembly checks architecture, executable modes, notices/content identity, native
 and extracted layout. 3D also checks packaged host and renderer source identity. CLI needs
 no Node/Electron installation. 3D needs no compact CLI content.
 
-### Desktop installers and manual upgrades
+### Desktop installers
+
+h3d owns installer construction and native acceptance checks through its
+`package:installer` command. Root `release:installers` verifies/extracts the native
+archive, invokes that app command, then hashes the installer and writes the suite
+receipt. The app command accepts `--native DIR --output FILE [--iscc PATH]` and
+requires its own app dependencies. `npm run check:installers` and
+`npm run test:installers` run from `apps/holtburger-3d/`.
+ and manual upgrades
 
 The desktop installer job consumes the verified 3D native ZIP. It does not rebuild
 Electron or the Rust host. Windows uses `apps/holtburger-3d/packaging/windows.iss` with
@@ -221,7 +240,7 @@ recommended packages disabled. Zypak/nickle original notices remain installed wi
 Rust/native notices are generated locally and committed as
 `.github/licenses/THIRD_PARTY_NOTICES.html`, with a generated
 `THIRD_PARTY_NOTICES.inputs.json` freshness record beside it. CI runs
-`python3 .github/scripts/generate_notices.py check` without installing cargo-about or
+`npm run check:notices` without installing cargo-about or
 accessing license sources. Failures emit a warning in both branch validation and release
 planning; they do not block CI or release creation. The local `check` command still exits
 nonzero to report stale inputs/output. Its whole-file fingerprints include Cargo versions,
@@ -254,10 +273,10 @@ Generation failures are local maintenance work, not a CI gate. A shared applicat
 does not require this step:
 
 ```sh
-VERSION=$(python3 .github/scripts/generate_notices.py tool-version)
+VERSION=$(node scripts/checks/notices.ts tool-version)
 cargo install --locked --features cli --version "$VERSION" cargo-about
-python3 .github/scripts/generate_notices.py generate
-python3 .github/scripts/generate_notices.py check
+npm run generate:notices
+npm run check:notices
 git diff -- .github/licenses/THIRD_PARTY_NOTICES.html .github/licenses/THIRD_PARTY_NOTICES.inputs.json
 ```
 

@@ -8,6 +8,7 @@ use holtburger_scripting::ScriptHostConfig;
 use holtburger_world::spell::SpellCatalog;
 
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
+use crate::scripting::ScriptDirectories;
 use crate::types::{ChatMessageTags, Page};
 
 use crate::pages::game::GameState;
@@ -65,6 +66,8 @@ pub struct AppState {
     pub pending_exit_message: Option<String>,
     pub queued_script_startup: Option<QueuedScriptStartup>,
     pub script_host_config: ScriptHostConfig,
+    /// Frontend-owned roots resolved once at launch and reused after reconnects.
+    pub script_directories: ScriptDirectories,
 }
 
 pub struct RenderContext<'a> {

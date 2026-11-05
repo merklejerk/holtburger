@@ -43,13 +43,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install release tooling dependencies
-        run: python -m pip install -r .github/scripts/requirements.txt
       - uses: actions/setup-node@v4
         with:
           node-version: 24.13.1
           cache: npm
-          cache-dependency-path: apps/holtburger-3d/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            apps/holtburger-3d/package-lock.json
+      - name: Install repository tooling
+        run: npm ci
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.95.0
@@ -62,7 +64,7 @@ jobs:
       - name: Validate and prepare distribution versions
         run: |
           if [ "$HOLTBURGER_DISTRIBUTION" = nightly ]; then cargo fetch --locked; fi
-          python .github/scripts/release_suite.py prepare-source --kind "$HOLTBURGER_DISTRIBUTION"
+          npm run --silent release -- prepare-source --kind "$HOLTBURGER_DISTRIBUTION"
           echo 'HOLTBURGER_SOURCE_MODIFIED=0' >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
@@ -72,7 +74,7 @@ jobs:
         if: inputs.product != '3d'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python .github/scripts/fetch_cli_content.py .holtburger-local/cli-content
+        run: npm run --silent content:fetch -- .holtburger-local/cli-content
       - name: Build selected executables together
         run: |
           PACKAGES=()
@@ -93,7 +95,7 @@ jobs:
           SUFFIX=''
           if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
           "target/${{ matrix.triple }}/release/content_bootstrap$SUFFIX" --content .holtburger-local/cli-content
-          python .github/scripts/release_suite.py assemble --product cli \
+          npm run --silent release -- assemble --product cli \
             --target '${{ matrix.triple }}' --content .holtburger-local/cli-content \
             --notices .holtburger-local/release-notices/THIRD_PARTY_NOTICES.html \
             --output .holtburger-local/release-artifacts/cli
@@ -121,8 +123,6 @@ jobs:
           npm run setup:windows-packaging
           npm run test:windows-packaging
       - name: Check native branding generation
-        if: inputs.product != 'cli'
-        working-directory: apps/holtburger-3d
         run: npm run check:branding
       - name: Build and inspect the 3D application
         if: inputs.product != 'cli'
@@ -131,6 +131,8 @@ jobs:
           npm run build
           npm run build:electron:main
           npm run package:built -- --platform=${{ matrix.platform }} --arch=${{ matrix.architecture }}
+          npm run check:installers
+          npm run test:installers
           npm run check:package
           npm run smoke:sidecar
       - name: Install Linux virtual display
@@ -163,7 +165,7 @@ jobs:
       - name: Assemble the 3D native archive
         if: inputs.product != 'cli'
         run: |
-          python .github/scripts/release_suite.py assemble --product 3d \
+          npm run --silent release -- assemble --product 3d \
             --target '${{ matrix.triple }}' \
             --package 'apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}' \
             --notices .holtburger-local/release-notices/THIRD_PARTY_NOTICES.html \
@@ -199,7 +201,7 @@ jobs:
         run: |
           COMPILER=()
           if [[ "$RUNNER_OS" == 'Windows' ]]; then COMPILER=(--iscc "$INNO_COMPILER"); fi
-          python .github/scripts/desktop_installers.py \
+          npm run --silent release:installers -- \
             --artifacts .holtburger-local/release-artifacts/3d \
             --target '${{ matrix.triple }}' \
             --output .holtburger-local/release-installers "${COMPILER[@]}"

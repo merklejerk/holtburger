@@ -21,6 +21,7 @@ use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::panels::logopolis::LogopolisState;
+use crate::scripting::ScriptDirectories;
 use crate::state::{EventContext, QueuedScriptStartup, TickContext};
 use crate::types::{
     AppAction, AppNotification, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
@@ -51,6 +52,8 @@ pub(crate) struct GameScriptState {
     pub(crate) running_source_name: Option<String>,
     pub(crate) queued_script_startup: Option<QueuedScriptStartup>,
     pub(crate) host_config: ScriptHostConfig,
+    /// Startup-selected roots retained by this character session.
+    pub(crate) directories: ScriptDirectories,
 }
 
 pub(crate) const SCRIPT_TICK_INTERVAL: Duration = Duration::from_millis(100);

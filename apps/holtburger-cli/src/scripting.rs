@@ -31,9 +31,8 @@ use crate::pages::game::panels::dashboard::tabs::classification;
 use crate::pages::game::{GameData, GameState, ViewState};
 use crate::types::{AppAction, AppNotification, ChatMessageTags, Interaction, LocalConfirmation};
 
-const SCRIPT_DIR_ENV_VAR: &str = "SCRIPT_DIR";
-const SCRIPT_BUNDLE_DIR_ENV_VAR: &str = "SCRIPT_BUNDLE_DIR";
-const DEFAULT_SCRIPT_DIR: &str = "scripts";
+mod directories;
+pub use directories::ScriptDirectories;
 
 fn running_script_stem(script_name: &str) -> Option<&str> {
     Path::new(script_name).file_stem()?.to_str()
@@ -145,6 +144,8 @@ pub struct TuiScriptClientView<'a> {
     pub view: &'a ViewState,
     pub server_time: Option<(f64, Instant)>,
     pub script_name: Option<&'a str>,
+    /// Selected startup roots shared by source, sidecar, and config operations.
+    pub directories: &'a ScriptDirectories,
 }
 
 impl TuiScriptClientView<'_> {
@@ -520,15 +521,15 @@ impl ScriptClientView for TuiScriptClientView<'_> {
 
     fn load_config(&self) -> Option<ScriptJsonValue> {
         let script_name = self.script_name?;
-        let path = script_config_path_for_name(&script_directory(), script_name)?;
+        let path = script_config_path_for_name(&self.directories.personal, script_name)?;
         load_json_file(&path)
     }
 
     fn load_data(&self) -> Option<ScriptJsonValue> {
         let script_name = self.script_name?;
         let path = resolve_script_data_path_for_name_in_dirs(
-            &script_directory(),
-            script_bundle_directory().as_deref(),
+            &self.directories.personal,
+            &self.directories.bundled,
             script_name,
         );
         let Some(path) = path else {
@@ -541,10 +542,8 @@ impl ScriptClientView for TuiScriptClientView<'_> {
     fn load_data_bin(&self) -> Option<Vec<u8>> {
         let script_name = self.script_name?;
         let path = first_existing_path([
-            script_data_bin_path_for_name(&script_directory(), script_name),
-            script_bundle_directory()
-                .as_deref()
-                .and_then(|script_dir| script_data_bin_path_for_name(script_dir, script_name)),
+            script_data_bin_path_for_name(&self.directories.personal, script_name),
+            script_data_bin_path_for_name(&self.directories.bundled, script_name),
         ]);
         let Some(path) = path else {
             log::warn!("missing script binary data for {script_name}");
@@ -559,7 +558,8 @@ impl ScriptClientView for TuiScriptClientView<'_> {
             return false;
         };
 
-        let Some(path) = script_config_path_for_name(&script_directory(), script_name) else {
+        let Some(path) = script_config_path_for_name(&self.directories.personal, script_name)
+        else {
             log::error!("cannot write script config because the running script name is invalid");
             return false;
         };
@@ -1078,37 +1078,15 @@ pub(crate) fn resolve_deferred_script_source(
     }
 }
 
-pub(crate) fn script_directory() -> PathBuf {
-    std::env::var_os(SCRIPT_DIR_ENV_VAR)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_SCRIPT_DIR))
-}
-
-fn script_bundle_directory() -> Option<PathBuf> {
-    std::env::var_os(SCRIPT_BUNDLE_DIR_ENV_VAR)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            let path = crate::installation::bundled_resource_path("scripts");
-            path.is_dir().then_some(path)
-        })
-}
-
 fn resolve_script_source_path_for_basename_in_dirs(
     local_script_dir: &Path,
-    system_script_dir: Option<&Path>,
+    system_script_dir: &Path,
     basename: &str,
 ) -> Result<PathBuf> {
-    let local_script_path = script_path_for_basename_in_dir(local_script_dir, basename)?;
-    if local_script_path.exists() {
-        return Ok(local_script_path);
-    }
-
-    if let Some(script_dir) = system_script_dir {
-        let system_script_path = script_path_for_basename_in_dir(script_dir, basename)?;
-        if system_script_path.exists() {
-            return Ok(system_script_path);
+    for directory in [local_script_dir, system_script_dir] {
+        let path = script_path_for_basename_in_dir(directory, basename)?;
+        if path.exists() {
+            return Ok(path);
         }
     }
 
@@ -1119,12 +1097,12 @@ fn resolve_script_source_path_for_basename_in_dirs(
 
 fn resolve_script_data_path_for_name_in_dirs(
     local_script_dir: &Path,
-    system_script_dir: Option<&Path>,
+    system_script_dir: &Path,
     script_name: &str,
 ) -> Option<PathBuf> {
     first_existing_path([
         script_data_path_for_name(local_script_dir, script_name),
-        system_script_dir.and_then(|script_dir| script_data_path_for_name(script_dir, script_name)),
+        script_data_path_for_name(system_script_dir, script_name),
     ])
 }
 
@@ -1153,10 +1131,13 @@ fn script_path_for_basename_in_dir(script_dir: &Path, basename: &str) -> Result<
     Ok(script_dir.join(format!("{basename}.js")))
 }
 
-pub(crate) fn deferred_script_source_for_basename(basename: &str) -> Result<DeferredScriptSource> {
+pub(crate) fn deferred_script_source_for_basename(
+    directories: &ScriptDirectories,
+    basename: &str,
+) -> Result<DeferredScriptSource> {
     let path = resolve_script_source_path_for_basename_in_dirs(
-        &script_directory(),
-        script_bundle_directory().as_deref(),
+        &directories.personal,
+        &directories.bundled,
         basename,
     )?;
     Ok(DeferredScriptSource::Path(path))
@@ -1208,21 +1189,21 @@ fn discoverable_script_entries_in_dir(
         .collect())
 }
 
-pub(crate) fn discoverable_scripts() -> Result<Vec<DiscoverableScript>> {
+pub(crate) fn discoverable_scripts(
+    directories: &ScriptDirectories,
+) -> Result<Vec<DiscoverableScript>> {
     let mut entries = BTreeMap::new();
 
     for entry in
-        discoverable_script_entries_in_dir(&script_directory(), DiscoverableScriptSource::Local)?
+        discoverable_script_entries_in_dir(&directories.personal, DiscoverableScriptSource::Local)?
     {
         entries.insert(entry.basename.clone(), entry);
     }
 
-    if let Some(script_dir) = script_bundle_directory() {
-        for entry in
-            discoverable_script_entries_in_dir(&script_dir, DiscoverableScriptSource::System)?
-        {
-            entries.entry(entry.basename.clone()).or_insert(entry);
-        }
+    for entry in
+        discoverable_script_entries_in_dir(&directories.bundled, DiscoverableScriptSource::System)?
+    {
+        entries.entry(entry.basename.clone()).or_insert(entry);
     }
 
     Ok(entries.into_values().collect())
@@ -1310,6 +1291,92 @@ mod tests {
     }
 
     #[test]
+    fn selected_roots_drive_source_discovery_sidecars_and_personal_config_persistence() {
+        let temp = tempfile::tempdir().unwrap();
+        let directories = ScriptDirectories {
+            personal: temp.path().join("personal 雪"),
+            bundled: temp.path().join("shipped scripts"),
+        };
+        fs::create_dir_all(&directories.bundled).unwrap();
+        fs::write(directories.bundled.join("probe.js"), "// bundled").unwrap();
+        fs::write(
+            directories.bundled.join("probe.data.json"),
+            r#"{"source":"bundled"}"#,
+        )
+        .unwrap();
+        fs::write(
+            directories.bundled.join("probe.data.bin"),
+            b"bundled binary",
+        )
+        .unwrap();
+        let bundled = deferred_script_source_for_basename(&directories, "probe").unwrap();
+        assert!(
+            matches!(bundled, DeferredScriptSource::Path(path) if path == directories.bundled.join("probe.js"))
+        );
+        assert_eq!(
+            discoverable_scripts(&directories).unwrap(),
+            vec![DiscoverableScript {
+                basename: "probe".into(),
+                source: DiscoverableScriptSource::System,
+            }]
+        );
+
+        let data = GameData::default();
+        let view = ViewState::default();
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &view,
+            server_time: None,
+            script_name: Some("probe.js"),
+            directories: &directories,
+        };
+        assert_eq!(
+            script_view.load_data(),
+            Some(serde_json::json!({"source":"bundled"}))
+        );
+        assert_eq!(
+            script_view.load_data_bin(),
+            Some(b"bundled binary".to_vec())
+        );
+        assert!(script_view.write_config(r#"{"retained":true}"#.into()));
+        assert_eq!(
+            script_view.load_config(),
+            Some(serde_json::json!({"retained":true}))
+        );
+        assert!(!directories.bundled.join(".config").exists());
+        fs::write(directories.personal.join("probe.js"), "// personal").unwrap();
+        fs::write(
+            directories.personal.join("probe.data.json"),
+            r#"{"source":"personal"}"#,
+        )
+        .unwrap();
+        fs::write(
+            directories.personal.join("probe.data.bin"),
+            b"personal binary",
+        )
+        .unwrap();
+        let personal = deferred_script_source_for_basename(&directories, "probe").unwrap();
+        assert!(
+            matches!(personal, DeferredScriptSource::Path(path) if path == directories.personal.join("probe.js"))
+        );
+        assert_eq!(
+            discoverable_scripts(&directories).unwrap(),
+            vec![DiscoverableScript {
+                basename: "probe".into(),
+                source: DiscoverableScriptSource::Local,
+            }]
+        );
+        assert_eq!(
+            script_view.load_data(),
+            Some(serde_json::json!({"source":"personal"}))
+        );
+        assert_eq!(
+            script_view.load_data_bin(),
+            Some(b"personal binary".to_vec())
+        );
+    }
+
+    #[test]
     fn script_persistence_paths_use_running_script_stem() {
         let script_dir = Path::new("/tmp/holtburger-scripts");
 
@@ -1353,14 +1420,11 @@ mod tests {
         File::create(system_dir.join("fighter.data.json"))
             .expect("create system fighter.data.json");
 
-        let script_path = resolve_script_source_path_for_basename_in_dirs(
-            &local_dir,
-            Some(&system_dir),
-            "fighter",
-        )
-        .expect("script path should resolve");
+        let script_path =
+            resolve_script_source_path_for_basename_in_dirs(&local_dir, &system_dir, "fighter")
+                .expect("script path should resolve");
         let data_path =
-            resolve_script_data_path_for_name_in_dirs(&local_dir, Some(&system_dir), "fighter.js")
+            resolve_script_data_path_for_name_in_dirs(&local_dir, &system_dir, "fighter.js")
                 .expect("data path should resolve");
 
         assert_eq!(script_path, local_dir.join("fighter.js"));
@@ -1368,16 +1432,12 @@ mod tests {
 
         fs::remove_dir_all(&local_dir).expect("clean up local test directory");
         assert_eq!(
-            resolve_script_source_path_for_basename_in_dirs(
-                &local_dir,
-                Some(&system_dir),
-                "fighter"
-            )
-            .unwrap(),
+            resolve_script_source_path_for_basename_in_dirs(&local_dir, &system_dir, "fighter")
+                .unwrap(),
             system_dir.join("fighter.js")
         );
         assert_eq!(
-            resolve_script_data_path_for_name_in_dirs(&local_dir, Some(&system_dir), "fighter.js")
+            resolve_script_data_path_for_name_in_dirs(&local_dir, &system_dir, "fighter.js")
                 .unwrap(),
             system_dir.join("fighter.data.json")
         );
@@ -1491,6 +1551,7 @@ mod tests {
         };
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &view,
             server_time: None,
@@ -1581,6 +1642,7 @@ mod tests {
         );
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -1631,6 +1693,7 @@ mod tests {
         data.combat_status.state = holtburger_core::ClientCombatControlState::Active;
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: Some((900.0, now)),
@@ -1657,6 +1720,7 @@ mod tests {
         };
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &view,
             server_time: None,
@@ -1721,6 +1785,7 @@ mod tests {
         });
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -1756,6 +1821,7 @@ mod tests {
         };
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -1785,6 +1851,7 @@ mod tests {
         );
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -1847,6 +1914,7 @@ mod tests {
         });
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -1869,6 +1937,7 @@ mod tests {
         data.player_spells = vec![3, 1, 2];
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -1884,6 +1953,7 @@ mod tests {
         data.player_spells = vec![10, 20, 30];
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -1922,6 +1992,7 @@ mod tests {
         data.player_pos = Some(from_position);
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -1949,6 +2020,7 @@ mod tests {
         );
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -1994,6 +2066,7 @@ mod tests {
             std::collections::HashSet::from([pack_guid, root_item_guid, pack_item_guid]);
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -2164,6 +2237,7 @@ mod tests {
         data.entities.insert(far_monster_guid, far_monster);
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -2203,6 +2277,7 @@ mod tests {
         data.entities.insert(entity_guid, entity);
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,
@@ -2253,6 +2328,7 @@ mod tests {
         data.entities.insert(entity_guid, entity);
 
         let script_view = TuiScriptClientView {
+            directories: &ScriptDirectories::default(),
             data: &data,
             view: &ViewState::default(),
             server_time: None,

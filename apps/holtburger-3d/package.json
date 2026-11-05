@@ -45,7 +45,7 @@
 		"harness:browser": "node scripts/browser-harness.mjs",
 		"probe:static-cell-coverage": "node scripts/static-cell-coverage-census.mjs",
 		"check:terrain-shader": "node scripts/validate-terrain-shader.mjs",
-		"check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json && npm run check:tests && npm run check:electron",
+		"check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json && npm run check:tests && npm run check:electron && npm run check:installers",
 		"check:tests": "tsc -p tsconfig.test.json",
 		"check:electron": "tsc -p tsconfig.electron.json && tsc -p tsconfig.electron-preload.json",
 		"check:electron:runtime": "node scripts/verify-electron-settings-runtime.mjs",
@@ -60,8 +60,9 @@
 		"dev:client:release": "npm run build:electron:main && node scripts/electron-dev-entry.mjs client --release",
 		"generate:world-map-settlements": "node --experimental-strip-types scripts/generate-world-map-settlements.ts",
 		"generate:housing-payment-icons": "node --experimental-strip-types scripts/generate-housing-payment-icons.ts",
-		"generate:branding": "node scripts/generate-branding.mjs",
-		"check:branding": "node scripts/generate-branding.mjs --check"
+		"package:installer": "node --experimental-strip-types scripts/installers/desktop.ts",
+		"check:installers": "tsc -p tsconfig.packaging.json",
+		"test:installers": "node --experimental-strip-types --test scripts/installers/desktop.node-test.ts"
 	},
 	"devDependencies": {
 		"@electron-forge/cli": "^7.11.2",
@@ -70,7 +71,6 @@
 		"@electron/osx-sign": "^2.7.2",
 		"@eslint/js": "^10.0.1",
 		"@poppanator/sveltekit-svg": "^7.0.1",
-		"@resvg/resvg-js": "2.6.2",
 		"@sveltejs/vite-plugin-svelte": "^7.0.0",
 		"@tsconfig/svelte": "^5.0.8",
 		"@types/node": "^24.12.2",
@@ -80,8 +80,6 @@
 		"eslint": "^10.2.1",
 		"globals": "^17.5.0",
 		"knip": "^6.13.1",
-		"png2icons": "2.0.1",
-		"postcss": "8.5.31",
 		"prettier": "3.9.6",
 		"prettier-plugin-svelte": "^3.5.2",
 		"svelte": "^5.55.4",

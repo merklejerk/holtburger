@@ -236,7 +236,8 @@ Check the workflow run and public pages to confirm which revision is live.
 
 `.github/workflows/promote-updates.yml` is the sole website and update-feed
 publisher. It runs for relevant pushes to main, release publication and manual
-dispatch, always checking out trusted main. It installs the site lockfile, checks
+dispatch, always checking out trusted main. It installs the independent root
+tooling and site lockfiles, checks
 formatting/types, builds the site and Pagefind, and checks local links/assets and
 anchors. The feed generator then writes only `build/updates/`; it cannot replace
 Home. A single job publishes one Pages artifact containing website and feeds.
@@ -248,7 +249,8 @@ preview running, use `npm run check:browser` for desktop/mobile, search and
 reading/navigation without JavaScript. Feed tests run from the repository root:
 
 ```sh
-uv run --with-requirements .github/scripts/requirements.txt python -m unittest discover -s .github/scripts -p 'test_promote_updates.py' -v
+npm ci
+node --test scripts/release/publication.test.ts
 ```
 
 Use localhost for iteration and visual review; rebuild after edits when using the

@@ -9,5 +9,5 @@ repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 export FLATPAK_USER_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/flatpak"
 HOLTBURGER_HOST_BIN="$repo_root/.github/flatpak/probe-host" \
   node "$repo_root/apps/holtburger-3d/scripts/sidecar-smoke.mjs"
-python3 "$repo_root/.github/scripts/probe_flatpak_io.py" --product 3d
+npm --prefix "$repo_root" run --silent probe:flatpak-io -- --product 3d
 node "$repo_root/apps/holtburger-3d/scripts/content-startup-probe.mjs" --flatpak --theme-check full

@@ -18,7 +18,7 @@
 <svelte:head
 	><link rel="stylesheet" href={asset('fonts.css')} /><link
 		rel="icon"
-		href={asset('assets/branding/portal-static.svg')}
+		href={asset('assets/branding/favicon.png')}
 	/></svelte:head
 >
 <a class="skip-link" href="#main">Skip to content</a>

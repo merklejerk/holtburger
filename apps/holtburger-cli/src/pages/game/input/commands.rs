@@ -1,6 +1,6 @@
 use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
-use crate::scripting::{DiscoverableScriptSource, discoverable_scripts, script_directory};
+use crate::scripting::{DiscoverableScriptSource, discoverable_scripts};
 use crate::types::{AppUiAction, ChatMessageTags, RedrawPriority};
 use holtburger_core::client::recall::RecallDestination;
 use holtburger_core::client::types::{ChatChannelDestination, ChatTellTarget};
@@ -222,11 +222,19 @@ impl GameState {
             ChatMessageTags::system(),
             format!(
                 "Local script dir: {}",
-                display_absolute_path(&script_directory())
+                display_absolute_path(&self.script.directories.personal)
             ),
         );
 
-        match discoverable_scripts() {
+        self.chat.log(
+            ChatMessageTags::system(),
+            format!(
+                "Bundled script dir: {}",
+                display_absolute_path(&self.script.directories.bundled)
+            ),
+        );
+
+        match discoverable_scripts(&self.script.directories) {
             Ok(entries) if entries.is_empty() => self.chat.log(
                 ChatMessageTags::system(),
                 "Discovered scripts: none found.".to_string(),
@@ -463,9 +471,9 @@ impl GameState {
             ],
             "scripts" => vec![
                 "Usage: /scripts".to_string(),
-                "Show the current script status, queued startup, local script dir, and discovered scripts."
+                "Show the current script status, queued startup, personal and bundled directories, and discovered scripts."
                     .to_string(),
-                "Use /run <BASENAME> [ARGS...] to load SCRIPT_DIR/<BASENAME>.js and /unrun to stop it."
+                "Use /run <BASENAME> [ARGS...] to load a personal or bundled script and /unrun to stop it."
                     .to_string(),
             ],
             "unrun" => vec![
@@ -1210,6 +1218,7 @@ mod tests {
 
         let host = {
             let view = crate::scripting::TuiScriptClientView {
+                directories: &state.script.directories,
                 data: &state.data,
                 view: &state.view,
                 server_time: None,
@@ -1238,6 +1247,11 @@ mod tests {
     fn scripts_command_reports_script_status_and_discoverable_scripts() {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        let temp = tempfile::tempdir().unwrap();
+        state.script.directories = crate::scripting::ScriptDirectories {
+            personal: temp.path().join("personal"),
+            bundled: temp.path().join("bundled"),
+        };
         state.view.focused_pane = FocusedPane::Input;
         state.chat_input.input.set_text("/scripts");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
@@ -1245,6 +1259,16 @@ mod tests {
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(result.commands.is_empty());
+        for (label, path) in [
+            ("Local", &state.script.directories.personal),
+            ("Bundled", &state.script.directories.bundled),
+        ] {
+            assert!(
+                state.chat.messages.iter().any(
+                    |message| message.text == format!("{label} script dir: {}", path.display())
+                )
+            );
+        }
         assert!(state.chat.messages.iter().any(|message| {
             message.chat_tags.contains(ChatMessageTags::system())
                 && message.text == "Current script: none (idle)"

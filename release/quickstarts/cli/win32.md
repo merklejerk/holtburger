@@ -42,7 +42,9 @@ The server can correct your position or reject actions.
 ## Optional: scripts and tools
 
 The download includes `fighter.js`, `mage.js`, and conversion/export tools.
-Set `SCRIPT_DIR` to a writable folder for personal scripts and preferences.
+Use `--script-dir DIR` or set `SCRIPT_DIR` to a writable folder for personal scripts
+and preferences. The CLI option takes precedence. `--script-bundle-dir DIR`
+overrides `SCRIPT_BUNDLE_DIR` when selecting a separate shipped-script directory.
 To see the tools' commands:
 
 ```powershell

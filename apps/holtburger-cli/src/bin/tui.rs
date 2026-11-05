@@ -6,6 +6,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use holtburger_cli::pages;
+use holtburger_cli::scripting::ScriptDirectories;
 use holtburger_cli::state::{AppState, NetStats, QueuedScriptStartup};
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
 use holtburger_content::CharacterGenCatalog;
@@ -299,6 +300,20 @@ struct Args {
         help = "Content directory containing bootstrap.hba or assets.hba, plus navigation.hnav (overrides automatic discovery)"
     )]
     content: Option<std::path::PathBuf>,
+    /// Personal script and preference root; CLI overrides SCRIPT_DIR.
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Writable personal script directory (overrides SCRIPT_DIR)"
+    )]
+    script_dir: Option<std::path::PathBuf>,
+    /// Shipped script root; CLI overrides SCRIPT_BUNDLE_DIR.
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Bundled script directory (overrides SCRIPT_BUNDLE_DIR)"
+    )]
+    script_bundle_dir: Option<std::path::PathBuf>,
     #[arg(
         short = 'Q',
         long = "auto-quit",
@@ -780,6 +795,8 @@ async fn main() -> ExitCode {
 
 async fn run() -> Result<()> {
     let args = Args::parse();
+    let script_directories =
+        ScriptDirectories::resolve(args.script_dir.clone(), args.script_bundle_dir.clone())?;
 
     let (host, port) = if let Some(server) = &args.server {
         if let Some((h, p)) = server.split_once(':') {
@@ -883,6 +900,7 @@ async fn run() -> Result<()> {
         pending_exit_message: None,
         queued_script_startup: queued_script_startup_from_args(&args),
         script_host_config: script_host_config_from_args(&args),
+        script_directories,
     };
 
     if args.verbose > 0 {
@@ -1208,6 +1226,28 @@ mod tests {
             .expect("auto-quit args should parse");
 
         assert!(args.quit_on_disconnect);
+    }
+
+    #[test]
+    fn script_directory_flags_parse_independent_roots() {
+        let args = Args::try_parse_from([
+            "tui",
+            "--account",
+            "acct",
+            "--script-dir",
+            "personal scripts 雪",
+            "--script-bundle-dir",
+            "shipped scripts",
+        ])
+        .expect("directory flags should parse");
+        assert_eq!(
+            args.script_dir,
+            Some(std::path::PathBuf::from("personal scripts 雪"))
+        );
+        assert_eq!(
+            args.script_bundle_dir,
+            Some(std::path::PathBuf::from("shipped scripts"))
+        );
     }
 
     #[test]

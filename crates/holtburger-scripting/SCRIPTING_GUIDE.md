@@ -17,6 +17,6 @@ Runnable JavaScript examples live in `site/examples/`. Their source is embedded 
 the website guides and copied for download at build time; do not maintain separate
 copies in this crate. Run `npm run check:examples` from `site/` to type-check them.
 
-The shipped scripts live in [assets/scripts](../../assets/scripts/README.md).
-The [mage source package](../../assets/scripts/src/mage/README.md) documents its
+The shipped scripts live in [apps/holtburger-cli/scripts](../../apps/holtburger-cli/scripts/README.md).
+The [mage source package](../../apps/holtburger-cli/scripts/src/mage/README.md) documents its
 TypeScript build and data generation.

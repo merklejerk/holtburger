@@ -76,12 +76,20 @@ export async function verifyElectronPackage(packageRoot) {
 			entry.replaceAll("\\", "/"),
 		),
 	);
+	const packageMetadata = JSON.parse(
+		readArchiveFile("package.json").toString("utf8"),
+	);
+	for (const name of Object.keys(packageMetadata.dependencies)) {
+		const entry = `/node_modules/${name}/package.json`;
+		if (!archiveEntries.has(entry))
+			throw new Error(`packaged ASAR is missing runtime dependency ${name}`);
+	}
 	for (const requiredEntry of [
 		"/package.json",
 		"/dist/client/index.html",
 		"/dist/launcher/index.html",
 		"/dist/explorer/index.html",
-		"/dist/favicon.svg",
+		"/dist/favicon.png",
 		"/dist/build-info.json",
 		"/dist-electron/electron/host-protocol.js",
 		"/dist-electron/electron/main.js",
@@ -96,9 +104,6 @@ export async function verifyElectronPackage(packageRoot) {
 			throw new Error(`packaged ASAR contains an empty file: ${requiredEntry}`);
 		}
 	}
-	const packageMetadata = JSON.parse(
-		readArchiveFile("package.json").toString(),
-	);
 	const sourcePackage = JSON.parse(
 		await readFile(join(appRoot, "package.json"), "utf8"),
 	);

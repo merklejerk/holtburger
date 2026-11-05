@@ -18,7 +18,7 @@ Enter the world, then use:
 /unrun
 ```
 
-`/scripts` shows script status, any queued startup, your local directory, and discovered scripts. `/run NAME` starts `NAME.js`; `/unrun` stops it and clears queued startup.
+`/scripts` shows script status, any queued startup, your personal and bundled directories, and discovered scripts. `/run NAME` starts `NAME.js`; `/unrun` stops it and clears queued startup.
 
 **Only one script runs at a time.** Starting another replaces the current script.
 
@@ -28,7 +28,7 @@ Use `/script MESSAGE` to send a command to the active script. What the message m
 
 ## Keep personal files separate
 
-Set `SCRIPT_DIR` to a writable directory for your scripts and preferences. Keep it outside the extracted release folder so updates do not replace your work.
+Pass `--script-dir DIR` or set `SCRIPT_DIR` to a writable directory for your scripts and preferences. The CLI option takes precedence. Keep it outside the extracted release folder so updates do not replace your work.
 
 ```text
 my-scripts/

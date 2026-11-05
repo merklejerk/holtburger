@@ -44,4 +44,4 @@ Local script/data files take precedence over bundled files with the same basenam
 
 Use the existing [declaration file](/holtburger/assets/scripting/holtburger.d.ts) for editor help and type checking. Compile TypeScript and bundle dependencies into one plain JavaScript file, without runtime module imports.
 
-The shipped mage uses this workflow. Its source package is linked from the [script source directory](https://github.com/merklejerk/holtburger/tree/main/assets/scripts/src/mage).
+The shipped mage uses this workflow. Its source package is linked from the [script source directory](https://github.com/merklejerk/holtburger/tree/main/apps/holtburger-cli/scripts/src/mage).

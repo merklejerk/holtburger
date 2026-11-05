@@ -16,7 +16,7 @@ modules:
       - ln -s /app/lib/holtburger/dat-tool /app/bin/dat-tool
       - install -Dm644 io.github.merklejerk.holtburger-cli.desktop /app/share/applications/io.github.merklejerk.holtburger-cli.desktop
       - install -Dm644 io.github.merklejerk.holtburger-cli.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli.metainfo.xml
-      - install -Dm644 io.github.merklejerk.holtburger-cli.svg /app/share/icons/hicolor/scalable/apps/io.github.merklejerk.holtburger-cli.svg
+      - install -Dm644 io.github.merklejerk.holtburger-cli.png /app/share/icons/hicolor/512x512/apps/io.github.merklejerk.holtburger-cli.png
     sources:
       - type: dir
         path: ../../../.holtburger-local/cli-native
@@ -26,7 +26,7 @@ modules:
       - type: file
         path: io.github.merklejerk.holtburger-cli.metainfo.xml
       - type: file
-        path: io.github.merklejerk.holtburger-cli.svg
+        path: io.github.merklejerk.holtburger-cli.png
 finish-args:
   - --share=network
   - --env=HOLTBURGER_DEFAULT_CONTENT=/app/lib/holtburger/content

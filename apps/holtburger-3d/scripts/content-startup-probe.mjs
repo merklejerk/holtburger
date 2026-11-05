@@ -74,7 +74,7 @@ const localAssets = join(directory, "assets");
 await mkdir(localAssets, { recursive: true });
 await mkdir(join(config, profileName), { recursive: true });
 await copyFile(
-	join(appRoot, "scripts/fixtures/minimal-content.hba.fixture"),
+	join(appRoot, "../../scripts/fixtures/content/minimal-content.hba.fixture"),
 	join(localAssets, "assets.hba"),
 );
 const vitePort = await findAvailablePort();

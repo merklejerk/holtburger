@@ -29,19 +29,19 @@ async function collectFiles(directory, prefix, files) {
 const destination = new URL('../static/assets/', import.meta.url);
 /** @type {Map<string, URL>} */
 const files = new Map();
-for (const directory of ['branding', 'screenshots']) {
-	await collectFiles(
-		new URL(`../../assets/${directory}/`, import.meta.url),
-		`${directory}/`,
-		files
-	);
-}
+await collectFiles(
+	new URL('../../assets/screenshots/', import.meta.url),
+	'screenshots/',
+	files
+);
+// Publish only the site icon, rather than the full-resolution branding source and native exports.
+files.set(
+	'branding/favicon.png',
+	new URL('../../assets/branding/favicon.png', import.meta.url)
+);
 for (const family of ['gelasio', 'arimo']) {
 	await collectFiles(
-		new URL(
-			`../../apps/holtburger-3d/public/fonts/${family}/`,
-			import.meta.url
-		),
+		new URL(`../assets/fonts/${family}/`, import.meta.url),
 		`fonts/${family}/`,
 		files
 	);

@@ -18,16 +18,29 @@ For day-to-day development, launch the TUI through Cargo from a terminal:
 ```
 
 The development runner selects `local/scripts/` for writable scripts and preferences,
-and `assets/scripts/` for the checked-in fighter/mage scripts and sidecars. Local scripts
-take precedence over shipped scripts with the same basename. The runtime default remains
-`./scripts/` when `SCRIPT_DIR` is unset; installed bundles retain their `scripts/` layout.
+and `apps/holtburger-cli/scripts/` for the checked-in fighter/mage scripts and sidecars.
+The TUI resolves these roots once at startup. CLI flags override environment values:
 
-Script storage:
+| Directory | CLI option | Environment | Default |
+| --- | --- | --- | --- |
+| Personal scripts and preferences | `--script-dir DIR` | `SCRIPT_DIR` | `./scripts/` relative to invocation |
+| Shipped scripts and sidecars | `--script-bundle-dir DIR` | `SCRIPT_BUNDLE_DIR` | `scripts/` beside the executable |
 
-- Source development local script directory: `local/scripts/` (through the development runner)
-- Custom scripts: `<SCRIPT_DIR>/<BASENAME>.js`
-- Script data: `<SCRIPT_DIR>/<BASENAME>.data.json`
-- Script config: `<SCRIPT_DIR>/.config/<BASENAME>.config.json`
+Relative overrides are resolved against the invocation directory. Empty selected paths
+are errors. An explicit bundled directory must exist; a new personal directory may be
+created when saving preferences. Personal scripts and data override bundled files with
+the same basename. `/scripts` reports both selected directories and discovered scripts.
+Installed bundles retain their executable-adjacent `scripts/` layout.
+
+Script storage under the selected personal directory:
+
+- Custom scripts: `<DIR>/<BASENAME>.js`
+- Script data: `<DIR>/<BASENAME>.data.json` and `<DIR>/<BASENAME>.data.bin`
+- Script config: `<DIR>/.config/<BASENAME>.config.json`
+
+The [bundled script sources and compiler](scripts/src/mage/README.md) are TUI-owned.
+Cargo builds the TUI independently of that compiler. Development and release assembly
+consume the checked-in script exports; editing mage requires its nested npm compiler. CI builds/tests that package and checks that `mage.js` matches its source.
 
 Unlike the release builds and Flatpak, source builds do **not** bundle client data automatically. See [Data File Configuration](#data-file-configuration).
 
@@ -77,7 +90,7 @@ PowerShell development launch, set absolute paths before running Cargo:
 ```powershell
 $env:HOLTBURGER_DEFAULT_CONTENT = Join-Path $PWD 'local/content'
 $env:SCRIPT_DIR = Join-Path $PWD 'local/scripts'
-$env:SCRIPT_BUNDLE_DIR = Join-Path $PWD 'assets/scripts'
+$env:SCRIPT_BUNDLE_DIR = Join-Path $PWD 'apps/holtburger-cli/scripts'
 cargo run --bin tui -- [ARGS]
 ```
 

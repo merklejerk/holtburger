@@ -62,7 +62,10 @@ async function smokeMode(mode, family) {
 	await mkdir(installation);
 	const contentPath = join(installation, `smoke.${family}`);
 	await copyFile(
-		join(appRoot, `scripts/fixtures/minimal-content.${family}.fixture`),
+		join(
+			appRoot,
+			`../../scripts/fixtures/content/minimal-content.${family}.fixture`,
+		),
 		contentPath,
 	);
 	const child = spawn(hostPath, [`--mode=${mode}`, "--content", installation], {

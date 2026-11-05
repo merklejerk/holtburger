@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::scripting::{
-    TuiScriptClientView, WorkflowProjection, chat_tags_for_style,
+    ScriptDirectories, TuiScriptClientView, WorkflowProjection, chat_tags_for_style,
     deferred_script_source_for_basename, resolve_deferred_script_source,
     script_event_from_notification, script_event_from_view_event, workflow_events,
     workflow_projection,
@@ -21,12 +21,14 @@ fn script_client_view<'a>(
     view: &'a ViewState,
     server_time: Option<(f64, Instant)>,
     script_name: Option<&'a str>,
+    directories: &'a ScriptDirectories,
 ) -> TuiScriptClientView<'a> {
     TuiScriptClientView {
         data,
         view,
         server_time,
         script_name,
+        directories,
     }
 }
 
@@ -50,6 +52,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 &state.view,
                 None,
                 state.script.running_source_name.as_deref(),
+                &state.script.directories,
             );
             dispatch_script_event_to_host(&view, host, ScriptEvent::Command { msg }, &mut result);
             result.request_redraw(crate::types::RedrawPriority::Immediate);
@@ -91,6 +94,7 @@ impl GameState {
             &self.view,
             None,
             self.script.running_source_name.as_deref(),
+            &self.script.directories,
         );
 
         let had_host = {
@@ -147,7 +151,7 @@ impl GameState {
             return;
         }
 
-        let source = match deferred_script_source_for_basename(basename) {
+        let source = match deferred_script_source_for_basename(&self.script.directories, basename) {
             Ok(source) => source,
             Err(error) => {
                 result.actions.push(AppAction::Log {
@@ -183,6 +187,7 @@ impl GameState {
             &self.view,
             None,
             Some(running_source_name.as_str()),
+            &self.script.directories,
         );
 
         match ScriptHost::spawn_with_config(source, &view, self.script.host_config.clone()) {
@@ -367,6 +372,7 @@ impl GameState {
             &self.view,
             server_time,
             self.script.running_source_name.as_deref(),
+            &self.script.directories,
         );
         let after_workflow = workflow_projection(Some(self));
 
@@ -417,6 +423,7 @@ impl GameState {
             &self.view,
             server_time,
             self.script.running_source_name.as_deref(),
+            &self.script.directories,
         );
 
         let Some(host) = self.script.host.as_mut() else {
@@ -443,6 +450,7 @@ impl GameState {
             &self.view,
             server_time,
             self.script.running_source_name.as_deref(),
+            &self.script.directories,
         );
         let mut tick_count = 0;
 

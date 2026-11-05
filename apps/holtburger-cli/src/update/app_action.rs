@@ -56,6 +56,7 @@ impl AppState {
                 game.data.spell_catalog = self.spell_catalog.clone();
                 game.data.skill_table = self.skill_table.clone();
                 game.script.host_config = self.script_host_config.clone();
+                game.script.directories = self.script_directories.clone();
                 let queued_script_startup = self.queued_script_startup.take();
                 self.page = Page::Game(Box::new(game));
                 let mut result = UpdateResult::redraw();
@@ -123,6 +124,7 @@ mod tests {
             pending_exit_message: None,
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
+            script_directories: crate::scripting::ScriptDirectories::default(),
         };
 
         let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
@@ -164,6 +166,7 @@ mod tests {
             pending_exit_message: None,
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
+            script_directories: crate::scripting::ScriptDirectories::default(),
         };
 
         let result = app_state.reduce_app_action(AppAction::TransitionToGame {
@@ -200,6 +203,7 @@ mod tests {
             pending_exit_message: None,
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
+            script_directories: crate::scripting::ScriptDirectories::default(),
         };
 
         app_state.drain_actions(&mut UpdateResult {
@@ -247,6 +251,7 @@ mod tests {
             pending_exit_message: None,
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
+            script_directories: crate::scripting::ScriptDirectories::default(),
         };
 
         let result = app_state.reduce_app_action(AppAction::SendCommands {
@@ -284,6 +289,7 @@ mod tests {
             pending_exit_message: None,
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
+            script_directories: crate::scripting::ScriptDirectories::default(),
         };
 
         let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
@@ -324,7 +330,14 @@ mod tests {
                 "pick up loot",
             )),
             script_host_config: ScriptHostConfig::default(),
+            script_directories: crate::scripting::ScriptDirectories::default(),
         };
+
+        let directories = crate::scripting::ScriptDirectories {
+            personal: "configured-personal".into(),
+            bundled: "configured-bundle".into(),
+        };
+        app_state.script_directories = directories.clone();
 
         let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
             guid: Guid(0x50000003),
@@ -334,6 +347,7 @@ mod tests {
 
         match &app_state.page {
             Page::Game(game) => {
+                assert_eq!(game.script.directories, directories);
                 assert!(matches!(
                     game.script.queued_script_startup.as_ref(),
                     Some(startup) if startup.basename == "fighter" && startup.args == "pick up loot"

@@ -61,6 +61,14 @@ Without explicit allow-host options, only `localhost:9999` is allowed. See [HTTP
 
 ## Script directories
 
-`SCRIPT_DIR` selects the writable directory for personal scripts and preferences. Without it, the runtime uses `./scripts/`. `SCRIPT_BUNDLE_DIR` selects the shipped-script tree when arranging a source-development setup.
+| Option                    | Environment         | Default                                              |
+| ------------------------- | ------------------- | ---------------------------------------------------- |
+| `--script-dir DIR`        | `SCRIPT_DIR`        | `./scripts/` for personal scripts and preferences    |
+| `--script-bundle-dir DIR` | `SCRIPT_BUNDLE_DIR` | `scripts/` beside the executable for shipped scripts |
+
+CLI options override environment values, as `--content DIR` overrides
+`HOLTBURGER_DEFAULT_CONTENT`. Relative script paths are resolved from the launch
+working directory. Empty selected paths are errors. A selected bundle directory
+must already exist; a personal directory can be created when saving preferences.
 
 Local scripts with matching basenames override bundled scripts. `/scripts` reports discovered scripts and directories.

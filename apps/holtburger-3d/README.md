@@ -1,4 +1,4 @@
-<img src="../../assets/branding/portal-static.svg" width="96" height="96" alt="Holtburger portal logo" />
+<img src="../../assets/branding/portal-docs.png" width="96" height="96" alt="Holtburger portal logo" />
 
 # Holtburger 3D development
 
@@ -949,10 +949,10 @@ passive mode; choose a verified entirely-water location for the water check.
 ## Packaging and platform status
 
 The app uses the repository's portal logo for browser tabs, native windows, and packaged
-Windows/macOS application icons. `assets/branding/portal.svg` at the repository root owns the
-animated artwork; `npm run generate:branding` exports the static SVG, PNG, ICO, and ICNS plus
-the browser and Flatpak copies. Commit these exports after artwork changes and run
-`npm run check:branding` to detect drift. Regular builds consume the checked-in icons.
+Windows/macOS application icons. `assets/branding/portal-source.png` at the repository root owns
+the static artwork; root `npm run generate:branding` exports sized PNGs, ICO, and ICNS plus
+the browser and Flatpak copies. `assets/branding/portal.svg` supplies the loading animation. Commit these exports after artwork changes and run
+`npm run check:branding` from the repository root to detect drift. Regular builds consume the checked-in icons.
 
 `npm run package` builds an unpacked application and `npm run make` creates the configured ZIP.
 Both commands build the frontend, Electron main/preload code, and release Rust sidecar first.
@@ -960,6 +960,16 @@ Both commands build the frontend, Electron main/preload code, and release Rust s
 and their licenses, application license, and Electron/Chromium notices in the unpacked package.
 Required ASAR files must be nonempty. After `npm run make`, `npm run check:archive`
 extracts the ZIP and applies the same inspection to the downloadable shape.
+Desktop installer construction and setup/repair/uninstall probes belong to
+`scripts/installers/`. From this app directory, `npm run package:installer --
+--native DIR --output FILE [--iscc PATH]` consumes an extracted native release
+bundle and runs the platform's acceptance checks. The repository release command
+owns archive admission and suite receipts. Use `npm run check:installers` and
+`npm run test:installers` for the app-owned tooling checks. Native installer
+acceptance runs on Windows/macOS; portable contract and process tests also run on Linux.
+The shared filesystem comparison/hash helper uses only Node built-ins and needs no
+repository-root dependency installation.
+
 Font packaging checks compare every file under `public/fonts/` with its packaged bytes,
 so adding or replacing fonts and notices does not require updating a verification inventory.
 

@@ -37,21 +37,26 @@ jobs:
           ref: ${{ inputs.commit || github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: '3.12'
-      - name: Install release tooling dependencies
-        run: python -m pip install -r .github/scripts/requirements.txt
+          node-version: 24.13.1
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install repository tooling
+        run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
       - id: changes
         name: Select build inputs without skipping the final status
-        run: python .github/scripts/build_changes.py
+        run: npm run check:changes
       - name: Check release tooling
-        run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
+        run: npm run check:tooling && npm run format:tooling:check && npm run test:tooling
       - name: Check suite versions
-        run: python .github/scripts/release_version.py check
+        run: npm run version:check
       - name: Review committed dependency notices (advisory)
         run: |
-          if ! python .github/scripts/generate_notices.py check; then
+          if ! npm run check:notices; then
             echo '::warning::Dependency notice check failed. Review and regenerate locally when needed; CI will use the checked-in notices.'
           fi
 
@@ -68,17 +73,16 @@ jobs:
         with:
           ref: ${{ inputs.commit || github.sha }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install release tooling dependencies
-        run: python -m pip install -r .github/scripts/requirements.txt
       - uses: actions/setup-node@v4
-        if: inputs.product != 'cli'
         with:
           node-version: 24.13.1
           cache: npm
-          cache-dependency-path: apps/holtburger-3d/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            apps/holtburger-3d/package-lock.json
+            apps/holtburger-cli/scripts/src/mage/package-lock.json
+      - name: Install repository tooling
+        run: npm ci
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.95.0
@@ -92,6 +96,16 @@ jobs:
         if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: npm ci
+      - name: Build and test TUI bundled scripts
+        if: inputs.product != '3d'
+        working-directory: apps/holtburger-cli/scripts/src/mage
+        run: |
+          npm ci
+          npm run build
+          npm test
+      - name: Verify checked-in TUI script bundle
+        if: inputs.product != '3d'
+        run: git diff --exit-code -- apps/holtburger-cli/scripts/mage.js
       - name: Check Rust formatting
         run: cargo fmt --all --check
       - name: Check shared frontend and Electron logic once
@@ -101,12 +115,9 @@ jobs:
           npm run check
           npm run lint:ts
           npm run test:ts
+          npm run test:installers
       - name: Check native branding generation
-        if: inputs.product != 'cli'
-        working-directory: apps/holtburger-3d
         run: npm run check:branding
-      - name: Test CLI development runner
-        run: python3 -m unittest discover -s apps/holtburger-cli/tests -p 'test_*.py' -v
       - name: Test the complete Rust workspace
         run: cargo test --locked --workspace --all-targets --all-features
       - name: Deny Rust lint warnings

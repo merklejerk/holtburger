@@ -9,9 +9,9 @@ on:
       - 'crates/holtburger-scripting/holtburger.d.ts'
       - 'assets/branding/**'
       - 'assets/screenshots/**'
-      - 'apps/holtburger-3d/public/fonts/**'
-      - 'apps/holtburger-3d/src/assets/icons/travelers-kit-*.svg'
-      - '.github/scripts/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/promote-updates.yml'
   release:
     types: [published]
@@ -43,20 +43,19 @@ jobs:
         with:
           node-version: 24.13.1
           cache: npm
-          cache-dependency-path: site/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            site/package-lock.json
+      - name: Install repository tooling
+        run: npm ci
       - name: Build and check website
         working-directory: site
         run: npm ci && npm run format:check && npm run check && npm run build && npm run check:links
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - name: Generate update feeds
         env:
           GH_TOKEN: ${{ github.token }}
-          PYTHONDONTWRITEBYTECODE: '1'
         run: |
-          python -m pip install -r .github/scripts/requirements.txt
-          python .github/scripts/promote_updates.py site/build
+          npm run --silent feeds:generate -- site/build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:

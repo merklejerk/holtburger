@@ -7,6 +7,9 @@ on:
       - ".github/workflows/holtburger-3d-portability.yml"
       - "apps/holtburger-3d/**"
       - "assets/branding/**"
+      - "scripts/**"
+      - "package.json"
+      - "package-lock.json"
       - "crates/**"
       - "Cargo.lock"
       - "Cargo.toml"
@@ -45,16 +48,19 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.13.1
           cache: npm
-          cache-dependency-path: apps/holtburger-3d/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            apps/holtburger-3d/package-lock.json
+      - name: Install repository tooling
+        run: npm ci
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install frontend dependencies
         working-directory: apps/holtburger-3d
         run: npm ci
       - name: Verify branding exports
-        working-directory: apps/holtburger-3d
         run: npm run check:branding
       - name: Test the Rust host
         run: cargo test -p holtburger-3d-host --all-targets

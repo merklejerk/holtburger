@@ -1,0 +1,10 @@
+{
+	"extends": "./tsconfig.node.json",
+	"compilerOptions": {
+		"strict": true,
+		"allowJs": true,
+		"checkJs": false,
+		"erasableSyntaxOnly": true
+	},
+	"include": ["scripts/installers/**/*.ts"]
+}

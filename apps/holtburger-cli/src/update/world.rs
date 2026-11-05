@@ -276,6 +276,7 @@ mod tests {
             pending_exit_message: None,
             queued_script_startup: None,
             script_host_config: ScriptHostConfig::default(),
+            script_directories: crate::scripting::ScriptDirectories::default(),
         }
     }
 

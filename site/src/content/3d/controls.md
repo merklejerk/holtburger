@@ -2,6 +2,7 @@
 title: '3D controls'
 description: 'Default gameplay bindings, grouped by what you want to do.'
 section: '3D client'
+presentation: reference
 ---
 
 ## Movement and camera

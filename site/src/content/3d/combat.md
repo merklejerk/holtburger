@@ -6,7 +6,10 @@ section: '3D client'
 
 <script>
 import Media from '#lib/components/Media.svelte';
+import EditorialSpread from '#lib/components/EditorialSpread.svelte';
 </script>
+
+<EditorialSpread>
 
 ## Your attack controls
 
@@ -22,9 +25,12 @@ The outer arc shows power or accuracy; the inner rows show attack height. You ca
 
 In magic stance, use your [spell bar](/holtburger/3d/spells/) instead.
 
+{#snippet illustration()}
 <Media id="combat-controls" detail />
-
 <Media id="combat-controls-missile" detail />
+{/snippet}
+
+</EditorialSpread>
 
 ## Use Smart Tab in combat
 
@@ -36,13 +42,18 @@ Choose your target, then start your attack or cast. Use the displayed key hints 
 
 ## Keep track of your target
 
-A bold outline traces your selected creature or object, staying visible through walls and other obstructions. It is easier to follow in a crowd than retail’s corner reticle.
+<EditorialSpread>
 
-<Media id="selection-outline" detail />
+A bold outline traces your selected creature or object, staying visible through walls and other obstructions. It is easier to follow in a crowd than retail’s corner reticle.
 
 A separate combat reticle marks the target you are actively attacking or casting at, so you can distinguish selection from the ongoing fight.
 
+{#snippet illustration()}
+<Media id="selection-outline" detail />
 <Media id="combat-reticle" detail />
+{/snippet}
+
+</EditorialSpread>
 
 ## Fight on the move
 

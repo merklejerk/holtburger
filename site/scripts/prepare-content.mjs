@@ -4,10 +4,8 @@ import { compile } from 'mdsvex';
 import { prepareQuickstarts } from './prepare-quickstarts.mjs';
 import { prepareCaptures } from './prepare-captures.mjs';
 
-const metadataOnly = process.argv.includes('--metadata-only');
-if (!metadataOnly || process.argv.includes('--quickstarts'))
-	await prepareQuickstarts();
-if (!metadataOnly) await prepareCaptures();
+await prepareQuickstarts();
+await prepareCaptures();
 
 // Compute cold page metadata once; Markdown parsers and raw prose never ship to readers.
 const root = new URL('../src/content/', import.meta.url);
@@ -29,12 +27,21 @@ for (const file of files) {
 	const title = requiredText(metadata, 'title', file);
 	const description = requiredText(metadata, 'description', file);
 	const section = requiredText(metadata, 'section', file);
+	const presentation =
+		typeof metadata === 'object' &&
+		metadata !== null &&
+		'presentation' in metadata
+			? metadata.presentation
+			: 'chapter';
+	if (presentation !== 'chapter' && presentation !== 'reference')
+		throw new Error(`${file} has unsupported presentation: ${presentation}`);
 	pages.push({
 		path: `/src/content/${file}`,
 		slug: file.slice(0, -3),
 		title,
 		description,
-		section
+		section,
+		presentation
 	});
 }
 const destination = new URL('../src/lib/generated/', import.meta.url);

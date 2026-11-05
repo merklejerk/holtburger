@@ -2,6 +2,7 @@
 title: '3D settings'
 description: 'Find the setting you need and know which preferences follow a character.'
 section: '3D client'
+presentation: reference
 ---
 
 ## Where to look

@@ -27,7 +27,7 @@ try {
 	page.on('pageerror', (error) => failures.push(error.message));
 	// Exercise real clicks with JavaScript enabled, including non-page destinations.
 	await page.goto(origin);
-	const screenshot = page.locator('.hero-caption');
+	const screenshot = page.locator('.terminal-plate > a');
 	const imageHref = await screenshot.getAttribute('href');
 	if (imageHref === null) throw new Error('Screenshot has no destination');
 	const imageUrl = new URL(imageHref, page.url()).href;
@@ -57,8 +57,10 @@ try {
 		assert.equal(page.url(), new URL(`${slug}/`, origin).href);
 	}
 	await page.goBack();
+	await page.waitForURL(new URL('3d/', origin).href);
 	assert.equal(page.url(), new URL('3d/', origin).href);
 	await page.goForward();
+	await page.waitForURL(new URL('tui/', origin).href);
 	assert.equal(page.url(), new URL('tui/', origin).href);
 	for (const [path, name] of [
 		['', 'home'],
@@ -69,11 +71,16 @@ try {
 		['3d/chat-commands/', 'commands'],
 		['tui/basics/', 'terminal'],
 		['tui/scripting/integrations/', 'scripting'],
-		['3d/combat/', 'guide']
+		['3d/combat/', 'guide'],
+		['3d/controls/', 'reference']
 	]) {
 		const response = await page.goto(new URL(path, origin).href);
 		assert.equal(response?.status(), 200);
 		await page.evaluate(() => document.fonts.ready);
+		if (name === 'reference') {
+			assert.equal(await page.locator('.guide-reference').count(), 1);
+			assert.ok((await page.getByRole('table').count()) > 0);
+		}
 		assert.equal(await page.locator('h1').count(), 1);
 		if (name === 'gallery') {
 			assert.equal(
@@ -98,20 +105,9 @@ try {
 			}
 		});
 		await page.screenshot({
-			path: `${captures}/${name}-dark.png`,
+			path: `${captures}/${name}-desktop.png`,
 			fullPage: true
 		});
-		await page.getByRole('button', { name: 'Use light theme' }).click();
-		await page.screenshot({
-			path: `${captures}/${name}-light.png`,
-			fullPage: true
-		});
-		await page.reload();
-		assert.equal(
-			await page.locator('html').getAttribute('data-theme'),
-			'light'
-		);
-		await page.getByRole('button', { name: 'Use dark theme' }).click();
 		await page.setViewportSize({ width: 390, height: 844 });
 		assert.equal(
 			await page.evaluate(
@@ -148,6 +144,57 @@ try {
 		await search.press('Escape');
 	}
 	await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(new URL('3d/combat/', origin).href);
+	const menuButton = page.getByRole('button', {
+		name: 'Open guide navigation'
+	});
+	const guideMenu = page.getByRole('dialog', { name: 'Browse the guides' });
+	await menuButton.click();
+	await guideMenu.waitFor();
+	assert.equal(
+		await page.evaluate(
+			() => getComputedStyle(document.documentElement).overflow
+		),
+		'hidden'
+	);
+	// Native dialogs may yield focus to browser chrome, but never background controls.
+	for (const key of ['Shift+Tab', 'Tab']) {
+		await page.keyboard.press(key);
+		assert.equal(
+			await guideMenu.evaluate(
+				(menu) => !document.hasFocus() || menu.contains(document.activeElement)
+			),
+			true
+		);
+	}
+	await page.keyboard.press('Escape');
+	await guideMenu.waitFor({ state: 'hidden' });
+	assert.equal(
+		await menuButton.evaluate((button) => button === document.activeElement),
+		true
+	);
+	await menuButton.click();
+	await page.getByRole('button', { name: 'Close guide navigation' }).click();
+	await guideMenu.waitFor({ state: 'hidden' });
+	await menuButton.click();
+	await page.mouse.click(1, 1);
+	await guideMenu.waitFor({ state: 'hidden' });
+	await menuButton.click();
+	await page.setViewportSize({ width: 1440, height: 1000 });
+	await guideMenu.waitFor({ state: 'hidden' });
+	await page.getByRole('complementary', { name: 'Guide navigation' }).waitFor();
+	assert.notEqual(
+		await page.evaluate(
+			() => getComputedStyle(document.documentElement).overflow
+		),
+		'hidden'
+	);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await menuButton.click();
+	await guideMenu.locator('summary').filter({ hasText: 'Startup' }).click();
+	await guideMenu.getByRole('link', { name: 'Launcher', exact: true }).click();
+	await page.getByRole('heading', { name: 'Launcher', level: 1 }).waitFor();
+	assert.equal(page.url(), new URL('startup/launcher/', origin).href);
 	for (const entry of catalog) {
 		const response = await page.goto(new URL(`${entry.slug}/`, origin).href);
 		assert.equal(response?.status(), 200, `Route ${entry.slug}`);
@@ -186,7 +233,10 @@ try {
 		await reader
 			.getByRole('heading', { name: 'Use Smart Tab in combat', exact: true })
 			.waitFor();
-		await reader.locator('summary').filter({ hasText: 'Startup' }).click();
+		await reader
+			.locator('.guide-sidebar summary')
+			.filter({ hasText: 'Startup' })
+			.click();
 		await reader
 			.getByRole('link', {
 				name: 'Launcher',

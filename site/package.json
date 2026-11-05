@@ -8,7 +8,7 @@
 	},
 	"scripts": {
 		"prepare:assets": "node scripts/prepare-assets.mjs",
-		"dev": "npm run prepare:assets && npm run prepare:content && vite --host 127.0.0.1",
+		"dev": "vite",
 		"build": "npm run prepare:assets && npm run prepare:content && vite build && pagefind --site build",
 		"preview": "node scripts/preview.mjs",
 		"check": "npm run prepare:assets && npm run prepare:content && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && npm run check:examples && npm run check:media",
@@ -19,7 +19,8 @@
 		"check:links": "node scripts/check-links.mjs",
 		"check:examples": "tsc --project examples/tsconfig.json",
 		"check:media": "node scripts/check-media.mjs",
-		"media:publish": "node scripts/publish-media.mjs"
+		"media:publish": "node scripts/publish-media.mjs",
+		"predev": "npm run prepare:assets && npm run prepare:content"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^4.0.1",

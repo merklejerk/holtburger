@@ -16,9 +16,11 @@ Select a player and choose **Invite to party** in the selected-target actions. L
 
 The party HUD keeps teammates’ health, stamina and mana visible while you play. Click a member to select them for a targeted action or spell.
 
+<div class="media-group">
 <Media id="party-hud" detail />
 
 <Media id="party" />
+</div>
 
 ## Friends
 

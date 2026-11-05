@@ -2,6 +2,7 @@
 title: 'TUI controls'
 description: 'Keys depend on the focused pane and the selected entry.'
 section: 'Terminal client'
+presentation: reference
 ---
 
 ## Pane and input controls

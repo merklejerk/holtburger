@@ -3,7 +3,7 @@
 	import { asset, resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import Search from '#lib/components/Search.svelte';
-	import ThemeToggle from '#lib/components/ThemeToggle.svelte';
+	import { illustrations } from '#lib/illustrations.ts';
 	import type { Snippet } from 'svelte';
 	let { children }: { children: Snippet } = $props();
 	const links = [
@@ -22,39 +22,43 @@
 	/></svelte:head
 >
 <a class="skip-link" href="#main">Skip to content</a>
-<header class="site-header">
-	<div class="header-inner">
-		<a class="brand" href={resolve('/')} aria-label="Holtburger home"
-			><picture>
-				<source
-					media="(prefers-reduced-motion: reduce)"
-					srcset={asset('assets/branding/portal-static.svg')}
-				/>
+<div
+	class="publication"
+	style:--paint-wash={`url('${illustrations.ochre.src}')`}
+>
+	<header class="site-header">
+		<div class="header-inner">
+			<div class="masthead">
+				<a class="brand" href={resolve('/')} aria-label="Holtburger home"
+					>Holtburger</a
+				>
 				<img
-					src={asset('assets/branding/portal.svg')}
+					class="masthead-landscape"
+					{...illustrations.engraving}
 					alt=""
-					width="48"
-					height="48"
+					aria-hidden="true"
 				/>
-			</picture><span>Holtburger</span></a
-		>
-		<nav aria-label="Main navigation">
-			{#each links as link}<a
-					href={resolve('/[...slug]', { slug: link.path })}
-					aria-current={page.url.pathname.includes(`/${link.path}/`)
-						? 'page'
-						: undefined}>{link.label}</a
-				>{/each}
-		</nav>
-		<Search />
-		<ThemeToggle />
-	</div>
-</header>
-{@render children()}
-<footer class="site-footer">
-	<div>
-		<a href="https://github.com/merklejerk/holtburger">Source on GitHub</a><a
-			href="https://github.com/merklejerk/holtburger/issues">Report an issue</a
-		>
-	</div>
-</footer>
+			</div>
+			<div class="navigation-row">
+				<nav aria-label="Main navigation">
+					{#each links as link}<a
+							href={resolve('/[...slug]', { slug: link.path })}
+							aria-current={page.url.pathname.includes(`/${link.path}/`)
+								? 'page'
+								: undefined}>{link.label}</a
+						>{/each}
+				</nav>
+				<Search />
+			</div>
+		</div>
+	</header>
+	{@render children()}
+	<footer class="site-footer">
+		<div>
+			<a href="https://github.com/merklejerk/holtburger">Source on GitHub</a><a
+				href="https://github.com/merklejerk/holtburger/issues"
+				>Report an issue</a
+			>
+		</div>
+	</footer>
+</div>

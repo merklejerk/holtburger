@@ -1,7 +1,21 @@
 @font-face {
+	font-family: Charm;
+	src: url('assets/fonts/charm/Charm-Bold.ttf') format('truetype');
+	font-style: normal;
+	font-weight: 700;
+	font-display: swap;
+}
+@font-face {
 	font-family: Gelasio;
 	src: url('assets/fonts/gelasio/Gelasio[wght].ttf') format('truetype');
 	font-style: normal;
+	font-weight: 400 700;
+	font-display: swap;
+}
+@font-face {
+	font-family: Gelasio;
+	src: url('assets/fonts/gelasio/Gelasio-Italic[wght].ttf') format('truetype');
+	font-style: italic;
 	font-weight: 400 700;
 	font-display: swap;
 }

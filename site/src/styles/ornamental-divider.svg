@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="112" height="112" viewBox="0 0 112 112">
+  <!-- One diamond per 64px tile leaves quiet space between ornaments. -->
+  <defs>
+    <g id="trim">
+      <path fill="#d5c9a3" d="M0 3h64v18H0z"/>
+      <path fill="none" stroke="#aaa17b" d="M0 12h22m20 0h22"/>
+      <path fill="#77734f" d="m22 12 10-8 10 8-10 8z"/>
+      <g fill="none" stroke="#f8edcd" stroke-width="1.2">
+        <path d="m26 12 6-5 6 5-6 5z"/>
+      </g>
+      <path fill="none" stroke="#55573b" stroke-width="1.5" d="M0 2h64M0 22h64"/>
+    </g>
+    <pattern id="horizontal" width="64" height="24" patternUnits="userSpaceOnUse">
+      <use href="#trim"/>
+    </pattern>
+    <pattern id="vertical" width="24" height="64" patternUnits="userSpaceOnUse">
+      <use href="#trim" transform="matrix(0 1 1 0 0 0)"/>
+    </pattern>
+  </defs>
+  <path fill="url(#horizontal)" transform="translate(24 0)" d="M0 0h64v24H0z"/>
+  <path fill="url(#horizontal)" transform="translate(24 88)" d="M0 0h64v24H0z"/>
+  <path fill="url(#vertical)" transform="translate(0 24)" d="M0 0h24v64H0z"/>
+  <path fill="url(#vertical)" transform="translate(88 24)" d="M0 0h24v64H0z"/>
+</svg>

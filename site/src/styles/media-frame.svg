@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <!-- Nine-slice at 24px; the empty center never covers media or native controls.
+       Round-repeated edge tiles preserve the scale of the printed lozenge motif. -->
+  <path fill="#ead09a" fill-rule="evenodd" d="M3 3h90v90H3zM14 14v68h68V14z"/>
+  <g fill="none">
+    <rect x="2.5" y="2.5" width="91" height="91" stroke="#7c2319" stroke-width="2"/>
+    <rect x="6.5" y="6.5" width="83" height="83" stroke="#a26b3e" stroke-width=".8"/>
+    <rect x="12.5" y="12.5" width="71" height="71" stroke="#7c2319" stroke-width="1.5"/>
+    <path stroke="#a26b3e" stroke-width=".75" d="m27 9 3-2 3 2-3 2zm12 0 3-2 3 2-3 2zm12 0 3-2 3 2-3 2zm12 0 3-2 3 2-3 2zM27 87l3-2 3 2-3 2zm12 0 3-2 3 2-3 2zm12 0 3-2 3 2-3 2zm12 0 3-2 3 2-3 2zM9 27l2 3-2 3-2-3zm0 12 2 3-2 3-2-3zm0 12 2 3-2 3-2-3zm0 12 2 3-2 3-2-3zM87 27l2 3-2 3-2-3zm0 12 2 3-2 3-2-3zm0 12 2 3-2 3-2-3zm0 12 2 3-2 3-2-3z"/>
+  </g>
+  <g fill="#7c2319" stroke="#fcf1d8" stroke-width=".7">
+    <path d="m3 9 6-6 6 6-6 6zM81 9l6-6 6 6-6 6zM3 87l6-6 6 6-6 6zM81 87l6-6 6 6-6 6z"/>
+  </g>
+  <g fill="#ead09a">
+    <circle cx="9" cy="9" r="1.6"/><circle cx="87" cy="9" r="1.6"/>
+    <circle cx="9" cy="87" r="1.6"/><circle cx="87" cy="87" r="1.6"/>
+  </g>
+</svg>

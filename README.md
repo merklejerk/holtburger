@@ -2,7 +2,7 @@
 
 **The Asheron's Call client, reengineered.**
 
-Built from the protocol up: a Rust core, a 3D interface, and a scriptable terminal client.
+Built from the protocol up: a Rust core, a 3D Electron interface, and a scriptable terminal client.
 
 [![Holtburger 3D in Holtburg, with nearby players, character appraisal, and the world map](assets/screenshots/3d-holtburg.webp)](assets/screenshots/3d-holtburg.webp)
 

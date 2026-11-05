@@ -82,17 +82,27 @@ checks those same files against the scripting crate's declaration file. Edit the
 canonical examples rather than maintaining separate snippets. The site publishes
 the existing declaration file without inventing another API type model.
 
-`npm run dev` uses Vite’s normal hot reload for pages, components, styles and
-catalog changes. A batched metadata refresh tracks page additions, removals and
-frontmatter edits; unchanged output is not rewritten and no blanket browser
-reload is sent. Release quickstart edits also refresh their generated pages.
-Run `npm run prepare:assets` after changing reused source assets, and
-`npm run prepare:content` after editing capture briefs. Invalid source metadata
-appears in the dev server and browser error overlay.
+`npm run dev` starts the standard Vite/SvelteKit development server on
+`http://127.0.0.1:4178/holtburger/`, bound to localhost only. npm's `predev`
+lifecycle prepares assets and content once before startup. Vite owns hot reload;
+there is no custom watcher, restart loop or development-server wrapper. Its
+standard watch configuration ignores the static adapter’s `build/` output.
 
-Stop the dev server before building: development and production share SvelteKit’s
-generated directory. Restart it after the build, or serve production output with
-`npm run preview`.
+Ordinary Markdown body, component, style and catalog edits use normal Vite HMR.
+After adding/removing pages, editing frontmatter, release quickstarts or capture
+briefs, run `npm run prepare:content` to refresh generated metadata. Run
+`npm run prepare:assets` after changing reused source assets. Preparation errors
+fail that command rather than being relayed through a custom browser overlay.
+The one development middleware serves the latest built Pagefind search index;
+it does not watch files, trigger reloads or manage the server process.
+
+Asset preparation writes only changed bytes and removes only obsolete output
+files. It must not delete/recreate the public asset tree on every build, because
+Vite treats those changes as reload requests.
+
+Leave the dev server running while building and checking production output.
+Use `npm run preview -- --port 4179` for a separate production preview. Do not
+stop/restart the user's dev server as part of routine validation.
 
 Guide sidebars show the same chapters in the same order on every guide; only
 the current chapter opens by default. Do not hide chapters based on the route.
@@ -103,7 +113,7 @@ link to precise reference entries. Separate 3D and TUI chat command references.
 
 Pages are prerendered HTML and use normal browser navigation, including screenshot
 links and browser history. The HTML shell disables SvelteKit's client-side link
-routing; Svelte still hydrates search, theme switching and media controls.
+routing; Svelte still hydrates search and media controls.
 
 Explain project origins on Home. Keep the shared footer functional;
 do not repeat the project pitch in hero labels, sidebars and footer copy.
@@ -114,12 +124,50 @@ owner, session, setup, framing and expected result there when adding a planned
 entry; preparation rejects missing briefs or unused placements. See [MEDIA.md](MEDIA.md)
 for snapshot publication, processing and hosted checks.
 
-Take inspiration from Traveler’s Kit: leather, stitching, copper fittings and
-field-guide layouts. Use recessed stitched seams for structural dividers, copper
-moulding and nailheads for screenshot mounts, and raised fittings for buttons.
-Prefer continuous sections and useful contents lists over feature-card grids and
-oversized slogans. Keep body text, commands and tables
-easy to read in both dark and light themes.
+The website follows the printed gazette direction of original boxed RPG companion
+publications: warm cream paper, honey-ochre paint washes, deep oxblood headings,
+spaced diamond border trims, and sepia architectural engravings. Use real irregular brush
+textures for broad bands rather than flat rectangular fills. Decorative art
+balances clear space around copy; actual screenshots establish the game's
+identity. Generated decoration stays generic: medieval buildings, historically
+grounded Asian architecture, landscapes and cartographic detail, never creatures,
+characters, portals or supposed game landmarks.
+
+Use one fixed publication palette. Keep body text, commands and tables readable
+on the warm parchment; the client's own theming is independent. Home pitches the
+project through editorial spreads, guides explain tasks with contextual media,
+and reference pages provide compact lookups. Avoid card grids, repeated heavy
+frames, leather and stitching. Reserve the raised gold treatment for the primary
+download button; secondary controls stay quieter.
+
+Charm Bold provides display lettering for the masthead and
+headings; use its actual bold face without synthesized styles. Gelasio owns prose and Arimo
+owns dense navigation and lookup tables. Fonts load from local assets with their
+redistribution licenses, not a font service.
+
+Guides use `chapter` presentation by default. Set `presentation: reference` in
+frontmatter for compact controls, command, settings and API lookup pages; the
+preparation script validates this value and emits the final metadata. Keep Home
+explicit rather than turning these two guide presentations into a page builder.
+Use `EditorialSpread` only for a real relationship between an explanation and
+its accompanying media. Its `children` snippet comes first in reading order and
+its `illustration` snippet follows on narrow screens. Related images form a row,
+vertically centered beside the text when their intrinsic sizes leave a readable
+text column; otherwise the row moves below the explanation. Group related media
+following prose in `<div class="media-group">`. Standalone media is centered.
+On mobile, text and every image stack vertically in source order. Do not shrink
+a pair into an unreadable side column merely to keep it beside the text.
+
+Media uses a narrow printed nine-slice frame with geometric corner marks. Frame
+the image/video mount, not its caption. A carousel has one frame around the whole
+component; its individual slides remain unframed. Compact component crops retain
+their intrinsic size and use the smaller border. Keep frame centers transparent
+so controls remain clickable. The guide navigation's torn-paper edge is purely
+decorative and is omitted from the mobile overlay. On mobile, a fixed hamburger
+button opens a native modal dialog: keep its close control visible, let Escape
+and backdrop clicks dismiss it, trap focus and lock background scrolling. Reuse
+the same navigation content as the desktop sidebar. Server-rendered ordinary
+navigation remains available when JavaScript is disabled.
 
 New media must remain outside the main repository. Existing README screenshots
 and branding are reused during asset preparation. Each proposed screenshot or
@@ -164,7 +212,7 @@ npm ci
 npm run build
 npm run dev
 npm run check
-npm run preview
+npm run preview -- --port 4179
 ```
 
 Use `npm run dev` for automatic reload during editing. Search uses the last
@@ -172,9 +220,11 @@ production index; rebuild when you want search results to reflect new content.
 The initial build supplies that index. `npm run preview` serves a fixed build
 without automatic reload.
 
-The production preview serves `site/build/` at
-`http://127.0.0.1:4178/holtburger/`, including generated Pagefind search.
-`npm run check:browser` uses an installed Chrome and the running preview. Override
+With `--port 4179`, the production preview serves `site/build/` at
+`http://127.0.0.1:4179/holtburger/`, including generated Pagefind search. Run
+`SITE_PREVIEW_URL=http://127.0.0.1:4179/holtburger/ npm run check:browser`
+to check it while the dev server remains on port 4178. The browser check uses an
+installed Chrome and the running preview. Override
 `CHROME_PATH`, `SITE_PREVIEW_URL` or `SITE_CAPTURE_DIR` as needed. Browser captures
 stay outside Git. Format with `npm run format`; check with
 `npm run format:check`.

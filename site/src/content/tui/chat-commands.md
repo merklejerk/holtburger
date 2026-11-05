@@ -2,6 +2,7 @@
 title: 'TUI chat commands'
 description: 'Messaging, gameplay utilities, and script control in the terminal client.'
 section: 'Terminal client'
+presentation: reference
 ---
 
 ## Help and syntax

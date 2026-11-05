@@ -39,6 +39,10 @@ its MP4 URL, poster, dimensions and captions: use `null` for a silent demonstrat
 or `{ src, language, label }` for a VTT track. A YouTube entry uses its video ID.
 Keep capture IDs stable when replacing planned entries.
 
+Decorative paint washes and engravings use published URLs and dimensions in
+`src/lib/illustrations.ts`. They share this media repository and the same URL
+checks; keep their files when publishing a new complete snapshot.
+
 Clips have native controls, start muted and use `preload="none"`. Silent
 demonstrations loop and play inline on mobile. YouTube loads
 only after a click. Labeled briefs remain where captures are pending.

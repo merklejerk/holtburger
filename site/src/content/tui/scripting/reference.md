@@ -2,6 +2,7 @@
 title: 'Scripting API reference'
 description: 'Find a helper or action, then use the shared declarations for its exact types.'
 section: 'Scripting'
+presentation: reference
 ---
 
 ## Exact contract

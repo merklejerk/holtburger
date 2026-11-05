@@ -1,6 +1,4 @@
-import { defineConfig, normalizePath, type Plugin } from 'vite';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { defineConfig, type Plugin } from 'vite';
 import { fileURLToPath } from 'node:url';
 import { sveltekit } from '@sveltejs/kit/vite';
 import adapter from '@sveltejs/adapter-static';
@@ -10,71 +8,32 @@ import { headingIds } from './scripts/heading-ids.ts';
 
 const base = '/holtburger';
 
-/** Refresh only generated page metadata; Vite owns browser updates. */
-function authoringRefresh(): Plugin {
-	const execute = promisify(execFile);
-	const root = fileURLToPath(new URL('.', import.meta.url));
-	const path = (relative: string) =>
-		normalizePath(fileURLToPath(new URL(relative, import.meta.url)));
-	const content = path('./src/content/');
-	const quickstarts = path('../release/quickstarts/');
+/** Expose the last built search index; this does not watch or reload anything. */
+function developmentSearch(): Plugin {
 	return {
-		name: 'holtburger-content-metadata',
+		name: 'holtburger-development-search',
+		apply: 'serve',
 		configureServer(server) {
-			// Search uses the latest production index during local development.
 			server.middlewares.use(
 				`${base}/pagefind`,
-				sirv(path('./build/pagefind/'), { dev: true })
+				sirv(fileURLToPath(new URL('./build/pagefind/', import.meta.url)), {
+					dev: true
+				})
 			);
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			let queue = Promise.resolve();
-			let quickstartsChanged = false;
-			server.watcher.add(quickstarts);
-			const refresh = (event: string, changed: string) => {
-				if (!['add', 'change', 'unlink'].includes(event)) return;
-				const file = normalizePath(changed);
-				if (!file.endsWith('.md')) return;
-				if (!file.startsWith(content) && !file.startsWith(quickstarts)) return;
-				quickstartsChanged ||= file.startsWith(quickstarts);
-				clearTimeout(timer);
-				timer = setTimeout(() => {
-					const prepareQuickstarts = quickstartsChanged;
-					quickstartsChanged = false;
-					queue = queue
-						.then(async () => {
-							await execute(
-								process.execPath,
-								[
-									'scripts/prepare-content.mjs',
-									'--metadata-only',
-									...(prepareQuickstarts ? ['--quickstarts'] : [])
-								],
-								{ cwd: root }
-							);
-						})
-						.catch((error: unknown) => {
-							const message =
-								error instanceof Error ? error.message : String(error);
-							server.config.logger.error(message);
-							server.ws.send({
-								type: 'error',
-								err: { message, stack: message }
-							});
-						});
-				}, 150);
-			};
-			server.watcher.on('all', refresh);
-			server.httpServer?.once('close', () => {
-				clearTimeout(timer);
-				server.watcher.off('all', refresh);
-			});
 		}
 	};
 }
 
 export default defineConfig({
+	server: {
+		host: '127.0.0.1',
+		port: 4178,
+		strictPort: true,
+		// Static-adapter output is not an input to the development server.
+		watch: { ignored: ['**/build/**'] }
+	},
 	plugins: [
-		authoringRefresh(),
+		developmentSearch(),
 		sveltekit({
 			adapter: adapter(),
 			extensions: ['.svelte', '.md'],

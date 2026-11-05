@@ -6,17 +6,23 @@ section: '3D client'
 
 <script>
 import Media from '#lib/components/Media.svelte';
+import EditorialSpread from '#lib/components/EditorialSpread.svelte';
 </script>
 
 ## Navigate with the minimap
+
+<EditorialSpread>
 
 The minimap puts the surrounding terrain under your radar markers: buildings, elevation and impassable areas help you read the route ahead. Inside dungeons, it shows the dungeon layout so you can follow passages and keep your bearings.
 
 A breadcrumb trail marks where you have recently walked, helping you retrace your steps through winding passages.
 
+{#snippet illustration()}
 <Media id="minimap" detail />
-
 <Media id="minimap-dungeon" detail />
+{/snippet}
+
+</EditorialSpread>
 
 ## Read the world map
 
@@ -49,9 +55,11 @@ Use the map's context menu to mark a destination, or enter coordinates in chat:
 
 Coordinate links in chat can also set a map pin. Enable **Interact with chat history** before clicking a coordinate link.
 
+<div class="media-group">
 <Media id="waypoints" detail />
 
 <Media id="waypoint-minimap" detail />
+</div>
 
 ## Recall
 

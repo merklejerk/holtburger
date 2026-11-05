@@ -2,6 +2,7 @@
 title: '3D chat commands'
 description: 'Messages, emotes, travel, corpse permissions, and local utilities.'
 section: '3D client'
+presentation: reference
 ---
 
 ## Help and syntax

@@ -1,5 +1,6 @@
 import { stat } from 'node:fs/promises';
 import { media } from '../src/lib/media/catalog.ts';
+import { illustrations } from '../src/lib/illustrations.ts';
 
 /** Collect remote media references for local link checks and optional hosting checks. */
 export async function catalogFiles() {
@@ -49,5 +50,7 @@ export async function catalogFiles() {
 		files.push({ url: url.href, contentType });
 	}
 	for (const [id, entry] of Object.entries(media)) await validate(id, entry);
+	for (const illustration of Object.values(illustrations))
+		add(illustration.src, 'image/');
 	return files;
 }

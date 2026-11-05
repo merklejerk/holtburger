@@ -32,5 +32,3 @@ Coming back from retail? [See what’s built in and what’s different](/holtbur
 ## New to Asheron’s Call?
 
 Community servers set their own rules and account requirements. Follow your chosen server’s instructions; its community is also the best place for advice specific to its world.
-
-The [AC Community Wiki](https://asheron.info/wiki/index.php/ACC_Wiki_Home) covers character builds, quests, equipment and places.

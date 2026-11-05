@@ -47,7 +47,7 @@
 			"priority": "first"
 		},
 		"loadouts": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "gear",
 			"setup": "Two weapon/gear arrangements, with one slot intentionally omitted and an empty included slot.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Capture the builder, result icon/bar cell, and equipment changes; split into short steps if needed.",
@@ -111,7 +111,7 @@
 			"priority": "first"
 		},
 		"locks": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "gear",
 			"setup": "A real locked chest/door, at least one key, trained Lockpick and a usable pick.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Show the locked object and helper; keep estimate and result text readable.",
@@ -127,7 +127,7 @@
 			"priority": "first"
 		},
 		"vendor": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "gear",
 			"setup": "A nearby vendor, enough currency, one purchase and one expendable sale.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Show stock, queue quantities, balances and Trade feedback.",
@@ -207,10 +207,10 @@
 			"priority": "later"
 		},
 		"chat": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "Sample conversation with coordinates and harmless text.",
-			"framing": "Crop to the chat buffer and its interaction control, with a small margin of world context. Show the held modifier key.",
+			"framing": "Crop to the compact chat buffer and its interaction control. Identify the held Ctrl key in the accompanying caption.",
 			"expected": "With history interaction enabled, scroll back and select text. Release temporary interaction to resume live messages; demonstrate toggling interaction for longer reading.",
 			"priority": "later"
 		},
@@ -247,15 +247,15 @@
 			"priority": "later"
 		},
 		"inventory-moves": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "gear",
-			"setup": "Two packs, mergeable stacks and an equippable item; Native sorting selected.",
+			"setup": "Two packs and an equippable item; Native sorting selected.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Keep source and destination plus the equipment strip visible.",
-			"expected": "Reordering/transfers, merging and equip/unequip have clear visible results.",
+			"expected": "Reordering, bag transfers and equip/unequip have clear visible results.",
 			"priority": "later"
 		},
 		"inventory-merge": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "gear",
 			"setup": "Several partially filled compatible stacks in one bag, with free space for a split.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Show the Y quantity prompt, bag Auto-merge action and completion feedback.",
@@ -263,7 +263,7 @@
 			"priority": "later"
 		},
 		"action-bars": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "gear",
 			"setup": "Usable item and saved loadout, plus room to clone a bar.",
 			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Keep drag sources, bar menu/layout controls and keyboard focus hints in view.",
@@ -271,7 +271,7 @@
 			"priority": "later"
 		},
 		"character-creation": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "setup",
 			"setup": "An unused character slot and a server on which creating a sample character is acceptable.",
 			"framing": "Show appearance, Skills & Stats and review in separate short beats.",
@@ -311,10 +311,10 @@
 			"priority": "first"
 		},
 		"creature-appraisal": {
-			"owner": "user",
+			"owner": "agent",
 			"session": "controls",
 			"setup": "A nearby creature and a player with a distinctive appearance; several selectable objects.",
-			"framing": "Keep the appraisal model, selected-target HUD and world visible.",
+			"framing": "Keep the appraisal model and selected-target HUD visible in a compact crop, with enough world context to orient the reader.",
 			"expected": "Examine a creature or player, rotate the preview, then select another target while the original appraisal stays open. Show the available creature and player details.",
 			"priority": "first"
 		},

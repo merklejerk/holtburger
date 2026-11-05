@@ -72,10 +72,10 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 
 ### Keep inspecting while targets change
 
-**First · user · pending · clip** — ID: `creature-appraisal`
+**First · agent · pending · clip** — ID: `creature-appraisal`
 
 - Setup: A nearby creature and a player with a distinctive appearance; several selectable objects.
-- Frame: Keep the appraisal model, selected-target HUD and world visible.
+- Frame: Keep the appraisal model and selected-target HUD visible in a compact crop, with enough world context to orient the reader.
 - Action/purpose: Rotate a creature or player preview, then change selection while keeping the appraisal open.
 - Expected result: Examine a creature or player, rotate the preview, then select another target while the original appraisal stays open. Show the available creature and player details.
 - Used in: [3d/inspecting/#turn-the-model-around](https://merklejerk.github.io/holtburger/3d/inspecting/#turn-the-model-around)
@@ -142,7 +142,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Equipment loadouts
 
-**First · user · pending · clip** — ID: `loadouts`
+**First · agent · pending · clip** — ID: `loadouts`
 
 - Setup: Two weapon/gear arrangements, with one slot intentionally omitted and an empty included slot.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Capture the builder, result icon/bar cell, and equipment changes; split into short steps if needed.
@@ -188,7 +188,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Open a locked container
 
-**Later · user · pending · clip** — ID: `locks`
+**Later · agent · pending · clip** — ID: `locks`
 
 - Setup: A real locked chest/door, at least one key, trained Lockpick and a usable pick.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Show the locked object and helper; keep estimate and result text readable.
@@ -198,7 +198,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Buy and sell
 
-**Later · user · pending · clip** — ID: `vendor`
+**Later · agent · pending · clip** — ID: `vendor`
 
 - Setup: A nearby vendor, enough currency, one purchase and one expendable sale.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Show stock, queue quantities, balances and Trade feedback.
@@ -208,17 +208,17 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Pack and equip
 
-**Later · user · pending · clip** — ID: `inventory-moves`
+**Later · agent · pending · clip** — ID: `inventory-moves`
 
-- Setup: Two packs, mergeable stacks and an equippable item; Native sorting selected.
+- Setup: Two packs and an equippable item; Native sorting selected.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Keep source and destination plus the equipment strip visible.
-- Action/purpose: Use Native sorting to move an item between packs, merge a stack, equip and unequip.
-- Expected result: Reordering/transfers, merging and equip/unequip have clear visible results.
+- Action/purpose: Use Native sorting to reorder items, move an item between bags, equip and unequip.
+- Expected result: Reordering, bag transfers and equip/unequip have clear visible results.
 - Used in: [3d/inventory/#move-items](https://merklejerk.github.io/holtburger/3d/inventory/#move-items)
 
 ### Make space in a bag
 
-**Later · user · pending · clip** — ID: `inventory-merge`
+**Later · agent · pending · clip** — ID: `inventory-merge`
 
 - Setup: Several partially filled compatible stacks in one bag, with free space for a split.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Show the Y quantity prompt, bag Auto-merge action and completion feedback.
@@ -228,7 +228,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Build a useful action bar
 
-**Later · user · pending · clip** — ID: `action-bars`
+**Later · agent · pending · clip** — ID: `action-bars`
 
 - Setup: Usable item and saved loadout, plus room to clone a bar.
 - Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Keep drag sources, bar menu/layout controls and keyboard focus hints in view.
@@ -411,11 +411,11 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### From playing to reading chat
 
-**Later · user · pending · clip** — ID: `chat`
+**Later · agent · pending · clip** — ID: `chat`
 
 - Setup: Sample conversation with coordinates and harmless text.
-- Frame: Crop to the chat buffer and its interaction control, with a small margin of world context. Show the held modifier key.
-- Action/purpose: Show command autocomplete with syntax and descriptions, then temporary history interaction and returning to play.
+- Frame: Crop to the compact chat buffer and its interaction control. Identify the held Ctrl key in the accompanying caption.
+- Action/purpose: Hold Ctrl to scroll and select chat history, release to return to live messages, then demonstrate the persistent history toggle.
 - Expected result: With history interaction enabled, scroll back and select text. Release temporary interaction to resume live messages; demonstrate toggling interaction for longer reading.
 - Used in: [3d/chat/#read-older-messages](https://merklejerk.github.io/holtburger/3d/chat/#read-older-messages)
 
@@ -430,7 +430,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Create an adventurer
 
-**Later · user · pending · clip** — ID: `character-creation`
+**Later · agent · pending · clip** — ID: `character-creation`
 
 - Setup: An unused character slot and a server on which creating a sample character is acceptable.
 - Frame: Show appearance, Skills & Stats and review in separate short beats.

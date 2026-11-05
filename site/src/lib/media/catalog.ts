@@ -411,7 +411,7 @@ export const media = {
 		kind: 'planned-video',
 		title: 'From playing to reading chat',
 		brief:
-			'Show command autocomplete with syntax and descriptions, then temporary history interaction and returning to play.'
+			'Hold Ctrl to scroll and select chat history, release to return to live messages, then demonstrate the persistent history toggle.'
 	},
 	emotes: {
 		kind: 'planned-video',
@@ -478,7 +478,7 @@ export const media = {
 		kind: 'planned-video',
 		title: 'Pack and equip',
 		brief:
-			'Use Native sorting to move an item between packs, merge a stack, equip and unequip.'
+			'Use Native sorting to reorder items, move an item between bags, equip and unequip.'
 	},
 	'inventory-merge': {
 		kind: 'planned-video',

@@ -2,6 +2,11 @@ import { chromium } from 'playwright-core';
 import { mkdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { navigation } from '../src/lib/content/navigation.ts';
+import {
+	media,
+	galleryImages,
+	galleryClips
+} from '../src/lib/media/catalog.ts';
 import catalog from '../src/lib/generated/pages.json' with { type: 'json' };
 
 const origin =
@@ -71,8 +76,16 @@ try {
 		await page.evaluate(() => document.fonts.ready);
 		assert.equal(await page.locator('h1').count(), 1);
 		if (name === 'gallery') {
-			assert.equal(await page.locator('.gallery-grid img').count(), 7);
-			assert.equal(await page.locator('.media-placeholder').count(), 4);
+			assert.equal(
+				await page.locator('.gallery-grid img').count(),
+				galleryImages.filter((id) => media[id].kind === 'image').length
+			);
+			assert.equal(
+				await page.locator('.media-placeholder').count(),
+				[...galleryImages, ...galleryClips].filter((id) =>
+					media[id].kind.startsWith('planned')
+				).length
+			);
 			assert.equal(await page.locator('iframe').count(), 0);
 		}
 
@@ -174,7 +187,10 @@ try {
 		await reader
 			.getByRole('heading', { name: 'Views from Dereth', level: 1 })
 			.waitFor();
-		assert.equal(await reader.locator('.gallery-grid img').count(), 7);
+		assert.equal(
+			await reader.locator('.gallery-grid img').count(),
+			galleryImages.filter((id) => media[id].kind === 'image').length
+		);
 		await reader.goto(new URL('3d/combat/', origin).href);
 		await reader
 			.getByRole('heading', { name: 'Use Smart Tab in combat', exact: true })

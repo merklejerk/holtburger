@@ -72,11 +72,10 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 
 ### A closer look
 
-**First · agent · pending · still** — ID: `creature-appraisal`
+**First · agent · available · still** — ID: `creature-appraisal`
 
 - Setup: A player appraisal with a loaded 3D model and useful character details.
 - Frame: Crop the appraisal window; show the model and identity clearly.
-- Action/purpose: Crop the appraisal window; show the model and identity clearly.
 - Expected result: The reader recognizes the model preview; prose explains rotation and independent selection.
 - Used in: [3d/inspecting/#turn-the-model-around](https://merklejerk.github.io/holtburger/3d/inspecting/#turn-the-model-around)
 
@@ -152,11 +151,10 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Equipment loadouts
 
-**First · agent · pending · clip** — ID: `loadouts`
+**First · agent · available · clip** — ID: `loadouts`
 
 - Setup: Two weapon/gear arrangements, with one slot intentionally omitted and an empty included slot.
 - Frame: Crop the builder and destination bar. Stop once the preset is saved; do not demonstrate gear changes.
-- Action/purpose: Show choosing included slots, naming the preset and dragging its icon to an action bar. Stop after saving.
 - Expected result: The reader can create and save a loadout; prose explains what applying it changes.
 - Used in: [3d/#prepare-your-next-move](https://merklejerk.github.io/holtburger/3d/#prepare-your-next-move), [3d/equipment-loadouts/#choose-what-changes](https://merklejerk.github.io/holtburger/3d/equipment-loadouts/#choose-what-changes), [gallery/#clips](https://merklejerk.github.io/holtburger/gallery/#clips)
 
@@ -198,41 +196,37 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Open a locked container
 
-**Later · agent · pending · clip** — ID: `locks`
+**Later · agent · available · clip** — ID: `locks`
 
 - Setup: A real locked chest/door, at least one key, trained Lockpick and a usable pick.
 - Frame: Keep the locked entity and the unlock helper in frame together, with the viewport feedback animation visible.
-- Action/purpose: Show the key action and lockpick estimate at a real locked chest, with the outcome visible.
 - Expected result: The reader sees the key/lockpick actions and their success or failure overlay on the actual target.
 - Used in: [3d/locks/#pick-the-lock](https://merklejerk.github.io/holtburger/3d/locks/#pick-the-lock)
 
 ### Review a vendor exchange
 
-**Later · agent · pending · still** — ID: `vendor`
+**Later · agent · available · still** — ID: `vendor`
 
 - Setup: One purchase and one sale queued at a vendor.
 - Frame: Crop the vendor window with stock, both queued items and the balance.
-- Action/purpose: Crop the vendor window with stock, both queued items and the balance.
 - Expected result: The reader recognizes the reviewed exchange and Trade button.
 - Used in: [3d/trading/#buy-or-sell-at-a-vendor](https://merklejerk.github.io/holtburger/3d/trading/#buy-or-sell-at-a-vendor)
 
 ### Auto-merge a bag
 
-**Later · agent · pending · still** — ID: `inventory-merge`
+**Later · agent · available · still** — ID: `inventory-merge`
 
 - Setup: An inventory pack-strip or bag-header context menu open.
 - Frame: Crop the bag control and popup, with Auto-merge readable.
-- Action/purpose: Crop the bag control and popup, with Auto-merge readable.
 - Expected result: The reader can find the Auto-merge action.
 - Used in: [3d/inventory/#auto-merge-a-bag](https://merklejerk.github.io/holtburger/3d/inventory/#auto-merge-a-bag)
 
 ### Action-bar menu
 
-**Later · agent · pending · still** — ID: `action-bars`
+**Later · agent · available · still** — ID: `action-bars`
 
 - Setup: A filled action bar with its menu expanded.
 - Frame: Frame just the bar and popup; all four menu actions are readable.
-- Action/purpose: Frame just the bar and popup; all four menu actions are readable.
 - Expected result: The reader can locate Clear, Cycle, Clone and Delete.
 - Used in: [3d/equipment-loadouts/#arrange-and-manage](https://merklejerk.github.io/holtburger/3d/equipment-loadouts/#arrange-and-manage)
 
@@ -247,11 +241,10 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 ### Split a stack
 
-**Later · agent · pending · still** — ID: `inventory-split`
+**Later · agent · available · still** — ID: `inventory-split`
 
 - Setup: A carried stack with the split quantity dialog open.
 - Frame: Crop the modal with item name, amount, slider and Split button.
-- Action/purpose: Crop the modal with item name, amount, slider and Split button.
 - Expected result: The quantity choice is clear without showing the whole inventory.
 - Used in: [3d/inventory/#split-a-stack](https://merklejerk.github.io/holtburger/3d/inventory/#split-a-stack)
 
@@ -441,11 +434,10 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Activate chat history
 
-**Later · agent · pending · still** — ID: `chat`
+**Later · agent · available · still** — ID: `chat`
 
 - Setup: Inactive chat with its history activation button visible.
 - Frame: Close up on the activation icon and a little surrounding chat.
-- Action/purpose: Close up on the activation icon and a little surrounding chat.
 - Expected result: The reader can locate the control that makes chat accept pointer input.
 - Used in: [3d/chat/#keep-the-world-clickable](https://merklejerk.github.io/holtburger/3d/chat/#keep-the-world-clickable)
 
@@ -460,11 +452,10 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Race
 
-**Later · agent · pending · still** — ID: `character-creation`
+**Later · agent · available · still** — ID: `character-creation`
 
 - Setup: A new character draft on the Race page.
 - Frame: Capture the creation page and preview, omitting unrelated application chrome.
-- Action/purpose: Capture the creation page and preview, omitting unrelated application chrome.
 - Expected result: The reader recognizes the race choices and character preview.
 - Used in: [startup/creation/#review-and-create](https://merklejerk.github.io/holtburger/startup/creation/#review-and-create)
 
@@ -488,31 +479,28 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 ### Appearance
 
-**Later · agent · pending · still** — ID: `creation-appearance`
+**Later · agent · available · still** — ID: `creation-appearance`
 
 - Setup: The same draft on the Appearance page.
 - Frame: Keep the preview and appearance choices visible.
-- Action/purpose: Keep the preview and appearance choices visible.
 - Expected result: The reader recognizes the appearance controls and clothing reroll.
 - Used in: [startup/creation/#review-and-create](https://merklejerk.github.io/holtburger/startup/creation/#review-and-create)
 
 ### Skills & Stats
 
-**Later · agent · pending · still** — ID: `creation-build`
+**Later · agent · available · still** — ID: `creation-build`
 
 - Setup: The same draft with attributes and skills allocated.
 - Frame: Show the combined attributes, starting vitals and skill groups.
-- Action/purpose: Show the combined attributes, starting vitals and skill groups.
 - Expected result: The reader sees the build together in one place.
 - Used in: [startup/creation/#review-and-create](https://merklejerk.github.io/holtburger/startup/creation/#review-and-create)
 
 ### Review
 
-**Later · agent · pending · still** — ID: `creation-review`
+**Later · agent · available · still** — ID: `creation-review`
 
 - Setup: The same draft on the final Review page.
 - Frame: Show the final build, starting town and Create character action.
-- Action/purpose: Show the final build, starting town and Create character action.
 - Expected result: The reader can recognize the final review before creation.
 - Used in: [startup/creation/#review-and-create](https://merklejerk.github.io/holtburger/startup/creation/#review-and-create)
 

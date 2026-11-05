@@ -250,10 +250,14 @@ export const media = {
 			'Compare left-drag orbit, right-drag turning, and mouse-button movement.'
 	},
 	loadouts: {
-		kind: 'planned-video',
+		kind: 'video',
 		title: 'Equipment loadouts',
-		brief:
-			'Show choosing included slots, naming the preset and dragging its icon to an action bar. Stop after saving.'
+		src: 'https://merklejerk.github.io/holtburger-media/3d/loadouts-v1.mp4',
+		poster:
+			'https://merklejerk.github.io/holtburger-media/3d/loadouts-poster-v1.webp',
+		width: 378,
+		height: 506,
+		captions: null
 	},
 	spells: {
 		kind: 'video',
@@ -315,10 +319,14 @@ export const media = {
 		brief: 'Crop the curved HUD with power, height and start/stop controls.'
 	},
 	locks: {
-		kind: 'planned-video',
+		kind: 'video',
 		title: 'Open a locked container',
-		brief:
-			'Show the key action and lockpick estimate at a real locked chest, with the outcome visible.'
+		src: 'https://merklejerk.github.io/holtburger-media/3d/locks-v2.mp4',
+		poster:
+			'https://merklejerk.github.io/holtburger-media/3d/locks-poster-v2.webp',
+		width: 380,
+		height: 400,
+		captions: null
 	},
 	salvage: {
 		kind: 'image',
@@ -332,10 +340,15 @@ export const media = {
 		height: 395
 	},
 	vendor: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Review a vendor exchange',
-		brief:
-			'Crop the vendor window with stock, both queued items and the balance.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/vendor-v1.webp'
+		},
+		alt: 'Vendor review with a Leather Basinet purchase, Leather Cap sale and projected balance.',
+		width: 362,
+		height: 382
 	},
 	'player-trade': {
 		kind: 'image',
@@ -419,9 +432,15 @@ export const media = {
 		brief: 'Show the compact alert controls and the linked notification.'
 	},
 	chat: {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Activate chat history',
-		brief: 'Close up on the activation icon and a little surrounding chat.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/chat-v1.webp'
+		},
+		alt: 'The Interact with chat history icon button.',
+		width: 40,
+		height: 40
 	},
 	emotes: {
 		kind: 'planned-image',
@@ -445,9 +464,15 @@ export const media = {
 		brief: 'Show the prompt with relevant item and footer actions.'
 	},
 	'creature-appraisal': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'A closer look',
-		brief: 'Crop the appraisal window; show the model and identity clearly.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/creature-appraisal-v1.webp'
+		},
+		alt: 'Player appraisal with a 3D character model, identity and vitals.',
+		width: 378,
+		height: 458
 	},
 	'item-appraisal': {
 		kind: 'image',
@@ -482,20 +507,37 @@ export const media = {
 		height: 283
 	},
 	'inventory-merge': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Auto-merge a bag',
-		brief: 'Crop the bag control and popup, with Auto-merge readable.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/inventory-merge-v1.webp'
+		},
+		alt: 'Main Pack context menu offering Auto-merge.',
+		width: 164,
+		height: 75
 	},
 	'action-bars': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Action-bar menu',
-		brief: 'Frame just the bar and popup; all four menu actions are readable.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/action-bars-v1.webp'
+		},
+		alt: 'Action bar with Clear, Cycle, Clone and Delete in its expanded menu.',
+		width: 244,
+		height: 227
 	},
 	'character-creation': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Race',
-		brief:
-			'Capture the creation page and preview, omitting unrelated application chrome.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/character-creation-v1.webp'
+		},
+		alt: 'Character builder Race page with heritage choices and the character preview.',
+		width: 1342,
+		height: 646
 	},
 	'hardware-info': {
 		kind: 'image',
@@ -509,24 +551,48 @@ export const media = {
 		height: 421
 	},
 	'inventory-split': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Split a stack',
-		brief: 'Crop the modal with item name, amount, slider and Split button.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/inventory-split-v1.webp'
+		},
+		alt: 'Split Bread dialog with quantity, slider and confirmation controls.',
+		width: 248,
+		height: 159
 	},
 	'creation-appearance': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Appearance',
-		brief: 'Keep the preview and appearance choices visible.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/creation-appearance-v1.webp'
+		},
+		alt: 'Character builder Appearance page with the preview, facial features and clothing reroll.',
+		width: 1342,
+		height: 646
 	},
 	'creation-build': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Skills & Stats',
-		brief: 'Show the combined attributes, starting vitals and skill groups.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/creation-build-v1.webp'
+		},
+		alt: 'Character builder Skills & Stats page showing attributes, starting vitals and skill groups.',
+		width: 1342,
+		height: 646
 	},
 	'creation-review': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'Review',
-		brief: 'Show the final build, starting town and Create character action.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/creation-review-v1.webp'
+		},
+		alt: 'Character builder Review page with the final build, starting town and Create character button.',
+		width: 1342,
+		height: 646
 	},
 	'combat-controls-missile': {
 		kind: 'planned-image',

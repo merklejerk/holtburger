@@ -1,6 +1,7 @@
 .svelte-kit/
 build/
 static/assets/
+static/updates/
 src/lib/generated/
 
 src/content/start/3d/

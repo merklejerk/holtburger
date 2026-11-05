@@ -4,13 +4,15 @@ description: 'Download Holtburger 3D and get back to Dereth.'
 section: 'Get started'
 ---
 
+<script>
+import Downloads from '#lib/components/Downloads.svelte';
+</script>
+
 ## Download Holtburger
 
-Choose your platform for installation instructions:
+Choose the download for your computer. The installation guide walks you through opening it.
 
-- [Windows: Setup or ZIP](/holtburger/start/3d/windows/)
-- [macOS: DMG or ZIP](/holtburger/start/3d/macos/)
-- [Linux: Flatpak or tar.gz](/holtburger/start/3d/linux/)
+<Downloads product="3d" />
 
 ## Connect and enter the world
 

@@ -2,6 +2,7 @@
 	import { asset, resolve } from '$app/paths';
 	import MediaCarousel from '#lib/components/MediaCarousel.svelte';
 	import { illustrations } from '#lib/illustrations.ts';
+	import { downloads } from '#lib/downloads.svelte.ts';
 	const guide = (slug: string) => resolve('/[...slug]', { slug });
 </script>
 
@@ -23,7 +24,9 @@
 			</p>
 			<div class="hero-actions">
 				<a class="button" href={guide('start')}
-					>Download Holtburger
+					>Download Holtburger{downloads.release === null
+						? ''
+						: ` ${downloads.release.version}`}
 					<span class="download-platforms"
 						>Available for Windows, Linux, and Mac</span
 					>

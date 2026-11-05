@@ -39,7 +39,7 @@ export async function prepareQuickstarts() {
 				'Install, connect, update, and troubleshoot your release bundle.';
 			await writeIfChanged(
 				new URL(`${platform.route}.md`, destination),
-				`---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(description)}\nsection: 'Installation'\n---\n\n${body}`
+				`---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(description)}\nsection: 'Installation'\n---\n\n<script>\nimport Downloads from '#lib/components/Downloads.svelte';\n</script>\n\n## Download\n\n<Downloads product="${product.source}" platform="${platform.route}" />\n\n${body}`
 			);
 		}
 	}

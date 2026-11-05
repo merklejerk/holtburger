@@ -137,13 +137,13 @@ export function alreadyPublished(identity: Distribution, api: GitHub): boolean {
   return true;
 }
 
-/** Admit all published beta inventories and order their source identities by SemVer. */
-export function publishedDistributions(
+/** Admit published beta inventories once, retaining their verified asset names for consumers. */
+function publishedInventories(
   releases: readonly unknown[],
   api: GitHub,
-): Distribution[] {
+): ReleaseInventory[] {
   const versions = new Set<string>();
-  const identities: Distribution[] = [];
+  const inventories: ReleaseInventory[] = [];
   for (const document of releases) {
     const summary = summarySchema.parse(document);
     if (
@@ -157,9 +157,11 @@ export function publishedDistributions(
         `Multiple published distributions claim suite version ${inventory.identity.version}`,
       );
     versions.add(inventory.identity.version);
-    identities.push(inventory.identity);
+    inventories.push(inventory);
   }
-  return identities.sort((a, b) => compare(b.version, a.version));
+  return inventories.sort((a, b) =>
+    compare(b.identity.version, a.identity.version),
+  );
 }
 
 /** Read all pages before selecting a published beta; API ordering is not version ordering. */
@@ -173,26 +175,41 @@ export function latestPublishedRelease(api: GitHub): Distribution | null {
         ),
       ),
     );
-  return publishedDistributions(pages.flat(), api)[0] ?? null;
+  return publishedInventories(pages.flat(), api)[0]?.identity ?? null;
 }
 
-/** Project accepted public inventories into beta updates without mutating website content. */
+/** Project one verified release into client updates and the website's build-time download snapshot. */
 export function generateFeeds(
   releases: readonly unknown[],
   api: GitHub,
   output: string,
 ): void {
   // Validate every advertised release before touching any existing output.
-  const [newest] = publishedDistributions(releases, api);
+  const [newest] = publishedInventories(releases, api);
   const updates = join(output, "updates");
   mkdirSync(updates, { recursive: true });
   if (newest === undefined) rmSync(join(updates, "beta.json"), { force: true });
   else
     writeJson(join(updates, "beta.json"), {
       schemaVersion: 1,
-      version: newest.version,
-      tag: newest.tag,
+      version: newest.identity.version,
+      tag: newest.identity.tag,
     });
+  writeJson(
+    join(updates, "downloads.json"),
+    newest === undefined
+      ? null
+      : {
+          version: newest.identity.version,
+          url: `https://github.com/${REPOSITORY}/releases/tag/${newest.identity.tag}`,
+          assets: Object.fromEntries(
+            [...newest.assets.keys()].map((name) => [
+              name,
+              `https://github.com/${REPOSITORY}/releases/download/${newest.identity.tag}/${name}`,
+            ]),
+          ),
+        },
+  );
   for (const retired of ["alpha.json", "nightly.json"])
     rmSync(join(updates, retired), { force: true });
 }

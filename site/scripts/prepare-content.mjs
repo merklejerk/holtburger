@@ -1,11 +1,21 @@
 import { writeIfChanged } from './write-if-changed.mjs';
 import { mkdir, readdir, readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { compile } from 'mdsvex';
 import { prepareQuickstarts } from './prepare-quickstarts.mjs';
 import { prepareCaptures } from './prepare-captures.mjs';
 
 await prepareQuickstarts();
 await prepareCaptures();
+
+// Publication supplies a verified snapshot; offline previews can explicitly have no release.
+const snapshot = new URL('../static/updates/downloads.json', import.meta.url);
+const generated = new URL('../src/lib/generated/', import.meta.url);
+await mkdir(generated, { recursive: true });
+await writeIfChanged(
+	new URL('release.json', generated),
+	existsSync(snapshot) ? await readFile(snapshot) : 'null\n'
+);
 
 // Compute cold page metadata once; Markdown parsers and raw prose never ship to readers.
 const root = new URL('../src/content/', import.meta.url);
@@ -44,10 +54,8 @@ for (const file of files) {
 		presentation
 	});
 }
-const destination = new URL('../src/lib/generated/', import.meta.url);
-await mkdir(destination, { recursive: true });
 await writeIfChanged(
-	new URL('pages.json', destination),
+	new URL('pages.json', generated),
 	`${JSON.stringify(pages, null, 2)}\n`
 );
 console.log(`Prepared ${pages.length} guide entries`);

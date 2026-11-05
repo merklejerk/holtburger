@@ -5,6 +5,20 @@
 	import Search from '#lib/components/Search.svelte';
 	import { illustrations } from '#lib/illustrations.ts';
 	import type { Snippet } from 'svelte';
+	import { onMount } from 'svelte';
+	import { refreshDownloads } from '#lib/downloads.svelte.ts';
+	onMount(() => {
+		const controller = new AbortController();
+		const refresh = () => {
+			void refreshDownloads(asset('updates/downloads.json'), controller.signal);
+		};
+		refresh();
+		window.addEventListener('focus', refresh);
+		return () => {
+			controller.abort();
+			window.removeEventListener('focus', refresh);
+		};
+	});
 	let { children }: { children: Snippet } = $props();
 	const links = [
 		{ path: '3d', label: '3D client' },

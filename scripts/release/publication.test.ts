@@ -36,6 +36,7 @@ function publicRelease(identity: Distribution, id: number) {
   const manifest = createManifestFixture(identity),
     data = Buffer.from(JSON.stringify(manifest));
   return {
+    manifest,
     data,
     release: {
       id,
@@ -95,6 +96,16 @@ test("beta reconciliation selects SemVer, supports withdrawal and preserves webs
       version: "0.2.1",
       tag: "v0.2.1",
     });
+    assert.deepEqual(readJson(join(output, "updates/downloads.json")), {
+      version: "0.2.1",
+      url: "https://github.com/merklejerk/holtburger/releases/tag/v0.2.1",
+      assets: Object.fromEntries(
+        newer.manifest.assets.map((asset: { name: string }) => [
+          asset.name,
+          `https://github.com/merklejerk/holtburger/releases/download/v0.2.1/${asset.name}`,
+        ]),
+      ),
+    });
   }
   generateFeeds([older.release], api, output);
   assert.equal(
@@ -103,6 +114,7 @@ test("beta reconciliation selects SemVer, supports withdrawal and preserves webs
   );
   generateFeeds([], api, output);
   assert.equal(existsSync(join(output, "updates/beta.json")), false);
+  assert.equal(readJson(join(output, "updates/downloads.json")), null);
   assert.equal(
     readFileSync(join(output, "index.html"), "utf8"),
     "existing website",

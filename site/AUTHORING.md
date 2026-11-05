@@ -239,9 +239,24 @@ publisher. It runs for relevant pushes to main, release publication and manual
 dispatch, always checking out trusted main. It installs the independent root
 tooling and site lockfiles, checks
 formatting/types, builds the site and Pagefind, and checks local links/assets and
-anchors. The feed generator then writes only `build/updates/`; it cannot replace
-Home. A single job publishes one Pages artifact containing website and feeds.
+anchors. Before building, the root feed generator validates the published beta inventory
+and writes `static/updates/beta.json` plus `static/updates/downloads.json`. Site preparation
+embeds that download snapshot for prerendered version labels and platform downloads.
+A single job publishes one Pages artifact containing website and feeds.
 Media is published separately; no remote media or publisher tests gate deployment.
+
+The browser refreshes the download beacon on arrival and window focus, updating the home
+button, release notes and platform links together. Failed or invalid requests retain the
+last usable snapshot and show a notice on download pages. With JavaScript disabled, the
+prerendered downloads still work. With no published beta, the download component links to
+the releases page instead of inventing a version or asset URL.
+
+For a local preview using verified public downloads, install the root tooling and run
+`npm run feeds:generate -- site/static` from the repository root before site checks/builds.
+This needs GitHub API access through `gh`. Without that ignored snapshot, an offline
+preview deliberately has no current-version label and links to the releases page. Package
+selection and labels belong to the site; the root generator owns release selection and
+verified asset URLs. Do not hard-code a version in content or derive it from main's version.
 
 For a local publication check, run `npm run format:check`, `npm run check`,
 `npm run build`, and `npm run check:links`, in that order. With the production

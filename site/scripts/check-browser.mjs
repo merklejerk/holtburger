@@ -8,6 +8,10 @@ import {
 	galleryClips
 } from '../src/lib/media/catalog.ts';
 import catalog from '../src/lib/generated/pages.json' with { type: 'json' };
+import snapshot from '../src/lib/generated/release.json' with { type: 'json' };
+import { downloadSnapshotSchema } from '../src/lib/downloads.ts';
+
+const published = downloadSnapshotSchema.parse(snapshot);
 
 const origin =
 	process.env.SITE_PREVIEW_URL ?? 'http://127.0.0.1:4178/holtburger/';
@@ -25,6 +29,90 @@ try {
 	/** @type {string[]} */
 	const failures = [];
 	page.on('pageerror', (error) => failures.push(error.message));
+	if (published !== null) {
+		// A page opened before publication must update its label and every download together.
+		/** @type {unknown} */
+		let beacon = published;
+		let status = 200;
+		await page.route('**/updates/downloads.json', (route) =>
+			route.fulfill({
+				status,
+				contentType: 'application/json',
+				body: JSON.stringify(beacon)
+			})
+		);
+		const arrival = page.waitForResponse('**/updates/downloads.json');
+		await page.goto(origin);
+		await arrival;
+		await page
+			.getByRole('link', {
+				name: `Download Holtburger ${published.version}`,
+				exact: false
+			})
+			.click();
+		const downloads = page.locator('.download-options');
+		assert.equal(await downloads.getByRole('link').count(), 9);
+		for (const href of await downloads
+			.locator('a.button')
+			.evaluateAll((links) => links.map((link) => link.getAttribute('href'))))
+			assert.ok(
+				href !== null && Object.values(published.assets).includes(href)
+			);
+		const [major, minor, patch] = published.version.split('.').map(Number);
+		const nextVersion = `${major}.${minor}.${patch + 1}`;
+		beacon = {
+			version: nextVersion,
+			url: published.url.replace(published.version, nextVersion),
+			assets: Object.fromEntries(
+				Object.entries(published.assets).map(([name, url]) => [
+					name.replace(published.version, nextVersion),
+					url.replaceAll(published.version, nextVersion)
+				])
+			)
+		};
+		await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+		await page
+			.getByText(`Holtburger ${nextVersion}`, { exact: true })
+			.waitFor();
+		const currentLinks = await downloads
+			.locator('a.button')
+			.evaluateAll((links) => links.map((link) => link.getAttribute('href')));
+		assert.equal(currentLinks.length, 3);
+		for (const href of currentLinks)
+			assert.ok(href?.includes(`/download/v${nextVersion}/`));
+		await page
+			.getByRole('link', { name: 'Holtburger home', exact: true })
+			.click();
+		await page
+			.getByRole('link', {
+				name: `Download Holtburger ${nextVersion}`,
+				exact: false
+			})
+			.click();
+		await page
+			.getByText(`Holtburger ${nextVersion}`, { exact: true })
+			.waitFor();
+		status = 503;
+		await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+		await page
+			.getByRole('status')
+			.filter({ hasText: 'We couldn’t check' })
+			.waitFor();
+		assert.deepEqual(
+			await downloads
+				.locator('a.button')
+				.evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
+			currentLinks
+		);
+		status = 200;
+		beacon = null;
+		await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+		await page
+			.getByRole('link', { name: 'Holtburger releases on GitHub', exact: true })
+			.waitFor();
+		assert.equal(await downloads.count(), 0);
+		await page.unroute('**/updates/downloads.json');
+	}
 	// Exercise real clicks with JavaScript enabled, including non-page destinations.
 	await page.goto(origin);
 	const screenshot = page.locator('.terminal-plate > a');
@@ -64,6 +152,7 @@ try {
 	assert.equal(page.url(), new URL('tui/', origin).href);
 	for (const [path, name] of [
 		['', 'home'],
+		['start/', 'downloads'],
 		['gallery/', 'gallery'],
 		['start/3d/linux/', 'installation'],
 		['startup/characters/', 'characters'],
@@ -221,6 +310,27 @@ try {
 	try {
 		const reader = await plain.newPage();
 		await reader.goto(origin);
+		if (published !== null) {
+			await reader
+				.getByRole('link', {
+					name: `Download Holtburger ${published.version}`,
+					exact: false
+				})
+				.click();
+			assert.equal(
+				await reader.locator('.download-options a.button').count(),
+				3
+			);
+			await reader.goto(new URL('start/3d/windows/', origin).href);
+			const setup = reader.getByRole('link', {
+				name: 'Download Setup',
+				exact: true
+			});
+			const href = await setup.getAttribute('href');
+			assert.ok(
+				href !== null && Object.values(published.assets).includes(href)
+			);
+		}
 		await reader.getByRole('link', { name: 'Gallery', exact: true }).click();
 		await reader
 			.getByRole('heading', { name: 'Views from Dereth', level: 1 })

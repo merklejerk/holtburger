@@ -409,9 +409,9 @@
 		"equipment-strip": {
 			"owner": "agent",
 			"session": "gear",
-			"setup": "Equipped gear beside several equippable items, with a slot hovered to show compatibility dimming.",
-			"framing": "Crop the equipment strip and adjacent inventory, retaining slot labels, dimmed incompatible items and visibility/loadout controls.",
-			"expected": "The reader recognizes the equipment strip and can locate compatible gear and its controls.",
+			"setup": "A few equipped items, with the strip scrolled to its top and its toolbar visible.",
+			"framing": "Crop only the equipment strip: equipped slots, scroll controls and helmet/cloak/loadout toolbar. Exclude adjacent bag contents.",
+			"expected": "The reader recognizes the equipment slots and can locate the visibility and loadout controls.",
 			"priority": "first"
 		}
 	}

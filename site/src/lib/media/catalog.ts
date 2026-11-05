@@ -345,9 +345,9 @@ export const media = {
 	},
 	'equipment-strip': {
 		kind: 'planned-image',
-		title: 'Equipment beside your packs',
+		title: 'The equipment strip',
 		brief:
-			'Show worn gear in the equipment strip, compatible-item highlighting and the visibility and loadout controls.'
+			'Show only the equipment strip, with equipped slots, scroll controls and the helmet, cloak and loadout controls.'
 	},
 	'inventory-moves': {
 		kind: 'planned-video',

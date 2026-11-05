@@ -184,14 +184,14 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Expected result: The reader understands that bags share a scrolling view and sorting reorganizes each bag visually without moving items.
 - Used in: [3d/inventory/#see-your-packs-together](https://merklejerk.github.io/holtburger/3d/inventory/#see-your-packs-together)
 
-### Equipment beside your packs
+### The equipment strip
 
 **First · agent · pending · still** — ID: `equipment-strip`
 
-- Setup: Equipped gear beside several equippable items, with a slot hovered to show compatibility dimming.
-- Frame: Crop the equipment strip and adjacent inventory, retaining slot labels, dimmed incompatible items and visibility/loadout controls.
-- Action/purpose: Show worn gear in the equipment strip, compatible-item highlighting and the visibility and loadout controls.
-- Expected result: The reader recognizes the equipment strip and can locate compatible gear and its controls.
+- Setup: A few equipped items, with the strip scrolled to its top and its toolbar visible.
+- Frame: Crop only the equipment strip: equipped slots, scroll controls and helmet/cloak/loadout toolbar. Exclude adjacent bag contents.
+- Action/purpose: Show only the equipment strip, with equipped slots, scroll controls and the helmet, cloak and loadout controls.
+- Expected result: The reader recognizes the equipment slots and can locate the visibility and loadout controls.
 - Used in: [3d/inventory/#equipment-at-a-glance](https://merklejerk.github.io/holtburger/3d/inventory/#equipment-at-a-glance)
 
 ### Open a locked container

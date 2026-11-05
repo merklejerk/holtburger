@@ -48,7 +48,9 @@ A bold outline traces your selected creature or object, making it easier to pick
 
 Keep running while casting or firing a bow. Movement continues through the windup with your normal movement controls—no sliding key combinations to learn. Reposition between enemies or keep your distance while attacking.
 
-<Media id="mobile-combat" />
+<Media id="run-casting" />
+
+<Media id="moving-archery" />
 
 ## Pick something specific
 

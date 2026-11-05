@@ -111,12 +111,6 @@ export const media = {
 		title: 'Selection and combat at a glance',
 		brief: 'Show both entities, their outline/reticle and enough scene context.'
 	},
-	'mobile-combat': {
-		kind: 'planned-video',
-		title: 'Keep moving through the windup',
-		brief:
-			'Show running while casting, then archery while moving, with normal movement keys visible.'
-	},
 	minimap: {
 		kind: 'planned-image',
 		title: 'Terrain under your radar',
@@ -608,6 +602,24 @@ export const media = {
 		kind: 'planned-image',
 		title: 'Follow the waypoint',
 		brief: 'Crop the minimap with direction and distance visible.'
+	},
+	'run-casting': {
+		kind: 'planned-video',
+		title: 'Cast on the run',
+		brief:
+			'Keep the character, spell windup and completed cast visible while running normally. Close the spellbook and unrelated windows before recording.'
+	},
+	'moving-archery': {
+		kind: 'planned-video',
+		title: 'Shoot on the move',
+		brief:
+			'Show the character moving through a bow windup and releasing the shot, with the target in view.'
+	},
+	enchantments: {
+		kind: 'planned-image',
+		title: 'Your active enchantments',
+		brief:
+			'Crop the populated Enchantments window with effect groups, durations, search and filters visible.'
 	}
 } satisfies Record<string, MediaAsset>;
 

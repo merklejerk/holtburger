@@ -26,6 +26,8 @@ For targeted spells, use [Smart Tab](/holtburger/3d/combat/) to select your targ
 
 Keep moving through spell windups using your normal movement controls. You can reposition while casting without retail’s sliding key combinations.
 
+<Media id="run-casting" />
+
 ## Build your spell bars
 
 Drag a spell from the list into a spell-bar cell. Use the tabs to group spells for different tasks. There are ten tabs; the first ten positions on each tab have keyboard shortcuts, with room for additional cells beyond them.
@@ -43,6 +45,8 @@ Supported non-Life projectile spells can fire forward when you have no selection
 Open **Enchantments** to inspect active spells and their remaining time. Effects are grouped by the stats they affect.
 
 The beneficial and harmful effect trays reflect effects currently contributing to your stats. Vitae appears with harmful effects.
+
+<Media id="enchantments" detail />
 
 ## Find the effect you need
 

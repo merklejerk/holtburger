@@ -58,8 +58,8 @@
 			"owner": "agent",
 			"session": "gear",
 			"setup": "Known spells in several schools/levels and an empty spell-bar cell.",
-			"framing": "Use a tight component crop; retain relevant controls and enough context to follow the task. Keep search, filters and destination bar readable.",
-			"expected": "A found spell is inspected and dragged to its bar, then used with the correct target.",
+			"framing": "Keep the spell search, filters and destination bar readable, then close the spellbook before casting. The final framing must include the character and cast effect.",
+			"expected": "A spell is found, inspected and bound, then cast with the book closed so the animation and result are visible.",
 			"priority": "first"
 		},
 		"hud": {
@@ -286,14 +286,6 @@
 			"expected": "The still distinguishes selection from the active fight.",
 			"priority": "first"
 		},
-		"mobile-combat": {
-			"owner": "user",
-			"session": "controls",
-			"setup": "Use a character with a caster, bow and ammunition in a safe fight.",
-			"framing": "Keep the character, targets and input display visible.",
-			"expected": "Show running while casting, then archery while moving, with normal movement keys visible.",
-			"priority": "first"
-		},
 		"minimap": {
 			"owner": "agent",
 			"session": "world",
@@ -461,6 +453,30 @@
 			"framing": "Crop the minimap with direction and distance visible.",
 			"expected": "The reader recognizes the guidance toward the destination.",
 			"priority": "later"
+		},
+		"run-casting": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "A caster, usable spell and safe route with room to run.",
+			"framing": "Keep the running character and cast animation visible. Spellbook and unrelated windows closed; agree framing with the user.",
+			"expected": "The character continues moving throughout the windup and the completed spell is visible.",
+			"priority": "first"
+		},
+		"moving-archery": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "A bow, ammunition and safe target.",
+			"framing": "Keep the moving character, windup, released shot and target in frame.",
+			"expected": "The character can reposition while preparing and releasing a shot.",
+			"priority": "first"
+		},
+		"enchantments": {
+			"owner": "agent",
+			"session": "gear",
+			"setup": "Several real active effects with readable remaining durations.",
+			"framing": "Crop only the Enchantments window; show groups, remaining time, search and filter controls.",
+			"expected": "The reader recognizes the effect groups and can find durations and filtering controls.",
+			"priority": "first"
 		}
 	}
 }

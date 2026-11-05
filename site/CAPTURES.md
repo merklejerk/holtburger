@@ -60,16 +60,6 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Expected result: The still distinguishes selection from the active fight.
 - Used in: [3d/combat/#keep-track-of-your-target](https://merklejerk.github.io/holtburger/3d/combat/#keep-track-of-your-target)
 
-### Keep moving through the windup
-
-**First · user · pending · clip** — ID: `mobile-combat`
-
-- Setup: Use a character with a caster, bow and ammunition in a safe fight.
-- Frame: Keep the character, targets and input display visible.
-- Action/purpose: Show running while casting, then archery while moving, with normal movement keys visible.
-- Expected result: Show running while casting, then archery while moving, with normal movement keys visible.
-- Used in: [3d/#stay-mobile](https://merklejerk.github.io/holtburger/3d/#stay-mobile), [3d/combat/#fight-on-the-move](https://merklejerk.github.io/holtburger/3d/combat/#fight-on-the-move)
-
 ### A closer look
 
 **First · agent · available · still** — ID: `creature-appraisal`
@@ -96,6 +86,26 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Frame: Crop to the character, complete arc, landing target and power control; omit unrelated HUD panels.
 - Expected result: Show the landing target, trajectory arc and power control together in a focused world-view crop.
 - Used in: [3d/movement-camera/#precise-jumping](https://merklejerk.github.io/holtburger/3d/movement-camera/#precise-jumping)
+
+### Cast on the run
+
+**First · user · pending · clip** — ID: `run-casting`
+
+- Setup: A caster, usable spell and safe route with room to run.
+- Frame: Keep the running character and cast animation visible. Spellbook and unrelated windows closed; agree framing with the user.
+- Action/purpose: Keep the character, spell windup and completed cast visible while running normally. Close the spellbook and unrelated windows before recording.
+- Expected result: The character continues moving throughout the windup and the completed spell is visible.
+- Used in: [3d/#stay-mobile](https://merklejerk.github.io/holtburger/3d/#stay-mobile), [3d/combat/#fight-on-the-move](https://merklejerk.github.io/holtburger/3d/combat/#fight-on-the-move), [3d/spells/#cast-on-the-move](https://merklejerk.github.io/holtburger/3d/spells/#cast-on-the-move)
+
+### Shoot on the move
+
+**First · user · pending · clip** — ID: `moving-archery`
+
+- Setup: A bow, ammunition and safe target.
+- Frame: Keep the moving character, windup, released shot and target in frame.
+- Action/purpose: Show the character moving through a bow windup and releasing the shot, with the target in view.
+- Expected result: The character can reposition while preparing and releasing a shot.
+- Used in: [3d/combat/#fight-on-the-move](https://merklejerk.github.io/holtburger/3d/combat/#fight-on-the-move)
 
 ### Watch for a name
 
@@ -163,8 +173,8 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 **First · agent · available · clip** — ID: `spells`
 
 - Setup: Known spells in several schools/levels and an empty spell-bar cell.
-- Frame: Use a tight component crop; retain relevant controls and enough context to follow the task. Keep search, filters and destination bar readable.
-- Expected result: A found spell is inspected and dragged to its bar, then used with the correct target.
+- Frame: Keep the spell search, filters and destination bar readable, then close the spellbook before casting. The final framing must include the character and cast effect.
+- Expected result: A spell is found, inspected and bound, then cast with the book closed so the animation and result are visible.
 - Used in: [3d/#prepare-your-next-move](https://merklejerk.github.io/holtburger/3d/#prepare-your-next-move), [3d/spells/#build-your-spell-bars](https://merklejerk.github.io/holtburger/3d/spells/#build-your-spell-bars)
 
 ### Review a mixed salvage batch
@@ -193,6 +203,16 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Frame: Crop only the equipment strip: equipped slots, scroll controls and helmet/cloak/loadout toolbar. Exclude adjacent bag contents.
 - Expected result: The reader recognizes the equipment slots and can locate the visibility and loadout controls.
 - Used in: [3d/inventory/#equipment-at-a-glance](https://merklejerk.github.io/holtburger/3d/inventory/#equipment-at-a-glance)
+
+### Your active enchantments
+
+**First · agent · pending · still** — ID: `enchantments`
+
+- Setup: Several real active effects with readable remaining durations.
+- Frame: Crop only the Enchantments window; show groups, remaining time, search and filter controls.
+- Action/purpose: Crop the populated Enchantments window with effect groups, durations, search and filters visible.
+- Expected result: The reader recognizes the effect groups and can find durations and filtering controls.
+- Used in: [3d/spells/#read-your-current-effects](https://merklejerk.github.io/holtburger/3d/spells/#read-your-current-effects)
 
 ### Open a locked container
 

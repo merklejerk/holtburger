@@ -3,6 +3,7 @@ import { compare } from "semver";
 import { digest, type Runner } from "../io.ts";
 import { REPOSITORY, type GitHub } from "../github.ts";
 import type { FrozenRelease } from "./assembly.ts";
+import { commitSchema, type Distribution } from "./identity.ts";
 import {
   releaseDescription,
   releaseRecords,
@@ -13,6 +14,7 @@ import {
 
 /** Private upload inspection retains source ownership, byte identities and the release URL. */
 const draftSchema = z.object({
+  id: z.number(),
   draft: z.boolean(),
   target_commitish: z.string(),
   html_url: z.string(),
@@ -20,6 +22,48 @@ const draftSchema = z.object({
     z.object({ name: z.string(), digest: z.string().nullable() }),
   ),
 });
+
+/** Bind only an unpublished tag; legacy beta attempts may have reserved an older source. */
+function publishTag(identity: Distribution, api: GitHub): void {
+  const ref = `refs/tags/${identity.tag}`;
+  const refs = api([
+    `repos/${REPOSITORY}/git/matching-refs/tags/${identity.tag}`,
+    "--paginate",
+    "--jq",
+    ".[].ref",
+  ])
+    .toString("utf8")
+    .trim()
+    .split("\n");
+  if (refs.includes(ref)) {
+    const commit = commitSchema.parse(
+      api([`repos/${REPOSITORY}/commits/${identity.tag}`, "--jq", ".sha"])
+        .toString("utf8")
+        .trim(),
+    );
+    if (commit === identity.commit) return;
+    if (identity.kind === "nightly")
+      throw new Error("Nightly tag points to another source commit");
+    api([
+      `repos/${REPOSITORY}/git/refs/tags/${identity.tag}`,
+      "--method",
+      "PATCH",
+      "--raw-field",
+      `sha=${identity.commit}`,
+      "--field",
+      "force=true",
+    ]);
+  } else
+    api([
+      `repos/${REPOSITORY}/git/refs`,
+      "--method",
+      "POST",
+      "--raw-field",
+      `ref=${ref}`,
+      "--raw-field",
+      `sha=${identity.commit}`,
+    ]);
+}
 
 /** Upload a complete verified distribution privately, then publish in the same operation. */
 export function publishFrozenRelease(
@@ -37,15 +81,37 @@ export function publishFrozenRelease(
   const makeLatest =
     identity.kind === "release" &&
     (latest === null || compare(identity.version, latest.version) > 0);
-  let records = releaseRecords(tag, api);
-  if (records.length === 0) {
-    const remote = api([`repos/${REPOSITORY}/commits/${tag}`, "--jq", ".sha"])
-      .toString("utf8")
-      .trim();
-    if (remote !== identity.commit)
-      throw new Error(
-        "Remote release tag does not point to the release commit",
-      );
+  let release = z
+    .array(draftSchema)
+    .max(1)
+    .parse(releaseRecords(tag, api))
+    .at(0);
+  if (release !== undefined && !release.draft) {
+    // Published versions are immutable, even when a retry selects a newer main head.
+    if (!alreadyPublished(identity, api))
+      throw new Error("Published release disappeared during verification");
+    console.log(`Already published verified distribution: ${release.html_url}`);
+    return;
+  }
+  for (const file of frozen.files)
+    if (digest(file.path) !== file.sha256)
+      throw new Error(`Release file changed after verification: ${file.name}`);
+  const expected = new Map(
+    frozen.files.map((file) => [file.name, `sha256:${file.sha256}`]),
+  );
+  // Bind the tag before creating a draft: GitHub ignores target_commitish for existing tags.
+  publishTag(identity, api);
+  // Rebuilds can change native signatures or archive bytes even at the same source.
+  // Resume matching private uploads; replace the whole draft when any payload differs.
+  if (
+    release !== undefined &&
+    (release.target_commitish !== identity.commit ||
+      release.assets.some((asset) => expected.get(asset.name) !== asset.digest))
+  ) {
+    api([`repos/${REPOSITORY}/releases/${release.id}`, "--method", "DELETE"]);
+    release = undefined;
+  }
+  if (release === undefined) {
     const created = api([
       `repos/${REPOSITORY}/releases`,
       "--method",
@@ -65,36 +131,15 @@ export function publishFrozenRelease(
       "--raw-field",
       `body=${releaseDescription(root, identity)}`,
     ]);
-    records = [JSON.parse(created.toString("utf8"))];
+    release = draftSchema.parse(JSON.parse(created.toString("utf8")));
   }
-  const [release] = z.tuple([draftSchema]).parse(records);
   if (release.target_commitish !== identity.commit)
     throw new Error("Refusing to modify a release for another source commit");
-  if (!release.draft) {
-    // A website dispatch may fail after publication. Retrying that job must be safe.
-    if (!alreadyPublished(identity, api))
-      throw new Error("Published release disappeared during verification");
-    console.log(`Already published verified distribution: ${release.html_url}`);
-    return;
-  }
-  const uploaded = new Map(
-    release.assets.map((asset) => [asset.name, asset.digest]),
-  );
+  const uploaded = new Set(release.assets.map((asset) => asset.name));
   if (uploaded.size !== release.assets.length)
     throw new Error("Draft contains duplicate release assets");
-  const expected = new Set(frozen.files.map((file) => file.name));
-  for (const name of uploaded.keys())
-    if (!expected.has(name))
-      throw new Error("Draft contains unexpected release assets");
   for (const file of frozen.files) {
-    if (digest(file.path) !== file.sha256)
-      throw new Error(`Release file changed after verification: ${file.name}`);
-    if (uploaded.has(file.name)) {
-      if (uploaded.get(file.name) !== `sha256:${file.sha256}`)
-        throw new Error(
-          `Draft asset conflicts with verified release: ${file.name}`,
-        );
-    } else
+    if (!uploaded.has(file.name))
       command(
         "gh",
         ["release", "upload", tag, file.path, "--repo", REPOSITORY],

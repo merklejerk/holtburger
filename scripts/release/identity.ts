@@ -18,7 +18,7 @@ import {
   validateReleaseIncrement,
 } from "./version.ts";
 
-/** The branch that immutable release tags must be reachable from. */
+/** The branch from which publication selects its source commit. */
 export const RELEASE_BRANCH = "main";
 /** Exactly these standalone suite owners may change during nightly preparation. */
 export const VERSION_FILES = [
@@ -41,7 +41,7 @@ export interface Distribution {
   readonly version: string;
   /** Immutable original source, never the prepared working tree. */
   readonly commit: string;
-  /** Immutable GitHub release tag. */
+  /** GitHub version tag, immutable once the release is published. */
   readonly tag: string;
 }
 
@@ -80,22 +80,6 @@ export function sourceDistribution(root: string, kind: string): Distribution {
       ? `${base}-nightly-${commit.slice(0, NIGHTLY_HASH_LENGTH)}`
       : base,
     commit,
-  );
-}
-
-/** Tags may be annotated or lightweight but must bind the expected reachable commit. */
-export function validateSourceTag(root: string, identity: Distribution): void {
-  if (
-    git(root, "rev-parse", `refs/tags/${identity.tag}^{commit}`) !==
-    identity.commit
-  )
-    throw new Error("Release tag points to another source commit");
-  git(
-    root,
-    "merge-base",
-    "--is-ancestor",
-    identity.commit,
-    `origin/${RELEASE_BRANCH}`,
   );
 }
 

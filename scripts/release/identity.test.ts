@@ -11,7 +11,6 @@ import {
   git,
   prepareSource,
   sourceDistribution,
-  validateSourceTag,
 } from "./identity.ts";
 import {
   NIGHTLY_HASH_LENGTH,
@@ -103,21 +102,6 @@ test("real npm/Cargo nightly preparation preserves source and root tooling on re
   );
 });
 
-test("nightly short-hash tags still bind the full source commit", (t) => {
-  const root = createSourceFixture(t);
-  const identity = sourceDistribution(root, "nightly");
-  git(root, "tag", identity.tag);
-  validateSourceTag(root, identity);
-  const otherCommit =
-    identity.commit.slice(0, -1) + (identity.commit.endsWith("a") ? "b" : "a");
-  const conflicting = distribution("nightly", identity.version, otherCommit);
-  assert.equal(conflicting.tag, identity.tag);
-  assert.throws(
-    () => validateSourceTag(root, conflicting),
-    /another source commit/,
-  );
-});
-
 test("prepared source rejects unrelated root changes, dependencies and untracked files", (t) => {
   for (const path of [
     "package-lock.json",
@@ -141,27 +125,10 @@ test("prepared source rejects unrelated root changes, dependencies and untracked
   }
 });
 
-test("release source must stay clean and tags bind the original reachable commit", (t) => {
+test("release source must stay clean", (t) => {
   const root = createSourceFixture(t);
   const identity = sourceDistribution(root, "release");
   prepareSource(root, identity);
-  git(root, "tag", "-a", identity.tag, "-m", "Release fixture");
-  git(root, "commit", "--allow-empty", "-m", "Later development");
-  git(
-    root,
-    "update-ref",
-    "refs/remotes/origin/main",
-    git(root, "rev-parse", "HEAD"),
-  );
-  validateSourceTag(root, identity);
-  assert.throws(
-    () =>
-      validateSourceTag(
-        root,
-        distribution("release", "0.2.0", git(root, "rev-parse", "HEAD")),
-      ),
-    /another source/,
-  );
   writeFileSync(join(root, "unexpected"), "dirty");
   assert.throws(
     () => prepareSource(root, sourceDistribution(root, "release")),
@@ -169,7 +136,7 @@ test("release source must stay clean and tags bind the original reachable commit
   );
 });
 
-test("release tags may name a reachable merge commit", (t) => {
+test("release source may be a merge commit", (t) => {
   const root = createSourceFixture(t);
   git(root, "checkout", "-b", "topic");
   git(root, "commit", "--allow-empty", "-m", "Topic");
@@ -178,8 +145,6 @@ test("release tags may name a reachable merge commit", (t) => {
   git(root, "merge", "--no-ff", "topic", "-m", "Merge");
   const identity = sourceDistribution(root, "release");
   git(root, "update-ref", "refs/remotes/origin/main", identity.commit);
-  git(root, "tag", identity.tag);
-  validateSourceTag(root, identity);
   prepareSource(root, identity);
   assert.equal(
     run("git", ["show", "-s", "--format=%P", identity.commit], root).split(" ")

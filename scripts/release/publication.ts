@@ -10,7 +10,6 @@ import {
   RELEASE_BRANCH,
   sourceDistribution,
   validateReleasePullRequest,
-  validateSourceTag,
   type Distribution,
 } from "./identity.ts";
 import { sourceFacts } from "./source.ts";
@@ -116,9 +115,9 @@ export function alreadyPublished(identity: Distribution, api: GitHub): boolean {
   const release = releaseSchema
     .extend({ target_commitish: z.string(), prerelease: z.boolean() })
     .parse(records[0]);
+  if (release.draft) return false;
   if (release.target_commitish !== identity.commit)
     throw new Error("Existing release belongs to another source commit");
-  if (release.draft) return false;
   if (release.prerelease !== (identity.kind === "nightly"))
     throw new Error("Published release has conflicting distribution policy");
   const inventory = publishedInventory(release, api, true);
@@ -126,6 +125,15 @@ export function alreadyPublished(identity: Distribution, api: GitHub): boolean {
     throw new Error(
       "Published manifest differs from the requested distribution",
     );
+  const taggedCommit = api([
+    `repos/${REPOSITORY}/commits/${identity.tag}`,
+    "--jq",
+    ".sha",
+  ])
+    .toString("utf8")
+    .trim();
+  if (taggedCommit !== identity.commit)
+    throw new Error("Published release tag points to another source commit");
   return true;
 }
 
@@ -224,9 +232,19 @@ export function planRelease(
   const identity = sourceDistribution(root, kind);
   let tag = "";
   if (selection.purpose === "release") {
-    if (env.GITHUB_EVENT_NAME !== "pull_request")
-      throw new Error("Beta publication requires a merged release PR");
-    if (
+    if (env.GITHUB_EVENT_NAME === "workflow_dispatch") {
+      if (
+        command("git", ["rev-parse", `origin/${RELEASE_BRANCH}`], root) !==
+        identity.commit
+      )
+        throw new Error(
+          "Manual beta publication requires the current main head",
+        );
+    } else if (env.GITHUB_EVENT_NAME !== "pull_request")
+      throw new Error(
+        "Beta publication requires a merged release PR or manual dispatch",
+      );
+    else if (
       !validateReleasePullRequest(
         root,
         JSON.parse(
@@ -251,12 +269,6 @@ export function planRelease(
       root,
     );
     tag = identity.tag;
-    if (command("git", ["tag", "--list", tag], root))
-      validateSourceTag(root, identity);
-    else {
-      command("git", ["tag", tag, identity.commit], root);
-      command("git", ["push", "origin", `refs/tags/${tag}`], root);
-    }
   }
   const published = tag !== "" && alreadyPublished(identity, api);
   const result = {

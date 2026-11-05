@@ -1,7 +1,7 @@
 # Preparing and announcing a release
 
 Development and release tooling live on `main`. Beta starts at `0.2.0` and uses
-ordinary unsuffixed `0.x.y` versions with immutable `v0.x.y` tags. Releases contain separate
+ordinary unsuffixed `0.x.y` versions with `v0.x.y` tags that become immutable at publication. Releases contain separate
 CLI and 3D products on Linux x86-64, Windows x86-64, and macOS Apple Silicon, plus a Flatpak
 per product. 3D also includes a Windows setup executable and macOS DMG. Intel macOS is not
 supported. Both products share one version and original source commit.
@@ -15,8 +15,8 @@ hashes the installer and writes its suite receipt. From `apps/holtburger-3d/`, r
 Release preparation is a manually requested Copilot analysis followed by a release PR.
 Reviewing and merging that PR authorizes automatic build, verification, and publication.
 There is no subsequent manual draft acceptance or publish step. Nightlies use the same
-builders and publish as prerelease/non-latest after checks succeed. Historical releases,
-drafts, tags, and assets remain unchanged.
+builders and publish as prerelease/non-latest after checks succeed. Published releases,
+tags, and assets remain unchanged. Unpublished attempts may be replaced by a retry.
 
 ## Preparing a release
 
@@ -44,7 +44,7 @@ gh workflow run prepare-release.yml --repo merklejerk/holtburger --ref main -f b
 There is no arbitrary requested-version input. Deterministic code computes either
 `0.x.y → 0.x.(y+1)` or `0.x.y → 0.(x+1).0`. It rejects major changes, skipped increments,
 downgrades, prerelease suffixes, and build metadata. The same rule applies after PR edits
-and again before publication. The manual `version:bump` command also enforces it.
+and again when a release PR merge starts publication. The manual `version:bump` command also enforces it.
 
 Copilot receives the latest published beta's verified source identity, merged PR context,
 previous release notes, and permission to inspect source/history. Without a published beta,
@@ -64,14 +64,41 @@ Copilot should retain unresolved limitations unless source evidence demonstrates
 human review owns the accuracy of those judgments. If main advances while the PR is open,
 review the intervening changes and update the notes as necessary. PR checks reject unrelated
 files, dependency changes hidden in version files, empty/unchanged notes, and invalid increments.
-Merge the PR to start **Release**. Its reviewed merge commit becomes the immutable release
-source. Ordinary PR merges, direct version commits, and tag pushes do not publish betas.
+Merge the PR to start **Release**. Its reviewed merge commit becomes that attempt's
+source. Ordinary PR merges, direct version commits, and tag pushes do not automatically publish betas.
 
 The publisher waits for all required checks and both products on every target. It uploads
 assets to a private draft to avoid exposing an incomplete distribution, then publishes in
 the same run. A failed upload may leave a draft that a retry can resume; it is not a manual
-handoff. Existing conflicting bytes fail rather than being replaced. Rerun a failed Release
-workflow at its original source. Never move a tag or reuse a version for changed source.
+handoff. Matching draft assets resume uploading; a draft with a different source or conflicting
+bytes is replaced as a whole. Published bytes are never replaced.
+
+## Retrying a failed release
+
+GitHub's **Re-run jobs** repeats the original workflow and source commit. Use it for
+transient failures when the source needs no changes. To include fixes merged into `main`,
+run **Actions → Release → Run workflow**, select branch `main`, purpose `release`, product
+`both`, and target `all`, or:
+
+```sh
+gh workflow run release.yml --repo merklejerk/holtburger --ref main \
+  -f purpose=release -f product=both -f target=all
+```
+
+This manual publication request uses the checked-in version and release notes without
+another version bump or preparation PR. Review the intervening changes and notes before
+requesting it. Planning requires a clean checkout of current `main` and pins one full source
+commit for all validation, packages, installers, and receipts. All products and targets must
+pass again; artifacts from different attempts are never combined.
+
+Planning does not reserve a tag. The publisher creates the tag after build verification,
+before staging the private draft. It may move an unpublished beta tag left by an earlier
+failed attempt to the selected source. A conflicting nightly tag is rejected because its
+short hash must still identify the full original commit. Publication attempts are serialized.
+
+Once a version is public, retries verify its manifest, source, tag, and assets. An exact
+published match skips rebuilding; selecting changed source for that version fails and requires
+a new release version. The version and tag become immutable at publication, not at preparation.
 
 ## Version and content inputs
 
@@ -175,7 +202,7 @@ archive, invokes that app command, then hashes the installer and writes the suit
 receipt. The app command accepts `--native DIR --output FILE [--iscc PATH]` and
 requires its own app dependencies. `npm run check:installers` and
 `npm run test:installers` run from `apps/holtburger-3d/`.
- and manual upgrades
+and manual upgrades
 
 The desktop installer job consumes the verified 3D native ZIP. It does not rebuild
 Electron or the Rust host. Windows uses `apps/holtburger-3d/packaging/windows.iss` with
@@ -225,8 +252,8 @@ Preparation verifies an initially clean source and permits only the exact versio
 including lockfiles. All binaries, package metadata, installers, archives, and manifests use
 the resulting effective version while provenance retains original main's commit. These
 changes are never committed to main. A complete matching published build is checked and
-skipped before rebuilding; matching drafts may resume, but conflicting bytes/identities fail.
-Neither retries nor publication overwrite an existing asset.
+skipped before rebuilding. Matching drafts may resume; stale or conflicting drafts are replaced
+before upload. Neither retries nor publication overwrite a published asset.
 
 Beta and nightly use the same app IDs, install locations, shortcuts, and user profiles.
 Installing either replaces the other; there are no side-by-side nightly installations.
@@ -236,7 +263,7 @@ A current-version nightly sorts below that version's beta even when built later.
 The release PR replaces `release/RELEASE_NOTES.md` with user-facing changes, known issues,
 and upgrade instructions. Nightly descriptions are generated from the source commit.
 Both descriptions append installation links pinned to that commit. Publication uses
-descriptions from the reviewed source, including on retries; temporary draft edits are
+descriptions from the selected source, including on retries; temporary draft edits are
 not authoritative.
 
 Diagnostics select `purpose=diagnostic` and one or both products/targets. They do not create
@@ -324,7 +351,7 @@ This avoids repeating tool compilation and license collection in the release pat
 
 ## Acceptance and publication
 
-Merging the release PR is the publication decision. Automated native packaging/runtime
+Merging the release PR or manually requesting `purpose=release` is the publication decision. Automated native packaging/runtime
 checks remain required; manual graphics, input, gameplay, Finder/browser quarantine, and
 visual acceptance are no longer publication gates. Those limitations should be understood
 when reviewing the release PR. Developer ID signing/notarization remains deferred;

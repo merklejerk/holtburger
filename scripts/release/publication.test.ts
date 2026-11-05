@@ -16,6 +16,7 @@ import {
   distribution,
   git,
   sourceDistribution,
+  RELEASE_PR_PREFIX,
   type Distribution,
 } from "./identity.ts";
 import {
@@ -25,8 +26,9 @@ import {
   releaseDescription,
   selectTargets,
 } from "./publication.ts";
-import { stageFrozenRelease } from "./staging.ts";
+import { publishFrozenRelease } from "./publishing.ts";
 import { createManifestFixture, createSourceFixture } from "./test-fixtures.ts";
+import { bumpVersion } from "./version.ts";
 import { TARGETS } from "./contracts.ts";
 
 /** Complete synthetic GitHub inventory over an independently constructed release manifest. */
@@ -183,62 +185,73 @@ test("published build skipping requires source, audience, manifest and ready dig
   assert.throws(() => alreadyPublished(identity, api), /no digest/);
 });
 
-test("partial selections stay diagnostic and tag events bind the full release", (t) => {
+test("partial builds stay diagnostic and beta publication requires the reviewed PR merge", (t) => {
   for (const product of ["cli", "3d", "both"])
     for (const target of ["all", ...TARGETS.map((target) => target.triple)])
       assert.ok(selectTargets(product, target, "diagnostic").length > 0);
   for (const purpose of ["release", "nightly"])
     assert.throws(() => selectTargets("cli", "all", purpose), /both products/);
-  const root = createSourceFixture(t),
-    identity = sourceDistribution(root, "release");
+  const root = createSourceFixture(t);
+  const base = git(root, "rev-parse", "HEAD");
+  bumpVersion("0.2.1", root);
+  writeFileSync(join(root, "release/RELEASE_NOTES.md"), "Reviewed notes");
+  git(root, "add", ".");
+  git(root, "commit", "-m", "Prepare beta");
+  const identity = sourceDistribution(root, "release");
+  git(root, "update-ref", "refs/remotes/origin/main", identity.commit);
   git(root, "tag", identity.tag);
-  const noMutation: Runner = () => {
-    assert.fail("Tagged plan mutated a Git ref");
+  const eventPath = join(scratch(t), "event.json");
+  writeFileSync(
+    eventPath,
+    JSON.stringify({
+      pull_request: {
+        merged: true,
+        merge_commit_sha: identity.commit,
+        base: { ref: "main", sha: base },
+        head: {
+          ref: `${RELEASE_PR_PREFIX}${base}`,
+          repo: { full_name: "merklejerk/holtburger" },
+        },
+      },
+    }),
+  );
+  const selection = { product: "both", target: "all", purpose: "release" };
+  const env = {
+    GITHUB_REF: "refs/heads/main",
+    GITHUB_EVENT_NAME: "pull_request",
+    GITHUB_EVENT_PATH: eventPath,
   };
-  planRelease(
-    root,
-    { product: "both", target: "all", purpose: "release" },
-    { GITHUB_REF_TYPE: "tag", GITHUB_REF_NAME: identity.tag },
-    () => Buffer.alloc(0),
-    noMutation,
-  );
+  planRelease(root, selection, env, () => Buffer.alloc(0), run);
   assert.throws(
     () =>
       planRelease(
         root,
-        { product: "both", target: "all", purpose: "release" },
-        { GITHUB_REF_TYPE: "tag", GITHUB_REF_NAME: "v0.2.1" },
+        selection,
+        { ...env, GITHUB_EVENT_NAME: "workflow_dispatch" },
         () => Buffer.alloc(0),
-        noMutation,
+        run,
       ),
-    /must equal/,
+    /merged release PR/,
   );
   assert.throws(
     () =>
       planRelease(
         root,
-        { product: "both", target: "all", purpose: "release" },
-        { GITHUB_REF: "refs/heads/topic" },
+        selection,
+        { ...env, GITHUB_REF: "refs/heads/topic" },
         () => Buffer.alloc(0),
-        noMutation,
+        run,
       ),
     /main branch/,
   );
   writeFileSync(join(root, "dirty"), "unexpected");
   assert.throws(
-    () =>
-      planRelease(
-        root,
-        { product: "both", target: "all", purpose: "release" },
-        {},
-        () => Buffer.alloc(0),
-        run,
-      ),
+    () => planRelease(root, selection, env, () => Buffer.alloc(0), run),
     /clean source/,
   );
 });
 
-test("draft creation uses its POST response and refuses published, conflicting or substituted files", (t) => {
+test("publication uploads before making the complete distribution public and rejects conflicts", (t) => {
   const root = scratch(t);
   mkdirSync(join(root, "release"));
   writeFileSync(
@@ -272,6 +285,7 @@ test("draft creation uses its POST response and refuses published, conflicting o
   };
   let lists = 0;
   const api: GitHub = (args) => {
+    if (args.includes("--slurp")) return Buffer.from("[[]]");
     if (args.includes("--paginate")) {
       lists++;
       return Buffer.alloc(0);
@@ -285,40 +299,50 @@ test("draft creation uses its POST response and refuses published, conflicting o
     );
     return Buffer.from(JSON.stringify(draft));
   };
-  stageFrozenRelease(root, frozen, identity.tag, api, command);
+  publishFrozenRelease(root, frozen, identity.tag, api, command);
   assert.equal(lists, 1);
-  assert.deepEqual(commands, [
-    [
-      "release",
-      "upload",
-      identity.tag,
-      path,
-      "--repo",
-      "merklejerk/holtburger",
-    ],
+  assert.deepEqual(commands[0], [
+    "release",
+    "upload",
+    identity.tag,
+    path,
+    "--repo",
+    "merklejerk/holtburger",
   ]);
-  const existing: GitHub = () => Buffer.from(JSON.stringify(draft));
+  const publication = commands[1];
+  assert.deepEqual(publication.slice(0, 5), [
+    "release",
+    "edit",
+    identity.tag,
+    "--repo",
+    "merklejerk/holtburger",
+  ]);
+  assert.ok(publication.includes("--draft=false"));
+  assert.ok(publication.includes("--prerelease=false"));
+  assert.ok(publication.includes("--latest=true"));
+  assert.ok(publication.includes(releaseDescription(root, identity)));
+  const existing: GitHub = (args) =>
+    Buffer.from(args.includes("--slurp") ? "[[]]" : JSON.stringify(draft));
   draft.assets = [
     { name: "payload.zip", digest: `sha256:${frozen.files[0].sha256}` },
   ];
   commands.length = 0;
-  stageFrozenRelease(root, frozen, identity.tag, existing, command);
-  assert.equal(commands.length, 0);
+  publishFrozenRelease(root, frozen, identity.tag, existing, command);
+  assert.equal(commands.length, 1);
   draft.assets[0].digest = `sha256:${"b".repeat(64)}`;
   assert.throws(
-    () => stageFrozenRelease(root, frozen, identity.tag, existing, command),
+    () => publishFrozenRelease(root, frozen, identity.tag, existing, command),
     /conflicts/,
   );
   draft.draft = false;
-  assert.throws(
-    () => stageFrozenRelease(root, frozen, identity.tag, existing, command),
-    /published release/,
+  assert.throws(() =>
+    publishFrozenRelease(root, frozen, identity.tag, existing, command),
   );
   draft.draft = true;
   draft.assets = [];
   writeFileSync(path, "substituted");
   assert.throws(
-    () => stageFrozenRelease(root, frozen, identity.tag, existing, command),
+    () => publishFrozenRelease(root, frozen, identity.tag, existing, command),
     /changed after verification/,
   );
   assert.ok(
@@ -331,4 +355,72 @@ test("draft creation uses its POST response and refuses published, conflicting o
       ),
     ).includes("They do not check for updates"),
   );
+});
+
+test("publication retries admit the complete existing distribution without rewriting public assets", (t) => {
+  const identity = distribution("release", "0.2.0", "a".repeat(40));
+  const fixture = publicRelease(identity, 1);
+  const api: GitHub = (args) => {
+    if (args.includes("--slurp")) return Buffer.from("[[]]");
+    if (args.includes("--paginate"))
+      return Buffer.from(
+        JSON.stringify({
+          ...fixture.release,
+          html_url: "https://example.invalid/release",
+        }),
+      );
+    return fixture.data;
+  };
+  publishFrozenRelease(
+    scratch(t),
+    { identity, files: [] },
+    identity.tag,
+    api,
+    () => assert.fail("A published retry mutated the release"),
+  );
+});
+
+test("nightlies and older beta retries never replace the newest beta as latest", (t) => {
+  const root = scratch(t);
+  mkdirSync(join(root, "release"));
+  writeFileSync(join(root, "release/RELEASE_NOTES.md"), "Reviewed notes");
+  const newer = publicRelease(
+    distribution("release", "0.3.0", "b".repeat(40)),
+    1,
+  );
+  for (const identity of [
+    distribution("release", "0.2.1", "a".repeat(40)),
+    distribution("nightly", `0.3.0-nightly-${"c".repeat(40)}`, "c".repeat(40)),
+  ]) {
+    const api: GitHub = (args) => {
+      if (args.includes("--slurp"))
+        return Buffer.from(JSON.stringify([[newer.release]]));
+      if (args.includes("--header")) return newer.data;
+      if (args.includes("--paginate")) return Buffer.alloc(0);
+      if (args.includes("--jq")) return Buffer.from(identity.commit);
+      assert.ok(args.includes("POST"));
+      return Buffer.from(
+        JSON.stringify({
+          draft: true,
+          target_commitish: identity.commit,
+          html_url: "https://example.invalid/release",
+          assets: [],
+        }),
+      );
+    };
+    let published = false;
+    publishFrozenRelease(
+      root,
+      { identity, files: [] },
+      identity.tag,
+      api,
+      (_program, args) => {
+        assert.ok(args.includes("--latest=false"));
+        assert.ok(args.includes(`--prerelease=${identity.kind === "nightly"}`));
+        published = true;
+        return "";
+      },
+    );
+    assert.ok(published);
+  }
 });

@@ -1,14 +1,17 @@
 import { z } from "zod";
+import { compare } from "semver";
 import { digest, type Runner } from "../io.ts";
 import { REPOSITORY, type GitHub } from "../github.ts";
 import type { FrozenRelease } from "./assembly.ts";
 import {
   releaseDescription,
   releaseRecords,
+  latestPublishedRelease,
+  alreadyPublished,
   validateTag,
 } from "./publication.ts";
 
-/** Draft inspection needs only source ownership, existing byte identities and final review URL. */
+/** Private upload inspection retains source ownership, byte identities and the release URL. */
 const draftSchema = z.object({
   draft: z.boolean(),
   target_commitish: z.string(),
@@ -18,8 +21,8 @@ const draftSchema = z.object({
   ),
 });
 
-/** Fill only a matching draft; publication remains a separate explicit human action. */
-export function stageFrozenRelease(
+/** Upload a complete verified distribution privately, then publish in the same operation. */
+export function publishFrozenRelease(
   root: string,
   frozen: FrozenRelease,
   tag: string,
@@ -28,6 +31,12 @@ export function stageFrozenRelease(
 ): void {
   const identity = frozen.identity;
   validateTag(tag, identity);
+  const latest =
+    identity.kind === "release" ? latestPublishedRelease(api) : null;
+  // Retrying an older failed release must not replace a newer GitHub latest release.
+  const makeLatest =
+    identity.kind === "release" &&
+    (latest === null || compare(identity.version, latest.version) > 0);
   let records = releaseRecords(tag, api);
   if (records.length === 0) {
     const remote = api([`repos/${REPOSITORY}/commits/${tag}`, "--jq", ".sha"])
@@ -59,10 +68,15 @@ export function stageFrozenRelease(
     records = [JSON.parse(created.toString("utf8"))];
   }
   const [release] = z.tuple([draftSchema]).parse(records);
-  if (!release.draft || release.target_commitish !== identity.commit)
-    throw new Error(
-      "Refusing to modify a published release or a draft for another commit",
-    );
+  if (release.target_commitish !== identity.commit)
+    throw new Error("Refusing to modify a release for another source commit");
+  if (!release.draft) {
+    // A website dispatch may fail after publication. Retrying that job must be safe.
+    if (!alreadyPublished(identity, api))
+      throw new Error("Published release disappeared during verification");
+    console.log(`Already published verified distribution: ${release.html_url}`);
+    return;
+  }
   const uploaded = new Map(
     release.assets.map((asset) => [asset.name, asset.digest]),
   );
@@ -87,5 +101,22 @@ export function stageFrozenRelease(
         root,
       );
   }
-  console.log(`Draft staged for final user verification: ${release.html_url}`);
+  // A private upload transaction avoids exposing a partially uploaded distribution.
+  command(
+    "gh",
+    [
+      "release",
+      "edit",
+      tag,
+      "--repo",
+      REPOSITORY,
+      "--notes",
+      releaseDescription(root, identity),
+      "--draft=false",
+      `--prerelease=${identity.kind === "nightly"}`,
+      `--latest=${makeLatest}`,
+    ],
+    root,
+  );
+  console.log(`Published verified distribution: ${release.html_url}`);
 }

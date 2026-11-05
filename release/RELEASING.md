@@ -12,23 +12,74 @@ h3d owns installer construction and native acceptance through its app-local
 hashes the installer and writes its suite receipt. From `apps/holtburger-3d/`, run
 `npm run check:installers` and `npm run test:installers` for tooling checks.
 
-The release workflow stages the complete beta draft for native acceptance. Publishing that
-accepted draft does not rebuild its assets. Nightlies use the same builders and automatically
-publish as prerelease/non-latest after checks succeed. Historical tags, drafts, and release
-assets remain unchanged; the new pipeline does not migrate them.
+Release preparation is a manually requested Copilot analysis followed by a release PR.
+Reviewing and merging that PR authorizes automatic build, verification, and publication.
+There is no subsequent manual draft acceptance or publish step. Nightlies use the same
+builders and publish as prerelease/non-latest after checks succeed. Historical releases,
+drafts, tags, and assets remain unchanged.
+
+## Preparing a release
+
+One-time setup:
+
+- Create a fine-grained personal access token with the **Copilot Requests** permission
+  for a user with Copilot access. Store it as the repository Actions secret
+  `COPILOT_RELEASE_TOKEN`. Organization-provided access also requires the Copilot CLI
+  policy to be enabled. AI usage draws on that user's Copilot entitlement.
+- In repository **Settings → Actions → General → Workflow permissions**, enable
+  **Allow GitHub Actions to create and approve pull requests**. The workflow creates
+  PRs; it does not approve or merge them.
+- Keep review/merge protection on `main`. If PR checks created by the workflow token
+  require approval, use the PR's **Approve workflows to run** control before merging.
+- Configure GitHub Pages to use GitHub Actions and allow its environment to deploy
+  from `main`.
+
+Run **Actions → Prepare Release → Run workflow** on `main`, or:
+
+```sh
+gh workflow run prepare-release.yml --repo merklejerk/holtburger --ref main -f bump=auto
+```
+
+`bump=auto` uses Copilot's recommendation; `patch` and `minor` are bounded overrides.
+There is no arbitrary requested-version input. Deterministic code computes either
+`0.x.y → 0.x.(y+1)` or `0.x.y → 0.(x+1).0`. It rejects major changes, skipped increments,
+downgrades, prerelease suffixes, and build metadata. The same rule applies after PR edits
+and again before publication. The manual `version:bump` command also enforces it.
+
+Copilot receives the latest published beta's verified source identity, merged PR context,
+previous release notes, and permission to inspect source/history. Without a published beta,
+it reviews current functionality and the full history for the first release. The analysis
+job cannot write repository contents through its workflow token. Its strict JSON proposal
+contains only patch/minor choice, rationale, and complete replacement notes.
+
+A separate writer job revalidates the source and published baseline, computes the version,
+and opens a unique `release/prepare-*` branch/PR containing exactly the four suite version
+files and `release/RELEASE_NOTES.md`. It refuses a second open release PR. Main advancing
+during preparation or a changed published baseline requires running preparation again.
+Failed runs do not overwrite historical branches. Close an abandoned PR before retrying;
+reviewing/editing an existing PR is usually simpler.
+
+Review the notes, known issues, upgrade instructions, and version rationale in the PR.
+Copilot should retain unresolved limitations unless source evidence demonstrates a fix;
+human review owns the accuracy of those judgments. If main advances while the PR is open,
+review the intervening changes and update the notes as necessary. PR checks reject unrelated
+files, dependency changes hidden in version files, empty/unchanged notes, and invalid increments.
+Merge the PR to start **Release**. Its reviewed merge commit becomes the immutable release
+source. Ordinary PR merges, direct version commits, and tag pushes do not publish betas.
+
+The publisher waits for all required checks and both products on every target. It uploads
+assets to a private draft to avoid exposing an incomplete distribution, then publishes in
+the same run. A failed upload may leave a draft that a retry can resume; it is not a manual
+handoff. Existing conflicting bytes fail rather than being replaced. Rerun a failed Release
+workflow at its original source. Never move a tag or reuse a version for changed source.
 
 ## Version and content inputs
 
-Record suite version bumps as ordinary reviewed changes on main. Use `npm run version:bump -- VERSION` to update the Cargo workspace, Electron manifest, and both lockfiles; protocol,
-archive, settings, and navigation compatibility versions remain independent. The checked-in
-version must be unsuffixed and `release/channel.json` must contain `"beta"`. Build metadata
-(`+...`) is rejected. A version bump alone does not require regenerating navigation content.
-
-Tag the reviewed source `vVERSION`, or manually dispatch Release from main to create that tag
-and continue the build in the same run. Existing tags must resolve to the same source commit;
-annotated and lightweight tags are accepted. A tagged merge commit is valid. Never move a tag
-or reuse a release version for changed source. Rerun a failed workflow at its original source;
-main advancing does not invalidate a retry of an existing reachable tag.
+The writer uses the existing suite version tooling to update the Cargo workspace,
+Electron manifest, and both lockfiles. Protocol, archive, settings, and navigation
+compatibility versions remain independent. The checked-in version must be unsuffixed and
+`release/channel.json` must contain `"beta"`. A version bump alone does not require
+regenerating navigation content.
 
 Local release tooling uses Node.js 24.13.1 and npm 11.8.0 with the independent
 repository-root lockfile. App dependencies still install inside the app:
@@ -130,7 +181,7 @@ The desktop installer job consumes the verified 3D native ZIP. It does not rebui
 Electron or the Rust host. Windows uses `apps/holtburger-3d/packaging/windows.iss` with
 the compiler selected by the installed Chocolatey package; macOS uses native `hdiutil`.
 Archives upload before installer generation, so a failed installer retains its source
-archive for diagnostics. The native job must still pass before complete-draft staging.
+archive for diagnostics. The native job must still pass before publication.
 
 macOS packaging signs the Rust host first, records its Cargo and signed digests in
 `Contents/Resources/host-provenance.json`, then seals the application. Both the native
@@ -158,24 +209,9 @@ user-owned. No update server or application updater is installed.
 
 `Build checks` validates main pushes/PRs and supplies reusable release validation. Root prose
 changes outside shipped inputs can skip compilation while retaining the final `Validation`
-status. Tag, schedule, and manual release builds receive full validation. Native jobs build
+status. Release PR merges, schedules, and manual builds receive full validation. Native jobs build
 and probe each platform, including launcher-first and direct-client update lifecycle checks
 with temporary profiles and intercepted browser opening.
-
-After committing the version bump and merging it into main, create the immutable stable tag:
-
-```sh
-git tag v0.2.0
-git push origin refs/tags/v0.2.0
-```
-
-Alternatively, dispatch **Actions → Release** on main with `purpose=release`, `product=both`,
-and `target=all`. There is no requested-version input and no automatic version commit:
-
-```sh
-gh workflow run release.yml --repo merklejerk/holtburger --ref main \
-  -f purpose=release -f product=both -f target=all
-```
 
 The nightly wrapper runs every eight hours or by manual dispatch, always from main. It reads
 the current checked-in base version and appends `-nightly-FULL_SOURCE_SHA`, for example
@@ -196,18 +232,19 @@ Installing either replaces the other; there are no side-by-side nightly installa
 Nightly builds have no update checks or update feed, including startup and focus/resume.
 A current-version nightly sorts below that version's beta even when built later.
 
-Before a beta, edit `release/RELEASE_NOTES.md` with user-facing changes, known issues,
+The release PR replaces `release/RELEASE_NOTES.md` with user-facing changes, known issues,
 and upgrade instructions. Nightly descriptions are generated from the source commit.
-Both descriptions append installation links pinned to that commit. Descriptions are
-set when a draft is created; retries preserve any edits made to the existing draft.
+Both descriptions append installation links pinned to that commit. Publication uses
+descriptions from the reviewed source, including on retries; temporary draft edits are
+not authoritative.
 
 Diagnostics select `purpose=diagnostic` and one or both products/targets. They do not create
-tags, stage drafts, or publish. Complete release/nightly builds require both products and
+tags or publish releases. Complete release/nightly builds require both products and
 all supported targets. The old cargo-dist and CLI-only nightly publishers are retired.
 
 The aggregator requires every native target, both Flatpaks, Windows setup, macOS DMG, matching
 notices/content/source/version/channel/kind, and exact file digests/names. It writes schema 2
-`release-manifest.json` and `SHA256SUMS`. Promotion uses the same inventory validator; staging
+`release-manifest.json` and `SHA256SUMS`. Promotion uses the same inventory validator; publication
 additionally checks every payload byte. A partially successful build cannot publish.
 
 ## Flatpak and CI cost
@@ -284,46 +321,31 @@ Local generation retrieves checksum-verified upstream license clarifications and
 network access. Do not hand-edit the generated digest record to bypass regeneration.
 This avoids repeating tool compilation and license collection in the release path.
 
-## Final handoff and publication
+## Acceptance and publication
 
-Manual native/visual acceptance happens after the complete draft exists. Provide its source,
-checksums, known limitations, and which automatic/manual checks actually ran:
-
-1. Download and checksum the matching CLI archive and/or 3D installer/archive. Exercise
-   a first installation and replacing a prior installation while retaining a real profile.
-2. CLI: use bundled content, check creation choices, entry, approach/follow, cell changes,
-   and authoritative repositioning. Local movement has no gravity/jumping/stair simulation.
-3. 3D: supply full retail data, launch the default client and explicit Explorer, and check
-   gameplay, graphics/audio/input, window scaling, and OS launch behavior.
-4. On Linux, install the two separate Flatpaks. Check CLI utility permissions and 3D portal
-   selection across restarts. Beta and nightly deliberately share installation/profile locations; exercise replacement in both directions.
-
-Record unavailable native targets explicitly. Previous release acceptance does not establish the
-new distribution's behavior. A fix requires a new identified release and affected checks;
-never silently replace frozen artifacts. Developer ID signing/notarization remains deferred;
+Merging the release PR is the publication decision. Automated native packaging/runtime
+checks remain required; manual graphics, input, gameplay, Finder/browser quarantine, and
+visual acceptance are no longer publication gates. Those limitations should be understood
+when reviewing the release PR. Developer ID signing/notarization remains deferred;
 ad-hoc integrity signing does not remove the quarantine limitation in the quickstart.
 
-After final acceptance and explicit publication authorization, publish the existing draft
-without rebuilding or altering application assets:
-
-```sh
-gh release edit v0.2.0 \
-  --repo merklejerk/holtburger \
-  --draft=false --prerelease=false --latest=true
-```
-
-Verify the public asset list and representative downloaded checksums. Preserve the existing
-nightly release and superseded drafts/tags; cleanup of them is a separate action.
+A new highest-version beta publishes as non-prerelease/latest after verification.
+Retrying an older beta does not replace a newer latest release. Nightlies remain
+prerelease/non-latest and have no update feed. The workflow then explicitly dispatches the
+website/update-feed workflow from main because publication with `GITHUB_TOKEN` does not
+trigger a separate release-event workflow. If website dispatch fails after publication,
+the release remains public; rerun the failed job or dispatch the website workflow below.
+Do not replace frozen assets to repair publication. Fixes need a new reviewed release.
 
 ## Update feed and Pages
 
 GitHub Pages uses GitHub Actions as its source. The `github-pages` environment must allow
-manual promotion from main and release events from `v0.*.*` tags. Deployment protection
+workflow dispatch from main and release events from `v0.*.*` tags. Deployment protection
 matches the event ref, even though promotion checks out trusted main tooling; checking out
 main does not change the release event’s tag ref. Promotion needs `contents: read`;
 deployment needs `pages: write` and `id-token: write`.
 
-`Promote Update Feeds` reconciles the complete published release inventory after publication
+`Publish Website and Update Feeds` reconciles the complete published release inventory after publication
 or manual dispatch. It accepts only unsuffixed `v0.x.y` tags with complete schema 2 beta
 release manifests, exact tag/version agreement, and verified public asset inventories.
 Historical alpha/candidate tags, nightlies, and drafts are excluded before manifest loading.
@@ -342,10 +364,10 @@ Repair after a failed promotion or release withdrawal:
 gh workflow run promote-updates.yml --repo merklejerk/holtburger --ref main
 ```
 
-Older events cannot replace a newer release while the full inventory is unchanged. Publishing
-with workflow credentials must explicitly arrange promotion rather than assume an automated
-release event triggers another workflow. A corrective release needs a greater version; the
-memory-only client cache is not an urgent recall mechanism.
+Older events cannot replace a newer release while the full inventory is unchanged.
+The release publisher explicitly requests promotion after beta publication. A corrective
+release needs a greater version; the memory-only client cache is not an urgent recall
+mechanism.
 
 Packaged clean beta client builds check once asynchronously at startup and at most hourly
 while launcher/pregame footers are visible. Focus/resume reevaluates due work; hidden windows

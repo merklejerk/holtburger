@@ -9,6 +9,7 @@ import { PRODUCTS, TARGETS, targetNamed } from "./contracts.ts";
 import {
   RELEASE_BRANCH,
   sourceDistribution,
+  validateReleasePullRequest,
   validateSourceTag,
   type Distribution,
 } from "./identity.ts";
@@ -128,12 +129,11 @@ export function alreadyPublished(identity: Distribution, api: GitHub): boolean {
   return true;
 }
 
-/** Project accepted public inventories into beta updates without mutating website content. */
-export function generateFeeds(
+/** Admit all published beta inventories and order their source identities by SemVer. */
+export function publishedDistributions(
   releases: readonly unknown[],
   api: GitHub,
-  output: string,
-): void {
+): Distribution[] {
   const versions = new Set<string>();
   const identities: Distribution[] = [];
   for (const document of releases) {
@@ -151,10 +151,33 @@ export function generateFeeds(
     versions.add(inventory.identity.version);
     identities.push(inventory.identity);
   }
+  return identities.sort((a, b) => compare(b.version, a.version));
+}
+
+/** Read all pages before selecting a published beta; API ordering is not version ordering. */
+export function latestPublishedRelease(api: GitHub): Distribution | null {
+  const pages = z
+    .array(z.array(z.unknown()))
+    .parse(
+      JSON.parse(
+        api([`repos/${REPOSITORY}/releases`, "--paginate", "--slurp"]).toString(
+          "utf8",
+        ),
+      ),
+    );
+  return publishedDistributions(pages.flat(), api)[0] ?? null;
+}
+
+/** Project accepted public inventories into beta updates without mutating website content. */
+export function generateFeeds(
+  releases: readonly unknown[],
+  api: GitHub,
+  output: string,
+): void {
   // Validate every advertised release before touching any existing output.
+  const [newest] = publishedDistributions(releases, api);
   const updates = join(output, "updates");
   mkdirSync(updates, { recursive: true });
-  const newest = identities.sort((a, b) => compare(b.version, a.version))[0];
   if (newest === undefined) rmSync(join(updates, "beta.json"), { force: true });
   else
     writeJson(join(updates, "beta.json"), {
@@ -200,13 +223,21 @@ export function planRelease(
   const kind = selection.purpose === "nightly" ? "nightly" : "release";
   const identity = sourceDistribution(root, kind);
   let tag = "";
-  if (env.GITHUB_REF_TYPE === "tag") {
-    if (selection.purpose !== "release")
-      throw new Error("Tag events only build stable releases");
-    validateTag(z.string().parse(env.GITHUB_REF_NAME), identity);
-    validateSourceTag(root, identity);
-    tag = identity.tag;
-  } else if (selection.purpose !== "diagnostic") {
+  if (selection.purpose === "release") {
+    if (env.GITHUB_EVENT_NAME !== "pull_request")
+      throw new Error("Beta publication requires a merged release PR");
+    if (
+      !validateReleasePullRequest(
+        root,
+        JSON.parse(
+          readFileSync(z.string().parse(env.GITHUB_EVENT_PATH), "utf8"),
+        ),
+        true,
+      )
+    )
+      throw new Error("Beta publication requires a release preparation branch");
+  }
+  if (selection.purpose !== "diagnostic") {
     if (env.GITHUB_REF !== `refs/heads/${RELEASE_BRANCH}`)
       throw new Error(`Run release builds on the ${RELEASE_BRANCH} branch`);
     command(

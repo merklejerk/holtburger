@@ -96,6 +96,10 @@ export function createSourceFixture(t: TestContext): string {
   mkdirSync(join(root, "member/src"), { recursive: true });
   mkdirSync(join(root, "apps/holtburger-3d"), { recursive: true });
   mkdirSync(join(root, "release"));
+  writeFileSync(
+    join(root, "release/RELEASE_NOTES.md"),
+    "Previous release notes\n",
+  );
   writeJson(join(root, "release/channel.json"), "beta");
   writeFileSync(
     join(root, "Cargo.toml"),

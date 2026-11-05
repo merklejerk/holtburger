@@ -28,6 +28,7 @@
     "check:changes": "node scripts/checks/build-changes.ts",
     "content:fetch": "node scripts/release/content.ts",
     "content:stage": "node scripts/release/content.ts",
+    "release:prepare": "node scripts/release/preparation.ts",
     "release": "node scripts/release/suite.ts",
     "release:installers": "node scripts/release/installers.ts",
     "probe:flatpak-io": "node scripts/release/flatpak-io.ts",

@@ -9,7 +9,7 @@ import { productSchema } from "./contracts.ts";
 import { flatpakManifest, prepareFlatpak, recordFlatpak } from "./flatpak.ts";
 import { prepareSource, sourceDistribution } from "./identity.ts";
 import { planRelease } from "./publication.ts";
-import { stageFrozenRelease } from "./staging.ts";
+import { publishFrozenRelease } from "./publishing.ts";
 import { distributionKind } from "./version.ts";
 
 /** Required paths are resolved at the CLI boundary before entering release operations. */
@@ -89,13 +89,13 @@ export async function main(args: readonly string[]): Promise<void> {
       freezeManifest(ROOT, path(artifacts), process.env);
       break;
     }
-    case "stage": {
+    case "publish": {
       const { positionals } = parseArgs({ args: rest, allowPositionals: true });
       const [artifacts, tag] = z
         .tuple([z.string(), z.string()])
         .parse(positionals);
       const frozen = freezeManifest(ROOT, path(artifacts), process.env);
-      stageFrozenRelease(ROOT, frozen, tag, github, run);
+      publishFrozenRelease(ROOT, frozen, tag, github, run);
       break;
     }
     case "flatpak-manifest": {
@@ -156,7 +156,7 @@ export async function main(args: readonly string[]): Promise<void> {
     }
     default:
       throw new Error(
-        "Expected plan, prepare-source, assemble, verify, manifest, stage, flatpak-manifest, prepare-flatpak or record-flatpak",
+        "Expected plan, prepare-source, assemble, verify, manifest, publish, flatpak-manifest, prepare-flatpak or record-flatpak",
       );
   }
 }

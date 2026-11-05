@@ -1,0 +1,95 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Use Copilot's recommendation or select a permitted increment
+        type: choice
+        options: [auto, patch, minor]
+        default: auto
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      source: ${{ steps.source.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.13.1
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - id: source
+        name: Record the immutable preparation source
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Install Copilot CLI
+        run: npm install --global @github/copilot
+      - name: Recommend an increment and write release notes
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          COPILOT_AUTO_UPDATE: 'false'
+        run: |
+          if [ -z "$COPILOT_GITHUB_TOKEN" ]; then
+            echo '::error::Set COPILOT_RELEASE_TOKEN to a fine-grained PAT with the Copilot Requests permission.'
+            exit 1
+          fi
+          npm run release:prepare -- propose "$RUNNER_TEMP/release-proposal.json"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-proposal
+          path: ${{ runner.temp }}/release-proposal.json
+          if-no-files-found: error
+
+  open-pr:
+    needs: propose
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.propose.outputs.source }}
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.13.1
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - name: Populate the registry for offline workspace version updates
+        run: cargo fetch --locked
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-proposal
+          path: ${{ runner.temp }}
+      - name: Apply the bounded version bump and open the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_BUMP: ${{ inputs.bump }}
+        run: npm run release:prepare -- open "$RUNNER_TEMP/release-proposal.json" "$REQUEST_BUMP"

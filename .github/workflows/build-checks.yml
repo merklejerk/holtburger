@@ -30,7 +30,8 @@ jobs:
   changes:
     runs-on: ubuntu-22.04
     outputs:
-      relevant: ${{ steps.changes.outputs.relevant }}
+      # A reusable release invocation always requests full validation.
+      relevant: ${{ inputs.commit != '' || steps.changes.outputs.relevant == 'true' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -48,12 +49,15 @@ jobs:
         with:
           toolchain: 1.95.0
       - id: changes
+        if: inputs.commit == ''
         name: Select build inputs without skipping the final status
         run: npm run check:changes
       - name: Check release tooling
         run: npm run check:tooling && npm run format:tooling:check && npm run test:tooling
       - name: Check suite versions
         run: npm run version:check
+      - name: Check release PR version policy and scope
+        run: npm run release:prepare -- check-pr
       - name: Review committed dependency notices (advisory)
         run: |
           if ! npm run check:notices; then

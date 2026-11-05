@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
-import { SemVer } from "semver";
+import { SemVer, inc } from "semver";
 import { z } from "zod";
 import { ROOT, readJson, run } from "../io.ts";
 
@@ -9,6 +9,27 @@ import { ROOT, readJson, run } from "../io.ts";
 export const distributionKind = z.enum(["release", "nightly"]);
 /** Source-controlled audience; no audience is inferred from a version suffix. */
 export const releaseChannel = z.literal("beta");
+/** Automation and manual overrides can choose only the next patch or minor. */
+export const releaseBump = z.enum(["patch", "minor"]);
+
+/** Compute the next zero-major release; callers never accept an AI-supplied version. */
+export function nextReleaseVersion(current: string, bump: string): string {
+  validateChannelVersion("beta", current, "release");
+  const next = z.string().parse(inc(current, releaseBump.parse(bump)));
+  validateChannelVersion("beta", next, "release");
+  return next;
+}
+
+/** Enforce exact increments even after a proposed release is edited during review. */
+export function validateReleaseIncrement(current: string, next: string): void {
+  validateChannelVersion("beta", next, "release");
+  if (
+    !releaseBump.options.some(
+      (bump) => nextReleaseVersion(current, bump) === next,
+    )
+  )
+    throw new Error("Release version must be exactly the next patch or minor");
+}
 /** Suite workspace metadata retains unrelated TOML fields for exact-delta verification. */
 export const cargoWorkspace = z
   .object({
@@ -150,9 +171,12 @@ export function bumpVersion(version: string, root: string): void {
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const [command, version] = args;
-  if (command === "check" && args.length === 1)
-    console.log(checkVersions(ROOT));
-  else if (command === "bump" && version !== undefined && args.length === 2) {
+  if (command === "check" && args.length === 1) {
+    const current = checkVersions(ROOT);
+    validateChannelVersion(readChannel(ROOT), current, "release");
+    console.log(current);
+  } else if (command === "bump" && version !== undefined && args.length === 2) {
+    validateReleaseIncrement(checkVersions(ROOT), version);
     bumpVersion(version, ROOT);
     console.log(checkVersions(ROOT));
   } else throw new Error("Usage: version.ts check|bump VERSION");

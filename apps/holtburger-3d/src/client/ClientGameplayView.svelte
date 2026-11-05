@@ -282,6 +282,8 @@
 		readonly onInspectionPreviewHeightChange: (height: number) => void;
 		/** App-owned layout mode also gates gameplay shortcuts. */
 		readonly hudMode: "runtime" | "layout";
+		/** Reveal conditional HUD previews without editing chrome. */
+		readonly uiShowcase?: boolean;
 		readonly onHudModeChange: (mode: "runtime" | "layout") => void;
 		/** Session-local bindings shared with game dispatch. */
 		readonly spellBar: ClientSpellBarState;
@@ -529,6 +531,7 @@
 		onInputChange,
 		mouseMovement,
 		hudMode,
+		uiShowcase = false,
 		onHudModeChange,
 		spellBar,
 		onSpellBarChange,
@@ -651,6 +654,9 @@
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
 	const displayPlatform = $derived(platform);
+	/** Preview visibility is independent of layout editing controls. */
+	const previewHud = $derived(hudMode === "layout" || uiShowcase);
+
 	/** The wheel owns a disposable physical-key lifetime while its activation key is held. */
 	let emoteWheel = $state<{ readonly release: () => void } | null>(null);
 	function closeEmotes(): void {
@@ -1310,7 +1316,7 @@
 			{/key}
 		{/if}
 
-		{#if actionBars !== null && spells !== null && (spellBarEnabled || (hudMode === "layout" && combatMode !== "melee" && combatMode !== "missile"))}
+		{#if actionBars !== null && spells !== null && (spellBarEnabled || (previewHud && combatMode !== "melee" && combatMode !== "missile"))}
 			<ClientSpellBar
 				{input}
 				{displayPlatform}
@@ -1376,7 +1382,7 @@
 				{characterSheet}
 			/>
 		</ClientHudPanel>
-		{#if partyHudPresent || hudMode === "layout"}
+		{#if partyHudPresent || previewHud}
 			<ClientPartyHud
 				{readPartyHudDisplay}
 				onSelectEntity={onSelectPartyMember}
@@ -1391,6 +1397,7 @@
 		{/if}
 
 		<ClientStatusTray
+			preview={previewHud}
 			placement={hudLayout.statusTray}
 			editable={hudMode === "layout"}
 			{viewport}
@@ -1402,7 +1409,7 @@
 				changeHudPlacement("statusTray", placement)}
 		/>
 
-		{#if jumpChargeActive || preciseJumpActive || hudMode === "layout"}
+		{#if jumpChargeActive || preciseJumpActive || previewHud}
 			<ClientHudPanel
 				label="Jump power"
 				placement={hudLayout.jumpPower}
@@ -1417,7 +1424,7 @@
 			>
 				<ClientJumpPowerBar
 					active={jumpChargeActive || preciseJumpActive}
-					previewExtent={hudMode === "layout" ? HUD_PREVIEW_JUMP_EXTENT : null}
+					previewExtent={previewHud ? HUD_PREVIEW_JUMP_EXTENT : null}
 					precise={preciseJumpActive}
 					readExtent={readJumpExtent}
 					powerKeys={jumpPowerKeys}
@@ -1427,7 +1434,7 @@
 				/>
 			</ClientHudPanel>
 		{/if}
-		{#if toast !== null || combining || hudMode === "layout"}
+		{#if toast !== null || combining || previewHud}
 			<ClientHudPanel
 				label="Notifications"
 				placement={hudLayout.toast}
@@ -1447,7 +1454,7 @@
 								kind: "status",
 								message: `Use ${itemInteraction.name} on… (Escape to cancel)`,
 							}
-						: hudMode === "layout"
+						: previewHud
 							? { kind: "preview", message: HUD_PREVIEW_TOAST_MESSAGE }
 							: null}
 				/>
@@ -1501,7 +1508,7 @@
 				<ClientFpsCounter {readFrameRates} />
 			</ClientHudPanel>
 		{/if}
-		{#if selectedEntityGuid !== null || hudMode === "layout"}
+		{#if selectedEntityGuid !== null || previewHud}
 			<ClientHudPanel
 				label="Selected entity"
 				placement={hudLayout.selectedEntity}

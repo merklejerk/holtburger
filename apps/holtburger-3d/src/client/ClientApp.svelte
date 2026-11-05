@@ -355,6 +355,8 @@
 				: emptySpellBarBindings.tabs,
 	});
 	let hudMode = $state<"runtime" | "layout">("runtime");
+	/** Temporary HUD visibility; never persisted to layout settings. */
+	let uiShowcase = $state(false);
 	function selectSpellTab(selected: InputDigitIndex): void {
 		selectedSpellTab = selected;
 	}
@@ -1422,7 +1424,10 @@
 	/** Explicit launches remain cold UI events; the board owns its run lifetime. */
 	let logopolisLaunchRevision = $state(0);
 	$effect(() => {
-		if (lifecycle.kind !== "in-world") logopolisLaunchRevision = 0;
+		if (lifecycle.kind !== "in-world") {
+			logopolisLaunchRevision = 0;
+			uiShowcase = false;
+		}
 	});
 
 	async function sendChat(
@@ -1455,6 +1460,11 @@
 		}
 		if (isLogopolisCommand(message)) {
 			logopolisLaunchRevision += 1;
+			return;
+		}
+		if (/^[/@]ui-showcase$/i.test(message.trim())) {
+			uiShowcase = !uiShowcase;
+			if (uiShowcase) hudMode = "runtime";
 			return;
 		}
 		if (/^[/@]fps$/i.test(message.trim())) {
@@ -2610,6 +2620,7 @@
 			onInspectionPreviewHeightChange={(previewHeight) =>
 				changeUserSection("inspection", { previewHeight })}
 			{hudMode}
+			{uiShowcase}
 			onHudModeChange={(mode) => (hudMode = mode)}
 			{spellBar}
 			onSpellBarChange={changeSpellBar}

@@ -140,6 +140,13 @@ export const HELP_COMMAND: ClientCommandDefinition = {
 };
 
 export const LOCAL_COMMANDS = {
+	uiShowcase: {
+		...invocation(["ui-showcase"], ""),
+		description: "Toggle hidden HUD previews without layout controls.",
+		details: [
+			"Temporary preview for screenshots; does not change saved HUD settings.",
+		],
+	},
 	version: {
 		...invocation(["version"], ""),
 		description: "Show the client version and build revision.",

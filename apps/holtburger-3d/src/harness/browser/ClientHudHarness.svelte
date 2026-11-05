@@ -6493,6 +6493,9 @@
 							characterSettings = { ...characterSettings, actionBars };
 					}}
 					{hudMode}
+					uiShowcase={new URLSearchParams(window.location.search).has(
+						"hud-showcase",
+					)}
 					onHudModeChange={(mode) => (hudMode = mode)}
 					{spellBar}
 					onSpellBarChange={(state) => (spellBar = state)}

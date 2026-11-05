@@ -18,6 +18,8 @@
 		/** Saved position and long-axis orientation of the fixed-size tray. */
 		readonly placement: ClientHudPlacement;
 		readonly editable: boolean;
+		/** Keep the tray mounted for HUD previews without enabling layout controls. */
+		readonly preview?: boolean;
 		readonly viewport: ClientHudViewport;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 		/** Visibility and change identities for effective ordinary spells and the vitae penalty. */
@@ -31,6 +33,7 @@
 	const {
 		placement,
 		editable,
+		preview = false,
 		viewport,
 		onPlacementChange,
 		enchantments,
@@ -87,7 +90,7 @@
 	]);
 </script>
 
-{#if editable || statuses.length > 0 || burdenPresentation.warning !== null}
+{#if editable || preview || statuses.length > 0 || burdenPresentation.warning !== null}
 	<ClientHudTray
 		label="Status tray"
 		{placement}

@@ -54,12 +54,12 @@ jobs:
       linux_matrix: ${{ steps.identity.outputs.linux_matrix }}
       desktop_matrix: ${{ steps.identity.outputs.desktop_matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           # Immutable tags are pushed only by explicit release/nightly dispatch.
           persist-credentials: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.13.1
           cache: npm
@@ -88,7 +88,7 @@ jobs:
           if ! npm run check:notices; then
             echo '::warning::Dependency notice check failed. Review and regenerate locally when needed; CI will use the checked-in notices.'
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-notices
           path: .github/licenses/THIRD_PARTY_NOTICES.html
@@ -130,11 +130,11 @@ jobs:
       HOLTBURGER_SOURCE_REVISION: ${{ needs.plan.outputs.commit }}
       HOLTBURGER_DISTRIBUTION: ${{ needs.plan.outputs.kind }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.plan.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.13.1
           cache: npm
@@ -150,7 +150,7 @@ jobs:
           if [ "$HOLTBURGER_DISTRIBUTION" = nightly ]; then cargo fetch --locked; fi
           npm run --silent release -- prepare-source --kind "$HOLTBURGER_DISTRIBUTION"
           echo 'HOLTBURGER_SOURCE_MODIFIED=0' >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: needs.plan.outputs.product != 'cli'
         with:
           name: verification-linux-electron
@@ -159,12 +159,12 @@ jobs:
         if: needs.plan.outputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: npm ci --ignore-scripts
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: release-*-x86_64-unknown-linux-gnu
           path: .holtburger-local/release-native-linux
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: needs.plan.outputs.product != '3d'
         with:
           name: verification-linux-bootstrap
@@ -211,7 +211,7 @@ jobs:
           npm run --silent release -- record-flatpak --files "$LOCATION/files" \
             --native "$HOLTBURGER_CLI_NATIVE" --bundle "$BUNDLE" \
             --output .holtburger-local/release-artifacts/cli/metadata-cli-flatpak.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: needs.plan.outputs.product != '3d'
         with:
           name: release-cli-flatpak
@@ -247,7 +247,7 @@ jobs:
           npm run --silent release -- record-flatpak --files "$LOCATION/files" \
             --native "$HOLTBURGER_3D_NATIVE" --bundle "$BUNDLE" \
             --output .holtburger-local/release-artifacts/3d/metadata-3d-flatpak.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: needs.plan.outputs.product != 'cli'
         with:
           name: release-3d-flatpak
@@ -265,11 +265,11 @@ jobs:
       HOLTBURGER_SOURCE_REVISION: ${{ needs.plan.outputs.commit }}
       HOLTBURGER_DISTRIBUTION: ${{ needs.plan.outputs.kind }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.plan.outputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.13.1
           cache: npm
@@ -285,7 +285,7 @@ jobs:
           if [ "$HOLTBURGER_DISTRIBUTION" = nightly ]; then cargo fetch --locked; fi
           npm run --silent release -- prepare-source --kind "$HOLTBURGER_DISTRIBUTION"
           echo 'HOLTBURGER_SOURCE_MODIFIED=0' >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: .holtburger-local/release-artifacts

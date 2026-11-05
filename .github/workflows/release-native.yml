@@ -36,14 +36,14 @@ jobs:
       HOLTBURGER_DISTRIBUTION: ${{ inputs.kind }}
       HOLTBURGER_PRODUCT: ${{ inputs.product }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.commit }}
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.13.1
           cache: npm
@@ -66,7 +66,7 @@ jobs:
           if [ "$HOLTBURGER_DISTRIBUTION" = nightly ]; then cargo fetch --locked; fi
           npm run --silent release -- prepare-source --kind "$HOLTBURGER_DISTRIBUTION"
           echo 'HOLTBURGER_SOURCE_MODIFIED=0' >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-notices
           path: .holtburger-local/release-notices
@@ -99,14 +99,14 @@ jobs:
             --target '${{ matrix.triple }}' --content .holtburger-local/cli-content \
             --notices .holtburger-local/release-notices/THIRD_PARTY_NOTICES.html \
             --output .holtburger-local/release-artifacts/cli
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: inputs.product != '3d'
         with:
           name: release-cli-${{ matrix.triple }}
           path: .holtburger-local/release-artifacts/cli/*
           if-no-files-found: error
           compression-level: 0
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: runner.os == 'Linux' && inputs.product != '3d'
         with:
           name: verification-linux-bootstrap
@@ -170,14 +170,14 @@ jobs:
             --package 'apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}' \
             --notices .holtburger-local/release-notices/THIRD_PARTY_NOTICES.html \
             --output .holtburger-local/release-artifacts/3d
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: inputs.product != 'cli'
         with:
           name: release-3d-${{ matrix.triple }}
           path: .holtburger-local/release-artifacts/3d/*
           if-no-files-found: error
           compression-level: 0
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: runner.os == 'Linux' && inputs.product != 'cli'
         with:
           name: verification-linux-electron
@@ -205,7 +205,7 @@ jobs:
             --artifacts .holtburger-local/release-artifacts/3d \
             --target '${{ matrix.triple }}' \
             --output .holtburger-local/release-installers "${COMPILER[@]}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: runner.os != 'Linux' && inputs.product != 'cli'
         with:
           name: release-3d-installer-${{ matrix.triple }}

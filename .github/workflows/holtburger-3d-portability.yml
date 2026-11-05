@@ -43,10 +43,10 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24.13.1
           cache: npm
@@ -111,7 +111,7 @@ jobs:
           echo 'This package is an unsupported, short-lived development artifact.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Hosted CI verifies build, protocol, package structure, native themes, and font decoding; real GPU, input, audio, display scaling, and user-facing OS launch behavior remain unverified.' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload unsupported diagnostic package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: holtburger-3d-portability-${{ matrix.target }}-${{ github.sha }}
           path: apps/holtburger-3d/out/make/zip/${{ matrix.platform }}/${{ matrix.architecture }}/*.zip

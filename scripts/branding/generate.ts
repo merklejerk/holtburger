@@ -15,11 +15,10 @@ const source = await readFile(
 
 // Sharp premultiplies alpha during resizing so transparent pixels cannot bleed
 // color into the edge. Resize every output directly from the original artwork.
+const resize = (size: number) =>
+  sharp(source).resize(size, size, { kernel: sharp.kernel.lanczos3 });
 const render = (size: number) =>
-  sharp(source)
-    .resize(size, size, { kernel: sharp.kernel.lanczos3 })
-    .png({ compressionLevel: 9 })
-    .toBuffer();
+  resize(size).png({ compressionLevel: 9 }).toBuffer();
 const [docsIcon, appIcon, favicon] = await Promise.all(
   [192, 512, 64].map(render),
 );
@@ -44,7 +43,12 @@ for (const [type, size] of [
   ["ic13", 256],
   ["ic14", 512],
 ] as const) {
-  icns.append(IcnsImage.fromPNG(await render(size), type));
+  // Only macOS gets an opaque charcoal background; other exports retain alpha.
+  const image = await resize(size)
+    .flatten({ background: "#202024" })
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+  icns.append(IcnsImage.fromPNG(image, type));
 }
 
 const outputs = new Map([

@@ -7,7 +7,9 @@ transparent PNG as the source; apps and docs consume the smaller generated expor
 - `portal-docs.png`: 192 px for README and site header marks displayed at 64–96 px.
 - `favicon.png`: 64 px for browser tabs and the docs site.
 - `icon.png`: 512 px for native windows and Flatpak launchers.
-- `icon.ico` and `icon.icns`: multi-resolution Windows and macOS application icons.
+- `icon.ico`: multi-resolution Windows application icon with transparency.
+- `icon.icns`: multi-resolution macOS application icon with an opaque dark charcoal
+  (`#202024`) background. Other platforms and docs retain the transparent artwork.
 
 The original [animated portal SVG](portal.svg) supplies the client loading and
 pregame artwork independently of the static emblem. The docs site publishes only

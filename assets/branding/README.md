@@ -4,14 +4,14 @@ The [portal emblem](portal-source.png) is Holtburger's project logo, generated
 with imagegen and selected without artwork changes. Preserve this full-resolution
 transparent PNG as the source; apps and docs consume the smaller generated exports:
 
-- `portal-docs.png`: 192 px for README marks displayed at 64–96 px.
+- `portal-docs.png`: 192 px for README and site header marks displayed at 64–96 px.
 - `favicon.png`: 64 px for browser tabs and the docs site.
 - `icon.png`: 512 px for native windows and Flatpak launchers.
 - `icon.ico` and `icon.icns`: multi-resolution Windows and macOS application icons.
 
 The original [animated portal SVG](portal.svg) supplies the client loading and
 pregame artwork independently of the static emblem. The docs site publishes only
-its small favicon rather than the full-resolution source or native icon exports.
+its small favicon and header emblem rather than the full-resolution source or native icon exports.
 Normal builds use the checked-in exports.
 
 The generator lives in `scripts/branding/generate.ts`; its dependencies belong to

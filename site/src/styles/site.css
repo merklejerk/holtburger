@@ -122,18 +122,22 @@ h3 {
 	background: var(--paint-wash) center / 100% 100% no-repeat;
 }
 .brand {
-	font-family: Charm, Gelasio, Georgia, serif;
-	font-weight: 700;
-	font-style: normal;
-	font-size: clamp(3rem, 6.6vw, 5.2rem);
-	letter-spacing: -0.025em;
-	line-height: 1;
-	color: #762119;
+	display: inline-flex;
+	align-items: center;
+	width: min(100%, 650px);
 	text-decoration: none;
 	z-index: 1;
 }
-.brand:hover {
-	color: #442214;
+.brand-logo {
+	width: 15%;
+	height: auto;
+	flex-shrink: 0;
+}
+.brand-wordmark {
+	flex: 1;
+	min-width: 0;
+	/* Bring the visible lettering closer across the two images' transparent margins. */
+	margin-left: -4%;
 }
 .masthead-landscape {
 	position: absolute;
@@ -216,6 +220,9 @@ h3 {
 }
 .home-document {
 	padding-top: 1.2rem;
+}
+.home-cover {
+	border-bottom: 10px solid transparent;
 }
 figcaption {
 	font-size: 0.75rem;
@@ -309,7 +316,7 @@ figcaption {
 	grid-template-columns: 0.85fr 1.4fr;
 	position: relative;
 	isolation: isolate;
-	border-block: 10px solid transparent;
+	border-top: 10px solid transparent;
 	margin-block: 0.2rem 2rem;
 }
 .home-editorial::before {
@@ -583,6 +590,7 @@ figcaption {
 }
 /* Dedicated woven trim distinguishes dividers from the framed media mounts. */
 .navigation-row,
+.home-cover,
 .home-editorial,
 .site-footer,
 .guide-menu-header,
@@ -913,9 +921,6 @@ figcaption {
 	.masthead {
 		min-height: 105px;
 		padding-inline: 1rem;
-	}
-	.brand {
-		font-size: clamp(2.2rem, 9.2vw, 3.7rem);
 	}
 	.masthead-landscape {
 		width: 45%;

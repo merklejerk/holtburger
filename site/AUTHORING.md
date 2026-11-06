@@ -140,8 +140,8 @@ and reference pages provide compact lookups. Avoid card grids, repeated heavy
 frames, leather and stitching. Reserve the raised gold treatment for the primary
 download button; secondary controls stay quieter.
 
-Charm Bold provides display lettering for the masthead and
-headings; use its actual bold face without synthesized styles. Gelasio owns prose and Arimo
+The masthead uses the copper illustrated wordmark from `assets/branding/wordmark.webp`.
+Charm Bold provides display headings; use its actual bold face without synthesized styles. Gelasio owns prose and Arimo
 owns dense navigation and lookup tables. Fonts load from local assets with their
 redistribution licenses, not a font service.
 

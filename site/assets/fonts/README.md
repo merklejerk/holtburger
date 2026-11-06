@@ -1,6 +1,7 @@
 # Website display font
 
-Charm Bold supplies the website's masthead and display headings. Body text remains
+Charm Bold supplies the website's display headings. The masthead uses illustrated
+wordmark artwork. Body text remains
 Gelasio, with Arimo for compact navigation and reference tables. The website font
 does not change the client font choices.
 

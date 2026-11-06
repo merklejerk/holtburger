@@ -34,10 +34,16 @@ await collectFiles(
 	'screenshots/',
 	files
 );
-// Publish only the site icon, rather than the full-resolution branding source and native exports.
+// Publish the small web exports, rather than the full-resolution source and native icons.
+for (const file of ['favicon.png', 'portal-docs.png']) {
+	files.set(
+		`branding/${file}`,
+		new URL(`../../assets/branding/${file}`, import.meta.url)
+	);
+}
 files.set(
-	'branding/favicon.png',
-	new URL('../../assets/branding/favicon.png', import.meta.url)
+	'branding/wordmark.webp',
+	new URL('../assets/branding/wordmark.webp', import.meta.url)
 );
 for (const family of ['gelasio', 'arimo']) {
 	await collectFiles(

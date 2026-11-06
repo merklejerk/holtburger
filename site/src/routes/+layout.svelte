@@ -44,9 +44,22 @@
 	<header class="site-header">
 		<div class="header-inner">
 			<div class="masthead">
-				<a class="brand" href={resolve('/')} aria-label="Holtburger home"
-					>Holtburger</a
-				>
+				<a class="brand" href={resolve('/')} aria-label="Holtburger home">
+					<img
+						class="brand-logo"
+						src={asset('assets/branding/portal-docs.png')}
+						width="192"
+						height="192"
+						alt=""
+					/>
+					<img
+						class="brand-wordmark"
+						src={asset('assets/branding/wordmark.webp')}
+						width="1200"
+						height="400"
+						alt="Holtburger"
+					/>
+				</a>
 				<img
 					class="masthead-landscape"
 					{...illustrations.engraving}

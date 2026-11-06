@@ -44,6 +44,11 @@
 		</div>
 	</header>
 
+	<MediaCarousel
+		label="Holtburger 3D screenshots"
+		images={['outdoors', 'combat', 'jump', 'map', 'characters', 'holtburg']}
+	/>
+
 	<div class="home-editorial">
 		<section class="opening-argument">
 			<h2>Keep Dereth.<br />Rethink the client.</h2>
@@ -67,11 +72,6 @@
 			</p>
 		</section>
 	</div>
-
-	<MediaCarousel
-		label="Holtburger 3D screenshots"
-		images={['outdoors', 'combat', 'jump', 'map', 'characters', 'holtburg']}
-	/>
 
 	<section class="foundation-spread">
 		<img

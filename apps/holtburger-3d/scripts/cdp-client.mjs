@@ -53,6 +53,9 @@ export function createCdpClient(webSocketUrl) {
 					if (socket.readyState !== WebSocket.OPEN)
 						return Promise.reject(new Error("CDP connection is not open."));
 					const id = nextId++;
+					// Capture the caller before the socket callback loses the originating operation.
+					// Request parameters may contain credentials, so retain the method and call site only.
+					const commandError = new Error(`CDP ${method} (#${id}) failed`);
 					return new Promise((resolveRequest, rejectRequest) => {
 						const timer = setTimeout(() => {
 							pending.delete(id);
@@ -63,6 +66,7 @@ export function createCdpClient(webSocketUrl) {
 							);
 						}, CDP_TIMEOUT_MS);
 						pending.set(id, {
+							commandError,
 							reject: rejectRequest,
 							resolve: resolveRequest,
 							timer,
@@ -96,8 +100,10 @@ export function createCdpClient(webSocketUrl) {
 			if (request === undefined) return;
 			pending.delete(message.id);
 			clearTimeout(request.timer);
-			if (message.error) request.reject(new Error(message.error.message));
-			else request.resolve(message.result);
+			if (message.error) {
+				request.commandError.message += `: ${message.error.message}`;
+				request.reject(request.commandError);
+			} else request.resolve(message.result);
 		});
 	});
 }

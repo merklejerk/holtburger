@@ -144,6 +144,8 @@ let browser;
 let inspector;
 let page;
 let status = null;
+// Retain the last entered phase even when a document disappears before its CDP reply.
+let stage = "starting Electron and attaching the initial document";
 const report = {
 	assetMode: values.assets
 		? "external diagnostic assets"
@@ -375,6 +377,7 @@ async function runProbe() {
 	inspector = await createCdpClient(inspectorEndpoint);
 	const initialUpdateRole = values["updates-direct"] ? "client" : "launcher";
 	await attach(initialUpdateRole);
+	stage = "running the launcher lifecycle scenario";
 	if (values["settings-reset-only"]) {
 		const state = await evaluate(page, "window.holtburgerLauncher.snapshot()");
 		requireCondition(
@@ -412,6 +415,7 @@ async function runProbe() {
 		return;
 	}
 	if (values["updates-only"] || values["updates-direct"]) {
+		stage = "installing the controlled update feed";
 		await evaluate(
 			inspector,
 			`(async () => {
@@ -458,6 +462,7 @@ async function runProbe() {
 			owner.start();
 		})()`,
 		);
+		stage = "reloading the initial document with the controlled update feed";
 		await page.send("Page.enable");
 		const loaded = new Promise((resolve) =>
 			page.on("Page.loadEventFired", resolve),
@@ -465,6 +470,7 @@ async function runProbe() {
 		await page.send("Page.reload");
 		await loaded;
 		await attach(initialUpdateRole);
+		stage = "checking and opening the initial update notification";
 		const updateIcon =
 			"document.querySelector('.pregame-build button[aria-label^=\"Update available\"]')";
 		await waitFor(
@@ -485,6 +491,7 @@ async function runProbe() {
 			"Click must open the confirmed release page",
 		);
 		if (values["updates-direct"]) {
+			stage = "returning from direct client startup to the launcher";
 			await evaluate(page, "window.holtburgerLauncher.back(null)");
 			await attach("launcher");
 			await waitFor(
@@ -495,6 +502,7 @@ async function runProbe() {
 				"Direct client startup receives update availability before the launcher is opened",
 			);
 		}
+		stage = "registering the old document token and saving the probe server";
 		const staleToken = await evaluate(
 			page,
 			"window.holtburgerUpdates.registerPregame(true)",
@@ -504,6 +512,7 @@ async function runProbe() {
 			page,
 			`window.holtburgerLauncher.saveServer(${JSON.stringify({ id: serverId, name: "Update probe", contentPath: assets, endpoint: { host: "127.0.0.1", port: 1 } })})`,
 		);
+		stage = "launching a client attempt from the launcher";
 		await evaluate(
 			page,
 			`window.holtburgerLauncher.play(${JSON.stringify({ serverId, profileId: null, credentials: { account: "update-probe", password: "probe-secret" } })})`,
@@ -513,12 +522,14 @@ async function runProbe() {
 			() => evaluate(page, `${updateIcon}?.checkVisibility()`),
 			"pregame update icon",
 		);
+		stage = "returning from the launched client attempt to the launcher";
 		await evaluate(page, "window.holtburgerLauncher.back(null)");
 		await attach("launcher");
 		await waitFor(
 			() => evaluate(page, `${updateIcon}?.checkVisibility()`),
 			"retained update on launcher return",
 		);
+		stage = "checking stale document rejection and update feed reconciliation";
 		requireCondition(
 			await evaluate(
 				page,
@@ -546,6 +557,7 @@ async function runProbe() {
 			"Native update startup, real footer click, picker/client replacement, stale-token rejection and hourly reconciliation",
 		);
 		report.updates = native;
+		stage = "quitting the update probe";
 		await evaluate(
 			inspector,
 			`setTimeout(() => process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron').app.quit(), 0); true`,
@@ -2384,6 +2396,13 @@ async function quitAndReport() {
 try {
 	await runProbe();
 } catch (error) {
+	console.error("Launcher probe failed", {
+		stage,
+		updatesDirect: values["updates-direct"] === true,
+		updatesOnly: values["updates-only"] === true,
+		packaged: Boolean(values.package),
+		processStatus: status,
+	});
 	console.error(output);
 	throw error;
 } finally {

@@ -128,16 +128,9 @@ h3 {
 	text-decoration: none;
 	z-index: 1;
 }
-.brand-logo {
-	width: 15%;
-	height: auto;
-	flex-shrink: 0;
-}
 .brand-wordmark {
-	flex: 1;
-	min-width: 0;
-	/* Bring the visible lettering closer across the two images' transparent margins. */
-	margin-left: -4%;
+	width: 100%;
+	height: auto;
 }
 .masthead-landscape {
 	position: absolute;

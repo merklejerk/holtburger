@@ -1,4 +1,4 @@
-<h1><img src="assets/branding/portal-docs.png" width="64" height="64" align="middle" alt="Holtburger portal logo" /> Holtburger</h1>
+<h1><img src="site/assets/branding/wordmark.webp" width="600" height="200" alt="Holtburger" /></h1>
 
 **The Asheron's Call client, reengineered.**
 

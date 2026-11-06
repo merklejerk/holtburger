@@ -197,7 +197,7 @@ describe("independent launcher persistence", () => {
 		await writeFile(app.path, JSON.stringify(saved));
 		const reopened = new LauncherStore(app.path, geometry);
 		await reopened.load();
-		expect(reopened.snapshot(null, true).recoveryRequired).toBe(false);
+		expect(reopened.snapshot(null, true).canPlay).toBe(true);
 		expect(() =>
 			reopened.credentials({ serverId: app.server.id, profileId: null }),
 		).toThrow();
@@ -216,7 +216,12 @@ describe("independent launcher persistence", () => {
 		await writeFile(app.path, JSON.stringify(saved));
 		const invalid = new LauncherStore(app.path, geometry);
 		await invalid.load();
-		expect(invalid.snapshot(null, true).recoveryRequired).toBe(true);
+		expect(invalid.snapshot(null, true).canPlay).toBe(true);
+		expect(
+			Object.keys(
+				JSON.parse(await readFile(app.path, "utf8")).serverCredentials,
+			),
+		).toEqual([app.server.id]);
 	});
 	it("persists server launch recency across restarts without promoting metadata edits or new servers", async () => {
 		const app = await setup();
@@ -320,7 +325,7 @@ describe("independent launcher persistence", () => {
 		});
 	});
 
-	it("requires recovery for remembered choices with unknown servers or profiles belonging to another server", async () => {
+	it("clears remembered choices with unknown servers or profiles belonging to another server", async () => {
 		const app = await setup();
 		await app.store.saveServer(app.server);
 		await app.store.saveProfile(app.profile);
@@ -341,7 +346,11 @@ describe("independent launcher persistence", () => {
 			);
 			const reopened = new LauncherStore(app.path, geometry);
 			await reopened.load();
-			expect(reopened.snapshot(null, true).recoveryRequired).toBe(true);
+			expect(reopened.snapshot(null, true)).toMatchObject({
+				canPlay: true,
+				lastProfileByServer: {},
+			});
+			expect(reopened.snapshot(null, true).profiles).toHaveLength(1);
 		}
 	});
 	it("adds a directory server immediately and preserves existing profiles and credentials on duplicates", async () => {
@@ -626,18 +635,15 @@ describe("independent launcher persistence", () => {
 		]);
 		await expect(app.store.flush()).resolves.toBeUndefined();
 	});
-	it("retains malformed files until explicit recovery and reports profile-local credential corruption", async () => {
+	it("automatically resets malformed files and reports profile-local credential corruption", async () => {
 		const app = await setup();
 		await writeFile(app.path, "broken");
 		const store = new LauncherStore(app.path, geometry);
 		await store.load();
 		expect(store.snapshot(null, true)).toMatchObject({
-			recoveryRequired: true,
-			canPlay: false,
+			canPlay: true,
+			servers: [],
 		});
-		await expect(store.saveServer(app.server)).rejects.toThrow("Recover");
-		expect(await readFile(app.path, "utf8")).toBe("broken");
-		await store.recover();
 		await store.saveServer(app.server);
 		await store.saveProfile(app.profile);
 		const document = JSON.parse(await readFile(app.path, "utf8"));

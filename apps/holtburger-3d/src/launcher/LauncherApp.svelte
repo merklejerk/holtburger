@@ -80,8 +80,7 @@
 		  }
 		| { kind: "delete-server"; value: LauncherServer }
 		| { kind: "delete-profile"; value: LauncherProfileView }
-		| { kind: "new-profile"; name: string }
-		| { kind: "recover" };
+		| { kind: "new-profile"; name: string };
 	let editor = $state<Editor | null>(null);
 
 	function diagnostic(error: unknown): string {
@@ -180,16 +179,12 @@
 					await transport.deleteProfile(value.value.id);
 					selectedProfileId = "";
 					break;
-				case "recover":
-					await transport.recover();
-					break;
 			}
 			editor = null;
 			await refresh();
 			if (
 				selectedServerId !== previousServerId ||
-				selectedProfileId !== previousProfileId ||
-				value.kind === "recover"
+				selectedProfileId !== previousProfileId
 			)
 				await chooseProfile(selectedProfileId);
 		});
@@ -282,19 +277,8 @@
 		aria-label="Server and profile launcher"
 		aria-busy={busy}
 	>
-		{#if !snapshot || snapshot.recoveryRequired}{@render heading()}{/if}
-		{#if snapshot?.recoveryRequired}
-			<p>
-				Your launcher settings need attention. Recovery preserves the original
-				file before creating an empty catalog.
-			</p>
-			<button
-				class="pregame-action ui-button"
-				disabled={busy}
-				onclick={() => (editor = { kind: "recover" })}
-				>Recover launcher settings</button
-			>
-		{:else if snapshot}
+		{#if !snapshot}{@render heading()}{/if}
+		{#if snapshot}
 			<div class="launcher-columns">
 				<section class="launcher-list" aria-label="Servers">
 					{@render heading()}
@@ -671,10 +655,7 @@
 					</p>
 				{:else if editor.kind === "delete-profile"}
 					<p>Delete {editor.value.name} and its saved credentials?</p>
-				{:else}<p>
-						Preserve the unreadable launcher file and create a new, empty
-						server/profile catalog?
-					</p>{/if}
+				{/if}
 				{#if failure}<p role="alert">{failure}</p>{/if}
 				<div class="ui-dialog-actions">
 					<button

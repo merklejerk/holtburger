@@ -148,7 +148,7 @@ export interface LauncherProfileView {
 	/** Main-owned decryption result; consumers never infer readiness from ciphertext. */
 	readonly credentialStatus: "absent" | "saved" | "unavailable";
 }
-/** Snapshot supports explicit recovery without silently replacing an unreadable file. */
+/** Launcher state after automatic settings repair, with persistence diagnostics. */
 export interface LauncherSnapshot {
 	/** Most recently launched servers first; metadata edits preserve order and dependent profiles. */
 	readonly servers: readonly LauncherServer[];
@@ -158,10 +158,8 @@ export interface LauncherSnapshot {
 	readonly lastSelection: z.infer<typeof launcherSelectionSchema> | null;
 	/** Last launched preset per server; absent/null means no preset. */
 	readonly lastProfileByServer: Readonly<Record<string, string | null>>;
-	/** Current persistence or session diagnostic suitable for the picker. */
+	/** Current persistence, repair, or session diagnostic suitable for the picker. */
 	readonly failure: string | null;
-	/** Prevents writes until the unreadable catalog is explicitly recovered. */
-	readonly recoveryRequired: boolean;
 	/** Combined application admission and catalog health, decided by native owners. */
 	readonly canPlay: boolean;
 }

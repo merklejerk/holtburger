@@ -40,7 +40,6 @@ interface LauncherBridge {
 	credentials(
 		selection: LauncherSelection,
 	): Promise<LauncherCredentials | null>;
-	recover(): Promise<void>;
 	play(value: LauncherPlay): Promise<void>;
 	/** Preserve the current page diagnostic when leaving a failed client attempt. */
 	back(diagnostic: string | null): Promise<void>;

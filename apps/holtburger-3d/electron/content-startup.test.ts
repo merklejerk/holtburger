@@ -195,6 +195,28 @@ describe("content startup", () => {
 		});
 		await startup.close();
 	});
+	it("allows replacing a malformed saved preference through folder setup", async () => {
+		const { startup, path, launch, pickFolder } = fixture(
+			[new FakeHost("/replacement", "ready")],
+			null,
+			{ noContentSearch: true, clearContent: false },
+		);
+		await writeFile(path, "invalid preference");
+		await startup.start();
+		expect(startup.snapshot.phase.kind).toBe("needs_assets");
+		expect(launch).not.toHaveBeenCalled();
+		pickFolder.mockResolvedValueOnce("/replacement");
+		await startup.choose();
+		expect(startup.snapshot.phase).toEqual({
+			kind: "ready",
+			location: "/replacement",
+		});
+		expect(await new ContentPreferenceStore(path).load()).toMatchObject({
+			kind: "selected",
+			location: "/replacement",
+		});
+		await startup.close();
+	});
 	it("clears a corrupt preference and goes straight to setup when both controls are supplied", async () => {
 		const { startup, path, launch } = fixture([], null, {
 			noContentSearch: true,

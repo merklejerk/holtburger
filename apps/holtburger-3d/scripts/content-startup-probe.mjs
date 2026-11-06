@@ -436,7 +436,7 @@ try {
 				if (values["expected-server"] !== undefined) {
 					const saved = await evaluate(
 						app.client,
-						`window.holtburgerLauncher.snapshot().then(value => !value.recoveryRequired && value.servers.some(server => server.name === ${JSON.stringify(values["expected-server"])}))`,
+						`window.holtburgerLauncher.snapshot().then(value => value.servers.some(server => server.name === ${JSON.stringify(values["expected-server"])}))`,
 					);
 					if (!saved)
 						throw new Error(

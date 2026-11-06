@@ -304,7 +304,6 @@
 				saveProfile: unavailableLauncherOperation,
 				deleteProfile: unavailableLauncherOperation,
 				credentials: unavailableLauncherOperation,
-				recover: unavailableLauncherOperation,
 				play: unavailableLauncherOperation,
 				back: async (diagnostic) => {
 					launcherReturns.push(diagnostic);

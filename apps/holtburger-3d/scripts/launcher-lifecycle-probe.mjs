@@ -29,6 +29,7 @@ const { values } = parseArgs({
 		"connection-failure-only": { type: "boolean" },
 		"server-content-only": { type: "boolean" },
 		"app-settings-only": { type: "boolean" },
+		"settings-reset-only": { type: "boolean" },
 		"dev-restart-only": { type: "boolean" },
 		"updates-only": { type: "boolean" },
 		"updates-direct": { type: "boolean" },
@@ -39,6 +40,8 @@ const config = join(directory, "config");
 const profileName = values.package ? "holtburger-3d" : "holtburger-3d-dev";
 const userData = join(config, profileName);
 await mkdir(userData, { recursive: true });
+if (values["settings-reset-only"])
+	await writeFile(join(userData, "launcher-settings.json"), "broken");
 const preference = join(userData, "content-selection.json");
 const appSettingsFile = join(userData, "app-settings.json");
 if (values["app-settings-only"] || values["dev-restart-only"]) {
@@ -275,6 +278,11 @@ async function snapshot(label) {
 	return { native, renderer };
 }
 async function runProbe() {
+	const click = (text) =>
+		evaluate(
+			page,
+			`(() => { const button = [...document.querySelectorAll('button')].find((value) => (value.getAttribute('aria-label') ?? value.textContent.trim()) === ${JSON.stringify(text)}); if (!button) throw new Error('Missing button: ' + ${JSON.stringify(text)}); button.closest('details:not([open])')?.querySelector('summary').click(); button.click(); })()`,
+		);
 	if (values["dev-restart-only"]) {
 		await runDevRestartProbe();
 		return;
@@ -367,6 +375,42 @@ async function runProbe() {
 	inspector = await createCdpClient(inspectorEndpoint);
 	const initialUpdateRole = values["updates-direct"] ? "client" : "launcher";
 	await attach(initialUpdateRole);
+	if (values["settings-reset-only"]) {
+		const state = await evaluate(page, "window.holtburgerLauncher.snapshot()");
+		requireCondition(
+			state.canPlay &&
+				state.servers.length === 0 &&
+				state.failure?.includes("Reset catalog"),
+			"Automatic reset did not admit an empty launcher",
+		);
+		const backups = (await readdir(userData)).filter((name) =>
+			name.startsWith("launcher-settings.json.backup-"),
+		);
+		requireCondition(
+			backups.length === 1,
+			"Automatic reset did not create one backup",
+		);
+		for (const backup of backups)
+			requireCondition(
+				(await readFile(join(userData, backup), "utf8")) === "broken",
+				"Backup did not preserve the original",
+			);
+		await click("Add server");
+		await waitFor(
+			() =>
+				evaluate(
+					page,
+					"Boolean(document.querySelector('dialog[open] .launcher-editor-form input'))",
+				),
+			"server editor after automatic reset",
+		);
+		await click("Cancel");
+		report.scenarios.push(
+			"Unreadable catalog is backed up and reset before the server editor becomes available",
+		);
+		await quitAndReport();
+		return;
+	}
 	if (values["updates-only"] || values["updates-direct"]) {
 		await evaluate(
 			inspector,
@@ -880,11 +924,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 		),
 		"Picker imported game composition",
 	);
-	const click = (text) =>
-		evaluate(
-			page,
-			`(() => { const button = [...document.querySelectorAll('button')].find((value) => (value.getAttribute('aria-label') ?? value.textContent.trim()) === ${JSON.stringify(text)}); if (!button) throw new Error('Missing button: ' + ${JSON.stringify(text)}); button.closest('details:not([open])')?.querySelector('summary').click(); button.click(); })()`,
-		);
+
 	const fill = (scope, label, value) =>
 		evaluate(
 			page,

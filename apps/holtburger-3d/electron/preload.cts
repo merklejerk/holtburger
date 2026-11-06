@@ -59,7 +59,6 @@ contextBridge.exposeInMainWorld("holtburgerLauncher", {
 	deleteProfile: (id: string) => invoke("launcher:delete-profile", id),
 	credentials: (selection: unknown) =>
 		invoke("launcher:credentials", selection),
-	recover: () => invoke("launcher:recover"),
 	play: (value: unknown) => invoke("launcher:play", value),
 	back: (diagnostic: string | null) => invoke("launcher:back", diagnostic),
 });

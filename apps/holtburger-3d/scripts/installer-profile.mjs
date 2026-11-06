@@ -44,7 +44,7 @@ if (operation === "seed") {
 } else {
 	const fixture = JSON.parse(await readFile(marker, "utf8"));
 	const snapshot = store.snapshot(null, true);
-	assert.equal(snapshot.recoveryRequired, false);
+	assert.equal(snapshot.failure, null);
 	assert.deepEqual(
 		snapshot.servers.find((item) => item.id === fixture.server.id),
 		fixture.server,

@@ -2,6 +2,11 @@ import { readFile, copyFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import {
+	repairLauncherSettings,
+	UnrepairableLauncherSettingsError,
+} from "./launcher-settings-repair.js";
 import { clientServerScope } from "./client-profile-key.js";
 import { replaceLocalFile } from "./replace-local-file.js";
 import {
@@ -39,7 +44,10 @@ export class LauncherStore {
 	readonly #initialWindow: ClientWindowSettings;
 	#document: LauncherSettings;
 	#failure: string | null = null;
-	#recoveryRequired = false;
+	/** Successful repairs are visible diagnostics, not failed writes for flush(). */
+	#repairNotice: string | null = null;
+	/** A failed load blocks writes so the untouched source cannot be overwritten. */
+	#loadFailure: string | null = null;
 	#tail: Promise<void> = Promise.resolve();
 
 	constructor(path: string, initialWindow: ClientWindowSettings) {
@@ -49,7 +57,7 @@ export class LauncherStore {
 	}
 	#empty(): LauncherSettings {
 		return {
-			version: 6,
+			version: launcherSettingsSchema.shape.version.value,
 			serverCredentials: {},
 			servers: [],
 			profiles: [],
@@ -60,16 +68,60 @@ export class LauncherStore {
 	}
 	async load(): Promise<void> {
 		try {
-			this.#document = launcherSettingsSchema.parse(
-				JSON.parse(await readFile(this.#path, "utf8")),
+			const serialized = await readFile(this.#path, "utf8").catch(
+				(error: unknown) => {
+					if (
+						error instanceof Error &&
+						"code" in error &&
+						error.code === "ENOENT"
+					)
+						return undefined;
+					throw error;
+				},
 			);
+			if (serialized === undefined) return;
+			const repaired = this.#decode(serialized);
+			let notice: string | null = null;
+			if (repaired.changed) {
+				const backup = `${this.#path}.backup-${randomUUID()}`;
+				await copyFile(this.#path, backup, constants.COPYFILE_EXCL);
+				await replaceLocalFile(
+					this.#path,
+					JSON.stringify(repaired.document, null, 2) + "\n",
+				);
+				notice = `Launcher settings repaired. Original saved at ${backup}.${repaired.notices.length ? ` ${repaired.notices.join("; ")}` : ""}`;
+			}
+			this.#document = repaired.document;
+			this.#failure = null;
+			this.#repairNotice = notice;
+			this.#loadFailure = null;
 		} catch (error) {
-			if (error instanceof Error && "code" in error && error.code === "ENOENT")
-				return;
-			this.#failure = `Launcher settings could not be loaded: ${formatError(error)}`;
-			this.#recoveryRequired = true;
+			this.#loadFailure = `Launcher settings could not be loaded: ${formatError(error)}`;
 		}
 	}
+	/** Decode failures reset automatically; filesystem failures stay outside this boundary. */
+	#decode(serialized: string) {
+		try {
+			const source: unknown = JSON.parse(serialized);
+			const repaired = repairLauncherSettings(source, this.#initialWindow);
+			return {
+				...repaired,
+				changed: !isDeepStrictEqual(source, repaired.document),
+			};
+		} catch (error) {
+			if (!(
+				error instanceof SyntaxError ||
+				error instanceof UnrepairableLauncherSettingsError
+			))
+				throw error;
+			return {
+				document: this.#empty(),
+				notices: [`Reset catalog: ${formatError(error)}`],
+				changed: true,
+			};
+		}
+	}
+
 	get window(): ClientWindowSettings {
 		return this.#document.window;
 	}
@@ -95,15 +147,14 @@ export class LauncherStore {
 			}),
 			lastSelection: this.#document.lastSelection,
 			lastProfileByServer: this.#document.lastProfileByServer,
-			failure: this.#failure ?? failure,
-			recoveryRequired: this.#recoveryRequired,
-			canPlay: canPlay && !this.#recoveryRequired,
+			failure:
+				this.#loadFailure ?? this.#failure ?? failure ?? this.#repairNotice,
+			canPlay: canPlay && this.#loadFailure === null,
 		};
 	}
 	#write(update: (value: LauncherSettings) => LauncherSettings): Promise<void> {
 		const operation = this.#tail.then(async () => {
-			if (this.#recoveryRequired)
-				throw new Error("Recover launcher settings before saving changes");
+			if (this.#loadFailure !== null) throw new Error(this.#loadFailure);
 			const next = launcherSettingsSchema.parse(update(this.#document));
 			try {
 				await replaceLocalFile(
@@ -120,27 +171,6 @@ export class LauncherStore {
 		// The caller observes operation failures; the settled tail only sequences subsequent work.
 		// Validation rejects do not poison flush. Actual replacement failures remain in #failure.
 		this.#tail = operation.catch(() => undefined);
-		return operation;
-	}
-	/** Explicit recovery keeps the unreadable original as a sibling before creating defaults. */
-	recover(): Promise<void> {
-		const operation = this.#tail.then(async () => {
-			if (!this.#recoveryRequired)
-				throw new Error("Launcher settings do not require recovery");
-			await copyFile(
-				this.#path,
-				`${this.#path}.invalid-${randomUUID()}`,
-				constants.COPYFILE_EXCL,
-			);
-			const next = this.#empty();
-			await replaceLocalFile(this.#path, JSON.stringify(next, null, 2) + "\n");
-			this.#document = next;
-			this.#failure = null;
-			this.#recoveryRequired = false;
-		});
-		this.#tail = operation.catch((error: unknown) => {
-			this.#failure = `Launcher settings recovery failed: ${formatError(error)}`;
-		});
 		return operation;
 	}
 	saveServer(input: unknown): Promise<void> {
@@ -324,12 +354,11 @@ export class LauncherStore {
 		};
 	}
 	updateWindow(window: ClientWindowSettings): Promise<void> {
-		if (this.#recoveryRequired) return Promise.resolve();
+		if (this.#loadFailure !== null) return Promise.resolve();
 		return this.#write((value) => ({ ...value, window }));
 	}
 	async flush(): Promise<void> {
 		await this.#tail;
-		if (this.#failure !== null && !this.#recoveryRequired)
-			throw new Error(this.#failure);
+		if (this.#failure !== null) throw new Error(this.#failure);
 	}
 }

@@ -1238,7 +1238,6 @@ void (async () => {
 	handle("launcher:credentials", "picker", (_event, selection: unknown) =>
 		launcher.credentials(selection),
 	);
-	handle("launcher:recover", "picker", () => launcher.recover());
 	handle("launcher:play", "picker", (_event, selection: unknown) =>
 		owner.play(async () => {
 			const startup = await launcher.select(selection);

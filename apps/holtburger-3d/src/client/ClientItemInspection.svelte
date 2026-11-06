@@ -690,7 +690,9 @@
 	{/if}
 	{#if item.useText !== null}<section>
 			<h3 class="ui-section-heading">Use</h3>
-			<p>{item.useText}</p>
+			<p>
+				<ClientWaypointText interactive text={item.useText} {onSetWaypoint} />
+			</p>
 		</section>{/if}
 	{#each spellGroups as group}
 		<section aria-busy={spellReferences === null && spellFailure === null}>

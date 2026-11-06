@@ -36,8 +36,6 @@ Items stay in your inventory while you prepare the batch. Use an item's remove b
 
 Holtburger appraises missing item details as needed. If an item cannot be appraised, read its explanation and use **Retry** when ready. The batch must have a valid review before **Salvage** is available.
 
-**Whole stacks are included.** Split a stack first if you only want to salvage part of it.
-
 <Media id="salvage" detail />
 
 ### Salvage the selected items

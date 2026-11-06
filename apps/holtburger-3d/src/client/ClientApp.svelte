@@ -23,6 +23,12 @@
 		UiThemeSelection,
 		UiThemeSettings,
 	} from "../app/ui-theme-selection";
+	import ClientMusicControls from "./ClientMusicControls.svelte";
+	import {
+		ClientTitleMusic,
+		titleMusicUrl,
+		bindTitleMusicForeground,
+	} from "./client-title-music";
 	import ClientPregameSettings from "./ClientPregameSettings.svelte";
 	import { choosePregameLocation } from "./client-pregame-tuning";
 	import PowerIcon from "../assets/icons/hud-power.svg?component";
@@ -586,6 +592,25 @@
 	const pregameSelection = $derived(
 		page.kind === "selection" ? page.selection : null,
 	);
+	let titleMusic = $state.raw<ClientTitleMusic | null>(null);
+	onMount(() => {
+		const music = new ClientTitleMusic(titleMusicUrl, (error) =>
+			console.warn("Optional title music unavailable:", error),
+		);
+		const unbindForeground = bindTitleMusicForeground(music, window);
+		titleMusic = music;
+		return () => {
+			unbindForeground();
+			music.destroy();
+			titleMusic = null;
+		};
+	});
+	$effect(() => {
+		titleMusic?.setActive(pregameSelection !== null);
+	});
+	$effect(() => {
+		titleMusic?.setSettings(userSettings.audio);
+	});
 	const pregameScene = $derived(
 		presentationRoot === null || canvasElement === null
 			? null
@@ -860,6 +885,7 @@
 	onMount(() => {
 		const prepareResources = async () => {
 			compositionClosing = true;
+			titleMusic?.destroy();
 			const themeRetirement = startupThemeSelection.retire();
 			characterSettingsOwner.retire();
 			// Withdrawal runs synchronously before flush takes its final producer snapshot.
@@ -1378,6 +1404,7 @@
 			page.kind === "loading" && page.content.kind !== "pending"
 				? page.content.details
 				: null;
+		titleMusic?.setActive(false);
 		await launcherTransport().back(details);
 	}
 	async function disconnect(): Promise<void> {
@@ -2882,6 +2909,12 @@
 						onEnter={enterWorld}
 						onDisconnect={disconnect}
 					>
+						{#snippet musicControls()}
+							<ClientMusicControls
+								audio={userSettings.audio}
+								onAudioChange={changeAudio}
+							/>
+						{/snippet}
 						{#snippet settings()}
 							<ClientPregameSettings
 								{theme}

@@ -43,6 +43,8 @@
 	interface Props {
 		/** Live settings content; omitted by roster-only diagnostic surfaces. */
 		readonly settings?: Snippet;
+		/** App-owned music controls shared with character creation. */
+		readonly musicControls?: Snippet;
 		/** Current roster and selection. */
 		readonly state: CharacterSelectionState;
 		/** Blocks selection and duplicate activation while entry is being requested. */
@@ -66,6 +68,7 @@
 	let {
 		state: selection,
 		settings,
+		musicControls,
 		entryPending,
 		management,
 		characterActions = null,
@@ -225,6 +228,7 @@
 {#if creating && creation !== null && scene !== null}
 	<ClientCharacterCreator
 		services={creation}
+		{musicControls}
 		{scene}
 		{management}
 		onBack={() => (creating = false)}
@@ -244,6 +248,7 @@
 			);
 		}}
 	>
+		{#snippet footerAside()}{@render musicControls?.()}{/snippet}
 		{#snippet footer()}
 			{#if settings !== undefined}
 				<button

@@ -678,6 +678,7 @@ describe("ClientSettingsStore", () => {
 		const audio = {
 			...CLIENT_AUDIO_DEFAULTS,
 			masterVolume: 0.35,
+			musicVolume: 0.45,
 			effectVolume: 0.6,
 			ambientVolume: 0.2,
 			muted: true,

@@ -19,7 +19,7 @@
 	import RandomizeIcon from "../assets/icons/hud-reset.svg?component";
 	import BackIcon from "../assets/icons/hud-back.svg?component";
 	import RotateIcon from "../assets/icons/layout-rotate.svg?component";
-	import { onMount } from "svelte";
+	import { onMount, type Snippet } from "svelte";
 	import UiOrdinalRange from "../app/UiOrdinalRange.svelte";
 	import BodyAppearanceColors from "./BodyAppearanceColors.svelte";
 	import UiTabs from "../app/UiTabs.svelte";
@@ -65,13 +65,16 @@
 	} from "./client-character-creation-build";
 
 	interface Props {
+		/** App-owned music controls, available throughout creation. */
+		readonly musicControls?: Snippet;
 		readonly services: CharacterCreationServices;
 		readonly scene: PregameCharacterPresentation;
 		readonly management: CharacterManagementState;
 		/** Return to the character roster without submitting the draft. */
 		readonly onBack: () => void;
 	}
-	const { services, scene, management, onBack }: Props = $props();
+	const { services, scene, management, onBack, musicControls }: Props =
+		$props();
 	type Editor = {
 		readonly catalog: CharacterCreationCatalog;
 		readonly draft: CharacterCreationDraft;
@@ -446,6 +449,7 @@
 	visible={true}
 >
 	<ClientPregameScreen branding="corner" showPortalLogo={true} backdrop={true}>
+		{#snippet footerAside()}{@render musicControls?.()}{/snippet}
 		{#snippet footer()}
 			<button
 				class="creation-back pregame-action pregame-quiet ui-button"

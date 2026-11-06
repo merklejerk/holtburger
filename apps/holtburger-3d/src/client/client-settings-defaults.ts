@@ -2,6 +2,7 @@ import type { InputPlatform } from "../lib/input/input-platform.js";
 import type { ClientUserSectionValues } from "./client-settings-sections.js";
 import {
 	CLIENT_DEFAULT_THEME_ID,
+	CLIENT_MUSIC_VOLUME_DEFAULT,
 	CLIENT_TEXT_SCALE,
 	CLIENT_UI_SCALE,
 	CLIENT_HUD_WINDOW_OPACITY,
@@ -36,6 +37,7 @@ import {
 /** First-run and reset mix; frontend preferences remain separate from engine tuning. */
 export const CLIENT_AUDIO_DEFAULTS = {
 	masterVolume: 1,
+	musicVolume: CLIENT_MUSIC_VOLUME_DEFAULT,
 	effectVolume: 1,
 	ambientVolume: 1,
 	muted: false,

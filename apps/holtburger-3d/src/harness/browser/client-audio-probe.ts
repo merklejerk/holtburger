@@ -1,3 +1,8 @@
+import {
+	ClientTitleMusic,
+	titleMusicUrl,
+} from "../../client/client-title-music";
+import { CLIENT_AUDIO_DEFAULTS } from "../../client/client-settings-defaults";
 import { decodeBehaviorCommand } from "../../lib/assets/decode-behavior-hook";
 import {
 	BehaviorEventRouter,
@@ -126,6 +131,7 @@ export async function probeClientAudio() {
 			throw new Error("Audio decoder lost the transferred source-byte count.");
 		return {
 			outputMix: await probeOutputMix(),
+			titleMusic: await probeTitleMusic(),
 			context: context.state,
 			loads,
 			decodedBytes: bytes.byteLength,
@@ -230,4 +236,72 @@ async function probeOutputMix() {
 		muted,
 		liveMuted,
 	};
+}
+
+/** Exercise the production media owner with the optional bundled track on the real browser decoder. */
+async function probeTitleMusic() {
+	if (titleMusicUrl === undefined) return { available: false };
+	const audio = new Audio();
+	const failures: unknown[] = [];
+	const music = new ClientTitleMusic(
+		titleMusicUrl,
+		(error) => failures.push(error),
+		() => audio,
+	);
+	try {
+		music.setSettings({
+			...CLIENT_AUDIO_DEFAULTS,
+			masterVolume: 0.4,
+			musicVolume: 0.3,
+		});
+		const playing = new Promise<void>((resolve, reject) => {
+			const timeout = setTimeout(
+				() => reject(new Error("Title music did not start")),
+				5000,
+			);
+			audio.addEventListener(
+				"playing",
+				() => {
+					clearTimeout(timeout);
+					resolve();
+				},
+				{ once: true },
+			);
+			audio.addEventListener(
+				"error",
+				() => {
+					clearTimeout(timeout);
+					reject(new Error("Title music decode failed"));
+				},
+				{ once: true },
+			);
+		});
+		music.setActive(true);
+		await playing;
+		await new Promise<void>((resolve) => setTimeout(resolve, 150));
+		const advanced = audio.currentTime > 0;
+		const volume = audio.volume;
+		music.setSettings({ ...CLIENT_AUDIO_DEFAULTS, muted: true });
+		const muted = audio.muted;
+		music.setActive(false);
+		const stopped = audio.paused && audio.currentTime === 0;
+		if (
+			!advanced ||
+			!stopped ||
+			!muted ||
+			Math.abs(volume - 0.12) > 0.00001 ||
+			failures.length
+		)
+			throw new Error("Title music lifecycle or mix failed");
+		return {
+			available: true,
+			advanced,
+			stopped,
+			muted,
+			volume,
+			loop: audio.loop,
+		};
+	} finally {
+		music.destroy();
+	}
 }

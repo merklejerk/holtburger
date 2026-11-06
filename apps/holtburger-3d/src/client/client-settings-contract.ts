@@ -14,6 +14,7 @@ import { ENTITY_SHADOW_MODES } from "../lib/game/renderer/entity-shadow-modes.js
 import { TEXTURE_FILTERING_POLICIES } from "../lib/game/renderer/texture-filtering-policy.js";
 import {
 	CLIENT_DEFAULT_THEME_ID,
+	CLIENT_MUSIC_VOLUME_DEFAULT,
 	CLIENT_FONT_FAMILY_OPTIONS,
 	CLIENT_VITAL_WARNING_PERCENT,
 	CLIENT_VITAL_WARNING_THRESHOLDS,
@@ -268,6 +269,11 @@ export const clientAudioSettingsSchema = z
 		masterVolume: finiteNumber.min(0).max(1),
 		/** Gameplay effects, including portal transition cues. */
 		effectVolume: finiteNumber.min(0).max(1),
+		/** Non-spatial title music; older profiles receive the declared initial level. */
+		musicVolume: finiteNumber
+			.min(0)
+			.max(1)
+			.default(CLIENT_MUSIC_VOLUME_DEFAULT),
 		/** Environmental ambience. */
 		ambientVolume: finiteNumber.min(0).max(1),
 		/** Silence output without discarding the saved mix. */

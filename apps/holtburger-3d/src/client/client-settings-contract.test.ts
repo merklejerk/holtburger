@@ -248,24 +248,26 @@ describe("current client settings values", () => {
 			createDefaultClientUserSettings(viewport, 8, "windows").audio,
 		).toEqual(CLIENT_AUDIO_DEFAULTS);
 	});
-	it.each(["masterVolume", "effectVolume", "ambientVolume"] as const)(
-		"validates %s independently",
-		(key) => {
-			for (const invalid of [NaN, Infinity, -0.01, 1.01]) {
-				expect(() =>
-					clientAudioSettingsSchema.parse({
-						...CLIENT_AUDIO_DEFAULTS,
-						[key]: invalid,
-					}),
-				).toThrow();
-			}
-			expect(
-				clientAudioSettingsSchema.parse({ ...CLIENT_AUDIO_DEFAULTS, [key]: 0 })[
-					key
-				],
-			).toBe(0);
-		},
-	);
+	it.each([
+		"masterVolume",
+		"effectVolume",
+		"ambientVolume",
+		"musicVolume",
+	] as const)("validates %s independently", (key) => {
+		for (const invalid of [NaN, Infinity, -0.01, 1.01]) {
+			expect(() =>
+				clientAudioSettingsSchema.parse({
+					...CLIENT_AUDIO_DEFAULTS,
+					[key]: invalid,
+				}),
+			).toThrow();
+		}
+		expect(
+			clientAudioSettingsSchema.parse({ ...CLIENT_AUDIO_DEFAULTS, [key]: 0 })[
+				key
+			],
+		).toBe(0);
+	});
 	it("validates complete runtime user and character settings", () => {
 		const user = createDefaultClientUserSettings(viewport, 8, "windows");
 		const character = createDefaultClientCharacterSettings();
@@ -484,4 +486,16 @@ describe("dungeon ambient settings", () => {
 			}).success,
 		).toBe(false);
 	});
+});
+
+it("fills music volume for older profiles and preserves saved choices", () => {
+	const { musicVolume, ...older } = CLIENT_AUDIO_DEFAULTS;
+	expect(clientAudioSettingsSchema.parse(older)).toEqual({
+		...older,
+		musicVolume,
+	});
+	expect(
+		clientAudioSettingsSchema.parse({ ...older, musicVolume: 0.23 })
+			.musicVolume,
+	).toBe(0.23);
 });

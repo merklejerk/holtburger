@@ -13,6 +13,7 @@
 		{ key: "masterVolume", label: "Master" },
 		{ key: "effectVolume", label: "Sound effects" },
 		{ key: "ambientVolume", label: "Ambience" },
+		{ key: "musicVolume", label: "Music" },
 	] as const;
 </script>
 

@@ -221,6 +221,7 @@
 	import { uiThemes } from "../../app/mount";
 	import { steelUrl, opaqueUrl } from "./ui-showcase-themes";
 	import type { FrameRates } from "../../app/frame-rate-sampler";
+	import ClientMusicControls from "../../client/ClientMusicControls.svelte";
 	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
 	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
 	import { ClientInventoryState } from "../../client/client-inventory-state";
@@ -3028,12 +3029,18 @@
 		const sliders = [
 			...panel.querySelectorAll<HTMLInputElement>('input[type="range"]'),
 		];
-		const keys = ["masterVolume", "effectVolume", "ambientVolume"] as const;
+		const keys = [
+			"masterVolume",
+			"effectVolume",
+			"ambientVolume",
+			"musicVolume",
+		] as const;
 		if (sliders.length !== keys.length)
 			throw new Error("Audio sliders missing");
 		const mix = {
 			...CLIENT_AUDIO_DEFAULTS,
 			masterVolume: 0.4,
+			musicVolume: 0.3,
 			effectVolume: 0.6,
 			ambientVolume: 0.2,
 		};
@@ -6741,7 +6748,15 @@
 							onDisconnect={() => {
 								previewCharacters = false;
 							}}
-						/>
+						>
+							{#snippet musicControls()}
+								<ClientMusicControls
+									audio={userSettings.audio}
+									onAudioChange={(audio) =>
+										(userSettings = { ...userSettings, audio })}
+								/>
+							{/snippet}
+						</ClientCharacterSelect>
 					</div>
 				</section>
 			</div>

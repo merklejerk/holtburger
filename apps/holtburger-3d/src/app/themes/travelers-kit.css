@@ -769,7 +769,7 @@
 
 			.ui-theme input.ui-range {
 				appearance: none;
-				height: 20px;
+				block-size: 20px;
 				margin-inline: 0;
 				background: transparent;
 				cursor: pointer;
@@ -779,13 +779,13 @@
 		   gestures and keyboard steps. Unconverted/specialized ranges stay native. */
 			.ui-theme input.ui-range::-webkit-slider-runnable-track {
 				box-sizing: border-box;
-				height: 6px;
+				block-size: 6px;
 				border: 1px solid var(--ui-color-border);
 				border-radius: 4px;
 				background:
 					linear-gradient(180deg, #e2b98455, transparent 50%, #38201566),
 					linear-gradient(
-						90deg,
+						var(--ui-range-fill-direction, 90deg),
 						#ad794d var(--ui-range-progress),
 						#20130d var(--ui-range-progress)
 					);
@@ -797,10 +797,10 @@
 			.ui-theme input.ui-range::-webkit-slider-thumb {
 				appearance: none;
 				box-sizing: border-box;
-				width: 16px;
-				height: 16px;
-				/* The 6px track has a 4px content box inside its border. */
-				margin-top: -6px;
+				inline-size: 16px;
+				block-size: 16px;
+				/* Logical sizing supports both orientations; the 6px track has a 4px content box. */
+				margin-block-start: -6px;
 				border: 1px solid #8e5c37;
 				border-radius: 50%;
 				background:

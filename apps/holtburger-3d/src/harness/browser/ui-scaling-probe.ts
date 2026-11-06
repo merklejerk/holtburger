@@ -13,6 +13,7 @@ import {
 	CLIENT_TEXT_SCALE,
 } from "../../client/client-settings-values";
 import { uiThemes } from "../../app/mount";
+import travelersUrl from "../../app/themes/travelers-kit.css?url&no-inline";
 import steelUrl from "./themes/steel.css?url&no-inline";
 
 /** Exercise live settings, CSS inheritance, top-layer dialogs and measured HUD geometry. */
@@ -82,6 +83,15 @@ export async function probeUiScaling(
 		slider().dispatchEvent(new Event("input", { bubbles: true }));
 		await settle();
 	};
+	const uiSlider = () =>
+		element<HTMLInputElement>('input[aria-label="UI scaling"]');
+	const editUi = async (value: number) => {
+		uiSlider().value = String(value);
+		uiSlider().dispatchEvent(new Event("input", { bubbles: true }));
+		fixtureScale.update(value);
+		await settle();
+		await settle(); // ResizeObserver publishes cold bar/tray geometry after the CSS update.
+	};
 	const uiFixture = mount(UiScaleFixture, { target: fixture, context });
 	const party = mount(ClientPartyHud, {
 		target: fixture,
@@ -118,7 +128,49 @@ export async function probeUiScaling(
 			spawn: async () => {},
 		},
 	});
+	/** Check real scroll offsets as well as integer metrics, which hide fractional overflow. */
+	function assertHudFits(scale: number) {
+		for (const selector of [".action-bar-scroll", ".spell-bar-scroll"]) {
+			const area = element(selector);
+			area.scrollLeft = 1;
+			area.scrollTop = 1;
+			require(area.scrollLeft === 0 &&
+				area.scrollTop === 0 &&
+				area.scrollWidth === area.clientWidth &&
+				area.scrollHeight ===
+					area.clientHeight, `Fitting ${selector} scrolled at ${scale}`);
+		}
+		const shell = element(
+			'[aria-label="Character HUD"]',
+		).getBoundingClientRect();
+		const content = element(".character-hud").getBoundingClientRect();
+		require(shell.height + 0.1 >= content.height &&
+			shell.height - content.height <=
+				scale +
+					0.1, `Character HUD did not contain its intrinsic rows at ${scale}: ${shell.height} vs ${content.height}`);
+	}
 	try {
+		await settle();
+		assertHudFits(uiScale(element(".action-bar-scroll")));
+		await uiThemes.replace(travelersUrl, null);
+		await settle();
+		assertHudFits(uiScale(element(".action-bar-scroll")));
+		// Theme borders change the published outer height without changing intrinsic row sizes.
+		const characterHud = element(".character-hud");
+		const previousBorder = characterHud.style.borderBlock;
+		try {
+			for (const width of [2, 4]) {
+				characterHud.style.borderBlock = `${width}px solid transparent`;
+				await settle();
+				await settle();
+				assertHudFits(uiScale(characterHud));
+			}
+		} finally {
+			characterHud.style.borderBlock = previousBorder;
+			await settle();
+		}
+		await uiThemes.replace(null, null);
+		await editUi(CLIENT_UI_SCALE.initial);
 		await edit(CLIENT_TEXT_SCALE.initial);
 		await settle();
 		const explorerCaption = element(".entity-note");
@@ -181,15 +233,6 @@ export async function probeUiScaling(
 			});
 		}
 		// Resolve dimensions through real shared cells, bars and trays; overall UI and additional text scaling compose.
-		const uiSlider = () =>
-			element<HTMLInputElement>('input[aria-label="UI scaling"]');
-		const editUi = async (value: number) => {
-			uiSlider().value = String(value);
-			uiSlider().dispatchEvent(new Event("input", { bubbles: true }));
-			fixtureScale.update(value);
-			await settle();
-			await settle(); // ResizeObserver publishes cold bar/tray geometry after the CSS update.
-		};
 		await edit(CLIENT_TEXT_SCALE.initial);
 		await editUi(CLIENT_UI_SCALE.initial);
 		const dimensions = [
@@ -214,6 +257,7 @@ export async function probeUiScaling(
 		const uiEvidence = [];
 		for (const scale of [
 			CLIENT_UI_SCALE.minimum,
+			0.9,
 			1.05,
 			1.1,
 			1.15,
@@ -222,6 +266,7 @@ export async function probeUiScaling(
 			CLIENT_UI_SCALE.maximum,
 		]) {
 			await editUi(scale);
+			assertHudFits(scale);
 			const canvasBounds = canvas.getBoundingClientRect();
 			require(Math.abs(canvasBounds.width - originalCanvasBounds.width) < 0.1 &&
 				Math.abs(canvasBounds.height - originalCanvasBounds.height) <
@@ -402,6 +447,52 @@ export async function probeUiScaling(
 				badge: renderedFontSize(badges[0]),
 			});
 		}
+		for (const theme of [null, travelersUrl]) {
+			await uiThemes.replace(theme, null);
+			await editUi(0.9);
+			element<HTMLButtonElement>(".client-ui-lock").click();
+			await settle();
+			for (let orientation = 0; orientation < 2; orientation++) {
+				for (let shape = 0; shape < 2; shape++) {
+					assertHudFits(0.9);
+					element<HTMLButtonElement>(
+						'[aria-label="Toggle action bar shape 1"]',
+					).click();
+					element<HTMLButtonElement>(
+						'[aria-label="Toggle spell bar shape"]',
+					).click();
+					await settle();
+				}
+				element<HTMLButtonElement>(
+					'[aria-label="Rotate action bar 1"]',
+				).click();
+				await settle();
+			}
+			element<HTMLButtonElement>(".client-ui-lock").click();
+			await settle();
+			// A genuinely smaller viewport must still expose the fixed-size cells by scrolling.
+			const controls = element(".gameplay-controls");
+			controls.style.width = "100px";
+			controls.style.height = "100px";
+			await settle();
+			await settle();
+			try {
+				for (const selector of [".action-bar-scroll", ".spell-bar-scroll"]) {
+					const area = element(selector);
+					area.scrollLeft = area.scrollWidth;
+					require(area.scrollLeft >
+						0, `Constrained ${selector} lost scrolling`);
+				}
+			} finally {
+				controls.style.removeProperty("width");
+				controls.style.removeProperty("height");
+				await settle();
+				await settle();
+			}
+			assertHudFits(0.9);
+		}
+		await uiThemes.replace(null, null);
+		await editUi(CLIENT_UI_SCALE.maximum);
 		fixture.style.setProperty("--ui-item-cell-min-size", "40px");
 		fixture.style.setProperty("--ui-item-count-font-size", "18px");
 		fixture.style.setProperty("--ui-inventory-currency-icon-size", "11px");
@@ -500,6 +591,12 @@ export async function probeUiScaling(
 			samples: evidence,
 			boundary,
 			uiSamples: uiEvidence,
+			hudFit: {
+				fractionalEntry: true,
+				shapes: true,
+				themes: true,
+				constrainedScrolling: true,
+			},
 			characterHeightRestored: true,
 			nestedRoots: true,
 			themeOverrides: true,

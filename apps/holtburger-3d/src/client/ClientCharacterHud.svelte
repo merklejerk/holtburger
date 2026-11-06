@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from "svelte";
+	import { uiLocalSize } from "../app/ui-scale";
 	import Sparkle from "../assets/icons/xp-sparkle.svg?component";
 	import { createXpFeedback, xpPresentation } from "./client-xp-feedback";
 	import { CLIENT_HUD_VITALS } from "./client-hud-vitals";
@@ -9,7 +10,6 @@
 	import type { ClientConnectionObservation } from "./client-lifecycle-session";
 	import type { ClientVital } from "./client-host-contract";
 	import { formatQuantity } from "../app/quantity-format";
-	import { observeUiTheme } from "../app/ui-theme";
 
 	interface Props {
 		/** Reader for the browser session-owned transport observation. */
@@ -38,27 +38,17 @@
 	let identityBlock = $state<HTMLElement | null>(null);
 	/** Exact progress text and target fill, sampled at the same bounded display cadence. */
 	let xpProgress = $state.raw(xpPresentation(null));
-	/** Measure intrinsic rows independently of the outer rectangle so theme changes can grow or shrink it. */
+	/** Intrinsic content owns its logical HUD height; the outer panel may clamp it independently. */
 	function measureContentHeight(node: HTMLElement) {
-		const rows = Array.from(node.children);
 		const update = () => {
-			const gap = Number.parseFloat(getComputedStyle(node).rowGap);
-			if (!Number.isFinite(gap))
-				throw new Error("Character HUD row gap must resolve to a CSS length");
-			onContentHeightChange(
-				rows.reduce(
-					(height, row) => height + row.getBoundingClientRect().height,
-					gap,
-				),
-			);
+			// Placement uses local units, with outward rounding to contain fractional text rows.
+			onContentHeightChange(Math.ceil(uiLocalSize(node).height));
 		};
-		const stopTheme = observeUiTheme(node, update);
 		const observer = new ResizeObserver(update);
-		for (const row of rows) observer.observe(row);
+		observer.observe(node, { box: "border-box" });
 		return {
 			destroy: () => {
 				observer.disconnect();
-				stopTheme();
 			},
 		};
 	}

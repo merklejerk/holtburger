@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { uiLocalSize } from "../app/ui-scale";
 	import { pulseItemCell } from "../app/item-cell-pulse";
 	import { loadoutLabel } from "./client-loadout";
 	import { presentClientBinding } from "./client-binding-catalog";
@@ -94,8 +93,11 @@
 		const menu = node.firstElementChild;
 		if (menu === null) throw new Error("Missing action bar menu metric");
 		const update = () => {
-			const { width: cell, height: gap } = uiLocalSize(node);
-			const menuSize = uiLocalSize(menu).width;
+			// Theme probes already resolve CSS lengths; avoid a zoomed bounds round trip.
+			const style = getComputedStyle(node);
+			const cell = Number.parseFloat(style.width);
+			const gap = Number.parseFloat(style.height);
+			const menuSize = Number.parseFloat(getComputedStyle(menu).width);
 			if (!Number.isFinite(cell) || cell <= 0)
 				throw new Error("Invalid action bar cell size");
 			if (!Number.isFinite(gap) || gap < 0)
@@ -120,8 +122,9 @@
 		height: metrics.cell + stripInset.top,
 	});
 	const extent = $derived({
-		width: grid.columns * metrics.cell + stripInset.left,
-		height: grid.rows * metrics.cell + stripInset.top,
+		// Reserve outward for fractional theme lengths and browser layout rounding.
+		width: Math.ceil(grid.columns * metrics.cell + stripInset.left),
+		height: Math.ceil(grid.rows * metrics.cell + stripInset.top),
 	});
 	const placement = $derived({
 		...bar.anchor,
@@ -130,6 +133,9 @@
 	});
 	const resolved = $derived(
 		resolveClientHudPlacement(placement, viewport, minimum),
+	);
+	const constrained = $derived(
+		resolved.width < extent.width || resolved.height < extent.height,
 	);
 	function activate(slot: ActionSlotIndex, alternate: boolean) {
 		keyboard.returnToGame();
@@ -268,7 +274,7 @@
 			}}
 			><span class="action-menu-hint">{focusBinding.hint ?? "—"}</span></button
 		>
-		<div class="action-bar-scroll">
+		<div class="action-bar-scroll" class:constrained>
 			<div
 				class="action-grid"
 				style:grid-template-columns={`repeat(${grid.columns}, ${metrics.cell}px)`}
@@ -406,6 +412,9 @@
 		.action-bar-scroll {
 			width: 100%;
 			height: 100%;
+		}
+		.action-bar-scroll.constrained {
+			/* Only viewport fitting admits scrolling; paint and subpixel rounding do not. */
 			overflow: auto;
 			scrollbar-width: thin;
 		}

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { uiLocalSize } from "../app/ui-scale";
 	import { presentClientBinding } from "./client-binding-catalog";
 	import { tick, untrack } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -160,11 +159,15 @@
 	});
 	const naturalPlacement = $derived({
 		...placement,
-		preferredWidth: (grid.columns + (caster === null ? 0 : 1)) * metrics.cell,
-		preferredHeight:
+		// Reserve outward for fractional theme lengths and browser layout rounding.
+		preferredWidth: Math.ceil(
+			(grid.columns + (caster === null ? 0 : 1)) * metrics.cell,
+		),
+		preferredHeight: Math.ceil(
 			grid.rows * metrics.cell +
-			metrics.tabs +
-			(overflowColumns > 0 ? metrics.scrollbar : 0),
+				metrics.tabs +
+				(overflowColumns > 0 ? metrics.scrollbar : 0),
+		),
 	});
 	const minimum = $derived({
 		width: metrics.cell,
@@ -173,6 +176,10 @@
 	const resolved = $derived(
 		resolveClientHudPlacement(naturalPlacement, viewport, minimum),
 	);
+	const constrained = $derived(
+		resolved.width < naturalPlacement.preferredWidth ||
+			resolved.height < naturalPlacement.preferredHeight,
+	);
 	function measureMetrics(node: HTMLElement) {
 		const scrollbarMetric = node.querySelector<HTMLElement>(
 			".spell-scrollbar-metrics",
@@ -180,8 +187,13 @@
 		if (scrollbarMetric === null)
 			throw new Error("Missing spell scrollbar metric");
 		const update = () => {
-			const { width, height } = uiLocalSize(node);
-			const scrollbar = uiLocalSize(scrollbarMetric).height;
+			// Theme probes already resolve CSS lengths; avoid a zoomed bounds round trip.
+			const style = getComputedStyle(node);
+			const width = Number.parseFloat(style.width);
+			const height = Number.parseFloat(style.height);
+			const scrollbar = Number.parseFloat(
+				getComputedStyle(scrollbarMetric).height,
+			);
 			if (
 				!Number.isFinite(width) ||
 				width <= 0 ||
@@ -309,7 +321,7 @@
 		<span class="spell-bar-metrics" aria-hidden="true" use:measureMetrics>
 			<span class="spell-scrollbar-metrics"></span>
 		</span>
-		<div class="spell-bar-scroll">
+		<div class="spell-bar-scroll" class:constrained>
 			{#if caster !== null}
 				{@const row = rows.get(caster.spell)}
 				<div class="caster-spell" data-caster-spell={caster.spell}>
@@ -460,6 +472,9 @@
 			display: flex;
 			width: 100%;
 			height: 100%;
+		}
+		.spell-bar-scroll.constrained {
+			/* Cell overflow has its own viewport; this scrollport is only for a clamped HUD. */
 			overflow: auto;
 			scrollbar-width: thin;
 		}

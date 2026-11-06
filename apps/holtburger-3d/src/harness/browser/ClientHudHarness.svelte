@@ -5700,6 +5700,16 @@
 			},
 			probeUiScaling: async () => {
 				const previous = spellCombatMode;
+				const previousScale = userSettings.ui.uiScale;
+				// Re-enter with a fractional preference so fresh bars cannot rely on neutral-scale measurements.
+				userSettings = {
+					...userSettings,
+					ui: { ...userSettings.ui, uiScale: 0.9 },
+				};
+				const savedCharacterSettings = characterSettings;
+				characterSettings = null;
+				await tick();
+				characterSettings = savedCharacterSettings;
 				spellCombatMode = "magic";
 				await tick();
 				try {
@@ -5709,6 +5719,10 @@
 					);
 				} finally {
 					spellCombatMode = previous;
+					userSettings = {
+						...userSettings,
+						ui: { ...userSettings.ui, uiScale: previousScale },
+					};
 				}
 			},
 			probeBindings,

@@ -161,6 +161,9 @@ If a new behavior cannot be described cleanly as input handling, an `AppAction`,
 Equipment requests are delegated to core’s equipment planner and executor. The TUI does not stage combat-mode changes or emit conflict-clearing unequips; core owns capacity preflight, sequencing, and server-confirmed completion.
 
 Salvage candidate readiness and normalized predictor inputs are read from shared entity facts.
-The CLI retains queue/confirmation presentation policy, uses shared exact-Ust discovery and
-skill-profile assembly, and displays explicit Examine guidance when raw appraisal details are
-missing. It does not independently infer eligibility or filter missing sources out of previews.
+The CLI owns the draft, automatic assessment of missing details, and confirmation presentation.
+Core produces the preview and its semantic review, then revalidates that review at guarded
+submission. Failed assessments and rejected submissions preserve the draft; changed reviews
+require another confirmation. The draft closes after transport dispatch, while inventory and
+server result events remain authoritative for actual processing. The CLI does not independently
+infer eligibility, assemble skill profiles, or filter missing sources out of previews.

@@ -28,6 +28,7 @@ mod logopolis;
 mod navigation;
 mod party;
 mod player;
+mod salvage;
 mod test_support;
 mod trade_vendor;
 mod ui;

@@ -11,6 +11,7 @@ pub(crate) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     result.merge(progression::reduce_view_event(state, event));
     result.merge(object_interaction::reduce_view_event(state, event));
     result.merge(entity::reduce_view_event(state, event));
+    result.merge(inventory::reduce_view_event(state, event));
     result.merge(navigation::reduce_view_event(state, event));
     result.merge(party::reduce_view_event(state, event));
     result.merge(trade_vendor::reduce_view_event(state, event));

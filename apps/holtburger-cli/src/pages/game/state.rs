@@ -28,7 +28,7 @@ use crate::types::{
     FocusedPane, InspectTarget, Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[path = "domains/mod.rs"]
 pub(super) mod domains;
@@ -90,10 +90,42 @@ impl InventoryNotificationState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Frontend draft and the latest correlated core evaluation.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SalvagingState {
     pub ust_guid: Guid,
     pub queued_items: Vec<Guid>,
+    /// Latest request identity; survives queue edits through a page-wide counter.
+    pub sequence: u32,
+    /// Only reviewed evaluations can be submitted.
+    pub phase: SalvagingPhase,
+    /// Per-item assessment progress, retained until the item leaves this draft.
+    pub assessments: HashMap<Guid, SalvageAssessment>,
+}
+
+/// Loading, review, and dispatch are mutually exclusive frontend states.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SalvagingPhase {
+    /// Waiting for the current draft's core preview.
+    Loading,
+    /// Latest accepted evaluation, including missing details or rejection.
+    Reviewed(holtburger_world::crafting::salvage::SalvageEvaluation),
+    /// Assessment finished without sufficient salvage evidence; manual assessment or requeuing can retry.
+    AssessmentFailed { reason: String },
+    /// Guarded submission is awaiting its dispatch receipt.
+    Submitting,
+}
+
+/// Assessment responses and salvage readiness have separate lifetimes: a successful
+/// appraisal can still omit evidence required by the salvage evaluator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SalvageAssessment {
+    /// An assessment was requested and has not returned.
+    Waiting,
+    /// Appraisal returned successfully; core must evaluate the merged evidence.
+    Received,
+    /// Appraisal returned a concrete failure, shown if core still needs details.
+    Failed { reason: String },
 }
 
 impl GameState {
@@ -291,6 +323,8 @@ pub struct ViewState {
 
 #[derive(Clone, Default)]
 struct GamePageRuntimeState {
+    /// Monotonic correlation across retired salvage drafts.
+    salvage_sequence: u32,
     /// At most one appraisal request or scheduled refresh for the visible Assess pane.
     inspection_refresh: Option<domains::object_interaction::InspectionRefresh>,
     last_trade_initiation: Option<(Instant, Guid)>,

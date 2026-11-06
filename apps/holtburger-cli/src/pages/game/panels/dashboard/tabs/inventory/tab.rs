@@ -10,6 +10,7 @@ use ratatui::layout::Rect;
 
 use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
+use crate::pages::game::state::SalvagingPhase;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageTags, DashboardTab, FilterInputSession,
@@ -19,6 +20,7 @@ use crate::types::{
 use crate::utils::{
     format_item_name, fuzzy_subsequence_match, normalize_filter_tokens, retain_matching_hierarchy,
 };
+use holtburger_world::crafting::salvage::SalvageEvaluation;
 
 #[derive(Debug, Clone)]
 struct SplitSession {
@@ -316,15 +318,20 @@ impl TabController for InventoryTab {
                         };
                         let is_queued = session.queued_items.contains(&cur_entity.guid);
 
+                        if matches!(session.phase, SalvagingPhase::Submitting) {
+                            return verbs;
+                        }
                         if is_queued && !session.queued_items.is_empty() {
-                            verbs.push(Verb::new(
-                                AppAction::SalvageItems {
-                                    ust_guid: session.ust_guid,
-                                    item_guids: session.queued_items.clone(),
-                                },
-                                '\r',
-                                "Confirm salvage",
-                            ));
+                            if matches!(
+                                session.phase,
+                                SalvagingPhase::Reviewed(SalvageEvaluation::Ready { .. })
+                            ) {
+                                verbs.push(Verb::new(
+                                    AppAction::ConfirmSalvage,
+                                    '\r',
+                                    "Confirm salvage",
+                                ));
+                            }
 
                             verbs.push(Verb::new(
                                 AppAction::UnqueueSalvageItem {

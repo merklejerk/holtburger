@@ -20,6 +20,9 @@ fn set_active_interaction(
 ) {
     let previous_interaction = state.view.active_interaction;
     state.view.active_interaction = next_interaction;
+    if next_interaction != Some(Interaction::Salvaging) {
+        state.view.salvaging = None;
+    }
 
     sync_target_health_query(previous_interaction, next_interaction, result);
 

@@ -1,11 +1,14 @@
 use crate::pages::game::combat::AttackActivity;
+use crate::pages::game::state::SalvagingPhase;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{FocusedPane, Interaction};
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
-use holtburger_world::crafting::salvage::{SalvagePreviewBag, get_material_name};
+use holtburger_world::crafting::salvage::{
+    SalvageEvaluation, SalvagePreviewBag, get_material_name,
+};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -89,32 +92,32 @@ pub fn render_dynamic_pane(f: &mut Frame, data: &GameData, view: &ViewState, are
     // --- 1. Interaction Info / World Name ---
     if let Some(interaction) = view.active_interaction {
         if interaction == Interaction::Salvaging {
-            let preview = view
-                .salvaging
-                .as_ref()
-                .map(|session| data.salvage_preview(&session.queued_items))
-                .unwrap_or_else(|| data.salvage_preview(&[]));
-
-            let preview = match preview {
-                Ok(preview) => preview,
-                Err(reason) => {
-                    f.render_widget(Paragraph::new(format!("  {reason}")), chunks[0]);
-                    return;
+            let Some(session) = view.salvaging.as_ref() else {
+                return;
+            };
+            let line = match &session.phase {
+                SalvagingPhase::Reviewed(SalvageEvaluation::Ready { bags, review }) => {
+                    let mut spans = vec![
+                        Span::raw("  "),
+                        Span::styled(
+                            format!("{} items", review.sources.len()),
+                            Style::default().add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" for "),
+                    ];
+                    spans.extend(format_salvage_results(bags).spans);
+                    Line::from(spans)
+                }
+                SalvagingPhase::Loading => Line::from("  Updating salvage preview…"),
+                SalvagingPhase::Submitting => Line::from("  Submitting salvage…"),
+                SalvagingPhase::Reviewed(SalvageEvaluation::PendingDetails { .. }) => {
+                    Line::from("  Assessing queued items…")
+                }
+                SalvagingPhase::AssessmentFailed { reason }
+                | SalvagingPhase::Reviewed(SalvageEvaluation::Rejected { reason }) => {
+                    Line::from(format!("  {reason}"))
                 }
             };
-
-            let mut line_spans = vec![
-                Span::raw("  "),
-                Span::styled(
-                    format!("{} items", preview.item_count),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" for "),
-            ];
-            line_spans.extend(format_salvage_results(&preview.bags).spans);
-
-            let line = Line::from(line_spans);
-
             f.render_widget(Paragraph::new(line), chunks[0]);
             return;
         }

@@ -51,12 +51,6 @@ mod item_type_bits {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct SalvagePreview {
-    pub item_count: usize,
-    pub bags: Vec<SalvagePreviewBag>,
-}
-
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SalvagePreviewBag {
@@ -166,10 +160,10 @@ pub fn salvage_tinkering_skill<'a>(skills: impl IntoIterator<Item = &'a Skill>) 
         .map_or(0, |(skill, _)| skill.current)
 }
 
-pub fn predict_salvage_preview(
+fn predict_salvage_bags(
     items: &[SalvageItemInput],
     skills: SalvageSkillProfile,
-) -> SalvagePreview {
+) -> Vec<SalvagePreviewBag> {
     let mut bags = Vec::new();
 
     for item in items {
@@ -183,10 +177,7 @@ pub fn predict_salvage_preview(
         }
     }
 
-    SalvagePreview {
-        item_count: items.len(),
-        bags: bags.into_iter().map(|bag| bag.to_preview()).collect(),
-    }
+    bags.into_iter().map(|bag| bag.to_preview()).collect()
 }
 
 pub fn get_material_name(material_type: MaterialType) -> String {
@@ -539,7 +530,7 @@ impl crate::WorldState {
                 sources,
                 skills,
             },
-            bags: predict_salvage_preview(&inputs, skills).bags,
+            bags: predict_salvage_bags(&inputs, skills),
         }
     }
 }
@@ -857,15 +848,14 @@ mod tests {
             num_items_in_material: 1,
         }];
 
-        let preview = predict_salvage_preview(&items, skill_profile(387, 50));
+        let bags = predict_salvage_bags(&items, skill_profile(387, 50));
 
-        assert_eq!(preview.item_count, 1);
-        assert_eq!(preview.bags.len(), 2);
-        assert_eq!(preview.bags[0].material_type, MaterialType::Steel);
-        assert_eq!(preview.bags[0].units, 100);
-        assert!((preview.bags[0].workmanship - 10.0).abs() < f64::EPSILON);
-        assert_eq!(preview.bags[1].units, 20);
-        assert!((preview.bags[1].workmanship - 10.0).abs() < f64::EPSILON);
+        assert_eq!(bags.len(), 2);
+        assert_eq!(bags[0].material_type, MaterialType::Steel);
+        assert_eq!(bags[0].units, 100);
+        assert!((bags[0].workmanship - 10.0).abs() < f64::EPSILON);
+        assert_eq!(bags[1].units, 20);
+        assert!((bags[1].workmanship - 10.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -889,13 +879,12 @@ mod tests {
             },
         ];
 
-        let preview = predict_salvage_preview(&items, skill_profile(387, 0));
+        let bags = predict_salvage_bags(&items, skill_profile(387, 0));
 
-        assert_eq!(preview.item_count, 2);
-        assert_eq!(preview.bags.len(), 2);
-        assert_eq!(preview.bags[0].units, 100);
-        assert!((preview.bags[0].workmanship - (50.0 / 7.0)).abs() < 0.001);
-        assert_eq!(preview.bags[1].units, 40);
-        assert!((preview.bags[1].workmanship - 5.0).abs() < 0.001);
+        assert_eq!(bags.len(), 2);
+        assert_eq!(bags[0].units, 100);
+        assert!((bags[0].workmanship - (50.0 / 7.0)).abs() < 0.001);
+        assert_eq!(bags[1].units, 40);
+        assert!((bags[1].workmanship - 5.0).abs() < 0.001);
     }
 }

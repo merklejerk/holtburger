@@ -177,7 +177,7 @@ impl ClientRuntime {
         .await
     }
 
-    /// Existing TUI/scripting callers share validation while retaining their own approval policy.
+    /// Direct callers share validation while retaining their own approval policy.
     pub(super) async fn salvage_items_with(&mut self, tool: Guid, items: Vec<Guid>) -> Result<()> {
         let reason = match self.salvage_admission(self.world.player.guid) {
             Err(reason) => reason.into(),

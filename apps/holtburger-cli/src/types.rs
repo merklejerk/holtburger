@@ -669,6 +669,8 @@ pub enum AppAction {
     UnqueueSalvageItem {
         guid: Guid,
     },
+    /// Submit the current reviewed salvage draft.
+    ConfirmSalvage,
     SalvageItems {
         ust_guid: Guid,
         item_guids: Vec<Guid>,

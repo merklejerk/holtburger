@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { asset, resolve } from '$app/paths';
 	import MediaCarousel from '#lib/components/MediaCarousel.svelte';
+	import { mediaUrl } from '#lib/media/url.ts';
 	import { illustrations } from '#lib/illustrations.ts';
 	import { downloads } from '#lib/downloads.svelte.ts';
 	const guide = (slug: string) => resolve('/[...slug]', { slug });
@@ -36,6 +37,7 @@
 			<img
 				class="cover-vignette"
 				{...illustrations.cottages}
+				src={mediaUrl(illustrations.cottages.src)}
 				alt=""
 				aria-hidden="true"
 			/>
@@ -75,6 +77,7 @@
 		<img
 			class="editorial-vignette"
 			{...illustrations.countryside}
+			src={mediaUrl(illustrations.countryside.src)}
 			alt=""
 			aria-hidden="true"
 			loading="lazy"

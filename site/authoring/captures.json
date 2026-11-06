@@ -81,7 +81,7 @@
 		"content-picker": {
 			"owner": "agent",
 			"session": "setup",
-			"setup": "A launcher profile using an actual retail DAT folder.",
+			"setup": "A launcher server using an actual retail DAT folder.",
 			"framing": "Crop the content-folder field and Browse/Use application default controls. Native OS file-picker chrome is outside this capture.",
 			"expected": "The reader can locate the application\u2019s folder selection control and see a selected DAT folder.",
 			"priority": "later"
@@ -321,9 +321,9 @@
 		"profile-content": {
 			"owner": "agent",
 			"session": "setup",
-			"setup": "A sample launcher profile with its Advanced controls expanded.",
-			"framing": "Crop the content-folder choice and save-profile action; use a neutral sample path.",
-			"expected": "Show the profile\u2019s content-folder control and the action that saves the change.",
+			"setup": "The server editor with Advanced expanded.",
+			"framing": "Crop the server editor with Content path override, its browse button and Save visible.",
+			"expected": "Show the server content-folder override and the action that saves the change.",
 			"priority": "later"
 		},
 		"crafting-confirmation": {

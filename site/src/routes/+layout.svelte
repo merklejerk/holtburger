@@ -3,6 +3,7 @@
 	import { asset, resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import Search from '#lib/components/Search.svelte';
+	import { mediaUrl } from '#lib/media/url.ts';
 	import { illustrations } from '#lib/illustrations.ts';
 	import type { Snippet } from 'svelte';
 	import { onMount } from 'svelte';
@@ -38,7 +39,7 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <div
 	class="publication"
-	style:--paint-wash={`url('${illustrations.ochre.src}')`}
+	style:--paint-wash={`url('${mediaUrl(illustrations.ochre.src)}')`}
 >
 	<header class="site-header">
 		<div class="header-inner">
@@ -49,6 +50,7 @@
 				<img
 					class="masthead-landscape"
 					{...illustrations.engraving}
+					src={mediaUrl(illustrations.engraving.src)}
 					alt=""
 					aria-hidden="true"
 				/>

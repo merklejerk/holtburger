@@ -1,6 +1,6 @@
 ---
 title: 'Game data'
-description: 'Use your AC DAT files and keep server-specific folders with each profile.'
+description: 'Use your AC DAT files and keep a separate folder for each server.'
 section: 'Startup'
 ---
 
@@ -24,11 +24,11 @@ Keep the folder somewhere permanent, outside the Holtburger application director
 
 ## Keep server-specific DATs separate
 
-Each launcher profile can remember its own DAT folder. Keep a server’s custom files in a separate folder, and switching profiles brings the right files with you.
+Each server can remember its own DAT folder, shared by all account profiles on that server. Keep a server’s custom files in a separate folder, and switching servers brings the right files with you.
 
-Select the profile, open **Advanced → Browse content folder**, then choose **Overwrite profile** to save the change. Use **Save to new profile** to keep another setup alongside it.
+Edit the server and expand **Advanced**. Under **Content path override**, use the **…** button to choose its DAT folder, then press **Save**.
 
-To return a profile to the default folder, choose **Use application default** and save the profile.
+To return a server to the application default folder, clear **Content path override** with the **×** button, then press **Save**. An empty field shows **Use application default**.
 
 For Linux Flatpak folder-access problems, see the [Linux installation guide](/holtburger/start/3d/linux/#troubleshooting).
 

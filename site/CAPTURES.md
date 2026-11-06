@@ -521,7 +521,7 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 
 **Later · agent · available · still** — ID: `content-picker`
 
-- Setup: A launcher profile using an actual retail DAT folder.
+- Setup: A launcher server using an actual retail DAT folder.
 - Frame: Crop the content-folder field and Browse/Use application default controls. Native OS file-picker chrome is outside this capture.
 - Expected result: The reader can locate the application’s folder selection control and see a selected DAT folder.
 - Used in: [startup/game-data/#need-the-dats](https://merklejerk.github.io/holtburger/startup/game-data/#need-the-dats)
@@ -571,13 +571,13 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Expected result: The troubleshooting action is easy to locate.
 - Used in: [3d/help/#report-a-rendering-problem](https://merklejerk.github.io/holtburger/3d/help/#report-a-rendering-problem)
 
-### Save a DAT folder with a profile
+### Set a server’s DAT folder
 
 **Later · agent · available · still** — ID: `profile-content`
 
-- Setup: A sample launcher profile with its Advanced controls expanded.
-- Frame: Crop the content-folder choice and save-profile action; use a neutral sample path.
-- Expected result: Show the profile’s content-folder control and the action that saves the change.
+- Setup: The server editor with Advanced expanded.
+- Frame: Crop the server editor with Content path override, its browse button and Save visible.
+- Expected result: Show the server content-folder override and the action that saves the change.
 - Used in: [startup/game-data/#keep-server-specific-dats-separate](https://merklejerk.github.io/holtburger/startup/game-data/#keep-server-specific-dats-separate)
 
 ### Appearance

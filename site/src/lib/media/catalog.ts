@@ -207,14 +207,14 @@ export const media = {
 	},
 	'profile-content': {
 		kind: 'image',
-		title: 'Save a DAT folder with a profile',
+		title: 'Set a server’s DAT folder',
 		source: {
 			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/profile-content-v1.webp'
+			url: 'https://merklejerk.github.io/holtburger-media/3d/server-content-v1.webp'
 		},
-		alt: 'Profile-specific game data folder and profile save controls.',
-		width: 378,
-		height: 273
+		alt: 'Server editor with Advanced expanded, Content path override set to Use application default, a browse button and Save.',
+		width: 347,
+		height: 397
 	},
 	'crafting-confirmation': {
 		kind: 'image',

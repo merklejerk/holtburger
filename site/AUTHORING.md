@@ -169,7 +169,8 @@ and backdrop clicks dismiss it, trap focus and lock background scrolling. Reuse
 the same navigation content as the desktop sidebar. Server-rendered ordinary
 navigation remains available when JavaScript is disabled.
 
-New media must remain outside the main repository. Existing README screenshots
+New media must remain outside the tracked application source. Preview unpublished
+files from the ignored local media library described in [MEDIA.md](MEDIA.md). Existing README screenshots
 and branding are reused during asset preparation. Each proposed screenshot or
 clip needs a capture brief: purpose, setup, framing, actions, expected result,
 owner and destination. User captures come at the end. Guides must remain useful

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { mediaUrl } from '#lib/media/url.ts';
 	import { asset } from '$app/paths';
 	import { getMedia, type MediaId } from '#lib/media/catalog.ts';
 	let {
@@ -18,7 +19,7 @@
 		{@const src =
 			entry.source.kind === 'local'
 				? asset(entry.source.path)
-				: entry.source.url}
+				: mediaUrl(entry.source.url)}
 		<a
 			class="media-mount"
 			href={src}
@@ -41,22 +42,22 @@
 				playsinline
 				loop={entry.captions === null}
 				preload="none"
-				poster={entry.poster}
+				poster={mediaUrl(entry.poster)}
 				width={entry.width}
 				height={entry.height}
 				style:aspect-ratio={`${entry.width} / ${entry.height}`}
 				crossorigin="anonymous"
 				aria-label={entry.title}
 			>
-				<source src={entry.src} type="video/mp4" />
+				<source src={mediaUrl(entry.src)} type="video/mp4" />
 				{#if entry.captions !== null}<track
 						kind="captions"
-						src={entry.captions.src}
+						src={mediaUrl(entry.captions.src)}
 						srclang={entry.captions.language}
 						label={entry.captions.label}
 						default
 					/>{/if}
-				<a href={entry.src}>Download clip</a>
+				<a href={mediaUrl(entry.src)}>Download clip</a>
 			</video>
 		</div>
 	{:else if entry.kind === 'youtube'}

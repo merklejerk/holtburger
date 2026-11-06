@@ -1,7 +1,9 @@
+import { mediaLibraryPath } from './media-library.mjs';
 import { execFile } from 'node:child_process';
 import { promisify, parseArgs } from 'node:util';
 import {
 	cp,
+	stat,
 	lstat,
 	mkdir,
 	mkdtemp,
@@ -32,11 +34,13 @@ const { values, positionals } = parseArgs({
 	allowPositionals: true,
 	options: { publish: { type: 'boolean', default: false } }
 });
-if (positionals.length !== 1)
+if (positionals.length > 1)
 	throw new Error(
-		'Usage: npm run media:publish -- CURRENT_LIBRARY [--publish]'
+		'Usage: npm run media:publish -- [CURRENT_LIBRARY] [--publish]'
 	);
-const source = positionals[0];
+const source = mediaLibraryPath(positionals[0]);
+if (!(await stat(source)).isDirectory())
+	throw new Error(`Site media library is not a directory: ${source}`);
 const refs = await git(['ls-remote', '--heads', '--tags', remote], root);
 // Other branches or tags would preserve history that snapshot replacement should retire.
 if (refs && !/^[a-f0-9]{40}\trefs\/heads\/main$/.test(refs))

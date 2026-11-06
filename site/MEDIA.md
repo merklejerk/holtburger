@@ -1,8 +1,28 @@
 # Website media
 
 Existing README screenshots stay in `assets/screenshots/`. New images and short
-clips use `merklejerk/holtburger-media`; longer footage uses YouTube. Developers
-and site CI never clone the media repository. The site reads published URLs.
+clips use `merklejerk/holtburger-media`; longer footage uses YouTube. Ordinary
+development and site CI do not require a media checkout. Production reads
+published URLs.
+
+## Local development
+
+Keep a complete working media library in `local/site-media/` at the repository
+root. It is ignored by Git. Set `HOLTBURGER_SITE_MEDIA` to use another directory;
+relative configuration paths and publisher arguments resolve from the repository
+root. Use an exported media snapshot without `.git` or other hidden files. The
+publisher generates `.nojekyll` itself; omit it from the working library.
+
+`npm run dev` serves an available library at `/holtburger/media/` and resolves
+this media repository's catalog URLs to that route, including videos, posters,
+captions, and decorative artwork. Keep public URLs in the catalogs. Files can be
+added or replaced while dev runs; restart after changing the library location.
+Missing files return 404 rather than falling back to published versions.
+
+Without the default directory, development uses published media. An explicitly
+configured missing or invalid directory fails startup. Production builds and
+`npm run preview` always use published media and never require the local library.
+No media is downloaded or synchronized automatically.
 
 ## Add or replace media
 
@@ -11,15 +31,21 @@ and site CI never clone the media repository. The site reads published URLs.
    new revision filename, such as `3d/smart-tab-v2.mp4`, to avoid stale caches.
 3. Add it to your **complete current media folder**, keeping files still used by
    the live site. Keep originals and backups elsewhere, outside Git.
-4. Review and publish that folder from `site/`:
+4. Update the entry in `src/lib/media/catalog.ts` with its public URL, dimensions
+   and alt text. Run `npm run dev` from `site/` to review the unpublished media
+   from your local library.
+5. Review and publish that folder from `site/`:
 
    ```sh
-   npm run media:publish -- /absolute/path/to/current-library
-   npm run media:publish -- /absolute/path/to/current-library --publish
+   npm run media:publish
+   npm run media:publish -- --publish
    ```
 
-5. Update the entry in `src/lib/media/catalog.ts`, check it locally, then deploy
-   the website. Remove an old file only after the live site stops using it.
+   The publisher uses the same configured library as development. An optional
+   positional directory overrides it for that invocation.
+
+6. Run `npm run check:media -- --remote` after media publication, then deploy the
+   website. Remove an old file only after the live site stops using it.
 
 The folder is the entire next snapshot: omitted files disappear from the media
 site. Review its contents before publishing. There are no manifests, automatic

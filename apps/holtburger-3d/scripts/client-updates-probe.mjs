@@ -39,6 +39,17 @@ export async function probeClientUpdates(client, evaluate, consoleMessages) {
 			evidence.x >= evidence.buildLeft && evidence.right <= evidence.buildRight,
 		);
 		assert.ok(evidence.registrations > 0);
+		assert.equal(
+			await read(`(() => {
+			const button = ${icon};
+			const build = document.querySelector('[aria-label="Build information"]');
+			const animation = getComputedStyle(button.querySelector('.pregame-icon'));
+			return getComputedStyle(build).color === getComputedStyle(button).color
+				&& getComputedStyle(build).color !== getComputedStyle(button.closest('.pregame-build')).color
+				&& animation.animationName !== 'none' && animation.animationIterationCount === 'infinite';
+		})()`),
+			true,
+		);
 		return { surface, ...evidence };
 	};
 	await wait(`${updates} && ${app}?.read().gates.connection.waiting > 0`);
@@ -47,6 +58,28 @@ export async function probeClientUpdates(client, evaluate, consoleMessages) {
 		`${updates}.publish({kind: 'available', version: '0.2.0', tag: 'v0.2.0'})`,
 	);
 	const surfaces = [await check("loading")];
+	const sizePulse = await read(`(() => {
+		const icon = ${icon}.querySelector('.pregame-icon');
+		const animation = icon.getAnimations()[0];
+		animation.pause();
+		animation.currentTime = 0;
+		const restingWidth = icon.getBoundingClientRect().width;
+		animation.currentTime = Number(animation.effect.getTiming().duration) / 2;
+		const peakWidth = icon.getBoundingClientRect().width;
+		animation.play();
+		return { restingWidth, peakWidth };
+	})()`);
+	assert.ok(sizePulse.peakWidth > sizePulse.restingWidth);
+	await client.send("Emulation.setEmulatedMedia", {
+		features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+	});
+	assert.equal(
+		await read(
+			`getComputedStyle(${icon}.querySelector('.pregame-icon')).animationName`,
+		),
+		"none",
+	);
+	await client.send("Emulation.setEmulatedMedia", { features: [] });
 	await read(`${icon}.click()`);
 	assert.equal(await read(`${updates}.read().opened`), 1);
 	await client.send("Emulation.setDeviceMetricsOverride", {
@@ -84,6 +117,7 @@ export async function probeClientUpdates(client, evaluate, consoleMessages) {
 	await wait(`${icon} === null`);
 	return {
 		passed: true,
+		sizePulse,
 		surfaces,
 		gameplayRegistrations: 0,
 		opened: await read(`${updates}.read().opened`),

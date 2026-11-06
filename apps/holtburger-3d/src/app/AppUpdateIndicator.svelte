@@ -2,6 +2,7 @@
 	import { onMount } from "svelte";
 	import DownloadIcon from "../assets/icons/hud-download.svg?component";
 	import { formatError } from "../lib/format-error";
+	import { APP_BUILD_LABEL } from "./app-build";
 	import type { UpdateSnapshot } from "./app-update-contract";
 	import { createAppUpdateTransport } from "./app-update-transport";
 
@@ -17,6 +18,7 @@
 			? `Update available: v${availability.version} — open downloads`
 			: "",
 	);
+	const updateAvailable = $derived(availability.kind === "available");
 
 	async function open(): Promise<void> {
 		if (openDownloads === null) return;
@@ -71,9 +73,14 @@
 	});
 </script>
 
-{#if availability.kind === "available"}
+<span
+	class="pregame-build-label"
+	class:update-available={updateAvailable}
+	aria-label="Build information">{APP_BUILD_LABEL}</span
+>
+{#if updateAvailable}
 	<button
-		class="ui-button ui-icon-button pregame-quiet"
+		class="ui-button ui-icon-button pregame-quiet pregame-update"
 		type="button"
 		title={label}
 		aria-label={label}

@@ -309,6 +309,27 @@
 		font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
 		text-shadow: 0 1px 4px var(--ui-color-well);
 	}
+	.client-pregame-screen .pregame-build-label.update-available,
+	.client-pregame-screen .pregame-update {
+		color: var(--ui-color-danger);
+	}
+	.client-pregame-screen .pregame-update .pregame-icon {
+		animation: pregame-update-pulse 1.2s ease-in-out infinite;
+	}
+	@keyframes pregame-update-pulse {
+		0%,
+		100% {
+			transform: scale(1);
+		}
+		50% {
+			transform: scale(1.65);
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.client-pregame-screen .pregame-update .pregame-icon {
+			animation: none;
+		}
+	}
 	@container pregame-viewport (max-width: 640px) {
 		.client-pregame-screen .character-roster::before {
 			background: linear-gradient(

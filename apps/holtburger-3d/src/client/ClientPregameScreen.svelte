@@ -6,7 +6,6 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import PortalLogo from "../../../../assets/branding/portal.svg?component";
-	import { APP_BUILD_LABEL } from "../app/app-build";
 	import AppUpdateIndicator from "../app/AppUpdateIndicator.svelte";
 	import { uiScale } from "../app/ui-scale";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -116,7 +115,6 @@
 		<footer class="pregame-footer">
 			{@render footer()}
 			<div class="pregame-build">
-				<span aria-label="Build information">{APP_BUILD_LABEL}</span>
 				<AppUpdateIndicator />
 				{#if footerAside}{@render footerAside()}{/if}
 			</div>

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { compare } from "semver";
 import { z } from "zod";
+import { commandLine, requiredString, runCli } from "../cli.ts";
 import { sha256, writeJson, type Runner } from "../io.ts";
 import { validateManifest, type ReleaseInventory } from "./artifacts.ts";
 import { PRODUCTS, TARGETS, targetNamed } from "./contracts.ts";
@@ -330,19 +331,29 @@ export function releaseDescription(
 }
 
 if (import.meta.main) {
-  const output = process.argv[2];
-  if (output === undefined || process.argv.length !== 3)
-    throw new Error("Usage: publication.ts OUTPUT");
-  const pages = z
-    .array(z.array(z.unknown()))
-    .parse(
-      JSON.parse(
-        github([
-          `repos/${REPOSITORY}/releases`,
-          "--paginate",
-          "--slurp",
-        ]).toString("utf8"),
-      ),
-    );
-  generateFeeds(pages.flat(), github, output);
+  await runCli(
+    commandLine("npm run feeds:generate --").command(
+      "$0 <output>",
+      "Generate website download data and verified update feeds",
+      (builder) =>
+        builder.positional("output", {
+          ...requiredString,
+          describe: "Website static output directory",
+        }),
+      (args) => {
+        const pages = z
+          .array(z.array(z.unknown()))
+          .parse(
+            JSON.parse(
+              github([
+                `repos/${REPOSITORY}/releases`,
+                "--paginate",
+                "--slurp",
+              ]).toString("utf8"),
+            ),
+          );
+        generateFeeds(pages.flat(), github, args.output);
+      },
+    ),
+  );
 }

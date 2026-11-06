@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdtempSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { mediaLibraryPath, developmentMediaLibrary } from './media-library.mjs';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { developmentMediaLibrary } from './media-library.mjs';
 import { mediaUrlForMode } from '../src/lib/media/url.ts';
 
 test('media resolution changes only owned URLs in local mode', () => {
@@ -33,14 +34,14 @@ test('library configuration resolves from the repository and rejects explicit in
 		symlinkSync(directory, link, 'dir');
 		process.env.HOLTBURGER_SITE_MEDIA = link;
 		assert.equal(developmentMediaLibrary(), link);
-		assert.equal(
-			mediaLibraryPath('local/site-media'),
-			new URL('../../local/site-media', import.meta.url).pathname
+		process.env.HOLTBURGER_SITE_MEDIA = relative(
+			fileURLToPath(new URL('../../', import.meta.url)),
+			directory
 		);
+		assert.equal(developmentMediaLibrary(), directory);
 		for (const empty of ['', '   ']) {
 			process.env.HOLTBURGER_SITE_MEDIA = empty;
 			assert.throws(developmentMediaLibrary, /path must not be empty/);
-			assert.throws(() => mediaLibraryPath(empty), /path must not be empty/);
 		}
 		const file = join(directory, 'file');
 		writeFileSync(file, 'example');

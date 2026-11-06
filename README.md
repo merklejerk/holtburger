@@ -94,8 +94,8 @@ and the bundled [example combat bots](apps/holtburger-cli/scripts).
 
 Website authoring and local preview are covered in [site/AUTHORING.md](site/AUTHORING.md).
 
-Install a current stable Rust toolchain. The 3D client also requires Node.js 22.12
-or newer and npm. Start by cloning the repository:
+Install a current stable Rust toolchain and the Node.js/npm versions listed below.
+Start by cloning the repository:
 
 ```bash
 git clone https://github.com/merklejerk/holtburger.git
@@ -112,9 +112,30 @@ with `npm ci` at the repository root. Use `npm run check:tooling`,
 The root package delegates frontend commands to independent h3d and website
 packages. Install their dependencies in their own directories; there are no npm
 workspaces. Root commands such as `npm run build:3d` and `npm run check:site` do
-not install application dependencies. Cargo owns the TUI build. Its bundled game
+not install application dependencies. Cargo owns Rust compilation, including the TUI. Its bundled game
 scripts and mage's nested npm compiler belong to `apps/holtburger-cli/scripts/`;
 see the [TUI script build instructions](apps/holtburger-cli/scripts/src/mage/README.md).
+
+Run developer tasks from the repository root:
+
+| Task | Commands |
+| --- | --- |
+| Launch clients | `dev:cli`, `dev:client`, `dev:explorer` |
+| Launch with optimized Rust | `dev:cli:release`, `dev:client:release`, `dev:explorer:release` |
+| Website | `dev:site`, `build:site`, `preview:site` |
+| Native/frontend builds | `build:cli`, `build:3d` |
+| CLI checks | `check:cli`, `lint:cli`, `test:cli` |
+| Website checks | `check:site`, `check:site:media`, `check:site:links`, `check:site:browser` |
+| Media publication | `publish:site:media -- SOURCE [--publish]` |
+| Rust tools | `tool:dat2hba`, `tool:dat-tool`, `tool:cli-content`, `tool:export-weenie-catalog`, `tool:survey-weenie-catalog`, `tool:weenie-resists`, `tool:soul-emotes` |
+
+Prefix these names with `npm run`. Use `npm run` alone to list commands.
+Pass arguments after `--`; orchestration CLIs support `--help` before doing work.
+The launch wrapper forwards app arguments; use an additional `--` to forward an
+app's own `--help`, for example `npm run tool:dat-tool -- -- --help`.
+Rust tool wrappers accept `--release` for optimized builds.
+Launchers preserve terminal input, exit status and explicitly configured environment values.
+Release commands produce distributions; `dev:*:release` launches optimized development builds.
 
 Release, content, notices, and update-feed commands also live at the root; see
 [release maintenance](release/RELEASING.md). General automation runs as typed
@@ -126,8 +147,8 @@ Windows installer API checks, and the optional font fixture generator.
 From the repository root:
 
 ```bash
-cd apps/holtburger-3d
 npm ci
+npm --prefix apps/holtburger-3d ci
 npm run dev:client
 ```
 
@@ -152,12 +173,12 @@ for discovery rules and local provisioning guidance.
 From the repository root:
 
 ```bash
-./apps/holtburger-cli/dev.sh --help
-./apps/holtburger-cli/dev.sh --host SERVER --port 9000 --account ACCOUNT --password PASSWORD
+npm run dev:cli -- --help
+npm run dev:cli -- --host SERVER --port 9000 --account ACCOUNT --password PASSWORD
 ```
 
 Replace SERVER, ACCOUNT, and PASSWORD with your server address and credentials.
-Pass `--release` first for an optimized build. The runner uses `local/scripts/`
+Use `npm run dev:cli:release -- [ARGS]` for an optimized build. The runner uses `local/scripts/`
 for personal scripts and preferences, alongside the bundled scripts in
 `apps/holtburger-cli/scripts/`.
 

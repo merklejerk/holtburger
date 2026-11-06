@@ -1,8 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { parseArgs } from "node:util";
-import { z } from "zod";
+import { commandLine, nonEmpty, requiredString, runCli } from "../cli.ts";
 import { ROOT, digest, readJson, run, writeJson, type Runner } from "../io.ts";
 import { extractBundle } from "./archives.ts";
 import { requireFields, verifyBundle } from "./artifacts.ts";
@@ -90,21 +89,40 @@ export async function buildInstaller(
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({
-    options: {
-      artifacts: { type: "string" },
-      target: { type: "string" },
-      output: { type: "string" },
-      iscc: { type: "string" },
-    },
-  });
-  console.log(
-    await buildInstaller(
-      ROOT,
-      resolve(z.string().parse(values.artifacts)),
-      z.string().parse(values.target),
-      resolve(z.string().parse(values.output)),
-      values.iscc,
+  await runCli(
+    commandLine("npm run release:installers --").command(
+      "$0",
+      "Build a platform installer from verified native artifacts",
+      (builder) =>
+        builder
+          .option("artifacts", {
+            ...requiredString,
+            describe: "Native artifact directory",
+          })
+          .option("target", {
+            ...requiredString,
+            describe: "Native target triple",
+          })
+          .option("output", {
+            ...requiredString,
+            describe: "Installer destination directory",
+          })
+          .option("iscc", {
+            type: "string",
+            coerce: nonEmpty,
+            describe: "Inno Setup compiler path",
+          }),
+      async (args) => {
+        console.log(
+          await buildInstaller(
+            ROOT,
+            resolve(args.artifacts),
+            args.target,
+            resolve(args.output),
+            args.iscc,
+          ),
+        );
+      },
     ),
   );
 }

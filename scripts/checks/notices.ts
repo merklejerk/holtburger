@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { parseArgs } from "node:util";
+import { commandLine, nonEmpty, runCli } from "../cli.ts";
 import { parse as parseToml } from "smol-toml";
 import { z } from "zod";
 import {
@@ -85,6 +85,7 @@ export function inputDigest(root: string): string {
     ".github/native-notices.json",
     "scripts/checks/notices.ts",
     "scripts/io.ts",
+    "scripts/cli.ts",
     "scripts/filesystem.ts",
     "package.json",
     "package-lock.json",
@@ -240,17 +241,38 @@ export function generateNotices(root: string, tool: string): void {
 }
 
 if (import.meta.main) {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
-    options: { "cargo-about": { type: "string", default: "cargo-about" } },
-  });
-  if (positionals.length !== 1)
-    throw new Error(
-      "Usage: notices.ts tool-version|check|generate [--cargo-about PATH]",
-    );
-  if (positionals[0] === "tool-version") console.log(CARGO_ABOUT_VERSION);
-  else if (positionals[0] === "check") checkNotices(ROOT);
-  else if (positionals[0] === "generate")
-    generateNotices(ROOT, values["cargo-about"]);
-  else throw new Error("Unknown notice command");
+  await runCli(
+    commandLine("npm run <check:notices|generate:notices> --")
+      .command(
+        "tool-version",
+        "Print the required cargo-about version",
+        {},
+        () => {
+          console.log(CARGO_ABOUT_VERSION);
+        },
+      )
+      .command(
+        "check",
+        "Verify checked-in notices against locked inputs",
+        {},
+        () => {
+          checkNotices(ROOT);
+        },
+      )
+      .command(
+        "generate",
+        "Regenerate notices using the pinned cargo-about",
+        (builder) =>
+          builder.option("cargo-about", {
+            type: "string",
+            default: "cargo-about",
+            coerce: nonEmpty,
+            describe: "cargo-about executable path",
+          }),
+        (args) => {
+          generateNotices(ROOT, args.cargoAbout);
+        },
+      )
+      .demandCommand(1),
+  );
 }

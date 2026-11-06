@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { z } from "zod";
+import { commandLine, runCli } from "../cli.ts";
 import { ROOT, readJson, runBytes } from "../io.ts";
 
 /** Only root prose is exempt: bundled quickstart edits remain build inputs. */
@@ -40,19 +41,28 @@ export function buildRelevant(
 }
 
 if (import.meta.main) {
-  const env = z
-    .object({
-      GITHUB_EVENT_PATH: z.string(),
-      GITHUB_EVENT_NAME: z.string(),
-      GITHUB_REF_TYPE: z.string(),
-      GITHUB_OUTPUT: z.string(),
-    })
-    .parse(process.env);
-  const relevant = buildRelevant(
-    readJson(env.GITHUB_EVENT_PATH),
-    env.GITHUB_EVENT_NAME,
-    env.GITHUB_REF_TYPE,
+  await runCli(
+    commandLine("npm run check:changes --").command(
+      "$0",
+      "Determine build relevance from the GitHub event environment",
+      {},
+      () => {
+        const env = z
+          .object({
+            GITHUB_EVENT_PATH: z.string(),
+            GITHUB_EVENT_NAME: z.string(),
+            GITHUB_REF_TYPE: z.string(),
+            GITHUB_OUTPUT: z.string(),
+          })
+          .parse(process.env);
+        const relevant = buildRelevant(
+          readJson(env.GITHUB_EVENT_PATH),
+          env.GITHUB_EVENT_NAME,
+          env.GITHUB_REF_TYPE,
+        );
+        appendFileSync(env.GITHUB_OUTPUT, `relevant=${relevant}\n`);
+        console.log(`Build-input changes: ${relevant}`);
+      },
+    ),
   );
-  appendFileSync(env.GITHUB_OUTPUT, `relevant=${relevant}\n`);
-  console.log(`Build-input changes: ${relevant}`);
 }

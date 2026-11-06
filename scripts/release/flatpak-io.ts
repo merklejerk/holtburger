@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { parseArgs } from "node:util";
+import { commandLine, scalarChoice, runCli } from "../cli.ts";
 import { z } from "zod";
 import { ROOT, readJson, run, type Runner } from "../io.ts";
 import { productSchema } from "./contracts.ts";
@@ -172,22 +172,35 @@ export function probe3dPortal(
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { product: { type: "string" } } });
-  const product = productSchema.parse(values.product),
-    temporary = mkdtempSync(join(tmpdir(), "holtburger-flatpak-io-"));
-  try {
-    const inputs = join(temporary, "retail inputs 雪");
-    mkdirSync(inputs);
-    copyFileSync(
-      join(ROOT, "scripts/fixtures/content/minimal-content.dat.fixture"),
-      join(inputs, "client_portal.dat"),
-    );
-    if (product === "cli") {
-      const outputs = join(temporary, "tool outputs");
-      mkdirSync(outputs);
-      probeCliTools(inputs, outputs, run);
-    } else probe3dPortal(ROOT, inputs, run);
-  } finally {
-    rmSync(temporary, { recursive: true, force: true });
-  }
+  await runCli(
+    commandLine("npm run probe:flatpak-io --").command(
+      "$0",
+      "Probe installed Flatpak file I/O contracts",
+      (builder) =>
+        builder.option("product", {
+          ...scalarChoice(productSchema.options),
+          demandOption: true,
+          describe: "Installed product to probe",
+        }),
+      (args) => {
+        const product = args.product,
+          temporary = mkdtempSync(join(tmpdir(), "holtburger-flatpak-io-"));
+        try {
+          const inputs = join(temporary, "retail inputs 雪");
+          mkdirSync(inputs);
+          copyFileSync(
+            join(ROOT, "scripts/fixtures/content/minimal-content.dat.fixture"),
+            join(inputs, "client_portal.dat"),
+          );
+          if (product === "cli") {
+            const outputs = join(temporary, "tool outputs");
+            mkdirSync(outputs);
+            probeCliTools(inputs, outputs, run);
+          } else probe3dPortal(ROOT, inputs, run);
+        } finally {
+          rmSync(temporary, { recursive: true, force: true });
+        }
+      },
+    ),
+  );
 }

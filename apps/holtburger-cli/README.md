@@ -7,13 +7,13 @@ Player guides: [TUI basics](https://merklejerk.github.io/holtburger/tui/basics/)
 Run commands below from the repository root. Install a current stable Rust toolchain
 and prepare the client data described under [Data File Configuration](#data-file-configuration).
 
-For day-to-day development, launch the TUI through Cargo from a terminal:
+For day-to-day development, run the root npm launcher from a terminal (after `npm ci` at the root):
 
 ```bash
 # see help
-./apps/holtburger-cli/dev.sh --help
-# connect (pass --release first for an optimized build)
-./apps/holtburger-cli/dev.sh -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
+npm run dev:cli -- --help
+# connect (use dev:cli:release for an optimized build)
+npm run dev:cli -- -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
 ```
 
 The development runner selects `local/scripts/` for writable scripts and preferences,

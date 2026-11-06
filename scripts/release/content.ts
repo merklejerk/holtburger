@@ -1,6 +1,6 @@
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseArgs } from "node:util";
+import { commandLine, requiredString, runCli } from "../cli.ts";
 import { z } from "zod";
 import { ROOT, readJson, sha256, digestSchema } from "../io.ts";
 import { github, REPOSITORY, type GitHub } from "../github.ts";
@@ -119,26 +119,51 @@ export async function fetchContent(
 }
 
 if (import.meta.main) {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
-    options: { sha256: { type: "string" }, output: { type: "string" } },
-  });
-  if (positionals.length !== 1)
-    throw new Error(
-      "Usage: content.ts OUTPUT | ARCHIVE --sha256 DIGEST --output OUTPUT",
-    );
-  if (values.output !== undefined && values.sha256 !== undefined) {
-    await unpackContent(
-      readFileSync(positionals[0]),
-      values.sha256,
-      values.output,
-    );
-    console.log(`Verified CLI content: ${values.sha256}`);
-  } else if (values.output === undefined && values.sha256 === undefined)
-    await fetchContent(
-      readJson(join(ROOT, ".github/cli-content.json")),
-      positionals[0],
-      github,
-    );
-  else throw new Error("Archive staging requires both --sha256 and --output");
+  await runCli(
+    commandLine("npm run content:<command> --")
+      .command(
+        "fetch <output>",
+        "Download and verify the pinned CLI content archive",
+        (builder) =>
+          builder.positional("output", {
+            ...requiredString,
+            describe: "New content destination directory",
+          }),
+        async (args) => {
+          await fetchContent(
+            readJson(join(ROOT, ".github/cli-content.json")),
+            args.output,
+            github,
+          );
+        },
+      )
+      .command(
+        "stage <archive>",
+        "Verify and unpack an explicit content archive",
+        (builder) =>
+          builder
+            .positional("archive", {
+              ...requiredString,
+              describe: "Input ZIP archive",
+            })
+            .option("sha256", {
+              ...requiredString,
+              describe: "Expected archive SHA-256",
+              coerce: (value) => digestSchema.parse(value),
+            })
+            .option("output", {
+              ...requiredString,
+              describe: "New content destination directory",
+            }),
+        async (args) => {
+          await unpackContent(
+            readFileSync(args.archive),
+            args.sha256,
+            args.output,
+          );
+          console.log(`Verified CLI content: ${args.sha256}`);
+        },
+      )
+      .demandCommand(1),
+  );
 }

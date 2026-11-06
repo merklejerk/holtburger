@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { randomUUID } from "node:crypto";
+import { commandLine, requiredString, scalarChoice, runCli } from "../cli.ts";
 import { z } from "zod";
 import { REPOSITORY, github, type GitHub } from "../github.ts";
 import { ROOT, readJson, run, writeJson, type Runner } from "../io.ts";
@@ -262,26 +263,60 @@ export function openReleasePullRequest(
 }
 
 if (import.meta.main) {
-  const [command, path, override] = process.argv.slice(2);
-  if (command === "propose" && path !== undefined && process.argv.length === 4)
-    writeJson(path, proposeRelease(ROOT, github, run));
-  else if (
-    command === "open" &&
-    path !== undefined &&
-    override !== undefined &&
-    process.argv.length === 5
-  )
-    openReleasePullRequest(ROOT, readJson(path), override, github, run);
-  else if (
-    command === "check-pr" &&
-    process.argv.length === 3 &&
-    process.env.GITHUB_EVENT_NAME === "pull_request"
-  ) {
-    const event = readJson(z.string().parse(process.env.GITHUB_EVENT_PATH));
-    if (z.object({ action: z.string() }).parse(event).action !== "closed")
-      validateReleasePullRequest(ROOT, event, false);
-  } else if (command !== "check-pr" || process.argv.length !== 3)
-    throw new Error(
-      "Usage: preparation.ts propose OUTPUT | open PROPOSAL auto|patch|minor | check-pr",
-    );
+  await runCli(
+    commandLine("npm run release:prepare --")
+      .command(
+        "propose <output>",
+        "Write a release proposal from the current source",
+        (builder) =>
+          builder.positional("output", {
+            ...requiredString,
+            describe: "Proposal JSON output path",
+          }),
+        (args) => {
+          writeJson(args.output, proposeRelease(ROOT, github, run));
+        },
+      )
+      .command(
+        "open <proposal> <increment>",
+        "Create and push a release preparation branch and open its PR",
+        (builder) =>
+          builder
+            .positional("proposal", {
+              ...requiredString,
+              describe: "Reviewed proposal JSON path",
+            })
+            .positional("increment", {
+              ...scalarChoice(bumpSelection.options),
+              demandOption: true,
+              describe: "Version increment policy",
+            }),
+        (args) => {
+          openReleasePullRequest(
+            ROOT,
+            readJson(args.proposal),
+            args.increment,
+            github,
+            run,
+          );
+        },
+      )
+      .command(
+        "check-pr",
+        "Check release preparation policy for a GitHub pull-request event",
+        {},
+        () => {
+          if (process.env.GITHUB_EVENT_NAME === "pull_request") {
+            const event = readJson(
+              z.string().parse(process.env.GITHUB_EVENT_PATH),
+            );
+            if (
+              z.object({ action: z.string() }).parse(event).action !== "closed"
+            )
+              validateReleasePullRequest(ROOT, event, false);
+          }
+        },
+      )
+      .demandCommand(1),
+  );
 }

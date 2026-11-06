@@ -4,6 +4,7 @@ import { parse as parseToml } from "smol-toml";
 import { SemVer, inc } from "semver";
 import { z } from "zod";
 import { ROOT, readJson, run } from "../io.ts";
+import { commandLine, requiredString, runCli } from "../cli.ts";
 
 /** Distribution policy distinguishes ordinary releases from source-stamped nightlies. */
 export const distributionKind = z.enum(["release", "nightly"]);
@@ -173,15 +174,27 @@ export function bumpVersion(version: string, root: string): void {
 }
 
 if (import.meta.main) {
-  const args = process.argv.slice(2);
-  const [command, version] = args;
-  if (command === "check" && args.length === 1) {
-    const current = checkVersions(ROOT);
-    validateChannelVersion(readChannel(ROOT), current, "release");
-    console.log(current);
-  } else if (command === "bump" && version !== undefined && args.length === 2) {
-    validateReleaseIncrement(checkVersions(ROOT), version);
-    bumpVersion(version, ROOT);
-    console.log(checkVersions(ROOT));
-  } else throw new Error("Usage: version.ts check|bump VERSION");
+  await runCli(
+    commandLine("npm run version:<command> --")
+      .command("check", "Check suite versions and release channel", {}, () => {
+        const current = checkVersions(ROOT);
+        validateChannelVersion(readChannel(ROOT), current, "release");
+        console.log(current);
+      })
+      .command(
+        "bump <version>",
+        "Update suite versions and lockfiles",
+        (builder) =>
+          builder.positional("version", {
+            ...requiredString,
+            describe: "Next suite SemVer",
+          }),
+        (args) => {
+          validateReleaseIncrement(checkVersions(ROOT), args.version);
+          bumpVersion(args.version, ROOT);
+          console.log(checkVersions(ROOT));
+        },
+      )
+      .demandCommand(1),
+  );
 }

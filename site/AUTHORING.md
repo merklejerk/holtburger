@@ -230,6 +230,11 @@ installed Chrome and the running preview. Override
 stay outside Git. Format with `npm run format`; check with
 `npm run format:check`.
 
+Repository-root entry points are `npm run dev:site`, `npm run build:site`,
+`npm run preview:site`, `npm run check:site`, `npm run check:site:links`,
+and `npm run check:site:browser`. Install site dependencies with
+`npm --prefix site ci`; these delegate to the site's own tooling.
+
 ## Publication
 
 The public destination is [merklejerk.github.io/holtburger](https://merklejerk.github.io/holtburger/).

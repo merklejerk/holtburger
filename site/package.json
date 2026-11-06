@@ -18,16 +18,17 @@
 		"check:browser": "node scripts/check-browser.mjs",
 		"check:links": "node scripts/check-links.mjs",
 		"check:examples": "tsc --project examples/tsconfig.json",
-		"check:media-tooling": "node --test scripts/media-library.test.mjs",
+		"check:media-tooling": "node --test scripts/media-library.test.mjs scripts/cli.test.mjs",
 		"check:media": "node scripts/check-media.mjs",
-		"media:publish": "node scripts/publish-media.mjs",
-		"predev": "npm run prepare:assets && npm run prepare:content"
+		"predev": "npm run prepare:assets && npm run prepare:content",
+		"publish:media": "node scripts/publish-media.mjs"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^4.0.1",
 		"@sveltejs/kit": "^3.1.1",
 		"@sveltejs/vite-plugin-svelte": "^7.3.1",
 		"@types/node": "^26.6.6",
+		"@types/yargs": "^17.0.35",
 		"github-slugger": "^2.0.0",
 		"mdast-util-to-string": "^4.0.0",
 		"mdsvex": "^0.12.8",
@@ -43,6 +44,7 @@
 		"typescript": "^6.0.3",
 		"unified": "^11.0.5",
 		"vite": "^8.3.5",
+		"yargs": "^18.2.0",
 		"zod": "^4.6.7"
 	},
 	"imports": {

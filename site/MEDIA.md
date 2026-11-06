@@ -10,8 +10,10 @@ published URLs.
 Keep a complete working media library in `local/site-media/` at the repository
 root. It is ignored by Git. Set `HOLTBURGER_SITE_MEDIA` to use another directory;
 relative configuration paths and publisher arguments resolve from the repository
-root. Use an exported media snapshot without `.git` or other hidden files. The
+root. Publishing always requires an explicit source path; development defaults and
+`HOLTBURGER_SITE_MEDIA` never select the publication source. Use an exported media snapshot without `.git` or other hidden files. The
 publisher generates `.nojekyll` itself; omit it from the working library.
+Every validated file is staged, including files matched by developer-global Git ignore rules.
 
 `npm run dev` serves an available library at `/holtburger/media/` and resolves
 this media repository's catalog URLs to that route, including videos, posters,
@@ -34,17 +36,20 @@ No media is downloaded or synchronized automatically.
 4. Update the entry in `src/lib/media/catalog.ts` with its public URL, dimensions
    and alt text. Run `npm run dev` from `site/` to review the unpublished media
    from your local library.
-5. Review and publish that folder from `site/`:
+5. Review and publish that complete folder from the repository root:
 
    ```sh
-   npm run media:publish
-   npm run media:publish -- --publish
+   npm run publish:site:media -- --help
+   npm run publish:site:media -- local/site-media
+   npm run publish:site:media -- local/site-media --publish
    ```
 
-   The publisher uses the same configured library as development. An optional
-   positional directory overrides it for that invocation.
+   The source directory is mandatory, including when a development library is
+   configured. Omitting it, passing a blank path, or using unknown flags fails
+   before filesystem or Git work. The dry run validates and stages files locally
+   without contacting the remote; `--publish` explicitly enables replacement.
 
-6. Run `npm run check:media -- --remote` after media publication, then deploy the
+6. Run `npm run check:site:media -- --remote` from the root after media publication, then deploy the
    website. Remove an old file only after the live site stops using it.
 
 The folder is the entire next snapshot: omitted files disappear from the media

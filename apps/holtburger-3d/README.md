@@ -632,14 +632,16 @@ The optional `npm run probe:launcher -- --package out/holtburger-3d-linux-x64/ho
 probe exercises the actual public-directory flow using isolated local data. It requires network access;
 ordinary launcher probes and unit tests use no public API.
 
-Install Node.js 22.12 or newer, a current stable Rust toolchain, and the frontend dependencies:
+Install the repository's Node.js/npm versions and a current stable Rust toolchain.
+Install both tooling packages and run launch commands from the repository root:
 
 ```bash
-cd apps/holtburger-3d
 npm ci
+npm --prefix apps/holtburger-3d ci
 ```
 
-Use `npm run dev:explorer` for the Explorer and `npm run dev` or `npm run dev:client` for client mode.
+Use `npm run dev:explorer` for the Explorer and `npm run dev:client` for client mode.
+Both root launch commands support `--help` without building or opening the app.
 Development startup incrementally builds the Rust sidecar, starts Vite, launches Electron, and stops
 Vite after the application exits. Add `:release` to either named route to use an optimized host build.
 Pass `--uncapped` to either mode, with a debug or release host, to disable Chromium's foreground
@@ -751,10 +753,10 @@ does not convert a legacy file during startup; it rejects that file without chan
 missing collection starts with defaults. To launch with a converted local collection:
 
 ```bash
-npm run dev:client -- --settings-file=../../.holtburger-local/client-settings-sections.json --account YOUR_ACCOUNT
+npm run dev:client -- --settings-file=.holtburger-local/client-settings-sections.json --account YOUR_ACCOUNT
 ```
 
-The example assumes you invoke npm from this app directory. Relative `--settings-file` paths
+The example assumes you invoke npm from the repository root. Relative `--settings-file` paths
 resolve from the directory where you invoked `npm run dev:client`; absolute paths also work.
 
 This worktree's local collection was created by a one-time conversion; no migration command ships

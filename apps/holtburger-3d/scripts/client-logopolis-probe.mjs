@@ -73,16 +73,29 @@ export async function probeClientLogopolis(driver) {
 			});
 			renderLogopolis(context, sprites, { ...game, score: game.score + 1 }, game.score + 1, 'playing');
 			const scored = pixels();
+			renderLogopolis(context, sprites, game, game.score, 'playing');
+			const withWall = pixels();
+			const { playfield } = LOGOPOLIS_SCREEN;
+			const boundaryVisible = [playfield.x, playfield.x + playfield.width - 1].every(x =>
+				[playfield.y, playfield.y + playfield.height - 1].every(y => context.getImageData(x, y, 1, 1).data[3] === 255));
+			renderLogopolis(context, sprites, { ...game, wall: { ...game.wall, cells: [] } }, game.score, 'playing');
+			const wallVisible = pixels().some((value, index) => value !== withWall[index]);
+			const extraPickup = { x: 10, y: 1 };
+			renderLogopolis(context, sprites, { ...game, outcome: { ...game.outcome, portalPickups: [...game.outcome.portalPickups, extraPickup] } }, game.score, 'playing');
+			const extraPickupVisible = pixels().some((value, index) => value !== withWall[index]);
 			const orientations = ['up', 'right', 'down', 'left'].map(direction => {
 				renderLogopolis(context, sprites, { ...game, portals: game.portals.map(portal => ({ ...portal, direction })) }, game.score, 'playing');
 				return pixels().join(',');
 			});
-			return { portalDirectionsDistinct: new Set(orientations).size === orientations.length,
+			return { boundaryVisible, wallVisible, extraPickupVisible, portalDirectionsDistinct: new Set(orientations).size === orientations.length,
 				draws: frames.every(frame => frame.some(value => value > 0)),
 				distinctStates: new Set(frames.map(frame => frame.join(','))).size === frames.length,
 				scoreUpdates: scored.some((value, index) => value !== frames[0][index]) };
 		})()`);
 		assert.deepEqual(renderer, {
+			boundaryVisible: true,
+			wallVisible: true,
+			extraPickupVisible: true,
 			portalDirectionsDistinct: true,
 			draws: true,
 			distinctStates: true,

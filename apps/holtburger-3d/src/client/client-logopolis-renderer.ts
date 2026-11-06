@@ -11,10 +11,19 @@ export type LogopolisScreenStatus = SnakeGame["outcome"]["kind"] | "paused";
 const CELL = 8;
 const INSET = 4;
 const SCORE_HEIGHT = 16;
+/** Board bounds in native canvas pixels, shared by drawing and browser verification. */
+const PLAYFIELD = {
+	x: INSET,
+	y: SCORE_HEIGHT + INSET,
+	width: LOGOPOLIS.width * CELL,
+	height: LOGOPOLIS.height * CELL,
+};
 /** Native framebuffer; CSS stretches its coarse pixels to a classic 4:3 display. */
 export const LOGOPOLIS_SCREEN = {
-	width: LOGOPOLIS.width * CELL + INSET * 2,
-	height: LOGOPOLIS.height * CELL + SCORE_HEIGHT + INSET * 2,
+	width: PLAYFIELD.width + INSET * 2,
+	height: PLAYFIELD.height + SCORE_HEIGHT + INSET * 2,
+	/** Exact playfield rectangle, excluding the scoreboard and outer inset. */
+	playfield: PLAYFIELD,
 };
 
 /** Decode the authored atlas before a board can start or draw sprites. */
@@ -92,7 +101,7 @@ export function renderLogopolis(
 	bestScore: number,
 	status: LogopolisScreenStatus,
 ): void {
-	const { width, height } = LOGOPOLIS_SCREEN;
+	const { width, height, playfield } = LOGOPOLIS_SCREEN;
 	context.clearRect(0, 0, width, height);
 	context.imageSmoothingEnabled = false;
 	ink(context, "#fff1b9");
@@ -107,11 +116,14 @@ export function renderLogopolis(
 	text(context, best, width - INSET - best.length * 4, INSET + 1, 1);
 
 	context.save();
-	context.translate(INSET, SCORE_HEIGHT + INSET);
+	context.translate(playfield.x, playfield.y);
 	// Clip bloom to the playfield so it cannot bleed into the score display.
 	context.beginPath();
-	context.rect(0, 0, LOGOPOLIS.width * CELL, LOGOPOLIS.height * CELL);
+	context.rect(0, 0, playfield.width, playfield.height);
 	context.clip();
+	ink(context, "#c77945");
+	for (const cell of game.wall.cells)
+		context.fillRect(cell.x * CELL, cell.y * CELL, CELL, CELL);
 	game.portals.forEach((portal, index) => {
 		const angles: Record<SnakeDirection, number> = {
 			right: 0,
@@ -148,8 +160,7 @@ export function renderLogopolis(
 			2,
 			2,
 		);
-		const pickup = game.outcome.portalPickup;
-		if (pickup !== null) {
+		for (const pickup of game.outcome.portalPickups) {
 			ink(context, "#37edff");
 			context.drawImage(
 				sprites,
@@ -189,6 +200,11 @@ export function renderLogopolis(
 	});
 	const [head] = game.body;
 	context.fillRect(head.x * CELL, head.y * CELL, CELL, CELL);
+	// Keep the lethal board edge visible even when the snake touches the perimeter.
+	context.shadowBlur = 0;
+	context.strokeStyle = "#fff1b9";
+	context.lineWidth = 1;
+	context.strokeRect(0.5, 0.5, playfield.width - 1, playfield.height - 1);
 	context.restore();
 
 	if (status !== "playing") {

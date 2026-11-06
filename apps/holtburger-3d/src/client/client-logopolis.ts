@@ -4,6 +4,14 @@ export const LOGOPOLIS = {
 	height: 18,
 	tickMs: 140,
 	turnBufferSize: 3,
+	/** Starting body size; also the baseline for pickup growth tiers. */
+	initialLength: 3,
+	/** Clear cells at each end of the bisecting wall. */
+	wallEdgeGap: 2,
+	/** Additional body segments required for each extra reset collectible. */
+	segmentsPerPortalPickup: 5,
+	/** Maximum simultaneous reset collectibles. */
+	maxPortalPickups: 10,
 } as const;
 
 const DIRECTIONS = ["up", "right", "down", "left"] as const;
@@ -29,16 +37,27 @@ type SnakeOutcome =
 	| {
 			readonly kind: "playing";
 			readonly food: SnakeCell;
-			/** Optional portal-shuffle pickup; absent when the board has no spare cell. */
-			readonly portalPickup: SnakeCell | null;
+			/** Reset collectibles, limited by snake length and available space. */
+			readonly portalPickups: readonly SnakeCell[];
 	  }
 	| { readonly kind: "lost" }
 	| { readonly kind: "won" };
+/** Bisector geometry and the coordinate axis used to classify portal sides. */
+export interface SnakeWall {
+	/** Normal axis: a horizontal wall separates y coordinates. */
+	readonly axis: "x" | "y";
+	/** Center line; portal entrances must lie strictly on opposite sides. */
+	readonly coordinate: number;
+	/** Solid cells, excluding edge passages and the single center opening. */
+	readonly cells: readonly SnakeCell[];
+}
 /** Head-first occupied route; discontinuities represent already-traversed portals. */
 export interface SnakeGame {
 	readonly body: readonly [SnakeCell, ...SnakeCell[]];
 	readonly direction: SnakeDirection;
 	readonly score: number;
+	/** Fixed obstacle cells selected at the start of the run. */
+	readonly wall: SnakeWall;
 	/** Current linked pair shared by movement, placement, and rendering. */
 	readonly portals: readonly [SnakePortal, SnakePortal];
 	readonly outcome: SnakeOutcome;
@@ -106,12 +125,14 @@ function choose<T>(values: readonly T[], random: () => number): T | null {
 function freeCells(
 	body: readonly SnakeCell[],
 	portals: SnakeGame["portals"],
+	wall: SnakeGame["wall"],
 ): SnakeCell[] {
 	const free: SnakeCell[] = [];
 	for (let y = 0; y < LOGOPOLIS.height; y++) {
 		for (let x = 0; x < LOGOPOLIS.width; x++) {
 			const cell = { x, y };
 			if (
+				!wall.cells.some((part) => sameSnakeCell(part, cell)) &&
 				!body.some((part) => sameSnakeCell(part, cell)) &&
 				!portals.some((portal) => sameSnakeCell(portal.cell, cell))
 			)
@@ -121,40 +142,66 @@ function freeCells(
 	return free;
 }
 
-function placePortalPickup(
+/** Preserve surviving pickups and fill the length-based allowance without displacing food. */
+function placePortalPickups(
 	body: SnakeGame["body"],
 	portals: SnakeGame["portals"],
+	wall: SnakeGame["wall"],
 	food: SnakeCell,
+	previous: readonly SnakeCell[],
 	random: () => number,
-): SnakeCell | null {
-	return choose(
-		freeCells(body, portals).filter((cell) => !sameSnakeCell(cell, food)),
-		random,
+): readonly SnakeCell[] {
+	const free = freeCells(body, portals, wall).filter(
+		(cell) => !sameSnakeCell(cell, food),
 	);
+	const pickups = previous.filter((pickup) =>
+		free.some((cell) => sameSnakeCell(cell, pickup)),
+	);
+	const target = Math.min(
+		LOGOPOLIS.maxPortalPickups,
+		1 +
+			Math.floor(
+				Math.max(0, body.length - LOGOPOLIS.initialLength) /
+					LOGOPOLIS.segmentsPerPortalPickup,
+			),
+	);
+	const available = free.filter(
+		(cell) => !pickups.some((pickup) => sameSnakeCell(cell, pickup)),
+	);
+	while (pickups.length < target) {
+		const pickup = choose(available, random);
+		if (pickup === null) break;
+		pickups.push(pickup);
+		available.splice(available.indexOf(pickup), 1);
+	}
+	return pickups;
 }
 
 function placeFood(
 	body: SnakeGame["body"],
 	portals: SnakeGame["portals"],
-	pickup: SnakeCell | null,
+	wall: SnakeGame["wall"],
+	pickups: readonly SnakeCell[],
 	random: () => number,
 ): SnakeOutcome {
-	const free = freeCells(body, portals);
-	// Convert a remaining shuffle pickup to food when it is the final unoccupied cell.
-	const food = choose(
-		free.length === 1 || pickup === null
-			? free
-			: free.filter((cell) => !sameSnakeCell(cell, pickup)),
-		random,
+	const free = freeCells(body, portals, wall);
+	const ordinary = free.filter(
+		(cell) => !pickups.some((pickup) => sameSnakeCell(cell, pickup)),
 	);
+	// Food takes priority when every remaining cell holds a reset pickup.
+	const food = choose(ordinary.length > 0 ? ordinary : free, random);
 	if (food === null) return { kind: "won" };
 	return {
 		kind: "playing",
 		food,
-		portalPickup:
-			pickup !== null && !sameSnakeCell(pickup, food)
-				? pickup
-				: placePortalPickup(body, portals, food, random),
+		portalPickups: placePortalPickups(
+			body,
+			portals,
+			wall,
+			food,
+			pickups,
+			random,
+		),
 	};
 }
 
@@ -163,11 +210,15 @@ function shufflePortals(
 	body: SnakeGame["body"],
 	food: SnakeCell,
 	previous: SnakeGame["portals"],
+	wall: SnakeGame["wall"],
+	pickups: readonly SnakeCell[],
 	random: () => number,
 ): SnakeGame["portals"] | null {
 	const vacant = (cell: SnakeCell) =>
 		insideBoard(cell) &&
 		!sameSnakeCell(cell, food) &&
+		!wall.cells.some((part) => sameSnakeCell(part, cell)) &&
+		!pickups.some((pickup) => sameSnakeCell(pickup, cell)) &&
 		!body.some((part) => sameSnakeCell(part, cell));
 	/** Placement-time proof: this portal's outward cell is already clear and in bounds. */
 	interface Candidate {
@@ -175,21 +226,25 @@ function shufflePortals(
 		readonly exit: SnakeCell;
 	}
 	const candidates: Candidate[] = [];
-	for (const cell of freeCells(body, previous)) {
+	for (const cell of freeCells([...body, ...pickups], previous, wall)) {
 		if (sameSnakeCell(cell, food)) continue;
 		for (const direction of DIRECTIONS) {
 			const exit = advance(cell, direction);
 			if (vacant(exit)) candidates.push({ portal: { cell, direction }, exit });
 		}
 	}
-	const disjoint = (a: Candidate, b: Candidate) =>
+	// Opposite halves and disjoint entrance/exit cells are both placement requirements.
+	const compatiblePair = (a: Candidate, b: Candidate) =>
+		(a.portal.cell[wall.axis] - wall.coordinate) *
+			(b.portal.cell[wall.axis] - wall.coordinate) <
+			0 &&
 		!sameSnakeCell(a.portal.cell, b.portal.cell) &&
 		!sameSnakeCell(a.portal.cell, b.exit) &&
 		!sameSnakeCell(a.exit, b.portal.cell) &&
 		!sameSnakeCell(a.exit, b.exit);
 	// Carry one proven partner through selection, so the second choice is nonempty by construction.
 	const choices = candidates.flatMap((first) => {
-		const partner = candidates.find((second) => disjoint(first, second));
+		const partner = candidates.find((second) => compatiblePair(first, second));
 		return partner === undefined ? [] : [{ first, partner }];
 	});
 	const chosen = choose(choices, random);
@@ -198,25 +253,54 @@ function shufflePortals(
 		chosen.partner,
 		...candidates.filter(
 			(candidate) =>
-				candidate !== chosen.partner && disjoint(chosen.first, candidate),
+				candidate !== chosen.partner && compatiblePair(chosen.first, candidate),
 		),
 	];
 	return [chosen.first.portal, choose(partners, random).portal];
 }
 
-/** Start a run; randomness is injected so food placement is reproducible in tests. */
+/** Start a run; injected randomness selects the wall orientation and collectible positions. */
 export function createSnakeGame(random: () => number): SnakeGame {
+	const horizontal = choose([true, false] as const, random);
+	const center = {
+		x: Math.floor(LOGOPOLIS.width / 2),
+		y: Math.floor(LOGOPOLIS.height / 2),
+	};
+	const span = horizontal ? LOGOPOLIS.width : LOGOPOLIS.height;
+	const middle = Math.floor(span / 2);
+	const wall: SnakeWall = {
+		axis: horizontal ? "y" : "x",
+		coordinate: horizontal ? center.y : center.x,
+		cells: Array.from(
+			{ length: span - LOGOPOLIS.wallEdgeGap * 2 },
+			(_, index) => index + LOGOPOLIS.wallEdgeGap,
+		)
+			.filter((position) => position !== middle)
+			.map((position) =>
+				horizontal
+					? { x: position, y: center.y }
+					: { x: center.x, y: position },
+			),
+	};
+	// Start parallel to the wall with a full clear lane ahead.
+	const head = horizontal
+		? { x: center.x - 2, y: center.y + 3 }
+		: { x: center.x - 3, y: center.y };
+	const direction = horizontal ? "right" : "down";
 	const body: SnakeGame["body"] = [
-		{ x: 8, y: 9 },
-		{ x: 7, y: 9 },
-		{ x: 6, y: 9 },
+		head,
+		...Array.from({ length: LOGOPOLIS.initialLength - 1 }, (_, index) => ({
+			x: head.x - STEPS[direction].x * (index + 1),
+			y: head.y - STEPS[direction].y * (index + 1),
+		})),
 	];
 	return {
 		body,
-		direction: "right",
+		direction,
 		score: 0,
+		wall,
 		portals: LOGOPOLIS_INITIAL_PORTALS,
-		outcome: placeFood(body, LOGOPOLIS_INITIAL_PORTALS, null, random),
+		outcome: placeFood(body, LOGOPOLIS_INITIAL_PORTALS, wall, [], random),
 	};
 }
 
@@ -245,6 +329,7 @@ export function stepSnake(
 	const retained = grows ? game.body : game.body.slice(0, -1);
 	if (
 		!insideBoard(next) ||
+		game.wall.cells.some((cell) => sameSnakeCell(cell, next)) ||
 		retained.some((part) => sameSnakeCell(part, next))
 	) {
 		return { ...game, direction, outcome: { kind: "lost" } };
@@ -256,25 +341,35 @@ export function stepSnake(
 			body,
 			direction,
 			score: game.score + 1,
-			outcome: placeFood(body, game.portals, game.outcome.portalPickup, random),
+			outcome: placeFood(
+				body,
+				game.portals,
+				game.wall,
+				game.outcome.portalPickups,
+				random,
+			),
 		};
 	if (
-		game.outcome.portalPickup !== null &&
-		sameSnakeCell(next, game.outcome.portalPickup)
+		game.outcome.portalPickups.some((pickup) => sameSnakeCell(next, pickup))
 	) {
+		const pickups = game.outcome.portalPickups.filter(
+			(pickup) => !sameSnakeCell(next, pickup),
+		);
 		const portals = shufflePortals(
 			body,
 			game.outcome.food,
 			game.portals,
+			game.wall,
+			pickups,
 			random,
 		);
-		// If the board cannot fit two safe entrances and exits, retire the special pickup.
+		// If no safe pair fits, retire reset pickups until food placement replenishes them.
 		if (portals === null)
 			return {
 				...game,
 				body,
 				direction,
-				outcome: { ...game.outcome, portalPickup: null },
+				outcome: { ...game.outcome, portalPickups: [] },
 			};
 		return {
 			...game,
@@ -283,10 +378,12 @@ export function stepSnake(
 			portals,
 			outcome: {
 				...game.outcome,
-				portalPickup: placePortalPickup(
+				portalPickups: placePortalPickups(
 					body,
 					portals,
+					game.wall,
 					game.outcome.food,
+					pickups,
 					random,
 				),
 			},

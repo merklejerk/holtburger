@@ -24,13 +24,90 @@ function board(
 		body,
 		direction,
 		score: 0,
+		wall: {
+			axis: "y",
+			coordinate: Math.floor(LOGOPOLIS.height / 2),
+			cells: [],
+		},
 		portals: LOGOPOLIS_INITIAL_PORTALS,
-		outcome: { kind: "playing", food, portalPickup: null },
+		outcome: { kind: "playing", food, portalPickups: [] },
 	};
 }
 const distantFood = { x: LOGOPOLIS.width - 1, y: LOGOPOLIS.height - 1 };
 
 describe("Logopolis", () => {
+	it.each([0, 0.999])(
+		"starts parallel to a centered wall using sample %s",
+		(sample) => {
+			const game = createSnakeGame(() => sample);
+			const horizontal = sample < 0.5;
+			const span = horizontal ? LOGOPOLIS.width : LOGOPOLIS.height;
+			expect(game.wall.cells).toHaveLength(
+				span - LOGOPOLIS.wallEdgeGap * 2 - 1,
+			);
+			const solidPositions = game.wall.cells.map((cell) =>
+				horizontal ? cell.x : cell.y,
+			);
+			expect(solidPositions).toEqual(
+				Array.from({ length: span }, (_, index) => index).filter(
+					(position) =>
+						position >= LOGOPOLIS.wallEdgeGap &&
+						position < span - LOGOPOLIS.wallEdgeGap &&
+						position !== Math.floor(span / 2),
+				),
+			);
+			const [first, second] = game.portals;
+			expect(
+				(first.cell[game.wall.axis] - game.wall.coordinate) *
+					(second.cell[game.wall.axis] - game.wall.coordinate),
+			).toBeLessThan(0);
+			expect(
+				new Set(game.wall.cells.map((cell) => (horizontal ? cell.y : cell.x)))
+					.size,
+			).toBe(1);
+			expect(
+				game.wall.cells.every((cell) =>
+					horizontal
+						? cell.y === Math.floor(LOGOPOLIS.height / 2)
+						: cell.x === Math.floor(LOGOPOLIS.width / 2),
+				),
+			).toBe(true);
+			const [head] = game.body;
+			for (const cell of game.wall.cells) {
+				expect(horizontal ? cell.y : cell.x).not.toBe(
+					horizontal ? head.y : head.x,
+				);
+				expect(game.body.some((part) => sameSnakeCell(part, cell))).toBe(false);
+			}
+			expect(game.direction).toBe(horizontal ? "right" : "down");
+			expect(stepSnake(game, game.direction, random).outcome.kind).toBe(
+				"playing",
+			);
+			if (game.outcome.kind !== "playing")
+				throw new Error("Expected live board.");
+			for (const cell of [game.outcome.food, ...game.outcome.portalPickups])
+				expect(game.wall.cells.some((wall) => sameSnakeCell(wall, cell))).toBe(
+					false,
+				);
+		},
+	);
+	it("collides with an interior wall directly and at a portal exit", () => {
+		const game = board([{ x: 1, y: 1 }], "right", distantFood);
+		expect(
+			stepSnake(
+				{ ...game, wall: { ...game.wall, cells: [{ x: 2, y: 1 }] } },
+				"right",
+				random,
+			).outcome.kind,
+		).toBe("lost");
+		const [entry, exit] = game.portals;
+		const approach = {
+			...game,
+			body: [{ x: entry.cell.x - 1, y: entry.cell.y }] as const,
+			wall: { ...game.wall, cells: [{ x: exit.cell.x, y: exit.cell.y - 1 }] },
+		};
+		expect(stepSnake(approach, "right", random).outcome.kind).toBe("lost");
+	});
 	it.each([-1, 1, Number.NaN, Number.POSITIVE_INFINITY])(
 		"rejects an invalid random source %s",
 		(sample) => {
@@ -276,17 +353,122 @@ function pickupAhead(): SnakeGame {
 		...game,
 		outcome: {
 			...game.outcome,
-			portalPickup: { x: game.body[0].x + 1, y: game.body[0].y },
+			portalPickups: [{ x: game.body[0].x + 1, y: game.body[0].y }],
 		},
 	};
 }
 
 describe("Portal shuffle pickup", () => {
+	it.each([0, 0.999])(
+		"keeps shuffled portals across the bisector for orientation sample %s",
+		(sample) => {
+			let game = createSnakeGame(() => sample);
+			const [head] = game.body;
+			const pickup = {
+				x: head.x + Number(game.direction === "right"),
+				y: head.y + Number(game.direction === "down"),
+			};
+			if (game.outcome.kind !== "playing")
+				throw new Error("Expected live board.");
+			game = { ...game, outcome: { ...game.outcome, portalPickups: [pickup] } };
+			const next = stepSnake(game, game.direction, () => sample);
+			expect(next.portals).not.toEqual(game.portals);
+			const [first, second] = next.portals;
+			expect(
+				(first.cell[next.wall.axis] - next.wall.coordinate) *
+					(second.cell[next.wall.axis] - next.wall.coordinate),
+			).toBeLessThan(0);
+		},
+	);
+	it.each([
+		0,
+		1,
+		4,
+		LOGOPOLIS.maxPortalPickups,
+		LOGOPOLIS.maxPortalPickups + 2,
+	])("scales the pickup pool at growth tier %s", (tier) => {
+		const length =
+			LOGOPOLIS.initialLength + tier * LOGOPOLIS.segmentsPerPortalPickup;
+		const body: [SnakeCell, ...SnakeCell[]] = [{ x: 0, y: 0 }];
+		for (let y = 1; y < LOGOPOLIS.height && body.length < length - 1; y++)
+			for (let x = 0; x < LOGOPOLIS.width && body.length < length - 1; x++) {
+				const cell = { x, y };
+				if (
+					!LOGOPOLIS_INITIAL_PORTALS.some((portal) =>
+						sameSnakeCell(portal.cell, cell),
+					)
+				)
+					body.push(cell);
+			}
+		const next = stepSnake(
+			board(body, "right", { x: 1, y: 0 }),
+			"right",
+			random,
+		);
+		if (next.outcome.kind !== "playing")
+			throw new Error("Expected live board.");
+		expect(next.body).toHaveLength(length);
+		expect(next.outcome.portalPickups).toHaveLength(
+			Math.min(1 + tier, LOGOPOLIS.maxPortalPickups),
+		);
+		expect(
+			new Set(next.outcome.portalPickups.map((cell) => `${cell.x},${cell.y}`))
+				.size,
+		).toBe(next.outcome.portalPickups.length);
+		for (const pickup of next.outcome.portalPickups) {
+			expect(next.body.some((cell) => sameSnakeCell(cell, pickup))).toBe(false);
+			expect(sameSnakeCell(next.outcome.food, pickup)).toBe(false);
+		}
+	});
+	it("preserves uncollected pickups when relocating portals", () => {
+		const game = pickupAhead();
+		if (game.outcome.kind !== "playing")
+			throw new Error("Expected live board.");
+		const [head] = game.body;
+		const body: SnakeGame["body"] = [
+			head,
+			...Array.from(
+				{
+					length:
+						LOGOPOLIS.initialLength + LOGOPOLIS.segmentsPerPortalPickup - 1,
+				},
+				(_, index) => ({ x: head.x - index - 1, y: head.y }),
+			),
+		];
+		const survivor = { x: 1, y: 1 };
+		const portalPickups = [...game.outcome.portalPickups, survivor];
+		const next = stepSnake(
+			{
+				...game,
+				body,
+				outcome: {
+					...game.outcome,
+					portalPickups,
+				},
+			},
+			"right",
+			random,
+		);
+		if (next.outcome.kind !== "playing")
+			throw new Error("Expected live board.");
+		expect(next.outcome.portalPickups).toContainEqual(survivor);
+		expect(next.outcome.portalPickups).toHaveLength(portalPickups.length);
+		for (const portal of next.portals) {
+			expect(sameSnakeCell(portal.cell, survivor)).toBe(false);
+			expect(
+				next.wall.cells.some((cell) => sameSnakeCell(cell, portal.cell)),
+			).toBe(false);
+		}
+	});
 	it("spawns separately from food, snake, and portals", () => {
 		const game = createSnakeGame(random);
-		if (game.outcome.kind !== "playing" || game.outcome.portalPickup === null)
+		if (
+			game.outcome.kind !== "playing" ||
+			game.outcome.portalPickups.length === 0
+		)
 			throw new Error("Expected both collectibles.");
-		const pickup = game.outcome.portalPickup;
+		const [pickup] = game.outcome.portalPickups;
+		if (pickup === undefined) throw new Error("Expected pickup.");
 		expect(sameSnakeCell(pickup, game.outcome.food)).toBe(false);
 		expect(game.body.some((part) => sameSnakeCell(part, pickup))).toBe(false);
 		expect(
@@ -301,9 +483,15 @@ describe("Portal shuffle pickup", () => {
 			expect(next.body).toHaveLength(game.body.length);
 			expect(next.score).toBe(game.score);
 			expect(next.portals).not.toEqual(game.portals);
+			const [first, second] = next.portals;
+			expect(
+				(first.cell[next.wall.axis] - next.wall.coordinate) *
+					(second.cell[next.wall.axis] - next.wall.coordinate),
+			).toBeLessThan(0);
 			if (next.outcome.kind !== "playing")
 				throw new Error("Expected a live board.");
-			const { food, portalPickup } = next.outcome;
+			const { food, portalPickups } = next.outcome;
+			const [portalPickup] = portalPickups;
 			const deltas: Record<SnakeDirection, SnakeCell> = {
 				up: { x: 0, y: -1 },
 				right: { x: 1, y: 0 },
@@ -321,6 +509,9 @@ describe("Portal shuffle pickup", () => {
 				occupied.length,
 			);
 			for (const cell of occupied) {
+				expect(next.wall.cells.some((wall) => sameSnakeCell(wall, cell))).toBe(
+					false,
+				);
 				expect(cell.x).toBeGreaterThanOrEqual(0);
 				expect(cell.y).toBeGreaterThanOrEqual(0);
 				expect(cell.x).toBeLessThan(LOGOPOLIS.width);
@@ -332,8 +523,8 @@ describe("Portal shuffle pickup", () => {
 				expect(
 					game.portals.some((old) => sameSnakeCell(old.cell, portal.cell)),
 				).toBe(false);
-			expect(portalPickup).not.toBeNull();
-			if (portalPickup === null)
+			expect(portalPickup).toBeDefined();
+			if (portalPickup === undefined)
 				throw new Error("Expected a replacement pickup.");
 			expect(next.body.some((part) => sameSnakeCell(part, portalPickup))).toBe(
 				false,
@@ -384,11 +575,11 @@ describe("Portal shuffle pickup", () => {
 			}
 		const game: SnakeGame = {
 			...board(body, "right", food),
-			outcome: { kind: "playing", food, portalPickup: pickup },
+			outcome: { kind: "playing", food, portalPickups: [pickup] },
 		};
 		const next = stepSnake(game, "right", random);
 		expect(next.portals).toBe(game.portals);
-		expect(next.outcome).toEqual({ kind: "playing", food, portalPickup: null });
+		expect(next.outcome).toEqual({ kind: "playing", food, portalPickups: [] });
 	});
 	it("converts the last free pickup cell to food so the board remains winnable", () => {
 		const head = { x: 0, y: 0 };
@@ -410,13 +601,13 @@ describe("Portal shuffle pickup", () => {
 			}
 		const game: SnakeGame = {
 			...board(body, "right", food),
-			outcome: { kind: "playing", food, portalPickup: pickup },
+			outcome: { kind: "playing", food, portalPickups: [pickup] },
 		};
 		const next = stepSnake(game, "right", random);
 		expect(next.outcome).toEqual({
 			kind: "playing",
 			food: pickup,
-			portalPickup: null,
+			portalPickups: [],
 		});
 		expect(stepSnake(next, "right", random).outcome.kind).toBe("won");
 	});

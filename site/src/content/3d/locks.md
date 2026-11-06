@@ -14,6 +14,8 @@ Try to use a locked door or container. With the unlock helper enabled, Holtburge
 
 The helper is enabled by default. Automatic key use is a separate setting and starts disabled.
 
+<Media id="unlock-helper" detail />
+
 ## Try your keys
 
 Choose **Try all keys** to try the distinct keys available in your inventory. The helper shows how many are available and reports the result.

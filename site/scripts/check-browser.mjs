@@ -159,7 +159,7 @@ try {
 		['3d/movement-camera/', 'jumping'],
 		['3d/chat-commands/', 'commands'],
 		['tui/basics/', 'terminal'],
-		['tui/scripting/integrations/', 'scripting'],
+		['tui/scripting/', 'scripting'],
 		['3d/combat/', 'guide'],
 		['3d/controls/', 'reference']
 	]) {

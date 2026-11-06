@@ -94,14 +94,6 @@
 			"expected": "The reader recognizes the dashboard, context and input areas.",
 			"priority": "first"
 		},
-		"tui-script": {
-			"owner": "user",
-			"session": "terminal",
-			"setup": "A prepared fighter or mage, with appropriate supplies and a safe test encounter.",
-			"framing": "Show /scripts, /run, useful script feedback, and /unrun without long idle time.",
-			"expected": "The script starts, makes a visible decision, then stops so manual control resumes.",
-			"priority": "first"
-		},
 		"combat-controls": {
 			"owner": "agent",
 			"session": "controls",
@@ -217,7 +209,7 @@
 		"tui-gameplay": {
 			"owner": "user",
 			"session": "terminal",
-			"setup": "A real inventory or vendor quantity prompt.",
+			"setup": "A real inventory Split quantity prompt for a carried stack.",
 			"framing": "Show the prompt with relevant item and footer actions.",
 			"expected": "The reader recognizes how a multi-step inventory task is presented.",
 			"priority": "later"

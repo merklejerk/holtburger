@@ -613,30 +613,19 @@ Use a real terminal session with a prepared character and the shipped scripts. S
 
 ### The TUI at a glance
 
-**First · user · pending · still** — ID: `tui-workflow`
+**First · user · available · still** — ID: `tui-workflow`
 
 - Setup: A focused dashboard with an assessed entity and context pane.
 - Frame: Keep pane boundaries, focus and footer shortcuts legible.
-- Action/purpose: Keep pane boundaries, focus and footer shortcuts legible.
 - Expected result: The reader recognizes the dashboard, context and input areas.
 - Used in: [tui/#a-client-you-can-play](https://merklejerk.github.io/holtburger/tui/#a-client-you-can-play), [tui/basics/#choose-a-dashboard-tab](https://merklejerk.github.io/holtburger/tui/basics/#choose-a-dashboard-tab)
-
-### Run a bundled script
-
-**First · user · pending · clip** — ID: `tui-script`
-
-- Setup: A prepared fighter or mage, with appropriate supplies and a safe test encounter.
-- Frame: Show /scripts, /run, useful script feedback, and /unrun without long idle time.
-- Action/purpose: Start a fighter or mage, show its feedback, then stop it and resume manual control.
-- Expected result: The script starts, makes a visible decision, then stops so manual control resumes.
-- Used in: [tui/#a-client-you-can-script](https://merklejerk.github.io/holtburger/tui/#a-client-you-can-script), [tui/bundled-scripts/#mage](https://merklejerk.github.io/holtburger/tui/bundled-scripts/#mage), [tui/running-scripts/#start-in-the-world](https://merklejerk.github.io/holtburger/tui/running-scripts/#start-in-the-world), [gallery/#clips](https://merklejerk.github.io/holtburger/gallery/#clips)
 
 ### A TUI quantity prompt
 
 **Later · user · pending · still** — ID: `tui-gameplay`
 
-- Setup: A real inventory or vendor quantity prompt.
+- Setup: A real inventory Split quantity prompt for a carried stack.
 - Frame: Show the prompt with relevant item and footer actions.
 - Action/purpose: Show the prompt with relevant item and footer actions.
 - Expected result: The reader recognizes how a multi-step inventory task is presented.
-- Used in: [tui/gameplay/#trading-and-salvage](https://merklejerk.github.io/holtburger/tui/gameplay/#trading-and-salvage)
+- Used in: [tui/gameplay/#inventory-and-equipment](https://merklejerk.github.io/holtburger/tui/gameplay/#inventory-and-equipment)

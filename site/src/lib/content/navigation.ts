@@ -10,23 +10,6 @@ export const navigation = [
 		]
 	},
 	{
-		title: 'Startup',
-		links: [
-			{
-				slug: 'startup/launcher',
-				label: 'Launcher'
-			},
-			{
-				slug: 'startup/game-data',
-				label: 'Game data'
-			},
-			{
-				slug: 'startup/characters',
-				label: 'Choose or create a character'
-			}
-		]
-	},
-	{
 		title: 'Installation',
 		links: [
 			{
@@ -40,6 +23,23 @@ export const navigation = [
 			{
 				slug: 'start/3d/linux',
 				label: 'Linux'
+			}
+		]
+	},
+	{
+		title: 'Startup',
+		links: [
+			{
+				slug: 'startup/launcher',
+				label: 'Launcher'
+			},
+			{
+				slug: 'startup/game-data',
+				label: 'Game data'
+			},
+			{
+				slug: 'startup/characters',
+				label: 'Choose or create a character'
 			}
 		]
 	},
@@ -172,28 +172,8 @@ export const navigation = [
 				label: 'Everyday gameplay'
 			},
 			{
-				slug: 'tui/running-scripts',
-				label: 'Run scripts'
-			},
-			{
-				slug: 'tui/bundled-scripts',
-				label: 'Fighter & mage'
-			},
-			{
 				slug: 'tui/scripting',
-				label: 'Your first script'
-			},
-			{
-				slug: 'tui/scripting/runtime',
-				label: 'Runtime & persistence'
-			},
-			{
-				slug: 'tui/scripting/reference',
-				label: 'API reference'
-			},
-			{
-				slug: 'tui/scripting/integrations',
-				label: 'HTTP integrations'
+				label: 'Scripts'
 			},
 			{
 				slug: 'tui/controls',

@@ -10,7 +10,7 @@
 	}
 	let { audio, onAudioChange }: Props = $props();
 	const audioControls = [
-		{ key: "masterVolume", label: "Master" },
+		{ key: "masterVolume", label: "In-game master" },
 		{ key: "effectVolume", label: "Sound effects" },
 		{ key: "ambientVolume", label: "Ambience" },
 		{ key: "musicVolume", label: "Music" },
@@ -40,7 +40,7 @@
 			checked={audio.muted}
 			onchange={(event) =>
 				onAudioChange({ ...audio, muted: event.currentTarget.checked })}
-		/> Mute all</label
+		/> Mute in-game audio</label
 	>
 	<button
 		type="button"

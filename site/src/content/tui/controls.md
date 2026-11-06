@@ -11,13 +11,14 @@ presentation: reference
 | ------------------------ | --------------------------------------------- |
 | Tab                      | Focus the next pane                           |
 | Shift+Tab                | Focus the previous pane                       |
+| Enter in the chat pane   | Focus the input line                          |
 | Enter in the input line  | Submit a message or command                   |
 | Escape in the input line | Leave input                                   |
 | Escape outside input     | Cancel an active interaction where applicable |
 | Up / Down in input       | Browse submitted input history                |
 | Ctrl+Q                   | Quit                                          |
 
-Enter can activate a selected entry's footer action in a dashboard tab. To type a message reliably, focus the input line first.
+Enter can activate a selected entry's footer action in a dashboard tab. To type a message reliably, switch to the chat pane with **Tab**, then press **Enter** to focus the input line. Tab cycles the display panes; it does not focus the input line.
 
 ## Dashboard tabs
 

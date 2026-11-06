@@ -1,9 +1,8 @@
 # Holtburger CLI development
 
 Player guides: [TUI basics](https://merklejerk.github.io/holtburger/tui/basics/),
-[installation](https://merklejerk.github.io/holtburger/start/),
-[running scripts](https://merklejerk.github.io/holtburger/tui/running-scripts/), and
-[scripting API](https://merklejerk.github.io/holtburger/tui/scripting/reference/).
+[installation](https://merklejerk.github.io/holtburger/start/), and
+[scripts](https://merklejerk.github.io/holtburger/tui/scripting/).
 
 Run commands below from the repository root. Install a current stable Rust toolchain
 and prepare the client data described under [Data File Configuration](#data-file-configuration).
@@ -18,7 +17,9 @@ For day-to-day development, launch the TUI through Cargo from a terminal:
 ```
 
 The development runner selects `local/scripts/` for writable scripts and preferences,
-and `apps/holtburger-cli/scripts/` for the checked-in fighter/mage scripts and sidecars.
+and `apps/holtburger-cli/scripts/` for the checked-in fighter and mage combat bots
+and their sidecars. These fully functional bots are bundled as examples to study
+and adapt.
 The TUI resolves these roots once at startup. CLI flags override environment values:
 
 | Directory | CLI option | Environment | Default |

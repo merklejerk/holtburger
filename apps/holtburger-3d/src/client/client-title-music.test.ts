@@ -24,6 +24,26 @@ function fixture() {
 }
 
 describe("optional title music", () => {
+	it("controls title music independently of the in-game master volume and mute", () => {
+		const { audio, music } = fixture();
+		for (const masterVolume of [0, 0.4, 1]) {
+			music.setSettings({
+				...CLIENT_AUDIO_DEFAULTS,
+				masterVolume,
+				musicVolume: 0.3,
+			});
+			expect(audio.volume).toBe(0.3);
+			expect(audio.muted).toBe(false);
+		}
+		music.setSettings({
+			...CLIENT_AUDIO_DEFAULTS,
+			musicVolume: 0.6,
+			muted: true,
+		});
+		expect(audio.volume).toBe(0.6);
+		expect(audio.muted).toBe(false);
+	});
+
 	it("plays once per selection visit, retains playback through updates, and restarts after world entry", () => {
 		const { audio, music } = fixture();
 		music.setSettings({
@@ -33,13 +53,13 @@ describe("optional title music", () => {
 		});
 		music.setActive(true);
 		expect(audio.loop).toBe(true);
-		expect(audio.volume).toBeCloseTo(0.12);
+		expect(audio.volume).toBeCloseTo(0.3);
 		audio.currentTime = 17;
 		music.setActive(true);
 		music.setSettings({ ...CLIENT_AUDIO_DEFAULTS, muted: true });
 		expect(audio.play).toHaveBeenCalledTimes(1);
 		expect(audio.currentTime).toBe(17);
-		expect(audio.muted).toBe(true);
+		expect(audio.muted).toBe(false);
 		music.setActive(false);
 		expect(audio.pause).toHaveBeenCalledOnce();
 		expect(audio.currentTime).toBe(0);
@@ -120,8 +140,8 @@ describe("optional title music", () => {
 		music.setForeground(true);
 		expect(audio.play).toHaveBeenCalledTimes(2);
 		expect(audio.currentTime).toBe(23);
-		expect(audio.volume).toBe(CLIENT_AUDIO_DEFAULTS.masterVolume * 0.37);
-		expect(audio.muted).toBe(true);
+		expect(audio.volume).toBe(0.37);
+		expect(audio.muted).toBe(false);
 	});
 
 	it("defers playback when selection first appears in the background", () => {

@@ -691,6 +691,9 @@ figcaption {
 	gap: 1.6rem;
 	margin-block: 1.8rem;
 }
+.editorial-spread:where(.editorial-spread--illustration-left) {
+	flex-direction: row-reverse;
+}
 .editorial-copy {
 	flex: 1 1 18rem;
 	min-width: 0;

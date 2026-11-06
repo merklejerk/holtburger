@@ -86,7 +86,7 @@ Recorded locations can be approximate or stale. They do not confirm that a corps
 | `/script MESSAGE`     | Send a message to the active script                             |
 | `/unrun`              | Stop the script and clear queued startup                        |
 
-Example: `/run fighter --aggro-dist 15`. See [running scripts](/holtburger/tui/running-scripts/) for startup and local-file precedence.
+Example: `/run hello a first test` with the [hello example](/holtburger/tui/scripting/). See [run and manage scripts](/holtburger/tui/scripting/#run-and-manage-scripts) for startup and local-file precedence.
 
 ## Client and character options
 

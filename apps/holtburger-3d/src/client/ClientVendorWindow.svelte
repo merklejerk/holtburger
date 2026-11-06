@@ -182,10 +182,6 @@
 			>
 				<div class="vendor-content" inert={current.quantityRequest !== null}>
 					<div class="vendor-catalog" data-vendor-catalog={current.vendor}>
-						<p class="vendor-hint">
-							Double-click or Enter to buy. Stackable items prompt for quantity.
-							Right-click or Examine ({examineShortcut.description}) to inspect.
-						</p>
 						{#each current.sections as section (section.name)}
 							<section aria-label={section.name}>
 								<h3>{section.name}</h3>
@@ -406,10 +402,6 @@
 		}
 		.vendor-catalog section + section {
 			margin-top: var(--ui-inventory-section-gap);
-		}
-		.vendor-hint {
-			margin: 0 0 var(--ui-inventory-section-gap);
-			color: var(--ui-color-muted);
 		}
 		.offer-details {
 			grid-column: 2 / -1;

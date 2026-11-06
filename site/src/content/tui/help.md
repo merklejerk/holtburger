@@ -16,7 +16,7 @@ Extract the complete release bundle and keep its prepared content alongside the 
 
 Enter the world before using `/run`. Use `/scripts` to check the active script, local directory and discovered names. A local script overrides a bundled one with the same basename.
 
-For the mage, keep the bundled data sidecars with the script. See [running scripts](/holtburger/tui/running-scripts/) for file layout and [runtime limits](/holtburger/tui/scripting/runtime/) if a custom script expects Node or Deno APIs.
+For the mage example, keep the bundled data sidecars with the script. See [files and persistence](/holtburger/tui/scripting/#files-and-persistence) for file layout and [runtime and events](/holtburger/tui/scripting/#runtime-and-events) if a custom script expects Node or Deno APIs.
 
 ## Report a problem
 

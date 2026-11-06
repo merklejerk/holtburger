@@ -31,7 +31,7 @@ Use the [platform quickstart](/holtburger/start/) for the executable or Flatpak 
 | `--run-args TEXT`   | Arguments for that queued script; requires `--run`  |
 | `--auto-quit`, `-Q` | Exit immediately on disconnect                      |
 
-For example, add `--character Bestie --run fighter --run-args '--aggro-dist 15'` to your connection command.
+After saving the [hello example](/holtburger/tui/scripting/), add `--character Bestie --run hello --run-args 'a first test'` to your connection command.
 
 `-Q` does not mean quiet or headless. Use an external supervisor if you want an exit to cause a restart.
 
@@ -57,7 +57,7 @@ Note that `-h` is the host option; use **`--help`** for help. Review logs and ca
 | `--script-fetch-timeout-ms NUMBER`         | Request timeout; defaults to 5000 ms                      |
 | `--script-fetch-max-response-bytes NUMBER` | Response size limit; defaults to 262144 bytes             |
 
-Without explicit allow-host options, only `localhost:9999` is allowed. See [HTTP integrations](/holtburger/tui/scripting/integrations/) for usage.
+Without explicit allow-host options, only `localhost:9999` is allowed. See [HTTP integrations](/holtburger/tui/scripting/#http-integrations) for usage.
 
 ## Script directories
 

@@ -405,15 +405,15 @@ export const media = {
 		height: 238
 	},
 	'tui-workflow': {
-		kind: 'planned-image',
+		kind: 'image',
 		title: 'The TUI at a glance',
-		brief: 'Keep pane boundaries, focus and footer shortcuts legible.'
-	},
-	'tui-script': {
-		kind: 'planned-video',
-		title: 'Run a bundled script',
-		brief:
-			'Start a fighter or mage, show its feedback, then stop it and resume manual control.'
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/tui/workflow-v1.webp'
+		},
+		alt: 'TUI dashboard with vitals and status, nearby entities, world chat, an NPC appraisal, footer shortcuts and command input.',
+		width: 1259,
+		height: 816
 	},
 	'combat-controls': {
 		kind: 'image',
@@ -425,6 +425,17 @@ export const media = {
 		alt: 'Melee HUD with the power arc, three attack-height choices, shortcut hints and Cancel attack control.',
 		width: 347,
 		height: 239
+	},
+	'unlock-helper': {
+		kind: 'image',
+		title: 'Choose how to unlock',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/unlock-helper-v1.webp'
+		},
+		alt: 'Unlock helper above an Aluvian Pathwarden Chest, offering Try all 1 key and Lockpick with a 0% success estimate.',
+		width: 549,
+		height: 307
 	},
 	locks: {
 		kind: 'video',
@@ -452,11 +463,11 @@ export const media = {
 		title: 'Review a vendor exchange',
 		source: {
 			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/vendor-v1.webp'
+			url: 'https://merklejerk.github.io/holtburger-media/3d/vendor-v2.webp'
 		},
-		alt: 'Vendor review with a Leather Basinet purchase, Leather Cap sale and projected balance.',
-		width: 362,
-		height: 382
+		alt: 'Shopkeeper Renald the Elder with armor offers, queued purchases and sale, and projected pyreal balance.',
+		width: 398,
+		height: 476
 	},
 	'player-trade': {
 		kind: 'image',
@@ -651,6 +662,39 @@ export const media = {
 		width: 359,
 		height: 326
 	},
+	'tui-vendor': {
+		kind: 'image',
+		title: 'Shop in the TUI',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/tui/vendor-v1.webp'
+		},
+		alt: 'Barkeeper Wilomine stock in the TUI Trade tab, with Red Wine selected, buy and sell multipliers, balance and Buy shortcut.',
+		width: 320,
+		height: 421
+	},
+	'tui-player-trade': {
+		kind: 'image',
+		title: 'Trade with another player in the TUI',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/tui/player-trade-v1.webp'
+		},
+		alt: 'TUI player trade with an Acid Yari offered for a Mana Forge Key and Lead Pea, plus the switch-side hint and Accept, Exit and Reset shortcuts.',
+		width: 312,
+		height: 388
+	},
+	'tui-item-appraisal': {
+		kind: 'image',
+		title: 'Appraise an item in the TUI',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/tui/item-appraisal-v1.webp'
+		},
+		alt: 'Acid Yari appraisal in the TUI context pane, showing weapon stats, wield and use requirements, bonuses, spells and an embedded gem.',
+		width: 317,
+		height: 639
+	},
 	'tui-gameplay': {
 		kind: 'planned-image',
 		title: 'A TUI quantity prompt',
@@ -661,11 +705,11 @@ export const media = {
 		title: 'A closer look',
 		source: {
 			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/creature-appraisal-v1.webp'
+			url: 'https://merklejerk.github.io/holtburger-media/3d/creature-appraisal-v2.webp'
 		},
-		alt: 'Player appraisal with a 3D character model, identity and vitals.',
-		width: 378,
-		height: 458
+		alt: 'Brighteyes appraisal with a 3D model, identity, vitals, attributes and protection.',
+		width: 317,
+		height: 598
 	},
 	'item-appraisal': {
 		kind: 'image',
@@ -693,11 +737,11 @@ export const media = {
 		title: 'The equipment strip',
 		source: {
 			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/equipment-strip-v4.webp'
+			url: 'https://merklejerk.github.io/holtburger-media/3d/equipment-strip-v5.webp'
 		},
 		alt: 'Equipment strip with worn slots, scroll controls and helmet, cloak and loadout buttons.',
-		width: 77,
-		height: 283
+		width: 99,
+		height: 628
 	},
 	'inventory-merge': {
 		kind: 'image',
@@ -857,9 +901,4 @@ export const galleryImages: MediaId[] = [
 	'characters',
 	'terminal'
 ];
-export const galleryClips: MediaId[] = [
-	'smart-tab',
-	'jump-demo',
-	'loadouts',
-	'tui-script'
-];
+export const galleryClips: MediaId[] = ['smart-tab', 'jump-demo', 'loadouts'];

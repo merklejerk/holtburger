@@ -14,7 +14,6 @@ type MusicAudio = Pick<
 	| "loop"
 	| "preload"
 	| "volume"
-	| "muted"
 	| "src"
 	| "currentTime"
 	| "error"
@@ -60,8 +59,8 @@ export class ClientTitleMusic {
 
 	setSettings(settings: ClientAudioSettings): void {
 		if (this.#audio === null || this.#destroyed) return;
-		this.#audio.volume = settings.masterVolume * settings.musicVolume;
-		this.#audio.muted = settings.muted;
+		// Title music has its own level, independent of in-game master volume and mute.
+		this.#audio.volume = settings.musicVolume;
 	}
 
 	setActive(active: boolean): void {

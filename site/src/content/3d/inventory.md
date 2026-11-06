@@ -6,6 +6,7 @@ section: '3D client'
 
 <script>
 import Media from '#lib/components/Media.svelte';
+import EditorialSpread from '#lib/components/EditorialSpread.svelte';
 </script>
 
 ## See your packs together
@@ -18,11 +19,17 @@ Cycle the sort control through **Native**, **Alphabetical**, and **Item type** t
 
 ## Equipment at a glance
 
+<EditorialSpread illustrationSide="left">
+
 The equipment strip keeps worn gear beside your pack contents. Hover a slot to dim items that cannot go there; drag an item to narrow the strip to compatible slots. Drop it onto a slot to equip it, or drag worn gear back into a bag to unequip it.
 
 Helmet and cloak visibility controls sit below the strip, alongside **Create loadout** for [saved gear swaps](/holtburger/3d/equipment-loadouts/).
 
+{#snippet illustration()}
 <Media id="equipment-strip" detail />
+{/snippet}
+
+</EditorialSpread>
 
 ## Check your currencies
 

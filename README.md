@@ -31,7 +31,8 @@ establishing the shared Rust systems that now power both clients.
   Asheron's Call game files.
 - **Terminal client (TUI):** gameplay and JavaScript scripting through Deno Core,
   without rendering a 3D world. The preferred form factor for automation and bots.
-  Release bundles include prepared reference/navigation data and fighter/mage scripts.
+  Release bundles include prepared reference/navigation data and fully functional
+  fighter and mage combat bots as examples to study and adapt.
 
 h3d has no plugin system yet. Plugins and scripting are planned, including
 support for automation. Existing Decal plugins and profiles cannot be imported.
@@ -86,8 +87,8 @@ and simulation behavior. [Command-line tools](apps/holtburger-tools) and the
 [debug harness](crates/holtburger-debug-harness) support asset conversion, protocol
 investigation, and focused diagnostics.
 
-For terminal scripting, see [your first script](https://merklejerk.github.io/holtburger/tui/scripting/)
-and the bundled [example scripts](apps/holtburger-cli/scripts).
+For terminal scripting, see the [scripting guide](https://merklejerk.github.io/holtburger/tui/scripting/)
+and the bundled [example combat bots](apps/holtburger-cli/scripts).
 
 ## Development
 

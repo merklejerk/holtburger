@@ -18,4 +18,4 @@ Run from the extracted directory:
 
 Use `./holtburger-cli.exe` in Windows PowerShell. Flatpak launch commands are in the Linux instructions. Use your server's actual address, port and account credentials.
 
-Once connected, [find your way around](/holtburger/tui/basics/) or [run a script](/holtburger/tui/running-scripts/).
+Once connected, [find your way around](/holtburger/tui/basics/) or [run a script](/holtburger/tui/scripting/#run-and-manage-scripts).

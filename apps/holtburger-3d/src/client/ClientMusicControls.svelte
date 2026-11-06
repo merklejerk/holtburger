@@ -70,9 +70,6 @@
 			/>
 			<span>{Math.round(audio.musicVolume * 100)}%</span>
 		</label>
-		{#if audio.muted || audio.masterVolume === 0}
-			<small>Master audio is muted</small>
-		{/if}
 	</div>
 </div>
 
@@ -109,10 +106,6 @@
 			direction: rtl;
 			inline-size: 8rem;
 			--ui-range-fill-direction: 0deg;
-		}
-		.music-popup small {
-			display: block;
-			margin-top: 8px;
 		}
 	}
 </style>

@@ -1,12 +1,8 @@
 # Holtburger scripting
 
-The player-facing scripting guide lives on the website:
-
-- [Write your first script](https://merklejerk.github.io/holtburger/tui/scripting/)
-- [Runtime and persistence](https://merklejerk.github.io/holtburger/tui/scripting/runtime/)
-- [API reference](https://merklejerk.github.io/holtburger/tui/scripting/reference/)
-- [HTTP integrations](https://merklejerk.github.io/holtburger/tui/scripting/integrations/)
-- [Run scripts in the TUI](https://merklejerk.github.io/holtburger/tui/running-scripts/)
+The player-facing [scripting guide](https://merklejerk.github.io/holtburger/tui/scripting/)
+covers writing and running scripts, the API, persistence, HTTP integrations and
+bundled examples.
 
 For local authoring, use [holtburger.d.ts](holtburger.d.ts) as the API contract.
 The website copies that file for download and checks its runnable examples against

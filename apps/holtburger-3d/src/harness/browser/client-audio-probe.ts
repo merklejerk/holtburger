@@ -281,15 +281,21 @@ async function probeTitleMusic() {
 		await new Promise<void>((resolve) => setTimeout(resolve, 150));
 		const advanced = audio.currentTime > 0;
 		const volume = audio.volume;
-		music.setSettings({ ...CLIENT_AUDIO_DEFAULTS, muted: true });
+		music.setSettings({
+			...CLIENT_AUDIO_DEFAULTS,
+			masterVolume: 0,
+			musicVolume: 0.3,
+			muted: true,
+		});
 		const muted = audio.muted;
 		music.setActive(false);
 		const stopped = audio.paused && audio.currentTime === 0;
 		if (
 			!advanced ||
 			!stopped ||
-			!muted ||
-			Math.abs(volume - 0.12) > 0.00001 ||
+			muted ||
+			Math.abs(volume - 0.3) > 0.00001 ||
+			audio.volume !== volume ||
 			failures.length
 		)
 			throw new Error("Title music lifecycle or mix failed");

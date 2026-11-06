@@ -18,11 +18,9 @@ The dashboard brings together nearby entities, inventory, equipment, spells, cha
 
 ## A client you can script
 
-Run the bundled fighter or mage, or write JavaScript against structured state, events and actions. One script runs at a time; starting another replaces it.
+Write JavaScript against structured state, events and actions. One script runs at a time; starting another replaces it. The bundled fighter and mage are fully functional combat bots provided as examples to study and adapt when building your own scripts.
 
-<Media id="tui-script" />
-
-Start with [running scripts](/holtburger/tui/running-scripts/) and the [bundled fighter and mage](/holtburger/tui/bundled-scripts/), or [write your own](/holtburger/tui/scripting/).
+The [scripting guide](/holtburger/tui/scripting/) covers writing and running scripts, the API, persistence and HTTP integrations.
 
 ## Set expectations
 

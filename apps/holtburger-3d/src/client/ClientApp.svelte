@@ -41,6 +41,7 @@
 	import { runClientVersionCommand } from "./client-version-command";
 	import { isLogopolisCommand } from "./client-logopolis";
 	import { runClientLocationCommand } from "./client-location-command";
+	import { runClientCopyEntityCommand } from "./client-copy-entity-command";
 	import { ClientDeathCommands } from "./client-death-commands";
 	import { runRecallCommand } from "./client-recall-command";
 	import { runClientHelpCommand } from "./client-command-help";
@@ -1493,6 +1494,14 @@
 			throw new Error("Command session is unavailable.");
 		const generation = chatComposer.generation;
 		const handled =
+			(await runClientCopyEntityCommand(
+				message,
+				readSelectedEntity,
+				(notice) => {
+					// Clipboard completion can outlive the character/session that requested it.
+					if (chatComposer.generation === generation) appendChatLine(notice);
+				},
+			)) ||
 			(await deathCommands.run(message)) ||
 			(await runRecallCommand(message, (destination) =>
 				currentSession.recall(destination),

@@ -44,6 +44,7 @@
 	import { nearbySceneInterest } from "../../client/client-nearby.test-support";
 	import { runClientHelpCommand } from "../../client/client-command-help";
 	import { runClientVersionCommand } from "../../client/client-version-command";
+	import { runClientCopyEntityCommand } from "../../client/client-copy-entity-command";
 	import {
 		PARTY_HUD_PREVIEW,
 		PARTY_HUD_MAXIMUM_COLUMNS,
@@ -1220,6 +1221,8 @@
 			/** Recreate the composer from synthetic saved user settings. */
 			readonly restart: () => Promise<void>;
 			readonly select: (target: ClientChatTellTarget | null) => void;
+			/** Set the production selection used by entity debugging commands. */
+			readonly selectEntity: (guid: number | null) => void;
 			readonly receive: (message: ClientChatMessage) => void;
 			readonly rejectNextSend: () => void;
 			readonly rejectAfter: (successes: number) => void;
@@ -5298,6 +5301,7 @@
 					chatComposer.setSelection(
 						target === null ? { kind: "none" } : { kind: "target", target },
 					),
+				selectEntity: (guid) => selection.select(guid),
 				receive: (message) =>
 					emitInteractionEvent("client-chat-message", message),
 				rejectAfter: (successes) => {
@@ -6657,6 +6661,7 @@
 					{chatComposer}
 					{sentChatHistory}
 					onSendChat={async (message, resolution) => {
+						const generation = chatComposer.generation;
 						sentChatHistory = recordSentChat(
 							sentChatHistory,
 							message,
@@ -6682,6 +6687,17 @@
 						} else if (runClientHelpCommand(message, appendChat)) {
 							return;
 						} else if (runClientVersionCommand(message, appendChat)) {
+							return;
+						} else if (
+							await runClientCopyEntityCommand(
+								message,
+								readSelectedEntity,
+								(notice) => {
+									if (chatComposer.generation === generation)
+										appendChat(notice);
+								},
+							)
+						) {
 							return;
 						} else if (waypointProbeEnabled) submitWaypointChat(message);
 						else if (message.startsWith("/"))

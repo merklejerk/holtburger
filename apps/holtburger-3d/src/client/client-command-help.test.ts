@@ -59,6 +59,7 @@ describe("h3d command help", () => {
 				"/allegiance hometown",
 				"/waypoint [coordinates|clear]",
 				"/loc",
+				"/copyent",
 				"/tell <player>, <message>",
 				"/tellselected <message>",
 				"/reply <message>",

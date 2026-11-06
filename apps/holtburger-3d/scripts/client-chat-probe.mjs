@@ -61,7 +61,87 @@ export async function probeClientChat(client, evaluateExpression) {
 	};
 	const lastRequest = async () => (await read()).requests.at(-1);
 	const npc = { kind: "npc", guid: 0x80000001, name: "Professor of War Magic" };
+	await client.send("Browser.grantPermissions", {
+		origin: await evaluate("location.origin"),
+		permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+	});
 	try {
+		await invoke("reset");
+		await invoke("selectEntity", 7);
+		await send("/copyent");
+		// The first Enter accepts command completion; the second submits it.
+		await press("Enter", "Enter", 13);
+		const entityReport = await evaluate(
+			"navigator.clipboard.readText().then(JSON.parse)",
+		);
+		assert.equal(entityReport.report, "h3d selected entity");
+		assert.equal(entityReport.guid, 7);
+		assert.equal(entityReport.guidHex, "0x00000007");
+		assert.ok(entityReport.build.length > 0);
+		assert.ok(entityReport.facts !== null);
+		assert.ok(entityReport.presentation !== null);
+		assert.equal((await read()).requests.length, 0);
+		assert.ok(
+			(await read()).retainedMessages.some(
+				(line) =>
+					line.kind === "system" &&
+					line.message === "Entity 0x00000007 report copied to clipboard.",
+			),
+		);
+		await evaluate(`globalThis.__copyentOriginalWriteText = navigator.clipboard.writeText;
+			navigator.clipboard.writeText = async () => { throw new Error('Copyent clipboard probe rejection'); }`);
+		try {
+			await send("@copyent");
+			await press("Enter", "Enter", 13);
+			const retained = (await read()).retainedMessages;
+			assert.ok(
+				retained.some(
+					(line) =>
+						line.kind === "system" &&
+						line.message.includes('"report": "h3d selected entity"'),
+				),
+			);
+			assert.ok(
+				retained.some(
+					(line) =>
+						line.kind === "error" &&
+						line.message.includes("Copyent clipboard probe rejection"),
+				),
+			);
+		} finally {
+			await evaluate(
+				"navigator.clipboard.writeText = globalThis.__copyentOriginalWriteText; delete globalThis.__copyentOriginalWriteText",
+			);
+		}
+		for (const outcome of ["resolve", "reject"]) {
+			await invoke("reset");
+			await evaluate(`globalThis.__copyentOriginalWriteText = navigator.clipboard.writeText;
+				navigator.clipboard.writeText = () => new Promise((resolve, reject) => {
+					globalThis.__copyentFinish = () => ${outcome === "resolve" ? "resolve()" : "reject(new Error('Retired clipboard request'))"};
+				});`);
+			try {
+				await send("/copyent");
+				await press("Enter", "Enter", 13);
+				assert.equal(
+					await evaluate("typeof globalThis.__copyentFinish"),
+					"function",
+				);
+				await invoke("reset");
+				const retainedCount = (await read()).retainedMessages.length;
+				await evaluate("globalThis.__copyentFinish()");
+				await settle();
+				assert.equal(
+					(await read()).retainedMessages.length,
+					retainedCount,
+					"Retired clipboard completion must not publish into the replacement chat generation",
+				);
+			} finally {
+				await evaluate(
+					"navigator.clipboard.writeText = globalThis.__copyentOriginalWriteText; delete globalThis.__copyentOriginalWriteText; delete globalThis.__copyentFinish",
+				);
+			}
+		}
+		await invoke("selectEntity", null);
 		await invoke("reset");
 		for (const notice of [
 			{ kind: "system", message: "Local notice probe" },
@@ -648,6 +728,7 @@ export async function probeClientChat(client, evaluateExpression) {
 		);
 		await evaluate("getSelection().removeAllRanges()");
 		return {
+			entityClipboardReport: true,
 			channelPrefixTheme: true,
 			picker: true,
 			commandOverrides: true,

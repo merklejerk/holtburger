@@ -188,6 +188,14 @@ export const LOCAL_COMMANDS = {
 			"Reports cells, positions, and orientations in their coordinate frames. The report remains in chat if copying to the clipboard fails.",
 		],
 	},
+	copyent: {
+		...invocation(["copyent"], ""),
+		description: "Copy the selected entity's debugging report.",
+		details: [
+			"Select a world or inventory entity, then use /copyent to copy JSON containing the client build, entity facts, and available host presentation data. Unavailable facts or presentation are null; this is not a complete server entity dump.",
+			"The full report is printed locally in chat if clipboard copying fails.",
+		],
+	},
 } satisfies Record<string, ClientCommandDefinition>;
 
 export const CHAT_COMMANDS = {

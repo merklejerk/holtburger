@@ -5757,6 +5757,7 @@
 					commands: interactionCommands,
 				}),
 			probeWorldContainer: async () => {
+				const previousScale = userSettings.ui.uiScale;
 				// Match ClientApp's feedback composition for server-refused transfer fixtures.
 				const unsubscribe = interactionLifecycle.subscribe((event) => {
 					if (event.type === "action-feedback")
@@ -5768,8 +5769,18 @@
 						selection,
 						interactions: itemInteractions,
 						commands: interactionCommands,
+						setUiScale: (uiScale) => {
+							userSettings = {
+								...userSettings,
+								ui: { ...userSettings.ui, uiScale },
+							};
+						},
 					});
 				} finally {
+					userSettings = {
+						...userSettings,
+						ui: { ...userSettings.ui, uiScale: previousScale },
+					};
 					unsubscribe();
 				}
 			},

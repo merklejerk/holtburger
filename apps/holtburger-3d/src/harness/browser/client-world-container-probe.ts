@@ -7,12 +7,15 @@ import { entityFacts } from "../../client/client-entity-mirror.test-support";
 import type { ClientEntitySelection } from "../../client/client-entity-selection";
 import type { ClientItemInteractions } from "../../client/client-item-interactions";
 import { CLIENT_TUNING } from "../../client/client-tuning";
+import { CLIENT_UI_SCALE } from "../../client/client-settings-values";
 
 /** Real session, production popup and DOM gestures with synthetic authoritative records. */
 export async function probeWorldContainer(options: {
 	readonly emit: (event: string, payload: unknown) => void;
 	readonly selection: ClientEntitySelection;
 	readonly interactions: ClientItemInteractions;
+	/** Apply the production UI preference before measuring a new opening. */
+	readonly setUiScale: (scale: number) => void;
 	readonly commands: readonly {
 		readonly command: string;
 		readonly args: Record<string, unknown> | undefined;
@@ -227,6 +230,8 @@ export async function probeWorldContainer(options: {
 			.filter((command) => command.command === "submit_client_inventory");
 	// Observe animation frames, not just the settled DOM: no default-size flash is allowed.
 	const openingSizes: {
+		/** Applied UI preference for this opening's geometry evidence. */
+		scale: number;
 		count: number;
 		columns: number;
 		width: number;
@@ -241,7 +246,15 @@ export async function probeWorldContainer(options: {
 		openingGrid.maxColumns * openingGrid.maxRows,
 		openingGrid.maxColumns * openingGrid.maxRows + 1,
 	];
-	for (const [index, count] of sizingCounts.entries()) {
+	const sizingCases = [
+		CLIENT_UI_SCALE.initial,
+		CLIENT_UI_SCALE.minimum,
+		1.25,
+		CLIENT_UI_SCALE.maximum,
+	].flatMap((scale) => sizingCounts.map((count) => ({ scale, count })));
+	for (const [index, { scale, count }] of sizingCases.entries()) {
+		options.setUiScale(scale);
+		await tick();
 		const guid = 500 + index;
 		const sizingRoot = named(guid, "Sizing chest", {
 			storage: {
@@ -300,21 +313,31 @@ export async function probeWorldContainer(options: {
 				? openingGrid.maxColumns
 				: openingGrid.minColumns;
 		require(columns ===
-			expected, `Opening ${count} items produced ${columns} columns, expected ${expected}`);
+			expected, `Opening ${count} items at scale ${scale} produced ${columns} columns, expected ${expected}`);
 		require(firstVisible[0]?.width === box.width &&
 			firstVisible[0]?.height ===
 				box.height, "Container resized after its first visible frame");
 		const scroll = element<HTMLElement>(
 			".world-container-panel .contents-scroll",
 		);
+		// Large UI scales can legitimately exhaust the space below the saved window anchor.
+		const viewportBottom = element<HTMLElement>(".gameplay-controls")
+			.getBoundingClientRect().bottom;
+		const heightClamped = Math.abs(box.bottom - viewportBottom) < 1;
 		if (count > openingGrid.maxColumns * openingGrid.maxRows)
 			require(scroll.scrollHeight >
 				scroll.clientHeight, "Large container did not scroll at its opening cap");
-		else
+		else if (!heightClamped)
 			require(scroll.scrollHeight <=
 				scroll.clientHeight +
-					1, `Opening ${count} items clipped its fitted contents`);
-		openingSizes.push({ count, columns, width: box.width, height: box.height });
+					1, `Opening ${count} items at scale ${scale} clipped its fitted contents`);
+		openingSizes.push({
+			scale,
+			count,
+			columns,
+			width: box.width,
+			height: box.height,
+		});
 		// Later hydration/content changes must not replace this opening's chosen geometry.
 		emit("client-entity-facts-changed", {
 			projectileSupply: null,
@@ -338,6 +361,8 @@ export async function probeWorldContainer(options: {
 		require(after.width === box.width &&
 			after.height === box.height, "Contents update resized an open container");
 	}
+	options.setUiScale(CLIENT_UI_SCALE.initial);
+	await tick();
 	populated();
 	await sample();
 	require(element<HTMLButtonElement>(

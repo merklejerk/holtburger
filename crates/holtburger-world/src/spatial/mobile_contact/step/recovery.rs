@@ -5,38 +5,6 @@ use crate::spatial::{
     PlacementRequest, bsp_query::CONTACT_EPSILON, volume_query::placed_shape_contacts,
 };
 
-/// Tests direct player contact using the same prepared response permissions and body spheres.
-pub(crate) fn has_player_contact(body: &SpatialBody, player: Option<&SpatialBody>) -> Result<bool> {
-    let Some(player) = player else {
-        return Ok(false);
-    };
-    let anchor = Guid(body.pose.landblock_id.0 | 0xffff);
-    let Some(actor) = PreparedBodyContact::from_body(body, anchor)? else {
-        return Ok(false);
-    };
-    let PreparedContactRole::Mover { body: mobile, .. } = actor.role else {
-        return Ok(false);
-    };
-    let Some(player) = PreparedBodyContact::from_body(player, anchor)? else {
-        return Ok(false);
-    };
-    if !actor
-        .participant
-        .receives_response_from(&player.participant)
-    {
-        return Ok(false);
-    }
-    let PreparedContactRole::Mover { body: player, .. } = player.role else {
-        return Ok(false);
-    };
-    Ok(mobile.spheres.iter().any(|first| {
-        player.spheres.iter().any(|second| {
-            (first.center - second.center).length()
-                <= first.radius + second.radius + MOBILE_CONTACT_TOLERANCE_METERS
-        })
-    }))
-}
-
 /// Candidate must already have destination membership and reset kinematics. Support recovery
 /// may lift it by the existing step allowance; final directionless clearance has the last word.
 pub(crate) fn checked_recovery_destination(
@@ -57,11 +25,9 @@ pub(crate) fn checked_recovery_destination(
         return Ok(None);
     };
     let mut hard = Vec::new();
+    let mut mobiles = Vec::new();
     for peer in peers.iter().filter(|peer| peer.id != candidate.id) {
         let Some(contact) = PreparedBodyContact::from_body(peer, anchor)? else {
-            continue;
-        };
-        let PreparedContactTarget::Hard(geometry) = contact.source.target else {
             continue;
         };
         if !actor
@@ -70,10 +36,14 @@ pub(crate) fn checked_recovery_destination(
         {
             continue;
         }
-        hard.push(SweepTarget {
-            contact: contact.participant,
-            shapes: placed_target_shapes(geometry, peer.pose, anchor)?,
-        });
+        if let PreparedContactTarget::Hard(geometry) = contact.source.target {
+            hard.push(SweepTarget {
+                contact: contact.participant,
+                shapes: placed_target_shapes(geometry, peer.pose, anchor)?,
+            });
+        } else if let PreparedContactRole::Mover { body, .. } = contact.role {
+            mobiles.push((contact.participant, body));
+        }
     }
     let hard = super::HardTargets::new(hard)?;
     let mut working = WorkingBody::new(
@@ -97,6 +67,21 @@ pub(crate) fn checked_recovery_destination(
             .any(|contact| contact.depth > CONTACT_EPSILON)
         {
             return Ok(None);
+        }
+        // Recovery skips the old route, but its supported endpoint must clear every blocking
+        // mobile body. Current player contact does not make a clear destination unsafe.
+        for (participant, mobile) in &mobiles {
+            if working
+                .contact
+                .membership
+                .intersects_reached(&participant.membership)
+                && mobile.spheres.iter().any(|other| {
+                    sphere.radius + other.radius - (sphere.center - other.center).length()
+                        > CONTACT_EPSILON
+                })
+            {
+                return Ok(None);
+            }
         }
         for target in hard.iter()? {
             if !working

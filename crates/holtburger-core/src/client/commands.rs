@@ -1166,7 +1166,7 @@ impl ClientRuntime {
                 }
                 log::info!(">>> Queueing self drive intent: {:?}", intent);
                 if intent.interrupts_combat() {
-                    self.interrupt_combat_for_player_movement(Instant::now());
+                    self.interrupt_combat_for_player_movement();
                 }
                 self.movement.enqueue_drive_intent(intent, Instant::now());
                 Ok(())

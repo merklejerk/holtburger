@@ -194,7 +194,7 @@ impl ClientRuntime {
                             self.cancel_rest_posture();
                         }
                         if self.server_motion_interrupts_combat(data) {
-                            self.interrupt_combat_for_movement(std::time::Instant::now());
+                            self.interrupt_combat_for_movement();
                         }
                         self.movement
                             .record_server_control_sequence(data.server_control_sequence);

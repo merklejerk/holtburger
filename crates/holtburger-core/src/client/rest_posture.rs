@@ -109,7 +109,7 @@ impl ClientRuntime {
             return Ok(());
         }
         let now = Instant::now();
-        self.interrupt_combat_for_movement(now);
+        self.interrupt_combat_for_movement();
         self.movement
             .enqueue_drive_intent(PlayerDriveIntent::Stop, now);
         // Standing does not require leaving combat. Resting deliberately remains peaceful:

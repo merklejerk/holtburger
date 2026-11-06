@@ -980,13 +980,14 @@ fn server_directed_local_travel_reaches_destination_height_without_fabricating_c
 }
 
 #[test]
-fn sticky_local_simulation_follows_canonical_height_with_clearance_and_one_translation_owner() {
+fn sticky_local_simulation_follows_received_height_with_clearance_and_one_translation_owner() {
     use crate::client::{
         movement::MovementSystem, movement_types::ClientMovementPolicy, simulation,
     };
     use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut};
     use holtburger_content::{SetupDimensionCatalog, SetupDimensions};
-    use holtburger_protocol::messages::movement::MotionStance;
+    use holtburger_protocol::messages::movement::{MotionStance, PositionPack};
+    use holtburger_protocol::messages::{GameMessage, UpdatePositionData};
     use holtburger_world::entity::{Entity, EntityMotionSnapshot, EntityNetworkMotion};
     use holtburger_world::motion::MotionCommand;
     use holtburger_world::state::motion_resolution::test_support::{
@@ -1072,6 +1073,16 @@ fn sticky_local_simulation_follows_canonical_height_with_clearance_and_one_trans
         SpatialSampleMode::SimulatingMotionState,
     );
     simulation::tick(now + dt, dt, &mut world, &mut movement, Some(&snapshot)).unwrap();
+    assert_eq!(world.local_player_runtime_pose(), Some(first));
+    world.handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+        guid: target,
+        pos: PositionPack {
+            pos: target_pose,
+            position_sequence: 1,
+            ..Default::default()
+        },
+    })));
+    simulation::tick(now + dt * 2, dt, &mut world, &mut movement, Some(&snapshot)).unwrap();
     let followed = world.local_player_runtime_pose().unwrap();
     assert!(followed.coords.z > first.coords.z);
     assert!((followed.distance_to(&target_pose) - sample.clearance).abs() < 0.0001);
@@ -1080,7 +1091,7 @@ fn sticky_local_simulation_follows_canonical_height_with_clearance_and_one_trans
     assert_eq!(body.contact, ContactState::Unknown);
 
     world.admit_entity_sticky_target(actor, None);
-    simulation::tick(now + dt * 2, dt, &mut world, &mut movement, Some(&snapshot)).unwrap();
+    simulation::tick(now + dt * 3, dt, &mut world, &mut movement, Some(&snapshot)).unwrap();
     assert_eq!(world.local_player_runtime_pose(), Some(followed));
 }
 

@@ -14,8 +14,8 @@ use crate::{
 };
 
 use crate::motion::{
-    AuthoredCollisionPose, MotionContact, MotionOrder, ServerDirectedMotionResolution,
-    begin_server_directed_motion, resolve_server_directed_motion,
+    AuthoredCollisionPose, MotionCommand, MotionContact, MotionOrder,
+    ServerDirectedMotionResolution, begin_server_directed_motion, resolve_server_directed_motion,
 };
 use crate::state::motion_resolution::test_support::{
     FIXTURE_STAND_COMMAND, FixtureCycle, explicit_motion_catalog,
@@ -5570,7 +5570,7 @@ fn sticky_preparation_samples_scaled_setup_clearance_heading_and_target_loss() {
 }
 
 #[test]
-fn position_only_sticky_waits_for_dimensions_and_retires_missing_targets() {
+fn position_only_sticky_requires_dimensions_and_tracks_received_targets() {
     use holtburger_common::properties::PropertyDataId;
     use holtburger_content::{SetupDimensionCatalog, SetupDimensions};
     let mut world = WorldState::synthetic();
@@ -5635,6 +5635,18 @@ fn position_only_sticky_waits_for_dimensions_and_retires_missing_targets() {
         sample.clearance,
         radius * 2.0 + radius + super::motion_resolution::STICKY_TARGET_CLEARANCE_M
     );
+    assert_eq!(sample.heading, pose.rotation.to_heading());
+    // Charge completion must not hand sticky movement a different, predicted target frame.
+    let received = world.entities.get(target).unwrap().position;
+    world
+        .scene
+        .body_mut(SpatialBodyId::Entity(target))
+        .unwrap()
+        .pose
+        .coords
+        .x = radius * 20.0;
+    let sample = world.prepare_position_only_sticky_target(actor).unwrap();
+    assert_eq!(sample.position, received);
     assert_eq!(sample.heading, pose.rotation.to_heading());
     assert!(world.prepare_sticky_body_targets().is_empty());
     assert!(world.scene.body_for_guid(actor).unwrap().physical.is_none());
@@ -5823,6 +5835,130 @@ fn login_combat_mode_defaults_to_peace_without_overriding_explicit_server_modes(
 }
 
 #[test]
+fn local_server_approach_tracks_received_target_while_remote_prediction_tracks_runtime() {
+    let actor = Guid(1);
+    let target = Guid(2);
+    let origin = WorldPosition {
+        landblock_id: Guid(0xda55_0020),
+        rotation: Quaternion::from_heading(std::f32::consts::PI),
+        ..WorldPosition::default()
+    };
+    let received = WorldPosition {
+        coords: Vector3::new(3.0, 0.0, 0.0),
+        ..origin
+    };
+    let predicted = WorldPosition {
+        coords: Vector3::new(1.25, 0.0, 0.0),
+        ..origin
+    };
+    for local_actor in [true, false] {
+        let mut world = WorldState::synthetic();
+        if local_actor {
+            world.player.guid = actor;
+        }
+        world.add_entity(Entity::new(actor, "Actor".into(), origin));
+        world.add_entity(Entity::new(target, "Target".into(), received));
+        for guid in [actor, target] {
+            world
+                .scene
+                .set_dynamic_physical_body(
+                    world.authoritative_body_id_for_guid(guid).unwrap(),
+                    Some(set_state_dynamic_definition()),
+                    crate::PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+        }
+        world
+            .scene
+            .body_mut(SpatialBodyId::Entity(target))
+            .unwrap()
+            .pose = predicted;
+        let sample = world.server_directed_target(actor, target).unwrap();
+        let expected_pose = if local_actor { received } else { predicted };
+        assert_eq!(sample.pose, expected_pose);
+        // Both prepared setups have half-metre radii; prediction puts the target in melee
+        // range while the received position still requires forward approach.
+        let radius_sum = set_state_dynamic_definition()
+            .definition()
+            .entity_collision
+            .target_geometry
+            .setup_radius
+            * 2.0;
+        assert_eq!(
+            sample.cylinder_distance,
+            Some(origin.distance_to(&expected_pose) - radius_sum)
+        );
+        let scalar = |value| OrderedMotionScalar::from_f32(value).unwrap();
+        let directive = EntityMotionDirective::MoveToObject {
+            admission: EntityMotionAdmission {
+                object_instance_sequence: 1,
+                movement_sequence: 1,
+                server_control_sequence: 1,
+                is_autonomous: false,
+            },
+            target,
+            fallback_target: OrderedMotionPosition {
+                cell_id: received.landblock_id,
+                x: scalar(received.coords.x),
+                y: scalar(received.coords.y),
+                z: scalar(received.coords.z),
+            },
+            params: EntityMoveToParameters {
+                flags: 0x601, // CanWalk | MoveTowards | UseSpheres.
+                distance_to_object: scalar(0.6),
+                min_distance: scalar(0.0),
+                fail_distance: scalar(15.0),
+                speed: scalar(1.5),
+                walk_run_threshold: scalar(1.0),
+                desired_heading_degrees: scalar(0.0),
+            },
+            run_rate: scalar(4.5),
+        };
+        let state = begin_server_directed_motion(directive, origin, Some(sample));
+        let resolve = |state, pose, sample| {
+            resolve_server_directed_motion(
+                state,
+                MotionOrder::default(),
+                pose,
+                crate::motion::DirectedMotionSupport::PositionOnly,
+                Some(sample),
+            )
+        };
+        if local_actor {
+            let ServerDirectedMotionResolution::Active(approach) = resolve(state, origin, sample)
+            else {
+                panic!("local charge must not finish at the predicted target");
+            };
+            assert!(
+                approach
+                    .order
+                    .forward
+                    .is_some_and(|(command, _)| command == MotionCommand::WALK_FORWARD)
+            );
+            let mut arrived = origin;
+            arrived.coords.x = received.coords.x - radius_sum;
+            let actor_body = world.runtime_body_id_for_guid(actor).unwrap();
+            world.scene.body_mut(actor_body).unwrap().pose = arrived;
+            let sample = world.server_directed_target(actor, target).unwrap();
+            assert_eq!(
+                resolve(approach.state, arrived, sample),
+                ServerDirectedMotionResolution::Complete {
+                    sticky_target: None
+                }
+            );
+        } else {
+            assert_eq!(
+                resolve(state, origin, sample),
+                ServerDirectedMotionResolution::Complete {
+                    sticky_target: None
+                }
+            );
+        }
+    }
+}
+
+#[test]
 fn use_range_and_directed_approach_share_scaled_body_distance_and_pending_geometry() {
     let mut world = WorldState::synthetic();
     let actor = Guid(0x5000_0201);
@@ -5932,15 +6068,14 @@ fn use_range_and_directed_approach_share_scaled_body_distance_and_pending_geomet
         .floats
         .insert(PropertyFloat::UseRadius, 1.0);
     assert_eq!(world.within_use_radius(actor, target), Some(true));
-    // Semantic/server placement can lag simulation; it must not replace the canonical body pose.
+    // Local use retention keeps canonical body range. A server-owned approach instead follows
+    // the received target position, even when local prediction would already permit use.
     world.entities.get_mut(target).unwrap().position.coords.x = 100.0;
     assert_eq!(world.within_use_radius(actor, target), Some(true));
-    assert_eq!(
+    assert!(matches!(
         resolve(&world),
-        ServerDirectedMotionResolution::Complete {
-            sticky_target: None
-        }
-    );
+        ServerDirectedMotionResolution::Active(_)
+    ));
     world
         .scene
         .set_dynamic_physical_body(

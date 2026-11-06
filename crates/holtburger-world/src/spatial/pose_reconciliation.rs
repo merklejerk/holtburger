@@ -230,10 +230,13 @@ struct ConfirmedTravelConstraint {
 
 /// One moving reference, separate from the body's canonical collision/presentation pose.
 ///
-/// RETAIL DIVERGENCE: explicitly requested local displacement replaces physical interpolation
-/// takeover and failed-node placement. Restoring placement would move correcting mobs through
+/// RETAIL DIVERGENCE: Retail behavior is to replace ordinary translation with interpolation
+/// and fall back to placement after stalled progress. Physical return instead adds swept
+/// correction to ordinary motion; stalled grounded recovery validates its destination against
+/// static and mobile blockers. Replacing ordinary travel could move correcting mobs through
 /// the player. The synthetic 200-tick blocked-return case covers repeated packets and later
-/// release; admission covers mobile grounded and free-sphere bodies, while
+/// release; recovery cases cover clear, player-contact, occupied and shared destinations.
+/// Admission covers mobile grounded and free-sphere bodies, while
 /// fixed-position/pose-only projection stays separate. This changes client collision positions
 /// intentionally; server gameplay remains authoritative.
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -90,16 +90,9 @@ impl WorldState {
     ///
     /// This is a shared geometry fact. Callers choose the interaction-specific reach threshold.
     pub fn cylinder_distance(&self, actor: Guid, target: Guid) -> Option<f32> {
-        let (actor_pose, actor_setup) = self.interaction_cylinder(actor)?;
-        let (target_pose, target_setup) = self.interaction_cylinder(target)?;
-        Some(use_cylinder_distance(
-            actor_pose.distance_to(&target_pose),
-            actor_pose.coords.z,
-            actor_setup.radius,
-            actor_setup.height,
-            target_pose.coords.z,
-            target_setup.radius,
-            target_setup.height,
+        Some(cylinder_distance_between(
+            self.interaction_cylinder(actor)?,
+            self.interaction_cylinder(target)?,
         ))
     }
 
@@ -153,9 +146,24 @@ impl WorldState {
     }
 }
 
-/// ACE Physics/Common/Position.cs::CylinderDistance (retail). Reach uses the full
-/// three-dimensional offset, not horizontal separation. Replacing it with conventional cylinder
-/// separation changes the server's vertical use-range boundary.
+/// Measures authored cylinders at caller-selected coherent poses. Retail behavior is to use the
+/// full three-dimensional origin offset before applying radii and vertical extent. Conventional
+/// horizontal cylinder separation changes the server's vertical use-range boundary.
+pub(super) fn cylinder_distance_between(
+    (actor_pose, actor_setup): (WorldPosition, SetupDimensions),
+    (target_pose, target_setup): (WorldPosition, SetupDimensions),
+) -> f32 {
+    use_cylinder_distance(
+        actor_pose.distance_to(&target_pose),
+        actor_pose.coords.z,
+        actor_setup.radius,
+        actor_setup.height,
+        target_pose.coords.z,
+        target_setup.radius,
+        target_setup.height,
+    )
+}
+
 fn use_cylinder_distance(
     origin_distance: f32,
     z: f32,

@@ -306,10 +306,13 @@ existing implicit `tick()` policy:
   Remote character recovery observes accepted progress toward the latest server pose separately
   from that predicted reference. Two simulated seconds without 5 cm of net improvement permit a
   checked placement attempt; repeated equivalent packets do not renew the window. Sticky intent
-  (including unavailable target geometry) and direct player contact clear the observation. Failed
+  is recoverable only while its predicted reference agrees with the latest server pose, including
+  when target geometry is unavailable. Player contact does not suspend the observation. Failed
   or uncovered placements wait another full window. Destination validation reuses bounded support
-  acquisition and directionless hard-geometry clearance, without sweeping the old route. A
-  successful relocation retains checked cell membership, clears obsolete response/reference state
+  acquisition and directionless hard-geometry clearance, then rejects overlap with blocking mobile
+  bodies, without sweeping the old route. Each accepted recovery updates the validation snapshot
+  before the next body in the batch. A successful relocation retains checked cell membership,
+  clears obsolete response/reference state
   and report lifetimes, and publishes `CorrectionSnap`; authored actions remain intact. The local
   player, autonomous inputs, and non-character bodies do not use this recovery policy.
   `spatial/body_movement.rs` prepares ordinary prediction and contact actuation once for both
@@ -587,6 +590,10 @@ return suffix without restarting its non-cyclic prefix.
 
 MoveTo and TurnTo remain source authority, not playback implementations. Their retained composite
 parameters enter the pure server-directed reducer with current pose, support, and target facts; its
+local-player target facts use the last received server position for steering, cylinder reach,
+and the subsequent sticky handoff. This prevents client crowd displacement from completing a
+server-owned charge early or pulling it away again after arrival.
+Remote prediction continues to follow canonical runtime targets. The reducer's
 ordinary `MotionOrder` then crosses the same table selector, runtime, and authored-root solver seam
 as every other actor. Setup fallback is resolved once by
 `WorldState::effective_motion_table_id_for_guid`, so solver and client projection cannot choose

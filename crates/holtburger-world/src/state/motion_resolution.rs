@@ -340,7 +340,8 @@ impl WorldState {
         speed_mps: f32,
     ) -> Option<crate::StickyBodyTarget> {
         let (actor, actor_dimensions) = self.interaction_cylinder(guid)?;
-        let (target, target_dimensions) = self.interaction_cylinder(target_guid)?;
+        let (_, target_dimensions) = self.interaction_cylinder(target_guid)?;
+        let target = self.target_relative_pose(guid, target_guid)?;
         let bearing = target.global_coords() - actor.global_coords();
         let heading = if bearing.x != 0.0 || bearing.y != 0.0 {
             actor.heading_to(&target)
@@ -1210,8 +1211,31 @@ impl WorldState {
         );
     }
 
+    /// Selects one target frame for both directed approach and its sticky handoff.
+    fn target_relative_pose(
+        &self,
+        actor: Guid,
+        target: Guid,
+    ) -> Option<holtburger_common::position::WorldPosition> {
+        if actor == self.player.guid {
+            self.entities.get(target).map(|entity| entity.position)
+        } else {
+            self.runtime_pose_for_guid(target)
+        }
+    }
+
     /// Samples the current target facts used by retail object-directed movement.
     ///
+    /// Local server-directed approach follows the received target position: crowd prediction
+    /// cannot authorize arrival while ACE is still waiting for range. Remote motion prediction
+    /// follows runtime targets, including the player's locally controlled position.
+    /// RETAIL DIVERGENCE: Retail behavior is to approach the target's locally simulated body.
+    /// Our compliant crowds can displace that body metres from the server observation; using
+    /// it for local arrival can stop a charge outside server melee range. The local actor uses
+    /// the received target pose for steering, separation and the following sticky command.
+    /// Caller census: local admission and movement ticks, two world motion-resolution paths,
+    /// and physical/position-only sticky preparation. The paired local/remote
+    /// displaced-target case covers this distinction; moving targets still depend on fresh poses.
     /// Object identity remains available while physical preparation is pending. The movement
     /// reducer can therefore wait for cylinder distance without converting a resolved object into
     /// retail's admission-time fixed-position fallback.
@@ -1220,12 +1244,15 @@ impl WorldState {
         actor: Guid,
         target: Guid,
     ) -> Option<ServerDirectedTarget> {
-        let entity = self.entities.get(target)?;
-        let pose = self
-            .runtime_body_id_for_guid(target)
-            .and_then(|body_id| self.scene.body(body_id))
-            .map_or(entity.position, |body| body.pose);
-        ServerDirectedTarget::new(pose, self.cylinder_distance(actor, target))
+        self.entities.get(target)?;
+        let pose = self.target_relative_pose(actor, target)?;
+        let distance = self
+            .interaction_cylinder(actor)
+            .zip(self.interaction_cylinder(target))
+            .map(|(actor, (_, target_dimensions))| {
+                super::world_container::cylinder_distance_between(actor, (pose, target_dimensions))
+            });
+        ServerDirectedTarget::new(pose, distance)
     }
 
     /// Resolves the motion table every playback and presentation consumer must use for an entity.

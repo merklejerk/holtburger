@@ -25,10 +25,10 @@ const MOVE_TOWARDS: u32 = 0x0000_0200;
 const USE_SPHERES: u32 = 0x0000_0400;
 const STOP_COMPLETELY: u32 = 0x0001_0000;
 
-/// Current authoritative facts for an object targeted by a server directive.
+/// Coherent target facts selected by the actor's movement authority for one interval.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ServerDirectedTarget {
-    /// Current authoritative target pose.
+    /// Target pose used for steering; cylinder separation must describe this same pose.
     pub pose: WorldPosition,
     /// Current retail cylinder separation from the moving actor, when both bodies are prepared.
     pub cylinder_distance: Option<f32>,

@@ -26,11 +26,9 @@ impl CollectionActuator {
         self,
         body: &mut SpatialBody,
         update: &ContactBodyUpdate,
-        player_poses: [Option<&SpatialBody>; 2],
         delta_seconds: f32,
         now: Instant,
     ) -> anyhow::Result<Option<WorldPosition>> {
-        let [player_before, player_after] = player_poses;
         let mut recovery = None;
         body.nominal.velocity = self.nominal_velocity;
         let mut reconciliation = if update.projectile_impact.is_some() {
@@ -59,9 +57,7 @@ impl CollectionActuator {
                     RecoveryAuthority::MatchingReference => {
                         state.reference_matches_authority(destination)
                     }
-                }
-                && !super::super::mobile_contact::has_player_contact(body, player_before)?
-                && !super::super::mobile_contact::has_player_contact(body, player_after)?;
+                };
             let requested = state.finish_recovery_tick(
                 body.pose,
                 body.retained.velocity - self.nominal_velocity,
@@ -312,19 +308,6 @@ impl SpatialScene {
                 .preview_touches(&result.report_touches, now)?,
         );
         profile.checkpoint("report_lifetimes");
-        let player_before = snapshots
-            .iter()
-            .find(|body| matches!(body.id, SpatialBodyId::LocalPlayer(_)))
-            .cloned();
-        let mut player_after = player_before.clone();
-        if let Some(player) = player_after.as_mut()
-            && let Some(update) = result
-                .bodies
-                .iter()
-                .find(|update| update.body_id == player.id)
-        {
-            update.apply_physical_state(player)?;
-        }
         let mut recovery_requests = Vec::new();
         let mut publications = Vec::with_capacity(result.bodies.len());
         outcomes.reserve(result.bodies.len());
@@ -351,13 +334,7 @@ impl SpatialScene {
             let is_character =
                 matches!(actuator.input.actuation, PhysicalBodyActuation::Grounded(_));
             let external_translation = actuator.external_translation || update.supported_push;
-            if let Some(destination) = actuator.finish(
-                &mut body,
-                &update,
-                [player_before.as_ref(), player_after.as_ref()],
-                delta_seconds,
-                now,
-            )? {
+            if let Some(destination) = actuator.finish(&mut body, &update, delta_seconds, now)? {
                 recovery_requests.push((body.id, destination));
             }
             if body
@@ -449,8 +426,8 @@ impl SpatialScene {
         now: Instant,
         collection: &mut DynamicEntityCollectionTick,
     ) -> anyhow::Result<()> {
-        // Only mobile characters recover; hard targets remain fixed throughout this batch.
-        let recovery_peers = if recovery_requests.is_empty() {
+        // Validate against committed endpoints, including earlier recoveries in this batch.
+        let mut recovery_peers = if recovery_requests.is_empty() {
             Vec::new()
         } else {
             let mut peers = self.body_store.bodies.values().cloned().collect::<Vec<_>>();
@@ -510,6 +487,15 @@ impl SpatialScene {
                 .context("validated recovery lost dynamic placement")?
                 .placement = membership;
             let relocated = self.publish_dynamic_relocation(candidate);
+            let peer = recovery_peers
+                .iter_mut()
+                .find(|peer| peer.id == body_id)
+                .context("recovered body lost its placement-validation snapshot")?;
+            *peer = self
+                .body_store
+                .body(body_id)
+                .context("recovered body disappeared before placement validation")?
+                .clone();
             collection
                 .collision_reports
                 .extend(relocated.collision_reports);

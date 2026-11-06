@@ -274,8 +274,11 @@ other clients.
 
 Reusable combat execution lives in [src/client/combat_runtime.rs](src/client/combat_runtime.rs)
 and [src/client/combat_engagement.rs](src/client/combat_engagement.rs). Core owns attack request
-eligibility, busy state, feedback, and combat pursuit; frontends select the desired engagement.
-Both combat pursuit and frontend steering use the same movement executor and canonical world pose.
+eligibility, busy state, feedback, and engagement lifetime; frontends select the desired engagement.
+After charge timing, melee requests reach ACE without local range, visibility, or collision-preparation
+admission. ACE owns range/visibility and directs approach when necessary. Server-directed approach
+and frontend steering use the same movement executor. Accepted server swing actions enter playback
+independently of local crowd collision; collision still constrains physical translation.
 World-owned sticky targeting supplies authored clearance and rate-limited pursuit without becoming
 a second translation owner.
 

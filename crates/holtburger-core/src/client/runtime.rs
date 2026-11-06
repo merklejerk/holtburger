@@ -348,7 +348,7 @@ impl ClientRuntime {
         if active_world {
             let prepared_movement = self.movement.prepare_tick(now, &mut self.world);
             self.advance_rest_posture(now);
-            self.prepare_combat_movement(now, dt_duration);
+            self.maintain_combat_engagement();
             let movement_events = self
                 .movement
                 .advance_tick(prepared_movement, now, &mut self.world, &mut self.session)
@@ -370,7 +370,7 @@ impl ClientRuntime {
                     feedback.outcome,
                     ClientCharacterMotionOutcome::ChargeAccepted
                 ) {
-                    self.interrupt_combat_for_player_movement(now);
+                    self.interrupt_combat_for_player_movement();
                 }
                 let _ = self
                     .client_view_event_tx
@@ -491,7 +491,7 @@ impl ClientRuntime {
                     });
             }
             if let Some(jump) = simulation_tick.committed_jump {
-                self.interrupt_combat_for_player_movement(now);
+                self.interrupt_combat_for_player_movement();
                 self.session
                     .send_action(GameAction::Jump(Box::new(JumpActionData {
                         extent: jump.resolved.extent().get(),

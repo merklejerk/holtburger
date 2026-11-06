@@ -27,7 +27,6 @@ pub use step::{
 };
 pub(crate) use step::{
     advance_body_contact_collection_without_reports, checked_recovery_destination,
-    has_player_contact,
 };
 
 use anyhow::{Result, ensure};

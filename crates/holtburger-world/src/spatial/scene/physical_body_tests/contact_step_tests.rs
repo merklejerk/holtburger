@@ -6326,6 +6326,10 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
         ControlledPlayer,
         Sticky,
         UnpreparedSticky,
+        PlayerContactClear,
+        PlayerAtDestination,
+        MobAtDestination,
+        SharedDestination,
     }
     for case in [
         Case::Clear,
@@ -6335,11 +6339,20 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
         Case::ControlledPlayer,
         Case::Sticky,
         Case::UnpreparedSticky,
+        Case::PlayerAtDestination,
+        Case::PlayerContactClear,
+        Case::MobAtDestination,
+        Case::SharedDestination,
     ] {
         let occupied = case == Case::Occupied;
         let expects_recovery = matches!(
             case,
-            Case::Clear | Case::PredictedInsideWall | Case::Sticky | Case::UnpreparedSticky
+            Case::Clear
+                | Case::PredictedInsideWall
+                | Case::Sticky
+                | Case::UnpreparedSticky
+                | Case::PlayerContactClear
+                | Case::SharedDestination
         );
         let now = Instant::now();
         let mut collision = flat_collision_scene();
@@ -6367,7 +6380,19 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
         };
         let definition = grounded_definition();
         let primary = definition.spheres().primary();
-        let start = pose(Vector3::new(90.0, 96.0, primary.radius - primary.center.z));
+        let start = pose(Vector3::new(
+            if matches!(case, Case::PlayerContactClear | Case::SharedDestination) {
+                92.0 - primary.center.x - primary.radius
+            } else {
+                90.0
+            },
+            if case == Case::SharedDestination {
+                96.0 - primary.radius
+            } else {
+                96.0
+            },
+            primary.radius - primary.center.z,
+        ));
         let mut target = pose(Vector3::new(
             if occupied { 92.0 } else { 94.0 },
             96.0,
@@ -6387,6 +6412,31 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
             )
             .unwrap();
         acquire_support(&mut scene, &collision, id, now);
+        let peer = match case {
+            Case::PlayerContactClear => Some((
+                SpatialBodyId::LocalPlayer(Guid(2)),
+                pose(start.coords + Vector3::new(0.0, primary.radius * 2.0, 0.0)),
+            )),
+            Case::PlayerAtDestination => Some((SpatialBodyId::LocalPlayer(Guid(2)), target)),
+            Case::MobAtDestination => Some((SpatialBodyId::Entity(Guid(2)), target)),
+            Case::SharedDestination => Some((
+                SpatialBodyId::Entity(Guid(2)),
+                pose(start.coords + Vector3::new(0.0, primary.radius * 2.0, 0.0)),
+            )),
+            _ => None,
+        };
+        if let Some((peer, peer_pose)) = peer {
+            scene.register_body(SpatialBody::new(peer, peer_pose, now));
+            scene
+                .set_dynamic_physical_body(
+                    peer,
+                    Some(dynamic_definition(definition, false)),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+            acquire_support(&mut scene, &collision, peer, now);
+        }
         let input = PhysicalBodyInput::referenced(
             PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
             if case == Case::Sticky {
@@ -6416,6 +6466,18 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
         world.scene = scene;
         let mut recovered = false;
         for index in 0..ticks {
+            if case == Case::SharedDestination {
+                world.scene.apply_authoritative_body_effect(
+                    SpatialBodyId::Entity(Guid(2)),
+                    AuthoritativePoseEffect::Interpolate {
+                        pose: target,
+                        keep_heading: true,
+                        adjusted_max_speed_mps: None,
+                    },
+                    AuthoritativeBodyVectors::default(),
+                    now,
+                );
+            }
             // Repeated identical authority must not postpone recovery forever.
             if case == Case::Clear {
                 let mut events = Vec::new();
@@ -6463,6 +6525,17 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
                     |_| Ok(input.clone()),
                 )
                 .unwrap();
+            if case == Case::SharedDestination {
+                assert!(
+                    tick.outcomes.iter().all(|outcome| !matches!(
+                        outcome,
+                        DynamicEntityBodyOutcome::RecoveredPlacement(SpatialBodyId::Entity(Guid(
+                            2
+                        )))
+                    )),
+                    "an earlier recovery must occupy the shared destination"
+                );
+            }
             if tick.outcomes.iter().any(|outcome| matches!(outcome, DynamicEntityBodyOutcome::RecoveredPlacement(body_id) if *body_id == id)) {
                 assert!(expects_recovery, "{case:?}");
                 assert_eq!(tick.outcomes.iter().filter(|outcome| outcome.body_id() == id).count(), 1);
@@ -6473,7 +6546,7 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
                 assert_eq!(body.nominal.velocity, Vector3::zero());
                 assert!(!recovered, "{case:?}: recovery must not repeat at its accepted destination");
                 recovered = true;
-                if !matches!(case, Case::Sticky | Case::UnpreparedSticky) {
+                if !matches!(case, Case::Sticky | Case::UnpreparedSticky | Case::SharedDestination) {
                     break;
                 }
             }
@@ -6873,72 +6946,6 @@ fn recovery_placement_checks_hard_entities_and_accommodates_support() {
         .unwrap()
         .unwrap();
     assert!((recovered.0.coords.z - standing.coords.z).abs() < 0.001);
-}
-
-#[test]
-fn player_contact_suspends_recovery_without_preserving_an_expired_window() {
-    use crate::spatial::{
-        mobile_contact::has_player_contact, pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS,
-    };
-    let collision = flat_collision_scene();
-    let now = Instant::now();
-    let mob = SpatialBodyId::Entity(Guid(1));
-    let player = SpatialBodyId::LocalPlayer(Guid(2));
-    let definition = grounded_definition();
-    let primary = definition.spheres().primary();
-    let mut scene = SpatialScene::new();
-    for (id, x) in [(mob, 90.0), (player, 90.0 + primary.radius * 2.0)] {
-        scene.register_body(SpatialBody::new(
-            id,
-            pose(Vector3::new(x, 96.0, primary.radius - primary.center.z)),
-            now,
-        ));
-        scene
-            .set_dynamic_physical_body(
-                id,
-                Some(dynamic_definition(definition, false)),
-                PhysicalCollisionFilter::ALL,
-                None,
-            )
-            .unwrap();
-        scene
-            .refresh_dynamic_body_placement(id, &collision)
-            .unwrap();
-    }
-    let mob = scene.body(mob).unwrap();
-    let contact = has_player_contact(mob, scene.body(player)).unwrap();
-    assert!(contact);
-    let target = pose(mob.pose.coords + Vector3::new(10.0, 0.0, 0.0));
-    let mut state = PoseReconciliationState::default();
-    state.correct(target, false);
-    assert!(!state.observe_recovery(
-        mob.pose,
-        target,
-        RECOVERY_WINDOW_SECONDS * 0.75,
-        true,
-        crate::spatial::pose_reconciliation::PhysicalReferenceDomain::Horizontal
-    ));
-    assert!(!state.observe_recovery(
-        mob.pose,
-        target,
-        RECOVERY_WINDOW_SECONDS,
-        !contact,
-        crate::spatial::pose_reconciliation::PhysicalReferenceDomain::Horizontal
-    ));
-    assert!(!state.observe_recovery(
-        mob.pose,
-        target,
-        RECOVERY_WINDOW_SECONDS * 0.5,
-        true,
-        crate::spatial::pose_reconciliation::PhysicalReferenceDomain::Horizontal
-    ));
-    assert!(state.observe_recovery(
-        mob.pose,
-        target,
-        RECOVERY_WINDOW_SECONDS * 0.5,
-        true,
-        crate::spatial::pose_reconciliation::PhysicalReferenceDomain::Horizontal
-    ));
 }
 
 #[test]

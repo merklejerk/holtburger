@@ -13,7 +13,7 @@ mod angular;
 pub use angular::MOBILE_CONTACT_ANGULAR_CHORDS;
 mod recovery;
 mod stairs;
-pub(crate) use recovery::{checked_recovery_destination, has_player_contact};
+pub(crate) use recovery::checked_recovery_destination;
 
 use anyhow::{Context, Result, ensure};
 use holtburger_common::position::WorldPosition;

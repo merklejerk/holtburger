@@ -294,10 +294,6 @@ pub struct ClientRuntime {
     combat_attribution: combat_attribution::CombatOutcomeAttributor,
     /// Validated shared combat policy selected by the runtime composition.
     combat_tuning: combat_tuning::ClientCombatTuning,
-    /// Whether combat currently owns the client-directed movement lease.
-    combat_approach_drive_active: bool,
-    /// Target-specific progress evidence and admission for the bounded stalled-melee handoff.
-    melee_approach_state: Option<combat_runtime::MeleeApproachState>,
     /// Stages static collision and local-player body products outside the simulation turn.
     collision_coordinator: Option<collision::ClientCollisionCoordinator>,
     /// Prepares object-state script timelines off-turn and joins them to exact entity instances.

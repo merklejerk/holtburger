@@ -5,10 +5,10 @@ use super::*;
 /// Time allowed between meaningful improvements, also bounding failed placement retries. RETAIL
 /// DIVERGENCE: Retail behavior is to evaluate interpolation progress during physical contact,
 /// check five frames against 30% expected speed, and then fall back to placement. We retain
-/// the contact requirement but use simulation time and minimum net distance, suspending for
-/// direct player contact. Sticky pursuit can recover only when its moving reference still
-/// agrees with authority; retail instead renews its watchdog while sticky. Copying retail's
-/// timing would make patience frame-rate dependent and prevent this blocked return. The wall,
+/// the contact requirement but use simulation time and minimum net distance. Recovery endpoints
+/// must clear blocking static and mobile geometry. Sticky pursuit can recover only when its
+/// moving reference still agrees with authority; retail instead renews its watchdog while sticky.
+/// Copying retail's timing would make patience frame-rate dependent and prevent this blocked return. The wall,
 /// wrong-floor, nominal-flight, moving ledge jump with a prearmed timer, unavailable-cell,
 /// stale-anchor sticky, player-contact and progress fixtures size the tested surface. A live
 /// moving ledge jump corroborates the unsupported-travel exclusion; no census establishes

@@ -2,8 +2,7 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client updates:** When a newer version is available, the update icon on the character-select and pregame screens is now more prominent. The icon and the build label turn red, and the icon pulses. The pulse is turned off when your system requests reduced motion. Selecting the icon still opens the downloads page.
-- **Branding and website:** The website wordmark now includes the dimensional portal, and the repository README uses the new wordmark.
+- **3D client HUD scaling:** The character HUD, action bar and spell bar now size correctly at fractional UI scales and with fractional theme lengths. Sizes are rounded outward, so content is no longer clipped or given stray scrollbars from subpixel rounding. The action bar and spell bar scroll only when the viewport is too small to fit them.
 - **Terminal client (CLI):** There are no changes in this release.
 
 ## Known issues

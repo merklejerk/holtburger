@@ -146,7 +146,7 @@ export function bumpVersion(version: string, root: string): void {
   const path = join(root, "Cargo.toml");
   let matches = 0;
   const updated = readFileSync(path, "utf8").replace(
-    /(\[workspace\.package\]\n(?:(?!\[)[\s\S])*?^version\s*=\s*)"[^"]+"/gm,
+    /(\[workspace\.package\]\r?\n(?:(?!\[)[\s\S])*?^version\s*=\s*)"[^"]+"/gm,
     (_match, prefix: string) => {
       matches++;
       return `${prefix}"${version}"`;

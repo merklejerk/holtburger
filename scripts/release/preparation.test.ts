@@ -31,6 +31,24 @@ const recommendation = {
 const emptyApi: GitHub = (args) =>
   Buffer.from(args.includes("--slurp") ? "[[]]" : "[]");
 
+for (const newline of ["\n", "\r\n"]) {
+  test(`version stamping preserves ${newline === "\n" ? "LF" : "CRLF"} manifest line endings`, (t) => {
+    const root = createSourceFixture(t);
+    const path = join(root, "Cargo.toml");
+    const original = readFileSync(path, "utf8").replace(/\r?\n/g, newline);
+    writeFileSync(path, original);
+    const version = "0.2.1";
+
+    bumpVersion(version, root);
+
+    assert.equal(checkVersions(root), version);
+    assert.equal(
+      readFileSync(path, "utf8"),
+      original.replace('version = "0.2.0"', `version = "${version}"`),
+    );
+  });
+}
+
 test("release increments are exact patch/minor steps with an enforced zero-major ceiling", () => {
   assert.equal(nextReleaseVersion("0.2.7", "patch"), "0.2.8");
   assert.equal(nextReleaseVersion("0.2.7", "minor"), "0.3.0");

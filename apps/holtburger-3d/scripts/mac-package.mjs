@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { sign } from "@electron/osx-sign";
 import { z } from "zod";
 
-/** Written after signing the host and before sealing the app, including Forge's app-only ZIP. */
+/** Written after signing the host and before sealing the app bundle. */
 export const MAC_HOST_PROVENANCE_FILE =
 	"Contents/Resources/host-provenance.json";
 const digestSchema = z.string().regex(/^[0-9a-f]{64}$/);

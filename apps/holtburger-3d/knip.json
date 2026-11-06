@@ -26,7 +26,7 @@
 	],
 	"ignore": ["scripts/entry-paths.d.mts"],
 	"ignoreBinaries": ["python"],
-	"ignoreDependencies": ["@electron-forge/maker-zip", "@types/rbush", "rbush"],
+	"ignoreDependencies": ["@types/rbush", "rbush"],
 	"ignoreIssues": {
 		"src/lib/game/commit/artifacts.ts": ["types"],
 		"src/lib/game/commit/types.ts": ["types"],

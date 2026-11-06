@@ -66,7 +66,7 @@ module.exports = {
 		},
 		async packageAfterExtract(_config, buildPath, _version, platform) {
 			if (platform !== "darwin") return;
-			// The macOS ZIP maker retains only the .app. Keep original notices inside it.
+			// Keep Electron notices inside the app bundle for package and installer inspection.
 			const resources = join(buildPath, "Electron.app/Contents/Resources");
 			for (const notice of ["LICENSE", "LICENSES.chromium.html"])
 				await rename(join(buildPath, notice), join(resources, notice));
@@ -84,9 +84,4 @@ module.exports = {
 		],
 		ignore: ignoreApplicationSource,
 	},
-	makers: [
-		{
-			name: "@electron-forge/maker-zip",
-		},
-	],
 };

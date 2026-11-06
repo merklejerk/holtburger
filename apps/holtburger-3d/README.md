@@ -954,12 +954,12 @@ the static artwork; root `npm run generate:branding` exports sized PNGs, ICO, an
 the browser and Flatpak copies. `assets/branding/portal.svg` supplies the loading animation. Commit these exports after artwork changes and run
 `npm run check:branding` from the repository root to detect drift. Regular builds consume the checked-in icons.
 
-`npm run package` builds an unpacked application and `npm run make` creates the configured ZIP.
-Both commands build the frontend, Electron main/preload code, and release Rust sidecar first.
+`npm run package` builds an unpacked application, compiling the frontend, Electron
+main/preload code, and release Rust sidecar first. The repository release suite
+assembles downloadable native archives from the inspected package.
 `npm run check:package` verifies the native host, compiled entries, branding assets, bundled fonts
 and their licenses, application license, and Electron/Chromium notices in the unpacked package.
-Required ASAR files must be nonempty. After `npm run make`, `npm run check:archive`
-extracts the ZIP and applies the same inspection to the downloadable shape.
+Required ASAR files must be nonempty.
 Desktop installer construction and setup/repair/uninstall probes belong to
 `scripts/installers/`. From this app directory, `npm run package:installer --
 --native DIR --output FILE [--iscc PATH]` consumes an extracted native release
@@ -973,7 +973,7 @@ repository-root dependency installation.
 Font packaging checks compare every file under `public/fonts/` with its packaged bytes,
 so adding or replacing fonts and notices does not require updating a verification inventory.
 
-The portability workflow also runs `npm run probe:user-themes:built` after building, reusing the
+The build checks workflow runs `npm run probe:user-themes:built` after building, reusing the
 compiled frontend and Electron output. It checks native theme loading and bundled font decoding
 in development HTTP and built-file modes, discovering registered faces from the Base font roles
 rather than assuming particular families or a fixed face count. Linux CI runs it under Xvfb. Use
@@ -985,13 +985,11 @@ display scaling, Gatekeeper, or SmartScreen behavior. Only the available Linux d
 interactive Explorer verification. Do not advertise another platform as supported until its
 packaged application has been exercised on that operating system.
 
-The branch-scoped `holtburger-3d-portability.yml` workflow is diagnostic only: it has read-only
-permissions, retains artifacts briefly, and cannot publish a GitHub release. The shared
-`release.yml` workflow builds both products from main, stages beta drafts for native
-acceptance, and publishes verified nightlies as prereleases. Both use the same installation
-identities. Nightly builds do not check for updates. See
-[release preparation](../../release/RELEASING.md); automated packaging checks do not replace
-native acceptance.
+The shared `release.yml` workflow builds both products from main, verifies native packages
+and installers, and publishes complete beta releases or nightly prereleases after checks
+succeed. Diagnostic builds use the same builders without publication. Nightly builds do
+not check for updates. See [release preparation](../../release/RELEASING.md) for the
+publication policy and limits of automated acceptance.
 
 ## Security and dependency maintenance
 
@@ -1003,7 +1001,7 @@ applies a Content Security Policy. Rust validates the closed command protocol in
 Review Electron and Electron Forge updates at least monthly and before sharing a build. Apply normal
 compatible updates through npm, inspect `npm audit` rather than using a forced downgrade or override,
 then run the full checks and package inspection above. Electron upgrades additionally require the
-branch portability probe and a fresh manual smoke check on available hardware. Update alerts open the published release downloads page; downloading and installing updates
+release workflow's diagnostic builds across all native targets and a fresh manual smoke check on available hardware. Update alerts open the published release downloads page; downloading and installing updates
 remain manual.
 
 The packaged resources contain Holtburger's AGPLv3 license alongside the Electron and Chromium

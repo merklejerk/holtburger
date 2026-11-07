@@ -657,22 +657,47 @@ impl ClientCollisionCoordinator {
                 anyhow::bail!("Navigation destination has no containing cell or outdoor domain")
             }
             holtburger_world::PointPlacement::Unavailable { owner } => {
-                match self.residency.availability().get(&owner) {
-                    Some(crate::SimulationSceneOwnerAvailability::Absent) => anyhow::bail!(
-                        "Navigation destination owner {:#010X} is absent from content",
-                        owner.0
-                    ),
-                    Some(crate::SimulationSceneOwnerAvailability::Failed { cause }) => {
-                        anyhow::bail!("Navigation destination loading failed: {cause}")
-                    }
-                    Some(crate::SimulationSceneOwnerAvailability::Resident { .. }) => {
-                        anyhow::bail!("Navigation scene lost resident owner {:#010X}", owner.0)
-                    }
-                    Some(crate::SimulationSceneOwnerAvailability::Pending { .. }) | None => {
-                        Ok(false)
-                    }
-                }
+                self.unavailable_activation_owner(owner)
             }
+        }
+    }
+
+    /// Resolve the prepared body without advancing simulation while portal space is active.
+    pub(super) fn activation_placement_ready(
+        &self,
+        world: &mut WorldState,
+        body_id: SpatialBodyId,
+    ) -> Result<bool> {
+        match world
+            .scene
+            .settle_dynamic_body_placement(body_id, &self.snapshot().scene)
+        {
+            Ok(()) => Ok(true),
+            Err(error) => match error.downcast_ref::<holtburger_world::CollisionQueryError>() {
+                Some(holtburger_world::CollisionQueryError::UnavailableOwner { owner }) => {
+                    self.unavailable_activation_owner(Guid(*owner))
+                }
+                _ => Err(error),
+            },
+        }
+    }
+
+    /// Loading may converge; absent, failed, or contradictory resident coverage cannot.
+    fn unavailable_activation_owner(&self, owner: Guid) -> Result<bool> {
+        match self.residency.availability().get(&owner) {
+            Some(crate::SimulationSceneOwnerAvailability::Absent) => anyhow::bail!(
+                "Activation collision owner {:#010X} is absent from content",
+                owner.0
+            ),
+            Some(crate::SimulationSceneOwnerAvailability::Failed { cause }) => anyhow::bail!(
+                "Activation collision owner {:#010X} loading failed: {cause}",
+                owner.0
+            ),
+            Some(crate::SimulationSceneOwnerAvailability::Resident { .. }) => anyhow::bail!(
+                "Activation scene lost resident collision owner {:#010X}",
+                owner.0
+            ),
+            Some(crate::SimulationSceneOwnerAvailability::Pending { .. }) | None => Ok(false),
         }
     }
 
@@ -1592,6 +1617,8 @@ mod tests {
         missing: Mutex<Vec<u32>>,
         prepared: AtomicUsize,
         body_gate: Mutex<Option<BodyGate>>,
+        /// Optional flat outdoor terrain used to exercise activation placement before reveal.
+        terrain_height: Option<f32>,
     }
 
     impl SceneContentSource for FakeSource {
@@ -1611,7 +1638,21 @@ mod tests {
             }
             Ok(Some(LandblockCollisionAsset {
                 landblock_id,
-                terrain: TerrainCollisionSurface::empty(),
+                terrain: match self.terrain_height {
+                    Some(height) => TerrainCollisionSurface::from_terrain(
+                        &holtburger_content::LandblockTerrain {
+                            grid_size: 9,
+                            tile_size: 24.0,
+                            height_indices: vec![0; 81],
+                            heights: vec![height; 81],
+                            terrain_samples: vec![0; 81],
+                            cell_diagonals: holtburger_content::TerrainCellDiagonals::for_landblock(
+                                landblock_id,
+                            ),
+                        },
+                    )?,
+                    None => TerrainCollisionSurface::empty(),
+                },
                 static_geometry: Default::default(),
             }))
         }
@@ -2220,6 +2261,7 @@ mod tests {
 
     #[tokio::test]
     async fn activation_waits_for_content_and_current_reveal_before_completing() {
+        const DESTINATION_HEIGHT: f32 = 40.0;
         for cause in [
             ClientWorldActivationState::InitialEntry,
             ClientWorldActivationState::Teleport,
@@ -2250,9 +2292,11 @@ mod tests {
                 .unwrap();
             let bytes_before_activation = client.session.bytes_out;
             client.requires_external_world_reveal = true;
-            client.collision_coordinator = Some(ClientCollisionCoordinator::new(Arc::new(
-                FakeSource::default(),
-            )));
+            client.collision_coordinator =
+                Some(ClientCollisionCoordinator::new(Arc::new(FakeSource {
+                    terrain_height: Some(DESTINATION_HEIGHT),
+                    ..FakeSource::default()
+                })));
             client.start_world_activation(ClientWorldActivationState::Teleport, guid);
             let retired_generation = client.activation.as_ref().unwrap().generation;
             client.start_world_activation(cause, guid);
@@ -2303,6 +2347,28 @@ mod tests {
             // Resident content permits camera settlement, but only the current reveal may activate.
             client.try_complete_world_activation().await.unwrap();
             assert!(client.activation.is_some());
+            let body = client
+                .world
+                .scene
+                .body(SpatialBodyId::LocalPlayer(guid))
+                .unwrap();
+            let primary = body
+                .physical
+                .as_ref()
+                .unwrap()
+                .definition
+                .spheres()
+                .primary();
+            assert_eq!(
+                body.pose.coords.z + primary.center.z - primary.radius,
+                DESTINATION_HEIGHT,
+                "arrival must be resolved before camera/reveal activation"
+            );
+            assert_eq!(
+                client.world.player_entity().unwrap().position.coords.z,
+                0.0,
+                "runtime placement must not rewrite server authority"
+            );
             let generation = client.activation.as_ref().unwrap().generation;
             client
                 .acknowledge_world_reveal(retired_generation)
@@ -2344,8 +2410,9 @@ mod tests {
                     client.world.local_player_runtime_pose().unwrap()
                 );
                 assert_eq!(
-                    idle.position.landblock_id,
-                    position(0x1234_0001).landblock_id
+                    idle.position.landblock_coords(),
+                    position(0x1234_0001).landblock_coords(),
+                    "destination movement must use the new owner; outdoor cell follows accepted XY"
                 );
                 assert_eq!(
                     idle.teleport_sequence,

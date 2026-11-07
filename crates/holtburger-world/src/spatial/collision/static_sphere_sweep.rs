@@ -819,22 +819,27 @@ impl MovingSphereCast {
             return Ok(());
         };
         // RETAIL DIVERGENCE: BSP collision response selects the polygon plane normal. Finite
-        // edge/vertex contacts use their closest-feature direction here; restoring the plane
-        // normal reproduces the supported riser-edge stall. Scope: synthetic wall, stair,
-        // corner and thin-obstacle fixtures; installed collision meshes have not received a
-        // full edge-feature census. Edge and vertex contacts have their own separating
-        // direction. The authored face normal above still owns one-sided admission, but cannot
-        // replace that direction.
+        // edge/vertex contacts and back-face overlaps use their closest-feature direction
+        // here; restoring the plane normal reproduces the supported riser-edge stall and
+        // rejects separating support recovery above a downward-facing bridge floor. Scope:
+        // synthetic wall, stair, corner, thin-obstacle and double-sided floor fixtures, plus
+        // one captured indoor bridge landing; installed collision meshes have not received
+        // a full feature census. The authored face normal above still owns one-sided
+        // admission, but cannot replace the actual separating direction.
         let center = parry_vector(self.displacement * hit.time_of_impact);
         let closest = triangle.project_local_point(center, true).point;
         let separation = world_vector(center - closest);
-        // At coincident center/face positions there is no radial direction; the admitted
-        // one-sided face supplies the outward direction for this deep initial overlap.
+        // An initial back-face overlap must retain its actual separating direction. A
+        // downward-facing bridge floor can overlap a sphere above it after endpoint
+        // rounding; its authored normal would falsely block upward support recovery.
+        // Front-side face contacts keep the stable plane normal. At coincident
+        // center/face positions there is no radial direction, so the face owns response.
         let face_distance = distance + approach * hit.time_of_impact;
         let face_point = center - parry_vector(normal * face_distance);
         let on_face = triangle.project_local_point(face_point, true).point;
-        let normal = if (on_face - face_point).length_squared()
-            <= crate::spatial::bsp_query::CONTACT_EPSILON.powi(2)
+        let normal = if (face_distance >= 0.0
+            && (on_face - face_point).length_squared()
+                <= crate::spatial::bsp_query::CONTACT_EPSILON.powi(2))
             || separation.length_squared() == 0.0
         {
             normal
@@ -1220,6 +1225,68 @@ mod tests {
             .update_triangle_hit(vertices, normal, &mut hit)
             .unwrap();
         assert_eq!(hit.unwrap().time_of_impact, 0.0);
+    }
+
+    #[test]
+    fn double_sided_face_overlap_allows_escape_and_blocks_inward_travel() {
+        let ball = Ball::new(0.48);
+        let tolerance = crate::spatial::bsp_query::CONTACT_EPSILON;
+        for height in [0.0, 384.0] {
+            let vertices = [
+                Vector3::new(-4.0, -4.0, height),
+                Vector3::new(4.0, -4.0, height),
+                Vector3::new(0.0, 4.0, height),
+            ];
+            for side in [-1.0, 1.0] {
+                // Slightly inside the hard radius, including the captured bridge's
+                // coordinate precision. Both the floor and ceiling sides participate.
+                let start = Vector3::new(
+                    0.0,
+                    0.0,
+                    height + side * (hard_contact_radius(ball.radius) - tolerance * 0.125),
+                );
+                let away = Vector3::new(0.0, 0.0, side);
+                for (travel, blocked) in [(away * tolerance, false), (away * -tolerance, true)] {
+                    let moving = MovingSphereCast::new(&ball, start, travel);
+                    let mut hit = None;
+                    for normal in [away, away * -1.0] {
+                        moving
+                            .update_triangle_hit(vertices, normal, &mut hit)
+                            .unwrap();
+                    }
+                    assert_eq!(hit.is_some(), blocked, "height={height} side={side}");
+                    if let Some(hit) = hit {
+                        assert_eq!(hit.time_of_impact, 0.0);
+                        assert_eq!(hit.normal, away);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn front_side_ceiling_blocks_before_the_sphere_crosses_it() {
+        let ball = Ball::new(0.48);
+        let height = 384.0;
+        let vertices = [
+            Vector3::new(-4.0, -4.0, height),
+            Vector3::new(4.0, -4.0, height),
+            Vector3::new(0.0, 4.0, height),
+        ];
+        let mut hit = None;
+        MovingSphereCast::new(
+            &ball,
+            Vector3::new(0.0, 0.0, height - 1.0),
+            Vector3::new(0.0, 0.0, 2.0),
+        )
+        .update_triangle_hit(vertices, Vector3::new(0.0, 0.0, -1.0), &mut hit)
+        .unwrap();
+        let hit = hit.expect("the upward path reaches the ceiling");
+        assert_eq!(hit.normal, Vector3::new(0.0, 0.0, -1.0));
+        assert_eq!(
+            hit.time_of_impact,
+            (1.0 - hard_contact_radius(ball.radius)) / 2.0
+        );
     }
 
     #[test]

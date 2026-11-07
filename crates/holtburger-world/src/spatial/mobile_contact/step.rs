@@ -13,6 +13,7 @@ mod angular;
 pub use angular::MOBILE_CONTACT_ANGULAR_CHORDS;
 mod recovery;
 mod stairs;
+mod terrain;
 pub(crate) use recovery::checked_recovery_destination;
 
 use anyhow::{Context, Result, ensure};
@@ -1251,7 +1252,7 @@ fn advance_projectile_translation(
 /// Preparation can correct a pose; final confirmation only observes accepted geometry.
 #[derive(Clone, Copy)]
 enum SupportRefresh {
-    /// One bounded upward recovery before selecting the ordinary motor.
+    /// Terrain penetration repair and bounded support recovery before selecting the ordinary motor.
     Recover,
     /// No additional movement after the completed navigation passes.
     Confirm,

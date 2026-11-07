@@ -1,12 +1,14 @@
-//! Checked destination placement for a stalled remote body, without traversing the old route.
+//! Checked endpoint placement for arrivals and stalled bodies, without traversing the old route.
 
 use super::*;
 use crate::spatial::{
-    PlacementRequest, bsp_query::CONTACT_EPSILON, volume_query::placed_shape_contacts,
+    PlacementRequest, PlacementRestrictionRequest, bsp_query::CONTACT_EPSILON,
+    volume_query::placed_shape_contacts,
 };
 
-/// Candidate must already have destination membership and reset kinematics. Support recovery
-/// may lift it by the existing step allowance; final directionless clearance has the last word.
+/// Candidate must already have destination membership. Callers own kinematic resets; only
+/// corrected pose and membership are returned. Support recovery repairs terrain penetration
+/// before bounded object support; final directionless clearance wins.
 pub(crate) fn checked_recovery_destination(
     collision: &CollisionScene,
     candidate: &SpatialBody,
@@ -18,7 +20,7 @@ pub(crate) fn checked_recovery_destination(
     };
     let PreparedContactRole::Mover {
         body: mobile,
-        grounded: Some(grounded),
+        grounded,
         policy,
     } = actor.role
     else {
@@ -50,24 +52,35 @@ pub(crate) fn checked_recovery_destination(
         actor.source,
         actor.participant,
         mobile,
-        Some(grounded),
+        grounded,
         policy,
         anchor,
     )?;
-    stairs::prepare_support(collision, &hard, anchor, &mut working, grounded.config)?;
-    for sphere in working.mobile.spheres.iter() {
-        let contacts = collision.placement_contacts(PlacementRequest {
-            anchor,
-            center: sphere.center,
-            radius: sphere.radius,
-            placement: &working.contact.membership,
-        })?;
-        if contacts
-            .iter()
-            .any(|contact| contact.depth > CONTACT_EPSILON)
-        {
-            return Ok(None);
+    if let Some(grounded) = grounded {
+        match stairs::prepare_support(collision, &hard, anchor, &mut working, grounded.config) {
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.downcast_ref::<CollisionQueryError>(),
+                    Some(CollisionQueryError::TerrainPlacementBlocked)
+                ) =>
+            {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
         }
+    }
+    if !placement_clear(
+        collision,
+        &hard,
+        anchor,
+        &working.contact,
+        working.mobile.spheres,
+        &working.contact.membership,
+    )? {
+        return Ok(None);
+    }
+    for sphere in working.mobile.spheres.iter() {
         // Recovery skips the old route, but its supported endpoint must clear every blocking
         // mobile body. Current player contact does not make a clear destination unsafe.
         for (participant, mobile) in &mobiles {
@@ -83,27 +96,66 @@ pub(crate) fn checked_recovery_destination(
                 return Ok(None);
             }
         }
-        for target in hard.iter()? {
-            if !working
-                .contact
-                .membership
-                .intersects_reached(&target.contact.membership)
-            {
-                continue;
-            }
-            if target.shapes.iter().any(|shape| {
-                placed_shape_contacts(shape, sphere.center, sphere.radius)
-                    .iter()
-                    .any(|contact| contact.depth > CONTACT_EPSILON)
-            }) {
-                return Ok(None);
-            }
-        }
     }
     let mut pose = candidate.pose;
     pose.coords = working.root;
-    if let Some(cell) = working.contact.membership.committed_cell() {
-        pose.landblock_id = cell;
-    }
+    let pose = crate::spatial::physical_body::place_body_pose(
+        pose,
+        working.contact.membership.committed_cell(),
+    )?;
     Ok(Some((pose, working.contact.membership)))
+}
+
+/// Final overlap checks are shared by terrain recovery and checked destination placement.
+pub(super) fn placement_clear(
+    collision: &CollisionScene,
+    hard: &HardTargets,
+    anchor: Guid,
+    contact: &ContactParticipant,
+    spheres: PhysicalSphereSet,
+    membership: &SpatialMembership,
+) -> Result<bool> {
+    if membership.center_domain_is_unresolved() {
+        return Ok(false);
+    }
+    let primary = spheres.primary();
+    if !collision
+        .placement_restrictions(PlacementRestrictionRequest {
+            anchor,
+            center: primary.center,
+            radius: primary.radius,
+            placement: membership,
+            filter: contact.filter,
+        })?
+        .is_empty()
+    {
+        return Ok(false);
+    }
+    for sphere in spheres.iter() {
+        if collision
+            .placement_contacts(PlacementRequest {
+                anchor,
+                center: sphere.center,
+                radius: sphere.radius,
+                placement: membership,
+            })?
+            .iter()
+            .any(|overlap| overlap.depth > CONTACT_EPSILON)
+        {
+            return Ok(false);
+        }
+        for target in hard.iter()? {
+            if contact.receives_response_from(&target.contact)
+                && membership.intersects_reached(&target.contact.membership)
+                && target.shapes.iter().any(|shape| {
+                    placed_shape_contacts(shape, sphere.center, sphere.radius)
+                        .iter()
+                        .any(|overlap| overlap.depth > CONTACT_EPSILON)
+                })
+            {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
 }

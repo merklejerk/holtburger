@@ -1662,6 +1662,83 @@ fn bsp_stair_scene() -> CollisionScene {
     collision_with_polygons(polygons)
 }
 
+#[test]
+fn back_face_floor_overlap_recovers_support_before_walking() {
+    let height = 384.0;
+    let vertices = vec![
+        Vector3::new(80.0, 86.0, height),
+        Vector3::new(100.0, 86.0, height),
+        Vector3::new(100.0, 106.0, height),
+        Vector3::new(80.0, 106.0, height),
+    ];
+    let collision = collision_with_polygons(HashMap::from([
+        (
+            0,
+            CollisionPolygon {
+                vertices: vertices.clone(),
+                normal: Vector3::new(0.0, 0.0, 1.0),
+                d: -height,
+            },
+        ),
+        (
+            1,
+            CollisionPolygon {
+                vertices: vertices.into_iter().rev().collect(),
+                normal: Vector3::new(0.0, 0.0, -1.0),
+                d: height,
+            },
+        ),
+    ]));
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let standing_z = height + primary.radius - primary.center.z;
+    // Reproduce an endpoint rounded slightly beyond the admitted sweep contact band.
+    let initial = pose(Vector3::new(
+        90.0,
+        96.0,
+        standing_z - CONTACT_EPSILON * 1.125,
+    ));
+    let id = SpatialBodyId::LocalPlayer(Guid(1));
+    let mut scene = SpatialScene::new();
+    scene.register_body(SpatialBody::new(id, initial, Instant::now()));
+    scene
+        .set_dynamic_physical_body(
+            id,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    for _ in 0..3 {
+        scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                Instant::now(),
+                |_| {
+                    Ok(PhysicalBodyInput::autonomous(
+                        PhysicalBodyActuation::Grounded(
+                            GroundedBodyActuation::drive(Vector3::new(1.0, 0.0, 0.0)).unwrap(),
+                        ),
+                    ))
+                },
+            )
+            .unwrap();
+        let body = scene.body(id).unwrap();
+        assert!(
+            body.physical
+                .as_ref()
+                .unwrap()
+                .response
+                .ground()
+                .walkable_support()
+                .is_some()
+        );
+        assert!((body.pose.coords.z - standing_z).abs() <= CONTACT_EPSILON);
+        assert!(body.pose.coords.x > initial.coords.x);
+    }
+}
+
 fn collision_with_polygons(polygons: HashMap<u16, CollisionPolygon>) -> CollisionScene {
     let box_bounds = CollisionBox::from_points(
         polygons
@@ -6946,6 +7023,397 @@ fn recovery_placement_checks_hard_entities_and_accommodates_support() {
         .unwrap()
         .unwrap();
     assert!((recovered.0.coords.z - standing.coords.z).abs() < 0.001);
+}
+
+/// Synthetic terrain/ceiling geometry reproduces the observed portal's penetration depth.
+#[test]
+fn terrain_arrival_reinserts_the_endpoint_without_sweeping_the_lift() {
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let upper = definition.spheres().upper_constraint().unwrap();
+    let standing_z = primary.radius - primary.center.z;
+    // The stored Khayyaban arrival is this far beneath its authored terrain after server offset.
+    const ARRIVAL_DEPTH: f32 = 4.656_083;
+    let initial = pose(Vector3::new(90.0, 96.0, standing_z - ARRIVAL_DEPTH));
+    for (roof, accepted) in [
+        (None, true),
+        (Some(-ARRIVAL_DEPTH * 0.5), true),
+        (Some(standing_z + upper.center.z), false),
+    ] {
+        let collision = roof.map_or_else(flat_collision_scene, |height| {
+            let mut polygons = HashMap::new();
+            for (id, z, normal) in [
+                (0, height, Vector3::new(0.0, 0.0, -1.0)),
+                (
+                    1,
+                    height + primary.radius * 0.2,
+                    Vector3::new(0.0, 0.0, 1.0),
+                ),
+            ] {
+                let mut vertices = vec![
+                    Vector3::new(80.0, 86.0, z),
+                    Vector3::new(100.0, 86.0, z),
+                    Vector3::new(100.0, 106.0, z),
+                    Vector3::new(80.0, 106.0, z),
+                ];
+                if normal.z < 0.0 {
+                    vertices.reverse();
+                }
+                polygons.insert(
+                    id,
+                    CollisionPolygon {
+                        d: -normal.dot(&vertices[0]),
+                        normal,
+                        vertices,
+                    },
+                );
+            }
+            collision_with_polygons(polygons)
+        });
+        let id = SpatialBodyId::LocalPlayer(Guid(1));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(id, initial, Instant::now()));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(definition, false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let result = scene.settle_dynamic_body_placement(id, &collision);
+        assert_eq!(result.is_ok(), accepted, "roof={roof:?}: {result:?}");
+        if !accepted {
+            assert_eq!(
+                scene.body(id).unwrap().pose,
+                initial,
+                "rejected placement must remain atomic"
+            );
+            continue;
+        }
+        assert!((scene.body(id).unwrap().pose.coords.z - standing_z).abs() < CONTACT_EPSILON);
+        // Placement consumes no time; ordinary simulation must retain the accepted footing.
+        for _ in 0..12 {
+            scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    MOBILE_CONTACT_TICK_SECONDS,
+                    Instant::now(),
+                    |_| {
+                        Ok(PhysicalBodyInput::autonomous(
+                            PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        ))
+                    },
+                )
+                .unwrap();
+            let body = scene.body(id).unwrap();
+            assert!((body.pose.coords.z - standing_z).abs() < CONTACT_EPSILON);
+            assert!(
+                body.physical
+                    .as_ref()
+                    .unwrap()
+                    .response
+                    .ground()
+                    .walkable_support()
+                    .is_some()
+            );
+        }
+    }
+}
+
+#[test]
+fn ordinary_terrain_recovery_precedes_motor_selection_and_keeps_upward_velocity() {
+    let collision = flat_collision_scene();
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let standing_z = primary.radius - primary.center.z;
+    for upward_velocity in [0.0, 2.0] {
+        let id = SpatialBodyId::Entity(Guid(1));
+        let mut scene = SpatialScene::new();
+        let mut body = SpatialBody::new(
+            id,
+            pose(Vector3::new(
+                90.0,
+                96.0,
+                standing_z - GROUNDED_CONFIG.step_up_height * 8.0,
+            )),
+            Instant::now(),
+        );
+        body.retained.velocity.z = upward_velocity;
+        scene.register_body(body);
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(definition, false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                Instant::now(),
+                |_| {
+                    Ok(PhysicalBodyInput::autonomous(
+                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                    ))
+                },
+            )
+            .unwrap();
+        let body = scene.body(id).unwrap();
+        assert!(body.pose.coords.z >= standing_z - CONTACT_EPSILON);
+        if upward_velocity > 0.0 {
+            assert!(body.retained.velocity.z > 0.0);
+            assert_eq!(body.contact, ContactState::Airborne);
+        } else {
+            assert!(
+                body.physical
+                    .as_ref()
+                    .unwrap()
+                    .response
+                    .ground()
+                    .walkable_support()
+                    .is_some()
+            );
+        }
+    }
+}
+
+#[test]
+fn terrain_recovery_does_not_pull_an_underground_room_outdoors() {
+    let mut asset = flat_collision_asset(0);
+    let cell = Guid((asset.landblock_id & 0xffff_0000) | 0x0100);
+    asset.static_geometry = LandblockColliders::new(
+        Vec::new(),
+        vec![CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
+            cell_selector: 0x0100,
+            placement: LandblockPlacement {
+                origin: Vector3::new(90.0, 96.0, -5.0),
+                orientation: Quaternion::identity(),
+            },
+            planes: [
+                Vector3::new(1.0, 0.0, 0.0),
+                Vector3::new(-1.0, 0.0, 0.0),
+                Vector3::new(0.0, 1.0, 0.0),
+                Vector3::new(0.0, -1.0, 0.0),
+                Vector3::new(0.0, 0.0, 1.0),
+                Vector3::new(0.0, 0.0, -1.0),
+            ]
+            .into_iter()
+            .map(|normal| Plane { normal, d: 3.0 })
+            .collect(),
+            portals: Vec::new(),
+        }],
+    );
+    let mut collision = flat_collision_scene();
+    collision.insert(asset).unwrap();
+    let id = SpatialBodyId::LocalPlayer(Guid(1));
+    let initial = WorldPosition {
+        landblock_id: cell,
+        ..pose(Vector3::new(90.0, 96.0, -5.0))
+    };
+    let mut scene = SpatialScene::new();
+    scene.register_body(SpatialBody::new(id, initial, Instant::now()));
+    scene
+        .set_dynamic_physical_body(
+            id,
+            Some(dynamic_definition(grounded_definition(), false)),
+            PhysicalCollisionFilter::ALL,
+            Some(cell),
+        )
+        .unwrap();
+    scene.settle_dynamic_body_placement(id, &collision).unwrap();
+    let body = scene.body(id).unwrap();
+    assert_eq!(body.pose, initial);
+    assert!(!body.spatial_membership().reaches_outdoors());
+    let void = WorldPosition {
+        coords: Vector3::new(90.0, 96.0, -0.25),
+        ..initial
+    };
+    scene
+        .relocate_dynamic_body(id, void, Instant::now())
+        .unwrap();
+    assert!(
+        scene.settle_dynamic_body_placement(id, &collision).is_err(),
+        "an indoor hint outside its room cannot authorize arrival"
+    );
+    assert_eq!(scene.body(id).unwrap().pose, void);
+}
+
+#[test]
+fn arrival_outside_an_indoor_hint_publishes_an_outdoor_pose() {
+    let cell = Guid(0xda55_0100);
+    let mut asset = flat_collision_asset(0);
+    asset.static_geometry = LandblockColliders::new(
+        Vec::new(),
+        vec![CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
+            cell_selector: 0x0100,
+            placement: LandblockPlacement {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            // The room occupies negative X, with an open portal onto outdoor space.
+            planes: vec![Plane {
+                normal: Vector3::new(-1.0, 0.0, 0.0),
+                d: 0.0,
+            }],
+            portals: vec![CellCollisionPortal {
+                plane: Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: 0.0,
+                },
+                aperture_vertices: Vec::new(),
+                reciprocal_visibility_vertices: None,
+                positive_side: true,
+                target: CellCollisionPortalTarget::Outdoor,
+                outdoor_building: None,
+            }],
+        }],
+    );
+    let mut collision = flat_collision_scene();
+    collision.insert(asset).unwrap();
+    let id = SpatialBodyId::LocalPlayer(Guid(1));
+    let mut scene = SpatialScene::new();
+    scene.register_body(SpatialBody::new(
+        id,
+        WorldPosition {
+            landblock_id: cell,
+            ..pose(Vector3::new(0.2, 96.0, 2.0))
+        },
+        Instant::now(),
+    ));
+    scene
+        .set_dynamic_physical_body(
+            id,
+            Some(dynamic_definition(grounded_definition(), false)),
+            PhysicalCollisionFilter::ALL,
+            Some(cell),
+        )
+        .unwrap();
+    scene.settle_dynamic_body_placement(id, &collision).unwrap();
+    let body = scene.body(id).unwrap();
+    assert!(body.spatial_membership().reaches_outdoors());
+    assert_eq!(body.spatial_membership().committed_cell(), None);
+    assert!(
+        !body.pose.is_indoors(),
+        "published pose must agree with accepted membership"
+    );
+}
+
+#[test]
+fn terrain_recovery_does_not_report_contacts_along_the_discarded_lift() {
+    let collision = flat_collision_scene();
+    let now = Instant::now();
+    let mover = SpatialBodyId::Entity(Guid(1));
+    let trigger = SpatialBodyId::Entity(Guid(2));
+    let depth = GROUNDED_CONFIG.step_up_height * 8.0;
+    let mut scene = SpatialScene::new();
+    for (id, z, definition) in [
+        (mover, -depth, grounded_definition()),
+        (trigger, -depth * 0.5, free_definition(Vector3::zero(), 0.2)),
+    ] {
+        scene.register_body(SpatialBody::new(id, pose(Vector3::new(90.0, 96.0, z)), now));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(definition, false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+    }
+    let dynamic = scene
+        .body_mut(trigger)
+        .unwrap()
+        .physical
+        .as_mut()
+        .unwrap()
+        .dynamic
+        .as_mut()
+        .unwrap();
+    dynamic.collision.dynamic_collision.target = EntityCollisionParticipation::Ethereal;
+    dynamic.collision.dynamic_collision.mover_accepts_response = false;
+    let result = scene
+        .advance_dynamic_entity_collection(
+            &collision,
+            MOBILE_CONTACT_TICK_SECONDS,
+            now,
+            collection_input,
+        )
+        .unwrap();
+    assert!(
+        result.collision_reports.iter().all(|report| !matches!(
+            report.contact.source,
+            crate::spatial::CollisionReportSource::DynamicBody { .. }
+        )),
+        "reinsertion must not synthesize a trigger crossing: {:?}",
+        result.collision_reports
+    );
+    assert!(scene.body(mover).unwrap().pose.coords.z >= 0.0);
+}
+
+#[test]
+fn terrain_arrival_preserves_water_immersion_and_rejects_entirely_water_owners() {
+    let owner = 0xda55_ffff;
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let standing_z = primary.radius - primary.center.z;
+    for entirely_water in [false, true] {
+        let mut samples = vec![0x10 << 2; 81];
+        if !entirely_water {
+            // Dry ground elsewhere makes this a shoreline owner; the arrival cell is flooded.
+            samples[0] = 0;
+        }
+        let mut collision = flat_collision_scene();
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: owner,
+                terrain: TerrainCollisionSurface::from_terrain(&LandblockTerrain {
+                    grid_size: 9,
+                    tile_size: 24.0,
+                    height_indices: vec![0; 81],
+                    heights: vec![0.0; 81],
+                    terrain_samples: samples,
+                    cell_diagonals: TerrainCellDiagonals::for_landblock(owner),
+                })
+                .unwrap(),
+                static_geometry: Default::default(),
+            })
+            .unwrap();
+        let id = SpatialBodyId::LocalPlayer(Guid(1));
+        let initial = pose(Vector3::new(
+            90.0,
+            96.0,
+            standing_z - GROUNDED_CONFIG.step_up_height * 8.0,
+        ));
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(id, initial, Instant::now()));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(definition, false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let result = scene.settle_dynamic_body_placement(id, &collision);
+        assert_eq!(result.is_err(), entirely_water);
+        let expected = if entirely_water {
+            initial.coords.z
+        } else {
+            standing_z - TERRAIN_WATER_COLLISION_DEPTH
+        };
+        assert!((scene.body(id).unwrap().pose.coords.z - expected).abs() < CONTACT_EPSILON);
+    }
 }
 
 #[test]

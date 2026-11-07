@@ -9,6 +9,7 @@ pub(super) use solid_recovery::SolidPlacementRecovery;
 pub(crate) use static_sphere_sweep::{PreparedHardSphereSweep, sphere_path_touches_shape};
 mod static_surface_ray;
 mod surface_ray_path;
+mod terrain_placement;
 
 pub use entity_surface_ray::{CollisionSurfaceRayHit, EntitySurfaceRayHit};
 pub use point_placement::PointPlacement;
@@ -79,6 +80,9 @@ pub enum CollisionQueryError {
     /// The preparation owner logs the peer identity and source error.
     #[error("collision query could not prepare selected peer geometry")]
     InvalidPeerPlacement,
+    /// Terrain correction cannot place the complete body clear of blocking geometry.
+    #[error("terrain recovery destination is obstructed")]
+    TerrainPlacementBlocked,
     /// A placed-motion request supplied no accepted geometric leg.
     #[error("placed-motion path must contain at least one waypoint")]
     EmptyMotionPath,
@@ -346,7 +350,7 @@ impl SpatialMembership {
     ///
     /// Reaching a different EnvCell or authored outdoor space is a resolved topology transition,
     /// not evidence that the retained cell escaped its portal graph.
-    fn center_domain_is_unresolved(&self) -> bool {
+    pub(in crate::spatial) fn center_domain_is_unresolved(&self) -> bool {
         self.committed_cell.is_none() && !self.reaches_outdoors
     }
 }
@@ -606,6 +610,28 @@ pub struct PlacedMotionPath {
 }
 
 impl PlacedMotionPath {
+    /// Directionless placement exposes only the accepted endpoint, never a traversed chord.
+    /// Report queries must not invent contacts with geometry skipped by terrain reinsertion.
+    pub(in crate::spatial) fn placed_endpoint(
+        anchor: Guid,
+        center: Vector3,
+        placement: SpatialMembership,
+    ) -> Self {
+        let point = PlacedMotionPoint {
+            center,
+            placement,
+            recovery: None,
+        };
+        Self {
+            anchor,
+            initial: point.clone(),
+            legs: vec![PlacedMotionLeg {
+                end_fraction: 1.0,
+                end: point,
+            }],
+        }
+    }
+
     /// Projects accepted movement-sphere segments into a canonical body-root publication path.
     /// Placement proofs survive projection; angular chords never translate the root. Gaps hold
     /// position, and zero-time adjustments retain only their final placement at that instant.

@@ -1021,6 +1021,56 @@ impl SpatialScene {
         Some(body.runtime_view())
     }
 
+    /// Resolves a discontinuous arrival without advancing time or replacing server authority.
+    /// Terrain recovery and final clearance are the same shared decisions used during simulation.
+    /// Missing coverage remains a collision-query error; a blocked endpoint cannot be published.
+    pub fn settle_dynamic_body_placement(
+        &mut self,
+        body_id: SpatialBodyId,
+        collision: &CollisionScene,
+    ) -> anyhow::Result<()> {
+        let mut candidate = self
+            .body_store
+            .body(body_id)
+            .context("placement body is absent")?
+            .clone();
+        let seed = candidate
+            .pose
+            .is_indoors()
+            .then_some(candidate.pose.landblock_id);
+        let membership = resolve_dynamic_body_placement(collision, &candidate, seed)?;
+        candidate
+            .physical
+            .as_mut()
+            .and_then(|physical| physical.dynamic.as_mut())
+            .context("placement body has no dynamic physics")?
+            .placement = membership;
+        let mut peers = self
+            .body_store
+            .bodies
+            .values()
+            .filter(|peer| peer.id != body_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        peers.sort_by_key(|peer| peer.id);
+        let (pose, membership) =
+            super::mobile_contact::checked_recovery_destination(collision, &candidate, &peers)?
+                .context("body arrival has no valid clear placement")?;
+        candidate.pose = pose;
+        let physical = candidate
+            .physical
+            .as_mut()
+            .context("placed body lost physics")?;
+        physical.reset_placement(membership.committed_cell());
+        physical
+            .dynamic
+            .as_mut()
+            .context("placed body lost dynamic physics")?
+            .placement = membership;
+        self.update_body(candidate);
+        Ok(())
+    }
+
     /// Relocates one dynamic body and clears every pose-dependent response/kinematic fact.
     pub fn relocate_dynamic_body(
         &mut self,
@@ -3422,7 +3472,7 @@ mod physical_body_tests {
     }
 
     #[test]
-    fn grounded_correction_preserves_ballistic_momentum_and_cannot_cross_the_floor() {
+    fn grounded_correction_preserves_ballistic_momentum_and_repairs_buried_reference() {
         let collision = flat_collision_scene();
         let now = Instant::now();
         let id = SpatialBodyId::Entity(Guid(0x7000_0015));
@@ -3470,8 +3520,8 @@ mod physical_body_tests {
             "airborne return must not add steering"
         );
 
-        // A corroborated target below solid terrain must fail checked placement, even after
-        // multiple watchdog windows. The horizontal motor never drives through the floor.
+        // Retail terrain reinsertion repairs a buried destination. The ordinary return stays
+        // swept; the watchdog may commit one checked, terrain-corrected placement and converge.
         scene.apply_authoritative_body_effect(
             id,
             AuthoritativePoseEffect::Reset {
@@ -3506,6 +3556,7 @@ mod physical_body_tests {
         let ticks = (crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS * 3.0
             / MOBILE_CONTACT_TICK_SECONDS)
             .ceil() as u32;
+        let mut recoveries = 0;
         for tick in 1..=ticks {
             let result = scene
                 .advance_dynamic_entity_collection(
@@ -3520,11 +3571,18 @@ mod physical_body_tests {
                 body.pose.coords.z
                     >= supported.coords.z - crate::spatial::bsp_query::CONTACT_EPSILON
             );
-            assert!(result.outcomes.iter().all(|outcome| !matches!(
-                outcome,
-                DynamicEntityBodyOutcome::RecoveredPlacement(_)
-            )));
+            recoveries += result
+                .outcomes
+                .iter()
+                .filter(|outcome| {
+                    matches!(outcome, DynamicEntityBodyOutcome::RecoveredPlacement(_))
+                })
+                .count();
         }
+        assert_eq!(
+            recoveries, 1,
+            "checked terrain recovery must converge without repeated relocations"
+        );
     }
 
     #[test]

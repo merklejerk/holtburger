@@ -286,8 +286,9 @@ fn standing_support_candidate(
     .max_by(|a, b| a.height_delta.total_cmp(&b.height_delta)))
 }
 
-/// Acquire standing height before motor selection. Recovery is a swept geometric adjustment; it
-/// consumes neither physical time nor a landing/restitution event. RETAIL DIVERGENCE: terrain
+/// Repair terrain penetration, then acquire bounded standing height before motor selection.
+/// Object support recovery is swept; terrain reinsertion validates only the endpoint. Neither
+/// consumes physical time or a landing/restitution event. RETAIL DIVERGENCE: terrain
 /// grounding uses the vertical sphere bottom; our full-sphere clearance instead requires a
 /// higher resting pose on slopes. Removing recovery while retaining that geometry strands
 /// compatible authority poses airborne. Evidence: captured Old Bones terrain overlap and
@@ -299,6 +300,7 @@ pub(super) fn prepare_support(
     body: &mut WorkingBody<'_>,
     config: GroundedConfig,
 ) -> Result<GroundState> {
+    super::terrain::recover(collision, hard, anchor, body)?;
     let Some(support) =
         standing_support_candidate(collision, hard, anchor, body.mobile, &body.contact, config)?
     else {

@@ -322,6 +322,8 @@ struct ClientWorldActivationRuntime {
     phase: ClientWorldActivationPhase,
     player_guid: Guid,
     destination: Option<ClientActivationDestination>,
+    /// World-owned physical placement has resolved before camera settlement and reveal.
+    placement_resolved: bool,
     camera_settlement: ClientActivationCameraSettlement,
     external_reveal_generation: Option<u64>,
 }
@@ -341,11 +343,12 @@ enum ClientWorldActivationPhase {
     TeleportDestinationInstalled,
 }
 
-/// Core-private authority guard pairing stable player identity with the exact destination cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Core-private authority guard pairing stable player identity with the exact server destination pose.
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct ClientActivationDestination {
     player: collision::ClientPlayerIdentity,
-    residency: Guid,
+    /// Full authority pose invalidates placement even for a second arrival in the same cell.
+    position: holtburger_common::position::WorldPosition,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -642,6 +645,7 @@ impl ClientRuntime {
             phase,
             player_guid,
             destination: None,
+            placement_resolved: false,
             camera_settlement: if self.requires_external_world_reveal {
                 ClientActivationCameraSettlement::Pending
             } else {
@@ -718,10 +722,11 @@ impl ClientRuntime {
                 guid: player.guid,
                 instance_sequence: player.instance_sequence(),
             },
-            residency: player.position.landblock_id,
+            position: player.position,
         };
         if activation.destination != Some(destination) {
             activation.destination = Some(destination);
+            activation.placement_resolved = false;
             activation.camera_settlement = if self.requires_external_world_reveal {
                 ClientActivationCameraSettlement::Pending
             } else {
@@ -729,44 +734,67 @@ impl ClientRuntime {
             };
         }
 
-        let (player_ready, destination_scene_ready) = match &self.collision_coordinator {
-            Some(coordinator) => {
-                let destination_ready =
-                    coordinator.destination_scene_ready(destination.residency)?;
-                let player_ready = match self.movement.movement_policy() {
-                    movement_types::ClientMovementPolicy::Physical => {
-                        coordinator.activation_body_ready(destination.player)?
-                            && self
-                                .world
-                                .scene
-                                .body(SpatialBodyId::LocalPlayer(player.guid))
-                                .is_some_and(|body| body.physical.is_some())
-                    }
-                    movement_types::ClientMovementPolicy::Navigation => {
-                        destination_ready && coordinator.activation_point_ready(player.position)?
-                    }
-                };
-                (player_ready, destination_ready)
+        let Some(coordinator) = self.collision_coordinator.as_ref() else {
+            self.activation = Some(activation);
+            return Ok(());
+        };
+        let destination_scene_ready =
+            coordinator.destination_scene_ready(destination.position.landblock_id)?;
+        let collision_snapshot = coordinator.snapshot();
+        let player_ready = match self.movement.movement_policy() {
+            movement_types::ClientMovementPolicy::Physical => {
+                coordinator.activation_body_ready(destination.player)?
+                    && self
+                        .world
+                        .scene
+                        .body(SpatialBodyId::LocalPlayer(destination.player.guid))
+                        .is_some_and(|body| body.physical.is_some())
             }
-            None => (false, false),
+            movement_types::ClientMovementPolicy::Navigation => {
+                destination_scene_ready
+                    && coordinator.activation_point_ready(destination.position)?
+            }
         };
         let containment_ready = self.world.all_player_contained_objects_exist();
         let reveal_ready = activation.external_reveal_generation == Some(activation.generation);
+
+        if !player_ready && activation.placement_resolved {
+            activation.placement_resolved = false;
+            if self.requires_external_world_reveal {
+                activation.camera_settlement = ClientActivationCameraSettlement::Pending;
+            }
+        }
+        if player_ready && destination_scene_ready && !activation.placement_resolved {
+            if self.movement.movement_policy() == movement_types::ClientMovementPolicy::Physical {
+                let body_id = SpatialBodyId::LocalPlayer(destination.player.guid);
+                if !coordinator
+                    .activation_placement_ready(&mut self.world, body_id)
+                    .map_err(|error| {
+                        error.context(format!(
+                            "Could not place player at destination {:#010X}",
+                            destination.position.landblock_id.0
+                        ))
+                    })?
+                {
+                    self.activation = Some(activation);
+                    return Ok(());
+                }
+                self.handle_runtime_world_event(&WorldEvent::RuntimeBodyChanged { body_id });
+            }
+            activation.placement_resolved = true;
+        }
 
         // Player policy readiness and static residency complete independently. A registered camera may
         // arrive before either worker; seeding it against the retained prior/empty scene would
         // turn ordinary asynchronous loading into a terminal missing-cell failure.
         if player_ready
             && destination_scene_ready
+            && activation.placement_resolved
             && activation.camera_settlement == ClientActivationCameraSettlement::Pending
         {
-            let collision_snapshot = self
-                .collision_coordinator
-                .as_ref()
-                .map(collision::ClientCollisionCoordinator::snapshot);
             let camera_input = camera::ClientCameraSceneInput::capture(
                 &self.world,
-                collision_snapshot.as_deref(),
+                Some(collision_snapshot.as_ref()),
                 None,
             );
             match self.camera.settle_for_activation(&camera_input)? {
@@ -779,7 +807,7 @@ impl ClientRuntime {
                     anyhow::bail!(
                         "Camera settlement exhausted its bounded work for world generation {} at destination {:#010X}",
                         activation.generation,
-                        destination.residency.0
+                        destination.position.landblock_id.0
                     );
                 }
             }
@@ -787,6 +815,7 @@ impl ClientRuntime {
 
         let presentation_ready = player_ready
             && destination_scene_ready
+            && activation.placement_resolved
             && containment_ready
             && activation.camera_settlement == ClientActivationCameraSettlement::Settled
             && reveal_ready;

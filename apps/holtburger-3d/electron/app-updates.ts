@@ -56,6 +56,8 @@ interface UpdateDependencies {
 
 /** One bounded request owns its cancellation, deadline and completion together. */
 interface UpdateRequest {
+	/** Clicks join an active refresh and observe its success or failure. */
+	readonly completion: Promise<void>;
 	/** Aborts both native fetch and the bounded read when optional work is retired. */
 	readonly cancellation: AbortController;
 	/** Native shutdown clears this timer synchronously. */
@@ -78,6 +80,7 @@ function readUpdateFeed(
 		void (async () => {
 			const response = await request(url, {
 				signal,
+				cache: "no-store",
 				headers: { Accept: "application/json" },
 				credentials: "omit",
 			});
@@ -157,8 +160,11 @@ export class AppUpdates {
 	}
 
 	async openDownloads(): Promise<void> {
+		if (this.#stopped || this.#snapshot.availability.kind !== "available")
+			throw new Error("No confirmed update downloads are available");
+		await this.#refresh();
 		const availability = this.#snapshot.availability;
-		if (availability.kind !== "available")
+		if (this.#stopped || availability.kind !== "available")
 			throw new Error("No confirmed update downloads are available");
 		await this.#dependencies.openExternal(
 			`${APP_UPDATE_TUNING.downloadsRootUrl}/${availability.tag}`,
@@ -205,8 +211,17 @@ export class AppUpdates {
 	}
 
 	#check(): void {
+		void this.#refresh().catch((error: unknown) => {
+			if (!this.#stopped)
+				this.#dependencies.report(`Update check failed: ${formatError(error)}`);
+		});
+	}
+
+	/** Explicit download actions bypass the hourly interval but share any active request. */
+	#refresh(): Promise<void> {
+		if (this.#request !== null) return this.#request.completion;
 		const build = this.#build;
-		if (build === null || this.#stopped || this.#request !== null) return;
+		if (build === null || this.#stopped) return Promise.resolve();
 		this.#lastAttempt = this.#dependencies.now();
 		const cancellation = new AbortController();
 		const deadline = setTimeout(
@@ -214,7 +229,7 @@ export class AppUpdates {
 			APP_UPDATE_TUNING.requestTimeoutMs,
 		);
 		// Defer work until the request resource is installed, including synchronous fetch failures.
-		void Promise.resolve().then(async () => {
+		const completion = Promise.resolve().then(async () => {
 			try {
 				const feed = await readUpdateFeed(
 					this.#dependencies.request,
@@ -228,18 +243,14 @@ export class AppUpdates {
 							? { kind: "available", version: feed.version, tag: feed.tag }
 							: { kind: "current" },
 					});
-			} catch (error) {
-				if (!this.#stopped)
-					this.#dependencies.report(
-						`Update check failed: ${formatError(error)}`,
-					);
 			} finally {
 				clearTimeout(deadline);
 				this.#request = null;
 				this.#schedule();
 			}
 		});
-		this.#request = { cancellation, deadline };
+		this.#request = { cancellation, deadline, completion };
+		return completion;
 	}
 
 	#publish(snapshot: UpdateSnapshot): void {

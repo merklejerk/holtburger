@@ -17,7 +17,7 @@ export interface AppUpdateBridge extends NativeSnapshotSource {
 	setPregameVisible(token: string, visible: boolean): Promise<unknown>;
 	/** Retire a footer when its frontend page unmounts. */
 	releasePregame(token: string): Promise<unknown>;
-	/** Open the downloads page retained by the native update owner. */
+	/** Refresh the installed channel and open its confirmed update downloads page. */
 	openDownloads(): Promise<void>;
 }
 

@@ -69,6 +69,110 @@ describe("application update ownership", () => {
 		updates.stop();
 	});
 
+	it("refreshes its channel on click and opens a release published after the notification", async () => {
+		const { updates, request, openExternal } = fixture(build);
+		updates.start();
+		await vi.advanceTimersByTimeAsync(0);
+		const latest = { ...feed, version: "0.1.5", tag: "v0.1.5" };
+		request.mockResolvedValueOnce(Response.json(latest));
+
+		await updates.openDownloads();
+
+		expect(request).toHaveBeenCalledTimes(2);
+		expect(request.mock.calls[1]).toEqual([
+			`${APP_UPDATE_TUNING.feedRootUrl}/${build.channel}.json`,
+			expect.objectContaining({ cache: "no-store" }),
+		]);
+		expect(updates.snapshot.availability).toEqual({
+			kind: "available",
+			version: latest.version,
+			tag: latest.tag,
+		});
+		expect(openExternal).toHaveBeenCalledExactlyOnceWith(
+			`${APP_UPDATE_TUNING.downloadsRootUrl}/${latest.tag}`,
+		);
+		updates.stop();
+	});
+
+	it("rejects a failed click refresh without opening stale downloads and allows immediate retry", async () => {
+		const { updates, request, openExternal } = fixture(build);
+		updates.start();
+		await vi.advanceTimersByTimeAsync(0);
+		const confirmed = updates.snapshot;
+		request.mockRejectedValueOnce(new Error("offline"));
+
+		await expect(updates.openDownloads()).rejects.toThrow("offline");
+		expect(openExternal).not.toHaveBeenCalled();
+		expect(updates.snapshot).toEqual(confirmed);
+		await updates.openDownloads();
+		expect(request).toHaveBeenCalledTimes(3);
+		expect(openExternal).toHaveBeenCalledOnce();
+		updates.stop();
+	});
+
+	it("bounds click refreshes and cancels them on shutdown without opening stale downloads", async () => {
+		for (const shutdown of [false, true]) {
+			const { updates, request, openExternal } = fixture(build);
+			updates.start();
+			await vi.advanceTimersByTimeAsync(0);
+			request.mockImplementationOnce(() => new Promise(() => {}));
+			const opening = expect(updates.openDownloads()).rejects.toThrow(
+				shutdown ? "shutdown" : "timed out",
+			);
+			if (shutdown) updates.stop();
+			await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.requestTimeoutMs);
+			await opening;
+			expect(openExternal).not.toHaveBeenCalled();
+			updates.stop();
+		}
+	});
+
+	it("joins an active periodic refresh before opening downloads", async () => {
+		const { updates, request, openExternal } = fixture(build);
+		updates.start();
+		updates.setWindowVisible(true);
+		updates.registerPregame(true);
+		await vi.advanceTimersByTimeAsync(0);
+		let respond: (response: Response) => void = () => {
+			throw new Error("Periodic refresh has not started");
+		};
+		request.mockImplementationOnce(
+			() =>
+				new Promise<Response>((resolve) => {
+					respond = resolve;
+				}),
+		);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
+		const opening = updates.openDownloads();
+		expect(openExternal).not.toHaveBeenCalled();
+		respond(Response.json({ ...feed, version: "0.1.5", tag: "v0.1.5" }));
+		await opening;
+		expect(request).toHaveBeenCalledTimes(2);
+		expect(openExternal).toHaveBeenCalledExactlyOnceWith(
+			`${APP_UPDATE_TUNING.downloadsRootUrl}/v0.1.5`,
+		);
+		updates.stop();
+	});
+
+	it("does not open downloads when the refreshed channel no longer offers an update", async () => {
+		const { updates, request, openExternal } = fixture(build);
+		updates.start();
+		await vi.advanceTimersByTimeAsync(0);
+		request.mockResolvedValueOnce(
+			Response.json({
+				...feed,
+				version: build.version,
+				tag: `v${build.version}`,
+			}),
+		);
+		await expect(updates.openDownloads()).rejects.toThrow(
+			"No confirmed update",
+		);
+		expect(updates.snapshot.availability.kind).toBe("current");
+		expect(openExternal).not.toHaveBeenCalled();
+		updates.stop();
+	});
+
 	it("uses one hourly timer for all pregame registrations and defers during gameplay", async () => {
 		const { updates, request } = fixture(build);
 		updates.start();

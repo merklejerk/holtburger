@@ -477,18 +477,30 @@ async function runProbe() {
 			() => evaluate(page, `${updateIcon}?.checkVisibility()`),
 			"launcher update icon",
 		);
+		requireCondition(
+			await evaluate(inspector, "__updatesProbe.requests.length === 1"),
+			"Launcher mounts must share one startup request",
+		);
+		await evaluate(
+			inspector,
+			"__updatesProbe.feed.version = '0.1.5'; __updatesProbe.feed.tag = 'v0.1.5'",
+		);
 		await evaluate(page, `${updateIcon}.click()`);
+		await waitFor(
+			() => evaluate(inspector, "__updatesProbe.opened.length === 1"),
+			"refreshed update downloads",
+		);
 		let native = await evaluate(
 			inspector,
 			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened, expectedDownloadsUrl: __updatesProbe.downloadsRootUrl + '/' + __updatesProbe.feed.tag })`,
 		);
 		requireCondition(
-			native.requests.length === 1,
-			"Launcher mounts must share one startup request",
+			native.requests.length === 2,
+			"Click must refresh the channel before opening downloads",
 		);
 		requireCondition(
 			native.opened[0] === native.expectedDownloadsUrl,
-			"Click must open the confirmed release page",
+			"Click must open the release published after the notification",
 		);
 		if (values["updates-direct"]) {
 			stage = "returning from direct client startup to the launcher";
@@ -550,11 +562,11 @@ async function runProbe() {
 			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened, expectedDownloadsUrl: __updatesProbe.downloadsRootUrl + '/' + __updatesProbe.feed.tag })`,
 		);
 		requireCondition(
-			native.requests.length === 2,
+			native.requests.length === 3,
 			"Returning between documents must not bypass the hourly interval",
 		);
 		report.scenarios.push(
-			"Native update startup, real footer click, picker/client replacement, stale-token rejection and hourly reconciliation",
+			"Native update startup, fresh release on footer click, picker/client replacement, stale-token rejection and hourly reconciliation",
 		);
 		report.updates = native;
 		stage = "quitting the update probe";

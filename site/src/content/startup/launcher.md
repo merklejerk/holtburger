@@ -40,8 +40,6 @@ Open **App settings** in the launcher to choose a graphics backend and toggle **
 
 For explanations of each setting, see [graphics troubleshooting](/holtburger/3d/help/#before-the-game-opens). If pieces of the interface briefly disappear, see [Windows UI flickering](/holtburger/3d/help/#windows-ui-flickering).
 
-Launcher settings are reconciled from supported older formats and repaired automatically when loaded. Servers, account profiles, saved credentials, and launch history carry forward. Missing preferences receive defaults, invalid history is cleared, and malformed entries are removed while valid entries are retained. Older profile content-folder overrides move to their server when its profiles agree; conflicting overrides revert to the application default and are reported. The launcher saves a backup of the original file before writing changes. If the catalog cannot be repaired, the launcher automatically backs up the original and creates an empty catalog. Backup or write failures are reported without replacing the original.
-
 ## Switch characters
 
 While playing, open the **System menu** and choose **Return to main menu**. This logs out your character and returns to character selection on the same connection.

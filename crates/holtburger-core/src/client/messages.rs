@@ -541,9 +541,9 @@ impl ClientRuntime {
                 self.clear_busy_operation();
                 self.reset_housing();
                 self.described_character = None;
-                self.refresh_spell_inspection_context();
                 self.authenticating = false;
                 self.character_selection.replace_roster(&data);
+                self.refresh_spell_inspection_context();
                 self.turbine_chat.enabled = data.use_turbine_chat;
                 if !data.use_turbine_chat {
                     self.turbine_chat.channels = None;
@@ -2865,6 +2865,31 @@ mod tests {
         }
 
         assert!(saw_completion);
+    }
+
+    #[tokio::test]
+    async fn character_roster_adopts_exact_server_account_identity() {
+        for account_name in ["account", "Account"] {
+            let mut client = build_test_client();
+            client.character_selection.account_name = "ACCOUNT".into();
+            client.authenticating = true;
+            client
+                .handle_message(&encode_message(&GameMessage::CharacterList(Box::new(
+                    CharacterListData {
+                        characters: vec![],
+                        max_slots: 11,
+                        account_name: account_name.into(),
+                        use_turbine_chat: false,
+                        has_tod_expansion: true,
+                    },
+                ))))
+                .await
+                .unwrap();
+
+            assert_eq!(client.character_selection.account_name, account_name);
+            assert_eq!(client.state, ClientState::CharacterSelection);
+            assert!(!client.authenticating);
+        }
     }
 
     #[tokio::test]

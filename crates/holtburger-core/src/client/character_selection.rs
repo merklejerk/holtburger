@@ -5,6 +5,7 @@ use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 
 pub(super) struct CharacterSelectionState {
+    /// Login spelling until the roster supplies the server's canonical account identity.
     pub(super) account_name: String,
     pub(super) characters: Vec<CharacterEntry>,
     /// Zero before the first roster; no character operation is admitted before selection.
@@ -32,6 +33,8 @@ impl CharacterSelectionState {
 
     /// Preserve an unresolved operation across unsolicited roster refreshes.
     pub(super) fn replace_roster(&mut self, data: &CharacterListData) {
+        // Character operations must echo the server's exact spelling, including case.
+        self.account_name.clone_from(&data.account_name);
         self.characters = data.characters.clone();
         self.max_slots = data.max_slots;
     }

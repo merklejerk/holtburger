@@ -220,6 +220,18 @@
 			transparent
 		);
 		--ui-combat-charge-color: var(--ui-color-health);
+		/* Recklessness remains visible on both the unfilled track and animated charge. */
+		--ui-combat-recklessness-track-color: color-mix(
+			in srgb,
+			var(--ui-color-warning) 40%,
+			var(--ui-combat-track-color)
+		);
+		--ui-combat-recklessness-charge-color: var(--ui-color-warning);
+		--ui-combat-recklessness-handle-color: var(--ui-color-warning);
+		--ui-combat-recklessness-handle-scale: 1.2;
+		/* One brief artwork pulse when a new slider position is committed. */
+		--ui-combat-handle-settle-duration: 280ms;
+		--ui-combat-handle-settle-scale: 1.25;
 		--ui-combat-height-color: color-mix(
 			in srgb,
 			var(--ui-color-control) 82%,

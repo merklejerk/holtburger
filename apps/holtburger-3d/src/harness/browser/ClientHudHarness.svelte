@@ -86,6 +86,7 @@
 	import {
 		COMBAT_BREAKPOINTS,
 		COMBAT_HEIGHTS,
+		RECKLESSNESS_RANGE,
 	} from "../../client/client-combat-bar-state";
 	import {
 		bindSpellCell,
@@ -620,6 +621,62 @@
 	};
 	let releaseCombatKeys: (() => void) | null = null;
 	const combatBarProbe = {
+		/** Production range and selection route for exact endpoint checks. */
+		range: RECKLESSNESS_RANGE,
+		select: selectCombatProfile,
+		/** Exercise the shipped copper gauge as well as the plain theme. */
+		theme: (id: string | null) => fixtureTheme.applyPreview(id, false),
+		/** Feed training changes through the production character-sheet owner while its panel is closed. */
+		recklessness: async (
+			training: "Unusable" | "Untrained" | "Trained" | "Specialized" | null,
+		) => {
+			interactionLifecycle.characterSheet.replace({
+				...SHOWCASE_CHARACTER_SHEET,
+				skills:
+					training === null
+						? []
+						: [
+								{
+									description: null,
+									availableInEor: true,
+									stat: {
+										skill_type: "Recklessness",
+										training,
+										ranks: 0,
+										init: 0,
+										spent_xp: 0,
+										next_rank_xp: null,
+										base: 0,
+										current: 0,
+										trained_cost: 4,
+										specialized_cost: 2,
+										breakdown: {
+											formula: "NoFormula",
+											base_bonuses: [],
+											current_bonuses: [],
+											vitae: 1,
+											modifiers: {
+												contributions: [],
+												multiplier: 1,
+												additive: 0,
+											},
+											wide_modifiers: [],
+											wide_additive_rounded: 0,
+											finalization: {
+												before_rounding: 0,
+												rounded: 0,
+												minimum: 0,
+												result: 0,
+											},
+										},
+									},
+								},
+							],
+			});
+			await new Promise((resolve) =>
+				setTimeout(resolve, CLIENT_TUNING.characterSheet.displayIntervalMs * 2),
+			);
+		},
 		/** Exercise the same cold UI preference passed to the production HUD. */
 		help: (showHelpLabels: boolean) => {
 			userSettings = {

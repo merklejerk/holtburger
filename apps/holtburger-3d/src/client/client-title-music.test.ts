@@ -24,7 +24,7 @@ function fixture() {
 }
 
 describe("optional title music", () => {
-	it("controls title music independently of the in-game master volume and mute", () => {
+	it("keeps title volume independent of in-game master while honoring global mute", () => {
 		const { audio, music } = fixture();
 		for (const masterVolume of [0, 0.4, 1]) {
 			music.setSettings({
@@ -41,9 +41,34 @@ describe("optional title music", () => {
 			muted: true,
 		});
 		expect(audio.volume).toBe(0.6);
+		expect(audio.muted).toBe(true);
+		music.setSettings({
+			...CLIENT_AUDIO_DEFAULTS,
+			musicVolume: 0.6,
+			muted: false,
+		});
 		expect(audio.muted).toBe(false);
+		expect(audio.volume).toBe(0.6);
 	});
 
+	it("applies the background preference immediately without resetting music position", () => {
+		const { audio, music } = fixture();
+		music.setSettings(CLIENT_AUDIO_DEFAULTS);
+		music.setActive(true);
+		audio.currentTime = 17;
+		music.setForeground(false);
+		expect(audio.pause).toHaveBeenCalledOnce();
+		music.setSettings({ ...CLIENT_AUDIO_DEFAULTS, playInBackground: true });
+		expect(audio.play).toHaveBeenCalledTimes(2);
+		expect(audio.currentTime).toBe(17);
+		music.setSettings(CLIENT_AUDIO_DEFAULTS);
+		expect(audio.pause).toHaveBeenCalledTimes(2);
+		music.setForeground(true);
+		expect(audio.play).toHaveBeenCalledTimes(3);
+		music.setActive(false);
+		music.setSettings({ ...CLIENT_AUDIO_DEFAULTS, playInBackground: true });
+		expect(audio.play).toHaveBeenCalledTimes(3);
+	});
 	it("plays once per selection visit, retains playback through updates, and restarts after world entry", () => {
 		const { audio, music } = fixture();
 		music.setSettings({
@@ -59,7 +84,7 @@ describe("optional title music", () => {
 		music.setSettings({ ...CLIENT_AUDIO_DEFAULTS, muted: true });
 		expect(audio.play).toHaveBeenCalledTimes(1);
 		expect(audio.currentTime).toBe(17);
-		expect(audio.muted).toBe(false);
+		expect(audio.muted).toBe(true);
 		music.setActive(false);
 		expect(audio.pause).toHaveBeenCalledOnce();
 		expect(audio.currentTime).toBe(0);
@@ -80,9 +105,13 @@ describe("optional title music", () => {
 
 	it("reports load failures once and never retries on later screen changes", () => {
 		const { audio, music, report } = fixture();
+		music.setForeground(false);
+		music.setSettings({ ...CLIENT_AUDIO_DEFAULTS, playInBackground: true });
 		music.setActive(true);
 		audio.dispatchEvent(new Event("error"));
 		audio.dispatchEvent(new Event("error"));
+		music.setSettings(CLIENT_AUDIO_DEFAULTS);
+		music.setSettings({ ...CLIENT_AUDIO_DEFAULTS, playInBackground: true });
 		music.setActive(false);
 		music.setActive(true);
 		expect(report).toHaveBeenCalledOnce();
@@ -141,7 +170,7 @@ describe("optional title music", () => {
 		expect(audio.play).toHaveBeenCalledTimes(2);
 		expect(audio.currentTime).toBe(23);
 		expect(audio.volume).toBe(0.37);
-		expect(audio.muted).toBe(false);
+		expect(audio.muted).toBe(true);
 	});
 
 	it("defers playback when selection first appears in the background", () => {

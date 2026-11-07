@@ -15,7 +15,12 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 	return { ...actual, copyFile: vi.fn(actual.copyFile) };
 });
 
-const window = { normalBounds: { width: 900, height: 650 }, maximized: false };
+const window = {
+	normalBounds: { width: 900, height: 650 },
+	maximized: false,
+	fullscreen: false,
+	freeResize: true,
+};
 const directories: string[] = [];
 afterEach(async () => {
 	vi.restoreAllMocks();

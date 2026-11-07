@@ -3,6 +3,7 @@ import { z } from "zod";
 /** Native window state is available before renderer settings bootstrap. */
 export const clientWindowSettingsSchema = z
 	.object({
+		/** Native outer window dimensions; retained separately from content-size presets. */
 		normalBounds: z
 			.object({
 				width: z.number().int().positive().safe(),
@@ -12,6 +13,10 @@ export const clientWindowSettingsSchema = z
 			.strip()
 			.readonly(),
 		maximized: z.boolean(),
+		/** Native fullscreen preference; older installations start windowed. */
+		fullscreen: z.boolean().default(false),
+		/** Allow edge resizing and maximizing independently of preset selection. */
+		freeResize: z.boolean().default(true),
 	})
 	.strict()
 	.readonly();

@@ -57,6 +57,8 @@ app.whenReady().then(async () => {
 		const store = new ClientSettingsStore(join(directory, "settings.json"), {
 			normalBounds: { width: 1200, height: 900 },
 			maximized: false,
+			fullscreen: false,
+			freeResize: true,
 		});
 		await store.load();
 		const diagnosticIdentity = "user-theme-diagnostic";

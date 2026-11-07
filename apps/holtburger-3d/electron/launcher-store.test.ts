@@ -10,6 +10,8 @@ const directories: string[] = [];
 const geometry = {
 	normalBounds: { width: 900, height: 650 },
 	maximized: false,
+	fullscreen: false,
+	freeResize: true,
 };
 async function setup() {
 	const directory = await mkdtemp(join(tmpdir(), "h3d-launcher-test-"));

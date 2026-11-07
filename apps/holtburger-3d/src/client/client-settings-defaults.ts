@@ -41,6 +41,7 @@ export const CLIENT_AUDIO_DEFAULTS = {
 	effectVolume: 1,
 	ambientVolume: 1,
 	muted: false,
+	playInBackground: false,
 } as const satisfies ClientAudioSettings;
 
 /** Build absence defaults from the same constants consumed by the live client. */

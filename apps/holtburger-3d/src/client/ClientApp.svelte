@@ -23,12 +23,9 @@
 		UiThemeSelection,
 		UiThemeSettings,
 	} from "../app/ui-theme-selection";
+	import { bindClientAudioForeground } from "./client-audio-foreground";
 	import ClientMusicControls from "./ClientMusicControls.svelte";
-	import {
-		ClientTitleMusic,
-		titleMusicUrl,
-		bindTitleMusicForeground,
-	} from "./client-title-music";
+	import { ClientTitleMusic, titleMusicUrl } from "./client-title-music";
 	import ClientPregameSettings from "./ClientPregameSettings.svelte";
 	import { choosePregameLocation } from "./client-pregame-tuning";
 	import PowerIcon from "../assets/icons/hud-power.svg?component";
@@ -594,12 +591,17 @@
 	const pregameSelection = $derived(
 		page.kind === "selection" ? page.selection : null,
 	);
+	let audioForeground = true;
 	let titleMusic = $state.raw<ClientTitleMusic | null>(null);
 	onMount(() => {
 		const music = new ClientTitleMusic(titleMusicUrl, (error) =>
 			console.warn("Optional title music unavailable:", error),
 		);
-		const unbindForeground = bindTitleMusicForeground(music, window);
+		const unbindForeground = bindClientAudioForeground((foreground) => {
+			audioForeground = foreground;
+			music.setForeground(foreground);
+			presentationRoot?.setForeground(foreground);
+		}, window);
 		titleMusic = music;
 		return () => {
 			unbindForeground();
@@ -1975,6 +1977,7 @@
 					},
 				);
 				textureFilteringCapabilities = owner.textureFilteringCapabilities;
+				root.setForeground(audioForeground);
 				root.setAudioSettings(userSettings.audio);
 				applyFrameGraphics(userSettings.graphics);
 			},

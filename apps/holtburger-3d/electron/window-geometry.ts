@@ -5,26 +5,39 @@ import type { ClientWindowSettings } from "../src/app/window-settings-contract.j
 interface GeometryWindow {
 	getNormalBounds(): ClientWindowSettings["normalBounds"];
 	isMaximized(): boolean;
+	isFullScreen(): boolean;
+	isResizable(): boolean;
 	on(event: string, listener: () => void): unknown;
 	removeListener(event: string, listener: () => void): unknown;
 }
-const GEOMETRY_EVENTS = ["resize", "maximize", "unmaximize"];
+const GEOMETRY_EVENTS = [
+	"resize",
+	"maximize",
+	"unmaximize",
+	"enter-full-screen",
+	"leave-full-screen",
+];
 /** Native geometry listeners outlive documents, so surface replacement must explicitly detach them. */
 export function observeWindowGeometry(
 	window: GeometryWindow,
 	save: (value: ClientWindowSettings) => Promise<void>,
 	report: (error: unknown) => void,
+	snapshot: () => ClientWindowSettings = () => {
+		const { width, height } = window.getNormalBounds();
+		return {
+			normalBounds: { width, height },
+			maximized: window.isMaximized(),
+			fullscreen: window.isFullScreen(),
+			freeResize: window.isResizable(),
+		};
+	},
 ): () => Promise<void> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let stopped = false;
 	let failureReported = false;
 	let tail: Promise<void> = Promise.resolve();
 	const write = (): Promise<void> => {
-		const { width, height } = window.getNormalBounds();
-		const value = {
-			normalBounds: { width, height },
-			maximized: window.isMaximized(),
-		};
+		const value = snapshot();
 		const writing = tail.then(() => save(value));
 		tail = writing.then(
 			() => {

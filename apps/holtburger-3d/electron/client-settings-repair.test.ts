@@ -34,6 +34,8 @@ const userContext = {
 const initialWindow = {
 	normalBounds: { width: 1440, height: 900 },
 	maximized: false,
+	fullscreen: false,
+	freeResize: true,
 };
 const user = createDefaultClientUserSettings(
 	initialWindow.normalBounds,
@@ -126,6 +128,8 @@ describe("persisted settings repair", () => {
 		expect(store.readWindow()).toEqual({
 			normalBounds: initialWindow.normalBounds,
 			maximized: true,
+			fullscreen: false,
+			freeResize: true,
 		});
 	});
 

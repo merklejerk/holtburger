@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ClientDisplaySettingsControls from "./ClientDisplaySettingsControls.svelte";
 	import UiRange from "../app/UiRange.svelte";
 	import type { ClientGraphicsSettings } from "./client-settings-contract";
 	import { CLIENT_GRAPHICS_DEFAULTS } from "./client-settings-policy";
@@ -36,6 +37,7 @@
 </script>
 
 <div class="settings-section">
+	<ClientDisplaySettingsControls />
 	<label
 		>View distance: {graphics.viewDistance} landblocks
 		<UiRange

@@ -254,33 +254,55 @@ async function probeTitleMusic() {
 			masterVolume: 0.4,
 			musicVolume: 0.3,
 		});
-		const playing = new Promise<void>((resolve, reject) => {
-			const timeout = setTimeout(
-				() => reject(new Error("Title music did not start")),
-				5000,
-			);
-			audio.addEventListener(
-				"playing",
-				() => {
-					clearTimeout(timeout);
-					resolve();
-				},
-				{ once: true },
-			);
-			audio.addEventListener(
-				"error",
-				() => {
-					clearTimeout(timeout);
-					reject(new Error("Title music decode failed"));
-				},
-				{ once: true },
-			);
-		});
+		const waitForPlaying = () =>
+			new Promise<void>((resolve, reject) => {
+				const timeout = setTimeout(
+					() => reject(new Error("Title music did not start")),
+					5000,
+				);
+				audio.addEventListener(
+					"playing",
+					() => {
+						clearTimeout(timeout);
+						resolve();
+					},
+					{ once: true },
+				);
+				audio.addEventListener(
+					"error",
+					() => {
+						clearTimeout(timeout);
+						reject(new Error("Title music decode failed"));
+					},
+					{ once: true },
+				);
+			});
+		const playing = waitForPlaying();
 		music.setActive(true);
 		await playing;
 		await new Promise<void>((resolve) => setTimeout(resolve, 150));
 		const advanced = audio.currentTime > 0;
 		const volume = audio.volume;
+		music.setForeground(false);
+		const pausedPosition = audio.currentTime;
+		if (!audio.paused) throw new Error("Background title music did not pause.");
+		const backgroundPlaying = waitForPlaying();
+		music.setSettings({
+			...CLIENT_AUDIO_DEFAULTS,
+			musicVolume: volume,
+			playInBackground: true,
+		});
+		await backgroundPlaying;
+		if (audio.paused || audio.currentTime < pausedPosition)
+			throw new Error(
+				"Enabled background title music did not resume in place.",
+			);
+		music.setSettings({ ...CLIENT_AUDIO_DEFAULTS, musicVolume: volume });
+		if (!audio.paused)
+			throw new Error(
+				"Disabling background playback did not pause title music.",
+			);
+		music.setForeground(true);
 		music.setSettings({
 			...CLIENT_AUDIO_DEFAULTS,
 			masterVolume: 0,
@@ -288,12 +310,26 @@ async function probeTitleMusic() {
 			muted: true,
 		});
 		const muted = audio.muted;
+		const positionBeforeUnmute = audio.currentTime;
+		music.setSettings({
+			...CLIENT_AUDIO_DEFAULTS,
+			musicVolume: volume,
+			muted: false,
+		});
+		if (
+			audio.muted ||
+			audio.volume !== volume ||
+			audio.currentTime < positionBeforeUnmute
+		)
+			throw new Error(
+				"Unmuting title music changed its saved mix or playback position.",
+			);
 		music.setActive(false);
 		const stopped = audio.paused && audio.currentTime === 0;
 		if (
 			!advanced ||
 			!stopped ||
-			muted ||
+			!muted ||
 			Math.abs(volume - 0.3) > 0.00001 ||
 			audio.volume !== volume ||
 			failures.length
@@ -301,6 +337,7 @@ async function probeTitleMusic() {
 			throw new Error("Title music lifecycle or mix failed");
 		return {
 			available: true,
+			backgroundPlayback: true,
 			advanced,
 			stopped,
 			muted,

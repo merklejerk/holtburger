@@ -238,6 +238,61 @@ describe("ClientPresentationRoot", () => {
 		expect(owner.destroy).toHaveBeenCalledOnce();
 	});
 
+	it("applies the cached audio mix and attention before publishing a constructed owner", async () => {
+		const { dependencies, owner, runtime } = fixture();
+		const building = deferred<typeof owner>();
+		dependencies.build.mockReturnValueOnce(building.promise);
+		const settings = {
+			...CLIENT_AUDIO_DEFAULTS,
+			masterVolume: 0.4,
+			effectVolume: 0.6,
+			ambientVolume: 0.2,
+		};
+		const published = vi.fn();
+		dependencies.onReady.mockImplementation(() => {
+			published(
+				owner.setOutputVolume.mock.lastCall,
+				runtime.setAudioSettings.mock.lastCall,
+			);
+		});
+		const root = new ClientPresentationRoot(dependencies);
+		root.setAudioSettings(settings);
+		root.setForeground(false);
+		const ready = root.setMode("pregame");
+		building.resolve(owner);
+		await ready;
+		expect(published).toHaveBeenCalledExactlyOnceWith(
+			[0],
+			[
+				{
+					effectVolume: settings.effectVolume,
+					ambientVolume: settings.ambientVolume,
+				},
+			],
+		);
+		await root.destroy();
+	});
+	it("gates gameplay output on attention without changing the saved mix or explicit mute", async () => {
+		const { dependencies, owner } = fixture();
+		const root = new ClientPresentationRoot(dependencies);
+		await root.setMode("pregame");
+		const settings = { ...CLIENT_AUDIO_DEFAULTS, masterVolume: 0.4 };
+		root.setAudioSettings(settings);
+		root.setForeground(false);
+		expect(owner.setOutputVolume).toHaveBeenLastCalledWith(0);
+		root.setAudioSettings({ ...settings, playInBackground: true });
+		expect(owner.setOutputVolume).toHaveBeenLastCalledWith(
+			settings.masterVolume,
+		);
+		root.setAudioSettings({ ...settings, playInBackground: true, muted: true });
+		expect(owner.setOutputVolume).toHaveBeenLastCalledWith(0);
+		root.setAudioSettings(settings);
+		root.setForeground(true);
+		expect(owner.setOutputVolume).toHaveBeenLastCalledWith(
+			settings.masterVolume,
+		);
+		await root.destroy();
+	});
 	it("owns graphics and audio settings across both drivers", async () => {
 		const { dependencies, owner, runtime } = fixture();
 		const root = new ClientPresentationRoot(dependencies);

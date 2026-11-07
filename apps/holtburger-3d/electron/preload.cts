@@ -229,6 +229,19 @@ if (process.argv.includes("--holtburger-mode=client")) {
 			return () => ipcRenderer.removeListener("visual-cache:failure", listener);
 		},
 	});
+	contextBridge.exposeInMainWorld("holtburgerDisplay", {
+		snapshot: (): Promise<unknown> => invoke("window:display-snapshot"),
+		change: (request: unknown): Promise<void> =>
+			invoke("window:display-change", request),
+		onState(handler: (snapshot: unknown) => void): () => void {
+			const listener = (_event: Electron.IpcRendererEvent, snapshot: unknown) =>
+				handler(snapshot);
+			ipcRenderer.on("window:display-state", listener);
+			return () => {
+				ipcRenderer.removeListener("window:display-state", listener);
+			};
+		},
+	});
 	contextBridge.exposeInMainWorld("holtburgerSettings", {
 		loadUser(context: unknown): Promise<unknown> {
 			return invoke("settings:load-user", context);

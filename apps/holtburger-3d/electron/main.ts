@@ -20,6 +20,15 @@ import {
 	type ApplicationAttempt,
 } from "./client-application.js";
 import { DocumentAdmission, type DocumentRole } from "./document-admission.js";
+import {
+	WindowDisplay,
+	setGameMinimumContentSize,
+	restoreWindowGeometry as restoreGeometry,
+} from "./window-display.js";
+import {
+	windowDisplayRequestSchema,
+	type WindowDisplayRequest,
+} from "../src/app/window-display-contract.js";
 import { observeWindowGeometry } from "./window-geometry.js";
 import {
 	PointerLockHover,
@@ -125,6 +134,7 @@ let fatalReported = false;
 const documents = new DocumentAdmission();
 let restartRequested = false;
 let desktop: ClientApplication<NativeAttempt> | undefined;
+let windowDisplay: WindowDisplay | null = null;
 let stopGeometry: (() => Promise<void>) | null = null;
 let pickerFailure: string | null = null;
 /** Update availability survives native document replacement and never owns the game lifecycle. */
@@ -549,10 +559,32 @@ function requireCharacterGuid(value: unknown): number {
 	return value;
 }
 
+function requireWindowDisplay(): WindowDisplay {
+	if (windowDisplay === null)
+		throw new Error("Client window controls are unavailable.");
+	return windowDisplay;
+}
+
+/** Both settings controls and native shortcuts commit through the same settings owner. */
+async function changeWindowDisplay(
+	request: WindowDisplayRequest,
+): Promise<void> {
+	const controls = requireWindowDisplay();
+	const settings = requireSettings();
+	await controls.change(request);
+	await settings.updateWindow(controls.settings());
+}
+
 function installSettingsIpcBridge(
 	window: BrowserWindow,
 	ignorePersistedConfig: boolean,
 ): void {
+	handle("window:display-snapshot", "client", () =>
+		requireWindowDisplay().snapshot(),
+	);
+	handle("window:display-change", "client", (_event, request: unknown) =>
+		changeWindowDisplay(windowDisplayRequestSchema.parse(request)),
+	);
 	const readMode: ClientSettingsReadMode = ignorePersistedConfig
 		? "fresh"
 		: "persisted";
@@ -632,8 +664,8 @@ function createWindow(entry: {
 		width: APP_WINDOW_TUNING.game.initialContentSize.width,
 		height: APP_WINDOW_TUNING.game.initialContentSize.height,
 		useContentSize: true,
-		minWidth: APP_WINDOW_TUNING.game.minimumSize.width,
-		minHeight: APP_WINDOW_TUNING.game.minimumSize.height,
+		minWidth: APP_WINDOW_TUNING.game.minimumContentSize.width,
+		minHeight: APP_WINDOW_TUNING.game.minimumContentSize.height,
 		resizable: true,
 		show: false,
 		backgroundColor: APP_WINDOW_TUNING.backgroundColor,
@@ -674,6 +706,7 @@ function createWindow(entry: {
 		APP_WINDOW_TUNING.game.initialContentSize.width,
 		APP_WINDOW_TUNING.game.initialContentSize.height,
 	);
+	setGameMinimumContentSize(window);
 	// Restored dimensions can stall ready-to-show's first-paint notification on Wayland.
 	// Show after the initial document loads so a mounted launcher cannot remain hidden.
 	window.webContents.once("did-finish-load", () => window.show());
@@ -707,6 +740,26 @@ function createWindow(entry: {
 	);
 	window.webContents.on("before-input-event", (event, input) => {
 		if (
+			input.key === "F11" &&
+			!input.control &&
+			!input.shift &&
+			!input.alt &&
+			!input.meta &&
+			windowDisplay !== null
+		) {
+			event.preventDefault();
+			if (input.type === "keyDown" && !input.isAutoRepeat) {
+				const controls = windowDisplay;
+				const display = controls.snapshot();
+				if (display.busy) return;
+				void changeWindowDisplay({
+					kind: "fullscreen",
+					enabled: !display.fullscreen,
+				}).catch((error) => reportWindowSettingsFailure(window, error));
+			}
+			return;
+		}
+		if (
 			input.control &&
 			input.shift &&
 			!input.alt &&
@@ -733,24 +786,12 @@ function createWindow(entry: {
 }
 
 async function stopWindowGeometry(): Promise<void> {
+	const controls = windowDisplay;
+	windowDisplay = null;
+	await controls?.close();
 	const stop = stopGeometry;
 	stopGeometry = null;
 	await stop?.();
-}
-function restoreGeometry(
-	window: BrowserWindow,
-	value: ClientWindowSettings,
-	role: "picker" | "client",
-): void {
-	const minimum =
-		role === "picker"
-			? APP_WINDOW_TUNING.launcher.minimumSize
-			: APP_WINDOW_TUNING.game.minimumSize;
-	window.setMinimumSize(minimum.width, minimum.height);
-	if (window.isFullScreen()) window.setFullScreen(false);
-	if (window.isMaximized()) window.unmaximize();
-	window.setSize(value.normalBounds.width, value.normalBounds.height);
-	if (value.maximized) window.maximize();
 }
 function initialGeometry(width: number, height: number): ClientWindowSettings {
 	return {
@@ -759,6 +800,8 @@ function initialGeometry(width: number, height: number): ClientWindowSettings {
 			height,
 		},
 		maximized: false,
+		fullscreen: false,
+		freeResize: true,
 	};
 }
 /** Geometry persistence errors must remain visible even when no form save is in progress. */
@@ -970,7 +1013,7 @@ void (async () => {
 		if (quitting) return;
 		pickerFailure = diagnostic;
 		documentRetirement = undefined;
-		restoreGeometry(window, launcher.window, "picker");
+		await restoreGeometry(window, launcher.window, "picker");
 		stopGeometry = observeWindowGeometry(
 			window,
 			(value) => launcher.updateWindow(value),
@@ -1046,11 +1089,27 @@ void (async () => {
 						`Client window settings repaired: ${repaired.join("; ")}`,
 					);
 				attempt.cancellation.signal.throwIfAborted();
-				restoreGeometry(window, settings.readWindow(), "client");
+				const savedWindow = settings.readWindow();
+				const restoredWindow = await restoreGeometry(
+					window,
+					savedWindow,
+					"client",
+				);
+				const controls = new WindowDisplay(
+					window,
+					restoredWindow,
+					(snapshot) => {
+						if (!window.isDestroyed())
+							window.webContents.send("window:display-state", snapshot);
+					},
+					(error) => reportWindowSettingsFailure(window, error),
+				);
+				windowDisplay = controls;
 				stopGeometry = observeWindowGeometry(
 					window,
 					(value) => settings.updateWindow(value),
 					(error) => reportWindowSettingsFailure(window, error),
+					() => controls.settings(),
 				);
 				const cache = new ClientVisualCacheStore(
 					join(app.getPath("userData"), "character-visuals"),

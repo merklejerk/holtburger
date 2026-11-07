@@ -14,6 +14,7 @@ type MusicAudio = Pick<
 	| "loop"
 	| "preload"
 	| "volume"
+	| "muted"
 	| "src"
 	| "currentTime"
 	| "error"
@@ -32,6 +33,8 @@ export class ClientTitleMusic {
 	#active = false;
 	/** Window attention pauses playback independently of whether the selection page owns the track. */
 	#foreground = true;
+	/** Background playback is independent of actual window attention. */
+	#playInBackground = false;
 	/** Last requested playback state keeps repeated focus/visibility events idempotent. */
 	#playRequested = false;
 	#playRevision = 0;
@@ -59,8 +62,11 @@ export class ClientTitleMusic {
 
 	setSettings(settings: ClientAudioSettings): void {
 		if (this.#audio === null || this.#destroyed) return;
-		// Title music has its own level, independent of in-game master volume and mute.
+		// Title music retains its own level while honoring the shared mute preference.
 		this.#audio.volume = settings.musicVolume;
+		this.#audio.muted = settings.muted;
+		this.#playInBackground = settings.playInBackground;
+		this.#updatePlayback();
 	}
 
 	setActive(active: boolean): void {
@@ -87,8 +93,9 @@ export class ClientTitleMusic {
 
 	#updatePlayback(): void {
 		const audio = this.#audio;
-		if (audio === null) return;
-		const shouldPlay = this.#active && this.#foreground;
+		if (audio === null || this.#failed || this.#destroyed) return;
+		const shouldPlay =
+			this.#active && (this.#foreground || this.#playInBackground);
 		if (shouldPlay === this.#playRequested) return;
 		this.#playRequested = shouldPlay;
 		const revision = ++this.#playRevision;
@@ -127,21 +134,4 @@ export class ClientTitleMusic {
 		this.#audio.removeAttribute("src");
 		this.#audio.load();
 	}
-}
-
-/** Browser focus and visibility jointly own suspension; page admission still owns stop/reset. */
-export function bindTitleMusicForeground(
-	music: ClientTitleMusic,
-	window: Window,
-): () => void {
-	const document = window.document;
-	const lifetime = new AbortController();
-	const options = { signal: lifetime.signal };
-	const update = () =>
-		music.setForeground(document.hasFocus() && !document.hidden);
-	window.addEventListener("focus", update, options);
-	window.addEventListener("blur", update, options);
-	document.addEventListener("visibilitychange", update, options);
-	update();
-	return () => lifetime.abort();
 }

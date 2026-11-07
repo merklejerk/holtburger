@@ -40,7 +40,18 @@
 			checked={audio.muted}
 			onchange={(event) =>
 				onAudioChange({ ...audio, muted: event.currentTarget.checked })}
-		/> Mute in-game audio</label
+		/> Mute all audio</label
+	>
+	<label class="ui-checkbox"
+		><input
+			type="checkbox"
+			checked={audio.playInBackground}
+			onchange={(event) =>
+				onAudioChange({
+					...audio,
+					playInBackground: event.currentTarget.checked,
+				})}
+		/> Play audio in background</label
 	>
 	<button
 		type="button"

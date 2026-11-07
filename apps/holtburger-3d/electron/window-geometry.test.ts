@@ -12,6 +12,8 @@ describe("surface geometry lifetime", () => {
 			const window = Object.assign(events, {
 				getNormalBounds: () => bounds,
 				isMaximized: () => false,
+				isFullScreen: () => false,
+				isResizable: () => true,
 			});
 			const savePicker = vi.fn(async () => {});
 			const saveGame = vi.fn(async () => {});
@@ -29,10 +31,14 @@ describe("surface geometry lifetime", () => {
 			expect(savePicker).toHaveBeenCalledExactlyOnceWith({
 				normalBounds: { width: 900, height: 650 },
 				maximized: false,
+				fullscreen: false,
+				freeResize: true,
 			});
 			expect(saveGame).toHaveBeenCalledWith({
 				normalBounds: { width: bounds.width, height: bounds.height },
 				maximized: false,
+				fullscreen: false,
+				freeResize: true,
 			});
 			await stopGame();
 			expect(window.listenerCount("resize")).toBe(0);
@@ -48,6 +54,8 @@ describe("surface geometry lifetime", () => {
 			const window = Object.assign(events, {
 				getNormalBounds: () => ({ x: 0, y: 0, width: 900, height: 650 }),
 				isMaximized: () => false,
+				isFullScreen: () => false,
+				isResizable: () => true,
 			});
 			const save = vi.fn(async () => {
 				throw new Error("Permission denied");

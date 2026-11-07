@@ -19,6 +19,10 @@ export const APP_UPDATE_TUNING = {
 export const APP_WINDOW_TUNING = {
 	/** Native background shown before renderer content paints. */
 	backgroundColor: "#0b0a08",
+	/** Deadline for native fullscreen, maximize, and resize acknowledgements. */
+	transitionTimeoutMs: 5000,
+	/** Quiet interval after native configure events before another geometry change or resize lock. */
+	geometryQuietMs: 100,
 	/** Launcher geometry is independent of the game viewport and its saved bounds. */
 	launcher: {
 		/** Initial launcher content dimensions in CSS pixels. */
@@ -30,8 +34,8 @@ export const APP_WINDOW_TUNING = {
 	game: {
 		/** Initial viewport dimensions in CSS pixels. */
 		initialContentSize: Object.freeze({ width: 1440, height: 900 }),
-		/** Minimum game window dimensions in CSS pixels. */
-		minimumSize: Object.freeze({ width: 1100, height: 700 }),
+		/** Minimum game content area in logical pixels, excluding native decorations. */
+		minimumContentSize: Object.freeze({ width: 1024, height: 768 }),
 	},
 } as const;
 

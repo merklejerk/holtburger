@@ -499,3 +499,14 @@ it("fills music volume for older profiles and preserves saved choices", () => {
 			.musicVolume,
 	).toBe(0.23);
 });
+
+it("defaults legacy audio profiles to foreground playback while retaining the background choice", () => {
+	const { playInBackground, ...legacy } = CLIENT_AUDIO_DEFAULTS;
+	expect(clientAudioSettingsSchema.parse(legacy).playInBackground).toBe(
+		playInBackground,
+	);
+	expect(
+		clientAudioSettingsSchema.parse({ ...legacy, playInBackground: true })
+			.playInBackground,
+	).toBe(true);
+});

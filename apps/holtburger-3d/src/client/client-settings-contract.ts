@@ -276,7 +276,9 @@ export const clientAudioSettingsSchema = z
 			.default(CLIENT_MUSIC_VOLUME_DEFAULT),
 		/** Environmental ambience. */
 		ambientVolume: finiteNumber.min(0).max(1),
-		/** Silence in-game output without discarding the saved mix or muting title music. */
+		/** Keep gameplay audio and title music audible when the window lacks focus. */
+		playInBackground: z.boolean().default(false),
+		/** Silence all output, including title music, without discarding saved volume levels. */
 		muted: z.boolean(),
 	})
 	.strict()

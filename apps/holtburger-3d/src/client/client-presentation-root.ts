@@ -17,6 +17,7 @@ import type {
 	ClientGameplayPresentationFrame,
 } from "./client-gameplay-presentation";
 import type { FrameSettings } from "../lib/game/renderer/renderer";
+import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 import type { ClientAudioSettings } from "./client-settings-contract";
 
 /** Browser resources owned by the root and borrowed by exactly one world driver at a time. */
@@ -84,6 +85,10 @@ export class ClientPresentationRoot<
 	TOwner extends ClientPresentationRootOwner,
 > {
 	readonly #dependencies: Dependencies<TOwner>;
+	/** Saved mix remains independent of window attention. */
+	#audioSettings: ClientAudioSettings = CLIENT_AUDIO_DEFAULTS;
+	/** Attention gates output without owning world-resource lifetime. */
+	#foreground = true;
 	/** Current pregame page survives world construction/retry without owning the renderer. */
 	readonly pregameCharacters = new ClientPregameCharacterService();
 	readonly #abort = new AbortController();
@@ -111,7 +116,10 @@ export class ClientPresentationRoot<
 			.build(this.#abort.signal)
 			.then((owner) => {
 				this.#owner = owner;
-				if (!this.#closed) dependencies.onReady(owner);
+				if (!this.#closed) {
+					this.#applyAudioSettings();
+					dependencies.onReady(owner);
+				}
 				return owner;
 			});
 		// Construction can reject before a mode request awaits it; retain the original rejection.
@@ -221,11 +229,26 @@ export class ClientPresentationRoot<
 	}
 
 	setAudioSettings(settings: ClientAudioSettings): void {
-		this.#owner?.setOutputVolume(settings.muted ? 0 : settings.masterVolume);
+		this.#audioSettings = settings;
+		this.#applyAudioSettings();
+	}
+	#applyAudioSettings(): void {
+		this.#applyOutputVolume();
 		this.#owner?.runtime.setAudioSettings({
-			effectVolume: settings.effectVolume,
-			ambientVolume: settings.ambientVolume,
+			effectVolume: this.#audioSettings.effectVolume,
+			ambientVolume: this.#audioSettings.ambientVolume,
 		});
+	}
+
+	setForeground(foreground: boolean): void {
+		this.#foreground = foreground;
+		this.#applyOutputVolume();
+	}
+	#applyOutputVolume(): void {
+		const settings = this.#audioSettings;
+		const audible =
+			!settings.muted && (this.#foreground || settings.playInBackground);
+		this.#owner?.setOutputVolume(audible ? settings.masterVolume : 0);
 	}
 
 	/** The caller schedules one world loop. Each driver retains its own proven tick/render order. */

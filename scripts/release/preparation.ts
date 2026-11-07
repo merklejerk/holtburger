@@ -128,8 +128,11 @@ export function proposeRelease(
   const prompt = `Prepare Holtburger's next beta release. Return ONLY a JSON object with exactly:
 {"bump":"patch" or "minor","rationale":"why this increment","notes":"complete Markdown release notes"}.
 Choose patch for fixes/maintenance, minor for substantial features or breaking changes. Major changes are forbidden.
-Write professional, concise user-facing prose for the 3D and terminal clients. Replace the prior release highlights;
-retain applicable known issues and upgrade instructions. Remove a limitation only when source evidence establishes
+Write professional, concise user-facing prose for the 3D and terminal clients. Replace the prior release highlights
+with at most six short, one-sentence bullets covering the most significant user-visible changes. Group related
+changes; omit implementation details, internal refactors, exhaustive fix lists, and repeated context. Use fewer
+bullets when warranted and no introductory or closing summary. Separately retain applicable known issues and
+upgrade instructions, stated briefly. Remove a limitation only when source evidence establishes
 it was fixed. Do not invent features or claim unperformed native/visual acceptance. Do not include an Install table;
 the publisher appends it. Inspect relevant source diffs using git log, git diff, git show, or git ls-tree.
 The comparison range is ${range}. With no published beta, describe current functionality from source/history.

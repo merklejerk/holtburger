@@ -2,12 +2,15 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, Windows graphics:** The launcher's App settings now include **Use GPU compositing**. On Windows it is off by default, as a workaround for reports of intermittent transparent or missing patches in the launcher, character selection and game UI on some NVIDIA laptops. macOS and Linux keep it on. Changing it requires **Save and restart**, and **Use defaults** restores your platform's choices. Existing saved settings keep your graphics backend and VSync choices and receive the platform default for compositing. This is a workaround based on user reports. The flicker has not been independently reproduced, and no native or visual acceptance was performed.
-- **Terminal and 3D clients, world state:** Object physics-state updates are now applied only to the matching object instance and only when they are newer than the current state. Duplicate, stale and out-of-order updates are ignored. Updates that arrive before their object exists, or for a future instance, are held and replayed when the object appears. They are discarded if the object is removed or expires. This is validated with automated unit tests only. It does not address the reported delay before the player's body appears after portal travel.
+- **3D client, display:** Settings now offer native fullscreen (F11), free window resizing and content-size presets for classic and modern aspect ratios, with a 1024x768 minimum content area.
+- **3D client, audio:** A new background-audio setting applies to both gameplay and title music, and mute now silences both.
+- **Terminal and 3D clients, inspection:** Item inspectors now show which body regions apparel and armor cover.
+- **3D client, visuals:** Whole-object transparency effects and hidden attached items are handled more consistently, and portal-travel body appearance was adjusted. The rare case of a permanently missing body after portal travel has not been verified as fixed.
 
 ## Known issues
 
 - Windows and macOS may warn when opening the app because it is not signed by a verified publisher. The installation guides below explain how to open it.
+- Windows and macOS behavior of the new display controls has not been verified natively.
 - CLI movement is simplified: jumping, falling, gravity, and stairs are not simulated locally. The server may correct your position or reject actions.
 
 ## Updating

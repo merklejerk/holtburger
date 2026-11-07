@@ -108,8 +108,10 @@ compatibility versions remain independent. The checked-in version must be unsuff
 `release/channel.json` must contain `"beta"`. A version bump alone does not require
 regenerating navigation content.
 
-Local release tooling uses Node.js 24.13.1 and npm 11.8.0 with the independent
-repository-root lockfile. App dependencies still install inside the app:
+Local release tooling requires Node.js >=24.13.1 and npm >=11.8.0 with the independent
+repository-root lockfile. CI tests with Node.js 24.13.1 and its bundled npm 11.8.0.
+Newer versions are permitted by the engine ranges but are not covered by that CI
+baseline. App dependencies still install inside the app:
 
 ```sh
 npm ci

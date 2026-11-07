@@ -4,8 +4,8 @@
   "type": "module",
   "packageManager": "npm@11.8.0",
   "engines": {
-    "node": ">=24.13.1 <25",
-    "npm": "11.8.x"
+    "node": ">=24.13.1",
+    "npm": ">=11.8.0"
   },
   "scripts": {
     "check": "npm run check:tooling && npm run check:branding && npm run check:3d && npm run check:site",

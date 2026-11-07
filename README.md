@@ -94,7 +94,7 @@ and the bundled [example combat bots](apps/holtburger-cli/scripts).
 
 Website authoring and local preview are covered in [site/AUTHORING.md](site/AUTHORING.md).
 
-Install a current stable Rust toolchain and the Node.js/npm versions listed below.
+Install a current stable Rust toolchain and compatible Node.js/npm versions as listed below.
 Start by cloning the repository:
 
 ```bash
@@ -104,7 +104,9 @@ cd holtburger
 
 ### Repository automation
 
-Repository automation uses Node.js 24.13.1 and npm 11.8.0. Install its dependencies
+Repository automation requires Node.js >=24.13.1 and npm >=11.8.0. CI tests with
+Node.js 24.13.1 and its bundled npm 11.8.0; newer versions are permitted by the
+engine ranges but are not covered by that CI baseline. Install its dependencies
 with `npm ci` at the repository root. Use `npm run check:tooling`,
 `npm run test:tooling`, and `npm run check:branding` for repository checks;
 `npm run generate:branding` refreshes the checked-in app/docs icons.

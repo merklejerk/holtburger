@@ -7,6 +7,8 @@ export const appSettingsSchema = z
 		graphicsBackend: z.enum(["automatic", "d3d11", "gl", "metal"]),
 		/** Request GPU synchronization; the OS compositor still owns final presentation. */
 		vsync: z.boolean(),
+		/** Use the GPU to composite browser UI surfaces; independent of WebGL rendering. */
+		gpuCompositing: z.boolean(),
 	})
 	.strict();
 export type AppSettings = z.infer<typeof appSettingsSchema>;

@@ -46,6 +46,26 @@ to run it.
 If game data cannot be loaded, select the folder containing the files listed above,
 rather than an individual DAT file. Keep all files from the portable ZIP together.
 
+### UI flickering or low frame rate
+
+If parts of panels, text, or the launcher logo briefly disappear or become
+transparent, open the launcher's gear button → **App settings** and turn off
+**Use GPU compositing**, then choose **Save and restart**. GPU compositing is off
+by default on Windows to address this issue, which has been observed on NVIDIA
+laptops. You can turn it back on from the same settings if needed.
+
+Windows also defaults to the **OpenGL** graphics backend with **Synchronize frames
+with the display (VSync)** off. Direct3D 11 can reduce frame rate on some systems;
+try OpenGL if that happens. VSync controls frame synchronization and is a separate
+choice from the compositing workaround. Change one setting at a time and restart
+to compare results. **Use defaults** restores the Windows choices.
+
+If you added graphics flags to a shortcut while troubleshooting, remove them
+before comparing saved settings; explicit launch overrides can take precedence.
+If problems continue, expand **Current graphics** in App settings and choose
+**Copy hardware info**. Include that report and a short recording of the flicker
+when reporting the problem. Use `/fps` in the game to compare frame rates.
+
 ## Optional: offline Explorer
 
 In PowerShell, from an extracted portable archive:

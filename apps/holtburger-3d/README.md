@@ -14,7 +14,11 @@ it through the context-isolated Electron preload boundary.
 
 The launcher's gear button opens **App settings** for process-wide graphics preferences.
 Windows defaults to OpenGL with display synchronization off, preserving the scene FPS and
-UI scrolling workarounds. macOS and Linux default to Automatic with synchronization on.
+UI scrolling workarounds. GPU compositing is off by default on Windows to address intermittent
+transparent UI patches observed on NVIDIA laptops; **Use GPU compositing** enables it again.
+macOS and Linux default to Automatic with synchronization and GPU compositing on.
+Existing preferences retain their backend and synchronization choices and adopt the platform's
+compositing default when the new preference is absent.
 **Use defaults** restores the current platform's defaults. Automatic backend selection delegates
 to Chromium.
 Windows offers Direct3D 11 and OpenGL overrides, macOS offers Metal, and Linux offers OpenGL.
@@ -33,7 +37,7 @@ and an on-demand launcher WebGL2 probe. The probe releases its context after col
 The report excludes raw launch arguments, local paths, credentials, hostnames, and display IDs.
 Missing native GPU information is recorded without preventing the rest of the report from copying.
 
-Explicit native `--use-angle=...`, `--disable-gpu-vsync`, and `--uncapped` launch arguments
+Explicit native `--use-angle=...`, `--disable-gpu-vsync`, `--disable-gpu-compositing`, and `--uncapped` launch arguments
 take precedence over saved preferences and remain in effect after restarting from the modal.
 Windows startup also supplies
 `--force-high-performance-gpu` to request the faster adapter on hybrid laptops, and the

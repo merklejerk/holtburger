@@ -7,15 +7,15 @@ presentation: reference
 
 ## Where to look
 
-| Area                   | Includes                                                                                      |
-| ---------------------- | --------------------------------------------------------------------------------------------- |
-| Graphics               | View distance, field of view, render scale, filtering, shadows, ambient occlusion and weather |
-| Audio                  | Volume mix and mute preferences                                                               |
-| UI                     | Themes, font choices, UI/text scaling, helper presentation and HUD placement reset            |
-| Input                  | Keybindings, mouse movement and axis inversion                                                |
-| Gameplay               | Gameplay preferences, including automatic key attempts                                        |
-| Chat controls/settings | Destinations, message/channel filters, timestamps and message suppression                     |
-| Launcher App settings  | Graphics backend and display synchronization before entering the game                         |
+| Area                   | Includes                                                                                        |
+| ---------------------- | ----------------------------------------------------------------------------------------------- |
+| Graphics               | View distance, field of view, render scale, filtering, shadows, ambient occlusion and weather   |
+| Audio                  | Volume mix and mute preferences                                                                 |
+| UI                     | Themes, font choices, UI/text scaling, helper presentation and HUD placement reset              |
+| Input                  | Keybindings, mouse movement and axis inversion                                                  |
+| Gameplay               | Gameplay preferences, including automatic key attempts                                          |
+| Chat controls/settings | Destinations, message/channel filters, timestamps and message suppression                       |
+| Launcher App settings  | Graphics backend, display synchronization (VSync), and GPU compositing before entering the game |
 
 Use [interface layout](/holtburger/3d/interface/) to arrange the HUD, and [graphics help](/holtburger/3d/help/#before-the-game-opens) for tuning or startup trouble.
 

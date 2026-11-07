@@ -111,9 +111,18 @@
 		<label class="ui-checkbox"
 			><input
 				type="checkbox"
+				name="vsync"
 				bind:checked={loaded.draft.vsync}
 				disabled={busy}
 			/> Synchronize frames with the display (VSync)</label
+		>
+		<label class="ui-checkbox"
+			><input
+				type="checkbox"
+				name="gpuCompositing"
+				bind:checked={loaded.draft.gpuCompositing}
+				disabled={busy}
+			/> Use GPU compositing</label
 		>
 		<details class="app-settings-graphics ui-disclosure ui-disclosure-section">
 			<summary>Current graphics</summary>

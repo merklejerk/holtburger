@@ -43,7 +43,11 @@ const window = {
 	getBounds: () => ({ x: 0, y: 0, width: 900, height: 650 }),
 	getContentSize: () => [900, 650],
 };
-const startup = { graphicsBackend: "automatic", vsync: true } as const;
+const startup = {
+	graphicsBackend: "automatic",
+	vsync: true,
+	gpuCompositing: true,
+} as const;
 
 beforeEach(() => {
 	vi.clearAllMocks();
@@ -86,7 +90,7 @@ describe("hardware clipboard report", () => {
 			window,
 			{ build: "v-test revision", webgl: null },
 			startup,
-			{ graphicsBackend: "gl", vsync: false },
+			{ graphicsBackend: "gl", vsync: false, gpuCompositing: true },
 			["--use-angle"],
 		);
 		const report: string = native.writeText.mock.calls[0][0];

@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	AppSettingsStore,
 	applyAppGraphicsSettings,
+	appSettingsRequireRestart,
 	graphicsBackendOptions,
 } from "./app-settings";
 
@@ -54,23 +55,43 @@ describe("app graphics startup", () => {
 			if (platform === "win32") {
 				expect(startup.switches.get("use-angle")).toBe("gl");
 				expect(startup.switches.has("disable-gpu-vsync")).toBe(true);
+				expect(startup.switches.has("disable-gpu-compositing")).toBe(true);
 			} else {
 				expect(startup.switches.size).toBe(0);
 			}
 		},
 	);
+	it("applies compositing preferences, preserves launch overrides, and requires restart", () => {
+		const enabled = {
+			graphicsBackend: "automatic",
+			vsync: true,
+			gpuCompositing: true,
+		} as const;
+		const disabled = { ...enabled, gpuCompositing: false };
+		const startup = commandLine([]);
+		expect(applyAppGraphicsSettings(disabled, startup)).toEqual([]);
+		expect(startup.switches.has("disable-gpu-compositing")).toBe(true);
+		const overridden = commandLine([["disable-gpu-compositing", ""]]);
+		expect(applyAppGraphicsSettings(enabled, overridden)).toEqual([
+			"--disable-gpu-compositing",
+		]);
+		expect(overridden.switches.has("disable-gpu-compositing")).toBe(true);
+		expect(appSettingsRequireRestart(enabled, disabled)).toBe(true);
+		expect(appSettingsRequireRestart(disabled, enabled)).toBe(true);
+		expect(appSettingsRequireRestart(disabled, disabled)).toBe(false);
+	});
 	it("delegates automatic graphics to Chromium and applies explicit preferences", () => {
 		const automatic = commandLine([]);
 		expect(
 			applyAppGraphicsSettings(
-				{ graphicsBackend: "automatic", vsync: true },
+				{ graphicsBackend: "automatic", vsync: true, gpuCompositing: true },
 				automatic,
 			),
 		).toEqual([]);
 		expect(automatic.switches.size).toBe(0);
 		const selected = commandLine([]);
 		applyAppGraphicsSettings(
-			{ graphicsBackend: "metal", vsync: false },
+			{ graphicsBackend: "metal", vsync: false, gpuCompositing: true },
 			selected,
 		);
 		expect(selected.switches.get("use-angle")).toBe("metal");
@@ -85,7 +106,7 @@ describe("app graphics startup", () => {
 		]);
 		expect(
 			applyAppGraphicsSettings(
-				{ graphicsBackend: "d3d11", vsync: false },
+				{ graphicsBackend: "d3d11", vsync: false, gpuCompositing: true },
 				native,
 			),
 		).toContain("--use-angle");
@@ -97,7 +118,7 @@ describe("app graphics startup", () => {
 			["disable-gpu-vsync", ""],
 		]);
 		applyAppGraphicsSettings(
-			{ graphicsBackend: "automatic", vsync: true },
+			{ graphicsBackend: "automatic", vsync: true, gpuCompositing: true },
 			uncapped,
 		);
 		expect(uncapped.switches.has("disable-gpu-vsync")).toBe(true);
@@ -120,11 +141,33 @@ describe("app graphics startup", () => {
 });
 
 describe("app settings persistence", () => {
+	it.each(["win32", "darwin", "linux"] as const)(
+		"adds the %s compositing default to older preferences without resetting other choices",
+		async (platform) => {
+			const path = await settingsPath();
+			const previous = { graphicsBackend: "automatic", vsync: false };
+			await writeFile(path, JSON.stringify({ version: 1, settings: previous }));
+			const store = new AppSettingsStore(path, platform);
+			expect(store.diagnostic).toBeNull();
+			expect(store.settings).toEqual({
+				...previous,
+				gpuCompositing: platform !== "win32",
+			});
+			await store.save(store.settings);
+			expect(new AppSettingsStore(path, platform).settings).toEqual(
+				store.settings,
+			);
+		},
+	);
 	it("retains prior preferences after a failed replacement and allows an explicit retry", async () => {
 		const path = await settingsPath();
 		const store = new AppSettingsStore(path, "win32");
 		const original = store.settings;
-		const selected = { graphicsBackend: "d3d11", vsync: true } as const;
+		const selected = {
+			graphicsBackend: "d3d11",
+			vsync: true,
+			gpuCompositing: true,
+		} as const;
 		await mkdir(path);
 		await expect(store.save(selected)).rejects.toThrow();
 		await expect(store.flush()).rejects.toThrow();
@@ -139,12 +182,20 @@ describe("app settings persistence", () => {
 		const store = new AppSettingsStore(path, "win32");
 		expect(store.settings).toEqual(store.defaults);
 		expect(store.diagnostic).toBeNull();
-		const settings = { graphicsBackend: "d3d11", vsync: false } as const;
+		const settings = {
+			graphicsBackend: "d3d11",
+			vsync: false,
+			gpuCompositing: true,
+		} as const;
 		await store.save(settings);
 		expect(new AppSettingsStore(path, "win32").settings).toEqual(settings);
-		expect(() => store.save({ graphicsBackend: "metal", vsync: true })).toThrow(
-			"unavailable on this platform",
-		);
+		expect(() =>
+			store.save({
+				graphicsBackend: "metal",
+				vsync: true,
+				gpuCompositing: true,
+			}),
+		).toThrow("unavailable on this platform");
 		expect(store.settings).toEqual(settings);
 	});
 	it("reports malformed preferences and preserves the original on explicit repair", async () => {

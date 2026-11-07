@@ -10,11 +10,11 @@ import {
 import { formatError } from "../src/lib/format-error.js";
 import { replaceLocalFile } from "./replace-local-file.js";
 
-/** Preserve the Windows FPS/scrolling workarounds; other platforms retain Chromium defaults. */
+/** Windows defaults address FPS, scrolling, and intermittent missing UI patches. */
 function defaultAppSettings(platform: NodeJS.Platform): AppSettings {
 	return platform === "win32"
-		? { graphicsBackend: "gl", vsync: false }
-		: { graphicsBackend: "automatic", vsync: true };
+		? { graphicsBackend: "gl", vsync: false, gpuCompositing: false }
+		: { graphicsBackend: "automatic", vsync: true, gpuCompositing: true };
 }
 
 /** Native settings projections share the same restart decision. */
@@ -24,7 +24,8 @@ export function appSettingsRequireRestart(
 ): boolean {
 	return (
 		startup.graphicsBackend !== saved.graphicsBackend ||
-		startup.vsync !== saved.vsync
+		startup.vsync !== saved.vsync ||
+		startup.gpuCompositing !== saved.gpuCompositing
 	);
 }
 
@@ -67,8 +68,11 @@ export function applyAppGraphicsSettings(
 		"enable-vsync",
 		"disable-gpu-vsync",
 		"disable-frame-rate-limit",
+		"disable-gpu-compositing",
 	];
 	const overrides = names.filter((name) => commandLine.hasSwitch(name));
+	if (!settings.gpuCompositing)
+		commandLine.appendSwitch("disable-gpu-compositing");
 	if (
 		!commandLine.hasSwitch("use-angle") &&
 		settings.graphicsBackend !== "automatic"
@@ -85,7 +89,13 @@ export function applyAppGraphicsSettings(
 }
 
 const savedAppSettingsSchema = z
-	.object({ version: z.literal(1), settings: appSettingsSchema })
+	.object({
+		version: z.literal(1),
+		// Earlier version-1 files predate this preference; resolve it at the native load boundary.
+		settings: appSettingsSchema.extend({
+			gpuCompositing: z.boolean().optional(),
+		}),
+	})
 	.strict();
 
 /** Synchronous loading is required before Electron initializes its GPU process. */
@@ -105,10 +115,14 @@ export class AppSettingsStore {
 		this.#defaults = defaultAppSettings(platform);
 		this.#settings = { ...this.#defaults };
 		try {
-			this.#settings = this.#validate(
-				savedAppSettingsSchema.parse(JSON.parse(readFileSync(path, "utf8")))
-					.settings,
+			const { settings } = savedAppSettingsSchema.parse(
+				JSON.parse(readFileSync(path, "utf8")),
 			);
+			this.#settings = this.#validate({
+				...settings,
+				gpuCompositing:
+					settings.gpuCompositing ?? this.#defaults.gpuCompositing,
+			});
 		} catch (error) {
 			if (error instanceof Error && "code" in error && error.code === "ENOENT")
 				return;

@@ -49,7 +49,11 @@ if (values["app-settings-only"] || values["dev-restart-only"]) {
 		appSettingsFile,
 		JSON.stringify({
 			version: 1,
-			settings: { graphicsBackend: "automatic", vsync: false },
+			settings: {
+				graphicsBackend: "automatic",
+				vsync: false,
+				gpuCompositing: false,
+			},
 		}),
 	);
 }
@@ -600,10 +604,12 @@ async function runProbe() {
 	if (values["app-settings-only"]) {
 		const startup = await evaluate(
 			inspector,
-			`Promise.resolve(process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron')).then(({ app }) => ({ angle: app.commandLine.getSwitchValue('use-angle'), vsyncDisabled: app.commandLine.hasSwitch('disable-gpu-vsync') }))`,
+			`Promise.resolve(process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron')).then(({ app }) => ({ angle: app.commandLine.getSwitchValue('use-angle'), vsyncDisabled: app.commandLine.hasSwitch('disable-gpu-vsync'), compositingDisabled: app.commandLine.hasSwitch('disable-gpu-compositing') }))`,
 		);
 		requireCondition(
-			startup.angle === "swiftshader" && startup.vsyncDisabled,
+			startup.angle === "swiftshader" &&
+				startup.vsyncDisabled &&
+				startup.compositingDisabled,
 			"Startup preferences must apply before ready and preserve explicit backend overrides",
 		);
 		await evaluate(
@@ -669,6 +675,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 		);
 		requireCondition(
 			initial.settings.vsync === false &&
+				initial.settings.gpuCompositing === false &&
 				initial.overrides.includes("--use-angle"),
 			"Modal must expose saved preferences and diagnostic overrides",
 		);
@@ -745,7 +752,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 		const savedSource = await readFile(appSettingsFile, "utf8");
 		await evaluate(
 			page,
-			`document.querySelector('.app-settings-dialog input[type=checkbox]').click(); [...document.querySelectorAll('.app-settings-dialog button')].find((button) => button.textContent.trim() === 'Cancel').click()`,
+			`document.querySelector('.app-settings-dialog input[name=vsync]').click(); [...document.querySelectorAll('.app-settings-dialog button')].find((button) => button.textContent.trim() === 'Cancel').click()`,
 		);
 		requireCondition(
 			(await readFile(appSettingsFile, "utf8")) === savedSource,
@@ -769,15 +776,21 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 		);
 		const draftUi = await evaluate(
 			page,
-			`({ backend: document.querySelector('.app-settings-dialog select').value, checked: document.querySelector('.app-settings-dialog input[type=checkbox]').checked })`,
+			`({ backend: document.querySelector('.app-settings-dialog select').value, checked: document.querySelector('.app-settings-dialog input[name=vsync]').checked, gpuCompositing: document.querySelector('.app-settings-dialog input[name=gpuCompositing]').checked })`,
 		);
 		requireCondition(
 			draftUi.backend === initial.defaults.graphicsBackend &&
-				draftUi.checked === initial.defaults.vsync,
+				draftUi.checked === initial.defaults.vsync &&
+				draftUi.gpuCompositing === initial.defaults.gpuCompositing,
 			`Use defaults did not restore native platform settings: ${JSON.stringify(draftUi)}`,
 		);
 		report.scenarios.push(
 			"native startup preferences, backend override precedence, actual renderer diagnostics, platform defaults reset, and draft cancellation",
+		);
+		await evaluate(
+			page,
+			// Exercise the binding even on platforms where Use defaults already enabled compositing.
+			`(() => { const toggle = document.querySelector('.app-settings-dialog input[name=gpuCompositing]'); if (toggle.checked) toggle.click(); toggle.click(); })()`,
 		);
 		// Intercept only spawning the replacement, so the production restart still drains and exits.
 		// This avoids leaving an untracked Electron process after the probe cleans its user data.
@@ -807,7 +820,8 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 		const saved = JSON.parse(await readFile(appSettingsFile, "utf8"));
 		requireCondition(
 			saved.settings.graphicsBackend === initial.defaults.graphicsBackend &&
-				saved.settings.vsync === initial.defaults.vsync,
+				saved.settings.vsync === initial.defaults.vsync &&
+				saved.settings.gpuCompositing === true,
 			"Save and restart did not persist the draft",
 		);
 		report.scenarios.push(
@@ -2326,7 +2340,7 @@ async function runDevRestartProbe() {
 	);
 	await evaluate(
 		page,
-		`document.querySelector('.app-settings-dialog input[type=checkbox]').click()`,
+		`document.querySelector('.app-settings-dialog input[name=vsync]').click()`,
 	);
 	await evaluate(
 		page,

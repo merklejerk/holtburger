@@ -276,6 +276,8 @@ pub struct ItemInspection {
     pub stack: Option<CountInfo>,
     /// Remaining and maximum structure/uses.
     pub uses: Option<CountInfo>,
+    /// Mechanically covered body regions in retail appraisal order, with clothing layers merged.
+    pub coverage: Vec<ItemCoverageRegion>,
     /// Effective armor level.
     pub armor: Option<EnchantedValue<i32>>,
     /// Weapon facts, including caster shapes with no disclosed speed.
@@ -317,6 +319,64 @@ pub struct ItemInspection {
     pub use_text: Option<String>,
     /// Appraisal spells classified as ordinary, on-use, triggered, or active enchantments.
     pub spells: Vec<InspectionSpell>,
+}
+
+/// Body region protected by an apparel item, independent of its visible model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display, serde::Serialize, serde::Deserialize)]
+pub enum ItemCoverageRegion {
+    /// Head.
+    Head,
+    /// Chest.
+    Chest,
+    /// Abdomen/groin.
+    Abdomen,
+    /// Both upper arms.
+    #[strum(serialize = "Upper Arms")]
+    UpperArms,
+    /// Both lower arms.
+    #[strum(serialize = "Lower Arms")]
+    LowerArms,
+    /// Both hands.
+    Hands,
+    /// Both upper legs.
+    #[strum(serialize = "Upper Legs")]
+    UpperLegs,
+    /// Both lower legs.
+    #[strum(serialize = "Lower Legs")]
+    LowerLegs,
+    /// Both feet.
+    Feet,
+}
+
+// Retail behavior is to describe ClothingPriority coverage for apparel, merging the
+// underwear and outerwear bits for each region. ValidLocations gates the description;
+// it does not supply the body regions. Unknown priority bits have no region label.
+const ITEM_COVERAGE_FLAGS: [(u32, ItemCoverageRegion); 9] = [
+    (0x4000, ItemCoverageRegion::Head),
+    (0x0008 | 0x0400, ItemCoverageRegion::Chest),
+    (0x0010 | 0x0800, ItemCoverageRegion::Abdomen),
+    (0x0020 | 0x1000, ItemCoverageRegion::UpperArms),
+    (0x0040 | 0x2000, ItemCoverageRegion::LowerArms),
+    (0x8000, ItemCoverageRegion::Hands),
+    (0x0002 | 0x0100, ItemCoverageRegion::UpperLegs),
+    (0x0004 | 0x0200, ItemCoverageRegion::LowerLegs),
+    (0x10000, ItemCoverageRegion::Feet),
+];
+
+fn item_coverage(object: &InspectionSource<'_>) -> Vec<ItemCoverageRegion> {
+    if !object
+        .valid_locations()
+        .intersects(crate::equipment::APPAREL_LOCATIONS)
+    {
+        return Vec::new();
+    }
+    let Some(priority) = object.priority() else {
+        return Vec::new();
+    };
+    ITEM_COVERAGE_FLAGS
+        .into_iter()
+        .filter_map(|(mask, region)| (priority & mask != 0).then_some(region))
+        .collect()
 }
 
 /// Portal prohibitions displayed by retail inspection, independent of player eligibility.
@@ -1478,6 +1538,7 @@ impl ItemInspection {
             lock_tool: lock_tool_facts(object.public_flags, object.item_type(), object.wcid),
             stack: CountInfo::stack_from_object(object),
             uses: CountInfo::uses_from_object(object),
+            coverage: item_coverage(object),
             armor: object
                 .get_int_prop(PropertyInt::ArmorLevel)
                 .map(|effective| {
@@ -2344,6 +2405,58 @@ mod tests {
     fn inspect_entity(entity: &Entity) -> Result<ObjectInspection, ObjectInspectionError> {
         let titles = CharacterTitleCatalog::default();
         ObjectInspection::from_entity(entity, InspectionContext::new(&titles))
+    }
+
+    #[test]
+    fn item_coverage_merges_layers_in_retail_order_without_using_equip_slots() {
+        let mut entity = Entity::new(Guid(1), "Apparel".into(), WorldPosition::default());
+        entity.set_int_prop(
+            PropertyInt::ValidLocations,
+            holtburger_common::properties::EquipMask::CHEST_ARMOR.bits() as i32,
+        );
+        // Wire coverage masks: underwear, outerwear, and their union. Head, hands,
+        // and feet are shared between layers; bit zero has no known region.
+        for priority in [0x1c07e, 0x1ff00, 0x1ff7f] {
+            entity.set_int_prop(PropertyInt::ClothingPriority, priority);
+            assert_eq!(
+                item_coverage(&InspectionSource::from_entity(&entity)),
+                vec![
+                    ItemCoverageRegion::Head,
+                    ItemCoverageRegion::Chest,
+                    ItemCoverageRegion::Abdomen,
+                    ItemCoverageRegion::UpperArms,
+                    ItemCoverageRegion::LowerArms,
+                    ItemCoverageRegion::Hands,
+                    ItemCoverageRegion::UpperLegs,
+                    ItemCoverageRegion::LowerLegs,
+                    ItemCoverageRegion::Feet,
+                ]
+            );
+        }
+        entity.set_int_prop(PropertyInt::ClothingPriority, 0x10 | 0x800);
+        assert_eq!(
+            item_coverage(&InspectionSource::from_entity(&entity)),
+            vec![ItemCoverageRegion::Abdomen]
+        );
+        entity.set_int_prop(
+            PropertyInt::ValidLocations,
+            holtburger_common::properties::EquipMask::MELEE_WEAPON.bits() as i32,
+        );
+        assert!(item_coverage(&InspectionSource::from_entity(&entity)).is_empty());
+    }
+
+    #[test]
+    fn item_coverage_omits_undisclosed_or_unrecognized_regions() {
+        let mut entity = Entity::new(Guid(1), "Apparel".into(), WorldPosition::default());
+        entity.set_int_prop(
+            PropertyInt::ValidLocations,
+            holtburger_common::properties::EquipMask::CHEST_ARMOR.bits() as i32,
+        );
+        assert!(item_coverage(&InspectionSource::from_entity(&entity)).is_empty());
+        for priority in [0, 1, i32::MIN] {
+            entity.set_int_prop(PropertyInt::ClothingPriority, priority);
+            assert!(item_coverage(&InspectionSource::from_entity(&entity)).is_empty());
+        }
     }
 
     #[test]

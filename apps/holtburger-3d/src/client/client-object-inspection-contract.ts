@@ -369,6 +369,20 @@ const itemInspectionSchema = z
 		uses: countSchema.nullable(),
 		/** Static reuse definition; live countdown comes from the player registry. */
 		cooldown: itemCooldownDefinitionSchema.nullable(),
+		/** World-derived mechanical body coverage, with clothing and armor layers merged. */
+		coverage: z.array(
+			z.enum([
+				"Head",
+				"Chest",
+				"Abdomen",
+				"UpperArms",
+				"LowerArms",
+				"Hands",
+				"UpperLegs",
+				"LowerLegs",
+				"Feet",
+			]),
+		),
 		armor: enchantedValueSchema(i32).nullable(),
 		weapon: z
 			.object({

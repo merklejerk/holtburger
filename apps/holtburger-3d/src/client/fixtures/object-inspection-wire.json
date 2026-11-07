@@ -43,6 +43,7 @@
 						},
 						"stack": null,
 						"uses": null,
+						"coverage": ["Chest", "UpperArms"],
 						"armor": null,
 						"weapon": null,
 						"protections": null,

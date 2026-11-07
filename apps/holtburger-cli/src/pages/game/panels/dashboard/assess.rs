@@ -428,6 +428,15 @@ fn push_item_info(
     if let Some(capacity) = item.capacity.containers.filter(|value| *value > 0) {
         push_labeled(lines, "Cont Cap", capacity, Color::White);
     }
+    if !item.coverage.is_empty() {
+        let coverage = item
+            .coverage
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        push_labeled(lines, "Covers", coverage, Color::White);
+    }
     if let Some(armor) = item.armor {
         push_labeled(lines, "Armor", armor.effective, Color::Green);
     }
@@ -901,6 +910,23 @@ mod tests {
             holtburger_world::inspection::InspectionContext::new(&titles),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn apparel_inspection_displays_coverage_without_an_armor_level() {
+        let mut entity = Entity::new(Guid(1), "Shirt".into(), WorldPosition::default());
+        entity.set_int_prop(
+            PropertyInt::ValidLocations,
+            holtburger_common::properties::EquipMask::CHEST_WEAR.bits() as i32,
+        );
+        entity.set_int_prop(PropertyInt::ClothingPriority, 0x8 | 0x20);
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Covers"));
+        assert!(text.contains("Chest, Upper Arms"));
     }
 
     #[test]

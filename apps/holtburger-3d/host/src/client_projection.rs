@@ -2806,6 +2806,12 @@ mod tests {
             Guid(42),
         );
         item.spell_book = vec![43, 42, 0x8000_002A];
+        // Appraisal coverage comes from priority, even when the equip slot only says chest.
+        item.set_int_prop(
+            PropertyInt::ValidLocations,
+            holtburger_common::properties::EquipMask::CHEST_ARMOR.bits() as i32,
+        );
+        item.set_int_prop(PropertyInt::ClothingPriority, 0x8 | 0x400 | 0x1000);
         // Full item appraisal fixture exercises the shared wire additions in both languages.
         for (property, value) in [
             (PropertyInt::EquipmentSetId, 13),

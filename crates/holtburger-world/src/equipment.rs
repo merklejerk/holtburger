@@ -47,7 +47,7 @@ pub const MAIN_HAND_LOCATIONS: EquipMask = EquipMask::from_bits_retain(
 
 /// Retail's apparel family includes full clothing coverage and cloak. Retail automatic-wear
 /// eligibility.
-const APPAREL_LOCATIONS: EquipMask = EquipMask::from_bits_retain(0x0800_7fff);
+pub(crate) const APPAREL_LOCATIONS: EquipMask = EquipMask::from_bits_retain(0x0800_7fff);
 
 /// Public equipment facts required to plan replacement, captured once per entity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

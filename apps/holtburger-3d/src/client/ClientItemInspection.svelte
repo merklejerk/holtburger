@@ -548,10 +548,14 @@
 		</section>
 	{/if}
 
-	{#if item.armor !== null || item.protections !== null}
+	{#if item.coverage.length > 0 || item.armor !== null || item.protections !== null}
 		<section>
 			<h3 class="ui-section-heading">Protections</h3>
 			<dl class="inspection-facts inspection-protections">
+				{#if item.coverage.length > 0}<div class="inspection-wide">
+						<dt>Covers</dt>
+						<dd>{item.coverage.map(humanizeInspectionName).join(", ")}</dd>
+					</div>{/if}
 				{#if item.armor !== null}<div class="inspection-wide">
 						<dt>Armor</dt>
 						<dd>

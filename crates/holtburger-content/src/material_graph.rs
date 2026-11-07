@@ -651,14 +651,15 @@ impl ContentRepository {
             .with_context(|| format!("failed to parse SetupModel 0x{setup_model_id:08X}"))?;
 
         let appearance = input.obj_desc.as_ref();
-        let mut selected_parts = setup_model.parts.clone();
-        if let Some(obj_desc) = appearance {
-            for change in &obj_desc.anim_part_changes {
-                if let Some(part) = selected_parts.get_mut(usize::from(change.part_index)) {
-                    *part = change.part_id;
-                }
-            }
-        }
+        let selected_parts = crate::resolve_setup_parts(
+            &setup_model.parts,
+            appearance.into_iter().flat_map(|obj_desc| {
+                obj_desc
+                    .anim_part_changes
+                    .iter()
+                    .map(|change| (change.part_index, change.part_id))
+            }),
+        );
 
         let palette_composite = match appearance {
             Some(obj_desc) => resolve_palette_composite(self, obj_desc)?,

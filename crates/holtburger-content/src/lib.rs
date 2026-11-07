@@ -26,6 +26,7 @@ mod resource_error;
 pub mod scene_source;
 pub mod selection_envelope;
 pub mod setup_dimensions;
+mod setup_parts;
 pub mod soul_emote;
 mod source_reader;
 pub mod spells;
@@ -97,6 +98,7 @@ pub use selection_envelope::{
     SelectionEnvelopeProfile, compute_selection_envelope_radius, resolve_selection_envelope_profile,
 };
 pub use setup_dimensions::{SetupDimensionCatalog, SetupDimensions};
+pub use setup_parts::resolve_setup_parts;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};
 pub use terrain_collision::{
     TERRAIN_WATER_COLLISION_DEPTH, TerrainCollisionCell, TerrainCollisionGrid,

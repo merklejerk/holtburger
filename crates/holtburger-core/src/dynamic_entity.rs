@@ -11,7 +11,7 @@ use holtburger_common::properties::{PhysicsState, RadarBehavior, WeenieType};
 use holtburger_common::{Guid, Placement, Quaternion, Vector3};
 use holtburger_content::{
     ColliderScale, CollisionShape, ContentRepository, MaterialAppearanceInput,
-    resolve_gfx_obj_collision_shape, resolve_setup_volume_collision_shapes,
+    resolve_gfx_obj_collision_shape, resolve_setup_parts, resolve_setup_volume_collision_shapes,
 };
 use holtburger_dat::file_type::setup_model::{AnimationFrame, AnimationHookPayload};
 use holtburger_dat::file_type::{
@@ -411,14 +411,6 @@ pub enum DynamicEntityPhysicalPreparationError {
         setup_did: u32,
         script_did: u32,
         hook_type: u32,
-    },
-    #[error(
-        "WCID {wcid} setup 0x{setup_did:08X} appearance references missing part index {part_index}"
-    )]
-    InvalidAppearancePart {
-        wcid: u32,
-        setup_did: u32,
-        part_index: usize,
     },
     #[error("could not prepare WCID {wcid} content resource 0x{resource_did:08X}: {source}")]
     Content {
@@ -1013,20 +1005,13 @@ fn prepare_target_geometry(
 ) -> Result<PreparedEntityTargetGeometry, DynamicEntityPhysicalPreparationError> {
     validate_default_script_collision_support(wcid, setup_did, setup.default_script_did, content)?;
 
-    let mut effective_part_dids = setup.parts.clone();
-    for change in &appearance.part_changes {
-        let part_index = usize::from(change.part_index);
-        let Some(part_did) = effective_part_dids.get_mut(part_index) else {
-            return Err(
-                DynamicEntityPhysicalPreparationError::InvalidAppearancePart {
-                    wcid,
-                    setup_did,
-                    part_index,
-                },
-            );
-        };
-        *part_did = change.gfx_obj_did;
-    }
+    let effective_part_dids = resolve_setup_parts(
+        &setup.parts,
+        appearance
+            .part_changes
+            .iter()
+            .map(|change| (change.part_index, change.gfx_obj_did)),
+    );
 
     let default_animation = setup
         .default_animation
@@ -1314,8 +1299,7 @@ mod tests {
         resolve_effective_entity_physics_state,
     };
 
-    #[test]
-    fn stable_geometry_uses_requested_placement_with_default_fallback_and_animation_precedence() {
+    fn stable_geometry_fixture() -> (SetupModel, Animation) {
         use holtburger_dat::file_type::animation::AnimationFlags;
         use holtburger_dat::file_type::setup_model::PlacementType;
         use holtburger_dat::graphics::Frame;
@@ -1376,6 +1360,72 @@ mod tests {
             pos_frames: Vec::new(),
             part_frames: vec![frame(11.0)],
         };
+        (setup, animation)
+    }
+
+    #[test]
+    fn target_geometry_keeps_setup_volumes_when_appearance_names_missing_parts() {
+        let (mut setup, _) = stable_geometry_fixture();
+        setup.spheres = vec![setup.selection_sphere];
+        let appearance = EntityAppearance {
+            part_changes: vec![EntityPartChange {
+                part_index: 9,
+                gfx_obj_did: 0x0100_0002,
+            }],
+            ..EntityAppearance::default()
+        };
+        let content = ContentRepository::from_mounts(Vec::new());
+        let geometry = prepare_target_geometry(
+            1,
+            setup.id,
+            &appearance,
+            Placement::Default as u32,
+            &setup,
+            false,
+            &content,
+        )
+        .expect("an out-of-range substitution must preserve valid setup collision");
+        assert_eq!(geometry.fallback_setup_did, setup.id);
+        assert_eq!(geometry.fallback_shapes.len(), setup.spheres.len());
+        let CollisionShape::Ball(ball) = &*geometry.fallback_shapes[0] else {
+            panic!("setup sphere must remain a collision ball");
+        };
+        assert_eq!(ball.center, setup.spheres[0].center);
+        assert_eq!(ball.radius, setup.spheres[0].radius);
+    }
+
+    #[test]
+    fn target_geometry_rejects_missing_resources_for_valid_substitutions() {
+        let (setup, _) = stable_geometry_fixture();
+        let replacement_did = 0x0100_0002;
+        let appearance = EntityAppearance {
+            part_changes: vec![EntityPartChange {
+                part_index: 0,
+                gfx_obj_did: replacement_did,
+            }],
+            ..EntityAppearance::default()
+        };
+        let content = ContentRepository::from_mounts(Vec::new());
+        let error = prepare_target_geometry(
+            1,
+            setup.id,
+            &appearance,
+            Placement::Default as u32,
+            &setup,
+            true,
+            &content,
+        )
+        .expect_err("a valid substitution still requires its resource");
+        assert!(
+            matches!(error, DynamicEntityPhysicalPreparationError::Content {
+            resource_did, ..
+        } if resource_did == replacement_did)
+        );
+    }
+
+    #[test]
+    fn stable_geometry_uses_requested_placement_with_default_fallback_and_animation_precedence() {
+        let (setup, animation) = stable_geometry_fixture();
         for (requested, expected) in [(0, 2.0), (Placement::Resting as u32, 7.0), (u32::MAX, 2.0)] {
             assert_eq!(
                 stable_part_frames(&setup, None, requested).unwrap().frames[0]

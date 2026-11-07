@@ -2,12 +2,7 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client combat bar:** When Recklessness is trained or specialized, the power and accuracy bar marks the 10–90% range where it applies. A larger skull and a "Reckless" label appear while your setting is in that range. The handle pulses briefly when a new position is committed. The pulse is skipped when reduced motion is enabled. Keyboard adjustments snap to whole percentages, so a displayed 10% or 90% no longer falls out of the Recklessness range because of rounding. Themes can customize the new colors, skull size and pulse. Automated browser checks cover this; no native visual acceptance was performed.
-- **3D client account tooltip:** Hovering the server text in the vitals display now shows the account you are logged in as, using the server's exact spelling.
-- **Movement and collision fixes:** Characters arriving on outdoor terrain are now corrected if they would be placed inside the ground, and the player body settles before the world is revealed. Rounded bridge landings now recover support instead of catching on the floor. These changes were tested with automated tests and replays of captured data; they have not been checked in a live native session.
-- **3D client updates:** The update link now refreshes the release channel before opening a download, so a release published after the notification is used rather than a stale link. If the refresh fails, you can retry.
-- **3D client runtime:** The bundled Electron runtime is upgraded to 45.2.3 (Chromium 156). Windows flicker behavior has not been verified.
-- **Terminal client (CLI):** Ctrl+D or Ctrl+Q on any page now opens an exit confirmation. Press Enter or Y to quit, or Esc or N to cancel. Quitting this way logs out and disconnects the same way as `/quit`. Modal dialogs now have even padding and size themselves more accurately in narrow terminals. The quickstarts and site docs describe the new shortcuts.
+- **3D client collision fix:** Objects whose appearance data names a part their model does not have no longer lose collision. The out-of-range substitution is now skipped, as in retail, and the remaining valid parts and the model's collision volumes are kept. Previously, such an invalid part index could cause the whole object's collision definition to be rejected. Material appearance, selection outlines and collision now resolve parts the same way. Validated with automated unit tests only; no live native or visual acceptance was performed.
 
 ## Known issues
 

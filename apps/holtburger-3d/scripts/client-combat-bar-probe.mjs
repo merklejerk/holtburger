@@ -69,6 +69,13 @@ export async function probeCombatBar(
 			y: end.y,
 			button: "left",
 		});
+		assert.equal(
+			await read(
+				"document.querySelector('.power-handle-pulse').getAnimations().length",
+			),
+			0,
+			"Drag preview must not pulse",
+		);
 		await client.send("Input.dispatchMouseEvent", {
 			type: "mouseReleased",
 			x: end.x,
@@ -89,6 +96,249 @@ export async function probeCombatBar(
 		);
 	};
 
+	await read(`${api}.begin('melee')`);
+	await settle();
+	await read(`${api}.theme("Traveler’s Kit")`);
+	const range = await read(`${api}.range`);
+	const cue = () =>
+		read("document.querySelector('.recklessness-skull-face') !== null");
+	// Training changes must update both physical-combat gauges with the character panel closed.
+	for (const mode of ["melee", "missile"]) {
+		await read(`${api}.active('${mode}')`);
+		for (const training of [
+			null,
+			"Unusable",
+			"Untrained",
+			"Trained",
+			"Specialized",
+		]) {
+			await read(`${api}.recklessness(${JSON.stringify(training)})`);
+			assert.equal(
+				await read("document.querySelectorAll('.recklessness-range').length"),
+				training === "Trained" || training === "Specialized" ? 1 : 0,
+			);
+			const trained = training === "Trained" || training === "Specialized";
+			assert.equal(await cue(), trained);
+			assert.equal(
+				await read("document.querySelector('.power-label').textContent.trim()"),
+				trained ? "Reckless" : mode === "melee" ? "Power" : "Accuracy",
+			);
+			assert.equal(
+				await read(`(() => {
+				const handle = document.querySelector('.power-handle');
+				const art = handle.querySelector('svg').getBoundingClientRect();
+				const hit = handle.querySelector('.power-handle-hit-area').getBoundingClientRect();
+				const scale = handle.querySelector('.recklessness-skull-art') === null ? 1 : Number(getComputedStyle(handle).getPropertyValue('--ui-combat-recklessness-handle-scale'));
+				const marginX = hit.width * (scale - 1) / 2;
+				const marginY = hit.height * (scale - 1) / 2;
+				return art.width > 0 && art.height > 0 && art.left >= hit.left - marginX - 0.1 && art.top >= hit.top - marginY - 0.1 && art.right <= hit.right + marginX + 0.1 && art.bottom <= hit.bottom + marginY + 0.1;
+			})()`),
+				true,
+				"Handle artwork must stay centered at its themed size",
+			);
+		}
+		for (const [setting, active] of [
+			[0, false],
+			[range.min, true],
+			[range.max, true],
+			[1, false],
+		]) {
+			await read(
+				`${api}.select(${JSON.stringify({ kind: mode, height: "medium", [mode === "melee" ? "power" : "accuracy"]: setting })})`,
+			);
+			await settle();
+			assert.equal(await cue(), active);
+			assert.equal(
+				await read("document.querySelector('.power-label').textContent.trim()"),
+				active ? "Reckless" : mode === "melee" ? "Power" : "Accuracy",
+			);
+		}
+		// Idle charge must not retire a cue selected by the power/accuracy setting.
+		await read(
+			`${api}.select(${JSON.stringify({ kind: mode, height: "medium", [mode === "melee" ? "power" : "accuracy"]: (range.min + range.max) / 2 })})`,
+		);
+		await read(`${api}.begin('${mode}')`);
+		await settle();
+		assert.equal(await cue(), true);
+		assert.equal(
+			await read(`(async () => {
+			const api = ${api};
+			const mode = '${mode}';
+			const setting = mode === 'melee' ? 'power' : 'accuracy';
+			const midpoint = (api.range.min + api.range.max) / 2;
+			for (const [target, key] of [[api.range.min, 'ArrowLeft'], [api.range.max, 'ArrowRight']]) {
+				api.select({kind: mode, height: 'medium', [setting]: midpoint});
+				await new Promise(requestAnimationFrame);
+				const slider = document.querySelector('.power-control');
+				const maximum = Number(slider.getAttribute('aria-valuemax'));
+				for (let count = 0; count < maximum && Number(slider.getAttribute('aria-valuenow')) !== target * maximum; count++) {
+					slider.dispatchEvent(new KeyboardEvent('keydown', {key, bubbles: true, cancelable: true}));
+					await new Promise(requestAnimationFrame);
+				}
+				const profile = api.status().desired.profile;
+				if (profile[setting] !== target || document.querySelector('.recklessness-skull-face') === null) return false;
+			}
+			return true;
+		})()`),
+			true,
+			"Keyboard steps must activate Recklessness at both displayed endpoints",
+		);
+	}
+	assert.deepEqual(
+		await read(`(() => {
+		const bar = document.querySelector('.combat-bar');
+		bar.style.setProperty('--ui-combat-recklessness-track-color', '#123456');
+		bar.style.setProperty('--ui-combat-recklessness-charge-color', '#abcdef');
+		bar.style.setProperty('--ui-combat-recklessness-handle-color', '#fedcba');
+		try {
+			return {
+				track: getComputedStyle(bar.querySelector('.recklessness-track')).stroke,
+				charge: getComputedStyle(bar.querySelector('.recklessness-charge')).stroke,
+				trackFill: getComputedStyle(bar.querySelector('.recklessness-track')).fill,
+				chargeFill: getComputedStyle(bar.querySelector('.recklessness-charge')).fill,
+				skull: getComputedStyle(bar.querySelector('.recklessness-skull-face')).fill,
+				pointerEvents: getComputedStyle(bar.querySelector('.recklessness-range')).pointerEvents,
+			};
+		} finally {
+			bar.style.removeProperty('--ui-combat-recklessness-track-color');
+			bar.style.removeProperty('--ui-combat-recklessness-charge-color');
+			bar.style.removeProperty('--ui-combat-recklessness-handle-color');
+		}
+	})()`),
+		{
+			track: "rgb(18, 52, 86)",
+			charge: "rgb(171, 205, 239)",
+			trackFill: "none",
+			chargeFill: "none",
+			skull: "rgb(254, 220, 186)",
+			pointerEvents: "none",
+		},
+	);
+	await capture("recklessness-skull");
+	// Rasterize the real tint geometry: checking paint colors alone missed the filled-center report.
+	assert.deepEqual(
+		await read(`(async () => {
+		const range = document.querySelector('.recklessness-range');
+		const gauge = range.ownerSVGElement;
+		const svg = gauge.cloneNode(false);
+		svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+		svg.setAttribute('width', gauge.viewBox.baseVal.width);
+		svg.setAttribute('height', gauge.viewBox.baseVal.height);
+		svg.removeAttribute('style');
+		svg.append(gauge.querySelector('defs').cloneNode(true));
+		const paint = range.cloneNode(true);
+		// An opaque interior paint must still be confined to the arc by the mask.
+		for (const path of paint.querySelectorAll('path')) {
+			path.setAttribute('fill', 'white');
+			path.setAttribute('stroke', 'white');
+		}
+		svg.append(paint);
+		const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' }));
+		try {
+			const image = new Image();
+			image.src = url;
+			await image.decode();
+			const canvas = document.createElement('canvas');
+			canvas.width = image.width;
+			canvas.height = image.height;
+			const context = canvas.getContext('2d');
+			context.drawImage(image, 0, 0);
+			const bounds = range.querySelector('path').getBBox();
+			const x = Math.round(bounds.x + bounds.width / 2);
+			const alpha = y => context.getImageData(x, Math.round(y), 1, 1).data[3];
+			return {
+				arcVisible: alpha(bounds.y) > 0,
+				centerClear: alpha(bounds.y + bounds.height / 2) === 0,
+			};
+		} finally { URL.revokeObjectURL(url); }
+	})()`),
+		{ arcVisible: true, centerClear: true },
+	);
+	await read(`${api}.theme(null)`);
+	// Artwork pulses on committed movement while its hit target stays fixed.
+	for (const mode of ["melee", "missile"]) {
+		assert.deepEqual(
+			await read(`(async () => {
+			const api = ${api};
+			const mode = '${mode}';
+			const setting = mode === 'melee' ? 'power' : 'accuracy';
+			const select = (value, height = 'medium') => api.select({kind: mode, height, [setting]: value});
+			api.begin(mode);
+			select(1);
+			await new Promise(requestAnimationFrame);
+			const bar = document.querySelector('.combat-bar');
+			bar.style.setProperty('--ui-combat-handle-settle-duration', '400ms');
+			bar.style.setProperty('--ui-combat-handle-settle-scale', '1.4');
+			const pulse = bar.querySelector('.power-handle-pulse');
+			const hit = bar.querySelector('.power-handle-hit-area');
+			const checks = [];
+			try {
+				for (const value of [0, (api.range.min + api.range.max) / 2]) {
+					select(value);
+					await new Promise(requestAnimationFrame);
+					const before = hit.getBoundingClientRect();
+					const animation = pulse.getAnimations()[0];
+					animation.pause();
+					animation.currentTime = Number(animation.effect.getTiming().duration) * 0.4;
+					const after = hit.getBoundingClientRect();
+					checks.push({
+						duration: animation.effect.getTiming().duration,
+						peak: animation.effect.getKeyframes()[1].transform,
+						enlarged: new DOMMatrixReadOnly(getComputedStyle(pulse).transform).a > 1,
+						stableHitArea: before.width === after.width && before.height === after.height,
+					});
+					animation.finish();
+					select(value, 'high');
+					await new Promise(requestAnimationFrame);
+					if (pulse.getAnimations().length !== 0) throw new Error('Unchanged setting or height selection replayed pulse');
+				}
+				return checks;
+			} finally {
+				bar.style.removeProperty('--ui-combat-handle-settle-duration');
+				bar.style.removeProperty('--ui-combat-handle-settle-scale');
+			}
+		})()`),
+			Array.from({ length: 2 }, () => ({
+				duration: 400,
+				peak: "scale(1.4)",
+				enlarged: true,
+				stableHitArea: true,
+			})),
+		);
+	}
+	await client.send("Emulation.setEmulatedMedia", {
+		features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+	});
+	await read(`${api}.select({kind: 'missile', height: 'medium', accuracy: 1})`);
+	await settle();
+	assert.equal(
+		await read(
+			"document.querySelector('.power-handle-pulse').getAnimations().length",
+		),
+		0,
+	);
+	await client.send("Emulation.setEmulatedMedia", { features: [] });
+	await read(
+		`${api}.select({kind: 'missile', height: 'medium', accuracy: ${(range.min + range.max) / 2}})`,
+	);
+	await settle();
+	await client.send("Emulation.setEmulatedMedia", {
+		features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+	});
+	await settle();
+	assert.equal(
+		await read(
+			"document.querySelector('.power-handle-pulse').getAnimations().length",
+		),
+		0,
+	);
+	await client.send("Emulation.setEmulatedMedia", { features: [] });
+	await read(
+		`${api}.select({kind: 'melee', height: 'medium', power: ${(range.min + range.max) / 2}})`,
+	);
+	await read(`${api}.end()`);
+	await settle();
+	await read(`${api}.recklessness(null)`);
 	await read(`${api}.begin('melee')`);
 	await settle();
 	assert.deepEqual(
@@ -601,6 +851,7 @@ export async function probeCombatBar(
 	);
 	return {
 		attackFeedback: true,
+		recklessnessTrainingAndTheme: true,
 		targetIndicator: targeting.combatTargetIndicator,
 		hoverHelp: true,
 		appearance: true,

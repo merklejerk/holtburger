@@ -4,6 +4,8 @@
 	import CombatHelpLeaders from "../assets/icons/combat-help-leaders.svg?component";
 	import CombatPlay from "../assets/icons/combat-play.svg?component";
 	import CombatPause from "../assets/icons/combat-pause.svg?component";
+	import CombatPowerHandle from "../assets/icons/combat-power-handle.svg?component";
+	import CombatRecklessnessHandle from "../assets/icons/combat-recklessness-handle.svg?component";
 	import {
 		COMBAT_BREAKPOINT_INDICES,
 		COMBAT_HEIGHT_INDICES,
@@ -17,6 +19,7 @@
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import { CLIENT_TUNING } from "./client-tuning";
 	import type { ClientInventoryState } from "./client-inventory-state";
+	import type { ClientCharacterSheetState } from "./client-character-sheet-state";
 	import type {
 		ClientAttackProfile,
 		ClientCombatStatus,
@@ -29,6 +32,7 @@
 		COMBAT_BREAKPOINTS,
 		COMBAT_GAUGE_SIZE,
 		COMBAT_HEIGHTS,
+		RECKLESSNESS_RANGE,
 	} from "./client-combat-bar-state";
 
 	const gaugeId = $props.id();
@@ -126,6 +130,11 @@
 		};
 	}
 
+	/** Bound the tint to the curved stroke itself, including under themes that paint SVG interiors. */
+	const recklessnessStart = pointOnArc(RECKLESSNESS_RANGE.min);
+	const recklessnessEnd = pointOnArc(RECKLESSNESS_RANGE.max);
+	const recklessnessArcPath = `M ${recklessnessStart.x} ${recklessnessStart.y} A ${GAUGE_TUNING.arcRadiusX} ${GAUGE_TUNING.arcRadiusY} 0 0 1 ${recklessnessEnd.x} ${recklessnessEnd.y}`;
+
 	/** Small radial marks share the slider's arc geometry and never catch input. */
 	const engravings = COMBAT_BREAKPOINTS.slice(1, -1).map((value) => {
 		const point = pointOnArc(value);
@@ -170,6 +179,8 @@
 	});
 
 	interface Props {
+		/** Session-owned training facts, sampled independently of character-panel visibility. */
+		readonly characterSheet: ClientCharacterSheetState | null;
 		/** Session-owned world facts, available independently of inventory-panel visibility. */
 		readonly inventory: ClientInventoryState | null;
 		/** Accepted physical-combat shortcuts. */
@@ -193,6 +204,7 @@
 	}
 
 	let {
+		characterSheet,
 		inventory,
 		input,
 		displayPlatform,
@@ -208,6 +220,27 @@
 		onProfileSelect,
 		onStopCombat,
 	}: Props = $props();
+
+	/** Only the range's visibility enters markup, at the character sheet display cadence. */
+	let recklessnessTrained = $state(false);
+	$effect(() => {
+		const owner = characterSheet;
+		const sample = () => {
+			const skill = owner
+				?.read()
+				.sheet?.skills.find((row) => row.stat.skill_type === "Recklessness");
+			recklessnessTrained =
+				skill?.stat.training === "Trained" ||
+				skill?.stat.training === "Specialized";
+		};
+		untrack(sample);
+		if (owner === null) return;
+		const timer = setInterval(
+			sample,
+			CLIENT_TUNING.characterSheet.displayIntervalMs,
+		);
+		return () => clearInterval(timer);
+	});
 
 	/** Only a bounded display sample enters Svelte; unknown supply has no readout. */
 	let remaining = $state<string | null>(null);
@@ -318,6 +351,12 @@
 	let activePointer = $state<number | null>(null);
 	let powerControl: SVGGElement | null = null;
 	const displayedValue = $derived(dragValue ?? value);
+	/** The selected setting owns the risk cue independently of the animated charge level. */
+	const recklessnessActive = $derived(
+		recklessnessTrained &&
+			displayedValue >= RECKLESSNESS_RANGE.min &&
+			displayedValue <= RECKLESSNESS_RANGE.max,
+	);
 	const chargeLevel = $derived(charge * displayedValue);
 	const displayedPercent = $derived(Math.round(displayedValue * 100));
 	const handlePoint = $derived(pointOnArc(displayedValue));
@@ -333,6 +372,66 @@
 
 	function clampPower(value: number): number {
 		return Math.min(1, Math.max(0, value));
+	}
+
+	/** Committed setting and drag lifetime; charge progress never drives handle feedback. */
+	interface HandleSelection {
+		/** Mode changes replace the scale rather than settling to a new position. */
+		readonly kind: ClientAttackProfile["kind"];
+		/** Accepted power or accuracy, independent of the drag preview. */
+		readonly value: number;
+		/** Pointer movement interrupts any previous pulse until release. */
+		readonly dragging: boolean;
+	}
+
+	/** Restart a short artwork-only pulse after an accepted position change. */
+	function pulseOnSettle(node: SVGGElement, selection: HandleSelection) {
+		let previous = selection;
+		let animation: Animation | null = null;
+		const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+		const stop = () => {
+			animation?.cancel();
+			animation = null;
+		};
+		reducedMotion.addEventListener("change", stop);
+		return {
+			update(next: HandleSelection) {
+				const changedMode = next.kind !== previous.kind;
+				const moved = !changedMode && next.value !== previous.value;
+				previous = next;
+				if (next.dragging || changedMode) {
+					stop();
+					return;
+				}
+				if (!moved) return;
+				stop();
+				if (reducedMotion.matches) return;
+				const scale = Number(
+					getComputedStyle(node).getPropertyValue(
+						"--ui-combat-handle-settle-scale",
+					),
+				);
+				if (!Number.isFinite(scale) || scale <= 0)
+					throw new Error(
+						"--ui-combat-handle-settle-scale must be a positive number",
+					);
+				animation = node.animate(
+					[
+						{ transform: "scale(1)" },
+						{ transform: `scale(${scale})`, offset: 0.4 },
+						{ transform: "scale(1)" },
+					],
+					{
+						duration: cssDurationMs("--ui-combat-handle-settle-duration"),
+						easing: "ease-out",
+					},
+				);
+			},
+			destroy() {
+				stop();
+				reducedMotion.removeEventListener("change", stop);
+			},
+		};
 	}
 
 	function profileWithValue(next: number): ClientAttackProfile {
@@ -407,7 +506,10 @@
 				return;
 		}
 		event.preventDefault();
-		onProfileSelect(profileWithValue(clampPower(next)));
+		// Keyboard steps land on the percentage grid; floating drift must not cross ACE's endpoints.
+		onProfileSelect(
+			profileWithValue(clampPower(Math.round(next / POWER_STEP) * POWER_STEP)),
+		);
 	}
 </script>
 
@@ -448,6 +550,21 @@
 			style:height={`${GAUGE_TUNING.viewBoxHeight}px`}
 		>
 			<defs>
+				<mask
+					id={`${gaugeId}-recklessness-range`}
+					maskUnits="userSpaceOnUse"
+					x="0"
+					y="0"
+					width={GAUGE_TUNING.viewBoxWidth}
+					height={GAUGE_TUNING.viewBoxHeight}
+				>
+					<path
+						d={recklessnessArcPath}
+						fill="none"
+						stroke="white"
+						stroke-width={GAUGE_TUNING.arcStrokeWidth}
+					/>
+				</mask>
 				<path id={`${gaugeId}-help-arc`} d={helpArcPath} />
 				<linearGradient
 					id={`${gaugeId}-metal`}
@@ -468,7 +585,11 @@
 					startOffset="50%"
 					text-anchor="middle"
 				>
-					{profile.kind === "melee" ? "Power" : "Accuracy"}
+					{recklessnessActive
+						? "Reckless"
+						: profile.kind === "melee"
+							? "Power"
+							: "Accuracy"}
 				</textPath>
 			</text>
 			<g class="gauge-decoration" aria-hidden="true">
@@ -496,6 +617,33 @@
 				stroke-width={GAUGE_TUNING.arcStrokeWidth}
 				style:stroke-dasharray={`${chargeLevel * ARC_LENGTH} ${ARC_LENGTH}`}
 			/>
+			{#if recklessnessTrained}
+				<g
+					class="recklessness-range"
+					class:recklessness-active={recklessnessActive}
+					mask={`url(#${gaugeId}-recklessness-range)`}
+					pointer-events="none"
+				>
+					<title
+						>Recklessness: {RECKLESSNESS_RANGE.min *
+							100}–{RECKLESSNESS_RANGE.max * 100}% {profile.kind === "melee"
+							? "power"
+							: "accuracy"}</title
+					>
+					<path
+						class="gauge-track recklessness-track"
+						d={arcPath}
+						stroke-width={GAUGE_TUNING.arcStrokeWidth}
+					/>
+					<path
+						class="gauge-fill recklessness-charge"
+						d={arcPath}
+						pathLength={ARC_LENGTH}
+						stroke-width={GAUGE_TUNING.arcStrokeWidth}
+						style:stroke-dasharray={`${chargeLevel * ARC_LENGTH} ${ARC_LENGTH}`}
+					/>
+				</g>
+			{/if}
 			<g class="gauge-decoration" aria-hidden="true">
 				{#each engravings as mark}<line
 						class="gauge-engraving"
@@ -523,7 +671,7 @@
 				aria-valuemin="0"
 				aria-valuemax="100"
 				aria-valuenow={displayedPercent}
-				aria-valuetext={`${displayedPercent}%`}
+				aria-valuetext={`${displayedPercent}%${recklessnessActive ? ", Recklessness active" : ""}`}
 				onpointerdown={beginPowerDrag}
 				onpointermove={movePowerDrag}
 				onpointerup={finishPowerDrag}
@@ -538,7 +686,40 @@
 				<g
 					transform={`translate(${handlePoint.x} ${handlePoint.y}) rotate(${handleAngle})`}
 				>
-					<path class="power-handle" d="M -10 -10 H 10 L 0 11 Z" />
+					<g
+						class="power-handle"
+						class:recklessness-active={recklessnessActive}
+					>
+						<!-- The same transparent target survives artwork changes. -->
+						<rect
+							class="power-handle-hit-area"
+							x="-12"
+							y="-12"
+							width="24"
+							height="24"
+						/>
+						<g
+							class="power-handle-pulse"
+							use:pulseOnSettle={{
+								kind: profile.kind,
+								value,
+								dragging: activePointer !== null,
+							}}
+						>
+							{#if recklessnessActive}
+								<g class="recklessness-skull-art">
+									<CombatRecklessnessHandle
+										x={-12}
+										y={-12}
+										width={24}
+										height={24}
+									/>
+								</g>
+							{:else}
+								<CombatPowerHandle x={-12} y={-12} width={24} height={24} />
+							{/if}
+						</g>
+					</g>
 				</g>
 			</g>
 		</svg>
@@ -819,6 +1000,12 @@
 		.gauge-fill {
 			stroke: var(--ui-combat-charge-color);
 		}
+		.recklessness-track {
+			stroke: var(--ui-combat-recklessness-track-color);
+		}
+		.recklessness-charge {
+			stroke: var(--ui-combat-recklessness-charge-color);
+		}
 		.power-control {
 			cursor: pointer;
 			outline: none;
@@ -848,6 +1035,26 @@
 		.power-control:focus-visible .power-handle,
 		.power-control.dragging .power-handle {
 			transform: scale(1.12);
+		}
+		.power-handle :global(svg) {
+			pointer-events: none;
+		}
+		.power-handle-pulse {
+			transform-origin: 0 0;
+			pointer-events: none;
+		}
+		.recklessness-skull-art {
+			transform: scale(var(--ui-combat-recklessness-handle-scale));
+			transform-origin: 0 0;
+		}
+		.power-handle-hit-area {
+			fill: transparent;
+			stroke: none;
+		}
+		.power-handle :global(.recklessness-skull-face) {
+			fill: var(--ui-combat-recklessness-handle-color);
+			stroke: var(--ui-combat-outline-color);
+			stroke-width: 1;
 		}
 		.attack-height {
 			position: absolute;

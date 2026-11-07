@@ -6,3 +6,6 @@ export const COMBAT_HEIGHTS = ["high", "medium", "low"] as const;
 
 /** Fixed gauge dimensions shared by new layouts and saved-layout migration. */
 export const COMBAT_GAUGE_SIZE = { width: 320, height: 200 } as const;
+
+/** ACE enables Recklessness inclusively for melee power and missile accuracy. */
+export const RECKLESSNESS_RANGE = { min: 0.1, max: 0.9 } as const;

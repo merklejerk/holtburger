@@ -288,6 +288,24 @@ physical press, selection, an open panel, or disabled controls.
 | `--ui-option-background`, `--ui-option-border-color`                                                                                                        | Full background and border color for `ui-option` list rows. Rows implemented as `ui-button` use button properties.                    |
 | `--ui-input-background`, `--ui-input-border-color`                                                                                                          | Full background and border color for inputs. Use `::placeholder`, `:disabled`, and `[aria-invalid="true"]` for text and state colors. |
 
+The combat gauge marks ACE's 10–90% Recklessness range when the skill is trained
+or specialized, for both melee power and missile accuracy. Themes can set
+`--ui-combat-recklessness-track-color` and `--ui-combat-recklessness-charge-color`
+independently; defaults use a muted warning tint on the track and the warning
+color on the charge. The `.recklessness-range` group contains both painted paths.
+Within that range the selected setting shows a skull and labels the gauge "Reckless",
+independently of charge progress. `--ui-combat-recklessness-handle-color` controls
+the skull's color and `--ui-combat-recklessness-handle-scale` its artwork size,
+independently of the fixed hit area. Themes can target
+`.recklessness-active` on the range or handle; the handle's hit area stays fixed.
+
+Committed slider position changes briefly enlarge the handle artwork, for both
+the normal pointer and the skull. `--ui-combat-handle-settle-duration` controls
+the pulse duration and `--ui-combat-handle-settle-scale` its peak scale (positive
+number). Dragging interrupts the pulse; release or a keyboard position change
+restarts it. Unchanged settings and attack-height selections do not pulse.
+Reduced-motion preferences disable this animation, including one already running.
+
 Combat HUD hover help uses `--ui-combat-help-color` and
 `--ui-combat-help-text-shadow` independently of the control paint. When omitted,
 they inherit the HUD foreground and shortcut shadow at the consuming element;

@@ -559,6 +559,8 @@ const currentStateSchema = z
 		serverTime: finiteNumber.nullable(),
 		worldGeneration: z.number().int().nonnegative(),
 		worldName: z.string().nullable(),
+		/** Current login account identity, supplied by the session authority. */
+		accountName: z.string(),
 		playerName: z.string().nullable(),
 		knownSpells: knownSpellIdsSchema.nullable(),
 		enchantments: resolvedEnchantmentsSchema.nullable(),

@@ -339,6 +339,7 @@ export async function probeClientInventory(options: {
 			worldGeneration: 1,
 			connection: null,
 			worldName: "Fixture",
+			accountName: "Fixture account",
 			playerName: "Wayfarer",
 			knownSpells: null,
 			enchantments: null,

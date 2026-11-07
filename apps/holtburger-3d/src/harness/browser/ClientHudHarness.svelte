@@ -1661,6 +1661,7 @@
 			worldGeneration: 1,
 			connection: null,
 			worldName: "Fixture",
+			accountName: "Fixture account",
 			playerName,
 			knownSpells: null,
 			enchantments: null,
@@ -6729,6 +6730,7 @@
 					onShowRetailHiddenGeometryChange={() => undefined}
 					playerName={showcase ? "Wayfarer" : "Alice"}
 					worldName={showcase ? "Dereth" : "ACE Emulator"}
+					accountName="Fixture account"
 					{vitalWarningsEnabled}
 					vitals={warningVitals}
 					{jumpChargeActive}

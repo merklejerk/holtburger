@@ -176,6 +176,7 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         server_time: None,
         world_generation: 1,
         world_name: None,
+        account_name: "Fixture account".into(),
         player_name: Some("Player".to_string()),
         vitals: Default::default(),
         character_sheet: Some(Box::new(character_sheet(guid))),

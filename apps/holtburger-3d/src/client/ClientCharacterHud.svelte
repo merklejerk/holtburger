@@ -16,6 +16,8 @@
 		readonly readConnection: () => ClientConnectionObservation | null;
 		readonly playerName: string | null;
 		readonly worldName: string | null;
+		/** Current session account shown when hovering the server label. */
+		readonly accountName: string | null;
 		readonly vitals: readonly ClientVital[];
 		/** Session-owned progression; sampled at the character sheet's display cadence. */
 		readonly characterSheet: ClientCharacterSheetState | null;
@@ -26,6 +28,7 @@
 	const {
 		playerName,
 		worldName,
+		accountName,
 		vitals,
 		readConnection,
 		characterSheet,
@@ -114,7 +117,11 @@
 				hidden={playerName === null || level === null}>({level})</span
 			>
 			<span class="server">
-				<span class="world-name">on {worldName ?? "Unknown world"}</span>
+				<span
+					class="world-name"
+					title={accountName === null ? undefined : `Account: ${accountName}`}
+					>on {worldName ?? "Unknown world"}</span
+				>
 				<ClientConnectionBadge {readConnection} />
 			</span>
 		</header>

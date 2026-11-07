@@ -488,6 +488,7 @@ impl ClientRuntime {
                 .map(|_| self.world.current_server_time()),
             world_generation: self.world_generation,
             world_name: self.world_name.clone(),
+            account_name: self.character_selection.account_name.clone(),
             player_name: self
                 .world
                 .player_entity()

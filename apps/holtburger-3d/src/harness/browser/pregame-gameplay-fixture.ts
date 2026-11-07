@@ -498,6 +498,7 @@ function currentState(player: DynamicEntityView): ClientCurrentState {
 		worldGeneration: 1,
 		connection: null,
 		worldName: "Leafcull",
+		accountName: "Fixture account",
 		playerName: "Player",
 		knownSpells: null,
 		enchantments: null,

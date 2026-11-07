@@ -48,6 +48,7 @@ async function fixture() {
 			worldGeneration: 1,
 			connection: null,
 			worldName: null,
+			accountName: "Fixture account",
 			playerName: null,
 			knownSpells: null,
 			enchantments: null,

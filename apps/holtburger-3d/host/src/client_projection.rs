@@ -716,6 +716,8 @@ pub struct ClientCurrentState {
     pub world_generation: u64,
     /// Latest server-provided world name.
     pub world_name: Option<String>,
+    /// Current login account identity for the HUD server-label tooltip.
+    pub account_name: String,
     /// Current local-player display name.
     pub player_name: Option<String>,
     /// Complete local-player vital replacement level.
@@ -1701,6 +1703,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             server_time: snapshot.server_time,
             world_generation: snapshot.world_generation,
             world_name: snapshot.world_name.clone(),
+            account_name: snapshot.account_name.clone(),
             player_name: snapshot.player_name.clone(),
             vitals: project_vitals(&snapshot.vitals),
             character_sheet: snapshot.character_sheet.as_deref().map(Into::into),

@@ -420,6 +420,8 @@
 		readonly onShowRetailHiddenGeometryChange: (visible: boolean) => void;
 		readonly playerName: string | null;
 		readonly worldName: string | null;
+		/** Current session account shown when hovering the server label. */
+		readonly accountName: string | null;
 		/** Imperative transport display reader, independent of world presentation. */
 		readonly readConnection: () => ClientConnectionObservation | null;
 		readonly vitals: readonly ClientVital[];
@@ -616,6 +618,7 @@
 		onShowRetailHiddenGeometryChange,
 		playerName,
 		worldName,
+		accountName,
 		vitals,
 		vitalWarningsEnabled,
 		readConnection,
@@ -1378,6 +1381,7 @@
 				onContentHeightChange={(height) => (characterContentHeight = height)}
 				{playerName}
 				{worldName}
+				{accountName}
 				{vitals}
 				{readConnection}
 				{characterSheet}

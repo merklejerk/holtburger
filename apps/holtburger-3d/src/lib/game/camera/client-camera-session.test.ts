@@ -439,6 +439,7 @@ function currentState(): ClientCurrentState {
 		serverTime: 10,
 		worldGeneration: 1,
 		connection: null,
+		accountName: "Fixture account",
 		worldName: "Leafcull",
 		playerName: "Drudge",
 		knownSpells: null,

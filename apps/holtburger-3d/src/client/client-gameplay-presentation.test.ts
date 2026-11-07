@@ -2348,6 +2348,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		worldGeneration: 1,
 		connection: null,
 		worldName: "Leafcull",
+		accountName: "Fixture account",
 		playerName: "Player",
 		knownSpells: null,
 		enchantments: null,

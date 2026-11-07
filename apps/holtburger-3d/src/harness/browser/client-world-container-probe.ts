@@ -151,6 +151,7 @@ export async function probeWorldContainer(options: {
 			worldGeneration: 1,
 			connection: null,
 			worldName: "Fixture",
+			accountName: "Fixture account",
 			playerName: "Wayfarer",
 			knownSpells: null,
 			enchantments: null,

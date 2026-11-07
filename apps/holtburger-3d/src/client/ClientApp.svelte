@@ -565,6 +565,8 @@
 	}
 	let playerName = $state<string | null>(null);
 	let worldName = $state<string | null>(null);
+	/** Cold session identity consumed by the HUD tooltip after snapshot delivery. */
+	let accountName = $state<string | null>(null);
 	let vitals = $state<readonly ClientVital[]>([]);
 	let appearanceOptions = $state<ClientAppearanceOptions | null>(null);
 	let characterMotion = $state<ClientCharacterMotionCapabilities | null>(null);
@@ -1252,6 +1254,7 @@
 						event.state.playerName,
 					);
 				worldName = event.state.worldName;
+				accountName = event.state.accountName;
 				vitals = event.state.vitals;
 				characterMotion = event.state.characterMotion;
 				if (characterMotion !== null)
@@ -2761,6 +2764,7 @@
 			onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
 			{playerName}
 			{worldName}
+			{accountName}
 			{vitals}
 			vitalWarningsEnabled={lifecycle.kind === "in-world"}
 			readConnection={() => session?.connectionSample() ?? null}

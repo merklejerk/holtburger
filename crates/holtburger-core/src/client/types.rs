@@ -636,6 +636,8 @@ pub struct ClientApplicationSnapshot {
     pub world_generation: u64,
     /// Latest server-provided world name, absent before the server-name message arrives.
     pub world_name: Option<String>,
+    /// Login account identity, updated to the exact server spelling when the roster arrives.
+    pub account_name: String,
     /// Current local-player display name, absent before its authoritative entity exists.
     pub player_name: Option<String>,
     /// Complete current/max local-player vitals used by client HUDs.

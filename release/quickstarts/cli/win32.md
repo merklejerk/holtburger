@@ -10,7 +10,7 @@ Extract the entire ZIP. Open PowerShell in the extracted folder and run:
 
 Replace SERVER, ACCOUNT, and PASSWORD with your server address and credentials.
 Change 9000 if your server uses a different port. There is no login screen.
-Press Ctrl+Q to quit.
+Press Ctrl+D or Ctrl+Q to open the exit confirmation. Enter/Y exits; Esc/N cancels.
 
 The game data needed by the terminal client is included. Keep `content/` and
 `scripts/` beside the executables. You do not need to supply retail DAT files.

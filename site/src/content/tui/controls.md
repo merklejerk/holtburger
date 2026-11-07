@@ -16,7 +16,9 @@ presentation: reference
 | Escape in the input line | Leave input                                   |
 | Escape outside input     | Cancel an active interaction where applicable |
 | Up / Down in input       | Browse submitted input history                |
-| Ctrl+Q                   | Quit                                          |
+| Ctrl+D / Ctrl+Q          | Open exit confirmation                        |
+| Enter / Y in exit popup  | Exit the client                               |
+| Esc / N in exit popup    | Cancel exit                                   |
 
 Enter can activate a selected entry's footer action in a dashboard tab. To type a message reliably, switch to the chat pane with **Tab**, then press **Enter** to focus the input line. Tab cycles the display panes; it does not focus the input line.
 

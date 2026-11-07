@@ -64,6 +64,8 @@ pub struct AppState {
     pub quit_on_disconnect: bool,
     pub disconnect_reason: Option<String>,
     pub pending_exit_message: Option<String>,
+    /// App-wide exit confirmation; captures input before the active page.
+    pub exit_confirmation_open: bool,
     pub queued_script_startup: Option<QueuedScriptStartup>,
     pub script_host_config: ScriptHostConfig,
     /// Frontend-owned roots resolved once at launch and reused after reconnects.

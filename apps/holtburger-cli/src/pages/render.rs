@@ -1,5 +1,6 @@
 use ratatui::Frame;
 
+use crate::components::modal::{ModalCardSpec, ModalPalette, render_modal_card};
 use crate::state::{AppState, RenderContext};
 
 pub fn render_app(f: &mut Frame, state: &mut AppState) {
@@ -14,4 +15,16 @@ pub fn render_app(f: &mut Frame, state: &mut AppState) {
 
     // We break the borrow cycle by borrowing disjoint fields from state.
     state.page.render(f, f.area(), &ctx);
+
+    if state.exit_confirmation_open {
+        render_modal_card(
+            f,
+            f.area(),
+            ModalCardSpec::new(
+                " Exit Holtburger? ",
+                "Exit the client?\n\n[Enter] Exit    [Esc] Cancel",
+                ModalPalette::CONFIRMATION,
+            ),
+        );
+    }
 }

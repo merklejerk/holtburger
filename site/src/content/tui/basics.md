@@ -44,6 +44,6 @@ Choose **Assess** to inspect the selected item or creature in the context pane. 
 
 Press **Enter** to focus the input line, type a message or command, then press **Enter** again to send it. If the dashboard has an **Enter** action, switch to the chat pane with **Tab** first. **Escape** leaves input; outside input it can cancel your current interaction.
 
-Use `/help` for commands and `/help COMMAND` for a topic. **Ctrl+Q** quits the client.
+Use `/help` for commands and `/help COMMAND` for a topic. **Ctrl+D** or **Ctrl+Q** opens the exit confirmation. Press **Enter/Y** to exit or **Esc/N** to cancel.
 
 Continue with [gameplay](/holtburger/tui/gameplay/) or [scripts](/holtburger/tui/scripting/).

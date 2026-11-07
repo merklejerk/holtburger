@@ -898,6 +898,7 @@ async fn run() -> Result<()> {
         quit_on_disconnect: args.quit_on_disconnect,
         disconnect_reason: None,
         pending_exit_message: None,
+        exit_confirmation_open: false,
         queued_script_startup: queued_script_startup_from_args(&args),
         script_host_config: script_host_config_from_args(&args),
         script_directories,

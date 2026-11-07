@@ -73,8 +73,8 @@ pub(crate) fn handle_message(
                 events.extend(state.set_player_position(data.pos.pos));
                 true
             } else {
-                state.receive_placement_message(
-                    crate::state::attachment_lifecycle::DeferredPlacementMessage::Position(
+                state.receive_entity_message(
+                    crate::state::entity_dependencies::DeferredEntityMessage::Position(
                         (**data).clone(),
                     ),
                     events,

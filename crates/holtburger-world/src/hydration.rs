@@ -5,7 +5,6 @@ use holtburger_common::properties::{
 use holtburger_protocol::messages::object::messages::description::{
     ObjectDescriptionData, PublicWeenieDescription,
 };
-use holtburger_protocol::messages::object::messages::properties::SetStateData;
 use holtburger_protocol::messages::trade::events::VendorItemEventData;
 
 /// Extension trait for [WorldObjectProperties] to support hydration from protocol structures.
@@ -18,9 +17,6 @@ pub trait WorldObjectPropertiesHydrationExt {
 
     /// Hydrates properties from a [PhysicsState].
     fn hydrate_from_physics_state(&mut self, pstate: PhysicsState);
-
-    /// Hydrates properties from a [SetStateData].
-    fn hydrate_from_set_state(&mut self, data: &SetStateData);
 
     /// Hydrates properties from a [VendorItemEventData].
     fn hydrate_from_vendor_item(&mut self, data: &VendorItemEventData);
@@ -315,10 +311,6 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
                 0
             },
         );
-    }
-
-    fn hydrate_from_set_state(&mut self, data: &SetStateData) {
-        self.hydrate_from_physics_state(data.physics_state);
     }
 }
 

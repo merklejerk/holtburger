@@ -1,7 +1,9 @@
 use crate::attachment::{EntityPlacementIntent, PhysicsAttachment};
 use crate::book::BookData;
 use crate::entity_appearance::EntityAppearance;
-use crate::entity_physics::{EntityPhysicsRuntimeState, resolve_effective_entity_physics_state};
+use crate::entity_physics::{
+    EffectiveEntityPhysicsState, EntityPhysicsRuntimeState, resolve_effective_entity_physics_state,
+};
 use crate::entity_scale::EntityScaleState;
 use crate::hydration::WorldObjectPropertiesHydrationExt;
 use crate::identify::{self, IdentifyTarget};
@@ -1267,12 +1269,14 @@ pub struct Entity {
 
 const OBJECT_POSITION_SEQUENCE_INDEX: usize = 0;
 const OBJECT_MOVEMENT_SEQUENCE_INDEX: usize = 1;
+/// Physics-state timestamp slot in a complete object description.
+pub(crate) const OBJECT_STATE_SEQUENCE_INDEX: usize = 2;
 const OBJECT_VECTOR_SEQUENCE_INDEX: usize = 3;
 const OBJECT_TELEPORT_SEQUENCE_INDEX: usize = 4;
 const OBJECT_SERVER_CONTROL_SEQUENCE_INDEX: usize = 5;
 const OBJECT_FORCE_POSITION_SEQUENCE_INDEX: usize = 6;
 const OBJECT_VISUAL_DESCRIPTION_SEQUENCE_INDEX: usize = 7;
-const OBJECT_INSTANCE_SEQUENCE_INDEX: usize = 8;
+pub(crate) const OBJECT_INSTANCE_SEQUENCE_INDEX: usize = 8;
 
 /// Result of applying retail's movement timestamp admission to one existing entity generation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1328,6 +1332,24 @@ impl Entity {
     /// Current server instance sequence used as the client composition's realization generation.
     pub const fn instance_sequence(&self) -> u16 {
         self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX]
+    }
+
+    /// Latest admitted physics-state timestamp for this incarnation.
+    pub(crate) const fn state_sequence(&self) -> u16 {
+        self.sequences[OBJECT_STATE_SEQUENCE_INDEX]
+    }
+
+    /// Commit an admitted mask and timestamp together, returning its resolved scene policy.
+    pub(crate) fn apply_physics_state(
+        &mut self,
+        state: PhysicsState,
+        state_sequence: u16,
+    ) -> EffectiveEntityPhysicsState {
+        let next = resolve_effective_entity_physics_state(state);
+        self.physics.reconcile(next);
+        self.properties.hydrate_from_physics_state(state);
+        self.sequences[OBJECT_STATE_SEQUENCE_INDEX] = state_sequence;
+        next
     }
 
     /// Latest admitted complete visual-description update for this object incarnation.

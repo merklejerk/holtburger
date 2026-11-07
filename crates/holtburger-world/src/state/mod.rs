@@ -1,6 +1,6 @@
 pub mod allegiance;
-pub(crate) mod attachment_lifecycle;
 pub mod contracts;
+pub(crate) mod entity_dependencies;
 mod entity_scale;
 pub mod fellowship;
 pub mod friends;
@@ -11,6 +11,7 @@ mod pose_orientation;
 mod scene_placement;
 pub mod self_movement;
 pub mod squelch;
+mod state_updates;
 pub mod storage;
 #[cfg(test)]
 pub mod tests;
@@ -40,7 +41,6 @@ pub use types::{ServerTimeSync, WorldState};
 
 use super::WorldEvent;
 use super::vendor::{CoreVendorItem, VendorState};
-pub(crate) use crate::hydration::WorldObjectPropertiesHydrationExt;
 use holtburger_common::Guid;
 use holtburger_common::Vector3;
 use holtburger_common::properties::{

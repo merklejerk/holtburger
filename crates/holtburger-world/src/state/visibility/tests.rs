@@ -300,7 +300,7 @@ fn accepted_remote_movement_does_not_refresh_visibility_deadline_or_use_predicte
 
 #[test]
 fn non_contact_position_return_cancels_visibility_prune_without_moving_runtime_body() {
-    use crate::state::attachment_lifecycle::DeferredPlacementMessage;
+    use crate::state::entity_dependencies::DeferredEntityMessage;
     use holtburger_protocol::messages::{PositionPack, UpdatePositionData};
 
     let scene = scene();
@@ -315,8 +315,8 @@ fn non_contact_position_return_cancels_visibility_prune_without_moving_runtime_b
             .pose;
         time(&mut world, expiry - ACE_DESTRUCTION_TIMEOUT_SECS / 2.0);
         let incoming = pose(cell_id(OWNER, if returns { LOWER } else { UPPER }));
-        world.receive_placement_message(
-            DeferredPlacementMessage::Position(UpdatePositionData {
+        world.receive_entity_message(
+            DeferredEntityMessage::Position(UpdatePositionData {
                 guid: TARGET,
                 pos: PositionPack {
                     pos: incoming,

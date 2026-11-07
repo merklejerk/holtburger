@@ -6,7 +6,7 @@ use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::object::messages::description::ObjDescEventData;
 use holtburger_protocol::messages::object::types::ModelData;
 
-use super::attachment_lifecycle::ScenePlacementScope;
+use super::entity_dependencies::ScenePlacementScope;
 use super::pose_orientation::recover_pose_orientation;
 use super::visibility::{EntityVisibility, VisibilitySnapshot};
 use crate::CollisionScene;
@@ -661,7 +661,7 @@ impl WorldState {
         let visibility = VisibilitySnapshot::capture(self, collision);
         self.invalidate_unavailable_visibility(&visibility);
         self.sweep_eviction_queue(now, &mut events);
-        self.prepare_deferred_scene_placements(&mut events);
+        self.prepare_deferred_entity_messages(&mut events);
         self.reconcile_scene_placements(&mut events, ScenePlacementScope::All);
         self.maintain_entity_prune_requests(now, &visibility);
 

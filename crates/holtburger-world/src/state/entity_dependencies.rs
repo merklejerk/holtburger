@@ -1,10 +1,12 @@
-//! World-owned attachment messages, dependency reconciliation and scene transitions.
+//! World-owned entity message dependencies, attachment reconciliation and scene transitions.
 
 use crate::{PhysicsAttachment, ResolvedScenePlacement, WorldEvent, WorldState};
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{Guid, ParentLocation, Placement, Vector3};
 use holtburger_protocol::messages::object::messages::description::PhysicsChildData;
-use holtburger_protocol::messages::{ParentEventData, PickupEventData, UpdatePositionData};
+use holtburger_protocol::messages::{
+    ParentEventData, PickupEventData, SetStateData, UpdatePositionData,
+};
 use std::collections::{BTreeSet, HashMap, VecDeque};
 
 /// A parent's announcement that some object hangs from one of its attach points.
@@ -21,34 +23,36 @@ pub(crate) struct AnnouncedAttachment {
     pub(crate) deadline: f64,
 }
 
-/// Attachment-specific input which cannot yet be applied to its intended endpoint.
+/// Entity input which cannot yet be applied to its intended incarnation or endpoint.
 #[derive(Debug, Clone)]
-pub(crate) enum DeferredPlacementMessage {
+pub(crate) enum DeferredEntityMessage {
     /// Parent instance and child position are separate sequence domains.
     Parent(ParentEventData),
     /// Pickup cannot retire a missing or future object incarnation early.
     Pickup(PickupEventData),
     /// Independent position shares the child timestamp and can supersede attachment intent.
     Position(UpdatePositionData),
+    /// Complete physics-state mask awaiting the matching object incarnation.
+    State(SetStateData),
 }
 
-/// A queued relationship transition with a bounded missing-dependency lifetime.
+/// A queued entity mutation with a bounded missing-dependency lifetime.
 #[derive(Debug)]
-struct DeferredPlacementEntry {
+struct DeferredEntityEntry {
     /// Original typed input, interpreted only once its prerequisites are available.
-    message: DeferredPlacementMessage,
+    message: DeferredEntityMessage,
     /// The endpoint whose arrival permits another admission attempt.
-    waiting: PlacementWait,
+    waiting: EntityDependencyWait,
 }
 
 /// Missing endpoints expire; future incarnations of retained endpoints share their data lifetime.
 #[derive(Debug, Clone, Copy)]
-enum PlacementWait {
+enum EntityDependencyWait {
     Missing { guid: Guid, deadline: f64 },
     FutureInstance { guid: Guid },
 }
 
-impl PlacementWait {
+impl EntityDependencyWait {
     fn guid(self) -> Guid {
         match self {
             Self::Missing { guid, .. } | Self::FutureInstance { guid } => guid,
@@ -60,13 +64,13 @@ impl PlacementWait {
     }
 }
 
-/// One owner for parent announcements, delayed transitions and scene-change detection.
+/// One owner for entity dependencies, parent announcements and scene-change detection.
 #[derive(Debug, Default)]
-pub(crate) struct AttachmentLifecycle {
+pub(crate) struct EntityDependencies {
     /// Parent-supplied hints consumed when a child description arrives.
     pub announcements: HashMap<Guid, AnnouncedAttachment>,
     /// Preserve arrival order; sequence gates are rechecked when endpoints become available.
-    pending: VecDeque<DeferredPlacementEntry>,
+    pending: VecDeque<DeferredEntityEntry>,
     /// Last reconciled incarnation/placement, used only to emit placement transitions once.
     reconciled: HashMap<Guid, (u16, ResolvedScenePlacement)>,
 }
@@ -94,7 +98,7 @@ impl WorldState {
             })
             .map(|entity| entity.guid)
             .chain(
-                self.attachments
+                self.entity_dependencies
                     .announcements
                     .iter()
                     .filter_map(|(guid, link)| (link.parent == parent).then_some(*guid)),
@@ -103,12 +107,12 @@ impl WorldState {
     }
 
     /// End missing-endpoint lifetimes before new input can refer to a fresh placeholder.
-    pub(crate) fn expire_missing_placement_dependencies(&mut self) {
+    pub(crate) fn expire_missing_entity_dependencies(&mut self) {
         let now = self.current_server_time();
-        self.attachments
+        self.entity_dependencies
             .announcements
             .retain(|_, link| now < link.deadline);
-        self.attachments
+        self.entity_dependencies
             .pending
             .retain(|entry| !entry.waiting.expired(now));
     }
@@ -142,7 +146,7 @@ impl WorldState {
                 .expect("collected child")
                 .set_attachment(None);
         }
-        self.attachments.announcements.retain(|guid, link| {
+        self.entity_dependencies.announcements.retain(|guid, link| {
             link.parent != parent
                 || children
                     .into_iter()
@@ -194,27 +198,30 @@ impl WorldState {
                 // GetNullObject schedules only a newly-created placeholder. Reannouncing an
                 // existing missing child does not refresh it.
                 deadline: self
-                    .attachments
+                    .entity_dependencies
                     .announcements
                     .get(&child.guid)
                     .map(|link| link.deadline)
                     .or_else(|| {
-                        self.attachments
-                            .pending
-                            .iter()
-                            .find_map(|entry| match entry.waiting {
-                                PlacementWait::Missing { guid, deadline } if guid == child.guid => {
+                        self.entity_dependencies.pending.iter().find_map(|entry| {
+                            match entry.waiting {
+                                EntityDependencyWait::Missing { guid, deadline }
+                                    if guid == child.guid =>
+                                {
                                     Some(deadline)
                                 }
                                 _ => None,
-                            })
+                            }
+                        })
                     })
                     .unwrap_or_else(|| {
                         self.current_server_time() + super::liveness::ACE_DESTRUCTION_TIMEOUT_SECS
                     }),
             };
 
-            self.attachments.announcements.insert(child.guid, link);
+            self.entity_dependencies
+                .announcements
+                .insert(child.guid, link);
         }
     }
 
@@ -223,7 +230,7 @@ impl WorldState {
     /// The child's own description wins when it names an attachment: it carries both the attach
     /// point and the pose, where the announcement carries only the attach point.
     pub(crate) fn resolve_announced_attachment(&mut self, guid: Guid, placement_key: u32) {
-        let Some(link) = self.attachments.announcements.remove(&guid) else {
+        let Some(link) = self.entity_dependencies.announcements.remove(&guid) else {
             return;
         };
         if self.current_server_time() >= link.deadline {
@@ -259,67 +266,70 @@ impl WorldState {
     }
 
     /// Retire input tied to a removed incarnation while preserving explicitly future input.
-    pub(crate) fn retire_attachment_endpoint(&mut self, guid: Guid, instance: u16) {
-        self.attachments
+    pub(crate) fn retire_entity_dependency_endpoint(&mut self, guid: Guid, instance: u16) {
+        self.entity_dependencies
             .pending
             .retain(|entry| match &entry.message {
-                DeferredPlacementMessage::Parent(data) => {
+                DeferredEntityMessage::Parent(data) => {
                     data.child_guid != guid
                         && (data.parent_guid != guid
                             || is_newer_u16(data.parent_instance_sequence, instance))
                 }
-                DeferredPlacementMessage::Pickup(data) => {
+                DeferredEntityMessage::Pickup(data) => {
                     data.guid != guid || is_newer_u16(data.instance_sequence, instance)
                 }
-                DeferredPlacementMessage::Position(data) => {
+                DeferredEntityMessage::Position(data) => {
                     data.guid != guid || is_newer_u16(data.pos.instance_sequence, instance)
+                }
+                DeferredEntityMessage::State(data) => {
+                    data.guid != guid || is_newer_u16(data.instance_sequence, instance)
                 }
             });
     }
 
-    /// Apply now or retain only this placement-specific message until its dependencies arrive.
-    pub(crate) fn receive_placement_message(
+    /// Apply now or retain the entity message until its dependencies arrive.
+    pub(crate) fn receive_entity_message(
         &mut self,
-        message: DeferredPlacementMessage,
+        message: DeferredEntityMessage,
         events: &mut Vec<WorldEvent>,
     ) {
-        if let Err(guid) = self.try_placement_message(&message, events) {
-            self.defer_placement_message(message, guid);
+        if let Err(guid) = self.try_entity_message(&message, events) {
+            self.defer_entity_message(message, guid);
         }
     }
 
-    fn defer_placement_message(&mut self, message: DeferredPlacementMessage, guid: Guid) {
+    fn defer_entity_message(&mut self, message: DeferredEntityMessage, guid: Guid) {
         let waiting = if self.entities.get(guid).is_some() {
-            PlacementWait::FutureInstance { guid }
+            EntityDependencyWait::FutureInstance { guid }
         } else {
             let now = self.current_server_time();
             let deadline = now + super::liveness::ACE_DESTRUCTION_TIMEOUT_SECS;
             // QueueBlobForObject refreshes the missing object's destruction time, not each
             // individual packet's lifetime. Expired work stays expired.
-            for entry in &mut self.attachments.pending {
+            for entry in &mut self.entity_dependencies.pending {
                 if entry.waiting.guid() == guid && !entry.waiting.expired(now) {
-                    entry.waiting = PlacementWait::Missing { guid, deadline };
+                    entry.waiting = EntityDependencyWait::Missing { guid, deadline };
                 }
             }
-            if let Some(link) = self.attachments.announcements.get_mut(&guid)
+            if let Some(link) = self.entity_dependencies.announcements.get_mut(&guid)
                 && now < link.deadline
             {
                 link.deadline = deadline;
             }
-            PlacementWait::Missing { guid, deadline }
+            EntityDependencyWait::Missing { guid, deadline }
         };
-        self.attachments
+        self.entity_dependencies
             .pending
-            .push_back(DeferredPlacementEntry { message, waiting });
+            .push_back(DeferredEntityEntry { message, waiting });
     }
 
-    fn try_placement_message(
+    fn try_entity_message(
         &mut self,
-        message: &DeferredPlacementMessage,
+        message: &DeferredEntityMessage,
         events: &mut Vec<WorldEvent>,
     ) -> Result<(), Guid> {
         let (child, instance, position) = match message {
-            DeferredPlacementMessage::Parent(data) => {
+            DeferredEntityMessage::Parent(data) => {
                 if data.parent_guid != Guid::NULL {
                     let Some(parent) = self.entities.get(data.parent_guid) else {
                         return Err(data.parent_guid);
@@ -333,16 +343,17 @@ impl WorldState {
                 }
                 (data.child_guid, None, data.child_position_sequence)
             }
-            DeferredPlacementMessage::Pickup(data) => (
+            DeferredEntityMessage::Pickup(data) => (
                 data.guid,
                 Some(data.instance_sequence),
                 data.position_sequence,
             ),
-            DeferredPlacementMessage::Position(data) => (
+            DeferredEntityMessage::Position(data) => (
                 data.guid,
                 Some(data.pos.instance_sequence),
                 data.pos.position_sequence,
             ),
+            DeferredEntityMessage::State(data) => return self.try_set_state_update(data, events),
         };
         let Some(entity) = self.entities.get(child) else {
             return Err(child);
@@ -358,12 +369,12 @@ impl WorldState {
         if !is_newer_u16(position, entity.position_sequence()) {
             return Ok(());
         }
-        if let DeferredPlacementMessage::Position(data) = message {
+        if let DeferredEntityMessage::Position(data) = message {
             self.apply_entity_position_pack(child, &data.pos, events);
             return Ok(());
         }
         let attachment = match message {
-            DeferredPlacementMessage::Parent(data) if data.parent_guid != Guid::NULL => {
+            DeferredEntityMessage::Parent(data) if data.parent_guid != Guid::NULL => {
                 match PhysicsAttachment::from_wire(data.parent_guid, data.location, data.placement)
                 {
                     Ok(attachment) => Some(attachment),
@@ -381,7 +392,7 @@ impl WorldState {
             .expect("endpoint checked in this world mutation");
         entity.apply_remote_position_sequence_only(position);
         entity.set_attachment(attachment);
-        if matches!(message, DeferredPlacementMessage::Pickup(_)) {
+        if matches!(message, DeferredEntityMessage::Pickup(_)) {
             if let Some(pos) = self.clear_entity_world_presence(child) {
                 events.push(WorldEvent::EntityMoved { guid: child, pos });
             }
@@ -396,44 +407,44 @@ impl WorldState {
     /// Establish observation baselines for data inserted through non-network world APIs.
     pub(crate) fn seed_scene_placements(&mut self) {
         for guid in self.entities.mutation_guids() {
-            if self.attachments.reconciled.contains_key(&guid) {
+            if self.entity_dependencies.reconciled.contains_key(&guid) {
                 continue;
             }
             if let Some(entity) = self.entities.get(guid)
                 && let Ok(placement) = self.resolve_scene_placement(guid)
             {
-                self.attachments
+                self.entity_dependencies
                     .reconciled
                     .insert(guid, (entity.instance_sequence(), placement));
             }
         }
     }
 
-    /// Admit delayed relationship input before selecting this boundary's placement work.
-    pub(super) fn prepare_deferred_scene_placements(&mut self, events: &mut Vec<WorldEvent>) {
+    /// Admit delayed entity input before selecting this boundary's placement work.
+    pub(super) fn prepare_deferred_entity_messages(&mut self, events: &mut Vec<WorldEvent>) {
         let now = self.current_server_time();
-        self.attachments
+        self.entity_dependencies
             .announcements
             .retain(|_, link| now < link.deadline);
         // Process each existing entry once. Keeping the queue in place lets a changed missing
         // prerequisite refresh other input for that endpoint without refreshing on every tick.
-        for _ in 0..self.attachments.pending.len() {
+        for _ in 0..self.entity_dependencies.pending.len() {
             let entry = self
-                .attachments
+                .entity_dependencies
                 .pending
                 .pop_front()
                 .expect("counted pending entry");
             if entry.waiting.expired(now) {
                 continue;
             }
-            if let Err(guid) = self.try_placement_message(&entry.message, events) {
+            if let Err(guid) = self.try_entity_message(&entry.message, events) {
                 let same_prerequisite = entry.waiting.guid() == guid
-                    && matches!(entry.waiting, PlacementWait::Missing { .. })
+                    && matches!(entry.waiting, EntityDependencyWait::Missing { .. })
                         == self.entities.get(guid).is_none();
                 if same_prerequisite {
-                    self.attachments.pending.push_back(entry);
+                    self.entity_dependencies.pending.push_back(entry);
                 } else {
-                    self.defer_placement_message(entry.message, guid);
+                    self.defer_entity_message(entry.message, guid);
                 }
             }
         }
@@ -448,7 +459,7 @@ impl WorldState {
         let guids = match scope {
             ScenePlacementScope::All => {
                 self.entities.clear_mutations();
-                self.attachments
+                self.entity_dependencies
                     .reconciled
                     .retain(|guid, _| self.entities.get(*guid).is_some());
                 self.entities.iter().map(|entity| entity.guid).collect()
@@ -527,7 +538,7 @@ impl WorldState {
                 .expect("retained entity")
                 .instance_sequence();
             if let Some((previous_generation, previous_placement)) = self
-                .attachments
+                .entity_dependencies
                 .reconciled
                 .insert(guid, (generation, placement))
                 && (previous_generation, previous_placement) != (generation, placement)
@@ -567,7 +578,7 @@ impl WorldState {
                 }
             }
             if !self.entities.contains(guid) {
-                self.attachments.reconciled.remove(&guid);
+                self.entity_dependencies.reconciled.remove(&guid);
             }
         }
         // Keep the ordinary store order for effects; unrelated entities have no message work.
@@ -799,7 +810,7 @@ mod tests {
         assert_eq!(entity.attachment().unwrap().parent, parent);
         assert_eq!(entity.position_sequence(), next_position);
         assert!(world.is_entity_world_participant(child));
-        assert!(world.attachments.pending.is_empty());
+        assert!(world.entity_dependencies.pending.is_empty());
         assert!(events.iter().any(|event| matches!(event,
             WorldEvent::EntityScenePlacementChanged { guid, generation, .. }
                 if *guid == parent && *generation == next_instance)));

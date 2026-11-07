@@ -1472,46 +1472,6 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn apply_set_state_update(
-        &mut self,
-        data: &SetStateData,
-        events: &mut Vec<WorldEvent>,
-    ) -> bool {
-        if data.guid == self.player.guid {
-            self.player.instance_sequence = data.instance_sequence;
-        }
-
-        if self.entities.get(data.guid).is_some() {
-            let next = crate::resolve_effective_entity_physics_state(data.physics_state);
-            {
-                let entity = self
-                    .entities
-                    .get_mut(data.guid)
-                    .expect("entity presence was checked above");
-                entity.physics.reconcile(next);
-                entity.properties.hydrate_from_set_state(data);
-            }
-            if let Some(body_id) = self.runtime_body_id_for_guid(data.guid)
-                && self
-                    .scene
-                    .body(body_id)
-                    .and_then(|body| body.physical.as_ref())
-                    .is_some()
-                && let Some(outcome) = self.scene.reconfigure_dynamic_body_for_state(body_id, next)
-                && outcome.change != crate::PhysicalBodyReconfiguration::Unchanged
-            {
-                events.push(WorldEvent::RuntimeBodyChanged { body_id });
-            }
-            events.push(WorldEvent::EntityStateUpdated {
-                guid: data.guid,
-                physics_state: data.physics_state,
-            });
-            true
-        } else {
-            data.guid == self.player.guid
-        }
-    }
-
     pub(crate) fn handle_trade_complete(&mut self, events: &mut Vec<WorldEvent>) {
         self.reset_trade(events);
     }

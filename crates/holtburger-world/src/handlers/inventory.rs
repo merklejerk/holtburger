@@ -82,19 +82,15 @@ pub(crate) fn handle_message(
             true
         }
         GameMessage::ParentEvent(data) => {
-            state.receive_placement_message(
-                crate::state::attachment_lifecycle::DeferredPlacementMessage::Parent(
-                    (**data).clone(),
-                ),
+            state.receive_entity_message(
+                crate::state::entity_dependencies::DeferredEntityMessage::Parent((**data).clone()),
                 events,
             );
             true
         }
         GameMessage::PickupEvent(data) => {
-            state.receive_placement_message(
-                crate::state::attachment_lifecycle::DeferredPlacementMessage::Pickup(
-                    (**data).clone(),
-                ),
+            state.receive_entity_message(
+                crate::state::entity_dependencies::DeferredEntityMessage::Pickup((**data).clone()),
                 events,
             );
             true

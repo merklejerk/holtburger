@@ -14,7 +14,7 @@ use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
 use crate::spatial::SpatialScene;
 use crate::spell::{SpellCatalog, SpellInfo};
-use crate::state::attachment_lifecycle::ScenePlacementScope;
+use crate::state::entity_dependencies::ScenePlacementScope;
 use crate::state::fellowship::FellowshipState;
 use crate::state::liveness::EntityLifecycleStore;
 use crate::state::self_movement::SelfMovementCapabilities;
@@ -88,8 +88,8 @@ pub struct WorldState {
     pub(crate) trade_revision: u32,
     /// Confirmed external storage access; roster receipt does not mutate this state.
     pub(crate) world_container: super::WorldContainerState,
-    /// Attachment admission, pending dependencies and scene transition history.
-    pub(crate) attachments: super::attachment_lifecycle::AttachmentLifecycle,
+    /// Deferred entity messages, attachment admission and scene transition history.
+    pub(crate) entity_dependencies: super::entity_dependencies::EntityDependencies,
     pub(crate) entity_lifecycle: EntityLifecycleStore,
     pub(crate) self_movement_capabilities_override: Option<SelfMovementCapabilities>,
 }
@@ -320,7 +320,7 @@ impl WorldState {
     /// Feature handlers own the orchestration order; this method preserves the external API while
     /// keeping routing separate from the state model itself.
     pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<WorldEvent> {
-        self.expire_missing_placement_dependencies();
+        self.expire_missing_entity_dependencies();
         self.seed_scene_placements();
         let previous_player = self.player.guid;
         let mut events = Vec::new();
@@ -332,7 +332,7 @@ impl WorldState {
         {
             self.close_world_container();
         }
-        self.prepare_deferred_scene_placements(&mut events);
+        self.prepare_deferred_entity_messages(&mut events);
         let mutations = self.entities.take_mutations();
         let scope = if previous_player == self.player.guid {
             ScenePlacementScope::ChangedEntities(mutations)
@@ -472,7 +472,7 @@ impl WorldState {
         self.allegiance = None;
         self.trade = None;
         self.world_container = super::WorldContainerState::Closed;
-        self.attachments = Default::default();
+        self.entity_dependencies = Default::default();
         self.entity_lifecycle = Default::default();
         self.self_movement_capabilities_override = None;
     }
@@ -509,7 +509,7 @@ impl WorldState {
             trade: None,
             trade_revision: 0,
             world_container: super::WorldContainerState::Closed,
-            attachments: super::attachment_lifecycle::AttachmentLifecycle::default(),
+            entity_dependencies: super::entity_dependencies::EntityDependencies::default(),
             entity_lifecycle: EntityLifecycleStore::default(),
             self_movement_capabilities_override: None,
         }
@@ -555,7 +555,7 @@ impl WorldState {
         let guid = guid.into();
         let deletion_already_retired_storage = self.current_instance_delete_requested(guid);
         if let Some(entity) = self.entities.remove(guid) {
-            self.retire_attachment_endpoint(guid, entity.instance_sequence());
+            self.retire_entity_dependency_endpoint(guid, entity.instance_sequence());
             self.motion_runtimes.forget(guid);
             self.retire_authoritative_body_for_guid(guid);
             self.entity_lifecycle.clear(guid);
@@ -565,8 +565,8 @@ impl WorldState {
                 self.retire_entity_storage(guid);
             }
             // Pending links live only as long as the entities at either end of them.
-            self.attachments.announcements.remove(&guid);
-            self.attachments
+            self.entity_dependencies.announcements.remove(&guid);
+            self.entity_dependencies
                 .announcements
                 .retain(|_, link| link.parent != guid);
 

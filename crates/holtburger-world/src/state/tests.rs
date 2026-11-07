@@ -3505,7 +3505,7 @@ fn newer_remote_teleport_resets_and_suspends_body_sampling() {
 
 #[test]
 fn rejected_remote_position_does_not_replace_observation_or_correction_authority() {
-    use crate::state::attachment_lifecycle::DeferredPlacementMessage;
+    use crate::state::entity_dependencies::DeferredEntityMessage;
     use holtburger_protocol::messages::UpdatePositionData;
 
     for (instance_sequence, position_sequence, teleport_sequence) in
@@ -3524,8 +3524,8 @@ fn rejected_remote_position_does_not_replace_observation_or_correction_authority
             .body(SpatialBodyId::Entity(guid))
             .unwrap()
             .clone();
-        state.receive_placement_message(
-            DeferredPlacementMessage::Position(UpdatePositionData {
+        state.receive_entity_message(
+            DeferredEntityMessage::Position(UpdatePositionData {
                 guid,
                 pos: PositionPack {
                     pos: WorldPosition {
@@ -3767,24 +3767,20 @@ fn test_tick_sweeps_expired_deadline_without_movement() {
 }
 
 #[test]
-fn apply_set_state_updates_local_player_instance_sequence_and_entity_physics_state() {
+fn admitted_set_state_updates_local_player_instance_sequence_and_entity_physics_state() {
     let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x5000_0001);
     state.player.instance_sequence = 0;
     state.seed_local_player_entity(state.player.guid, "Player", WorldPosition::default());
-    let mut events = Vec::new();
+    state.entities.get_mut(state.player.guid).unwrap().sequences
+        [crate::entity::OBJECT_INSTANCE_SEQUENCE_INDEX] = 1649;
+    let events = state.handle_message(&GameMessage::SetState(Box::new(SetStateData {
+        guid: state.player.guid,
+        physics_state: PhysicsState::REPORT_COLLISIONS | PhysicsState::IGNORE_COLLISIONS,
+        instance_sequence: 1649,
+        state_sequence: 1,
+    })));
 
-    let handled = state.apply_set_state_update(
-        &SetStateData {
-            guid: state.player.guid,
-            physics_state: PhysicsState::REPORT_COLLISIONS | PhysicsState::IGNORE_COLLISIONS,
-            instance_sequence: 1649,
-            state_sequence: 1,
-        },
-        &mut events,
-    );
-
-    assert!(handled);
     assert_eq!(state.player.instance_sequence, 1649);
     let player_entity = state
         .player_entity()
@@ -4245,16 +4241,12 @@ fn admitted_set_state_reconciles_authored_prediction_and_runtime_body_policy() {
         crate::entity_physics::AuthoredEtherealTransition::Predicted { ethereal: true }
     );
 
-    let mut events = Vec::new();
-    assert!(state.apply_set_state_update(
-        &SetStateData {
-            guid,
-            physics_state: PhysicsState::NONE,
-            instance_sequence: 0,
-            state_sequence: 1,
-        },
-        &mut events,
-    ));
+    let events = state.handle_message(&GameMessage::SetState(Box::new(SetStateData {
+        guid,
+        physics_state: PhysicsState::NONE,
+        instance_sequence: 0,
+        state_sequence: 1,
+    })));
 
     let physics = state.entities.get(guid).unwrap().physics;
     assert_eq!(
@@ -4304,16 +4296,12 @@ fn set_state_updates_semantic_truth_without_inferring_client_physical_policy() {
         )
         .unwrap();
 
-    let mut frozen_events = Vec::new();
-    assert!(state.apply_set_state_update(
-        &SetStateData {
-            guid,
-            physics_state: PhysicsState::FROZEN,
-            instance_sequence: 0,
-            state_sequence: 1,
-        },
-        &mut frozen_events,
-    ));
+    let frozen_events = state.handle_message(&GameMessage::SetState(Box::new(SetStateData {
+        guid,
+        physics_state: PhysicsState::FROZEN,
+        instance_sequence: 0,
+        state_sequence: 1,
+    })));
     assert_eq!(
         state
             .entities
@@ -4330,16 +4318,12 @@ fn set_state_updates_semantic_truth_without_inferring_client_physical_policy() {
         Some(WorldEvent::EntityStateUpdated { .. })
     ));
 
-    let mut unsupported_events = Vec::new();
-    assert!(state.apply_set_state_update(
-        &SetStateData {
-            guid,
-            physics_state: PhysicsState::PUSHABLE,
-            instance_sequence: 0,
-            state_sequence: 2,
-        },
-        &mut unsupported_events,
-    ));
+    let unsupported_events = state.handle_message(&GameMessage::SetState(Box::new(SetStateData {
+        guid,
+        physics_state: PhysicsState::PUSHABLE,
+        instance_sequence: 0,
+        state_sequence: 2,
+    })));
     assert!(state.scene.body(body_id).unwrap().physical.is_some());
     assert_eq!(
         state
@@ -5333,7 +5317,7 @@ fn a_parent_announcing_an_unarrived_child_attaches_it_on_arrival() {
     }]);
     state.handle_message(&GameMessage::ObjectCreate(Box::new(wielder_data)));
 
-    assert!(state.attachments.announcements.contains_key(&item));
+    assert!(state.entity_dependencies.announcements.contains_key(&item));
 
     let mut item_data = ObjectDescriptionData::with_guid(item);
     item_data.animation_frame = Some(Placement::RightHandNonCombat as u32);
@@ -5351,7 +5335,7 @@ fn a_parent_announcing_an_unarrived_child_attaches_it_on_arrival() {
         state.entities.get(item).unwrap().position.landblock_id,
         Guid(0xDA55_001C)
     );
-    assert!(state.attachments.announcements.is_empty());
+    assert!(state.entity_dependencies.announcements.is_empty());
 }
 
 #[test]
@@ -5419,9 +5403,9 @@ fn removing_a_parent_detaches_children_and_drops_its_pending_links() {
         ParentLocation::RightHand as u32,
         Placement::RightHandCombat as u32,
     ));
-    state.attachments.announcements.insert(
+    state.entity_dependencies.announcements.insert(
         unarrived,
-        crate::state::attachment_lifecycle::AnnouncedAttachment {
+        crate::state::entity_dependencies::AnnouncedAttachment {
             parent: wielder,
             location: ParentLocation::Shield,
             deadline: state.current_server_time() + super::liveness::ACE_DESTRUCTION_TIMEOUT_SECS,
@@ -5431,7 +5415,7 @@ fn removing_a_parent_detaches_children_and_drops_its_pending_links() {
     state.remove_entity(wielder);
 
     assert_eq!(state.entities.get(item).unwrap().attachment(), None);
-    assert!(state.attachments.announcements.is_empty());
+    assert!(state.entity_dependencies.announcements.is_empty());
 }
 
 #[test]

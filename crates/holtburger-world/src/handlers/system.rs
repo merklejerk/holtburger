@@ -1,5 +1,6 @@
 use crate::WorldEvent;
 use crate::state::WorldState;
+use crate::state::entity_dependencies::DeferredEntityMessage;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::{GameEvent, GameEventMessage, GameMessage};
 
@@ -9,7 +10,10 @@ pub(crate) fn handle_message(
     events: &mut Vec<WorldEvent>,
 ) -> bool {
     match message {
-        GameMessage::SetState(data) => state.apply_set_state_update(data, events),
+        GameMessage::SetState(data) => {
+            state.receive_entity_message(DeferredEntityMessage::State((**data).clone()), events);
+            true
+        }
         GameMessage::GameEvent(event) => handle_event(state, event, events),
         _ => false,
     }

@@ -65,6 +65,27 @@ const CALL_RECORD = {
 };
 
 describe("decodePhysicsScriptRecord", () => {
+	it("decodes whole-object transparency through the script producer", () => {
+		const command = {
+			kind: "transparent",
+			start: 1,
+			end: 0,
+			durationSeconds: 0.75,
+		};
+		const record = {
+			authoredOrder: 0,
+			startTime: 0,
+			hookType: 20,
+			hookName: "transparent",
+			payload: command,
+		};
+		const decoded = decodePhysicsScriptRecord(
+			encode(manifest([record], 0)),
+			"0x33000863",
+		);
+		expect(decoded.records[0]).toMatchObject(command);
+	});
+
 	it("decodes collision visibility and emitted-light commands without raw payload reconstruction", () => {
 		const decoded = decodePhysicsScriptRecord(
 			encode(

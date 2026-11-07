@@ -31,7 +31,11 @@ import type {
 	ResolvedMaterial,
 	ResolvedObjectPresentation,
 } from "../resolution/presentation";
-import { INCLUDE_ALL_SCENE_CULLING_GROUPS, SceneGraph } from "../scene";
+import {
+	INCLUDE_ALL_SCENE_CULLING_GROUPS,
+	SceneGraph,
+	type SceneScope,
+} from "../scene";
 import type { DynamicPresentationSample } from "./animation-system";
 import {
 	DynamicEntitySystem,
@@ -826,9 +830,16 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const sibling = requiredAt(installation.nodeIds, 1);
 		const partNode = system.requestPartNode(root, 0);
 		const siblingRenderable = system.getRenderable(sibling);
-		effects.applyTransparentPart(
+		effects.applyTranslucency(
 			{ generation: installation.generation, targetId: behaviorTargetId(root) },
-			{ partIndex: 0, start: 0.4, end: 0.4, durationSeconds: 0 },
+			{
+				kind: "transparent-part",
+				partIndex: 0,
+				start: 0.4,
+				end: 0.4,
+				durationSeconds: 0,
+			},
+			"live",
 		);
 		effects.applyTextureVelocity(
 			{ generation: installation.generation, targetId: behaviorTargetId(root) },
@@ -1778,7 +1789,9 @@ describe("DynamicEntitySystem authored ownership", () => {
 	});
 
 	it("publishes independent part opacity while preserving shared appearance and cloak semantics", async () => {
-		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
+		const { system, effects } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
 		const shared = source("shared-translucency");
 		const installation = system.replaceOwner("layer", [
 			{ ...shared, source: { ...shared.source, identity: "first" } },
@@ -1857,7 +1870,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			translucency: 0,
 		});
 		expect(system.getVisiblePresentation(firstNodeId)).toBeNull();
-		expect(system.canRenderParticles(firstNodeId)).toBe(false);
+		expect(system.canRenderParticles(firstNodeId)).toBe(true);
 
 		system.updatePresentationState(firstNodeId, {
 			cloaked: false,
@@ -1866,7 +1879,13 @@ describe("DynamicEntitySystem authored ownership", () => {
 			noDraw: false,
 			translucency: 0,
 		});
-		system.publishPresentation([presentationSample(firstPrepared, 0.2)]);
+		effects.applyObjectTranslucency(firstNodeId, 0.2);
+		system.publishPresentation([
+			{
+				...presentationSample(firstPrepared, 0.2),
+				effects: effects.samplePresentation(firstNodeId),
+			},
+		]);
 		system.updatePresentationState(firstNodeId, {
 			cloaked: true,
 			hidden: false,
@@ -1874,17 +1893,20 @@ describe("DynamicEntitySystem authored ownership", () => {
 			noDraw: false,
 			translucency: 0,
 		});
-		// Retail ignores later SetTranslucency writes while cloaked; it does not invent cloak alpha.
-		const cloakedSample = presentationSample(firstPrepared, 0.8);
+		// Material write admission belongs to the effect owner; publication consumes its result.
+		effects.applyTranslucency(
+			{ generation: 1, targetId: behaviorTargetId(firstNodeId) },
+			{ kind: "transparent", start: 0.2, end: 0.8, durationSeconds: 0 },
+			"live",
+		);
+		effects.applyTextureVelocity(
+			{ generation: 1, targetId: behaviorTargetId(firstNodeId) },
+			{ kind: "texture-velocity", uSpeed: 0.125, vSpeed: 0 },
+		);
 		system.publishPresentation([
 			{
-				...cloakedSample,
-				effects: {
-					...cloakedSample.effects,
-					partRenderStates: [
-						{ translucency: 0.8, textureVelocity: [0.125, 0] },
-					],
-				},
+				...presentationSample(firstPrepared, 0.8),
+				effects: effects.samplePresentation(firstNodeId),
 			},
 		]);
 		expect(
@@ -1903,11 +1925,16 @@ describe("DynamicEntitySystem authored ownership", () => {
 			noDraw: false,
 			translucency: 0,
 		});
-		system.publishPresentation([presentationSample(firstPrepared, 0.8)]);
+		system.publishPresentation([
+			{
+				...presentationSample(firstPrepared, 0.8),
+				effects: effects.samplePresentation(firstNodeId),
+			},
+		]);
 		expect(
 			system.getVisiblePresentation(firstNodeId)?.visual.parts[0]?.frameInstance
 				.color.a,
-		).toBeCloseTo(0.2);
+		).toBeCloseTo(0.8);
 		expect(system.getDiagnostics()).toMatchObject({
 			lastParticleEnvelopeChangeCount: 0,
 			lastParticleEnvelopeQueryCount: 1,
@@ -2194,81 +2221,139 @@ describe("DynamicEntitySystem authored ownership", () => {
 	 * Two independent culls read two different bounds. An envelope in only the presentation bounds
 	 * still loses the swarm, because the broadphase drops the owner before the footprint test runs.
 	 */
-	it("grows the broadphase bounds by the particle envelope, not only the drawn pose", async () => {
-		let envelopeRadius = 0;
-		const { scene, system } = createSystem(
-			new InlineObjectVisualTemplatePreparer(),
-			new FixtureAnimationSource(),
-			() => envelopeRadius,
-		);
-		const installation = system.replaceOwner("layer", [source("swarm-owner")]);
-		expect(await installation.ready).toBe("ready");
-		const prepared = requiredAt(installation.getPreparedEntities(), 0);
-		commit(installation);
-		const nodeId = requiredAt(installation.nodeIds, 0);
-		const meshBounds = scene.getNode(nodeId)?.localBounds?.clone();
-		const retainedPoseBounds = system.getPublishedPresentationBounds(nodeId);
-		const retainedRigidBounds =
-			system.getPublishedRigidPresentationBounds(nodeId);
-		expect(retainedPoseBounds).not.toBe(retainedRigidBounds);
-		const poseBounds = system.getPublishedPresentationBounds(nodeId)?.clone();
-		const rigidBounds = system
-			.getPublishedRigidPresentationBounds(nodeId)
-			?.clone();
-		if (!meshBounds || !poseBounds || !rigidBounds)
-			throw new Error("Entity published no bounds.");
-		expect(rigidBounds).toEqual(poseBounds);
-		const particleOnlyFrustum = {
-			cameraPosition: Vec3.zero(),
-			// The owner proxy at x=0 is outside; a radius-five particle envelope crosses this plane.
-			planes: [{ constant: -2.5, x: 1, y: 0, z: 0 }],
-		};
-		expect(
-			scene.queryFlatFrustum(
-				particleOnlyFrustum,
-				"0x0001ffff",
-				INCLUDE_ALL_SCENE_CULLING_GROUPS,
-			).entries,
-		).not.toContain(nodeId);
+	it.each(["outdoor", "env-cell"] as const)(
+		"admits a hidden owner's particle envelope only in its %s scope",
+		async (kind) => {
+			let envelopeRadius = 0;
+			const { scene, system } = createSystem(
+				new InlineObjectVisualTemplatePreparer(),
+				new FixtureAnimationSource(),
+				() => envelopeRadius,
+			);
+			const cellScope: Extract<SceneScope, { kind: "env-cell" }> = {
+				kind: "env-cell",
+				landblockId: "0x0001ffff",
+				envCellId: "0x00010100",
+			};
+			scene.upsertEnvCellScope({
+				scope: cellScope,
+				containmentPlanes: new Float32Array(),
+				landblockBounds: new AABB3(
+					new Vec3(-10, -10, -10),
+					new Vec3(10, 10, 10),
+				),
+				potentiallyVisibleEnvCellIds: new Set(),
+				structureToLandblock: Mat4.identity(),
+				seenOutside: false,
+				visibilityIslandId: "env-cell-island:fixture",
+			});
+			const scope: SceneScope =
+				kind === "outdoor" ? { kind: "outdoor" } : cellScope;
+			const base = source("swarm-owner");
+			const installation = system.replaceOwner("layer", [
+				{
+					...base,
+					initialPresentationState: {
+						...base.initialPresentationState,
+						hidden: true,
+					},
+					placement: {
+						...base.placement,
+						envCellId: kind === "env-cell" ? cellScope.envCellId : null,
+						spatialMembership: { scopes: [scope] },
+					},
+				},
+			]);
+			expect(await installation.ready).toBe("ready");
+			const prepared = requiredAt(installation.getPreparedEntities(), 0);
+			commit(installation);
+			const nodeId = requiredAt(installation.nodeIds, 0);
+			const meshBounds = scene.getNode(nodeId)?.localBounds?.clone();
+			const retainedPoseBounds = system.getPublishedPresentationBounds(nodeId);
+			const retainedRigidBounds =
+				system.getPublishedRigidPresentationBounds(nodeId);
+			expect(retainedPoseBounds).not.toBe(retainedRigidBounds);
+			const poseBounds = system.getPublishedPresentationBounds(nodeId)?.clone();
+			const rigidBounds = system
+				.getPublishedRigidPresentationBounds(nodeId)
+				?.clone();
+			if (!meshBounds || !poseBounds || !rigidBounds)
+				throw new Error("Entity published no bounds.");
+			expect(rigidBounds).toEqual(poseBounds);
+			const particleOnlyFrustum = {
+				cameraPosition: Vec3.zero(),
+				// The owner proxy at x=0 is outside; a radius-five particle envelope crosses this plane.
+				planes: [{ constant: -2.5, x: 1, y: 0, z: 0 }],
+			};
+			expect(
+				scene.queryFlatFrustum(
+					particleOnlyFrustum,
+					"0x0001ffff",
+					INCLUDE_ALL_SCENE_CULLING_GROUPS,
+				).entries,
+			).not.toContain(nodeId);
 
-		envelopeRadius = 5;
-		system.publishPresentation([presentationSample(prepared, 0)]);
-		expect(system.getPublishedPresentationBounds(nodeId)).toBe(
-			retainedPoseBounds,
-		);
-		expect(system.getPublishedRigidPresentationBounds(nodeId)).toBe(
-			retainedRigidBounds,
-		);
+			envelopeRadius = 5;
+			system.publishPresentation([presentationSample(prepared, 0)]);
+			expect(system.getPublishedPresentationBounds(nodeId)).toBe(
+				retainedPoseBounds,
+			);
+			expect(system.getPublishedRigidPresentationBounds(nodeId)).toBe(
+				retainedRigidBounds,
+			);
 
-		expect(scene.getNode(nodeId)?.localBounds).toEqual(
-			expandBounds(meshBounds, 5),
-		);
-		expect(system.getPublishedPresentationBounds(nodeId)).toEqual(
-			expandBounds(poseBounds, 5),
-		);
-		expect(system.getPublishedRigidPresentationBounds(nodeId)).toEqual(
-			rigidBounds,
-		);
-		expect(
-			scene.queryFlatFrustum(
-				particleOnlyFrustum,
-				"0x0001ffff",
-				INCLUDE_ALL_SCENE_CULLING_GROUPS,
-			).entries,
-		).toContain(nodeId);
-		expect(system.getDiagnostics()).toMatchObject({
-			lastParticleEnvelopeChangeCount: 1,
-			lastParticleEnvelopeQueryCount: 1,
-			lastPresentationEntityVisitCount: 1,
-		});
-		envelopeRadius = 0;
-		system.publishPresentation([presentationSample(prepared, 0)]);
-		expect(system.getPublishedPresentationBounds(nodeId)).toBe(
-			retainedPoseBounds,
-		);
-		expect(retainedPoseBounds).toEqual(rigidBounds);
-		expect(retainedRigidBounds).toEqual(rigidBounds);
-	});
+			expect(scene.getNode(nodeId)?.localBounds).toEqual(
+				expandBounds(meshBounds, 5),
+			);
+			expect(system.getPublishedPresentationBounds(nodeId)).toEqual(
+				expandBounds(poseBounds, 5),
+			);
+			expect(system.getPublishedRigidPresentationBounds(nodeId)).toEqual(
+				rigidBounds,
+			);
+			expect(
+				scene.queryFlatFrustum(
+					particleOnlyFrustum,
+					"0x0001ffff",
+					INCLUDE_ALL_SCENE_CULLING_GROUPS,
+				).entries,
+			).toContain(nodeId);
+			expect(system.getVisiblePresentation(nodeId)).toBeNull();
+			expect(system.canRenderParticles(nodeId)).toBe(true);
+			expect(
+				scene.queryScopesFrustum(
+					particleOnlyFrustum,
+					"0x0001ffff",
+					[scope],
+					INCLUDE_ALL_SCENE_CULLING_GROUPS,
+					null,
+				).entries,
+			).toContain(nodeId);
+			const otherScope: SceneScope =
+				kind === "outdoor" ? cellScope : { kind: "outdoor" };
+			expect(
+				scene.queryScopesFrustum(
+					particleOnlyFrustum,
+					"0x0001ffff",
+					[otherScope],
+					INCLUDE_ALL_SCENE_CULLING_GROUPS,
+					null,
+				).entries,
+			).not.toContain(nodeId);
+			expect(system.getDiagnostics()).toMatchObject({
+				lastParticleEnvelopeChangeCount: 1,
+				lastParticleEnvelopeQueryCount: 1,
+				lastPresentationEntityVisitCount: 1,
+			});
+			envelopeRadius = 0;
+			system.publishPresentation([presentationSample(prepared, 0)]);
+			expect(system.getPublishedPresentationBounds(nodeId)).toBe(
+				retainedPoseBounds,
+			);
+			expect(retainedPoseBounds).toEqual(rigidBounds);
+			expect(retainedRigidBounds).toEqual(rigidBounds);
+		},
+	);
 
 	it("activates a blocked visual clip as valid static presentation", async () => {
 		const { scene, system } = createSystem(

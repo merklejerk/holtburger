@@ -66,6 +66,29 @@ describe("decodeAnimationRecord", () => {
 		).toThrow("Animation hook set-omega direction facts disagree");
 	});
 
+	it("decodes whole-object transparency without part binding and rejects mismatched payloads", () => {
+		const payload = {
+			kind: "transparent",
+			start: 1,
+			end: 0,
+			durationSeconds: 0.75,
+		};
+		const decoded = decodeAnimationRecord(
+			animationResponse("transparent", { hookType: 20, payload }),
+			"0x03000001",
+		);
+		expect(decoded.hooks[0]).toMatchObject(payload);
+		expect(() =>
+			decodeAnimationRecord(
+				animationResponse("transparent", {
+					hookType: 20,
+					payload: { kind: "no-payload" },
+				}),
+				"0x03000001",
+			),
+		).toThrow("hook type 20 requires transparent payload");
+	});
+
 	it("decodes a typed TransparentPart hook without retaining transport provenance", () => {
 		const decoded = decodeAnimationRecord(
 			transparentPartResponse(),

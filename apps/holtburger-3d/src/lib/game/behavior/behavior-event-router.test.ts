@@ -25,7 +25,7 @@ function build(isLive = true) {
 	const effects = {
 		applyScale: vi.fn(),
 		applySetOmega: vi.fn(),
-		applyTransparentPart: vi.fn(),
+		applyTranslucency: vi.fn(),
 		applyTextureVelocity: vi.fn(),
 	};
 	const audio = {

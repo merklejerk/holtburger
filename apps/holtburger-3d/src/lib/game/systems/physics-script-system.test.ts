@@ -37,7 +37,7 @@ function build(options: { roll?: () => number; liveTargets?: boolean } = {}) {
 		{
 			effects: {
 				applySetOmega: vi.fn(),
-				applyTransparentPart: vi.fn(),
+				applyTranslucency: vi.fn(),
 				applyTextureVelocity: vi.fn(),
 			},
 			objectState: {

@@ -19,6 +19,7 @@ export type PreparedBehaviorCommand =
 			readonly omega: Vec3;
 	  }
 	| (TransparentPartValues & { readonly kind: "transparent-part" })
+	| (TranslucencyTransitionValues & { readonly kind: "transparent" })
 	| {
 			readonly kind: "scale";
 			/** Uniform scale reached when the ramp completes. */
@@ -102,16 +103,19 @@ export type PreparedBehaviorCommand =
 			readonly blocksActivation: boolean;
 	  };
 
-/** Typed semantic values carried by retail `TransparentPartHook`. */
-interface TransparentPartValues {
+/** Authored transition values shared by whole-object and part-local transparency hooks. */
+interface TranslucencyTransitionValues {
 	/** Authored ramp duration in seconds. */
 	readonly durationSeconds: number;
 	/** Translucency at the end of the effect. */
 	readonly end: number;
-	/** Zero-based setup part-array index. */
-	readonly partIndex: number;
 	/** Translucency at the start of the effect. */
 	readonly start: number;
+}
+
+/** A part-local transition addresses the installed setup's part array. */
+interface TransparentPartValues extends TranslucencyTransitionValues {
+	readonly partIndex: number;
 }
 
 /** Payload retained for commands that decode but have no execution owner. */

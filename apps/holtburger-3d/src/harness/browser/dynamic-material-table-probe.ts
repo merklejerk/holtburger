@@ -315,7 +315,7 @@ export async function probeDynamicMaterialTables() {
 		const effects = new EffectSystem();
 		const nodeId = "scene-node:1" as const;
 		const target = { targetId: behaviorTargetId(nodeId), generation: 1 };
-		effects.install(nodeId, 2, 0);
+		effects.install(nodeId, 2, { translucency: 0, cloaked: false });
 		const packedEntities = new Map([
 			[
 				"padding",
@@ -506,7 +506,7 @@ export async function probeDynamicMaterialTables() {
 			const clockSeconds = scenario.time;
 			if (scenario.name === "reload") {
 				effects.remove(nodeId);
-				effects.install(nodeId, 2, 0);
+				effects.install(nodeId, 2, { translucency: 0, cloaked: false });
 				posePages.destroy();
 			}
 			effects.applyTextureVelocity(target, {

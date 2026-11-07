@@ -455,15 +455,6 @@ interface DynamicEntityPresentationRecord {
 	/** Mutable visibility/lighting level already applied to the dynamic system. */
 	presentationStateIdentity: string;
 	/**
-	 * Hidden level and script lifecycle are separate from rigid visibility because the particles
-	 * intentionally remain visible while the entity mesh does not.
-	 */
-	hiddenCue: {
-		hidden: boolean;
-		phase: "idle" | "preparing-hidden" | "hidden-applied" | "preparing-unhide";
-		revision: number;
-	};
-	/**
 	 * Accepted levels and installation outcomes for each track, so restated levels are not re-entered.
 	 *
 	 * Mutable because it tracks playback state independently from appearance replacement.
@@ -534,6 +525,8 @@ type DynamicEntityDeferral =
 
 /** Runtime-owned desired level and every derived fact consumed by realization decisions. */
 interface DesiredDynamicEntityRecord {
+	/** Last queued intrinsic level, including transitions accepted before model installation. */
+	cueHidden: boolean;
 	/** Latest mirror-accepted entity, retained independently of local presentation. */
 	authoritative: DynamicEntityView;
 	/** Effective visual level; world placement and simulation remain authoritative. */
@@ -794,8 +787,8 @@ export class GamePresentationRuntime {
 	#presentationOverride: DynamicPresentationOverride | null = null;
 	/** Equipment suppression follows the installed body, including while restoration loads. */
 	#bareBodySubject: { guid: number; generation: number } | null = null;
-	/** Local equipment suppression also gates emitters; NoDraw alone intentionally does not. */
-	readonly #suppressedEquipmentRoots = new Set<SceneNodeId>();
+	/** Frontend-owned preview visibility suppresses emitters independently of game Hidden/NoDraw. */
+	readonly #suppressedParticleRoots = new Set<SceneNodeId>();
 	/** Latest desired current views are liveness tokens and late-readiness endpoints, not authority. */
 	readonly #spawnedDesiredEntities = new Map<
 		number,
@@ -874,8 +867,8 @@ export class GamePresentationRuntime {
 	#expiredServerSoundCount = 0;
 	/** Additional live-cue assets retained until their dynamic owner generation retires. */
 	readonly #dynamicCueAssets = new Map<DynamicOwnerId, DynamicCueAssets[]>();
-	/** Per-GUID ordered preparation tails joined during shutdown and rechecked before activation. */
-	readonly #dynamicCuePreparations = new Map<number, Promise<void>>();
+	/** Per-entity insertion order; asset preparation remains concurrent and teardown tracks every tail. */
+	readonly #dynamicCueInsertions = new Map<number, Promise<void>>();
 	/**
 	 * Sky-module-owned behavior targets, which have no scene residency at all.
 	 *
@@ -1185,7 +1178,7 @@ export class GamePresentationRuntime {
 		const nodeId = sceneNodeIdOf(target.targetId);
 		const root = nodeId === null ? null : this.#dynamics.modelRootOf(nodeId);
 		return root !== null &&
-			!this.#suppressedEquipmentRoots.has(root) &&
+			!this.#suppressedParticleRoots.has(root) &&
 			this.#dynamics.canRenderParticles(root) &&
 			this.#selectedDynamicNodeIds.has(root)
 			? root
@@ -1919,25 +1912,60 @@ export class GamePresentationRuntime {
 		}
 	}
 
-	/** Derive local equipment visibility from attachment ownership, never from equipment commands. */
-	#withEquipmentVisibility(entity: DynamicEntityView): DynamicEntityView {
-		const subject = this.#bareBodySubject;
-		if (subject === null || entity.placement.kind !== "attached") return entity;
-		let parentGuid = entity.placement.parent;
-		const visited = new Set<number>();
-		while (!visited.has(parentGuid)) {
+	/** Keep attachment draw suppression separate from the child's authoritative Hidden state. */
+	#attachmentVisibility(entity: DynamicEntityView) {
+		if (entity.placement.kind !== "attached")
+			return { entity, suppressParticles: false };
+		let noDraw = entity.physics.noDraw;
+		let suppressParticles = false;
+		let current = entity;
+		const visited = new Set<number>([entity.identity.guid]);
+		while (current.placement.kind === "attached") {
+			const parentGuid = current.placement.parent;
+			if (visited.has(parentGuid))
+				throw new Error("Dynamic equipment attachment contains a cycle.");
 			visited.add(parentGuid);
 			const parent = this.#spawnedDesiredEntities.get(parentGuid)?.entity;
-			if (parent === undefined) return entity;
+			if (parent === undefined) break;
+			// Retail behavior is to suppress attached meshes while their parent is Hidden.
+			// Use NoDraw here: copying Hidden would invent child materialization cues.
+			noDraw ||= parent.physics.hidden;
 			if (
-				parentGuid === subject.guid &&
-				parent.generation === subject.generation
-			)
-				return { ...entity, physics: { ...entity.physics, noDraw: true } };
-			if (parent.placement.kind !== "attached") return entity;
-			parentGuid = parent.placement.parent;
+				parentGuid === this.#bareBodySubject?.guid &&
+				parent.generation === this.#bareBodySubject.generation
+			) {
+				noDraw = true;
+				suppressParticles = true;
+			}
+			current = parent;
 		}
-		throw new Error("Dynamic equipment attachment contains a cycle.");
+		return {
+			/** Effective mesh visibility; the desired entity itself remains authoritative. */
+			entity:
+				noDraw === entity.physics.noDraw
+					? entity
+					: { ...entity, physics: { ...entity.physics, noDraw } },
+			/** Preview equipment also suppresses emitters; retail parent Hidden only sets NoDraw. */
+			suppressParticles,
+		};
+	}
+
+	/** Parent-only visibility updates must reach every installed attachment before the next frame. */
+	#refreshAttachmentVisibility(parentGuid: number): void {
+		const pending = [parentGuid];
+		const visited = new Set<number>();
+		for (const parent of pending) {
+			if (visited.has(parent))
+				throw new Error("Dynamic equipment attachment contains a cycle.");
+			visited.add(parent);
+			for (const childGuid of this.#spawnedDesiredChildren.get(parent) ?? []) {
+				const desired = this.#spawnedDesiredEntities.get(childGuid);
+				const installed = this.#spawnedPresentations.get(childGuid);
+				if (desired !== undefined && installed !== undefined)
+					this.#applySpawnedPresentationState(installed, desired.entity);
+				pending.push(childGuid);
+			}
+		}
 	}
 
 	/** Publish body and attachment visibility in the same synchronous commit turn. */
@@ -2086,6 +2114,7 @@ export class GamePresentationRuntime {
 	clearDynamicEntityCues(): void {
 		this.#entityCueEpoch += 1;
 		this.#pendingDynamicEntityCues.clear();
+		this.#dynamicCueInsertions.clear();
 	}
 
 	#queueDynamicEntityCue(cue: DynamicEntityCue): void {
@@ -2139,7 +2168,7 @@ export class GamePresentationRuntime {
 		);
 		const epoch = this.#entityCueEpoch;
 		this.#pendingDynamicEntityCues.delete(guid);
-		let tail = this.#dynamicCuePreparations.get(guid) ?? Promise.resolve();
+		let tail = this.#dynamicCueInsertions.get(guid) ?? Promise.resolve();
 		for (const cue of current) {
 			// Handle failure immediately even when an earlier cue or installation is still pending.
 			const preparation = (
@@ -2160,7 +2189,8 @@ export class GamePresentationRuntime {
 					if (
 						settled.some((result) => result.status === "rejected") ||
 						epoch !== this.#entityCueEpoch ||
-						this.#spawnedDesiredEntities.get(guid) !== desired ||
+						(installed === undefined &&
+							this.#spawnedDesiredEntities.get(guid) !== desired) ||
 						target === undefined ||
 						target.generation !== cue.generation ||
 						(installed !== undefined && target !== installed) ||
@@ -2198,10 +2228,12 @@ export class GamePresentationRuntime {
 				this.#presentationFailures.push(error);
 			});
 		}
-		this.#dynamicCuePreparations.set(guid, tail);
+		this.#dynamicCueInsertions.set(guid, tail);
+		// Clearing/replacing an insertion chain must not lose ownership of unfinished assets.
+		this.#trackRealizationContinuation(tail);
 		void tail.finally(() => {
-			if (this.#dynamicCuePreparations.get(guid) !== tail) return;
-			this.#dynamicCuePreparations.delete(guid);
+			if (this.#dynamicCueInsertions.get(guid) !== tail) return;
+			this.#dynamicCueInsertions.delete(guid);
 			this.#drainDynamicEntityCues(guid);
 		});
 	}
@@ -2299,106 +2331,27 @@ export class GamePresentationRuntime {
 	}
 
 	/**
-	 * Reconcile retail's intrinsic Hidden/UnHide cues without manufacturing a server event.
+	 * Queue each intrinsic transition in the same receipt order as explicit packet cues.
 	 *
-	 * Retail resolves these synchronously from retail object hidden assignment. Browser assets
-	 * are asynchronous, so a revision invalidates obsolete work: an entity that becomes
-	 * visible before Hidden finishes preparing must not acquire a late portal-space bubble.
+	 * Retail behavior is to append both paths to one object-owned script queue. Preparation may
+	 * finish out of order, but an earlier Hide must never run after a later UnHide. Preserve both
+	 * transitions even before a model is installed: UnHide owns cleanup
+	 * of the queued Hidden effect as well as restoration after an explicit packet Hide.
 	 */
-	#reconcileIntrinsicHiddenCue(
-		installed: DynamicEntityPresentationRecord,
-		entity: DynamicEntityView,
-		tableId: DatAssetId | null,
-	): void {
+	#reconcileIntrinsicHiddenCue(record: DesiredDynamicEntityRecord): void {
+		const entity = record.entity;
 		const hidden = entity.physics.hidden;
-		if (installed.hiddenCue.hidden === hidden) return;
-		installed.hiddenCue.hidden = hidden;
-		const revision = ++installed.hiddenCue.revision;
-
-		if (hidden) {
-			// A not-yet-applied UnHide leaves the existing Hidden behavior active. Cancelling that
-			// preparation is sufficient; replaying Hidden would duplicate its authored emitters.
-			if (
-				installed.hiddenCue.phase === "hidden-applied" ||
-				installed.hiddenCue.phase === "preparing-unhide"
-			) {
-				installed.hiddenCue.phase = "hidden-applied";
-				return;
-			}
-			installed.hiddenCue.phase = "preparing-hidden";
-			this.#prepareIntrinsicHiddenCue(
-				installed,
-				entity,
-				tableId,
-				"hide",
-				revision,
-			);
-			return;
-		}
-
-		// If Hidden never reached playback, visibility simply cancels it. There is no authored
-		// emitter to clean up and playing UnHide later would invent a materialization effect.
-		if (installed.hiddenCue.phase === "preparing-hidden") {
-			installed.hiddenCue.phase = "idle";
-			return;
-		}
-		if (installed.hiddenCue.phase === "idle") return;
-		installed.hiddenCue.phase = "preparing-unhide";
-		this.#prepareIntrinsicHiddenCue(
-			installed,
-			entity,
-			tableId,
-			"unhide",
-			revision,
-		);
-	}
-
-	/** Prepare and conditionally append one latest-level intrinsic state cue. */
-	#prepareIntrinsicHiddenCue(
-		installed: DynamicEntityPresentationRecord,
-		entity: DynamicEntityView,
-		tableId: DatAssetId | null,
-		action: "hide" | "unhide",
-		revision: number,
-	): void {
-		const guid = entity.identity.guid;
-		const hiding = action === "hide";
-		const expectedPhase = hiding ? "preparing-hidden" : "preparing-unhide";
-		const preparation = (async () => {
-			let assets: DynamicCueAssets | null = null;
-			let transferred = false;
-			try {
-				assets = await this.#prepareDynamicScriptCue(tableId, {
-					guid,
-					generation: entity.generation,
-					cue: hiding
-						? RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE
-						: RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE,
-					intensity: INTRINSIC_STATE_CUE_INTENSITY,
-				});
-				if (
-					this.#destroyed ||
-					this.#spawnedPresentations.get(guid) !== installed ||
-					installed.hiddenCue.revision !== revision ||
-					installed.hiddenCue.phase !== expectedPhase
-				)
-					return;
-				if (assets !== null)
-					transferred = this.#appendDynamicScriptCue(installed, assets);
-				installed.hiddenCue.phase = hiding ? "hidden-applied" : "idle";
-			} catch (error: unknown) {
-				if (
-					this.#spawnedPresentations.get(guid) === installed &&
-					installed.hiddenCue.revision === revision
-				) {
-					installed.hiddenCue.phase = hiding ? "idle" : "hidden-applied";
-				}
-				this.#presentationFailures.push(error);
-			} finally {
-				if (assets !== null && !transferred) releaseCueAssets(assets);
-			}
-		})();
-		this.#trackRealizationContinuation(preparation);
+		if (record.cueHidden === hidden) return;
+		record.cueHidden = hidden;
+		this.#queueDynamicEntityCue({
+			kind: "script",
+			guid: entity.identity.guid,
+			generation: entity.generation,
+			cue: hidden
+				? RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE
+				: RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE,
+			intensity: INTRINSIC_STATE_CUE_INTENSITY,
+		});
 	}
 
 	/** Revisit desired authority only at an explicit scene-readiness boundary. */
@@ -2556,6 +2509,8 @@ export class GamePresentationRuntime {
 				},
 			};
 		const previous = this.#spawnedDesiredEntities.get(guid);
+		const hiddenChanged =
+			previous?.entity.physics.hidden !== entity.physics.hidden;
 		// Preserve the ordinary tick path's existing key work; only the locally overridden player
 		// needs additional visual/effect identity.
 		const acceptedVisualKey = dynamicVisualKey(entity);
@@ -2592,6 +2547,8 @@ export class GamePresentationRuntime {
 			previous.authoritative = authoritative;
 			previous.entity = entity;
 			previous.placementIdentity = placementIdentity;
+			this.#reconcileIntrinsicHiddenCue(previous);
+			if (hiddenChanged) this.#refreshAttachmentVisibility(guid);
 			return previous;
 		}
 		if (previous !== undefined) {
@@ -2602,7 +2559,16 @@ export class GamePresentationRuntime {
 				previous.visualKey === visualKey ? "retain-visual" : "release-visual",
 			);
 		}
+		const retainsInstalledCues =
+			sameGeneration && this.#spawnedPresentations.has(guid);
+		// Superseded cold visuals have no playback owner to retain. Detach their preparation
+		// tail and seed the replacement from its current Hidden level.
+		if (!retainsInstalledCues) this.#dynamicCueInsertions.delete(guid);
 		const record: DesiredDynamicEntityRecord = {
+			cueHidden:
+				retainsInstalledCues && previous !== undefined
+					? previous.cueHidden
+					: false,
 			authoritative,
 			override,
 			deferral: null,
@@ -2621,6 +2587,8 @@ export class GamePresentationRuntime {
 			}
 			children.add(guid);
 		}
+		this.#reconcileIntrinsicHiddenCue(record);
+		if (hiddenChanged) this.#refreshAttachmentVisibility(guid);
 		return record;
 	}
 
@@ -2994,7 +2962,7 @@ export class GamePresentationRuntime {
 		if (stagingPlacement === null) return;
 		const ownerId = dynamicEntityOwnerId(guid);
 		let source = adaptDynamicEntityPresentation(
-			this.#withEquipmentVisibility(entity),
+			this.#attachmentVisibility(entity).entity,
 			resolved,
 			stagingPlacement,
 		);
@@ -3107,6 +3075,12 @@ export class GamePresentationRuntime {
 		for (const childGuid of this.#spawnedDesiredChildren.get(guid) ?? [])
 			this.#retireDynamicPresentationTree(childGuid);
 		activation.commit();
+		if (live !== undefined) {
+			// A new skeleton has a new playback lifetime. Old preparation tails must not delay it,
+			// and a currently Hidden level must seed the new owner's intrinsic effect again.
+			this.#dynamicCueInsertions.delete(guid);
+			record.cueHidden = false;
+		}
 		const [preparedEntity] = activation.prepared;
 		if (preparedEntity === undefined)
 			throw new Error("Committed dynamic entity has no prepared source.");
@@ -3118,7 +3092,6 @@ export class GamePresentationRuntime {
 			behaviorGeneration: activation.generation,
 			particleKey,
 			generation: entity.generation,
-			hiddenCue: { hidden: false, phase: "idle", revision: 0 },
 			nodeId,
 			ownerId,
 			placementIdentity: record.placementIdentity,
@@ -3204,11 +3177,11 @@ export class GamePresentationRuntime {
 		installed: DynamicEntityPresentationRecord,
 		entity: DynamicEntityView,
 	): void {
-		const effective = this.#withEquipmentVisibility(entity);
-		if (effective !== entity)
-			this.#suppressedEquipmentRoots.add(installed.nodeId);
-		else this.#suppressedEquipmentRoots.delete(installed.nodeId);
-		entity = effective;
+		const visibility = this.#attachmentVisibility(entity);
+		if (visibility.suppressParticles)
+			this.#suppressedParticleRoots.add(installed.nodeId);
+		else this.#suppressedParticleRoots.delete(installed.nodeId);
+		entity = visibility.entity;
 		if (installed.objectScale !== entity.presentation.objectScale) {
 			this.#dynamics.updateRootScale(
 				installed.nodeId,
@@ -3232,11 +3205,7 @@ export class GamePresentationRuntime {
 			desired?.entity.generation === entity.generation &&
 			desired.scriptTableId !== undefined
 		)
-			this.#reconcileIntrinsicHiddenCue(
-				installed,
-				entity,
-				desired.scriptTableId,
-			);
+			this.#reconcileIntrinsicHiddenCue(desired);
 		this.#dynamics.updateNameplateContent(installed.nodeId, {
 			...entity.display,
 			...(this.#spawnedNameplateDecoration.get(entity.identity.guid) ?? {
@@ -3326,8 +3295,11 @@ export class GamePresentationRuntime {
 
 	/** Retire an unrealizable scene node without confusing deferred authority with deletion. */
 	#retireDeferredDynamicEntity(guid: number): void {
+		this.#dynamicCueInsertions.delete(guid);
 		const installed = this.#spawnedPresentations.get(guid);
 		if (installed === undefined) return;
+		const desired = this.#spawnedDesiredEntities.get(guid);
+		if (desired !== undefined) desired.cueHidden = false;
 		this.#retireDynamicOwner(installed.ownerId);
 		this.#spawnedPresentations.delete(guid);
 	}
@@ -4755,7 +4727,6 @@ export class GamePresentationRuntime {
 			this.#envCellRealizer.destroy(),
 		]);
 		await Promise.allSettled([...this.#realizationContinuations]);
-		await Promise.allSettled([...this.#dynamicCuePreparations.values()]);
 		await this.#skyScripts.destroy();
 		this.#combatEffects?.dispose();
 		this.#combatEffects = null;
@@ -5084,6 +5055,8 @@ export class GamePresentationRuntime {
 				const source = installed.presentation.sources[index];
 				if (source === undefined)
 					throw new Error("Installed local model has no presentation source.");
+				if (visible) this.#suppressedParticleRoots.delete(model.nodeId);
+				else this.#suppressedParticleRoots.add(model.nodeId);
 				this.#dynamics.updatePresentationState(model.nodeId, {
 					...source.initialPresentationState,
 					// Local scene visibility suppresses the whole presentation, including emitters.
@@ -5361,7 +5334,7 @@ export class GamePresentationRuntime {
 				if (objectStateAuthority === "world")
 					this.#releaseDynamicOverrideEffect(ownerId);
 				for (const nodeId of previousTargets ?? []) {
-					this.#suppressedEquipmentRoots.delete(nodeId);
+					this.#suppressedParticleRoots.delete(nodeId);
 					const targetId = behaviorTargetId(nodeId);
 					this.#localModelNodeOwners.delete(nodeId);
 					this.#particles.destroy({ generation: 0, targetId }, 0);
@@ -5485,7 +5458,7 @@ export class GamePresentationRuntime {
 		}
 		const steps: (() => void)[] = [];
 		for (const nodeId of roots) {
-			this.#suppressedEquipmentRoots.delete(nodeId);
+			this.#suppressedParticleRoots.delete(nodeId);
 			const targetId = behaviorTargetId(nodeId);
 			this.#targetSoundTables.delete(targetId);
 			steps.push(() => this.#particles.destroy({ generation: 0, targetId }, 0));

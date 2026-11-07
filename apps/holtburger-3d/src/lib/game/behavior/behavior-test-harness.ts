@@ -60,7 +60,10 @@ export function installEffectState(
 	nodeId: string,
 	partCount = 1,
 ): void {
-	effects.install(nodeId as SceneNodeId, partCount, 0);
+	effects.install(nodeId as SceneNodeId, partCount, {
+		translucency: 0,
+		cloaked: false,
+	});
 }
 
 /** The single-generation target a test uses when generation reuse is not what it is proving. */

@@ -79,7 +79,7 @@ export async function probeClientAudio() {
 				},
 				effects: {
 					applySetOmega() {},
-					applyTransparentPart() {},
+					applyTranslucency() {},
 					applyTextureVelocity() {},
 				},
 				objectState: { applyObjectState: () => "executed" },

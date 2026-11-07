@@ -82,6 +82,8 @@ pub enum AnimationHookPayload {
     SetLight(bool),
     ReplaceObject(ReplaceObjectHookPayload),
     SetOmega(SetOmegaHookPayload),
+    /// Whole-object authored translucency transition; execution is frontend-owned.
+    Transparent(TransparentHookPayload),
     TransparentPart(TransparentPartHookPayload),
     TextureVelocity(TextureVelocityHookPayload),
     TextureVelocityPart(TextureVelocityPartHookPayload),
@@ -241,6 +243,18 @@ pub struct TransparentPartHookPayload {
     pub duration_seconds: f32,
 }
 
+/// Whole-object translucency hook: three consecutive floats, in start/end/duration order.
+/// Values remain authored; interpolation and the object's original floor belong to playback.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TransparentHookPayload {
+    /// Translucency at activation.
+    pub start: f32,
+    /// Translucency at completion.
+    pub end: f32,
+    /// Seconds; very small durations select an immediate endpoint write.
+    pub duration_seconds: f32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextureVelocityHookPayload {
     pub u_speed: f32,
@@ -288,7 +302,7 @@ impl AnimationHook {
             17 => AnimationHookPayload::NoPayload, // DefaultScript
             18 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // DefaultScriptPart
             19 => AnimationHookPayload::CallPes(read_call_pes_payload(reader)?),
-            20 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Transparent
+            20 => AnimationHookPayload::Transparent(read_transparent_payload(reader)?),
             21 => AnimationHookPayload::SoundTweaked(read_sound_tweaked_payload(reader)?),
             22 => AnimationHookPayload::SetOmega(read_set_omega_payload(reader)?),
             23 => AnimationHookPayload::TextureVelocity(TextureVelocityHookPayload {
@@ -383,6 +397,11 @@ impl AnimationHookPayload {
                 payload.end.write_le(writer)?;
                 payload.duration_seconds.write_le(writer)
             }
+            Self::Transparent(payload) => {
+                payload.start.write_le(writer)?;
+                payload.end.write_le(writer)?;
+                payload.duration_seconds.write_le(writer)
+            }
             Self::TextureVelocity(payload) => {
                 payload.u_speed.write_le(writer)?;
                 payload.v_speed.write_le(writer)
@@ -437,6 +456,24 @@ fn read_set_omega_payload<R: Read + Seek>(reader: &mut R) -> BinResult<SetOmegaH
             z: f32::read_le(reader)?,
         },
     })
+}
+
+fn read_transparent_payload<R: Read + Seek>(reader: &mut R) -> BinResult<TransparentHookPayload> {
+    let payload = TransparentHookPayload {
+        start: f32::read_le(reader)?,
+        end: f32::read_le(reader)?,
+        duration_seconds: f32::read_le(reader)?,
+    };
+    if !payload.start.is_finite()
+        || !payload.end.is_finite()
+        || !payload.duration_seconds.is_finite()
+    {
+        return Err(decode_error(
+            reader,
+            "Transparent payload contains a non-finite value".to_owned(),
+        ));
+    }
+    Ok(payload)
 }
 
 fn read_transparent_part_payload<R: Read + Seek>(
@@ -1226,6 +1263,54 @@ mod tests {
                 },
             })
         );
+    }
+
+    #[test]
+    fn whole_object_transparency_round_trips_authored_values() {
+        let bytes = [
+            20u32.to_le_bytes(),
+            (-1i32).to_le_bytes(),
+            1f32.to_le_bytes(),
+            0f32.to_le_bytes(),
+            0.75f32.to_le_bytes(),
+        ]
+        .concat();
+        let hook = round_trip_hook(bytes, "whole-object transparency should round trip");
+        assert_eq!(
+            hook.payload,
+            AnimationHookPayload::Transparent(TransparentHookPayload {
+                start: 1.0,
+                end: 0.0,
+                duration_seconds: 0.75,
+            })
+        );
+    }
+
+    #[test]
+    fn whole_object_transparency_rejects_truncation_and_each_non_finite_field() {
+        let header = [20u32.to_le_bytes(), 0i32.to_le_bytes()].concat();
+        for payload_bytes in 0..12 {
+            let mut bytes = header.clone();
+            bytes.extend(vec![0; payload_bytes]);
+            assert!(AnimationHook::read(&mut Cursor::new(bytes)).is_err());
+        }
+        for field in 0..3 {
+            for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                let mut values = [0.0f32; 3];
+                values[field] = value;
+                let mut bytes = header.clone();
+                for value in values {
+                    bytes.extend(value.to_le_bytes());
+                }
+                let error = AnimationHook::read(&mut Cursor::new(bytes))
+                    .expect_err("non-finite transition");
+                assert!(
+                    error
+                        .to_string()
+                        .contains("Transparent payload contains a non-finite value")
+                );
+            }
+        }
     }
 
     #[test]

@@ -68,6 +68,12 @@ pub(crate) enum BehaviorHookPayloadManifest {
     SetOmega {
         omega: [f32; 3],
     },
+    /// Whole-object transition, shared by animation and script producers.
+    Transparent {
+        start: f32,
+        end: f32,
+        duration_seconds: f32,
+    },
     TransparentPart {
         part_index: u32,
         start: f32,
@@ -189,6 +195,19 @@ pub(crate) fn behavior_hook_payload(
             );
             BehaviorHookPayloadManifest::SetOmega {
                 omega: [payload.omega.x, payload.omega.y, payload.omega.z],
+            }
+        }
+        AnimationHookPayload::Transparent(payload) => {
+            ensure!(
+                payload.start.is_finite()
+                    && payload.end.is_finite()
+                    && payload.duration_seconds.is_finite(),
+                "Transparent payload contains a non-finite value"
+            );
+            BehaviorHookPayloadManifest::Transparent {
+                start: payload.start,
+                end: payload.end,
+                duration_seconds: payload.duration_seconds,
             }
         }
         AnimationHookPayload::TransparentPart(TransparentPartHookPayload {
@@ -380,6 +399,33 @@ pub(crate) fn hook_name(hook_type: u32) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whole_object_transparency_projects_without_requiring_a_part_layout() {
+        let hook = AnimationHook {
+            hook_type: 20,
+            direction: 0,
+            payload: AnimationHookPayload::Transparent(
+                holtburger_dat::file_type::setup_model::TransparentHookPayload {
+                    start: 1.0,
+                    end: 0.0,
+                    duration_seconds: 0.75,
+                },
+            ),
+        };
+        for scope in [PartIndexScope::Known(0), PartIndexScope::DeferredToBinding] {
+            let payload = behavior_hook_payload(&hook, scope, &mut Vec::new())
+                .expect("transparent projection");
+            assert!(matches!(
+                payload,
+                BehaviorHookPayloadManifest::Transparent {
+                    start: 1.0,
+                    end: 0.0,
+                    duration_seconds: 0.75
+                }
+            ));
+        }
+    }
 
     #[test]
     fn attack_metadata_is_not_bounded_by_render_part_count() {

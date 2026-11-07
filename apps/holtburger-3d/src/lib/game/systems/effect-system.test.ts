@@ -6,7 +6,11 @@ import {
 import { buildEffectRouter } from "../behavior/behavior-test-harness";
 import { Vec3 } from "../math/types";
 import type { SceneNodeId } from "../scene";
-import { EffectSystem } from "./effect-system";
+import {
+	EffectSystem,
+	BEHAVIOR_STEP_SECONDS,
+	MINIMUM_TIMED_EFFECT_SECONDS,
+} from "./effect-system";
 
 const NODE_ID = "scene-node:1" as SceneNodeId;
 const TARGET: BehaviorTarget = {
@@ -16,7 +20,10 @@ const TARGET: BehaviorTarget = {
 
 function install(partCount = 2, initialTranslucency = 0) {
 	const effects = new EffectSystem();
-	effects.install(NODE_ID, partCount, initialTranslucency);
+	effects.install(NODE_ID, partCount, {
+		translucency: initialTranslucency,
+		cloaked: false,
+	});
 	return effects;
 }
 
@@ -42,10 +49,215 @@ function advance(effects: EffectSystem, elapsedSeconds: number): void {
 }
 
 describe("EffectSystem", () => {
+	it("enqueues a timed object hook without changing materials until clock advancement", () => {
+		const effects = install(2, 0.4);
+		effects.applyTranslucency(
+			TARGET,
+			{ kind: "transparent", start: 1, end: 0, durationSeconds: 1 },
+			"live",
+		);
+		expect(translucencies(effects)).toEqual([0.4, 0.4]);
+		advance(effects, BEHAVIOR_STEP_SECONDS);
+		expect(translucencies(effects)[0]).toBeCloseTo(1 - BEHAVIOR_STEP_SECONDS);
+		advance(effects, 1);
+		expect(translucencies(effects)).toEqual([0.4, 0.4]);
+	});
+
+	it.each(["transparent", "transparent-part"] as const)(
+		"coexists with an older whole-object hook: newer %s",
+		(kind) => {
+			const effects = install(2);
+			effects.applyTranslucency(
+				TARGET,
+				{
+					kind: "transparent",
+					start: 0,
+					end: 1,
+					durationSeconds: 4 * BEHAVIOR_STEP_SECONDS,
+				},
+				"live",
+			);
+			effects.applyTranslucency(
+				TARGET,
+				{
+					kind,
+					partIndex: 0,
+					start: 1,
+					end: 0,
+					durationSeconds: 8 * BEHAVIOR_STEP_SECONDS,
+				},
+				"live",
+			);
+			advance(effects, 4 * BEHAVIOR_STEP_SECONDS);
+			// The older hook writes its endpoint last before it retires on this exact boundary.
+			expect(translucencies(effects)).toEqual([1, 1]);
+			expect(translucencies(effects)).toEqual([1, 1]);
+			advance(effects, BEHAVIOR_STEP_SECONDS);
+			expect(translucencies(effects)[0]).toBeCloseTo(3 / 8);
+			expect(translucencies(effects)[1]).toBeCloseTo(
+				kind === "transparent" ? 3 / 8 : 1,
+			);
+		},
+	);
+
+	it("allows an older part hook to write after a newer whole-object hook", () => {
+		const effects = install(2);
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent-part",
+				partIndex: 0,
+				start: 0,
+				end: 1,
+				durationSeconds: 4 * BEHAVIOR_STEP_SECONDS,
+			},
+			"live",
+		);
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent",
+				start: 1,
+				end: 0,
+				durationSeconds: 8 * BEHAVIOR_STEP_SECONDS,
+			},
+			"live",
+		);
+		advance(effects, 2 * BEHAVIOR_STEP_SECONDS);
+		expect(translucencies(effects)).toEqual([0.5, 0.75]);
+	});
+
+	it("holds an immediate write until the next update without cancelling an active hook", () => {
+		const effects = install(1);
+		effects.applyTranslucency(
+			TARGET,
+			{ kind: "transparent", start: 0, end: 1, durationSeconds: 1 },
+			"live",
+		);
+		advance(effects, BEHAVIOR_STEP_SECONDS / 2);
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent",
+				start: 0,
+				end: 0.8,
+				durationSeconds: MINIMUM_TIMED_EFFECT_SECONDS / 2,
+			},
+			"live",
+		);
+		expect(translucencies(effects)).toEqual([0.8]);
+		advance(effects, BEHAVIOR_STEP_SECONDS / 4);
+		expect(translucencies(effects)[0]).toBeCloseTo(
+			(3 * BEHAVIOR_STEP_SECONDS) / 4,
+		);
+	});
+
+	it("treats the threshold duration as timed and starts at the command's fractional phase", () => {
+		const effects = install(1, 0.2);
+		advance(effects, BEHAVIOR_STEP_SECONDS / 2);
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent",
+				start: 1,
+				end: 0.4,
+				durationSeconds: MINIMUM_TIMED_EFFECT_SECONDS,
+			},
+			"live",
+		);
+		expect(translucencies(effects)).toEqual([0.2]);
+		advance(effects, MINIMUM_TIMED_EFFECT_SECONDS / 2);
+		expect(translucencies(effects)[0]).toBeCloseTo(0.7);
+		advance(effects, BEHAVIOR_STEP_SECONDS);
+		expect(translucencies(effects)).toEqual([0.4]);
+	});
+
+	it("retains the original floor while initially cloaked and never replays expired ignored writes", () => {
+		const effects = new EffectSystem();
+		effects.install(NODE_ID, 2, { translucency: 0.4, cloaked: true });
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent",
+				start: 1,
+				end: 0,
+				durationSeconds: BEHAVIOR_STEP_SECONDS,
+			},
+			"live",
+		);
+		advance(effects, 2 * BEHAVIOR_STEP_SECONDS);
+		effects.setCloaked(NODE_ID, false);
+		expect(translucencies(effects)).toEqual([0, 0]);
+		advance(effects, BEHAVIOR_STEP_SECONDS);
+		expect(translucencies(effects)).toEqual([0, 0]);
+		effects.applyTranslucency(
+			TARGET,
+			{ kind: "transparent", start: 1, end: 0, durationSeconds: 0 },
+			"live",
+		);
+		expect(translucencies(effects)).toEqual([0.4, 0.4]);
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent-part",
+				partIndex: 0,
+				start: 1,
+				end: 0,
+				durationSeconds: 0,
+			},
+			"live",
+		);
+		expect(translucencies(effects)).toEqual([0, 0.4]);
+	});
+
+	it("preserves permitted fractional material state while cloaked and resumes an unexpired hook", () => {
+		const effects = install(1);
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent",
+				start: 0,
+				end: 1,
+				durationSeconds: 8 * BEHAVIOR_STEP_SECONDS,
+			},
+			"live",
+		);
+		advance(effects, BEHAVIOR_STEP_SECONDS / 2);
+		const before = translucencies(effects);
+		effects.setCloaked(NODE_ID, true);
+		advance(effects, 3 * BEHAVIOR_STEP_SECONDS);
+		expect(translucencies(effects)).toEqual(before);
+		effects.setCloaked(NODE_ID, false);
+		expect(translucencies(effects)).toEqual(before);
+		advance(effects, BEHAVIOR_STEP_SECONDS);
+		expect(translucencies(effects)[0]).toBeCloseTo(4.5 / 8);
+	});
+
+	it("replays translucency on the owner's independent semantic clock", () => {
+		const effects = install(1);
+		advance(effects, BEHAVIOR_STEP_SECONDS / 2);
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent",
+				start: 1,
+				end: 0,
+				durationSeconds: 4 * BEHAVIOR_STEP_SECONDS,
+			},
+			"initial-state",
+		);
+		effects.foldSemanticStep(NODE_ID);
+		expect(translucencies(effects)).toEqual([0.75]);
+		effects.finishReplay(NODE_ID, BEHAVIOR_STEP_SECONDS / 2);
+		expect(translucencies(effects)).toEqual([0.625]);
+		advance(effects, BEHAVIOR_STEP_SECONDS / 2);
+		expect(translucencies(effects)[0]).toBeCloseTo(0.5);
+	});
+
 	it("folds part rates without sharing ownership or continually invalidating presentation", () => {
 		const effects = install();
 		const other = "scene-node:2" as SceneNodeId;
-		effects.install(other, 2, 0);
+		effects.install(other, 2, { translucency: 0, cloaked: false });
 		const { router } = buildEffectRouter(effects);
 		const provenance = {
 			assetId: "0x33000D34" as const,
@@ -112,7 +324,7 @@ describe("EffectSystem", () => {
 			[0, 0],
 		]);
 		effects.remove(NODE_ID);
-		effects.install(NODE_ID, 1, 0);
+		effects.install(NODE_ID, 1, { translucency: 0, cloaked: false });
 		expect(effects.samplePresentation(NODE_ID).partRenderStates).toEqual([
 			{ translucency: 0, textureVelocity: [0, 0] },
 		]);
@@ -134,41 +346,71 @@ describe("EffectSystem", () => {
 		const effects = install(3, 0.5);
 		expect(translucencies(effects)).toEqual([0.5, 0.5, 0.5]);
 
-		effects.applyTransparentPart(TARGET, {
-			durationSeconds: 0,
-			end: 1,
-			partIndex: 1,
-			start: 0.5,
-		});
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent-part",
+				durationSeconds: 0,
+				end: 1,
+				partIndex: 1,
+				start: 0.5,
+			},
+			"live",
+		);
 		expect(translucencies(effects)).toEqual([0.5, 1, 0.5]);
 	});
 
 	it("updates every part without cancelling an in-flight part ramp", () => {
 		const effects = install(2, 0.5);
-		effects.applyTransparentPart(TARGET, {
-			durationSeconds: 1,
-			end: 0.8,
-			partIndex: 1,
-			start: 0.2,
-		});
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent-part",
+				durationSeconds: 1,
+				end: 0.8,
+				partIndex: 1,
+				start: 0.2,
+			},
+			"live",
+		);
 
 		effects.applyObjectTranslucency(NODE_ID, 0.4);
-		expect(translucencies(effects)).toEqual([0.4, 0.2]);
+		expect(translucencies(effects)).toEqual([0.4, 0.4]);
 		advance(effects, 0.5);
 		expect(translucencies(effects)[0]).toBe(0.4);
 		expect(translucencies(effects)[1]).toBeCloseTo(0.5);
+		effects.applyTranslucency(
+			TARGET,
+			{ kind: "transparent", start: 1, end: 0, durationSeconds: 0 },
+			"live",
+		);
+		// Ordinary current-level writes did not replace the original object-description floor.
+		expect(translucencies(effects)).toEqual([0.5, 0.5]);
 	});
 
 	it("steps every installed state, not only those a playback drives", () => {
 		// The defect this clock exists to fix: stepping used to hang off `AnimationSystem`, so a
 		// resident with a script but no animation never advanced and its ramps were inert.
 		const effects = new EffectSystem();
-		effects.install("scene-node:scripted" as SceneNodeId, 1, 0);
-		effects.install("scene-node:animated" as SceneNodeId, 1, 0);
+		effects.install("scene-node:scripted" as SceneNodeId, 1, {
+			translucency: 0,
+			cloaked: false,
+		});
+		effects.install("scene-node:animated" as SceneNodeId, 1, {
+			translucency: 0,
+			cloaked: false,
+		});
 		for (const nodeId of ["scene-node:scripted", "scene-node:animated"]) {
-			effects.applyTransparentPart(
+			effects.applyTranslucency(
 				{ generation: 1, targetId: behaviorTargetId(nodeId) },
-				{ durationSeconds: 1, end: 1, partIndex: 0, start: 0 },
+				{
+					kind: "transparent-part",
+					durationSeconds: 1,
+					end: 1,
+					partIndex: 0,
+					start: 0,
+				},
+				"live",
 			);
 		}
 
@@ -209,18 +451,28 @@ describe("EffectSystem", () => {
 
 	it("applies a sub-threshold ramp instantly and a timed ramp progressively", () => {
 		const effects = install();
-		effects.applyTransparentPart(TARGET, {
-			durationSeconds: 0,
-			end: 0.75,
-			partIndex: 0,
-			start: 0,
-		});
-		effects.applyTransparentPart(TARGET, {
-			durationSeconds: 1,
-			end: 1,
-			partIndex: 1,
-			start: 0,
-		});
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent-part",
+				durationSeconds: 0,
+				end: 0.75,
+				partIndex: 0,
+				start: 0,
+			},
+			"live",
+		);
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent-part",
+				durationSeconds: 1,
+				end: 1,
+				partIndex: 1,
+				start: 0,
+			},
+			"live",
+		);
 
 		// Part 0 jumped straight to its endpoint; part 1 is still at its start value.
 		expect(translucencies(effects)).toEqual([0.75, 0]);
@@ -231,12 +483,17 @@ describe("EffectSystem", () => {
 
 	it("lands a timed ramp exactly on its endpoint across uneven steps", () => {
 		const effects = install(1);
-		effects.applyTransparentPart(TARGET, {
-			durationSeconds: 1,
-			end: 1,
-			partIndex: 0,
-			start: 0,
-		});
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent-part",
+				durationSeconds: 1,
+				end: 1,
+				partIndex: 0,
+				start: 0,
+			},
+			"live",
+		);
 
 		for (const step of [0.3, 0.45, 0.4]) {
 			advance(effects, step);
@@ -247,12 +504,17 @@ describe("EffectSystem", () => {
 
 	it("samples a ramp without committing the sampled time", () => {
 		const effects = install(1);
-		effects.applyTransparentPart(TARGET, {
-			durationSeconds: 1,
-			end: 1,
-			partIndex: 0,
-			start: 0,
-		});
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent-part",
+				durationSeconds: 1,
+				end: 1,
+				partIndex: 0,
+				start: 0,
+			},
+			"live",
+		);
 
 		// Less than one behavior step, so nothing commits and the value comes purely from
 		// sub-step interpolation against the shared clock's phase.
@@ -267,12 +529,17 @@ describe("EffectSystem", () => {
 
 		// Replay applies the ramp, then the remaining elapsed steps advance it. Snapping to the end
 		// here would discard a ramp that was still running when the owner became observable.
-		effects.applyTransparentPart(TARGET, {
-			durationSeconds: 10,
-			end: 1,
-			partIndex: 0,
-			start: 0,
-		});
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent-part",
+				durationSeconds: 10,
+				end: 1,
+				partIndex: 0,
+				start: 0,
+			},
+			"live",
+		);
 		advance(effects, 2.5);
 
 		expect(translucencies(effects)[0]).toBeCloseTo(0.25);
@@ -282,23 +549,33 @@ describe("EffectSystem", () => {
 		"ignores absent transparency parts without disturbing resident ramps (duration %s)",
 		(durationSeconds) => {
 			const effects = install(1);
-			effects.applyTransparentPart(TARGET, {
-				durationSeconds: 1,
-				end: 1,
-				partIndex: 0,
-				start: 0,
-			});
+			effects.applyTranslucency(
+				TARGET,
+				{
+					kind: "transparent-part",
+					durationSeconds: 1,
+					end: 1,
+					partIndex: 0,
+					start: 0,
+				},
+				"live",
+			);
 			translucencies(effects);
 			expect(effects.needsPresentation(NODE_ID)).toBe(false);
 
 			// The first absent slot and the reported failing index both leave state untouched.
 			for (const partIndex of [1, 10]) {
-				effects.applyTransparentPart(TARGET, {
-					durationSeconds,
-					end: 0,
-					partIndex,
-					start: 1,
-				});
+				effects.applyTranslucency(
+					TARGET,
+					{
+						kind: "transparent-part",
+						durationSeconds,
+						end: 0,
+						partIndex,
+						start: 1,
+					},
+					"live",
+				);
 			}
 			expect(effects.needsPresentation(NODE_ID)).toBe(false);
 			expect(translucencies(effects)).toEqual([0]);
@@ -375,12 +652,17 @@ describe("EffectSystem", () => {
 
 	it("keeps part timelines independent and drops removed entity state", () => {
 		const effects = install();
-		effects.applyTransparentPart(TARGET, {
-			durationSeconds: 1,
-			end: 1,
-			partIndex: 1,
-			start: 0,
-		});
+		effects.applyTranslucency(
+			TARGET,
+			{
+				kind: "transparent-part",
+				durationSeconds: 1,
+				end: 1,
+				partIndex: 1,
+				start: 0,
+			},
+			"live",
+		);
 		advance(effects, 0.5);
 
 		expect(translucencies(effects)[0]).toBe(0);

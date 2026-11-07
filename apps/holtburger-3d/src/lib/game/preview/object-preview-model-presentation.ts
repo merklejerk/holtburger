@@ -110,11 +110,10 @@ export class ObjectPreviewModelPresentation {
 				assets.firstCyclicClip,
 				assets.setupPose,
 			);
-		this.#effects.install(
-			this.#rootNodeId(),
-			assets.setupPose.length,
-			assets.translucency,
-		);
+		this.#effects.install(this.#rootNodeId(), assets.setupPose.length, {
+			translucency: assets.translucency,
+			cloaked: false,
+		});
 		const scriptWiring: {
 			system?: PhysicsScriptSystem<typeof PREVIEW_OWNER>;
 		} = {};

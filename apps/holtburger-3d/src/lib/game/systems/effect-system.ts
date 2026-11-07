@@ -1,6 +1,7 @@
 import type {
 	BehaviorTarget,
 	EffectCommandPort,
+	BehaviorDispatchMode,
 } from "../behavior/behavior-event-router";
 import {
 	multiplyQuaternion,
@@ -18,8 +19,8 @@ import type { SceneNodeId } from "../scene";
 import type { PreparedBehaviorCommand } from "../behavior/prepared-behavior-command";
 import type { PartRenderState } from "./components";
 
-/** Retail schedules an `FPHook` only at or above this duration. */
-const MINIMUM_TIMED_EFFECT_SECONDS = 0.0002;
+/** Retail's small-duration boundary in the authored f32 domain, including an exact threshold. */
+export const MINIMUM_TIMED_EFFECT_SECONDS = Math.fround(0.0002);
 
 /** A linear ramp toward a whole-object uniform scale, as retail's `SetScale` interpolates. */
 interface ScaleRamp {
@@ -29,24 +30,41 @@ interface ScaleRamp {
 	elapsedSeconds: number;
 }
 
-interface TranslucencyRamp {
+/** A timed material write; newest hooks execute first and older hooks can write last. */
+interface TranslucencyHook {
+	readonly target:
+		| { readonly kind: "object" }
+		| { readonly kind: "part"; readonly part: PartEffectState };
 	readonly durationSeconds: number;
-	readonly end: number;
-	elapsedSeconds: number;
 	readonly start: number;
+	readonly end: number;
+	/** Relative to the committed clock; live insertion subtracts its current fractional phase. */
+	elapsedSeconds: number;
+}
+
+/** Source facts required independently of any scripted/current part material values. */
+export interface EffectMaterialSource {
+	/** Original object-description floor, retained for this installed object's lifetime. */
+	readonly translucency: number;
+	/** Cloaked parts ignore material writes, including endpoints of completed hooks. */
+	readonly cloaked: boolean;
 }
 
 /** Object-owned effects for one rigid part, retired together with its layout. */
 interface PartEffectState {
-	/** Current committed translucency, also the baseline for whole-object writes. */
-	translucency: number;
-	/** Active authored transition, or null when the committed level is stationary. */
-	translucencyRamp: TranslucencyRamp | null;
+	/** Committed physics-step value and the current frame's permitted fractional material write. */
+	readonly translucency: { committed: number; sampled: number };
 	/** U/V cycles per second, sampled against the shared renderer clock. */
 	textureVelocity: readonly [number, number];
 }
 
 interface EffectState {
+	/** Object-description baseline is not changed by current-value or script writes. */
+	readonly originalTranslucency: number;
+	/** Authoritative material write admission, supplied by the presentation owner. */
+	cloaked: boolean;
+	/** Both whole-object and part-local hooks coexist in newest-first execution order. */
+	translucencyHooks: TranslucencyHook[];
 	/**
 	 * Whether this state has changed since it was last sampled.
 	 *
@@ -82,18 +100,15 @@ export interface EffectPresentationSample {
 }
 
 /**
- * Owns persistent visual-effect state and nothing else.
- *
- * A pure consumer since Phase 3: producers own clocks and traversal, the router owns dispatch
- * decisions and their provenance, and this system owns only the state those decisions mutate.
- */
-/**
  * Retail's behavior tick, and the cadence every effect ramp advances on.
  *
  * Exported from the system that owns the clock. Animation imports it for its own hook cadence.
  */
 export const BEHAVIOR_STEP_SECONDS = 1 / 30;
+/** Absorbs timestamp subtraction noise at behavior-step and hook-completion boundaries. */
+export const BEHAVIOR_CLOCK_EPSILON_SECONDS = 1e-9;
 
+/** Owns the shared effect clock, committed visual state, and render-cadence material samples. */
 export class EffectSystem implements EffectCommandPort {
 	readonly #states = new Map<SceneNodeId, EffectState>();
 	#appliedCommandCount = 0;
@@ -104,29 +119,34 @@ export class EffectSystem implements EffectCommandPort {
 	install(
 		nodeId: SceneNodeId,
 		partCount: number,
-		initialTranslucency: number,
+		source: EffectMaterialSource,
 	): void {
 		if (this.#states.has(nodeId))
 			throw new Error(`Effect state for ${nodeId} already exists.`);
 		if (!Number.isInteger(partCount) || partCount <= 0)
 			throw new Error("Effect state requires a positive part count.");
 		if (
-			!Number.isFinite(initialTranslucency) ||
-			initialTranslucency < 0 ||
-			initialTranslucency > 1
+			!Number.isFinite(source.translucency) ||
+			source.translucency < 0 ||
+			source.translucency > 1
 		)
 			throw new Error(
 				"Effect state requires initial translucency between zero and one.",
 			);
 		this.#states.set(nodeId, {
+			originalTranslucency: source.translucency,
+			cloaked: source.cloaked,
+			translucencyHooks: [],
 			committedOrientation: Quat.identity(),
 			omega: Vec3.zero(),
 			scale: 1,
 			scaleRamp: null,
 			dirty: true,
 			parts: Array.from({ length: partCount }, () => ({
-				translucency: initialTranslucency,
-				translucencyRamp: null,
+				translucency: {
+					committed: source.cloaked ? 0 : source.translucency,
+					sampled: source.cloaked ? 0 : source.translucency,
+				},
 				textureVelocity: [0, 0],
 			})),
 		});
@@ -137,7 +157,21 @@ export class EffectSystem implements EffectCommandPort {
 		if (!Number.isFinite(translucency) || translucency < 0 || translucency > 1)
 			throw new Error("Object translucency must be between zero and one.");
 		const state = this.#requiredState(nodeId);
-		for (const part of state.parts) part.translucency = translucency;
+		if (state.cloaked) return;
+		for (const part of state.parts)
+			writePartTranslucency(part, translucency, "committed");
+		state.dirty = true;
+	}
+
+	/** Preserve permitted material values when cloak starts; ignored writes never replay later. */
+	setCloaked(nodeId: SceneNodeId, cloaked: boolean): void {
+		const state = this.#requiredState(nodeId);
+		if (state.cloaked === cloaked) return;
+		if (cloaked) {
+			for (const part of state.parts)
+				part.translucency.committed = part.translucency.sampled;
+		}
+		state.cloaked = cloaked;
 		state.dirty = true;
 	}
 
@@ -158,15 +192,39 @@ export class EffectSystem implements EffectCommandPort {
 			throw new Error("Effect clock time must be finite.");
 		const previous = this.#lastTimeSeconds;
 		this.#lastTimeSeconds = timeSeconds;
-		if (previous === null) return;
+		for (const state of this.#states.values()) {
+			if (state.translucencyHooks.length > 0) state.dirty = true;
+		}
+		if (previous === null) {
+			for (const state of this.#states.values()) {
+				if (state.translucencyHooks.length > 0)
+					sampleTranslucencyHooks(state, this.#fractionalSeconds);
+			}
+			return;
+		}
 		if (timeSeconds < previous)
 			throw new Error("Effect clock moved backwards.");
 		this.#fractionalSeconds += timeSeconds - previous;
-		while (this.#fractionalSeconds >= BEHAVIOR_STEP_SECONDS) {
-			this.#fractionalSeconds -= BEHAVIOR_STEP_SECONDS;
+		let committed = false;
+		while (
+			this.#fractionalSeconds + BEHAVIOR_CLOCK_EPSILON_SECONDS >=
+			BEHAVIOR_STEP_SECONDS
+		) {
+			committed = true;
+			this.#fractionalSeconds = Math.max(
+				0,
+				this.#fractionalSeconds - BEHAVIOR_STEP_SECONDS,
+			);
 			for (const nodeId of this.#states.keys()) {
 				this.#commitStep(nodeId, BEHAVIOR_STEP_SECONDS);
 			}
+		}
+		for (const state of this.#states.values()) {
+			if (
+				state.translucencyHooks.length > 0 &&
+				(!committed || this.#fractionalSeconds > BEHAVIOR_CLOCK_EPSILON_SECONDS)
+			)
+				sampleTranslucencyHooks(state, this.#fractionalSeconds);
 		}
 	}
 
@@ -181,6 +239,30 @@ export class EffectSystem implements EffectCommandPort {
 		this.#commitStep(nodeId, BEHAVIOR_STEP_SECONDS);
 	}
 
+	/** Join a newly replayed owner's fractional phase to the existing shared live clock. */
+	finishReplay(nodeId: SceneNodeId, remainingSeconds: number): void {
+		if (
+			!Number.isFinite(remainingSeconds) ||
+			remainingSeconds < 0 ||
+			remainingSeconds >= BEHAVIOR_STEP_SECONDS
+		)
+			throw new Error(
+				"Effect replay remainder must be within one behavior step.",
+			);
+		const state = this.#requiredState(nodeId);
+		for (const hook of state.translucencyHooks)
+			hook.elapsedSeconds += remainingSeconds;
+		if (
+			remainingSeconds > BEHAVIOR_CLOCK_EPSILON_SECONDS &&
+			state.translucencyHooks.length > 0
+		)
+			sampleTranslucencyHooks(state, 0);
+		// Hook age now includes the replay remainder. Remove the live clock's current remainder
+		// from committed-relative age so the next shared update cannot count that time twice.
+		for (const hook of state.translucencyHooks)
+			hook.elapsedSeconds -= this.#fractionalSeconds;
+	}
+
 	/** Advance exactly one committed behavior step for one state. */
 	#commitStep(nodeId: SceneNodeId, stepSeconds: number): void {
 		const state = this.#requiredState(nodeId);
@@ -191,7 +273,7 @@ export class EffectSystem implements EffectCommandPort {
 			state.omega.x !== 0 ||
 			state.omega.y !== 0 ||
 			state.omega.z !== 0 ||
-			state.parts.some((part) => part.translucencyRamp !== null);
+			state.translucencyHooks.length > 0;
 		if (animating) state.dirty = true;
 		if (state.scaleRamp) {
 			state.scaleRamp.elapsedSeconds += stepSeconds;
@@ -210,16 +292,23 @@ export class EffectSystem implements EffectCommandPort {
 			delta,
 			state.committedOrientation,
 		);
-		for (const part of state.parts) {
-			const ramp = part.translucencyRamp;
-			if (ramp === null) continue;
-			ramp.elapsedSeconds += stepSeconds;
-			if (ramp.elapsedSeconds >= ramp.durationSeconds) {
-				part.translucency = ramp.end;
-				part.translucencyRamp = null;
-			} else {
-				part.translucency = sampleRamp(ramp, ramp.elapsedSeconds);
+		if (state.translucencyHooks.length > 0) {
+			for (const hook of state.translucencyHooks) {
+				hook.elapsedSeconds += stepSeconds;
+				if (!state.cloaked)
+					writeTranslucency(
+						state,
+						hook.target,
+						sampleRamp(hook, hook.elapsedSeconds),
+						"committed",
+					);
 			}
+			// Retire after the endpoint write, preserving newest-first ordering on this boundary.
+			state.translucencyHooks = state.translucencyHooks.filter(
+				(hook) =>
+					hook.elapsedSeconds + BEHAVIOR_CLOCK_EPSILON_SECONDS <
+					hook.durationSeconds,
+			);
 		}
 	}
 
@@ -285,43 +374,48 @@ export class EffectSystem implements EffectCommandPort {
 	}
 
 	/**
-	 * Start or immediately settle one part's translucency ramp.
-	 *
-	 * Deliberately identical during replay and live execution. A ramp is persistent state, so
-	 * replaying it and then advancing the remaining elapsed steps lands on exactly the translucency
-	 * the part should show now — which is not the same as its endpoint, and jumping there would
-	 * discard a ramp still in flight when the owner became observable.
+	 * Schedule one ordered translucency write without replacing any earlier active hook.
+	 * Retail behavior is to enqueue timed hooks without writing their start value; immediate
+	 * commands write the endpoint and leave active hooks intact. Whole-object writes apply the
+	 * original floor, while part-local writes do not. Both producers execute through this seam.
 	 */
-	applyTransparentPart(
+	applyTranslucency(
 		target: BehaviorTarget,
-		values: {
-			readonly partIndex: number;
-			readonly start: number;
-			readonly end: number;
-			readonly durationSeconds: number;
-		},
+		command: Extract<
+			PreparedBehaviorCommand,
+			{ kind: "transparent" | "transparent-part" }
+		>,
+		mode: BehaviorDispatchMode,
 	): void {
 		const state = this.#requiredState(
 			requireSceneNodeId(target.targetId, "EffectSystem"),
 		);
-		const part = state.parts[values.partIndex];
-		// Scripts can address parts absent from their target's setup. Retail ignores these
-		// writes, including timed-ramp samples.
-		if (part === undefined) return;
-		state.dirty = true;
+		let writeTarget: TranslucencyHook["target"];
+		if (command.kind === "transparent") writeTarget = { kind: "object" };
+		else {
+			// A script's authored part need not exist in the setup it eventually runs on.
+			const part = state.parts[command.partIndex];
+			if (part === undefined) return;
+			writeTarget = { kind: "part", part };
+		}
 		this.#appliedCommandCount += 1;
-		if (values.durationSeconds < MINIMUM_TIMED_EFFECT_SECONDS) {
-			part.translucency = values.end;
-			part.translucencyRamp = null;
+		if (command.durationSeconds < MINIMUM_TIMED_EFFECT_SECONDS) {
+			if (!state.cloaked) {
+				writeTranslucency(state, writeTarget, command.end, "committed");
+				state.dirty = true;
+			}
 			return;
 		}
-		part.translucency = values.start;
-		part.translucencyRamp = {
-			durationSeconds: values.durationSeconds,
-			elapsedSeconds: 0,
-			end: values.end,
-			start: values.start,
-		};
+		state.translucencyHooks.unshift({
+			target: writeTarget,
+			start: command.start,
+			end: command.end,
+			durationSeconds: command.durationSeconds,
+			// Replay owns independent elapsed steps; live commands start at the current wall time,
+			// rather than inheriting the shared clock's already elapsed fractional remainder.
+			elapsedSeconds: mode === "live" ? -this.#fractionalSeconds : 0,
+		});
+		state.dirty = true;
 	}
 
 	/**
@@ -390,13 +484,7 @@ export class EffectSystem implements EffectCommandPort {
 		return {
 			partRenderStates: state.parts.map((part) => ({
 				textureVelocity: part.textureVelocity,
-				translucency:
-					part.translucencyRamp === null
-						? part.translucency
-						: sampleRamp(
-								part.translucencyRamp,
-								part.translucencyRamp.elapsedSeconds + fractionalSeconds,
-							),
+				translucency: part.translucency.sampled,
 			})),
 			rootTransformModifier: multiplyMat4(
 				createRotationMat4(
@@ -449,10 +537,52 @@ function sampleScaleRamp(ramp: ScaleRamp, elapsedSeconds: number): number {
 	);
 }
 
-function sampleRamp(ramp: TranslucencyRamp, elapsedSeconds: number): number {
-	if (elapsedSeconds >= ramp.durationSeconds) return ramp.end;
+function sampleRamp(ramp: TranslucencyHook, elapsedSeconds: number): number {
+	if (elapsedSeconds + BEHAVIOR_CLOCK_EPSILON_SECONDS >= ramp.durationSeconds)
+		return ramp.end;
 	return (
 		ramp.start +
-		(ramp.end - ramp.start) * (elapsedSeconds / ramp.durationSeconds)
+		(ramp.end - ramp.start) *
+			(Math.max(0, elapsedSeconds) / ramp.durationSeconds)
 	);
+}
+
+/** Apply the target/floor rule once for both committed and fractional material writes. */
+function writeTranslucency(
+	state: EffectState,
+	target: TranslucencyHook["target"],
+	value: number,
+	lane: "committed" | "sampled",
+): void {
+	if (target.kind === "object") {
+		const floored = Math.max(value, state.originalTranslucency);
+		for (const part of state.parts) writePartTranslucency(part, floored, lane);
+	} else writePartTranslucency(target.part, value, lane);
+}
+
+/** Immediate commands keep their write visible until the next clock update. */
+function writePartTranslucency(
+	part: PartEffectState,
+	value: number,
+	lane: "committed" | "sampled",
+): void {
+	if (lane === "committed") part.translucency.committed = value;
+	part.translucency.sampled = value;
+}
+
+/** Update fractional presentation without committing time or retiring hooks. */
+function sampleTranslucencyHooks(
+	state: EffectState,
+	fractionalSeconds: number,
+): void {
+	if (state.cloaked) return;
+	for (const part of state.parts)
+		part.translucency.sampled = part.translucency.committed;
+	for (const hook of state.translucencyHooks)
+		writeTranslucency(
+			state,
+			hook.target,
+			sampleRamp(hook, hook.elapsedSeconds + fractionalSeconds),
+			"sampled",
+		);
 }

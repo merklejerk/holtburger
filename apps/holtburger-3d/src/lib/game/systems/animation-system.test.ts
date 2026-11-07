@@ -339,33 +339,36 @@ describe("AnimationSystem", () => {
 		]);
 	});
 
-	it("folds effect history before the deterministic initial phase is sampled", () => {
-		const effects = new EffectSystem();
-		const system = buildAnimationSystemOver(effects);
-		const animation = animationWithInitialTransparency();
-		const initial = requiredAt(
-			install(system, "owner", [
-				{
-					animation,
-					residentIdentity: "resident:a",
-					target: testTarget("scene-node:1"),
-				},
-			]),
-			0,
-		);
-		const renderState = initial.effects.partRenderStates[0];
-		if (!renderState)
-			throw new Error("Initial effect sample has no first part.");
+	it.each(["transparent", "transparent-part"] as const)(
+		"folds %s history before the deterministic initial phase is sampled",
+		(kind) => {
+			const effects = new EffectSystem();
+			const system = buildAnimationSystemOver(effects);
+			const animation = animationWithInitialTransparency(kind);
+			const initial = requiredAt(
+				install(system, "owner", [
+					{
+						animation,
+						residentIdentity: "resident:a",
+						target: testTarget("scene-node:1"),
+					},
+				]),
+				0,
+			);
+			const renderState = initial.effects.partRenderStates[0];
+			if (!renderState)
+				throw new Error("Initial effect sample has no first part.");
 
-		expect(renderState.translucency).toBeGreaterThan(0);
-		expect(renderState.translucency).toBeLessThan(1);
-		expect(observations()).toContainEqual(
-			expect.objectContaining({
-				command: "transparent-part",
-				outcome: "folded-initial-state",
-			}),
-		);
-	});
+			expect(renderState.translucency).toBeGreaterThan(0);
+			expect(renderState.translucency).toBeLessThan(1);
+			expect(observations()).toContainEqual(
+				expect.objectContaining({
+					command: kind,
+					outcome: "folded-initial-state",
+				}),
+			);
+		},
+	);
 
 	it("produces identical hook and effect outcomes for one large accepted step or smaller steps", () => {
 		const largeEffects = new EffectSystem();
@@ -841,23 +844,22 @@ function animationWithTransparency(): PreparedAnimation {
 	};
 }
 
-function animationWithInitialTransparency(): PreparedAnimation {
-	const animation = testAnimation(Vec3.zero());
-	return {
-		...animation,
-		hooks: [
-			{
-				authoredOrder: 0,
-				direction: "both",
-				durationSeconds: 1,
-				end: 1,
-				frameIndex: 0,
-				kind: "transparent-part",
-				partIndex: 0,
-				start: 0,
-			},
-		],
+function animationWithInitialTransparency(
+	kind: "transparent" | "transparent-part",
+): PreparedAnimation {
+	const values = {
+		authoredOrder: 0,
+		direction: "both" as const,
+		durationSeconds: 1,
+		end: 1,
+		frameIndex: 0,
+		start: 0,
 	};
+	const hook: DecodedAnimationHook =
+		kind === "transparent-part"
+			? { ...values, kind, partIndex: 0 }
+			: { ...values, kind };
+	return { ...testAnimation(Vec3.zero()), hooks: [hook] };
 }
 
 describe("independent gesture and locomotion playback", () => {

@@ -777,14 +777,10 @@ export class DynamicEntitySystem<
 		return this.#modelRoots.get(nodeId) ?? null;
 	}
 
-	/** NoDraw hides model parts, not their emitters. */
+	/** Hidden and NoDraw suppress meshes; authored emitters retain their own spatial admission. */
 	canRenderParticles(nodeId: SceneNodeId): boolean {
 		const entity = this.#entities.get(nodeId);
-		return (
-			entity !== undefined &&
-			entity.renderable.kind !== "preparing" &&
-			!entity.presentationState.hidden
-		);
+		return entity !== undefined && entity.renderable.kind !== "preparing";
 	}
 
 	/** Cold attachment lookup; ordinary mesh parts need no scene node or per-frame scene copy. */
@@ -1281,6 +1277,7 @@ export class DynamicEntitySystem<
 			// and cannot be sized from static content.
 			this.#effects.applyObjectTranslucency(nodeId, state.translucency);
 		}
+		this.#effects.setCloaked(nodeId, state.cloaked);
 		entity.presentationState = state;
 	}
 
@@ -1723,9 +1720,7 @@ export class DynamicEntitySystem<
 				this.#effects.install(
 					entity.rootNodeId,
 					result.effectPartCount,
-					entity.presentationState.cloaked
-						? 0
-						: entity.presentationState.translucency,
+					entity.presentationState,
 				);
 			}
 			// Transfer leases only after every fallible installation succeeds. Rollback still owns
@@ -1856,10 +1851,8 @@ export class DynamicEntitySystem<
 			if (!transform || !sampledRenderState) {
 				throw new Error("Validated dynamic sample became incomplete.");
 			}
-			// Cloaking suppresses translucency hooks, not independent texture rates.
-			part.renderState = entity.presentationState.cloaked
-				? { ...sampledRenderState, translucency: part.renderState.translucency }
-				: sampledRenderState;
+			// Effect ownership admits material writes, including cloak behavior, before publication.
+			part.renderState = sampledRenderState;
 			composeObjectPartTransform(
 				transform,
 				entity.rootScale,

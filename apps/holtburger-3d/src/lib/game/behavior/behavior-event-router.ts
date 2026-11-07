@@ -101,14 +101,14 @@ export interface EffectCommandPort {
 		>,
 	): void;
 	applySetOmega(target: BehaviorTarget, omega: Vec3Like): void;
-	applyTransparentPart(
+	/** Both translucency targets share ordering and the producer's replay clock domain. */
+	applyTranslucency(
 		target: BehaviorTarget,
-		values: {
-			readonly partIndex: number;
-			readonly start: number;
-			readonly end: number;
-			readonly durationSeconds: number;
-		},
+		command: Extract<
+			PreparedBehaviorCommand,
+			{ kind: "transparent" | "transparent-part" }
+		>,
+		mode: BehaviorDispatchMode,
 	): void;
 }
 
@@ -268,11 +268,11 @@ export class BehaviorEventRouter {
 				this.#consumers.effects.applySetOmega(target, command.omega);
 				return mode === "initial-state" ? "folded-initial-state" : "executed";
 
+			case "transparent":
 			case "transparent-part":
-				// The consumer does not branch on mode: a ramp is persistent state either way, and the
-				// remaining replay steps advance it to where it should be now. Only the recorded
-				// outcome distinguishes replay from live execution.
-				this.#consumers.effects.applyTransparentPart(target, command);
+				// Both producers share persistent effect state. The mode selects the activation
+				// clock domain: replay folds one owner's history, while live insertion uses wall time.
+				this.#consumers.effects.applyTranslucency(target, command, mode);
 				return mode === "initial-state" ? "folded-initial-state" : "executed";
 
 			case "call-pes":

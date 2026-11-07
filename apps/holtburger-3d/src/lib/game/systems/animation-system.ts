@@ -22,13 +22,13 @@ import type { Mat4 } from "../math/types";
 import type { ArticulatedPose } from "./components";
 import {
 	BEHAVIOR_STEP_SECONDS,
+	BEHAVIOR_CLOCK_EPSILON_SECONDS,
 	EffectSystem,
 	type EffectPresentationSample,
 } from "./effect-system";
 
 const DISCONTINUITY_SECONDS = 2;
-/** Absorbs timestamp subtraction noise without admitting a materially early behavior step. */
-const CLOCK_EPSILON_SECONDS = 1e-9;
+
 const advancedAnimationFrameBrand: unique symbol = Symbol(
 	"advanced-animation-frame",
 );
@@ -672,7 +672,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		record.fractionalSeconds += elapsed;
 		let semanticStepCount = 0;
 		while (
-			record.fractionalSeconds + CLOCK_EPSILON_SECONDS >=
+			record.fractionalSeconds + BEHAVIOR_CLOCK_EPSILON_SECONDS >=
 			BEHAVIOR_STEP_SECONDS
 		) {
 			semanticStepCount += 1;
@@ -736,11 +736,15 @@ export class AnimationSystem<TOwnerId extends string> {
 			target,
 		};
 		let remainingSeconds = phaseSeconds;
-		while (remainingSeconds + CLOCK_EPSILON_SECONDS >= BEHAVIOR_STEP_SECONDS) {
+		while (
+			remainingSeconds + BEHAVIOR_CLOCK_EPSILON_SECONDS >=
+			BEHAVIOR_STEP_SECONDS
+		) {
 			this.#advanceSemanticStep(nodeId, record, "initial-state");
 			remainingSeconds = Math.max(0, remainingSeconds - BEHAVIOR_STEP_SECONDS);
 		}
 		record.fractionalSeconds = remainingSeconds;
+		if (phaseSeconds > 0) this.#effects.finishReplay(nodeId, remainingSeconds);
 		return record;
 	}
 

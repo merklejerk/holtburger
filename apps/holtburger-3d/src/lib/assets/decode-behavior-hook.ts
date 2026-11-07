@@ -43,6 +43,14 @@ export const behaviorHookPayloadSchema = z.discriminatedUnion("kind", [
 		.strict(),
 	z
 		.object({
+			kind: z.literal("transparent"),
+			start: finiteNumber,
+			end: finiteNumber,
+			durationSeconds: finiteNumber,
+		})
+		.strict(),
+	z
+		.object({
 			durationSeconds: finiteNumber,
 			end: finiteNumber,
 			kind: z.literal("transparent-part"),
@@ -130,6 +138,7 @@ const TYPED_PAYLOAD_KIND_BY_HOOK_TYPE = new Map<
 	[14, "destroy-particle"],
 	[15, "stop-particle"],
 	[19, "call-pes"],
+	[20, "transparent"],
 	[21, "sound-tweaked"],
 	[22, "set-omega"],
 	[23, "texture-velocity"],
@@ -197,6 +206,13 @@ export function decodeBehaviorCommand(
 				kind: "transparent-part",
 				partIndex: payload.partIndex,
 				start: payload.start,
+			};
+		case "transparent":
+			return {
+				kind: "transparent",
+				start: payload.start,
+				end: payload.end,
+				durationSeconds: payload.durationSeconds,
 			};
 		case "scale":
 			return {

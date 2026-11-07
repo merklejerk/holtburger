@@ -2,7 +2,8 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client collision fix:** Objects whose appearance data names a part their model does not have no longer lose collision. The out-of-range substitution is now skipped, as in retail, and the remaining valid parts and the model's collision volumes are kept. Previously, such an invalid part index could cause the whole object's collision definition to be rejected. Material appearance, selection outlines and collision now resolve parts the same way. Validated with automated unit tests only; no live native or visual acceptance was performed.
+- **3D client, Windows graphics:** The launcher's App settings now include **Use GPU compositing**. On Windows it is off by default, as a workaround for reports of intermittent transparent or missing patches in the launcher, character selection and game UI on some NVIDIA laptops. macOS and Linux keep it on. Changing it requires **Save and restart**, and **Use defaults** restores your platform's choices. Existing saved settings keep your graphics backend and VSync choices and receive the platform default for compositing. This is a workaround based on user reports. The flicker has not been independently reproduced, and no native or visual acceptance was performed.
+- **Terminal and 3D clients, world state:** Object physics-state updates are now applied only to the matching object instance and only when they are newer than the current state. Duplicate, stale and out-of-order updates are ignored. Updates that arrive before their object exists, or for a future instance, are held and replayed when the object appears. They are discarded if the object is removed or expires. This is validated with automated unit tests only. It does not address the reported delay before the player's body appears after portal travel.
 
 ## Known issues
 

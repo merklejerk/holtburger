@@ -306,15 +306,25 @@ export class PortalWindowArena {
 		const offsetZ =
 			-(aperture.landblockCoordinates.y - projection.anchorCoordinates.y) *
 			OUTDOOR_LANDBLOCK_WORLD_SIZE;
+		const nearPlane = volume.clippingPlanes[0];
+		let beyondNearPlane = true;
 		for (let vertex = 0; vertex < vertexCount; vertex += 1) {
 			const source = vertex * 3;
 			chargeNear(meter, "apertureVertexReadCount", 1);
 			chargeNear(meter, "createdVertexCount", 1);
-			this.#apertureX[vertex] = aperture.aperture.vertices[source]! + offsetX;
-			this.#apertureY[vertex] = aperture.aperture.vertices[source + 1]!;
-			this.#apertureZ[vertex] =
-				aperture.aperture.vertices[source + 2]! + offsetZ;
+			const x = aperture.aperture.vertices[source]! + offsetX;
+			const y = aperture.aperture.vertices[source + 1]!;
+			const z = aperture.aperture.vertices[source + 2]! + offsetZ;
+			this.#apertureX[vertex] = x;
+			this.#apertureY[vertex] = y;
+			this.#apertureZ[vertex] = z;
+			chargeNear(meter, "vertexPlaneTestCount", 1);
+			if (spatialPlaneDistance(nearPlane, x, y, z) <= NEAR_CLIP_CONTACT_EPSILON)
+				beyondNearPlane = false;
 		}
+		// Every triangle lies outside the finite near pyramid when all its vertices
+		// lie beyond the near cap. Contact-band and straddling apertures still need clipping.
+		if (beyondNearPlane) return false;
 		const indices = aperture.aperture.indices;
 		for (let index = 0; index < indices.length; index += 3) {
 			chargeNear(meter, "triangleTestCount", 1);

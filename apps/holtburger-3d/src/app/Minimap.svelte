@@ -29,6 +29,15 @@
 		return `M 0 0 L ${-x} ${y} A ${CONE_LENGTH} ${CONE_LENGTH} 0 0 1 ${x} ${y} Z`;
 	}
 
+	/** Reapplying identical SVG/ARIA attributes still schedules browser mutation work. */
+	function setAttributeIfChanged(
+		element: Element,
+		name: string,
+		value: string,
+	): void {
+		if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+	}
+
 	/** Controlled-character arrow dimensions in canvas pixels. */
 	const CONTROLLED_ARROW_LENGTH = 11;
 	const CONTROLLED_ARROW_HALF_WIDTH = 5;
@@ -231,7 +240,8 @@
 		overlay: ProjectedMapView | null,
 	): void {
 		const display = frame.waypoint;
-		waypointRow.hidden = display === null;
+		const hidden = display === null;
+		if (waypointRow.hidden !== hidden) waypointRow.hidden = hidden;
 		const text =
 			display === null
 				? ""
@@ -240,34 +250,40 @@
 					: display.target.label;
 		if (waypointReadout.textContent !== text)
 			waypointReadout.textContent = text;
-		waypointRow.title =
+		const title =
 			display === null
 				? "Clear waypoint"
 				: `Clear waypoint: ${display.target.label}`;
-		waypointRow.setAttribute(
+		if (waypointRow.title !== title) waypointRow.title = title;
+		setAttributeIfChanged(
+			waypointRow,
 			"aria-description",
 			display === null ? "Waypoint" : text,
 		);
-		waypointPointer.style.display = "none";
-		waypointMarker.style.display = "none";
-		if (display === null || display.kind === "paused" || overlay === null)
-			return;
-		const point = projectMapWorldPoint(
-			overlay.worldToClip,
-			overlay.view,
-			display.target.position.x,
-			display.target.position.z,
-		);
+		const point =
+			display === null || display.kind === "paused" || overlay === null
+				? null
+				: projectMapWorldPoint(
+						overlay.worldToClip,
+						overlay.view,
+						display.target.position.x,
+						display.target.position.z,
+					);
 		// Geographic visibility belongs to the viewed map, including its current pan and zoom.
-		if (Math.hypot(point[0], point[1]) <= 1) {
-			waypointMarker.style.display = "";
-			waypointMarker.setAttribute(
+		const showMarker = point !== null && Math.hypot(point[0], point[1]) <= 1;
+		const showPointer =
+			point !== null && !showMarker && display?.kind === "guiding";
+		waypointMarker.style.display = showMarker ? "" : "none";
+		waypointPointer.style.display = showPointer ? "" : "none";
+		if (showMarker) {
+			setAttributeIfChanged(
+				waypointMarker,
 				"transform",
 				`translate(${point[0] * DISC_RADIUS} ${-point[1] * DISC_RADIUS})`,
 			);
-		} else if (display.kind === "guiding") {
-			waypointPointer.style.display = "";
-			waypointPointer.setAttribute(
+		} else if (showPointer) {
+			setAttributeIfChanged(
+				waypointPointer,
 				"transform",
 				`rotate(${(display.relativeBearingRadians * 180) / Math.PI})`,
 			);
@@ -732,35 +748,40 @@
 			subjectClip !== null && Math.hypot(subjectClip[0], subjectClip[1]) <= 1;
 		if (coneElement) {
 			coneElement.style.display = subjectInsideDisc ? "" : "none";
-			coneElement.setAttribute("d", conePath(frame.cameraFovRadians));
+			setAttributeIfChanged(coneElement, "d", conePath(frame.cameraFovRadians));
 			const rotation = anchor
 				? ((frame.cameraHeadingRadians - anchor.headingRadians) * 180) / Math.PI
 				: 0;
-			coneElement.setAttribute(
+			setAttributeIfChanged(
+				coneElement,
 				"transform",
 				`translate(${subjectX} ${subjectY}) rotate(${rotation})`,
 			);
 		}
 		if (northGroup) {
 			const rotation = anchor ? (-anchor.headingRadians * 180) / Math.PI : 0;
-			northGroup.setAttribute("transform", `rotate(${rotation})`);
+			setAttributeIfChanged(northGroup, "transform", `rotate(${rotation})`);
 		}
 		if (freeAnchorElement) {
 			freeAnchorElement.style.display =
 				frame.subject?.kind === "free-camera" ? "" : "none";
-			freeAnchorElement.setAttribute("cx", String(subjectX));
-			freeAnchorElement.setAttribute("cy", String(subjectY));
+			setAttributeIfChanged(freeAnchorElement, "cx", String(subjectX));
+			setAttributeIfChanged(freeAnchorElement, "cy", String(subjectY));
 		}
 		if (coordinatesElement) {
-			coordinatesElement.disabled = overlay === null;
+			const disabled = overlay === null;
+			if (coordinatesElement.disabled !== disabled)
+				coordinatesElement.disabled = disabled;
 			const coordinates = overlay
 				? formatWorldMapCoordinates({
 						x: overlay.view.center.worldX,
 						z: overlay.view.center.worldZ,
 					})
 				: "";
-			coordinatesElement.textContent = coordinates;
-			coordinatesElement.setAttribute(
+			if (coordinatesElement.textContent !== coordinates)
+				coordinatesElement.textContent = coordinates;
+			setAttributeIfChanged(
+				coordinatesElement,
 				"aria-label",
 				coordinates === ""
 					? "Copy minimap coordinates"

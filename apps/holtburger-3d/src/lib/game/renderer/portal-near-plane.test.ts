@@ -1,9 +1,11 @@
 import { sceneVec3 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
 import { Mat4, Quat, Vec3 } from "../math/types";
+import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
 import type { Camera } from "../runtime/types";
 import type { PlanarAperture } from "../scene/planar-aperture";
 import {
+	NEAR_CLIP_CONTACT_EPSILON,
 	apertureIntersectsCameraNearClipVolume,
 	createCameraNearClipVolume,
 } from "./portal-near-plane";
@@ -233,6 +235,49 @@ describe("finite portal near-clip-volume intersection", () => {
 					0,
 				),
 			).toBe(apertureIntersectsCameraNearClipVolume(near, aperture));
+		}
+	});
+
+	it("preserves near-cap contact and landblock offsets when rejecting distant apertures", () => {
+		for (const landblockX of [0, 1]) {
+			const near = createCameraNearClipVolume(
+				CAMERA,
+				{
+					position: new Vec3(landblockX * OUTDOOR_LANDBLOCK_WORLD_SIZE, 0, 0),
+					rotation: Quat.identity(),
+				},
+				1,
+			);
+			for (const [offset, expected] of [
+				[-NEAR_CLIP_CONTACT_EPSILON, true],
+				[0, true],
+				[NEAR_CLIP_CONTACT_EPSILON / 2, true],
+				[NEAR_CLIP_CONTACT_EPSILON * 2, false],
+			] as const) {
+				const depth = -CAMERA.near - offset;
+				const aperture = triangleApertureFromPoints([
+					new Vec3(-0.2, -0.2, depth),
+					new Vec3(0.2, -0.2, depth),
+					new Vec3(0, 0.2, depth),
+				]);
+				const arena = nearClassifierArena();
+				arena.reset();
+				expect(
+					arena.apertureIntersectsNearClip(
+						near,
+						preparePortalApertureProjectionInput({
+							aperture,
+							landblockCoordinates: { x: landblockX, y: 0 },
+						}),
+						{
+							anchorCoordinates: { x: 0, y: 0 },
+							clipFromAnchor: Mat4.identity(),
+						},
+						{ consume: () => {} },
+						0,
+					),
+				).toBe(expected);
+			}
 		}
 	});
 });

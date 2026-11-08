@@ -702,9 +702,11 @@ export class ClientGameplayPresentation {
 						this.#selectedEntityGuid,
 					) ?? null);
 		const selected = state?.kind === "realized" ? state.frame : null;
+		// An absent target needs no projection or synchronous browser layout read.
+		if (view === null || selected === null) return null;
 		const cssWidth = this.#canvas.clientWidth;
 		const cssHeight = this.#canvas.clientHeight;
-		if (view === null || selected === null || cssWidth <= 0 || cssHeight <= 0) {
+		if (cssWidth <= 0 || cssHeight <= 0) {
 			return null;
 		}
 		return projectClientTargetIndicator({

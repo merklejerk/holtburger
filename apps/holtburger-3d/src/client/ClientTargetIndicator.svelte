@@ -18,10 +18,9 @@
 		let frameHandle = 0;
 		const update = (): void => {
 			const frame = readFrame();
-			if (frame === null) {
-				marker.hidden = true;
-			} else {
-				marker.hidden = false;
+			const hidden = frame === null;
+			if (marker.hidden !== hidden) marker.hidden = hidden;
+			if (frame !== null) {
 				marker.style.transform = `translate3d(${frame.x}px, ${frame.y}px, 0) translate(-50%, -50%) rotate(${frame.rotationRadians}rad)`;
 			}
 			frameHandle = requestAnimationFrame(update);

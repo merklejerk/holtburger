@@ -19,8 +19,10 @@
 				marker.dataset.combatType = frame.combatType;
 				edgeMarker.dataset.combatType = frame.combatType;
 			}
-			marker.hidden = frame?.kind !== "reticle";
-			edgeMarker.hidden = frame?.kind !== "edge";
+			const reticleHidden = frame?.kind !== "reticle";
+			const edgeHidden = frame?.kind !== "edge";
+			if (marker.hidden !== reticleHidden) marker.hidden = reticleHidden;
+			if (edgeMarker.hidden !== edgeHidden) edgeMarker.hidden = edgeHidden;
 			if (frame?.kind === "reticle")
 				marker.style.transform = `translate3d(${frame.x}px, ${frame.y}px, 0)`;
 			if (frame?.kind === "edge")

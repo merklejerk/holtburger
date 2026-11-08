@@ -15,6 +15,7 @@ const DEGENERATE_PLANE_SINE = Number.EPSILON * 64;
 
 /** Finite pyramid between the camera eye and its ordered near-plane corners. */
 export interface CameraNearClipVolume {
+	/** Near cap first, then the four side planes; the arena rejects against the cap before clipping. */
 	readonly clippingPlanes: readonly [
 		PlanarAperturePlane,
 		PlanarAperturePlane,

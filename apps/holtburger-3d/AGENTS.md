@@ -145,6 +145,27 @@ Electron app launchers follow the same policy; use
 `npm run dev:client -- --vite-port 1432` for an explicit client port. In client
 mode, `--port` continues to mean the ACE server port.
 
+### Keep Verification Scoped
+
+`npm run test:ts` runs the Vitest regression suite. `harness:browser` runs
+diagnostic probes, some with scripted assertions against production UI. Report
+which kind ran; a broad harness probe is not automatically an acceptance gate
+for every change.
+
+- Choose the smallest runtime check that verifies the changed behavior. Focused
+  harness scenarios, live-client measurements, and visual inspection can provide
+  that evidence without running an entire HUD probe.
+- When a probe fails, inspect whether the failure involves the changed behavior
+  before expanding the investigation. If attribution needs a baseline, compare
+  equivalent commands and settings, including screenshot/profiling options.
+- Record unrelated or inconclusive probe failures and return to the requested
+  task. Do not repair unrelated fixtures, input scenarios, or probe infrastructure
+  merely to obtain a passing broad run. Such repair needs its own task scope.
+- If a failure prevents verification of the changed behavior, isolate that
+  behavior in a focused check. Preserve meaningful assertions and report the
+  coverage actually completed; do not claim a full probe passed or call a failure
+  pre-existing without evidence.
+
 ### Renderer Profiling
 
 The Explorer Frame panel exposes explicit renderer CPU/GPU profiling. The

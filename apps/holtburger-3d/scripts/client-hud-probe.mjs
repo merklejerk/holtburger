@@ -2602,8 +2602,8 @@ function assertClientHudHarness(evidence) {
 		JSON.stringify(evidence.minimapSelected.selectionEvents) !==
 			JSON.stringify([7, null, 7]) ||
 		evidence.minimapSelected.selectedGuid !== 7 ||
-		evidence.minimapSelected.minimapOverlayArcCalls <=
-			evidence.minimapCleared.minimapOverlayArcCalls
+		evidence.minimapSelected.minimapOverlayCircleCalls <=
+			evidence.minimapCleared.minimapOverlayCircleCalls
 	) {
 		throw new Error(
 			"Client HUD minimap blip click did not select through the shared owner and draw its ring.",
@@ -2659,76 +2659,77 @@ function assertClientHudHarness(evidence) {
 		);
 	}
 	if (
-		evidence.runtime.minimapOverlayArcCalls <= 0 ||
+		evidence.runtime.minimapOverlayCircleCalls <= 0 ||
 		evidence.runtime.minimapOverlayInkPixels <= 0
 	) {
 		throw new Error("Client HUD minimap did not draw its initial breadcrumb.");
 	}
 	if (
-		evidence.breadcrumbBelowSpacing.minimapOverlayArcCalls !==
-		evidence.runtime.minimapOverlayArcCalls
+		evidence.breadcrumbBelowSpacing.minimapOverlayCircleCalls !==
+		evidence.runtime.minimapOverlayCircleCalls
 	) {
 		throw new Error(
 			"Client HUD minimap recorded movement below its breadcrumb spacing.",
 		);
 	}
 	if (
-		evidence.breadcrumbOutdoorSampled.minimapOverlayArcCalls <=
-		evidence.breadcrumbBelowSpacing.minimapOverlayArcCalls
+		evidence.breadcrumbOutdoorSampled.minimapOverlayCircleCalls <=
+		evidence.breadcrumbBelowSpacing.minimapOverlayCircleCalls
 	) {
 		throw new Error(
 			"Client HUD minimap did not record outdoor breadcrumb travel at its spacing.",
 		);
 	}
 	if (
-		evidence.breadcrumbIndoorSampled.minimapOverlayArcCalls <=
-		evidence.breadcrumbOutdoorSampled.minimapOverlayArcCalls
+		evidence.breadcrumbIndoorSampled.minimapOverlayCircleCalls <=
+		evidence.breadcrumbOutdoorSampled.minimapOverlayCircleCalls
 	) {
 		throw new Error(
 			"Client HUD minimap did not apply denser indoor breadcrumb spacing.",
 		);
 	}
 	if (
-		evidence.breadcrumbDoorwayTravel.minimapOverlayArcCalls <=
-		evidence.breadcrumbIndoorSampled.minimapOverlayArcCalls
+		evidence.breadcrumbDoorwayTravel.minimapOverlayCircleCalls <=
+		evidence.breadcrumbIndoorSampled.minimapOverlayCircleCalls
 	) {
 		throw new Error(
 			"Client HUD minimap discarded breadcrumb history at an ordinary doorway transition.",
 		);
 	}
 	if (
-		evidence.breadcrumbRevisited.minimapOverlayArcCalls >=
-		evidence.breadcrumbDoorwayTravel.minimapOverlayArcCalls
+		evidence.breadcrumbRevisited.minimapOverlayCircleCalls >=
+		evidence.breadcrumbDoorwayTravel.minimapOverlayCircleCalls
 	) {
 		throw new Error(
 			"Client HUD minimap consumed another breadcrumb slot when revisiting covered space.",
 		);
 	}
 	if (
-		evidence.breadcrumbAfterDiscontinuity.minimapOverlayArcCalls >=
-		evidence.breadcrumbRevisited.minimapOverlayArcCalls
+		evidence.breadcrumbAfterDiscontinuity.minimapOverlayCircleCalls >=
+		evidence.breadcrumbRevisited.minimapOverlayCircleCalls
 	) {
 		throw new Error(
 			"Client HUD minimap retained old breadcrumb history after a discontinuity.",
 		);
 	}
 	if (
-		evidence.breadcrumbAfterIdentityChange.minimapOverlayArcCalls !==
-		evidence.breadcrumbAfterDiscontinuity.minimapOverlayArcCalls
+		evidence.breadcrumbAfterIdentityChange.minimapOverlayCircleCalls !==
+		evidence.breadcrumbAfterDiscontinuity.minimapOverlayCircleCalls
 	) {
 		throw new Error(
 			"Client HUD minimap carried breadcrumb history across controlled identities.",
 		);
 	}
 	if (
-		evidence.breadcrumbWithoutControlledSubject.minimapOverlayArcCalls !== 0 ||
+		evidence.breadcrumbWithoutControlledSubject.minimapOverlayCircleCalls !==
+			0 ||
 		evidence.breadcrumbWithoutControlledSubject.minimapOverlayInkPixels !== 0
 	) {
 		throw new Error(
 			"Client HUD minimap retained breadcrumbs without a controlled subject.",
 		);
 	}
-	if (evidence.breadcrumbSubjectRestored.minimapOverlayArcCalls <= 0) {
+	if (evidence.breadcrumbSubjectRestored.minimapOverlayCircleCalls <= 0) {
 		throw new Error(
 			"Client HUD minimap did not begin a fresh trail when control returned.",
 		);
@@ -2763,8 +2764,8 @@ function assertClientHudHarness(evidence) {
 		);
 	}
 	if (
-		evidence.minimapPannedWithBreadcrumb.minimapOverlayArcCalls <=
-		evidence.minimapPanned.minimapOverlayArcCalls
+		evidence.minimapPannedWithBreadcrumb.minimapOverlayCircleCalls <=
+		evidence.minimapPanned.minimapOverlayCircleCalls
 	) {
 		throw new Error(
 			"Client HUD minimap stopped recording breadcrumbs while panned.",

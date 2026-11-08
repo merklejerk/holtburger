@@ -70,6 +70,29 @@ describe("frame-rate sampler", () => {
 		expect(rates?.uncapped).toBe(rates?.capped);
 	});
 
+	it.each([
+		["every refresh", 1],
+		["every second refresh", 2],
+	])("reports jittery delivered cadence at %s", (_label, refreshStride) => {
+		const displayIntervalMs = 10;
+		const callbackDelayMs = displayIntervalMs / 2;
+		const sampler = createFrameRateSampler(1_000);
+		for (let index = 0; index <= 2_000; index += 1) {
+			const animationFrameTimeMs = index * displayIntervalMs * refreshStride;
+			sampler.recordFrame({
+				animationFrameTimeMs,
+				startedAtMs:
+					animationFrameTimeMs + (index % 2 === 0 ? 0 : callbackDelayMs),
+				workMs: 1,
+			});
+		}
+
+		expect(sampler.readFrameRates()?.capped).toBeCloseTo(
+			1_000 / (displayIntervalMs * refreshStride),
+			0,
+		);
+	});
+
 	it("rejects invalid configuration, duration, and timestamps", () => {
 		expect(() => createFrameRateSampler(Number.NaN)).toThrow(/must be finite/);
 		expect(() => createFrameRateSampler(0)).toThrow(/must be positive/);

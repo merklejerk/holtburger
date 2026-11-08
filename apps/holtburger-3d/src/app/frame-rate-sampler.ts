@@ -32,9 +32,10 @@ export interface FrameRateSampler {
 const REFRESH_INTERVAL_SAMPLE_COUNT = 30;
 
 /** Smoothed inputs from which both displayed rates are derived. */
-interface SmoothedFrameTimes {
+interface SmoothedFrameMetrics {
 	readonly workMs: number;
-	readonly intervalMs: number;
+	/** Elapsed-time-weighted delivered frame rate. */
+	readonly framesPerSecond: number;
 	readonly excessDelayMs: number;
 }
 
@@ -50,7 +51,7 @@ export function createFrameRateSampler(emaWindowMs: number): FrameRateSampler {
 		throw new Error("Frame-rate EMA window must be positive.");
 	}
 	let previousSample: FrameRateSample | null = null;
-	let smoothedTimes: SmoothedFrameTimes | null = null;
+	let smoothedMetrics: SmoothedFrameMetrics | null = null;
 	const refreshIntervals = new Float64Array(REFRESH_INTERVAL_SAMPLE_COUNT);
 	let refreshIntervalCount = 0;
 	let nextRefreshIntervalIndex = 0;
@@ -118,20 +119,27 @@ export function createFrameRateSampler(emaWindowMs: number): FrameRateSampler {
 			// excess is charged to the uncapped estimate as otherwise-hidden main-thread work.
 			const excessDelayMs = Math.max(0, frameIntervalMs - refreshIntervalMs);
 			const alpha = 1 - Math.exp(-frameIntervalMs / emaWindowMs);
+			const framesPerSecond = 1_000 / Math.max(frameIntervalMs, 0.001);
 
-			const previousTimes = smoothedTimes;
-			if (previousTimes === null) {
-				smoothedTimes = {
+			const previousMetrics = smoothedMetrics;
+			if (previousMetrics === null) {
+				smoothedMetrics = {
 					workMs: smooth(previousSample.workMs, workMs, alpha),
-					intervalMs: frameIntervalMs,
+					framesPerSecond,
 					excessDelayMs,
 				};
 			} else {
-				smoothedTimes = {
-					workMs: smooth(previousTimes.workMs, workMs, alpha),
-					intervalMs: smooth(previousTimes.intervalMs, frameIntervalMs, alpha),
+				smoothedMetrics = {
+					workMs: smooth(previousMetrics.workMs, workMs, alpha),
+					// Elapsed-time weighting belongs on the rate. Applying it to intervals before
+					// taking their reciprocal counts long gaps twice and understates jittery cadence.
+					framesPerSecond: smooth(
+						previousMetrics.framesPerSecond,
+						framesPerSecond,
+						alpha,
+					),
 					excessDelayMs: smooth(
-						previousTimes.excessDelayMs,
+						previousMetrics.excessDelayMs,
 						excessDelayMs,
 						alpha,
 					),
@@ -140,11 +148,11 @@ export function createFrameRateSampler(emaWindowMs: number): FrameRateSampler {
 			previousSample = sample;
 		},
 		readFrameRates(): FrameRates | null {
-			if (smoothedTimes === null) return null;
-			const capped = 1_000 / Math.max(smoothedTimes.intervalMs, 0.001);
+			if (smoothedMetrics === null) return null;
+			const capped = smoothedMetrics.framesPerSecond;
 			const estimatedCapacity =
 				1_000 /
-				Math.max(smoothedTimes.workMs + smoothedTimes.excessDelayMs, 0.001);
+				Math.max(smoothedMetrics.workMs + smoothedMetrics.excessDelayMs, 0.001);
 			return {
 				capped,
 				uncapped: Math.max(capped, estimatedCapacity),

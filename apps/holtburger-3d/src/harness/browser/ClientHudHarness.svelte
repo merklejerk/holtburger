@@ -850,10 +850,10 @@
 		readonly minimapConeVisible: boolean;
 		/** Whether detached-map chrome is currently available. */
 		readonly minimapResetVisible: boolean;
-		/** Non-transparent backing pixels in the Canvas2D breadcrumb/blip overlay. */
+		/** Non-transparent backing pixels in the minimap overlay. */
 		readonly minimapOverlayInkPixels: number;
-		/** Last overlay arc count; this fixture's null map source leaves breadcrumbs as its only arcs. */
-		readonly minimapOverlayArcCalls: number;
+		/** Full-circle overlay draws, excluding the camera field-of-view sector. */
+		readonly minimapOverlayCircleCalls: number;
 		/** Bounds used to drive the actual minimap overlay pointer handlers. */
 		readonly minimapOverlayCanvas: ClientHudHarnessRectangle;
 		readonly moveHandles: Readonly<Record<string, ClientHudHarnessRectangle>>;
@@ -4156,7 +4156,17 @@
 	let minimapSubjectWorldZ = -200;
 	let minimapSubjectGuid: number | null = 1;
 	let minimapSubjectIndoor = false;
-	let readMinimapOverlayArcCalls = (): number => 0;
+	/** Canvas operations observed in one completed minimap overlay frame. */
+	interface MinimapOverlayDraw {
+		/** Full-circle marker and breadcrumb draws in the last overlay frame. */
+		readonly circleCalls: number;
+		/** Whether that frame painted a camera field-of-view sector. */
+		readonly coneVisible: boolean;
+	}
+	let readMinimapOverlayDraw = (): MinimapOverlayDraw => ({
+		circleCalls: 0,
+		coneVisible: false,
+	});
 
 	/** Keep the keyboard fixture's two submitted entries regardless of product tuning. */
 	const chatHistoryLimit = 2;
@@ -4596,6 +4606,7 @@
 		if (gameCanvas === null || minimapOverlayCanvas === null) {
 			throw new Error("Client HUD interaction canvases are unavailable.");
 		}
+		const minimapOverlay = readMinimapOverlayDraw();
 		return {
 			gameCanvas: rectangle(gameCanvas),
 			gameCanvasCursor: getComputedStyle(gameCanvas).cursor,
@@ -4604,11 +4615,9 @@
 			minimapCoordinates:
 				document.querySelector<HTMLElement>(".minimap-coordinates")
 					?.textContent ?? "",
-			minimapConeVisible:
-				document.querySelector<SVGPathElement>(".minimap-cone")?.style
-					.display !== "none",
+			minimapConeVisible: minimapOverlay.coneVisible,
 			minimapResetVisible: document.querySelector(".minimap-reset") !== null,
-			minimapOverlayArcCalls: readMinimapOverlayArcCalls(),
+			minimapOverlayCircleCalls: minimapOverlay.circleCalls,
 			minimapOverlayInkPixels: countMinimapOverlayInkPixels(),
 			minimapOverlayCanvas: rectangle(minimapOverlayCanvas),
 			moveHandles,
@@ -4679,8 +4688,8 @@
 	}
 
 	/** Observe final Canvas operations without adding diagnostic state to production components. */
-	function observeMinimapOverlayArcCalls(): {
-		readonly read: () => number;
+	function observeMinimapOverlayDraw(): {
+		readonly read: () => MinimapOverlayDraw;
 		readonly restore: () => void;
 	} {
 		const canvas = document.querySelector<HTMLCanvasElement>(
@@ -4690,7 +4699,8 @@
 		if (!canvas || !context) {
 			throw new Error("Client HUD minimap overlay is unavailable.");
 		}
-		let arcCalls = 0;
+		let circleCalls = 0;
+		let coneVisible = false;
 		const originalArc = context.arc;
 		const originalClearRect = context.clearRect;
 		context.arc = (
@@ -4701,7 +4711,8 @@
 			endAngle: number,
 			counterclockwise?: boolean,
 		): void => {
-			arcCalls += 1;
+			if (Math.abs(endAngle - startAngle) >= Math.PI * 2) circleCalls += 1;
+			else coneVisible = true;
 			originalArc.call(
 				context,
 				x,
@@ -4718,11 +4729,12 @@
 			width: number,
 			height: number,
 		) => {
-			arcCalls = 0;
+			circleCalls = 0;
+			coneVisible = false;
 			originalClearRect.call(context, x, y, width, height);
 		};
 		return {
-			read: () => arcCalls,
+			read: () => ({ circleCalls, coneVisible }),
 			restore: () => {
 				context.arc = originalArc;
 				context.clearRect = originalClearRect;
@@ -5232,8 +5244,8 @@
 			},
 		);
 		const sessionStarted = interactionLifecycle.start();
-		const overlayObservation = observeMinimapOverlayArcCalls();
-		readMinimapOverlayArcCalls = overlayObservation.read;
+		const overlayObservation = observeMinimapOverlayDraw();
+		readMinimapOverlayDraw = overlayObservation.read;
 		const harnessGlobal = globalThis as typeof globalThis & {
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
@@ -6403,7 +6415,7 @@
 			emoteController.destroy();
 			interactionLifecycle.stop();
 			overlayObservation.restore();
-			readMinimapOverlayArcCalls = () => 0;
+			readMinimapOverlayDraw = () => ({ circleCalls: 0, coneVisible: false });
 			harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = undefined;
 		};
 	});

@@ -18,16 +18,8 @@
 	 * outside its own viewBox, which is why it is the one element allowed to overflow.
 	 */
 	const CARDINAL_RADIUS = 100;
-	/** From any origin inside the disc, two radii reach every point on its rim. */
-	const CONE_LENGTH = DISC_RADIUS * 2;
-
-	/** Wedge from the subject spanning one field of view, in the compass viewBox's units. */
-	function conePath(fovRadians: number): string {
-		const half = Math.max(0.05, Math.min(Math.PI - 0.05, fovRadians)) / 2;
-		const x = Math.sin(half) * CONE_LENGTH;
-		const y = -Math.cos(half) * CONE_LENGTH;
-		return `M 0 0 L ${-x} ${y} A ${CONE_LENGTH} ${CONE_LENGTH} 0 0 1 ${x} ${y} Z`;
-	}
+	/** Translucent camera field of view, painted above map markers. */
+	const CAMERA_CONE_FILL = "rgba(230, 230, 245, 0.12)";
 
 	/** Reapplying identical SVG/ARIA attributes still schedules browser mutation work. */
 	function setAttributeIfChanged(
@@ -172,6 +164,14 @@
 		readonly view: MapViewParameters;
 	}
 
+	/** Subject projection shared by the canvas cone and SVG anchor chrome. */
+	interface ProjectedMinimapSubject {
+		/** Subject origin in the current map's clip space. */
+		readonly point: readonly [number, number];
+		/** Camera bearing relative to the subject-up map. */
+		readonly cameraBearingRadians: number;
+	}
+
 	interface Props {
 		/**
 		 * Pull every presentation-rate input in one snapshot.
@@ -301,7 +301,6 @@
 
 	let mapCanvas = $state<HTMLCanvasElement | null>(null);
 	let overlayCanvas = $state<HTMLCanvasElement | null>(null);
-	let coneElement = $state<SVGPathElement | null>(null);
 	let northGroup = $state<SVGGElement | null>(null);
 	let freeAnchorElement = $state<SVGCircleElement | null>(null);
 	let coordinatesElement = $state<HTMLButtonElement | null>(null);
@@ -421,14 +420,28 @@
 		parameters: MapViewParameters | null,
 		size: number,
 	): void {
-		if (parameters === null) {
-			drawChrome(frame, null);
+		const overlay =
+			parameters === null ? null : projectMapView(parameters, size, size);
+		const subject = frame.subject;
+		const projectedSubject: ProjectedMinimapSubject | null =
+			overlay === null || subject === null
+				? null
+				: {
+						point: projectMapWorldPoint(
+							overlay.worldToClip,
+							overlay.view,
+							subject.anchor.worldX,
+							subject.anchor.worldZ,
+						),
+						cameraBearingRadians:
+							frame.cameraHeadingRadians - subject.anchor.headingRadians,
+					};
+		drawChrome(frame, overlay, projectedSubject);
+		if (overlay === null) {
 			clearOverlayCanvas();
 			return;
 		}
-		const overlay = projectMapView(parameters, size, size);
-		drawChrome(frame, overlay);
-		drawCanvasOverlay(frame, overlay, size);
+		drawCanvasOverlay(frame, overlay, size, projectedSubject);
 	}
 
 	/** Draw only the map content that requires WebGL, subject to the 30 Hz cap. */
@@ -474,7 +487,7 @@
 	}
 
 	/**
-	 * Breadcrumbs and blips are drawn in 2D above the map rather than in its GL pass.
+	 * Breadcrumbs, blips, and the camera cone are drawn in 2D above the map rather than in its GL pass.
 	 *
 	 * They want crisp UI styling and they change for different reasons than geometry does, so
 	 * keeping them here lets a future client restyle markers without touching a shader.
@@ -483,6 +496,7 @@
 		frame: MinimapFrame,
 		overlay: ProjectedMapView,
 		size: number,
+		projectedSubject: ProjectedMinimapSubject | null,
 	): void {
 		const canvas = overlayCanvas;
 		if (!canvas) return;
@@ -591,8 +605,31 @@
 			context.stroke();
 			drawSelectedBlipRing(context, frame, blip.guid, x, y);
 		}
+		drawCameraCone(context, projectedSubject, frame.cameraFovRadians, size);
 		blipHitTargets = hitTargets;
 		reconcileBlipHover();
+	}
+
+	/** Paint the live cone into the existing overlay, avoiding frame-rate SVG layer rebuilding. */
+	function drawCameraCone(
+		context: CanvasRenderingContext2D,
+		subject: ProjectedMinimapSubject | null,
+		fovRadians: number,
+		size: number,
+	): void {
+		if (subject === null || Math.hypot(subject.point[0], subject.point[1]) > 1)
+			return;
+		const x = ((subject.point[0] + 1) * size) / 2;
+		const y = ((1 - subject.point[1]) * size) / 2;
+		const halfFov = Math.max(0.05, Math.min(Math.PI - 0.05, fovRadians)) / 2;
+		const direction = subject.cameraBearingRadians - Math.PI / 2;
+		context.beginPath();
+		context.moveTo(x, y);
+		// A disc diameter reaches its far edge from any visible subject; the disc clips the canvas.
+		context.arc(x, y, size, direction - halfFov, direction + halfFov);
+		context.closePath();
+		context.fillStyle = CAMERA_CONE_FILL;
+		context.fill();
 	}
 
 	function drawSelectedBlipRing(
@@ -724,40 +761,17 @@
 	/**
 	 * Update compass chrome from the same snapshot as the canvases, outside Svelte reactivity.
 	 *
-	 * The map always faces the subject up, so north turns opposite its bearing. The camera cone is
-	 * relative to that bearing and therefore points straight up whenever camera and subject agree.
+	 * The map always faces the subject up, so north turns opposite its bearing.
 	 */
 	function drawChrome(
 		frame: MinimapFrame,
 		overlay: ProjectedMapView | null,
+		projectedSubject: ProjectedMinimapSubject | null,
 	): void {
 		drawWaypoint(frame, overlay);
 		const anchor = frame.subject?.anchor ?? null;
-		const subjectClip =
-			overlay === null || anchor === null
-				? null
-				: projectMapWorldPoint(
-						overlay.worldToClip,
-						overlay.view,
-						anchor.worldX,
-						anchor.worldZ,
-					);
-		const subjectX = (subjectClip?.[0] ?? 0) * DISC_RADIUS;
-		const subjectY = -(subjectClip?.[1] ?? 0) * DISC_RADIUS;
-		const subjectInsideDisc =
-			subjectClip !== null && Math.hypot(subjectClip[0], subjectClip[1]) <= 1;
-		if (coneElement) {
-			coneElement.style.display = subjectInsideDisc ? "" : "none";
-			setAttributeIfChanged(coneElement, "d", conePath(frame.cameraFovRadians));
-			const rotation = anchor
-				? ((frame.cameraHeadingRadians - anchor.headingRadians) * 180) / Math.PI
-				: 0;
-			setAttributeIfChanged(
-				coneElement,
-				"transform",
-				`translate(${subjectX} ${subjectY}) rotate(${rotation})`,
-			);
-		}
+		const subjectX = (projectedSubject?.point[0] ?? 0) * DISC_RADIUS;
+		const subjectY = -(projectedSubject?.point[1] ?? 0) * DISC_RADIUS;
 		if (northGroup) {
 			const rotation = anchor ? (-anchor.headingRadians * 180) / Math.PI : 0;
 			setAttributeIfChanged(northGroup, "transform", `rotate(${rotation})`);
@@ -1020,7 +1034,6 @@
 			></canvas>
 		</div>
 		<svg class="minimap-compass" viewBox="-100 -100 200 200" aria-hidden="true">
-			<!-- The camera's own cone, attached to the subject even when the viewed centre is panned. -->
 			<defs>
 				<!-- Optional metal face; per-instance IDs keep separate minimaps independent. -->
 				<linearGradient
@@ -1038,10 +1051,6 @@
 					<circle cx="0" cy="0" r={DISC_RADIUS} />
 				</clipPath>
 			</defs>
-			<!-- The fixed parent clips the translated cone; clipping the path would move its mask too. -->
-			<g clip-path="url(#minimap-disc-clip)">
-				<path bind:this={coneElement} class="minimap-cone" />
-			</g>
 			<g bind:this={northGroup}>
 				<!-- Optional north fittings share the compass rotation; themes own their paint. -->
 				<g
@@ -1230,10 +1239,6 @@
 			/* Cardinal letters are drawn past the viewBox on purpose; see CARDINAL_RADIUS. */
 			overflow: visible;
 			pointer-events: none;
-		}
-
-		.minimap-cone {
-			fill: rgb(230 230 245 / 0.12);
 		}
 
 		.minimap-cardinal {

@@ -657,6 +657,20 @@ npm run dev:client:release -- --account YOUR_ACCOUNT --uncapped
 npm run dev:explorer:release -- --uncapped
 ```
 
+The client main view renders with a 5% cadence margin above observed display refresh by default,
+authored in `CLIENT_TUNING.frameCadenceMarginPercent` in `src/client/client-tuning.ts`.
+Override it with `--frame-cadence-margin=10`, or use `--frame-cadence-margin=0` for the ordinary
+refresh-paced loop. The margin controls render submission cadence and preserves the GPU vsync setting;
+it does not increase the display's refresh rate. Extra submissions consume headroom and can hurt pacing
+on saturated machines. Background throttling and preview cadence remain independent.
+`--uncapped` bypasses the default margin unless a margin is explicitly supplied;
+`--enable-vsync` retains its existing precedence over `--uncapped`.
+
+```bash
+npm run dev:client -- --enable-vsync --frame-cadence-margin=10
+npm run dev:client -- --enable-vsync --frame-cadence-margin=0
+```
+
 Pass `--dev` to enable renderer diagnostics and expose Chrome DevTools on port 9222,
 including in release bundles. This flag does not change the build or optimization mode.
 The development launchers also accept `--debug`; use `--dev` with bundles because Electron

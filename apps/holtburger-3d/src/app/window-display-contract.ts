@@ -19,6 +19,8 @@ export const windowDisplaySnapshotSchema = z
 		freeResize: z.boolean(),
 		/** Disable controls until the current native transition finishes. */
 		busy: z.boolean(),
+		/** Current display refresh when GPU vsync is requested; null when disabled or unavailable. */
+		vsyncRefreshHz: z.number().positive().nullable(),
 		/** Actual viewport size, including any desktop scaling quantization. */
 		contentSize: windowContentSizeSchema,
 		/** Supported window sizes meeting the app minimum, independent of monitor placement. */

@@ -256,13 +256,21 @@ describe("Electron launch arguments", () => {
 				"--landblock=0x7fffff",
 			]),
 		).toEqual({
-			args: ["--debug", "--landblock=0x7fffff"],
+			args: ["--debug", "--landblock=0x7fffff", "--frame-cadence-margin=0"],
 			electronSwitches: [
 				"--disable-frame-rate-limit",
 				"--disable-gpu-vsync",
 				"--remote-debugging-port=9222",
 			],
 		});
+	});
+
+	it("lets an explicit cadence margin override uncapped's default cadence bypass", () => {
+		const launch = extractElectronLaunchArguments([
+			"--uncapped",
+			"--frame-cadence-margin=10",
+		]);
+		expect(launch.args).toEqual(["--frame-cadence-margin=10"]);
 	});
 
 	it("forwards world-map cache bypass to main without putting it in the renderer URL", () => {

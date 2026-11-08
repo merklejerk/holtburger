@@ -11,6 +11,7 @@ import {
 	ipcMain,
 	Menu,
 	powerMonitor,
+	screen,
 	shell,
 } from "electron";
 import { AppUpdates, loadUpdateBuild } from "./app-updates.js";
@@ -875,6 +876,11 @@ void (async () => {
 		menuTemplate === null ? null : Menu.buildFromTemplate(menuTemplate),
 	);
 	const window = createWindow(entry);
+	const refreshDisplay = () => windowDisplay?.refresh();
+	screen.on("display-metrics-changed", refreshDisplay);
+	window.once("closed", () =>
+		screen.removeListener("display-metrics-changed", refreshDisplay),
+	);
 	const themes = new UiThemeCatalog(
 		join(app.getPath("userData"), "themes"),
 		console.error,
@@ -1105,6 +1111,17 @@ void (async () => {
 							window.webContents.send("window:display-state", snapshot);
 					},
 					(error) => reportWindowSettingsFailure(window, error),
+					() => {
+						if (
+							app.commandLine.hasSwitch("disable-gpu-vsync") ||
+							app.commandLine.hasSwitch("disable-frame-rate-limit")
+						)
+							return null;
+						const hz = screen.getDisplayMatching(
+							window.getBounds(),
+						).displayFrequency;
+						return Number.isFinite(hz) && hz > 0 ? hz : null;
+					},
 				);
 				windowDisplay = controls;
 				stopGeometry = observeWindowGeometry(

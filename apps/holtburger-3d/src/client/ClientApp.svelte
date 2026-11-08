@@ -39,6 +39,10 @@
 	import { ClientEmoteController } from "./client-emote-controller";
 	import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
+	import {
+		readFrameCadenceMargin,
+		startFrameLoopWithCadenceMargin,
+	} from "../app/frame-cadence-margin";
 	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
 	import { runClientAssetsCommand } from "./client-assets-command";
 	import { runClientVersionCommand } from "./client-version-command";
@@ -338,6 +342,10 @@
 		kind: "idle",
 	});
 	const debugEnabled = clientDebugEnabled(window.location.search);
+	const frameCadenceMargin = readFrameCadenceMargin(
+		window.location.search,
+		CLIENT_TUNING.frameCadenceMarginPercent,
+	);
 	let deathCommands: ClientDeathCommands | null = null;
 	let emoteController: ClientEmoteController | null = null;
 	let postureController: ClientRestPostureController | null = null;
@@ -2009,7 +2017,7 @@
 		};
 		(window as ClientPerformanceWindow).__holtburgerClientPerformance =
 			performanceProbe;
-		const stopFrameLoop = startPresentationFrameLoop(
+		const stopFrameLoop = startFrameLoopWithCadenceMargin(
 			(timeMs) => {
 				if (cancelled) return;
 				const elapsedSeconds =
@@ -2037,6 +2045,7 @@
 				appLifecycle.acceptPresentation(result);
 			},
 			() => 0,
+			frameCadenceMargin,
 		);
 		return () => {
 			cancelled = true;

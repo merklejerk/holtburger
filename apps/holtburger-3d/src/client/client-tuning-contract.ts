@@ -43,6 +43,8 @@ export interface ClientPortalTransitionTuning extends FrontendPortalTransitionTu
 
 /** Exhaustive client-owned tuning contract used to drive authoring completion. */
 export interface ClientTuning {
+	/** Main-view render cadence above observed display refresh, in percent; zero uses native RAF. */
+	readonly frameCadenceMarginPercent: number;
 	/** Screen-edge warnings are client presentation policy only. */
 	readonly vitalWarning: ClientVitalWarningTuning;
 	/** Journal pulls display facts only while its window is visible. */

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { windowDisplayBridge } from "../app/window-display-transport";
 	import {
-		windowDisplaySnapshotSchema,
+		observeWindowDisplay,
+		windowDisplayBridge,
+	} from "../app/window-display-transport";
+	import {
 		type WindowDisplayRequest,
 		type WindowDisplaySnapshot,
 	} from "../app/window-display-contract";
@@ -28,33 +30,15 @@
 
 	onMount(() => {
 		if (bridge === undefined) return;
-		let active = true;
-		let revision = 0;
-		const accept = (value: unknown) => {
-			try {
-				snapshot = windowDisplaySnapshotSchema.parse(value);
-			} catch (failure) {
+		return observeWindowDisplay(
+			bridge,
+			(value) => {
+				snapshot = value;
+			},
+			(failure) => {
 				error = formatError(failure);
-			}
-		};
-		const unsubscribe = bridge.onState((value) => {
-			revision++;
-			accept(value);
-		});
-		const initialRevision = revision;
-		void bridge
-			.snapshot()
-			.then((value) => {
-				// A later native event takes precedence over an older bootstrap reply.
-				if (active && revision === initialRevision) accept(value);
-			})
-			.catch((failure) => {
-				if (active) error = formatError(failure);
-			});
-		return () => {
-			active = false;
-			unsubscribe();
-		};
+			},
+		);
 	});
 	async function change(request: WindowDisplayRequest): Promise<void> {
 		if (bridge === undefined || disabled) return;

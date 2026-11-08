@@ -97,11 +97,42 @@ function fixture() {
 	});
 	const publish = vi.fn();
 	const report = vi.fn();
-	const owner = new WindowDisplay(window, saved, publish, report);
-	return { window, owner, publish, report };
+	let vsyncRefreshHz: number | null = 144;
+	const owner = new WindowDisplay(
+		window,
+		saved,
+		publish,
+		report,
+		() => vsyncRefreshHz,
+	);
+	return {
+		window,
+		owner,
+		publish,
+		report,
+		setVsyncRefresh: (hz: number | null) => {
+			vsyncRefreshHz = hz;
+		},
+	};
 }
 
 describe("native display controls", () => {
+	it("publishes the current vsync refresh after moving between displays", async () => {
+		const { window, owner, publish, setVsyncRefresh } = fixture();
+		expect(owner.snapshot().vsyncRefreshHz).toBe(144);
+		setVsyncRefresh(60);
+		window.emit("move");
+		expect(publish).toHaveBeenLastCalledWith(
+			expect.objectContaining({ vsyncRefreshHz: 60 }),
+		);
+		setVsyncRefresh(null);
+		owner.refresh();
+		expect(publish).toHaveBeenLastCalledWith(
+			expect.objectContaining({ vsyncRefreshHz: null }),
+		);
+		await owner.close();
+	});
+
 	it("measures normal decorations after unmaximizing when setting the content minimum", async () => {
 		const window = new NativeWindow();
 		window.maximized = true;
@@ -163,7 +194,13 @@ describe("native display controls", () => {
 			},
 			fullscreen: true,
 		});
-		const owner = new WindowDisplay(window, accepted, vi.fn(), vi.fn());
+		const owner = new WindowDisplay(
+			window,
+			accepted,
+			vi.fn(),
+			vi.fn(),
+			() => null,
+		);
 		await owner.change({ kind: "fullscreen", enabled: false });
 		expect(owner.settings().normalBounds).toEqual(accepted.normalBounds);
 		await owner.close();

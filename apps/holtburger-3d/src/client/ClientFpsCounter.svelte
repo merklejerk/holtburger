@@ -2,6 +2,10 @@
 	import { onMount } from "svelte";
 	import type { FrameRates } from "../app/frame-rate-sampler";
 	import { CLIENT_TUNING } from "./client-tuning";
+	import {
+		observeWindowDisplay,
+		windowDisplayBridge,
+	} from "../app/window-display-transport";
 
 	interface Props {
 		/** Cold read of presentation cadence and capacity maintained outside Svelte. */
@@ -10,15 +14,32 @@
 
 	const { readFrameRates }: Props = $props();
 	let frameRates = $state<FrameRates | null>(null);
+	/** Cold native monitor/vsync policy; raw sampler and diagnostic rates remain unchanged. */
+	let vsyncRefreshHz = $state<number | null>(null);
 	const formatFramesPerSecond = (value: number): string =>
 		value > CLIENT_TUNING.diagnostics.maximumDisplayedFramesPerSecond
 			? `${CLIENT_TUNING.diagnostics.maximumDisplayedFramesPerSecond}+`
 			: value.toFixed(0);
-	const display = $derived(
-		frameRates === null
-			? "— / —"
-			: `${formatFramesPerSecond(frameRates.capped)} / ${formatFramesPerSecond(frameRates.uncapped)}`,
-	);
+	// The compact HUD saturates at vsync as an indicator; this is not measured presentation FPS.
+	const display = $derived.by(() => {
+		if (frameRates === null) return "— / —";
+		const primaryRate =
+			vsyncRefreshHz === null
+				? frameRates.capped
+				: Math.min(frameRates.capped, vsyncRefreshHz);
+		return `${formatFramesPerSecond(primaryRate)} / ${formatFramesPerSecond(frameRates.uncapped)}`;
+	});
+	onMount(() => {
+		const bridge = windowDisplayBridge();
+		if (bridge === undefined) return;
+		return observeWindowDisplay(
+			bridge,
+			(value) => {
+				vsyncRefreshHz = value.vsyncRefreshHz;
+			},
+			(error) => window.reportError(error),
+		);
+	});
 
 	onMount(() => {
 		const sample = (): void => {

@@ -1,16 +1,16 @@
-/** Observed presentation cadence and estimated capacity without the display refresh cap. */
+/** Observed presentation cadence and estimated capacity without the scheduling cap. */
 export interface FrameRates {
-	/** Frames delivered per second by requestAnimationFrame. */
+	/** Frames delivered per second by the frontend presentation loop. */
 	readonly capped: number;
-	/** Best-effort frame capacity after charging delays beyond the learned refresh cadence. */
+	/** Best-effort frame capacity after charging delays beyond the learned callback cadence. */
 	readonly uncapped: number;
 }
 
-/** One complete frontend frame measured at the requestAnimationFrame boundary. */
+/** One complete frontend frame measured at its scheduling boundary. */
 export interface FrameRateSample {
-	/** Browser-supplied requestAnimationFrame timestamp used to learn display cadence. */
+	/** Scheduling timestamp: native animation time or the cadence pacer's monotonic clock. */
 	readonly animationFrameTimeMs: number;
-	/** Time at which the requestAnimationFrame callback began executing. */
+	/** Time at which the presentation callback began executing. */
 	readonly startedAtMs: number;
 	/** Synchronous work performed by the callback. */
 	readonly workMs: number;
@@ -18,14 +18,14 @@ export interface FrameRateSample {
 
 /** Imperative frame-rate source written by a hot frame loop and read by colder UI consumers. */
 export interface FrameRateSampler {
-	/** Record one requestAnimationFrame callback without publishing reactive state. */
+	/** Record one presentation callback without publishing reactive state. */
 	recordFrame(sample: FrameRateSample): void;
 	/** Read the latest observed cadence and best-effort uncapped capacity. */
 	readFrameRates(): FrameRates | null;
 }
 
 /**
- * Refresh intervals retained to distinguish ordinary display waiting from excess event-loop delay.
+ * Callback intervals retained to distinguish ordinary scheduled waiting from excess event-loop delay.
  * A short window adapts when the window moves between monitors without letting one stall redefine
  * the display cadence.
  */
@@ -115,7 +115,7 @@ export function createFrameRateSampler(emaWindowMs: number): FrameRateSampler {
 			const animationFrameIntervalMs =
 				animationFrameTimeMs - previousSample.animationFrameTimeMs;
 			const refreshIntervalMs = recordRefreshInterval(animationFrameIntervalMs);
-			// Delay within one refresh interval is presumed to be deliberate rAF waiting. Only the
+			// Delay within one learned interval is presumed to be deliberate scheduling. Only the
 			// excess is charged to the uncapped estimate as otherwise-hidden main-thread work.
 			const excessDelayMs = Math.max(0, frameIntervalMs - refreshIntervalMs);
 			const alpha = 1 - Math.exp(-frameIntervalMs / emaWindowMs);

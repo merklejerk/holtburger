@@ -203,6 +203,11 @@ existing implicit `tick()` policy:
   from recovered footing; there is no tick-wide cumulative upward-displacement budget.
   Retail/ACE terrain uses the vertical sphere bottom; our nominal full
   sphere can therefore rest slightly higher than the independent authoritative reference.
+  Terrain recovery selects penetration and correction using that same full-sphere clearance:
+  a vertical-bottom tangent on a slope must recover before arrival validation, even when its
+  bottom is not below terrain. Recovery uses the highest admitted terrain plane across the
+  primary sphere's finite horizontal footprint, including adjacent triangles and owners;
+  clearing only the center triangle can leave the endpoint intersecting its neighbor.
 - Current-pose support confirmation permits only contact-tolerance height error. Walking step-down
   and the lenient landing probe may search farther, but any adjustment requires full-body hard
   clearance. Walking and landing retain their separate normal thresholds; a steep admitted plane
@@ -333,6 +338,17 @@ existing implicit `tick()` policy:
 Collision integration uses an anchor landblock's local coordinates across one solve. It does not
 accumulate large absolute-world `f32` coordinates; doing so produced measurable centimeter-scale
 drift at `0xDA55FFFF`. Owner-local conversion occurs only at collision lookup and pose commit.
+
+Discontinuous arrivals run world-owned whole-body placement before the client completes entry.
+After terrain reinsertion, finite world, hard-entity and mobile contacts propose one common
+translation for all movement spheres. Existing hard sweeps admit each correction and preserve
+cell topology; every accepted endpoint rechecks both spheres, restrictions and peers. A fixed
+pass budget and cumulative travel bound scaled by the primary radius keep the solve bounded.
+Missing coverage remains a query error; blocked or exhausted placement leaves the original body
+and its authoritative reference untouched. Arrival corrections consume no simulation time or
+velocity. They do not borrow walking slope/step policy, and ordinary locomotion and exact remote
+reference recovery retain their existing policies. Retail player placement permits bounded local
+repositioning, but the contact-driven search does not reproduce retail's radial candidate order.
 
 #### Dynamic entity bodies
 

@@ -1022,8 +1022,8 @@ impl SpatialScene {
     }
 
     /// Resolves a discontinuous arrival without advancing time or replacing server authority.
-    /// Terrain recovery and final clearance are the same shared decisions used during simulation.
-    /// Missing coverage remains a collision-query error; a blocked endpoint cannot be published.
+    /// Terrain reinsertion precedes bounded whole-body separation through existing hard sweeps.
+    /// Missing coverage remains a collision-query error; an unresolved endpoint is never published.
     pub fn settle_dynamic_body_placement(
         &mut self,
         body_id: SpatialBodyId,
@@ -1054,7 +1054,7 @@ impl SpatialScene {
             .collect::<Vec<_>>();
         peers.sort_by_key(|peer| peer.id);
         let (pose, membership) =
-            super::mobile_contact::checked_recovery_destination(collision, &candidate, &peers)?
+            super::mobile_contact::settle_arrival_destination(collision, &candidate, &peers)?
                 .context("body arrival has no valid clear placement")?;
         candidate.pose = pose;
         let physical = candidate

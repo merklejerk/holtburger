@@ -27,6 +27,7 @@ pub use step::{
 };
 pub(crate) use step::{
     advance_body_contact_collection_without_reports, checked_recovery_destination,
+    settle_arrival_destination,
 };
 
 use anyhow::{Result, ensure};
@@ -39,6 +40,11 @@ use super::{
     DynamicBodyActivity, PhysicalBodyDefinition, PhysicalSphereSet, SpatialBody, SpatialBodyId,
     SpatialMembership,
 };
+
+/// Maximum whole-body separation passes for one discontinuous arrival, excluding terrain lift.
+pub(crate) const BODY_ARRIVAL_MAXIMUM_CONTACT_PASSES: usize = 8;
+/// Cumulative arrival separation travel relative to the primary sphere radius, excluding terrain lift.
+pub(crate) const BODY_ARRIVAL_MAXIMUM_CORRECTION_RADIUS_RATIO: f32 = 4.0;
 
 /// Maximum duration of a compliant physical tick, in seconds.
 pub const MOBILE_CONTACT_TICK_SECONDS: f32 = 1.0 / 30.0;
@@ -144,6 +150,16 @@ pub struct MobileContactResponse {
     pub second: MobileContactChange,
 }
 
+/// Stable direction for exactly coincident spheres: oppose relative motion, or use +X at rest.
+fn coincident_contact_normal(relative_velocity: Vector3) -> Vector3 {
+    let speed = relative_velocity.length();
+    if speed > f32::EPSILON {
+        relative_velocity * (-1.0 / speed)
+    } else {
+        Vector3::new(1.0, 0.0, 0.0)
+    }
+}
+
 /// Resolves at most one contact for an unordered body pair in stable caller-owned identity order.
 ///
 /// Sphere-order ties retain the first contact. Coincident centers use opposing relative velocity,
@@ -175,12 +191,7 @@ pub fn resolve_mobile_contact(
             let normal = if distance > f32::EPSILON {
                 delta / distance
             } else {
-                let speed = relative_velocity.length();
-                if speed > f32::EPSILON {
-                    relative_velocity * (-1.0 / speed)
-                } else {
-                    Vector3::new(1.0, 0.0, 0.0)
-                }
+                coincident_contact_normal(relative_velocity)
             };
             selected = Some((normal, excess));
         }

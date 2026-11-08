@@ -9,7 +9,8 @@ use crate::spatial::{
     MOBILE_CONTACT_TICK_SECONDS, PHYSICAL_RETURN_START_THRESHOLD_M, PhysicalReferenceDomain,
     PlacedMotionPath, advance_body_contacts,
 };
-use holtburger_common::RigidTransform;
+use holtburger_common::{RigidTransform, position::METERS_PER_LANDBLOCK};
+use holtburger_content::TERRAIN_GRID_CELLS;
 
 fn contact_stair_scene(step_height: f32, ceiling: bool) -> CollisionScene {
     let mut collision = flat_collision_scene();
@@ -4005,6 +4006,9 @@ fn authored_input_survives_settling_and_residency_reactivation() {
 #[path = "footing_tests.rs"]
 mod footing_tests;
 
+#[path = "arrival_placement_tests.rs"]
+mod arrival_placement_tests;
+
 #[test]
 fn supported_character_contacts_brake_incoming_motion_and_allow_escape() {
     for (player_speed, mob_speed) in [(0.0, -2.0), (2.0, 0.0), (2.0, -2.0)] {
@@ -7023,6 +7027,94 @@ fn recovery_placement_checks_hard_entities_and_accommodates_support() {
         .unwrap()
         .unwrap();
     assert!((recovered.0.coords.z - standing.coords.z).abs() < 0.001);
+}
+
+/// Server arrivals can rest the vertical sphere bottom on terrain while the full sphere
+/// still penetrates a slope. All such starts must reach clear placement without a timed tick.
+#[test]
+fn terrain_arrival_clears_slopes_above_and_below_vertical_bottom_tangency() {
+    let owner = Guid(0xda55_ffff);
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let side = TERRAIN_GRID_CELLS + 1;
+    let tile = METERS_PER_LANDBLOCK / TERRAIN_GRID_CELLS as f32;
+    for slope in [0.0, 0.4, 1.25] {
+        let terrain = LandblockTerrain {
+            grid_size: side,
+            tile_size: tile,
+            height_indices: vec![0; side * side],
+            heights: (0..side * side)
+                .map(|index| (index / side) as f32 * tile * slope)
+                .collect(),
+            terrain_samples: vec![0; side * side],
+            cell_diagonals: TerrainCellDiagonals::for_landblock(owner.0),
+        };
+        let mut collision = CollisionScene::new();
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: owner.0,
+                terrain: TerrainCollisionSurface::from_terrain(&terrain).unwrap(),
+                static_geometry: Default::default(),
+            })
+            .unwrap();
+        let x = tile * 4.25;
+        let y = tile * 5.25;
+        let normal = Vector3::new(0.0, -slope, 1.0).normalize();
+        let ground_height = y * slope;
+        let bottom_tangent_z = ground_height + primary.radius - primary.center.z;
+        let clear_z = ground_height + primary.radius / normal.z - primary.center.z;
+        for start_z in [
+            bottom_tangent_z - CONTACT_EPSILON * 4.0,
+            bottom_tangent_z,
+            bottom_tangent_z + CONTACT_EPSILON * 4.0,
+            clear_z + primary.radius,
+        ] {
+            let id = SpatialBodyId::LocalPlayer(Guid(1));
+            let initial = pose(Vector3::new(x, y, start_z));
+            let mut scene = SpatialScene::new();
+            scene.register_body(SpatialBody::new(id, initial, Instant::now()));
+            scene
+                .set_dynamic_physical_body(
+                    id,
+                    Some(dynamic_definition(definition, false)),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+            scene
+                .settle_dynamic_body_placement(id, &collision)
+                .unwrap_or_else(|error| panic!("slope={slope} start_z={start_z}: {error:#}"));
+            let placed = scene.body(id).unwrap().pose;
+            assert_eq!(placed.coords.x, initial.coords.x);
+            assert_eq!(placed.coords.y, initial.coords.y);
+            assert!(
+                (placed.coords.z - start_z.max(clear_z)).abs() <= CONTACT_EPSILON,
+                "slope={slope} start_z={start_z} placed={placed:?} clear_z={clear_z}"
+            );
+            for sphere in definition.spheres().iter() {
+                let contacts = collision
+                    .placement_contacts(crate::PlacementRequest {
+                        anchor: owner,
+                        center: placed.coords + sphere.center,
+                        radius: sphere.radius,
+                        placement: &SpatialMembership::outdoor(),
+                    })
+                    .unwrap();
+                assert!(
+                    contacts
+                        .iter()
+                        .all(|contact| contact.depth <= CONTACT_EPSILON),
+                    "slope={slope} start_z={start_z}: {contacts:?}"
+                );
+            }
+            scene.settle_dynamic_body_placement(id, &collision).unwrap();
+            assert_eq!(
+                scene.body(id).unwrap().pose,
+                placed,
+                "repeating placement must not lift an already clear body"
+            );
+        }
+    }
 }
 
 /// Synthetic terrain/ceiling geometry reproduces the observed portal's penetration depth.

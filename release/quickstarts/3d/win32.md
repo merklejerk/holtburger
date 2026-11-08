@@ -46,6 +46,21 @@ to run it.
 If game data cannot be loaded, select the folder containing the files listed above,
 rather than an individual DAT file. Keep all files from the portable ZIP together.
 
+### Host exits with code 3221225781
+
+If pressing Play returns you to the launcher with
+`host exited before completing the protocol (code=3221225781, signal=none)`,
+Windows could not find a DLL required by the game host. The code is Windows error
+`0xC0000135` (`STATUS_DLL_NOT_FOUND`).
+
+Install or repair Microsoft's [Visual C++ x64 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe),
+then reopen Holtburger and try Play again. A missing Visual C++ runtime can cause
+this error; the exit code alone does not identify the missing DLL.
+
+If it still fails, open `resources\holtburger-3d-host.exe` inside the application
+folder directly. Windows may display a dialog naming the missing DLL. Include
+that name and the launcher error when reporting the problem.
+
 ### UI flickering or low frame rate
 
 If parts of panels, text, or the launcher logo briefly disappear or become

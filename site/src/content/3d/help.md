@@ -13,6 +13,8 @@ import Media from '#lib/components/Media.svelte';
 
 Check the server address, port and account in the [launcher](/holtburger/startup/launcher/). Holtburger is developed against ACE; GDLE compatibility is unverified.
 
+On Windows, if Play returns you to the launcher with `host exited before completing the protocol` and `code=3221225781`, follow the [missing-DLL recovery steps](/holtburger/start/3d/windows/#host-exits-with-code-3221225781).
+
 <IllustratedProse name="black-hills">
 
 ## Before the game opens

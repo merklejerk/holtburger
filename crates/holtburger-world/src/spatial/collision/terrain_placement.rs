@@ -1,12 +1,12 @@
 //! Terrain penetration is a height-field constraint, independent of finite-object step admission.
 
 use super::*;
-use crate::spatial::bsp_query::CONTACT_EPSILON;
+use crate::spatial::bsp_query::{CONTACT_EPSILON, SupportProbe};
 
 impl CollisionScene {
-    /// Return the required vertical correction from the polygon under the primary sphere's bottom.
+    /// Return the vertical correction that clears terrain across the primary sphere footprint.
     ///
-    /// Retail behavior is to lift a penetrating outdoor body to this polygon without applying
+    /// Retail behavior is to lift a penetrating outdoor body to its terrain polygon without applying
     /// the step-height limit. Collision reinsertion validates the corrected endpoint; the lift
     /// does not sweep the intervening space. A census of 1,577 evaluable outdoor portal templates
     /// found 101 arrivals at 28 distinct destinations over 0.6 units below rendered terrain.
@@ -19,38 +19,44 @@ impl CollisionScene {
         if !request.placement.reaches_outdoors() {
             return Ok(None);
         }
-        let Some(owner) = outdoor_landblock_owner_at(request.anchor, request.center) else {
-            return Ok(None);
+        let touched = touched_landblocks(SphereSweep {
+            anchor: request.anchor,
+            start: request.center,
+            end: request.center,
+            radius: request.radius,
+        });
+        self.require_query_coverage(&touched, request.placement)?;
+        // Terrain reinsertion has no step-height cap. Reuse standing terrain's finite
+        // footprint admission and plane clearance rather than selecting only the center face.
+        let probe = SupportProbe::Column {
+            maximum_drop: 0.0,
+            maximum_rise: f32::MAX,
         };
-        let asset = self
-            .landblock_asset(owner)
-            .ok_or(CollisionQueryError::UnavailableOwner { owner: owner.0 })?;
-        if asset.terrain.cells.is_empty() {
-            return Ok(None);
+        let mut correction: Option<f32> = None;
+        for owner in touched {
+            let asset = self
+                .landblock_asset(owner)
+                .ok_or(CollisionQueryError::UnavailableOwner { owner: owner.0 })?;
+            let center = anchor_to_landblock(request.center, request.anchor, owner);
+            for cell in overlapped_terrain_cells(&asset.terrain, center, request.radius) {
+                for triangle in &cell.triangles {
+                    let plane_d = -triangle.normal.dot(&triangle.vertices[0]);
+                    if let Some(support) = probe.on_polygon(
+                        || triangle.vertices.iter().copied(),
+                        triangle.normal,
+                        plane_d,
+                        center,
+                        request.radius,
+                    ) && support.height_delta * triangle.normal.z > CONTACT_EPSILON
+                    {
+                        correction = Some(correction.map_or(support.height_delta, |current| {
+                            current.max(support.height_delta)
+                        }));
+                    }
+                }
+            }
         }
-        let center = anchor_to_landblock(request.center, request.anchor, owner);
-        let Some(triangle) = overlapped_terrain_cells(&asset.terrain, center, 0.0)
-            .flat_map(|cell| &cell.triangles)
-            .find(|triangle| {
-                (0..3).all(|index| {
-                    let start = triangle.vertices[index];
-                    let end = triangle.vertices[(index + 1) % 3];
-                    (end.x - start.x) * (center.y - start.y)
-                        - (end.y - start.y) * (center.x - start.x)
-                        >= -CONTACT_EPSILON
-                })
-            })
-        else {
-            return Ok(None);
-        };
-        let distance = triangle.normal.dot(&(center - triangle.vertices[0]));
-        let bottom_distance = distance - request.radius * triangle.normal.z;
-        if bottom_distance >= -CONTACT_EPSILON {
-            return Ok(None);
-        }
-        // Preserve the established full-sphere resting clearance on slopes. Penetration
-        // selection uses retail's vertical bottom; finite footprint support stays bounded.
-        Ok(Some((request.radius - distance) / triangle.normal.z))
+        Ok(correction)
     }
 }
 
@@ -62,7 +68,7 @@ mod tests {
     };
 
     #[test]
-    fn recovery_samples_the_polygon_under_the_bottom_instead_of_the_sphere_footprint() {
+    fn terrain_recovery_clears_a_sphere_straddling_a_diagonal_in_another_anchor() {
         let owner = Guid(0xda55_ffff);
         let side = TERRAIN_GRID_CELLS + 1;
         let tile = METERS_PER_LANDBLOCK / TERRAIN_GRID_CELLS as f32;
@@ -93,23 +99,51 @@ mod tests {
                 static_geometry: Default::default(),
             })
             .unwrap();
-        // The footprint straddles the diagonal, but its center lies over the flat first polygon.
+        // The center lies over the flat polygon, but the sphere also reaches its sloped neighbor.
         let center = Vector3::new(
-            (column as f32 + if southwest_cut { 0.51 } else { 0.49 }) * tile,
-            (row as f32 + 0.49) * tile,
+            (column as f32 + if southwest_cut { 0.501 } else { 0.499 }) * tile,
+            (row as f32 + 0.499) * tile,
             0.25,
         );
         let placement = SpatialMembership::outdoor();
-        assert_eq!(
-            scene
-                .terrain_penetration(PlacementRequest {
-                    anchor: owner,
-                    center,
-                    radius: 0.5,
-                    placement: &placement,
-                })
-                .unwrap(),
-            Some(0.25)
-        );
+        for anchor in [owner, Guid(owner.0 - (1 << 24))] {
+            let center = center
+                + Vector3::new(
+                    if anchor == owner {
+                        0.0
+                    } else {
+                        METERS_PER_LANDBLOCK
+                    },
+                    0.0,
+                    0.0,
+                );
+            let request = PlacementRequest {
+                anchor,
+                center,
+                radius: 0.5,
+                placement: &placement,
+            };
+            let lift = scene.terrain_penetration(request).unwrap().unwrap();
+            assert!(
+                lift > request.radius - request.center.z,
+                "the adjacent slope must raise the sphere above the flat plane"
+            );
+            let corrected = PlacementRequest {
+                center: center + Vector3::new(0.0, 0.0, lift),
+                ..request
+            };
+            let contacts = scene.placement_contacts(corrected).unwrap();
+            assert!(
+                contacts
+                    .iter()
+                    .all(|contact| contact.depth <= CONTACT_EPSILON),
+                "corrected sphere still overlaps terrain: {contacts:?}"
+            );
+            assert_eq!(
+                scene.terrain_penetration(corrected).unwrap(),
+                None,
+                "a clear sphere must not be raised again"
+            );
+        }
     }
 }

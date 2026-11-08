@@ -291,8 +291,11 @@ fn standing_support_candidate(
 /// consumes physical time or a landing/restitution event. RETAIL DIVERGENCE: terrain
 /// grounding uses the vertical sphere bottom; our full-sphere clearance instead requires a
 /// higher resting pose on slopes. Removing recovery while retaining that geometry strands
-/// compatible authority poses airborne. Evidence: captured Old Bones terrain overlap and
-/// synthetic slope, ceiling, step-cap, and cell-transit fixtures; no full terrain census.
+/// compatible authority poses airborne or rejects their arrival. Evidence: captured Old Bones
+/// terrain overlap, a slope-tangent arrival, and a scaled body crossing a terrain diagonal,
+/// plus synthetic slope, diagonal, ceiling, step-cap, and cell-transit fixtures; no full terrain
+/// census. Recovery uses the same finite horizontal terrain footprint as standing support;
+/// checking only the center polygon can leave the full sphere overlapping its neighbor.
 pub(super) fn prepare_support(
     collision: &CollisionScene,
     hard: &HardTargets,

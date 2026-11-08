@@ -294,6 +294,10 @@
 							<button
 								type="button"
 								class="client-character ui-button ui-option"
+								class:character-deleted={character.deleteTime !== 0}
+								data-ui-tooltip={character.deleteTime !== 0
+									? `Pending deletion · ${new Date(character.deleteTime * 1000).toLocaleString()}`
+									: undefined}
 								name="character"
 								value={character.guid}
 								aria-pressed={selectedGuid === character.guid}
@@ -306,21 +310,7 @@
 								<span class="character-selection-marker"
 									><SelectionMarker /></span
 								>
-								<span class="character-row-label">
-									<strong>{character.name}</strong>
-									{#if character.deleteTime !== 0}
-										<span class="character-deletion-status ui-muted"
-											>Pending deletion · <time
-												datetime={new Date(
-													character.deleteTime * 1000,
-												).toISOString()}
-												>{new Date(
-													character.deleteTime * 1000,
-												).toLocaleString()}</time
-											></span
-										>
-									{/if}
-								</span>
+								<strong>{character.name}</strong>
 							</button>
 							{#if characterActions !== null}
 								<button
@@ -539,20 +529,20 @@
 			grid-template-columns: minmax(0, 1fr) auto;
 			align-items: center;
 		}
-		.character-row-label,
 		.character-deletion-form,
 		.character-confirmation-label {
 			display: grid;
 			gap: 8px;
 			min-width: 0;
 		}
-		.character-deletion-status {
-			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+		.character-deleted strong {
+			text-decoration: line-through;
 		}
 		.character-row-action {
 			visibility: hidden;
 		}
-		.character-row:hover .character-row-action {
+		.character-row:hover .character-row-action,
+		.character-row:focus-within .character-row-action {
 			visibility: visible;
 		}
 		.client-character {

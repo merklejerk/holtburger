@@ -18,8 +18,9 @@ use holtburger_protocol::messages::movement::{
 };
 use holtburger_session::Session;
 use holtburger_world::entity::{
-    Entity, EntityMotionAdmission, EntityMotionDirective, EntityMotionSnapshot,
-    EntityMoveToParameters, EntityNetworkMotion, OrderedMotionPosition, OrderedMotionScalar,
+    Entity, EntityMotionAction, EntityMotionAdmission, EntityMotionCommandSource,
+    EntityMotionDirective, EntityMotionSnapshot, EntityMoveToParameters, EntityNetworkMotion,
+    OrderedMotionPosition, OrderedMotionScalar,
 };
 use holtburger_world::motion::begin_server_directed_motion;
 use holtburger_world::state::motion_resolution::test_support::{
@@ -210,23 +211,14 @@ fn seed_authored_manual_motion_world(world: &mut WorldState, guid: Guid) {
     );
 }
 
-#[test]
-fn equivalent_local_remote_player_and_creature_directives_share_one_runtime_contract() {
-    let local_guid = Guid(0x5100_1001);
-    let remote_player_guid = Guid(0x5100_1002);
-    let creature_guid = Guid(0x5100_1003);
-    let target = WorldPosition {
-        landblock_id: Guid(0x1234_0001),
-        coords: Vector3::new(20.0, 0.0, 0.0),
-        rotation: Quaternion::identity(),
-    };
-    let mut start = WorldPosition {
-        coords: Vector3::zero(),
-        ..target
-    };
-    start.rotation = Quaternion::from_heading(start.heading_to(&target));
+/// Shared wire fixture for position approaches with an explicit admission identity and travel limit.
+fn test_server_position_directive(
+    target: WorldPosition,
+    movement_sequence: u16,
+    fail_distance: f32,
+) -> EntityMotionDirective {
     let scalar = |value| OrderedMotionScalar::from_f32(value).unwrap();
-    let directive_for = |movement_sequence| EntityMotionDirective::MoveToPosition {
+    EntityMotionDirective::MoveToPosition {
         admission: EntityMotionAdmission {
             object_instance_sequence: 1,
             movement_sequence,
@@ -243,13 +235,31 @@ fn equivalent_local_remote_player_and_creature_directives_share_one_runtime_cont
             flags: 0x0000_0203,
             distance_to_object: scalar(1.0),
             min_distance: scalar(0.0),
-            fail_distance: scalar(100.0),
+            fail_distance: scalar(fail_distance),
             speed: scalar(1.0),
             walk_run_threshold: scalar(5.0),
             desired_heading_degrees: scalar(0.0),
         },
         run_rate: scalar(1.25),
+    }
+}
+
+#[test]
+fn equivalent_local_remote_player_and_creature_directives_share_one_runtime_contract() {
+    let local_guid = Guid(0x5100_1001);
+    let remote_player_guid = Guid(0x5100_1002);
+    let creature_guid = Guid(0x5100_1003);
+    let target = WorldPosition {
+        landblock_id: Guid(0x1234_0001),
+        coords: Vector3::new(20.0, 0.0, 0.0),
+        rotation: Quaternion::identity(),
     };
+    let mut start = WorldPosition {
+        coords: Vector3::zero(),
+        ..target
+    };
+    start.rotation = Quaternion::from_heading(start.heading_to(&target));
+    let directive_for = |sequence| test_server_position_directive(target, sequence, 100.0);
     let snapshot_for = |movement_sequence| EntityMotionSnapshot {
         current_style: Some(MotionStance::NonCombat),
         directive: Some(directive_for(movement_sequence)),
@@ -277,6 +287,8 @@ fn equivalent_local_remote_player_and_creature_directives_share_one_runtime_cont
         );
     }
     let local_directive = directive_for(19);
+    world.player_entity_mut().unwrap().network_motion =
+        EntityNetworkMotion::Initialized(snapshot_for(19));
     let mut movement = MovementSystem::new();
     install_manual_drive(
         &mut movement,
@@ -353,6 +365,156 @@ fn equivalent_local_remote_player_and_creature_directives_share_one_runtime_cont
         assert_eq!(
             world.motion_runtimes.state(guid).unwrap().substate,
             MotionCommand(FIXTURE_STAND_COMMAND),
+        );
+    }
+    // A completed local controller must not hand its unchanged directive back as fresh work.
+    assert!(world.scene.apply_runtime_body_pose(
+        SpatialBodyId::LocalPlayer(local_guid),
+        start,
+        holtburger_world::SpatialSampleMode::SimulatingMotionState,
+    ));
+    world.advance_authored_motion_except(quantum, None);
+    assert_eq!(
+        world.motion_runtimes.state(local_guid).unwrap().substate,
+        MotionCommand(FIXTURE_STAND_COMMAND)
+    );
+}
+
+#[test]
+fn failed_server_approach_stops_playback_and_stays_retired_until_a_new_directive() {
+    for (local_controller, retain_running_snapshot) in
+        [(false, false), (false, true), (true, false), (true, true)]
+    {
+        let guid = Guid(0x5100_1010);
+        let target = WorldPosition {
+            landblock_id: Guid(0x1234_0001),
+            coords: Vector3::new(20.0, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let mut start = WorldPosition {
+            coords: Vector3::zero(),
+            ..target
+        };
+        start.rotation = Quaternion::from_heading(start.heading_to(&target));
+        let scalar = |value| OrderedMotionScalar::from_f32(value).unwrap();
+        let directive_for = |sequence| test_server_position_directive(target, sequence, 2.0);
+        let directive = directive_for(1);
+        let snapshot = EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: retain_running_snapshot.then_some(InterpretedMotionCommand(
+                MotionCommand::RUN_FORWARD.raw() as u16,
+            )),
+            directive: Some(directive),
+            ..Default::default()
+        };
+        let mut world = WorldState::synthetic();
+        seed_local_player(&mut world, guid, start);
+        seed_authored_manual_motion_world(&mut world, guid);
+        world.player_entity_mut().unwrap().network_motion =
+            EntityNetworkMotion::Initialized(snapshot);
+        let mut movement = MovementSystem::new();
+        if local_controller {
+            movement.select_server_directive(Some(begin_server_directed_motion(
+                directive, start, None,
+            )));
+        }
+        let dt = Duration::from_millis(100);
+        if local_controller {
+            movement
+                .advance_local_authored_motion(&mut world, dt)
+                .unwrap()
+                .unwrap();
+        } else {
+            world.advance_authored_motion_except(dt, None);
+        }
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            MotionCommand::RUN_FORWARD
+        );
+
+        // Still outside arrival range, but beyond the allowed travel from the admission pose.
+        let failed_pose = WorldPosition {
+            coords: Vector3::new(3.0, 0.0, 0.0),
+            ..start
+        };
+        assert!(world.scene.apply_runtime_body_pose(
+            SpatialBodyId::LocalPlayer(guid),
+            failed_pose,
+            holtburger_world::SpatialSampleMode::SimulatingMotionState,
+        ));
+        if local_controller {
+            movement
+                .advance_local_authored_motion(&mut world, dt)
+                .unwrap()
+                .unwrap();
+        } else {
+            world.advance_authored_motion_except(dt, None);
+        }
+        assert!(!movement.has_server_controlled_motion());
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            MotionCommand(FIXTURE_STAND_COMMAND)
+        );
+        assert_eq!(
+            world.player_entity().unwrap().network_motion.snapshot(),
+            Some(snapshot)
+        );
+
+        // Ordinary world playback takes over after the controller releases the local body.
+        for _ in 0..3 {
+            world.advance_authored_motion_except(dt, None);
+            let runtime = world.motion_runtimes.get(guid).unwrap();
+            assert_eq!(
+                runtime.state().substate,
+                MotionCommand(FIXTURE_STAND_COMMAND)
+            );
+            assert_eq!(runtime.tick().offset.translation, Vector3::zero());
+        }
+        // Even an action rejected for missing content must not erase the terminal timeline.
+        let table = world
+            .motion_sequences
+            .table(FIXTURE_MOTION_TABLE_ID)
+            .unwrap();
+        assert_eq!(
+            world.motion_runtimes.enqueue_action(
+                table,
+                guid,
+                EntityMotionAction {
+                    command: MotionCommand(0x1000_004a),
+                    speed: scalar(1.0),
+                    action_sequence: 1,
+                    is_autonomous: false,
+                    admission: EntityMotionAdmission {
+                        object_instance_sequence: 1,
+                        movement_sequence: 1,
+                        server_control_sequence: 3,
+                        is_autonomous: false,
+                    },
+                    source: EntityMotionCommandSource::CommandList,
+                }
+            ),
+            holtburger_world::motion::MotionActionEnqueueOutcome::Queued
+        );
+        movement
+            .advance_local_authored_motion(&mut world, dt)
+            .unwrap()
+            .unwrap();
+        world.advance_authored_motion_except(dt, None);
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            MotionCommand(FIXTURE_STAND_COMMAND)
+        );
+
+        // A fresh admission of the same destination is allowed to run again.
+        world.player_entity_mut().unwrap().network_motion =
+            EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+                directive: Some(directive_for(2)),
+                ..snapshot
+            });
+        world.advance_authored_motion_except(dt, None);
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            MotionCommand::RUN_FORWARD
         );
     }
 }

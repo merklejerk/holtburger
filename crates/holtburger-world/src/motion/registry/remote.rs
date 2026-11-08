@@ -46,13 +46,22 @@ pub struct RemoteMotionSample {
     pub rotation: Quaternion,
 }
 
-/// Retain terminal identity so an unchanged completed directive cannot restart after displacement.
+/// Retain terminal identity so an unchanged terminated directive cannot restart after displacement.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct RemoteDirective {
-    /// Wire admission identity retained even after completion.
+    /// Wire admission identity retained after completion or failure.
     directive: EntityMotionDirective,
-    /// Active pure-reducer successor, or terminal completion/failure.
-    state: Option<ServerDirectedMotionState>,
+    /// Active reducer successor or the order retained after local/remote termination.
+    progress: RemoteDirectiveProgress,
+}
+
+/// Terminal playback belongs to the directive identity, so unchanged wire state cannot restart it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RemoteDirectiveProgress {
+    /// Pure-reducer successor for the next movement sample.
+    Active(ServerDirectedMotionState),
+    /// Return order before support presentation; failures stop all movement channels.
+    Terminal(MotionOrder),
 }
 
 /// Entity-owned source timeline, preserved across content rebinding and physical return completion.
@@ -118,37 +127,85 @@ impl RemoteMotionState {
             return terminal;
         };
         let state = match self.directive {
-            Some(retained) if retained.directive == directive => retained.state,
-            _ => Some(begin_server_directed_motion(directive, pose, input.target)),
+            Some(retained) if retained.directive == directive => match retained.progress {
+                RemoteDirectiveProgress::Active(state) => state,
+                RemoteDirectiveProgress::Terminal(order) => {
+                    return order.with_character_presentation(
+                        input
+                            .contact
+                            .presentation(CharacterMotionPresentation::Grounded),
+                    );
+                }
+            },
+            _ => begin_server_directed_motion(directive, pose, input.target),
         };
-        let Some(state) = state else {
-            return terminal;
-        };
-        let (state, order) = match resolve_server_directed_motion(
+        let (progress, order) = match resolve_server_directed_motion(
             state,
             steady,
             pose,
             crate::motion::DirectedMotionSupport::Physical(input.contact),
             input.target,
         ) {
-            ServerDirectedMotionResolution::Active(step) => (Some(step.state), step.order),
+            ServerDirectedMotionResolution::Active(step) => {
+                (RemoteDirectiveProgress::Active(step.state), step.order)
+            }
             ServerDirectedMotionResolution::Complete { sticky_target } => {
                 if let Some(target) = sticky_target {
                     sticky.admit(Some(target), std::time::Instant::now());
                 }
-                (None, terminal)
+                (RemoteDirectiveProgress::Terminal(steady), terminal)
             }
             ServerDirectedMotionResolution::Failed(failure) => {
-                log::warn!("entity 0x{guid:08X} server-directed motion failed: {failure:?}");
-                (None, terminal)
+                log::log!(
+                    failure.log_level(),
+                    "entity 0x{guid:08X} server-directed motion failed: {failure:?}"
+                );
+                let stopped = MotionOrder {
+                    style: steady.style,
+                    ..MotionOrder::default()
+                };
+                (
+                    RemoteDirectiveProgress::Terminal(stopped),
+                    stopped.with_character_presentation(
+                        input
+                            .contact
+                            .presentation(CharacterMotionPresentation::Grounded),
+                    ),
+                )
             }
         };
-        self.directive = Some(RemoteDirective { directive, state });
+        self.directive = Some(RemoteDirective {
+            directive,
+            progress,
+        });
         order
     }
 }
 
 impl MotionRuntimeRegistry {
+    /// Transfers a locally resolved terminal directive to ordinary world playback.
+    /// The wire snapshot stays authoritative; its unchanged directive cannot acquire playback again.
+    /// Returns false when the body has no playback runtime to receive the handoff.
+    pub fn retain_terminal_directive(
+        &mut self,
+        guid: Guid,
+        directive: EntityMotionDirective,
+        rotation: Quaternion,
+        order: MotionOrder,
+    ) -> bool {
+        let Some(runtime) = self.bodies.get_mut(&guid) else {
+            return false;
+        };
+        let remote = runtime
+            .remote_motion
+            .get_or_insert_with(|| RemoteMotionState::new(rotation));
+        remote.directive = Some(RemoteDirective {
+            directive,
+            progress: RemoteDirectiveProgress::Terminal(order),
+        });
+        true
+    }
+
     /// Applies one accepted packet in order, before any later packet or positive-duration tick.
     pub(crate) fn accept_remote(
         &mut self,

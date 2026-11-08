@@ -916,6 +916,26 @@ impl WorldState {
             .ok_or(PlayerMotionTableLookupError::PlayerUnavailable)
     }
 
+    /// Advances one admitted wire timeline, preserving directive progress and terminal playback.
+    /// Local action adapters use this path so advancing an action cannot reacquire its retired approach.
+    pub fn advance_authored_motion_for_body(
+        &mut self,
+        guid: Guid,
+        dt: Duration,
+    ) -> Option<SequenceTick> {
+        let snapshot = self.entities.get(guid)?.network_motion.snapshot()?;
+        let source = self.motion_table_source_for_guid(guid)?;
+        let input = self.remote_motion_input(guid, snapshot)?;
+        let table = self
+            .motion_sequences
+            .table(motion_table_id_for_source(source))?;
+        Some(
+            self.motion_runtimes
+                .drive_remote(table, guid, input, dt.as_secs_f32())
+                .clone(),
+        )
+    }
+
     /// Advances every body's authored motion by one tick, before any solver reads a basis.
     ///
     /// Playback is stateful and the basis is derived from it, so the advance happens once per tick
@@ -940,23 +960,14 @@ impl WorldState {
             return Vec::new();
         }
 
-        // Collected first because driving playback needs the contract, the registry, and the entity
-        // set at once, and only the registry is mutated.
-        let driving: Vec<(Guid, u32, RemoteMotionInput)> = self
+        // Collect identities before mutating playback; each body samples its admitted source once.
+        let driving: Vec<Guid> = self
             .entities
             .iter()
-            .filter_map(|entity| {
-                if excluded == Some(entity.guid) || !self.is_entity_world_participant(entity.guid) {
-                    return None;
-                }
-                let snapshot = entity.network_motion.snapshot()?;
-                let source = self.motion_table_source_for_guid(entity.guid)?;
-                Some((
-                    entity.guid,
-                    motion_table_id_for_source(source),
-                    self.remote_motion_input(entity.guid, snapshot)?,
-                ))
+            .filter(|entity| {
+                excluded != Some(entity.guid) && self.is_entity_world_participant(entity.guid)
             })
+            .map(|entity| entity.guid)
             .collect();
 
         // Cursor lifetime follows entity lifetime, not the presence of a snapshot in this tick.
@@ -967,20 +978,13 @@ impl WorldState {
         self.motion_runtimes
             .retain_bodies(|guid| live.contains(&guid));
 
-        let mut ticks = Vec::with_capacity(driving.len());
-        for (guid, motion_table_id, input) in driving {
-            let Some(table) = self.motion_sequences.table(motion_table_id) else {
-                continue;
-            };
-            ticks.push(AuthoredBodyMotionTick {
-                guid,
-                tick: self
-                    .motion_runtimes
-                    .drive_remote(table, guid, input, quantum)
-                    .clone(),
-            });
-        }
-        ticks
+        driving
+            .into_iter()
+            .filter_map(|guid| {
+                self.advance_authored_motion_for_body(guid, dt)
+                    .map(|tick| AuthoredBodyMotionTick { guid, tick })
+            })
+            .collect()
     }
 
     /// Selects initial authored playback without advancing time, then samples physical parts.

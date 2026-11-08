@@ -186,6 +186,16 @@ pub enum ServerDirectedMotionFailure {
     FailDistanceExceeded,
 }
 
+impl ServerDirectedMotionFailure {
+    /// Travel limits are expected gameplay stops; losing an admitted target remains diagnostic.
+    pub const fn log_level(self) -> log::Level {
+        match self {
+            Self::FailDistanceExceeded => log::Level::Debug,
+            Self::TargetUnavailable { .. } => log::Level::Warn,
+        }
+    }
+}
+
 /// Support requirement for reducing a directed movement command, independent of wire contact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirectedMotionSupport {

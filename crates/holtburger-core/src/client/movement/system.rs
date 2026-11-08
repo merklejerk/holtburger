@@ -1119,11 +1119,10 @@ impl MovementSystem {
             let contact = world
                 .runtime_body_view(SpatialBodyId::LocalPlayer(guid))
                 .map_or(ContactState::Unknown, |body| body.contact);
-            let steady_order = world
+            let snapshot = world
                 .player_entity()
-                .and_then(|entity| entity.network_motion.snapshot())
-                .map(MotionOrder::from_snapshot)
-                .unwrap_or_default();
+                .and_then(|entity| entity.network_motion.snapshot());
+            let steady_order = snapshot.map(MotionOrder::from_snapshot).unwrap_or_default();
             let target = state
                 .target_guid()
                 .and_then(|target| world.server_directed_target(guid, target));
@@ -1135,7 +1134,7 @@ impl MovementSystem {
                 ClientMovementPolicy::Physical => DirectedMotionSupport::Physical(contact),
                 ClientMovementPolicy::Navigation => DirectedMotionSupport::PositionOnly,
             };
-            let terminal_order = steady_order.with_character_presentation(support.presentation());
+            let mut terminal_order = steady_order;
             let order = match resolve_server_directed_motion(
                 state,
                 steady_order,
@@ -1156,12 +1155,20 @@ impl MovementSystem {
                     }
                     log::info!("movement: completed server-directed motion");
                     self.retire_active_movement();
-                    terminal_order
+                    terminal_order.with_character_presentation(support.presentation())
                 }
                 ServerDirectedMotionResolution::Failed(failure) => {
-                    log::warn!("movement: server-directed motion failed: {failure:?}");
+                    log::log!(
+                        failure.log_level(),
+                        "movement: server-directed motion failed: {failure:?}"
+                    );
                     self.retire_active_movement();
-                    terminal_order
+                    // Retail behavior is to stop forward, sidestep, and turn commands on failure.
+                    terminal_order = MotionOrder {
+                        style: steady_order.style,
+                        ..MotionOrder::default()
+                    };
+                    terminal_order.with_character_presentation(support.presentation())
                 }
             };
             let tick = world
@@ -1169,6 +1176,19 @@ impl MovementSystem {
                 .map_err(|error| {
                     anyhow::anyhow!("local server-directed authored playback failed: {error}")
                 })?;
+            if !self.has_server_controlled_motion()
+                && let Some(directive) = snapshot.and_then(|snapshot| snapshot.directive)
+            {
+                anyhow::ensure!(
+                    world.motion_runtimes.retain_terminal_directive(
+                        guid,
+                        directive,
+                        current_pose.rotation,
+                        terminal_order,
+                    ),
+                    "server-directed terminal playback runtime is unavailable"
+                );
+            }
             return Ok(Some(tick));
         }
         if !self.has_active_manual_drive()
@@ -1184,19 +1204,11 @@ impl MovementSystem {
             && !world.has_manual_locomotion(guid)
             && (world.has_authored_motion_actions(guid) || world.has_pending_motion_gesture(guid))
         {
-            // A server-authored local action owns the same cursor as every other source. The local
-            // player is excluded from remote projection because this adapter alone may feed its
-            // exact authored offset into physical actuation.
-            let steady_order = world
-                .player_entity()
-                .and_then(|entity| entity.network_motion.snapshot())
-                .map(MotionOrder::from_snapshot)
-                .unwrap_or_default();
+            // The local adapter consumes this tick's root offset, while the world retains the
+            // wire timeline and any terminal directive through the action's authored return.
             let tick = world
-                .drive_authored_motion_for_body(guid, steady_order, dt)
-                .map_err(|error| {
-                    anyhow::anyhow!("local action authored playback failed: {error}")
-                })?;
+                .advance_authored_motion_for_body(guid, dt)
+                .context("local action authored playback source is unavailable")?;
             return Ok(Some(tick));
         }
         let (state, run_rate) = match self.active_movement {

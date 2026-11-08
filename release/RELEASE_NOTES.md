@@ -2,15 +2,13 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, display:** Settings now offer native fullscreen (F11), free window resizing and content-size presets for classic and modern aspect ratios, with a 1024x768 minimum content area.
-- **3D client, audio:** A new background-audio setting applies to both gameplay and title music, and mute now silences both.
-- **Terminal and 3D clients, inspection:** Item inspectors now show which body regions apparel and armor cover.
-- **3D client, visuals:** Whole-object transparency effects and hidden attached items are handled more consistently, and portal-travel body appearance was adjusted. The rare case of a permanently missing body after portal travel has not been verified as fixed.
+- **3D client, world entry:** Arrivals after teleport or portal travel now place your character more reliably when the server's arrival position overlaps slopes, terrain seams or building geometry.
+- **Terminal and 3D clients, movement:** Walking, sidestepping and turning now stop cleanly when the server cancels or fails a directed movement, and no longer restart on their own.
 
 ## Known issues
 
 - Windows and macOS may warn when opening the app because it is not signed by a verified publisher. The installation guides below explain how to open it.
-- Windows and macOS behavior of the new display controls has not been verified natively.
+- Windows and macOS behavior of the display controls has not been verified natively.
 - CLI movement is simplified: jumping, falling, gravity, and stairs are not simulated locally. The server may correct your position or reject actions.
 
 ## Updating

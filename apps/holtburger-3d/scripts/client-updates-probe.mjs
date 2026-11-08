@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 
-/** Exercise the shared update footer on actual loading, selection, creation and gameplay surfaces. */
+/** Exercise release changes and lifecycle on actual pregame and gameplay surfaces. */
 export async function probeClientUpdates(client, evaluate, consoleMessages) {
 	const read = (expression) => evaluate(client, expression);
 	const app = "globalThis.__HOLTBURGER_CLIENT_PRESENTATION__";
 	const updates = "globalThis.__HOLTBURGER_UPDATE_FIXTURE__";
-	const icon =
-		"document.querySelector('.pregame-build button[aria-label^=\"Update available\"]')";
+	const trigger = "document.querySelector('.pregame-build-label')";
+	const dialog = "document.querySelector('.app-update-dialog')";
 	const wait = async (expression) => {
 		const deadline = Date.now() + 90_000;
 		while (!(await read(expression))) {
@@ -25,63 +25,96 @@ export async function probeClientUpdates(client, evaluate, consoleMessages) {
 		if (!button || button.disabled) throw new Error('Unavailable update probe action: ' + ${JSON.stringify(label)});
 		button.click();
 	})()`);
+	const releases = [
+		{
+			version: "0.2.0",
+			tag: "v0.2.0",
+			notes:
+				"## Changes\n\n- **Improved** movement\n\n" +
+				"- More release details\n".repeat(60),
+		},
+		{
+			version: "0.1.9",
+			tag: "v0.1.9",
+			notes:
+				"Fixed arrival placement. <img src=x onerror=alert(1)> [Details](javascript:alert(1))",
+		},
+	];
+	const available = { kind: "available", releases, historyIncomplete: true };
+	const publish = (availability, check) =>
+		read(
+			`${updates}.publish(${JSON.stringify(availability)}, ${JSON.stringify(check)})`,
+		);
 	const check = async (surface) => {
-		await wait(`${icon} !== null`);
+		await wait(`${trigger}?.classList.contains('update-available')`);
 		const evidence = await read(`(() => {
-			const icon = ${icon}; const bounds = icon.getBoundingClientRect();
-			const build = icon.parentElement.getBoundingClientRect();
-			return {label: icon.getAttribute('aria-label'), visible: icon.checkVisibility(), x: bounds.left, right: bounds.right, width: innerWidth, buildLeft: build.left, buildRight: build.right, registrations: ${updates}.read().registrations};
+			const button = ${trigger}; const bounds = button.getBoundingClientRect();
+			return {label: button.getAttribute('aria-label'), visible: button.checkVisibility(), x: bounds.left, right: bounds.right, width: innerWidth, registrations: ${updates}.read().registrations};
 		})()`);
-		assert.equal(evidence.label, "Update available: v0.2.0 — open downloads");
+		assert.equal(evidence.label, "Update available: v0.2.0 — view changes");
 		assert.equal(evidence.visible, true);
 		assert.ok(evidence.x >= 0 && evidence.right <= evidence.width);
-		assert.ok(
-			evidence.x >= evidence.buildLeft && evidence.right <= evidence.buildRight,
-		);
 		assert.ok(evidence.registrations > 0);
 		assert.equal(
-			await read(`(() => {
-			const button = ${icon};
-			const build = document.querySelector('[aria-label="Build information"]');
-			const animation = getComputedStyle(button.querySelector('.pregame-icon'));
-			return getComputedStyle(build).color === getComputedStyle(button).color
-				&& getComputedStyle(build).color !== getComputedStyle(button.closest('.pregame-build')).color
-				&& animation.animationName !== 'none' && animation.animationIterationCount === 'infinite';
-		})()`),
+			await read(
+				`getComputedStyle(${trigger}.querySelector('.pregame-icon')).animationName !== 'none'`,
+			),
 			true,
 		);
 		return { surface, ...evidence };
 	};
 	await wait(`${updates} && ${app}?.read().gates.connection.waiting > 0`);
-	assert.equal(await read(`${icon} === null`), true);
-	await read(
-		`${updates}.publish({kind: 'available', version: '0.2.0', tag: 'v0.2.0'})`,
-	);
+	await publish(available, { kind: "ready" });
 	const surfaces = [await check("loading")];
-	const sizePulse = await read(`(() => {
-		const icon = ${icon}.querySelector('.pregame-icon');
-		const animation = icon.getAnimations()[0];
-		animation.pause();
-		animation.currentTime = 0;
-		const restingWidth = icon.getBoundingClientRect().width;
-		animation.currentTime = Number(animation.effect.getTiming().duration) / 2;
-		const peakWidth = icon.getBoundingClientRect().width;
-		animation.play();
-		return { restingWidth, peakWidth };
-	})()`);
-	assert.ok(sizePulse.peakWidth > sizePulse.restingWidth);
 	await client.send("Emulation.setEmulatedMedia", {
 		features: [{ name: "prefers-reduced-motion", value: "reduce" }],
 	});
 	assert.equal(
 		await read(
-			`getComputedStyle(${icon}.querySelector('.pregame-icon')).animationName`,
+			`getComputedStyle(${trigger}.querySelector('.pregame-icon')).animationName`,
 		),
 		"none",
 	);
 	await client.send("Emulation.setEmulatedMedia", { features: [] });
-	await read(`${icon}.click()`);
-	assert.equal(await read(`${updates}.read().opened`), 1);
+	await read(`${trigger}.focus(); ${trigger}.click()`);
+	await wait(`${dialog}?.open`);
+	const modalEvidence = await read(`(() => {
+		const dialog = ${dialog};
+		const style = getComputedStyle(dialog);
+		const paragraphStyle = getComputedStyle(dialog.querySelector('.release-markdown p'));
+		const bodySize = parseFloat(style.getPropertyValue('--ui-font-size-body')) * parseFloat(style.getPropertyValue('--ui-text-scale'));
+		const buttons = dialog.querySelector('.ui-dialog-actions').getBoundingClientRect();
+		const bounds = dialog.getBoundingClientRect();
+		return { readable: parseFloat(paragraphStyle.fontSize) === bodySize && paragraphStyle.textAlign === 'left', actionsVisible: buttons.top >= bounds.top && buttons.bottom <= bounds.bottom, versions: [...dialog.querySelectorAll('h3')].map(element => element.textContent), historyLink: [...dialog.querySelectorAll('button')].some(button => button.textContent.trim() === 'Full release history'), formatted: !!dialog.querySelector('strong'), safe: !dialog.querySelector('img, a, script'), scrollable: dialog.querySelector('.release-changes-content').scrollHeight > dialog.querySelector('.release-changes-content').clientHeight, focused: dialog.contains(document.activeElement) };
+	})()`);
+	assert.deepEqual(modalEvidence, {
+		readable: true,
+		actionsVisible: true,
+		versions: ["v0.2.0", "v0.1.9"],
+		historyLink: true,
+		formatted: true,
+		safe: true,
+		scrollable: true,
+		focused: true,
+	});
+	await click("Download latest release");
+	await wait(`${updates}.read().opened === 1`);
+	await click("Full release history");
+	await wait(`${updates}.read().opened === 2`);
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyDown",
+		key: "Escape",
+		code: "Escape",
+		windowsVirtualKeyCode: 27,
+	});
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyUp",
+		key: "Escape",
+		code: "Escape",
+		windowsVirtualKeyCode: 27,
+	});
+	await wait(`${dialog} === null`);
+	assert.equal(await read(`document.activeElement === ${trigger}`), true);
 	await client.send("Emulation.setDeviceMetricsOverride", {
 		width: 700,
 		height: 650,
@@ -89,7 +122,59 @@ export async function probeClientUpdates(client, evaluate, consoleMessages) {
 		mobile: false,
 	});
 	surfaces.push(await check("narrow loading"));
+	await read(`${trigger}.click()`);
+	await wait(`${dialog}?.open`);
+	assert.equal(
+		await read(
+			`(() => { const bounds = ${dialog}.getBoundingClientRect(); return bounds.left >= 0 && bounds.right <= innerWidth && bounds.top >= 0 && bounds.bottom <= innerHeight; })()`,
+		),
+		true,
+	);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mousePressed",
+		x: 1,
+		y: 1,
+		button: "left",
+		clickCount: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseReleased",
+		x: 1,
+		y: 1,
+		button: "left",
+		clickCount: 1,
+	});
+	await wait(`${dialog} === null`);
 	await client.send("Emulation.clearDeviceMetricsOverride");
+	await publish(
+		{ kind: "current", releases: [releases[0]] },
+		{ kind: "ready" },
+	);
+	await read(`${trigger}.click()`);
+	await wait(`${dialog}?.textContent.includes('You’re up to date')`);
+	assert.equal(
+		await read(
+			`[...${dialog}.querySelectorAll('button')].some(button => button.textContent.trim() === 'Full release history')`,
+		),
+		false,
+	);
+	assert.equal(
+		await read(`${trigger}.querySelector('.pregame-icon') === null`),
+		true,
+	);
+	assert.equal(await read(`${dialog}.querySelectorAll('h3').length`), 1);
+	await publish(available, { kind: "failed", message: "Offline fixture" });
+	await wait(`${dialog}?.textContent.includes('Offline fixture')`);
+	assert.equal(await read(`${dialog}.querySelectorAll('h3').length`), 2);
+	await click("Retry");
+	await publish({ kind: "unknown" }, { kind: "loading" });
+	await wait(`${dialog}?.textContent.includes('Checking for updates')`);
+	await publish({ kind: "unknown" }, { kind: "disabled" });
+	await wait(
+		`${dialog}?.textContent.includes('Update checking is unavailable')`,
+	);
+	await click("Close");
+	await publish(available, { kind: "ready" });
 	await read(
 		`${app}.authenticate(); ${app}.releaseConnection(); ${app}.releaseScene()`,
 	);
@@ -105,7 +190,7 @@ export async function probeClientUpdates(client, evaluate, consoleMessages) {
 		`${app}.read().portalReveals === 1 && document.querySelector('.client-world') !== null`,
 	);
 	await wait(`${updates}.read().registrations === 0`);
-	assert.equal(await read(`${icon} === null`), true);
+	assert.equal(await read(`${trigger} === null && ${dialog} === null`), true);
 	await read("document.querySelector('[aria-label=\"System menu\"]').click()");
 	await wait(
 		"document.querySelector('[role=menu][aria-label=System]') !== null",
@@ -113,11 +198,9 @@ export async function probeClientUpdates(client, evaluate, consoleMessages) {
 	await click("Return to main menu");
 	await wait("document.querySelector('.client-character-list') !== null");
 	surfaces.push(await check("returned selection"));
-	await read(`${updates}.publish({kind: 'current'})`);
-	await wait(`${icon} === null`);
 	return {
 		passed: true,
-		sizePulse,
+		modalEvidence,
 		surfaces,
 		gameplayRegistrations: 0,
 		opened: await read(`${updates}.read().opened`),

@@ -15,6 +15,10 @@ import {
 } from "./identity.ts";
 import { sourceFacts } from "./source.ts";
 import { REPOSITORY, github, type GitHub } from "../github.ts";
+import {
+  RELEASE_HISTORY_LIMIT,
+  releaseHistoryFeedSchema,
+} from "../../apps/holtburger-3d/src/app/release-history-contract.ts";
 
 /** Public asset facts used for complete inventory and byte-identity admission. */
 const assetSchema = z.object({
@@ -179,16 +183,39 @@ export function latestPublishedRelease(api: GitHub): Distribution | null {
   return publishedInventories(pages.flat(), api)[0]?.identity ?? null;
 }
 
-/** Project one verified release into client updates and the website's build-time download snapshot. */
+/** Publish bounded verified history alongside the latest release's download and compatibility documents. */
 export function generateFeeds(
   releases: readonly unknown[],
   api: GitHub,
   output: string,
 ): void {
   // Validate every advertised release before touching any existing output.
-  const [newest] = publishedInventories(releases, api);
+  const inventories = publishedInventories(releases, api);
+  const [newest] = inventories;
+  // Resolve every retained changelog before modifying any existing published output.
+  const history =
+    newest === undefined
+      ? null
+      : releaseHistoryFeedSchema.parse({
+          schemaVersion: 2,
+          releases: inventories
+            .slice(0, RELEASE_HISTORY_LIMIT)
+            .map(({ identity }) => ({
+              version: identity.version,
+              tag: identity.tag,
+              notes: api([
+                `repos/${REPOSITORY}/contents/release/RELEASE_NOTES.md?ref=${identity.commit}`,
+                "--header",
+                "Accept: application/vnd.github.raw+json",
+              ]).toString("utf8"),
+            })),
+          omittedVersion:
+            inventories[RELEASE_HISTORY_LIMIT]?.identity.version ?? null,
+        });
   const updates = join(output, "updates");
-  mkdirSync(updates, { recursive: true });
+  mkdirSync(join(updates, "v2"), { recursive: true });
+  if (history === null) rmSync(join(updates, "v2/beta.json"), { force: true });
+  else writeJson(join(updates, "v2/beta.json"), history);
   if (newest === undefined) rmSync(join(updates, "beta.json"), { force: true });
   else
     writeJson(join(updates, "beta.json"), {

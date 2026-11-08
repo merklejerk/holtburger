@@ -9,6 +9,8 @@ export const APP_UPDATE_TUNING = {
 	feedRootUrl: "https://merklejerk.github.io/holtburger/updates",
 	/** Confirmed release tags append to this URL; omit the trailing slash. */
 	downloadsRootUrl: "https://github.com/merklejerk/holtburger/releases/tag",
+	/** Full release history, used when retained changelogs omit newer changes. */
+	historyUrl: "https://github.com/merklejerk/holtburger/releases",
 	/** Minimum time between attempts while the launcher or pregame is visible. */
 	checkIntervalMs: 60 * 60 * 1000,
 	/** Deadline covers both requesting the feed and reading its body. */

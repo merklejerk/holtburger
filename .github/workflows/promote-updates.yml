@@ -10,6 +10,7 @@ on:
       - 'assets/branding/**'
       - 'assets/screenshots/**'
       - 'scripts/**'
+      - 'apps/holtburger-3d/src/app/release-history-contract.ts'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/promote-updates.yml'

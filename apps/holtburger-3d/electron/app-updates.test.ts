@@ -14,11 +14,17 @@ const build: AppBuild = {
 	kind: "release",
 	revision: "abcdef12",
 };
-const feed = {
-	schemaVersion: 1,
-	version: "0.1.4",
-	tag: "v0.1.4",
-};
+function history(version: string) {
+	return {
+		schemaVersion: 2,
+		releases: [
+			{ version, tag: `v${version}`, notes: `Changes for ${version}` },
+		],
+		omittedVersion: null,
+	};
+}
+const feed = history("0.1.4");
+const latestRelease = feed.releases[0];
 
 function fixture(identity: AppBuild | null) {
 	const request = vi
@@ -55,16 +61,16 @@ describe("application update ownership", () => {
 		await vi.advanceTimersByTimeAsync(0);
 		expect(request).toHaveBeenCalledOnce();
 		expect(request.mock.calls[0][0]).toBe(
-			`${APP_UPDATE_TUNING.feedRootUrl}/beta.json`,
+			`${APP_UPDATE_TUNING.feedRootUrl}/v2/beta.json`,
 		);
 		expect(updates.snapshot.availability).toEqual({
 			kind: "available",
-			version: feed.version,
-			tag: feed.tag,
+			releases: feed.releases,
+			historyIncomplete: false,
 		});
 		await updates.openDownloads();
 		expect(openExternal).toHaveBeenCalledExactlyOnceWith(
-			`${APP_UPDATE_TUNING.downloadsRootUrl}/${feed.tag}`,
+			`${APP_UPDATE_TUNING.downloadsRootUrl}/${latestRelease.tag}`,
 		);
 		updates.stop();
 	});
@@ -73,23 +79,23 @@ describe("application update ownership", () => {
 		const { updates, request, openExternal } = fixture(build);
 		updates.start();
 		await vi.advanceTimersByTimeAsync(0);
-		const latest = { ...feed, version: "0.1.5", tag: "v0.1.5" };
+		const latest = history("0.1.5");
 		request.mockResolvedValueOnce(Response.json(latest));
 
 		await updates.openDownloads();
 
 		expect(request).toHaveBeenCalledTimes(2);
 		expect(request.mock.calls[1]).toEqual([
-			`${APP_UPDATE_TUNING.feedRootUrl}/${build.channel}.json`,
+			`${APP_UPDATE_TUNING.feedRootUrl}/v2/${build.channel}.json`,
 			expect.objectContaining({ cache: "no-store" }),
 		]);
 		expect(updates.snapshot.availability).toEqual({
 			kind: "available",
-			version: latest.version,
-			tag: latest.tag,
+			releases: latest.releases,
+			historyIncomplete: false,
 		});
 		expect(openExternal).toHaveBeenCalledExactlyOnceWith(
-			`${APP_UPDATE_TUNING.downloadsRootUrl}/${latest.tag}`,
+			`${APP_UPDATE_TUNING.downloadsRootUrl}/${latest.releases[0].tag}`,
 		);
 		updates.stop();
 	});
@@ -103,7 +109,8 @@ describe("application update ownership", () => {
 
 		await expect(updates.openDownloads()).rejects.toThrow("offline");
 		expect(openExternal).not.toHaveBeenCalled();
-		expect(updates.snapshot).toEqual(confirmed);
+		expect(updates.snapshot.availability).toEqual(confirmed.availability);
+		expect(updates.snapshot.check.kind).toBe("failed");
 		await updates.openDownloads();
 		expect(request).toHaveBeenCalledTimes(3);
 		expect(openExternal).toHaveBeenCalledOnce();
@@ -145,7 +152,7 @@ describe("application update ownership", () => {
 		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		const opening = updates.openDownloads();
 		expect(openExternal).not.toHaveBeenCalled();
-		respond(Response.json({ ...feed, version: "0.1.5", tag: "v0.1.5" }));
+		respond(Response.json(history("0.1.5")));
 		await opening;
 		expect(request).toHaveBeenCalledTimes(2);
 		expect(openExternal).toHaveBeenCalledExactlyOnceWith(
@@ -154,22 +161,16 @@ describe("application update ownership", () => {
 		updates.stop();
 	});
 
-	it("does not open downloads when the refreshed channel no longer offers an update", async () => {
+	it("opens the latest confirmed release even when already current", async () => {
 		const { updates, request, openExternal } = fixture(build);
 		updates.start();
 		await vi.advanceTimersByTimeAsync(0);
-		request.mockResolvedValueOnce(
-			Response.json({
-				...feed,
-				version: build.version,
-				tag: `v${build.version}`,
-			}),
-		);
-		await expect(updates.openDownloads()).rejects.toThrow(
-			"No confirmed update",
-		);
+		request.mockResolvedValueOnce(Response.json(history(build.version)));
+		await updates.openDownloads();
 		expect(updates.snapshot.availability.kind).toBe("current");
-		expect(openExternal).not.toHaveBeenCalled();
+		expect(openExternal).toHaveBeenCalledExactlyOnceWith(
+			`${APP_UPDATE_TUNING.downloadsRootUrl}/v${build.version}`,
+		);
 		updates.stop();
 	});
 
@@ -243,19 +244,12 @@ describe("application update ownership", () => {
 		request.mockRejectedValueOnce(new Error("offline"));
 		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		expect(updates.snapshot.availability.kind).toBe("available");
-		expect(updates.snapshot).toEqual(confirmed);
-		request.mockResolvedValueOnce(
-			Response.json({
-				...feed,
-				version: build.version,
-				tag: `v${build.version}`,
-			}),
-		);
+		expect(updates.snapshot.availability).toEqual(confirmed.availability);
+		expect(updates.snapshot.check.kind).toBe("failed");
+		request.mockResolvedValueOnce(Response.json(history(build.version)));
 		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		expect(updates.snapshot.availability.kind).toBe("current");
-		await expect(updates.openDownloads()).rejects.toThrow(
-			"No confirmed update",
-		);
+		await updates.openDownloads();
 		updates.stop();
 	});
 
@@ -288,8 +282,13 @@ describe("application update ownership", () => {
 		for (const response of [
 			new Response("not json"),
 			new Response("unavailable", { status: 503 }),
-			Response.json({ ...feed, version: "bad" }),
-			Response.json({ ...feed, tag: "https://example.invalid/download" }),
+			Response.json(history("bad")),
+			Response.json({
+				...feed,
+				releases: [
+					{ ...latestRelease, tag: "https://example.invalid/download" },
+				],
+			}),
 		]) {
 			const { updates, request, openExternal } = fixture(build);
 			request.mockResolvedValueOnce(response);
@@ -308,6 +307,7 @@ describe("application update ownership", () => {
 		updates.start();
 		await vi.advanceTimersByTimeAsync(0);
 		updates.stop();
+		publish.mockClear();
 		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		expect(publish).not.toHaveBeenCalled();
 		expect(vi.getTimerCount()).toBe(0);
@@ -319,6 +319,8 @@ describe("application update ownership", () => {
 		updates.setWindowVisible(true);
 		updates.registerPregame(true);
 		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
+		await updates.refresh();
+		expect(updates.snapshot.check.kind).toBe("disabled");
 		expect(request).not.toHaveBeenCalled();
 		updates.stop();
 	});
@@ -344,24 +346,95 @@ describe("application update ownership", () => {
 	});
 
 	it("beta uses its explicit feed and equal or older versions remain current", async () => {
-		for (const version of ["0.1.4", "0.1.3"]) {
+		for (const version of ["0.1.10", "0.1.9"]) {
 			const { updates, request } = fixture({
 				...build,
-				version: "0.1.4",
+				version: "0.1.10",
 				channel: "beta",
 				kind: "release",
 			});
-			request.mockResolvedValueOnce(
-				Response.json({ ...feed, version, tag: `v${version}` }),
-			);
+			request.mockResolvedValueOnce(Response.json(history(version)));
 			updates.start();
 			await vi.advanceTimersByTimeAsync(0);
 			expect(request.mock.calls[0][0]).toBe(
-				`${APP_UPDATE_TUNING.feedRootUrl}/beta.json`,
+				`${APP_UPDATE_TUNING.feedRootUrl}/v2/beta.json`,
 			);
 			expect(updates.snapshot.availability.kind).toBe("current");
 			updates.stop();
 		}
+	});
+
+	it.each([
+		{
+			installed: "0.1.1",
+			expected: {
+				kind: "available",
+				versions: ["0.1.4", "0.1.3"],
+				historyIncomplete: true,
+			},
+		},
+		{
+			installed: "0.1.2",
+			expected: {
+				kind: "available",
+				versions: ["0.1.4", "0.1.3"],
+				historyIncomplete: false,
+			},
+		},
+		{
+			installed: "0.1.3",
+			expected: {
+				kind: "available",
+				versions: ["0.1.4"],
+				historyIncomplete: false,
+			},
+		},
+		{ installed: "0.1.4", expected: { kind: "current", versions: ["0.1.4"] } },
+		{ installed: "0.1.5", expected: { kind: "current", versions: ["0.1.4"] } },
+	])(
+		"selects changes since $installed and identifies omitted newer history",
+		async ({ installed, expected }) => {
+			const { updates, request } = fixture({ ...build, version: installed });
+			request.mockResolvedValueOnce(
+				Response.json({
+					schemaVersion: 2,
+					releases: [
+						history("0.1.4").releases[0],
+						history("0.1.3").releases[0],
+					],
+					omittedVersion: "0.1.2",
+				}),
+			);
+			updates.start();
+			await vi.advanceTimersByTimeAsync(0);
+			const availability = updates.snapshot.availability;
+			if (availability.kind === "unknown")
+				throw new Error("Expected confirmed history");
+			const { releases, ...selection } = availability;
+			expect({
+				...selection,
+				versions: releases.map(({ version }) => version),
+			}).toEqual(expected);
+			updates.stop();
+		},
+	);
+
+	it("exposes startup failure, permits explicit retry and opens only the fixed full history", async () => {
+		const { updates, request, openExternal } = fixture(build);
+		request.mockRejectedValueOnce(new Error("offline"));
+		updates.start();
+		await vi.advanceTimersByTimeAsync(0);
+		expect(updates.snapshot.check).toEqual({
+			kind: "failed",
+			message: "offline",
+		});
+		await updates.refresh();
+		expect(updates.snapshot.check.kind).toBe("ready");
+		await updates.openHistory();
+		expect(openExternal).toHaveBeenCalledExactlyOnceWith(
+			APP_UPDATE_TUNING.historyUrl,
+		);
+		updates.stop();
 	});
 
 	it("backward clock correction postpones checks without timer overflow or request bursts", async () => {

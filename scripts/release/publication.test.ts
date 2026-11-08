@@ -29,6 +29,7 @@ import {
 import { publishFrozenRelease } from "./publishing.ts";
 import { createManifestFixture, createSourceFixture } from "./test-fixtures.ts";
 import { NIGHTLY_HASH_LENGTH, bumpVersion } from "./version.ts";
+import { RELEASE_HISTORY_LIMIT } from "../../apps/holtburger-3d/src/app/release-history-contract.ts";
 import { TARGETS } from "./contracts.ts";
 
 /** Complete synthetic GitHub inventory over an independently constructed release manifest. */
@@ -82,6 +83,8 @@ test("beta reconciliation selects SemVer, supports withdrawal and preserves webs
     ),
     newer = publicRelease(distribution("release", "0.2.1", "b".repeat(40)), 2);
   const api: GitHub = (args) => {
+    if (args[0].includes("/contents/"))
+      return Buffer.from("## Changes\n\nReviewed notes");
     const id = basename(args[0]);
     assert.equal(args[1], "--header");
     return id === "1" ? older.data : newer.data;
@@ -114,6 +117,7 @@ test("beta reconciliation selects SemVer, supports withdrawal and preserves webs
   );
   generateFeeds([], api, output);
   assert.equal(existsSync(join(output, "updates/beta.json")), false);
+  assert.equal(existsSync(join(output, "updates/v2/beta.json")), false);
   assert.equal(readJson(join(output, "updates/downloads.json")), null);
   assert.equal(
     readFileSync(join(output, "index.html"), "utf8"),
@@ -145,7 +149,10 @@ test("bad public asset inventories and duplicate versions leave prior feed intac
   const output = scratch(t),
     identity = distribution("release", "0.2.0", "a".repeat(40)),
     fixture = publicRelease(identity, 1);
-  const api: GitHub = () => fixture.data;
+  const api: GitHub = (args) =>
+    args[0].includes("/contents/")
+      ? Buffer.from("Reviewed notes")
+      : fixture.data;
   generateFeeds([fixture.release], api, output);
   const prior = readFileSync(join(output, "updates/beta.json"));
   for (const mutate of [
@@ -171,6 +178,75 @@ test("bad public asset inventories and duplicate versions leave prior feed intac
     () => generateFeeds([fixture.release, fixture.release], api, output),
     /Multiple published distributions/,
   );
+});
+
+test("history backfills retained source notes and records the newest omitted version", (t) => {
+  const output = scratch(t);
+  const fixtures = Array.from(
+    { length: RELEASE_HISTORY_LIMIT + 2 },
+    (_, index) =>
+      publicRelease(
+        distribution(
+          "release",
+          `0.2.${index}`,
+          index.toString(16).padStart(40, "0"),
+        ),
+        index,
+      ),
+  );
+  const requestedNotes: string[] = [];
+  const api: GitHub = (args) => {
+    if (args[0].includes("/contents/")) {
+      requestedNotes.push(args[0]);
+      return Buffer.from(`## Changes\n\nNotes at ${args[0]}`);
+    }
+    const fixture = fixtures.find(
+      ({ release }) => String(release.id) === basename(args[0]),
+    );
+    assert.ok(fixture);
+    return fixture.data;
+  };
+  generateFeeds(
+    fixtures.map(({ release }) => release),
+    api,
+    output,
+  );
+  const history = readJson(join(output, "updates/v2/beta.json"));
+  assert.deepEqual(history, {
+    schemaVersion: 2,
+    releases: fixtures
+      .slice(-RELEASE_HISTORY_LIMIT)
+      .reverse()
+      .map(({ manifest }) => ({
+        version: manifest.version,
+        tag: `v${manifest.version}`,
+        notes: `## Changes\n\nNotes at repos/merklejerk/holtburger/contents/release/RELEASE_NOTES.md?ref=${manifest.commit}`,
+      })),
+    omittedVersion: fixtures[1].manifest.version,
+  });
+  assert.equal(requestedNotes.length, RELEASE_HISTORY_LIMIT);
+  const prior = readFileSync(join(output, "updates/v2/beta.json"));
+  const priorLegacy = readFileSync(join(output, "updates/beta.json"));
+  for (const missing of [false, true]) {
+    assert.throws(() =>
+      generateFeeds(
+        fixtures.map(({ release }) => release),
+        (args) => {
+          if (args[0].includes("/contents/")) {
+            if (missing) throw new Error("Source notes unavailable");
+            return Buffer.from(" ");
+          }
+          return api(args);
+        },
+        output,
+      ),
+    );
+    assert.deepEqual(readFileSync(join(output, "updates/v2/beta.json")), prior);
+    assert.deepEqual(
+      readFileSync(join(output, "updates/beta.json")),
+      priorLegacy,
+    );
+  }
 });
 
 test("published build skipping requires source, audience, manifest and ready digest inventory", () => {

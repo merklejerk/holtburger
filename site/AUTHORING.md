@@ -246,7 +246,12 @@ dispatch, always checking out trusted main. It installs the independent root
 tooling and site lockfiles, checks
 formatting/types, builds the site and Pagefind, and checks local links/assets and
 anchors. Before building, the root feed generator validates the published beta inventory
-and writes `static/updates/beta.json` plus `static/updates/downloads.json`. Site preparation
+and writes `static/updates/beta.json`, `static/updates/v2/beta.json`, and
+`static/updates/downloads.json`. The v2 feed backfills the latest ten verified beta
+changelogs from `release/RELEASE_NOTES.md` at each manifest's source commit. Its
+omitted-version boundary lets clients identify missing changes. Missing or empty
+notes fail generation before existing feeds are modified. The legacy beta feed
+retains its original identity-only format for installed clients. Site preparation
 embeds that download snapshot for prerendered version labels and platform downloads.
 A single job publishes one Pages artifact containing website and feeds.
 Media is published separately; no remote media or publisher tests gate deployment.

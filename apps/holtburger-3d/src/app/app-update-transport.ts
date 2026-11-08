@@ -9,7 +9,7 @@ import {
 	type NativeSnapshotSource,
 } from "./native-snapshot";
 
-/** The desktop bridge exposes visibility and one confirmed action, never arbitrary network access. */
+/** The desktop bridge exposes visibility and fixed release actions, never arbitrary network access. */
 export interface AppUpdateBridge extends NativeSnapshotSource {
 	/** Register one mounted launcher/pregame footer with its initial visibility. */
 	registerPregame(visible: boolean): Promise<unknown>;
@@ -17,7 +17,11 @@ export interface AppUpdateBridge extends NativeSnapshotSource {
 	setPregameVisible(token: string, visible: boolean): Promise<unknown>;
 	/** Retire a footer when its frontend page unmounts. */
 	releasePregame(token: string): Promise<unknown>;
-	/** Refresh the installed channel and open its confirmed update downloads page. */
+	/** Retry a bounded feed request; native state carries failures as well as retained notes. */
+	refresh(): Promise<void>;
+	/** Open the fixed repository release history in the system browser. */
+	openHistory(): Promise<void>;
+	/** Refresh the installed channel and open its confirmed release downloads page. */
 	openDownloads(): Promise<void>;
 }
 
@@ -45,6 +49,8 @@ export function createAppUpdateTransport(bridge: AppUpdateBridge) {
 			);
 		},
 		openDownloads: () => bridge.openDownloads(),
+		refresh: () => bridge.refresh(),
+		openHistory: () => bridge.openHistory(),
 		subscribe(
 			handler: (snapshot: UpdateSnapshot) => void,
 			failed: (error: unknown) => void,

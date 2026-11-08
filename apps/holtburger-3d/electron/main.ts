@@ -991,6 +991,8 @@ void (async () => {
 			),
 	);
 	handle("updates:open-downloads", undefined, () => updates.openDownloads());
+	handle("updates:refresh", undefined, () => updates.refresh());
+	handle("updates:open-history", undefined, () => updates.openHistory());
 	updates.start();
 	reconsiderUpdates();
 

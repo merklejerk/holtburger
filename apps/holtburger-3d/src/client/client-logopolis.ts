@@ -43,7 +43,7 @@ type SnakeOutcome =
 	| { readonly kind: "lost" }
 	| { readonly kind: "won" };
 /** Bisector geometry and the coordinate axis used to classify portal sides. */
-export interface SnakeWall {
+interface SnakeWall {
 	/** Normal axis: a horizontal wall separates y coordinates. */
 	readonly axis: "x" | "y";
 	/** Center line; portal entrances must lie strictly on opposite sides. */

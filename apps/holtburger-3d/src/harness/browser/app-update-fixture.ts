@@ -8,6 +8,7 @@ export function installAppUpdateFixture() {
 	let snapshot: UpdateSnapshot = {
 		revision: 0,
 		availability: { kind: "unknown" },
+		check: { kind: "idle" },
 	};
 	let opened = 0;
 	window.holtburgerUpdates = {
@@ -34,17 +35,25 @@ export function installAppUpdateFixture() {
 				throw new Error("Fixture footer registration is missing");
 			return "retired";
 		},
+		refresh: async () => {},
+		openHistory: async () => {
+			opened++;
+		},
 		openDownloads: async () => {
-			if (snapshot.availability.kind !== "available")
+			if (snapshot.availability.kind === "unknown")
 				throw new Error("Fixture has no available update");
 			opened++;
 		},
 	};
 	const capability = {
-		publish(availability: UpdateSnapshot["availability"]) {
+		publish(
+			availability: UpdateSnapshot["availability"],
+			check: UpdateSnapshot["check"],
+		) {
 			snapshot = {
 				revision: snapshot.revision + 1,
 				availability,
+				check,
 			};
 			for (const listener of listeners) listener(snapshot);
 		},
@@ -67,7 +76,10 @@ declare global {
 		/** Present only in the controlled browser update probe. */
 		__HOLTBURGER_UPDATE_FIXTURE__?: {
 			/** Publish a native-owned decision to the actual footer. */
-			publish(availability: UpdateSnapshot["availability"]): void;
+			publish(
+				availability: UpdateSnapshot["availability"],
+				check: UpdateSnapshot["check"],
+			): void;
 			/** Verify registrations follow actual pregame/gameplay mounts. */
 			read(): {
 				registrations: number;

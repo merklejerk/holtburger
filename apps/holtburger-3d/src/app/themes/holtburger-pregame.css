@@ -309,11 +309,10 @@
 		font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
 		text-shadow: 0 1px 4px var(--ui-color-well);
 	}
-	.client-pregame-screen .pregame-build-label.update-available,
-	.client-pregame-screen .pregame-update {
+	.client-pregame-screen .pregame-build-label.update-available {
 		color: var(--ui-color-danger);
 	}
-	.client-pregame-screen .pregame-update .pregame-icon {
+	.client-pregame-screen .pregame-build-label.update-available .pregame-icon {
 		animation: pregame-update-pulse 1.2s ease-in-out infinite;
 	}
 	@keyframes pregame-update-pulse {
@@ -326,7 +325,7 @@
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {
-		.client-pregame-screen .pregame-update .pregame-icon {
+		.client-pregame-screen .pregame-build-label.update-available .pregame-icon {
 			animation: none;
 		}
 	}

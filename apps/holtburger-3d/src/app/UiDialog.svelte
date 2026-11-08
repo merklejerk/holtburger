@@ -37,7 +37,7 @@
 	use:dismissDialogOnBackdrop={() => {
 		if (dismissOnBackdrop) onCancel();
 	}}
-	class={`ui-dialog ui-overlay-surface ${className}`}
+	class={`ui-theme ui-dialog ui-overlay-surface ${className}`}
 	tabindex="-1"
 	aria-labelledby={headingId}
 	aria-describedby={describedBy}
@@ -57,10 +57,16 @@
 <style>
 	@layer components {
 		.ui-dialog {
+			/* Top-layer placement retains DOM inheritance, including compact/right-aligned footer text. */
+			text-align: left;
+			text-shadow: none;
 			/* Browsers with expanding content can opt into a stable width; viewport limits still apply. */
 			width: var(--ui-dialog-width, fit-content);
 			min-width: min(18rem, calc(var(--ui-viewport-width) - 2rem));
-			max-width: min(34rem, calc(var(--ui-viewport-width) - 2rem));
+			max-width: min(
+				var(--ui-dialog-width, 34rem),
+				calc(var(--ui-viewport-width) - 2rem)
+			);
 			max-height: calc(var(--ui-viewport-height) - 2rem);
 			box-sizing: border-box;
 			overflow: auto;

@@ -139,6 +139,8 @@ if (process.argv.includes("--holtburger-mode=client")) {
 			invoke("updates:pregame-visible", token, visible),
 		releasePregame: (token: string) => invoke("updates:release-pregame", token),
 		openDownloads: () => invoke("updates:open-downloads"),
+		refresh: () => invoke("updates:refresh"),
+		openHistory: () => invoke("updates:open-history"),
 		listen(handler: (snapshot: unknown) => void): () => void {
 			const listener = (_event: unknown, snapshot: unknown) =>
 				handler(snapshot);

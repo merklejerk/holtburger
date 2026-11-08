@@ -7,11 +7,13 @@ import {
 	type AppBuild,
 } from "../src/app/app-build-contract.js";
 import {
-	updateFeedSchema,
-	type UpdateFeed,
 	type PregameRegistrationStatus,
 	type UpdateSnapshot,
 } from "../src/app/app-update-contract.js";
+import {
+	releaseHistoryFeedSchema,
+	type ReleaseHistoryFeed,
+} from "../src/app/release-history-contract.js";
 import { formatError } from "../src/lib/format-error.js";
 
 /** One native admission policy covers metadata loading and direct owner construction. */
@@ -69,7 +71,7 @@ function readUpdateFeed(
 	request: typeof fetch,
 	url: string,
 	signal: AbortSignal,
-): Promise<UpdateFeed> {
+): Promise<ReleaseHistoryFeed> {
 	return new Promise((resolve, reject) => {
 		const onAbort = () => reject(signal.reason);
 		if (signal.aborted) {
@@ -86,7 +88,7 @@ function readUpdateFeed(
 			});
 			if (!response.ok)
 				throw new Error(`Update feed returned HTTP ${response.status}`);
-			return updateFeedSchema.parse(await response.json());
+			return releaseHistoryFeedSchema.parse(await response.json());
 		})()
 			.then(resolve, reject)
 			.finally(() => signal.removeEventListener("abort", onAbort));
@@ -101,6 +103,7 @@ export class AppUpdates {
 	#snapshot: UpdateSnapshot = {
 		revision: 0,
 		availability: { kind: "unknown" },
+		check: { kind: "idle" },
 	};
 	#request: UpdateRequest | null = null;
 	#timer: ReturnType<typeof setTimeout> | null = null;
@@ -111,6 +114,7 @@ export class AppUpdates {
 
 	constructor(build: AppBuild | null, dependencies: UpdateDependencies) {
 		this.#build = checkingBuild(build);
+		if (this.#build === null) this.#snapshot.check = { kind: "disabled" };
 		this.#dependencies = dependencies;
 	}
 
@@ -160,15 +164,21 @@ export class AppUpdates {
 	}
 
 	async openDownloads(): Promise<void> {
-		if (this.#stopped || this.#snapshot.availability.kind !== "available")
-			throw new Error("No confirmed update downloads are available");
-		await this.#refresh();
-		const availability = this.#snapshot.availability;
-		if (this.#stopped || availability.kind !== "available")
-			throw new Error("No confirmed update downloads are available");
+		if (this.#stopped || this.#snapshot.availability.kind === "unknown")
+			throw new Error("No confirmed release downloads are available");
+		await this.refresh();
+		const availability = this.snapshot.availability;
+		if (this.#stopped || availability.kind === "unknown")
+			throw new Error("No confirmed release downloads are available");
 		await this.#dependencies.openExternal(
-			`${APP_UPDATE_TUNING.downloadsRootUrl}/${availability.tag}`,
+			`${APP_UPDATE_TUNING.downloadsRootUrl}/${availability.releases[0].tag}`,
 		);
+	}
+
+	/** History navigation is fixed to this repository, including when notes are incomplete. */
+	openHistory(): Promise<void> {
+		if (this.#stopped) throw new Error("Update checking has stopped");
+		return this.#dependencies.openExternal(APP_UPDATE_TUNING.historyUrl);
 	}
 
 	/** Optional network work never joins native settings/host shutdown. */
@@ -211,14 +221,14 @@ export class AppUpdates {
 	}
 
 	#check(): void {
-		void this.#refresh().catch((error: unknown) => {
+		void this.refresh().catch((error: unknown) => {
 			if (!this.#stopped)
 				this.#dependencies.report(`Update check failed: ${formatError(error)}`);
 		});
 	}
 
-	/** Explicit download actions bypass the hourly interval but share any active request. */
-	#refresh(): Promise<void> {
+	/** Modal retries and download actions bypass the hourly interval and share any active request. */
+	refresh(): Promise<void> {
 		if (this.#request !== null) return this.#request.completion;
 		const build = this.#build;
 		if (build === null || this.#stopped) return Promise.resolve();
@@ -233,16 +243,40 @@ export class AppUpdates {
 			try {
 				const feed = await readUpdateFeed(
 					this.#dependencies.request,
-					`${APP_UPDATE_TUNING.feedRootUrl}/${build.channel}.json`,
+					`${APP_UPDATE_TUNING.feedRootUrl}/v2/${build.channel}.json`,
 					cancellation.signal,
 				);
-				if (!this.#stopped)
+				if (!this.#stopped) {
+					const newer = feed.releases.filter((release) =>
+						gt(release.version, build.version),
+					);
+					const [first, ...rest] = newer;
 					this.#publish({
 						revision: this.#snapshot.revision + 1,
-						availability: gt(feed.version, build.version)
-							? { kind: "available", version: feed.version, tag: feed.tag }
-							: { kind: "current" },
+						check: { kind: "ready" },
+						availability:
+							first === undefined
+								? {
+										kind: "current",
+										releases: [feed.releases[0]],
+									}
+								: {
+										kind: "available",
+										releases: [first, ...rest],
+										historyIncomplete:
+											feed.omittedVersion !== null &&
+											gt(feed.omittedVersion, build.version),
+									},
 					});
+				}
+			} catch (error) {
+				if (!this.#stopped)
+					this.#publish({
+						...this.#snapshot,
+						revision: this.#snapshot.revision + 1,
+						check: { kind: "failed", message: formatError(error) },
+					});
+				throw error;
 			} finally {
 				clearTimeout(deadline);
 				this.#request = null;
@@ -250,6 +284,11 @@ export class AppUpdates {
 			}
 		});
 		this.#request = { cancellation, deadline, completion };
+		this.#publish({
+			...this.#snapshot,
+			revision: this.#snapshot.revision + 1,
+			check: { kind: "loading" },
+		});
 		return completion;
 	}
 

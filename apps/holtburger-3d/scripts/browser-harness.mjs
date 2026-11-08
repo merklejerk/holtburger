@@ -2079,7 +2079,7 @@ Options:
   --nameplate-report-only
                         Print only renderer identity, errors, profiling, and nameplate evidence.
   --client-presentation Verify actual client selection/creator/gameplay/return on one world context.
-  --client-updates Verify the update footer and pregame visibility registrations on actual client pages.
+  --client-updates Verify the release changes modal and pregame visibility registrations on actual client pages.
   --client-combat-escape Verify combat retry and cancellation ordering through the actual client.
   --pregame-location <index> Choose a configured pregame scene for diagnostics (default: 0).
   --pregame-preview    Exercise static asset ownership and direct preview draw before world startup.

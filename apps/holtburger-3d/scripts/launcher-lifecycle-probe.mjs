@@ -438,7 +438,7 @@ async function runProbe() {
 				if (requests !== 0) throw new Error('Packaged nightly requested updates');
 				nightly.stop();
 			}
-			const probe = { requests: [], opened: [], clock: 0, feed: { schemaVersion: 1, version: '0.1.4', tag: 'v0.1.4' } };
+			const probe = { requests: [], opened: [], clock: 0, feed: { schemaVersion: 2, releases: [{ version: '0.1.4', tag: 'v0.1.4', notes: 'Controlled release notes' }], omittedVersion: null } };
 			const owner = new AppUpdates({ development: false, modified: false, version: '0.1.3', channel: 'beta', kind: 'release', revision: 'abcdef12' }, {
 				request: async (url) => { probe.requests.push(url); return Response.json(probe.feed); },
 				now: () => probe.clock,
@@ -475,11 +475,11 @@ async function runProbe() {
 		await loaded;
 		await attach(initialUpdateRole);
 		stage = "checking and opening the initial update notification";
-		const updateIcon =
+		const updateTrigger =
 			"document.querySelector('.pregame-build button[aria-label^=\"Update available\"]')";
 		await waitFor(
-			() => evaluate(page, `${updateIcon}?.checkVisibility()`),
-			"launcher update icon",
+			() => evaluate(page, `${updateTrigger}?.checkVisibility()`),
+			"launcher update notification",
 		);
 		requireCondition(
 			await evaluate(inspector, "__updatesProbe.requests.length === 1"),
@@ -487,16 +487,25 @@ async function runProbe() {
 		);
 		await evaluate(
 			inspector,
-			"__updatesProbe.feed.version = '0.1.5'; __updatesProbe.feed.tag = 'v0.1.5'",
+			"__updatesProbe.feed.releases[0].version = '0.1.5'; __updatesProbe.feed.releases[0].tag = 'v0.1.5'",
 		);
-		await evaluate(page, `${updateIcon}.click()`);
+		await evaluate(page, `${updateTrigger}.click()`);
+		await waitFor(
+			() =>
+				evaluate(page, "document.querySelector('.app-update-dialog')?.open"),
+			"release changes modal",
+		);
+		await evaluate(
+			page,
+			"[...document.querySelectorAll('.app-update-dialog button')].find(button => button.textContent.trim() === 'Download latest release').click()",
+		);
 		await waitFor(
 			() => evaluate(inspector, "__updatesProbe.opened.length === 1"),
 			"refreshed update downloads",
 		);
 		let native = await evaluate(
 			inspector,
-			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened, expectedDownloadsUrl: __updatesProbe.downloadsRootUrl + '/' + __updatesProbe.feed.tag })`,
+			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened, expectedDownloadsUrl: __updatesProbe.downloadsRootUrl + '/' + __updatesProbe.feed.releases[0].tag })`,
 		);
 		requireCondition(
 			native.requests.length === 2,
@@ -506,12 +515,16 @@ async function runProbe() {
 			native.opened[0] === native.expectedDownloadsUrl,
 			"Click must open the release published after the notification",
 		);
+		await evaluate(
+			page,
+			"[...document.querySelectorAll('.app-update-dialog button')].find(button => button.textContent.trim() === 'Close').click()",
+		);
 		if (values["updates-direct"]) {
 			stage = "returning from direct client startup to the launcher";
 			await evaluate(page, "window.holtburgerLauncher.back(null)");
 			await attach("launcher");
 			await waitFor(
-				() => evaluate(page, `${updateIcon}?.checkVisibility()`),
+				() => evaluate(page, `${updateTrigger}?.checkVisibility()`),
 				"direct startup update retained on launcher return",
 			);
 			report.scenarios.push(
@@ -535,14 +548,14 @@ async function runProbe() {
 		);
 		await attach("client");
 		await waitFor(
-			() => evaluate(page, `${updateIcon}?.checkVisibility()`),
-			"pregame update icon",
+			() => evaluate(page, `${updateTrigger}?.checkVisibility()`),
+			"pregame update notification",
 		);
 		stage = "returning from the launched client attempt to the launcher";
 		await evaluate(page, "window.holtburgerLauncher.back(null)");
 		await attach("launcher");
 		await waitFor(
-			() => evaluate(page, `${updateIcon}?.checkVisibility()`),
+			() => evaluate(page, `${updateTrigger}?.checkVisibility()`),
 			"retained update on launcher return",
 		);
 		stage = "checking stale document rejection and update feed reconciliation";
@@ -555,22 +568,26 @@ async function runProbe() {
 		);
 		await evaluate(
 			inspector,
-			`__updatesProbe.feed.version = '0.1.3'; __updatesProbe.feed.tag = 'v0.1.3'; __updatesProbe.advance()`,
+			`__updatesProbe.feed.releases[0].version = '0.1.3'; __updatesProbe.feed.releases[0].tag = 'v0.1.3'; __updatesProbe.advance()`,
 		);
 		await waitFor(
-			() => evaluate(page, `${updateIcon} === null`),
-			"successful feed reconciliation removes update icon",
+			() =>
+				evaluate(
+					page,
+					"!document.querySelector('.pregame-build-label.update-available')",
+				),
+			"successful feed reconciliation clears update notification",
 		);
 		native = await evaluate(
 			inspector,
-			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened, expectedDownloadsUrl: __updatesProbe.downloadsRootUrl + '/' + __updatesProbe.feed.tag })`,
+			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened, expectedDownloadsUrl: __updatesProbe.downloadsRootUrl + '/' + __updatesProbe.feed.releases[0].tag })`,
 		);
 		requireCondition(
 			native.requests.length === 3,
 			"Returning between documents must not bypass the hourly interval",
 		);
 		report.scenarios.push(
-			"Native update startup, fresh release on footer click, picker/client replacement, stale-token rejection and hourly reconciliation",
+			"Native update startup, fresh release on modal download, picker/client replacement, stale-token rejection and hourly reconciliation",
 		);
 		report.updates = native;
 		stage = "quitting the update probe";

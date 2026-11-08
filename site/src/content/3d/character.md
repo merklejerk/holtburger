@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -14,11 +15,15 @@ Open the character sheet for attributes, vitals, skills, experience and luminanc
 
 Skill sections distinguish trained and specialized skills. Check the displayed costs before spending experience; an improvement button can purchase immediately. Training a new skill has a separate confirmation.
 
+<IllustratedProse name="lugian">
+
 ## Improve a stat or train a skill
 
 Choose the improvement beside the stat you want to raise. Read unavailable-action explanations when you cannot buy the next improvement—for example, when you lack the required currency or have reached a cap.
 
 To train a skill, choose **Train**, review the cost, and confirm. Check the skill's new state afterward.
+
+</IllustratedProse>
 
 <Media id="character-progression" detail />
 

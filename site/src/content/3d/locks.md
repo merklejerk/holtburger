@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -16,11 +17,15 @@ The helper is enabled by default. Automatic key use is a separate setting and st
 
 <Media id="unlock-helper" detail />
 
+<IllustratedProse name="danbys-outpost">
+
 ## Try your keys
 
 Choose **Try all keys** to try the distinct keys available in your inventory. The helper shows how many are available and reports the result.
 
 If you prefer this to happen when you encounter a lock, enable **Automatically try inventory keys** under **Settings → Gameplay → Locks**. If the keys do not open it, the helper can offer the lockpick fallback.
+
+</IllustratedProse>
 
 ## Pick the lock
 

@@ -7,10 +7,26 @@ export async function prepareQuickstarts() {
 		{ source: '3d', route: 'start/3d', title: 'Holtburger 3D' },
 		{ source: 'cli', route: 'tui/install', title: 'Holtburger TUI' }
 	];
+	// Website-only vistas vary across the installation guides; bundled prose stays unchanged.
 	const platforms = [
-		{ source: 'linux', route: 'linux', title: 'Linux (x86-64)' },
-		{ source: 'win32', route: 'windows', title: 'Windows (x86-64)' },
-		{ source: 'darwin', route: 'macos', title: 'macOS (Apple Silicon)' }
+		{
+			source: 'linux',
+			route: 'linux',
+			title: 'Linux (x86-64)',
+			illustration: 'black-hills'
+		},
+		{
+			source: 'win32',
+			route: 'windows',
+			title: 'Windows (x86-64)',
+			illustration: 'danbys-outpost'
+		},
+		{
+			source: 'darwin',
+			route: 'macos',
+			title: 'macOS (Apple Silicon)',
+			illustration: 'qalabar'
+		}
 	];
 	for (const product of products) {
 		const destination = new URL(
@@ -37,9 +53,15 @@ export async function prepareQuickstarts() {
 			const title = `${product.title} for ${platform.title}`;
 			const description =
 				'Install, connect, update, and troubleshoot your release bundle.';
+			// Illustrate the opening passage even if the bundled guide gains introductory prose.
+			const [opening, ...sections] = body.split(/\r?\n(?=## )/);
+			body = [
+				`<IllustratedProse name="${platform.illustration}">\n\n${opening}\n</IllustratedProse>\n`,
+				...sections
+			].join('\n');
 			await writeIfChanged(
 				new URL(`${platform.route}.md`, destination),
-				`---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(description)}\nsection: 'Installation'\n---\n\n<script>\nimport Downloads from '#lib/components/Downloads.svelte';\n</script>\n\n## Download\n\n<Downloads product="${product.source}" platform="${platform.route}" />\n\n${body}`
+				`---\ntitle: ${JSON.stringify(title)}\ndescription: ${JSON.stringify(description)}\nsection: 'Installation'\n---\n\n<script>\nimport Downloads from '#lib/components/Downloads.svelte';\nimport IllustratedProse from '#lib/components/IllustratedProse.svelte';\n</script>\n\n## Download\n\n<Downloads product="${product.source}" platform="${platform.route}" />\n\n${body}`
 			);
 		}
 	}

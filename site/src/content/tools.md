@@ -4,11 +4,19 @@ description: 'Browse content offline or inspect data with the included utilities
 section: 'Tools'
 ---
 
+<script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
+</script>
+
+<IllustratedProse name="black-hills">
+
 ## Offline Explorer
 
 Explorer lets you browse game content without connecting to a server. It needs the same full game data used by the 3D client.
 
 The [Windows](/holtburger/start/3d/windows/#optional-offline-explorer), [macOS](/holtburger/start/3d/macos/#optional-offline-explorer), and [Linux](/holtburger/start/3d/linux/#optional-offline-explorer) quickstarts include the command for their installed or portable bundle.
+
+</IllustratedProse>
 
 ## Data utilities
 

@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -22,6 +23,8 @@ Prepare the requested items in the payment area. **Auto-fill** helps choose item
 
 <Media id="housing-payments" detail />
 
+<IllustratedProse name="qalabar">
+
 ## Manage your house
 
 Open **World → Housing** to check your home’s location, maintenance status, next payment date and property details.
@@ -29,5 +32,7 @@ Open **World → Housing** to check your home’s location, maintenance status, 
 - **Access & guests:** control public and allegiance access, add or remove guests, and grant entry and storage permissions separately. Booting an occupant does not remove their guest permission.
 - **Decorations:** show or hide empty hooks.
 - **Advanced:** abandon your home.
+
+</IllustratedProse>
 
 <Media id="housing-management" detail />

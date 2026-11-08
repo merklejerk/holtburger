@@ -5,14 +5,19 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
+
+<IllustratedProse name="olthoi">
 
 ## Inspect one thing, select another
 
 Unlike retail, selection and inspection are separate. Open an appraisal to read it, then change targets or keep fighting without replacing what you are inspecting. Examining something else replaces the appraisal.
 
 Select a creature, player or item and press **E**, or right-click it to select and examine in one step. The magnifying-glass action also opens appraisal. Move and resize the window to keep it comfortably in view.
+
+</IllustratedProse>
 
 ## Turn the model around
 

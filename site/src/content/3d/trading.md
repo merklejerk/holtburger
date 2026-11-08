@@ -5,8 +5,11 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
+
+<IllustratedProse name="drudge">
 
 ## Buy or sell at a vendor
 
@@ -15,6 +18,8 @@ Interact with the vendor to open its shop. Drag stock into the trade queue to bu
 Check quantities, available stock, and the projected currency balances. Remove unwanted entries or use **Clear** to start over. Press **Trade** when the queue and totals are right.
 
 Wait for the result before preparing another trade. If the price, stock, range or inventory changes, review the updated feedback and adjust your queue.
+
+</IllustratedProse>
 
 <Media id="vendor" detail />
 

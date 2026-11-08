@@ -134,19 +134,25 @@ h3 {
 }
 .masthead-landscape {
 	position: absolute;
-	right: 1rem;
-	bottom: 0.4rem;
-	width: 52%;
-	max-height: 100%;
+	z-index: -1;
+	right: -1.5rem;
+	bottom: -1.2rem;
+	width: 75%;
+	height: 125%;
 	object-fit: contain;
 	object-position: right bottom;
 	pointer-events: none;
 }
 .masthead-landscape,
 .cover-vignette,
-.editorial-vignette {
+.editorial-vignette,
+.creature-vignette {
 	opacity: 0.55;
 	mix-blend-mode: multiply;
+}
+/* Let Holtburg share the masthead paper underneath the wordmark and paint. */
+.masthead .masthead-landscape {
+	opacity: 0.4;
 }
 .navigation-row {
 	display: flex;
@@ -225,14 +231,12 @@ figcaption {
 	padding-block: 0.5rem;
 }
 .cover-copy {
-	display: grid;
-	grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-	align-items: end;
-	gap: 0 1rem;
-	padding: 0.5rem 0 1.4rem;
+	position: relative;
+	isolation: isolate;
+	padding: 0.5rem 0 2rem;
+	text-align: center;
 }
 .cover-copy h1 {
-	grid-column: 1 / -1;
 	font-size: clamp(2rem, 3.8vw, 3.2rem);
 	line-height: 1.3;
 	color: var(--cover-ink);
@@ -240,14 +244,14 @@ figcaption {
 	margin-bottom: 0.7rem;
 }
 .cover-deck {
-	grid-column: 1 / -1;
 	max-width: 75ch;
+	margin-inline: auto;
 	font-size: 1.12rem;
 	font-style: italic;
 	margin-bottom: 1rem;
 }
 .hero-actions {
-	justify-self: center;
+	margin: 2rem auto 0.5rem;
 	padding-bottom: 0.6rem;
 	display: flex;
 	align-items: flex-start;
@@ -298,11 +302,19 @@ figcaption {
 	align-self: center;
 	font-size: 0.88rem;
 }
+/* The creature shares the cover paper without reserving a separate image cell. */
 .cover-vignette {
-	width: 100%;
-	max-height: 170px;
+	position: absolute;
+	z-index: -1;
+	left: 0;
+	top: 50%;
+	width: 38%;
+	height: 95%;
+	transform: translateY(-50%);
 	object-fit: contain;
-	object-position: right bottom;
+	object-position: left center;
+	opacity: 0.22;
+	pointer-events: none;
 }
 .home-editorial {
 	display: grid;
@@ -343,6 +355,7 @@ figcaption {
 	font-size: 0.95rem;
 }
 .player-argument {
+	display: flow-root;
 	padding: 2.5rem 3rem 2.5rem 2.5rem;
 }
 
@@ -350,19 +363,26 @@ figcaption {
 	margin-bottom: 0;
 }
 .foundation-spread {
-	display: grid;
-	grid-template-columns: 1fr 1.1fr;
-	gap: 2rem;
-	align-items: end;
-	padding-block: 2rem;
+	position: relative;
+	isolation: isolate;
+	padding-block: 3rem;
+}
+.foundation-spread > div {
+	max-width: 60ch;
+	width: 66%;
 }
 .foundation-spread h2,
 .terminal-spread h2 {
 	color: var(--accent);
 }
 .editorial-vignette {
-	margin-bottom: 1rem;
-	width: 100%;
+	position: absolute;
+	z-index: -1;
+	right: -2rem;
+	bottom: 0;
+	width: 78%;
+	opacity: 0.2;
+	pointer-events: none;
 }
 .terminal-spread {
 	display: grid;
@@ -919,7 +939,10 @@ figcaption {
 		padding-inline: 1rem;
 	}
 	.masthead-landscape {
-		width: 45%;
+		right: -0.5rem;
+		bottom: -0.5rem;
+		width: 65%;
+		height: 85%;
 	}
 	.navigation-row {
 		flex-wrap: wrap;
@@ -940,14 +963,10 @@ figcaption {
 	.home-document {
 		padding-top: 0.8rem;
 	}
-	.cover-copy {
-		grid-template-columns: minmax(0, 1fr);
-	}
 	.cover-vignette {
-		max-height: 120px;
-		width: 70%;
-		margin-left: auto;
-		margin-top: -1rem;
+		width: 50%;
+		height: 85%;
+		opacity: 0.14;
 	}
 	.cover-copy h1 {
 		font-size: clamp(1.7rem, 6.4vw, 2.8rem);
@@ -967,15 +986,21 @@ figcaption {
 	.player-argument {
 		padding: 0.8rem 2rem 2.5rem;
 	}
-	.foundation-spread,
 	.terminal-spread {
 		grid-template-columns: minmax(0, 1fr);
 		gap: 1rem;
 		padding-block: 1.5rem;
 	}
+	.foundation-spread {
+		padding-block: 2rem;
+	}
+	.foundation-spread > div {
+		width: 100%;
+	}
 	.editorial-vignette {
-		max-width: 480px;
-		margin-inline: auto;
+		right: -0.5rem;
+		width: 100%;
+		opacity: 0.13;
 	}
 	.guide-shell {
 		display: block;
@@ -1043,5 +1068,24 @@ figcaption {
 	* {
 		scroll-behavior: auto !important;
 		transition: none !important;
+	}
+}
+
+/* Only the homepage Lugian shapes prose around its silhouette. */
+.creature-vignette {
+	float: left;
+	width: min(38%, 200px);
+	height: auto;
+	margin: 0.2rem 1rem 0.5rem -0.75rem;
+	shape-outside: var(--art-silhouette);
+	shape-image-threshold: 0.12;
+	shape-margin: 1rem;
+	pointer-events: none;
+}
+@media (max-width: 760px) {
+	.creature-vignette {
+		width: 44%;
+		margin: 0.5rem 0.75rem 0.5rem -1.5rem;
+		shape-margin: 0.6rem;
 	}
 }

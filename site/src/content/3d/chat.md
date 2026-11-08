@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -29,6 +30,8 @@ Activate the history when you want to scroll, select text or follow a link:
 
 Press **Enter** to type a message. Choose the destination, type, and send; sending returns you to the game. If a command suggestion is highlighted, Enter accepts that suggestion first.
 
+<IllustratedProse name="drudge">
+
 ## Discover commands as you type
 
 Start typing a command to see matching suggestions, their syntax and a short description. Browse with the arrow keys and accept with **Tab** or **Enter**—handy for finding a command without leaving the game to look it up.
@@ -36,6 +39,8 @@ Start typing a command to see matching suggestions, their syntax and a short des
 Input history lets you reuse commands you have already sent.
 
 Type `/help` for the command list or `/help COMMAND` for one command. Both `/` and `@` can introduce commands. Chat commands also include utilities such as waypoints, recalls and corpse permissions.
+
+</IllustratedProse>
 
 <Media id="chat-completion" detail />
 

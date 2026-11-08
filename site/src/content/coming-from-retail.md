@@ -4,9 +4,15 @@ description: 'The changes to know, and the tools you no longer need a plugin for
 section: '3D client'
 ---
 
+<script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
+</script>
+
 ## Get your bearings
 
 Holtburger’s UX, rendering and physics take their own direction. The game knowledge carries over, but expect a different feel to movement, management, and interaction.
+
+<IllustratedProse name="qalabar">
 
 ## What's new or different?
 
@@ -23,6 +29,8 @@ Holtburger’s UX, rendering and physics take their own direction. The game know
 | Tools & crafting         | [Keys and lockpicks](/holtburger/3d/locks/) get an integrated helper. [Crafting and salvage](/holtburger/3d/crafting/) offer success-chance confirmation and mixed-material salvage estimates. Giving remembers your recipient while you browse items.                                                                                                              |
 | Housing & contracts      | [Housing](/holtburger/3d/housing/) combines map searches, payment auto-fill and home management. The [Journal](/holtburger/3d/journal/) adds search, status filters, repeat timers and mapped destinations.                                                                                                                                                         |
 | Character appearance     | [Live in-world barbershop previews](/holtburger/3d/appearance/) and helmet/cloak visibility toggles conveniently beside your equipment.                                                                                                                                                                                                                             |
+
+</IllustratedProse>
 
 ## Make it yours
 

@@ -5,6 +5,7 @@ section: 'Startup'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -22,6 +23,8 @@ Keep the folder somewhere permanent, outside the Holtburger application director
 
 <Media id="content-picker" detail />
 
+<IllustratedProse name="black-hills">
+
 ## Keep server-specific DATs separate
 
 Each server can remember its own DAT folder, shared by all account profiles on that server. Keep a server’s custom files in a separate folder, and switching servers brings the right files with you.
@@ -31,5 +34,7 @@ Edit the server and expand **Advanced**. Under **Content path override**, use th
 To return a server to the application default folder, clear **Content path override** with the **×** button, then press **Save**. An empty field shows **Use application default**.
 
 For Linux Flatpak folder-access problems, see the [Linux installation guide](/holtburger/start/3d/linux/#troubleshooting).
+
+</IllustratedProse>
 
 <Media id="profile-content" detail />

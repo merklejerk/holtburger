@@ -4,6 +4,10 @@ description: 'Connection, bundled content, scripts and diagnostic logs.'
 section: 'Terminal client'
 ---
 
+<script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
+</script>
+
 ## Cannot connect
 
 Check the address, port and account in your [launch command](/holtburger/tui/connect/). Holtburger is developed against ACE; GDLE compatibility is unverified.
@@ -12,11 +16,15 @@ Check the address, port and account in your [launch command](/holtburger/tui/con
 
 Extract the complete release bundle and keep its prepared content alongside the executable. Retail DATs alone do not replace the TUI’s navigation data. See the [installation instructions](/holtburger/tui/connect/).
 
+<IllustratedProse name="drudge">
+
 ## A script will not start
 
 Enter the world before using `/run`. Use `/scripts` to check the active script, local directory and discovered names. A local script overrides a bundled one with the same basename.
 
 For the mage example, keep the bundled data sidecars with the script. See [files and persistence](/holtburger/tui/scripting/#files-and-persistence) for file layout and [runtime and events](/holtburger/tui/scripting/#runtime-and-events) if a custom script expects Node or Deno APIs.
+
+</IllustratedProse>
 
 ## Report a problem
 

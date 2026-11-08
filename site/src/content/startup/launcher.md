@@ -5,6 +5,7 @@ section: 'Startup'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -20,6 +21,8 @@ Holtburger is developed against **ACE**. **GDLE compatibility is unverified**; c
 
 <Media id="treestats-import" detail />
 
+<IllustratedProse name="drudge">
+
 ## Add your account
 
 Select the imported server and enter your account credentials. **Save to new profile** keeps a connection ready for next time; profiles let you switch between accounts without retyping the details. The server can also remember [its own DAT folder](/holtburger/startup/game-data/#keep-server-specific-dats-separate), shared by all its account profiles.
@@ -27,6 +30,8 @@ Select the imported server and enter your account credentials. **Save to new pro
 Accounts belong to the server. Follow its account-creation instructions if you need a new one.
 
 Press **Play**, choose your [game-data folder](/holtburger/startup/game-data/) if prompted, and [choose your character](/holtburger/startup/characters/).
+
+</IllustratedProse>
 
 ## Enter a server manually
 

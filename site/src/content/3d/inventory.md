@@ -5,15 +5,20 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 import EditorialSpread from '#lib/components/EditorialSpread.svelte';
 </script>
+
+<IllustratedProse name="lugian">
 
 ## See your packs together
 
 Inventory puts your main pack and bags in one scrolling view, with a heading for each bag. Click a pack icon to jump straight to its contents instead of opening bags one at a time.
 
 Cycle the sort control through **Native**, **Alphabetical**, and **Item type** to find things within each bag. Sorting changes the view without moving your items; return to **Native** when arranging their actual order.
+
+</IllustratedProse>
 
 <Media id="inventory-overview" detail />
 

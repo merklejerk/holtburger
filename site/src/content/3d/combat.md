@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 import EditorialSpread from '#lib/components/EditorialSpread.svelte';
 </script>
@@ -32,11 +33,15 @@ In magic stance, use your [spell bar](/holtburger/3d/spells/) instead.
 
 </EditorialSpread>
 
+<IllustratedProse name="olthoi">
+
 ## Use Smart Tab in combat
 
 Tap **Tab** to cycle targets, or hold it to acquire an immediate target. **Shift+Tab** cycles in reverse. Use the hostile-only and in-view options to keep the selection useful for your current fight.
 
 Choose your target, then start your attack or cast. Use the displayed key hints for power, height and spell shortcuts; the [full keymap](/holtburger/3d/controls/#combat-and-bars) covers each stance.
+
+</IllustratedProse>
 
 <Media id="smart-tab" />
 

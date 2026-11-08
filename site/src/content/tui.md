@@ -5,6 +5,7 @@ section: 'Holtburger TUI'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -15,6 +16,8 @@ The dashboard brings together nearby entities, inventory, equipment, spells, cha
 <Media id="tui-workflow" />
 
 [Learn the panes and controls](/holtburger/tui/basics/), then follow the [gameplay guide](/holtburger/tui/gameplay/).
+
+<IllustratedProse name="drudge">
 
 ## A client you can script
 
@@ -31,3 +34,5 @@ The TUI uses simplified movement and physics. Supervise scripts through difficul
 Release bundles include prepared content and scripts, so you can connect straight from the terminal. Supply your connection details at launch.
 
 [Download the terminal client](/holtburger/tui/connect/) for your platform.
+
+</IllustratedProse>

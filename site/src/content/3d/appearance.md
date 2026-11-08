@@ -5,12 +5,17 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
+
+<IllustratedProse name="qalabar">
 
 ## Barbershop
 
 Interact with your server’s barber service to open **Barbershop**. Changes preview live on your character in the world as you adjust them; choose **Apply** to save your new look. Available choices follow your character’s heritage.
+
+</IllustratedProse>
 
 <Media id="barber" />
 

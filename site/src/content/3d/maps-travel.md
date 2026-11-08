@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 import EditorialSpread from '#lib/components/EditorialSpread.svelte';
 </script>
@@ -61,11 +62,15 @@ Coordinate links in chat can also set a map pin. Enable **Interact with chat his
 <Media id="waypoint-minimap" detail />
 </div>
 
+<IllustratedProse name="danbys-outpost">
+
 ## Recall
 
 Open **Recall destinations** on the map to see the destinations available to your character. Chat shortcuts include `/lifestone`, `/marketplace`, and `/house recall`.
 
 Use the destination that fits your trip. House and allegiance recalls depend on your character's home or allegiance arrangements.
+
+</IllustratedProse>
 
 <Media id="recall-menu" detail />
 

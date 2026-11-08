@@ -5,6 +5,7 @@ section: 'Terminal client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import hello from '../../../examples/hello.js?raw';
 import status from '../../../examples/status.js?raw';
 </script>
@@ -19,6 +20,8 @@ Save this as `hello.js` there, or [download the example](/holtburger/assets/scri
 
 Enter the world, then run `/run hello a first test`. The script prints a greeting and sends its startup arguments to the debug log.
 
+<IllustratedProse name="lugian">
+
 ## Run and manage scripts
 
 | Command               | Action                                                                 |
@@ -31,6 +34,8 @@ Enter the world, then run `/run hello a first test`. The script prints a greetin
 One script runs at a time. A local script takes precedence over a bundled script with the same basename.
 
 To start at launch, add `--character NAME --run hello` to your connection command. Use `--run-args 'TEXT'` for startup arguments. Startup waits until the character is ready. `-Q` / `--auto-quit` exits on disconnect for use with an external supervisor. See [launch options](/holtburger/tui/options/) for the full flags.
+
+</IllustratedProse>
 
 ## Runtime and events
 

@@ -5,6 +5,7 @@ section: 'Get started'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Downloads from '#lib/components/Downloads.svelte';
 </script>
 
@@ -14,11 +15,15 @@ Choose the download for your computer. The installation guide walks you through 
 
 <Downloads product="3d" />
 
+<IllustratedProse name="danbys-outpost">
+
 ## Connect and enter the world
 
 1. [Get your game data ready](/holtburger/startup/game-data/). Use your existing AC DATs or download them.
 2. [Add a server and account](/holtburger/startup/launcher/#import-your-server). **Import from TreeStats** is the quickest route. Holtburger is developed against **ACE**; **GDLE compatibility is unverified**.
 3. Press **Play**, choose your DAT folder if prompted, then [choose or create a character](/holtburger/startup/characters/).
+
+</IllustratedProse>
 
 ## Get your bearings
 

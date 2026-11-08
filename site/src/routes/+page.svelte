@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { asset, resolve } from '$app/paths';
 	import MediaCarousel from '#lib/components/MediaCarousel.svelte';
-	import { mediaUrl } from '#lib/media/url.ts';
-	import { illustrations } from '#lib/illustrations.ts';
+	import DecorativeArt from '#lib/components/DecorativeArt.svelte';
 	import { downloads } from '#lib/downloads.svelte.ts';
 	const guide = (slug: string) => resolve('/[...slug]', { slug });
 </script>
@@ -34,13 +33,7 @@
 				</a>
 				<a href={guide('coming-from-retail')}>Coming from retail?</a>
 			</div>
-			<img
-				class="cover-vignette"
-				{...illustrations.cottages}
-				src={mediaUrl(illustrations.cottages.src)}
-				alt=""
-				aria-hidden="true"
-			/>
+			<DecorativeArt name="olthoi" class="cover-vignette" loading="eager" />
 		</div>
 	</header>
 
@@ -60,6 +53,7 @@
 		</section>
 		<section class="player-argument">
 			<h2>Built for the player at the keyboard</h2>
+			<DecorativeArt name="lugian" class="creature-vignette" />
 			<p>
 				A long-running game accumulates friction. Plugins fill the gaps, windows
 				crowd the view, and familiar workarounds become muscle memory. A new
@@ -74,14 +68,7 @@
 	</div>
 
 	<section class="foundation-spread">
-		<img
-			class="editorial-vignette"
-			{...illustrations.countryside}
-			src={mediaUrl(illustrations.countryside.src)}
-			alt=""
-			aria-hidden="true"
-			loading="lazy"
-		/>
+		<DecorativeArt name="black-hills" class="editorial-vignette" />
 		<div>
 			<h2>Reengineered,<br />from the protocol up</h2>
 			<p>

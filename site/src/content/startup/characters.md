@@ -5,6 +5,7 @@ section: 'Startup'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 import MediaCarousel from '#lib/components/MediaCarousel.svelte';
 </script>
@@ -17,6 +18,8 @@ Select your character and press **Enter** or use the enter-world button. The ros
 
 Delete and restore actions are beside the roster entries; deletion asks you to confirm the character name.
 
+<IllustratedProse name="qalabar">
+
 ## Create a character
 
 **Skills & Stats** previews your skill values and starting vitals live as you adjust your build. Attributes and skills share one page, so you can see how each allocation changes the numbers before committing.
@@ -24,6 +27,8 @@ Delete and restore actions are beside the roster entries; deletion asks you to c
 The clothing reroll lets you try another starting outfit while keeping your chosen features.
 
 <MediaCarousel label="Character builder screenshots" images={['character-creation', 'creation-appearance', 'creation-build', 'creation-review']} />
+
+</IllustratedProse>
 
 ## Next
 

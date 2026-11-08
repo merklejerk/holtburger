@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -13,6 +14,8 @@ import Media from '#lib/components/Media.svelte';
 Left-drag orbits the camera without turning your character. With mouse movement enabled, hold the right button to steer; hold the middle button or both buttons to move forward.
 
 <Media id="camera" />
+
+<IllustratedProse name="black-hills">
 
 ## Precise jumping
 
@@ -23,6 +26,8 @@ Left-drag orbits the camera without turning your character. With mouse movement 
 5. Click to launch the chosen jump. Press **Escape** to cancel instead.
 
 Holtburger's movement and physics have their own feel. Try a few low-risk jumps before relying on a familiar retail route.
+
+</IllustratedProse>
 
 <Media id="jump-demo" />
 

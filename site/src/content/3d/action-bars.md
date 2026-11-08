@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -36,6 +37,8 @@ Press **Ctrl+1** through **Ctrl+0** to focus a bar. While that bar is focused, *
 
 See the [controls reference](/holtburger/3d/controls/#combat-and-bars) to look up or customize bar bindings.
 
+<IllustratedProse name="lugian">
+
 ## Arrange and manage
 
 You can keep up to ten action bars, with ten cells each. Use the bar menu:
@@ -48,6 +51,8 @@ You can keep up to ten action bars, with ten cells each. Use the bar menu:
 | Delete | Remove the bar                                                                                                    |
 
 Layout controls let you move and rotate bars. The last bar cannot be deleted.
+
+</IllustratedProse>
 
 <Media id="action-bars" detail />
 

@@ -5,12 +5,15 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
 ## Cannot connect
 
 Check the server address, port and account in the [launcher](/holtburger/startup/launcher/). Holtburger is developed against ACE; GDLE compatibility is unverified.
+
+<IllustratedProse name="black-hills">
 
 ## Before the game opens
 
@@ -25,6 +28,8 @@ Open the launcher's gear button → **App settings** for process-wide graphics c
 macOS and Linux default to Automatic with VSync and GPU compositing on. **Use defaults** restores the choices for your platform. Change one setting at a time and restart to compare results.
 
 If the application will not open, start with the [installation guide for your platform](/holtburger/start/). It covers unsigned-download prompts, Linux runtime dependencies, and Flatpak folder access.
+
+</IllustratedProse>
 
 ## Windows UI flickering
 

@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -28,11 +29,15 @@ Select something and press **R** to interact. For a loose item, that means picki
 
 Some items need a target. Activate the item first, then choose what to use it on. Follow the targeting prompt; **Escape** cancels.
 
+<IllustratedProse name="drudge">
+
 ## Loot and world containers
 
 Select a container or corpse and press **R** to open it. Use its contents to move items into your inventory. **V** cycles unopened corpses; **Shift+V** cycles in reverse.
 
 For locked doors and containers, use the [key and lockpick helper](/holtburger/3d/locks/). To clear unwanted gear, [sell it](/holtburger/3d/trading/#buy-or-sell-at-a-vendor) or [salvage it](/holtburger/3d/crafting/#salvaging-items).
+
+</IllustratedProse>
 
 ## Give an item
 

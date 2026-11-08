@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -24,6 +25,8 @@ Use overall UI scale to change control sizes, and text scale to adjust readabili
 
 Use **Settings → UI → HUD windows → Window background opacity** to make floating windows more solid while keeping text and icons clear.
 
+<IllustratedProse name="qalabar">
+
 ## Choose fonts and themes
 
 h3d is an Electron desktop app with a browser-based interface. Its UI uses HTML and CSS, giving themes the expressive range of web interfaces: custom typography, textures, gradients, transparency and animation.
@@ -31,6 +34,8 @@ h3d is an Electron desktop app with a browser-based interface. Its UI uses HTML 
 Open **Settings → UI** to choose **Traveler’s Kit**, **Base** or an installed custom theme. Body text, headings and monospace text each have a font choice; **Theme default** follows the theme’s typography.
 
 Themes can change much more than colors: window textures and frames, buttons, tabs, fonts, HUD styling and feedback animations. A theme can give the interface a different visual character while keeping the same controls and gameplay.
+
+</IllustratedProse>
 
 ## Install or make a theme
 

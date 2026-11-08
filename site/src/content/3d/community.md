@@ -5,8 +5,11 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
+
+<IllustratedProse name="danbys-outpost">
 
 ## Form a party
 
@@ -15,6 +18,8 @@ Open **Social → Party** and choose **Create Party**. Review the party's name, 
 Select a player and choose **Invite to party** in the selected-target actions. Leaders can manage recruitment, let members invite, dismiss members, or transfer leadership. Members can leave; the leader also has a disband action.
 
 The party HUD keeps teammates’ health, stamina and mana visible while you play. Click a member to select them for a targeted action or spell.
+
+</IllustratedProse>
 
 <div class="media-group">
 <Media id="party-hud" detail />

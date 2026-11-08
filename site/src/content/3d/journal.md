@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -16,9 +17,13 @@ Select an entry to read its status, progress and available details. Timed contra
 
 <Media id="journal" detail />
 
+<IllustratedProse name="danbys-outpost">
+
 ## Plan the trip
 
 Check the contract's contact location and quest area. Enable **Contracts** on the [world map](/holtburger/3d/maps-travel/) to see the available contract destinations alongside your other map layers.
+
+</IllustratedProse>
 
 ## Clean up the list
 

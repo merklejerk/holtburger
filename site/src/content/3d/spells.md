@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -28,11 +29,15 @@ Drag spells from **Spells** into cells. Use the ten tabs to group your regular c
 
 Spell bindings are saved per character. Customize shortcuts in **Settings → Input**.
 
+<IllustratedProse name="olthoi">
+
 ## Browse your spellbook
 
 Search by name or combine filters for school, level, damage type and targeting. Select a spell’s name for its description, mana cost, range and components.
 
 Unlike retail, you can **cast directly from the list**. In magic stance, select your target and press **Cast** beside a spell—useful for an occasional cast you have not put on a bar.
+
+</IllustratedProse>
 
 <Media id="spell-list" detail />
 

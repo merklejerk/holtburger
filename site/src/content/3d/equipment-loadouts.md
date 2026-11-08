@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -28,8 +29,12 @@ For example, include only your weapon slots to swap weapons while leaving your a
 
 <Media id="loadouts" detail />
 
+<IllustratedProse name="lugian">
+
 ## Activate and check
 
 Activate the saved [action-bar cell](/holtburger/3d/action-bars/) to apply the loadout. If an item is missing or a change fails, read the feedback and check your equipment. Other changes may already have succeeded.
 
 Loadouts are saved with that character's action bars. Keep required items in your inventory, and rebuild a loadout when you replace one of its captured items.
+
+</IllustratedProse>

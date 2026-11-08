@@ -5,6 +5,7 @@ section: '3D client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -22,6 +23,8 @@ Read the result in chat and inspect the resulting item. For breaking items down 
 
 <Media id="crafting-confirmation" detail />
 
+<IllustratedProse name="drudge">
+
 ## Salvaging items
 
 ### Choose items to salvage
@@ -35,6 +38,8 @@ Items stay in your inventory while you prepare the batch. Use an item's remove b
 ### Review the salvage output
 
 Holtburger appraises missing item details as needed. If an item cannot be appraised, read its explanation and use **Retry** when ready. The batch must have a valid review before **Salvage** is available.
+
+</IllustratedProse>
 
 <Media id="salvage" detail />
 

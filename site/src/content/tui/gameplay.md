@@ -5,8 +5,11 @@ section: 'Terminal client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
+
+<IllustratedProse name="olthoi">
 
 ## Nearby and movement
 
@@ -15,6 +18,8 @@ In **Nearby**, select an entity and read the footer actions. Use the offered int
 `/scoot 3` moves approximately three metres forward. `/combat` toggles combat mode. Rest with `/kneel`, `/sit`, `/lie`, or `/stand`.
 
 Movement is simplified: the terminal client does not locally simulate jumping, falling, gravity or stairs. Keep that in mind when following someone or supervising a script through difficult terrain.
+
+</IllustratedProse>
 
 ## Inventory and equipment
 

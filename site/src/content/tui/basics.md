@@ -5,6 +5,7 @@ section: 'Terminal client'
 ---
 
 <script>
+import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
@@ -13,6 +14,8 @@ import Media from '#lib/components/Media.svelte';
 Press **Tab** to move between panes, or **Shift+Tab** to move back. The focused pane determines what a key does.
 
 The dashboard holds game lists and character information. Chat shows messages and feedback; the context pane shows details for the thing you are inspecting. The input line is where you type messages and commands.
+
+<IllustratedProse name="qalabar">
 
 ## Choose a dashboard tab
 
@@ -29,6 +32,8 @@ With the dashboard focused:
 | 7   | Party     |
 
 Use the displayed navigation keys to select an entry. The footer updates with actions for that entry—such as **Assess**, **Use**, **Equip**, or **Follow**—and their shortcuts. Watch it when learning a new tab.
+
+</IllustratedProse>
 
 <Media id="tui-workflow" />
 

@@ -2,9 +2,10 @@
 	import '../styles/site.css';
 	import { asset, resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import DecorativeArt from '#lib/components/DecorativeArt.svelte';
 	import Search from '#lib/components/Search.svelte';
 	import { mediaUrl } from '#lib/media/url.ts';
-	import { illustrations } from '#lib/illustrations.ts';
+	import { paintWashUrl } from '#lib/illustrations.ts';
 	import type { Snippet } from 'svelte';
 	import { onMount } from 'svelte';
 	import { refreshDownloads } from '#lib/downloads.svelte.ts';
@@ -39,7 +40,7 @@
 <a class="skip-link" href="#main">Skip to content</a>
 <div
 	class="publication"
-	style:--paint-wash={`url('${mediaUrl(illustrations.ochre.src)}')`}
+	style:--paint-wash={`url('${mediaUrl(paintWashUrl)}')`}
 >
 	<header class="site-header">
 		<div class="header-inner">
@@ -53,12 +54,10 @@
 						alt="Holtburger"
 					/>
 				</a>
-				<img
+				<DecorativeArt
+					name="holtburg"
 					class="masthead-landscape"
-					{...illustrations.engraving}
-					src={mediaUrl(illustrations.engraving.src)}
-					alt=""
-					aria-hidden="true"
+					loading="eager"
 				/>
 			</div>
 			<div class="navigation-row">

@@ -29,6 +29,8 @@ export function chatCompletion(
 	local: boolean,
 	emotes: ClientSoulEmotes | null,
 ): ChatCompletion | null {
+	// Escaped drafts and chat-emote bodies have no command or soul-emote suggestions.
+	if (text.trimStart() !== text || text.startsWith(":")) return null;
 	return (
 		completeCommand(text, caret) ??
 		(emotes === null ? null : completeSoulEmote(text, caret, local, emotes))
@@ -37,7 +39,7 @@ export function chatCompletion(
 
 /** Complete only a command's opening name. Fixed command paths may be inserted before arguments exist. */
 function completeCommand(text: string, caret: number): ChatCompletion | null {
-	const match = /^\s*([/@])(\S*)/.exec(text);
+	const match = /^([/@])(\S*)/.exec(text);
 	if (match === null) return null;
 	const prefix = match[1];
 	const tokenEnd = match[0].length;
@@ -79,8 +81,8 @@ function completeSoulEmote(
 	local: boolean,
 	catalog: ClientSoulEmotes,
 ): ChatCompletion | null {
-	const say = /^\s*[/@]say\s+/i.exec(text);
-	if (/^\s*[/@]/.test(text) && say === null) return null;
+	const say = /^[/@]say\s+/i.exec(text);
+	if (/^[/@]/.test(text) && say === null) return null;
 	const offset = say === null ? 0 : say[0].length;
 	const prefix = text.slice(offset, caret);
 	const stars = [...prefix.matchAll(/\*/g)];

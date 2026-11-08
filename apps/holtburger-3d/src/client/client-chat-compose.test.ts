@@ -27,6 +27,56 @@ const context: ChatComposeContext = {
 };
 
 describe("chat composition", () => {
+	it.each(["waves", " waves  ", "/help", "*wave*", ":waves"])(
+		"resolves colon-prefixed %j as a local chat emote with its body preserved",
+		(body) => {
+			for (const destination of [
+				{ kind: "speech" },
+				{ kind: "tell", target: player },
+				context.destination,
+			] as const) {
+				expect(
+					resolveChatCompose(`:${body}`, { ...context, destination }),
+				).toMatchObject({
+					kind: "send",
+					label: "Emote",
+					buttonLabel: "Em",
+					request: { kind: "emote", message: body },
+				});
+			}
+		},
+	);
+
+	it.each([":", ": ", ":  \t"])("rejects an empty colon emote %j", (text) => {
+		expect(resolveChatCompose(text, context)).toMatchObject({
+			kind: "error",
+			label: "Emote",
+			message: "Emote text must contain visible text.",
+		});
+	});
+
+	it.each([" /help", "  @help", "\t/help", " *wave*", " :waves"])(
+		"sends %j literally to the selected destination",
+		(text) => {
+			for (const destination of [
+				{ kind: "speech" },
+				{ kind: "tell", target: player },
+				context.destination,
+			] as const) {
+				expect(
+					resolveChatCompose(`${text}  `, { ...context, destination }),
+				).toMatchObject({
+					kind: "send",
+					request: { ...destination, message: `${text.trimStart()}  ` },
+				});
+			}
+		},
+	);
+
+	it.each(["", " ", "  \t"])("rejects blank input %j", (text) => {
+		expect(resolveChatCompose(text, context).kind).toBe("error");
+	});
+
 	it("shares one complete destination catalog with picker and command aliases", () => {
 		expect(
 			CHAT_CHANNEL_DESTINATIONS.map((entry) => entry.channel).sort(),
@@ -117,7 +167,7 @@ describe("chat composition", () => {
 	it("uses the picker for plain text while explicit commands override it", () => {
 		expect(resolveChatCompose("  hello  ", context)).toMatchObject({
 			kind: "send",
-			request: { kind: "channel", channel: "fellowship", message: "hello" },
+			request: { kind: "channel", channel: "fellowship", message: "hello  " },
 		});
 		expect(resolveChatCompose("/rt hello", context)).toMatchObject({
 			kind: "send",

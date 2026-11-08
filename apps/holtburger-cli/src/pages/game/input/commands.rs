@@ -270,7 +270,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>".to_string(),
+            "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>. Start with a space to send literal chat; leading whitespace is removed.".to_string(),
         );
         self.chat.log(
             ChatMessageTags::system(),
@@ -569,10 +569,9 @@ impl GameState {
 
     pub(super) fn handle_prefixed_command(&mut self, submitted_command: &str) -> UpdateResult {
         // Normalize only local matching; history and unknown server commands retain the input.
-        let local_command = submitted_command.trim_start();
-        let normalized_command = match local_command.strip_prefix('@') {
+        let normalized_command = match submitted_command.strip_prefix('@') {
             Some(body) => Cow::Owned(format!("/{body}")),
-            None => Cow::Borrowed(local_command),
+            None => Cow::Borrowed(submitted_command),
         };
         let command = normalized_command.as_ref();
         let mut result = UpdateResult::new();
@@ -1001,7 +1000,7 @@ mod tests {
         for prefix in ['/', '@'] {
             let mut state =
                 GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
-            let submitted = format!("  {prefix}tell Bestie keep @this /payload");
+            let submitted = format!("{prefix}tell Bestie keep @this /payload");
             let result = state.handle_prefixed_command(&submitted);
             assert!(
                 matches!(result.commands.first(), Some(ClientCommand::Tell { target: ChatTellTarget::Player { name: target }, message })
@@ -1138,7 +1137,7 @@ mod tests {
     #[test]
     fn retail_recall_subcommands_dispatch_from_the_input_bar() {
         for (command, destination) in [
-            ("  @LS  ", RecallDestination::Lifestone),
+            ("@LS  ", RecallDestination::Lifestone),
             ("/hou re", RecallDestination::House),
             (
                 "/house mansion_recall",

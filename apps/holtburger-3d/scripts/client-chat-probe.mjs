@@ -314,6 +314,38 @@ export async function probeClientChat(client, evaluateExpression) {
 			channel: "fellowship",
 			message: "party hello",
 		});
+		await send(" /help");
+		assert.deepEqual(await lastRequest(), {
+			kind: "channel",
+			channel: "fellowship",
+			message: "/help",
+		});
+		await draft("");
+		await press("ArrowUp", "ArrowUp", 38);
+		assert.equal(
+			await evaluate(
+				`document.querySelector('input[aria-label="Chat message"]').value`,
+			),
+			" /help",
+			"History must retain the escape so resending cannot execute the command",
+		);
+		const beforeResend = (await read()).requests.length;
+		await press("Enter", "Enter", 13);
+		assert.equal((await read()).requests.length, beforeResend + 1);
+		assert.deepEqual(await lastRequest(), {
+			kind: "channel",
+			channel: "fellowship",
+			message: "/help",
+		});
+		await draft(":*wave*");
+		assert.equal(
+			await evaluate(
+				`document.querySelector('.chat-destination').textContent.trim()`,
+			),
+			"Em",
+		);
+		await press("Enter", "Enter", 13);
+		assert.deepEqual(await lastRequest(), { kind: "emote", message: "*wave*" });
 		await send("/t Some Player, private hello");
 		assert.deepEqual(await lastRequest(), {
 			kind: "tell",
@@ -327,6 +359,7 @@ export async function probeClientChat(client, evaluateExpression) {
 		await send("still party");
 		assert.equal((await lastRequest()).channel, "fellowship");
 
+		const requestsBeforeRecipient = (await read()).requests.length;
 		await draft("preserved draft");
 		const rowGeometry = () =>
 			evaluate(`(() => {
@@ -392,7 +425,7 @@ export async function probeClientChat(client, evaluateExpression) {
 		);
 		assert.equal(
 			(await read()).requests.length,
-			3,
+			requestsBeforeRecipient,
 			"Recipient Enter must not submit a message",
 		);
 		await choose("Tell…");

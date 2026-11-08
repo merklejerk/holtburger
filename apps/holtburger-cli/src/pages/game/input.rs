@@ -234,12 +234,21 @@ impl GameState {
             KeyCode::Enter => {
                 if self.view.focused_pane == FocusedPane::Input {
                     let command = self.chat_input.input.take_text();
-                    if command.is_empty() {
+                    if command.trim().is_empty() {
                         result.actions.push(AppUiAction::ExitInputMode.into());
                         return result;
                     }
                     self.chat_input.record_history_submission(&command);
-                    if command.trim_start().starts_with(['/', '@']) {
+                    let literal = command.trim_start();
+                    // Leading whitespace escapes all command and emote interpretation.
+                    if literal != command {
+                        result
+                            .commands
+                            .push(ClientCommand::Talk(literal.to_string()));
+                        result.merge(self.finish_input_command_submission(&command));
+                        return result;
+                    }
+                    if command.starts_with(['/', '@']) {
                         return self.handle_prefixed_command(&command);
                     }
                     if let Some(emote) = command.strip_prefix(':') {
@@ -777,6 +786,48 @@ mod tests {
         ));
         assert!(!result.redraw_requested());
         assert!(state.view.local_confirmation.is_some());
+    }
+
+    #[test]
+    fn enter_sends_whitespace_prefixed_input_literally_and_preserves_history() {
+        for input in [
+            " /help", "  @help", "\t/help", " *wave*", " :waves", " /help  ",
+        ] {
+            let mut state = GameState::new(Guid(0x50000001), "Player".into(), "World".into());
+            state.view.focused_pane = FocusedPane::Input;
+            state.chat_input.input.set_text(input);
+            state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+            let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+            assert!(
+                matches!(result.commands.as_slice(), [ClientCommand::Talk(message)]
+                if message == input.trim_start())
+            );
+            assert_eq!(state.chat_input.input_history, [input]);
+            assert!(result.actions.iter().any(|action| matches!(action,
+                AppAction::UiAction { action: AppUiAction::FinishInputCommandSubmission { command } }
+                if command == input)));
+            assert!(result.actions.iter().all(|action| !matches!(
+                action,
+                AppAction::Emote { .. } | AppAction::SoulEmote { .. }
+            )));
+        }
+    }
+
+    #[test]
+    fn enter_ignores_whitespace_only_input() {
+        for input in ["", " ", "  \t"] {
+            let mut state = GameState::new(Guid(0x50000001), "Player".into(), "World".into());
+            state.view.focused_pane = FocusedPane::Input;
+            state.chat_input.input.set_text(input);
+            state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+            let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+            assert!(result.commands.is_empty());
+            assert!(state.chat_input.input_history.is_empty());
+        }
     }
 
     #[test]

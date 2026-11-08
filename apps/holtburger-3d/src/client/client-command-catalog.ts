@@ -234,7 +234,7 @@ export const CHAT_COMMANDS = {
 	},
 	emote: {
 		...invocation(["emote"], "<message>"),
-		description: "Describe an action in local chat.",
+		description: "Describe an action in local chat. Shortcut: :<message>.",
 		details: [],
 	},
 } satisfies Record<string, ClientCommandDefinition>;

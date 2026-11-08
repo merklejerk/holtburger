@@ -208,11 +208,27 @@ function send(
 		: { kind: "send", ...labels, request: { ...destination, message } };
 }
 
+/** Chat emotes preserve their body without interpreting commands or soul-emote spans. */
+function chatEmote(message: string): ChatComposeResolution {
+	const labels: ChatComposeLabels = {
+		label: "Emote",
+		buttonLabel: "Em",
+		buttonIcon: "speech",
+	};
+	return message.trim().length === 0
+		? error(labels, "Emote text must contain visible text.")
+		: { kind: "send", ...labels, request: { kind: "emote", message } };
+}
+
 /** Chat commands override one message; unrecognized commands remain with the existing app dispatcher. */
 export function resolveChatCompose(
 	text: string,
 	context: ChatComposeContext,
 ): ChatComposeResolution {
+	// Leading whitespace escapes all command and emote interpretation.
+	const literal = text.trimStart();
+	if (literal !== text) return send(context.destination, literal);
+	if (text.startsWith(":")) return chatEmote(text.slice(1));
 	const trimmed = text.trim();
 	const command = /^[/@](\S+)(?:\s+([\s\S]*))?$/.exec(trimmed);
 	if (command === null) {
@@ -302,19 +318,7 @@ export function resolveChatCompose(
 		return context.emotes === null
 			? send({ kind: "speech" }, body)
 			: localEmoteSpeech(body, context.emotes);
-	if (verb === "emote")
-		return body.length === 0
-			? error(
-					{ label: "Emote", buttonLabel: "Em", buttonIcon: "speech" },
-					"Emote text must contain visible text.",
-				)
-			: {
-					kind: "send",
-					label: "Emote",
-					buttonLabel: "Em",
-					buttonIcon: "speech",
-					request: { kind: "emote", message: body },
-				};
+	if (verb === "emote") return chatEmote(body);
 	// The allegiance command namespace also contains hometown and administration commands.
 	const broadcast = verb === "allegiance" && /^broadcast(?:\s|$)/i.test(body);
 	if (broadcast)

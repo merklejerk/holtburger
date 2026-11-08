@@ -38,6 +38,14 @@ function requests(text: string, ctx: ChatComposeContext) {
 }
 
 describe("soul-emote composition", () => {
+	it.each([" *wave*", " /say *wave*", " hello *wave*"])(
+		"sends escaped %j literally even with emote content loaded",
+		(text) =>
+			expect(requests(text, context)).toEqual([
+				{ kind: "speech", message: text.trimStart() },
+			]),
+	);
+
 	it("overrides a picker destination only for a standalone recognized gesture", () => {
 		const privateContext: ChatComposeContext = {
 			...context,
@@ -71,7 +79,7 @@ describe("soul-emote composition", () => {
 			]);
 		},
 	);
-	it.each(["/tell Bob, *wave*", "/general *wave*", "/emote *wave*"])(
+	it.each(["/tell Bob, *wave*", "/general *wave*", "/emote *wave*", ":*wave*"])(
 		"keeps explicit route literal: %s",
 		(text) => {
 			expect(requests(text, context)[0]).toMatchObject({ message: "*wave*" });

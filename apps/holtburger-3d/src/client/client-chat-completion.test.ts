@@ -11,6 +11,16 @@ function complete(text: string, caret = text.length, local = true) {
 }
 
 describe("chat command completion", () => {
+	it.each([":*wa", ": *wa", ":/he"])(
+		"suppresses suggestions in chat-emote body %j",
+		(text) => expect(complete(text)).toBeNull(),
+	);
+
+	it.each([" /he", "  @TE", "\t/help", " *wa", " /say *wa"])(
+		"suppresses suggestions for escaped input %j",
+		(text) => expect(complete(text)).toBeNull(),
+	);
+
 	it.each(["/", "@"])(
 		"discovers commands with %s independently of emote content",
 		(prefix) => {
@@ -25,12 +35,12 @@ describe("chat command completion", () => {
 	);
 
 	it("groups aliases by command and preserves the typed prefix", () => {
-		const result = complete("  @TE");
+		const result = complete("@TE");
 		expect(result?.choices.map((choice) => choice.replacement)).toEqual([
 			"@tell ",
 			"@tellselected ",
 		]);
-		expect(result).toMatchObject({ start: 2, end: 5 });
+		expect(result).toMatchObject({ start: 0, end: 3 });
 		expect(complete("/ls")?.choices).toEqual([
 			expect.objectContaining({
 				label: "/lifestone · /ls",

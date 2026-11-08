@@ -409,8 +409,8 @@
 	}
 
 	async function submit(): Promise<void> {
-		const text = message.trim();
-		if (sending || composing || text.length === 0) return;
+		const text = message;
+		if (sending || composing || text.trim().length === 0) return;
 		const generation = composer.generation;
 		const resolved = resolution;
 		sending = true;

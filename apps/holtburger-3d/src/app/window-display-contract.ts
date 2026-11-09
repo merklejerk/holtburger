@@ -10,6 +10,28 @@ const windowContentSizeSchema = z
 	.readonly();
 export type WindowContentSize = z.infer<typeof windowContentSizeSchema>;
 
+/** Native-owned decisions distinguish an acceptable preview from restoration-only recovery. */
+const displayConfirmationSchema = z.discriminatedUnion("kind", [
+	z
+		.object({
+			kind: z.literal("preview"),
+			/** Monotonic identity within this window owner. */
+			id: z.number().int().positive().safe(),
+			/** Wall-clock deadline in milliseconds, shared with the visible countdown. */
+			expiresAt: z.number().int().positive().safe(),
+		})
+		.strict()
+		.readonly(),
+	z
+		.object({
+			kind: z.literal("recovery"),
+			/** Retain the preview identity so pending answers can only retry restoration. */
+			id: z.number().int().positive().safe(),
+		})
+		.strict()
+		.readonly(),
+]);
+
 /** Native-owner projection consumed by display controls; presets respect the app minimum. */
 export const windowDisplaySnapshotSchema = z
 	.object({
@@ -19,6 +41,8 @@ export const windowDisplaySnapshotSchema = z
 		freeResize: z.boolean(),
 		/** Disable controls until the current native transition finishes. */
 		busy: z.boolean(),
+		/** Preview decision or failed restoration awaiting retry; null during native operations. */
+		confirmation: displayConfirmationSchema.nullable(),
 		/** Current display refresh when GPU vsync is requested; null when disabled or unavailable. */
 		vsyncRefreshHz: z.number().positive().nullable(),
 		/** Actual viewport size, including any desktop scaling quantization. */
@@ -30,11 +54,20 @@ export const windowDisplaySnapshotSchema = z
 	.readonly();
 export type WindowDisplaySnapshot = z.infer<typeof windowDisplaySnapshotSchema>;
 
-/** Each request changes one native window concern, independently of renderer quality. */
+/** Native window changes and preview decisions, independent of renderer quality. */
 export const windowDisplayRequestSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("fullscreen"), enabled: z.boolean() }).strict(),
 	z.object({ kind: z.literal("free-resize"), enabled: z.boolean() }).strict(),
 	z.object({ kind: z.literal("size"), size: windowContentSizeSchema }).strict(),
+	z
+		.object({
+			kind: z.literal("confirm"),
+			/** Answer only the preview with this native-owned identity. */
+			id: z.number().int().positive().safe(),
+			/** Accept before its deadline, or restore the previously accepted settings. */
+			keep: z.boolean(),
+		})
+		.strict(),
 ]);
 export type WindowDisplayRequest = z.infer<typeof windowDisplayRequestSchema>;
 

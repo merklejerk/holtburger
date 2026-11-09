@@ -50,7 +50,7 @@ async function probe() {
 	const timeout = setTimeout(() => {
 		console.error("Display probe timed out.");
 		app.exit(1);
-	}, 30_000);
+	}, 60_000);
 	let window;
 	let server;
 	try {
@@ -65,7 +65,7 @@ async function probe() {
 			await import("../dist-electron/src/app/window-settings-contract.js");
 		const { windowDisplayRequestSchema, windowDisplaySnapshotSchema } =
 			await import("../dist-electron/src/app/window-display-contract.js");
-		const { APP_WINDOW_TUNING } =
+		const { APP_WINDOW_TUNING, APP_PERSISTENCE_TUNING } =
 			await import("../dist-electron/src/app/app-tuning.js");
 		const initial = clientWindowSettingsSchema.parse({
 			normalBounds: APP_WINDOW_TUNING.game.initialContentSize,
@@ -111,6 +111,7 @@ async function probe() {
 			restoredInitial,
 			(state) => window.webContents.send("window:display-state", state),
 			(error) => failures.push(error),
+			() => null,
 		);
 		const stop = observeWindowGeometry(
 			window,
@@ -147,7 +148,7 @@ async function probe() {
 							response.setHeader("Content-Type", "text/html");
 							const html = `<!doctype html><html><body class="ui-theme"><div id="app"></div><script type="module">
       import {mount} from "svelte";
-      import Controls from "/src/client/ClientDisplaySettingsControls.svelte";
+      import Controls from "/src/harness/DisplaySettingsProbe.svelte";
       import "/src/app/ui-base.css";
       import "/src/client/client-settings-controls.css";
       mount(Controls, {target: document.getElementById("app")});
@@ -171,8 +172,41 @@ async function probe() {
 			windowDisplaySnapshotSchema.parse(
 				await run("holtburgerDisplay.snapshot()"),
 			);
-		const change = (request) =>
+		const rawChange = (request) =>
 			run(`holtburgerDisplay.change(${JSON.stringify(request)})`);
+		const keepPreview = async () => {
+			const state = await snapshot();
+			if (state.confirmation === null) return;
+			await run(`new Promise(resolve => {
+				const check = () => document.querySelector('dialog[open]') ? resolve() : requestAnimationFrame(check);
+				check();
+			})`);
+			assert.equal(
+				await run(
+					"document.activeElement?.hasAttribute('data-display-revert')",
+				),
+				true,
+			);
+			await run(
+				"[...document.querySelectorAll('dialog button')].find(button => button.textContent.trim() === 'Keep').click(); undefined;",
+			);
+			await waitForDecision();
+		};
+		const change = async (request) => {
+			await rawChange(request);
+			await keepPreview();
+		};
+		const waitForDecision = () =>
+			run(`new Promise((resolve, reject) => {
+			const deadline = Date.now() + ${APP_WINDOW_TUNING.transitionTimeoutMs};
+			const check = async () => {
+				const state = await holtburgerDisplay.snapshot();
+				if (!state.busy && state.confirmation === null) resolve();
+				else if (Date.now() >= deadline) reject(new Error('Display decision did not settle.'));
+				else setTimeout(check, 20);
+			};
+			check();
+		})`);
 		// Native mode events can precede the compositor animation and final Chromium resize.
 		const assertViewport = async (expected, message) => {
 			const viewport = await run(`new Promise(resolve => {
@@ -199,11 +233,17 @@ async function probe() {
 		await run(
 			"globalThis.displayStates = []; holtburgerDisplay.onState(state => displayStates.push(state)); undefined;",
 		);
-		const ready = () =>
-			run(`new Promise(resolve => {
-   const check = () => document.querySelectorAll('input[type="checkbox"]').length === 2 && !document.querySelector('input').disabled ? resolve() : requestAnimationFrame(check);
-   check();
-  })`);
+		const ready = async () => {
+			await run(`new Promise(resolve => {
+				const check = async () => {
+					const state = await holtburgerDisplay.snapshot();
+					if (!state.busy && document.querySelectorAll('input[type="checkbox"]').length === 2) resolve();
+					else requestAnimationFrame(check);
+				};
+				check();
+			})`);
+			await keepPreview();
+		};
 		await ready();
 		const first = await snapshot();
 		const preset = first.presets[0];
@@ -211,6 +251,100 @@ async function probe() {
 			throw new Error(
 				`Display controls returned no window size presets: ${JSON.stringify({ snapshot: first, display: screen.getDisplayMatching(window.getBounds()), minimum: window.getMinimumSize() })}`,
 			);
+		const originalSettings = controls.settings();
+		await rawChange({ kind: "size", size: preset });
+		assert.notEqual((await snapshot()).confirmation, null);
+		assert.deepEqual(controls.settings(), originalSettings);
+		await new Promise((resolve) =>
+			setTimeout(
+				resolve,
+				APP_PERSISTENCE_TUNING.windowGeometryWriteDelayMs +
+					APP_WINDOW_TUNING.geometryQuietMs,
+			),
+		);
+		assert.deepEqual(store.readWindow(), originalSettings);
+		assert.equal(await run("document.querySelector('select').disabled"), true);
+		window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+		window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+		await waitForDecision();
+		assert.deepEqual(controls.settings(), originalSettings);
+		assert.deepEqual(
+			window.getBounds().width,
+			originalSettings.normalBounds.width,
+		);
+
+		// Both the explicit action and the shared backdrop policy restore the same transaction.
+		await rawChange({ kind: "size", size: preset });
+		await run(
+			"document.querySelector('[data-display-revert]').click(); undefined;",
+		);
+		await waitForDecision();
+		assert.deepEqual(controls.settings(), originalSettings);
+		await rawChange({ kind: "size", size: preset });
+		await run(`const dialog = document.querySelector('dialog[open]');
+			const bounds = dialog.getBoundingClientRect();
+			const point = {clientX: bounds.left - 1, clientY: bounds.top - 1, bubbles: true};
+			dialog.dispatchEvent(new PointerEvent('pointerdown', point));
+			dialog.dispatchEvent(new MouseEvent('click', point)); undefined;`);
+		await waitForDecision();
+		assert.deepEqual(controls.settings(), originalSettings);
+
+		await rawChange({ kind: "size", size: preset });
+		const restoreSize = window.setSize.bind(window);
+		window.setSize = () => {
+			throw new Error("Synthetic native restoration failure.");
+		};
+		try {
+			await run(
+				"document.querySelector('[data-display-revert]').click(); undefined;",
+			);
+			await run(`new Promise((resolve, reject) => {
+				const deadline = Date.now() + ${APP_WINDOW_TUNING.transitionTimeoutMs};
+				const check = async () => {
+					const state = await holtburgerDisplay.snapshot();
+					const dialog = document.querySelector('dialog[open]');
+					if (!state.busy && state.confirmation?.kind === 'recovery' && dialog?.querySelector('[role=alert]')) resolve();
+					else if (Date.now() >= deadline) reject(new Error('Restoration recovery prompt did not appear.'));
+					else setTimeout(check, 20);
+				};
+				check();
+			})`);
+			assert.equal(
+				await run(
+					"[...document.querySelectorAll('dialog button')].some(button => button.textContent.trim() === 'Keep')",
+				),
+				false,
+			);
+			assert.equal(
+				await run(
+					"document.querySelector('dialog [role=alert]').textContent.includes('Synthetic native restoration failure')",
+				),
+				true,
+			);
+			assert.deepEqual(controls.settings(), originalSettings);
+		} finally {
+			window.setSize = restoreSize;
+		}
+		await run(
+			"document.querySelector('[data-display-revert]').click(); undefined;",
+		);
+		await waitForDecision();
+		assert.deepEqual(controls.settings(), originalSettings);
+
+		await rawChange({ kind: "fullscreen", enabled: true });
+		assert.equal(window.isFullScreen(), true);
+		assert.deepEqual(controls.settings(), originalSettings);
+		await new Promise((resolve) =>
+			setTimeout(
+				resolve,
+				APP_WINDOW_TUNING.displayConfirmationMs +
+					APP_WINDOW_TUNING.geometryQuietMs * 4,
+			),
+		);
+		await waitForDecision();
+		assert.equal(window.isFullScreen(), false);
+		assert.deepEqual(controls.settings(), originalSettings);
+
 		await change({ kind: "size", size: preset });
 		await run(
 			"document.querySelectorAll('input[type=checkbox]')[1].click(); undefined;",
@@ -293,7 +427,7 @@ async function probe() {
 		assert.ok(await run("displayStates.length > 0"));
 		assert.deepEqual(failures, []);
 		console.log(
-			"Display probe passed: locked presets, fullscreen/maximize restoration, preload events, saved preferences, launcher round trip.",
+			"Display probe passed: confirmation Keep/Revert/Escape/backdrop/timeout, failed rollback recovery, preview persistence isolation, locked presets, fullscreen/maximize restoration, preload events, saved preferences, launcher round trip.",
 		);
 	} finally {
 		clearTimeout(timeout);

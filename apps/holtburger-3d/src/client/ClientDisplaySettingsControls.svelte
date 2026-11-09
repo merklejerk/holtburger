@@ -15,7 +15,12 @@
 	let snapshot = $state<WindowDisplaySnapshot | null>(null);
 	let pending = $state(false);
 	let error = $state<string | null>(null);
-	let disabled = $derived(pending || snapshot === null || snapshot.busy);
+	let disabled = $derived(
+		pending ||
+			snapshot === null ||
+			snapshot.busy ||
+			snapshot.confirmation !== null,
+	);
 	let selectedSize = $derived.by(() => {
 		const current = snapshot;
 		if (current === null) return "custom";

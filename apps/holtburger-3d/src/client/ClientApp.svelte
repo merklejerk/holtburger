@@ -26,6 +26,7 @@
 	import { bindClientAudioForeground } from "./client-audio-foreground";
 	import ClientMusicControls from "./ClientMusicControls.svelte";
 	import { ClientTitleMusic, titleMusicUrl } from "./client-title-music";
+	import ClientDisplayConfirmation from "./ClientDisplayConfirmation.svelte";
 	import ClientPregameSettings from "./ClientPregameSettings.svelte";
 	import { choosePregameLocation } from "./client-pregame-tuning";
 	import PowerIcon from "../assets/icons/hud-power.svg?component";
@@ -2582,6 +2583,7 @@
 >
 	{#if interactionRoot !== null}<UiTooltipHost root={interactionRoot} />{/if}
 	<div class="client-overlay-ui" use:applyUiScale={userSettings.ui.uiScale}>
+		<ClientDisplayConfirmation />
 		<!-- A mounted dialog receives a non-null item until teardown, including nested snippets. -->
 		{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
 			<ClientMessageDialog

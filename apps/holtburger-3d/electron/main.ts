@@ -752,7 +752,7 @@ function createWindow(entry: {
 			if (input.type === "keyDown" && !input.isAutoRepeat) {
 				const controls = windowDisplay;
 				const display = controls.snapshot();
-				if (display.busy) return;
+				if (display.busy || display.confirmation !== null) return;
 				void changeWindowDisplay({
 					kind: "fullscreen",
 					enabled: !display.fullscreen,
@@ -789,10 +789,14 @@ function createWindow(entry: {
 async function stopWindowGeometry(): Promise<void> {
 	const controls = windowDisplay;
 	windowDisplay = null;
-	await controls?.close();
 	const stop = stopGeometry;
 	stopGeometry = null;
-	await stop?.();
+	try {
+		await controls?.close();
+	} finally {
+		// A failed rollback must not leave persistence subscribed to a retired window owner.
+		await stop?.();
+	}
 }
 function initialGeometry(width: number, height: number): ClientWindowSettings {
 	return {

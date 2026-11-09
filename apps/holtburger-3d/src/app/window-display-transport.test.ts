@@ -6,6 +6,7 @@ const snapshot: WindowDisplaySnapshot = {
 	fullscreen: false,
 	freeResize: true,
 	busy: false,
+	confirmation: null,
 	vsyncRefreshHz: 144,
 	contentSize: { width: 1024, height: 768 },
 	presets: [],

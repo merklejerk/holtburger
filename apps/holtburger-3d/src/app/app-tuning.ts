@@ -25,6 +25,8 @@ export const APP_WINDOW_TUNING = {
 	transitionTimeoutMs: 5000,
 	/** Quiet interval after native configure events before another geometry change or resize lock. */
 	geometryQuietMs: 100,
+	/** Time to keep a settled display preview before the native owner restores it. */
+	displayConfirmationMs: 15_000,
 	/** Launcher geometry is independent of the game viewport and its saved bounds. */
 	launcher: {
 		/** Initial launcher content dimensions in CSS pixels. */

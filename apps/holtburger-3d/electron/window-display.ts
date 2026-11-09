@@ -148,6 +148,14 @@ async function restoreWindowedGeometry(
 	return { ...accepted, maximized: window.isMaximized() };
 }
 
+/** A preview retains persistence-safe settings throughout apply, confirmation, and rollback. */
+interface DisplayPreview {
+	/** Last accepted mode and windowed geometry. */
+	readonly previous: ClientWindowSettings;
+	/** Decision published after native operations settle; failed restores permit only recovery. */
+	confirmation: NonNullable<WindowDisplaySnapshot["confirmation"]>;
+}
+
 /** One client-attempt owner serializes native changes and preserves windowed size and maximize state. */
 export class WindowDisplay {
 	readonly #window: DisplayWindow;
@@ -158,6 +166,9 @@ export class WindowDisplay {
 	#windowed: WindowedGeometry;
 	#freeResize: boolean;
 	#busy = false;
+	#preview: DisplayPreview | null = null;
+	#confirmationId = 0;
+	#confirmationTimer: ReturnType<typeof setTimeout> | undefined;
 	#closed = false;
 	#tail: Promise<void> = Promise.resolve();
 	readonly #events = ["resize", "move", "maximize", "unmaximize"];
@@ -183,6 +194,7 @@ export class WindowDisplay {
 	}
 	/** Persist retained windowed geometry without consulting fullscreen bounds. */
 	settings(): ClientWindowSettings {
+		if (this.#preview !== null) return this.#preview.previous;
 		return {
 			...this.#windowed,
 			fullscreen: this.#window.isFullScreen(),
@@ -200,6 +212,7 @@ export class WindowDisplay {
 			fullscreen: window.isFullScreen(),
 			freeResize: this.#freeResize,
 			busy: this.#busy,
+			confirmation: this.#busy ? null : (this.#preview?.confirmation ?? null),
 			vsyncRefreshHz: this.#readVsyncRefreshHz(),
 			contentSize: { width: content.width, height: content.height },
 			// Window sizes are requests, not display modes. Native monitor placement can be
@@ -216,27 +229,132 @@ export class WindowDisplay {
 		this.#publish(this.snapshot());
 	};
 
-	/** Native fullscreen controls must follow the same policy as app requests. */
+	/** OS fullscreen gestures use the same preview policy as IPC and F11. */
 	readonly #fullscreenChanged = (): void => {
-		if (this.#closed) return;
-		if (!this.#busy) {
-			if (this.#window.isFullScreen())
-				applyNativeResizePolicy(this.#window, this.#freeResize);
-			else {
-				// Route native fullscreen exits through the same serialized restoration as app requests.
-				const settled = nativeTransition(this.#window, null, () => {});
-				void this.#enqueue(async () => {
+		if (this.#closed || this.#busy) return;
+		const enabled = this.#window.isFullScreen();
+		// Fullscreen exits must restore windowed geometry before fixed-size hints are reinstated.
+		if (enabled) applyNativeResizePolicy(this.#window, this.#freeResize);
+		const previous = { ...this.settings(), fullscreen: !enabled };
+		const settled = nativeTransition(this.#window, null, () => {});
+		void this.#enqueue(async () => {
+			if (this.#preview !== null) {
+				await settled;
+				await this.#revert();
+			} else
+				await this.#startPreview(previous, async () => {
 					await settled;
-					await this.#apply({ kind: "fullscreen", enabled: false });
-				}).catch(this.#report);
-				return;
-			}
-		}
-		this.#publish(this.snapshot());
+					await this.#apply({ kind: "fullscreen", enabled });
+				});
+		}).catch(this.#report);
 	};
 
 	change(request: WindowDisplayRequest): Promise<void> {
-		return this.#enqueue(() => this.#apply(request));
+		return this.#enqueue(async () => {
+			if (request.kind === "confirm") {
+				const confirmation = this.#preview?.confirmation;
+				// Timeout and a late UI answer may race. Obsolete answers never affect a new preview.
+				if (confirmation?.id !== request.id) return;
+				if (
+					request.keep &&
+					confirmation.kind === "preview" &&
+					Date.now() < confirmation.expiresAt
+				) {
+					clearTimeout(this.#confirmationTimer);
+					this.#preview = null;
+				} else await this.#revert();
+				return;
+			}
+			if (this.#preview !== null)
+				throw new Error("Keep or revert the current display change first.");
+			if (request.kind === "free-resize") await this.#apply(request);
+			else {
+				if (
+					request.kind === "fullscreen" &&
+					request.enabled === this.#window.isFullScreen()
+				)
+					return;
+				const content = this.#window.getContentBounds();
+				if (
+					request.kind === "size" &&
+					!this.#window.isFullScreen() &&
+					!this.#window.isMaximized() &&
+					content.width === request.size.width &&
+					content.height === request.size.height
+				)
+					return;
+				await this.#startPreview(this.settings(), () => this.#apply(request));
+			}
+		});
+	}
+	async #startPreview(
+		previous: ClientWindowSettings,
+		apply: () => Promise<void>,
+	): Promise<void> {
+		const id = ++this.#confirmationId;
+		const preview: DisplayPreview = {
+			previous,
+			confirmation: { kind: "recovery", id },
+		};
+		this.#preview = preview;
+		// An OS mode event can be followed by resize events before this queued operation runs.
+		// Its captured windowed geometry remains the authority for fullscreen restoration.
+		this.#windowed = {
+			normalBounds: previous.normalBounds,
+			maximized: previous.maximized,
+		};
+		try {
+			await apply();
+		} catch (error) {
+			// Partial native changes must be restored before exposing settings to persistence.
+			try {
+				await this.#revert();
+			} catch (rollbackError) {
+				throw new AggregateError(
+					[error, rollbackError],
+					"Display change and restoration both failed.",
+					{ cause: rollbackError },
+				);
+			}
+			throw error;
+		}
+		preview.confirmation = {
+			kind: "preview",
+			id,
+			expiresAt: Date.now() + APP_WINDOW_TUNING.displayConfirmationMs,
+		};
+		this.#confirmationTimer = setTimeout(() => {
+			void this.change({ kind: "confirm", id, keep: false }).catch(
+				this.#report,
+			);
+		}, APP_WINDOW_TUNING.displayConfirmationMs);
+	}
+	async #revert(): Promise<void> {
+		clearTimeout(this.#confirmationTimer);
+		const preview = this.#preview;
+		if (preview === null) return;
+		// Once restoration starts, a failed native operation must never make Keep valid again.
+		preview.confirmation = { kind: "recovery", id: preview.confirmation.id };
+		const previous = preview.previous;
+		this.#windowed = {
+			normalBounds: previous.normalBounds,
+			maximized: previous.maximized,
+		};
+		this.#freeResize = previous.freeResize;
+		// Release native locks while restoring arbitrary custom bounds and maximization.
+		this.#window.setResizable(true);
+		this.#window.setMaximizable(true);
+		try {
+			await changeNativeFullscreen(this.#window, false);
+			this.#windowed = await restoreWindowedGeometry(
+				this.#window,
+				this.#windowed,
+			);
+			await changeNativeFullscreen(this.#window, previous.fullscreen);
+			this.#preview = null;
+		} finally {
+			applyNativeResizePolicy(this.#window, this.#freeResize);
+		}
 	}
 	#enqueue(apply: () => Promise<void>): Promise<void> {
 		if (this.#closed)
@@ -255,7 +373,9 @@ export class WindowDisplay {
 		this.#tail = changing.catch(() => {});
 		return changing;
 	}
-	async #apply(request: WindowDisplayRequest): Promise<void> {
+	async #apply(
+		request: Exclude<WindowDisplayRequest, { kind: "confirm" }>,
+	): Promise<void> {
 		const window = this.#window;
 		if (request.kind === "fullscreen") {
 			if (request.enabled && !window.isFullScreen())
@@ -310,10 +430,17 @@ export class WindowDisplay {
 	async close(): Promise<void> {
 		this.#closed = true;
 		await this.#tail;
-		for (const event of this.#events)
-			this.#window.removeListener(event, this.refresh);
-		this.#window.removeListener("enter-full-screen", this.#fullscreenChanged);
-		this.#window.removeListener("leave-full-screen", this.#fullscreenChanged);
+		clearTimeout(this.#confirmationTimer);
+		this.#busy = true;
+		try {
+			await this.#revert();
+		} finally {
+			this.#busy = false;
+			for (const event of this.#events)
+				this.#window.removeListener(event, this.refresh);
+			this.#window.removeListener("enter-full-screen", this.#fullscreenChanged);
+			this.#window.removeListener("leave-full-screen", this.#fullscreenChanged);
+		}
 	}
 }
 

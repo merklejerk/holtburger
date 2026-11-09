@@ -2139,11 +2139,13 @@
 				preciseEscapeContext = null;
 				preciseJumpSession?.cancel();
 			},
-			onAutoRunChanged: (enabled) =>
+			onAutoRunChanged: (enabled) => {
+				if (enabled) stopCombat();
 				toastCenter.publish({
 					message: enabled ? "AutoRun ON" : "AutoRun OFF",
 					tone: "status",
-				}),
+				});
+			},
 		});
 		inputArbiter = arbiter;
 

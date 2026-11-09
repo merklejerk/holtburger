@@ -305,7 +305,7 @@ pub enum MotionPresentation {
 pub enum OrdinaryMotionActivity {
     /// Standing or travelling playback that can be represented by independent locomotion.
     Locomotion,
-    /// Recognized spell and missile gesture, including entry and return transitions.
+    /// Recognized movement-compatible gesture, including entry and return transitions.
     Gesture,
     /// Inventory reach, including entry and return; independent of locomotion eligibility.
     Reach,
@@ -861,9 +861,7 @@ impl BodyMotionRuntime {
                 .active_action
                 .iter()
                 .chain(self.action_queue.iter())
-                .all(|action| {
-                    action.command.movement_override_gesture() == Some(super::MotionGesture::Windup)
-                })
+                .all(|action| action.command.is_movement_override_action())
     }
 
     /// Whether an accepted substate gesture still owns its entry, hold, or return playback.

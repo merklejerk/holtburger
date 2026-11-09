@@ -98,6 +98,8 @@ export class PossessionCameraController<
 	>;
 	/** True while longitudinal or lateral player intent remains held. */
 	#translationActive = false;
+	/** Held orbit input owns yaw even while the mouse is stationary. */
+	#orbitHeld = false;
 	/** Explicit state prevents an armed dwell, transition, and pin from coexisting. */
 	#recenterState: PossessionCameraRecenterState = { kind: "free" };
 	#pendingZoomDisplacement = 0;
@@ -177,6 +179,14 @@ export class PossessionCameraController<
 		);
 	}
 
+	/** Release automatic rear-follow for the whole hold; release begins a fresh movement dwell. */
+	setOrbitHeld(held: boolean, nowMs: number): void {
+		assertFiniteTimestamp(nowMs);
+		if (held === this.#orbitHeld) return;
+		this.#orbitHeld = held;
+		this.#rearmRecenter(nowMs);
+	}
+
 	/** Enter sticky rear-follow explicitly, bypassing the translation dwell. */
 	followRear(nowMs: number): void {
 		assertFiniteTimestamp(nowMs);
@@ -210,7 +220,7 @@ export class PossessionCameraController<
 				this.#recenterState = { kind: "free" };
 			return;
 		}
-		if (this.#recenterState.kind === "free")
+		if (!this.#orbitHeld && this.#recenterState.kind === "free")
 			this.#recenterState = {
 				kind: "arming",
 				deadlineMs: nowMs + this.#recenter.delayMs,
@@ -271,6 +281,7 @@ export class PossessionCameraController<
 
 	stop(): Promise<void> {
 		this.#pendingZoomDisplacement = 0;
+		this.#orbitHeld = false;
 		this.#resetRecenter();
 		return this.#session.stop();
 	}
@@ -297,9 +308,10 @@ export class PossessionCameraController<
 	}
 
 	#rearmRecenter(nowMs: number): void {
-		this.#recenterState = this.#translationActive
-			? { kind: "arming", deadlineMs: nowMs + this.#recenter.delayMs }
-			: { kind: "free" };
+		this.#recenterState =
+			this.#translationActive && !this.#orbitHeld
+				? { kind: "arming", deadlineMs: nowMs + this.#recenter.delayMs }
+				: { kind: "free" };
 	}
 
 	#resetRecenter(): void {
@@ -308,6 +320,7 @@ export class PossessionCameraController<
 	}
 
 	#advanceRecenter(nowMs: number, targetFacingYawRadians: number): void {
+		if (this.#orbitHeld) return;
 		const targetYawRadians = normalizeYaw(targetFacingYawRadians);
 		const state = this.#recenterState;
 		if (state.kind === "transition") {

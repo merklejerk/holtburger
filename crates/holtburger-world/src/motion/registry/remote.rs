@@ -3,7 +3,7 @@
 use super::{BodyMotionRuntime, MotionRuntimeRegistry};
 use crate::entity::{EntityMotionAction, EntityMotionDirective, EntityMotionSnapshot};
 use crate::motion::{
-    CharacterMotionPresentation, MotionContact, MotionGesture, MotionOrder, SequenceTick,
+    CharacterMotionPresentation, MotionContact, MotionOrder, SequenceTick,
     ServerDirectedMotionResolution, ServerDirectedMotionState, ServerDirectedTarget,
     begin_server_directed_motion, resolve_server_directed_motion,
 };
@@ -222,11 +222,11 @@ impl MotionRuntimeRegistry {
         runtime.bind_table(table);
         runtime.local_command_owned = false;
         let actions: Vec<_> = actions.into_iter().collect();
-        let incoming_windups = !actions.is_empty()
-            && actions.iter().all(|action| {
-                action.command.movement_override_gesture() == Some(MotionGesture::Windup)
-            });
-        let order = runtime.remote_order(table, guid, input, incoming_windups);
+        let incoming_gesture_actions = !actions.is_empty()
+            && actions
+                .iter()
+                .all(|action| action.command.is_movement_override_action());
+        let order = runtime.remote_order(table, guid, input, incoming_gesture_actions);
         let previous_resolution = runtime.ordinary_resolution;
         runtime.accept_order(table, order);
         for action in actions {
@@ -306,13 +306,13 @@ impl MotionRuntimeRegistry {
 
 impl BodyMotionRuntime {
     /// Resolve physical remote intent while retaining eligible gestures on ordinary playback.
-    /// Incoming windups matter before packet admission has populated the action queue.
+    /// Incoming gesture actions matter before packet admission has populated the action queue.
     fn remote_order(
         &mut self,
         table: &MotionSequenceTable,
         guid: Guid,
         input: RemoteMotionInput,
-        incoming_windups: bool,
+        incoming_gesture_actions: bool,
     ) -> MotionOrder {
         let unsupported = input
             .contact
@@ -329,7 +329,7 @@ impl BodyMotionRuntime {
         }
         // RETAIL DIVERGENCE: support replaces ordinary commands with Falling in retail.
         // Retaining accepted gestures permits remote airborne composition; reverting this
-        // erases gestures at admission or next tick. Scope is the explicit spell/reach/missile
+        // erases gestures at admission or next tick. Scope is the explicit movement-compatible gesture
         // allowlist and 22 humanoid CharGen layouts.
         // Physical support still selects the lower-body pose.
         let style = commanded.style.unwrap_or(self.state.style);
@@ -345,10 +345,11 @@ impl BodyMotionRuntime {
         });
         let ongoing_gesture = self.has_layerable_gesture(table);
         let preserve_gesture = self.gesture_actions_allow_locomotion()
-            && (gesture_command || (gesture_return && (incoming_windups || ongoing_gesture)));
+            && (gesture_command
+                || (gesture_return && (incoming_gesture_actions || ongoing_gesture)));
         if self.has_manual_locomotion() || preserve_gesture {
             // A gesture received during takeoff must not sit behind the old locomotion entry.
-            // Existing gesture entries and queued windups retain their clocks and hooks.
+            // Existing gesture entries and queued gesture actions retain their clocks and hooks.
             if unsupported && preserve_gesture && !ongoing_gesture {
                 self.sequence.remove_transition_prefix();
             }

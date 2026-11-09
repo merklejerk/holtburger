@@ -129,6 +129,8 @@ impl RestPosture {
 pub enum MotionGesture {
     /// Scarab-selected spell preparation action.
     Windup,
+    /// Healing-skill action on self or another player.
+    Healing,
     /// Talisman-selected spell release substate.
     Release,
     /// Pickup/drop reach substate; does not imply an inventory transaction.
@@ -145,10 +147,10 @@ impl MotionCommand {
     const MODIFIER: u32 = 0x2000_0000;
     const ACTION: u32 = 0x1000_0000;
 
-    /// Classifies the spell/reach/missile allowlist for independent manual movement.
-    /// Shipped component gestures (ACE SpellFormula.cs), inventory reach variants
-    /// (Player_Inventory.cs), and missile aim/reload substates (Player_Missile.cs). Arbitrary
-    /// UseUserAnimation overrides are not inferred.
+    /// Classifies recognized gestures for independent manual movement.
+    /// Includes spell components, inventory reaches, missile aim/reload and healing-skill
+    /// actions. Healing completion and movement-disruption checks remain server-owned.
+    /// Arbitrary UseUserAnimation overrides are not inferred.
     pub const fn movement_override_gesture(self) -> Option<MotionGesture> {
         match self.0 {
             0x1000_0070 | 0x1000_0072 | 0x1000_0074 | 0x1000_0076 | 0x1000_0078 | 0x1000_0132 => {
@@ -158,8 +160,15 @@ impl MotionCommand {
             0x4000_0018 | 0x4000_0136..=0x4000_0139 => Some(MotionGesture::Reach),
             0x4000_0016 => Some(MotionGesture::MissileReload),
             0x4000_001e..=0x4000_002a => Some(MotionGesture::MissileAim),
+            0x1000_010e | 0x1000_010f => Some(MotionGesture::Healing),
             _ => None,
         }
+    }
+
+    /// Recognized one-shot gestures may retain playback while locomotion owns displacement.
+    /// Both queued-action admission and active playback use the same command classification.
+    pub(crate) const fn is_movement_override_action(self) -> bool {
+        self.is_action() && self.movement_override_gesture().is_some()
     }
 
     pub const fn raw(self) -> u32 {

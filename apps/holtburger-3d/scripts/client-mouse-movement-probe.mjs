@@ -126,6 +126,21 @@ export async function probeClientMouseMovement(client, evaluate) {
 		const panPixels = await read(
 			`import('/src/client/client-viewport-pointer-gesture.ts').then(module => module.CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS + 1)`,
 		);
+		// Ownership starts before dragging and ends on input cancellation or browser capture loss.
+		for (const cancellation of [
+			`window.dispatchEvent(new Event('blur'))`,
+			`document.querySelector('.client-canvas').dispatchEvent(new PointerEvent('pointercancel',{bubbles:true}))`,
+			`document.exitPointerLock()`,
+		]) {
+			await mouse("mouseMoved", "none", 0);
+			await mouse("mousePressed", "left", 1);
+			await waitForLock(true);
+			assert.equal(await read(`${api}.mouseMovement.orbitHeld()`), true);
+			await read(cancellation);
+			await waitForLock(false);
+			assert.equal(await read(`${api}.mouseMovement.orbitHeld()`), false);
+			await mouse("mouseReleased", "left", 0);
+		}
 		// The same production owner must read live preferences while pointer lock remains held.
 		for (const [button, mask, horizontal, vertical] of [
 			["left", 1, "invertCameraHorizontal", "invertCameraVertical"],
@@ -134,6 +149,10 @@ export async function probeClientMouseMovement(client, evaluate) {
 			await mouse("mouseMoved", "none", 0);
 			await mouse("mousePressed", button, mask);
 			await waitForLock(true);
+			assert.equal(
+				await read(`${api}.mouseMovement.orbitHeld()`),
+				button === "left",
+			);
 			for (const invertX of [false, true])
 				for (const invertY of [false, true]) {
 					// Opposite settings for the other gesture expose accidental coupling.
@@ -189,6 +208,7 @@ export async function probeClientMouseMovement(client, evaluate) {
 				}
 			await mouse("mouseReleased", button, 0);
 			await waitForLock(false);
+			assert.equal(await read(`${api}.mouseMovement.orbitHeld()`), false);
 		}
 		await read(`${api}.bindingSettings.replace(${JSON.stringify(initial)})`);
 		await settle();
@@ -557,6 +577,7 @@ export async function probeClientMouseMovement(client, evaluate) {
 		const turnsBeforeOrbit = (await state()).turns.length;
 		const orbitsBefore = await read(`${api}.capture().orbitDeltas.length`);
 		await mouse("mouseReleased", "right", 1, point.x + 35);
+		assert.equal(await read(`${api}.mouseMovement.orbitHeld()`), true);
 		await forward(null);
 		await waitForLock(true);
 		await mouse("mouseMoved", "none", 1, point.x + 45, point.y + 10);

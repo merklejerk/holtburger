@@ -141,6 +141,49 @@ describe("PossessionCameraController", () => {
 		expect(controller.desiredLook().yawRadians).toBeCloseTo(0.8);
 	});
 
+	it.each([0, 1_100, 1_200])(
+		"holds orbit through recentering at %s ms and rearms only on release",
+		async (heldAt) => {
+			const controller = new PossessionCameraController({
+				initialLook: { pitchRadians: -0.4, yawRadians: 0.2 },
+				orbit: ORBIT,
+				recenter: { delayMs: 1_000, durationMs: 200 },
+				transport: new RecordingTransport(),
+			});
+			await controller.start(TARGET, DISTANCE, PROJECTION);
+			controller.setTranslationIntent(true, 0);
+			await controller.synchronize(PROJECTION, heldAt, 1);
+			controller.setOrbitHeld(true, heldAt);
+			const heldLook = controller.desiredLook();
+			await controller.synchronize(PROJECTION, heldAt + 5_000, 2);
+			expect(controller.desiredLook()).toEqual(heldLook);
+			controller.setOrbitHeld(false, heldAt + 5_000);
+			await controller.synchronize(PROJECTION, heldAt + 5_999, 2);
+			expect(controller.desiredLook()).toEqual(heldLook);
+			await controller.synchronize(PROJECTION, heldAt + 6_200, 2);
+			expect(controller.desiredLook()).toEqual({ ...heldLook, yawRadians: 2 });
+		},
+	);
+
+	it("does not arm movement recentering during orbit or after movement ends during the hold", async () => {
+		const controller = new PossessionCameraController({
+			initialLook: { pitchRadians: 0, yawRadians: 0.4 },
+			orbit: ORBIT,
+			recenter: { delayMs: 100, durationMs: 0 },
+			transport: new RecordingTransport(),
+		});
+		await controller.start(TARGET, DISTANCE, PROJECTION);
+		controller.setOrbitHeld(true, 0);
+		controller.setTranslationIntent(true, 1);
+		controller.orbit(10, 0, 2);
+		await controller.synchronize(PROJECTION, 1_000, 2);
+		expect(controller.desiredLook().yawRadians).toBeCloseTo(0.3);
+		controller.setTranslationIntent(false, 1_001);
+		controller.setOrbitHeld(false, 1_002);
+		await controller.synchronize(PROJECTION, 2_000, 2);
+		expect(controller.desiredLook().yawRadians).toBeCloseTo(0.3);
+	});
+
 	it("cancels an armed recenter when continuous movement ends early", async () => {
 		const transport = new RecordingTransport();
 		const controller = new PossessionCameraController({

@@ -3,6 +3,8 @@ export const CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS = 3;
 
 /** Camera operations consumed by viewport pointer gestures. */
 export interface ClientViewportCameraController {
+	/** Held orbit input suspends automatic recentering, including pauses between mouse deltas. */
+	readonly setOrbitHeld: (held: boolean, nowMs: number) => void;
 	/** Explicit sticky rear-follow used by character steering. */
 	readonly followRear: (nowMs: number) => void;
 	/** Vertical camera adjustment that preserves character-owned steering yaw. */

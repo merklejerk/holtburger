@@ -5,6 +5,8 @@ const RELEASE: u32 = 0x4000_002b;
 const REACH: u32 = 0x4000_0018;
 const MISSILE_RELOAD: u32 = 0x4000_0016;
 const MISSILE_AIM: u32 = 0x4000_001e;
+const HEAL_SELF: u32 = 0x1000_010e;
+const HEAL_OTHER: u32 = 0x1000_010f;
 const ENTRY_ANIM: u32 = 0x0300_0010;
 const RETURN_ANIM: u32 = 0x0300_0011;
 const HOLD_ANIM: u32 = 0x0300_0012;
@@ -44,6 +46,8 @@ fn build_gesture_catalog(with_stop: bool, reach: u32) -> MotionSequenceCatalog {
                 ),
                 (MISSILE_AIM, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
                 (WINDUP, motion(vec![clip(ACTION_ANIM, 4.0)], None, None)),
+                (HEAL_SELF, motion(vec![clip(ACTION_ANIM, 4.0)], None, None)),
+                (HEAL_OTHER, motion(vec![clip(ACTION_ANIM, 4.0)], None, None)),
             ]),
         ),
         (
@@ -203,6 +207,52 @@ fn stopped_input_preserves_reach_and_new_input_does_not_restart_it() {
     );
     assert_eq!(runtime.sequence().frame_number(), 3.0);
     assert_eq!(runtime.tick().offset.translation.y, 1.0);
+}
+
+#[test]
+fn healing_keeps_its_action_clock_and_completion_when_movement_starts_and_stops() {
+    let catalog = gesture_catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    for command in [HEAL_SELF, HEAL_OTHER] {
+        let mut idle = BodyMotionRuntime::new(table);
+        idle.enqueue_action(EntityMotionAction {
+            command: MotionCommand(command),
+            ..action(1)
+        });
+        idle.drive(table, MotionOrder::default(), 0.0);
+        let mut moving = idle.clone();
+        assert!(moving.permits_gesture_locomotion(table));
+        // Start, stop, and restart movement while the same healing action is active.
+        for forward in [
+            Some((MotionCommand(WALK), 1.0)),
+            None,
+            Some((MotionCommand(WALK), 1.0)),
+            None,
+        ] {
+            idle.drive(table, MotionOrder::default(), 0.25);
+            moving.drive_manual(
+                table,
+                MotionOrder {
+                    forward,
+                    ..MotionOrder::default()
+                },
+                CharacterMotionPresentation::Grounded,
+                0.25,
+            );
+            assert_eq!(moving.active_action(), idle.active_action());
+            assert_eq!(moving.tick().action_completed, idle.tick().action_completed);
+            assert_eq!(
+                moving.motion_playback().unwrap().ordinary,
+                idle.motion_playback().unwrap().ordinary,
+            );
+            if forward.is_some() {
+                assert_eq!(moving.tick().offset.translation.y, 1.0);
+            }
+        }
+        assert_eq!(moving.action_count(), 0);
+        assert!(moving.tick().action_completed);
+        assert_eq!(moving.state().substate, MotionCommand(STAND));
+    }
 }
 
 #[test]
@@ -860,6 +910,70 @@ fn remote_gesture_input(command: u32, contact: ContactState) -> RemoteMotionInpu
         target: None,
         frame_policy: RemoteFramePolicy::Command,
         omega: Vector3::zero(),
+    }
+}
+
+#[test]
+fn remote_healing_admission_preserves_action_during_airborne_locomotion() {
+    let catalog = gesture_catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = Guid(1);
+    for command in [HEAL_SELF, HEAL_OTHER] {
+        let mut registry = MotionRuntimeRegistry::new();
+        registry.drive_remote(
+            table,
+            guid,
+            remote_gesture_input(STAND, ContactState::Airborne),
+            0.1,
+        );
+        registry.accept_remote(
+            table,
+            guid,
+            remote_gesture_input(STAND, ContactState::Airborne),
+            [EntityMotionAction {
+                command: MotionCommand(command),
+                ..action(1)
+            }],
+            None,
+        );
+        let mut grounded = BodyMotionRuntime::new(table);
+        grounded.enqueue_action(EntityMotionAction {
+            command: MotionCommand(command),
+            ..action(1)
+        });
+        for _ in 0..4 {
+            grounded.drive(table, MotionOrder::default(), 0.25);
+            registry.drive_remote(
+                table,
+                guid,
+                remote_gesture_input(STAND, ContactState::Airborne),
+                0.25,
+            );
+            registry.present_locomotion(table, guid, order(WALK), 0.25);
+            let runtime = registry.get(guid).unwrap();
+            assert_eq!(runtime.action_count(), grounded.action_count());
+            assert_eq!(
+                runtime
+                    .motion_playback()
+                    .unwrap()
+                    .ordinary
+                    .map(|layer| layer.clip),
+                grounded
+                    .motion_playback()
+                    .unwrap()
+                    .ordinary
+                    .map(|layer| layer.clip)
+            );
+            assert_eq!(
+                runtime.sequence().frame_number(),
+                grounded.sequence().frame_number()
+            );
+            assert_eq!(
+                runtime.tick().action_completed,
+                grounded.tick().action_completed
+            );
+        }
+        assert_eq!(registry.get(guid).unwrap().action_count(), 0);
     }
 }
 

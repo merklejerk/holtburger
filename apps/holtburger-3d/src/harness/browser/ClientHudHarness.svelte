@@ -1415,6 +1415,8 @@
 			/** Production camera math resolves pointer deltas to a direction for input assertions. */
 			lookDirection: typeof mouseLookDirection;
 			resetLook: () => void;
+			/** Whether production mouse input currently owns camera orbit. */
+			orbitHeld: () => boolean;
 			rearFollowEntries: () => number;
 		};
 		/** Accepted settings seam for focused browser remapping scenarios. */
@@ -3979,6 +3981,8 @@
 	);
 	let rearFollowEntries = 0;
 	const orbitDeltas: { x: number; y: number }[] = [];
+	/** Production mouse ownership, exposed for button-edge and cancellation probes. */
+	let orbitHeld = false;
 	const zoomDeltas: number[] = [];
 	const selectionEvents: (number | null)[] = [];
 	const viewportSelectionPoints: { x: number; y: number; interact: boolean }[] =
@@ -4003,6 +4007,9 @@
 		return createCameraAxesRadians(look.yawRadians, look.pitchRadians).forward;
 	}
 	const cameraController = {
+		setOrbitHeld(held: boolean): void {
+			orbitHeld = held;
+		},
 		pitch(deltaY: number): void {
 			orbitDeltas.push({ x: 0, y: deltaY });
 			rotateMouseLook(0, deltaY);
@@ -5810,6 +5817,7 @@
 			mouseMovement: {
 				fixture: mouseFixture,
 				lookDirection: mouseLookDirection,
+				orbitHeld: () => orbitHeld,
 				resetLook: () => {
 					mouseLook.replace({ yawRadians: 0, pitchRadians: 0 });
 				},

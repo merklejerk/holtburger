@@ -151,6 +151,8 @@ export class ClientViewportMouseController {
 				: (this.#buttons & LEFT) !== 0
 					? "orbit"
 					: null;
+		if (mode !== this.#mode)
+			this.#options.camera()?.setOrbitHeld(mode === "orbit", performance.now());
 		// A lone right press retains examine until dragging; movement chords commit immediately.
 		if (
 			mode === "steer" &&
@@ -305,6 +307,7 @@ export class ClientViewportMouseController {
 	 * Clearing motion prevents re-locking until a fresh camera hold starts.
 	 */
 	#endCapture(): void {
+		this.#options.camera()?.setOrbitHeld(false, performance.now());
 		this.#motion = null;
 		this.#click = null;
 		this.#unlock();

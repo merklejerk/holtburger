@@ -468,7 +468,7 @@
 							class="pregame-action ui-button launcher-save-profile"
 							type="button"
 							disabled={busy || !server || !account}
-							onclick={() => (editor = { kind: "new-profile", name: "" })}
+							onclick={() => (editor = { kind: "new-profile", name: account })}
 							>Save to new profile</button
 						>
 					</div>

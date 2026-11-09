@@ -18,7 +18,7 @@ export interface FrameRateSample {
 
 /** Imperative frame-rate source written by a hot frame loop and read by colder UI consumers. */
 export interface FrameRateSampler {
-	/** Record one presentation callback without publishing reactive state. */
+	/** Record one presentation callback; unusable timing samples never interrupt presentation. */
 	recordFrame(sample: FrameRateSample): void;
 	/** Read the latest observed cadence and best-effort uncapped capacity. */
 	readFrameRates(): FrameRates | null;
@@ -78,38 +78,45 @@ export function createFrameRateSampler(emaWindowMs: number): FrameRateSampler {
 			startedAtMs,
 			workMs,
 		}: FrameRateSample): void {
-			if (!Number.isFinite(animationFrameTimeMs)) {
-				throw new Error("Animation-frame timestamp must be finite.");
-			}
-			if (!Number.isFinite(startedAtMs)) {
-				throw new Error("Frame start timestamp must be finite.");
-			}
-			if (!Number.isFinite(workMs)) {
-				throw new Error("Frame work duration must be finite.");
-			}
-			if (workMs < 0) {
-				throw new Error("Frame work duration must be non-negative.");
-			}
-			if (
-				previousSample !== null &&
-				animationFrameTimeMs <= previousSample.animationFrameTimeMs
-			) {
-				throw new Error(
-					`Animation-frame timestamps must increase. Previous=${previousSample.animationFrameTimeMs}, current=${animationFrameTimeMs}, start=${startedAtMs}.`,
-				);
-			}
-			if (
-				previousSample !== null &&
-				startedAtMs <= previousSample.startedAtMs
-			) {
-				throw new Error("Frame start timestamps must increase.");
-			}
-
 			const sample = { animationFrameTimeMs, startedAtMs, workMs };
+			const invalidReason = !Number.isFinite(animationFrameTimeMs)
+				? "Animation-frame timestamp must be finite."
+				: !Number.isFinite(startedAtMs)
+					? "Frame start timestamp must be finite."
+					: !Number.isFinite(workMs)
+						? "Frame work duration must be finite."
+						: workMs < 0
+							? "Frame work duration must be non-negative."
+							: null;
+			const clockRegressed =
+				previousSample !== null &&
+				(animationFrameTimeMs < previousSample.animationFrameTimeMs ||
+					startedAtMs < previousSample.startedAtMs);
+			if (invalidReason !== null || clockRegressed) {
+				console.warn("Frame-rate sampling reset.", {
+					reason: invalidReason ?? "Frame timestamps moved backwards.",
+					previousSample,
+					sample,
+				});
+				// Discard learned cadence as well as rates across a clock discontinuity. A valid
+				// regressed sample establishes the new clock baseline; malformed samples cannot.
+				previousSample = invalidReason === null ? sample : null;
+				smoothedMetrics = null;
+				refreshIntervalCount = 0;
+				nextRefreshIntervalIndex = 0;
+				return;
+			}
 			if (previousSample === null) {
 				previousSample = sample;
 				return;
 			}
+			// Clock precision and bunched callbacks can produce equal readings. Retain the
+			// last measurable baseline and rates until both clocks have positive elapsed time.
+			if (
+				animationFrameTimeMs === previousSample.animationFrameTimeMs ||
+				startedAtMs === previousSample.startedAtMs
+			)
+				return;
 
 			const frameIntervalMs = startedAtMs - previousSample.startedAtMs;
 			const animationFrameIntervalMs =

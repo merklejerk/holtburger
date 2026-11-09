@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
 	createFrameRateSampler,
@@ -12,6 +12,8 @@ function frame(timeMs: number, workMs: number): FrameRateSample {
 		workMs,
 	};
 }
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("frame-rate sampler", () => {
 	it("reports observed and uncapped frame rates without reactive frame writes", () => {
@@ -93,44 +95,70 @@ describe("frame-rate sampler", () => {
 		);
 	});
 
-	it("rejects invalid configuration, duration, and timestamps", () => {
+	it.each([
+		{ animationFrameTimeMs: 16, startedAtMs: 20, workMs: 0 },
+		{ animationFrameTimeMs: 20, startedAtMs: 16, workMs: 0 },
+		frame(16, 0),
+	])(
+		"waits for measurable elapsed time after equal timestamps: %j",
+		(sample) => {
+			const sampler = createFrameRateSampler(0.001);
+			sampler.recordFrame(frame(0, 5));
+			sampler.recordFrame(frame(16, 5));
+			const previousRates = sampler.readFrameRates();
+			sampler.recordFrame(sample);
+			expect(sampler.readFrameRates()).toEqual(previousRates);
+			sampler.recordFrame(frame(32, 5));
+			expect(sampler.readFrameRates()?.capped).toBeCloseTo(62.5);
+			expect(sampler.readFrameRates()?.uncapped).toBeCloseTo(200);
+		},
+	);
+
+	it.each([
+		{ animationFrameTimeMs: 15, startedAtMs: 20, workMs: 5 },
+		{ animationFrameTimeMs: 20, startedAtMs: 15, workMs: 5 },
+		frame(0, 5),
+	])("relearns cadence after a clock regression: %j", (sample) => {
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+		const sampler = createFrameRateSampler(0.001);
+		sampler.recordFrame(frame(0, 5));
+		sampler.recordFrame(frame(16, 5));
+		sampler.recordFrame(sample);
+		expect(sampler.readFrameRates()).toBeNull();
+		sampler.recordFrame({
+			animationFrameTimeMs: sample.animationFrameTimeMs + 32,
+			startedAtMs: sample.startedAtMs + 32,
+			workMs: 5,
+		});
+		expect(sampler.readFrameRates()?.capped).toBeCloseTo(31.25);
+		expect(sampler.readFrameRates()?.uncapped).toBeCloseTo(200);
+	});
+
+	it.each([
+		{ animationFrameTimeMs: Number.NaN, startedAtMs: 32, workMs: 5 },
+		{
+			animationFrameTimeMs: 32,
+			startedAtMs: Number.POSITIVE_INFINITY,
+			workMs: 5,
+		},
+		frame(32, Number.NaN),
+		frame(32, -1),
+	])("recovers from an invalid runtime sample: %j", (sample) => {
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+		const sampler = createFrameRateSampler(0.001);
+		sampler.recordFrame(frame(0, 5));
+		sampler.recordFrame(frame(16, 5));
+		sampler.recordFrame(sample);
+		expect(sampler.readFrameRates()).toBeNull();
+		sampler.recordFrame(frame(64, 5));
+		expect(sampler.readFrameRates()).toBeNull();
+		sampler.recordFrame(frame(96, 5));
+		expect(sampler.readFrameRates()?.capped).toBeCloseTo(31.25);
+		expect(sampler.readFrameRates()?.uncapped).toBeCloseTo(200);
+	});
+
+	it("rejects invalid configuration", () => {
 		expect(() => createFrameRateSampler(Number.NaN)).toThrow(/must be finite/);
 		expect(() => createFrameRateSampler(0)).toThrow(/must be positive/);
-		const sampler = createFrameRateSampler(1_000);
-		expect(() =>
-			sampler.recordFrame({
-				animationFrameTimeMs: Number.NaN,
-				startedAtMs: 10,
-				workMs: 1,
-			}),
-		).toThrow(/Animation-frame timestamp must be finite/);
-		expect(() =>
-			sampler.recordFrame({
-				animationFrameTimeMs: 10,
-				startedAtMs: Number.NaN,
-				workMs: 1,
-			}),
-		).toThrow(/Frame start timestamp must be finite/);
-		expect(() => sampler.recordFrame(frame(10, Number.NaN))).toThrow(
-			/Frame work duration must be finite/,
-		);
-		expect(() => sampler.recordFrame(frame(10, -1))).toThrow(
-			/Frame work duration must be non-negative/,
-		);
-		sampler.recordFrame(frame(10, 5));
-		expect(() =>
-			sampler.recordFrame({
-				animationFrameTimeMs: 10,
-				startedAtMs: 11,
-				workMs: 5,
-			}),
-		).toThrow(/Animation-frame timestamps must increase/);
-		expect(() =>
-			sampler.recordFrame({
-				animationFrameTimeMs: 11,
-				startedAtMs: 10,
-				workMs: 5,
-			}),
-		).toThrow(/Frame start timestamps must increase/);
 	});
 });

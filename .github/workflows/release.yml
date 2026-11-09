@@ -178,17 +178,32 @@ jobs:
         with:
           name: verification-linux-bootstrap
           path: .holtburger-local/release-linux-probes
-      - name: Install Flatpak tooling and shared runtime
+      - name: Refresh Ubuntu package indexes
+        timeout-minutes: 5
         run: |
-          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          # Bound network stalls for this refresh and subsequent package installs.
+          # Keep the runner's default mirror selection instead of excluding a mirror.
+          sudo tee /etc/apt/apt.conf.d/99-holtburger-ci > /dev/null <<'EOF'
+          Acquire::Retries "2";
+          Acquire::http::Timeout "30";
+          Acquire::https::Timeout "30";
+          APT::Update::Error-Mode "any";
+          EOF
           sudo apt-get update
+      - name: Install Ubuntu Flatpak tooling
+        timeout-minutes: 10
+        run: |
           sudo apt-get install --yes --no-install-recommends \
             flatpak flatpak-builder appstream-compose desktop-file-utils elfutils ostree librsvg2-common dbus-x11
+      - name: Download shared Flatpak runtime and SDK from Flathub
+        timeout-minutes: 15
+        run: |
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
           RUNTIME_VERSION=$(node --input-type=module -e 'import {readFileSync} from "node:fs"; console.log(JSON.parse(readFileSync(".github/flatpak/io.github.merklejerk.holtburger-3d.json", "utf8"))["runtime-version"])')
           sudo flatpak install --noninteractive --assumeyes flathub "org.freedesktop.Platform/x86_64/$RUNTIME_VERSION" "org.freedesktop.Sdk/x86_64/$RUNTIME_VERSION"
       - name: Install 3D probe display and portal helpers
         if: needs.plan.outputs.product != 'cli'
+        timeout-minutes: 5
         run: sudo apt-get install --yes --no-install-recommends xvfb xauth xdg-desktop-portal xdg-desktop-portal-gtk
       - name: Materialize CLI recipe from its native archive
         if: needs.plan.outputs.product != '3d'

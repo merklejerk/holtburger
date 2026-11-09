@@ -4,7 +4,7 @@ import { resolveChatCompose } from "./client-chat-compose";
 import { runClientVersionCommand } from "./client-version-command";
 
 describe("version command", () => {
-	it.each(["/version", "@version", " /VERSION "])(
+	it.each(["/version", "@version", "/VERSION "])(
 		"reports frontend build identity locally for %s",
 		(command) => {
 			const append = vi.fn();

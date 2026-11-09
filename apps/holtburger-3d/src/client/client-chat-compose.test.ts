@@ -55,23 +55,28 @@ describe("chat composition", () => {
 		});
 	});
 
-	it.each([" /help", "  @help", "\t/help", " *wave*", " :waves"])(
-		"sends %j literally to the selected destination",
-		(text) => {
-			for (const destination of [
-				{ kind: "speech" },
-				{ kind: "tell", target: player },
-				context.destination,
-			] as const) {
-				expect(
-					resolveChatCompose(`${text}  `, { ...context, destination }),
-				).toMatchObject({
-					kind: "send",
-					request: { ...destination, message: `${text.trimStart()}  ` },
-				});
-			}
-		},
-	);
+	it.each([
+		" /help",
+		"  @help",
+		"\t/help",
+		" /VERSION",
+		"  @version",
+		" *wave*",
+		" :waves",
+	])("sends %j literally to the selected destination", (text) => {
+		for (const destination of [
+			{ kind: "speech" },
+			{ kind: "tell", target: player },
+			context.destination,
+		] as const) {
+			expect(
+				resolveChatCompose(`${text}  `, { ...context, destination }),
+			).toMatchObject({
+				kind: "send",
+				request: { ...destination, message: `${text.trimStart()}  ` },
+			});
+		}
+	});
 
 	it.each(["", " ", "  \t"])("rejects blank input %j", (text) => {
 		expect(resolveChatCompose(text, context).kind).toBe("error");

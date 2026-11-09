@@ -100,6 +100,11 @@ conditionally required LandblockInfo, and the pinned active RegionDesc:
 valid absent result. If `has_objects` is zero, the foundation does not read LandblockInfo; if it is
 nonzero, missing or corrupt LandblockInfo is an error.
 
+`TerrainCollisionSurface` derives authored and immersed triangles together from that canonical
+grid and diagonal topology. Each surface retains its own face normals: movement follows the
+continuously lowered water vertices, while viewer clearance follows the undisplaced terrain.
+Both surfaces share the collision artifact's ownership and replacement lifetime.
+
 ### Generated Scenery ([src/generated_scenery.rs](src/generated_scenery.rs))
 
 `GeneratedSceneryAssetAssembler` resolves retail scenery population over an existing

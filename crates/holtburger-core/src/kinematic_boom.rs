@@ -7,12 +7,17 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_world::spatial::SphereCollisionQuery;
 use holtburger_world::{
     CollisionQueryPolicy, FreeSphereSettleConfig, FreeSphereSettleOutcome, FreeSphereState,
-    MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionFilter, PlacedMotionPath,
-    PlacedMotionPathRequest, StaticSphereSweepRequest, settle_free_sphere_with_policy,
+    MotionWaypoint, MotionWaypointPlacement, PhysicalCollisionExclusions, PhysicalCollisionFilter,
+    PlacedMotionPath, PlacedMotionPathRequest, StaticSphereSweepRequest,
+    settle_free_sphere_with_policy,
 };
 use thiserror::Error;
 
 const DIRECTION_EPSILON: f32 = 1.0e-6;
+// Retail behavior is to exempt the viewer from the whole-water-landblock movement barrier.
+// Terrain still obstructs its clearance sphere at the authored surface.
+const CAMERA_COLLISION_FILTER: PhysicalCollisionFilter =
+    PhysicalCollisionFilter::excluding(PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER);
 
 /// Point a third-person camera pivots on, in the body's own frame.
 ///
@@ -926,7 +931,7 @@ impl KinematicBoomController {
                 cell: self.target_seed.placement.cell,
                 radius: requested.radius,
             },
-            PhysicalCollisionFilter::ALL,
+            CAMERA_COLLISION_FILTER,
             CollisionQueryPolicy::AllowUncoveredQuery,
         );
         let (body, contact_passes, unavailable_owner) = match outcome {
@@ -1129,7 +1134,7 @@ impl KinematicBoomController {
                 cell: self.target_seed.placement.cell,
                 radius: clearance.radius,
             },
-            PhysicalCollisionFilter::ALL,
+            CAMERA_COLLISION_FILTER,
             CollisionQueryPolicy::AllowUncoveredQuery,
         )
         .map_err(|_| KinematicBoomFailureReason::FreeSphereQuery)?;
@@ -1210,7 +1215,7 @@ impl KinematicBoomController {
                             displacement,
                             previous_cell: start.cell,
                             radius: clearance.radius,
-                            filter: PhysicalCollisionFilter::ALL,
+                            filter: CAMERA_COLLISION_FILTER,
                         },
                         CollisionQueryPolicy::AllowUncoveredQuery,
                     )
@@ -1264,7 +1269,7 @@ impl KinematicBoomController {
                     displacement: ray,
                     previous_cell: seed.cell,
                     radius: clearance_radius,
-                    filter: PhysicalCollisionFilter::ALL,
+                    filter: CAMERA_COLLISION_FILTER,
                 },
                 CollisionQueryPolicy::AllowUncoveredQuery,
             )
@@ -1841,6 +1846,65 @@ mod tests {
         }
     }
 
+    #[test]
+    fn camera_boom_keeps_clearance_above_water_with_a_submerged_pivot() {
+        let mut scene = collision_scene(Vec::new());
+        let side = holtburger_content::TERRAIN_GRID_CELLS + 1;
+        scene
+            .insert(LandblockCollisionAsset {
+                landblock_id: LANDBLOCK,
+                terrain: TerrainCollisionSurface::from_terrain(&LandblockTerrain {
+                    grid_size: side,
+                    tile_size: 24.0,
+                    height_indices: vec![0; side * side],
+                    heights: vec![0.0; side * side],
+                    terrain_samples: vec![0x10 << 2; side * side],
+                    cell_diagonals: TerrainCellDiagonals::for_landblock(LANDBLOCK),
+                })
+                .unwrap(),
+                static_geometry: Default::default(),
+            })
+            .unwrap();
+        let entities = holtburger_world::SpatialScene::new()
+            .entity_collision_snapshot()
+            .unwrap();
+        let excluded = std::collections::BTreeSet::new();
+        let target = stationary_sample(Vector3::new(20.0, 20.0, -0.5));
+        let radius = 0.25;
+        for entities in [None, Some(entities.as_ref())] {
+            let query = holtburger_world::spatial::CameraCollisionQuery {
+                environment: &scene,
+                entities,
+                excluded: &excluded,
+            };
+            let mut camera = KinematicBoomController::new(
+                profile(64),
+                target.visual_pivot,
+                target.target_seed,
+                clearance(1, radius),
+                4.5,
+                KinematicBoomIntent {
+                    sequence: 0,
+                    view_direction: Vector3::new(1.0, 0.0, -1.0).normalize(),
+                    cumulative_zoom_displacement: 0.0,
+                },
+            )
+            .unwrap();
+            for _ in 0..60 {
+                let outcome = camera.advance(&query, 1.0 / 30.0, &[target]).unwrap();
+                assert!(
+                    matches!(outcome, KinematicBoomOutcome::Advanced { .. }),
+                    "{outcome:?}"
+                );
+                assert!(camera.camera().pose.coords.z >= radius - profile(64).surface_clearance);
+                assert!(
+                    (camera.camera().pose.coords - target.visual_pivot.coords).length()
+                        <= camera.desired_reach()
+                );
+            }
+        }
+    }
+
     fn settle_reach(
         controller: &mut KinematicBoomController,
         scene: &CollisionScene,
@@ -1859,7 +1923,11 @@ mod tests {
         let center = Vector3::new(41.050262, 188.6869, 59.355);
         let mut terrain = flat_terrain(LANDBLOCK);
         for cell in &mut terrain.cells {
-            for triangle in &mut cell.triangles {
+            for triangle in cell
+                .immersed_triangles
+                .iter_mut()
+                .chain(&mut cell.authored_triangles)
+            {
                 for vertex in &mut triangle.vertices {
                     vertex.z = 58.0;
                 }
@@ -1877,7 +1945,8 @@ mod tests {
         terrain
             .cells
             .push(holtburger_content::TerrainCollisionCell {
-                triangles: [slope.clone(), slope],
+                authored_triangles: [slope.clone(), slope.clone()],
+                immersed_triangles: [slope.clone(), slope],
             });
         let mut scene = CollisionScene::new();
         scene

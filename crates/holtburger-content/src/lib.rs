@@ -102,7 +102,7 @@ pub use setup_parts::resolve_setup_parts;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};
 pub use terrain_collision::{
     TERRAIN_WATER_COLLISION_DEPTH, TerrainCollisionCell, TerrainCollisionGrid,
-    TerrainCollisionSurface, TerrainCollisionTriangle,
+    TerrainCollisionSurface, TerrainCollisionSurfaceKind, TerrainCollisionTriangle,
 };
 pub use terrain_topology::{TERRAIN_GRID_CELLS, TerrainCellDiagonals};
 pub use texture_pixels::{ResolvedSurfaceTexturePixels, TexturePixelFormat};

@@ -1,7 +1,7 @@
 //! Stationary BSP recovery candidates and paths through their originating solids.
 
 use holtburger_common::Vector3;
-use holtburger_content::CollisionShape;
+use holtburger_content::{CollisionShape, TerrainCollisionSurfaceKind};
 
 use crate::spatial::bsp_query::{
     SOLID_RECOVERY_CANDIDATE_LIMIT, SolidRegionRecovery, placed_solid_recovery_candidates,
@@ -93,9 +93,13 @@ impl CollisionScene {
         request: StaticSphereSweepRequest,
         candidates: &SolidPlacementCandidates,
         policy: CollisionQueryPolicy,
+        terrain_surface: TerrainCollisionSurfaceKind,
     ) -> Result<UncoveredCollisionQuery<Option<StaticSphereSweepHit>>, CollisionQueryError> {
-        let traced =
-            self.trace_static_sphere_excluding(request, &candidates.containing_colliders)?;
+        let traced = self.trace_static_sphere_excluding(
+            request,
+            &candidates.containing_colliders,
+            terrain_surface,
+        )?;
         // Coverage is required over the whole proposed path, even when a blocker rejects it.
         let coverage = self.finish_sphere_path(request, 1.0, policy)?;
         Ok(UncoveredCollisionQuery {

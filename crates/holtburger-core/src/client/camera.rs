@@ -756,18 +756,15 @@ impl ClientCameraRuntime {
             }
         };
         let initial_visual_pivot = active.controller.visual_pivot();
-        let entity_query = collision.entities.as_ref().map(|entities| {
-            holtburger_world::spatial::CameraCollisionQuery {
-                environment: collision.environment.as_ref(),
-                entities,
-                excluded: &collision.excluded,
-            }
-        });
-        let query: &dyn holtburger_world::spatial::SphereCollisionQuery = match &entity_query {
-            Some(query) => query,
-            None => collision.environment.as_ref(),
+        let query = holtburger_world::spatial::CameraCollisionQuery {
+            environment: collision.environment.as_ref(),
+            entities: collision.entities.as_deref(),
+            excluded: &collision.excluded,
         };
-        let outcome = match active.controller.advance(query, duration_seconds, &samples) {
+        let outcome = match active
+            .controller
+            .advance(&query, duration_seconds, &samples)
+        {
             Ok(outcome) => outcome,
             Err(_) => {
                 // Publish the existing safe placement before retiring its proof for recovery.

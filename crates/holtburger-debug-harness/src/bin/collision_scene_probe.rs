@@ -205,7 +205,7 @@ fn main() -> Result<()> {
         collision.static_geometry.cell_volumes().len()
     );
     let cell_slope = |cell: &holtburger_content::TerrainCollisionCell| {
-        cell.triangles
+        cell.immersed_triangles
             .iter()
             .map(|triangle| {
                 (triangle.normal.x * triangle.normal.x + triangle.normal.y * triangle.normal.y)
@@ -227,7 +227,7 @@ fn main() -> Result<()> {
             (index % 8) * 24,
             (index / 8) * 24
         );
-        for triangle in &collision.terrain.cells[index].triangles {
+        for triangle in &collision.terrain.cells[index].immersed_triangles {
             println!(
                 "terrain_steepest_triangle normal=({:.3},{:.3},{:.3}) vertices={:?}",
                 triangle.normal.x, triangle.normal.y, triangle.normal.z, triangle.vertices

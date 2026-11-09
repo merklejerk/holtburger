@@ -1,8 +1,8 @@
 //! Terrain obstruction triangles shared by host collision consumers.
 //!
 //! This surface preserves the authored grid and canonical diagonal topology transported to the
-//! frontend. Collision-only water immersion adjusts its vertex heights; rendered terrain remains
-//! unchanged.
+//! frontend. Authored geometry provides viewer clearance; immersed geometry lowers water vertices
+//! for body movement. Both surfaces retain their own face normals.
 
 use anyhow::{Result, ensure};
 use holtburger_common::math::Vector3;
@@ -48,11 +48,35 @@ pub struct TerrainCollisionTriangle {
     pub normal: Vector3,
 }
 
-/// The two authored triangles covering one terrain cell.
+/// Authored and immersed triangles covering one terrain cell with identical topology.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TerrainCollisionCell {
-    /// The exact two triangles selected by retail's diagonal rule.
-    pub triangles: [TerrainCollisionTriangle; 2],
+    /// Movement triangles with continuous water immersion, using the canonical diagonal.
+    pub immersed_triangles: [TerrainCollisionTriangle; 2],
+    /// Undisplaced terrain triangles matching the rendered surface and its face normals.
+    pub authored_triangles: [TerrainCollisionTriangle; 2],
+}
+
+/// Terrain geometry admitted by one collision consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerrainCollisionSurfaceKind {
+    /// Body movement follows the continuously immersed water surface.
+    Immersed,
+    /// Viewer clearance follows the undisplaced rendered terrain surface.
+    Authored,
+}
+
+impl TerrainCollisionCell {
+    /// Selects precomputed geometry without changing topology or recomputing normals.
+    pub fn triangles(
+        &self,
+        surface: TerrainCollisionSurfaceKind,
+    ) -> &[TerrainCollisionTriangle; 2] {
+        match surface {
+            TerrainCollisionSurfaceKind::Immersed => &self.immersed_triangles,
+            TerrainCollisionSurfaceKind::Authored => &self.authored_triangles,
+        }
+    }
 }
 
 /// Derived terrain collision geometry for one outdoor landblock.
@@ -107,33 +131,40 @@ impl TerrainCollisionSurface {
             terrain.terrain_samples.len()
         );
 
-        let collision_vertices = (0..expected_grid_size)
+        let vertices = (0..expected_grid_size)
             .flat_map(|row| {
                 (0..expected_grid_size)
-                    .map(move |column| terrain_collision_vertex(terrain, column, row))
+                    .map(move |column| terrain_collision_vertices(terrain, column, row))
             })
             .collect::<Vec<_>>();
-        let vertex =
-            |column: usize, row: usize| collision_vertices[row * expected_grid_size + column];
         let mut cells = Vec::with_capacity(TERRAIN_GRID_CELLS * TERRAIN_GRID_CELLS);
         for row in 0..TERRAIN_GRID_CELLS {
             for column in 0..TERRAIN_GRID_CELLS {
-                let southwest = vertex(column, row);
-                let southeast = vertex(column + 1, row);
-                let northwest = vertex(column, row + 1);
-                let northeast = vertex(column + 1, row + 1);
-                let triangle_vertices = terrain.cell_diagonals.cell_triangles(
-                    column,
-                    row,
-                    [southwest, southeast, northwest, northeast],
-                );
+                let corners = [
+                    (column, row),
+                    (column + 1, row),
+                    (column, row + 1),
+                    (column + 1, row + 1),
+                ]
+                .map(|(column, row)| vertices[row * expected_grid_size + column]);
+                let triangles = |corners| {
+                    terrain
+                        .cell_diagonals
+                        .cell_triangles(column, row, corners)
+                        .map(TerrainCollisionTriangle::from_vertices)
+                };
                 cells.push(TerrainCollisionCell {
-                    triangles: triangle_vertices.map(TerrainCollisionTriangle::from_vertices),
+                    immersed_triangles: triangles(corners.map(|(_, immersed)| immersed)),
+                    authored_triangles: triangles(corners.map(|(authored, _)| authored)),
                 });
             }
         }
         for cell in &cells {
-            for triangle in &cell.triangles {
+            for triangle in cell
+                .immersed_triangles
+                .iter()
+                .chain(&cell.authored_triangles)
+            {
                 ensure!(
                     triangle.normal.z > 0.0,
                     "terrain triangles must face upward; got normal {:?}",
@@ -153,12 +184,8 @@ impl TerrainCollisionSurface {
     }
 }
 
-fn terrain_vertex_is_water(terrain: TerrainCollisionGrid<'_>, column: usize, row: usize) -> bool {
-    // Retail's fixed `SurfChar` table marks terrain types 16 through 20 as water.
-    terrain_sample_is_water(terrain.terrain_samples[row * terrain.grid_size + column])
-}
-
 fn terrain_sample_is_water(sample: u16) -> bool {
+    // Retail's fixed `SurfChar` table marks terrain types 16 through 20 as water.
     let terrain_type = (sample >> 2) & 0x1f;
     (0x10..=0x14).contains(&terrain_type)
 }
@@ -172,12 +199,18 @@ impl TerrainCollisionTriangle {
     }
 }
 
-fn terrain_collision_vertex(
+/// Derives authored and immersed coordinates together from one canonical grid sample.
+fn terrain_collision_vertices(
     terrain: TerrainCollisionGrid<'_>,
     column: usize,
     row: usize,
-) -> Vector3 {
-    let authored_height = terrain.heights[row * terrain.grid_size + column];
+) -> (Vector3, Vector3) {
+    let index = row * terrain.grid_size + column;
+    let authored = Vector3::new(
+        column as f32 * terrain.tile_size,
+        row as f32 * terrain.tile_size,
+        terrain.heights[index],
+    );
     // RETAIL DIVERGENCE: Retail selects discontinuous 0.1/0.45 quarter-cell depths and a 0.9
     // fully-flooded plane offset. Lowering water vertices instead makes the existing collision
     // triangles interpolate a continuous immersion depth; restoring the retail lookup
@@ -185,16 +218,11 @@ fn terrain_collision_vertex(
     // client-content census found 60,491 partial-water cells among 4,161,600 cells; only 1,233
     // fully flooded cells are sloped, where vertical lowering also differs slightly from
     // retail's normal-distance offset.
-    let collision_height = if terrain_vertex_is_water(terrain, column, row) {
-        authored_height - TERRAIN_WATER_COLLISION_DEPTH
-    } else {
-        authored_height
-    };
-    Vector3::new(
-        column as f32 * terrain.tile_size,
-        row as f32 * terrain.tile_size,
-        collision_height,
-    )
+    let mut immersed = authored;
+    if terrain_sample_is_water(terrain.terrain_samples[index]) {
+        immersed.z -= TERRAIN_WATER_COLLISION_DEPTH;
+    }
+    (authored, immersed)
 }
 
 fn cross(left: Vector3, right: Vector3) -> Vector3 {
@@ -231,7 +259,7 @@ mod tests {
             for column in 0..8 {
                 let cell = &surface.cells[row * 8 + column];
                 assert!(
-                    cell.triangles
+                    cell.immersed_triangles
                         .iter()
                         .all(|triangle| triangle.normal.z > 0.0)
                 );
@@ -251,21 +279,25 @@ mod tests {
         let cell = &surface.cells[0];
         let southwest = Vector3::new(0.0, 0.0, -TERRAIN_WATER_COLLISION_DEPTH);
         let dry_vertices = cell
-            .triangles
+            .immersed_triangles
             .iter()
             .flat_map(|triangle| triangle.vertices)
             .filter(|vertex| *vertex != southwest);
         assert!(
-            cell.triangles
+            cell.immersed_triangles
                 .iter()
                 .any(|triangle| triangle.vertices.contains(&southwest))
         );
         assert!(dry_vertices.into_iter().all(|vertex| vertex.z == 0.0));
         assert!(
-            cell.triangles
+            cell.immersed_triangles
                 .iter()
                 .any(|triangle| triangle.normal.z < 1.0)
         );
+        assert!(cell.authored_triangles.iter().all(|triangle| {
+            triangle.vertices.iter().all(|vertex| vertex.z == 0.0)
+                && triangle.normal == Vector3::new(0.0, 0.0, 1.0)
+        }));
     }
 
     #[test]
@@ -279,13 +311,19 @@ mod tests {
         }
         let surface = TerrainCollisionSurface::from_terrain(&flooded).unwrap();
         assert!(!surface.entirely_water);
-        assert!(surface.cells[0].triangles.iter().all(|triangle| {
+        assert!(surface.cells[0].immersed_triangles.iter().all(|triangle| {
             triangle
                 .vertices
                 .iter()
                 .all(|vertex| vertex.z == -TERRAIN_WATER_COLLISION_DEPTH)
                 && triangle.normal == Vector3::new(0.0, 0.0, 1.0)
         }));
+        assert!(
+            surface.cells[0]
+                .authored_triangles
+                .iter()
+                .all(|triangle| { triangle.vertices.iter().all(|vertex| vertex.z == 0.0) })
+        );
     }
 
     #[test]
@@ -312,13 +350,20 @@ mod tests {
     fn triangle_vertices_follow_the_canonical_diagonal() {
         let terrain = terrain(0xda55_ffff);
         let surface = TerrainCollisionSurface::from_terrain(&terrain).unwrap();
+        let vertex = |column: usize, row: usize| {
+            Vector3::new(
+                column as f32 * terrain.tile_size,
+                row as f32 * terrain.tile_size,
+                terrain.heights[row * terrain.grid_size + column],
+            )
+        };
         for row in 0..8 {
             for column in 0..8 {
                 let cell = &surface.cells[row * 8 + column];
-                let southwest = terrain_collision_vertex((&terrain).into(), column, row);
-                let southeast = terrain_collision_vertex((&terrain).into(), column + 1, row);
-                let northwest = terrain_collision_vertex((&terrain).into(), column, row + 1);
-                let northeast = terrain_collision_vertex((&terrain).into(), column + 1, row + 1);
+                let southwest = vertex(column, row);
+                let southeast = vertex(column + 1, row);
+                let northwest = vertex(column, row + 1);
+                let northeast = vertex(column + 1, row + 1);
                 let expected = if terrain
                     .cell_diagonals
                     .uses_southwest_to_northeast_cut(column, row)
@@ -333,8 +378,9 @@ mod tests {
                         [northeast, northwest, southeast],
                     ]
                 };
-                assert_eq!(cell.triangles[0].vertices, expected[0]);
-                assert_eq!(cell.triangles[1].vertices, expected[1]);
+                assert_eq!(cell.immersed_triangles[0].vertices, expected[0]);
+                assert_eq!(cell.immersed_triangles[1].vertices, expected[1]);
+                assert_eq!(cell.authored_triangles, cell.immersed_triangles);
             }
         }
     }

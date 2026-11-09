@@ -175,7 +175,7 @@ impl CollisionScene {
                     continue;
                 };
                 for cell in &asset.terrain.cells {
-                    for triangle in &cell.triangles {
+                    for triangle in &cell.immersed_triangles {
                         let vertices = triangle.vertices.map(|vertex| {
                             super::point_between_landblocks(vertex, owner.0, request.anchor.0)
                         });

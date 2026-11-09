@@ -254,9 +254,12 @@ fn recover_solid_placement(
             radius: request.radius,
             filter,
         };
-        let path = scene
-            .environment()
-            .sweep_solid_recovery(sweep, &candidates, policy)?;
+        let path = scene.environment().sweep_solid_recovery(
+            sweep,
+            &candidates,
+            policy,
+            scene.terrain_surface(),
+        )?;
         remember_unavailable_owner(unavailable_owner, path.unavailable_owner);
         if path.value.is_some() || scene.entity_sweep_sphere(sweep)?.is_some() {
             continue;
@@ -276,9 +279,11 @@ fn placement_contacts(
     query_policy: CollisionQueryPolicy,
     unavailable_owner: &mut Option<Guid>,
 ) -> Result<Vec<StaticContact>> {
-    let placement_contacts = scene
-        .environment()
-        .placement_contacts_with_policy(request, query_policy)?;
+    let placement_contacts = scene.environment().placement_contacts_on_surface(
+        request,
+        query_policy,
+        scene.terrain_surface(),
+    )?;
     remember_unavailable_owner(unavailable_owner, placement_contacts.unavailable_owner);
     let mut contacts = placement_contacts.value;
     let restrictions = scene.environment().placement_restrictions_with_policy(

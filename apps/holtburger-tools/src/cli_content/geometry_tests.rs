@@ -235,7 +235,7 @@ fn exported_shared_rooms_preserve_placement_portals_shells_and_terrain_at_runtim
             .terrain
             .cells
             .iter()
-            .flat_map(|cell| &cell.triangles)
+            .flat_map(|cell| &cell.immersed_triangles)
             .flat_map(|triangle| triangle.vertices)
             .all(|point| point.z == ground_height)
     );

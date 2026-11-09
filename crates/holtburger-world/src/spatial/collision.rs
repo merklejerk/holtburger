@@ -34,7 +34,7 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_content::{
     CellCollisionPortal, CellCollisionPortalTarget, CellVolume, CollisionShape, LandblockColliders,
     LandblockCollisionAsset, PlacedCollider, PlacedCollisionShape, StaticColliderPlacement,
-    TerrainCollisionTriangle,
+    TerrainCollisionSurfaceKind, TerrainCollisionTriangle,
 };
 use thiserror::Error;
 
@@ -1435,7 +1435,7 @@ impl CollisionScene {
                 for cell in
                     overlapped_terrain_cells(&asset.terrain, local_center, request.sweep.radius)
                 {
-                    for triangle in &cell.triangles {
+                    for triangle in &cell.immersed_triangles {
                         if let Some(contact) =
                             terrain_contact(triangle, local_center, request.sweep.radius)
                             && movement.dot(&triangle.normal) <= 0.0
@@ -1546,6 +1546,16 @@ impl CollisionScene {
         request: PlacementRequest,
         policy: CollisionQueryPolicy,
     ) -> Result<UncoveredCollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
+        self.placement_contacts_on_surface(request, policy, TerrainCollisionSurfaceKind::Immersed)
+    }
+
+    /// Stationary contacts using the same terrain geometry as the caller's continuous queries.
+    pub(super) fn placement_contacts_on_surface(
+        &self,
+        request: PlacementRequest,
+        policy: CollisionQueryPolicy,
+        terrain_surface: TerrainCollisionSurfaceKind,
+    ) -> Result<UncoveredCollisionQuery<Vec<StaticContact>>, CollisionQueryError> {
         let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.center,
@@ -1554,14 +1564,17 @@ impl CollisionScene {
         };
         validate_sweep(sweep)?;
         let touched = touched_landblocks(sweep);
-        let value = self.contacts(StaticContactRequest {
-            touched: &touched,
-            anchor: request.anchor,
-            center: request.center,
-            radius: request.radius,
-            movement: None,
-            placement: request.placement,
-        });
+        let value = self.contacts_on_surface(
+            StaticContactRequest {
+                touched: &touched,
+                anchor: request.anchor,
+                center: request.center,
+                radius: request.radius,
+                movement: None,
+                placement: request.placement,
+            },
+            terrain_surface,
+        );
         self.complete_query(policy, &touched, request.placement, value)
     }
 
@@ -1646,7 +1659,7 @@ impl CollisionScene {
                 // A settle probe is vertical, so its planar reach is only the sphere radius; the
                 // drop and rise change which triangles can be reached in Z, not in XY.
                 for cell in overlapped_terrain_cells(&asset.terrain, local_center, request.radius) {
-                    for triangle in &cell.triangles {
+                    for triangle in &cell.immersed_triangles {
                         let plane_d = -triangle.normal.dot(&triangle.vertices[0]);
                         if let Some(support) = terrain_probe.on_polygon(
                             || triangle.vertices.iter().copied(),
@@ -2579,6 +2592,14 @@ impl CollisionScene {
     }
 
     fn contacts(&self, request: StaticContactRequest<'_>) -> Vec<StaticContact> {
+        self.contacts_on_surface(request, TerrainCollisionSurfaceKind::Immersed)
+    }
+
+    fn contacts_on_surface(
+        &self,
+        request: StaticContactRequest<'_>,
+        terrain_surface: TerrainCollisionSurfaceKind,
+    ) -> Vec<StaticContact> {
         let mut contacts = Vec::new();
         for owner in request.touched {
             let Some(asset) = self.landblock_asset(*owner) else {
@@ -2587,9 +2608,16 @@ impl CollisionScene {
             let local_center = anchor_to_landblock(request.center, request.anchor, *owner);
             if request.placement.reaches_outdoors {
                 for cell in overlapped_terrain_cells(&asset.terrain, local_center, request.radius) {
-                    for triangle in &cell.triangles {
-                        if let Some(contact) =
-                            terrain_contact(triangle, local_center, request.radius)
+                    for triangle in cell.triangles(terrain_surface) {
+                        let contact = match terrain_surface {
+                            TerrainCollisionSurfaceKind::Immersed => {
+                                terrain_contact(triangle, local_center, request.radius)
+                            }
+                            TerrainCollisionSurfaceKind::Authored => {
+                                terrain_clearance_contact(triangle, local_center, request.radius)
+                            }
+                        };
+                        if let Some(contact) = contact
                             && request
                                 .movement
                                 .is_none_or(|delta| delta.dot(&contact.normal) < 0.0)
@@ -3123,6 +3151,31 @@ fn terrain_contact(
             normal: contact.normal,
             depth: contact.depth,
         })
+}
+
+/// Camera seeds can lie completely beneath water. Treat authored terrain as a height field
+/// during recovery so finite sphere/triangle overlap cannot falsely prove such a seed clear.
+fn terrain_clearance_contact(
+    triangle: &TerrainCollisionTriangle,
+    center: Vector3,
+    radius: f32,
+) -> Option<StaticContact> {
+    let support = (SupportProbe::Column {
+        maximum_drop: 0.0,
+        maximum_rise: f32::MAX,
+    })
+    .on_polygon(
+        || triangle.vertices.iter().copied(),
+        triangle.normal,
+        -triangle.normal.dot(&triangle.vertices[0]),
+        center,
+        radius,
+    )?;
+    let depth = support.height_delta * triangle.normal.z;
+    (depth > super::bsp_query::CONTACT_EPSILON).then_some(StaticContact {
+        normal: triangle.normal,
+        depth,
+    })
 }
 
 /// RETAIL QUIRK: Building entry transforms a sphere in its current query-owner frame through
@@ -4279,7 +4332,7 @@ mod tests {
             let local_center = anchor_to_landblock(center, anchor, *owner);
             if placement.reaches_outdoors {
                 for cell in &asset.terrain.cells {
-                    for triangle in &cell.triangles {
+                    for triangle in &cell.immersed_triangles {
                         if let Some(contact) = terrain_contact(triangle, local_center, radius) {
                             contacts.push(contact_bits(contact.normal, contact.depth));
                         }

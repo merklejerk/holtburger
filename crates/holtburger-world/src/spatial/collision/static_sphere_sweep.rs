@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use holtburger_common::{Guid, Vector3};
 use holtburger_content::{
     CellCollisionPortalTarget, CollisionPolygon, CollisionShape, PlacedCollisionShape,
+    TerrainCollisionSurfaceKind,
 };
 use parry3d::math::{Pose, Vector as ParryVector};
 use parry3d::query::{PointQuery, ShapeCastOptions, cast_shapes};
@@ -320,20 +321,23 @@ impl CollisionScene {
     /// Camera entity admission shares the static sweep's already-resolved spatial domains.
     pub(crate) fn sweep_camera_sphere(
         &self,
-        entities: &crate::spatial::EntityCollisionSnapshot,
+        entities: Option<&crate::spatial::EntityCollisionSnapshot>,
         excluded: &BTreeSet<SpatialBodyId>,
         request: StaticSphereSweepRequest,
         policy: CollisionQueryPolicy,
+        terrain_surface: TerrainCollisionSurfaceKind,
     ) -> anyhow::Result<UncoveredCollisionQuery<Option<StaticSphereSweepHit>>> {
-        let traced = self.trace_static_sphere(request)?;
+        let traced = self.trace_static_sphere_excluding(request, &[], terrain_surface)?;
         let mut earliest = traced.hit;
-        self.update_camera_entity_hit(
-            entities,
-            excluded,
-            request,
-            &traced.membership,
-            &mut earliest,
-        )?;
+        if let Some(entities) = entities {
+            self.update_camera_entity_hit(
+                entities,
+                excluded,
+                request,
+                &traced.membership,
+                &mut earliest,
+            )?;
+        }
         let fraction = earliest.map_or(1.0, |hit| hit.time_of_impact);
         let accepted = self.finish_sphere_path(request, fraction, policy)?;
         Ok(UncoveredCollisionQuery {
@@ -418,13 +422,14 @@ impl CollisionScene {
         &self,
         request: StaticSphereSweepRequest,
     ) -> Result<StaticSphereTrace, CollisionQueryError> {
-        self.trace_static_sphere_excluding(request, &[])
+        self.trace_static_sphere_excluding(request, &[], TerrainCollisionSurfaceKind::Immersed)
     }
 
     pub(super) fn trace_static_sphere_excluding(
         &self,
         request: StaticSphereSweepRequest,
         excluded: &[ColliderReference],
+        terrain_surface: TerrainCollisionSurfaceKind,
     ) -> Result<StaticSphereTrace, CollisionQueryError> {
         let sweep = SphereSweep {
             anchor: request.anchor,
@@ -463,7 +468,7 @@ impl CollisionScene {
                 };
                 let center = point_between_landblocks(query_center, request.anchor.0, owner.0);
                 for cell in overlapped_terrain_cells(&asset.terrain, center, query_radius) {
-                    for triangle in &cell.triangles {
+                    for triangle in cell.triangles(terrain_surface) {
                         let vertices = triangle.vertices.map(|vertex| {
                             point_between_landblocks(vertex, owner.0, request.anchor.0)
                         });
@@ -1186,7 +1191,11 @@ mod tests {
                             .update_collider_hit(&collider, owner, anchor, &mut expected)
                             .unwrap();
                             let actual = scene
-                                .trace_static_sphere_excluding(request, &[])
+                                .trace_static_sphere_excluding(
+                                    request,
+                                    &[],
+                                    TerrainCollisionSurfaceKind::Immersed,
+                                )
                                 .unwrap()
                                 .hit;
                             assert_eq!(

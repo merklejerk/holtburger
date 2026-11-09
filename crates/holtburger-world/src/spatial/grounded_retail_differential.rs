@@ -284,7 +284,8 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
             landblock_id: LANDBLOCK,
             terrain: TerrainCollisionSurface {
                 cells: vec![TerrainCollisionCell {
-                    triangles: [terrain.clone(), remote],
+                    authored_triangles: [terrain.clone(), remote.clone()],
+                    immersed_triangles: [terrain.clone(), remote],
                 }],
                 ..TerrainCollisionSurface::empty()
             },

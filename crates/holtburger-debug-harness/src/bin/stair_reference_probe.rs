@@ -111,7 +111,7 @@ fn placement_audit(
             .terrain
             .cells
             .iter()
-            .flat_map(|cell| &cell.triangles)
+            .flat_map(|cell| &cell.immersed_triangles)
             .any(|triangle| {
                 let minimum_x = triangle
                     .vertices

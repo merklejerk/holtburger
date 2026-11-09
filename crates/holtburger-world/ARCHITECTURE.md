@@ -119,11 +119,18 @@ sampling behavior lives inside it via `BodySamplingStore`, and that world-owned 
 the canonical runtime body model for the client. Any app-facing cache in `holtburger-core` or a
 frontend is derived read state only; it must not independently advance runtime bodies.
 
-`settle_free_sphere` is the generic bounded placement counterpart to movement-oriented
-the scene/contact movement pipeline. It consumes directionless placement contacts and either returns a separated
+`settle_free_sphere` is the generic bounded placement counterpart to the scene/contact movement
+pipeline. It consumes directionless placement contacts and either returns a separated
 body/cell or reports that the finite contact budget could not prove one. It never publishes its
 unconverged candidate. Camera clearance growth is one consumer, but the primitive has no camera or
 projection policy.
+
+`SphereCollisionQuery` owns the terrain-surface choice used by sweeps, placement contacts, and
+solid-recovery paths. `CameraCollisionQuery` selects authored terrain even when entity obstacles
+are explicitly excluded; ordinary environment queries retain immersed movement geometry. Camera
+settlement treats authored terrain as a height field over the sphere's finite horizontal footprint,
+so a seed completely below water cannot be accepted merely because it misses finite triangle
+contacts. The core boom owns the viewer's exemption from whole-water-landblock movement barriers.
 
 Shared world does not perform automatic local collision or local velocity integration during
 `tick()`. Constraint-aware advancement is an explicit solve operation on the world-owned runtime
@@ -161,7 +168,7 @@ existing implicit `tick()` policy:
   per-cell stab-list granularity), so cross-owner spans need no seam handling and selection cost
   follows the query's swept extent rather than scene residency; EnvCell buckets contain stable
   source references per reached cell. Terrain contact generation indexes the row-major cell grid
-  directly by the query's reach. Terrain and authored polygons share finite face, edge, and vertex
+  directly by the query's reach. Movement terrain contacts and authored polygons share finite face, edge, and vertex
   overlap calculations. Batched insertion/replacement/eviction rebuilds the index transactionally,
   so terrain, placed shapes, volumes, and every derived shadow change atomically.
 - Coverage, movement obstruction, lower-sphere support, placement confirmation, and prior-cell

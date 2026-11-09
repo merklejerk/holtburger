@@ -159,7 +159,7 @@ fn stationary_camera_recovery_checks_entity_paths_endpoints_and_target_exclusion
         let entities = scene.entity_collision_snapshot().unwrap();
         let query = CameraCollisionQuery {
             environment: &environment,
-            entities: &entities,
+            entities: Some(&entities),
             excluded: &std::collections::BTreeSet::from([SpatialBodyId::LocalPlayer(Guid(99))]),
         };
         let outcome = settle_free_sphere(
@@ -435,7 +435,7 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
     let before = scene.entity_collision_snapshot().unwrap();
     let query = CameraCollisionQuery {
         environment: &environment,
-        entities: &before,
+        entities: Some(&before),
         excluded: &std::collections::BTreeSet::from([camera_target]),
     };
     let request = StaticSphereSweepRequest {
@@ -467,7 +467,7 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
     let after = scene.entity_collision_snapshot().unwrap();
     let moved_query = CameraCollisionQuery {
         environment: &environment,
-        entities: &after,
+        entities: Some(&after),
         excluded: &std::collections::BTreeSet::from([camera_target]),
     };
     let overlap = crate::spatial::settle_free_sphere_with_policy(
@@ -509,7 +509,7 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
     );
     let excluded = CameraCollisionQuery {
         environment: &environment,
-        entities: &after,
+        entities: Some(&after),
         excluded: &std::collections::BTreeSet::from([id]),
     };
     assert!(excluded.entity_sweep_sphere(request).unwrap().is_none());
@@ -536,7 +536,7 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
     assert!(
         CameraCollisionQuery {
             environment: &environment,
-            entities: &ethereal,
+            entities: Some(&ethereal),
             excluded: &std::collections::BTreeSet::from([camera_target]),
         }
         .sweep_sphere(request, CollisionQueryPolicy::RequireCollisionCoverage)
@@ -561,7 +561,7 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
     assert!(
         CameraCollisionQuery {
             environment: &environment,
-            entities: &creature,
+            entities: Some(&creature),
             excluded: &std::collections::BTreeSet::from([camera_target]),
         }
         .sweep_sphere(request, CollisionQueryPolicy::RequireCollisionCoverage)

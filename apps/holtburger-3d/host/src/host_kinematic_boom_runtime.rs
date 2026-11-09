@@ -918,7 +918,7 @@ fn advance_camera(
     let result = active.controller.advance(
         &holtburger_world::spatial::CameraCollisionQuery {
             environment: collision.as_ref(),
-            entities: entities.as_ref(),
+            entities: Some(entities.as_ref()),
             excluded: &std::collections::BTreeSet::from([holtburger_world::SpatialBodyId::Entity(
                 active.identity.guid,
             )]),

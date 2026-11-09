@@ -39,7 +39,7 @@ impl CollisionScene {
                 .ok_or(CollisionQueryError::UnavailableOwner { owner: owner.0 })?;
             let center = anchor_to_landblock(request.center, request.anchor, owner);
             for cell in overlapped_terrain_cells(&asset.terrain, center, request.radius) {
-                for triangle in &cell.triangles {
+                for triangle in &cell.immersed_triangles {
                     let plane_d = -triangle.normal.dot(&triangle.vertices[0]);
                     if let Some(support) = probe.on_polygon(
                         || triangle.vertices.iter().copied(),

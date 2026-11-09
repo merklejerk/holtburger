@@ -7277,6 +7277,117 @@ fn ordinary_terrain_recovery_precedes_motor_selection_and_keeps_upward_velocity(
 }
 
 #[test]
+fn obstructed_terrain_recovery_allows_escape_and_retries_after_clearance() {
+    use crate::spatial::grounded_types::STATIONARY_FALL_SUPPORT_FRAMES;
+    use crate::spatial::mobile_contact::checked_recovery_destination;
+
+    let collision = flat_collision_scene();
+    let now = Instant::now();
+    let mover = SpatialBodyId::Entity(Guid(1));
+    let hard = SpatialBodyId::Entity(Guid(2));
+    let radius = grounded_definition().spheres().primary().radius;
+    let definition = grounded_definition_with_spheres(
+        PhysicalSphereSet::new(
+            Sphere {
+                center: Vector3::zero(),
+                radius,
+            },
+            None,
+        )
+        .unwrap(),
+    );
+    let initial = pose(Vector3::new(90.0, 96.0, radius * 0.5));
+    let obstruction = initial.coords + Vector3::new(radius, 0.0, radius * 2.0);
+    let mut scene = SpatialScene::new();
+    scene.register_body(SpatialBody::new(mover, initial, now));
+    scene
+        .set_dynamic_physical_body(
+            mover,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    install_free_dynamic_with_radius(
+        &mut scene,
+        hard,
+        obstruction,
+        Vector3::zero(),
+        radius,
+        fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+            center: Vector3::zero(),
+            radius,
+        }))),
+        now,
+    );
+    scene
+        .body_mut(hard)
+        .unwrap()
+        .physical
+        .as_mut()
+        .unwrap()
+        .dynamic
+        .as_mut()
+        .unwrap()
+        .demand
+        .integration = LocalIntegrationDemand::Excluded;
+    scene
+        .refresh_dynamic_body_placement(mover, &collision)
+        .unwrap();
+    scene
+        .refresh_dynamic_body_placement(hard, &collision)
+        .unwrap();
+
+    // Exact reference recovery must still reject a terrain-penetrating endpoint when its
+    // lift is obstructed, even though ordinary simulation can work free over later ticks.
+    assert!(
+        checked_recovery_destination(
+            &collision,
+            scene.body(mover).unwrap(),
+            &[scene.body(hard).unwrap().clone()],
+        )
+        .unwrap()
+        .is_none()
+    );
+    for _ in 0..STATIONARY_FALL_SUPPORT_FRAMES {
+        scene
+            .advance_dynamic_entity_collection(&collision, MOBILE_CONTACT_TICK_SECONDS, now, |_| {
+                Ok(PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                ))
+            })
+            .unwrap();
+        let position = scene.body(mover).unwrap().pose.coords;
+        assert!(position.z < radius - CONTACT_EPSILON);
+        assert!((position - obstruction).length() >= radius * 2.0 - CONTACT_EPSILON);
+    }
+
+    let escape_velocity = Vector3::new(-radius / MOBILE_CONTACT_TICK_SECONDS, 0.0, 0.0);
+    scene.body_mut(mover).unwrap().retained.velocity = escape_velocity;
+    for _ in 0..STATIONARY_FALL_SUPPORT_FRAMES {
+        scene
+            .advance_dynamic_entity_collection(&collision, MOBILE_CONTACT_TICK_SECONDS, now, |_| {
+                Ok(PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::Grounded(
+                        GroundedBodyActuation::drive(escape_velocity).unwrap(),
+                    ),
+                ))
+            })
+            .unwrap();
+        assert!(
+            (scene.body(mover).unwrap().pose.coords - obstruction).length()
+                >= radius * 2.0 - CONTACT_EPSILON
+        );
+    }
+    let position = scene.body(mover).unwrap().pose.coords;
+    assert!(position.x < initial.coords.x - radius, "{position:?}");
+    assert!(
+        (position.z - radius).abs() <= CONTACT_EPSILON,
+        "{position:?}"
+    );
+}
+
+#[test]
 fn terrain_recovery_does_not_pull_an_underground_room_outdoors() {
     let mut asset = flat_collision_asset(0);
     let cell = Guid((asset.landblock_id & 0xffff_0000) | 0x0100);

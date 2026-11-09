@@ -13,7 +13,9 @@ struct TerrainReinsertion {
     path: ContactBodyPath,
 }
 
-/// The candidate remains private until both spheres clear world and hard-entity geometry.
+/// Apply a terrain lift only when both spheres clear world and hard-entity geometry.
+/// An obstructed lift leaves the body unchanged for ordinary support and movement to resolve;
+/// later ticks can retry after the body or its obstruction moves.
 pub(super) fn recover(
     collision: &CollisionScene,
     hard: &HardTargets,
@@ -32,13 +34,9 @@ pub(super) fn recover(
         candidate.spheres,
         candidate.path.membership(),
     )?;
-    if !matches!(clearance, super::recovery::PlacementClearance::Clear) {
-        return Err(
-            anyhow::Error::new(CollisionQueryError::TerrainPlacementBlocked)
-                .context(format!("terrain correction rejected: {clearance}")),
-        );
+    if matches!(clearance, super::recovery::PlacementClearance::Clear) {
+        accept_reinsertion(body, candidate);
     }
-    accept_reinsertion(body, candidate);
     Ok(())
 }
 

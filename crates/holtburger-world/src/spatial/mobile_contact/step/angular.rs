@@ -6,10 +6,7 @@ use anyhow::{Context, Result, ensure};
 use holtburger_common::{Guid, Quaternion, Sphere, Vector3};
 
 use super::{ContactMotionSegment, HardTargets, PhysicalSphereSet, WorkingBody, sweep_body_chords};
-use crate::spatial::{
-    CollisionQueryError, CollisionScene, GroundState, HardSphereSweepHit,
-    bsp_query::CONTACT_EPSILON,
-};
+use crate::spatial::{CollisionScene, GroundState, HardSphereSweepHit, bsp_query::CONTACT_EPSILON};
 
 /// Shared chord budget for controller/body facing and physical omega in one tick.
 pub const MOBILE_CONTACT_ANGULAR_CHORDS: usize = 4;
@@ -126,20 +123,16 @@ fn advance_arc(
         let displacement = |sphere: crate::spatial::GroundedSphere| {
             root + delta.rotate_vector(sphere.center - root) - sphere.center
         };
-        let swept = match sweep_body_chords(
+        let swept = sweep_body_chords(
             collision,
             hard,
             anchor,
             &body.contact,
             body.mobile.spheres,
             displacement,
-        ) {
-            Ok(swept) => swept,
-            Err(CollisionQueryError::UnavailableOwner { owner }) => {
-                body.unavailable_owner = Some(Guid(owner));
-                return Ok(ControlFlow::Break(None));
-            }
-            Err(error) => return Err(error.into()),
+        );
+        let Some(swept) = body.accept_query(swept.map_err(Into::into))? else {
+            return Ok(ControlFlow::Break(None));
         };
         if let Some(hit) = swept.hit {
             // A clipped chord is not itself a point on the rotation arc. Keep the prior sample.

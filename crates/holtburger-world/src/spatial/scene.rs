@@ -457,6 +457,8 @@ pub struct SpatialScene {
     /// Complete dynamic solver epoch, absent between collection preparation and finish boundaries.
     /// Minimal directional state required to distinguish report starts, refreshes, and ends.
     collision_reports: CollisionReportLifetimes,
+    /// Last rejected mobile solve, used to report persistent faults once until they change or clear.
+    last_contact_failure: Option<String>,
 }
 
 impl Default for SpatialScene {
@@ -471,6 +473,7 @@ impl SpatialScene {
             landblock_map: HashMap::new(),
             body_store: SpatialBodyStore::default(),
             collision_reports: CollisionReportLifetimes::default(),
+            last_contact_failure: None,
         }
     }
 
@@ -556,6 +559,9 @@ impl SpatialScene {
     }
 
     /// Advances and publishes one bounded contact collection.
+    /// A failed mobile solve is reported and discarded; fixed placements already committed
+    /// remain in the result. Subsequent ticks sample fresh input instead of replaying this tick.
+    /// Scene preparation and publication contract failures still return errors.
     pub fn advance_dynamic_entity_collection(
         &mut self,
         collision: &CollisionScene,
@@ -2958,6 +2964,7 @@ mod physical_body_tests {
 
     mod collision_pose_tests;
     mod contact_step_tests;
+    mod solver_failure_tests;
 
     #[test]
     fn target_and_integration_demand_drive_independent_scene_membership() {
@@ -6096,10 +6103,9 @@ mod physical_body_tests {
                 now + Duration::from_millis(100),
             )
             .expect_err("an absent retained EnvCell must not become an outdoor placement");
-        assert!(
-            error
-                .to_string()
-                .contains("placed-motion EnvCell 0xDA550100 is absent from the collision scene")
+        assert_eq!(
+            error.downcast_ref::<CollisionQueryError>(),
+            Some(&CollisionQueryError::UnknownMotionCell { cell: cell.0 })
         );
         assert_eq!(scene.body(id).unwrap().pose.landblock_id, cell);
     }

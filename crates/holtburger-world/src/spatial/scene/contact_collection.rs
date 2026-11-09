@@ -293,15 +293,41 @@ impl SpatialScene {
                 let actuator = actuators
                     .get_mut(&body.id)
                     .context("contact body has no captured input")?;
-                let input =
-                    actuator
-                        .input
-                        .step(body, ground, interval, &mut actuator.reconciliation)?;
+                let input = actuator
+                    .input
+                    .step(body, ground, interval, &mut actuator.reconciliation)
+                    .with_context(|| format!("contact input rejected for {:?}", body.id))?;
                 actuator.nominal_velocity = input.nominal_velocity;
                 actuator.external_translation |= input.external_translation;
                 Ok(input.actuation)
             },
-        )?;
+        );
+        let result = match result {
+            Ok(result) => {
+                if self.last_contact_failure.take().is_some() {
+                    log::info!("mobile contact simulation resumed");
+                }
+                result
+            }
+            Err(error) => {
+                // Input was captured once and the solver changed only private snapshots.
+                // Discard this mobile proposal without replaying input or undoing fixed bodies
+                // already committed above. The next scheduled tick samples fresh input.
+                let diagnostic = format!("{error:#}");
+                if self.last_contact_failure.as_ref() != Some(&diagnostic) {
+                    log::warn!(
+                        "mobile contact solve rejected; retaining committed poses: {diagnostic}"
+                    );
+                    self.last_contact_failure = Some(diagnostic);
+                }
+                collision_reports.extend(self.collision_reports.expire(now)?);
+                return Ok(DynamicEntityCollectionTick {
+                    outcomes,
+                    collision_reports,
+                    coverage_rejections,
+                });
+            }
+        };
         profile.checkpoint("integration_and_reports");
         collision_reports.extend(
             self.collision_reports

@@ -80,9 +80,6 @@ pub enum CollisionQueryError {
     /// The preparation owner logs the peer identity and source error.
     #[error("collision query could not prepare selected peer geometry")]
     InvalidPeerPlacement,
-    /// Terrain correction cannot place the complete body clear of blocking geometry.
-    #[error("terrain recovery destination is obstructed")]
-    TerrainPlacementBlocked,
     /// A placed-motion request supplied no accepted geometric leg.
     #[error("placed-motion path must contain at least one waypoint")]
     EmptyMotionPath,

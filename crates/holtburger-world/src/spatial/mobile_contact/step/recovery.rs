@@ -92,18 +92,6 @@ pub(super) enum PlacementClearance {
     },
 }
 
-impl fmt::Display for PlacementClearance {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Clear => formatter.write_str("clear"),
-            Self::Blocked(reason)
-            | Self::Overlapping {
-                diagnostic: reason, ..
-            } => formatter.write_str(reason),
-        }
-    }
-}
-
 /// Validate an exact remote recovery endpoint without searching for a different authority pose.
 pub(crate) fn checked_recovery_destination(
     collision: &CollisionScene,
@@ -202,7 +190,7 @@ fn checked_destination(
     if let Some(grounded) = grounded {
         // Arrival placement separates geometry without borrowing walking slope or step policy.
         // Ordinary reference recovery still acquires supported footing before validation.
-        let prepared = match placement {
+        match placement {
             DestinationPlacement::Arrival => {
                 terrain::reinsert_arrival(collision, anchor, &mut working)
             }
@@ -210,19 +198,7 @@ fn checked_destination(
                 stairs::prepare_support(collision, &hard, anchor, &mut working, grounded.config)
                     .map(|_| ())
             }
-        };
-        match prepared {
-            Ok(()) => {}
-            Err(error)
-                if matches!(
-                    error.downcast_ref::<CollisionQueryError>(),
-                    Some(CollisionQueryError::TerrainPlacementBlocked)
-                ) =>
-            {
-                return reject(format!("support preparation failed: {error:#}"));
-            }
-            Err(error) => return Err(error),
-        }
+        }?;
     }
     let maximum_passes = match placement {
         DestinationPlacement::Arrival => BODY_ARRIVAL_MAXIMUM_CONTACT_PASSES,

@@ -573,6 +573,22 @@ struct WorkingBody<'a> {
 }
 
 impl<'a> WorkingBody<'a> {
+    /// Missing coverage holds this body at its accepted prefix for the rest of the tick.
+    /// Clear continuation velocity so gravity cannot accumulate while movement is unavailable.
+    fn accept_query<T>(&mut self, result: Result<T>) -> Result<Option<T>> {
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(error) => match error.downcast_ref::<CollisionQueryError>() {
+                Some(CollisionQueryError::UnavailableOwner { owner }) => {
+                    self.unavailable_owner = Some(Guid(*owner));
+                    self.mobile.velocity = Vector3::zero();
+                    Ok(None)
+                }
+                _ => Err(error),
+            },
+        }
+    }
+
     /// Supported publication constrains normal velocity; launches and rebounds release support.
     fn constrain_supported_velocity(&mut self) {
         if let Some(support) = self.ground().walkable_support() {
@@ -869,7 +885,9 @@ fn advance_contacts(
     let mut hard = Vec::new();
     let mut projectiles = Vec::new();
     for body in bodies {
-        let Some(contact) = PreparedBodyContact::from_body(body, anchor)? else {
+        let Some(contact) = PreparedBodyContact::from_body(body, anchor)
+            .with_context(|| format!("contact preparation rejected for {:?}", body.id))?
+        else {
             continue;
         };
         if frozen.is_none()
@@ -1134,10 +1152,14 @@ fn advance_ordinary_motion(
         anchor,
         body,
         HardMovement::Timed(delta_seconds),
-    )?;
+    )
+    .with_context(|| format!("contact movement rejected for {:?}", body.contact.body_id))?;
     if body.unavailable_owner.is_none()
         && let Some(hit) =
-            angular::advance_orientation(collision, hard, anchor, body, delta_seconds)?
+            angular::advance_orientation(collision, hard, anchor, body, delta_seconds)
+                .with_context(|| {
+                    format!("contact rotation rejected for {:?}", body.contact.body_id)
+                })?
     {
         body.record_impact(hit, 1.0, anchor);
     }
@@ -1229,21 +1251,16 @@ fn advance_projectile_translation(
     if requested.length_squared() == 0.0 {
         return Ok(None);
     }
-    let swept = match sweep_body_motion(
+    let swept = sweep_body_motion(
         collision,
         targets,
         anchor,
         &projectile.contact,
         projectile.mobile.spheres,
         requested,
-    ) {
-        Ok(swept) => swept,
-        Err(CollisionQueryError::UnavailableOwner { owner }) => {
-            projectile.unavailable_owner = Some(Guid(owner));
-            projectile.mobile.velocity = Vector3::zero();
-            return Ok(None);
-        }
-        Err(error) => return Err(error.into()),
+    );
+    let Some(swept) = projectile.accept_query(swept.map_err(Into::into))? else {
+        return Ok(None);
     };
     let fraction = swept.hit.map_or(1.0, |hit| hit.contact().time_of_impact);
     if fraction > 0.0 {
@@ -1300,15 +1317,8 @@ fn refresh_support(
         )
         .map_err(Into::into),
     };
-    match result {
-        Ok(ground) => body.grounded = Some(GroundedContactState { ground, ..grounded }),
-        Err(error) => match error.downcast_ref::<CollisionQueryError>() {
-            Some(CollisionQueryError::UnavailableOwner { owner }) => {
-                body.unavailable_owner = Some(Guid(*owner));
-                body.mobile.velocity = Vector3::zero();
-            }
-            _ => return Err(error),
-        },
+    if let Some(ground) = body.accept_query(result)? {
+        body.grounded = Some(GroundedContactState { ground, ..grounded });
     }
     Ok(())
 }
@@ -1429,23 +1439,16 @@ fn advance_hard_candidate(
         if requested.length_squared() == 0.0 {
             break;
         }
-        let swept = match sweep_body_motion(
+        let swept = sweep_body_motion(
             collision,
             hard,
             anchor,
             &body.contact,
             body.mobile.spheres,
             requested,
-        ) {
-            Ok(swept) => swept,
-            Err(CollisionQueryError::UnavailableOwner { owner }) => {
-                body.unavailable_owner = Some(Guid(owner));
-                // An unqueryable ordinary move stops locally. Do not retain force-advanced
-                // velocity at a held pose and accumulate gravity across unavailable ticks.
-                body.mobile.velocity = Vector3::zero();
-                break;
-            }
-            Err(error) => return Err(error.into()),
+        );
+        let Some(swept) = body.accept_query(swept.map_err(Into::into))? else {
+            break;
         };
         if let Some(hit) = swept.hit
             && !stair_attempted

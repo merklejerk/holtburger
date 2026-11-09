@@ -288,7 +288,7 @@ fn standing_support_candidate(
     .max_by(|a, b| a.height_delta.total_cmp(&b.height_delta)))
 }
 
-/// Repair terrain penetration, then acquire bounded standing height before motor selection.
+/// Attempt terrain repair, then acquire bounded standing height before motor selection.
 /// Object support recovery is swept; terrain reinsertion validates only the endpoint. Neither
 /// consumes physical time or a landing/restitution event. RETAIL DIVERGENCE: terrain
 /// grounding uses the vertical sphere bottom; our full-sphere clearance instead requires a

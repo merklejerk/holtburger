@@ -1,12 +1,8 @@
 import { APP_PERSISTENCE_TUNING } from "../src/app/app-tuning.js";
 import type { ClientWindowSettings } from "../src/app/window-settings-contract.js";
 
-/** Only native window events and bounds are required; tests can hold writes independently. */
+/** The geometry owner supplies the complete persistence snapshot; tests can hold writes independently. */
 interface GeometryWindow {
-	getNormalBounds(): ClientWindowSettings["normalBounds"];
-	isMaximized(): boolean;
-	isFullScreen(): boolean;
-	isResizable(): boolean;
 	on(event: string, listener: () => void): unknown;
 	removeListener(event: string, listener: () => void): unknown;
 }
@@ -22,15 +18,7 @@ export function observeWindowGeometry(
 	window: GeometryWindow,
 	save: (value: ClientWindowSettings) => Promise<void>,
 	report: (error: unknown) => void,
-	snapshot: () => ClientWindowSettings = () => {
-		const { width, height } = window.getNormalBounds();
-		return {
-			normalBounds: { width, height },
-			maximized: window.isMaximized(),
-			fullscreen: window.isFullScreen(),
-			freeResize: window.isResizable(),
-		};
-	},
+	snapshot: () => ClientWindowSettings,
 ): () => Promise<void> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let stopped = false;

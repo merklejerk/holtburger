@@ -632,10 +632,6 @@ counts are for browsing and do not establish server availability or H3D compatib
 loads on demand, is cached in memory, and has an explicit Refresh action. Imported servers remain local
 copies; directory changes never update saved endpoints or credentials automatically.
 
-The optional `npm run probe:launcher -- --package out/holtburger-3d-linux-x64/holtburger-3d --tree-stats`
-probe exercises the actual public-directory flow using isolated local data. It requires network access;
-ordinary launcher probes and unit tests use no public API.
-
 Install the repository's Node.js/npm versions and a current stable Rust toolchain.
 Install both tooling packages and run launch commands from the repository root:
 
@@ -899,11 +895,6 @@ servers or encrypted envelopes and upgrade to version 4 on the next save. Incomp
 remain editable. Saved credentials are
 loaded through a picker-only native command to fill the masked password field; catalog snapshots
 exclude passwords and encrypted envelopes.
-
-`npm run probe:launcher` verifies one-window startup, asset recovery/cancellation, repeat attempts,
-encrypted persistence, invalid-game-settings recovery, and Quit with an isolated temporary profile.
-Add `-- --assets /path/to/content` for diagnostic game construction and a real connection timeout.
-The probe records native process/memory snapshots; it makes no visual acceptance judgments.
 
 `npm run probe:content` verifies native startup/recovery in an isolated temporary profile without
 screenshots. The synthetic archive intentionally lacks necessary scene/bootstrap assets: the

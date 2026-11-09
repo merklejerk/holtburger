@@ -13,6 +13,8 @@ export const clientWindowSettingsSchema = z
 			.strip()
 			.readonly(),
 		maximized: z.boolean(),
+		/** Client-only native chrome preference; the launcher always has its title bar. */
+		borderless: z.boolean().default(false),
 		/** Native fullscreen preference; older installations start windowed. */
 		fullscreen: z.boolean().default(false),
 		/** Allow edge resizing and maximizing independently of preset selection. */

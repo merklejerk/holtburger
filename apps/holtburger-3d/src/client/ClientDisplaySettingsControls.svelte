@@ -84,6 +84,18 @@
 				<label class="ui-checkbox"
 					><input
 						type="checkbox"
+						checked={snapshot.borderless}
+						disabled={disabled || snapshot.fullscreen}
+						onchange={(event) =>
+							void change({
+								kind: "borderless",
+								enabled: event.currentTarget.checked,
+							})}
+					/> Borderless window (hide title bar)</label
+				>
+				<label class="ui-checkbox"
+					><input
+						type="checkbox"
 						checked={snapshot.freeResize}
 						disabled={disabled || snapshot.fullscreen}
 						onchange={(event) =>

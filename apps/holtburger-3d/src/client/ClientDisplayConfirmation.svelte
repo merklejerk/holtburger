@@ -67,8 +67,12 @@
 		dismissOnBackdrop={!pending}
 	>
 		<p>
-			{snapshot.fullscreen ? "Fullscreen" : "Windowed"} — {snapshot.contentSize
-				.width} × {snapshot.contentSize.height}
+			{snapshot.fullscreen
+				? "Fullscreen"
+				: snapshot.borderless
+					? "Borderless window"
+					: "Windowed"} — {snapshot.contentSize.width} × {snapshot.contentSize
+				.height}
 		</p>
 		{#if confirmation.kind === "preview"}
 			<p>Reverting in {seconds} seconds.</p>

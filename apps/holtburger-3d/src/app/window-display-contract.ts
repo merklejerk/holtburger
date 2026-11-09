@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** Window content dimensions in logical desktop pixels, excluding native decorations. */
-const windowContentSizeSchema = z
+/** Game-page viewport dimensions in CSS pixels, excluding native window decorations. */
+export const windowContentSizeSchema = z
 	.object({
 		width: z.number().int().positive().safe(),
 		height: z.number().int().positive().safe(),
@@ -35,6 +35,8 @@ const displayConfirmationSchema = z.discriminatedUnion("kind", [
 /** Native-owner projection consumed by display controls; presets respect the app minimum. */
 export const windowDisplaySnapshotSchema = z
 	.object({
+		/** Client window omits native title bar and borders. */
+		borderless: z.boolean(),
 		/** Confirmed native fullscreen state. */
 		fullscreen: z.boolean(),
 		/** Saved policy governing edge resizing and maximizing. */
@@ -43,7 +45,7 @@ export const windowDisplaySnapshotSchema = z
 		busy: z.boolean(),
 		/** Preview decision or failed restoration awaiting retry; null during native operations. */
 		confirmation: displayConfirmationSchema.nullable(),
-		/** Actual viewport size, including any desktop scaling quantization. */
+		/** Measured page viewport after native display scaling and rounding. */
 		contentSize: windowContentSizeSchema,
 		/** Supported window sizes meeting the app minimum, independent of monitor placement. */
 		presets: z.array(windowContentSizeSchema).readonly(),
@@ -54,6 +56,7 @@ export type WindowDisplaySnapshot = z.infer<typeof windowDisplaySnapshotSchema>;
 
 /** Native window changes and preview decisions, independent of renderer quality. */
 export const windowDisplayRequestSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("borderless"), enabled: z.boolean() }).strict(),
 	z.object({ kind: z.literal("fullscreen"), enabled: z.boolean() }).strict(),
 	z.object({ kind: z.literal("free-resize"), enabled: z.boolean() }).strict(),
 	z.object({ kind: z.literal("size"), size: windowContentSizeSchema }).strict(),

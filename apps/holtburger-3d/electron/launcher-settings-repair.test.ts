@@ -18,6 +18,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 const window = {
 	normalBounds: { width: 900, height: 650 },
 	maximized: false,
+	borderless: false,
 	fullscreen: false,
 	freeResize: true,
 };

@@ -3,6 +3,7 @@ import type { WindowDisplaySnapshot } from "./window-display-contract";
 import { observeWindowDisplay } from "./window-display-transport";
 
 const snapshot: WindowDisplaySnapshot = {
+	borderless: false,
 	fullscreen: false,
 	freeResize: true,
 	busy: false,
@@ -34,6 +35,7 @@ describe("native display observation", () => {
 		expect(accept).toHaveBeenCalledTimes(1);
 		expect(accept).toHaveBeenLastCalledWith({
 			...snapshot,
+			borderless: false,
 			fullscreen: true,
 		});
 		expect(report).not.toHaveBeenCalled();

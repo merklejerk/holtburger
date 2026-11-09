@@ -16,6 +16,29 @@ const NATIVE_DECORATION_HEIGHT = 30;
 
 /** Model OS acknowledgements separately from requests, including intervening resize events. */
 class NativeWindow extends EventEmitter {
+	borderless = false;
+	setMinimumSize = vi.fn();
+	async getViewportSize() {
+		const [width, height] = this.getContentSize();
+		return { width, height };
+	}
+	get native() {
+		return this;
+	}
+	isBorderless() {
+		return this.borderless;
+	}
+	setBorderless(enabled: boolean) {
+		if (this.borderless === enabled) return;
+		const content = this.getContentBounds();
+		this.borderless = enabled;
+		this.bounds = {
+			...this.bounds,
+			height: content.height + (enabled ? 0 : NATIVE_DECORATION_HEIGHT),
+		};
+		this.normalBounds = this.bounds;
+		this.emit("resize");
+	}
 	bounds = { x: 0, y: 0, width: 1440, height: 930 };
 	normalBounds = this.bounds;
 	fullscreen = false;
@@ -25,11 +48,23 @@ class NativeWindow extends EventEmitter {
 	getBounds() {
 		return this.bounds;
 	}
+	getContentSize(): [number, number] {
+		return [
+			this.bounds.width,
+			this.bounds.height - (this.borderless ? 0 : NATIVE_DECORATION_HEIGHT),
+		];
+	}
 	getContentBounds() {
-		return {
-			...this.bounds,
-			height: this.bounds.height - NATIVE_DECORATION_HEIGHT,
-		};
+		const [width, height] = this.getContentSize();
+		return { ...this.bounds, width, height };
+	}
+	setContentBounds(bounds: {
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+	}) {
+		this.setContentSize(bounds.width, bounds.height);
 	}
 	getNormalBounds() {
 		return this.normalBounds;
@@ -85,7 +120,7 @@ class NativeWindow extends EventEmitter {
 			this.bounds = {
 				...this.bounds,
 				width,
-				height: height + NATIVE_DECORATION_HEIGHT,
+				height: height + (this.borderless ? 0 : NATIVE_DECORATION_HEIGHT),
 			};
 			this.normalBounds = this.bounds;
 			this.emit("resize");
@@ -121,15 +156,133 @@ async function changeAndKeep(
 }
 
 describe("native display controls", () => {
+	it("reports viewport failures only while their controls remain active", async () => {
+		const { owner, window, report } = fixture();
+		const error = new Error("Document context changed.");
+		window.getViewportSize = async () => {
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			throw error;
+		};
+		owner.refresh();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(report).toHaveBeenCalledExactlyOnceWith(error);
+		report.mockClear();
+		owner.refresh();
+		await owner.close();
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(report).not.toHaveBeenCalled();
+	});
+
+	it("corrects native rounding for presets and repeated border changes", async () => {
+		const { owner, window } = fixture();
+		const target = smallestPreset();
+		const rounding = { width: 2, height: 1 };
+		const setContentSize = window.setContentSize.bind(window);
+		window.setContentBounds = (bounds) =>
+			setContentSize(
+				bounds.width + rounding.width,
+				bounds.height + rounding.height,
+			);
+		const setBorderless = window.setBorderless.bind(window);
+		window.setBorderless = (enabled) => {
+			setBorderless(enabled);
+			const [width, height] = window.getContentSize();
+			setContentSize(width + rounding.width, height + rounding.height);
+		};
+		await changeAndKeep(owner, { kind: "size", size: target });
+		expect(owner.snapshot().contentSize).toEqual(target);
+		for (const enabled of [true, false, true, false]) {
+			await changeAndKeep(owner, { kind: "borderless", enabled });
+			expect(owner.snapshot().contentSize).toEqual(target);
+		}
+		await owner.close();
+	});
+	it("corrects against the page viewport when native DIP dimensions differ", async () => {
+		const { owner, window } = fixture();
+		const target = smallestPreset();
+		window.getViewportSize = async () => {
+			const [width, height] = window.getContentSize();
+			return { width: width + 1, height };
+		};
+		await changeAndKeep(owner, { kind: "size", size: target });
+		expect(owner.snapshot().contentSize).toEqual(target);
+		expect(window.getContentSize()[0]).toBe(target.width - 1);
+		for (const enabled of [true, false]) {
+			await changeAndKeep(owner, { kind: "borderless", enabled });
+			expect(owner.snapshot().contentSize).toEqual(target);
+		}
+		await owner.close();
+	});
+	it("accepts actual dimensions when the native minimum prevents closer sizing", async () => {
+		const { owner, window } = fixture();
+		const target = smallestPreset();
+		const minimumWidth = target.width + 17;
+		const setContentSize = window.setContentSize.bind(window);
+		window.setContentBounds = (bounds) =>
+			setContentSize(Math.max(minimumWidth, bounds.width), bounds.height);
+		await changeAndKeep(owner, { kind: "size", size: target });
+		expect(owner.snapshot().contentSize).toEqual({
+			...target,
+			width: minimumWidth,
+		});
+		await owner.close();
+	});
+
+	it("uses viewport dimensions independently of outer and content rectangle discrepancies", async () => {
+		const { owner, window } = fixture();
+		const contentSize = owner.snapshot().contentSize;
+		vi.spyOn(window, "getContentBounds").mockImplementation(() => ({
+			...window.bounds,
+			width: contentSize.width + 2,
+			height: contentSize.height + 3,
+		}));
+		expect(owner.snapshot().contentSize).toEqual(contentSize);
+		const setContentSize = vi.spyOn(window, "setContentSize");
+		await owner.change({ kind: "size", size: contentSize });
+		expect(setContentSize).not.toHaveBeenCalled();
+		await owner.close();
+	});
+
+	it("previews borderless windows at the same viewport size and reverts their geometry and resize lock", async () => {
+		const { owner, window } = fixture();
+		await changeAndKeep(owner, { kind: "free-resize", enabled: false });
+		const previous = owner.settings();
+		const content = owner.snapshot().contentSize;
+		await owner.change({ kind: "borderless", enabled: true });
+		expect(owner.snapshot().borderless).toBe(true);
+		expect(owner.snapshot().contentSize).toEqual(content);
+		expect(owner.settings()).toEqual(previous);
+		expect(window.resizable).toBe(false);
+		const confirmation = owner.snapshot().confirmation;
+		if (confirmation === null) throw new Error("Missing borderless preview.");
+		await owner.change({ kind: "confirm", id: confirmation.id, keep: false });
+		expect(owner.snapshot().borderless).toBe(false);
+		expect(owner.snapshot().contentSize).toEqual(content);
+		expect(owner.settings()).toEqual(previous);
+		expect(window.resizable).toBe(false);
+		await owner.close();
+	});
+	it("retains accepted borderless geometry through fullscreen and rejects frame changes inside it", async () => {
+		const { owner } = fixture();
+		await changeAndKeep(owner, { kind: "borderless", enabled: true });
+		const previous = owner.settings();
+		expect(previous.borderless).toBe(true);
+		await changeAndKeep(owner, { kind: "fullscreen", enabled: true });
+		await expect(
+			owner.change({ kind: "borderless", enabled: false }),
+		).rejects.toThrow("Leave fullscreen");
+		await changeAndKeep(owner, { kind: "fullscreen", enabled: false });
+		expect(owner.settings()).toEqual(previous);
+		await owner.close();
+	});
+
 	it("measures normal decorations after unmaximizing when setting the content minimum", async () => {
 		const window = new NativeWindow();
 		window.maximized = true;
-		vi.spyOn(window, "getContentBounds").mockImplementation(() => ({
-			...window.bounds,
-			height:
-				window.bounds.height -
-				(window.maximized ? 0 : NATIVE_DECORATION_HEIGHT),
-		}));
+		vi.spyOn(window, "getContentSize").mockImplementation(() => [
+			window.bounds.width,
+			window.bounds.height - (window.maximized ? 0 : NATIVE_DECORATION_HEIGHT),
+		]);
 		const setMinimumSize = vi.fn();
 		const saved = clientWindowSettingsSchema.parse({
 			normalBounds: window.normalBounds,
@@ -168,6 +321,7 @@ describe("native display controls", () => {
 				height: Math.floor(minimum.height / 2),
 			},
 			maximized: false,
+			borderless: false,
 			fullscreen: true,
 		});
 		const accepted = await restoreWindowGeometry(
@@ -180,6 +334,7 @@ describe("native display controls", () => {
 				width: minimum.width,
 				height: minimum.height + NATIVE_DECORATION_HEIGHT,
 			},
+			borderless: false,
 			fullscreen: true,
 		});
 		const owner = new WindowDisplay(window, accepted, vi.fn(), vi.fn());
@@ -197,6 +352,7 @@ describe("native display controls", () => {
 		).toEqual({
 			normalBounds: bounds,
 			maximized: true,
+			borderless: false,
 			fullscreen: false,
 			freeResize: true,
 		});
@@ -215,7 +371,7 @@ describe("native display controls", () => {
 		window.bounds = { ...window.bounds, width: preset.width + 17 };
 		window.normalBounds = window.bounds;
 		window.emit("resize");
-		expect(owner.snapshot().contentSize.width).toBe(preset.width + 17);
+		expect((await owner.read()).contentSize.width).toBe(preset.width + 17);
 		await owner.close();
 	});
 
@@ -249,6 +405,7 @@ describe("native display controls", () => {
 		expect(enter).toHaveBeenCalledWith(true);
 		expect(window.resizable).toBe(true);
 		expect(owner.settings()).toMatchObject({
+			borderless: false,
 			fullscreen: true,
 			freeResize: false,
 		});
@@ -256,6 +413,7 @@ describe("native display controls", () => {
 		expect(window.resizable).toBe(false);
 		expect(window.maximizable).toBe(false);
 		expect(owner.settings()).toMatchObject({
+			borderless: false,
 			fullscreen: false,
 			freeResize: false,
 		});
@@ -272,6 +430,7 @@ describe("native display controls", () => {
 		).rejects.toThrow("Native fullscreen failed.");
 		expect(window.resizable).toBe(false);
 		expect(owner.snapshot()).toMatchObject({
+			borderless: false,
 			fullscreen: false,
 			freeResize: false,
 			busy: false,
@@ -344,6 +503,7 @@ describe("native display controls", () => {
 		});
 		await entering;
 		expect(owner.settings()).toMatchObject({
+			borderless: false,
 			fullscreen: true,
 			maximized: true,
 			normalBounds: before,
@@ -505,7 +665,7 @@ describe("display confirmation", () => {
 		"restores previous fullscreen state (%s) on timeout without the renderer",
 		async (fullscreen) => {
 			const { owner, window, report } = fixture();
-			await owner.change({ kind: "free-resize", enabled: false });
+			await settleChange(owner.change({ kind: "free-resize", enabled: false }));
 			if (fullscreen) {
 				await settleChange(owner.change({ kind: "fullscreen", enabled: true }));
 				await owner.change({
@@ -578,7 +738,7 @@ describe("display confirmation", () => {
 			window.bounds = {
 				...window.bounds,
 				width,
-				height: height + NATIVE_DECORATION_HEIGHT,
+				height: height + (window.borderless ? 0 : NATIVE_DECORATION_HEIGHT),
 			};
 			throw new Error("Resize failed after changing bounds.");
 		};
@@ -644,7 +804,7 @@ describe("display confirmation", () => {
 
 	it("restores retained geometry before locking an OS fullscreen exit", async () => {
 		const { owner, window } = fixture();
-		await owner.change({ kind: "free-resize", enabled: false });
+		await settleChange(owner.change({ kind: "free-resize", enabled: false }));
 		const before = owner.settings();
 		await settleChange(owner.change({ kind: "fullscreen", enabled: true }));
 		await owner.change({

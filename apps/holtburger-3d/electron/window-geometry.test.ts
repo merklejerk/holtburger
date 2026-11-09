@@ -18,12 +18,24 @@ describe("surface geometry lifetime", () => {
 			const savePicker = vi.fn(async () => {});
 			const saveGame = vi.fn(async () => {});
 			const report = vi.fn();
-			const stop = observeWindowGeometry(window, savePicker, report);
+			const snapshot = () => ({
+				normalBounds: { width: bounds.width, height: bounds.height },
+				maximized: false,
+				fullscreen: false,
+				freeResize: true,
+				borderless: false,
+			});
+			const stop = observeWindowGeometry(window, savePicker, report, snapshot);
 			window.emit("resize");
 			await stop();
 			bounds = { x: 0, y: 0, width: 1440, height: 900 };
 			window.emit("resize");
-			const stopGame = observeWindowGeometry(window, saveGame, report);
+			const stopGame = observeWindowGeometry(
+				window,
+				saveGame,
+				report,
+				snapshot,
+			);
 			window.emit("resize");
 			await vi.advanceTimersByTimeAsync(
 				APP_PERSISTENCE_TUNING.windowGeometryWriteDelayMs,
@@ -31,12 +43,14 @@ describe("surface geometry lifetime", () => {
 			expect(savePicker).toHaveBeenCalledExactlyOnceWith({
 				normalBounds: { width: 900, height: 650 },
 				maximized: false,
+				borderless: false,
 				fullscreen: false,
 				freeResize: true,
 			});
 			expect(saveGame).toHaveBeenCalledWith({
 				normalBounds: { width: bounds.width, height: bounds.height },
 				maximized: false,
+				borderless: false,
 				fullscreen: false,
 				freeResize: true,
 			});
@@ -61,7 +75,13 @@ describe("surface geometry lifetime", () => {
 				throw new Error("Permission denied");
 			});
 			const notifyUser = vi.fn();
-			const stop = observeWindowGeometry(window, save, notifyUser);
+			const stop = observeWindowGeometry(window, save, notifyUser, () => ({
+				normalBounds: { width: 900, height: 650 },
+				maximized: false,
+				fullscreen: false,
+				freeResize: true,
+				borderless: false,
+			}));
 			for (let attempt = 0; attempt < 2; attempt++) {
 				window.emit("resize");
 				await vi.advanceTimersByTimeAsync(

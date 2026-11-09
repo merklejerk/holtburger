@@ -1,7 +1,8 @@
-import type { BrowserWindow } from "electron";
+import type { BaseWindow } from "electron";
 import { APP_WINDOW_TUNING } from "../src/app/app-tuning.js";
 import {
 	WINDOW_CONTENT_PRESETS,
+	type WindowContentSize,
 	type WindowDisplayRequest,
 	type WindowDisplaySnapshot,
 } from "../src/app/window-display-contract.js";
@@ -9,10 +10,12 @@ import type { ClientWindowSettings } from "../src/app/window-settings-contract.j
 
 /** Native operations needed by the app-local display owner, also usable by focused probes. */
 type DisplayWindow = Pick<
-	BrowserWindow,
+	BaseWindow,
 	| "getBounds"
 	| "setSize"
+	| "getContentSize"
 	| "getContentBounds"
+	| "setContentBounds"
 	| "isFullScreen"
 	| "isMaximized"
 	| "setFullScreen"
@@ -20,11 +23,22 @@ type DisplayWindow = Pick<
 	| "setMaximizable"
 	| "unmaximize"
 	| "maximize"
-	| "setContentSize"
+	| "setMinimumSize"
 > & {
 	on(event: string, listener: () => void): unknown;
 	removeListener(event: string, listener: () => void): unknown;
 };
+
+/** Stable document owner forwards native events across frame replacement. */
+interface DisplaySurface {
+	readonly native: DisplayWindow;
+	/** Actual page dimensions after the native-to-renderer scaling conversion. */
+	getViewportSize(): Promise<WindowContentSize>;
+	isBorderless(): boolean;
+	setBorderless(enabled: boolean): void;
+	on(event: string, listener: () => void): unknown;
+	removeListener(event: string, listener: () => void): unknown;
+}
 
 /** Wait for the native mode acknowledgement and its associated geometry configure burst. */
 export function changeNativeFullscreen(
@@ -96,6 +110,44 @@ function nativeTransition(
 	});
 }
 
+/** Correct native scaling roundoff without repeatedly converting the window's position. */
+async function resizeWindowContent(
+	surface: DisplaySurface,
+	target: WindowContentSize,
+): Promise<void> {
+	const window = surface.native;
+	const { x, y } = window.getContentBounds();
+	let request = target;
+	let best: {
+		readonly request: WindowContentSize;
+		readonly error: number;
+	} | null = null;
+	for (;;) {
+		await nativeTransition(window, null, () =>
+			window.setContentBounds({ x, y, ...request }),
+		);
+		const { width, height } = await surface.getViewportSize();
+		const error =
+			Math.abs(target.width - width) + Math.abs(target.height - height);
+		if (error === 0) return;
+		// Clamping and unrepresentable logical sizes can prevent an exact result.
+		// Retain the closest achieved viewport; the snapshot reports its actual dimensions.
+		if (best !== null && error >= best.error) {
+			const closest = best.request;
+			await nativeTransition(window, null, () =>
+				window.setContentBounds({ x, y, ...closest }),
+			);
+			return;
+		}
+		best = { request, error };
+		// Each continuing step must reduce the integer error, so this search is finite.
+		request = {
+			width: Math.max(1, request.width + target.width - width),
+			height: Math.max(1, request.height + target.height - height),
+		};
+	}
+}
+
 /** Resize locking is windowed policy; fullscreen needs an unconstrained native surface. */
 function applyNativeResizePolicy(
 	window: DisplayWindow,
@@ -158,11 +210,18 @@ interface DisplayPreview {
 
 /** One client-attempt owner serializes native changes and preserves windowed size and maximize state. */
 export class WindowDisplay {
-	readonly #window: DisplayWindow;
+	readonly #surface: DisplaySurface;
+	get #window(): DisplayWindow {
+		return this.#surface.native;
+	}
 	readonly #publish: (snapshot: WindowDisplaySnapshot) => void;
 	readonly #report: (error: unknown) => void;
 	#windowed: WindowedGeometry;
 	#freeResize: boolean;
+	/** Last measured page viewport, shared by controls and confirmation text. */
+	#contentSize: WindowContentSize;
+	/** Reject a measurement superseded by another native configure event. */
+	#contentRevision = 0;
 	#busy = false;
 	#preview: DisplayPreview | null = null;
 	#confirmationId = 0;
@@ -171,12 +230,14 @@ export class WindowDisplay {
 	#tail: Promise<void> = Promise.resolve();
 	readonly #events = ["resize", "move", "maximize", "unmaximize"];
 	constructor(
-		window: DisplayWindow,
+		surface: DisplaySurface,
 		saved: ClientWindowSettings,
 		publish: (snapshot: WindowDisplaySnapshot) => void,
 		report: (error: unknown) => void,
 	) {
-		this.#window = window;
+		this.#surface = surface;
+		const [width, height] = surface.native.getContentSize();
+		this.#contentSize = { width, height };
 		this.#windowed = {
 			normalBounds: saved.normalBounds,
 			maximized: saved.maximized,
@@ -184,9 +245,9 @@ export class WindowDisplay {
 		this.#report = report;
 		this.#freeResize = saved.freeResize;
 		this.#publish = publish;
-		for (const event of this.#events) window.on(event, this.refresh);
-		window.on("enter-full-screen", this.#fullscreenChanged);
-		window.on("leave-full-screen", this.#fullscreenChanged);
+		for (const event of this.#events) surface.on(event, this.refresh);
+		surface.on("enter-full-screen", this.#fullscreenChanged);
+		surface.on("leave-full-screen", this.#fullscreenChanged);
 	}
 	/** Persist retained windowed geometry without consulting fullscreen bounds. */
 	settings(): ClientWindowSettings {
@@ -194,22 +255,28 @@ export class WindowDisplay {
 		return {
 			...this.#windowed,
 			fullscreen: this.#window.isFullScreen(),
+			borderless: this.#surface.isBorderless(),
 			freeResize: this.#freeResize,
 		};
 	}
+	/** IPC reads measure the admitted page before exposing its viewport dimensions. */
+	async read(): Promise<WindowDisplaySnapshot> {
+		await this.#measureViewport();
+		return this.snapshot();
+	}
 	snapshot(): WindowDisplaySnapshot {
 		const window = this.#window;
-		const content = window.getContentBounds();
 		// Linux can expose the locked window size as its native minimum. Preset admission
 		// uses the app’s viewport policy, independently of temporary native resize locks.
 		const { width: minimumWidth, height: minimumHeight } =
 			APP_WINDOW_TUNING.game.minimumContentSize;
 		return {
 			fullscreen: window.isFullScreen(),
+			borderless: this.#surface.isBorderless(),
 			freeResize: this.#freeResize,
 			busy: this.#busy,
 			confirmation: this.#busy ? null : (this.#preview?.confirmation ?? null),
-			contentSize: { width: content.width, height: content.height },
+			contentSize: this.#contentSize,
 			// Window sizes are requests, not display modes. Native monitor placement can be
 			// unavailable under Wayland; do not use it to hide otherwise valid presets.
 			presets: WINDOW_CONTENT_PRESETS.filter(
@@ -222,7 +289,23 @@ export class WindowDisplay {
 		if (!this.#busy && !this.#window.isFullScreen())
 			this.#windowed = readWindowedGeometry(this.#window, this.#windowed);
 		this.#publish(this.snapshot());
+		if (!this.#busy && !this.#closed)
+			void this.#measureViewport()
+				.then(() => {
+					if (!this.#closed) this.#publish(this.snapshot());
+				})
+				.catch((error: unknown) => {
+					// Navigation may reject a pending measurement after this attempt retires.
+					if (!this.#closed) this.#report(error);
+				});
 	};
+
+	async #measureViewport(): Promise<void> {
+		const revision = ++this.#contentRevision;
+		const size = await this.#surface.getViewportSize();
+		if (!this.#closed && revision === this.#contentRevision)
+			this.#contentSize = size;
+	}
 
 	/** OS fullscreen gestures use the same preview policy as IPC and F11. */
 	readonly #fullscreenChanged = (): void => {
@@ -265,17 +348,19 @@ export class WindowDisplay {
 			if (request.kind === "free-resize") await this.#apply(request);
 			else {
 				if (
-					request.kind === "fullscreen" &&
-					request.enabled === this.#window.isFullScreen()
+					(request.kind === "fullscreen" &&
+						request.enabled === this.#window.isFullScreen()) ||
+					(request.kind === "borderless" &&
+						request.enabled === this.#surface.isBorderless())
 				)
 					return;
-				const content = this.#window.getContentBounds();
+				const { width, height } = await this.#surface.getViewportSize();
 				if (
 					request.kind === "size" &&
 					!this.#window.isFullScreen() &&
 					!this.#window.isMaximized() &&
-					content.width === request.size.width &&
-					content.height === request.size.height
+					width === request.size.width &&
+					height === request.size.height
 				)
 					return;
 				await this.#startPreview(this.settings(), () => this.#apply(request));
@@ -341,6 +426,8 @@ export class WindowDisplay {
 		this.#window.setMaximizable(true);
 		try {
 			await changeNativeFullscreen(this.#window, false);
+			this.#surface.setBorderless(previous.borderless);
+			setGameMinimumContentSize(this.#window);
 			this.#windowed = await restoreWindowedGeometry(
 				this.#window,
 				this.#windowed,
@@ -359,6 +446,7 @@ export class WindowDisplay {
 			this.refresh();
 			try {
 				await apply();
+				await this.#measureViewport();
 			} finally {
 				this.#busy = false;
 				this.refresh();
@@ -392,12 +480,34 @@ export class WindowDisplay {
 		}
 		if (window.isFullScreen())
 			throw new Error(
-				"Leave fullscreen before changing window size or free resize.",
+				"Leave fullscreen before changing window borders, size, or free resize.",
 			);
+		if (request.kind === "borderless") {
+			const maximized = window.isMaximized();
+			if (maximized)
+				await nativeTransition(window, "unmaximize", () => window.unmaximize());
+			const { width, height } = await this.#surface.getViewportSize();
+			this.#surface.setBorderless(request.enabled);
+			setGameMinimumContentSize(this.#window);
+			applyNativeResizePolicy(this.#window, this.#freeResize);
+			await nativeTransition(this.#window, null, () => {});
+			await resizeWindowContent(this.#surface, { width, height });
+			this.#windowed = readWindowedGeometry(this.#window, this.#windowed);
+			if (maximized)
+				await nativeTransition(this.#window, "maximize", () =>
+					this.#window.maximize(),
+				);
+			return;
+		}
 		if (request.kind === "free-resize") {
 			if (!request.enabled && window.isMaximized())
 				await nativeTransition(window, "unmaximize", () => window.unmaximize());
+			const { width, height } = await this.#surface.getViewportSize();
 			applyNativeResizePolicy(window, request.enabled);
+			if (!window.isMaximized()) {
+				await nativeTransition(window, null, () => {});
+				await resizeWindowContent(this.#surface, { width, height });
+			}
 			this.#freeResize = request.enabled;
 			return;
 		}
@@ -411,15 +521,9 @@ export class WindowDisplay {
 			throw new Error("Window size is not a supported preset.");
 		if (window.isMaximized())
 			await nativeTransition(window, "unmaximize", () => window.unmaximize());
-		const content = window.getContentBounds();
-		if (
-			content.width === request.size.width &&
-			content.height === request.size.height
-		)
-			return;
-		await nativeTransition(window, "resize", () =>
-			window.setContentSize(request.size.width, request.size.height),
-		);
+		const { width, height } = await this.#surface.getViewportSize();
+		if (width === request.size.width && height === request.size.height) return;
+		await resizeWindowContent(this.#surface, request.size);
 	}
 	/** Drain requests before another document restores its own native geometry. */
 	async close(): Promise<void> {
@@ -432,38 +536,43 @@ export class WindowDisplay {
 		} finally {
 			this.#busy = false;
 			for (const event of this.#events)
-				this.#window.removeListener(event, this.refresh);
-			this.#window.removeListener("enter-full-screen", this.#fullscreenChanged);
-			this.#window.removeListener("leave-full-screen", this.#fullscreenChanged);
+				this.#surface.removeListener(event, this.refresh);
+			this.#surface.removeListener(
+				"enter-full-screen",
+				this.#fullscreenChanged,
+			);
+			this.#surface.removeListener(
+				"leave-full-screen",
+				this.#fullscreenChanged,
+			);
 		}
 	}
 }
 
 /** Convert the game viewport minimum to the outer dimensions required by Electron. */
 export function setGameMinimumContentSize(
-	window: Pick<
-		BrowserWindow,
-		"getBounds" | "getContentBounds" | "setMinimumSize"
-	>,
+	window: Pick<BaseWindow, "getBounds" | "getContentSize" | "setMinimumSize">,
 ): void {
 	const outer = window.getBounds();
-	const content = window.getContentBounds();
+	const [width, height] = window.getContentSize();
 	const minimum = APP_WINDOW_TUNING.game.minimumContentSize;
 	window.setMinimumSize(
-		minimum.width + outer.width - content.width,
-		minimum.height + outer.height - content.height,
+		minimum.width + outer.width - width,
+		minimum.height + outer.height - height,
 	);
 }
 
 /** Replace surface geometry only after leaving the preceding surface’s native fullscreen state. */
 export async function restoreWindowGeometry(
-	window: DisplayWindow & Pick<BrowserWindow, "setMinimumSize">,
+	surface: DisplaySurface,
 	value: ClientWindowSettings,
 	role: "picker" | "client",
 ): Promise<ClientWindowSettings> {
+	await changeNativeFullscreen(surface.native, false);
+	surface.setBorderless(role === "client" && value.borderless);
+	const window = surface.native;
 	window.setResizable(true);
 	window.setMaximizable(true);
-	await changeNativeFullscreen(window, false);
 	if (window.isMaximized())
 		await nativeTransition(window, "unmaximize", () => window.unmaximize());
 	if (role === "picker") {
@@ -477,5 +586,10 @@ export async function restoreWindowGeometry(
 	if (role === "client") await changeNativeFullscreen(window, value.fullscreen);
 	const freeResize = role === "picker" || value.freeResize;
 	applyNativeResizePolicy(window, freeResize);
-	return { ...accepted, fullscreen: window.isFullScreen(), freeResize };
+	return {
+		...accepted,
+		fullscreen: window.isFullScreen(),
+		freeResize,
+		borderless: surface.isBorderless(),
+	};
 }

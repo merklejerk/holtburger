@@ -1,3 +1,4 @@
+import { ApplicationWindow } from "./application-window.js";
 import { ClientRetirement } from "./client-retirement.js";
 import {
 	APP_WINDOW_TUNING,
@@ -6,7 +7,6 @@ import {
 } from "../src/app/app-tuning.js";
 import {
 	app,
-	BrowserWindow,
 	dialog,
 	ipcMain,
 	Menu,
@@ -126,6 +126,8 @@ const currentDirectory = dirname(fileURLToPath(import.meta.url));
 const applicationIconPath = app.isPackaged
 	? join(process.resourcesPath, "icon.png")
 	: resolve(app.getAppPath(), "../../assets/branding/icon.png");
+/** Exact application contents admit IPC independently of native surface replacement. */
+let applicationWindow: ApplicationWindow | null = null;
 let explorerContent: ContentStartup<SidecarHostClient> | undefined;
 let quitting = false;
 /** Client window close joins renderer preparation before native store/process shutdown. */
@@ -187,7 +189,7 @@ function handle<Args extends unknown[], Result>(
 	listener: (event: Electron.IpcMainInvokeEvent, ...args: Args) => Result,
 ): void {
 	ipcMain.handle(channel, (event, identity: unknown, ...args: Args) => {
-		requireApplicationFrame(event, BrowserWindow.fromWebContents(event.sender));
+		requireApplicationFrame(event, applicationWindow);
 		documents.require(identity, role);
 		if (
 			documentRetirement !== undefined &&
@@ -362,10 +364,10 @@ function launchHost(
 
 /** Both launcher drafts and startup recovery use the same native folder selection behavior. */
 async function chooseContentFolder(
-	window: BrowserWindow,
+	window: ApplicationWindow,
 	previous: string | null,
 ): Promise<string | null> {
-	const result = await dialog.showOpenDialog(window, {
+	const result = await dialog.showOpenDialog(window.native, {
 		title: "Choose Asheron's Call assets",
 		properties: ["openDirectory"],
 		...(previous === null ? {} : { defaultPath: previous }),
@@ -378,7 +380,7 @@ async function chooseContentFolder(
 }
 
 function createContentStartup(
-	window: BrowserWindow,
+	window: ApplicationWindow,
 	entry: ReturnType<typeof entryArguments>,
 	clearContent: boolean,
 	overridePath: string | null,
@@ -403,7 +405,7 @@ function createContentStartup(
 		admit: async (client) => {
 			for (const event of hostEventNamesForMode(entry.mode)) {
 				const unlisten = await client.listen(event, (payload) => {
-					if (isCurrent() && !window.isDestroyed()) {
+					if (isCurrent() && !window.native.isDestroyed()) {
 						window.webContents.send("host:event", { event, payload });
 						if (
 							event === "client-exit-requested" &&
@@ -428,7 +430,7 @@ function createContentStartup(
 	});
 	detach.push(
 		startup.listen((snapshot) => {
-			if (isCurrent() && !window.isDestroyed()) {
+			if (isCurrent() && !window.native.isDestroyed()) {
 				window.webContents.send("content:state", snapshot);
 				if (
 					snapshot.phase.kind === "fatal" &&
@@ -478,7 +480,7 @@ function isHostCommandArguments(value: unknown): value is HostCommandArguments {
 	);
 }
 
-function installIpcBridge(window: BrowserWindow, mode: HostMode): void {
+function installIpcBridge(window: ApplicationWindow, mode: HostMode): void {
 	handle("client:start", "client", async (event) => {
 		requireApplicationFrame(event, window);
 		if (quitting)
@@ -537,7 +539,7 @@ function installIpcBridge(window: BrowserWindow, mode: HostMode): void {
 
 function requireApplicationFrame(
 	event: Electron.IpcMainInvokeEvent,
-	window: BrowserWindow | null,
+	window: ApplicationWindow | null,
 ): void {
 	if (window === null) throw new Error("Application window is unavailable");
 	const applicationContents = window.webContents;
@@ -577,11 +579,11 @@ async function changeWindowDisplay(
 }
 
 function installSettingsIpcBridge(
-	window: BrowserWindow,
+	window: ApplicationWindow,
 	ignorePersistedConfig: boolean,
 ): void {
 	handle("window:display-snapshot", "client", () =>
-		requireWindowDisplay().snapshot(),
+		requireWindowDisplay().read(),
 	);
 	handle("window:display-change", "client", (_event, request: unknown) =>
 		changeWindowDisplay(windowDisplayRequestSchema.parse(request)),
@@ -652,14 +654,14 @@ function createWindow(entry: {
 	title: string;
 	mode: HostMode;
 	noLauncher: boolean;
-}): BrowserWindow {
+}): ApplicationWindow {
 	const developmentOrigin = electronDevOrigin(entry.mode);
 	const ozonePlatform = app.commandLine.getSwitchValue("ozone-platform");
 	const restoreWaylandPointer =
 		process.platform === "linux" &&
 		ozonePlatform !== "x11" &&
 		(ozonePlatform === "wayland" || process.env.XDG_SESSION_TYPE === "wayland");
-	const window = new BrowserWindow({
+	const window = new ApplicationWindow({
 		title: entry.title,
 		icon: applicationIconPath,
 		width: APP_WINDOW_TUNING.game.initialContentSize.width,
@@ -703,14 +705,14 @@ function createWindow(entry: {
 	}
 	// Electron/Wayland can negotiate the constructor width down to minWidth. Reapply the
 	// content size while hidden so the first visible frame keeps the configured inner dimensions.
-	window.setContentSize(
+	window.native.setContentSize(
 		APP_WINDOW_TUNING.game.initialContentSize.width,
 		APP_WINDOW_TUNING.game.initialContentSize.height,
 	);
-	setGameMinimumContentSize(window);
+	setGameMinimumContentSize(window.native);
 	// Restored dimensions can stall ready-to-show's first-paint notification on Wayland.
 	// Show after the initial document loads so a mounted launcher cannot remain hidden.
-	window.webContents.once("did-finish-load", () => window.show());
+	window.webContents.once("did-finish-load", () => window.native.show());
 	window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 	window.webContents.on("render-process-gone", (_event, details) => {
 		documentRetirement?.rendererUnavailable(
@@ -806,25 +808,29 @@ function initialGeometry(width: number, height: number): ClientWindowSettings {
 		},
 		maximized: false,
 		fullscreen: false,
+		borderless: false,
 		freeResize: true,
 	};
 }
 /** Geometry persistence errors must remain visible even when no form save is in progress. */
 function reportWindowSettingsFailure(
-	window: BrowserWindow,
+	window: ApplicationWindow,
 	error: unknown,
 ): void {
 	console.error(error);
-	if (!window.isDestroyed())
+	if (!window.native.isDestroyed())
 		dialog.showErrorBox(
 			"Holtburger window settings could not be saved",
 			formatError(error),
 		);
 }
-function reportTransitionFailure(window: BrowserWindow, error: unknown): void {
+function reportTransitionFailure(
+	window: ApplicationWindow,
+	error: unknown,
+): void {
 	pickerFailure = formatError(error);
 	console.error(error);
-	if (!window.isDestroyed())
+	if (!window.native.isDestroyed())
 		dialog.showErrorBox("Holtburger session could not finish", pickerFailure);
 }
 
@@ -839,16 +845,16 @@ function reportFatalError(title: string, error: unknown): void {
 }
 
 async function loadEntry(
-	window: BrowserWindow,
+	window: ApplicationWindow,
 	entryPath: string,
 	mode: HostMode,
 ): Promise<void> {
 	if (!app.isPackaged) {
-		await window.loadURL(`${electronDevOrigin(mode)}/${entryPath}`);
+		await window.webContents.loadURL(`${electronDevOrigin(mode)}/${entryPath}`);
 		return;
 	}
 	const [pathname, query = ""] = entryPath.split("?", 2);
-	await window.loadFile(join(app.getAppPath(), "dist", pathname), {
+	await window.webContents.loadFile(join(app.getAppPath(), "dist", pathname), {
 		search: query.length === 0 ? undefined : `?${query}`,
 	});
 }
@@ -880,6 +886,7 @@ void (async () => {
 		menuTemplate === null ? null : Menu.buildFromTemplate(menuTemplate),
 	);
 	const window = createWindow(entry);
+	applicationWindow = window;
 	const refreshDisplay = () => windowDisplay?.refresh();
 	screen.on("display-metrics-changed", refreshDisplay);
 	window.once("closed", () =>
@@ -950,8 +957,10 @@ void (async () => {
 	);
 	appUpdates = updates;
 	const reconsiderUpdates = () => {
-		if (!window.isDestroyed())
-			updates.setWindowVisible(window.isVisible() && !window.isMinimized());
+		if (!window.native.isDestroyed())
+			updates.setWindowVisible(
+				window.native.isVisible() && !window.native.isMinimized(),
+			);
 	};
 	window.on("show", reconsiderUpdates);
 	window.on("hide", reconsiderUpdates);
@@ -974,7 +983,7 @@ void (async () => {
 		identity: unknown,
 		operation: () => PregameRegistrationStatus,
 	) => {
-		requireApplicationFrame(event, BrowserWindow.fromWebContents(event.sender));
+		requireApplicationFrame(event, applicationWindow);
 		if (
 			!documents.isAdmitted(identity) ||
 			(documentRetirement !== undefined &&
@@ -1032,6 +1041,16 @@ void (async () => {
 			(error) => {
 				pickerFailure = formatError(error);
 				reportWindowSettingsFailure(window, error);
+			},
+			() => {
+				const { width, height } = window.native.getNormalBounds();
+				return {
+					normalBounds: { width, height },
+					maximized: window.native.isMaximized(),
+					fullscreen: false,
+					freeResize: true,
+					borderless: false,
+				};
 			},
 		);
 		await navigate("picker", "launcher/index.html");
@@ -1111,7 +1130,7 @@ void (async () => {
 					window,
 					restoredWindow,
 					(snapshot) => {
-						if (!window.isDestroyed())
+						if (!window.native.isDestroyed())
 							window.webContents.send("window:display-state", snapshot);
 					},
 					(error) => reportWindowSettingsFailure(window, error),
@@ -1129,7 +1148,7 @@ void (async () => {
 					APP_PERSISTENCE_TUNING.visualCacheWriteDelayMs,
 					(message) => {
 						console.error(message);
-						if (owner.attempt === attempt && !window.isDestroyed())
+						if (owner.attempt === attempt && !window.native.isDestroyed())
 							window.webContents.send("visual-cache:failure", message);
 					},
 				);
@@ -1156,7 +1175,7 @@ void (async () => {
 				prepareRenderer: () => {
 					if (
 						documents.role !== "client" ||
-						window.isDestroyed() ||
+						window.native.isDestroyed() ||
 						fatalReported
 					) {
 						retirement.acceptPreparation({ kind: "prepared" });
@@ -1263,7 +1282,7 @@ void (async () => {
 	);
 	handle("launcher:copy-hardware-info", "picker", (_event, input: unknown) =>
 		copyHardwareInfo(
-			window,
+			window.native,
 			input,
 			startupSettings,
 			appSettings.settings,
@@ -1325,7 +1344,7 @@ void (async () => {
 	handle("client:prepared-close", "client", (_event, payload: unknown) => {
 		documentRetirement?.acceptPreparation(payload);
 	});
-	window.on("close", (event) => {
+	window.on("close", (event: Electron.Event) => {
 		event.preventDefault();
 		updates.stop();
 		quitting = true;

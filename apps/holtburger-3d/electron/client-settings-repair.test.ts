@@ -34,6 +34,7 @@ const userContext = {
 const initialWindow = {
 	normalBounds: { width: 1440, height: 900 },
 	maximized: false,
+	borderless: false,
 	fullscreen: false,
 	freeResize: true,
 };
@@ -128,6 +129,7 @@ describe("persisted settings repair", () => {
 		expect(store.readWindow()).toEqual({
 			normalBounds: initialWindow.normalBounds,
 			maximized: true,
+			borderless: false,
 			fullscreen: false,
 			freeResize: true,
 		});

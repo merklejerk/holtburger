@@ -43,8 +43,6 @@ export const windowDisplaySnapshotSchema = z
 		busy: z.boolean(),
 		/** Preview decision or failed restoration awaiting retry; null during native operations. */
 		confirmation: displayConfirmationSchema.nullable(),
-		/** Current display refresh when GPU vsync is requested; null when disabled or unavailable. */
-		vsyncRefreshHz: z.number().positive().nullable(),
 		/** Actual viewport size, including any desktop scaling quantization. */
 		contentSize: windowContentSizeSchema,
 		/** Supported window sizes meeting the app minimum, independent of monitor placement. */

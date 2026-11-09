@@ -7,13 +7,12 @@ const snapshot: WindowDisplaySnapshot = {
 	freeResize: true,
 	busy: false,
 	confirmation: null,
-	vsyncRefreshHz: 144,
 	contentSize: { width: 1024, height: 768 },
 	presets: [],
 };
 
 describe("native display observation", () => {
-	it("retains a monitor event that arrives before an older bootstrap reply", async () => {
+	it("retains a display event that arrives before an older bootstrap reply", async () => {
 		const initial = Promise.resolve(snapshot);
 		const handlers = new Set<(value: unknown) => void>();
 		const accept = vi.fn();
@@ -30,13 +29,12 @@ describe("native display observation", () => {
 			accept,
 			report,
 		);
-		for (const handler of handlers)
-			handler({ ...snapshot, vsyncRefreshHz: 60 });
+		for (const handler of handlers) handler({ ...snapshot, fullscreen: true });
 		await initial;
 		expect(accept).toHaveBeenCalledTimes(1);
 		expect(accept).toHaveBeenLastCalledWith({
 			...snapshot,
-			vsyncRefreshHz: 60,
+			fullscreen: true,
 		});
 		expect(report).not.toHaveBeenCalled();
 		stop();

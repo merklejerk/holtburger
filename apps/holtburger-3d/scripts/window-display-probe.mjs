@@ -111,7 +111,6 @@ async function probe() {
 			restoredInitial,
 			(state) => window.webContents.send("window:display-state", state),
 			(error) => failures.push(error),
-			() => null,
 		);
 		const stop = observeWindowGeometry(
 			window,

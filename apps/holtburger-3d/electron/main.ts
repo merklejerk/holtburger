@@ -1115,17 +1115,6 @@ void (async () => {
 							window.webContents.send("window:display-state", snapshot);
 					},
 					(error) => reportWindowSettingsFailure(window, error),
-					() => {
-						if (
-							app.commandLine.hasSwitch("disable-gpu-vsync") ||
-							app.commandLine.hasSwitch("disable-frame-rate-limit")
-						)
-							return null;
-						const hz = screen.getDisplayMatching(
-							window.getBounds(),
-						).displayFrequency;
-						return Number.isFinite(hz) && hz > 0 ? hz : null;
-					},
 				);
 				windowDisplay = controls;
 				stopGeometry = observeWindowGeometry(

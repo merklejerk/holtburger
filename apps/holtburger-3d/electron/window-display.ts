@@ -161,8 +161,6 @@ export class WindowDisplay {
 	readonly #window: DisplayWindow;
 	readonly #publish: (snapshot: WindowDisplaySnapshot) => void;
 	readonly #report: (error: unknown) => void;
-	/** Native graphics policy and monitor facts stay with the Electron composition root. */
-	readonly #readVsyncRefreshHz: () => number | null;
 	#windowed: WindowedGeometry;
 	#freeResize: boolean;
 	#busy = false;
@@ -177,7 +175,6 @@ export class WindowDisplay {
 		saved: ClientWindowSettings,
 		publish: (snapshot: WindowDisplaySnapshot) => void,
 		report: (error: unknown) => void,
-		readVsyncRefreshHz: () => number | null,
 	) {
 		this.#window = window;
 		this.#windowed = {
@@ -185,7 +182,6 @@ export class WindowDisplay {
 			maximized: saved.maximized,
 		};
 		this.#report = report;
-		this.#readVsyncRefreshHz = readVsyncRefreshHz;
 		this.#freeResize = saved.freeResize;
 		this.#publish = publish;
 		for (const event of this.#events) window.on(event, this.refresh);
@@ -213,7 +209,6 @@ export class WindowDisplay {
 			freeResize: this.#freeResize,
 			busy: this.#busy,
 			confirmation: this.#busy ? null : (this.#preview?.confirmation ?? null),
-			vsyncRefreshHz: this.#readVsyncRefreshHz(),
 			contentSize: { width: content.width, height: content.height },
 			// Window sizes are requests, not display modes. Native monitor placement can be
 			// unavailable under Wayland; do not use it to hide otherwise valid presets.

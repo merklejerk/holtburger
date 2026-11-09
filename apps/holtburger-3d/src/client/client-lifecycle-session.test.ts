@@ -2033,7 +2033,7 @@ describe("ClientLifecycleSession", () => {
 			cue: 7,
 			intensity: 0.5,
 		});
-		transport.emit("client-server-controlled-motion", null);
+		transport.emit("client-local-movement-displaced", null);
 		transport.emit("client-presentation-discontinuity", {
 			worldGeneration: 4,
 			kind: "reset",
@@ -2073,7 +2073,7 @@ describe("ClientLifecycleSession", () => {
 			"vitals",
 			"chat",
 			"dynamic-script-cue",
-			"server-controlled-motion",
+			"local-movement-displaced",
 			"presentation-discontinuity",
 			"lifecycle",
 			"exit-requested",

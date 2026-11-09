@@ -405,7 +405,7 @@ type ClientEventName = Extract<
 	| "client-player-visual-capture-changed"
 	| "client-character-motion-capabilities-updated"
 	| "client-character-motion-feedback"
-	| "client-server-controlled-motion"
+	| "client-local-movement-displaced"
 	| "client-precise-jump-evaluation"
 	| "client-precise-jump-transaction-feedback"
 	| "client-entity-selection-query-result"
@@ -638,7 +638,7 @@ export type ClientLifecycleSessionEvent =
 			readonly type: "character-motion-feedback";
 			readonly feedback: ClientCharacterMotionFeedback;
 	  }
-	| { readonly type: "server-controlled-motion" }
+	| { readonly type: "local-movement-displaced" }
 	| {
 			readonly type: "precise-jump-evaluation";
 			readonly evaluation: ClientPreciseJumpProgress;
@@ -1816,10 +1816,12 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
-				await listen("client-server-controlled-motion", (payload) => {
+				await listen("client-local-movement-displaced", (payload) => {
 					if (payload !== null)
-						throw new Error("Invalid server-controlled motion notification.");
-					this.#emit({ type: "server-controlled-motion" });
+						throw new Error(
+							"Invalid local movement displacement notification.",
+						);
+					this.#emit({ type: "local-movement-displaced" });
 				}),
 			);
 			unlisteners.push(

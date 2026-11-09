@@ -1347,7 +1347,7 @@
 					});
 				}
 				return;
-			case "server-controlled-motion":
+			case "local-movement-displaced":
 				inputArbiter?.cancelAutoRun();
 				return;
 			case "world-name":

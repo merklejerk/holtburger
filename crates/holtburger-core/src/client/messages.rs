@@ -198,19 +198,18 @@ impl ClientRuntime {
                         }
                         self.movement
                             .record_server_control_sequence(data.server_control_sequence);
-                        let world_events = {
-                            let ClientRuntime {
-                                movement,
-                                world,
-                                session,
-                                ..
-                            } = self;
-                            super::simulation::handle_server_controlled_movement(
-                                data, movement, world, session,
-                            )
-                            .await?
-                        };
-                        follow_up_events.extend(world_events);
+                        let admission = super::simulation::handle_server_controlled_movement(
+                            data,
+                            &mut self.movement,
+                            &mut self.world,
+                        );
+                        if admission
+                            == super::simulation::ServerMotionAdmission::DisplacesLocalMovement
+                        {
+                            let _ = self
+                                .client_view_event_tx
+                                .send(ClientViewEvent::LocalMovementDisplaced);
+                        }
                     }
                     WorldEvent::SelfUpdatePosition {
                         position,
@@ -1240,20 +1239,34 @@ impl ClientRuntime {
 mod tests {
     use super::*;
     use crate::DynamicEntityEvent;
+    use crate::client::movement_types::{CharacterDrive, PlayerDriveIntent};
     use crate::client::{ClientState, PHYSICS_TICK_MS, PendingOperation, builder};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
-        PropertyInt64, PropertyString, PropertyUpdate, WorldObjectPropertyAccessorsMut,
+        PropertyDataId, PropertyInt64, PropertyString, PropertyUpdate,
+        WorldObjectPropertyAccessorsMut,
     };
-    use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType, Quaternion};
+    use holtburger_common::{
+        CharacterOptions1, CharacterOptions2, ConfirmationType, Quaternion, Vector3,
+    };
+    use holtburger_content::MotionSequenceCatalog;
+    use holtburger_dat::file_type::animation::{Animation, AnimationFlags};
+    use holtburger_dat::file_type::motion_table::{
+        AnimData, MotionData, MotionDataFlags, MotionTable,
+    };
+    use holtburger_dat::file_type::setup_model::AnimationFrame;
     use holtburger_protocol::errors::WeenieError;
     use holtburger_protocol::messages::movement::{
-        MotionStance, TurnToHeading, TurnToObject, TurnToParameters,
+        InterpretedMotionState, MotionItem, MotionStance, MovementStateFlags, TurnToHeading,
+        TurnToObject, TurnToParameters,
     };
     use holtburger_protocol::traits::ProtocolPack;
     use holtburger_world::WorldEvent;
+    use holtburger_world::motion::MotionCommand;
     use holtburger_world::player::PlayerCharacterOptions;
+    use holtburger_world::state::motion_resolution::test_support::FIXTURE_STAND_COMMAND;
     use holtburger_world::stats::CharacterLevelInfo;
+    use std::collections::HashMap;
 
     fn build_test_client() -> ClientRuntime {
         builder::build_test_client(ClientState::Connected)
@@ -1499,6 +1512,170 @@ mod tests {
         assert!(client.application_snapshot().fellowship.is_none());
         client.handle_message(&encoded).await.unwrap();
         assert!(client.application_snapshot().fellowship.is_none());
+    }
+
+    #[tokio::test]
+    async fn server_motion_notifies_displacement_only_when_local_movement_is_displaced() {
+        const TABLE: u32 = 0x0900_0020;
+        const HEAL_SELF: u16 = 0x010e;
+        const HEAL_OTHER: u16 = 0x010f;
+        const THRUST_MEDIUM: u16 = 0x0058;
+        for (command, preserves_movement) in [
+            (HEAL_SELF, true),
+            (HEAL_OTHER, true),
+            (THRUST_MEDIUM, false),
+        ] {
+            let mut client = build_test_client();
+            let guid = Guid(0x5000_0001);
+            client
+                .world
+                .seed_local_player_entity(guid, "Healer", WorldPosition::default());
+            const ANIMATION: u32 = 0x0300_0001;
+            let style = MotionStance::NonCombat as u32;
+            let motion = MotionData {
+                bitfield: 0,
+                flags: MotionDataFlags::empty(),
+                anims: vec![AnimData {
+                    anim_id: ANIMATION,
+                    low_frame: 0,
+                    high_frame: -1,
+                    framerate: 1.0,
+                }],
+                velocity: None,
+                omega: None,
+            };
+            client.world.set_motion_sequences(
+                MotionSequenceCatalog::assemble(
+                    [MotionTable {
+                        id: TABLE,
+                        default_style: style,
+                        style_defaults: HashMap::from([(style, FIXTURE_STAND_COMMAND)]),
+                        cycles: HashMap::from([
+                            (
+                                MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
+                                motion.clone(),
+                            ),
+                            (
+                                MotionTable::cycle_key(style, MotionCommand::RUN_FORWARD.raw()),
+                                MotionData {
+                                    flags: MotionDataFlags::HAS_VELOCITY,
+                                    velocity: Some(Vector3::new(1.0, 0.0, 0.0)),
+                                    ..motion.clone()
+                                },
+                            ),
+                        ]),
+                        modifiers: HashMap::new(),
+                        links: HashMap::from([(
+                            MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
+                            HashMap::from([(0x1000_0000 | u32::from(command), motion)]),
+                        )]),
+                    }],
+                    [Animation {
+                        id: ANIMATION,
+                        flags: AnimationFlags::empty(),
+                        num_parts: 0,
+                        num_frames: 1,
+                        pos_frames: Vec::new(),
+                        part_frames: vec![AnimationFrame {
+                            frames: Vec::new(),
+                            hooks: Vec::new(),
+                        }],
+                    }],
+                    [],
+                )
+                .unwrap(),
+            );
+            client
+                .world
+                .player_entity_mut()
+                .unwrap()
+                .set_did_prop(PropertyDataId::MotionTable, Guid(TABLE));
+            let now = Instant::now();
+            client.movement.enqueue_drive_intent(
+                PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
+                now,
+            );
+            client
+                .movement
+                .tick(now, &mut client.world, &mut client.session)
+                .await
+                .unwrap();
+            assert!(client.movement.has_active_manual_drive());
+            let mut events = client.client_view_event_tx.subscribe();
+            let gesture = MovementEventData {
+                guid,
+                object_instance_sequence: client.world.player.instance_sequence,
+                movement_sequence: 1,
+                server_control_sequence: 1,
+                is_autonomous: false,
+                movement_type: MovementType::Invalid,
+                motion_flags: 0,
+                current_style: MotionStance::NonCombat.interpreted(),
+                data: MovementTypeData::Invalid(MovementInvalid {
+                    state: InterpretedMotionState {
+                        flags: MovementStateFlags::CURRENT_STYLE
+                            | MovementStateFlags::FORWARD_COMMAND,
+                        current_style: Some(MotionStance::NonCombat.interpreted()),
+                        forward_command: Some(InterpretedMotionCommand(
+                            MotionCommand::READY.raw() as u16
+                        )),
+                        num_commands: 1,
+                        commands: vec![MotionItem::new(command, 1, false, 1.0)],
+                        ..Default::default()
+                    },
+                    sticky_object: None,
+                }),
+            };
+            let encoded_gesture =
+                encode_message(&GameMessage::UpdateMotion(Box::new(gesture.clone())));
+            client.handle_message(&encoded_gesture).await.unwrap();
+            assert!(client.world.has_authored_motion_actions(guid));
+            assert_eq!(
+                client.movement.has_active_manual_drive(),
+                preserves_movement
+            );
+            assert_eq!(
+                std::iter::from_fn(|| events.try_recv().ok())
+                    .filter(|event| matches!(event, ClientViewEvent::LocalMovementDisplaced))
+                    .count(),
+                usize::from(!preserves_movement),
+            );
+
+            // A duplicate packet must not publish another admission outcome.
+            client.handle_message(&encoded_gesture).await.unwrap();
+            assert!(
+                !std::iter::from_fn(|| events.try_recv().ok())
+                    .any(|event| matches!(event, ClientViewEvent::LocalMovementDisplaced))
+            );
+
+            // A server-directed turn still displaces independent movement.
+            let takeover = MovementEventData {
+                movement_sequence: 2,
+                server_control_sequence: 2,
+                movement_type: MovementType::TurnToHeading,
+                data: MovementTypeData::TurnToHeading(TurnToHeading {
+                    params: TurnToParameters {
+                        desired_heading: 180.0,
+                        speed: 1.0,
+                        movement_parameters: 0,
+                    },
+                }),
+                ..gesture
+            };
+            client
+                .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(
+                    takeover,
+                ))))
+                .await
+                .unwrap();
+            assert!(!client.movement.has_active_manual_drive());
+            assert_eq!(
+                std::iter::from_fn(|| events.try_recv().ok())
+                    .filter(|event| matches!(event, ClientViewEvent::LocalMovementDisplaced))
+                    .count(),
+                1
+            );
+        }
     }
 
     fn server_controlled_motion(

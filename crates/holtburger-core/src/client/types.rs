@@ -18,7 +18,6 @@ use holtburger_protocol::messages::combat::{
 };
 use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
-use holtburger_protocol::messages::movement::MovementEventData;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{
     CharacterCreateRequestData, CharacterCreateResponseData, CharacterEntry, ChatChannel,
@@ -1235,9 +1234,8 @@ pub enum ClientViewEvent {
     SelfMovementKinematicsUpdated {
         kinematics: Option<SelfMovementKinematics>,
     },
-    SelfServerControlledMotion {
-        data: Box<MovementEventData>,
-    },
+    /// Server motion admission displaced local movement; compatible gestures do not emit this.
+    LocalMovementDisplaced,
     ForcedReposition {
         guid: Guid,
         pos: holtburger_common::position::WorldPosition,

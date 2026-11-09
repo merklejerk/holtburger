@@ -1414,8 +1414,8 @@ pub enum ClientHostEvent {
     PlayerVisualCaptureChanged(Option<holtburger_core::client::player_visual::PlayerVisualCapture>),
     CharacterMotionCapabilitiesUpdated(Option<ClientCharacterMotionCapabilitiesWire>),
     CharacterMotionFeedback(ClientCharacterMotionFeedbackWire),
-    /// Accepted non-autonomous server movement for the local character.
-    ServerControlledMotion,
+    /// Server motion admission displaced the local character's independent movement.
+    LocalMovementDisplaced,
     PreciseJumpEvaluation(ClientPreciseJumpEvaluationWire),
     PreciseJumpTransactionFeedback(ClientPreciseJumpTransactionFeedbackWire),
     EntitySelectionQueryResult(ClientEntitySelectionQueryResultWire),
@@ -1865,9 +1865,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::CharacterMotionFeedback(feedback) => {
             Some(ClientHostEvent::CharacterMotionFeedback(feedback.into()))
         }
-        ClientViewEvent::SelfServerControlledMotion { .. } => {
-            Some(ClientHostEvent::ServerControlledMotion)
-        }
+        ClientViewEvent::LocalMovementDisplaced => Some(ClientHostEvent::LocalMovementDisplaced),
         ClientViewEvent::PreciseJumpEvaluation(evaluation) => {
             Some(ClientHostEvent::PreciseJumpEvaluation(evaluation.into()))
         }
@@ -3081,10 +3079,12 @@ mod tests {
     }
 
     #[test]
-    fn server_controlled_motion_projects_as_a_payloadless_notification() {
+    fn local_movement_displacement_projects_as_a_payloadless_notification() {
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
         StdioEventSink::new(sender)
-            .publish_client_event(ClientHostEvent::ServerControlledMotion)
+            .publish_client_event(
+                project_client_event(ClientViewEvent::LocalMovementDisplaced).unwrap(),
+            )
             .unwrap();
         let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
             panic!("Expected event");
@@ -3092,7 +3092,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(event).unwrap(),
             serde_json::json!({
-                "event": "client-server-controlled-motion", "payload": null
+                "event": "client-local-movement-displaced", "payload": null
             })
         );
     }

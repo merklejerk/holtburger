@@ -17,7 +17,6 @@ use holtburger_common::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, RigidTransform, Vector3};
 use holtburger_protocol::messages::*;
-use holtburger_session::Session;
 use holtburger_world::entity::EntityMotionDirective;
 use holtburger_world::motion::{
     LocomotionPresentationSource, ServerDirectedMotionState, begin_server_directed_motion,
@@ -920,12 +919,20 @@ fn tick_pose_only_remote_entities(
     Ok(events)
 }
 
-pub(super) async fn handle_server_controlled_movement(
+/// Effect of an admitted server motion on the client's independent movement controls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ServerMotionAdmission {
+    /// Gesture playback allows the latest held movement to survive.
+    PreservesLocalMovement,
+    /// Server authority displaces local movement, even if its directive cannot be resolved.
+    DisplacesLocalMovement,
+}
+
+pub(super) fn handle_server_controlled_movement(
     data: &MovementEventData,
     movement: &mut MovementSystem,
     world: &mut WorldState,
-    _session: &mut Session,
-) -> Result<Vec<WorldEvent>> {
+) -> ServerMotionAdmission {
     log::info!(
         ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",
         data.movement_type,
@@ -936,10 +943,11 @@ pub(super) async fn handle_server_controlled_movement(
         && world.permits_gesture_locomotion(world.player.guid)
     {
         movement.admit_server_gesture(Instant::now(), world);
+        ServerMotionAdmission::PreservesLocalMovement
     } else {
         movement.admit_server_controlled_motion(motion, Instant::now(), world);
+        ServerMotionAdmission::DisplacesLocalMovement
     }
-    Ok(Vec::new())
 }
 
 fn build_server_controlled_motion(

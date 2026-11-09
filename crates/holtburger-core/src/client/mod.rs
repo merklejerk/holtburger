@@ -1430,11 +1430,6 @@ impl ClientRuntime {
                         grounded: *grounded,
                     });
             }
-            WorldEvent::SelfServerControlledMotion(data) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::SelfServerControlledMotion { data: data.clone() });
-            }
             WorldEvent::ForcedReposition {
                 guid,
                 pos,
@@ -2799,10 +2794,7 @@ mod tests {
             &data,
             &mut client.movement,
             &mut client.world,
-            &mut client.session,
-        )
-        .await
-        .unwrap();
+        );
         assert!(client.world.has_authored_motion_actions(guid));
         for drive in [
             movement_types::CharacterDrive::builder()
@@ -3288,10 +3280,7 @@ mod tests {
             &data,
             &mut client.movement,
             &mut client.world,
-            &mut client.session,
-        )
-        .await
-        .unwrap();
+        );
         assert!(client.world.has_pending_motion_gesture(guid));
         let clip_before_rejected_launch = client
             .world

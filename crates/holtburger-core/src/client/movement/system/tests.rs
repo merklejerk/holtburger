@@ -2998,14 +2998,14 @@ async fn gesture_packets_preserve_held_input_through_release_and_reach() {
         let before_admission = session.game_action_sequence;
         world.handle_message(&GameMessage::UpdateMotion(Box::new(data.clone())));
         assert!(world.has_manual_locomotion(guid));
-        crate::client::simulation::handle_server_controlled_movement(
-            &data,
-            &mut movement,
-            &mut world,
-            &mut session,
-        )
-        .await
-        .unwrap();
+        assert_eq!(
+            crate::client::simulation::handle_server_controlled_movement(
+                &data,
+                &mut movement,
+                &mut world,
+            ),
+            crate::client::simulation::ServerMotionAdmission::PreservesLocalMovement,
+        );
         assert!(movement.has_active_manual_drive());
         assert!(world.has_manual_locomotion(guid));
         assert_eq!(

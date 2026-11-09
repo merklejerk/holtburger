@@ -94,6 +94,48 @@ function fixture() {
 }
 
 describe("immediate target traversal", () => {
+	it.each(
+		(["smart-combat", "non-creature", "unopened-corpse"] as const).flatMap(
+			(filter) =>
+				(["tap", "hold"] as const).map((action) => ({ filter, action })),
+		),
+	)(
+		"$filter $action acquires the immediate, then traverses the remaining targets in ranked order",
+		({ filter, action }) => {
+			const f = fixture();
+			const aligned = candidate(
+				2,
+				POLICY.initialDistanceBandMeters * 0.9,
+				1,
+				filter,
+			);
+			const immediate = candidate(
+				3,
+				POLICY.initialDistanceBandMeters * 0.7,
+				0.98,
+				filter,
+			);
+			const farther = candidate(
+				4,
+				POLICY.initialDistanceBandMeters * 1.5,
+				1,
+				filter,
+			);
+			f.set([farther, immediate, aligned]);
+			if (action === "tap") f.cycle.cycle(filter, 1);
+			else f.cycle.selectImmediate(filter);
+			expect(f.selection.selectedGuid()).toBe(immediate.guid);
+			for (const target of [aligned, farther, immediate]) {
+				f.cycle.cycle(filter, 1);
+				expect(f.selection.selectedGuid()).toBe(target.guid);
+			}
+			// Reverse traversal follows the same ring back through every target.
+			for (const target of [farther, aligned, immediate]) {
+				f.cycle.cycle(filter, -1);
+				expect(f.selection.selectedGuid()).toBe(target.guid);
+			}
+		},
+	);
 	it.each([1, 1.4, 3.2])(
 		"skips an immediate-only door at %s band widths even when the innermost band is empty",
 		(distanceInBandWidths) => {

@@ -415,8 +415,8 @@ export class ClientCycleSelectionController {
 		let start = direction === 1 ? -1 : 0;
 		if (cursorIndex >= 0) start = cursorIndex;
 		if (immediate !== undefined && (cursorIndex < 0 || changedImmediate)) {
-			// Begin just before the immediate; the shared traversal skips it if already selected.
-			start = matching.indexOf(immediate) - direction;
+			// The immediate leads the ring; traversal skips it if already selected.
+			start = -direction;
 		}
 		for (let step = 1; step <= matching.length; step++) {
 			const index =
@@ -456,7 +456,7 @@ export class ClientCycleSelectionController {
 	#candidates(filter: CycleFilter): {
 		/** Nearest candidate; Smart Tab requires the cone and innermost distance band. */
 		readonly immediate: CycleCandidate | undefined;
-		/** Broad traversal ring, including the immediate-only winner when present. */
+		/** Immediate winner first, followed by the remaining traversable candidates in ranked order. */
 		readonly matching: CycleCandidate[];
 	} | null {
 		const candidates = this.#sample();
@@ -489,12 +489,16 @@ export class ClientCycleSelectionController {
 				winner = { candidate, distanceSquared: acquisition.distanceSquared };
 		}
 		const immediate = winner?.candidate;
+		const matching = ranked.filter(
+			(candidate) =>
+				candidate !== immediate && candidate.filters[filter] === "cycle",
+		);
+		// Promote the winner rather than rotating the ring: otherwise higher-ranked
+		// targets preceding it would be deferred until traversal wraps around.
+		if (immediate !== undefined) matching.unshift(immediate);
 		return {
 			immediate,
-			matching: ranked.filter(
-				(candidate) =>
-					candidate === immediate || candidate.filters[filter] === "cycle",
-			),
+			matching,
 		};
 	}
 

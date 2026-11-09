@@ -66,7 +66,8 @@
 </script>
 
 <script lang="ts">
-	import { hudAttention } from "../app/hud-attention";
+	import { shortcutAttention } from "./client-shortcut-attention";
+	import type { ClientLifecycleSession } from "./client-lifecycle-session";
 	import type { ContentsArrivalSource } from "./client-contents-arrivals";
 	import { presentClientBinding } from "./client-binding-catalog";
 	import type { ClientCombatMode } from "./client-host-contract";
@@ -103,6 +104,11 @@
 		readonly activePanel: ClientSystemPanel | null;
 		/** Session arrival notifications remain live while inventory is closed. */
 		readonly inventory?: ContentsArrivalSource | null;
+		/** Accepted session activity remains live while journal and character panels are closed. */
+		readonly session: Pick<
+			ClientLifecycleSession,
+			"state" | "subscribe"
+		> | null;
 		readonly onToggle: (panel: ClientSystemPanel) => void;
 	}
 
@@ -116,35 +122,12 @@
 		shortcuts,
 		activePanel,
 		inventory,
+		session,
 		onToggle,
 		combatMode,
 		combatEnabled,
 		onToggleCombat,
 	}: Props = $props();
-	/** Rebinding withdraws the old session subscription without pulsing the new baseline. */
-	function inventoryAttention(
-		node: HTMLElement,
-		source: ContentsArrivalSource | null | undefined,
-	) {
-		let sequence = 0;
-		const attention = hudAttention(node, null);
-		let unsubscribe = source?.subscribeArrivals(() =>
-			attention.update(++sequence),
-		);
-		return {
-			update(next: ContentsArrivalSource | null | undefined) {
-				if (next === source) return;
-				unsubscribe?.();
-				source = next;
-				unsubscribe = source?.subscribeArrivals(() =>
-					attention.update(++sequence),
-				);
-			},
-			destroy() {
-				unsubscribe?.();
-			},
-		};
-	}
 	const trayPlacement = $derived.by(() => {
 		const defaults = createClientHudPanelPlacement(
 			CLIENT_UI_DEFAULTS.shortcuts,
@@ -205,7 +188,7 @@
 			<button
 				type="button"
 				class="ui-hud-button ui-icon-button"
-				use:inventoryAttention={panel === "inventory" ? inventory : null}
+				use:shortcutAttention={{ panel, inventory, session }}
 				title={combat
 					? `Combat stance: ${combatMode}. Toggle peace/combat (${combatShortcut.description})`
 					: panel === null

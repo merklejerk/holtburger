@@ -126,7 +126,44 @@ export async function probeContracts(options: {
 		return originalRead();
 	};
 	try {
+		const journalButton = get<HTMLButtonElement>(
+			'nav[aria-label="Game shortcuts"] button[aria-label="Journal"]',
+		);
+		const characterButton = get<HTMLButtonElement>(
+			'nav[aria-label="Game shortcuts"] button[aria-label="Character"]',
+		);
+		const animation = (button: HTMLElement) => button.getAnimations()[0];
+		const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+		// Recovery establishes a quiet spell baseline; live membership changes then drive the dock.
+		baseline(1, { rows });
+		await settle();
+		const initialCharacterPulse = animation(characterButton);
+		emit("client-player-spells-updated", { spellIds: [1] });
+		require(animation(characterButton) ===
+			initialCharacterPulse, "Initial spellbook hydration pulsed Character");
+		emit("client-player-spells-updated", { spellIds: [1, 2] });
+		const learnedPulse = animation(characterButton);
+		require(reduced ||
+			(learnedPulse !== undefined &&
+				learnedPulse !==
+					initialCharacterPulse), "Learning a spell did not pulse Character while its panel was closed");
+		emit("client-player-spells-updated", { spellIds: [2, 1] });
+		emit("client-player-spells-updated", { spellIds: [2] });
+		require(animation(characterButton) ===
+			learnedPulse, "Reordering or removing spells restarted the Character pulse");
+		emit("client-player-spells-updated", { spellIds: [3] });
+		require(reduced ||
+			animation(characterButton) !==
+				learnedPulse, "Learning alongside removal did not restart the Character pulse");
+		const beforeRecovery = animation(characterButton);
+		baseline(1, { rows });
+		emit("client-player-spells-updated", { spellIds: [4] });
+		require(animation(characterButton) ===
+			beforeRecovery, "Recovery replayed a Character pulse");
+		const initialJournalPulse = animation(journalButton);
 		emit("client-contracts-updated", { contracts: { rows } });
+		require(animation(journalButton) ===
+			initialJournalPulse, "Journal snapshot hydration pulsed the shortcut");
 		const flushNotifications = async () => {
 			await new Promise((resolve) =>
 				setTimeout(resolve, CLIENT_TUNING.journal.membershipToastBatchMs + 50),
@@ -137,11 +174,19 @@ export async function probeContracts(options: {
 		require(center.snapshot() ===
 			null, "Snapshot hydration produced a membership toast");
 		emit("client-contract-membership-changed", membershipFixture[0]);
+		const addedPulse = animation(journalButton);
+		require(reduced ||
+			(addedPulse !== undefined &&
+				addedPulse !==
+					initialJournalPulse), "Adding a contract did not pulse Journal while its panel was closed");
 		await flushNotifications();
 		require(renderedToastIncludes(
 			"Added to journal: Same quest",
 		), "Added membership did not reach the production toast overlay while Journal was closed");
+		const beforeRemoval = animation(journalButton);
 		emit("client-contract-membership-changed", membershipFixture[1]);
+		require(animation(journalButton) ===
+			beforeRemoval, "Removing a contract restarted the Journal pulse");
 		await flushNotifications();
 		require(center.snapshot()?.message ===
 			"Removed from journal: Contract #99" &&

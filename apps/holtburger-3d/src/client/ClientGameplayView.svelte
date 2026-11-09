@@ -1616,6 +1616,7 @@
 		{/if}
 
 		<ClientShortcutDock
+			session={itemSession}
 			{inventory}
 			placement={hudLayout.shortcuts}
 			editable={hudMode === "layout"}

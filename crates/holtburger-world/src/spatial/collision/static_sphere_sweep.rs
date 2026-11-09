@@ -1015,24 +1015,21 @@ fn update_water_restriction_hit(
             continue;
         }
         let local_start = anchor_to_landblock(sweep.start, sweep.anchor, *owner);
-        if (0.0..holtburger_common::position::METERS_PER_LANDBLOCK).contains(&local_start.x)
-            && (0.0..holtburger_common::position::METERS_PER_LANDBLOCK).contains(&local_start.y)
-        {
-            continue;
-        }
         if let Some(hit) = landblock_entry_hit(local_start, displacement) {
             update_earliest(earliest, hit);
         }
     }
 }
 
+/// Blocks entry into the open XY interior, allowing retreat and travel along its boundary.
+/// A body already inside can leave; an exact boundary start must still block inward travel.
 pub(super) fn landblock_entry_hit(
     start: Vector3,
     displacement: Vector3,
 ) -> Option<StaticSphereSweepHit> {
     let extent = holtburger_common::position::METERS_PER_LANDBLOCK;
-    let mut enter = 0.0_f32;
-    let mut exit = 1.0_f32;
+    let mut enter = f32::NEG_INFINITY;
+    let mut exit = f32::INFINITY;
     let mut normal = Vector3::zero();
     for (start, delta, low_normal, high_normal) in [
         (
@@ -1049,7 +1046,7 @@ pub(super) fn landblock_entry_hit(
         ),
     ] {
         if delta.abs() <= f32::EPSILON {
-            if !(0.0..extent).contains(&start) {
+            if start <= 0.0 || start >= extent {
                 return None;
             }
             continue;
@@ -1066,7 +1063,7 @@ pub(super) fn landblock_entry_hit(
             normal = axis_normal;
         }
         exit = exit.min(axis_exit);
-        if enter > exit {
+        if enter >= exit {
             return None;
         }
     }
@@ -1098,6 +1095,72 @@ mod tests {
     use holtburger_dat::physics::{BspLeaf, BspNode};
     use std::collections::HashMap;
     use std::sync::Arc;
+
+    #[test]
+    fn ocean_boundary_entry_is_directional_on_every_edge() {
+        let extent = holtburger_common::position::METERS_PER_LANDBLOCK;
+        for (edge, inward) in [
+            (
+                Vector3::new(0.0, extent / 2.0, 10.0),
+                Vector3::new(1.0, 0.0, 0.0),
+            ),
+            (
+                Vector3::new(extent, extent / 2.0, 10.0),
+                Vector3::new(-1.0, 0.0, 0.0),
+            ),
+            (
+                Vector3::new(extent / 2.0, 0.0, 10.0),
+                Vector3::new(0.0, 1.0, 0.0),
+            ),
+            (
+                Vector3::new(extent / 2.0, extent, 10.0),
+                Vector3::new(0.0, -1.0, 0.0),
+            ),
+        ] {
+            let tangent = Vector3::new(-inward.y, inward.x, 0.0);
+            for vertical in [-2.0, 0.0, 2.0] {
+                let vertical = Vector3::new(0.0, 0.0, vertical);
+                let hit = landblock_entry_hit(edge, inward + vertical).unwrap();
+                assert_eq!(hit.time_of_impact, 0.0);
+                assert_eq!(hit.normal, inward * -1.0);
+                assert_eq!(landblock_entry_hit(edge, inward * -1.0 + vertical), None);
+                assert_eq!(landblock_entry_hit(edge, tangent + vertical), None);
+                assert_eq!(landblock_entry_hit(edge, tangent * -1.0 + vertical), None);
+                assert_eq!(landblock_entry_hit(edge, vertical), None);
+                assert_eq!(
+                    landblock_entry_hit(edge + inward, inward * -2.0 + vertical),
+                    None
+                );
+                let hit = landblock_entry_hit(edge - inward, inward * 2.0 + vertical).unwrap();
+                assert_eq!(hit.time_of_impact, 0.5);
+                assert_eq!(hit.normal, inward * -1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn ocean_corner_grazing_does_not_enter_the_interior() {
+        let extent = holtburger_common::position::METERS_PER_LANDBLOCK;
+        for corner in [
+            Vector3::new(0.0, 0.0, 10.0),
+            Vector3::new(extent, 0.0, 10.0),
+            Vector3::new(0.0, extent, 10.0),
+            Vector3::new(extent, extent, 10.0),
+        ] {
+            let inward = Vector3::new(
+                if corner.x == 0.0 { 1.0 } else { -1.0 },
+                if corner.y == 0.0 { 1.0 } else { -1.0 },
+                0.0,
+            );
+            assert_eq!(
+                landblock_entry_hit(corner, inward).unwrap().time_of_impact,
+                0.0
+            );
+            assert_eq!(landblock_entry_hit(corner, inward * -1.0), None);
+            let graze = Vector3::new(inward.x, -inward.y, 0.0);
+            assert_eq!(landblock_entry_hit(corner - graze, graze * 2.0), None);
+        }
+    }
 
     #[test]
     fn static_sweep_bounds_preserve_exhaustive_hits_across_shapes_scales_and_frames() {

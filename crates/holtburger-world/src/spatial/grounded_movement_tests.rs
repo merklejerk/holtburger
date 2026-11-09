@@ -486,6 +486,115 @@ fn upper_polygon_back_face_blocks_and_releases_on_retreat() {
 }
 
 #[test]
+fn walking_and_airborne_bodies_can_slide_and_retreat_at_ocean_boundaries() {
+    use holtburger_common::position::METERS_PER_LANDBLOCK;
+
+    let extent = METERS_PER_LANDBLOCK;
+    let speed = 12.0;
+    let travel = speed * MOBILE_CONTACT_TICK_SECONDS;
+    for (water_owner, boundary, inward) in [
+        (
+            EAST,
+            Vector3::new(extent, extent / 2.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+        ),
+        (
+            0xd955_ffff,
+            Vector3::new(0.0, extent / 2.0, 0.0),
+            Vector3::new(-1.0, 0.0, 0.0),
+        ),
+        (
+            0xda56_ffff,
+            Vector3::new(extent / 2.0, extent, 0.0),
+            Vector3::new(0.0, 1.0, 0.0),
+        ),
+        (
+            0xda54_ffff,
+            Vector3::new(extent / 2.0, 0.0, 0.0),
+            Vector3::new(0.0, -1.0, 0.0),
+        ),
+    ] {
+        let mut collision = scene(vec![floor()]);
+        collision
+            .insert(LandblockCollisionAsset {
+                landblock_id: water_owner,
+                terrain: TerrainCollisionSurface {
+                    entirely_water: true,
+                    ..TerrainCollisionSurface::empty()
+                },
+                static_geometry: LandblockColliders::default(),
+            })
+            .unwrap();
+        for airborne in [false, true] {
+            let start = boundary - inward * (travel / 2.0);
+            let mut body = if airborne {
+                grounded_movement_body(
+                    pose(start + Vector3::new(0.0, 0.0, 5.0)),
+                    pair(),
+                    config(),
+                    inward * speed + Vector3::new(0.0, 0.0, 3.0),
+                    GroundState::Airborne,
+                )
+            } else {
+                resting_body(&collision, start, pair())
+            };
+            // Remove rebound so the next tick exercises the exact accepted boundary.
+            body.physical.as_mut().unwrap().response_policy.restitution =
+                PhysicalRestitution::Elastic(PhysicalElasticity::ZERO);
+            let position = |body: &SpatialBody| {
+                body.pose
+                    .reanchor_to_landblock_owner(Guid(LANDBLOCK))
+                    .unwrap()
+                    .coords
+            };
+            // Airborne steering is not a walking control. Seed each requested velocity so both
+            // contact states exercise identical collision chords without adding air-control policy.
+            let advance = |mut body: SpatialBody, velocity: Vector3| {
+                body.retained.velocity = velocity;
+                drive(
+                    &collision,
+                    body,
+                    Vector3::new(velocity.x, velocity.y, 0.0),
+                    1,
+                )
+            };
+            let vertical = if airborne {
+                Vector3::new(0.0, 0.0, 3.0)
+            } else {
+                Vector3::zero()
+            };
+            let mut body = advance(body, inward * speed + vertical);
+            assert!(
+                (position(&body) - boundary).dot(&inward).abs() < EPSILON,
+                "owner={water_owner:08x} airborne={airborne} position={:?} boundary={boundary:?} velocity={:?}",
+                position(&body),
+                body.retained.velocity
+            );
+            // A second inward tick starts exactly at the boundary, not just near it.
+            body = advance(body, inward * speed + vertical);
+            assert!((position(&body) - boundary).dot(&inward).abs() < EPSILON);
+            assert!(body.retained.velocity.dot(&inward).abs() < EPSILON);
+            let tangent = Vector3::new(-inward.y, inward.x, 0.0);
+            let before = position(&body);
+            body = advance(body, (inward + tangent) * speed + vertical);
+            assert!((position(&body) - boundary).dot(&inward).abs() < EPSILON);
+            assert!(((position(&body) - before).dot(&tangent) - travel).abs() < EPSILON);
+            let before = position(&body);
+            body = advance(body, inward * -speed + vertical);
+            assert!(((position(&body) - before).dot(&inward) + travel).abs() < EPSILON);
+            assert_eq!(
+                body.contact,
+                if airborne {
+                    ContactState::Airborne
+                } else {
+                    ContactState::Grounded
+                }
+            );
+        }
+    }
+}
+
+#[test]
 fn whole_water_restriction_is_selected_only_by_primary_sphere() {
     let mut collision = scene(Vec::new());
     insert_test_coverage_neighborhood(&mut collision, &[LANDBLOCK, EAST]);

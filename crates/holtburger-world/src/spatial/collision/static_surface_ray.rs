@@ -219,12 +219,6 @@ impl CollisionScene {
                     continue;
                 }
                 let local_start = anchor_to_landblock(request.start, request.anchor, *owner);
-                if (0.0..holtburger_common::position::METERS_PER_LANDBLOCK).contains(&local_start.x)
-                    && (0.0..holtburger_common::position::METERS_PER_LANDBLOCK)
-                        .contains(&local_start.y)
-                {
-                    continue;
-                }
                 if let Some(hit) =
                     landblock_entry_hit(local_start, request.direction * request.maximum_distance)
                 {

@@ -28,8 +28,9 @@ use crate::spatial::contact_profile::ContactPhaseProfile;
 use crate::spatial::grounded_types::{STATIONARY_FALL_STOP_FRAMES, STATIONARY_FALL_SUPPORT_FRAMES};
 use crate::spatial::{
     CollisionQueryError, CollisionScene, GroundState, GroundedLaunch, GroundedSphere,
-    HardEntityShape, HardSphereSweepHit, PlacedMotionPath, PlacedMotionPoint,
-    StaticSphereSweepRequest, dynamic_index::placed_target_shapes, physical_body::impact_velocity,
+    HardEntityShape, HardSphereSweepHit, PhysicalCollisionExclusions, PhysicalCollisionFilter,
+    PlacedMotionPath, PlacedMotionPoint, StaticSphereSweepRequest,
+    dynamic_index::placed_target_shapes, physical_body::impact_velocity,
 };
 
 /// Maximum stop/slide continuations for ordinary travel in one physical tick.
@@ -1782,6 +1783,7 @@ fn sweep_body_chords(
         contact,
         displacement(spheres.primary()),
         spheres.primary(),
+        contact.filter,
     )?;
     let upper = spheres
         .upper_constraint()
@@ -1793,6 +1795,11 @@ fn sweep_body_chords(
                 contact,
                 displacement(sphere),
                 sphere,
+                // Whole-landblock restrictions belong to the primary center. The upper
+                // sphere constrains geometry, including when it reaches the boundary first.
+                contact
+                    .filter
+                    .with_exclusion(PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER, true),
             )
         })
         .transpose()?;
@@ -1822,6 +1829,7 @@ fn sweep_motion_sphere(
     contact: &ContactParticipant,
     requested: Vector3,
     sphere: GroundedSphere,
+    filter: PhysicalCollisionFilter,
 ) -> std::result::Result<PreparedHardSphereSweep, CollisionQueryError> {
     let center = sphere.center + requested * 0.5;
     let reach = sphere.radius + requested.length() * 0.5;
@@ -1846,7 +1854,7 @@ fn sweep_motion_sphere(
             displacement: requested,
             previous_cell: contact.membership.committed_cell(),
             radius: sphere.radius,
-            filter: contact.filter,
+            filter,
         },
         candidates,
     )

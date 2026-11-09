@@ -228,45 +228,46 @@ vec3 applyTerrainOverlay(vec3 color, uint pcode, uint terrainCode, uint shapeCod
 	return mix(color, sampleTerrainColor(terrainCode, uv).rgb, clamp(1.0 - mask, 0.0, 1.0));
 }
 
+// Read packed codes directly: storing them in a dynamically indexed local array here caused
+// persistent rendering corruption on Iris Xe's Windows OpenGL driver 32.0.101.7077.
 vec3 composeTerrain(uint pcode, TerrainUv uv) {
-	uint codes[4];
-	for (int corner = 0; corner < 4; corner += 1) codes[corner] = terrainCodeAt(pcode, corner);
 	int baseIndex = -1;
 	for (int first = 0; first < 3 && baseIndex < 0; first += 1) {
 		for (int second = first + 1; second < 4; second += 1) {
-			if (codes[first] == codes[second]) {
+			if (terrainCodeAt(pcode, first) == terrainCodeAt(pcode, second)) {
 				baseIndex = first;
 				break;
 			}
 		}
 	}
 	if (baseIndex < 0) {
-		vec3 color = sampleTerrainColor(codes[0], uv).rgb;
-		color = applyTerrainOverlay(color, pcode, codes[1], 2u, uv);
-		color = applyTerrainOverlay(color, pcode, codes[2], 4u, uv);
-		return applyTerrainOverlay(color, pcode, codes[3], 8u, uv);
+		vec3 color = sampleTerrainColor(terrainCodeAt(pcode, 0), uv).rgb;
+		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, 1), 2u, uv);
+		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, 2), 4u, uv);
+		return applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, 3), 8u, uv);
 	}
 
-	uint baseCode = codes[baseIndex];
+	uint baseCode = terrainCodeAt(pcode, baseIndex);
 	vec3 color = sampleTerrainColor(baseCode, uv).rgb;
 	int firstOverlayIndex = -1;
 	uint firstShape = 0u;
 	for (int corner = 0; corner < 4; corner += 1) {
-		if (codes[corner] == baseCode) continue;
+		if (terrainCodeAt(pcode, corner) == baseCode) continue;
 		if (firstOverlayIndex < 0) {
 			firstOverlayIndex = corner;
 			firstShape = 1u << uint(corner);
 			continue;
 		}
-		if (codes[corner] == codes[firstOverlayIndex] && firstOverlayIndex == corner - 1) {
+		if (terrainCodeAt(pcode, corner) == terrainCodeAt(pcode, firstOverlayIndex)
+			&& firstOverlayIndex == corner - 1) {
 			firstShape += 1u << uint(corner);
 			continue;
 		}
-		color = applyTerrainOverlay(color, pcode, codes[firstOverlayIndex], firstShape, uv);
-		return applyTerrainOverlay(color, pcode, codes[corner], 1u << uint(corner), uv);
+		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, firstOverlayIndex), firstShape, uv);
+		return applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, corner), 1u << uint(corner), uv);
 	}
 	if (firstOverlayIndex >= 0) {
-		color = applyTerrainOverlay(color, pcode, codes[firstOverlayIndex], firstShape, uv);
+		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, firstOverlayIndex), firstShape, uv);
 	}
 	return color;
 }

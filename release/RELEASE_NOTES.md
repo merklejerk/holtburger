@@ -2,15 +2,14 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, display:** Window size and fullscreen changes, including F11, are previewed first and revert automatically unless you confirm them.
-- **3D client, camera:** The boom camera now stays above visible water instead of dipping beneath the surface.
-- **3D client, FPS:** The FPS counter shows measured frame cadence rather than the monitor refresh limit, and it recovers from timing glitches.
-- **3D client, characters:** Character selection shows a clear message when the selected character's model data has not been observed.
+- **3D client, display:** Display settings now include a borderless window option that uses the same confirm-or-revert flow as other display changes, and window sizing is corrected against the actual game viewport.
+- **3D client, targeting:** Cycling targets now starts with the target you just acquired and then follows the normal nearby-target ranking.
+- **Launcher:** Saving to a new profile now pre-fills the profile name from the current account, and you can edit it before saving.
 
 ## Known issues
 
 - Windows and macOS may warn when opening the app because it is not signed by a verified publisher. The installation guides below explain how to open it.
-- Windows and macOS behavior of the display controls, including the new confirmation flow, has not been verified natively.
+- Windows and macOS behavior of the display controls, including borderless mode and the confirmation flow, has not been verified natively. Borderless window sizing is best effort and may not match the requested size exactly.
 - The terrain rendering change for Intel Iris Xe has not been verified on that hardware.
 - CLI movement is simplified: jumping, falling, gravity, and stairs are not simulated locally. The server may correct your position or reject actions.
 

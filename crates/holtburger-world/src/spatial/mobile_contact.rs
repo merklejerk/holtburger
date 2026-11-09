@@ -235,6 +235,8 @@ pub struct GroundedContactState {
     pub config: super::GroundedConfig,
     /// Accepted support; the step validates world ownership or re-queries its hard entity.
     pub ground: super::GroundState,
+    /// Consecutive collision-blocked falling ticks, saturated at retail's recovery stage.
+    pub stationary_fall_frames: u8,
 }
 
 /// Prepared geometric role, independent of whether ordinary integration is sleeping.
@@ -397,14 +399,21 @@ impl<'a> PreparedBodyContact<'a> {
                     policy: physical.response_policy,
                     grounded: match physical.definition {
                         PhysicalBodyDefinition::Grounded { config, .. } => {
-                            let super::PhysicalBodyResponseState::Grounded { ground, .. } =
-                                physical.response
+                            let super::PhysicalBodyResponseState::Grounded {
+                                ground,
+                                stationary_fall_frames,
+                                ..
+                            } = physical.response
                             else {
                                 anyhow::bail!(
                                     "grounded contact definition requires grounded response state"
                                 );
                             };
-                            Some(GroundedContactState { config, ground })
+                            Some(GroundedContactState {
+                                config,
+                                ground,
+                                stationary_fall_frames,
+                            })
                         }
                         PhysicalBodyDefinition::FreeSphere { .. }
                         | PhysicalBodyDefinition::FixedPosition { .. } => None,

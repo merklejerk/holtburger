@@ -96,7 +96,9 @@ impl ProtectedFooting {
         let grounded = body.grounded?;
         // Crowd correction may leave residual overlap, but cannot cause a supported body to
         // fall. Timed movement uses this tick's edge policy; launches are airborne.
-        if grounded.ground.walkable_support().is_none()
+        let support = grounded.ground.walkable_support()?;
+        // Recovery supplies controls at the stalled pose, not a geometric ledge to protect.
+        if matches!(support.source, SupportSource::StationaryFall(_))
             || (matches!(movement, HardMovement::Timed(_))
                 && grounded.config.edge_protection != crate::spatial::EdgeProtection::Creature)
         {
@@ -367,6 +369,16 @@ pub(super) fn settle_after_movement(
     let Some(grounded) = body.grounded else {
         return Ok(NavigationFooting::Unchanged);
     };
+    // Keep recovered support at its exact stalled pose. Successful departure must establish
+    // real support or become airborne, and launches have already released this plane.
+    if body.root == body.initial_root
+        && grounded
+            .ground
+            .walkable_support()
+            .is_some_and(|support| matches!(support.source, SupportSource::StationaryFall(_)))
+    {
+        return Ok(NavigationFooting::Unchanged);
+    }
     let walking = grounded.ground.walkable_support().is_some();
     // World-Z ascent is not departure from an uphill surface. Candidate admission
     // and the final normal check below own separation, including genuine launches.
@@ -465,7 +477,9 @@ pub(super) fn settle_after_movement(
             normal,
         };
         let hit = match settled.support.source {
-            SupportSource::World(_) => crate::spatial::HardSphereSweepHit::World(contact),
+            SupportSource::World(_) | SupportSource::StationaryFall(_) => {
+                crate::spatial::HardSphereSweepHit::World(contact)
+            }
             SupportSource::Entity(body_id) => crate::spatial::HardSphereSweepHit::Entity {
                 body_id,
                 hit: contact,

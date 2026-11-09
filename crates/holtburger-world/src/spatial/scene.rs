@@ -1113,25 +1113,37 @@ impl SpatialScene {
         let placement =
             match resolve_dynamic_body_placement(collision, body, physical.response.cell()) {
                 Ok(placement) => placement,
-                Err(error)
-                    if matches!(
-                        error.downcast_ref::<CollisionQueryError>(),
-                        Some(CollisionQueryError::UnknownMotionCell { .. })
-                    ) =>
-                {
-                    // A scene-interest replacement may evict the dungeon containing this body while
-                    // retaining the entity. Preserve its authored pose/cell, but keep it out of
-                    // solving and dynamic-contact indexing until that topology is resident again.
-                    let dynamic = self
+                Err(error) => {
+                    let physical = self
                         .body_store
                         .body_mut(body_id)
                         .and_then(|body| body.physical.as_mut())
-                        .and_then(|physical| physical.dynamic.as_mut())
-                        .expect("validated dynamic body vanished during placement refresh");
+                        .context("placement refresh lost its physical body")?;
+                    // An unqueryable pose interrupts consecutive collision-blocked falling,
+                    // including both absent owners and evicted interior topology.
+                    if let super::PhysicalBodyResponseState::Grounded {
+                        stationary_fall_frames,
+                        ..
+                    } = &mut physical.response
+                    {
+                        *stationary_fall_frames = 0;
+                    }
+                    if !matches!(
+                        error.downcast_ref::<CollisionQueryError>(),
+                        Some(CollisionQueryError::UnknownMotionCell { .. })
+                    ) {
+                        return Err(error);
+                    }
+                    // A scene-interest replacement may evict the dungeon containing this body while
+                    // retaining the entity. Preserve its authored pose/cell, but keep it out of
+                    // solving and dynamic-contact indexing until that topology is resident again.
+                    let dynamic = physical
+                        .dynamic
+                        .as_mut()
+                        .context("placement refresh lost its dynamic body")?;
                     dynamic.activity = DynamicBodyActivity::Suspended;
                     return Ok(());
                 }
-                Err(error) => return Err(error),
             };
         let dynamic = self
             .body_store

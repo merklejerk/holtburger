@@ -23,6 +23,11 @@ pub const RETAIL_LANDING_NORMAL_Z: f32 = 0.087_155_7;
 /// Retail's step-down reach for bodies without walkable support.
 pub const RETAIL_AIRBORNE_STEP_DOWN_HEIGHT: f32 = 0.04;
 
+/// Retail stops continuation after two consecutive stationary falling transitions.
+pub(crate) const STATIONARY_FALL_STOP_FRAMES: u8 = 2;
+/// Retail supplies horizontal recovery support on the third stationary falling transition.
+pub(crate) const STATIONARY_FALL_SUPPORT_FRAMES: u8 = 3;
+
 /// Authored grounded-response policy used by the contact runtime.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GroundedConfig {
@@ -77,7 +82,7 @@ pub struct GroundedBodySpheres {
 /// Retained walkable support selected by the grounded response.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GroundSupport {
-    /// Authored outward-facing unit normal.
+    /// Effective outward-facing unit normal; stationary-fall recovery supplies world up.
     pub normal: Vector3,
     /// Footprint classification retained for bounded edge guidance.
     pub feature: SupportFeature,

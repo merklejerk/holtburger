@@ -25,6 +25,7 @@ use std::borrow::Cow;
 use super::*;
 use crate::spatial::collision::PreparedHardSphereSweep;
 use crate::spatial::contact_profile::ContactPhaseProfile;
+use crate::spatial::grounded_types::{STATIONARY_FALL_STOP_FRAMES, STATIONARY_FALL_SUPPORT_FRAMES};
 use crate::spatial::{
     CollisionQueryError, CollisionScene, GroundState, GroundedLaunch, GroundedSphere,
     HardEntityShape, HardSphereSweepHit, PlacedMotionPath, PlacedMotionPoint,
@@ -507,8 +508,10 @@ pub struct ContactBodyUpdate {
     pub supported_velocity: Vector3,
     /// A nonzero horizontal crowd separation was accepted while supported.
     pub supported_push: bool,
-    /// Final world or hard-entity support; free-flight and projectile response remain airborne.
+    /// Final world, hard-entity or stationary-fall support; flight/projectiles remain airborne.
     pub ground: GroundState,
+    /// Response-owned stationary-fall stage to retain for the next physical tick.
+    pub stationary_fall_frames: u8,
     /// Final movement-sphere domains with primary committed-cell ownership.
     pub membership: SpatialMembership,
     /// Accepted travel and zero-duration adjustments in their actual application order.
@@ -667,6 +670,9 @@ impl<'a> WorkingBody<'a> {
             supported_velocity: self.observed_travel.supported / delta_seconds,
             supported_push: self.supported_push,
             ground: self.ground(),
+            stationary_fall_frames: self
+                .grounded
+                .map_or(0, |grounded| grounded.stationary_fall_frames),
             membership: self.contact.membership,
             motion: self.motion,
             unavailable_owner: self.unavailable_owner,
@@ -940,13 +946,24 @@ fn advance_contacts(
         if let Some(grounded) = body.grounded {
             let valid = match grounded.ground {
                 GroundState::Supported(support) | GroundState::Sliding(support) => {
-                    matches!(support.source, crate::spatial::SupportSource::World(proof) if collision.proves(proof))
+                    matches!(support.source, crate::spatial::SupportSource::World(proof) | crate::spatial::SupportSource::StationaryFall(proof) if collision.proves(proof))
                         && body.mobile.velocity.dot(&support.normal)
                             <= crate::spatial::bsp_query::CONTACT_EPSILON
                 }
                 GroundState::Airborne => false,
             };
             if !valid {
+                if let Some(state) = &mut body.grounded
+                    && matches!(
+                        state
+                            .ground
+                            .walkable_support()
+                            .map(|support| support.source),
+                        Some(crate::spatial::SupportSource::StationaryFall(_))
+                    )
+                {
+                    state.stationary_fall_frames = 0;
+                }
                 refresh_support(collision, &hard, anchor, body, SupportRefresh::Recover)?;
                 // Entity support is re-queried even while sleeping using the ordinary query.
                 // Gameplay concession: retaining grounded state after support removal is also
@@ -1056,6 +1073,7 @@ fn advance_contacts(
         if body.unavailable_owner.is_none() && matches!(body.ground(), GroundState::Airborne) {
             refresh_support(collision, &hard, anchor, body, SupportRefresh::Confirm)?;
         }
+        recovery::recover_stationary_fall(collision, body)?;
         // Crowd velocity can change even when its combined correction is zero.
         body.constrain_supported_velocity();
     }
@@ -1565,12 +1583,12 @@ impl SupportedWallResponse {
     }
 }
 
-/// Physical impact response shared by swept hits and accepted landing probes. RETAIL
-/// DIVERGENCE: retail uses a stationary-fall frame counter when handling contacts. Here
-/// negligible grounded rebounds use ballistic height, and sustained support absorbs inward
-/// force; restoring frame-dependent settling would make rest depend on tick frequency again.
-/// Scope: synthetic slope, sledding, landing, launch and crowd conformance fixtures; no full
-/// authored-surface census is claimed.
+/// Physical impact response shared by swept hits and accepted landing probes.
+/// RETAIL DIVERGENCE: Retail behavior is to settle stationary contacts through a frame counter.
+/// Here negligible rebounds use ballistic height and sustained support absorbs inward force;
+/// waiting for the counter would make ordinary rest depend on tick frequency. Collision-blocked
+/// falls still receive that separate recovery. Scope: synthetic slope, sledding, landing,
+/// launch and crowd fixtures; no authored-surface census.
 fn ordinary_impact_velocity(
     incoming: Vector3,
     normal: Vector3,

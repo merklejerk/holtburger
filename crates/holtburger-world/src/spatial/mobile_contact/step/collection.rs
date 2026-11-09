@@ -169,9 +169,14 @@ impl ContactBodyUpdate {
             PhysicalBodyResponseState::Placement { cell } => {
                 *cell = self.membership.committed_cell()
             }
-            PhysicalBodyResponseState::Grounded { cell, ground, .. } => {
+            PhysicalBodyResponseState::Grounded {
+                cell,
+                ground,
+                stationary_fall_frames,
+            } => {
                 *cell = self.membership.committed_cell();
                 *ground = self.ground;
+                *stationary_fall_frames = self.stationary_fall_frames;
             }
         }
         if self.projectile_impact.is_some() {

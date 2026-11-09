@@ -206,6 +206,9 @@ pub struct SupportContact {
 pub enum SupportSource {
     /// Immutable world product whose revision proves unchanged support geometry.
     World(CollisionOwnerProof),
+    /// Horizontal recovery plane at a stalled body's current pose, valid only while this
+    /// collision product remains installed and the body has not moved away.
+    StationaryFall(CollisionOwnerProof),
     /// Hard body to re-query in the current prepared collection, never a cached validity proof.
     Entity(super::SpatialBodyId),
 }

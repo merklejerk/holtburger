@@ -3268,6 +3268,7 @@ fn contact_publication_preserves_world_point_across_cell_frames() {
                 supported_velocity: Vector3::zero(),
                 supported_push: false,
                 ground: GroundState::Airborne,
+                stationary_fall_frames: 0,
                 membership,
                 motion: Vec::new(),
                 unavailable_owner: None,
@@ -4005,6 +4006,9 @@ fn authored_input_survives_settling_and_residency_reactivation() {
 
 #[path = "footing_tests.rs"]
 mod footing_tests;
+
+#[path = "stationary_fall_tests.rs"]
+mod stationary_fall_tests;
 
 #[path = "arrival_placement_tests.rs"]
 mod arrival_placement_tests;

@@ -4,11 +4,69 @@ use std::fmt;
 
 use super::*;
 use crate::spatial::{
-    PlacementRequest, PlacementRestrictionRequest,
+    GroundSupport, PlacementRequest, PlacementRestrictionRequest, SupportFeature, SupportSource,
     bsp_query::CONTACT_EPSILON,
     collision::{StaticContact, separating_displacement},
     volume_query::placed_shape_contacts,
 };
+
+/// RETAIL QUIRK: Retail behavior is to stop velocity on the second consecutive stationary
+/// falling tick and create horizontal support beneath the lower sphere on the third. Geometry
+/// need not supply a walkable floor. Removing this recovery can leave bodies permanently
+/// airborne between blocking contacts, disabling grounded controls. Evidence covers one
+/// captured dungeon corner and synthetic blocked-fall, departure and coverage cases; no
+/// full-content census has been performed.
+pub(super) fn recover_stationary_fall(
+    collision: &CollisionScene,
+    body: &mut WorkingBody<'_>,
+) -> Result<()> {
+    let Some(grounded) = &mut body.grounded else {
+        return Ok(());
+    };
+    if body.unavailable_owner.is_some()
+        || body.root != body.initial_root
+        || body.rotation != body.source.body.pose.rotation
+        || body.launch_admitted
+        || grounded.config.gravity >= 0.0
+    {
+        grounded.stationary_fall_frames = 0;
+        return Ok(());
+    }
+    if let Some(support) = grounded.ground.walkable_support() {
+        if !matches!(support.source, SupportSource::StationaryFall(_)) {
+            grounded.stationary_fall_frames = 0;
+        }
+        return Ok(());
+    }
+    if !body.integrate_ordinary
+        || !body
+            .motion
+            .iter()
+            .any(|segment| matches!(segment, ContactMotionSegment::Impact { .. }))
+    {
+        grounded.stationary_fall_frames = 0;
+        return Ok(());
+    }
+    grounded.stationary_fall_frames = grounded
+        .stationary_fall_frames
+        .saturating_add(1)
+        .min(STATIONARY_FALL_SUPPORT_FRAMES);
+    if grounded.stationary_fall_frames >= STATIONARY_FALL_STOP_FRAMES {
+        body.mobile.velocity = Vector3::zero();
+    }
+    if grounded.stationary_fall_frames == STATIONARY_FALL_SUPPORT_FRAMES {
+        grounded.ground = GroundState::Supported(GroundSupport {
+            normal: Vector3::new(0.0, 0.0, 1.0),
+            feature: SupportFeature::Surface,
+            source: SupportSource::StationaryFall(
+                collision
+                    .owner_proof(Guid(body.source.body.pose.landblock_id.0 | 0xffff))
+                    .context("stationary-fall recovery lost collision ownership")?,
+            ),
+        });
+    }
+    Ok(())
+}
 
 /// Contact-driven correction work allowed after ordinary terrain/support preparation.
 /// Reference recovery validates its exact authority endpoint; arrivals may separate nearby.

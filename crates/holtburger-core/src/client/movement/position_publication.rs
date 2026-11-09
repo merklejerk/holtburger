@@ -63,7 +63,7 @@ impl PositionSample {
             .and_then(|body| body.physical.as_ref())
             .and_then(|physical| physical.response.ground().contact_plane())
             .and_then(|support| match support.source {
-                SupportSource::World(_) => None,
+                SupportSource::World(_) | SupportSource::StationaryFall(_) => None,
                 SupportSource::Entity(id) => Some(id),
             });
         let support = match body.map_or(ContactState::Unknown, |body| body.contact) {
@@ -235,6 +235,7 @@ mod tests {
         for source in [
             SupportSource::World(proofs[0]),
             SupportSource::World(proofs[1]),
+            SupportSource::StationaryFall(proofs[0]),
             SupportSource::Entity(SpatialBodyId::Entity(Guid(2))),
         ] {
             let physical = body.physical.as_mut().unwrap();
@@ -249,7 +250,9 @@ mod tests {
             };
             world.scene.register_body(body.clone());
             let expected = match source {
-                SupportSource::World(_) => PositionSupport::Grounded(None),
+                SupportSource::World(_) | SupportSource::StationaryFall(_) => {
+                    PositionSupport::Grounded(None)
+                }
                 SupportSource::Entity(id) => PositionSupport::Grounded(Some(id)),
             };
             assert_eq!(PositionSample::capture(&world).unwrap().support, expected);

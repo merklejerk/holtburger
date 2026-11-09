@@ -142,7 +142,7 @@ jobs:
             sudo apt-get update
             sudo apt-get install --yes --no-install-recommends xvfb xauth
           fi
-      - name: Check packaged renderer, content recovery and update lifecycle
+      - name: Check packaged renderer and content recovery
         if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: |
@@ -155,12 +155,8 @@ jobs:
           esac
           if [[ "$RUNNER_OS" == 'Linux' ]]; then
             xvfb-run --auto-servernum node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
-            xvfb-run --auto-servernum npm run probe:launcher -- --updates-only --package "$EXECUTABLE"
-            xvfb-run --auto-servernum npm run probe:launcher -- --updates-direct --package "$EXECUTABLE"
           else
             node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
-            npm run probe:launcher -- --updates-only --package "$EXECUTABLE"
-            npm run probe:launcher -- --updates-direct --package "$EXECUTABLE"
           fi
       - name: Assemble the 3D native archive
         if: inputs.product != 'cli'

@@ -402,6 +402,11 @@
 							{scene}
 							framing={{ kind: "body" }}
 						/>
+						{#if previewState.kind === "missing" && previewState.guid === previewGuid}
+							<p class="character-preview-empty ui-muted" role="status">
+								No player model data observed yet.
+							</p>
+						{/if}
 					</div>
 					{#if previewState.kind === "unavailable" && previewState.guid === previewGuid}<p
 							class="ui-error"
@@ -510,8 +515,17 @@
 			min-height: 0;
 		}
 		.character-preview-viewport {
+			position: relative;
 			min-width: 0;
 			min-height: 0;
+		}
+		.character-preview-empty {
+			position: absolute;
+			inset: 0;
+			display: grid;
+			place-content: center;
+			margin: 0;
+			text-align: center;
 		}
 		.client-character-list {
 			display: grid;

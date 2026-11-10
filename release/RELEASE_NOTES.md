@@ -2,8 +2,11 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, diagnostics:** Client and Explorer modes now share one opt-in performance panel with a versioned report, and the Client debug panel uses collapsible sections.
-- **3D client, stability:** Presentation cleanup is more robust when the client shuts down or leaves the world, including when individual cleanup steps fail.
+- **3D client, summons:** Summons now show lifetime and ownership with themed leashes, and you get a notice when your summon ends.
+- **3D client, targeting:** `/scan` and `@scan` select the best nearby match by name, and combat reticles sit at the height of the attack you are using.
+- **3D client, inventory:** Dragging an item near the top or bottom edge of the inventory now scrolls it.
+- **Both clients, inspection:** Item inspection now shows the unspent XP cost for augmentation items.
+- **3D client, reliability:** Graphics resource uploads are checked more carefully, and desktop failure reports can be copied from the launcher Diagnostics tab.
 
 ## Known issues
 
@@ -11,7 +14,7 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 - Windows and macOS behavior of the display controls, including borderless mode and the confirmation flow, has not been verified natively. Borderless window sizing is best effort and may not match the requested size exactly.
 - The terrain rendering change for Intel Iris Xe has not been verified on that hardware.
 - Healing animation blending while moving, and autorun during healing, have not been visually verified in live play.
-- The consolidated performance panel and GPU timing have not been verified on native Windows or macOS.
+- The performance panel and GPU timing have not been verified on native Windows or macOS.
 - CLI movement is simplified: jumping, falling, gravity, and stairs are not simulated locally. The server may correct your position or reject actions.
 
 ## Updating

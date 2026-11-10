@@ -12,7 +12,7 @@
 		"check": "tsc --noEmit",
 		"lint": "eslint src eslint.config.mjs",
 		"lint:fix": "eslint src eslint.config.mjs --fix",
-		"test": "tsx --test src/**/*.test.ts",
+		"test": "tsx --test \"src/**/*.test.ts\"",
 		"format": "prettier src/*.ts src/**/*.ts *.json *.mjs README.md --write",
 		"format:check": "prettier src/*.ts src/**/*.ts *.json *.mjs README.md --check",
 		"clean": "node -e \"require('node:fs').rmSync('../../mage.js', { force: true })\""

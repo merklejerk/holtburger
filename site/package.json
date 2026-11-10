@@ -18,7 +18,8 @@
 		"check:browser": "node scripts/check-browser.mjs",
 		"check:links": "node scripts/check-links.mjs",
 		"check:examples": "tsc --project examples/tsconfig.json",
-		"check:media-tooling": "node --test scripts/media-library.test.mjs scripts/cli.test.mjs",
+		"test": "node --test scripts/media-library.test.mjs scripts/cli.test.mjs",
+		"check:media-tooling": "npm test",
 		"check:media": "node scripts/check-media.mjs",
 		"predev": "npm run prepare:assets && npm run prepare:content",
 		"publish:media": "node scripts/publish-media.mjs"

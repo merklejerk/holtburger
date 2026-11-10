@@ -118,6 +118,24 @@ not install application dependencies. Cargo owns Rust compilation, including the
 scripts and mage's nested npm compiler belong to `apps/holtburger-cli/scripts/`;
 see the [TUI script build instructions](apps/holtburger-cli/scripts/src/mage/README.md).
 
+After installing dependencies for the root, 3D, website, and mage npm packages,
+use these repository-wide commands:
+
+```bash
+npm test
+npm run format
+npm run format:check
+```
+
+Tests cover repository tooling, 3D TypeScript and packaging, website tooling,
+mage, and every Rust workspace member with all features enabled, including Rust
+documentation tests. The packaging tests also require Python and the dependencies
+installed by `npm --prefix apps/holtburger-3d run setup:windows-packaging`.
+Live-server and browser probes remain separate diagnostic commands.
+Formatting runs the existing package-specific Prettier configurations and
+workspace-wide rustfmt. Both test and formatting commands stop at the first failure;
+their scoped scripts remain available for focused work.
+
 Run developer tasks from the repository root:
 
 | Task | Commands |

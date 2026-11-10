@@ -13,6 +13,8 @@ import Media from '#lib/components/Media.svelte';
 
 Click a particular object when you know what you want, or find it in the [Nearby list](/holtburger/3d/nearby/). Use **R** to interact and **E** to examine; right-clicking also selects and examines.
 
+You can also select by name with [`/scan NAME`](/holtburger/3d/nearby/#select-by-name-from-chat), such as `/scan diamond golem`.
+
 For looting, the [controls reference](/holtburger/3d/controls/#select-and-interact) includes dedicated object and unopened-corpse cyclers.
 
 ## Use the selected-entity HUD

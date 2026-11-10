@@ -48,6 +48,7 @@
 	import { nearbySceneInterest } from "../../client/client-nearby.test-support";
 	import { runClientHelpCommand } from "../../client/client-command-help";
 	import { runClientVersionCommand } from "../../client/client-version-command";
+	import { runClientScanCommand } from "../../client/client-scan-command";
 	import { runClientCopyEntityCommand } from "../../client/client-copy-entity-command";
 	import {
 		PARTY_HUD_PREVIEW,
@@ -5951,6 +5952,15 @@
 					} else if (runClientHelpCommand(message, appendChat)) {
 						return;
 					} else if (runClientVersionCommand(message, appendChat)) {
+						return;
+					} else if (
+						runClientScanCommand(
+							message,
+							() => nearbyOwner.read().rows,
+							(guid) => selection.selectKnownEntity(guid),
+							appendChat,
+						)
+					) {
 						return;
 					} else if (
 						await runClientCopyEntityCommand(

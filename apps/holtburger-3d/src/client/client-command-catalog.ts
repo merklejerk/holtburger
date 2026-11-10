@@ -140,6 +140,14 @@ export const HELP_COMMAND: ClientCommandDefinition = {
 };
 
 export const LOCAL_COMMANDS = {
+	scan: {
+		...invocation(["scan"], "<name>"),
+		description: "Select the nearby entity with the best name match.",
+		details: [
+			"Example: /scan diamond golem. Abbreviations work too. The best name match wins; equally good matches select the nearest.",
+			"Searches nearby creatures and objects regardless of Nearby panel filters or camera direction. If nothing matches, prints No entity found and keeps your current selection.",
+		],
+	},
 	uiShowcase: {
 		...invocation(["ui-showcase"], ""),
 		description: "Toggle hidden HUD previews without layout controls.",

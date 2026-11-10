@@ -39,6 +39,8 @@ In magic stance, use your [spell bar](/holtburger/3d/spells/) instead.
 
 Tap **Tab** to cycle targets, or hold it to acquire an immediate target. **Shift+Tab** cycles in reverse. Use the hostile-only and in-view options to keep the selection useful for your current fight.
 
+Looking for a specific target? Use the [Nearby panel or `/scan NAME`](/holtburger/3d/nearby/).
+
 Choose your target, then start your attack or cast. Use the displayed key hints for power, height and spell shortcuts; the [full keymap](/holtburger/3d/controls/#combat-and-bars) covers each stance.
 
 </IllustratedProse>

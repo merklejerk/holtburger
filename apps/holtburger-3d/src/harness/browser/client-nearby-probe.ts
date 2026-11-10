@@ -158,6 +158,43 @@ export async function probeClientNearby(dependencies: {
 	require(dependencies.selected() ===
 		7, "row uses production selected identity");
 	require(examineRequests().length === 0, "left click only selects its entity");
+	// Submit through the mounted chat form while the Nearby filter hides the requested NPC.
+	const submitScan = async (message: string) => {
+		input('[aria-label="Chat message"]', message);
+		const editor = document.querySelector<HTMLInputElement>(
+			'[aria-label="Chat message"]',
+		);
+		require(editor?.form != null, "chat form exists");
+		editor.form.requestSubmit();
+		await tick();
+		await wait(0);
+	};
+	await submitScan("/scan twn crr");
+	require(
+		dependencies.selected() === 9,
+		"scan ignores panel filters and selects a fuzzy name match",
+	);
+	await submitScan("@scan golem");
+	require(
+		dependencies.selected() === 7,
+		"scan breaks equal substring ranks by player distance",
+	);
+	await submitScan("/scan unmatchedentity");
+	require(
+		dependencies.selected() === 7 &&
+			dependencies.messages().some(
+				(line) => line.kind === "error" && line.message === "No entity found",
+			),
+		"failed scan reports in chat and preserves selection",
+	);
+	require(
+		Array.from(document.querySelectorAll(".chat-tone-error")).some(
+			(line) =>
+				line.textContent?.includes("No entity found") &&
+				line.querySelector(".chat-channel-prefix") === null,
+		),
+		"failed scan uses the chat error color without a channel prefix",
+	);
 	input('[aria-label="Search entity names"]', "");
 	await tick();
 	const pickup = nearbyFacts(7, "Loose Gem");
@@ -833,6 +870,7 @@ export async function probeClientNearby(dependencies: {
 			"catalog-row-controls",
 			"pointer-hit-testing",
 			"search",
+			"scan-chat-selection-and-miss",
 			"selection",
 			"right-click-examine-preserves-selection",
 			"stale-row-examination-rejected",

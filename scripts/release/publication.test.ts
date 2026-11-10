@@ -492,6 +492,72 @@ test("publication uploads before making the complete distribution public and rej
   );
 });
 
+test("publication batches only missing assets and leaves the draft private after upload failure", (t) => {
+  const root = scratch(t);
+  mkdirSync(join(root, "release"));
+  writeFileSync(join(root, "release/RELEASE_NOTES.md"), "Reviewed notes");
+  const identity = distribution("release", "0.2.1", "a".repeat(40));
+  const files = [
+    "retained.zip",
+    "native.zip",
+    "installer.exe",
+    "checksums.txt",
+  ].map((name) => {
+    const path = join(root, name);
+    writeFileSync(path, name);
+    return { name, path, sha256: sha256(Buffer.from(name)) };
+  });
+  const draft = {
+    id: 10,
+    draft: true,
+    target_commitish: identity.commit,
+    html_url: "https://example.invalid/draft",
+    assets: [{ name: files[0].name, digest: `sha256:${files[0].sha256}` }],
+  };
+  const api: GitHub = (args) => {
+    if (args[0].includes("/git/matching-refs/"))
+      return Buffer.from(`refs/tags/${identity.tag}`);
+    if (args[0].includes("/commits/")) return Buffer.from(identity.commit);
+    if (args.includes("--slurp")) return Buffer.from("[[]]");
+    assert.ok(
+      !args.includes("--method"),
+      "Matching drafts must not be replaced",
+    );
+    return Buffer.from(JSON.stringify(draft));
+  };
+  for (const failUpload of [false, true]) {
+    const calls: string[][] = [];
+    const command: Runner = (program, args) => {
+      assert.equal(program, "gh");
+      calls.push([...args]);
+      if (failUpload && args[1] === "upload") throw new Error("upload refused");
+      return "";
+    };
+    const publish = () =>
+      publishFrozenRelease(
+        root,
+        { identity, files },
+        identity.tag,
+        api,
+        command,
+      );
+    if (failUpload) assert.throws(publish, /upload refused/);
+    else publish();
+    assert.deepEqual(calls[0], [
+      "release",
+      "upload",
+      identity.tag,
+      ...files.slice(1).map((file) => file.path),
+      "--repo",
+      "merklejerk/holtburger",
+    ]);
+    assert.deepEqual(
+      calls.map((args) => args[1]),
+      failUpload ? ["upload"] : ["upload", "edit"],
+    );
+  }
+});
+
 test("unpublished beta retries recover legacy tags and replace stale or conflicting drafts", (t) => {
   for (const state of ["tag-only", "old-source", "rebuilt-bytes"] as const) {
     const root = scratch(t);

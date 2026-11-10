@@ -66,18 +66,21 @@ export function numericVersion(version: string): string {
 	return [...parts, "0"].join(".");
 }
 
-/** Wrap verified native bytes using the production Inno Setup recipe. */
+/** Use the same installation recipe for published installers and uncompressed test fixtures. */
 export function compileWindows(
 	appRoot: string,
 	native: string,
 	version: string,
 	destination: string,
 	compiler: string,
+	purpose: "distribution" | "fixture",
+	command: Runner = run,
 ): void {
-	run(
+	command(
 		compiler,
 		[
 			"/Qp",
+			...(purpose === "fixture" ? ["/DFixtureInstaller"] : []),
 			`/DPayloadDir=${native}`,
 			`/DInstallerAppId=${WINDOWS_APP_ID}`,
 			`/DDisplayName=${WINDOWS_APP_NAME}`,
@@ -323,7 +326,14 @@ async function verifyWindowsInstaller(
 			predecessor = join(work, "predecessor.exe");
 		cpSync(native, previous, { recursive: true, verbatimSymlinks: true });
 		writeFileSync(join(previous, "obsolete-upgrade-fixture.txt"), "obsolete");
-		compileWindows(appRoot, previous, "0.0.0", predecessor, compiler);
+		compileWindows(
+			appRoot,
+			previous,
+			"0.0.0",
+			predecessor,
+			compiler,
+			"fixture",
+		);
 		requireSuccess(
 			runInstaller(predecessor, [`/DIR=${install}`]),
 			"Predecessor installer",
@@ -345,7 +355,14 @@ async function verifyWindowsInstaller(
 					? `${base}-nightly-${info.commit.slice(0, SOURCE_REVISION_LENGTH)}`
 					: base,
 			alternate = join(work, "alternate-distribution.exe");
-		compileWindows(appRoot, native, alternateVersion, alternate, compiler);
+		compileWindows(
+			appRoot,
+			native,
+			alternateVersion,
+			alternate,
+			compiler,
+			"fixture",
+		);
 		setup(alternate, false, alternateVersion);
 		setup(installer, false, info.version);
 		for (const executable of [
@@ -399,7 +416,14 @@ export async function buildInstaller(
 		if (process.platform === "win32") {
 			if (compiler === undefined)
 				throw new Error("Windows installer generation requires --iscc");
-			compileWindows(APP_ROOT, native, info.version, destination, compiler);
+			compileWindows(
+				APP_ROOT,
+				native,
+				info.version,
+				destination,
+				compiler,
+				"distribution",
+			);
 			await verifyWindowsInstaller(
 				APP_ROOT,
 				native,

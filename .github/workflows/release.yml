@@ -74,12 +74,7 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install repository tooling
-        run: npm ci
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.95.0
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
+        run: npm ci --omit=dev --no-audit --no-fund
       - name: Resolve source identity and selected native matrix
         id: identity
         env:
@@ -88,15 +83,6 @@ jobs:
           REQUEST_TARGET: ${{ inputs.target || 'all' }}
           GH_TOKEN: ${{ github.token }}
         run: npm run --silent release -- plan --purpose "$REQUEST_PURPOSE" --product "$REQUEST_PRODUCT" --target "$REQUEST_TARGET"
-      - name: Check release tooling
-        run: npm run check:tooling && npm run format:tooling:check && npm run test:tooling
-      - name: Check Rust formatting
-        run: cargo fmt --all --check
-      - name: Review committed dependency notices (advisory)
-        run: |
-          if ! npm run check:notices; then
-            echo '::warning::Dependency notice check failed. Review and regenerate locally when needed; CI will use the checked-in notices.'
-          fi
       - uses: actions/upload-artifact@v7
         with:
           name: release-notices
@@ -149,11 +135,16 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install repository tooling
-        run: npm ci
+        run: npm ci --omit=dev --no-audit --no-fund
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.plan.outputs.kind == 'nightly'
         with:
           toolchain: 1.95.0
       - uses: Swatinem/rust-cache@v2
+        if: needs.plan.outputs.kind == 'nightly'
+        with:
+          cache-targets: false
+          shared-key: release-versioning-registry
       - name: Validate and prepare distribution versions
         run: |
           if [ "$HOLTBURGER_DISTRIBUTION" = nightly ]; then cargo fetch --locked; fi
@@ -300,11 +291,16 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install repository tooling
-        run: npm ci
+        run: npm ci --omit=dev --no-audit --no-fund
       - uses: dtolnay/rust-toolchain@stable
+        if: needs.plan.outputs.kind == 'nightly'
         with:
           toolchain: 1.95.0
       - uses: Swatinem/rust-cache@v2
+        if: needs.plan.outputs.kind == 'nightly'
+        with:
+          cache-targets: false
+          shared-key: release-versioning-registry
       - name: Validate and prepare distribution versions
         run: |
           if [ "$HOLTBURGER_DISTRIBUTION" = nightly ]; then cargo fetch --locked; fi

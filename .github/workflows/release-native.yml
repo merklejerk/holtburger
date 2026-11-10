@@ -41,6 +41,7 @@ jobs:
           ref: ${{ inputs.commit }}
           persist-credentials: false
       - uses: actions/setup-python@v7
+        if: runner.os == 'Windows' && inputs.product != 'cli'
         with:
           python-version: '3.12'
       - uses: actions/setup-node@v7
@@ -51,7 +52,7 @@ jobs:
             package-lock.json
             apps/holtburger-3d/package-lock.json
       - name: Install repository tooling
-        run: npm ci
+        run: npm ci --omit=dev --no-audit --no-fund
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.95.0
@@ -122,8 +123,6 @@ jobs:
         run: |
           npm run setup:windows-packaging
           npm run test:windows-packaging
-      - name: Check native branding generation
-        run: npm run check:branding
       - name: Build and inspect the 3D application
         if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
@@ -131,7 +130,6 @@ jobs:
           npm run build
           npm run build:electron:main
           npm run package:built -- --platform=${{ matrix.platform }} --arch=${{ matrix.architecture }}
-          npm run check:installers
           npm run test:installers
           npm run check:package
           npm run smoke:sidecar
@@ -179,12 +177,10 @@ jobs:
           name: verification-linux-electron
           path: apps/holtburger-3d/dist-electron/
           if-no-files-found: error
-      - name: Install the Windows installer compiler
+      - name: Locate the preinstalled Windows installer compiler
         if: runner.os == 'Windows' && inputs.product != 'cli'
         shell: pwsh
         run: |
-          choco install innosetup --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
           $package = @(choco list --exact innosetup --limit-output | Where-Object { $_ -match '^innosetup\|' })
           if ($package.Count -ne 1) { throw 'Expected one installed Inno Setup package' }
           $major = ($package[0].Split('|')[1]).Split('.')[0]

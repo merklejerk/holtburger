@@ -36,7 +36,7 @@ jobs:
           node-version: 24.13.1
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: npm ci
+      - run: npm ci --omit=dev --no-audit --no-fund
       - id: source
         name: Record the immutable preparation source
         run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -81,7 +81,7 @@ jobs:
         with:
           toolchain: 1.95.0
       - uses: Swatinem/rust-cache@v2
-      - run: npm ci
+      - run: npm ci --omit=dev --no-audit --no-fund
       - name: Populate the registry for offline workspace version updates
         run: cargo fetch --locked
       - uses: actions/download-artifact@v8

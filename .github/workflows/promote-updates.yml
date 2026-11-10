@@ -48,7 +48,7 @@ jobs:
             package-lock.json
             site/package-lock.json
       - name: Install repository tooling
-        run: npm ci
+        run: npm ci --omit=dev --no-audit --no-fund
       - name: Resolve the verified published release and update feeds
         env:
           GH_TOKEN: ${{ github.token }}

@@ -17,10 +17,40 @@ import { APP_ROOT, run, runResult } from "./native.ts";
 import {
 	dmgDocuments,
 	dmgLayout,
+	compileWindows,
 	numericVersion,
 	verifyDmg,
 } from "./desktop.ts";
 import { withDeleteLock } from "./windows-native.ts";
+
+test("fixture compilation passes its selector without changing the installer identity or payload", () => {
+	const calls: { args: readonly string[]; cwd: string }[] = [];
+	for (const purpose of ["distribution", "fixture"] as const)
+		compileWindows(
+			APP_ROOT,
+			"payload with spaces",
+			"0.2.1-nightly-abcdef12",
+			"output/setup.exe",
+			"ISCC.exe",
+			purpose,
+			(program, args, cwd) => {
+				assert.equal(program, "ISCC.exe");
+				calls.push({ args, cwd });
+				return "";
+			},
+		);
+	assert.equal(calls[0].args.includes("/DFixtureInstaller"), false);
+	assert.equal(calls[1].args.includes("/DFixtureInstaller"), true);
+	assert.deepEqual(
+		calls[1].args.filter((arg) => arg !== "/DFixtureInstaller"),
+		calls[0].args,
+	);
+	assert.ok(calls[0].args.includes("/DPayloadDir=payload with spaces"));
+	assert.ok(calls[0].args.includes("/DReleaseVersion=0.2.1-nightly-abcdef12"));
+	assert.ok(calls[0].args.includes("/DNumericVersion=0.2.1.0"));
+	assert.equal(calls[0].cwd, APP_ROOT);
+	assert.equal(calls[1].cwd, APP_ROOT);
+});
 
 test("installer resources keep SemVer display separate from unsigned 16-bit numeric version", () => {
 	assert.equal(numericVersion("0.2.1"), "0.2.1.0");

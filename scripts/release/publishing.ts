@@ -138,14 +138,21 @@ export function publishFrozenRelease(
   const uploaded = new Set(release.assets.map((asset) => asset.name));
   if (uploaded.size !== release.assets.length)
     throw new Error("Draft contains duplicate release assets");
-  for (const file of frozen.files) {
-    if (!uploaded.has(file.name))
-      command(
-        "gh",
-        ["release", "upload", tag, file.path, "--repo", REPOSITORY],
-        root,
-      );
-  }
+  const pending = frozen.files.filter((file) => !uploaded.has(file.name));
+  // gh uploads multiple files concurrently and returns failure before the draft can publish.
+  if (pending.length > 0)
+    command(
+      "gh",
+      [
+        "release",
+        "upload",
+        tag,
+        ...pending.map((file) => file.path),
+        "--repo",
+        REPOSITORY,
+      ],
+      root,
+    );
   // A private upload transaction avoids exposing a partially uploaded distribution.
   command(
     "gh",

@@ -9,7 +9,10 @@ supported. Both products share one version and original source commit.
 h3d owns installer construction and native acceptance through its app-local
 `package:installer` command (`--native DIR --output FILE [--iscc PATH]`). Root
 `release:installers` admits/extracts the source archive, invokes that command, then
-hashes the installer and writes its suite receipt. From `apps/holtburger-3d/`, run
+hashes the installer and writes its suite receipt. Windows release verification retains the
+full installation, upgrade, repair, channel-switch, lock and uninstall scenarios. Its two
+throwaway installers use the same recipe and full payload without compression; the published
+installer retains solid LZMA2 compression. From `apps/holtburger-3d/`, run
 `npm run check:installers` and `npm run test:installers` for tooling checks.
 
 Release preparation is a manually requested Copilot analysis followed by a release PR.
@@ -70,8 +73,9 @@ source. Ordinary PR merges, direct version commits, and tag pushes do not automa
 The publisher waits for all required checks and both products on every target. It uploads
 assets to a private draft to avoid exposing an incomplete distribution, then publishes in
 the same run. A failed upload may leave a draft that a retry can resume; it is not a manual
-handoff. Matching draft assets resume uploading; a draft with a different source or conflicting
-bytes is replaced as a whole. Published bytes are never replaced.
+handoff. Missing assets upload together through GitHub CLI's bounded concurrent uploader;
+publication occurs only after that command succeeds. Matching draft assets resume uploading;
+a draft with a different source or conflicting bytes is replaced as a whole. Published bytes are never replaced.
 
 ## Retrying a failed release
 
@@ -109,7 +113,9 @@ compatibility versions remain independent. The checked-in version must be unsuff
 regenerating navigation content.
 
 Local release tooling requires Node.js >=24.13.1 and npm >=11.8.0 with the independent
-repository-root lockfile. CI tests with Node.js 24.13.1 and its bundled npm 11.8.0.
+repository-root lockfile. Root distribution execution dependencies are separate from development
+checks; release execution jobs use `npm ci --omit=dev`. Frontend packaging still requires its
+build and packaging tools. CI tests with Node.js 24.13.1 and its bundled npm 11.8.0.
 Newer versions are permitted by the engine ranges but are not covered by that CI
 baseline. App dependencies still install inside the app:
 
@@ -298,8 +304,8 @@ the verified native product. Renderer inspection is not repeated for identical i
 
 Cargo, npm, and Flatpak builder caches remain enabled. Fresh hosted runners still install OS
 packages and the SDK/runtime. Measure actual job/setup duration before adding image or runner
-infrastructure. The Flatpak apt setup removes the Azure mirror preference while retaining the
-official Ubuntu archive/security mirrors. Required SVG/AppStream helpers are explicit with
+infrastructure. The Flatpak apt setup retains the runner's default mirror selection and bounds
+network retries and timeouts. Required SVG/AppStream helpers are explicit with
 recommended packages disabled. Zypak/nickle original notices remain installed with the 3D app.
 
 ## Dependency notices
@@ -308,9 +314,9 @@ Rust/native notices are generated locally and committed as
 `.github/licenses/THIRD_PARTY_NOTICES.html`, with a generated
 `THIRD_PARTY_NOTICES.inputs.json` freshness record beside it. CI runs
 `npm run check:notices` without installing cargo-about or
-accessing license sources. Failures emit a warning in both branch validation and release
-planning; they do not block CI or release creation. The local `check` command still exits
-nonzero to report stale inputs/output. Its whole-file fingerprints include Cargo versions,
+accessing license sources. Failures emit a warning in branch validation and the same reusable
+validation invoked by releases; they do not block CI or release creation. The local `check`
+command still exits nonzero to report stale inputs/output. Its whole-file fingerprints include Cargo versions,
 so a shared application version bump may warn but does not require regeneration to release.
 Ordinary application source changes do not invalidate notices.
 

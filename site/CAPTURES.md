@@ -10,6 +10,15 @@ Keep originals outside Git and publish processed files through [MEDIA.md](MEDIA.
 
 Use a safe outdoor area with several nearby creatures or objects, a short practice jump, and enough health/stamina. Keep movement and targeting defaults for the demonstration. Record short clips with key presses visible.
 
+### See who a summon belongs to
+
+**First · user · available · still** — ID: `summon-leash`
+
+- Setup: An active player summon beside its owner.
+- Frame: Show the player, summon, complete glowing leash and readable summon name.
+- Expected result: A green leash identifies the local player's summon, with its name using the player palette.
+- Used in: [3d/combat/#recognize-summons](https://merklejerk.github.io/holtburger/3d/combat/#recognize-summons)
+
 ### Smart Tab in action
 
 **First · user · available · clip** — ID: `smart-tab`

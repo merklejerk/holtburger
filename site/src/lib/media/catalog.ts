@@ -128,6 +128,17 @@ export const media = {
 		width: 367,
 		height: 342
 	},
+	'summon-leash': {
+		kind: 'image',
+		title: 'See who a summon belongs to',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/summon-leash-v1.webp'
+		},
+		alt: 'A glowing green chain-link leash connects a player to their Grievver summon, whose nameplate uses the player name color.',
+		width: 485,
+		height: 492
+	},
 	minimap: {
 		kind: 'image',
 		title: 'Terrain under your radar',

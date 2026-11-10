@@ -60,6 +60,20 @@ A separate combat reticle marks the target you are actively attacking or casting
 
 </EditorialSpread>
 
+## Recognize summons
+
+<EditorialSpread>
+
+A glowing leash links each nearby summon to its owner. By default, your summon’s leash is green and other players’ leashes are pale blue. Summon names use the same color as player names, making them easier to distinguish from ordinary creatures.
+
+When a summon’s remaining lifetime is known, it and its leash flicker together as expiry approaches. If your summon dies or the server removes it from view, combat chat and a toast show **“Your summon is no longer active”**.
+
+{#snippet illustration()}
+<Media id="summon-leash" detail />
+{/snippet}
+
+</EditorialSpread>
+
 ## Fight on the move
 
 Keep running while casting or firing a bow. Movement continues through the windup with your normal movement controls—no sliding key combinations to learn. Reposition between enemies or keep your distance while attacking.

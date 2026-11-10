@@ -22,6 +22,14 @@
 		}
 	},
 	"captures": {
+		"summon-leash": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "An active player summon beside its owner.",
+			"framing": "Show the player, summon, complete glowing leash and readable summon name.",
+			"expected": "A green leash identifies the local player's summon, with its name using the player palette.",
+			"priority": "first"
+		},
 		"smart-tab": {
 			"owner": "user",
 			"session": "controls",

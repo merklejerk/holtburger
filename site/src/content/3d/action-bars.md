@@ -17,6 +17,8 @@ Click an action-bar cell to use an item, equip a piece of gear or apply a saved 
 
 **Targeted items default to you.** Unlike retail shortcuts, activating a healing-kit cell uses it on you immediately—no extra targeting keystroke. Hold **Shift** while clicking or using the shortcut to use your selected target instead, or choose a target when prompted.
 
+Healing kits work while running, so you can use a shortcut to heal yourself without stopping.
+
 Mix actions on one bar, or keep separate bars for different jobs:
 
 - **Combat supplies:** keep potions, food and other consumables ready without searching your packs. When a consumable runs out, its shortcut can find an equivalent replacement in your inventory.

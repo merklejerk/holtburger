@@ -66,6 +66,10 @@ Keep running while casting or firing a bow. Movement continues through the windu
 
 <Media id="run-casting" />
 
+You can also use healing kits while running. Put a kit on an [action bar](/holtburger/3d/action-bars/) to heal yourself with a shortcut while you keep moving.
+
+<Media id="run-healing" />
+
 For looting, using items and selected-entity actions, see [Interactions](/holtburger/3d/interactions/).
 
 ## Between fights

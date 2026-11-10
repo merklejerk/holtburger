@@ -874,6 +874,16 @@ export const media = {
 		height: 650,
 		captions: null
 	},
+	'run-healing': {
+		kind: 'video',
+		title: 'Heal on the run',
+		src: 'https://merklejerk.github.io/holtburger-media/3d/run-healing.mp4',
+		poster:
+			'https://merklejerk.github.io/holtburger-media/3d/run-healing-poster-v1.webp',
+		width: 484,
+		height: 492,
+		captions: null
+	},
 	enchantments: {
 		kind: 'image',
 		title: 'Your active enchantments',

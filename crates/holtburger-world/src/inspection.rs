@@ -16,7 +16,7 @@ use crate::vendor::CoreVendorItem;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     AttackType, AttunedStatus, DamageType, HasProperties, ImbuedEffectType, ItemType, MaterialType,
-    ObjectDescriptionFlag, PropertyBool, PropertyDataId, PropertyFloat, PropertyInt,
+    ObjectDescriptionFlag, PropertyBool, PropertyDataId, PropertyFloat, PropertyInt, PropertyInt64,
     PropertyString, WeaponType, WorldObjectExt as _, WorldObjectProperties,
     WorldObjectPropertyAccessors,
 };
@@ -227,6 +227,14 @@ pub enum ObjectInspectionError {
         /// Uninterpretable secondary-attribute identifier.
         value: i32,
     },
+    /// A disclosed augmentation cost cannot consume a negative amount of player XP.
+    #[error("item {guid} has negative augmentation XP cost {value}")]
+    NegativeAugmentationCost {
+        /// Identity of the item whose cost is invalid.
+        guid: Guid,
+        /// Invalid server-disclosed cost.
+        value: i64,
+    },
     /// Disclosed item progression cannot be interpreted safely.
     #[error("item {guid} has invalid progression: {source}")]
     ItemProgression {
@@ -244,6 +252,9 @@ pub enum ObjectInspectionError {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemInspection {
+    /// Unspent player XP consumed by augmentation, absent when undisclosed; transported exactly.
+    #[serde(with = "crate::progression::optional_decimal_u64")]
+    pub augmentation_cost: Option<u64>,
     /// Authored cooldown definition; live remaining time comes from the player's registry.
     pub cooldown: Option<crate::item_cooldowns::ItemCooldownDefinition>,
     /// Appraised on-use effect, distinguishing direct vital changes from healing-kit bonuses.
@@ -1491,6 +1502,17 @@ impl ItemInspection {
             .get_data_prop(PropertyDataId::ProcSpell)
             .map(|id| id.0);
         Ok(Self {
+            augmentation_cost: object
+                .get_int64_prop(PropertyInt64::AugmentationCost)
+                .map(|value| {
+                    u64::try_from(value).map_err(|_| {
+                        ObjectInspectionError::NegativeAugmentationCost {
+                            guid: object.guid,
+                            value,
+                        }
+                    })
+                })
+                .transpose()?,
             cooldown: crate::item_cooldowns::ItemCooldownDefinition::from_properties(object),
             use_effect: InspectionUseEffect::from_object(object)?,
             progression: crate::item_progression::ItemProgression::from_properties(
@@ -2405,6 +2427,44 @@ mod tests {
     fn inspect_entity(entity: &Entity) -> Result<ObjectInspection, ObjectInspectionError> {
         let titles = CharacterTitleCatalog::default();
         ObjectInspection::from_entity(entity, InspectionContext::new(&titles))
+    }
+
+    #[test]
+    fn augmentation_cost_preserves_appraisal_absence_zero_and_exact_xp() {
+        let mut entity = Entity::new(Guid(1), "Augmentation Gem".into(), WorldPosition::default());
+        for cost in [None, Some(0), Some(1_000_000_000), Some(i64::MAX), None] {
+            let mut response = IdentifyObjectResponseEventData {
+                object_guid: entity.guid,
+                success: true,
+                ..Default::default()
+            };
+            if let Some(cost) = cost {
+                response
+                    .properties
+                    .set_int64_prop(PropertyInt64::AugmentationCost, cost);
+            }
+            assert!(entity.apply_identify_response(&response));
+            let inspection = inspect_entity(&entity).unwrap();
+            let ObjectInspectionDetails::Item(item) = &inspection.details else {
+                panic!("gem must use item inspection");
+            };
+            assert_eq!(item.augmentation_cost, cost.map(|value| value as u64));
+            let rejected = IdentifyObjectResponseEventData {
+                object_guid: entity.guid,
+                success: false,
+                ..Default::default()
+            };
+            assert!(!entity.apply_identify_response(&rejected));
+            assert_eq!(inspect_entity(&entity).unwrap(), inspection);
+        }
+        entity.set_int64_prop(PropertyInt64::AugmentationCost, -1);
+        assert_eq!(
+            inspect_entity(&entity),
+            Err(ObjectInspectionError::NegativeAugmentationCost {
+                guid: entity.guid,
+                value: -1,
+            })
+        );
     }
 
     #[test]

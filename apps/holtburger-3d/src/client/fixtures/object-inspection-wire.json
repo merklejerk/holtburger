@@ -11,6 +11,7 @@
 				"details": {
 					"kind": "item",
 					"details": {
+						"augmentationCost": "9007199254740993",
 						"artwork": {
 							"base": null,
 							"overlay": null,

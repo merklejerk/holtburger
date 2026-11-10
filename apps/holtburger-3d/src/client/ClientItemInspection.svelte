@@ -325,7 +325,7 @@
 		</section>
 	{/if}
 
-	{#if item.useEffect !== null || onUseIndexes.length > 0}
+	{#if item.augmentationCost !== null || item.useEffect !== null || onUseIndexes.length > 0}
 		<section
 			data-inspection-on-use
 			aria-busy={onUseIndexes.length > 0 &&
@@ -333,6 +333,17 @@
 				spellFailure === null}
 		>
 			<h3 class="ui-section-heading">On use</h3>
+			{#if item.augmentationCost !== null}
+				<dl class="inspection-facts">
+					<div class="inspection-wide">
+						<dt>XP cost</dt>
+						<dd>
+							<UiQuantity value={BigInt(item.augmentationCost)} /> unspent XP
+						</dd>
+					</div>
+				</dl>
+				<p>Consumed when this augmentation is applied.</p>
+			{/if}
 			{#if item.useEffect?.kind === "vital-change"}<p>
 					{formatInspectionVitalChange(item.useEffect)}
 				</p>{/if}

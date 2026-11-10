@@ -310,6 +310,8 @@ const itemXpSchema = z
 
 const itemInspectionSchema = z
 	.object({
+		/** Exact unspent player XP consumed by augmentation, if disclosed. */
+		augmentationCost: itemXpSchema.nullable(),
 		progression: z
 			.object({
 				level: u32,

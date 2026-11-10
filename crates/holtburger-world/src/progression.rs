@@ -19,6 +19,23 @@ pub mod decimal_u64 {
     }
 }
 
+/// Optional decimal transport preserving undisclosed XP separately from zero.
+pub mod optional_decimal_u64 {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &Option<u64>, serializer: S) -> Result<S::Ok, S::Error> {
+        value.map(|value| value.to_string()).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<u64>, D::Error> {
+        Option::<String>::deserialize(deserializer)?
+            .map(|value| value.parse().map_err(serde::de::Error::custom))
+            .transpose()
+    }
+}
+
 /// A single server-owned attribute, vital, or skill that can gain ranks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StatTarget {

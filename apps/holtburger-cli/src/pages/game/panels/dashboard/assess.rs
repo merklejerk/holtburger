@@ -1,4 +1,4 @@
-use crate::utils::wrap_text;
+use crate::utils::{format_cost, wrap_text};
 use holtburger_common::properties::AttunedStatus;
 use holtburger_world::inspection::{
     BondedStatus, BonusKind, CreatureIdentity, CreatureInspection, Effect, GearRatingKind,
@@ -183,13 +183,27 @@ fn push_item_on_use(
     item: &ItemInspection,
     spell_lookup: Option<&SpellCatalog>,
 ) {
-    if item.use_effect.is_some()
+    if item.augmentation_cost.is_some()
+        || item.use_effect.is_some()
         || item
             .spells
             .iter()
             .any(|spell| spell.role == InspectionSpellRole::OnUse)
     {
         push_section(lines, "On use");
+        if let Some(cost) = item.augmentation_cost {
+            push_labeled(
+                lines,
+                "XP cost",
+                format!("{} unspent XP", format_cost(cost)),
+                Color::White,
+            );
+            lines.extend(
+                wrap_text("Consumed when this augmentation is applied.", 40)
+                    .into_iter()
+                    .map(Line::from),
+            );
+        }
         if let Some(effect) = &item.use_effect {
             match effect {
                 InspectionUseEffect::VitalChange { vital, amount } => {
@@ -1106,6 +1120,27 @@ mod tests {
                 .join("\n");
             assert!(text.contains("Bonus to Healing Skill:  50"));
             assert!(text.contains(&format!("Restoration Bonus:  {percent}")));
+        }
+    }
+
+    #[test]
+    fn assess_output_shows_augmentation_cost_without_other_on_use_effects() {
+        use holtburger_common::properties::PropertyInt64;
+
+        let mut entity = Entity::new(Guid(1), "Augmentation Gem".into(), WorldPosition::default());
+        for cost in [0, 1_000_000_000, i64::MAX] {
+            entity.set_int64_prop(PropertyInt64::AugmentationCost, cost);
+            let text = get_assess_info(&inspect_entity(&entity), None, None)
+                .iter()
+                .map(Line::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("On use:"));
+            assert!(text.contains(&format!(
+                "XP cost:  {} unspent XP",
+                format_cost(cost as u64)
+            )));
+            assert!(text.contains("Consumed when this augmentation is"));
         }
     }
 

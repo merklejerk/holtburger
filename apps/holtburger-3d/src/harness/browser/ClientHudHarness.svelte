@@ -2383,6 +2383,7 @@
 									data: { creatureType: "Olthoi", bonus: 0.2 },
 								},
 							],
+							augmentationCost: null,
 							useEffect: null,
 							portalDestination: "Holtburg (42.1N, 33.6E).",
 							portalRestrictions: ["no-recall-or-tie", "no-summon"],

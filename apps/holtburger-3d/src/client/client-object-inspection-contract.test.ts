@@ -3,6 +3,34 @@ import fixture from "./fixtures/object-inspection-wire.json";
 import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
 
 describe("object inspection host contract", () => {
+	it("preserves exact augmentation XP costs, zero, and undisclosed costs", () => {
+		for (const augmentationCost of [
+			null,
+			"0",
+			"1000000000",
+			"9223372036854775807",
+		]) {
+			const item = structuredClone(fixture.item);
+			Object.assign(item.outcome.inspection.details.details, {
+				augmentationCost,
+			});
+			expect(decodeObjectInspectionResult(item)).toEqual(item);
+		}
+		for (const augmentationCost of [
+			-1,
+			1000000000,
+			"-1",
+			"1.5",
+			"18446744073709551616",
+		]) {
+			const item = structuredClone(fixture.item);
+			Object.assign(item.outcome.inspection.details.details, {
+				augmentationCost,
+			});
+			expect(() => decodeObjectInspectionResult(item)).toThrow();
+		}
+	});
+
 	it("preserves activation skill requirements with optional thresholds", () => {
 		const item = structuredClone(fixture.item);
 		for (const minimum of [null, 570]) {

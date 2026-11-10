@@ -1,6 +1,7 @@
 use crate::inspection::{GEAR_RATING_PROPERTIES, InspectionSupplement};
 use holtburger_common::properties::{
-    PropertyBool, PropertyDataId, PropertyFloat, PropertyInt, PropertyString, WorldObjectProperties,
+    PropertyBool, PropertyDataId, PropertyFloat, PropertyInt, PropertyInt64, PropertyString,
+    WorldObjectProperties,
 };
 use holtburger_protocol::messages::object::events::{
     IdentifyObjectResponseEventData, IdentifyResponseFlags,
@@ -129,9 +130,10 @@ pub(crate) fn apply_identify_response(
 }
 
 /// A successful full appraisal replaces these item facts; absence must not inherit an
-/// older requirement, proc, rating, or description contributor. Live property updates
+/// older requirement, cost, proc, rating, or description contributor. Live property updates
 /// still use the same canonical tables after this replacement.
 fn clear_item_appraisal_properties(properties: &mut WorldObjectProperties) {
+    properties.int64s.0.remove(&PropertyInt64::AugmentationCost);
     for key in [
         PropertyInt::WieldRequirements,
         PropertyInt::WieldSkillType,

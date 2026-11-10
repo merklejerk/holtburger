@@ -2813,6 +2813,10 @@ mod tests {
             "Test Item".into(),
             holtburger_common::position::WorldPosition::default(),
         );
+        item.set_int64_prop(
+            holtburger_common::properties::PropertyInt64::AugmentationCost,
+            9_007_199_254_740_993,
+        );
         item.flags = ObjectDescriptionFlag::FOOD;
         item.set_int_prop(PropertyInt::BoosterEnum, 4);
         item.set_int_prop(PropertyInt::BoostValue, 50);

@@ -79,7 +79,7 @@ mod runtime;
 pub mod runtime_body_view_cache;
 #[cfg(feature = "runtime-fixture")]
 pub mod runtime_fixture;
-mod runtime_profile;
+pub mod runtime_profile;
 pub mod salvage;
 pub mod selection_envelope;
 pub mod selection_query;
@@ -209,6 +209,8 @@ enum PublishedCharacterMotionCapabilities {
 }
 
 pub struct ClientRuntime {
+    /// Optional authority profiling injected by a diagnostic consumer.
+    runtime_profile: Option<runtime_profile::RuntimeProfileHandle>,
     /// Character-bound appearance editing and persistent local racial particle selection.
     barber: barber::BarberRuntime,
     /// Frontend-owned preference consumed by inventory and equipment planning.

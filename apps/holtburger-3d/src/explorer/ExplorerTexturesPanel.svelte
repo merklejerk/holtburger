@@ -107,7 +107,7 @@
 
 	function formatWorker(worker: ClosedWorkerPoolDiagnostics | null): string {
 		if (worker === null) return "Unavailable";
-		return `${worker.completedJobCount} jobs · ${formatDuration(worker.totalExecutionDurationMs)} work · ${formatDuration(worker.totalQueueDelayMs)} queued`;
+		return `${worker.completedJobCount} jobs · ${formatDuration(worker.totalJobTurnaroundMs)} turnaround · ${formatDuration(worker.totalQueueDelayMs)} queued`;
 	}
 
 	function describeSort(pageSort: PageSort): string {

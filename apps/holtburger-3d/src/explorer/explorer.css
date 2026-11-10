@@ -193,10 +193,6 @@
 		gap: 6px;
 	}
 
-	.explorer-frame-profile-toggle {
-		grid-column: 1 / -1;
-	}
-
 	.explorer-frame-summary {
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));

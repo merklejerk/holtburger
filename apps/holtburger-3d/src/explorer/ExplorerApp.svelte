@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { PerformanceSession } from "../app/performance-session";
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
 	import { type WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 
@@ -20,7 +21,6 @@
 		GamePresentationRuntime,
 		type StaticObjectRuntimeDiagnostics,
 	} from "../lib/game/runtime/game-presentation-runtime";
-	import { RuntimeTickProfiler } from "../lib/game/runtime/runtime-tick-profiler";
 	import { GamePresentationOwner } from "../lib/game/runtime/game-presentation-owner";
 	import { HostPresentationAssets } from "../lib/game/runtime/host-presentation-assets";
 	import {
@@ -583,10 +583,9 @@
 		return gameRuntime?.getStaticObjectRuntimeDiagnostics() ?? null;
 	}
 
-	function updateRendererFrameProfiling(enabled: boolean): void {
-		if (!gameRuntime)
-			throw new Error("Renderer profiling requires an active runtime.");
-		gameRuntime.setRendererFrameProfilingEnabled(enabled);
+	let performanceSession: PerformanceSession | null = null;
+	function readPerformanceSession(): PerformanceSession | null {
+		return performanceSession;
 	}
 
 	function readRendererFrameDiagnostics(): RendererFrameDiagnosticsSnapshot | null {
@@ -606,7 +605,6 @@
 		if (!frame) return null;
 		const viewport = canvasElement.getBoundingClientRect();
 		return createExplorerFrameDiagnosticReport({
-			applicationFrame: frameMetrics,
 			browser: {
 				userAgent: navigator.userAgent,
 				webgl: device.getDiagnosticIdentity(),
@@ -1827,6 +1825,7 @@
 			physicalCameraStatus = null;
 			teardown = (async () => {
 				stopFrameLoop?.();
+				performanceSession?.retire();
 				entityUnsubscribe?.();
 				fixedTickUnsubscribe?.();
 				possessionOutcomeUnsubscribe?.();
@@ -1882,13 +1881,22 @@
 							EXPLORER_TUNING.audio.placementSmoothingSeconds,
 						loudnessCurveExponent: EXPLORER_TUNING.audio.loudnessCurveExponent,
 					},
-					// The Explorer is a development surface and its Frame panel reports tick
-					// timing; the thin client route passes nothing and pays nothing.
-					tickProfiler: new RuntimeTickProfiler(),
 				});
 				presentationOwner = presentation;
 				activeRegion = presentation.activeRegion;
 				gameRuntime = presentation.runtime;
+				performanceSession = new PerformanceSession({
+					mode: "explorer",
+					runtime: presentation.runtime,
+					canvas,
+					native: {
+						kind: "unavailable",
+						reason: "Not measured in Explorer.",
+					},
+					readGraphics: () => frameSettings,
+					readDevice: () => presentation.device.getDiagnosticIdentity(),
+					readFrameRates: () => frameRateSampler.readFrameRates(),
+				});
 				textureFilteringCapabilities =
 					presentation.textureFilteringCapabilities;
 				if (destroyed) return;
@@ -2032,6 +2040,7 @@
 						setSceneInputBlocked(false);
 					}
 					const frameFinishedAt = performance.now();
+					performanceSession?.recordFrame(frameFinishedAt - tickStartedAt);
 					frameRateSampler.recordFrame({
 						animationFrameTimeMs,
 						startedAtMs: tickStartedAt,
@@ -2167,7 +2176,7 @@
 			renderScaleOptions={RENDER_SCALE_OPTIONS}
 			{updateRenderScale}
 			{readRendererFrameDiagnostics}
-			{updateRendererFrameProfiling}
+			{readPerformanceSession}
 			{captureFrameDiagnosticReport}
 			{readAuthoredDynamicRuntimeDiagnostics}
 			{readStaticObjectRuntimeDiagnostics}

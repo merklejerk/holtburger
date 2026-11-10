@@ -129,12 +129,10 @@ async function measureSubmission(
 	const profiler = new WebGL2GpuFrameProfiler(gl);
 	try {
 		const frame = profiler.beginFrame(1);
-		const phase = frame?.beginPhase("opaque");
 		const started = performance.now();
 		for (let iteration = 0; iteration < SUBMISSION_REPETITIONS; iteration += 1)
 			submit();
 		const cpuMs = performance.now() - started;
-		phase?.finish();
 		frame?.finish();
 		gl.flush();
 		const deadline = performance.now() + 2000;
@@ -145,7 +143,7 @@ async function measureSubmission(
 				return {
 					repetitions: SUBMISSION_REPETITIONS,
 					cpuMs,
-					gpuMs: gpu.opaqueMs,
+					gpuMs: gpu.latestMs,
 				};
 			if (gpu.kind === "unsupported" || gpu.kind === "disjoint")
 				return {

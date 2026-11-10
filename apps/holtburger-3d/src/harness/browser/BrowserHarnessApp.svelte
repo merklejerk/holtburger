@@ -99,7 +99,6 @@
 		type StaticObjectRuntimeDiagnostics,
 	} from "../../lib/game/runtime/game-presentation-runtime";
 	import type { ClosedWorkerPoolDiagnostics } from "../../lib/game/workers/closed-worker";
-	import { RuntimeTickProfiler } from "../../lib/game/runtime/runtime-tick-profiler";
 	import { LandblockLayerKind } from "../../lib/game/runtime/scene-interest";
 	import {
 		SceneInterestRequestCoordinator,
@@ -796,8 +795,8 @@
 		readonly frameProfile: RendererFrameProfile | null;
 		/** Latest plate selection, submission, and renderer-local cache evidence. */
 		readonly nameplates: RendererFrameDiagnosticsSnapshot["nameplates"] | null;
-		readonly tickProfile: ReturnType<
-			GamePresentationRuntime["getTickProfile"]
+		readonly presentationProfile: ReturnType<
+			GamePresentationRuntime["getPresentationProfile"]
 		> | null;
 		readonly authoredDynamics: AuthoredDynamicDiagnostics | null;
 		/** Required authored portal closure and transition cursor/resource evidence. */
@@ -3750,7 +3749,7 @@
 
 	function setFrameProfiling(enabled: boolean): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
-		runtime.setRendererFrameProfilingEnabled(enabled);
+		runtime.setFrameProfilingEnabled(enabled);
 	}
 
 	function captureBakedDrawMergeCensus(): Promise<BakedDrawMergeCensus> {
@@ -3824,7 +3823,7 @@
 		lastFrameAt = undefined;
 		// One reset delimits both aggregates, so a --measure-ms window governs the renderer profile
 		// mean as well as the harness frame timing rather than leaving it a rolling tail.
-		runtime?.resetRendererFrameProfile();
+		runtime?.resetFrameProfile();
 	}
 
 	function timingSnapshot(): BrowserHarnessTiming {
@@ -4382,8 +4381,6 @@
 					PARTICLE_SEED === null
 						? undefined
 						: seededRoll(Number(PARTICLE_SEED)),
-					// The harness is a measurement surface, so it always wants tick timing.
-					new RuntimeTickProfiler(),
 				);
 				if (
 					PORTAL_TRANSITION_COMPOSITOR_DIAGNOSTIC ||
@@ -4910,7 +4907,7 @@
 							portalTransition:
 								runtime?.getPortalTransitionDiagnostics() ?? null,
 							portalTransitionPresentationFixture,
-							tickProfile: runtime?.getTickProfile() ?? null,
+							presentationProfile: runtime?.getPresentationProfile() ?? null,
 							camera: cameraEvidence,
 							error,
 							frameSettings,

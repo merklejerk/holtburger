@@ -1181,7 +1181,10 @@ mod tests {
                 .advance_physics_tick(
                     now + dt,
                     dt,
-                    super::super::runtime_profile::RuntimePhaseProfile::begin("physics_tick"),
+                    super::super::runtime_profile::RuntimeScopeProfile::begin(
+                        crate::client::runtime_profile::RuntimeProfileScope::PhysicsTick,
+                        None,
+                    ),
                     #[cfg(feature = "runtime-fixture")]
                     None,
                 )

@@ -62,7 +62,6 @@ export interface PhysicsScriptDiagnostics {
 	readonly activeScriptCount: number;
 	readonly pendingActivationCount: number;
 	readonly resynchronizedCount: number;
-	readonly lastAdvancementDurationMs: number;
 }
 
 /** Source of the uniform roll retail performs for a nonzero `CallPES` pause. */
@@ -82,7 +81,6 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 	readonly #records = new Map<BehaviorTargetId, ScriptRecord>();
 	readonly #owners = new Map<TOwnerId, Set<BehaviorTargetId>>();
 	#resynchronizedCount = 0;
-	#lastAdvancementDurationMs = 0;
 	#destroyed = false;
 
 	/**
@@ -236,10 +234,8 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			throw new Error("Cannot advance a destroyed physics script system.");
 		if (!Number.isFinite(timeSeconds))
 			throw new Error("Script time must be finite.");
-		const startedAt = performance.now();
 		for (const record of this.#records.values())
 			this.#advanceRecord(record, timeSeconds);
-		this.#lastAdvancementDurationMs = performance.now() - startedAt;
 	}
 
 	/**
@@ -281,7 +277,6 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 		return {
 			activeOwnerCount: this.#records.size,
 			activeScriptCount,
-			lastAdvancementDurationMs: this.#lastAdvancementDurationMs,
 			pendingActivationCount,
 			resynchronizedCount: this.#resynchronizedCount,
 		};

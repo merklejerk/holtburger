@@ -145,7 +145,6 @@ import type {
 	WorldCurveTrajectoryInput,
 	WorldTrajectoryInput,
 } from "../lib/game/renderer/renderer";
-import type { RuntimeTickProfile } from "../lib/game/runtime/runtime-tick-profiler";
 import type { MinimapFrame } from "../app/minimap-frame";
 import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
@@ -221,8 +220,6 @@ export interface ClientGameplayPresentationDiagnostics {
 		readonly drawingBufferWidth: number;
 		readonly drawingBufferHeight: number;
 	};
-	/** Existing shared runtime clocks, injected only for an explicitly debug-enabled client. */
-	readonly tickProfile: RuntimeTickProfile | null;
 	/** Shared resource totals for cold resident-memory comparisons in client profiles. */
 	readonly residentResources:
 		PortalTransitionRuntimeDiagnostics["persistent"] | null;
@@ -383,14 +380,8 @@ export interface ClientGameplayRuntime
 	render(timeSeconds: number): PortalTransitionPresentationReceipt | null;
 	/** Optional cold renderer counters used only by explicitly enabled client diagnostics. */
 	getRendererFrameDiagnostics?(): RendererFrameDiagnosticsSnapshot | null;
-	/** Optional shared runtime timing injected only by a diagnostics-oriented frontend. */
-	getTickProfile?(): RuntimeTickProfile | null;
 	/** Reuse existing runtime resource accounting without adding a frame-hot collector. */
 	getPortalTransitionDiagnostics?(): PortalTransitionRuntimeDiagnostics;
-	/** Explicitly create or tear down the existing renderer profiling session. */
-	setRendererFrameProfilingEnabled?(enabled: boolean): void;
-	/** Delimit the renderer measurement mean without rebuilding presentation. */
-	resetRendererFrameProfile?(): void;
 }
 
 /** Borrowed presentation capabilities consumed by gameplay; browser-resource lifetime stays in the root. */
@@ -749,7 +740,6 @@ export class ClientGameplayPresentation {
 				drawingBufferWidth: this.#canvas.width,
 				drawingBufferHeight: this.#canvas.height,
 			},
-			tickProfile: resources?.runtime.getTickProfile?.() ?? null,
 			residentResources:
 				resources?.runtime.getPortalTransitionDiagnostics?.().persistent ??
 				null,
@@ -770,22 +760,6 @@ export class ClientGameplayPresentation {
 							particleBatches: selection.submittedParticleBatchCount,
 						},
 		};
-	}
-
-	/** Enable the existing renderer phase clocks for an explicit live-client investigation. */
-	setRendererFrameProfilingEnabled(enabled: boolean): void {
-		const runtime = this.#activeResources?.runtime;
-		if (runtime === undefined)
-			throw new Error("Client presentation is unavailable.");
-		if (runtime.setRendererFrameProfilingEnabled === undefined) {
-			throw new Error("Client renderer profiling is unavailable.");
-		}
-		runtime.setRendererFrameProfilingEnabled(enabled);
-	}
-
-	/** Reset the active renderer window immediately before a bounded measurement. */
-	resetRendererFrameProfile(): void {
-		this.#activeResources?.runtime.resetRendererFrameProfile?.();
 	}
 
 	/** Capture one acquisition owner; geometry remains borrowed inside the synchronous callback. */

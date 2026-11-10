@@ -105,7 +105,8 @@ export interface ClosedWorkerPoolDiagnostics {
 	readonly completedJobCount: number;
 	readonly peakQueuedJobCount: number;
 	readonly queuedJobCount: number;
-	readonly totalExecutionDurationMs: number;
+	/** Accumulated dispatch-to-result elapsed time, including transport and scheduling. */
+	readonly totalJobTurnaroundMs: number;
 	readonly totalQueueDelayMs: number;
 	readonly transferredBytes: number;
 	readonly workerCount: number;
@@ -122,7 +123,7 @@ export class BoundedClosedWorkerPool<TInput, TResult> {
 	#activeJobCount = 0;
 	#completedJobCount = 0;
 	#peakQueuedJobCount = 0;
-	#totalExecutionDurationMs = 0;
+	#totalJobTurnaroundMs = 0;
 	#totalQueueDelayMs = 0;
 	#transferredBytes = 0;
 	#destroyed = false;
@@ -167,7 +168,7 @@ export class BoundedClosedWorkerPool<TInput, TResult> {
 			completedJobCount: this.#completedJobCount,
 			peakQueuedJobCount: this.#peakQueuedJobCount,
 			queuedJobCount: this.#pending.length,
-			totalExecutionDurationMs: this.#totalExecutionDurationMs,
+			totalJobTurnaroundMs: this.#totalJobTurnaroundMs,
 			totalQueueDelayMs: this.#totalQueueDelayMs,
 			transferredBytes: this.#transferredBytes,
 			workerCount: this.#slots.length,
@@ -206,7 +207,7 @@ export class BoundedClosedWorkerPool<TInput, TResult> {
 					slot.busy = false;
 					this.#activeJobCount -= 1;
 					this.#completedJobCount += 1;
-					this.#totalExecutionDurationMs += performance.now() - startedAt;
+					this.#totalJobTurnaroundMs += performance.now() - startedAt;
 					if (slot.client.isDestroyed && !this.#destroyed) {
 						slot.client = new ClosedWorkerClient<TInput, TResult>(
 							this.#createWorker(),

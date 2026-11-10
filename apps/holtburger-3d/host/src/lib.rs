@@ -27,6 +27,7 @@ pub mod client_friends;
 pub mod client_gameplay;
 pub mod client_host;
 pub mod client_party;
+mod client_performance;
 pub mod client_projection;
 pub mod client_runtime;
 pub mod client_squelch;

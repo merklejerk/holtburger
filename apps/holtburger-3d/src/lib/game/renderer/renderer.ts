@@ -503,186 +503,23 @@ export interface FrameSelectionMetrics {
 	readonly objectSuppressedUniformUploads: number;
 }
 
-/** Non-overlapping renderer CPU wall-time phases aggregated from profiled frames. */
-export interface RendererCpuFrameTimings {
-	/** CPU wall time spent deriving distance and phase order for blended objects. */
-	readonly blendedOrderingMs: number;
-	/** CPU wall time spent submitting blended object work. */
-	readonly blendedSubmissionMs: number;
-	/** CPU wall time spent finalizing renderer diagnostics. */
-	readonly finalizationMs: number;
-	/** CPU wall time spent projecting and selecting generated-instance envelopes. */
-	/** CPU wall time spent encoding and uploading frame-local object instances. */
-	readonly instanceUploadMs: number;
-	/** CPU wall time spent forming compatible frame-instance submission runs. */
-	readonly instanceRunPreparationMs: number;
-	/** CPU wall time spent submitting opaque object work. */
-	readonly opaqueSubmissionMs: number;
-	/** CPU wall time spent constructing and submitting outdoor shadow maps. */
-	readonly outdoorShadowMapMs: number;
-	/** CPU cost of routing sources and uploading particle batches, separate from blended work. */
-	readonly particleSubmissionMs: number;
-	/** Renderer work outside the named spans. */
-	readonly otherMs: number;
-	/** CPU wall time spent clearing, propagating, reducing, and resolving portal targets. */
-	readonly portalCompositionMs: number;
-	/** CPU wall time spent planning portal visibility and packing its atlas. */
-	readonly portalPlanningMs: number;
-	/** CPU wall time spent querying visible scene identities. */
-	readonly sceneQueryMs: number;
-	/** CPU wall time spent resolving selected scene identities into raw frame inputs. */
-	readonly sceneContributionResolutionMs: number;
-	/** CPU wall time spent preparing frame-global renderer state. */
-	readonly setupMs: number;
-	/** CPU wall time spent submitting terrain work. */
-	readonly terrainSubmissionMs: number;
-	/** CPU wall time spanning the complete renderer frame call. */
-	readonly totalMs: number;
-	/** CPU wall time spent deriving camera, projection, and frustum state. */
-	readonly viewPreparationMs: number;
-}
-
-/** Per-frame contribution work recorded only by an explicitly active renderer profile. */
-export interface RendererContributionFrameMetrics {
-	/** Dynamic object inputs compiled into frame-current draw state. */
-	readonly dynamicObjectPreparationCount: number;
-	/** Non-dynamic object inputs compiled from retained scene contributions. */
-	readonly staticObjectPreparationCount: number;
-}
-
-/** Explanatory outdoor-shadow work recorded only by an explicitly active renderer profile. */
-export interface RendererOutdoorShadowMapFrameMetrics {
-	/** Cascade-frustum scene queries issued by the shadow pass. */
-	readonly cascadeQueryCount: number;
-	/** Candidate memberships summed across cascades, including repeated roots. */
-	readonly cascadeCandidateMembershipCount: number;
-	/** Unique eligible complete roots before the per-view N/M budget. */
-	readonly candidateRootCount: number;
-	/** Ordinary merged depth spans selected across every cascade. */
-	readonly selectedDepthDrawCount: number;
-	/** Selected complete roots assigned to mapped PSSM work. */
-	readonly mappedRootCount: number;
-	/** Selected complete roots assigned to geometry-free analytic fallback. */
-	readonly analyticRootCount: number;
-	/** Eligible complete roots rejected by the per-view N cap. */
-	readonly rejectedRootCount: number;
-	/** Complete roots retained across both disjoint tiers. */
-	readonly selectedRootCount: number;
-	/** Views that skipped mapped target and submission work because no depth parts survived. */
-	readonly emptyMappedViewCount: number;
-	/** Distinct visible parts per root, summed across its intersected cascades. */
-	readonly selectedPartCascadeCount: number;
-}
-
-/** Renderer CPU timings for one explicitly profiled frame. */
-export interface RendererCpuFrameProfile extends RendererCpuFrameTimings {
-	/** Contribution work counters for this profiled frame. */
-	readonly contribution: RendererContributionFrameMetrics;
-	/** Monotonic renderer-local frame identifier. */
-	readonly frameNumber: number;
-	/** Outdoor shadow-map work counters for this profiled frame. */
-	readonly outdoorShadowMap: RendererOutdoorShadowMapFrameMetrics;
-}
-
-/** CPU profile accumulated since the last reset, exposing attribution and frame-time variance. */
-export interface RendererCpuFrameProfileWindow {
-	/** Latest and arithmetic-mean contribution work since the last profile reset. */
-	readonly contribution: {
-		readonly latest: RendererContributionFrameMetrics;
-		readonly mean: RendererContributionFrameMetrics;
-	};
-	/** Frame identifier of the most recently captured sample. */
+/** Whole-renderer elapsed statistics; there are no per-pass measurements. */
+interface RendererCpuFrameProfileWindow {
 	readonly latestFrameNumber: number;
-	/** Total CPU wall time of the most recently captured sample. */
-	readonly latestTotalMs: number;
-	/** Latest and arithmetic-mean outdoor shadow work since the last profile reset. */
-	readonly outdoorShadowMap: {
-		readonly latest: RendererOutdoorShadowMapFrameMetrics;
-		readonly mean: RendererOutdoorShadowMapFrameMetrics;
-	};
-	/**
-	 * Per-phase arithmetic mean over every frame since the last profile reset.
-	 *
-	 * This is the only figure in this type suitable for comparing two builds. A fixed frame count
-	 * spans a different amount of wall time at every frame rate, so a rolling tail can invert the
-	 * sign of a real change when one hitch lands inside it.
-	 */
-	readonly mean: RendererCpuFrameTimings;
-	/**
-	 * Nearest-rank 95th percentile of total CPU frame time over the most recent frames only.
-	 *
-	 * Bounded by the shared diagnostics tuning's percentile CPU-frame tail because a percentile needs
-	 * retained samples to rank and running sums cannot supply them. Read it as a hitch signal for
-	 * the recent past, never as a property of the measurement window.
-	 */
-	readonly p95RecentTotalMs: number;
-	/** Frames represented by `mean`, counted since the last profile reset. */
+	readonly latestMs: number;
+	readonly meanMs: number;
+	/** Recent hitch indicator, independent of the capture-wide mean. */
+	readonly p95RecentMs: number;
 	readonly sampleCount: number;
 }
 
-/** Per-phase GPU elapsed-time spans measured for one resolved frame. */
-export interface RendererGpuFrameTimings {
-	/** GPU elapsed-time span covering evaluation, filtering, and AO composition. */
-	readonly ambientOcclusionMs: number;
-	/** GPU elapsed-time span covering blended object commands. */
-	readonly blendedMs: number;
-	/** GPU elapsed-time span covering sampler-free far-terrain groups. */
-	readonly farTerrainMs: number;
-	/** GPU elapsed-time span covering opaque object commands. */
-	readonly opaqueMs: number;
-	/** GPU elapsed-time span covering outdoor shadow layer clears and caster depth draws. */
-	readonly outdoorShadowMapMs: number;
-	/**
-	 * GPU elapsed-time span covering particle commands.
-	 *
-	 * Separate from `blendedMs` so a per-batch upload stall is attributable: every batch
-	 * writes into one buffer immediately before its own draw, and the driver must either
-	 * rename the buffer or wait.
-	 */
-	readonly particleMs: number;
-	/** GPU elapsed-time span covering flat color/depth presentation. */
-	readonly presentationMs: number;
-	/** GPU elapsed-time spans covering portal target setup and composition commands. */
-	readonly portalCompositionMs: number;
-	/**
-	 * GPU elapsed-time span covering both sky passes.
-	 *
-	 * One figure rather than two: the before-world and after-landscape passes are the same
-	 * cost to reason about, and elapsed queries cannot nest, so they are measured
-	 * sequentially and summed.
-	 */
-	readonly skyMs: number;
-	/** GPU elapsed-time span covering composed near-terrain groups. */
-	readonly nearTerrainMs: number;
-	/** GPU elapsed-time span covering terrain commands. */
-	readonly terrainMs: number;
-	/**
-	 * Sum of the measured phase spans, **not** wall-clock across the frame.
-	 *
-	 * Elapsed-time queries cannot nest, so no query can wrap the frame while phase queries
-	 * run inside it, and GPU work between phases is unmeasurable. There is deliberately no
-	 * `otherMs`: reporting an unmeasured gap as zero would read as "no unattributed work"
-	 * rather than "not measured".
-	 */
-	readonly totalMs: number;
-}
-
-/**
- * One resolved GPU frame, plus the mean over every frame resolved since the last profile reset.
- *
- * The mean exists because a single GPU frame is not evidence: results arrive asynchronously, a
- * driver may retire several frames' queries together, and one stalled batch moves a phase span by
- * an order of magnitude. Compare builds on `mean`; read the per-frame spans as the latest sample.
- */
-interface RendererGpuFrameSample extends RendererGpuFrameTimings {
-	/** Renderer frame identifier associated with this delayed result. */
+/** One complete renderer command-stream span, not GPU utilization. */
+interface RendererGpuFrameSample {
 	readonly frameNumber: number;
 	readonly kind: "available";
-	/** Arithmetic mean of every phase over the frames resolved since the last reset. */
-	readonly mean: RendererGpuFrameTimings;
-	/** Submitted GPU frames whose timing results are not yet readable. */
+	readonly latestMs: number;
+	readonly meanMs: number;
 	readonly pendingFrameCount: number;
-	/** Frames represented by `mean`, counted since the last profile reset. */
 	readonly sampleCount: number;
 }
 
@@ -703,7 +540,7 @@ export type RendererGpuFrameProfile =
 
 /** Latest CPU frame and delayed GPU result from an explicitly enabled profiling session. */
 export interface RendererFrameProfile {
-	/** Synchronous CPU measurements summarized across the recent frame window. */
+	/** Synchronous CPU measurements averaged since reset, with a separately labeled recent p95. */
 	readonly cpu: RendererCpuFrameProfileWindow;
 	/** Most recently resolved asynchronous GPU measurement state. */
 	readonly gpu: RendererGpuFrameProfile;

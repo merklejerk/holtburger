@@ -631,7 +631,6 @@ describe("GamePresentationRuntime view and interest control", () => {
 					PARTICLE_MESH_SOURCE,
 					SHARED_FRAME_SETTINGS,
 					undefined,
-					undefined,
 					{ createTerrainWorker: () => worker },
 				);
 				if (failBuild)
@@ -968,7 +967,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 			profilingEnabled: false,
 			selectionMetrics: frameSelectionMetrics,
 		});
-		runtime.setRendererFrameProfilingEnabled(true);
+		runtime.setFrameProfilingEnabled(true);
 		expect(setFrameProfilingEnabled).toHaveBeenCalledWith(true);
 		const queriedPoint = createLandblockWorldOrigin("0x0102ffff").add(
 			new Vec3(1, 10, -1),
@@ -5340,7 +5339,6 @@ async function buildGamePresentationRuntimeForTest(
 		soundTableSource,
 		particleMeshSource,
 		SHARED_FRAME_SETTINGS,
-		undefined,
 		undefined,
 		{ createTerrainWorker: () => new TestTerrainWorkerPort() },
 	);

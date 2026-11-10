@@ -68,7 +68,7 @@ export async function runClientStreamingProbe(client, helpers, options) {
 		}`,
 			);
 			const before = await snapshot(client, evaluate);
-			const start = before.client.diagnostics.playerResidency;
+			const start = before.client.playerResidency;
 			if (
 				start?.landblockId !== options.startLandblock ||
 				start.envCellId !== null
@@ -76,19 +76,16 @@ export async function runClientStreamingProbe(client, helpers, options) {
 				throw new Error(
 					"Streaming start did not reach the expected outdoor landblock.",
 				);
-			if (options.profile) {
-				await evaluate(
-					client,
-					`() => window.__holtburgerClientPerformance.setRendererProfilingEnabled(true)`,
-				);
+			await evaluate(client, `() => window.__holtburgerPerformance.start()`);
+			if (options.v8Sampling) {
 				await client.send("Profiler.enable");
 				await client.send("Profiler.setSamplingInterval", { interval: 100 });
 				await client.send("Profiler.start");
 			}
 			await evaluate(
 				client,
-				`() => {
-			window.__holtburgerClientPerformance.reset();
+				`async () => {
+			await window.__holtburgerPerformance.reset();
 			const state = window.__holtburgerStreamingProbe;
 			state.frames = []; state.interest = []; state.lastRenderAt = null; state.tickMs = 0;
 			state.startedAt = performance.now();
@@ -114,25 +111,22 @@ export async function runClientStreamingProbe(client, helpers, options) {
 			await delay(options.drainMs);
 			const measured = await evaluate(
 				client,
-				`() => {
+				`async () => {
 			const state = window.__holtburgerStreamingProbe;
 			const endedAt = performance.now();
 			state.active = false;
 			return { window: { startedAt: state.startedAt, endedAt }, frames: state.frames, interest: state.interest,
-				performance: window.__holtburgerClientPerformance.snapshot() };
+				performance: await window.__holtburgerPerformance.snapshot() };
 		}`,
 			);
-			if (options.profile) {
+			if (options.v8Sampling) {
 				const { profile } = await client.send("Profiler.stop");
 				await writeFile(
 					`${options.outputPrefix}-${trial}.cpuprofile`,
 					JSON.stringify(profile),
 				);
-				await evaluate(
-					client,
-					`() => window.__holtburgerClientPerformance.setRendererProfilingEnabled(false)`,
-				);
 			}
+			await evaluate(client, `() => window.__holtburgerPerformance.stop()`);
 			const after = await snapshot(client, evaluate);
 			trials.push({ before, after, ...measured });
 			const screenshot = await client.send("Page.captureScreenshot", {
@@ -189,7 +183,7 @@ async function snapshot(client, evaluate) {
 		if (!runtime) throw new Error('Streaming probe has not observed the runtime.');
 		return {
 			at: performance.now(),
-			client: window.__holtburgerClientPerformance.snapshot(),
+			client: window.__holtburgerPerformance.readClientDiagnostics(),
 			camera: window.__holtburgerProbeEvidence.camera,
 			staticObjects: runtime.getStaticObjectRuntimeDiagnostics(),
 			terrain: runtime.getTerrainWorkerDiagnostics(),

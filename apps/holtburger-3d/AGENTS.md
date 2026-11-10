@@ -168,14 +168,18 @@ for every change.
 
 ### Renderer Profiling
 
-The Explorer Frame panel exposes explicit renderer CPU/GPU profiling. The
+Client Debug/dev and Explorer Frame info expose the same explicit performance panel,
+with browser/presentation, renderer CPU/GPU, terrain-worker and native coverage states.
+Captures are owned by the mode root and survive panel hiding; stopped reports retain
+completed observations. Native client authority timings include awaits, and Explorer
+native camera/entity execution is explicitly unmeasured. The
 browser-harness equivalent is `npm run harness:browser -- --profile-renderer
-...`. Use either to locate the responsible renderer boundary before changing a
+...`. Use these to locate the responsible renderer boundary before changing a
 performance-sensitive path.
 
 Profiling is intentionally opt-in. When disabled, renderer hot paths must not
 perform profiling clocks, GPU-query work, or retain profiling samples. Enabling
-it may add CPU clocks and asynchronous GPU timestamp queries; disabling it must
+it may add CPU clocks and one asynchronous elapsed GPU query per admitted renderer frame; disabling it must
 tear down those resources again.
 
 **The harness renders on the real GPU with `--gpu`, and CPU and GPU timing both
@@ -196,18 +200,10 @@ profiler needs no extra tooling: `--cpu-profile <path>` samples the page at
 standard `.cpuprofile` JSON, loadable in the Chrome DevTools Performance panel
 or speedscope.
 
-The two profilers answer different questions; use them together. The
-renderer's phase buckets measure spans the renderer itself defined, and work
-that crosses a bucket boundary is silently billed to the wrong phase — cached
-generated-instance selection has been billed to run preparation, and the
-non-nesting GPU elapsed windows once pinned opaque-pass cost on the terrain
-pass. The V8 profile attributes CPU time to actual functions regardless of
-bucket boundaries, so it corroborates the buckets and also surfaces costs no
-bucket names: key-string construction, per-draw attribute rebinding, GC
-pressure. Capture an on/off pair of the workload under investigation and diff
-function self-times; a single profile cannot separate the workload from the
-baseline. Frame counts differ between unthrottled runs, so normalize per frame
-before comparing.
+The built-in profiler measures major runtime systems and the whole renderer CPU/GPU
+boundary. It deliberately has no per-pass hooks. Use V8 sampling for function-level
+attribution, including allocation and GC costs. Compare equivalent workloads and
+normalize function self-times per frame when frame counts differ.
 
 Capture your own numbers; do not quote numbers recorded here or in any other
 doc. A timing is only meaningful alongside the scene interest radius, content,
@@ -280,13 +276,9 @@ Emitter positions are discoverable rather than guessable: the scene-space
 origin of every live emitter passes through `collectCohorts`, so a temporary
 probe there yields real coordinates to point a camera at.
 
-GPU spans are **elapsed-time** queries, not timestamps: Chrome reports zero
-`QUERY_COUNTER_BITS_EXT` for `TIMESTAMP_EXT`, because absolute GPU timestamps
-are a timing-attack vector, while `TIME_ELAPSED_EXT` is fully supported.
-Elapsed queries cannot nest, so phases are sequential and `gpu.totalMs` is the
-**sum of measured phases**, not wall-clock across the frame. There is
-deliberately no GPU `otherMs`: unattributed GPU work is unmeasurable rather
-than zero.
+GPU timing uses one `TIME_ELAPSED_EXT` query around the complete renderer command
+stream. It reports an elapsed device span, not utilization or a sum of pass times.
+Queries are bounded, read asynchronously, and discarded on reset or clock disjoint.
 
 Treat the profile as attribution evidence, not a final diagnosis. GPU results
 arrive delayed by a frame or more, and a disjoint GPU clock discards them.

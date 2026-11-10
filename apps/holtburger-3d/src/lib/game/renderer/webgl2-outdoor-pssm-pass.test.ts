@@ -21,21 +21,18 @@ describe("WebGL2OutdoorPssmPass", () => {
 		const fixture = createFixture(true);
 		fixture.pass.beginFrame();
 		const input = createInput(new Vec3(0.2, 1, -0.3));
-		const first = fixture.pass.prepare(input, null);
+		const first = fixture.pass.prepare(input);
 		if (first === null) throw new Error("Fixture requires directional light.");
 		const firstMatrices = first.storage.cascades.map((cascade) => ({
 			...cascade.lightClip,
 		}));
 		const batchCapacity = first.storage.batchPool.length;
 		const casterArray = first.storage.batches[0]?.casters;
-		const second = fixture.pass.prepare(
-			{
-				...input,
-				camera: { ...input.camera, position: new Vec3(10, 2, 3) },
-				casterBudget: { maximumMappedRoots: 0, maximumSelectedRoots: 1 },
-			},
-			null,
-		);
+		const second = fixture.pass.prepare({
+			...input,
+			camera: { ...input.camera, position: new Vec3(10, 2, 3) },
+			casterBudget: { maximumMappedRoots: 0, maximumSelectedRoots: 1 },
+		});
 		if (second === null) throw new Error("Fixture requires directional light.");
 		expect(first.storage).not.toBe(second.storage);
 		expect(first.storage.casterSelectionScratch).not.toBe(
@@ -54,9 +51,9 @@ describe("WebGL2OutdoorPssmPass", () => {
 		expect(fixture.state.poseReads).toEqual([]);
 		expect(fixture.state.targetResizes).toBe(0);
 		const queries = fixture.state.queries;
-		fixture.pass.render(first, null);
+		fixture.pass.render(first);
 		expect(fixture.state.draws).toHaveLength(input.settings.cascadeCount);
-		fixture.pass.render(second, null);
+		fixture.pass.render(second);
 		expect(second.storage.analyticCasters).toHaveLength(1);
 		expect(fixture.state.queries).toBe(queries);
 		fixture.pass.beginFrame();
@@ -66,16 +63,14 @@ describe("WebGL2OutdoorPssmPass", () => {
 		expect(first.storage.batchPool).toHaveLength(batchCapacity);
 		expect(casterArray).toHaveLength(0);
 		expect(second.storage.analyticCasters).toHaveLength(0);
-		const next = fixture.pass.prepare(input, null);
+		const next = fixture.pass.prepare(input);
 		expect(next?.storage).toBe(first.storage);
 	});
 	it("does no GPU, query, target, or shader work for zero sun", () => {
 		const fixture = createFixture();
 		const input = createInput(Vec3.zero());
 
-		expect(
-			fixture.pass.render(fixture.pass.prepare(input, null), null),
-		).toBeNull();
+		expect(fixture.pass.render(fixture.pass.prepare(input))).toBeNull();
 
 		expect(fixture.state.targetResizes).toBe(0);
 		expect(fixture.state.queries).toBe(0);
@@ -86,23 +81,8 @@ describe("WebGL2OutdoorPssmPass", () => {
 	it("clears and submits every cascade with one lazy material-free program", () => {
 		const fixture = createFixture(true);
 		const input = createInput(new Vec3(0.2, 1, -0.3));
-		const profileMetrics = {
-			analyticRootCount: 0,
-			candidateRootCount: 0,
-			cascadeCandidateMembershipCount: 0,
-			cascadeQueryCount: 0,
-			selectedDepthDrawCount: 0,
-			emptyMappedViewCount: 0,
-			mappedRootCount: 0,
-			rejectedRootCount: 0,
-			selectedRootCount: 0,
-			selectedPartCascadeCount: 0,
-		};
 
-		const active = fixture.pass.render(
-			fixture.pass.prepare(input, profileMetrics),
-			profileMetrics,
-		);
+		const active = fixture.pass.render(fixture.pass.prepare(input));
 
 		expect(active?.cascades).toHaveLength(2);
 		expect(active?.targets).toBe(fixture.targets);
@@ -111,18 +91,7 @@ describe("WebGL2OutdoorPssmPass", () => {
 		expect(fixture.state.queries).toBe(2);
 		expect(fixture.state.programCreations).toBe(1);
 		expect(fixture.state.poseReads).toEqual([NODE, NODE]);
-		expect(profileMetrics).toEqual({
-			analyticRootCount: 0,
-			candidateRootCount: 1,
-			cascadeCandidateMembershipCount: 2,
-			cascadeQueryCount: 2,
-			selectedDepthDrawCount: 2,
-			emptyMappedViewCount: 0,
-			mappedRootCount: 1,
-			rejectedRootCount: 0,
-			selectedRootCount: 1,
-			selectedPartCascadeCount: 2,
-		});
+
 		expect(fixture.state.depthPreparations).toBe(1);
 		expect(fixture.state.draws).toEqual([
 			{ count: 6, type: 0x1405, offset: 0 },
@@ -142,10 +111,7 @@ describe("WebGL2OutdoorPssmPass", () => {
 		const fixture = createFixture(false);
 
 		expect(
-			fixture.pass.render(
-				fixture.pass.prepare(createInput(new Vec3(0, 1, 0)), null),
-				null,
-			),
+			fixture.pass.render(fixture.pass.prepare(createInput(new Vec3(0, 1, 0)))),
 		).toBeNull();
 
 		expect(fixture.state.targetResizes).toBe(0);
@@ -161,9 +127,9 @@ describe("WebGL2OutdoorPssmPass", () => {
 			...createInput(new Vec3(0, 1, 0)),
 			casterBudget: { maximumMappedRoots: 0, maximumSelectedRoots: 1 },
 		};
-		const prepared = fixture.pass.prepare(input, null);
+		const prepared = fixture.pass.prepare(input);
 		expect(prepared?.storage.analyticCasters).toHaveLength(1);
-		expect(fixture.pass.render(prepared, null)).toBeNull();
+		expect(fixture.pass.render(prepared)).toBeNull();
 		expect(input.selectedDynamicNodeIds).toEqual(new Set([NODE]));
 		expect(fixture.state.depthPreparations).toBe(1);
 		expect(fixture.state.targetResizes).toBe(0);
@@ -173,10 +139,7 @@ describe("WebGL2OutdoorPssmPass", () => {
 
 	it("forwards master disable and destroys a compiled program once", () => {
 		const fixture = createFixture(true);
-		fixture.pass.render(
-			fixture.pass.prepare(createInput(new Vec3(0, 1, 0)), null),
-			null,
-		);
+		fixture.pass.render(fixture.pass.prepare(createInput(new Vec3(0, 1, 0))));
 
 		fixture.pass.disable();
 		fixture.pass.destroy();

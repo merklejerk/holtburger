@@ -147,7 +147,6 @@ import { FrameInstanceStreamArena } from "./frame-instance-stream-arena";
 import {
 	WebGL2OutdoorPssmPass,
 	type ActiveOutdoorPssmFrame,
-	type WebGL2OutdoorPssmPassProfileMetrics,
 } from "./webgl2-outdoor-pssm-pass";
 import {
 	hasOutdoorShadowLight,
@@ -316,10 +315,7 @@ import { WebGL2DynamicPosePages } from "./webgl2-dynamic-pose-pages";
 import { DynamicDepthPreparations } from "./dynamic-depth-preparation";
 import type { DynamicLayout } from "../geometry/dynamic-layout";
 import type { DynamicAppearance } from "../systems/dynamic-appearance";
-import {
-	WebGL2FrameProfiler,
-	type WebGL2FrameProfileCapture,
-} from "./webgl2-gpu-frame-profiler";
+import { WebGL2FrameProfiler } from "./webgl2-gpu-frame-profiler";
 import {
 	WebGL2PortalScopeAtlasPipeline,
 	type WebGL2PortalScopeAtlasFrame,
@@ -441,21 +437,6 @@ const PROBE_SHADING: SceneShading = {
 const ORIGIN = sceneVec3(Vec3.zero());
 const EMPTY_LIGHTS: readonly RuntimeLight[] = [];
 
-/** Allocate explanatory shadow counters only for an explicitly profiled frame. */
-function createEmptyOutdoorShadowMapProfileMetrics(): WebGL2OutdoorPssmPassProfileMetrics {
-	return {
-		analyticRootCount: 0,
-		candidateRootCount: 0,
-		cascadeCandidateMembershipCount: 0,
-		cascadeQueryCount: 0,
-		selectedDepthDrawCount: 0,
-		emptyMappedViewCount: 0,
-		mappedRootCount: 0,
-		rejectedRootCount: 0,
-		selectedRootCount: 0,
-		selectedPartCascadeCount: 0,
-	};
-}
 /** Synthetic single render domain used by the deliberately unpartitioned flat debug mode. */
 const FLAT_PARTICLE_DOMAIN = "particle-render-domain:flat";
 const FLAT_SKY_PARTICLE_DOMAIN = "particle-render-domain:flat-sky";
@@ -777,8 +758,6 @@ interface PreparedOutdoorShadowView {
 	readonly projection: ResolvedOutdoorShadowProjection;
 	/** Whole-root analytic tier chosen during mapped caster preparation. */
 	readonly analyticCasters: readonly EntityShadowCasterShape[];
-	/** Opt-in metric sink shared by preparation and execution, never allocated otherwise. */
-	readonly profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null;
 }
 
 /** Complete CPU inputs retained until this portal camera's sequential GPU execution. */
@@ -1440,7 +1419,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#assertDeviceReady();
 		const profile = this.#frameProfiler?.beginFrame() ?? null;
 		try {
-			this.#drawFrameContent(input, profile);
+			this.#drawFrameContent(input);
 			for (const adapter of this.#combatEffectAdapters)
 				adapter.drawLane(
 					this.#canvas.width,
@@ -1467,7 +1446,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#assertDeviceReady();
 		const profile = this.#frameProfiler?.beginFrame() ?? null;
 		try {
-			this.#drawPortalTransitionFrameContent(input, profile);
+			this.#drawPortalTransitionFrameContent(input);
 			return portalTransitionPresentationReceipt(input.portalTransition);
 		} finally {
 			profile?.finish();
@@ -1545,11 +1524,7 @@ export class WebGL2Renderer implements Renderer {
 		return this.#saoPass?.getCoverageCensus() ?? null;
 	}
 
-	#drawFrameContent(
-		input: FrameInput,
-		profile: WebGL2FrameProfileCapture | null,
-	): void {
-		const setupStartedAt = profile?.beginCpuPhase();
+	#drawFrameContent(input: FrameInput): void {
 		const entityShadows = createEntityShadowSettings(
 			input.frameSettings.entityShadows,
 		);
@@ -1680,30 +1655,23 @@ export class WebGL2Renderer implements Renderer {
 		};
 		this.#beginFrame(shading.clearColor);
 		this.#particlePass?.beginFrame(this.#particleRecords);
-		if (profile && setupStartedAt !== undefined) {
-			profile.finishCpuPhase("setup", setupStartedAt);
-		}
+
 		if (input.frameSettings.envCellRenderMode === "flat") {
 			const plans = input.views.map((view) => {
-				const preparationStartedAt = profile?.beginCpuPhase();
 				const geometry = this.#prepareViewGeometry(
 					input.anchorLandblockId,
 					view,
 				);
-				if (profile && preparationStartedAt !== undefined) {
-					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
-				}
+
 				const shadows = this.#prepareOutdoorShadows(
 					geometry,
 					entityShadows,
 					input.frameSettings.showRetailHiddenGeometry,
 					shading,
-					profile,
 				);
 				const contributions = this.#collectScene(
 					geometry,
 					input.frameSettings,
-					profile,
 					shadows,
 				);
 				return { view: { ...geometry, ...contributions }, shadows };
@@ -1713,34 +1681,29 @@ export class WebGL2Renderer implements Renderer {
 				this.#frameClockSeconds,
 			);
 			for (const plan of plans) {
-				this.#executeOutdoorShadows(plan.shadows, profile);
+				this.#executeOutdoorShadows(plan.shadows);
 				this.#drawFlatView(
 					plan.view,
 					shading,
 					"exterior",
 					input.frameSettings.showRetailHiddenGeometry,
-					profile,
 				);
 			}
 		} else {
 			const pipeline = (this.#portalScopeAtlasPipeline ??=
 				new WebGL2PortalScopeAtlasPipeline(this.#gl));
 			const plans = input.views.map((view) => {
-				const preparationStartedAt = profile?.beginCpuPhase();
 				const prepared = this.#prepareViewGeometry(
 					input.anchorLandblockId,
 					view,
 				);
-				if (profile && preparationStartedAt !== undefined) {
-					profile.finishCpuPhase("viewPreparation", preparationStartedAt);
-				}
+
 				return this.#preparePortalView(
 					prepared,
 					view,
 					shading,
 					input.frameSettings,
 					entityShadows,
-					profile,
 					pipeline,
 				);
 			});
@@ -1753,24 +1716,18 @@ export class WebGL2Renderer implements Renderer {
 					plan,
 					shading,
 					input.frameSettings,
-					profile,
 					pipeline,
 				);
 			}
 		}
-		const finalizationStartedAt = profile?.beginCpuPhase();
+
 		this.#updateRenderTargetMetrics();
 		this.#finishFrameSelectionMetrics();
-		if (profile && finalizationStartedAt !== undefined) {
-			profile.finishCpuPhase("finalization", finalizationStartedAt);
-		}
 	}
 
 	#drawPortalTransitionFrameContent(
 		input: PortalTransitionOnlyFrameInput,
-		profile: WebGL2FrameProfileCapture | null,
 	): void {
-		const setupStartedAt = profile?.beginCpuPhase();
 		this.#frameTextureFiltering = input.frameSettings.quality.textureFiltering;
 		if (this.#compiledTextureFiltering !== this.#frameTextureFiltering) {
 			this.#dynamicAppearances.rebuild();
@@ -1792,18 +1749,14 @@ export class WebGL2Renderer implements Renderer {
 		this.#activeTransition = input.portalTransition;
 		this.#resetFrameSelectionMetrics(0, input.frameSettings.envCellRenderMode);
 		this.#frameSelectionMetrics.portalTransitionOnlyFramePresented = true;
-		if (profile && setupStartedAt !== undefined) {
-			profile.finishCpuPhase("setup", setupStartedAt);
-		}
 
 		const target = this.#acquireFlatSceneTarget();
 		this.#beginFlatOpaqueScene(target, BLACK_SCENE_CLEAR_COLOR);
 		this.#drawPortalTransitionTunnel(
 			target,
 			input.frameSettings.showRetailHiddenGeometry,
-			profile,
 		);
-		this.#presentFlatScene(target, profile);
+		this.#presentFlatScene(target);
 		this.#updateRenderTargetMetrics();
 		this.#finishFrameSelectionMetrics();
 	}
@@ -1825,19 +1778,16 @@ export class WebGL2Renderer implements Renderer {
 		shading: SceneShading,
 		frameSettings: FrameSettings,
 		entityShadows: EntityShadowSettings,
-		profile: WebGL2FrameProfileCapture | null,
 		pipeline: WebGL2PortalScopeAtlasPipeline,
 	): PreparedPortalView {
 		const placement = viewInput.camera.placement;
 		const rootScope = scopeFor(placement.landblockId, placement.envCellId);
-		const planningStartedAt = profile?.beginCpuPhase();
+
 		const frame = pipeline.prepare(
 			this.#world.getPortalTopologyView(),
 			this.#createPortalScopeWindowCullInput(prepared, viewInput, rootScope),
 		);
-		if (profile && planningStartedAt !== undefined) {
-			profile.finishCpuPhase("portalPlanning", planningStartedAt);
-		}
+
 		this.#accumulatePortalScopeAtlasMetrics(frame);
 		const shadows =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null
@@ -1846,14 +1796,12 @@ export class WebGL2Renderer implements Renderer {
 						entityShadows,
 						frameSettings.showRetailHiddenGeometry,
 						shading,
-						profile,
 					)
 				: null;
 		return this.#preparePortalContributions(
 			prepared,
 			frame,
 			frameSettings,
-			profile,
 			shadows,
 		);
 	}
@@ -1960,7 +1908,6 @@ export class WebGL2Renderer implements Renderer {
 			frame,
 			frameSettings,
 			null,
-			null,
 		);
 		this.#dynamicPosePages.upload(
 			this.#poseUploadParts,
@@ -1970,7 +1917,6 @@ export class WebGL2Renderer implements Renderer {
 			plan,
 			PROBE_SHADING,
 			frameSettings,
-			null,
 			pipeline,
 		);
 		this.#updateRenderTargetMetrics();
@@ -1992,24 +1938,19 @@ export class WebGL2Renderer implements Renderer {
 		prepared: PreparedViewGeometry,
 		frame: WebGL2PortalScopeAtlasFrame,
 		frameSettings: FrameSettings,
-		profile: WebGL2FrameProfileCapture | null,
 		shadows: PreparedOutdoorShadowView | null,
 	): PreparedPortalView {
-		const queryStartedAt = profile?.beginCpuPhase();
 		const visible = this.#world.queryScopeSelectionScene(
 			prepared.frustum,
 			prepared.anchorLandblockId,
 			frame,
 			renderCullingGroupFilter(frameSettings.layerVisibility),
 		);
-		if (profile && queryStartedAt !== undefined) {
-			profile.finishCpuPhase("sceneQuery", queryStartedAt);
-		}
+
 		const contributions = this.#resolveSceneContributions(
 			prepared,
 			visible.entries,
 			frameSettings,
-			profile,
 			frame.atlas.visibility,
 			shadows,
 		);
@@ -2042,32 +1983,20 @@ export class WebGL2Renderer implements Renderer {
 		plan: PreparedPortalView,
 		shading: SceneShading,
 		frameSettings: FrameSettings,
-		profile: WebGL2FrameProfileCapture | null,
 		pipeline: WebGL2PortalScopeAtlasPipeline,
 	): void {
 		const { view, frame, particlesByScope } = plan;
 		const clearColor = this.#viewClearColor(view, shading);
-		this.#executeOutdoorShadows(plan.shadows, profile);
+		this.#executeOutdoorShadows(plan.shadows);
 		const target = this.#acquireFlatSceneTarget();
-		const setupGpu = profile?.beginGpuPhase("portalComposition") ?? null;
-		const setupStartedAt = profile?.beginCpuPhase();
-		let portalTargets: ReturnType<
-			WebGL2PortalScopeAtlasPipeline["beginOpaqueScene"]
-		>;
-		try {
-			this.#beginFlatOpaqueScene(target, clearColor);
-			portalTargets = pipeline.beginOpaqueScene(frame, clearColor);
-		} finally {
-			if (profile && setupStartedAt !== undefined) {
-				profile.finishCpuPhase("portalComposition", setupStartedAt);
-			}
-			setupGpu?.finish();
-		}
-		const objectPhases = this.#createObjectSubmissionPhases(view, profile);
+
+		this.#beginFlatOpaqueScene(target, clearColor);
+		const portalTargets = pipeline.beginOpaqueScene(frame, clearColor);
+		const objectPhases = this.#createObjectSubmissionPhases(view);
 		const hasOutdoorScope =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null;
 		if (hasOutdoorScope) {
-			this.#submitSkyPhase(view, shading, "before-world", profile, pipeline);
+			this.#drawSky(view, shading, "before-world", pipeline);
 			const skyBatches = particlesByScope.get("sky");
 			if (
 				skyBatches &&
@@ -2077,59 +2006,38 @@ export class WebGL2Renderer implements Renderer {
 				this.#drawParticleBatches(
 					view,
 					skyBatches,
-					profile,
 					this.#frameClockSeconds *
 						SHARED_FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
 					SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale,
 				);
 			}
 		}
-		this.#submitTerrainPhase(view, shading, profile, pipeline);
-		this.#submitOpaquePhase(
-			view,
-			objectPhases.opaque,
-			shading,
-			profile,
-			pipeline,
-		);
+		this.#drawTerrain(view, shading, pipeline);
+		this.#submitOpaquePhase(view, objectPhases.opaque, shading, pipeline);
 		if (shading.ambientOcclusion.kind === "enabled") {
-			const ambientOcclusionGpu =
-				profile?.beginGpuPhase("ambientOcclusion") ?? null;
-			try {
-				this.#getSaoPass().applyPortal(
-					portalTargets.scene,
-					portalTargets.extents.atlas,
-					portalTargets.extents.drawingBuffer,
-					frame.atlas,
-					view.camera,
-					view.projection,
-					shading.ambientOcclusion,
-				);
-				this.#recordAmbientOcclusionWork(
-					frame.atlas.tileCount,
-					frame.atlas.trace.tilePixelCount,
-				);
-				pipeline.invalidateOpaqueTileState();
-			} finally {
-				ambientOcclusionGpu?.finish();
-			}
+			this.#getSaoPass().applyPortal(
+				portalTargets.scene,
+				portalTargets.extents.atlas,
+				portalTargets.extents.drawingBuffer,
+				frame.atlas,
+				view.camera,
+				view.projection,
+				shading.ambientOcclusion,
+			);
+			this.#recordAmbientOcclusionWork(
+				frame.atlas.tileCount,
+				frame.atlas.trace.tilePixelCount,
+			);
+			pipeline.invalidateOpaqueTileState();
 		}
 		if (hasOutdoorScope) {
-			this.#submitSkyPhase(view, shading, "after-landscape", profile, pipeline);
+			this.#drawSky(view, shading, "after-landscape", pipeline);
 		}
-		const compositionGpu = profile?.beginGpuPhase("portalComposition") ?? null;
-		const compositionStartedAt = profile?.beginCpuPhase();
-		try {
-			pipeline.execute(target.framebuffer);
-			pipeline.beginDeferredScene(target.framebuffer);
-		} finally {
-			if (profile && compositionStartedAt !== undefined) {
-				profile.finishCpuPhase("portalComposition", compositionStartedAt);
-			}
-			compositionGpu?.finish();
-		}
-		this.#submitBlendedPhase(view, objectPhases, shading, profile, pipeline);
-		this.#drawWorldParticles(view, particlesByScope, profile);
+
+		pipeline.execute(target.framebuffer);
+		pipeline.beginDeferredScene(target.framebuffer);
+		this.#drawBlendedObjects(view, objectPhases, shading, pipeline);
+		this.#drawWorldParticles(view, particlesByScope);
 		this.#drawNameplates(view, pipeline);
 		this.#drawCombatEffects(view, pipeline, frame.atlas.visibility);
 		const indicator = this.#frameWorldIndicator;
@@ -2164,13 +2072,8 @@ export class WebGL2Renderer implements Renderer {
 		this.#drawPortalTransitionTunnel(
 			target,
 			frameSettings.showRetailHiddenGeometry,
-			profile,
 		);
-		this.#presentFlatScene(
-			target,
-			profile,
-			this.#drawEntitySelectionMask(view),
-		);
+		this.#presentFlatScene(target, this.#drawEntitySelectionMask(view));
 	}
 
 	async destroy(): Promise<void> {
@@ -2268,7 +2171,6 @@ export class WebGL2Renderer implements Renderer {
 		entityShadows: EntityShadowSettings,
 		showRetailHiddenGeometry: boolean,
 		shading: SceneShading,
-		profile: WebGL2FrameProfileCapture | null,
 	): PreparedOutdoorShadowView | null {
 		if (entityShadows.mode === "none") return null;
 		if (entityShadows.mode === "simple") {
@@ -2282,81 +2184,52 @@ export class WebGL2Renderer implements Renderer {
 				maps: null,
 				projection,
 				analyticCasters: [],
-				profileMetrics: null,
 			};
 		}
-		const profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null = profile
-			? createEmptyOutdoorShadowMapProfileMetrics()
-			: null;
-		const cpuStartedAt = profile?.beginCpuPhase();
-		try {
-			const preparedShadows = this.#outdoorPssmPass.prepare(
-				{
-					anchorCoordinates: prepared.anchorCoordinates,
-					anchorLandblockId: prepared.anchorLandblockId,
-					aspectRatio: this.#frameWidth / Math.max(1, this.#frameHeight),
-					camera: {
-						far: prepared.camera.far,
-						near: prepared.camera.near,
-						position: prepared.cameraPosition,
-						rotation: prepared.camera.placement.rotation,
-						verticalFovDegrees: prepared.camera.fov,
-					},
-					cameraFrustum: prepared.frustum,
-					casterBudget: entityShadows.casterBudget,
-					frameHeight: this.#frameHeight,
-					frameWidth: this.#frameWidth,
-					selectedDynamicNodeIds: this.#selectedDynamicNodeIds,
-					showRetailHiddenGeometry,
-					projectionSettings: entityShadows.projection,
-					settings: entityShadows.pssm,
-					sunVector: shading.lighting.terrain.sunVector,
-				},
-				profileMetrics,
-			);
-			if (preparedShadows !== null) {
-				for (const batch of preparedShadows.storage.batches)
-					for (const caster of batch.casters)
-						this.#poseUploadParts.set(caster.nodeId, caster.parts);
-			}
-			return preparedShadows === null
-				? null
-				: {
-						maps: preparedShadows,
-						projection: preparedShadows.projection,
-						analyticCasters: preparedShadows.storage.analyticCasters,
-						profileMetrics,
-					};
-		} finally {
-			if (profile && cpuStartedAt !== undefined) {
-				profile.finishCpuPhase("outdoorShadowMap", cpuStartedAt);
-			}
+
+		const preparedShadows = this.#outdoorPssmPass.prepare({
+			anchorCoordinates: prepared.anchorCoordinates,
+			anchorLandblockId: prepared.anchorLandblockId,
+			aspectRatio: this.#frameWidth / Math.max(1, this.#frameHeight),
+			camera: {
+				far: prepared.camera.far,
+				near: prepared.camera.near,
+				position: prepared.cameraPosition,
+				rotation: prepared.camera.placement.rotation,
+				verticalFovDegrees: prepared.camera.fov,
+			},
+			cameraFrustum: prepared.frustum,
+			casterBudget: entityShadows.casterBudget,
+			frameHeight: this.#frameHeight,
+			frameWidth: this.#frameWidth,
+			selectedDynamicNodeIds: this.#selectedDynamicNodeIds,
+			showRetailHiddenGeometry,
+			projectionSettings: entityShadows.projection,
+			settings: entityShadows.pssm,
+			sunVector: shading.lighting.terrain.sunVector,
+		});
+		if (preparedShadows !== null) {
+			for (const batch of preparedShadows.storage.batches)
+				for (const caster of batch.casters)
+					this.#poseUploadParts.set(caster.nodeId, caster.parts);
 		}
+		return preparedShadows === null
+			? null
+			: {
+					maps: preparedShadows,
+					projection: preparedShadows.projection,
+					analyticCasters: preparedShadows.storage.analyticCasters,
+				};
 	}
 
-	/** Execute selected mapped casters only; CPU selection cannot enter this GPU timing scope. */
-	#executeOutdoorShadows(
-		prepared: PreparedOutdoorShadowView | null,
-		profile: WebGL2FrameProfileCapture | null,
-	): void {
+	/** Execute selected mapped casters only; selection has already completed. */
+	#executeOutdoorShadows(prepared: PreparedOutdoorShadowView | null): void {
 		this.#activeOutdoorPssmFrame = null;
 		if (prepared === null || prepared.maps === null) return;
-		const { maps, profileMetrics } = prepared;
-		const cpuStartedAt = profile?.beginCpuPhase();
-		const gpuPhase = profile?.beginGpuPhase("outdoorShadowMap") ?? null;
-		try {
-			this.#activeOutdoorPssmFrame = this.#outdoorPssmPass.render(
-				maps,
-				profileMetrics,
-			);
-		} finally {
-			gpuPhase?.finish();
-			if (profile && cpuStartedAt !== undefined)
-				profile.finishCpuPhase("outdoorShadowMap", cpuStartedAt);
-		}
-		if (profile && profileMetrics) {
-			profile.recordOutdoorShadowMap(profileMetrics);
-		}
+		const { maps } = prepared;
+
+		this.#activeOutdoorPssmFrame = this.#outdoorPssmPass.render(maps);
+
 		if (this.#activeOutdoorPssmFrame) {
 			this.#deviceState.invalidate();
 		}
@@ -2450,23 +2323,18 @@ export class WebGL2Renderer implements Renderer {
 	#collectScene(
 		prepared: PreparedViewGeometry,
 		frameSettings: FrameSettings,
-		profile: WebGL2FrameProfileCapture | null,
 		shadows: PreparedOutdoorShadowView | null,
 	): PreparedSceneContributions {
-		const queryStartedAt = profile?.beginCpuPhase();
 		const visible = this.#world.queryFlatScene(
 			prepared.frustum,
 			prepared.anchorLandblockId,
 			renderCullingGroupFilter(frameSettings.layerVisibility),
 		);
-		if (profile && queryStartedAt !== undefined) {
-			profile.finishCpuPhase("sceneQuery", queryStartedAt);
-		}
+
 		const contributions = this.#resolveSceneContributions(
 			prepared,
 			visible.entries,
 			frameSettings,
-			profile,
 			null,
 			shadows,
 		);
@@ -2494,11 +2362,9 @@ export class WebGL2Renderer implements Renderer {
 		prepared: PreparedViewGeometry,
 		visibleEntries: readonly SceneNodeId[],
 		frameSettings: FrameSettings,
-		profile: WebGL2FrameProfileCapture | null,
 		portalVisibility: DynamicRenderDomainSelection | null,
 		shadows: PreparedOutdoorShadowView | null,
 	): PreparedSceneContributions {
-		const resolutionStartedAt = profile?.beginCpuPhase();
 		this.#reconcileNameplateTextureCache(
 			frameSettings.nameplates.appearance,
 			frameSettings.quality.renderScale,
@@ -2520,7 +2386,7 @@ export class WebGL2Renderer implements Renderer {
 				this.#indoorVisibilityIslands,
 			);
 		}
-		let staticObjectCount = 0;
+
 		// One offset per visible landblock, not one per object: it is the same value for every
 		// object in a landblock. Submissions carry only their landblock id, so a cached static
 		// submission stays valid across re-anchoring and the frame never rewrites it.
@@ -2565,7 +2431,7 @@ export class WebGL2Renderer implements Renderer {
 						)
 					)
 						continue;
-					staticObjectCount += 1;
+
 					objects.push(object);
 				}
 				continue;
@@ -2833,7 +2699,7 @@ export class WebGL2Renderer implements Renderer {
 				}
 				this.#visibleStaticLayers.add(compiled.visibleLayerKey);
 				retainOffset(compiled.landblockId);
-				staticObjectCount += compiled.objects.length;
+
 				for (const object of compiled.objects) objects.push(object);
 				continue;
 			}
@@ -2925,12 +2791,7 @@ export class WebGL2Renderer implements Renderer {
 				}
 			}
 		}
-		if (profile && resolutionStartedAt !== undefined) {
-			profile.finishCpuPhase(
-				"sceneContributionResolution",
-				resolutionStartedAt,
-			);
-		}
+
 		retainLegibleNameplates(
 			nameplates,
 			prepared.clipFromAnchor,
@@ -2944,14 +2805,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#eligibleNameplateCandidateCount += eligibleNameplateCandidateCount;
 		this.#budgetRejectedNameplateCandidateCount +=
 			eligibleNameplateCandidateCount - nameplates.length;
-		if (profile) {
-			profile.recordObjectPreparation(
-				staticObjectCount,
-				objects.length -
-					staticObjectCount +
-					dynamicOpaque.reduce((sum, object) => sum + object.ranges.length, 0),
-			);
-		}
+
 		return {
 			entityAnalyticShadows: entityShadowsEnabled
 				? {
@@ -3562,42 +3416,30 @@ export class WebGL2Renderer implements Renderer {
 		};
 	}
 
-	#executeParticlePass(
-		profile: WebGL2FrameProfileCapture | null,
-		execute: (pass: WebGL2ParticlePass) => void,
-	): void {
+	#executeParticlePass(execute: (pass: WebGL2ParticlePass) => void): void {
 		const pass = this.#particlePass;
 		if (!pass) return;
-		const gpuPhase = profile?.beginGpuPhase("particle") ?? null;
-		const startedAt = profile?.beginCpuPhase();
-		try {
-			execute(pass);
-			const diagnostics = pass.getDiagnostics();
-			this.#frameSelectionMetrics.submittedParticleBatchCount +=
-				diagnostics.drawnBatchCount;
-			this.#frameSelectionMetrics.submittedParticleInstanceCount +=
-				diagnostics.drawnParticleCount;
-			this.#frameSelectionMetrics.unresolvedParticleBatchCount +=
-				diagnostics.unresolvedBatchCount;
-			this.#frameSelectionMetrics.uploadedParticleRecordRowCount +=
-				diagnostics.uploadedRecordRowCount;
-		} finally {
-			if (startedAt !== undefined) {
-				profile?.finishCpuPhase("particleSubmission", startedAt);
-			}
-			gpuPhase?.finish();
-		}
+
+		execute(pass);
+		const diagnostics = pass.getDiagnostics();
+		this.#frameSelectionMetrics.submittedParticleBatchCount +=
+			diagnostics.drawnBatchCount;
+		this.#frameSelectionMetrics.submittedParticleInstanceCount +=
+			diagnostics.drawnParticleCount;
+		this.#frameSelectionMetrics.unresolvedParticleBatchCount +=
+			diagnostics.unresolvedBatchCount;
+		this.#frameSelectionMetrics.uploadedParticleRecordRowCount +=
+			diagnostics.uploadedRecordRowCount;
 	}
 
 	#drawParticleBatches(
 		view: PreparedView,
 		batches: readonly ParticleDrawRange[],
-		profile: WebGL2FrameProfileCapture | null,
 		clockSeconds: number,
 		opacityScale: number,
 	): void {
 		if (batches.length === 0 || opacityScale <= 0) return;
-		this.#executeParticlePass(profile, (pass) => {
+		this.#executeParticlePass((pass) => {
 			const context = this.#createParticleDrawContext(
 				view,
 				clockSeconds,
@@ -3610,9 +3452,8 @@ export class WebGL2Renderer implements Renderer {
 	#drawWorldParticles(
 		view: PreparedView,
 		particlesByScope: ReadonlyMap<string, readonly ParticleDrawRange[]>,
-		profile: WebGL2FrameProfileCapture | null,
 	): void {
-		this.#executeParticlePass(profile, (pass) => {
+		this.#executeParticlePass((pass) => {
 			const context = this.#createParticleDrawContext(
 				view,
 				this.#frameClockSeconds,
@@ -3622,19 +3463,18 @@ export class WebGL2Renderer implements Renderer {
 		});
 	}
 
-	/** Draw one flat view through the single nullable-profile physical schedule. */
+	/** Draw one flat view through the shared physical schedule. */
 	#drawFlatView(
 		view: PreparedView,
 		shading: SceneShading,
 		domain: SceneRenderDomain,
 		showRetailHiddenGeometry: boolean,
-		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const target = this.#acquireFlatSceneTarget();
 		this.#beginFlatOpaqueScene(target, this.#viewClearColor(view, shading));
-		const objectPhases = this.#createObjectSubmissionPhases(view, profile);
+		const objectPhases = this.#createObjectSubmissionPhases(view);
 		if (domain === "exterior") {
-			this.#submitSkyPhase(view, shading, "before-world", profile, null);
+			this.#drawSky(view, shading, "before-world", null);
 			if (
 				view.skyParticles.length > 0 &&
 				SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale > 0
@@ -3642,45 +3482,37 @@ export class WebGL2Renderer implements Renderer {
 				this.#drawParticleBatches(
 					view,
 					view.skyParticles,
-					profile,
 					this.#frameClockSeconds *
 						SHARED_FRONTEND_TUNING.rendering.skyParticles.speedMultiplier,
 					SHARED_FRONTEND_TUNING.rendering.skyParticles.opacityScale,
 				);
 			}
 		}
-		this.#submitTerrainPhase(view, shading, profile, null);
-		this.#submitOpaquePhase(view, objectPhases.opaque, shading, profile, null);
+		this.#drawTerrain(view, shading, null);
+		this.#submitOpaquePhase(view, objectPhases.opaque, shading, null);
 		if (shading.ambientOcclusion.kind === "enabled") {
-			const ambientOcclusionGpu =
-				profile?.beginGpuPhase("ambientOcclusion") ?? null;
-			try {
-				this.#getSaoPass().applyFlat(
-					target,
-					view.camera,
-					view.projection,
-					shading.ambientOcclusion,
-				);
-				this.#recordAmbientOcclusionWork(
-					1,
-					target.extent.width * target.extent.height,
-				);
-			} finally {
-				ambientOcclusionGpu?.finish();
-			}
+			this.#getSaoPass().applyFlat(
+				target,
+				view.camera,
+				view.projection,
+				shading.ambientOcclusion,
+			);
+			this.#recordAmbientOcclusionWork(
+				1,
+				target.extent.width * target.extent.height,
+			);
 		}
 		// Retail's after-landscape weather: drawn once the landblock loop is down but before
 		// the deferred translucent flush, which is legitimately allowed to cover it.
 		if (domain === "exterior") {
-			this.#submitSkyPhase(view, shading, "after-landscape", profile, null);
+			this.#drawSky(view, shading, "after-landscape", null);
 		}
-		this.#submitBlendedPhase(view, objectPhases, shading, profile, null);
+		this.#drawBlendedObjects(view, objectPhases, shading, null);
 		// After the blended pass: particles are transparent and must not occlude the geometry they
 		// sort against.
 		this.#drawParticleBatches(
 			view,
 			view.particles,
-			profile,
 			this.#frameClockSeconds,
 			1.0,
 		);
@@ -3707,12 +3539,8 @@ export class WebGL2Renderer implements Renderer {
 				this.#drawWorldMarker(view, indicator.landingMarker, null);
 		}
 		this.#gl.bindVertexArray(null);
-		this.#drawPortalTransitionTunnel(target, showRetailHiddenGeometry, profile);
-		this.#presentFlatScene(
-			target,
-			profile,
-			this.#drawEntitySelectionMask(view),
-		);
+		this.#drawPortalTransitionTunnel(target, showRetailHiddenGeometry);
+		this.#presentFlatScene(target, this.#drawEntitySelectionMask(view));
 	}
 
 	#reconcileNameplateTextureCache(
@@ -3985,7 +3813,6 @@ export class WebGL2Renderer implements Renderer {
 	#drawPortalTransitionTunnel(
 		sceneTarget: WebGL2FlatSceneTargetSet,
 		showRetailHiddenGeometry: boolean,
-		profile: WebGL2FrameProfileCapture | null,
 	): void {
 		const transition = this.#activeTransition;
 		const visual = this.#portalTransitionVisual;
@@ -4003,7 +3830,7 @@ export class WebGL2Renderer implements Renderer {
 		const target = (this.#portalTransitionTarget ??= new WebGL2FlatSceneTarget(
 			this.#gl,
 		)).resizeDimensions(this.#frameWidth, this.#frameHeight);
-		const startedAt = profile?.beginCpuPhase();
+
 		try {
 			this.#beginPortalTransitionTarget(target);
 			const view = this.#prepareViewGeometry(PORTAL_TRANSITION_ANCHOR, {
@@ -4064,24 +3891,14 @@ export class WebGL2Renderer implements Renderer {
 				weatherEnabled: false,
 				lighting: resolveSceneLightingByRole(PORTAL_TRANSITION_LIGHTING, null),
 			};
-			const phases = this.#createObjectSubmissionPhases(
-				portalViewInput,
-				profile,
-			);
+			const phases = this.#createObjectSubmissionPhases(portalViewInput);
 			this.#drawOpaqueObjects(
 				portalViewInput,
 				phases.opaque,
 				portalShading,
-				profile,
 				null,
 			);
-			this.#drawBlendedObjects(
-				portalViewInput,
-				phases,
-				portalShading,
-				profile,
-				null,
-			);
+			this.#drawBlendedObjects(portalViewInput, phases, portalShading, null);
 		} finally {
 			// The presenter samples the scene target next; restore its framebuffer and viewport even
 			// when an authored material fails loudly during this transition-only pass.
@@ -4095,9 +3912,6 @@ export class WebGL2Renderer implements Renderer {
 				sceneTarget.extent.width,
 				sceneTarget.extent.height,
 			);
-			if (profile && startedAt !== undefined) {
-				profile.finishCpuPhase("portalComposition", startedAt);
-			}
 		}
 	}
 
@@ -4201,27 +4015,21 @@ export class WebGL2Renderer implements Renderer {
 	 */
 	#presentFlatScene(
 		target: WebGL2FlatSceneTargetSet,
-		profile: WebGL2FrameProfileCapture | null,
 		selectionMask: WebGL2EntitySelectionMask | null = null,
 	): void {
-		const presentationGpu = profile?.beginGpuPhase("presentation") ?? null;
-		try {
-			const transition = this.#transitionPresentationInput();
-			(this.#flatScenePresentation ??= new WebGL2FlatScenePresentation(
-				this.#gl,
-				this.#portalWarpDriveTuning,
-			)).present(
-				target,
-				this.#frameColorGrade,
-				transition,
-				this.#frameEntitySelectionOutline,
-				this.#renderScale,
-				selectionMask,
-				this.#frameClockSeconds,
-			);
-		} finally {
-			presentationGpu?.finish();
-		}
+		const transition = this.#transitionPresentationInput();
+		(this.#flatScenePresentation ??= new WebGL2FlatScenePresentation(
+			this.#gl,
+			this.#portalWarpDriveTuning,
+		)).present(
+			target,
+			this.#frameColorGrade,
+			transition,
+			this.#frameEntitySelectionOutline,
+			this.#renderScale,
+			selectionMask,
+			this.#frameClockSeconds,
+		);
 		const activeTransition = this.#activeTransition;
 		if (
 			activeTransition === null ||
@@ -4323,76 +4131,20 @@ export class WebGL2Renderer implements Renderer {
 		metrics.pixelCount += pixelCount;
 	}
 
-	/** Submit one sky pass while preserving the caller's portal routing and optional GPU span. */
-	#submitSkyPhase(
-		view: PreparedView,
-		shading: SceneShading,
-		phase: "before-world" | "after-landscape",
-		profile: WebGL2FrameProfileCapture | null,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-	): void {
-		const gpu = profile?.beginGpuPhase("sky") ?? null;
-		try {
-			this.#drawSky(view, shading, phase, portalPipeline);
-		} finally {
-			gpu?.finish();
-		}
-	}
-
-	/** Submit terrain through shared flat/portal profiling ownership. */
-	#submitTerrainPhase(
-		view: PreparedView,
-		shading: SceneShading,
-		profile: WebGL2FrameProfileCapture | null,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-	): void {
-		const startedAt = profile?.beginCpuPhase();
-		try {
-			this.#drawTerrain(view, shading, profile, portalPipeline);
-		} finally {
-			if (profile && startedAt !== undefined) {
-				profile.finishCpuPhase("terrainSubmission", startedAt);
-			}
-		}
-	}
-
-	/** Submit physical opaque batches once through shared flat/portal GPU attribution. */
+	/** Submit static and dynamic opaque batches through the same portal route. */
 	#submitOpaquePhase(
 		view: PreparedView,
 		opaque: ObjectSubmissionPhases<ObjectColorSubmission>["opaque"],
 		shading: SceneShading,
-		profile: WebGL2FrameProfileCapture | null,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
-		const gpu = profile?.beginGpuPhase("opaque") ?? null;
-		try {
-			this.#drawOpaqueObjects(view, opaque, shading, profile, portalPipeline);
-			this.#drawDynamicOpaque(view, shading, profile, portalPipeline);
-		} finally {
-			gpu?.finish();
-		}
-	}
-
-	/** Submit deferred objects through shared flat/portal GPU attribution. */
-	#submitBlendedPhase(
-		view: PreparedView,
-		phases: ObjectSubmissionPhases<ObjectColorSubmission>,
-		shading: SceneShading,
-		profile: WebGL2FrameProfileCapture | null,
-		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
-	): void {
-		const gpu = profile?.beginGpuPhase("blended") ?? null;
-		try {
-			this.#drawBlendedObjects(view, phases, shading, profile, portalPipeline);
-		} finally {
-			gpu?.finish();
-		}
+		this.#drawOpaqueObjects(view, opaque, shading, portalPipeline);
+		this.#drawDynamicOpaque(view, shading, portalPipeline);
 	}
 
 	#drawTerrain(
 		view: PreparedView,
 		shading: SceneShading,
-		profile: WebGL2FrameProfileCapture | null,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
 		const [passResources] = view.terrain;
@@ -4433,48 +4185,38 @@ export class WebGL2Renderer implements Renderer {
 		gl.polygonOffset(TERRAIN_DEPTH_OFFSET.factor, TERRAIN_DEPTH_OFFSET.units);
 		let routedTerrainPass = false;
 		if (nearCount > 0) {
-			const gpu = profile?.beginGpuPhase("nearTerrain") ?? null;
-			try {
-				for (const directional of [false, true]) {
-					const count = directional
-						? directionalCount
-						: nearCount - directionalCount;
-					if (count === 0) continue;
-					const nearProgram = this.#beginNearTerrainGroup(
-						view,
-						shading,
-						passResources,
-						portalPipeline,
-						routedTerrainPass ? null : view.terrain.length,
-						directional,
-					);
-					routedTerrainPass = true;
-					this.#drawNearTerrainGroup(
-						view,
-						shading,
-						farCutoff,
-						nearProgram,
-						directional,
-					);
-				}
-			} finally {
-				gpu?.finish();
-			}
-		}
-		if (farCount > 0) {
-			const gpu = profile?.beginGpuPhase("farTerrain") ?? null;
-			try {
-				this.#beginFarTerrainGroup(
+			for (const directional of [false, true]) {
+				const count = directional
+					? directionalCount
+					: nearCount - directionalCount;
+				if (count === 0) continue;
+				const nearProgram = this.#beginNearTerrainGroup(
 					view,
 					shading,
 					passResources,
 					portalPipeline,
 					routedTerrainPass ? null : view.terrain.length,
+					directional,
 				);
-				this.#drawFarTerrainGroup(view, farCutoff);
-			} finally {
-				gpu?.finish();
+				routedTerrainPass = true;
+				this.#drawNearTerrainGroup(
+					view,
+					shading,
+					farCutoff,
+					nearProgram,
+					directional,
+				);
 			}
+		}
+		if (farCount > 0) {
+			this.#beginFarTerrainGroup(
+				view,
+				shading,
+				passResources,
+				portalPipeline,
+				routedTerrainPass ? null : view.terrain.length,
+			);
+			this.#drawFarTerrainGroup(view, farCutoff);
 		}
 		gl.disable(gl.CULL_FACE);
 		gl.disable(gl.POLYGON_OFFSET_FILL);
@@ -4944,33 +4686,25 @@ export class WebGL2Renderer implements Renderer {
 	/** Partition one prepared physical object population for both opaque and deferred consumers. */
 	#createObjectSubmissionPhases(
 		view: PreparedView,
-		profile: WebGL2FrameProfileCapture | null,
 	): ObjectSubmissionPhases<ObjectColorSubmission> {
-		const orderingStartedAt = profile?.beginCpuPhase();
-		try {
-			const phases = createObjectSubmissionPhases(
-				view.objects,
-				(object) => this.#transparentSortFacts(object, view),
-				(object) =>
-					object.drawKind === "merged"
-						? object.transparentCohortKey
-						: object.instances?.kind === "frame-template"
-							? object.instances.transparentCohortKey
-							: null,
-				(object) => this.#transparentCameraDepth(object, view),
-			);
-			this.#frameSelectionMetrics.transparentObjectCandidateCount +=
-				phases.transparent.far.length + phases.transparent.near.length;
-			this.#frameSelectionMetrics.farTransparentObjectCandidateCount +=
-				phases.transparent.far.length;
-			this.#frameSelectionMetrics.nearTransparentObjectCandidateCount +=
-				phases.transparent.near.length;
-			return phases;
-		} finally {
-			if (profile && orderingStartedAt !== undefined) {
-				profile.finishCpuPhase("blendedOrdering", orderingStartedAt);
-			}
-		}
+		const phases = createObjectSubmissionPhases(
+			view.objects,
+			(object) => this.#transparentSortFacts(object, view),
+			(object) =>
+				object.drawKind === "merged"
+					? object.transparentCohortKey
+					: object.instances?.kind === "frame-template"
+						? object.instances.transparentCohortKey
+						: null,
+			(object) => this.#transparentCameraDepth(object, view),
+		);
+		this.#frameSelectionMetrics.transparentObjectCandidateCount +=
+			phases.transparent.far.length + phases.transparent.near.length;
+		this.#frameSelectionMetrics.farTransparentObjectCandidateCount +=
+			phases.transparent.far.length;
+		this.#frameSelectionMetrics.nearTransparentObjectCandidateCount +=
+			phases.transparent.near.length;
+		return phases;
 	}
 
 	/**
@@ -5096,40 +4830,35 @@ export class WebGL2Renderer implements Renderer {
 	#drawDynamicOpaque(
 		view: PreparedView,
 		shading: SceneShading,
-		profile: WebGL2FrameProfileCapture | null,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
 		if (view.dynamicOpaque.length === 0) return;
 		const program = this.#dynamicOpaqueProgram;
 		if (program === null)
 			throw new Error("Merged opaque color was not prepared before execution.");
-		const startedAt = profile?.beginCpuPhase();
+
 		const gl = this.#gl;
 		const state = this.#deviceState;
-		try {
-			this.#beginObjectPhase();
-			gl.depthMask(true);
-			state.applyBlend(null);
-			for (const object of view.dynamicOpaque) {
-				const changed = state.applyProgram(program.program);
-				if (changed) this.#activateObjectProgram(program, view, shading);
-				this.#applyObjectLighting(program, object, shading);
-				portalPipeline?.routeObjectSubmission(
-					object.renderScopeKey,
-					program.uniforms.clipTransform,
-					changed,
-				);
-				this.#bindDynamicColor(program, object, view);
-				for (const span of object.ranges) {
-					const range = object.appearance.plan.physicalRanges[span.rangeIndex];
-					if (range === undefined)
-						throw new Error("Merged opaque span lost its physical range.");
-					this.#drawDynamicColorSpan(range, span.indexCount);
-				}
+
+		this.#beginObjectPhase();
+		gl.depthMask(true);
+		state.applyBlend(null);
+		for (const object of view.dynamicOpaque) {
+			const changed = state.applyProgram(program.program);
+			if (changed) this.#activateObjectProgram(program, view, shading);
+			this.#applyObjectLighting(program, object, shading);
+			portalPipeline?.routeObjectSubmission(
+				object.renderScopeKey,
+				program.uniforms.clipTransform,
+				changed,
+			);
+			this.#bindDynamicColor(program, object, view);
+			for (const span of object.ranges) {
+				const range = object.appearance.plan.physicalRanges[span.rangeIndex];
+				if (range === undefined)
+					throw new Error("Merged opaque span lost its physical range.");
+				this.#drawDynamicColorSpan(range, span.indexCount);
 			}
-		} finally {
-			if (profile && startedAt !== undefined)
-				profile.finishCpuPhase("opaqueSubmission", startedAt);
 		}
 	}
 
@@ -5137,61 +4866,56 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		candidates: readonly ObjectColorSubmission[],
 		shading: SceneShading,
-		profile: WebGL2FrameProfileCapture | null,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
 		if (candidates.length === 0) return;
-		const objects = this.#prepareFrameInstanceRuns([candidates], profile, [
-			{ cohort: "ignore", grouping: "grouped" },
-		]).objects;
-		const submissionStartedAt = profile?.beginCpuPhase();
+		const objects = this.#prepareFrameInstanceRuns(
+			[candidates],
+			[{ cohort: "ignore", grouping: "grouped" }],
+		).objects;
+
 		const gl = this.#gl;
-		try {
-			this.#beginObjectPhase();
-			gl.depthMask(true);
-			this.#deviceState.applyBlend(null);
-			for (const object of objects) {
-				if (object.drawKind === "merged")
-					throw new Error("Ordered merged geometry entered the opaque phase.");
-				const receivesIndoorGrounding =
-					object.source === "env-cell-shell" &&
-					view.entityAnalyticShadows?.indoorByScopeKey.has(
-						object.renderScopeKey,
-					) === true;
-				const receivesOutdoorPssm =
-					this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
-				const program = object.compatibility.geometry.staticMaterials
-					? this.#requireStaticTableProgram(
-							/* distanceFog */ true,
-							/* portalVisibility */ false,
-							receivesOutdoorPssm,
-						)
-					: receivesIndoorGrounding
-						? this.#entityGroundingPrograms.fogged()
-						: receivesOutdoorPssm
-							? object.drawKind === "instanced"
-								? this.#outdoorPssmReceiverPrograms.foggedInstanced()
-								: this.#outdoorPssmReceiverPrograms.foggedBaked()
-							: object.drawKind === "instanced"
-								? this.#instancedObjectProgram
-								: this.#objectProgram;
-				const programChanged = this.#deviceState.applyProgram(program.program);
-				if (programChanged) {
-					this.#activateObjectProgram(program, view, shading);
-				}
-				this.#applyObjectLighting(program, object, shading);
-				this.#applyObjectGrounding(program, object, view);
-				portalPipeline?.routeObjectSubmission(
+
+		this.#beginObjectPhase();
+		gl.depthMask(true);
+		this.#deviceState.applyBlend(null);
+		for (const object of objects) {
+			if (object.drawKind === "merged")
+				throw new Error("Ordered merged geometry entered the opaque phase.");
+			const receivesIndoorGrounding =
+				object.source === "env-cell-shell" &&
+				view.entityAnalyticShadows?.indoorByScopeKey.has(
 					object.renderScopeKey,
-					program.uniforms.clipTransform,
-					programChanged,
-				);
-				this.#drawObjectRange(program, object, view.landblockOffsets);
+				) === true;
+			const receivesOutdoorPssm =
+				this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
+			const program = object.compatibility.geometry.staticMaterials
+				? this.#requireStaticTableProgram(
+						/* distanceFog */ true,
+						/* portalVisibility */ false,
+						receivesOutdoorPssm,
+					)
+				: receivesIndoorGrounding
+					? this.#entityGroundingPrograms.fogged()
+					: receivesOutdoorPssm
+						? object.drawKind === "instanced"
+							? this.#outdoorPssmReceiverPrograms.foggedInstanced()
+							: this.#outdoorPssmReceiverPrograms.foggedBaked()
+						: object.drawKind === "instanced"
+							? this.#instancedObjectProgram
+							: this.#objectProgram;
+			const programChanged = this.#deviceState.applyProgram(program.program);
+			if (programChanged) {
+				this.#activateObjectProgram(program, view, shading);
 			}
-		} finally {
-			if (profile && submissionStartedAt !== undefined) {
-				profile.finishCpuPhase("opaqueSubmission", submissionStartedAt);
-			}
+			this.#applyObjectLighting(program, object, shading);
+			this.#applyObjectGrounding(program, object, view);
+			portalPipeline?.routeObjectSubmission(
+				object.renderScopeKey,
+				program.uniforms.clipTransform,
+				programChanged,
+			);
+			this.#drawObjectRange(program, object, view.landblockOffsets);
 		}
 	}
 
@@ -5227,100 +4951,87 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		phases: ObjectSubmissionPhases<ObjectColorSubmission>,
 		shading: SceneShading,
-		profile: WebGL2FrameProfileCapture | null,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
-		const sortedBlended = this.#prepareFrameBlendedRuns(
-			{
-				additive: phases.additive,
-				far: phases.transparent.far,
-				near: phases.transparent.near,
-			},
-			profile,
-		);
+		const sortedBlended = this.#prepareFrameBlendedRuns({
+			additive: phases.additive,
+			far: phases.transparent.far,
+			near: phases.transparent.near,
+		});
 		if (sortedBlended.length === 0) return;
-		const submissionStartedAt = profile?.beginCpuPhase();
+
 		const gl = this.#gl;
-		try {
-			// Primes every object sampler unit, not just the cache, exactly as the opaque pass does.
-			// `invalidate()` alone was not enough: it makes issued binds re-apply, but a material
-			// that *skips* a bind — direct colour skips the palette, solid colour skips both — keeps
-			// whatever the frame last left on that unit. Terrain leaves integer `usampler2D`
-			// textures on units 0 and 1, and the opaque pass returns before priming them when a view
-			// has no opaque candidates, so a view of purely transparent objects reached this loop
-			// with an integer texture bound under a float sampler and every draw failed validation.
-			this.#beginObjectPhase();
-			gl.depthMask(false);
-			let portalPrograms: {
-				readonly baked: WebGL2ObjectProgram;
-				readonly instanced: WebGL2InstancedObjectProgram;
-			} | null = null;
-			for (const object of sortedBlended) {
-				if (object.drawKind === "merged") {
-					this.#drawDynamicBlended(object, view, shading, portalPipeline);
-					continue;
-				}
-				const receivesIndoorGrounding =
-					object.source === "env-cell-shell" &&
-					view.entityAnalyticShadows?.indoorByScopeKey.has(
-						object.renderScopeKey,
-					) === true;
-				const receivesOutdoorPssm =
-					this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
-				let program: AnyObjectProgram;
-				if (object.compatibility.geometry.staticMaterials) {
-					program = this.#requireStaticTableProgram(
-						/* distanceFog */ false,
-						portalPipeline !== null,
-						receivesOutdoorPssm,
-					);
-				} else if (receivesIndoorGrounding) {
-					program = this.#entityGroundingPrograms.blended(
-						portalPipeline !== null,
-					);
-				} else if (receivesOutdoorPssm) {
-					program =
-						object.drawKind === "instanced"
-							? this.#outdoorPssmReceiverPrograms.blendedInstanced(
-									portalPipeline !== null,
-								)
-							: this.#outdoorPssmReceiverPrograms.blendedBaked(
-									portalPipeline !== null,
-								);
-				} else {
-					if (portalPipeline) {
-						portalPrograms ??= this.#requirePortalBlendedObjectPrograms();
-					}
-					program =
-						object.drawKind === "instanced"
-							? (portalPrograms?.instanced ??
-								this.#blendedInstancedObjectProgram)
-							: (portalPrograms?.baked ?? this.#blendedObjectProgram);
-				}
-				if (this.#deviceState.applyProgram(program.program)) {
-					this.#activateObjectProgram(program, view, shading);
-				}
+
+		// Primes every object sampler unit, not just the cache, exactly as the opaque pass does.
+		// `invalidate()` alone was not enough: it makes issued binds re-apply, but a material
+		// that *skips* a bind — direct colour skips the palette, solid colour skips both — keeps
+		// whatever the frame last left on that unit. Terrain leaves integer `usampler2D`
+		// textures on units 0 and 1, and the opaque pass returns before priming them when a view
+		// has no opaque candidates, so a view of purely transparent objects reached this loop
+		// with an integer texture bound under a float sampler and every draw failed validation.
+		this.#beginObjectPhase();
+		gl.depthMask(false);
+		let portalPrograms: {
+			readonly baked: WebGL2ObjectProgram;
+			readonly instanced: WebGL2InstancedObjectProgram;
+		} | null = null;
+		for (const object of sortedBlended) {
+			if (object.drawKind === "merged") {
+				this.#drawDynamicBlended(object, view, shading, portalPipeline);
+				continue;
+			}
+			const receivesIndoorGrounding =
+				object.source === "env-cell-shell" &&
+				view.entityAnalyticShadows?.indoorByScopeKey.has(
+					object.renderScopeKey,
+				) === true;
+			const receivesOutdoorPssm =
+				this.#activeOutdoorPssmFrame !== null && object.receivesOutdoorPssm;
+			let program: AnyObjectProgram;
+			if (object.compatibility.geometry.staticMaterials) {
+				program = this.#requireStaticTableProgram(
+					/* distanceFog */ false,
+					portalPipeline !== null,
+					receivesOutdoorPssm,
+				);
+			} else if (receivesIndoorGrounding) {
+				program = this.#entityGroundingPrograms.blended(
+					portalPipeline !== null,
+				);
+			} else if (receivesOutdoorPssm) {
+				program =
+					object.drawKind === "instanced"
+						? this.#outdoorPssmReceiverPrograms.blendedInstanced(
+								portalPipeline !== null,
+							)
+						: this.#outdoorPssmReceiverPrograms.blendedBaked(
+								portalPipeline !== null,
+							);
+			} else {
 				if (portalPipeline) {
-					const uniforms = program.portalVisibilityUniforms;
-					if (!uniforms) {
-						throw new Error(
-							"Portal deferred object draw selected a program without scope-envelope visibility.",
-						);
-					}
-					portalPipeline.routeDeferredSubmission(
-						object.renderScopeKey,
-						uniforms,
+					portalPrograms ??= this.#requirePortalBlendedObjectPrograms();
+				}
+				program =
+					object.drawKind === "instanced"
+						? (portalPrograms?.instanced ?? this.#blendedInstancedObjectProgram)
+						: (portalPrograms?.baked ?? this.#blendedObjectProgram);
+			}
+			if (this.#deviceState.applyProgram(program.program)) {
+				this.#activateObjectProgram(program, view, shading);
+			}
+			if (portalPipeline) {
+				const uniforms = program.portalVisibilityUniforms;
+				if (!uniforms) {
+					throw new Error(
+						"Portal deferred object draw selected a program without scope-envelope visibility.",
 					);
 				}
-				this.#applyObjectLighting(program, object, shading);
-				this.#applyObjectGrounding(program, object, view);
-				this.#deviceState.applyBlend(object.blendPolicy);
-				this.#drawObjectRange(program, object, view.landblockOffsets);
+				portalPipeline.routeDeferredSubmission(object.renderScopeKey, uniforms);
 			}
-		} finally {
-			if (profile && submissionStartedAt !== undefined) {
-				profile.finishCpuPhase("blendedSubmission", submissionStartedAt);
-			}
+			this.#applyObjectLighting(program, object, shading);
+			this.#applyObjectGrounding(program, object, view);
+			this.#deviceState.applyBlend(object.blendPolicy);
+			this.#drawObjectRange(program, object, view.landblockOffsets);
 		}
 	}
 
@@ -5374,17 +5085,13 @@ export class WebGL2Renderer implements Renderer {
 	/**
 	 * Upload both transparent phases once while keeping their independent run boundaries.
 	 */
-	#prepareFrameBlendedRuns(
-		ordered: {
-			readonly additive: readonly ObjectColorSubmission[];
-			readonly far: readonly ObjectColorSubmission[];
-			readonly near: readonly ObjectColorSubmission[];
-		},
-		profile: WebGL2FrameProfileCapture | null,
-	): readonly ObjectColorSubmission[] {
+	#prepareFrameBlendedRuns(ordered: {
+		readonly additive: readonly ObjectColorSubmission[];
+		readonly far: readonly ObjectColorSubmission[];
+		readonly near: readonly ObjectColorSubmission[];
+	}): readonly ObjectColorSubmission[] {
 		const prepared = this.#prepareFrameInstanceRuns(
 			[ordered.far, ordered.near, ordered.additive],
-			profile,
 			[
 				{
 					cohort: "require",
@@ -5411,7 +5118,6 @@ export class WebGL2Renderer implements Renderer {
 	/** Form phase-local compatible runs and upload their complete sequential instance population. */
 	#prepareFrameInstanceRuns(
 		phases: readonly (readonly ObjectColorSubmission[])[],
-		profile: WebGL2FrameProfileCapture | null,
 		policies: readonly FrameInstancePhasePolicy[],
 	): {
 		readonly objects: readonly ObjectColorSubmission[];
@@ -5420,7 +5126,7 @@ export class WebGL2Renderer implements Renderer {
 		const orderedInstances: ObjectInstanceData[] = [];
 		const objects: ObjectColorSubmission[] = [];
 		const runCounts: number[] = [];
-		const preparationStartedAt = profile?.beginCpuPhase();
+
 		for (const [phaseIndex, phase] of phases.entries()) {
 			const policy = policies[phaseIndex];
 			if (!policy) {
@@ -5466,14 +5172,9 @@ export class WebGL2Renderer implements Renderer {
 				});
 			}
 		}
-		if (profile && preparationStartedAt !== undefined) {
-			profile.finishCpuPhase("instanceRunPreparation", preparationStartedAt);
-		}
-		const uploadStartedAt = profile?.beginCpuPhase();
+
 		this.#frameInstances.prepareView(orderedInstances);
-		if (profile && uploadStartedAt !== undefined) {
-			profile.finishCpuPhase("instanceUpload", uploadStartedAt);
-		}
+
 		if (orderedInstances.length > 0) {
 			this.#frameSelectionMetrics.frameInstanceUploadCount += 1;
 			this.#frameSelectionMetrics.frameInstanceUploadBytes +=

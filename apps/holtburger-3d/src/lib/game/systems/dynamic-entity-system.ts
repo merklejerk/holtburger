@@ -307,7 +307,6 @@ export class DynamicEntitySystem<
 		StagedObjectVisualTemplateOwner<TTemplateOwnerId>
 	>();
 	#destroyed = false;
-	#lastPresentationPublicationDurationMs = 0;
 	/** Entities visited by the last complete presentation sweep. */
 	#lastPresentationEntityVisitCount = 0;
 	#lastPublishedPresentationCount = 0;
@@ -1347,8 +1346,6 @@ export class DynamicEntitySystem<
 			).length,
 			animationResources: this.#animations.getDiagnostics(),
 			entityCount: this.#entities.size,
-			lastPresentationPublicationDurationMs:
-				this.#lastPresentationPublicationDurationMs,
 			lastPresentationEntityVisitCount: this.#lastPresentationEntityVisitCount,
 			lastPublishedPresentationCount: this.#lastPublishedPresentationCount,
 			lastEffectOnlyPresentationCount: this.#lastEffectOnlyPresentationCount,
@@ -1363,7 +1360,6 @@ export class DynamicEntitySystem<
 
 	/** Publish sparse current samples to entity-owned state before the frame is selected. */
 	publishPresentation(samples: readonly DynamicPresentationSample[]): void {
-		const startedAt = performance.now();
 		const publishedNodeIds = new Set<SceneNodeId>();
 		let particleEnvelopeChangeCount = 0;
 		let particleEnvelopeQueryCount = 0;
@@ -1415,7 +1411,6 @@ export class DynamicEntitySystem<
 			});
 			effectOnlyCount += 1;
 		}
-		this.#lastPresentationPublicationDurationMs = performance.now() - startedAt;
 		this.#lastPresentationEntityVisitCount = this.#entities.size;
 		this.#lastPublishedPresentationCount = samples.length + effectOnlyCount;
 		this.#lastEffectOnlyPresentationCount = effectOnlyCount;

@@ -25,6 +25,8 @@ struct ServerEndpoint {
 
 #[derive(Clone)]
 pub struct ClientRuntimeBuilder {
+    /// Optional external diagnostic collector, independent of world/view events.
+    runtime_profile: Option<super::runtime_profile::RuntimeProfileHandle>,
     barber_source: Option<Arc<dyn super::barber::ClientBarberSource>>,
     account_name: String,
     server_endpoint: Option<ServerEndpoint>,
@@ -43,9 +45,16 @@ pub struct ClientRuntimeBuilder {
 }
 
 impl ClientRuntimeBuilder {
+    /// Attach a cold, optional authority diagnostic consumer.
+    pub fn runtime_profile(mut self, handle: super::runtime_profile::RuntimeProfileHandle) -> Self {
+        self.runtime_profile = Some(handle);
+        self
+    }
+
     pub fn new(account_name: impl Into<String>) -> Self {
         Self {
             barber_source: None,
+            runtime_profile: None,
             account_name: account_name.into(),
             server_endpoint: None,
             world_bootstrap: None,
@@ -269,6 +278,7 @@ impl ClientRuntimeBuilder {
                 sources.bodies.movement_policy()
             });
         Ok(ClientRuntime {
+            runtime_profile: self.runtime_profile,
             barber: super::barber::BarberRuntime::new(self.barber_source),
             inventory_placement: self.inventory_placement,
             #[cfg(feature = "runtime-fixture")]
@@ -346,6 +356,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
     let (client_view_event_tx, _) = broadcast::channel(4096);
 
     let mut client = ClientRuntime {
+        runtime_profile: None,
         barber: super::barber::BarberRuntime::new(None),
         inventory_placement: Default::default(),
         #[cfg(feature = "runtime-fixture")]

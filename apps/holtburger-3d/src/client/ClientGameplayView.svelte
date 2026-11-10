@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { PerformanceSession } from "../app/performance-session";
 	import type { StatArtworkServices } from "./client-stat-artwork";
 	import { type InputPlatform } from "../lib/input/input-platform";
 
@@ -187,6 +188,8 @@
 	import ClientSystemMenu from "./ClientSystemMenu.svelte";
 
 	interface Props {
+		/** Cold access to the mode-owned capture lifecycle. */
+		readonly readPerformanceSession: () => PerformanceSession | null;
 		/** Startup platform used by input reset policy and key labels. */
 		readonly platform: InputPlatform;
 		/** Local chat admission preferences, independent of server character options. */
@@ -569,6 +572,7 @@
 		recallDestinations,
 		onRecall,
 		onTeleportToMapPosition,
+		readPerformanceSession,
 		readDiagnostics,
 		readSelectedEntity,
 		readFrameRates,
@@ -1980,6 +1984,7 @@
 						{/key}
 					{:else}
 						<ClientDebugPanel
+							{readPerformanceSession}
 							{readDiagnostics}
 							{readSelectedEntity}
 							{entityCollisionDisabled}

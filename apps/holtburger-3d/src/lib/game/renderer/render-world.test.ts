@@ -293,7 +293,6 @@ describe("RenderWorld", () => {
 				false,
 				batches,
 				createOutdoorPssmCasterSelectionScratch(),
-				null,
 			);
 			return { batches, selected: [...selected], analytic };
 		};

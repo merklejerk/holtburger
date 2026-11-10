@@ -54,35 +54,6 @@ interface OutdoorPssmCasterSelectionScratch {
 	readonly candidates: OutdoorShadowCasterCandidate[];
 }
 
-/** Structural work and retained output produced by one all-cascade selection. */
-interface OutdoorPssmCasterCollectionMetrics {
-	/** Cascade-frustum queries issued by the collector. */
-	readonly cascadeQueryCount: number;
-	/** Candidate memberships summed across cascades, including overlap. */
-	readonly cascadeCandidateMembershipCount: number;
-	/** Unique eligible complete roots before budget selection. */
-	readonly candidateRootCount: number;
-	/** Ordinary merged spans selected across every cascade. */
-	readonly selectedDepthDrawCount: number;
-	/** Selected roots assigned to mapped PSSM work. */
-	readonly mappedRootCount: number;
-	/** Selected roots assigned to analytic fallback. */
-	readonly analyticRootCount: number;
-	/** Candidate roots rejected by N. */
-	readonly rejectedRootCount: number;
-	/** Roots retained across both tiers. */
-	readonly selectedRootCount: number;
-	/** Views whose mapped tier produced no depth parts. */
-	readonly emptyMappedViewCount: number;
-	/** Distinct visible parts per root, summed across its intersected cascades. */
-	readonly selectedPartCascadeCount: number;
-}
-
-/** Optional caller-owned profiling sink; absent frames perform no collection accounting. */
-type OutdoorPssmCasterCollectionMetricsSink = {
-	-readonly [Key in keyof OutdoorPssmCasterCollectionMetrics]: number;
-};
-
 /** Allocate one cascade's reusable selected-root list. */
 export function createOutdoorPssmCasterBatch(): OutdoorPssmCasterBatch {
 	return { casters: [] };
@@ -114,7 +85,6 @@ export function planOutdoorShadowCastersForView(
 	showRetailHiddenGeometry: boolean,
 	batches: readonly OutdoorPssmCasterBatch[],
 	scratch: OutdoorPssmCasterSelectionScratch,
-	metrics: OutdoorPssmCasterCollectionMetricsSink | null,
 ): void {
 	if (cascadeFrusta.length !== batches.length) {
 		throw new Error(
@@ -132,7 +102,7 @@ export function planOutdoorShadowCastersForView(
 	analyticCasters.length = 0;
 	const rootCascadeMasks = scratch.rootCascadeMasks;
 	rootCascadeMasks.clear();
-	if (metrics !== null) metrics.cascadeQueryCount += cascadeFrusta.length;
+
 	for (
 		let cascadeIndex = 0;
 		cascadeIndex < cascadeFrusta.length;
@@ -224,10 +194,6 @@ export function planOutdoorShadowCastersForView(
 			candidate.bounds,
 		);
 		candidateCount += 1;
-		if (metrics !== null) {
-			metrics.candidateRootCount += 1;
-			metrics.cascadeCandidateMembershipCount += countSetBits(cascadeMask);
-		}
 	}
 	candidates.length = candidateCount;
 	if (candidateCount > budget.maximumMappedRoots) {
@@ -235,12 +201,7 @@ export function planOutdoorShadowCastersForView(
 	}
 	const selectedCount = Math.min(candidateCount, budget.maximumSelectedRoots);
 	const mappedCount = Math.min(selectedCount, budget.maximumMappedRoots);
-	if (metrics !== null) {
-		metrics.selectedRootCount += selectedCount;
-		metrics.rejectedRootCount += candidateCount - selectedCount;
-		metrics.mappedRootCount += mappedCount;
-		metrics.analyticRootCount += selectedCount - mappedCount;
-	}
+
 	for (let mappedIndex = 0; mappedIndex < mappedCount; mappedIndex += 1) {
 		const candidate = candidates[mappedIndex];
 		if (candidate === undefined)
@@ -258,10 +219,6 @@ export function planOutdoorShadowCastersForView(
 			if (batch === undefined)
 				throw new Error(`Outdoor PSSM cascade ${cascadeIndex} has no batch.`);
 			batch.casters.push(depth);
-			if (metrics !== null) {
-				metrics.selectedPartCascadeCount += depth.selectedPartCount;
-				metrics.selectedDepthDrawCount += depth.ranges.length;
-			}
 		}
 		selectedDynamicNodeIds.add(nodeId);
 	}
@@ -303,14 +260,4 @@ function distanceSquaredToBounds(point: Vec3, bounds: AABB3): number {
 
 function isOutdoorScope(scope: { readonly kind: string }): boolean {
 	return scope.kind === "outdoor";
-}
-
-function countSetBits(value: number): number {
-	let remaining = value >>> 0;
-	let count = 0;
-	while (remaining !== 0) {
-		remaining &= remaining - 1;
-		count += 1;
-	}
-	return count;
 }

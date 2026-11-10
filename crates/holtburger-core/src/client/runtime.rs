@@ -1,4 +1,4 @@
-use super::runtime_profile::RuntimePhaseProfile;
+use super::runtime_profile::{RuntimeProfileScope, RuntimeScopeProfile};
 use super::*;
 use anyhow::Result;
 use futures::FutureExt;
@@ -271,9 +271,9 @@ impl ClientRuntime {
                     self.entity_cue_inbox.expire(now);
                 }
                 res = self.session.recv_message() => {
-                    let mut profile = RuntimePhaseProfile::begin("network_batch");
+                    let profile = RuntimeScopeProfile::begin(RuntimeProfileScope::NetworkBatch, self.runtime_profile.as_ref());
                     self.process_network_batch(res).await?;
-                    profile.checkpoint("dispatch");
+
                     profile.finish(format_args!(""));
                 }
                 Some(cmd) = async {
@@ -283,16 +283,16 @@ impl ClientRuntime {
                         None
                     }
                 } => {
-                    let mut profile = RuntimePhaseProfile::begin("command_batch");
+                    let profile = RuntimeScopeProfile::begin(RuntimeProfileScope::CommandBatch, self.runtime_profile.as_ref());
                     self.process_command_batch(Some(cmd)).await?;
-                    profile.checkpoint("dispatch");
+
                     profile.finish(format_args!(""));
                 }
                 _ = precise_jump_notification.notified() => {
                     self.publish_precise_jump_progress();
                 }
                 _ = physics_tick.tick() => {
-                    let mut profile = RuntimePhaseProfile::begin("physics_tick");
+                    let profile = RuntimeScopeProfile::begin(RuntimeProfileScope::PhysicsTick, self.runtime_profile.as_ref());
                     // A ready physics deadline must not bypass all queued input. Preserve command
                     // order, but leave a backlog for later turns rather than starving simulation.
                     self.process_command_batch(None).await?;
@@ -302,7 +302,7 @@ impl ClientRuntime {
                     let now = Instant::now();
                     let dt_duration = now.duration_since(last_physics_time);
                     last_physics_time = now;
-                    profile.checkpoint("queued_commands");
+
 
                     #[cfg(feature = "runtime-fixture")]
                     if let Some(capture) = &mut self.runtime_fixture {
@@ -333,7 +333,7 @@ impl ClientRuntime {
         &mut self,
         now: Instant,
         dt_duration: Duration,
-        mut profile: RuntimePhaseProfile,
+        profile: RuntimeScopeProfile,
         #[cfg(feature = "runtime-fixture")] fixture_content_wait: Option<&mut Duration>,
     ) -> Result<()> {
         self.advance_equipment_change(now).await?;
@@ -378,7 +378,6 @@ impl ClientRuntime {
             }
         }
 
-        profile.checkpoint("movement_and_equipment");
         let scene_snapshot = self
             .collision_coordinator
             .as_ref()
@@ -392,7 +391,6 @@ impl ClientRuntime {
             self.handle_runtime_world_event(&event);
         }
 
-        profile.checkpoint("world_tick");
         if let Some(coordinator) = self.collision_coordinator.as_mut() {
             let mut collision_events = coordinator.observe(&mut self.world);
             #[cfg(feature = "runtime-fixture")]
@@ -412,7 +410,6 @@ impl ClientRuntime {
             }
         }
 
-        profile.checkpoint("collision_content");
         self.publish_precise_jump_progress();
 
         self.try_complete_world_activation().await?;
@@ -421,7 +418,7 @@ impl ClientRuntime {
         self.advance_equipment_set(now).await?;
         self.advance_inventory_operation(now).await?;
         let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
-        profile.checkpoint("activation_and_equipment");
+
         let before_dynamic = active_world.then(|| self.capture_dynamic_entity_tick_baseline());
         let collision_snapshot = self
             .collision_coordinator
@@ -429,7 +426,7 @@ impl ClientRuntime {
             .map(super::collision::ClientCollisionCoordinator::snapshot);
         let mut body_motions = std::collections::HashMap::new();
         self.publish_social_motion_readiness();
-        profile.checkpoint("before_entity_projection");
+
         if active_world {
             let prepared_precise_jump = match self
                 .precise_jump
@@ -455,7 +452,7 @@ impl ClientRuntime {
             .inspect_err(|_| {
                 self.set_exit_cause(ClientExitCause::RuntimeFailure);
             })?;
-            profile.checkpoint("simulation");
+
             for feedback in self
                 .movement
                 .take_authored_request_feedback(&mut self.world)
@@ -527,14 +524,12 @@ impl ClientRuntime {
             }
         }
 
-        profile.checkpoint("simulation_events_and_combat");
         self.publish_entity_facts();
         if active_world {
             self.hydrate_projectile_supply().await?;
         }
         self.publish_character_motion_capabilities_if_changed();
 
-        profile.checkpoint("entity_facts_and_supply");
         let dynamic_batch = if let Some(before_dynamic) =
             before_dynamic.filter(|before| !before.views.is_empty())
         {
@@ -547,7 +542,7 @@ impl ClientRuntime {
         } else {
             None
         };
-        profile.checkpoint("after_entity_projection_and_diff");
+
         let camera_input = (active_world && self.camera.identity().is_some()).then(|| {
             camera::ClientCameraSceneInput::capture(
                 &self.world,
@@ -559,7 +554,7 @@ impl ClientRuntime {
             Some(input) => self.camera.advance_world(&input, dt_duration)?,
             None => None,
         };
-        profile.checkpoint("camera");
+
         if dynamic_batch.is_some() || camera.is_some() {
             let _ = self
                 .client_view_event_tx
@@ -568,7 +563,7 @@ impl ClientRuntime {
                     camera,
                 });
         }
-        profile.checkpoint("event_enqueue");
+
         profile.finish(format_args!(
             "interval_ms={:.3} entities={} advanced_bodies={}",
             dt_duration.as_secs_f64() * 1_000.0,

@@ -358,6 +358,10 @@ where
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum ClientHostCommand {
+    /// Control/read a bounded diagnostic capture independently of gameplay commands.
+    ClientPerformance {
+        request: crate::client_performance::ClientPerformanceRequest,
+    },
     /// Submit a semantic barber preview, Apply, or cancellation to the shared owner.
     RequestClientBarber {
         request: holtburger_core::client::barber::BarberRequest,
@@ -657,6 +661,7 @@ pub enum ClientHostCommand {
 
 /// Exact wire names owned by the client dispatcher.
 pub const CLIENT_COMMAND_NAMES: &[&str] = &[
+    "client_performance",
     "examine_client_entity",
     "read_client_book_page",
     "close_client_container",
@@ -760,6 +765,8 @@ struct ClientHostState {
 
 /// Client composition root. Its supervisor owns authority and forwarding for one launch.
 pub struct ClientHostRuntime {
+    /// Diagnostic ownership follows this one client authority attempt.
+    performance: crate::client_performance::ClientPerformance,
     /// Static-content discovery and reusable content service shared with Explorer.
     pub content: SharedHostContent,
     event_sink: Arc<dyn ClientEventSink>,
@@ -772,6 +779,7 @@ impl ClientHostRuntime {
     /// Composes the client shell without constructing any Explorer authority or scheduler.
     pub fn from_content(content: SharedHostContent, event_sink: Arc<dyn ClientEventSink>) -> Self {
         Self {
+            performance: Default::default(),
             content,
             event_sink,
             stop_startup: tokio::sync::Notify::new(),
@@ -826,6 +834,7 @@ impl ClientHostRuntime {
             ),
         );
         let mut builder = holtburger_core::ClientRuntimeBuilder::new(startup.account.clone())
+            .runtime_profile(self.performance.authority.clone())
             .inventory_placement(InventoryPlacementPolicy {
                 automatic: InventoryInsertion::Prepend,
                 split_after_source: true,
@@ -902,6 +911,7 @@ impl ClientHostRuntime {
                 command_tx.clone(),
                 Arc::clone(&self.event_sink),
                 shutdown_requested,
+                self.performance.clone(),
             );
             state.task = Some(tokio::spawn(async move {
                 if let Err(error) = supervisor.await {
@@ -1109,6 +1119,21 @@ pub async fn dispatch_client(
     use ClientHostCommand::*;
 
     match command {
+        ClientPerformance { request } => {
+            let state = runtime.state.lock().await;
+            if !state.accepting {
+                return Err(application_error(anyhow::anyhow!(
+                    "Client diagnostics retired"
+                )));
+            }
+            let snapshot = runtime
+                .performance
+                .control(request)
+                .map_err(application_error)?;
+            serde_json::to_value(snapshot)
+                .map(HostResponse::Json)
+                .map_err(application_error)
+        }
         CreateClientCharacter { draft } => {
             let catalog = Arc::new(
                 runtime

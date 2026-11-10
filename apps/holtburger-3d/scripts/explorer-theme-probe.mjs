@@ -230,7 +230,7 @@ try {
 				JSON.stringify({ modal, focusRestored }),
 		);
 	await tab("frame");
-	await click(".explorer-frame-profile-toggle");
+	await click('[data-performance-action="start"]');
 	// Capture the production report through its existing export action without changing the clipboard.
 	await read(() => {
 		globalThis.__explorerThemeClipboardWrite = navigator.clipboard.writeText;
@@ -246,8 +246,7 @@ try {
 			: [true, false]) {
 			await configureOverride(opaqueOverride);
 			await delay(500);
-			await click(".explorer-frame-profile-toggle");
-			await click(".explorer-frame-profile-toggle");
+			await click('[data-performance-action="reset"]');
 			if (workload === "modal") {
 				await tab("textures");
 				await click(".explorer-texture-inspect");
@@ -297,7 +296,7 @@ try {
 				await click('button[aria-label="Close texture page"]');
 				await tab("frame");
 			}
-			await click(".explorer-frame-actions button:nth-child(2)");
+			await click('[data-performance-action="copy"]');
 			const report = await read(() => globalThis.__explorerThemeReport);
 			const metricDelta = Object.fromEntries(
 				after.metrics.map(({ name, value }) => [

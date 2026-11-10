@@ -22,8 +22,7 @@ const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const account = requiredEnvironment("HOLTBURGER_PROBE_ACCOUNT");
 const password = requiredEnvironment("HOLTBURGER_PROBE_PASSWORD");
 const mode = probeMode(process.env.HOLTBURGER_PROBE_MODE);
-const performanceInstrumentationEnabled =
-	process.env.HOLTBURGER_PROBE_PROFILE_INSTRUMENTATION !== "0";
+const v8SamplingEnabled = process.env.HOLTBURGER_PROBE_V8_SAMPLING !== "0";
 if (
 	mode !== "teleport" &&
 	process.env.HOLTBURGER_PROBE_TELEPORT_SEQUENCE !== undefined
@@ -54,7 +53,7 @@ const streamingOptions =
 				moveMs: 2000,
 				drainMs: 4000,
 				timeoutMs,
-				profile: performanceInstrumentationEnabled,
+				v8Sampling: v8SamplingEnabled,
 				outputPrefix: requiredEnvironment("HOLTBURGER_STREAMING_OUTPUT"),
 				reportPath: requiredEnvironment("HOLTBURGER_PROBE_REPORT"),
 			}
@@ -81,7 +80,7 @@ const child = spawn(
 		account,
 		"--password",
 		password,
-		`--debug=${(mode !== "profile" && mode !== "streaming") || performanceInstrumentationEnabled}`,
+		"--debug=true",
 	],
 	{
 		cwd: appRoot,
@@ -233,27 +232,20 @@ try {
 		});
 		process.exitCode = retained ? 0 : 1;
 	} else if (mode === "profile") {
-		const instrumentationEnabled = performanceInstrumentationEnabled;
 		await waitFor(
 			client,
-			`() => window.__holtburgerClientPerformance !== undefined`,
+			`() => window.__holtburgerPerformance !== undefined`,
 			timeoutMs,
 			"client performance bridge",
 		);
 		await delay(PROFILE_SETTLE_MS);
-		if (instrumentationEnabled) {
-			await evaluate(
-				client,
-				`() => window.__holtburgerClientPerformance.setRendererProfilingEnabled(true)`,
-			);
+		await evaluate(client, `() => window.__holtburgerPerformance.start()`);
+		if (v8SamplingEnabled) {
 			await client.send("Profiler.enable");
 			await client.send("Profiler.setSamplingInterval", { interval: 100 });
 			await client.send("Profiler.start");
 		}
-		await evaluate(
-			client,
-			`() => window.__holtburgerClientPerformance.reset()`,
-		);
+		await evaluate(client, `() => window.__holtburgerPerformance.reset()`);
 		const snapshots = [];
 		const profileStartedAt = Date.now();
 		while (Date.now() - profileStartedAt < PROFILE_WINDOW_MS) {
@@ -261,7 +253,7 @@ try {
 			snapshots.push(
 				await evaluate(
 					client,
-					`() => window.__holtburgerClientPerformance.snapshot()`,
+					`() => window.__holtburgerPerformance.snapshot()`,
 				),
 			);
 		}
@@ -269,11 +261,11 @@ try {
 		// profiler can allow more frames to accumulate in the final snapshot.
 		const finalSnapshot = await evaluate(
 			client,
-			`() => window.__holtburgerClientPerformance.snapshot()`,
+			`() => window.__holtburgerPerformance.snapshot()`,
 		);
 		const measuredWindowMs = Date.now() - profileStartedAt;
 		let cpuProfilePath = null;
-		if (instrumentationEnabled) {
+		if (v8SamplingEnabled) {
 			const { profile } = await client.send("Profiler.stop");
 			cpuProfilePath =
 				process.env.HOLTBURGER_PROBE_CPU_PROFILE ??
@@ -281,12 +273,7 @@ try {
 			await writeFile(cpuProfilePath, JSON.stringify(profile));
 		}
 		const screenshotPath = await captureScreenshot(client);
-		if (instrumentationEnabled) {
-			await evaluate(
-				client,
-				`() => window.__holtburgerClientPerformance.setRendererProfilingEnabled(false)`,
-			);
-		}
+		await evaluate(client, `() => window.__holtburgerPerformance.stop()`);
 		const report = {
 			materialTableProbe:
 				process.env.HOLTBURGER_PROBE_MATERIAL_TABLES === "1"
@@ -297,7 +284,7 @@ try {
 					: null,
 			ok: true,
 			mode,
-			instrumentationEnabled,
+			v8SamplingEnabled,
 			cpuProfilePath,
 			selectedCharacter,
 			settleMs: PROFILE_SETTLE_MS,
@@ -318,7 +305,7 @@ try {
 			printReport({
 				ok: true,
 				mode,
-				instrumentationEnabled,
+				v8SamplingEnabled,
 				cpuProfilePath,
 				reportPath,
 				windowMs: report.windowMs,
@@ -552,20 +539,17 @@ function delay(milliseconds) {
 }
 
 function summarizePerformanceSnapshot(snapshot) {
-	const profile = snapshot.diagnostics.renderer?.profile;
+	const profile = snapshot.renderer;
 	return {
-		frameRates: snapshot.frameRates,
-		meanFrameWorkMs: snapshot.meanFrameWorkMs,
-		renderedFrames: snapshot.sampledFrameCount,
-		rendererCpuMean: profile?.cpu.mean ?? null,
-		rendererGpuMean:
-			profile?.gpu.kind === "available" ? profile.gpu.mean : null,
-		runtimeTickMean: snapshot.diagnostics.tickProfile?.mean ?? null,
-		selectionMetrics: snapshot.diagnostics.renderer?.selectionMetrics ?? null,
-		dynamicResources: snapshot.diagnostics.renderer?.dynamicResources ?? null,
-		viewport: snapshot.diagnostics.viewport,
-		playerResidency: snapshot.diagnostics.playerResidency,
-		cameraResidency: snapshot.diagnostics.cameraResidency,
+		frameRates: snapshot.browser.frameRates,
+		meanFrameWorkMs: snapshot.browser.meanFrameWorkMs,
+		renderedFrames: snapshot.browser.sampleCount,
+		rendererCpuMeanMs: profile?.cpu.meanMs ?? null,
+		rendererGpuMeanMs:
+			profile?.gpu.kind === "available" ? profile.gpu.meanMs : null,
+		presentationFrameMean: snapshot.browser.presentation?.frame?.mean ?? null,
+		workload: snapshot.workload,
+		viewport: snapshot.context.viewport,
 	};
 }
 

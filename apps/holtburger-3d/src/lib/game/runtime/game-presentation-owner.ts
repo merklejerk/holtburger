@@ -16,7 +16,6 @@ import { StandardCommitPipeline } from "../commit/pipeline";
 import { WebGL2Device } from "../renderer/webgl2-device";
 import type { FrameSettings } from "../renderer/renderer";
 import { ActiveRegionStaticDetailOwner } from "../resolution/active-region-static-detail";
-import { RuntimeTickProfiler } from "./runtime-tick-profiler";
 import { GamePresentationRuntime } from "./game-presentation-runtime";
 import type { TextureFilteringCapabilities } from "../renderer/texture-filtering-policy";
 import type { PortalWarpDriveTuning } from "../renderer/portal-warp-drive-tuning";
@@ -40,8 +39,6 @@ export interface GamePresentationOwnerDependencies {
 	readonly portalWarpDriveTuning: PortalWarpDriveTuning;
 	/** Optional lifecycle signal; construction stops between expensive host/GPU steps when aborted. */
 	readonly signal?: AbortSignal;
-	/** Optional frame profiler; a diagnostics-oriented frontend may inject one. */
-	readonly tickProfiler?: RuntimeTickProfiler;
 	/** Injectable for focused browser tests without changing the runtime's audio policy. */
 	readonly audioContextFactory?: () => AudioContext;
 }
@@ -116,7 +113,6 @@ export class GamePresentationOwner {
 			frameSettings,
 			portalWarpDriveTuning,
 			signal,
-			tickProfiler,
 			audioContextFactory = () => new AudioContext(),
 		} = dependencies;
 		let activeRegionSource: ActiveRegionHostSource | undefined;
@@ -166,8 +162,6 @@ export class GamePresentationOwner {
 				soundTableSource,
 				presentationResources.particleMeshSource(),
 				frameSettings,
-				undefined,
-				tickProfiler,
 			);
 			signal?.throwIfAborted();
 			const liveRuntime = runtime;

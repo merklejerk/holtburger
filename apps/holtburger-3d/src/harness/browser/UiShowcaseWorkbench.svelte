@@ -613,6 +613,7 @@
 							active={tab === "diagnostics"}
 						>
 							<ClientDebugPanel
+								readPerformanceSession={() => null}
 								readDiagnostics={() => null}
 								readSelectedEntity={() => null}
 								entityCollisionDisabled={false}

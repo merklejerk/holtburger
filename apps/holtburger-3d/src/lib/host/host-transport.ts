@@ -169,6 +169,7 @@ const EXPLORER_HOST_COMMAND_NAMES = [
 
 /** Client lifecycle and movement commands; startup remains private to Electron main. */
 const CLIENT_HOST_COMMAND_NAMES = [
+	"client_performance",
 	"examine_client_entity",
 	"read_client_book_page",
 	"request_client_current_state",

@@ -8,7 +8,7 @@ import type { ExplorerSceneInterestSnapshot } from "./explorer-camera-coordinato
 import type { ExplorerCameraLocation } from "./explorer-camera-location";
 import type { FreeFlyCameraState } from "./explorer-camera-input-controller";
 
-const EXPLORER_FRAME_DIAGNOSTIC_REPORT_VERSION = 6;
+const EXPLORER_FRAME_DIAGNOSTIC_REPORT_VERSION = 7;
 
 /** Browser-owned viewport facts recorded at the same instant as the diagnostic snapshot. */
 interface ExplorerViewportDiagnosticSnapshot {
@@ -21,12 +21,6 @@ interface ExplorerViewportDiagnosticSnapshot {
 
 /** Versioned, JSON-safe evidence bundle composed at the Explorer diagnostic boundary. */
 export interface ExplorerFrameDiagnosticReport {
-	/** Explorer loop timing shown by the viewport HUD at capture time. */
-	readonly applicationFrame: {
-		readonly frameMs: number;
-		readonly tickMs: number;
-		readonly updateFrameMs: number;
-	} | null;
 	readonly browser: {
 		readonly userAgent: string;
 		readonly webgl: WebGL2DeviceDiagnosticIdentity;
@@ -50,7 +44,10 @@ export interface ExplorerFrameDiagnosticReport {
 	} | null;
 	readonly capturedAt: string;
 	readonly environment: SceneEnvironmentSelection;
-	readonly frame: RendererFrameDiagnosticsSnapshot;
+	readonly frame: Omit<
+		RendererFrameDiagnosticsSnapshot,
+		"profile" | "profilingEnabled"
+	>;
 	readonly frameSettings: FrameSettings;
 	readonly sceneInterest: ExplorerSceneInterestSnapshot | null;
 	readonly schemaVersion: typeof EXPLORER_FRAME_DIAGNOSTIC_REPORT_VERSION;
@@ -58,7 +55,6 @@ export interface ExplorerFrameDiagnosticReport {
 }
 
 export interface ExplorerFrameDiagnosticReportInput {
-	readonly applicationFrame: ExplorerFrameDiagnosticReport["applicationFrame"];
 	readonly browser: ExplorerFrameDiagnosticReport["browser"];
 	readonly camera: FreeFlyCameraState | null;
 	readonly cameraLocation: ExplorerCameraLocation | null;
@@ -75,7 +71,6 @@ export function createExplorerFrameDiagnosticReport(
 	input: ExplorerFrameDiagnosticReportInput,
 ): ExplorerFrameDiagnosticReport {
 	return {
-		applicationFrame: input.applicationFrame,
 		browser: input.browser,
 		camera: input.camera
 			? {
@@ -100,7 +95,13 @@ export function createExplorerFrameDiagnosticReport(
 			: null,
 		capturedAt: input.capturedAt,
 		environment: input.environment,
-		frame: input.frame,
+		frame: {
+			dynamicResources: input.frame.dynamicResources,
+			entityShadows: input.frame.entityShadows,
+			nameplates: input.frame.nameplates,
+			selectionMetrics: input.frame.selectionMetrics,
+			compiledObjectDraws: input.frame.compiledObjectDraws,
+		},
 		frameSettings: input.frameSettings,
 		sceneInterest: input.sceneInterest,
 		schemaVersion: EXPLORER_FRAME_DIAGNOSTIC_REPORT_VERSION,

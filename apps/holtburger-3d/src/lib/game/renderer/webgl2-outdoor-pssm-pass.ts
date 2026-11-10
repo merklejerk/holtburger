@@ -34,13 +34,7 @@ import {
 	type WebGL2PssmShadowTargetDiagnostics,
 	type WebGL2PssmShadowTargetSet,
 } from "./webgl2-pssm-shadow-targets";
-import type { RendererOutdoorShadowMapFrameMetrics } from "./renderer";
 import type { WebGL2GeometryBinding } from "./webgl2-resource-manager";
-
-/** Caller-owned profiling sink; omitted entirely when renderer profiling is disabled. */
-export type WebGL2OutdoorPssmPassProfileMetrics = {
-	-readonly [Key in keyof RendererOutdoorShadowMapFrameMetrics]: number;
-};
 
 /** Per-view outdoor map state consumed immediately by eligible receiver programs. */
 export interface ActiveOutdoorPssmFrame {
@@ -175,10 +169,7 @@ export class WebGL2OutdoorPssmPass {
 	}
 
 	/** Select casters and build cascades without issuing GPU commands or instance uploads. */
-	prepare(
-		input: WebGL2OutdoorPssmPassInput,
-		profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null,
-	): PreparedOutdoorPssmView | null {
+	prepare(input: WebGL2OutdoorPssmPassInput): PreparedOutdoorPssmView | null {
 		if (!hasOutdoorPssmLightAndInterval(input)) {
 			return null;
 		}
@@ -219,7 +210,6 @@ export class WebGL2OutdoorPssmPass {
 			input.showRetailHiddenGeometry,
 			storage.batches,
 			storage.casterSelectionScratch,
-			profileMetrics,
 		);
 		return { input, storage, projection };
 	}
@@ -227,12 +217,10 @@ export class WebGL2OutdoorPssmPass {
 	/** Execute an already-selected view; this method performs no scene selection. */
 	render(
 		prepared: PreparedOutdoorPssmView | null,
-		profileMetrics: WebGL2OutdoorPssmPassProfileMetrics | null,
 	): ActiveOutdoorPssmFrame | null {
 		if (prepared === null) return null;
 		const { input, storage } = prepared;
 		if (storage.batches.every((batch) => batch.casters.length === 0)) {
-			if (profileMetrics) profileMetrics.emptyMappedViewCount += 1;
 			return null;
 		}
 		const targets = this.#targets.resize(

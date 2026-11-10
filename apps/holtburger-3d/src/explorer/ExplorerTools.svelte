@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { PerformanceSession } from "../app/performance-session";
 	import { type WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 
 	import type { SceneInterestTarget } from "../lib/game/runtime/scene-target";
@@ -58,6 +59,8 @@
 	}
 
 	interface Props {
+		/** Cold access to the mode-owned capture lifecycle. */
+		readonly readPerformanceSession: () => PerformanceSession | null;
 		/** Shared cold identity selected from either the entity list or minimap. */
 		readonly entitySelection: ExplorerEntitySelection | null;
 		readonly selectEntity: (selection: ExplorerEntitySelection | null) => void;
@@ -135,8 +138,6 @@
 		readonly updateRenderScale: (renderScale: number) => void;
 		/** Pull renderer diagnostics only while the Frame panel is mounted. */
 		readonly readRendererFrameDiagnostics: () => RendererFrameDiagnosticsSnapshot | null;
-		/** Explicitly create or tear down the renderer profiling session. */
-		readonly updateRendererFrameProfiling: (enabled: boolean) => void;
 		/** Compose current renderer and Explorer context into one exportable report. */
 		readonly captureFrameDiagnosticReport: () => ExplorerFrameDiagnosticReport | null;
 		readonly readAuthoredDynamicRuntimeDiagnostics: () => ReturnType<
@@ -228,8 +229,8 @@
 		renderScale,
 		renderScaleOptions,
 		updateRenderScale,
+		readPerformanceSession,
 		readRendererFrameDiagnostics,
-		updateRendererFrameProfiling,
 		captureFrameDiagnosticReport,
 		readAuthoredDynamicRuntimeDiagnostics,
 		readStaticObjectRuntimeDiagnostics,
@@ -406,7 +407,7 @@
 							<ExplorerFramePanel
 								{readRendererFrameDiagnostics}
 								{readAuthoredDynamicRuntimeDiagnostics}
-								setProfilingEnabled={updateRendererFrameProfiling}
+								{readPerformanceSession}
 								captureReport={captureFrameDiagnosticReport}
 							/>
 						{:else if activeTab.id === "textures"}

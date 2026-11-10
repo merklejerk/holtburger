@@ -5,7 +5,7 @@
 //! Population mismatches and content-readiness waits are reported explicitly.
 //! Incoming messages can contain character/chat data. Keep raw fixtures private.
 
-use super::runtime_profile::RuntimePhaseProfile;
+use super::runtime_profile::RuntimeScopeProfile;
 use super::{ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState};
 use anyhow::{Result, bail, ensure};
 use holtburger_common::Guid;
@@ -283,7 +283,10 @@ impl RuntimeFixture {
                         .advance_physics_tick(
                             begin,
                             *elapsed,
-                            RuntimePhaseProfile::begin("physics_tick"),
+                            RuntimeScopeProfile::begin(
+                                crate::client::runtime_profile::RuntimeProfileScope::PhysicsTick,
+                                None,
+                            ),
                             Some(&mut waited),
                         )
                         .await?;

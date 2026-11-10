@@ -1,4 +1,6 @@
 <script lang="ts">
+	import PerformancePanel from "../app/PerformancePanel.svelte";
+	import type { PerformanceSession } from "../app/performance-session";
 	import { onMount } from "svelte";
 	import type { RendererFrameDiagnosticsSnapshot } from "../lib/game/renderer/renderer";
 	import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
@@ -16,8 +18,8 @@
 		readonly readAuthoredDynamicRuntimeDiagnostics: () => ReturnType<
 			GamePresentationRuntime["getAuthoredDynamicRuntimeDiagnostics"]
 		> | null;
-		/** Explicitly create or tear down the renderer profiling session. */
-		readonly setProfilingEnabled: (enabled: boolean) => void;
+		/** Borrow the mode-owned profiling session without owning its lifetime. */
+		readonly readPerformanceSession: () => PerformanceSession | null;
 		/** Compose one current, versioned Explorer and renderer evidence bundle. */
 		readonly captureReport: () => ExplorerFrameDiagnosticReport | null;
 	}
@@ -25,7 +27,7 @@
 	let {
 		readRendererFrameDiagnostics,
 		readAuthoredDynamicRuntimeDiagnostics,
-		setProfilingEnabled,
+		readPerformanceSession,
 		captureReport,
 	}: Props = $props();
 	let diagnostics = $state<RendererFrameDiagnosticsSnapshot | null>(null);
@@ -49,40 +51,9 @@
 	});
 
 	const metrics = $derived(diagnostics?.selectionMetrics ?? null);
-	const compiledDraws = $derived(diagnostics?.compiledObjectDraws ?? null);
 	const shadowTargets = $derived(
 		diagnostics?.entityShadows.outdoorTargets ?? null,
 	);
-	/** Flushes are rare by design, so showing the total keeps an unexpected source visible. */
-	const compiledFlushTotal = $derived(
-		compiledDraws === null
-			? 0
-			: Object.values(compiledDraws.flushCounts).reduce(
-					(total, count) => total + count,
-					0,
-				),
-	);
-	const profile = $derived(diagnostics?.profile ?? null);
-	const profilingEnabled = $derived(diagnostics?.profilingEnabled ?? false);
-
-	/**
-	 * Toggle profiling, reporting the outcome either way.
-	 *
-	 * Every other control here reports its own failure; this one used to throw into the console and
-	 * leave the button visually inert, which silently invalidates every capture taken afterwards.
-	 */
-	function toggleProfiling(): void {
-		const next = !profilingEnabled;
-		try {
-			setProfilingEnabled(next);
-			sampleDiagnostics();
-			exportStatus = next ? "Profiling started." : "Profiling stopped.";
-		} catch (error) {
-			exportStatus = `Could not ${next ? "start" : "stop"} profiling: ${
-				error instanceof Error ? error.message : String(error)
-			}`;
-		}
-	}
 
 	function requireReport(): ExplorerFrameDiagnosticReport {
 		const report = captureReport();
@@ -96,9 +67,7 @@
 			await navigator.clipboard.writeText(
 				serializeExplorerFrameDiagnosticReport(report),
 			);
-			exportStatus = report.frame.profile
-				? `Copied profile frame ${report.frame.profile.cpu.latestFrameNumber}.`
-				: "Copied diagnostic snapshot; profiling was off.";
+			exportStatus = "Copied scene inspection snapshot.";
 		} catch (error) {
 			exportStatus = error instanceof Error ? error.message : String(error);
 		}
@@ -128,19 +97,11 @@
 	<div class="explorer-frame-actions">
 		<button
 			type="button"
-			class="explorer-action explorer-frame-profile-toggle ui-button"
-			disabled={diagnostics === null}
-			onclick={toggleProfiling}
-		>
-			{profilingEnabled ? "Stop profiling" : "Start profiling"}
-		</button>
-		<button
-			type="button"
 			class="explorer-action ui-button"
 			disabled={diagnostics === null}
 			onclick={() => void copyReport()}
 		>
-			Copy snapshot
+			Copy scene snapshot
 		</button>
 		<button
 			type="button"
@@ -148,230 +109,14 @@
 			disabled={diagnostics === null}
 			onclick={downloadReport}
 		>
-			Download JSON
+			Download scene JSON
 		</button>
 	</div>
 	{#if exportStatus !== null}
 		<p class="explorer-frame-status" role="status">{exportStatus}</p>
 	{/if}
 
-	{#if profilingEnabled}
-		<fieldset class="explorer-section">
-			<legend>Performance</legend>
-			{#if profile === null}
-				<p>Waiting for the first profiled frame.</p>
-			{:else}
-				<div class="explorer-frame-summary">
-					<div class="ui-well">
-						<span>CPU mean</span>
-						<strong>{profile.cpu.mean.totalMs.toFixed(2)} ms</strong>
-					</div>
-					<div class="ui-well">
-						<span>CPU p95</span>
-						<strong>{profile.cpu.p95RecentTotalMs.toFixed(2)} ms</strong>
-					</div>
-					<div class="ui-well">
-						<span>Latest</span>
-						<strong>{profile.cpu.latestTotalMs.toFixed(2)} ms</strong>
-					</div>
-					<div class="ui-well">
-						<span>Samples</span>
-						<strong>{profile.cpu.sampleCount}</strong>
-					</div>
-				</div>
-				{#if profile.gpu.kind === "available"}
-					<div class="explorer-param-row">
-						<span class="explorer-param-key">GPU command span</span>
-						<code>{profile.gpu.totalMs.toFixed(2)} ms</code>
-					</div>
-				{:else if profile.gpu.kind === "unsupported"}
-					<p class="explorer-frame-note">
-						GPU timestamp queries are unavailable on this device.
-					</p>
-				{:else if profile.gpu.kind === "disjoint"}
-					<p class="explorer-frame-note">
-						GPU clock was disjoint; invalid samples were discarded.
-					</p>
-				{:else}
-					<p class="explorer-frame-note">
-						Waiting on {profile.gpu.pendingFrameCount} GPU frame queries.
-					</p>
-				{/if}
-				<details class="explorer-frame-details ui-disclosure">
-					<summary>Phase timings</summary>
-					<div class="explorer-param-panel">
-						<div class="explorer-param-row">
-							<span class="explorer-param-key"
-								>Candidates / selected / rejected</span
-							>
-							<code
-								>{profile.cpu.outdoorShadowMap.mean.candidateRootCount.toFixed(
-									1,
-								)} / {profile.cpu.outdoorShadowMap.mean.selectedRootCount.toFixed(
-									1,
-								)} / {profile.cpu.outdoorShadowMap.mean.rejectedRootCount.toFixed(
-									1,
-								)}</code
-							>
-						</div>
-						<div class="explorer-param-row">
-							<span class="explorer-param-key"
-								>Mapped / analytic / empty views</span
-							>
-							<code
-								>{profile.cpu.outdoorShadowMap.mean.mappedRootCount.toFixed(1)} /
-								{profile.cpu.outdoorShadowMap.mean.analyticRootCount.toFixed(1)} /
-								{profile.cpu.outdoorShadowMap.mean.emptyMappedViewCount.toFixed(
-									1,
-								)}</code
-							>
-						</div>
-						<div class="explorer-param-row">
-							<span class="explorer-param-key">View / scene query</span>
-							<code
-								>{profile.cpu.mean.viewPreparationMs.toFixed(2)} / {profile.cpu.mean.sceneQueryMs.toFixed(
-									2,
-								)} ms</code
-							>
-						</div>
-						<div class="explorer-param-row">
-							<span class="explorer-param-key">Contribution resolve</span>
-							<code
-								>{profile.cpu.mean.sceneContributionResolutionMs.toFixed(2)} ms</code
-							>
-						</div>
-						<div class="explorer-param-row">
-							<span class="explorer-param-key">Portal plan / compose</span>
-							<code
-								>{profile.cpu.mean.portalPlanningMs.toFixed(2)} / {profile.cpu.mean.portalCompositionMs.toFixed(
-									2,
-								)} ms</code
-							>
-						</div>
-						<div class="explorer-param-row">
-							<span class="explorer-param-key">Particle submit</span>
-							<code>{profile.cpu.mean.particleSubmissionMs.toFixed(2)} ms</code>
-						</div>
-						<div class="explorer-param-row">
-							<span class="explorer-param-key">Outdoor shadow maps</span>
-							<code
-								>{profile.cpu.mean.outdoorShadowMapMs.toFixed(2)} ms CPU</code
-							>
-						</div>
-						{#if profile.gpu.kind === "available"}
-							<div class="explorer-param-row">
-								<span class="explorer-param-key">GPU outdoor shadow maps</span>
-								<code>{profile.gpu.outdoorShadowMapMs.toFixed(2)} ms</code>
-							</div>
-							<div class="explorer-param-row">
-								<span class="explorer-param-key">GPU ambient occlusion</span>
-								<code>{profile.gpu.ambientOcclusionMs.toFixed(2)} ms</code>
-							</div>
-							<div class="explorer-param-row">
-								<span class="explorer-param-key"
-									>GPU portal / opaque / present / particle</span
-								>
-								<code
-									>{profile.gpu.portalCompositionMs.toFixed(2)} / {profile.gpu.opaqueMs.toFixed(
-										2,
-									)} / {profile.gpu.presentationMs.toFixed(2)} / {profile.gpu.particleMs.toFixed(
-										2,
-									)} ms</code
-								>
-							</div>
-							<div class="explorer-param-row">
-								<span class="explorer-param-key"
-									>GPU sky / terrain / blended</span
-								>
-								<code
-									>{profile.gpu.skyMs.toFixed(2)} / {profile.gpu.terrainMs.toFixed(
-										2,
-									)} / {profile.gpu.blendedMs.toFixed(2)} ms</code
-								>
-							</div>
-						{/if}
-						{#if compiledDraws}
-							<div class="explorer-param-row">
-								<span class="explorer-param-key"
-									>Compiled draws / total / flushes</span
-								>
-								<code
-									>{compiledDraws.compiledEntryCount} / {compiledDraws.totalCompilationCount}
-									/ {compiledFlushTotal}</code
-								>
-							</div>
-						{/if}
-						<div class="explorer-param-row">
-							<span class="explorer-param-key">Instance runs / upload</span>
-							<code
-								>{profile.cpu.mean.instanceRunPreparationMs.toFixed(2)} / {profile.cpu.mean.instanceUploadMs.toFixed(
-									2,
-								)} ms</code
-							>
-						</div>
-						<div class="explorer-param-row">
-							<span class="explorer-param-key"
-								>Terrain / opaque / blended submit</span
-							>
-							<code
-								>{profile.cpu.mean.terrainSubmissionMs.toFixed(2)} / {profile.cpu.mean.opaqueSubmissionMs.toFixed(
-									2,
-								)} / {profile.cpu.mean.blendedSubmissionMs.toFixed(2)} ms</code
-							>
-						</div>
-						<div class="explorer-param-row">
-							<span class="explorer-param-key">Blended order / other</span>
-							<code
-								>{profile.cpu.mean.blendedOrderingMs.toFixed(2)} / {profile.cpu.mean.otherMs.toFixed(
-									2,
-								)} ms</code
-							>
-						</div>
-					</div>
-				</details>
-				<details class="explorer-frame-details ui-disclosure">
-					<summary>Outdoor shadow work</summary>
-					<div class="explorer-param-panel">
-						<div class="explorer-param-row">
-							<span class="explorer-param-key"
-								>Cascade queries / memberships / part memberships / draws</span
-							>
-							<code
-								>{profile.cpu.outdoorShadowMap.mean.cascadeQueryCount.toFixed(
-									1,
-								)} / {profile.cpu.outdoorShadowMap.mean.cascadeCandidateMembershipCount.toFixed(
-									1,
-								)} / {profile.cpu.outdoorShadowMap.mean.selectedPartCascadeCount.toFixed(
-									1,
-								)} / {profile.cpu.outdoorShadowMap.mean.selectedDepthDrawCount.toFixed(
-									1,
-								)}</code
-							>
-						</div>
-					</div>
-				</details>
-				<details class="explorer-frame-details ui-disclosure">
-					<summary>Contribution preparation</summary>
-					<div class="explorer-param-panel">
-						<div class="explorer-param-row">
-							<span class="explorer-param-key">Static / dynamic prepared</span>
-							<code
-								>{profile.cpu.contribution.mean.staticObjectPreparationCount.toFixed(
-									1,
-								)} / {profile.cpu.contribution.mean.dynamicObjectPreparationCount.toFixed(
-									1,
-								)}</code
-							>
-						</div>
-					</div>
-				</details>
-				<p class="explorer-frame-note">
-					Profiling adds CPU clocks and asynchronous GPU queries. GPU values may
-					describe an earlier frame.
-				</p>
-			{/if}
-		</fieldset>
-	{/if}
+	<PerformancePanel readSession={readPerformanceSession} />
 
 	{#if metrics === null}
 		<p>Waiting for renderer diagnostics.</p>
@@ -658,18 +403,7 @@
 							.assetCount}</code
 					>
 				</div>
-				<div class="explorer-param-row">
-					<span class="explorer-param-key"
-						>Animation advance / sample / publish ms</span
-					>
-					<code
-						>{dynamics.animation.lastAdvancementDurationMs.toFixed(2)} / {dynamics.animation.lastSamplingDurationMs.toFixed(
-							2,
-						)} / {dynamics.dynamics.lastPresentationPublicationDurationMs.toFixed(
-							2,
-						)}</code
-					>
-				</div>
+
 				<div class="explorer-param-row">
 					<span class="explorer-param-key"
 						>Commands executed / unconsumed / fallback</span

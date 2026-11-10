@@ -131,7 +131,13 @@ try {
 		}
 	}
 	let report;
-	if (options.cellTooltips) {
+	if (options.performanceSurfaces) {
+		report = {
+			suite: "performance-surfaces",
+			evidence: result.performanceSurfaces,
+			browserErrors,
+		};
+	} else if (options.cellTooltips) {
 		report = {
 			suite: "cell-tooltips",
 			evidence: result.cellTooltips,
@@ -694,6 +700,7 @@ function parseArgs(args) {
 		clientLoadouts: false,
 		clientPreciseJump: false,
 		clientSettingsTabs: false,
+		performanceSurfaces: false,
 		clientUiScaling: false,
 		clientEnvironment: false,
 		clientVitals: false,
@@ -916,6 +923,10 @@ function parseArgs(args) {
 			case "--client-housing":
 				parsed.clientHudFixture = true;
 				parsed.clientHousing = true;
+				break;
+			case "--performance-surfaces":
+				parsed.clientHudFixture = true;
+				parsed.performanceSurfaces = true;
 				break;
 			case "--client-settings-tabs":
 				parsed.clientHudFixture = true;
@@ -2227,6 +2238,7 @@ Options:
                          Hide GfxObjs suppressed by retail degradation without reloading content.
   --no-weather           Disable authored weather, mirroring retail's player option. Use it to
                          A/B a Rainy day group against the same scene without rain.
+  --performance-surfaces Exercise shared Client/Explorer profiling controls without assets.
   --profile-renderer     Enable opt-in renderer CPU/GPU profiling before capture.
   --merge-census         Report how far the frame's baked object draws could merge.
   --texture-filtering <mode>
@@ -2623,7 +2635,8 @@ function briefHarnessReport(result) {
 		nameplates: result.state.nameplates,
 		nameplateWorkload: result.nameplateWorkload,
 		nameplateLifecycle: result.nameplateLifecycle,
-		tickProfile: result.state.tickProfile,
+		presentationProfile: result.state.presentationProfile,
+		unsupportedGpuSurfaces: result.unsupportedGpuSurfaces,
 		frameSettings: result.state.frameSettings,
 		entityShadowResources: result.state.entityShadowResources,
 		portalScopeAtlasExecutorFixture: result.state.portalScopeAtlasExecutor,
@@ -2692,10 +2705,10 @@ function summarizeObjectPreviewBenchmark(benchmark) {
 			samples.map((sample) => sample.timing.averageFrameWorkMs),
 		),
 		rendererCpu: summarizeNumbers(
-			samples.map((sample) => sample.rendererCpu.meanTotalMs),
+			samples.map((sample) => sample.rendererCpu.meanMs),
 		),
 		gpu: samples.every((sample) => sample.gpu.kind === "available")
-			? summarizeNumbers(samples.map((sample) => sample.gpu.meanTotalMs))
+			? summarizeNumbers(samples.map((sample) => sample.gpu.meanMs))
 			: { kind: "unavailable" },
 		worstFrameWork: summarizeNumbers(
 			samples.map((sample) => sample.timing.longestFrameWorkMs),
@@ -4712,13 +4725,15 @@ async function runClientHudHarness({ viteUrl }) {
 		join(tmpdir(), "holtburger-3d-client-hud-harness-"),
 	);
 	tempDirectories.push(userDataDirectory);
-	const page = options.cellTooltips
-		? "cell-tooltips"
-		: options.uiShowcase
-			? "ui-showcase"
-			: options.itemCooldowns
-				? "item-cooldowns"
-				: "client-hud";
+	const page = options.performanceSurfaces
+		? "performance-surfaces"
+		: options.cellTooltips
+			? "cell-tooltips"
+			: options.uiShowcase
+				? "ui-showcase"
+				: options.itemCooldowns
+					? "item-cooldowns"
+					: "client-hud";
 	const pageUrl = `${viteUrl}/harness/browser/?${page}=1`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
@@ -4796,6 +4811,27 @@ async function runClientHudHarness({ viteUrl }) {
 				itemCooldowns: await evaluateExpression(
 					client,
 					"window.__HOLTBURGER_ITEM_COOLDOWNS__()",
+				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.performanceSurfaces) {
+			const deadline = Date.now() + 30_000;
+			while (
+				!(await evaluateExpression(
+					client,
+					"Boolean(window.__HOLTBURGER_PERFORMANCE_SURFACES__)",
+				))
+			) {
+				if (Date.now() > deadline)
+					throw new Error("Performance surface fixture did not load");
+				await delay(100);
+			}
+			return {
+				performanceSurfaces: await evaluateExpression(
+					client,
+					"window.__HOLTBURGER_PERFORMANCE_SURFACES__()",
 				),
 				consoleMessages,
 				state: { error: null, ready: true },
@@ -6893,7 +6929,43 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				);
 			contentFailures.continuedFrameSamples = continued.timing.sampleCount;
 		}
+		let unsupportedGpuSurfaces = null;
+		if (options.profileRenderer) {
+			unsupportedGpuSurfaces = await evaluateExpression(
+				client,
+				`(async () => {
+				const state = globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state();
+				if (!state.frameProfile || !state.metrics || !state.dynamicResources || !state.entityShadowResources || !state.nameplates) throw new Error('Renderer diagnostic fixture is incomplete');
+				const { probeUnsupportedGpuSurfaces } = await import('/src/harness/browser/performance-surface-probe.ts');
+				return probeUnsupportedGpuSurfaces({
+					profile: state.frameProfile, profilingEnabled: true, selectionMetrics: state.metrics,
+					dynamicResources: state.dynamicResources, entityShadows: state.entityShadowResources,
+					nameplates: state.nameplates, compiledObjectDraws: state.compiledObjectDraws,
+				});
+			})()`,
+			);
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.setFrameProfiling",
+				[false],
+			);
+			const stopped = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
+			);
+			if (
+				stopped.frameProfile !== null ||
+				stopped.presentationProfile !== null
+			) {
+				throw new Error(
+					"Stopping profiling retained active presentation or GPU collectors.",
+				);
+			}
+		}
+
 		return {
+			unsupportedGpuSurfaces,
 			contentFailures,
 			bakedDrawMergeCensus,
 			cpuProfile,
@@ -6995,7 +7067,7 @@ function entityShadowBenchmarkSample(state, pairIndex, orderIndex, mode) {
 		mode,
 		timing: state.timing,
 		frameProfile: state.frameProfile,
-		tickProfile: state.tickProfile,
+		presentationProfile: state.presentationProfile,
 		effectiveSettings: state.frameSettings.entityShadows,
 		resources: state.entityShadowResources,
 		outdoorPssm: state.outdoorPssm,
@@ -7113,14 +7185,13 @@ async function runObjectPreviewBenchmark(client, pairCount, measureMs, guid) {
 					previewDiagnostics: previewAfter,
 					timing: state.timing,
 					rendererCpu: {
-						meanTotalMs: cpuProfile?.mean.totalMs ?? null,
-						p95RecentTotalMs: cpuProfile?.p95RecentTotalMs ?? null,
+						meanMs: cpuProfile?.meanMs ?? null,
+						p95RecentMs: cpuProfile?.p95RecentMs ?? null,
 						sampleCount: cpuProfile?.sampleCount ?? 0,
 					},
 					gpu: {
 						kind: gpuProfile?.kind ?? "unavailable",
-						meanTotalMs: gpuProfile?.mean?.totalMs ?? null,
-						meanPresentationMs: gpuProfile?.mean?.presentationMs ?? null,
+						meanMs: gpuProfile?.meanMs ?? null,
 						sampleCount: gpuProfile?.sampleCount ?? 0,
 					},
 					metrics: objectPreviewBenchmarkMetrics(state.metrics),
@@ -7216,17 +7287,13 @@ async function runNameplateBenchmark(client, pairCount, measureMs) {
 						sampleCount: state.timing.sampleCount,
 					},
 					rendererCpu: {
-						meanTotalMs: cpuProfile?.mean.totalMs ?? null,
-						p95RecentTotalMs: cpuProfile?.p95RecentTotalMs ?? null,
-						meanSceneContributionResolutionMs:
-							cpuProfile?.mean.sceneContributionResolutionMs ?? null,
-						meanOtherMs: cpuProfile?.mean.otherMs ?? null,
+						meanMs: cpuProfile?.meanMs ?? null,
+						p95RecentMs: cpuProfile?.p95RecentMs ?? null,
 						sampleCount: cpuProfile?.sampleCount ?? 0,
 					},
 					gpu: {
 						kind: gpuProfile?.kind ?? "unavailable",
-						meanTotalMs: gpuProfile?.mean?.totalMs ?? null,
-						meanPresentationMs: gpuProfile?.mean?.presentationMs ?? null,
+						meanMs: gpuProfile?.meanMs ?? null,
 						sampleCount: gpuProfile?.sampleCount ?? 0,
 					},
 					nameplates: state.nameplates,

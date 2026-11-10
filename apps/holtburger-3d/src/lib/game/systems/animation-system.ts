@@ -179,11 +179,8 @@ function canFinishGesture(record: ClipAnimationRecord): boolean {
 export interface AnimationRuntimeDiagnostics {
 	readonly activePlaybackCount: number;
 	readonly discontinuityCount: number;
-	/** Wall time spent advancing clocks and semantic behavior during the latest frame. */
-	readonly lastAdvancementDurationMs: number;
 	/** Number of selected presentations visually sampled during the latest sample call. */
 	readonly lastSampledPresentationCount: number;
-	readonly lastSamplingDurationMs: number;
 	readonly lastSemanticStepCount: number;
 }
 
@@ -225,9 +222,7 @@ export class AnimationSystem<TOwnerId extends string> {
 	#diagnostics: AnimationRuntimeDiagnostics = {
 		activePlaybackCount: 0,
 		discontinuityCount: 0,
-		lastAdvancementDurationMs: 0,
 		lastSampledPresentationCount: 0,
-		lastSamplingDurationMs: 0,
 		lastSemanticStepCount: 0,
 	};
 
@@ -415,7 +410,6 @@ export class AnimationSystem<TOwnerId extends string> {
 			throw new Error("Cannot advance destroyed animation playback.");
 		if (!Number.isFinite(timeSeconds))
 			throw new Error("Animation time must be finite.");
-		const startedAt = performance.now();
 		let semanticStepCount = 0;
 		let activePlaybackCount = 0;
 		for (const [nodeId, node] of this.#records) {
@@ -483,7 +477,6 @@ export class AnimationSystem<TOwnerId extends string> {
 		this.#diagnostics = {
 			...this.#diagnostics,
 			activePlaybackCount,
-			lastAdvancementDurationMs: performance.now() - startedAt,
 			lastSemanticStepCount: semanticStepCount,
 		};
 		return frame;
@@ -498,7 +491,6 @@ export class AnimationSystem<TOwnerId extends string> {
 			throw new Error("Cannot sample destroyed animation playback.");
 		if (frame !== this.#latestAdvancedFrame)
 			throw new Error("Animation samples require the latest advanced frame.");
-		const startedAt = performance.now();
 		const requested = new Set<SceneNodeId>();
 		const samples = nodeIds.map((nodeId) => {
 			if (requested.has(nodeId))
@@ -534,7 +526,6 @@ export class AnimationSystem<TOwnerId extends string> {
 		this.#diagnostics = {
 			...this.#diagnostics,
 			lastSampledPresentationCount: samples.length,
-			lastSamplingDurationMs: performance.now() - startedAt,
 		};
 		return samples;
 	}

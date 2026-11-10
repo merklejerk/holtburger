@@ -175,10 +175,14 @@ pub async fn run_client_task(
     command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
     sink: Arc<dyn crate::host_event_sink::ClientEventSink>,
     shutdown_requested: Arc<std::sync::atomic::AtomicBool>,
+    performance: crate::client_performance::ClientPerformance,
 ) -> anyhow::Result<()> {
+    let authority_performance = performance.clone();
     supervise_client_runtime(
+        Some(performance),
         async move {
             let result = client.run().await;
+            authority_performance.retire();
             let exit = client_task_exit(
                 client.exit_outcome(),
                 result,
@@ -222,6 +226,7 @@ fn client_task_exit(
 /// The runtime future owns the event sender; completion or panic must close its stream.
 /// JoinSet aborts the authority if forwarding fails or the host cancels this supervisor.
 async fn supervise_client_runtime(
+    performance: Option<crate::client_performance::ClientPerformance>,
     run: impl std::future::Future<Output = ClientHostEvent> + Send + 'static,
     events: broadcast::Receiver<ClientViewEvent>,
     command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
@@ -229,7 +234,7 @@ async fn supervise_client_runtime(
 ) -> anyhow::Result<()> {
     let mut authority = tokio::task::JoinSet::new();
     authority.spawn(run);
-    forward_client_events(events, command_tx, sink.as_ref()).await?;
+    forward_client_events(performance.as_ref(), events, command_tx, sink.as_ref()).await?;
     while let Some(result) = authority.join_next().await {
         let exit = match result {
             Ok(exit) => exit,
@@ -242,6 +247,7 @@ async fn supervise_client_runtime(
 
 /// Preserve snapshot recovery and event order independently of the authority's tick polling.
 async fn forward_client_events(
+    performance: Option<&crate::client_performance::ClientPerformance>,
     mut events: broadcast::Receiver<ClientViewEvent>,
     command_tx: mpsc::UnboundedSender<holtburger_core::ClientCommand>,
     sink: &dyn crate::host_event_sink::ClientEventSink,
@@ -261,22 +267,25 @@ async fn forward_client_events(
                     awaiting_snapshot = false;
                     snapshot_request_pending = false;
                 }
-                let started = log::log_enabled!(target: EVENT_PROFILE_TARGET, log::Level::Debug)
-                    .then(Instant::now);
+                let generation = performance.and_then(|profile| profile.forwarding_generation());
+                let started = (generation.is_some()
+                    || log::log_enabled!(target: EVENT_PROFILE_TARGET, log::Level::Debug))
+                .then(Instant::now);
                 let presentation_tick = matches!(event, ClientViewEvent::PresentationTick { .. });
                 let projected = project_client_event(event);
-                let projection = started.map(|started| (started, Instant::now()));
                 if let Some(projected) = projected {
                     sink.publish_client_event(projected)?;
                 }
-                if let Some((started, projected_at)) = projection {
-                    let finished = Instant::now();
+                if let Some(started) = started {
+                    let elapsed = started.elapsed();
+                    if let (Some(profile), Some(generation)) = (performance, generation) {
+                        profile.record_forwarding(generation, elapsed);
+                    }
                     log::debug!(
                         target: EVENT_PROFILE_TARGET,
-                        "scope=event_forward presentation_tick={} projection_ms={:.3} enqueue_ms={:.3}",
+                        "scope=event_forward presentation_tick={} total_ms={:.3}",
                         presentation_tick,
-                        projected_at.duration_since(started).as_secs_f64() * 1_000.0,
-                        finished.duration_since(projected_at).as_secs_f64() * 1_000.0,
+                        elapsed.as_secs_f64() * 1_000.0,
                     );
                 }
             }
@@ -605,6 +614,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn forwards_during_a_busy_authority_turn_and_drains_before_exit() {
+        let performance = crate::client_performance::ClientPerformance::default();
+        let start =
+            serde_json::from_value(serde_json::json!({ "action": "start", "generation": 1 }))
+                .unwrap();
+        performance.control(start).unwrap();
         let (event_tx, events) = broadcast::channel(8);
         let (command_tx, _commands) = mpsc::unbounded_channel();
         let (forwarded_tx, mut forwarded) = mpsc::unbounded_channel();
@@ -617,6 +631,7 @@ mod tests {
             Ok(())
         }));
         supervise_client_runtime(
+            Some(performance.clone()),
             async move {
                 event_tx.send(snapshot_event()).unwrap();
                 // Deliberately occupy the authority worker until forwarding makes progress.
@@ -655,6 +670,11 @@ mod tests {
             crate::client_projection::ClientExitCauseWire::HostShutdown
         ));
         assert!(forwarded.recv().await.is_none());
+        let stop = serde_json::from_value(serde_json::json!({ "action": "stop", "generation": 1 }))
+            .unwrap();
+        let snapshot = serde_json::to_value(performance.control(stop).unwrap()).unwrap();
+        assert_eq!(snapshot["forwarding"]["sampleCount"], 2);
+        assert_eq!(snapshot["recording"], false);
     }
 
     #[tokio::test]
@@ -673,10 +693,9 @@ mod tests {
                 })
                 .unwrap();
         }
-        let forwarder =
-            tokio::spawn(
-                async move { forward_client_events(events, command_tx, sink.as_ref()).await },
-            );
+        let forwarder = tokio::spawn(async move {
+            forward_client_events(None, events, command_tx, sink.as_ref()).await
+        });
         assert!(matches!(
             commands.recv().await,
             Some(holtburger_core::ClientCommand::RequestCurrentApplicationState)
@@ -810,6 +829,7 @@ mod tests {
         let (lifetime, dropped) = tokio::sync::oneshot::channel::<()>();
         let sink = Arc::new(TestSink(|_| anyhow::bail!("output closed")));
         let error = supervise_client_runtime(
+            None,
             async move {
                 let _lifetime = lifetime;
                 event_tx.send(snapshot_event()).unwrap();
@@ -839,6 +859,7 @@ mod tests {
         let (started_tx, started) = tokio::sync::oneshot::channel();
         let (lifetime, dropped) = tokio::sync::oneshot::channel::<()>();
         let task = tokio::spawn(supervise_client_runtime(
+            None,
             async move {
                 let _lifetime = lifetime;
                 started_tx.send(()).unwrap();
@@ -867,6 +888,7 @@ mod tests {
         let (command_tx, _commands) = mpsc::unbounded_channel();
         let (forwarded_tx, mut forwarded) = mpsc::unbounded_channel();
         supervise_client_runtime(
+            None,
             async move {
                 let _events = event_tx;
                 panic!("authority test failure");

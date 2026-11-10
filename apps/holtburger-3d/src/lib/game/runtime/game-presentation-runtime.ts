@@ -316,10 +316,10 @@ import type {
 	Camera,
 	PrimaryCameraView,
 } from "./types";
-import type {
-	RuntimeTickProfile,
-	RuntimeTickProfiler,
-} from "./runtime-tick-profiler";
+import {
+	type PresentationProfile,
+	PresentationProfiler,
+} from "./presentation-profiler";
 import type {
 	SceneActivationRequest,
 	SceneActivationReceipt,
@@ -400,14 +400,6 @@ export interface GamePresentationRuntimeDependencies {
 	>;
 	/** Mode-owned initial display policy; shared runtime behavior never chooses a frontend look. */
 	readonly frameSettings: FrameSettings;
-	/**
-	 * Optional per-phase tick timing.
-	 *
-	 * Diagnostic infrastructure, so a production runtime is not obliged to construct one or carry
-	 * its state, and the tick reads as phases rather than as measurement. The Explorer and the
-	 * browser harness supply one; the thin client route does not.
-	 */
-	readonly tickProfiler?: RuntimeTickProfiler;
 	/**
 	 * Uniform [0, 1) source for authored randomness, defaulting to `Math.random`.
 	 *
@@ -1192,7 +1184,7 @@ export class GamePresentationRuntime {
 	#lastFrameTimeSeconds = 0;
 	/** Previous frame's renderer selection, which particle culling reads. */
 	#selectedDynamicNodeIds = new Set<SceneNodeId>();
-	readonly #tickProfiler: RuntimeTickProfiler | undefined;
+	#presentationProfiler: PresentationProfiler | undefined;
 	/** Active authored-dynamic residents grouped by their source owner. */
 	readonly #authoredDynamicResidents = new Map<
 		OwnerId,
@@ -1313,7 +1305,6 @@ export class GamePresentationRuntime {
 		validateEntitySelectionOutlineSettings(
 			dependencies.frameSettings.entitySelectionOutline,
 		);
-		this.#tickProfiler = dependencies.tickProfiler;
 		this.#frameSettings = dependencies.frameSettings;
 		this.#presentationAssets = dependencies.presentationAssets;
 		this.#terrainGenerator = dependencies.terrainGenerator;
@@ -1765,7 +1756,6 @@ export class GamePresentationRuntime {
 		particleMeshSource: ParticleMeshSource,
 		frameSettings: FrameSettings,
 		roll?: UniformRoll,
-		tickProfiler?: RuntimeTickProfiler,
 		workerFactories?: GamePresentationRuntimeWorkerFactories,
 	): Promise<GamePresentationRuntime> {
 		const terrainGenerator = await (workerFactories === undefined
@@ -1784,7 +1774,6 @@ export class GamePresentationRuntime {
 				presentationAssets,
 				roll,
 				soundTableSource,
-				tickProfiler,
 				staticGeometryPreparer:
 					typeof Worker === "undefined"
 						? new InlineStaticObjectGeometryPreparer()
@@ -4075,19 +4064,24 @@ export class GamePresentationRuntime {
 		return this.#terrainGenerator.getDiagnostics();
 	}
 
-	/** Explicitly enable or tear down renderer profiling for diagnostic frontends. */
-	setRendererFrameProfilingEnabled(enabled: boolean): void {
+	/** Enable or tear down presentation and renderer profiling as one diagnostic capability. */
+	setFrameProfilingEnabled(enabled: boolean): void {
 		const renderer = this.#renderer;
 		if (!renderer) throw new Error("Renderer is unavailable.");
 		if (!renderer.frameDiagnostics) {
 			throw new Error("Renderer does not support explicit frame profiling.");
 		}
 		renderer.frameDiagnostics.setProfilingEnabled(enabled);
+		if (enabled) {
+			if (!this.#presentationProfiler)
+				this.#presentationProfiler = new PresentationProfiler();
+		} else this.#presentationProfiler = undefined;
 	}
 
-	/** Delimit a measurement window so the next renderer profile mean covers only it. */
-	resetRendererFrameProfile(): void {
+	/** Reset presentation work and renderer measurements at the same browser boundary. */
+	resetFrameProfile(): void {
 		this.#renderer?.frameDiagnostics?.resetProfile();
+		this.#presentationProfiler?.reset();
 	}
 
 	/** Size how far the next frame's baked object draws could merge, for partitioning decisions. */
@@ -4490,13 +4484,24 @@ export class GamePresentationRuntime {
 	tick(): void {
 		if (this.#destroyed) return;
 		this.pollPortalTransitionLoading();
-		this.#dynamicPlacements.advance(performance.now());
+		const finishPlacement =
+			this.#presentationProfiler?.beginWork("placementAdvance");
+		try {
+			this.#dynamicPlacements.advance(performance.now());
+		} finally {
+			finishPlacement?.();
+		}
 	}
 
 	/** Commit loading work while portal space is the only presented scene. */
 	pollPortalTransitionLoading(): void {
 		if (this.#destroyed) return;
-		this.#drainCommitArtifacts();
+		const finishCommit = this.#presentationProfiler?.beginWork("contentCommit");
+		try {
+			this.#drainCommitArtifacts();
+		} finally {
+			finishCommit?.();
+		}
 		const failures = this.#presentationFailures.splice(0);
 		if (failures.length === 1) throw failures[0];
 		if (failures.length > 1) {
@@ -4577,8 +4582,8 @@ export class GamePresentationRuntime {
 		const portalTransition = this.#advancePortalTransition(timeSeconds);
 		// Retail runs script hooks before this frame's animation hooks for static objects
 		// (`animate_static_object`), and statics are this population.
-		const tick = this.#tickProfiler;
-		tick?.beginTick();
+		const frameProfile = this.#presentationProfiler;
+		frameProfile?.beginFrame();
 		// Reconciled before the clocks advance, so a script activated by this tick's sky state runs
 		// its `t=0` records on the same tick rather than a frame late.
 		this.#skyScripts.sync(
@@ -4590,13 +4595,13 @@ export class GamePresentationRuntime {
 		this.#effects.advance(timeSeconds);
 		this.#physicsScriptSystem.advance(timeSeconds);
 		this.#worldOwnedPhysicsScriptSystem.advance(timeSeconds);
-		tick?.mark("scriptAdvance");
 		// Advance against the same previous-frame owner selection used below for draw routing. Sky
 		// owners remain unconditionally visible through #particleRenderOwner.
 		this.#particles.advance(
 			timeSeconds,
 			(target) => this.#particleRenderOwner(target) !== null,
 		);
+		frameProfile?.mark("effects");
 		const ambientRefreshed = this.#audioListenerEnabled
 			? this.#refreshAmbient(timeSeconds)
 			: false;
@@ -4610,20 +4615,19 @@ export class GamePresentationRuntime {
 			// After ambience so a voice admitted on this control tick is placed against the same pose.
 			if (updateAudioControl) this.#audio.updatePlacements();
 		}
-		tick?.mark("particleAdvance");
+		frameProfile?.mark("audio");
 		const animationFrame = this.#animation.advance(timeSeconds);
 		const presentationSelection = this.#animationPresentation.select(
 			animationFrame,
 			timeSeconds,
 		);
-		tick?.mark("animationAdvance");
 		this.#dynamics.publishPresentation(
 			this.#animation.sample(
 				animationFrame,
 				presentationSelection.selectedNodeIds,
 			),
 		);
-		tick?.mark("presentationPublish");
+		frameProfile?.mark("animation");
 		// Ranges cull at emitter granularity against the previous frame's selection. They are built
 		// before the renderer selects, so this is one frame behind; the owner's bounds already
 		// include the particle envelope, so an emitter entering view is selected on the frame its
@@ -4637,7 +4641,6 @@ export class GamePresentationRuntime {
 				dirtySlots: this.#particles.takeDirtyRecordSlots(),
 			},
 		);
-		tick?.mark("particleRanges");
 		const anchorLandblockId = this.#camera.placement.landblockId;
 		const feedback = renderer.drawFrame({
 			anchorLandblockId,
@@ -4678,18 +4681,17 @@ export class GamePresentationRuntime {
 			],
 			worldIndicator: this.#worldIndicator,
 		});
-		tick?.mark("render");
+		frameProfile?.mark("render");
 		const loadingReceipt = this.#presentOpaquePortalLoading();
 		this.#selectedDynamicNodeIds = new Set(feedback.selectedDynamicNodeIds);
 		this.#animationPresentation.completeFrame(feedback, timeSeconds);
-		tick?.mark("frameCompletion");
-		tick?.finishTick();
+		frameProfile?.finishFrame();
 		return loadingReceipt ?? feedback.portalTransitionReceipt;
 	}
 
-	/** Per-phase update-tick timing; null unless a frontend injected a profiler. */
-	getTickProfile(): RuntimeTickProfile | null {
-		return this.#tickProfiler?.getProfile() ?? null;
+	/** Per-phase presentation timing; null outside an explicit profiling capture. */
+	getPresentationProfile(): PresentationProfile | null {
+		return this.#presentationProfiler?.getProfile() ?? null;
 	}
 
 	/**

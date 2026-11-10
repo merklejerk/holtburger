@@ -527,7 +527,7 @@ class DeferredTerrainGenerator implements TerrainGenerator {
 			completedJobCount: 0,
 			peakQueuedJobCount: 0,
 			queuedJobCount: 0,
-			totalExecutionDurationMs: 0,
+			totalJobTurnaroundMs: 0,
 			totalQueueDelayMs: 0,
 			transferredBytes: 0,
 			workerCount: 1,
@@ -580,7 +580,7 @@ class QueuedTerrainGenerator implements TerrainGenerator {
 			peakQueuedJobCount: 1,
 			queuedJobCount: this.#jobs.filter(({ state }) => state === "queued")
 				.length,
-			totalExecutionDurationMs: 0,
+			totalJobTurnaroundMs: 0,
 			totalQueueDelayMs: 0,
 			transferredBytes: 0,
 			workerCount: 1,

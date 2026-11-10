@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { clientNativePerformance } from "../app/native-performance";
+	import { PerformanceSession } from "../app/performance-session";
 	import {
 		statArtworkServices,
 		type StatArtworkServices,
@@ -159,7 +161,6 @@
 	} from "./client-gameplay-presentation";
 	import { StandardClientObjectPreviewService } from "./client-object-preview-service";
 	import { HostPresentationAssets } from "../lib/game/runtime/host-presentation-assets";
-	import { RuntimeTickProfiler } from "../lib/game/runtime/runtime-tick-profiler";
 	import { ClientPresentationRoot } from "./client-presentation-root";
 
 	import { GamePresentationOwner } from "../lib/game/runtime/game-presentation-owner";
@@ -716,20 +717,20 @@
 
 	let frameRateSampler: FrameRateSampler | null = null;
 
-	/** CDP-facing bridge for explicit live-client performance probes. */
-	interface ClientPerformanceProbe {
-		reset(): void;
-		setRendererProfilingEnabled(enabled: boolean): void;
-		snapshot(): {
-			readonly diagnostics: ClientGameplayPresentationDiagnostics | null;
-			readonly frameRates: FrameRates | null;
-			readonly meanFrameWorkMs: number | null;
-			readonly sampledFrameCount: number;
-		};
+	let performanceSession: PerformanceSession | null = null;
+	function readPerformanceSession(): PerformanceSession | null {
+		return performanceSession;
 	}
 	type ClientPerformanceWindow = Window & {
-		__holtburgerClientPerformance?: ClientPerformanceProbe;
+		__holtburgerPerformance?: {
+			start(): Promise<void>;
+			readClientDiagnostics(): ReturnType<typeof readDiagnostics>;
+			reset(): Promise<void>;
+			stop(): Promise<void>;
+			snapshot(): Promise<ReturnType<PerformanceSession["snapshot"]>>;
+		};
 	};
+
 	const toastCenter = new ClientToastCenter({
 		durationMs: CLIENT_TOAST_DURATION_MS,
 		scheduler: {
@@ -1929,7 +1930,6 @@
 					frameSettings: untrack(() => frameSettings),
 					portalWarpDriveTuning: CLIENT_TUNING.portalTransition.visual,
 					audioTuning: CLIENT_TUNING.audio,
-					tickProfiler: debugEnabled ? new RuntimeTickProfiler() : undefined,
 				}),
 			createGameplay: (resources) => {
 				const presentation = new ClientGameplayPresentation({
@@ -1991,6 +1991,19 @@
 						if (!cancelled) appendChatError(error);
 					},
 				);
+				performanceSession?.retire();
+				performanceSession = new PerformanceSession({
+					mode: "client",
+					runtime: owner.runtime,
+					canvas,
+					native: {
+						kind: "available",
+						source: clientNativePerformance(currentTransport),
+					},
+					readGraphics: () => frameSettings,
+					readDevice: () => owner.device.getDiagnosticIdentity(),
+					readFrameRates,
+				});
 				textureFilteringCapabilities = owner.textureFilteringCapabilities;
 				root.setForeground(audioForeground);
 				root.setAudioSettings(userSettings.audio);
@@ -2004,25 +2017,23 @@
 		);
 		frameRateSampler = sampler;
 		let previousFrameTime: number | null = null;
-		let sampledFrameWorkMs = 0;
-		let sampledFrameCount = 0;
-		const performanceProbe: ClientPerformanceProbe = {
-			reset: () => {
-				sampledFrameWorkMs = 0;
-				sampledFrameCount = 0;
-				gameplayPresentation?.resetRendererFrameProfile();
+		function requirePerformanceSession(): PerformanceSession {
+			if (!performanceSession)
+				throw new Error("Client presentation is unavailable.");
+			return performanceSession;
+		}
+		const performanceProbe = {
+			readClientDiagnostics: readDiagnostics,
+			start: () => requirePerformanceSession().start(),
+			reset: () => requirePerformanceSession().reset(),
+			stop: () => requirePerformanceSession().stop(),
+			snapshot: async () => {
+				const capture = requirePerformanceSession();
+				await capture.refresh();
+				return capture.snapshot();
 			},
-			setRendererProfilingEnabled: (enabled) =>
-				gameplayPresentation?.setRendererFrameProfilingEnabled(enabled),
-			snapshot: () => ({
-				diagnostics: gameplayPresentation?.readDiagnostics() ?? null,
-				frameRates: sampler.readFrameRates(),
-				meanFrameWorkMs:
-					sampledFrameCount === 0 ? 0 : sampledFrameWorkMs / sampledFrameCount,
-				sampledFrameCount,
-			}),
 		};
-		(window as ClientPerformanceWindow).__holtburgerClientPerformance =
+		(window as ClientPerformanceWindow).__holtburgerPerformance =
 			performanceProbe;
 		const stopFrameLoop = startFrameLoopWithCadenceMargin(
 			(timeMs) => {
@@ -2040,8 +2051,7 @@
 				const startedAtMs = performance.now();
 				const result = root.frame(timeMs);
 				const workMs = performance.now() - startedAtMs;
-				sampledFrameWorkMs += workMs;
-				sampledFrameCount++;
+				performanceSession?.recordFrame(workMs);
 				sampler.recordFrame({
 					animationFrameTimeMs: timeMs,
 					startedAtMs,
@@ -2057,6 +2067,7 @@
 		return () => {
 			cancelled = true;
 			stopFrameLoop();
+			performanceSession?.retire();
 			unsubscribeContentFailures?.();
 			appLifecycle.acceptScene({ kind: "stopped" }, false);
 			const retirement = root.destroy();
@@ -2071,8 +2082,8 @@
 			if (presentationRoot === root) presentationRoot = null;
 			if (frameRateSampler === sampler) frameRateSampler = null;
 			const performanceWindow = window as ClientPerformanceWindow;
-			if (performanceWindow.__holtburgerClientPerformance === performanceProbe)
-				delete performanceWindow.__holtburgerClientPerformance;
+			if (performanceWindow.__holtburgerPerformance === performanceProbe)
+				delete performanceWindow.__holtburgerPerformance;
 		};
 	});
 
@@ -2755,6 +2766,7 @@
 			{recallDestinations}
 			onRecall={recall}
 			onTeleportToMapPosition={teleportToMapPosition}
+			{readPerformanceSession}
 			{readDiagnostics}
 			{readSelectedEntity}
 			{readFrameRates}

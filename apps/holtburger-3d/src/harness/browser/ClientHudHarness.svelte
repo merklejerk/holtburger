@@ -3920,7 +3920,6 @@
 		return {
 			renderer: null,
 			residentResources: null,
-			tickProfile: null,
 			playerGuid: 0x5000_0001,
 			playerResidency: {
 				landblockId: "0xda55ffff",
@@ -5578,6 +5577,7 @@
 		></canvas>
 		{#if gameplayCanvas !== null && interactionRoot !== null}
 			<ClientGameplayView
+				readPerformanceSession={() => null}
 				statArtwork={{
 					load: async () => STAT_ICON_FIXTURE,
 					prepare: async () => {

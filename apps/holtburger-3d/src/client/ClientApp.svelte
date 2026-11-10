@@ -1,4 +1,8 @@
 <script lang="ts">
+	import {
+		retainRendererFailure,
+		retainStartupFailure,
+	} from "../app/app-failure-report";
 	import { ClientSummonPresentation } from "./client-summon-presentation";
 	import { clientNativePerformance } from "../app/native-performance";
 	import { PerformanceSession } from "../app/performance-session";
@@ -1933,16 +1937,23 @@
 		const root = new ClientPresentationRoot({
 			canvas,
 			pregameLocation,
-			build: async (signal) =>
-				GamePresentationOwner.build({
-					canvas,
-					hostTransport: currentTransport,
-					presentationResources: await currentAssets.resources(),
-					signal,
-					frameSettings: untrack(() => frameSettings),
-					portalWarpDriveTuning: CLIENT_TUNING.portalTransition.visual,
-					audioTuning: CLIENT_TUNING.audio,
-				}),
+			build: async (signal) => {
+				try {
+					return await GamePresentationOwner.build({
+						onRendererFailure: retainRendererFailure,
+						canvas,
+						hostTransport: currentTransport,
+						presentationResources: await currentAssets.resources(),
+						signal,
+						frameSettings: untrack(() => frameSettings),
+						portalWarpDriveTuning: CLIENT_TUNING.portalTransition.visual,
+						audioTuning: CLIENT_TUNING.audio,
+					});
+				} catch (error) {
+					if (!signal.aborted) retainStartupFailure(error);
+					throw error;
+				}
+			},
 			createGameplay: (resources) => {
 				const presentation = new ClientGameplayPresentation({
 					canvas,

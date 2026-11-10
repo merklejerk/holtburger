@@ -1,3 +1,7 @@
+import {
+	recordWebGL2Operation,
+	requireWebGL2NoError,
+} from "../webgl/diagnostics";
 import type { DynamicLayout } from "../geometry/dynamic-layout";
 import type { DynamicAppearance } from "../systems/dynamic-appearance";
 import { compileDynamicIndexBatches } from "./dynamic-index-batches";
@@ -174,6 +178,11 @@ export class WebGL2DynamicAppearances {
 		);
 		const data = createObjectMaterialTable(surfaces);
 		const gl = this.#gl;
+		requireWebGL2NoError(gl, "Before dynamic appearance upload");
+		recordWebGL2Operation(
+			gl,
+			`appearance ${layout.key}: ${plan.indices.byteLength} index bytes, ${data.byteLength} material bytes`,
+		);
 		const table = gl.createTexture();
 		const indexBuffer = gl.createBuffer();
 		if (table === null || indexBuffer === null) {
@@ -205,6 +214,7 @@ export class WebGL2DynamicAppearances {
 			gl.bindVertexArray(null);
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, plan.indices, gl.STATIC_DRAW);
+			requireWebGL2NoError(gl, "After dynamic appearance upload");
 			return { kind: "drawable", table, indexBuffer, plan, rangeGroupsByPart };
 		} catch (cause) {
 			gl.deleteTexture(table);

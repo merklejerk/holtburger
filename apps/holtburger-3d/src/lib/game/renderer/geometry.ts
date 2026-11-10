@@ -1,3 +1,5 @@
+import { OBJECT_MATERIAL_TEXELS } from "./object-material-table";
+
 /** Terrain attributes retained from generation through backend upload. */
 export interface TerrainGeometryData {
 	readonly kind: "terrain";
@@ -69,3 +71,34 @@ export type RenderGeometryData =
 	| ObjectGeometryData
 	| DynamicGeometryData
 	| PortalGeometryData;
+
+/** Sum the uploaded payload of one geometry source across its present attribute buffers. */
+export function geometryByteLength(geometry: RenderGeometryData): number {
+	// Dynamic index buffers belong to appearance resources, not this shared vertex lease.
+	let bytes = geometry.positions.byteLength;
+	if (geometry.kind !== "dynamic-parts") bytes += geometry.indices.byteLength;
+	if (geometry.kind === "portal-aperture") return bytes;
+	bytes += geometry.normals.byteLength + geometry.textureCoordinates.byteLength;
+	switch (geometry.kind) {
+		case "terrain":
+			return bytes + geometry.terrainColorCodes.byteLength;
+		case "object":
+			return (
+				bytes +
+				(geometry.bakedLight?.byteLength ?? 0) +
+				(geometry.materials
+					? geometry.materials.selectors.byteLength +
+						geometry.materials.count *
+							OBJECT_MATERIAL_TEXELS *
+							4 *
+							Float32Array.BYTES_PER_ELEMENT
+					: 0)
+			);
+		case "dynamic-parts":
+			return (
+				bytes +
+				geometry.partSelectors.byteLength +
+				geometry.materialSelectors.byteLength
+			);
+	}
+}

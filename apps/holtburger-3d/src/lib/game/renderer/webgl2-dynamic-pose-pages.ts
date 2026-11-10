@@ -1,3 +1,7 @@
+import {
+	recordWebGL2Operation,
+	requireWebGL2NoError,
+} from "../webgl/diagnostics";
 import { textureScrollPhase } from "./texture-scroll-phase";
 import { writeMat4ToFloat32Array } from "../math/matrices";
 import type { ActiveDynamicPart } from "../systems/components";
@@ -141,6 +145,11 @@ export class WebGL2DynamicPosePages<TKey extends string> {
 		const existing = this.#pages[index];
 		if (existing !== undefined) return existing;
 		const gl = this.#gl;
+		requireWebGL2NoError(gl, "Before dynamic pose page allocation");
+		recordWebGL2Operation(
+			gl,
+			`allocate pose page ${DYNAMIC_POSE_TEXELS}x${this.#maximumRows} RGBA32F`,
+		);
 		const texture = gl.createTexture();
 		if (texture === null)
 			throw new Error("Failed to allocate a dynamic pose page.");
@@ -158,6 +167,7 @@ export class WebGL2DynamicPosePages<TKey extends string> {
 				DYNAMIC_POSE_TEXELS,
 				this.#maximumRows,
 			);
+			requireWebGL2NoError(gl, "After dynamic pose page allocation");
 			const page = {
 				texture,
 				data: new Float32Array(this.#maximumRows * FLOATS_PER_PART),

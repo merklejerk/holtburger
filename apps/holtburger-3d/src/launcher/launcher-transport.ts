@@ -25,6 +25,8 @@ interface LauncherBridge {
 	/** Process-wide preferences are available before any game connection or content setup. */
 	appSettings(): Promise<AppSettingsSnapshot>;
 	saveAppSettings(value: AppSettings): Promise<void>;
+	/** Copy the saved application failure report, or return false if no report exists. */
+	copyLastFailure(): Promise<boolean>;
 	/** Collect current host diagnostics and copy the report through the native clipboard. */
 	copyHardwareInfo(value: HardwareInfoRequest): Promise<void>;
 	/** Restart through the native application shutdown owner. */

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { TexturePixelFormat } from "../textures/types";
 import { TERRAIN_TYPE_COUNT } from "../terrain/pcode";
 import { TERRAIN_COLOR_CODE_ATTRIBUTE } from "./webgl2-terrain-program";
 import { WebGL2ResourceManager } from "./webgl2-resource-manager";
@@ -56,6 +57,68 @@ describe("geometry-owned static material tables", () => {
 			installed.staticMaterials?.texture,
 		);
 	});
+	it("rejects GL allocation errors without publishing or retiring the installed geometry", () => {
+		const { context: gl } = createGeometryWebGL2();
+		const resources = new WebGL2ResourceManager(gl);
+		const key = resources.createGeometry(geometry);
+		const installed = resources.getGeometry(key);
+		vi.mocked(gl.getError)
+			.mockReturnValueOnce(gl.NO_ERROR)
+			.mockReturnValueOnce(gl.OUT_OF_MEMORY);
+		expect(() => resources.replaceGeometry(key, geometry)).toThrow(
+			"After object geometry upload: WebGL error 0x505",
+		);
+		expect(resources.getGeometry(key)).toBe(installed);
+		expect(gl.deleteVertexArray).toHaveBeenCalledTimes(1);
+		expect(gl.deleteVertexArray).not.toHaveBeenCalledWith(
+			installed.vertexArray,
+		);
+		resources.replaceGeometry(key, geometry);
+		expect(resources.getGeometry(key)).not.toBe(installed);
+	});
+
+	it("rejects a pending GL error before allocating and preserves its attribution", () => {
+		const { context: gl } = createGeometryWebGL2();
+		vi.mocked(gl.getError).mockReturnValueOnce(gl.INVALID_OPERATION);
+		expect(() =>
+			new WebGL2ResourceManager(gl).createGeometry(geometry),
+		).toThrow("Before geometry upload");
+		expect(gl.createVertexArray).not.toHaveBeenCalled();
+	});
+
+	it("rejects indices outside the vertex streams before allocating", () => {
+		const { context: gl } = createGeometryWebGL2();
+		expect(() =>
+			new WebGL2ResourceManager(gl).createGeometry({
+				...geometry,
+				indices: new Uint32Array([0, 1, geometry.positions.length / 3]),
+			}),
+		).toThrow("index exceeds vertex count");
+		expect(gl.createBuffer).not.toHaveBeenCalled();
+	});
+
+	it("rejects an index above the reported device limit even when the vertex exists", () => {
+		const { context: gl } = createGeometryWebGL2();
+		vi.mocked(gl.getParameter).mockImplementation((parameter) =>
+			parameter === gl.MAX_ELEMENT_INDEX ? 1 : 4,
+		);
+		expect(() =>
+			new WebGL2ResourceManager(gl).createGeometry(geometry),
+		).toThrow("Geometry index exceeds device limit 1");
+		expect(gl.createBuffer).not.toHaveBeenCalled();
+	});
+
+	it("rejects an incomplete baked-light attribute before allocating", () => {
+		const { context: gl } = createGeometryWebGL2();
+		expect(() =>
+			new WebGL2ResourceManager(gl).createGeometry({
+				...geometry,
+				bakedLight: new Float32Array(3),
+			}),
+		).toThrow("baked-light count");
+		expect(gl.createBuffer).not.toHaveBeenCalled();
+	});
+
 	it("rejects oversized tables before allocating geometry", () => {
 		const { context: gl } = createGeometryWebGL2();
 		const resources = new WebGL2ResourceManager(gl);
@@ -252,6 +315,44 @@ describe("WebGL2ResourceManager terrain geometry", () => {
 	});
 });
 
+describe("WebGL2ResourceManager 2D textures", () => {
+	const upload = {
+		width: 2,
+		height: 2,
+		mipLevels: 1,
+		format: TexturePixelFormat.RGBA8,
+		data: new Uint8Array(16),
+	};
+	it("rejects a device dimension violation before creating a texture", () => {
+		const { context: gl } = createGeometryWebGL2();
+		const maximum = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+		expect(() =>
+			new WebGL2ResourceManager(gl).createTexture2D({
+				...upload,
+				width: maximum + 1,
+				height: 1,
+				data: new Uint8Array((maximum + 1) * 4),
+			}),
+		).toThrow("exceed device limit");
+		expect(gl.createTexture).not.toHaveBeenCalled();
+	});
+	it("rejects a GL upload error and releases only the failed replacement", () => {
+		const { context: gl } = createGeometryWebGL2();
+		const resources = new WebGL2ResourceManager(gl);
+		const key = resources.createTexture2D(upload);
+		const installed = resources.getTexture2D(key);
+		vi.mocked(gl.getError)
+			.mockReturnValueOnce(gl.NO_ERROR)
+			.mockReturnValueOnce(gl.OUT_OF_MEMORY);
+		expect(() => resources.replaceTexture2D(key, upload)).toThrow(
+			"After texture upload",
+		);
+		expect(resources.getTexture2D(key)).toBe(installed);
+		expect(gl.deleteTexture).toHaveBeenCalledTimes(1);
+		expect(gl.deleteTexture).not.toHaveBeenCalledWith(installed.texture);
+	});
+});
+
 function createGeometryWebGL2(): {
 	readonly context: WebGL2RenderingContext;
 	readonly bufferData: ReturnType<typeof vi.fn>;
@@ -262,6 +363,7 @@ function createGeometryWebGL2(): {
 	const enableVertexAttribArray = vi.fn();
 	const vertexAttribIPointer = vi.fn();
 	let nextBuffer = 0;
+	let nextVertexArray = 0;
 	let nextTexture = 0;
 	return {
 		context: {
@@ -270,10 +372,17 @@ function createGeometryWebGL2(): {
 			activeTexture: vi.fn(),
 			bindTexture: vi.fn(),
 			texStorage2D: vi.fn(),
+			texImage2D: vi.fn(),
+			pixelStorei: vi.fn(),
 			texSubImage2D: vi.fn(),
 			texParameteri: vi.fn(),
 			ARRAY_BUFFER: 0x8892,
 			MAX_TEXTURE_SIZE: 0x0d33,
+			MAX_ELEMENT_INDEX: 0x8d6b,
+			NO_ERROR: 0,
+			OUT_OF_MEMORY: 0x0505,
+			INVALID_OPERATION: 0x0502,
+			getError: vi.fn(() => 0),
 			getParameter: vi.fn(() => 4),
 			ELEMENT_ARRAY_BUFFER: 0x8893,
 			FLOAT: 0x1406,
@@ -286,7 +395,7 @@ function createGeometryWebGL2(): {
 			bufferData,
 			createBuffer: vi.fn(() => ({ id: nextBuffer++ }) as WebGLBuffer),
 			createVertexArray: vi.fn(
-				() => ({ id: "terrain" }) as unknown as WebGLVertexArrayObject,
+				() => ({ id: nextVertexArray++ }) as unknown as WebGLVertexArrayObject,
 			),
 			deleteBuffer: vi.fn(),
 			deleteVertexArray: vi.fn(),

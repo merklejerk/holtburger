@@ -89,6 +89,8 @@ function setup() {
 		bindVertexArray: vi.fn(),
 		bindBuffer: vi.fn(),
 		bufferData: vi.fn(),
+		NO_ERROR: 0,
+		getError: () => 0,
 	};
 	const prepare = vi.fn(
 		(): PreparedObjectSurface<WebGLTexture, WebGLSampler> => ({

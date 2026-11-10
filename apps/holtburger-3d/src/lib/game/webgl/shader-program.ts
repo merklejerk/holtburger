@@ -1,3 +1,5 @@
+import { recordWebGL2Operation, reportWebGL2Failure } from "./diagnostics";
+
 /**
  * Context-neutral WebGL2 program construction.
  *
@@ -24,6 +26,7 @@ export function compileWebGL2Shader(
 		: driverLog && driverLog.length > 0
 			? driverLog
 			: `The driver returned no diagnostic (GL error 0x${gl.getError().toString(16)}).`;
+	reportWebGL2Failure(gl, `Shader compilation: ${message}`);
 	gl.deleteShader(shader);
 	const stage = type === gl.VERTEX_SHADER ? "vertex" : "fragment";
 	throw new Error(`Failed to compile WebGL ${stage} shader: ${message}`);
@@ -52,6 +55,7 @@ export function linkWebGL2Program(
 	vertexSource: string,
 	fragmentSource: string,
 ): WebGLProgram {
+	recordWebGL2Operation(gl, `compile/link ${label}`);
 	const vertexShader = compileWebGL2Shader(gl, gl.VERTEX_SHADER, vertexSource);
 	let fragmentShader: WebGLShader;
 	try {
@@ -81,6 +85,10 @@ export function linkWebGL2Program(
 		}
 		return program;
 	} catch (error) {
+		reportWebGL2Failure(
+			gl,
+			error instanceof Error ? error.message : String(error),
+		);
 		gl.deleteProgram(program);
 		throw error;
 	} finally {

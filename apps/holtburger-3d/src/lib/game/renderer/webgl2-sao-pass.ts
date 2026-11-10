@@ -6,7 +6,7 @@ import {
 	type EffectiveAmbientOcclusionPolicy,
 } from "./ambient-occlusion-policy";
 import {
-	compileWebGL2Shader,
+	linkWebGL2Program,
 	requireWebGL2Uniform,
 } from "../webgl/shader-program";
 import { withPreservedWebGL2AllocationBindings } from "./webgl2-render-target";
@@ -1272,30 +1272,13 @@ function linkSaoProgram(
 	fragmentSource: string,
 	owner: string,
 ): SaoProgram {
-	let vertexShader: WebGLShader | null = null;
-	let fragmentShader: WebGLShader | null = null;
-	let program: WebGLProgram | null = null;
+	const program = linkWebGL2Program(
+		gl,
+		`SAO ${owner}`,
+		TILE_VERTEX_SHADER,
+		fragmentSource,
+	);
 	try {
-		vertexShader = compileWebGL2Shader(
-			gl,
-			gl.VERTEX_SHADER,
-			TILE_VERTEX_SHADER,
-		);
-		fragmentShader = compileWebGL2Shader(
-			gl,
-			gl.FRAGMENT_SHADER,
-			fragmentSource,
-		);
-		program = gl.createProgram();
-		if (!program) throw new Error(`Failed to allocate SAO ${owner} program.`);
-		gl.attachShader(program, vertexShader);
-		gl.attachShader(program, fragmentShader);
-		gl.linkProgram(program);
-		if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-			throw new Error(
-				`Failed to link SAO ${owner} program: ${gl.getProgramInfoLog(program) ?? "unknown error"}`,
-			);
-		}
 		bindTileMetadataBlock(gl, program);
 		return {
 			outputExtent: requireWebGL2Uniform(gl, program, "uOutputExtent"),
@@ -1303,11 +1286,8 @@ function linkSaoProgram(
 			program,
 		};
 	} catch (cause) {
-		if (program) gl.deleteProgram(program);
+		gl.deleteProgram(program);
 		throw cause;
-	} finally {
-		if (vertexShader) gl.deleteShader(vertexShader);
-		if (fragmentShader) gl.deleteShader(fragmentShader);
 	}
 }
 

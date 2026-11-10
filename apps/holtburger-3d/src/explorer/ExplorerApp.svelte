@@ -1,4 +1,8 @@
 <script lang="ts">
+	import {
+		retainRendererFailure,
+		retainStartupFailure,
+	} from "../app/app-failure-report";
 	import { PerformanceSession } from "../app/performance-session";
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
 	import { type WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
@@ -1870,6 +1874,7 @@
 				entityCatalog = await entitySession.catalogCapability();
 				if (destroyed) return;
 				const presentation = await GamePresentationOwner.build({
+					onRendererFailure: retainRendererFailure,
 					canvas,
 					hostTransport,
 					presentationResources: await presentationAssets.resources(),
@@ -2056,11 +2061,10 @@
 
 				stopFrameLoop = startPresentationFrameLoop(step, () => 0);
 			} catch (error) {
-				if (!destroyed)
-					startupError =
-						error instanceof Error
-							? error.message
-							: "Failed to initialize renderer.";
+				if (!destroyed) {
+					retainStartupFailure(error);
+					startupError = errorMessage(error);
+				}
 				await destroySystems();
 			}
 		};

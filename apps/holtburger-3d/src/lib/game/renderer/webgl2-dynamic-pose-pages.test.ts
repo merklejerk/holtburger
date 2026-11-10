@@ -27,6 +27,8 @@ function parts(count: number) {
 function setup() {
 	let next = 0;
 	const gl = {
+		NO_ERROR: 0,
+		getError: () => 0,
 		MAX_TEXTURE_SIZE: 0x0d33,
 		TEXTURE0: 0x84c0,
 		TEXTURE_2D: 0x0de1,

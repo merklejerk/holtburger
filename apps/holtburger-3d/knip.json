@@ -11,6 +11,7 @@
 		"src/harness/browser/content-failure-probe.ts",
 		"src/harness/browser/performance-surface-probe.ts",
 		"src/harness/browser/dynamic-material-table-probe.ts",
+		"src/harness/browser/renderer-resource-safety-probe.ts",
 		"src/harness/browser/portal-traversal-investigation.ts",
 		"src/harness/browser/static-cell-coverage-probe.ts",
 		"src/harness/browser/portal-seam-probe.ts",

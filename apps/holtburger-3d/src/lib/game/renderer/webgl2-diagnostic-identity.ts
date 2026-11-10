@@ -1,4 +1,4 @@
-/** Cold context identity captured only for an explicitly exported diagnostic report. */
+/** Cold context identity captured for diagnostic exports and before a context can fail. */
 export interface WebGL2DeviceDiagnosticIdentity {
 	readonly renderer: string;
 	readonly shadingLanguageVersion: string;
@@ -22,7 +22,7 @@ interface WebGLDebugRendererInfo {
 	readonly UNMASKED_VENDOR_WEBGL: GLenum;
 }
 
-/** Read identity from an existing context only for an explicit diagnostic request. */
+/** Read identity while the context is healthy; never infer capabilities from adapter strings. */
 export function readWebGL2DiagnosticIdentity(
 	gl: WebGL2RenderingContext,
 ): WebGL2DeviceDiagnosticIdentity {

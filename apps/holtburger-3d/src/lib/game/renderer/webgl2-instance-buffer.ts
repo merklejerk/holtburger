@@ -1,3 +1,7 @@
+import {
+	recordWebGL2Operation,
+	requireWebGL2NoError,
+} from "../webgl/diagnostics";
 import { writeMat4ToFloat32Array } from "../math/matrices";
 import {
 	OBJECT_INSTANCE_RECORD_BYTES,
@@ -45,25 +49,41 @@ export class WebGL2InstanceBuffer {
 	resetFrame(requiredInstanceCount: number): boolean {
 		this.#requireAlive();
 		requireNonNegativeInteger(requiredInstanceCount, "Required instance count");
-		const previousCapacity = this.#capacity;
-		while (this.#capacity < requiredInstanceCount) {
-			this.#capacity = Math.max(1, this.#capacity * 2);
-		}
-		if (this.#capacity !== previousCapacity) {
-			this.#encodedInstances = new Float32Array(
-				this.#capacity * OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
-			);
-		}
+		// Rejecting preparation must leave no previous population drawable.
 		this.#populatedInstanceCount = 0;
+		const previousCapacity = this.#capacity;
+		let capacity = previousCapacity;
+		while (capacity < requiredInstanceCount) {
+			capacity = Math.max(1, capacity * 2);
+		}
+		const byteLength = capacity * OBJECT_INSTANCE_STRIDE_BYTES;
+		if (!Number.isSafeInteger(byteLength))
+			throw new Error("Instance buffer byte length exceeds safe integers.");
+		const growing = capacity !== previousCapacity;
+		const encodedInstances = growing
+			? new Float32Array(capacity * OBJECT_INSTANCE_RECORD_FLOAT_COUNT)
+			: this.#encodedInstances;
 		if (requiredInstanceCount > 0) {
 			this.#withBoundBuffer(() => {
+				// Growth is cold. Avoid synchronous GL queries for ordinary per-view orphaning.
+				if (growing) {
+					requireWebGL2NoError(this.#gl, "Before instance buffer growth");
+					recordWebGL2Operation(
+						this.#gl,
+						`grow instance buffer to ${byteLength} bytes`,
+					);
+				}
 				this.#gl.bufferData(
 					this.#gl.ARRAY_BUFFER,
-					this.#capacity * OBJECT_INSTANCE_STRIDE_BYTES,
+					byteLength,
 					this.#gl.STREAM_DRAW,
 				);
+				if (growing)
+					requireWebGL2NoError(this.#gl, "After instance buffer growth");
 			});
 		}
+		this.#capacity = capacity;
+		this.#encodedInstances = encodedInstances;
 		return this.#capacity !== previousCapacity;
 	}
 
@@ -204,7 +224,7 @@ function encodeObjectInstancesInto(
 }
 
 function requireNonNegativeInteger(value: number, label: string): void {
-	if (!Number.isInteger(value) || value < 0) {
+	if (!Number.isSafeInteger(value) || value < 0) {
 		throw new Error(`${label} must be a non-negative integer.`);
 	}
 }

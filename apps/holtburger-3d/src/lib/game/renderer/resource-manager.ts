@@ -61,7 +61,11 @@ export interface TextureArrayLayerUpload {
 
 /** Backend resource boundary consumed by logical render and texture-storage systems. */
 export interface RendererResourceManager {
-	createGeometry(geometry: RenderGeometryData): GeometryResourceKey;
+	/** Optional logical identity is retained in allocation-failure evidence. */
+	createGeometry(
+		geometry: RenderGeometryData,
+		label?: string,
+	): GeometryResourceKey;
 	replaceGeometry(key: GeometryResourceKey, geometry: RenderGeometryData): void;
 	createTexture2D(upload: Texture2DUpload): Texture2DResourceKey;
 	replaceTexture2D(key: Texture2DResourceKey, upload: Texture2DUpload): void;

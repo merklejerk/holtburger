@@ -1,5 +1,5 @@
 import { LeaseRegistry } from "../ownership";
-import { OBJECT_MATERIAL_TEXELS } from "../renderer/object-material-table";
+import { geometryByteLength } from "../renderer/geometry";
 import type {
 	GeometryResourceKey,
 	RendererResourceManager,
@@ -55,7 +55,7 @@ export class GeometryManager<TOwnerId extends string = string> {
 		try {
 			this.#geometry.set(
 				source.key,
-				this.#renderResources.createGeometry(source.geometry),
+				this.#renderResources.createGeometry(source.geometry, source.key),
 			);
 		} catch (cause) {
 			const detail = cause instanceof Error ? cause.message : String(cause);
@@ -63,7 +63,7 @@ export class GeometryManager<TOwnerId extends string = string> {
 				cause,
 			});
 		}
-		this.#geometryBytes.set(source.key, geometrySourceBytes(source));
+		this.#geometryBytes.set(source.key, geometryByteLength(source.geometry));
 	}
 
 	getResource(key: GeometryKey): GeometryResourceKey {
@@ -114,37 +114,5 @@ export class GeometryManager<TOwnerId extends string = string> {
 	/** Release every geometry resource retained by runtime owners. */
 	destroy(): void {
 		for (const owner of [...this.#leases.iterOwners()]) this.dropOwner(owner);
-	}
-}
-
-/** Sum the uploaded payload of one geometry source across its present attribute buffers. */
-function geometrySourceBytes(source: GeometrySource): number {
-	const geometry = source.geometry;
-	// Dynamic index buffers belong to appearance resources, not this shared vertex lease.
-	let bytes = geometry.positions.byteLength;
-	if (geometry.kind !== "dynamic-parts") bytes += geometry.indices.byteLength;
-	if (geometry.kind === "portal-aperture") return bytes;
-	bytes += geometry.normals.byteLength + geometry.textureCoordinates.byteLength;
-	switch (geometry.kind) {
-		case "terrain":
-			return bytes + geometry.terrainColorCodes.byteLength;
-		case "object":
-			return (
-				bytes +
-				(geometry.bakedLight?.byteLength ?? 0) +
-				(geometry.materials
-					? geometry.materials.selectors.byteLength +
-						geometry.materials.count *
-							OBJECT_MATERIAL_TEXELS *
-							4 *
-							Float32Array.BYTES_PER_ELEMENT
-					: 0)
-			);
-		case "dynamic-parts":
-			return (
-				bytes +
-				geometry.partSelectors.byteLength +
-				geometry.materialSelectors.byteLength
-			);
 	}
 }

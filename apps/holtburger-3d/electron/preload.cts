@@ -40,9 +40,14 @@ if (process.argv.includes("--holtburger-wayland-pointer-restore")) {
 	});
 }
 
+contextBridge.exposeInMainWorld("holtburgerAppDiagnostics", {
+	save: (failure: unknown) => invoke("diagnostics:save-failure", failure),
+});
+
 contextBridge.exposeInMainWorld("holtburgerLauncher", {
 	enabled: !process.argv.includes("--holtburger-launcher-disabled"),
 	snapshot: () => invoke("launcher:snapshot"),
+	copyLastFailure: () => invoke("launcher:copy-last-failure"),
 	copyHardwareInfo: (value: unknown) =>
 		invoke("launcher:copy-hardware-info", value),
 	appSettings: () => invoke("launcher:app-settings"),

@@ -478,6 +478,7 @@ try {
 			portalTraversalInvestigation: result.portalTraversalInvestigation,
 			portalSeamProbe: result.portalSeamProbe,
 			materialTableProbe: result.materialTableProbe,
+			resourceSafetyProbe: result.resourceSafetyProbe,
 			nameplateBenchmark: result.nameplateBenchmark,
 			objectPreviewBenchmark: result.objectPreviewBenchmark,
 			ambientOcclusionCoverageCensus:
@@ -2409,7 +2410,8 @@ function assertPortalScopeAtlasFixture(state) {
 	assertPortalScopeAtlasExecutorFixture(state.portalScopeAtlasExecutor);
 	const contextLoss = state.portalContextLossPolicy;
 	if (
-		!contextLoss?.lossEventCanceled ||
+		!contextLoss?.failureCaptured ||
+		!contextLoss.lossEventCanceled ||
 		!contextLoss.operationRejected ||
 		!contextLoss.rendererDrawRejected ||
 		contextLoss.status?.kind !== "restart-required"
@@ -2627,6 +2629,7 @@ function briefHarnessReport(result) {
 		portalTraversalInvestigation: result.portalTraversalInvestigation,
 		portalSeamProbe: result.portalSeamProbe,
 		materialTableProbe: result.materialTableProbe,
+		resourceSafetyProbe: result.resourceSafetyProbe,
 		authoredDynamics:
 			authoredDynamics === null
 				? null
@@ -7063,6 +7066,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			portalTraversalSurvey,
 			portalTraversalInvestigation,
 			portalSeamProbe,
+			resourceSafetyProbe:
+				process.env.HOLTBURGER_PROBE_RESOURCE_SAFETY === "1"
+					? await evaluate(
+							client,
+							`async () => (await import('/src/harness/browser/renderer-resource-safety-probe.ts')).probeRendererResourceSafety()`,
+							[],
+						)
+					: null,
 			materialTableProbe:
 				process.env.HOLTBURGER_PROBE_MATERIAL_TABLES === "1"
 					? await evaluate(

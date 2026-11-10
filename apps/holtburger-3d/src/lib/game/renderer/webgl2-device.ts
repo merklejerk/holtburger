@@ -1,4 +1,8 @@
 import {
+	WebGL2FailureDiagnostics,
+	type WebGL2FailureReport,
+} from "./webgl2-failure-diagnostics";
+import {
 	readWebGL2DiagnosticIdentity,
 	type WebGL2DeviceDiagnosticIdentity,
 } from "./webgl2-diagnostic-identity";
@@ -55,6 +59,8 @@ export type WebGL2DeviceStatus =
 
 /** Browser evidence that context loss invalidates every operation without claiming restoration. */
 export interface WebGL2ContextLossPolicyProbe {
+	/** The intentional loss reached the same first-failure reporter used by applications. */
+	readonly failureCaptured: boolean;
 	readonly lossEventCanceled: boolean;
 	readonly operationRejected: boolean;
 	readonly rejectionMessage: string;
@@ -70,6 +76,8 @@ export class WebGL2Device {
 	readonly #canvas: HTMLCanvasElement;
 	/** Context retained so this device, rather than one renderer, owns context loss. */
 	readonly #gl: WebGL2RenderingContext;
+	/** First-failure recorder remains valid after the context is lost. */
+	readonly #failureDiagnostics: WebGL2FailureDiagnostics;
 	/** One context-lifetime filtering probe shared by UI capability and backend sampler consumers. */
 	readonly #textureFilteringSupport: WebGL2TextureFilteringSupport;
 	/** Frontend-selected portal look retained for every renderer built on this device. */
@@ -83,6 +91,9 @@ export class WebGL2Device {
 				reason: "context-lost",
 			};
 		}
+		this.#failureDiagnostics.fail(
+			`WebGL2 context lost: ${(event as WebGLContextEvent).statusMessage || "no browser status message"}`,
+		);
 	};
 	readonly #onContextRestored = (): void => {
 		// Restoration cannot revive resource handles or upload descriptions owned by this device.
@@ -94,7 +105,9 @@ export class WebGL2Device {
 		resources: WebGL2ResourceManager,
 		textureFilteringSupport: WebGL2TextureFilteringSupport,
 		portalWarpDriveTuning: PortalWarpDriveTuning,
+		failureDiagnostics: WebGL2FailureDiagnostics,
 	) {
+		this.#failureDiagnostics = failureDiagnostics;
 		this.#canvas = canvas;
 		this.#gl = gl;
 		this.resources = resources;
@@ -110,6 +123,7 @@ export class WebGL2Device {
 	static async build(
 		canvas: HTMLCanvasElement,
 		portalWarpDriveTuning: PortalWarpDriveTuning,
+		onFailure?: (report: WebGL2FailureReport) => void,
 	): Promise<WebGL2Device> {
 		const gl = canvas.getContext("webgl2", {
 			alpha: false,
@@ -122,6 +136,10 @@ export class WebGL2Device {
 		});
 		if (!gl) throw new Error("WebGL2 is not available in this browser.");
 
+		const failureDiagnostics = new WebGL2FailureDiagnostics(gl, (report) => {
+			if (onFailure) onFailure(report);
+			else console.error("WebGL2 failure", JSON.stringify(report));
+		});
 		const resources = new WebGL2ResourceManager(gl);
 		const textureFilteringSupport = probeWebGL2TextureFilteringSupport(gl);
 		return new WebGL2Device(
@@ -130,6 +148,7 @@ export class WebGL2Device {
 			resources,
 			textureFilteringSupport,
 			portalWarpDriveTuning,
+			failureDiagnostics,
 		);
 	}
 
@@ -138,7 +157,14 @@ export class WebGL2Device {
 		portalWarpDriveTuning: PortalWarpDriveTuning,
 	): Promise<WebGL2ContextLossPolicyProbe> {
 		const canvas = document.createElement("canvas");
-		const device = await WebGL2Device.build(canvas, portalWarpDriveTuning);
+		let failureCaptured = false;
+		const device = await WebGL2Device.build(
+			canvas,
+			portalWarpDriveTuning,
+			() => {
+				failureCaptured = true;
+			},
+		);
 		const renderer = await device.buildRenderer({} as RenderWorld);
 		try {
 			const lossEvent = await device.#loseContextForProbe();
@@ -157,6 +183,7 @@ export class WebGL2Device {
 					cause instanceof Error ? cause.message : String(cause);
 			}
 			return {
+				failureCaptured,
 				lossEventCanceled: lossEvent.defaultPrevented,
 				operationRejected: rejectionMessage.includes("restart is required"),
 				rejectionMessage,

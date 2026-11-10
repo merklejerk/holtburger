@@ -1,3 +1,8 @@
+import {
+	AppFailureReportStore,
+	MAX_RENDERER_EVIDENCE_BYTES,
+	type AppFailureKind,
+} from "./app-failure-report.js";
 import { ApplicationWindow } from "./application-window.js";
 import { ClientRetirement } from "./client-retirement.js";
 import {
@@ -7,6 +12,7 @@ import {
 } from "../src/app/app-tuning.js";
 import {
 	app,
+	clipboard,
 	dialog,
 	ipcMain,
 	Menu,
@@ -129,6 +135,26 @@ const applicationIconPath = app.isPackaged
 /** Exact application contents admit IPC independently of native surface replacement. */
 let applicationWindow: ApplicationWindow | null = null;
 let explorerContent: ContentStartup<SidecarHostClient> | undefined;
+/** The selected desktop profile owns one latest failure report. */
+const failureReports = new AppFailureReportStore(
+	join(app.getPath("userData"), "last-failure.json"),
+);
+
+function persistAppFailure(
+	kind: AppFailureKind,
+	message: string,
+): Promise<void> {
+	return failureReports.save(kind, message, {
+		version: app.getVersion(),
+		document: documents.role,
+	});
+}
+
+function saveAppFailure(kind: AppFailureKind, message: string): Promise<void> {
+	return persistAppFailure(kind, message).catch((error: unknown) =>
+		console.error("Could not save application failure report.", error),
+	);
+}
 let quitting = false;
 /** Client window close joins renderer preparation before native store/process shutdown. */
 let documentRetirement: ClientRetirement | undefined;
@@ -417,6 +443,8 @@ function createContentStartup(
 								exit.cause !== "explicit-disconnect" &&
 								exit.cause !== "host-shutdown"
 							) {
+								if (exit.diagnostic !== null)
+									void saveAppFailure("session", exit.diagnostic);
 								void desktop.back(exit.diagnostic).catch(console.error);
 							}
 						}
@@ -432,6 +460,14 @@ function createContentStartup(
 		startup.listen((snapshot) => {
 			if (isCurrent() && !window.native.isDestroyed()) {
 				window.webContents.send("content:state", snapshot);
+				const phase = snapshot.phase;
+				if (
+					!quitting &&
+					(phase.kind === "fatal" ||
+						phase.kind === "restart_required" ||
+						phase.kind === "persistence_failed")
+				)
+					void saveAppFailure("content", phase.message);
 				if (
 					snapshot.phase.kind === "fatal" &&
 					desktop !== undefined &&
@@ -462,6 +498,8 @@ function installContentIpc(): void {
 			phase?.kind === "fatal" || phase?.kind === "restart_required"
 				? phase.message
 				: null;
+		if (localFailure !== null && localFailure !== contentFailure)
+			void saveAppFailure("session", localFailure);
 		void desktop?.back(localFailure ?? contentFailure).catch(console.error);
 	});
 }
@@ -724,6 +762,7 @@ function createWindow(entry: {
 			new Error(
 				`renderer process stopped (reason=${details.reason}, exitCode=${details.exitCode})`,
 			),
+			"process",
 		);
 	});
 	window.webContents.on(
@@ -829,19 +868,26 @@ function reportTransitionFailure(
 	error: unknown,
 ): void {
 	pickerFailure = formatError(error);
+	void saveAppFailure("session", pickerFailure);
 	console.error(error);
 	if (!window.native.isDestroyed())
 		dialog.showErrorBox("Holtburger session could not finish", pickerFailure);
 }
 
-function reportFatalError(title: string, error: unknown): void {
+function reportFatalError(
+	title: string,
+	error: unknown,
+	kind: AppFailureKind = "startup",
+): void {
 	if (fatalReported) return;
 	fatalReported = true;
 	const message = error instanceof Error ? error.message : String(error);
 	console.error(error);
-	dialog.showErrorBox(title, message);
 	exitCode = 1;
-	app.quit();
+	void saveAppFailure(kind, `${title}: ${formatError(error)}`).then(() => {
+		dialog.showErrorBox(title, message);
+		app.quit();
+	});
 }
 
 async function loadEntry(
@@ -917,8 +963,32 @@ void (async () => {
 	});
 	installIpcBridge(window, entry.mode);
 	installContentIpc();
+	handle("diagnostics:save-failure", undefined, (_event, input: unknown) => {
+		if (documents.role !== "client" && documents.role !== "explorer")
+			throw new Error("Game failure reports require a game document");
+		const failure = z
+			.discriminatedUnion("kind", [
+				z.object({ kind: z.literal("renderer"), report: z.string() }),
+				z.object({ kind: z.literal("startup"), message: z.string().max(4096) }),
+			])
+			.parse(input);
+		if (failure.kind === "startup")
+			return persistAppFailure("startup", failure.message);
+		if (Buffer.byteLength(failure.report) > MAX_RENDERER_EVIDENCE_BYTES)
+			throw new Error("Renderer evidence exceeds 64 KiB");
+		const reason = failureReports.retainRendererEvidence(failure.report);
+		return persistAppFailure("renderer", reason);
+	});
+	app.on("child-process-gone", (_event, details) => {
+		if (quitting || details.reason === "clean-exit") return;
+		void saveAppFailure(
+			"process",
+			`Chromium ${details.type} process stopped (reason=${details.reason}, exitCode=${details.exitCode}).`,
+		);
+	});
 	const navigate = async (role: DocumentRole, path: string) => {
 		appUpdates?.clearPregame();
+		failureReports.beginDocument();
 		documents.navigate(role, path);
 		await loadEntry(window, path, entry.mode);
 	};
@@ -1157,10 +1227,16 @@ void (async () => {
 				await navigate("client", gamePath);
 				attempt.cancellation.signal.throwIfAborted();
 			})();
-			await attempt.opening;
-			attempt.cancellation.signal.throwIfAborted();
-			clearContent = false;
-			await attempt.content.start();
+			try {
+				await attempt.opening;
+				attempt.cancellation.signal.throwIfAborted();
+				clearContent = false;
+				await attempt.content.start();
+			} catch (error) {
+				if (!attempt.cancellation.signal.aborted)
+					void saveAppFailure("startup", formatError(error));
+				throw error;
+			}
 		},
 		retire: async (attempt) => {
 			updates.clearPregame();
@@ -1202,13 +1278,14 @@ void (async () => {
 			await showPicker(messages.size === 0 ? null : [...messages].join("\n"));
 		},
 		flushLauncher: async () => {
-			// Both independent stores must settle even when another persistence owner fails.
+			// Independent writes must settle even when another persistence owner fails.
 			const results = await Promise.allSettled([
 				(async () => {
 					if (owner.attempt === null) await stopWindowGeometry();
 					await launcher.flush();
 				})(),
 				appSettings.flush(),
+				failureReports.flush(),
 			]);
 			const failures = results.flatMap((result) =>
 				result.status === "rejected" ? [formatError(result.reason)] : [],
@@ -1280,6 +1357,12 @@ void (async () => {
 	handle("launcher:save-app-settings", "picker", (_event, input: unknown) =>
 		appSettings.save(input),
 	);
+	handle("launcher:copy-last-failure", "picker", async () => {
+		const report = await failureReports.read();
+		if (report === null) return false;
+		clipboard.writeText(report);
+		return true;
+	});
 	handle("launcher:copy-hardware-info", "picker", (_event, input: unknown) =>
 		copyHardwareInfo(
 			window.native,
@@ -1383,5 +1466,8 @@ app.on("before-quit", (event) => {
 			console.error(error);
 			exitCode = 1;
 		})
-		.finally(() => app.exit(exitCode));
+		.finally(async () => {
+			await failureReports.flush();
+			app.exit(exitCode);
+		});
 });

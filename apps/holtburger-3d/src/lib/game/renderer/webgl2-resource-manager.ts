@@ -1,4 +1,9 @@
 import {
+	recordWebGL2Operation,
+	recordWebGL2ResourceBytes,
+	requireWebGL2NoError,
+} from "../webgl/diagnostics";
+import {
 	IntegerTexture2DFormat,
 	type GeometryResourceKey,
 	type RendererResourceManager,
@@ -11,8 +16,12 @@ import {
 	type Texture2DRegionUpload,
 	type Texture2DUpload,
 } from "./resource-manager";
-import { TexturePixelFormat } from "../textures/types";
 import {
+	TexturePixelFormat,
+	textureMipChainByteLength,
+} from "../textures/types";
+import {
+	geometryByteLength,
 	DYNAMIC_PART_SELECTOR_ATTRIBUTE,
 	OBJECT_MATERIAL_SELECTOR_ATTRIBUTE,
 	type RenderGeometryData,
@@ -42,6 +51,8 @@ export interface WebGL2GeometryBinding {
 
 interface WebGL2GeometryResource extends WebGL2GeometryBinding {
 	readonly buffers: readonly WebGLBuffer[];
+	/** Actual manager-owned storage, excluding dynamic appearance indices. */
+	readonly byteLength: number;
 }
 
 /** WebGL binding retained for one two-dimensional texture resource. */
@@ -78,8 +89,15 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		this.#gl = gl;
 	}
 
-	createGeometry(geometry: RenderGeometryData): GeometryResourceKey {
+	createGeometry(
+		geometry: RenderGeometryData,
+		label?: string,
+	): GeometryResourceKey {
 		const key: GeometryResourceKey = `geometry-resource:${this.#nextGeometryId++}`;
+		recordWebGL2Operation(
+			this.#gl,
+			`create ${key}${label === undefined ? "" : ` (${label})`}`,
+		);
 		this.#geometry.set(key, this.#uploadGeometry(geometry));
 		return key;
 	}
@@ -90,6 +108,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	): void {
 		const previous = this.#geometry.get(key);
 		if (!previous) throw new Error(`Geometry resource ${key} does not exist.`);
+		recordWebGL2Operation(this.#gl, `replace ${key}`);
 		const replacement = this.#uploadGeometry(geometry);
 		this.#geometry.set(key, replacement);
 		this.#destroyGeometry(previous);
@@ -112,6 +131,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		const gl = this.#gl;
 		gl.activeTexture(gl.TEXTURE0);
 		gl.bindTexture(gl.TEXTURE_2D, table.texture);
+		requireWebGL2NoError(gl, "Before static material update");
 		gl.texSubImage2D(
 			gl.TEXTURE_2D,
 			0,
@@ -123,6 +143,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			gl.FLOAT,
 			data,
 		);
+		requireWebGL2NoError(gl, "After static material update");
 	}
 
 	createTexture2D(upload: Texture2DUpload): Texture2DResourceKey {
@@ -137,6 +158,11 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		const replacement = this.#uploadTexture(upload);
 		this.#textures.set(key, replacement);
 		this.#gl.deleteTexture(previous.texture);
+		recordWebGL2ResourceBytes(
+			this.#gl,
+			-texture2DBytes(previous),
+			`release ${key}`,
+		);
 	}
 
 	updateTexture2DRegions(
@@ -149,6 +175,11 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		for (const region of regions) {
 			validateTexture2DRegionUpload(region, resource, format);
 		}
+		requireWebGL2NoError(gl, "Before texture region upload");
+		recordWebGL2Operation(
+			gl,
+			`patch ${key}: ${regions.reduce((sum, region) => sum + region.data.byteLength, 0)} bytes`,
+		);
 		try {
 			gl.bindTexture(gl.TEXTURE_2D, resource.texture);
 			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -168,6 +199,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			// Level zero now matches a full rebuild of this texture, so one regeneration produces
 			// the same chain a replacement upload would have.
 			if (resource.mipLevels > 1) gl.generateMipmap(gl.TEXTURE_2D);
+			requireWebGL2NoError(gl, "After texture region upload");
 		} finally {
 			gl.bindTexture(gl.TEXTURE_2D, null);
 		}
@@ -212,6 +244,8 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		}
 
 		const gl = this.#gl;
+		requireWebGL2NoError(gl, "Before texture array update");
+		recordWebGL2Operation(gl, `update ${key}`);
 		try {
 			gl.bindTexture(gl.TEXTURE_2D_ARRAY, resource.texture);
 			gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -228,6 +262,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 				gl.UNSIGNED_BYTE,
 				upload.data,
 			);
+			requireWebGL2NoError(gl, "After texture array update");
 		} finally {
 			gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
 		}
@@ -237,9 +272,12 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		const resource = this.getTextureArray(key);
 		if (resource.description.mipLevels === 1) return;
 		const gl = this.#gl;
+		requireWebGL2NoError(gl, "Before texture array update");
+		recordWebGL2Operation(gl, `update ${key}`);
 		try {
 			gl.bindTexture(gl.TEXTURE_2D_ARRAY, resource.texture);
 			gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+			requireWebGL2NoError(gl, "After texture array update");
 		} finally {
 			gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
 		}
@@ -254,6 +292,7 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	}
 
 	releaseResource(key: RenderResourceKey): boolean {
+		recordWebGL2Operation(this.#gl, `release ${key}`);
 		if (isGeometryResourceKey(key)) {
 			const resource = this.#geometry.get(key);
 			if (!resource) return false;
@@ -266,6 +305,11 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			if (!resource) return false;
 			this.#textureArrays.delete(key);
 			this.#gl.deleteTexture(resource.texture);
+			recordWebGL2ResourceBytes(
+				this.#gl,
+				-textureArrayBytes(resource.description),
+				`release ${key}`,
+			);
 			return true;
 		}
 		const textureKey = key as Texture2DResourceKey;
@@ -273,6 +317,11 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		if (!resource) return false;
 		this.#textures.delete(textureKey);
 		this.#gl.deleteTexture(resource.texture);
+		recordWebGL2ResourceBytes(
+			this.#gl,
+			-texture2DBytes(resource),
+			`release ${key}`,
+		);
 		return true;
 	}
 
@@ -281,9 +330,19 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			this.#destroyGeometry(resource);
 		}
 		for (const resource of this.#textures.values()) {
+			recordWebGL2ResourceBytes(
+				this.#gl,
+				-texture2DBytes(resource),
+				"release 2D texture",
+			);
 			this.#gl.deleteTexture(resource.texture);
 		}
 		for (const resource of this.#textureArrays.values()) {
+			recordWebGL2ResourceBytes(
+				this.#gl,
+				-textureArrayBytes(resource.description),
+				"release texture array",
+			);
 			this.#gl.deleteTexture(resource.texture);
 		}
 		this.#geometry.clear();
@@ -292,8 +351,9 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	}
 
 	#uploadGeometry(geometry: RenderGeometryData): WebGL2GeometryResource {
-		validateGeometry(geometry);
 		const gl = this.#gl;
+		const maximumElementIndex = gl.getParameter(gl.MAX_ELEMENT_INDEX) as number;
+		validateGeometry(geometry, maximumElementIndex);
 		if (geometry.kind === "object" && geometry.materials) {
 			const maximumRows: number = gl.getParameter(gl.MAX_TEXTURE_SIZE);
 			if (geometry.materials.count > maximumRows)
@@ -314,6 +374,9 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 					`Dynamic material table requires ${geometry.materialCount} rows; device limit is ${maximumRows}.`,
 				);
 		}
+		requireWebGL2NoError(gl, "Before geometry upload");
+		const byteLength = geometryByteLength(geometry);
+		recordWebGL2Operation(gl, `upload ${geometry.kind}: ${byteLength} bytes`);
 		const vertexArray = gl.createVertexArray();
 		if (!vertexArray)
 			throw new Error(`Failed to allocate ${geometry.kind} geometry.`);
@@ -407,8 +470,11 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 					gl.STATIC_DRAW,
 				);
 			}
+			requireWebGL2NoError(gl, `After ${geometry.kind} geometry upload`);
+			recordWebGL2ResourceBytes(gl, byteLength, `allocate ${geometry.kind}`);
 			const usesShortIndices = geometry.indices instanceof Uint16Array;
 			return {
+				byteLength,
 				buffers,
 				...(staticMaterials ? { staticMaterials } : {}),
 				indexCount: geometry.indices.length,
@@ -430,7 +496,12 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 
 	#uploadTexture(upload: Texture2DUpload): WebGL2Texture2DBinding {
 		validateTexture2DUpload(this.#gl, upload);
+		recordWebGL2Operation(
+			this.#gl,
+			`upload texture ${upload.width}x${upload.height}, ${upload.format}, ${upload.data.byteLength} source bytes, ${upload.mipLevels} mip levels`,
+		);
 		const gl = this.#gl;
+		requireWebGL2NoError(gl, "Before texture allocation");
 		const texture = gl.createTexture();
 		if (!texture) throw new Error("Failed to allocate texture resource.");
 		try {
@@ -457,6 +528,12 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 			if (upload.mipLevels > 1) gl.generateMipmap(gl.TEXTURE_2D);
 			if (format.integer) configureIntegerTexture(gl);
 			else configureNormalizedTexture(gl, gl.TEXTURE_2D, upload.mipLevels);
+			requireWebGL2NoError(gl, "After texture upload and mip generation");
+			recordWebGL2ResourceBytes(
+				gl,
+				texture2DBytes(upload),
+				"allocate 2D texture",
+			);
 			return {
 				format: upload.format,
 				height: upload.height,
@@ -476,7 +553,12 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 		description: TextureArrayDescription,
 	): WebGL2TextureArrayBinding {
 		validateTextureArrayDescription(this.#gl, description);
+		recordWebGL2Operation(
+			this.#gl,
+			`allocate texture array ${description.width}x${description.height}x${description.layerCapacity}, ${description.format}, ${description.mipLevels} mip levels`,
+		);
 		const gl = this.#gl;
+		requireWebGL2NoError(gl, "Before texture allocation");
 		const texture = gl.createTexture();
 		if (!texture) throw new Error("Failed to allocate texture array resource.");
 		try {
@@ -495,6 +577,12 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 				gl.TEXTURE_2D_ARRAY,
 				description.mipLevels,
 			);
+			requireWebGL2NoError(gl, "After texture array allocation");
+			recordWebGL2ResourceBytes(
+				gl,
+				textureArrayBytes(description),
+				"allocate texture array",
+			);
 			return { description, texture };
 		} catch (error) {
 			gl.deleteTexture(texture);
@@ -505,6 +593,11 @@ export class WebGL2ResourceManager implements RendererResourceManager {
 	}
 
 	#destroyGeometry(resource: WebGL2GeometryResource): void {
+		recordWebGL2ResourceBytes(
+			this.#gl,
+			-resource.byteLength,
+			"release geometry",
+		);
 		if (resource.staticMaterials)
 			this.#gl.deleteTexture(resource.staticMaterials.texture);
 		for (const buffer of resource.buffers) this.#gl.deleteBuffer(buffer);
@@ -581,6 +674,11 @@ function validateTexture2DUpload(
 	) {
 		throw new Error("Texture dimensions must be positive.");
 	}
+	const maximumTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+	if (upload.width > maximumTextureSize || upload.height > maximumTextureSize)
+		throw new Error(
+			`Texture dimensions ${upload.width}x${upload.height} exceed device limit ${maximumTextureSize}.`,
+		);
 	const maximumMipLevels =
 		Math.floor(Math.log2(Math.max(upload.width, upload.height))) + 1;
 	if (
@@ -653,13 +751,33 @@ function requireBuffer(gl: WebGL2RenderingContext): WebGLBuffer {
 	return buffer;
 }
 
-function validateGeometry(geometry: RenderGeometryData): void {
+function validateGeometry(
+	geometry: RenderGeometryData,
+	maximumElementIndex: number,
+): void {
 	if (geometry.positions.length % 3 !== 0) {
 		throw new Error(
 			`${geometry.kind} positions are not three-component vectors.`,
 		);
 	}
 	const vertexCount = geometry.positions.length / 3;
+	// Every index addresses the same dense vertex streams, including appearance-owned copies.
+	for (const index of geometry.indices) {
+		if (index >= vertexCount)
+			throw new Error(
+				`${geometry.kind} index exceeds vertex count ${vertexCount}.`,
+			);
+		if (index > maximumElementIndex)
+			throw new Error(
+				`Geometry index exceeds device limit ${maximumElementIndex}.`,
+			);
+	}
+	if (
+		geometry.kind === "object" &&
+		geometry.bakedLight !== null &&
+		geometry.bakedLight.length !== geometry.positions.length
+	)
+		throw new Error("Object baked-light count does not match positions.");
 	if (geometry.kind === "object" && geometry.materials) {
 		const { selectors, count } = geometry.materials;
 		if (!Number.isSafeInteger(count) || count <= 0)
@@ -672,6 +790,23 @@ function validateGeometry(geometry: RenderGeometryData): void {
 			throw new Error("Static material selector exceeds its table.");
 	}
 	if (geometry.kind === "dynamic-parts") {
+		if (!Number.isSafeInteger(geometry.partCount) || geometry.partCount <= 0)
+			throw new Error("Dynamic part count must be positive.");
+		if (
+			!Number.isSafeInteger(geometry.materialCount) ||
+			geometry.materialCount <= 0
+		)
+			throw new Error("Dynamic material count must be positive.");
+		if (
+			geometry.partSelectors.some((selector) => selector >= geometry.partCount)
+		)
+			throw new Error("Dynamic part selector exceeds its table.");
+		if (
+			geometry.materialSelectors.some(
+				(selector) => selector >= geometry.materialCount,
+			)
+		)
+			throw new Error("Dynamic material selector exceeds its table.");
 		if (geometry.partSelectors.length !== vertexCount)
 			throw new Error("Dynamic part-selector count does not match positions.");
 		if (geometry.materialSelectors.length !== vertexCount)
@@ -822,4 +957,25 @@ function validateTextureArrayDescription(
 			`Texture array mip level count must be between 1 and ${maximumMipLevels}.`,
 		);
 	}
+}
+
+/** Include all integer channels and every allocated mip, not just the source upload. */
+function texture2DBytes(
+	texture: Pick<Texture2DUpload, "width" | "height" | "mipLevels" | "format">,
+): number {
+	if (
+		texture.format === IntegerTexture2DFormat.RGBA32UI ||
+		texture.format === IntegerTexture2DFormat.R32UI
+	)
+		return (
+			textureMipChainByteLength({
+				...texture,
+				format: TexturePixelFormat.RGBA8,
+			}) * (texture.format === IntegerTexture2DFormat.RGBA32UI ? 4 : 1)
+		);
+	return textureMipChainByteLength({ ...texture, format: texture.format });
+}
+
+function textureArrayBytes(description: TextureArrayDescription): number {
+	return textureMipChainByteLength(description) * description.layerCapacity;
 }

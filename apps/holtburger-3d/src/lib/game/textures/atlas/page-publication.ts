@@ -49,7 +49,7 @@ export interface AtlasPagePublicationDiagnostics {
 	readonly activePageCount: number;
 	readonly bindingCount: number;
 	readonly longestPublicationDurationMs: number;
-	/** Largest retained device allocation observed, including mip levels. */
+	/** Largest live page allocation, including staged replacements and mip levels. */
 	readonly peakPageBytes: number;
 	readonly publicationDurationMs: number;
 	/** Released device allocation bytes including every purpose-promised mip level. */
@@ -165,10 +165,6 @@ export class AtlasPagePublication {
 			for (const [pageId, page] of nextPages) this.#pages.set(pageId, page);
 			this.#bindings.clear();
 			for (const [key, binding] of bindings) this.#bindings.set(key, binding);
-			this.#peakPageBytes = Math.max(
-				this.#peakPageBytes,
-				this.#activePageBytes(),
-			);
 			this.#releaseSupersededPages(oldPages, nextPages);
 			// Patch counters commit with the publication: writes made before a later failure are
 			// not work that landed, and the caller's rebuild fallback will overwrite them.
@@ -212,22 +208,23 @@ export class AtlasPagePublication {
 		builtPages: readonly AtlasPageBuildResult[],
 	): ReadonlyMap<AtlasPageId, Texture2DResourceKey> {
 		const created = new Map<AtlasPageId, Texture2DResourceKey>();
+		let liveBytes = this.#activePageBytes();
 		try {
 			for (const page of builtPages) {
-				created.set(
-					page.pageId,
-					this.#renderResources.createTexture2D({
-						data: page.pageBits,
-						format: texturePurposePolicy(page.purpose).format,
-						height: page.height,
-						mipLevels: texturePurposeMipLevelCount(
-							page.purpose,
-							page.width,
-							page.height,
-						),
-						width: page.width,
-					}),
-				);
+				const upload = {
+					data: page.pageBits,
+					format: texturePurposePolicy(page.purpose).format,
+					height: page.height,
+					mipLevels: texturePurposeMipLevelCount(
+						page.purpose,
+						page.width,
+						page.height,
+					),
+					width: page.width,
+				};
+				created.set(page.pageId, this.#renderResources.createTexture2D(upload));
+				liveBytes += textureMipChainByteLength(upload);
+				this.#peakPageBytes = Math.max(this.#peakPageBytes, liveBytes);
 				this.#uploadedPageCount += 1;
 				this.#uploadedPageBytes += page.pageBits.byteLength;
 			}

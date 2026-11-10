@@ -1,3 +1,5 @@
+import { setWebGL2FailureFrame } from "./webgl2-failure-diagnostics";
+import { reportWebGL2Failure } from "../webgl/diagnostics";
 import { WebGL2SummonChainPass } from "./webgl2-summon-chain-pass";
 import type { SummonLeashInput } from "../runtime/summon-presentation";
 import { WebGL2CombatEffects } from "./webgl2-combat-effects";
@@ -1422,6 +1424,7 @@ export class WebGL2Renderer implements Renderer {
 
 	drawFrame(input: FrameInput): RendererFrameFeedback {
 		this.#assertDeviceReady();
+		setWebGL2FailureFrame(this.#gl, input);
 		const profile = this.#frameProfiler?.beginFrame() ?? null;
 		try {
 			this.#drawFrameContent(input);
@@ -1439,6 +1442,12 @@ export class WebGL2Renderer implements Renderer {
 					...this.#selectedDynamicNodeIds,
 				]),
 			});
+		} catch (error) {
+			reportWebGL2Failure(
+				this.#gl,
+				error instanceof Error ? error.message : String(error),
+			);
+			throw error;
 		} finally {
 			profile?.finish();
 		}
@@ -1449,10 +1458,17 @@ export class WebGL2Renderer implements Renderer {
 		input: PortalTransitionOnlyFrameInput,
 	): PortalTransitionPresentationReceipt | null {
 		this.#assertDeviceReady();
+		setWebGL2FailureFrame(this.#gl, input);
 		const profile = this.#frameProfiler?.beginFrame() ?? null;
 		try {
 			this.#drawPortalTransitionFrameContent(input);
 			return portalTransitionPresentationReceipt(input.portalTransition);
+		} catch (error) {
+			reportWebGL2Failure(
+				this.#gl,
+				error instanceof Error ? error.message : String(error),
+			);
+			throw error;
 		} finally {
 			profile?.finish();
 		}
@@ -5653,6 +5669,13 @@ export class WebGL2Renderer implements Renderer {
 		)
 			return;
 
+		const maximumViewport = this.#gl.getParameter(
+			this.#gl.MAX_VIEWPORT_DIMS,
+		) as readonly [number, number];
+		if (width > maximumViewport[0] || height > maximumViewport[1])
+			throw new Error(
+				`Frame extent ${width}x${height} exceeds device viewport limit ${maximumViewport[0]}x${maximumViewport[1]}.`,
+			);
 		this.#frameWidth = width;
 		this.#frameHeight = height;
 		this.#canvas.width = width;

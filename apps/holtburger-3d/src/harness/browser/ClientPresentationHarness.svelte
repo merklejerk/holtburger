@@ -302,6 +302,7 @@
 				appSettings: unavailableLauncherOperation,
 				saveAppSettings: unavailableLauncherOperation,
 				copyHardwareInfo: unavailableLauncherOperation,
+				copyLastFailure: unavailableLauncherOperation,
 				restart: unavailableLauncherOperation,
 				directory: unavailableLauncherOperation,
 				importServer: unavailableLauncherOperation,

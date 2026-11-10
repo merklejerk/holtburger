@@ -12,7 +12,7 @@ import {
 	PORTAL_SCOPE_ATLAS_METADATA_GLSL,
 } from "./portal-scope-atlas-metadata-glsl";
 import {
-	compileWebGL2Shader,
+	linkWebGL2Program,
 	requireWebGL2Uniform,
 } from "../webgl/shader-program";
 
@@ -432,31 +432,10 @@ function linkProgram(
 	fragmentSource: string,
 	owner: string,
 ): WebGLProgram {
-	const vertex = compileWebGL2Shader(gl, gl.VERTEX_SHADER, vertexSource);
-	let fragment: WebGLShader | null = null;
-	let program: WebGLProgram | null = null;
-	try {
-		fragment = compileWebGL2Shader(gl, gl.FRAGMENT_SHADER, fragmentSource);
-		program = gl.createProgram();
-		if (!program) {
-			throw new Error(
-				`Failed to allocate portal scope-atlas ${owner} program.`,
-			);
-		}
-		gl.attachShader(program, vertex);
-		gl.attachShader(program, fragment);
-		gl.linkProgram(program);
-		if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-			throw new Error(
-				`Failed to link portal scope-atlas ${owner} program: ${gl.getProgramInfoLog(program) ?? "unknown error"}.`,
-			);
-		}
-		return program;
-	} catch (cause) {
-		if (program) gl.deleteProgram(program);
-		throw cause;
-	} finally {
-		gl.deleteShader(vertex);
-		if (fragment) gl.deleteShader(fragment);
-	}
+	return linkWebGL2Program(
+		gl,
+		`portal scope-atlas ${owner}`,
+		vertexSource,
+		fragmentSource,
+	);
 }

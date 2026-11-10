@@ -713,7 +713,7 @@ export function createWebGL2ObjectProgram(
 	}
 	const program = linkWebGL2Program(
 		gl,
-		"object",
+		`object transform=${transformSource} material=${materialSource} fog=${distanceFog} portal=${portalVisibility} pssm=${outdoorPssm} grounding=${groundingMode}`,
 		createObjectVertexShader(
 			distanceFog,
 			transformSource,

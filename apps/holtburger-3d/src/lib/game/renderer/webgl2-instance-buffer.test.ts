@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Mat4 } from "../math/types";
 import {
 	OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
@@ -96,6 +96,29 @@ describe("WebGL2InstanceBuffer", () => {
 		expect(fixture.bufferSubData[2]?.data).toHaveLength(
 			8 * OBJECT_INSTANCE_RECORD_FLOAT_COUNT,
 		);
+	});
+
+	it("does not publish capacity or population after failed GPU growth", () => {
+		const fixture = fakeGl();
+		const buffer = new WebGL2InstanceBuffer(fixture.gl);
+		buffer.resetFrame(1);
+		buffer.updateRange(0, [instance(Mat4.identity(), [1, 1, 1, 1])]);
+		const previous = buffer.getBinding();
+		vi.spyOn(fixture.gl, "getError")
+			.mockReturnValueOnce(fixture.gl.NO_ERROR)
+			.mockReturnValueOnce(fixture.gl.OUT_OF_MEMORY);
+		expect(() => buffer.resetFrame(previous.capacity + 1)).toThrow(
+			"After instance buffer growth",
+		);
+		expect(buffer.getBinding()).toMatchObject({
+			capacity: previous.capacity,
+			populatedInstanceCount: 0,
+		});
+		expect(() =>
+			bindWebGL2ObjectInstanceRange(fixture.gl, buffer.getBinding(), 0, 1),
+		).toThrow("exceeds populated count");
+		buffer.resetFrame(previous.capacity + 1);
+		expect(buffer.getBinding().capacity).toBeGreaterThan(previous.capacity);
 	});
 
 	it("uploads only the encoded range from its reusable staging storage", () => {
@@ -209,6 +232,9 @@ function fakeGl(): {
 	const attributeDivisors: Array<{ divisor: number; location: number }> = [];
 	const gl = {
 		ARRAY_BUFFER: 0x8892,
+		NO_ERROR: 0,
+		OUT_OF_MEMORY: 0x0505,
+		getError: () => 0,
 		FLOAT: 0x1406,
 		STATIC_DRAW: 0x88e4,
 		STREAM_DRAW: 0x88e0,

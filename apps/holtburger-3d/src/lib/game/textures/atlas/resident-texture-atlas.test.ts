@@ -674,6 +674,7 @@ describe("ResidentTextureAtlas", () => {
 			INDEX8,
 		]);
 		await first.completion;
+		const previousBytes = atlas.getDiagnostics().activePageBytes;
 		const second = atlas.prepareOwnerRequirements("second", revision(1), [
 			SECOND_INDEX8,
 		]);
@@ -685,6 +686,7 @@ describe("ResidentTextureAtlas", () => {
 		expect(resources.released).toEqual(["texture-2d-resource:0"]);
 		expect(onRetainedBindingsChanged).toHaveBeenCalledTimes(1);
 		expect(atlas.getDiagnostics()).toMatchObject({
+			peakPageBytes: previousBytes + atlas.getDiagnostics().activePageBytes,
 			acceptedCompactionCount: 1,
 			eliminatedPageCount: 1,
 			failedCompactionCount: 0,

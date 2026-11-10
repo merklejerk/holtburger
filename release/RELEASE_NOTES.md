@@ -2,9 +2,8 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, movement:** Autorun is now preserved during compatible healing gestures, while server-directed movement and exclusive actions still cancel it.
-- **3D client, movement:** Movement at exact landblock edges near the ocean no longer misbehaves.
-- **3D client, stability:** The client handles cells that are not yet loaded or have just unloaded more reliably, and closing the world map no longer interrupts panel cleanup.
+- **3D client, diagnostics:** Client and Explorer modes now share one opt-in performance panel with a versioned report, and the Client debug panel uses collapsible sections.
+- **3D client, stability:** Presentation cleanup is more robust when the client shuts down or leaves the world, including when individual cleanup steps fail.
 
 ## Known issues
 
@@ -12,6 +11,7 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 - Windows and macOS behavior of the display controls, including borderless mode and the confirmation flow, has not been verified natively. Borderless window sizing is best effort and may not match the requested size exactly.
 - The terrain rendering change for Intel Iris Xe has not been verified on that hardware.
 - Healing animation blending while moving, and autorun during healing, have not been visually verified in live play.
+- The consolidated performance panel and GPU timing have not been verified on native Windows or macOS.
 - CLI movement is simplified: jumping, falling, gravity, and stairs are not simulated locally. The server may correct your position or reject actions.
 
 ## Updating

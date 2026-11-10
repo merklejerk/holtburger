@@ -99,6 +99,64 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		);
 		await read(`new Promise(resolve => setTimeout(resolve, ${interval * 2}))`);
 	};
+	// Add overflow without depending on the fixture's item count or the active cell theme.
+	await begin(source, source);
+	const scrollFixture = await read(`(() => {
+		const scroll = document.querySelector('.client-inventory .contents-scroll');
+		const spacer = document.createElement('div');
+		spacer.dataset.dragScrollProbe = '';
+		spacer.style.cssText = 'height: 2000px; flex-shrink: 0';
+		scroll.append(spacer);
+		scroll.scrollTop = 0;
+		const box = scroll.getBoundingClientRect();
+		return { x: box.left + box.width / 2, top: box.top + 1,
+			bottom: box.bottom - 1, middle: box.top + box.height / 2 };
+	})()`);
+	const scrollTop = () =>
+		read(
+			"document.querySelector('.client-inventory .contents-scroll').scrollTop",
+		);
+	const hold = async (x, y) => {
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x,
+			y,
+			button: "left",
+			buttons: 1,
+		});
+		await read("new Promise(resolve => setTimeout(resolve, 180))");
+		return scrollTop();
+	};
+	const down = await hold(scrollFixture.x, scrollFixture.bottom);
+	if (down <= 0) throw new Error("Stationary bottom-edge drag did not scroll");
+	const middle = await hold(scrollFixture.x, scrollFixture.middle);
+	if ((await hold(scrollFixture.x, scrollFixture.middle)) !== middle)
+		throw new Error("Inventory kept scrolling away from the edge");
+	if ((await hold(scrollFixture.x, scrollFixture.top)) >= middle)
+		throw new Error("Stationary top-edge drag did not scroll upward");
+	await hold(scrollFixture.x, scrollFixture.bottom);
+	const outside = await hold(0, 0);
+	if ((await hold(0, 0)) !== outside)
+		throw new Error("Inventory kept scrolling outside the panel");
+	await hold(scrollFixture.x, scrollFixture.bottom);
+	// Blur follows the production cancellation path without dispatching an inventory move.
+	await read("window.dispatchEvent(new Event('blur'))");
+	const cancelledScroll = await scrollTop();
+	await hold(scrollFixture.x, scrollFixture.bottom);
+	if ((await scrollTop()) !== cancelledScroll)
+		throw new Error("Inventory kept scrolling after drag cancellation");
+	await release({ x: scrollFixture.x, y: scrollFixture.bottom });
+	await begin(source, source);
+	await hold(scrollFixture.x, scrollFixture.bottom);
+	await release({ x: scrollFixture.x, y: scrollFixture.bottom });
+	const releasedScroll = await scrollTop();
+	await hold(scrollFixture.x, scrollFixture.bottom);
+	if ((await scrollTop()) !== releasedScroll)
+		throw new Error("Inventory kept scrolling after pointer release");
+	await read(`(() => {
+		document.querySelector('[data-drag-scroll-probe]').remove();
+		document.querySelector('.client-inventory .contents-scroll').scrollTop = 0;
+	})()`);
 	const sigilMask = await read(
 		"import('/src/client/client-inventory-equipment.ts').then(({ EQUIPMENT_SLOTS }) => EQUIPMENT_SLOTS.find(slot => slot.activation === 'red').mask)",
 	);
@@ -778,6 +836,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 	await read(`${api}.giveProbe.end()`);
 
 	return {
+		edgeScrolling: true,
 		nativeSubmission: true,
 		aetheriaDropAdmission: true,
 		worldGive: true,

@@ -71,13 +71,13 @@ or `{ src, language, label }` for a VTT track. A YouTube entry uses its video ID
 Keep capture IDs stable when replacing planned entries.
 
 The decorative paint wash URL and concept-art catalog live in
-`src/lib/illustrations.ts`. Each illustration supplies its subject kind and image
+`src/lib/illustrations.ts`. Each illustration supplies its layout kind and image
 dimensions. These assets share this media repository and the same URL checks;
 keep their files when publishing a new complete snapshot.
 
 Wrap an illustrated guide passage in `IllustratedProse` and choose its `name` from
 the catalog. The component keeps the artwork out of text layout, centers
-landscapes, and aligns creatures to the right. Use each subject at most once per
+landscapes, and aligns vignettes to the right. Use each subject at most once per
 page, counting the shared Holtburg masthead. Homepage placements use
 `DecorativeArt` directly for their individual compositions.
 

@@ -171,7 +171,7 @@ function categoryTone(category: ClientChatCategory): ClientChatTone {
 	}
 }
 
-/** Buffer prefixes identify conversation routes and explicit errors; category feedback stays unprefixed. */
+/** Buffer prefixes identify conversation routes; category feedback and errors stay unprefixed. */
 export function clientChatMessageLabel(line: ClientChatLine): string | null {
 	if (line.kind === "channel") {
 		if (line.channel !== "unknown") return clientChatChannelLabel(line.channel);
@@ -190,7 +190,7 @@ export function clientChatMessageLabel(line: ClientChatLine): string | null {
 				return null;
 		}
 	}
-	return line.kind === "error" ? "Error" : null;
+	return null;
 }
 
 export function clientChatFilterLabel(tag: ClientChatFilterTag): string {

@@ -1,5 +1,5 @@
 import {
-	projectClientEntityCenter,
+	projectClientEntityHeight,
 	type ClientEntityScreenPoint,
 	type ClientEntityProjectionInput,
 	createClientEntityProjector,
@@ -19,7 +19,7 @@ export interface ClientTargetIndicatorFrame {
 	readonly y: number;
 }
 
-/** Geometry-only result shared by centered and offscreen combat target projection. */
+/** Geometry-only result shared by attack-height and offscreen combat target projection. */
 export type ClientCombatTargetPlacement =
 	| (ClientEntityScreenPoint & { readonly kind: "reticle" })
 	| (ClientTargetIndicatorFrame & { readonly kind: "edge" });
@@ -36,13 +36,19 @@ export interface ClientTargetIndicatorProjectionInput extends ClientEntityProjec
 	readonly tuning: ClientTargetIndicatorGeometryTuning;
 }
 
-/** Prefer the centered reticle; reuse selection's full-bound clipping policy for edge guidance. */
+/** Combat reticle anchor selected by the gameplay presentation owner. */
+export interface ClientCombatTargetProjectionInput extends ClientTargetIndicatorProjectionInput {
+	/** Normalized height above the local bounds bottom. */
+	readonly heightFraction: number;
+}
+
+/** Project the attack-height reticle; reuse selection's full-bound clipping policy for edge guidance. */
 export function projectClientCombatTarget(
-	input: ClientTargetIndicatorProjectionInput,
+	input: ClientCombatTargetProjectionInput,
 ): ClientCombatTargetPlacement | null {
 	if (input.cssWidth <= 0 || input.cssHeight <= 0) return null;
-	const center = projectClientEntityCenter(input);
-	if (center !== null) return { ...center, kind: "reticle" };
+	const anchor = projectClientEntityHeight(input, input.heightFraction);
+	if (anchor !== null) return { ...anchor, kind: "reticle" };
 	const edge = projectClientTargetIndicator(input);
 	return edge === null ? null : { ...edge, kind: "edge" };
 }

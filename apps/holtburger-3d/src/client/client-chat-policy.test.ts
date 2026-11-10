@@ -311,7 +311,8 @@ describe("client chat presentation policy", () => {
 		);
 		expect(clientChatFiltersAllow([], system, channelFilters)).toBe(true);
 		expect(clientChatFiltersAllow([], error, channelFilters)).toBe(true);
-		expect(clientChatMessageLabel(error)).toBe("Error");
+		expect(clientChatMessageLabel(error)).toBeNull();
+		expect(clientChatTone(error)).toBe("error");
 		expect(clientChatMessageLabel(combat)).toBeNull();
 		const formatted = line({
 			kind: "formatted-system",

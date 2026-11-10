@@ -9,7 +9,7 @@ import IllustratedProse from '#lib/components/IllustratedProse.svelte';
 import Media from '#lib/components/Media.svelte';
 </script>
 
-<IllustratedProse name="olthoi">
+<IllustratedProse name="lifestone">
 
 ## Nearby and movement
 

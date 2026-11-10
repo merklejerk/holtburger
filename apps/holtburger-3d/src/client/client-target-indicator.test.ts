@@ -116,6 +116,7 @@ describe("combat indicator center projection", () => {
 describe("combat target reticle and edge guidance", () => {
 	const projectCombat = (x: number, y: number, z: number) =>
 		projectClientCombatTarget({
+			heightFraction: 0.5,
 			bounds: bounds(0.2),
 			placement: placement(x, y, z),
 			cssWidth: 1000,
@@ -130,6 +131,27 @@ describe("combat target reticle and edge guidance", () => {
 			y: 400,
 		});
 	});
+	it.each([0.1, 0.5, 0.9])(
+		"projects height %s through the target scale and placement",
+		(heightFraction) => {
+			const transformed = placement(0, -2, -10);
+			transformed.localToLandblock.m11 = 2;
+			transformed.localToLandblock.m22 = 2;
+			transformed.localToLandblock.m33 = 2;
+			const frame = projectClientCombatTarget({
+				heightFraction,
+				bounds: new AABB3(new Vec3(-1, 0, -1), new Vec3(1, 2, 1)),
+				placement: transformed,
+				cssWidth: 1000,
+				cssHeight: 800,
+				view: VIEW,
+				tuning: TUNING,
+			});
+			expect(frame?.kind).toBe("reticle");
+			expect(frame?.x).toBeCloseTo(500);
+			expect(frame?.y).toBeCloseTo(480 - 160 * heightFraction);
+		},
+	);
 	it("keeps the combat arrow inward of the independent selection arrow", () => {
 		const combat = projectCombat(30, 0, -10);
 		const selected = project(placement(30, 0, -10), bounds(0.2));
@@ -149,6 +171,7 @@ describe("combat target reticle and edge guidance", () => {
 	it("has no marker for a collapsed viewport", () => {
 		expect(
 			projectClientCombatTarget({
+				heightFraction: 0.5,
 				bounds: bounds(1),
 				placement: placement(0, 0, -10),
 				cssWidth: 0,

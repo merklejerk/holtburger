@@ -188,6 +188,8 @@ export class ClientItemDrag {
 		dragging: boolean;
 	} | null = null;
 	#cursor = { x: 0, y: 0 };
+	/** Animation lifetime belongs to an active item drag, including stationary edge holds. */
+	#scrollFrame: number | null = null;
 	/** Last active gesture views; idle world clicks do not prepare contents sections. */
 	#views: readonly unknown[] = [];
 	/** Current host-owned merge eligibility queries, retired on view changes or drag end. */
@@ -580,6 +582,7 @@ export class ClientItemDrag {
 				target: null,
 			};
 			this.#gesture = gesture;
+			this.#startEdgeScroll();
 			this.#showGhost(gesture.source.element);
 			// Initial hints already describe this view; the timer must not retire them as stale.
 			this.#views = this.#readViews();
@@ -590,6 +593,43 @@ export class ClientItemDrag {
 		positionUiDragGhost(this.#ghost, event);
 		this.#target(false);
 	};
+
+	/** Keep pointer-rate geometry imperative and re-hit-test cells as they scroll underneath it. */
+	#startEdgeScroll(): void {
+		let previous = performance.now();
+		const frame = (now: number): void => {
+			this.#scrollFrame = null;
+			if (this.#gesture?.kind !== "dragging") return;
+			// A suspended frame must not jump through several packs when rendering resumes.
+			const elapsed = Math.min(now - previous, 50) / 1_000;
+			previous = now;
+			const scroll = document
+				.elementFromPoint(this.#cursor.x, this.#cursor.y)
+				?.closest<HTMLElement>(".client-inventory .contents-scroll");
+			if (scroll != null && this.#root.contains(scroll)) {
+				const box = scroll.getBoundingClientRect();
+				const tuning = CLIENT_TUNING.inventory;
+				// Non-overlapping zones also support short, resized inventory windows.
+				const edge = Math.min(tuning.dragScrollEdgeCssPixels, box.height / 2);
+				if (edge > 0) {
+					const top = Math.max(0, 1 - (this.#cursor.y - box.top) / edge);
+					const bottom = Math.max(0, 1 - (box.bottom - this.#cursor.y) / edge);
+					const before = scroll.scrollTop;
+					scroll.scrollTop +=
+						(bottom - top) * tuning.dragScrollCssPixelsPerSecond * elapsed;
+					if (scroll.scrollTop !== before) this.#target(false);
+				}
+			}
+			if (this.#gesture?.kind === "dragging")
+				this.#scrollFrame = requestAnimationFrame(frame);
+		};
+		this.#scrollFrame = requestAnimationFrame(frame);
+	}
+
+	#stopEdgeScroll(): void {
+		if (this.#scrollFrame !== null) cancelAnimationFrame(this.#scrollFrame);
+		this.#scrollFrame = null;
+	}
 
 	/** Dim blocked contents targets and filter equipment using the drag source. */
 	#dimDropCandidates(): void {
@@ -1231,6 +1271,7 @@ export class ClientItemDrag {
 		this.#suppressClick = true;
 		this.#suppressDoubleClickUntil =
 			performance.now() + CLIENT_TUNING.inventory.doubleClickSuppressionMs;
+		this.#stopEdgeScroll();
 		this.#ghost.hidden = true;
 		this.#ghost.hidePopover();
 		this.#clearDimming();
@@ -1349,6 +1390,7 @@ export class ClientItemDrag {
 		}
 	}
 	#finishGesture(): void {
+		this.#stopEdgeScroll();
 		filterDraggedEquipment(this.#root, null);
 		this.#clearDimming();
 		this.#gesture = null;

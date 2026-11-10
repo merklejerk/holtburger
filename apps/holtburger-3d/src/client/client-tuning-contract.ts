@@ -1,3 +1,4 @@
+import type { ClientAttackProfile } from "./client-host-contract";
 import type { ClientTargetIndicatorGeometryTuning } from "./client-target-indicator";
 import type { ClientVitalWarningTuning } from "./client-vital-warning";
 import type { CycleSelectionPolicy } from "./client-cycle-selection-controller";
@@ -178,7 +179,12 @@ export interface ClientTuning {
 		readonly markerRadius: number;
 	};
 	/** Combat guidance uses a separate screen-edge lane so selection remains distinguishable. */
-	readonly combatTargetIndicator: ClientTargetIndicatorGeometryTuning;
+	readonly combatTargetIndicator: ClientTargetIndicatorGeometryTuning & {
+		/** Normalized reticle positions above the target bounds bottom for physical attacks. */
+		readonly heightFractions: Readonly<
+			Record<ClientAttackProfile["height"], number>
+		>;
+	};
 
 	/** Client-local entity acquisition feedback policy. */
 	readonly entitySelection: {
@@ -242,6 +248,10 @@ export interface ClientTuning {
 		};
 		/** Pointer travel required before an inventory selection becomes a drag. */
 		readonly dragThresholdCssPixels: number;
+		/** Vertical inventory edge band for pointer-held drag scrolling. */
+		readonly dragScrollEdgeCssPixels: number;
+		/** Maximum scroll speed, reached at the viewport edge. */
+		readonly dragScrollCssPixelsPerSecond: number;
 		/** Time after a drag during which synthetic double-click activation is suppressed. */
 		readonly doubleClickSuppressionMs: number;
 		readonly displayIntervalMs: number;

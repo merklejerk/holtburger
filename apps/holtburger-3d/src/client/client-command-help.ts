@@ -63,7 +63,7 @@ export function clientCommandHelp(
 				...Object.values(DEATH_COMMANDS).map(commandRow),
 				heading("Recalls"),
 				...Object.values(RECALL_COMMANDS).map(commandRow),
-				heading("Map and diagnostics"),
+				heading("Local utilities"),
 				...Object.values(LOCAL_COMMANDS).map(commandRow),
 				{
 					indented: false,

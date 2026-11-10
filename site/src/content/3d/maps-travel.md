@@ -62,7 +62,7 @@ Coordinate links in chat can also set a map pin. Enable **Interact with chat his
 <Media id="waypoint-minimap" detail />
 </div>
 
-<IllustratedProse name="danbys-outpost">
+<IllustratedProse name="lifestone">
 
 ## Recall
 

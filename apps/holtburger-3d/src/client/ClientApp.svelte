@@ -56,6 +56,7 @@
 	import { runClientVersionCommand } from "./client-version-command";
 	import { isLogopolisCommand } from "./client-logopolis";
 	import { runClientLocationCommand } from "./client-location-command";
+	import { runClientScanCommand } from "./client-scan-command";
 	import { runClientCopyEntityCommand } from "./client-copy-entity-command";
 	import { ClientDeathCommands } from "./client-death-commands";
 	import { runRecallCommand } from "./client-recall-command";
@@ -1555,6 +1556,20 @@
 			throw new Error("Command session is unavailable.");
 		const generation = chatComposer.generation;
 		const handled =
+			runClientScanCommand(
+				message,
+				() => {
+					if (nearby === null)
+						throw new Error("Nearby entities are unavailable.");
+					return nearby.read().rows;
+				},
+				(guid) => {
+					if (entitySelection === null)
+						throw new Error("Entity selection is unavailable.");
+					return entitySelection.selectKnownEntity(guid);
+				},
+				appendChatLine,
+			) ||
 			(await runClientCopyEntityCommand(
 				message,
 				readSelectedEntity,

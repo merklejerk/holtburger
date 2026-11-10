@@ -4,6 +4,10 @@ import { mount, tick, unmount } from "svelte";
 import ClientCombatTargetIndicator from "../../client/ClientCombatTargetIndicator.svelte";
 import ClientTargetIndicator from "../../client/ClientTargetIndicator.svelte";
 import type { ClientCombatTargetFrame } from "../../client/client-target-indicator";
+import { projectClientCombatTarget } from "../../client/client-target-indicator";
+import { CLIENT_TUNING } from "../../client/client-tuning";
+import { TARGETING_TEST_VIEW } from "../../client/client-targeting.test-support";
+import { AABB3, Mat4, Vec3 } from "../../lib/game/math/types";
 
 /** Verify overlay placement, coexistence, animation policy, and RAF teardown without runtime assets. */
 export async function probeClientCombatTargetIndicator() {
@@ -209,6 +213,42 @@ export async function probeClientCombatTargetIndicator() {
 		)
 			throw new Error("Reticle theme removal did not restore base appearance.");
 
+		// Exercise production height tuning and projection through the mounted overlay.
+		const localToLandblock = Mat4.identity();
+		localToLandblock.m43 = -10;
+		for (const height of ["low", "medium", "high"] as const) {
+			const heightFraction =
+				CLIENT_TUNING.combatTargetIndicator.heightFractions[height];
+			const projected = projectClientCombatTarget({
+				heightFraction,
+				bounds: new AABB3(new Vec3(-1, 0, -1), new Vec3(1, 2, 1)),
+				placement: {
+					landblockId: TARGETING_TEST_VIEW.camera.placement.landblockId,
+					envCellId: null,
+					scope: { kind: "outdoor" },
+					localToLandblock,
+				},
+				view: TARGETING_TEST_VIEW,
+				cssWidth: 100,
+				cssHeight: 100,
+				tuning: CLIENT_TUNING.combatTargetIndicator,
+			});
+			if (projected?.kind !== "reticle")
+				throw new Error("Attack height did not produce an onscreen reticle.");
+			frame = { ...projected, combatType: "melee" };
+			await nextFrame();
+			const transform = new DOMMatrixReadOnly(
+				getComputedStyle(marker).transform,
+			);
+			if (
+				marker.hidden ||
+				Math.abs(transform.e - 50) > 0.01 ||
+				Math.abs(transform.f - (50 - 10 * heightFraction)) > 0.01
+			)
+				throw new Error(
+					"Combat reticle did not follow the projected attack height.",
+				);
+		}
 		frame = { combatType: "melee", kind: "reticle", x: 230, y: 175 };
 		await nextFrame();
 		expectPosition("translate3d(230px, 175px, 0px)");
@@ -234,6 +274,7 @@ export async function probeClientCombatTargetIndicator() {
 		offscreenArrow: true,
 		onscreenOffscreenTransitions: true,
 		followsProjection: true,
+		attackHeightProjection: true,
 		selectionIndependent: true,
 		themeInheritance: true,
 		combatTypeColors: true,

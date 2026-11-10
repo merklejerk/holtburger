@@ -233,7 +233,10 @@ export const CLIENT_TUNING = {
 		markerRadius: 0.65,
 	},
 	/** Keep the combat arrow inward of the selected-target arrow, including artwork and glow. */
-	combatTargetIndicator: { safeInsetCssPixels: 128 },
+	combatTargetIndicator: {
+		safeInsetCssPixels: 128,
+		heightFractions: { low: 0.15, medium: 0.5, high: 0.85 },
+	},
 	entitySelection: {
 		/** Hold any cycle binding to acquire the immediate target once. */
 		holdDelayMs: 500,
@@ -285,6 +288,10 @@ export const CLIENT_TUNING = {
 		},
 		/** Pointer travel that distinguishes inventory selection from dragging. */
 		dragThresholdCssPixels: 6,
+		/** Vertical edge band that scrolls inventory contents during an item drag. */
+		dragScrollEdgeCssPixels: 40,
+		/** Maximum speed at the edge; proximity scales it down toward the middle. */
+		dragScrollCssPixelsPerSecond: 480,
 		/** Ignore double-click completion from a finished drag gesture. */
 		doubleClickSuppressionMs: 500,
 		/** Mounted inventory display cadence, independent of host publication. */

@@ -21,6 +21,14 @@ Select a result to make it your current target, then [inspect it](/holtburger/3d
 
 <Media id="nearby-list" detail />
 
+## Select by name from chat
+
+Use `/scan NAME` to select a nearby creature or object without opening the list. For example, try `/scan diamond golem`. Abbreviations such as `/scan dmnd glm` work too.
+
+The best name match wins; equally good matches select the nearest. If nothing matches, chat shows **No entity found** and keeps your current selection.
+
+See the [chat commands reference](/holtburger/3d/chat-commands/#select-by-name) for command syntax.
+
 <IllustratedProse name="olthoi">
 
 ## Add a name alert

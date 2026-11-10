@@ -1,6 +1,6 @@
 ---
 title: '3D chat commands'
-description: 'Messages, emotes, travel, corpse permissions, and local utilities.'
+description: 'Messages, emotes, selection, travel, corpse permissions, and local utilities.'
 section: '3D client'
 presentation: reference
 ---
@@ -49,6 +49,12 @@ For example, `/f ready` speaks to your party. **In h3d, `/p` means patron; in th
 Type `*wave*` to perform a named social emote. Typing `*` offers completions; Tab or Enter accepts a suggestion, and Enter submits the completed input.
 
 Local speech can include gestures, such as `Hello *wave*`. Explicit tells, channel messages and `/emote` bodies keep their text literal. The [emote wheel](/holtburger/3d/chat/#use-an-emote) is another way to choose gestures.
+
+## Select by name
+
+Use `/scan NAME` to select a nearby creature or object by name, such as `/scan diamond golem`. Abbreviations work too. If several names match equally well, the nearest wins.
+
+If nothing matches, chat shows **No entity found** and keeps your current selection. See [Finding creatures & objects](/holtburger/3d/nearby/) for the Nearby panel and name alerts.
 
 ## Waypoint and recalls
 

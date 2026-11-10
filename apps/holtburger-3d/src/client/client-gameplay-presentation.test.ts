@@ -31,6 +31,7 @@ import type { ScenePlacement, SceneResidency } from "../lib/game/scene";
 import type { NameplateContent } from "../lib/game/systems/dynamic-presentation-source";
 import { createLandblockWorldOrigin } from "../lib/game/landblocks";
 import type {
+	ClientAttackProfile,
 	ClientCameraTick,
 	ClientCurrentState,
 	ClientDynamicScriptCue,
@@ -62,6 +63,7 @@ import type { ResolvedSceneEnvironment } from "../lib/game/environment/scene-env
 import type { ClientLifecycleTransport } from "./client-lifecycle-session";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
 import { CLIENT_TUNING } from "./client-tuning";
+import { projectClientEntityHeight } from "./client-entity-projection";
 import type { WorldIndicatorInput } from "../lib/game/renderer/renderer";
 import type {
 	PortalTransitionPresentationPlan,
@@ -1160,9 +1162,36 @@ describe("ClientGameplayPresentation", () => {
 			expect(presentation.readCombatTargetFrame()?.x).toBeCloseTo(
 				canvas.clientWidth / 2,
 			);
-			expect(presentation.readCombatTargetFrame()?.y).toBeCloseTo(
-				canvas.clientHeight / 2,
-			);
+			// Accepted profile updates must reach projection without recreating presentation.
+			for (const height of ["low", "medium", "high"] as const) {
+				const profiles: readonly ClientAttackProfile[] = [
+					{ kind: "melee", height, power: 0.5 },
+					{ kind: "missile", height, accuracy: 0.5 },
+				];
+				for (const profile of profiles) {
+					transport.emit("client-combat-status-updated", {
+						...engagement,
+						desired: { target: 7, profile },
+					});
+					const expected = projectClientEntityHeight(
+						{
+							bounds: runtime.entityFrame.localBounds,
+							placement: runtime.entityFrame.placement,
+							view,
+							cssWidth: canvas.clientWidth,
+							cssHeight: canvas.clientHeight,
+						},
+						CLIENT_TUNING.combatTargetIndicator.heightFractions[height],
+					);
+					expect(expected).not.toBeNull();
+					expect(presentation.readCombatTargetFrame()).toEqual({
+						...expected,
+						kind: "reticle",
+						combatType: profile.kind,
+					});
+				}
+			}
+			transport.emit("client-combat-status-updated", engagement);
 			const initial = presentation.readCombatTargetFrame();
 			expect(initial?.combatType).toBe("melee");
 			presentation.setSelectedEntityGuid(8);

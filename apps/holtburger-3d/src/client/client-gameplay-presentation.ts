@@ -657,12 +657,20 @@ export class ClientGameplayPresentation {
 		// A pending non-self cast takes presentation priority without changing auto-attack intent.
 		const engagement =
 			spellCastTarget !== null
-				? { target: spellCastTarget, combatType: "magic" as const }
+				? {
+						target: spellCastTarget,
+						combatType: "magic" as const,
+						heightFraction: 0.5,
+					}
 				: combat.desired === null
 					? null
 					: {
 							target: combat.desired.target,
 							combatType: combat.desired.profile.kind,
+							heightFraction:
+								CLIENT_TUNING.combatTargetIndicator.heightFractions[
+									combat.desired.profile.height
+								],
 						};
 		const state =
 			engagement === null
@@ -673,6 +681,7 @@ export class ClientGameplayPresentation {
 		if (view === null || engagement === null || state?.kind !== "realized")
 			return null;
 		const projection = projectClientCombatTarget({
+			heightFraction: engagement.heightFraction,
 			tuning: CLIENT_TUNING.combatTargetIndicator,
 			bounds: state.frame.localBounds,
 			placement: state.frame.placement,

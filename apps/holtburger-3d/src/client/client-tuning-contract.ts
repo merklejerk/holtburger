@@ -1,3 +1,4 @@
+import type { ClientAttackProfile } from "./client-host-contract";
 import type { ClientTargetIndicatorGeometryTuning } from "./client-target-indicator";
 import type { ClientVitalWarningTuning } from "./client-vital-warning";
 import type { CycleSelectionPolicy } from "./client-cycle-selection-controller";
@@ -178,7 +179,12 @@ export interface ClientTuning {
 		readonly markerRadius: number;
 	};
 	/** Combat guidance uses a separate screen-edge lane so selection remains distinguishable. */
-	readonly combatTargetIndicator: ClientTargetIndicatorGeometryTuning;
+	readonly combatTargetIndicator: ClientTargetIndicatorGeometryTuning & {
+		/** Normalized reticle positions above the target bounds bottom for physical attacks. */
+		readonly heightFractions: Readonly<
+			Record<ClientAttackProfile["height"], number>
+		>;
+	};
 
 	/** Client-local entity acquisition feedback policy. */
 	readonly entitySelection: {

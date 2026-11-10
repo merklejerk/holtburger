@@ -233,7 +233,10 @@ export const CLIENT_TUNING = {
 		markerRadius: 0.65,
 	},
 	/** Keep the combat arrow inward of the selected-target arrow, including artwork and glow. */
-	combatTargetIndicator: { safeInsetCssPixels: 128 },
+	combatTargetIndicator: {
+		safeInsetCssPixels: 128,
+		heightFractions: { low: 0.15, medium: 0.5, high: 0.85 },
+	},
 	entitySelection: {
 		/** Hold any cycle binding to acquire the immediate target once. */
 		holdDelayMs: 500,

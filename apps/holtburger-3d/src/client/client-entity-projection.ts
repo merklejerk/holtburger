@@ -88,11 +88,19 @@ export function createClientEntityProjector(
 export function projectClientEntityCenter(
 	input: ClientEntityProjectionInput,
 ): ClientEntityScreenPoint | null {
+	return projectClientEntityHeight(input, 0.5);
+}
+
+/** Project a normalized height above the local bounds bottom, centered on the other axes. */
+export function projectClientEntityHeight(
+	input: ClientEntityProjectionInput,
+	heightFraction: number,
+): ClientEntityScreenPoint | null {
 	const { bounds, cssWidth, cssHeight } = input;
 	if (cssWidth <= 0 || cssHeight <= 0) return null;
 	const point = createClientEntityProjector(input.view, input.placement)(
 		(bounds.min.x + bounds.max.x) / 2,
-		(bounds.min.y + bounds.max.y) / 2,
+		bounds.min.y + (bounds.max.y - bounds.min.y) * heightFraction,
 		(bounds.min.z + bounds.max.z) / 2,
 	);
 	if (

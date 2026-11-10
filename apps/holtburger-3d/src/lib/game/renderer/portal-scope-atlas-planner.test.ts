@@ -384,7 +384,7 @@ describe("portal scope-atlas planning", () => {
 		expect(frame.tileOrdinalForRenderScopeKey("outdoor")).toBe(0);
 		expect(frame.tileOrdinalForRenderScopeKey(child.envCellId)).toBe(1);
 		expect(() => frame.tileOrdinalForRenderScopeKey("missing")).toThrow(
-			"unavailable in this topology",
+			"has no selected atlas tile",
 		);
 		expect(frame.trace).toMatchObject({
 			arenaGrowthCount: 0,

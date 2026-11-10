@@ -133,9 +133,9 @@ export interface PortalScopeWindowFrameView {
 	readonly trace: PortalScopeWindowArenaTrace;
 	/** Return the persistent topology scope for one selected ordinal. */
 	selectedScope(ordinal: number): SceneScope;
-	/** Resolve an existing renderer scope key to its selected ordinal, or null when culled. */
+	/** Resolve a renderer scope key, or null when its cell is unloaded or unselected. */
 	selectedScopeOrdinal(renderScopeKey: string): number | null;
-	/** Resolve any member of a selected visibility island to its render ordinal. */
+	/** Resolve a loaded member of a selected visibility island, or null when unavailable. */
 	selectedRenderDomainOrdinal(renderScopeKey: string): number | null;
 	/** Return one selected scope's visibility-island render ordinal. */
 	selectedScopeRenderDomainOrdinal(ordinal: number): number;
@@ -506,11 +506,8 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 	selectedScopeOrdinal(renderScopeKey: string): number | null {
 		const arena = this.#requireArena();
 		const scopeId = this.index!.scopeIdByRenderKey.get(renderScopeKey);
-		if (scopeId === undefined) {
-			throw new Error(
-				`Portal renderer scope key ${renderScopeKey} is unavailable in this topology.`,
-			);
-		}
+		// Membership and retained effects can name cells beyond this view's loaded topology.
+		if (scopeId === undefined) return null;
 		return arena.selectedByScopeId[scopeId] === 0
 			? null
 			: arena.selectedOrdinalByScopeId[scopeId]!;
@@ -519,11 +516,7 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 	selectedRenderDomainOrdinal(renderScopeKey: string): number | null {
 		const arena = this.#requireArena();
 		const scopeId = this.index!.scopeIdByRenderKey.get(renderScopeKey);
-		if (scopeId === undefined) {
-			throw new Error(
-				`Portal renderer scope key ${renderScopeKey} is unavailable in this topology.`,
-			);
-		}
+		if (scopeId === undefined) return null;
 		const renderDomainId = this.index!.renderDomainIdByScopeId[scopeId]!;
 		return arena.selectedByRenderDomainId[renderDomainId] === 0
 			? null

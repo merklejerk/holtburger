@@ -43,7 +43,9 @@
 			return {
 				kind: "failed",
 				title: "Unable to continue",
-				message: "Application startup failed.",
+				message: mounted
+					? "Application failed."
+					: "Application startup failed.",
 				details: failure,
 			};
 		switch (phase?.kind) {
@@ -95,8 +97,12 @@
 		}
 	});
 	function report(error: unknown): void {
-		console.error("Application startup failed", error);
-		failure = error instanceof Error ? error.message : String(error);
+		console.error(
+			mounted ? "Application failed" : "Application startup failed",
+			error instanceof Error ? (error.stack ?? error.message) : error,
+		);
+		// A cleanup failure must not replace the diagnostic that first stopped the application.
+		failure ??= error instanceof Error ? error.message : String(error);
 	}
 	function run(action: () => Promise<void>): void {
 		void action().catch(report);

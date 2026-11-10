@@ -212,9 +212,11 @@ try {
 			evidence: result.clientWaypoint,
 			browserErrors,
 		};
-	} else if (options.clientWorldMap) {
+	} else if (options.clientWorldMap || options.clientWorldMapLifetime) {
 		report = {
-			suite: "client-world-map",
+			suite: options.clientWorldMapLifetime
+				? "client-world-map-lifetime"
+				: "client-world-map",
 			passed: true,
 			evidence: result.worldMapPanel,
 			consoleMessages: result.consoleMessages,
@@ -700,6 +702,7 @@ function parseArgs(args) {
 		userThemeLifecycle: false,
 		worldMap: false,
 		clientWorldMap: false,
+		clientWorldMapLifetime: false,
 		clientWaypoint: false,
 		clientHousing: false,
 		clientHud: false,
@@ -926,6 +929,10 @@ function parseArgs(args) {
 			case "--client-world-map":
 				parsed.clientHud = true;
 				parsed.clientWorldMap = true;
+				break;
+			case "--client-world-map-lifetime":
+				parsed.clientHud = true;
+				parsed.clientWorldMapLifetime = true;
 				break;
 			case "--client-housing":
 				parsed.clientHud = true;
@@ -2292,6 +2299,8 @@ Options:
   --client-connection   Verify connection health, traffic activity, recovery, and keyboard details.
   --client-waypoint     Verify commands, content links, compass guidance, both maps, and waypoint lifetime.
   --client-world-map    Exercise the World dock shortcut and retained World-panel switching.
+  --client-world-map-lifetime
+                        Mount and retire map overlays with pending tile delivery.
   --client-housing      Exercise crystal ownership profiles, requirement drops, row auto-fill, and dismissal.
   --world-map           Exercise the retained World map with an isolated cache and real content.
   --client-audio        Exercise audio settings and real browser output gain with synthetic PCM.
@@ -5154,6 +5163,15 @@ async function runClientHudHarness({ viteUrl }) {
 		if (options.clientWaypoint)
 			return {
 				clientWaypoint: await probeClientWaypoint(client, evaluateExpression),
+				state: { error: null, ready: true },
+				consoleMessages,
+			};
+		if (options.clientWorldMapLifetime)
+			return {
+				worldMapPanel: await evaluateExpression(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeWorldMapLifetime()",
+				),
 				state: { error: null, ready: true },
 				consoleMessages,
 			};

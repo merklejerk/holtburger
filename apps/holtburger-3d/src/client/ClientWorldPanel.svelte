@@ -220,7 +220,7 @@
 			unsubscribe();
 			clearInterval(timer);
 			overlay.clear();
-			drawTooltip();
+			// Bindings may already be cleared during unmount; only release owned resources here.
 		};
 	});
 

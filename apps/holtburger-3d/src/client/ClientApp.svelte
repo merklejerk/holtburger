@@ -1870,7 +1870,10 @@
 		let unsubscribeContentFailures: (() => void) | null = null;
 		const reportPresentationError = (error: unknown): void => {
 			if (cancelled) return;
-			console.error(error);
+			// Electron's console relay otherwise keeps the logger location and loses the throw site.
+			console.error(
+				error instanceof Error ? (error.stack ?? error.message) : error,
+			);
 			const message = formatError(error);
 			if (message === lastErrorMessage) return;
 			lastErrorMessage = message;

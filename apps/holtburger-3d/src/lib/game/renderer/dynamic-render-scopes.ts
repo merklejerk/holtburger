@@ -3,7 +3,7 @@ import { scopeKey } from "../scene/scope";
 
 /** Renderer-domain lookup required to route one dynamic object's plural source scopes. */
 export interface DynamicRenderDomainSelection {
-	/** Resolve a selected scope to its collapsed visibility-island domain. */
+	/** Resolve a loaded member of a selected domain; unavailable memberships return null. */
 	selectedRenderDomainOrdinal(renderScopeKey: string): number | null;
 }
 

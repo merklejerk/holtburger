@@ -230,6 +230,7 @@
 	import { createClientShortcuts } from "../../client/ClientShortcutDock.svelte";
 	import ClientGameplayView from "../../client/ClientGameplayView.svelte";
 	import { createWorldMapFixture } from "./world-map-fixture";
+	import { probeWorldMapLifetime } from "./client-world-map-lifetime-probe";
 	import {
 		clientChatShouldSuppress,
 		type ClientChatEntry,
@@ -1369,6 +1370,10 @@
 		readonly holdWorldMapPreparation: () => void;
 		readonly advanceWorldMapPreparation: () => void;
 		readonly releaseWorldMapPreparation: () => void;
+		/** Mount and retire production map overlays while tile reads remain pending. */
+		readonly probeWorldMapLifetime: () => ReturnType<
+			typeof probeWorldMapLifetime
+		>;
 		/** Requests made by the retained World-panel fixture. */
 		readonly readWorldMapFixture: () => ReturnType<
 			typeof worldMapFixture.read
@@ -5681,6 +5686,12 @@
 			holdWorldMapPreparation: worldMapFixture.holdPreparation,
 			advanceWorldMapPreparation: worldMapFixture.advancePreparation,
 			releaseWorldMapPreparation: worldMapFixture.releasePreparation,
+			probeWorldMapLifetime: () =>
+				probeWorldMapLifetime(
+					partyProbeContext,
+					interactionLifecycle.contracts,
+					readMinimapFrame,
+				),
 			readWorldMapFixture: () => ({
 				...worldMapFixture.read(),
 				sceneZooms: zoomDeltas.length,

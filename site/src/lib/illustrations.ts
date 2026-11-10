@@ -2,7 +2,7 @@
 export const paintWashUrl =
 	'https://merklejerk.github.io/holtburger-media/illustrations/ochre-wash-v1.webp';
 
-/** Published concept art; kind controls guide alignment and dimensions reserve layout space. */
+/** Published concept art with guide alignment and intrinsic image dimensions. */
 export const illustrations = {
 	/** Reference-based hand-drawn study of Holtburg. */
 	holtburg: {
@@ -34,21 +34,28 @@ export const illustrations = {
 	},
 	/** Reference-based hand-drawn study of a Lugian. */
 	lugian: {
-		kind: 'creature',
+		kind: 'vignette',
 		src: 'https://merklejerk.github.io/holtburger-media/illustrations/lugian-sepia-v2.webp',
 		width: 600,
 		height: 840
 	},
 	/** Reference-based hand-drawn study of an Olthoi. */
 	olthoi: {
-		kind: 'creature',
+		kind: 'vignette',
 		src: 'https://merklejerk.github.io/holtburger-media/illustrations/olthoi-sepia-v2.webp',
 		width: 600,
 		height: 800
 	},
+	/** Sepia study of a lifestone based on an in-game reference. */
+	lifestone: {
+		kind: 'vignette',
+		src: 'https://merklejerk.github.io/holtburger-media/illustrations/lifestone-sepia-v1.webp',
+		width: 600,
+		height: 600
+	},
 	/** Reference-based hand-drawn study of a Drudge. */
 	drudge: {
-		kind: 'creature',
+		kind: 'vignette',
 		src: 'https://merklejerk.github.io/holtburger-media/illustrations/drudge-sepia-v2.webp',
 		width: 600,
 		height: 800

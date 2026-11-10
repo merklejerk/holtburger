@@ -34,6 +34,11 @@
 				<a href={guide('coming-from-retail')}>Coming from retail?</a>
 			</div>
 			<DecorativeArt name="olthoi" class="cover-vignette" loading="eager" />
+			<DecorativeArt
+				name="lifestone"
+				class="cover-vignette cover-vignette-right"
+				loading="eager"
+			/>
 		</div>
 	</header>
 

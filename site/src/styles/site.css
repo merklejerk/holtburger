@@ -302,7 +302,7 @@ figcaption {
 	align-self: center;
 	font-size: 0.88rem;
 }
-/* The creature shares the cover paper without reserving a separate image cell. */
+/* The vignettes share the cover paper without reserving separate image cells. */
 .cover-vignette {
 	position: absolute;
 	z-index: -1;
@@ -315,6 +315,11 @@ figcaption {
 	object-position: left center;
 	opacity: 0.22;
 	pointer-events: none;
+}
+.cover-vignette-right {
+	left: auto;
+	right: 0;
+	object-position: right center;
 }
 .home-editorial {
 	display: grid;

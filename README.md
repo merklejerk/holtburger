@@ -127,10 +127,11 @@ npm run format
 npm run format:check
 ```
 
-Tests cover repository tooling, 3D TypeScript and packaging, website tooling,
+Tests cover repository tooling, 3D TypeScript and installer tooling, website tooling,
 mage, and every Rust workspace member with all features enabled, including Rust
-documentation tests. The packaging tests also require Python and the dependencies
-installed by `npm --prefix apps/holtburger-3d run setup:windows-packaging`.
+documentation tests. To run the Windows executable packaging tests separately, install
+their Python dependencies with `npm --prefix apps/holtburger-3d run setup:windows-packaging`
+and run `npm --prefix apps/holtburger-3d run test:windows-packaging`.
 Live-server and browser probes remain separate diagnostic commands.
 Formatting runs the existing package-specific Prettier configurations and
 workspace-wide rustfmt. Both test and formatting commands stop at the first failure;

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { filterMageDataSpells, normalizeMageData } from "./runtime-data";
+import {
+	filterMageDataSpells,
+	loadMageData,
+	normalizeMageData,
+} from "./runtime-data";
 
 test("normalizeMageData flattens grouped spell tables", () => {
 	const data = normalizeMageData(
@@ -59,21 +63,17 @@ test("normalizeMageData flattens grouped spell tables", () => {
 	assert.equal(data?.weenieResists.byteLength, 8);
 });
 
-test("normalizeMageData accepts array-shaped resist bytes", () => {
-	const data = normalizeMageData(
-		{
-			skills: {},
-			spells: {
-				war: {},
-				life: {},
-				void: {},
-			},
-		},
-		[1, 0, 0, 0, 0, 0, 0, 0],
-	);
+test("loadMageData converts array-shaped resist bytes from the script host", () => {
+	const testGlobal = globalThis as typeof globalThis & {
+		HB: { loadData: typeof HB.loadData; loadDataBin: () => number[] };
+	};
+	const resistBytes = [1, 0, 0, 0, 0, 0, 0, 0];
+	testGlobal.HB = {
+		loadData: () => ({ skills: {}, spells: { war: {}, life: {}, void: {} } }),
+		loadDataBin: () => resistBytes,
+	};
 
-	assert.equal(data?.weenieResists instanceof Uint8Array, true);
-	assert.equal(data?.weenieResists.byteLength, 8);
+	assert.deepEqual(loadMageData()?.weenieResists, Uint8Array.from(resistBytes));
 });
 
 test("filterMageDataSpells removes banned spell ids from the spell db", () => {

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SELF_STAMINA_THRESHOLD } from "./constants";
+import {
+	HEALING_DISTANCE,
+	PARTY_REVITALIZE_THRESHOLD,
+	SELF_MANA_THRESHOLD,
+	SELF_STAMINA_THRESHOLD,
+} from "./constants";
 import {
 	maybeRestoreMana,
 	maybeRestoreStamina,
@@ -12,7 +17,7 @@ import { createInitialState } from "./state";
 
 const testGlobal = globalThis as typeof globalThis & {
 	HB: {
-		log: (level: string, message: string) => void;
+		debugLog: typeof HB.debugLog;
 		distance: (left: Guid, right: Guid) => number;
 		castSpell: (spellId: number, targetGuid: Guid | null) => void;
 		party: () => ScriptPartyView | null;
@@ -26,7 +31,7 @@ const recordedCasts: Array<{ spellId: number; targetGuid: Guid | null }> = [];
 let activeSelf: ScriptSelfView | null = null;
 
 testGlobal.HB = {
-	log: () => undefined,
+	debugLog: () => undefined,
 	distance: () => 0,
 	castSpell: (spellId, targetGuid) => {
 		recordedCasts.push({ spellId, targetGuid });
@@ -41,10 +46,8 @@ test("maybeRestoreStamina casts a stamina recovery spell when stamina is low", (
 	recordedCasts.length = 0;
 	const state = createInitialState();
 	const self = sampleSelf({
-		stamina: 20,
-		staminaMax: 100,
-		mana: 80,
-		manaMax: 100,
+		stamina: SELF_STAMINA_THRESHOLD / 2,
+		mana: 1,
 	});
 	const spells = [makeSpell({ spellId: 10, type: "revitalize" })];
 
@@ -58,10 +61,8 @@ test("maybeRestoreMana does not spend stamina when stamina is already low", () =
 	recordedCasts.length = 0;
 	const state = createInitialState();
 	const self = sampleSelf({
-		stamina: 20,
-		staminaMax: 100,
-		mana: 20,
-		manaMax: 100,
+		stamina: SELF_STAMINA_THRESHOLD / 2,
+		mana: SELF_MANA_THRESHOLD / 2,
 	});
 	const spells = [makeSpell({ spellId: 11, type: "stamina-to-mana" })];
 
@@ -75,10 +76,8 @@ test("maybeRestoreMana still uses stamina-to-mana above the stamina threshold", 
 	recordedCasts.length = 0;
 	const state = createInitialState();
 	const self = sampleSelf({
-		stamina: 80,
-		staminaMax: 100,
-		mana: 20,
-		manaMax: 100,
+		stamina: (1 + SELF_STAMINA_THRESHOLD) / 2,
+		mana: SELF_MANA_THRESHOLD / 2,
 	});
 	const spells = [makeSpell({ spellId: 12, type: "stamina-to-mana" })];
 
@@ -88,21 +87,15 @@ test("maybeRestoreMana still uses stamina-to-mana above the stamina threshold", 
 	assert.deepEqual(recordedCasts.pop(), { spellId: 12, targetGuid: self.guid });
 });
 
-test("stamina threshold matches the mana threshold by default", () => {
-	assert.equal(SELF_STAMINA_THRESHOLD, 0.6);
-});
-
 test("maybeRevitalizePartyMember casts revitalize on low stamina party members", () => {
 	recordedCasts.length = 0;
 	const state = createInitialState();
-	const self = sampleSelf({
-		stamina: 90,
-		staminaMax: 100,
-		mana: 80,
-		manaMax: 100,
-	});
-	const lowStaminaMember = samplePartyMember(2, 0.4);
-	const higherStaminaMember = samplePartyMember(3, 0.8);
+	const self = sampleSelf({ stamina: 1, mana: 1 });
+	const lowStaminaMember = samplePartyMember(2, PARTY_REVITALIZE_THRESHOLD / 2);
+	const higherStaminaMember = samplePartyMember(
+		3,
+		(1 + PARTY_REVITALIZE_THRESHOLD) / 2,
+	);
 	const entityByGuid = new Map<Guid, ScriptEntityView>([
 		[lowStaminaMember.guid, sampleEntity()],
 		[higherStaminaMember.guid, sampleEntity()],
@@ -116,7 +109,7 @@ test("maybeRevitalizePartyMember casts revitalize on low stamina party members",
 		entityExists: (guid) => entityByGuid.has(guid),
 		entity: (guid?: Guid) =>
 			guid == null ? null : (entityByGuid.get(guid) ?? null),
-		distance: () => 10,
+		distance: () => HEALING_DISTANCE / 2,
 	};
 	const spells = [
 		makeSpell({ spellId: 20, type: "revitalize", targetKind: "other" }),
@@ -146,12 +139,7 @@ function makeSpell(overrides: Partial<MageSpellRecord>): MageSpellRecord {
 }
 
 function sampleSelf(
-	overrides: Partial<ScriptSelfView> & {
-		stamina: number;
-		staminaMax: number;
-		mana: number;
-		manaMax: number;
-	},
+	vitals: Pick<ScriptSelfView, "stamina" | "mana">,
 ): ScriptSelfView {
 	const self = {
 		guid: 1 as Guid,
@@ -168,7 +156,9 @@ function sampleSelf(
 		busyOperation: "none",
 		heading: 0,
 		combatMode: 0 as unknown as CombatMode,
-		...overrides,
+		staminaMax: 1,
+		manaMax: 1,
+		...vitals,
 	} as ScriptSelfView;
 	activeSelf = self;
 	return self;

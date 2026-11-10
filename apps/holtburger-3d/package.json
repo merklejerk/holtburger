@@ -35,7 +35,7 @@
 		"probe:explorer:theme": "node scripts/explorer-theme-probe.mjs",
 		"check:package": "node scripts/verify-electron-package.mjs",
 		"preview": "vite preview --host 127.0.0.1 --port 0 --strictPort",
-		"test": "npm run test:ts && npm run test:installers && npm run test:windows-packaging",
+		"test": "npm run test:ts && npm run test:installers",
 		"test:ts": "vitest run",
 		"setup:windows-packaging": "python -m pip install -r scripts/windows-packaging-requirements.txt",
 		"test:windows-packaging": "python -B -m unittest discover -s scripts -p test_windows_gpu_hints.py -v",

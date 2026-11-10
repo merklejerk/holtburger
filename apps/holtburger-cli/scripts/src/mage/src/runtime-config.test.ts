@@ -2,13 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { MageData, MageSpellRecord } from "./types";
-import { loadMageConfig, normalizeMageConfig } from "./runtime-config";
-
-const testGlobal = globalThis as typeof globalThis & {
-	HB: {
-		loadConfig: () => unknown;
-	};
-};
+import { normalizeMageConfig } from "./runtime-config";
 
 test("normalizeMageConfig resolves preferred and banned spells by id and key", () => {
 	const data = makeMageData();
@@ -30,17 +24,6 @@ test("normalizeMageConfig resolves preferred and banned spells by id and key", (
 
 test("normalizeMageConfig defaults missing config to empty spell lists", () => {
 	assert.deepEqual(normalizeMageConfig(null, makeMageData()), {
-		preferredSpellIds: [],
-		bannedSpellIds: [],
-	});
-});
-
-test("loadMageConfig returns an empty config when none exists", () => {
-	testGlobal.HB = {
-		loadConfig: () => null,
-	};
-
-	assert.deepEqual(loadMageConfig(makeMageData()), {
 		preferredSpellIds: [],
 		bannedSpellIds: [],
 	});

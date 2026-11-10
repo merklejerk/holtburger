@@ -27,7 +27,7 @@ import {
 } from "../lib/game/runtime/dynamic-entity-feed";
 import { AABB3, Mat4, Vec3 } from "../lib/game/math/types";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
-import type { ScenePlacement } from "../lib/game/scene";
+import type { ScenePlacement, SceneResidency } from "../lib/game/scene";
 import type { NameplateContent } from "../lib/game/systems/dynamic-presentation-source";
 import { createLandblockWorldOrigin } from "../lib/game/landblocks";
 import type {
@@ -75,6 +75,108 @@ import type { PrimaryCameraView } from "../lib/game/runtime/types";
 import { projectClientTargetIndicator } from "./client-target-indicator";
 
 describe("ClientGameplayPresentation", () => {
+	it("keeps entities withdrawn when appearance setup finishes during retirement", async () => {
+		const lifecycle = new ClientLifecycleSession(
+			new FakeClientTransport(currentState(0x0101_0001)),
+		);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const appearance = controlledPromise<void>();
+		vi.spyOn(runtime, "setDynamicPresentationOverride").mockImplementationOnce(
+			() => appearance.promise,
+		);
+		const membership = vi.fn();
+		const presentation = new ClientGameplayPresentation({
+			canvas: fakeCanvas(),
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+			onSceneMembership: membership,
+		});
+		const starting = presentation.start();
+		const closing = presentation.destroy();
+		try {
+			await vi.waitFor(() =>
+				expect(runtime.snapshotReplacements).toContainEqual([]),
+			);
+			appearance.resolve(undefined);
+			await Promise.all([starting, closing]);
+			expect(runtime.snapshotReplacements.flat()).toEqual([]);
+			expect(membership).not.toHaveBeenCalledWith(runtime.sceneMembership);
+			expect(membership).toHaveBeenLastCalledWith(null);
+		} finally {
+			appearance.resolve(undefined);
+			await Promise.allSettled([starting, closing]);
+			lifecycle.stop();
+		}
+	});
+
+	it.each(["gameplay", "portal"] as const)(
+		"waits for the camera's cell independently of the player's loaded cell during %s",
+		async (mode) => {
+			const state = currentState(0x0101_0001);
+			const transport = new FakeClientTransport(
+				mode === "portal"
+					? { ...state, lifecycle: portalLifecycle(4), worldGeneration: 4 }
+					: state,
+			);
+			const lifecycle = new ClientLifecycleSession(transport);
+			await lifecycle.start();
+			const runtime = new FakePresentationRuntime();
+			runtime.dynamicOriginEnvCellId = "0x01000100";
+			const cameraCell = "0x01000101";
+			runtime.unavailableEnvCellIds.add(cameraCell);
+			const presentation = new ClientGameplayPresentation({
+				canvas: fakeCanvas(),
+				session: lifecycle,
+				resources: fakeOwner(runtime, activeRegion()),
+			});
+			const readCamera = presentation.camera.presentation.bind(
+				presentation.camera,
+			);
+			vi.spyOn(presentation.camera, "presentation").mockImplementation(
+				(timeMs) => {
+					const camera = readCamera(timeMs);
+					return camera === null
+						? null
+						: {
+								...camera,
+								placement: {
+									...camera.placement,
+									residency: {
+										...camera.placement.residency,
+										envCellId: cameraCell,
+									},
+								},
+							};
+				},
+			);
+			await presentation.start();
+			try {
+				await vi.waitFor(() => {
+					presentation.frame(1_000);
+					expect(presentation.status()).toMatchObject({
+						kind: "loading-activation",
+						diagnostic: expect.stringContaining("camera"),
+					});
+				});
+				expect(runtime.worldRenderCount).toBe(0);
+				expect(runtime.primaryViews).toHaveLength(0);
+				expect(transport.acknowledgedWorldReveals).toEqual([]);
+				if (mode === "portal")
+					expect(runtime.portalTransitionRenderTimes.length).toBeGreaterThan(0);
+				runtime.unavailableEnvCellIds.delete(cameraCell);
+				await vi.waitFor(() =>
+					expect(presentation.frame(1_016).status.kind).toBe("ready"),
+				);
+				expect(runtime.primaryViews.at(-1)?.camera.placement.envCellId).toBe(
+					cameraCell,
+				);
+			} finally {
+				await presentation.destroy();
+			}
+		},
+	);
+
 	it("borrows a ready-empty cycle frame and withdraws the source during destruction", async () => {
 		const transport = new FakeClientTransport(currentState(0x0101_0001));
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -493,7 +595,7 @@ describe("ClientGameplayPresentation", () => {
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
 		runtime.dynamicOriginEnvCellId = "0x01000100";
-		runtime.envCellScopeAvailable = false;
+		runtime.unavailableEnvCellIds.add("0x01000100");
 		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
 			session: lifecycle,
@@ -512,7 +614,7 @@ describe("ClientGameplayPresentation", () => {
 		expect(runtime.portalTransitions.at(-1)?.kind).toBe("tunnel-only");
 		expect(transport.acknowledgedWorldReveals).toEqual([]);
 
-		runtime.envCellScopeAvailable = true;
+		runtime.unavailableEnvCellIds.delete("0x01000100");
 		await vi.waitFor(() => {
 			expect(presentation.frame(2_000).rendered).toBe(true);
 			expect(runtime.portalTransitions.at(-1)).toMatchObject({
@@ -523,7 +625,7 @@ describe("ClientGameplayPresentation", () => {
 		expect(transport.acknowledgedWorldReveals).toEqual([]);
 
 		const portalOnlyFramesAtExit = runtime.portalTransitionRenderTimes.length;
-		runtime.envCellScopeAvailable = false;
+		runtime.unavailableEnvCellIds.add("0x01000100");
 		expect(presentation.frame(2_500).rendered).toBe(true);
 		expect(runtime.portalTransitions.at(-1)).toMatchObject({
 			kind: "tunnel-to-destination",
@@ -1226,7 +1328,7 @@ describe("ClientGameplayPresentation", () => {
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
 		runtime.dynamicOriginEnvCellId = "0x01000100";
-		runtime.envCellScopeAvailable = false;
+		runtime.unavailableEnvCellIds.add("0x01000100");
 		const releaseSceneActivation = runtime.holdNextSceneActivation();
 		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
@@ -1252,7 +1354,7 @@ describe("ClientGameplayPresentation", () => {
 			expect(presentation.frame(8_032).status.kind).toBe("loading-activation");
 			expect(runtime.eligibilityReevaluationCount).toBeGreaterThan(0);
 		});
-		runtime.envCellScopeAvailable = true;
+		runtime.unavailableEnvCellIds.delete("0x01000100");
 		await vi.waitFor(() => {
 			expect(presentation.frame(9_000).rendered).toBe(true);
 			expect(runtime.portalTransitions.at(-1)).toMatchObject({
@@ -1913,7 +2015,8 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 		number,
 		Pick<NameplateContent, "indicators" | "strikeThrough">
 	>();
-	envCellScopeAvailable = true;
+	/** Independent streaming availability for player and third-person camera cells. */
+	readonly unavailableEnvCellIds = new Set<string>();
 	#activationRevision = 0;
 	readonly #desired = new Map<number, DynamicEntityView>();
 	#nextUpsertRealization:
@@ -2177,8 +2280,11 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 		return null;
 	}
 
-	hasEnvCellScope(): boolean {
-		return this.envCellScopeAvailable;
+	hasEnvCellScope(residency: SceneResidency): boolean {
+		return (
+			residency.envCellId === null ||
+			!this.unavailableEnvCellIds.has(residency.envCellId)
+		);
 	}
 
 	readonly combatOutcomes: Parameters<

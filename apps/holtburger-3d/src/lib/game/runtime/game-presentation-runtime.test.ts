@@ -220,6 +220,46 @@ function realizedBoundsEvidence(runtime: GamePresentationRuntime) {
 	return rows;
 }
 
+describe("GamePresentationRuntime retirement", () => {
+	it("finishes later releases after renderer retirement fails and retains the failed completion", async () => {
+		const failure = new Error("Renderer release failed.");
+		const readDiagnostics = vi.fn(() => {
+			throw new Error("Retired renderer diagnostics were read.");
+		});
+		const renderer = testRenderer({
+			frameDiagnostics: {
+				captureBakedDrawMergeCensus: vi.fn(),
+				setProfilingEnabled: vi.fn(),
+				resetProfile: vi.fn(),
+				snapshot: readDiagnostics,
+			},
+			destroy: vi.fn(async () => {
+				throw failure;
+			}),
+		});
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			renderer,
+		);
+		const releaseDynamics = vi.spyOn(DynamicEntitySystem.prototype, "destroy");
+		onTestFinished(() => releaseDynamics.mockRestore());
+		const retirement = runtime.destroy();
+		await expect(retirement).rejects.toMatchObject({
+			message: "Presentation teardown failed for: renderer.",
+			errors: [failure],
+		});
+		expect(releaseDynamics).toHaveBeenCalledOnce();
+		expect(runtime.getRendererFrameDiagnostics()).toBeNull();
+		expect(readDiagnostics).not.toHaveBeenCalled();
+		expect(runtime.destroy()).toBe(retirement);
+		await expect(runtime.destroy()).rejects.toMatchObject({
+			errors: [failure],
+		});
+		expect(renderer.destroy).toHaveBeenCalledOnce();
+	});
+});
+
 describe("realized selection volume population", () => {
 	it("keeps offscreen world roots but excludes hidden, no-draw and attached entities", async () => {
 		const runtime = await buildSpawnRuntime({
@@ -1458,7 +1498,9 @@ describe("GamePresentationRuntime local scene models", () => {
 		});
 		await requested.promise;
 		let retired = false;
-		const retirement = runtime.destroy().then(() => {
+		const shutdown = runtime.destroy();
+		expect(runtime.destroy()).toBe(shutdown);
+		const retirement = shutdown.then(() => {
 			retired = true;
 		});
 		expect(await pending).toEqual({ kind: "superseded" });

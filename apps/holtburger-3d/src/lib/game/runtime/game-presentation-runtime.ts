@@ -5,7 +5,10 @@ import { formatError } from "../../format-error";
 import { resolveObjectBehavior } from "../resolution/object-resident-classifier";
 import type { DistantAnimationSamplingPolicy } from "../../frontend-tuning-contract";
 import type { RuntimeLight } from "../environment/runtime-lights";
-import { completePresentationOperations } from "./presentation-teardown";
+import {
+	completePresentationOperations,
+	PresentationTeardownStack,
+} from "./presentation-teardown";
 import { placementKey } from "./attachment-contract";
 import {
 	CombatEffectsSystem,
@@ -1298,6 +1301,8 @@ export class GamePresentationRuntime {
 	>();
 	/** Prevents new work and late async publication after runtime shutdown begins. */
 	#destroyed = false;
+	/** Every shutdown caller joins the same completion, including any collected release failures. */
+	#retirement: Promise<void> | null = null;
 
 	protected constructor(
 		renderResources: RendererResourceManager,
@@ -4699,79 +4704,129 @@ export class GamePresentationRuntime {
 		return this.#scene.getEnvCellSeenOutside(envCellId) === false;
 	}
 
-	async destroy(): Promise<void> {
-		if (this.#destroyed) return;
-		for (const unsubscribe of this.#contentUnsubscriptions) unsubscribe();
-		this.#contentFailures.clear();
+	destroy(): Promise<void> {
+		return (this.#retirement ??= this.#destroy());
+	}
+
+	async #destroy(): Promise<void> {
+		this.#destroyed = true;
 		const spawned = [...this.#spawnedDesiredEntities.keys()];
-		for (const guid of spawned) this.#retireDynamicPresentationTree(guid);
-		for (const guid of spawned)
-			this.#forgetDesiredDynamicEntity(guid, "release-visual");
+		// Revoke demand synchronously before any release awaits in-flight publication.
+		try {
+			completePresentationOperations([
+				...this.#contentUnsubscriptions,
+				...spawned.map(
+					(guid) => () => this.#retireDynamicPresentationTree(guid),
+				),
+				...spawned.map(
+					(guid) => () =>
+						this.#forgetDesiredDynamicEntity(guid, "release-visual"),
+				),
+			]);
+		} catch (error) {
+			this.#presentationFailures.push(error);
+		}
+		this.#contentFailures.clear();
 		this.#spawnedVisualKeys.clear();
 		this.#spawnedNameplateDecoration.clear();
 		this.#pendingDynamicEntityCues.clear();
-		this.#destroyed = true;
 		this.#presentationLights = [];
-		const localRetirement = await Promise.allSettled(
-			[...this.#localSceneModels].map((handle) => handle.destroy()),
+		// Register repositories before their users; reverse-order teardown retires users first,
+		// attempts every release, and preserves the original dependency order on failure.
+		const teardown = new PresentationTeardownStack();
+		teardown.add("asynchronous-presentation", () => {
+			if (this.#presentationFailures.length > 0)
+				throw new AggregateError(
+					this.#presentationFailures.splice(0),
+					"Asynchronous presentation work failed during retirement.",
+				);
+		});
+		teardown.add("geometry", () => this.#geometry.destroy());
+		teardown.add("static-details", () => {
+			this.#activeRegionStaticDetails.clear();
+			this.#activeRegionStaticDetailOwner = null;
+		});
+		teardown.add("setup-visual-users", () => {
+			if (this.#retainedSetupVisuals.size !== 0)
+				throw new Error(
+					`Runtime shutdown retained ${this.#retainedSetupVisuals.size} setup visual users.`,
+				);
+		});
+		teardown.add("textures", () => this.#textures.destroy());
+		teardown.add("resident-atlas", () => this.#residentAtlas.destroy());
+		teardown.add("terrain-worker", () => this.#terrainGenerator.destroy());
+		teardown.add("terrain", () => this.#terrain.destroy());
+		teardown.add("ocean", () => this.#oceanBackdrop.destroy());
+		teardown.add("env-cells", () => this.#envCells.destroy());
+		teardown.add("target-sound-tables", () => this.#targetSoundTables.clear());
+		teardown.add("particle-meshes", () => this.#particleMeshes.destroy());
+		teardown.add("physics-script-tables", () =>
+			this.#physicsScriptTables.destroy(),
 		);
-		this.#localSceneModels.clear();
-		for (const result of localRetirement) {
-			if (result.status === "rejected")
-				this.#presentationFailures.push(result.reason);
-		}
-		this.#sceneInterestCoordinator.destroy();
-		this.#commitArtifacts.length = 0;
-		await Promise.all([
-			this.#staticLayerRealizer.destroy(),
-			this.#envCellRealizer.destroy(),
-		]);
-		await Promise.allSettled([...this.#realizationContinuations]);
-		await this.#skyScripts.destroy();
-		this.#combatEffects?.dispose();
-		this.#combatEffects = null;
-		await this.#renderer?.destroy();
-		this.#renderer = null;
-		this.#portalAssets = { kind: "uninitialized" };
-		this.#portalTransitionAnimationGeneration = null;
-		this.#portalTransitionFramePosition = 0;
-		this.#portalTransitionAxialRollFramePosition = 0;
-		this.#portalTransitionLastTimeSeconds = null;
-		this.#animationPresentation.clear();
-		this.#animation.destroy();
-		this.#physicsScriptSystem.destroy();
-		this.#worldOwnedPhysicsScriptSystem.destroy();
-		this.#audio.destroy();
-		// Dynamic residents own emitter and sound-table handles; release them before their repositories.
-		await this.#dynamics.destroy();
-		await this.#objectVisualTemplates.destroy();
-		for (const handle of this.#ambientSoundTableHandles.values()) {
-			handle.release();
-		}
-		this.#ambientSoundTableHandles.clear();
-		this.#ambientSoundTables.clear();
-		this.#soundTables.destroy();
-		this.#physicsScriptTables.destroy();
-		this.#particleMeshes.destroy();
-		this.#targetSoundTables.clear();
-		this.#envCells.destroy();
-		this.#oceanBackdrop.destroy();
-		await this.#terrain.destroy();
-		await this.#terrainGenerator.destroy();
-		this.#residentAtlas.destroy();
-		await this.#textures.destroy();
-		if (this.#retainedSetupVisuals.size !== 0)
-			throw new Error(
-				`Runtime shutdown retained ${this.#retainedSetupVisuals.size} setup visual users.`,
+		teardown.add("sound-tables", () => this.#soundTables.destroy());
+		teardown.add("ambient-state", () => {
+			this.#ambientSoundTableHandles.clear();
+			this.#ambientSoundTables.clear();
+		});
+		teardown.add("ambient-handles", () => {
+			completePresentationOperations(
+				[...this.#ambientSoundTableHandles.values()].map(
+					(handle) => () => handle.release(),
+				),
 			);
-		this.#activeRegionStaticDetails.clear();
-		this.#activeRegionStaticDetailOwner = null;
-		this.#geometry.destroy();
-		if (this.#presentationFailures.length > 0)
-			throw new AggregateError(
-				this.#presentationFailures.splice(0),
-				"Asynchronous presentation work failed during retirement.",
+		});
+		teardown.add("visual-templates", () =>
+			this.#objectVisualTemplates.destroy(),
+		);
+		teardown.add("dynamic-entities", () => this.#dynamics.destroy());
+		teardown.add("audio", () => this.#audio.destroy());
+		teardown.add("world-physics-scripts", () =>
+			this.#worldOwnedPhysicsScriptSystem.destroy(),
+		);
+		teardown.add("physics-scripts", () => this.#physicsScriptSystem.destroy());
+		teardown.add("animation", () => this.#animation.destroy());
+		teardown.add("animation-selection", () =>
+			this.#animationPresentation.clear(),
+		);
+		teardown.add("portal-state", () => {
+			this.#portalAssets = { kind: "uninitialized" };
+			this.#portalTransitionAnimationGeneration = null;
+			this.#portalTransitionFramePosition = 0;
+			this.#portalTransitionAxialRollFramePosition = 0;
+			this.#portalTransitionLastTimeSeconds = null;
+		});
+		teardown.add("renderer", () => {
+			const renderer = this.#renderer;
+			this.#renderer = null;
+			return renderer?.destroy();
+		});
+		teardown.add("combat-effects", () => {
+			const effects = this.#combatEffects;
+			this.#combatEffects = null;
+			effects?.dispose();
+		});
+		teardown.add("sky-scripts", () => this.#skyScripts.destroy());
+		teardown.add("realization-continuations", async () => {
+			await Promise.allSettled([...this.#realizationContinuations]);
+		});
+		teardown.add("env-cell-layers", () => this.#envCellRealizer.destroy());
+		teardown.add("static-layers", () => this.#staticLayerRealizer.destroy());
+		teardown.add("commit-artifacts", () => {
+			this.#commitArtifacts.length = 0;
+		});
+		teardown.add("scene-interest", () =>
+			this.#sceneInterestCoordinator.destroy(),
+		);
+		teardown.add("local-models", async () => {
+			const retired = await Promise.allSettled(
+				[...this.#localSceneModels].map((handle) => handle.destroy()),
 			);
+			this.#localSceneModels.clear();
+			for (const result of retired)
+				if (result.status === "rejected")
+					this.#presentationFailures.push(result.reason);
+		});
+		await teardown.close();
 	}
 
 	#applySceneInterest(interest: SceneInterestMap): SceneInterestReceipt {

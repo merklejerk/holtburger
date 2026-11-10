@@ -89,7 +89,6 @@ export default tseslint.config(
 			"scripts/item-cell-pulse-probe.mjs",
 			"scripts/indexed-texture-readback.mjs",
 			"scripts/ui-showcase-panels-probe.mjs",
-			"scripts/client-theme-probe.mjs",
 			"scripts/explorer-theme-probe.mjs",
 		],
 		languageOptions: { globals: globals.browser },

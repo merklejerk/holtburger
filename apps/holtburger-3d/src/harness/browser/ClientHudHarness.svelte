@@ -141,7 +141,6 @@
 	import { ClientPartyState } from "../../client/client-party-state";
 	import { probeAllegiance } from "./client-allegiance-probe";
 	import { probeSquelch } from "./client-squelch-probe";
-	import { probeOverlayTheme } from "./overlay-theme-probe";
 	import { probeUiScaling } from "./ui-scaling-probe";
 	import { probeSelectedActions } from "./client-selected-actions-probe";
 	import {
@@ -157,7 +156,6 @@
 	import { probeClientLocks } from "./client-locks-probe";
 	import { probeClientInventory } from "./client-inventory-probe";
 	import type { DynamicEntityMapBlipCategory } from "../../lib/game/map/map-blip-category";
-	import { mapBlipFillStyle } from "../../lib/game/map/map-appearance";
 	import { probeBoomCameraCorrection } from "./boom-camera-probe";
 	import { probeClientAudio } from "./client-audio-probe";
 	import ClientMessageDialog from "../../client/ClientMessageDialog.svelte";
@@ -220,11 +218,8 @@
 	import { selectedChatRecipient } from "../../client/client-chat-compose";
 	import { ClientChatComposer } from "../../client/client-chat-composer.svelte";
 	import { uiThemes } from "../../app/mount";
-	import { steelUrl, opaqueUrl } from "./ui-showcase-themes";
+	import { steelUrl } from "./ui-showcase-themes";
 	import type { FrameRates } from "../../app/frame-rate-sampler";
-	import ClientMusicControls from "../../client/ClientMusicControls.svelte";
-	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
-	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
 	import { ClientInventoryState } from "../../client/client-inventory-state";
 	import { browserUiIconRepository } from "../../app/ui-icon-repository";
 	import { createClientShortcuts } from "../../client/ClientShortcutDock.svelte";
@@ -255,17 +250,12 @@
 	import { Mat4 } from "../../lib/game/math/types";
 	import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";
 	import type { ScenePlacement } from "../../lib/game/scene";
-	import {
-		MINIMAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
-		MINIMAP_BREADCRUMB_POLICY,
-	} from "../../app/minimap-tuning";
 	import type { ClientGameplayPresentationDiagnostics } from "../../client/client-gameplay-presentation";
 	import {
 		ClientToastCenter,
 		CLIENT_TOAST_DURATION_MS,
 		type ClientToast,
 	} from "../../client/client-toast-center";
-	import type { ClientTargetIndicatorFrame } from "../../client/client-target-indicator";
 	import {
 		CLIENT_AUDIO_DEFAULTS,
 		createDefaultClientCharacterSettings,
@@ -837,148 +827,25 @@
 		readonly top: number;
 		readonly width: number;
 	}
-
+	/** Input evidence shared by focused gesture and inventory checks. */
 	interface ClientHudHarnessState {
-		/** Bounds used to drive the actual game-canvas pointer handlers. */
+		/** Bounds used to drive real game-canvas pointer handlers. */
 		readonly gameCanvas: ClientHudHarnessRectangle;
-		/** Browser-resolved cursor for the game canvas. */
-		readonly gameCanvasCursor: string;
-		readonly hoveredGuid: number | null;
-		readonly mode: "runtime" | "layout";
-		/** Coordinates currently displayed beneath the map. */
-		readonly minimapCoordinates: string;
-		/** Whether the subject-attached camera cone is currently rendered. */
-		readonly minimapConeVisible: boolean;
-		/** Whether detached-map chrome is currently available. */
-		readonly minimapResetVisible: boolean;
-		/** Non-transparent backing pixels in the minimap overlay. */
-		readonly minimapOverlayInkPixels: number;
-		/** Full-circle overlay draws, excluding the camera field-of-view sector. */
-		readonly minimapOverlayCircleCalls: number;
-		/** Bounds used to drive the actual minimap overlay pointer handlers. */
-		readonly minimapOverlayCanvas: ClientHudHarnessRectangle;
-		readonly moveHandles: Readonly<Record<string, ClientHudHarnessRectangle>>;
-		/** Camera deltas emitted by completed drag classification. */
+		/** Camera deltas emitted by drag classification. */
 		readonly orbitDeltas: readonly { readonly x: number; readonly y: number }[];
 		/** Left-clicks consumed by precise-jump mode. */
 		readonly preciseJumpActivationCount: number;
-		/** Aim callback count distinguishes click jitter from orbit-driven refresh. */
+		/** Aim refreshes distinguish click jitter from deliberate camera movement. */
 		readonly preciseJumpAimCount: number;
-		/** Selection changes emitted by either viewport or minimap input. */
-		readonly selectionEvents: readonly (number | null)[];
-		/** Cadence ticks delivered independently of pointer presence. */
-		readonly selectionMaintenanceCount: number;
-		/** Identity currently read back by the minimap frame. */
+		/** Identity currently selected through production interaction owners. */
 		readonly selectedGuid: number | null;
-		readonly selectionAnnouncement: string;
-		readonly selectedEntityHud: null | {
-			/** Whether the direct interaction command is currently offered. */
-			readonly interactionAvailable: boolean;
-			readonly name: string;
-		};
-		readonly targetIndicator: null | {
-			readonly fill: string | null;
-			readonly filter: string;
-			readonly rectangle: ClientHudHarnessRectangle;
-		};
-		readonly surfaces: Readonly<Record<string, ClientHudHarnessRectangle>>;
-		readonly toast: {
-			readonly preview: boolean;
-			readonly role: string | null;
-			readonly text: string;
-		} | null;
-		readonly viewport: { readonly height: number; readonly width: number };
-		/** Completed viewport click locations sent to entity acquisition. */
+		/** Completed viewport activations sent to entity acquisition. */
 		readonly viewportSelectionPoints: readonly {
-			/** Activation requested by the accepted second click. */
 			readonly interact: boolean;
 			readonly x: number;
 			readonly y: number;
 		}[];
-		/** Bounded-cadence viewport hover samples received by the component boundary. */
-		readonly viewportHoverPoints: readonly {
-			readonly x: number;
-			readonly y: number;
-		}[];
 	}
-
-	/** Exercise selection replacement and clearing through the mounted diagnostic panel. */
-	async function probeSelectedDiagnostics(): Promise<void> {
-		const debug = document.querySelector<HTMLButtonElement>(
-			'button[aria-label="Debug"]',
-		);
-		if (debug === null) throw new Error("Debug shortcut is absent.");
-		const wasOpen = debug.getAttribute("aria-pressed") === "true";
-		const previousGuid = selection.selectedGuid();
-		if (!wasOpen) debug.click();
-		const sample = () =>
-			new Promise<void>((resolve) => window.setTimeout(resolve, 300));
-		try {
-			selection.select(7);
-			await sample();
-			const panel = document.querySelector(
-				'section[aria-label="Selected entity details"]',
-			);
-			const snapshot = panel?.querySelector<HTMLTextAreaElement>("textarea");
-			if (
-				!panel?.textContent?.includes("Drudge") ||
-				!panel.textContent.includes("42 (0x0000002a)") ||
-				snapshot === null ||
-				snapshot === undefined ||
-				!snapshot.value.includes('"wcid": 42')
-			) {
-				throw new Error(
-					"Selected entity diagnostics did not display identity and JSON.",
-				);
-			}
-			const toggle = Array.from(document.querySelectorAll("label.toggle-field"))
-				.find((label) => label.textContent?.includes("Unrestricted use"))
-				?.querySelector<HTMLInputElement>('input[type="checkbox"]');
-			const useButton = document.querySelector<HTMLButtonElement>(
-				'button[aria-label="Interact"]',
-			);
-			if (!toggle || !useButton || toggle.checked)
-				throw new Error("Unrestricted use must start disabled.");
-			for (const expected of [true, false]) {
-				toggle.click();
-				await tick();
-				useButton.click();
-				await tick();
-				const command = interactionCommands.at(-1);
-				if (
-					command?.command !== "submit_client_item_use" ||
-					!((intent) =>
-						intent.kind === "direct" && intent.unrestricted === expected)(
-						itemUseRequestSchema.parse(command.args?.request).intent,
-					)
-				) {
-					throw new Error("Debug use policy did not reach the use request.");
-				}
-			}
-			selection.select(8);
-			await sample();
-			if (
-				!panel.textContent?.includes("0x00000008") ||
-				!panel.textContent.includes("No scene presentation for this entity.") ||
-				!panel.querySelector("textarea")?.value.includes('"facts"')
-			) {
-				throw new Error(
-					"Unavailable selection retained stale diagnostic details.",
-				);
-			}
-			selection.select(null);
-			await sample();
-			if (panel.querySelector("dl, textarea") !== null) {
-				throw new Error("Cleared selection retained diagnostic details.");
-			}
-		} finally {
-			selection.select(previousGuid);
-			if (!wasOpen) debug.click();
-		}
-	}
-
-	/** Cold character-selection fixture exercises production controls without a live server. */
-	let previewCharacters = $state(false);
 
 	let gameplayPreferences = $state({ ...gameplayPreferencesFixture });
 	let deferGameplayUpdate = false;
@@ -986,60 +853,6 @@
 	let appearanceOptions = $state({ showHelmet: true, showCloak: true });
 	/** Session-local diagnostic use policy exercised through the production panel. */
 	let unrestrictedUse = $state(false);
-	let entryPending = $state(false);
-	let characterState = $state<
-		Extract<ClientAppPhase, { kind: "character-selection" }>
-	>({
-		kind: "character-selection",
-		rejection: null,
-		maxSlots: 11,
-		selectedGuid: null,
-		characters: [
-			{ guid: 1, name: "Wayfarer", slot: 0, deleteTime: 0 },
-			{ guid: 2, name: "Lantern Keeper", slot: 1, deleteTime: 0 },
-		],
-	});
-	/** Test a live theme change against existing DOM and layout ownership. */
-	async function probeThemeApplication() {
-		const canvas = document.querySelector(".client-canvas");
-		const before = capture().surfaces;
-		const chat = document.querySelector(".chat-buffer");
-		if (chat === null)
-			throw new Error("Theme probe requires the chat backing.");
-		const expectedBackdrop = getComputedStyle(document.documentElement)
-			.getPropertyValue("--ui-backdrop-filter")
-			.trim();
-		if (getComputedStyle(chat).backdropFilter !== expectedBackdrop)
-			throw new Error("Client chat did not consume the HUD backdrop.");
-
-		try {
-			await uiThemes.replace(null, opaqueUrl);
-			await new Promise<void>((resolve) =>
-				requestAnimationFrame(() => resolve()),
-			);
-			const panel = document.querySelector(
-				'.hud-window[aria-label="Client diagnostics"]',
-			);
-			if (panel === null)
-				throw new Error("Theme probe requires an open diagnostic window.");
-			const stable =
-				canvas === document.querySelector(".client-canvas") &&
-				JSON.stringify(before) === JSON.stringify(capture().surfaces);
-			const opaque =
-				getComputedStyle(panel).backdropFilter === "none" &&
-				getComputedStyle(chat).backdropFilter === "none";
-			if (!stable || !opaque)
-				throw new Error(
-					"Client theme application changed layout/identity or retained filtering.",
-				);
-			return {
-				identityAndLayoutPreserved: stable,
-				opaqueOverride: opaque,
-			};
-		} finally {
-			await uiThemes.replace(null, null);
-		}
-	}
 	let activeItemUseProbe: ReturnType<typeof beginItemUseProbe> | null = null;
 	function beginItemUseProbe() {
 		const read = interactionLifecycle.entities.read();
@@ -1404,8 +1217,6 @@
 		readonly tradeProbe: ReturnType<typeof createTradeFixture>;
 		readonly probeAllegiance: () => ReturnType<typeof probeAllegiance>;
 		readonly probeSquelch: () => ReturnType<typeof probeSquelch>;
-		/** Verify shared surface, backdrop, and density overrides across overlay components. */
-		readonly probeOverlayTheme: () => ReturnType<typeof probeOverlayTheme>;
 		/** Change the production UI preference for external geometry probes. */
 		readonly setUiScale: (scale: number) => void;
 		/** Verify overall UI scale and additional text enlargement across retained UI and native dialogs. */
@@ -1503,55 +1314,16 @@
 		readonly replyInventoryPreview: (
 			result: ClientInventoryPreviewResult,
 		) => void;
-		/** Verify style updates without replacing world presentation or HUD placement. */
-		readonly probeThemeApplication: typeof probeThemeApplication;
-		/** Verify sampled selected-entity identity and snapshot disclosure. */
-		readonly probeSelectedDiagnostics: typeof probeSelectedDiagnostics;
-		readonly probeInteractableMarker: typeof probeInteractableMarker;
-		readonly measureDoorBar: typeof measureDoorBar;
-		/** Exercise health presentation and use dispatch through production session owners. */
-		readonly probeSelectedInteractions: typeof probeSelectedInteractions;
 		/** Verify action warning presentation independently of selected-entity fixtures. */
 		readonly probeActionFeedback: typeof probeActionFeedback;
-		/** Verify default and pointer focus across production vital bars. */
-		readonly probeCharacterVitals: typeof probeCharacterVitals;
 		readonly probeConnectionBadge: typeof probeConnectionBadge;
-		/** Show production character selection for the theme probe. */
-		readonly previewCharacterSelection: () => void;
-		/** Exercise overlapping modal/chat ownership while a viewport gesture is pending. */
-		readonly probeViewportBlockers: () => void;
 		readonly capture: () => ClientHudHarnessState;
-		readonly dragSurface: (
-			label: string,
-			deltaX: number,
-			deltaY: number,
-		) => void;
-		/** Move the imperative subject fixture beyond the production automatic-reset threshold. */
-		readonly moveMinimapSubjectPastAutomaticReanchor: () => void;
-		/** Move by a fraction of the current environment's production breadcrumb spacing. */
-		readonly moveMinimapSubjectByBreadcrumbSpacing: (fraction: number) => void;
-		/** Move beyond the production continuous-step threshold in one observation. */
-		readonly teleportMinimapSubject: () => void;
-		/** Select controlled identity and environment; null identity selects a free camera. */
-		readonly setMinimapSubject: (guid: number | null, indoor: boolean) => void;
-		/** Activate the map's visible reset control. */
-		readonly resetMinimap: () => void;
 		/** Restore deterministic interaction inputs and clear recorded output. */
 		readonly resetSelectionFixture: () => void;
-		/** Toggle the lifecycle-owned camera capability supplied to the HUD. */
-		readonly setCameraEnabled: (enabled: boolean) => void;
-		/** Choose whether subsequent viewport hover samples resolve an entity. */
-		readonly setHoverHitEnabled: (enabled: boolean) => void;
 		/** Toggle precise-jump pointer ownership. */
 		readonly setPreciseJumpActive: (active: boolean) => void;
 		/** Verify real viewport wheel ownership in precise/manual and blocked states. */
 		readonly probePreciseJumpWheel: () => Promise<{ passed: boolean }>;
-		/** Replace the frame-hot target projection consumed by the real indicator component. */
-		readonly setTargetIndicatorFrame: (
-			frame: ClientTargetIndicatorFrame | null,
-		) => void;
-		readonly setRuntimeTransients: (visible: boolean) => void;
-		readonly toggleMode: () => void;
 	}
 
 	const jumpFixture = new URLSearchParams(window.location.search).get("jump");
@@ -1576,7 +1348,6 @@
 	let preciseJumpActivationCount = 0;
 	/** Counts aim publication for the precise click/drag ownership probe. */
 	let preciseJumpAimCount = 0;
-	let selectionMaintenanceCount = 0;
 	/** Counts synthetic artwork preparation independently of inventory sampling. */
 	let preparedIconCount = 0;
 	let iconPreparationGate: Promise<void> | null = null;
@@ -2997,85 +2768,6 @@
 		}
 	}
 
-	async function probeSelectedInteractions() {
-		const target = selection.selectedGuid();
-		if (target === null)
-			throw new Error("Interaction probe requires a selected entity.");
-		const meter = document.querySelector(
-			'[aria-label="Selected entity health"]',
-		);
-		const button = document.querySelector<HTMLButtonElement>(
-			'button[aria-label="Interact"]',
-		);
-		const splitButton = document.querySelector(
-			'button[aria-label="Split stack"]',
-		);
-		if (meter === null || button === null || splitButton !== null)
-			throw new Error(
-				"Selected creature controls are missing or expose an ineligible split action.",
-			);
-		const unknown = meter.getAttribute("aria-valuetext");
-		emitInteractionEvent("client-entity-health-updated", {
-			guid: target,
-			healthFraction: 0.35,
-		});
-		emitInteractionEvent("client-entity-health-updated", {
-			guid: target + 1,
-			healthFraction: 0.9,
-		});
-		await new Promise((resolve) =>
-			window.setTimeout(
-				resolve,
-				CLIENT_TUNING.selectedEntityHud.displayIntervalMs * 2,
-			),
-		);
-		const health = meter.getAttribute("aria-valuenow");
-		button.click();
-		await tick();
-		const use = interactionCommands.at(-1);
-		if (
-			unknown !== "Unknown" ||
-			health !== "35" ||
-			use?.command !== "submit_client_item_use" ||
-			itemUseRequestSchema.parse(use.args?.request).intent.source !== target
-		) {
-			throw new Error(
-				"Selected entity health or use dispatch did not match the selected target.",
-			);
-		}
-		// Reselect the same mob with unchanged server health after the HUD has unmounted.
-		selection.select(null);
-		await tick();
-		selection.select(target);
-		await tick();
-		emitInteractionEvent("client-entity-health-updated", {
-			guid: target,
-			healthFraction: 0.35,
-		});
-		await new Promise((resolve) =>
-			window.setTimeout(
-				resolve,
-				CLIENT_TUNING.selectedEntityHud.displayIntervalMs * 2,
-			),
-		);
-		const reselectedHealth = document
-			.querySelector('[aria-label="Selected entity health"]')
-			?.getAttribute("aria-valuenow");
-		if (reselectedHealth !== health)
-			throw new Error("Reselection lost unchanged entity health.");
-		return {
-			unknown,
-			health,
-			reselectedHealth,
-			actionFeedback: await probeActionFeedback(),
-			dialogs: await probeDialogs(),
-			audio: await probeClientAudio(),
-			boomCamera: await probeBoomCameraCorrection(),
-			use,
-			commands: [...interactionCommands],
-		};
-	}
-
 	async function probeAudioControls() {
 		document
 			.querySelector<HTMLButtonElement>('button[aria-label="Settings"]')
@@ -3872,113 +3564,7 @@
 		emitInteractionEvent("client-connection-updated", sample);
 		return { passed: true, width: terminal.width, height: terminal.height };
 	}
-
-	async function probeCharacterVitals() {
-		const vitalLabels = ["Health", "Mana", "Stamina"] as const;
-		type VitalLabel = (typeof vitalLabels)[number];
-		const bar = (label: VitalLabel): HTMLElement => {
-			const element = document.querySelector<HTMLElement>(
-				`.character-hud [role="meter"][aria-label="${label}"]`,
-			);
-			if (element === null) throw new Error(`Missing ${label} vital bar.`);
-			return element;
-		};
-		const vitalGroup = (): HTMLElement => {
-			const element = bar("Health").closest<HTMLElement>(".vitals");
-			if (element === null) throw new Error("Missing vital group.");
-			return element;
-		};
-		const snapshotBar = (label: VitalLabel) => {
-			const element = bar(label);
-			const quantity = element.querySelector<HTMLElement>("strong");
-			return {
-				focused: element.dataset.focused === "true",
-				height: element.getBoundingClientRect().height,
-				quantity: quantity?.textContent?.trim() ?? null,
-				quantityVisible:
-					quantity !== null &&
-					getComputedStyle(quantity).visibility === "visible",
-			};
-		};
-		const snapshot = () => ({
-			health: snapshotBar("Health"),
-			mana: snapshotBar("Mana"),
-			stamina: snapshotBar("Stamina"),
-		});
-		const groupHeight = (): number =>
-			vitalGroup().getBoundingClientRect().height;
-		const stackHeight = (): number =>
-			vitalLabels.reduce(
-				(total, label) => total + bar(label).getBoundingClientRect().height,
-				0,
-			);
-		const verifyStableFootprint = async (
-			expectedGroupHeight: number,
-			expectedStackHeight: number,
-		): Promise<void> => {
-			const nextFrame = () =>
-				new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-			await nextFrame();
-			while (true) {
-				const currentGroupHeight = groupHeight();
-				const currentStackHeight = stackHeight();
-				if (
-					currentGroupHeight !== expectedGroupHeight ||
-					Math.abs(currentStackHeight - expectedStackHeight) > 0.01
-				)
-					throw new Error(
-						`Vital footprint changed during focus transition: group ${expectedGroupHeight} -> ${currentGroupHeight}, bars ${expectedStackHeight} -> ${currentStackHeight}`,
-					);
-				if (vitalGroup().getAnimations({ subtree: true }).length === 0) return;
-				await nextFrame();
-			}
-		};
-		const initial = snapshot();
-		const initialGroupHeight = groupHeight();
-		const initialStackHeight = stackHeight();
-		if (
-			initial.health.focused !== true ||
-			initial.health.quantity !== "1,555 / 12,555" ||
-			initial.health.quantityVisible !== true ||
-			initial.health.height <= initial.mana.height ||
-			initial.stamina.quantityVisible !== false ||
-			initial.mana.quantityVisible !== false
-		)
-			throw new Error(
-				`Initial vital focus is invalid: ${JSON.stringify(initial)}`,
-			);
-		bar("Mana").dispatchEvent(new PointerEvent("pointerenter"));
-		await verifyStableFootprint(initialGroupHeight, initialStackHeight);
-		const hovered = snapshot();
-		if (
-			hovered.mana.focused !== true ||
-			hovered.mana.height !== initial.health.height ||
-			hovered.mana.quantity !== "1,302 / 4,100" ||
-			hovered.mana.quantityVisible !== true ||
-			hovered.health.height !== initial.mana.height ||
-			hovered.health.quantityVisible !== false
-		)
-			throw new Error(
-				`Hovered vital focus is invalid: ${JSON.stringify(hovered)}`,
-			);
-		vitalGroup().dispatchEvent(new PointerEvent("pointerleave"));
-		await verifyStableFootprint(initialGroupHeight, initialStackHeight);
-		const reset = snapshot();
-		if (
-			reset.health.focused !== true ||
-			reset.health.height !== initial.health.height ||
-			reset.health.quantityVisible !== true ||
-			reset.mana.height !== initial.mana.height ||
-			reset.mana.quantityVisible !== false
-		)
-			throw new Error(
-				`Vital focus did not reset after pointer exit: ${JSON.stringify(reset)}`,
-			);
-		return { initial, hovered, reset };
-	}
 	let hoveredGuid = $state<number | null>(null);
-	let hoverHitEnabled = true;
-	let targetIndicatorFrame: ClientTargetIndicatorFrame | null = null;
 	const mouseFixture = createClientMouseMovementFixture(
 		keyboard,
 		inputGate,
@@ -3989,10 +3575,8 @@
 	/** Production mouse ownership, exposed for button-edge and cancellation probes. */
 	let orbitHeld = false;
 	const zoomDeltas: number[] = [];
-	const selectionEvents: (number | null)[] = [];
 	const viewportSelectionPoints: { x: number; y: number; interact: boolean }[] =
 		[];
-	const viewportHoverPoints: { x: number; y: number }[] = [];
 	const mouseLook = new CameraLookController({
 		yawRadians: 0,
 		pitchRadians: 0,
@@ -4032,153 +3616,14 @@
 	};
 	/** Imperative fixture position, matching the production map frame's presentation-rate source. */
 	let minimapCategory: DynamicEntityMapBlipCategory = "mob";
-	let doorAngle = 0;
-	let doorHalfWidth = 2;
 	let nearbyMapFixture = false;
 	let minimapHidden = false;
 	let minimapNoDraw = false;
-	/** Read the actual drawn door segment for browser pointer and zoom probes. */
-	async function measureDoorBar(angle: number): Promise<{
-		start: { x: number; y: number };
-		end: { x: number; y: number };
-	}> {
-		doorAngle = angle;
-		doorHalfWidth = 20;
-		minimapCategory = "door";
-		minimapHidden = false;
-		minimapNoDraw = false;
-		minimapSubjectIndoor = false;
-		const canvas = document.querySelector<HTMLCanvasElement>(
-			".minimap-overlay-canvas",
-		);
-		const context = canvas?.getContext("2d");
-		if (!canvas || !context) throw new Error("Minimap unavailable");
-		const move = context.moveTo,
-			line = context.lineTo,
-			stroke = context.stroke;
-		let start = { x: 0, y: 0 },
-			end = { x: 0, y: 0 };
-		let segment: {
-			start: { x: number; y: number };
-			end: { x: number; y: number };
-		} | null = null;
-		context.strokeStyle = mapBlipFillStyle(
-			"door",
-			-minimapSubjectWorldY,
-			"outdoor",
-		);
-		const color = context.strokeStyle;
-		context.moveTo = (x, y) => {
-			start = { x, y };
-			move.call(context, x, y);
-		};
-		context.lineTo = (x, y) => {
-			end = { x, y };
-			line.call(context, x, y);
-		};
-		context.stroke = () => {
-			if (context.strokeStyle === color) segment = { start, end };
-			stroke.bind(context)();
-		};
-		try {
-			await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
-			if (segment === null) throw new Error("Door stroke absent");
-			const bounds = canvas.getBoundingClientRect();
-			const screen = (point: { x: number; y: number }) => ({
-				x: bounds.left + (point.x * bounds.width) / canvas.width,
-				y: bounds.top + (point.y * bounds.height) / canvas.height,
-			});
-			// Callback writes occur while the explicit sampling promise is pending.
-			const measured: {
-				start: { x: number; y: number };
-				end: { x: number; y: number };
-			} = segment;
-			return { start: screen(measured.start), end: screen(measured.end) };
-		} finally {
-			context.moveTo = move;
-			context.lineTo = line;
-			context.stroke = stroke;
-		}
-	}
-
-	/** Change only producer facts, without moving the marker or rebuilding the map. */
-	async function probeInteractableMarker(
-		category: DynamicEntityMapBlipCategory,
-		indoor: boolean,
-		hidden: boolean,
-		noDraw: boolean,
-	): Promise<void> {
-		minimapCategory = category;
-		minimapSubjectIndoor = indoor;
-		minimapHidden = hidden;
-		minimapNoDraw = noDraw;
-		const canvas = document.querySelector<HTMLCanvasElement>(
-			".minimap-overlay-canvas",
-		);
-		const context = canvas?.getContext("2d");
-		if (!context) throw new Error("Minimap canvas missing");
-		const originalRect = context.rect;
-		const originalLine = context.lineTo;
-		const originalFill = context.fill;
-		const originalStroke = context.stroke;
-		let rectangles = 0;
-		let lines = 0;
-		const fills: string[] = [];
-		context.rect = (...args: Parameters<typeof originalRect>) => {
-			rectangles++;
-			originalRect.apply(context, args);
-		};
-		context.lineTo = (...args: Parameters<typeof originalLine>) => {
-			lines++;
-			originalLine.apply(context, args);
-		};
-		context.stroke = () => {
-			fills.push(String(context.strokeStyle));
-			originalStroke.bind(context)();
-		};
-		context.fill = () => {
-			fills.push(String(context.fillStyle));
-			originalFill.bind(context)();
-		};
-		try {
-			await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
-			const expected = mapBlipFillStyle(
-				category,
-				-minimapSubjectWorldY,
-				indoor ? "indoor" : "outdoor",
-			);
-			// Canvas normalizes CSS values, so compare its canonical representation.
-			context.fillStyle = expected;
-			const hasFill = fills.includes(String(context.fillStyle));
-			if (hasFill !== !(hidden || noDraw))
-				throw new Error(`${category}: incorrect marker visibility/color`);
-			if (!hidden && !noDraw && category !== "mob") {
-				if (lines === 0 || rectangles !== 0)
-					throw new Error(`${category}: incorrect marker shape`);
-			}
-		} finally {
-			context.rect = originalRect;
-			context.lineTo = originalLine;
-			context.fill = originalFill;
-			context.stroke = originalStroke;
-		}
-	}
 	let minimapSubjectWorldX = 100;
 	const minimapSubjectWorldY = 20;
 	let minimapSubjectWorldZ = -200;
 	let minimapSubjectGuid: number | null = 1;
 	let minimapSubjectIndoor = false;
-	/** Canvas operations observed in one completed minimap overlay frame. */
-	interface MinimapOverlayDraw {
-		/** Full-circle marker and breadcrumb draws in the last overlay frame. */
-		readonly circleCalls: number;
-		/** Whether that frame painted a camera field-of-view sector. */
-		readonly coneVisible: boolean;
-	}
-	let readMinimapOverlayDraw = (): MinimapOverlayDraw => ({
-		circleCalls: 0,
-		coneVisible: false,
-	});
 
 	/** Keep the keyboard fixture's two submitted entries regardless of product tuning. */
 	const chatHistoryLimit = 2;
@@ -4440,12 +3885,8 @@
 		// Landblock (0, 1) begins at world (0, -192), placing this at (100, -200).
 		transform.m41 = 100;
 		transform.m43 = -8;
-		transform.m11 = Math.cos(doorAngle);
-		transform.m13 = Math.sin(doorAngle);
-		transform.m31 = -Math.sin(doorAngle);
-		transform.m33 = Math.cos(doorAngle);
 		return {
-			sidewaysSpan: { minX: -doorHalfWidth, maxX: doorHalfWidth, z: 0 },
+			sidewaysSpan: { minX: -2, maxX: 2, z: 0 },
 			placement: {
 				envCellId: null,
 				landblockId: "0x0001ffff",
@@ -4550,24 +3991,6 @@
 		return { capped: 60, uncapped: 144 };
 	}
 
-	function clientWorld(): HTMLElement {
-		const world = document.querySelector<HTMLElement>(".client-world");
-		if (world === null)
-			throw new Error("Client HUD harness world is unavailable.");
-		return world;
-	}
-
-	function surface(label: string): HTMLElement {
-		const candidate = Array.from(
-			clientWorld().querySelectorAll<HTMLElement>(
-				":scope > .gameplay-controls > section[aria-label]",
-			),
-		).find((element) => element.getAttribute("aria-label") === label);
-		if (candidate === undefined)
-			throw new Error(`Client HUD surface is unavailable: ${label}.`);
-		return candidate;
-	}
-
 	function rectangle(element: HTMLElement): ClientHudHarnessRectangle {
 		const bounds = element.getBoundingClientRect();
 		return {
@@ -4577,298 +4000,19 @@
 			width: bounds.width,
 		};
 	}
-
 	function capture(): ClientHudHarnessState {
-		const lock = document.querySelector<HTMLButtonElement>(".client-ui-lock");
-		if (lock === null)
-			throw new Error("Client HUD harness layout control is unavailable.");
-		const surfaces = Object.fromEntries(
-			Array.from(
-				clientWorld().querySelectorAll<HTMLElement>(
-					":scope > .gameplay-controls > section[aria-label]",
-				),
-			).map((element) => [
-				element.getAttribute("aria-label") ?? "",
-				rectangle(element),
-			]),
-		);
-		const moveHandles = Object.fromEntries(
-			Object.keys(surfaces).flatMap((label) => {
-				const handle = surface(label).querySelector<HTMLElement>(
-					".layout-move, .hud-window-titlebar",
-				);
-				return handle === null ? [] : [[label, rectangle(handle)]];
-			}),
-		);
-		const toastElement = document.querySelector<HTMLElement>(".client-toast");
-		const gameCanvas = document.querySelector<HTMLElement>(".client-canvas");
-		const targetIndicator =
-			document.querySelector<HTMLElement>(".target-indicator");
-		const targetIndicatorGlass = targetIndicator?.querySelector<SVGPathElement>(
-			".target-indicator__glass",
-		);
-		const selectedEntityHud =
-			document.querySelector<HTMLElement>(".selected-entity");
-		const interactButton = selectedEntityHud?.querySelector<HTMLButtonElement>(
-			'button[aria-label="Interact"]',
-		);
-		const minimapOverlayCanvas = document.querySelector<HTMLElement>(
-			".minimap-overlay-canvas",
-		);
-		if (gameCanvas === null || minimapOverlayCanvas === null) {
-			throw new Error("Client HUD interaction canvases are unavailable.");
-		}
-		const minimapOverlay = readMinimapOverlayDraw();
+		const canvas = document.querySelector<HTMLElement>(".client-canvas");
+		if (canvas === null) throw new Error("Client HUD canvas is unavailable.");
 		return {
-			gameCanvas: rectangle(gameCanvas),
-			gameCanvasCursor: getComputedStyle(gameCanvas).cursor,
-			hoveredGuid,
-			mode: lock.getAttribute("aria-pressed") === "true" ? "layout" : "runtime",
-			minimapCoordinates:
-				document.querySelector<HTMLElement>(".minimap-coordinates")
-					?.textContent ?? "",
-			minimapConeVisible: minimapOverlay.coneVisible,
-			minimapResetVisible: document.querySelector(".minimap-reset") !== null,
-			minimapOverlayCircleCalls: minimapOverlay.circleCalls,
-			minimapOverlayInkPixels: countMinimapOverlayInkPixels(),
-			minimapOverlayCanvas: rectangle(minimapOverlayCanvas),
-			moveHandles,
+			gameCanvas: rectangle(canvas),
 			orbitDeltas: orbitDeltas.map((delta) => ({ ...delta })),
 			preciseJumpActivationCount,
 			preciseJumpAimCount,
 			selectedGuid,
-			selectionAnnouncement:
-				document
-					.querySelector<HTMLElement>(".selection-announcement")
-					?.textContent?.trim() ?? "",
-			selectionEvents: [...selectionEvents],
-			selectionMaintenanceCount,
-			selectedEntityHud:
-				selectedEntityHud === null
-					? null
-					: {
-							interactionAvailable: interactButton?.disabled === false,
-							name:
-								selectedEntityHud
-									.querySelector("strong")
-									?.textContent?.trim() ?? "",
-						},
-			surfaces,
-			toast:
-				toastElement === null
-					? null
-					: {
-							preview: toastElement.classList.contains("client-toast-preview"),
-							role: toastElement.getAttribute("role"),
-							text: toastElement.textContent?.trim() ?? "",
-						},
-			targetIndicator:
-				targetIndicator === null || targetIndicator.hidden
-					? null
-					: {
-							fill:
-								targetIndicatorGlass === null ||
-								targetIndicatorGlass === undefined
-									? null
-									: getComputedStyle(targetIndicatorGlass).fill,
-							filter: getComputedStyle(targetIndicator).filter,
-							rectangle: rectangle(targetIndicator),
-						},
-			viewport: {
-				height: clientWorld().clientHeight,
-				width: clientWorld().clientWidth,
-			},
 			viewportSelectionPoints: viewportSelectionPoints.map((point) => ({
 				...point,
 			})),
-			viewportHoverPoints: viewportHoverPoints.map((point) => ({ ...point })),
 		};
-	}
-
-	function countMinimapOverlayInkPixels(): number {
-		const canvas = document.querySelector<HTMLCanvasElement>(
-			".minimap-overlay-canvas",
-		);
-		const context = canvas?.getContext("2d");
-		if (!canvas || !context) return 0;
-		const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
-		let count = 0;
-		for (let alpha = 3; alpha < pixels.length; alpha += 4) {
-			if (pixels[alpha] !== 0) count += 1;
-		}
-		return count;
-	}
-
-	/** Observe final Canvas operations without adding diagnostic state to production components. */
-	function observeMinimapOverlayDraw(): {
-		readonly read: () => MinimapOverlayDraw;
-		readonly restore: () => void;
-	} {
-		const canvas = document.querySelector<HTMLCanvasElement>(
-			".minimap-overlay-canvas",
-		);
-		const context = canvas?.getContext("2d");
-		if (!canvas || !context) {
-			throw new Error("Client HUD minimap overlay is unavailable.");
-		}
-		let circleCalls = 0;
-		let coneVisible = false;
-		const originalArc = context.arc;
-		const originalClearRect = context.clearRect;
-		context.arc = (
-			x: number,
-			y: number,
-			radius: number,
-			startAngle: number,
-			endAngle: number,
-			counterclockwise?: boolean,
-		): void => {
-			if (Math.abs(endAngle - startAngle) >= Math.PI * 2) circleCalls += 1;
-			else coneVisible = true;
-			originalArc.call(
-				context,
-				x,
-				y,
-				radius,
-				startAngle,
-				endAngle,
-				counterclockwise,
-			);
-		};
-		context.clearRect = (
-			x: number,
-			y: number,
-			width: number,
-			height: number,
-		) => {
-			circleCalls = 0;
-			coneVisible = false;
-			originalClearRect.call(context, x, y, width, height);
-		};
-		return {
-			read: () => ({ circleCalls, coneVisible }),
-			restore: () => {
-				context.arc = originalArc;
-				context.clearRect = originalClearRect;
-			},
-		};
-	}
-
-	function toggleMode(): void {
-		const lock = document.querySelector<HTMLButtonElement>(".client-ui-lock");
-		if (lock === null)
-			throw new Error("Client HUD harness layout control is unavailable.");
-		lock.click();
-	}
-
-	function setRuntimeTransients(visible: boolean): void {
-		jumpChargeActive = visible;
-		toast = visible
-			? { id: 2, message: "Runtime notification", tone: "status" }
-			: null;
-	}
-
-	function dragSurface(label: string, deltaX: number, deltaY: number): void {
-		const target = surface(label);
-		const handle = target.querySelector<HTMLElement>(
-			".layout-move, .hud-window-titlebar",
-		);
-		if (handle === null)
-			throw new Error(`Client HUD surface has no move handle: ${label}.`);
-		const bounds = handle.getBoundingClientRect();
-		const clientX = bounds.left + bounds.width / 2;
-		const clientY = bounds.top + bounds.height / 2;
-		const pointerId = 37;
-		handle.dispatchEvent(
-			new PointerEvent("pointerdown", {
-				bubbles: true,
-				button: 0,
-				buttons: 1,
-				clientX,
-				clientY,
-				pointerId,
-			}),
-		);
-		window.dispatchEvent(
-			new PointerEvent("pointermove", {
-				bubbles: true,
-				buttons: 1,
-				clientX: clientX + deltaX,
-				clientY: clientY + deltaY,
-				pointerId,
-			}),
-		);
-		window.dispatchEvent(
-			new PointerEvent("pointerup", {
-				bubbles: true,
-				button: 0,
-				clientX: clientX + deltaX,
-				clientY: clientY + deltaY,
-				pointerId,
-			}),
-		);
-	}
-
-	function resetMinimap(): void {
-		const reset = document.querySelector<HTMLButtonElement>(".minimap-reset");
-		if (reset === null)
-			throw new Error("Client HUD minimap reset is unavailable.");
-		reset.click();
-	}
-
-	function moveMinimapSubjectPastAutomaticReanchor(): void {
-		minimapSubjectWorldX += MINIMAP_AUTOMATIC_REANCHOR_DISTANCE_METERS + 1;
-	}
-
-	function moveMinimapSubjectByBreadcrumbSpacing(fraction: number): void {
-		const environment = minimapSubjectIndoor ? "indoor" : "outdoor";
-		minimapSubjectWorldX +=
-			MINIMAP_BREADCRUMB_POLICY.spacingMeters[environment] * fraction;
-	}
-
-	function teleportMinimapSubject(): void {
-		minimapSubjectWorldX +=
-			MINIMAP_BREADCRUMB_POLICY.maximumContinuousStepMeters + 1;
-	}
-
-	function setMinimapSubject(guid: number | null, indoor: boolean): void {
-		minimapSubjectGuid = guid;
-		minimapSubjectIndoor = indoor;
-	}
-
-	function probeViewportBlockers(): void {
-		const canvas = document.querySelector<HTMLCanvasElement>(".client-canvas");
-		const chat = document.querySelector<HTMLInputElement>(
-			'[aria-label="Chat message"]',
-		);
-		if (canvas === null || chat === null)
-			throw new Error("Viewport blocker probe requires canvas and chat.");
-		const closeModal = inputGate.block();
-		try {
-			chat.focus();
-			closeModal();
-			if (keyboard.gameActive || !inputGate.allowed)
-				throw new Error(
-					"Chat must own keyboard input while leaving viewport gestures available.",
-				);
-			canvas.dispatchEvent(
-				new PointerEvent("pointermove", {
-					clientX: 700,
-					clientY: 400,
-					pointerId: 1,
-				}),
-			);
-			keyboard.returnToGame();
-			if (!inputGate.allowed)
-				throw new Error("Returning to the game retained a viewport blocker.");
-		} finally {
-			closeModal();
-			keyboard.returnToGame();
-		}
-	}
-
-	function setCameraEnabled(enabled: boolean): void {
-		cameraEnabled = enabled;
 	}
 
 	async function probePreciseJumpWheel() {
@@ -4936,19 +4080,8 @@
 		preciseJumpActive = active;
 	}
 
-	function setTargetIndicatorFrame(
-		frame: ClientTargetIndicatorFrame | null,
-	): void {
-		targetIndicatorFrame = frame;
-	}
-
 	function selectEntity(guid: number | null): void {
 		selection.select(guid);
-		selectionEvents.push(guid);
-	}
-
-	function setHoverHitEnabled(enabled: boolean): void {
-		hoverHitEnabled = enabled;
 	}
 
 	function resetSelectionFixture(): void {
@@ -4957,15 +4090,11 @@
 		minimapSubjectIndoor = false;
 		selection.select(null);
 		hoveredGuid = null;
-		hoverHitEnabled = true;
-		targetIndicatorFrame = null;
 		cameraEnabled = true;
 		preciseJumpActive = false;
 		preciseJumpActivationCount = 0;
 		orbitDeltas.length = 0;
-		selectionEvents.length = 0;
 		viewportSelectionPoints.length = 0;
-		viewportHoverPoints.length = 0;
 	}
 
 	const showcaseSession = $derived(
@@ -5256,8 +4385,6 @@
 			},
 		);
 		const sessionStarted = interactionLifecycle.start();
-		const overlayObservation = observeMinimapOverlayDraw();
-		readMinimapOverlayDraw = overlayObservation.read;
 		const harnessGlobal = globalThis as typeof globalThis & {
 			__HOLTBURGER_3D_CLIENT_HUD_HARNESS__: ClientHudHarnessApi | undefined;
 		};
@@ -5776,7 +4903,6 @@
 					emit: emitInteractionEvent,
 					commands: interactionCommands,
 				}),
-			probeOverlayTheme: () => probeOverlayTheme(partyProbeContext),
 			setUiScale: (scale) => {
 				userSettings = {
 					...userSettings,
@@ -6064,35 +5190,14 @@
 			},
 			replyInventoryPreview: (result) =>
 				emitInteractionEvent("client-inventory-preview", result),
-			probeThemeApplication,
-			probeSelectedDiagnostics,
-			probeInteractableMarker,
-			measureDoorBar,
-			probeSelectedInteractions,
 			probeActionFeedback,
-			probeCharacterVitals,
 			probeConnectionBadge,
 			probePartyHud,
 			showPartyHud,
-			previewCharacterSelection: () => {
-				previewCharacters = true;
-			},
-			probeViewportBlockers,
 			capture,
-			dragSurface,
-			moveMinimapSubjectByBreadcrumbSpacing,
-			moveMinimapSubjectPastAutomaticReanchor,
-			resetMinimap,
 			resetSelectionFixture,
-			setCameraEnabled,
-			setHoverHitEnabled,
-			setMinimapSubject,
 			setPreciseJumpActive,
 			probePreciseJumpWheel,
-			setTargetIndicatorFrame,
-			setRuntimeTransients,
-			teleportMinimapSubject,
-			toggleMode,
 		};
 		function seedShowcaseInventory(): void {
 			const read = interactionLifecycle.entities.read();
@@ -6433,8 +5538,6 @@
 			nearbyOwner.destroy();
 			emoteController.destroy();
 			interactionLifecycle.stop();
-			overlayObservation.restore();
-			readMinimapOverlayDraw = () => ({ circleCalls: 0, coneVisible: false });
 			harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = undefined;
 		};
 	});
@@ -6466,404 +5569,355 @@
 			{/each}
 		</div>
 
-		{#if !previewCharacters}
-			<canvas
-				bind:this={gameplayCanvas}
-				class="client-canvas gameplay"
-				data-game-viewport
-				tabindex="-1"
-				aria-label="Game world"
-			></canvas>
-			{#if gameplayCanvas !== null && interactionRoot !== null}
-				<ClientGameplayView
-					statArtwork={{
-						load: async () => STAT_ICON_FIXTURE,
-						prepare: async () => {
-							throw new Error(
-								"HUD stat icons must use their session repository",
-							);
-						},
-					}}
-					platform="windows"
-					{barber}
-					lockInteractions={userSettings.lockInteractions}
-					onLockInteractionsChange={(lockInteractions) =>
-						(userSettings = { ...userSettings, lockInteractions })}
-					chatSuppression={userSettings.chatSuppression}
-					onChatSuppressionChange={(chatSuppression) =>
-						(userSettings = { ...userSettings, chatSuppression })}
-					{gameplayPreferences}
-					gameplayEnabled={true}
-					onGameplayOptionChange={async (option, enabled) => {
-						const apply = () => {
-							gameplayPreferences = {
-								...gameplayPreferences,
-								[option]: enabled,
-							};
+		<canvas
+			bind:this={gameplayCanvas}
+			class="client-canvas gameplay"
+			data-game-viewport
+			tabindex="-1"
+			aria-label="Game world"
+		></canvas>
+		{#if gameplayCanvas !== null && interactionRoot !== null}
+			<ClientGameplayView
+				statArtwork={{
+					load: async () => STAT_ICON_FIXTURE,
+					prepare: async () => {
+						throw new Error("HUD stat icons must use their session repository");
+					},
+				}}
+				platform="windows"
+				{barber}
+				lockInteractions={userSettings.lockInteractions}
+				onLockInteractionsChange={(lockInteractions) =>
+					(userSettings = { ...userSettings, lockInteractions })}
+				chatSuppression={userSettings.chatSuppression}
+				onChatSuppressionChange={(chatSuppression) =>
+					(userSettings = { ...userSettings, chatSuppression })}
+				{gameplayPreferences}
+				gameplayEnabled={true}
+				onGameplayOptionChange={async (option, enabled) => {
+					const apply = () => {
+						gameplayPreferences = {
+							...gameplayPreferences,
+							[option]: enabled,
 						};
-						if (deferGameplayUpdate) {
-							deferGameplayUpdate = false;
-							pendingGameplayUpdate = apply;
-						} else apply();
-					}}
-					{logopolisLaunchRevision}
-					theme={fixtureTheme}
-					canReturnToMenu={true}
-					canDisconnect={true}
-					onReturnToMainMenu={() => void interactionLifecycle.logout()}
-					onDisconnect={() => void interactionLifecycle.disconnect()}
-					bind:this={gameplayView}
-					{emotesEnabled}
-					nearby={nearbyOwner}
-					onSelectKnownEntity={(guid) => selection.selectKnownEntity(guid)}
-					onClearWaypoint={clearWaypoint}
-					onSetWaypoint={setWaypoint}
-					{partyHudPresent}
-					readPartyHudDisplay={() =>
-						presentPartyHud(
-							interactionLifecycle.partySnapshot(),
-							interactionLifecycle.state().playerGuid,
-						)}
-					onPartyHudDemand={(enabled) =>
-						interactionLifecycle.setPartyUpdateDemand("hud", enabled)}
-					party={socialParty}
-					friends={interactionLifecycle.friends}
-					contracts={interactionLifecycle.contracts}
-					squelch={interactionLifecycle.squelch}
-					allegiance={interactionLifecycle.allegiance}
-					characterGuid={housingCharacterGuid}
-					{houseCrystal}
-					{housing}
-					{housingManagement}
-					onSearchHousing={async (houseType) => {
-						housingSearches.push(houseType);
-						housing = {
-							...housing,
-							search: { ...housing.search, pendingType: houseType },
-						};
-					}}
-					onRefreshHousing={async () => {
-						housingRefreshes += 1;
-					}}
-					readConnection={() => interactionLifecycle.connectionSample()}
-					characterSheet={interactionLifecycle.characterSheet}
-					{appearanceOptions}
-					onAppearanceOptionChange={async (option, enabled) => {
-						appearanceOptions = {
-							...appearanceOptions,
-							[option === "helmet" ? "showHelmet" : "showCloak"]: enabled,
-						};
-					}}
-					inspectionPreviewHeight={userSettings.inspection.previewHeight}
-					audio={userSettings.audio}
-					onAudioChange={(audio) => (userSettings = { ...userSettings, audio })}
-					graphics={userSettings.graphics}
-					ui={userSettings.ui}
-					clockFormat={userSettings.clockFormat}
-					environmentOverrides={userSettings.environmentOverrides}
-					weatherPresets={environmentPresets}
-					{environmentIssue}
-					readServerEnvironment={() => environmentServer.readout()}
-					onClockFormatChange={(clockFormat) =>
-						(userSettings = { ...userSettings, clockFormat })}
-					onEnvironmentOverridesChange={changeEnvironmentOverrides}
-					input={userSettings.input}
-					textureFilteringCapabilities={{ maximumAnisotropy: 8 }}
-					onGraphicsChange={(graphics) =>
-						(userSettings = { ...userSettings, graphics })}
-					onUiChange={(ui) => (userSettings = { ...userSettings, ui })}
-					onInputChange={changeInput}
-					onInspectionPreviewHeightChange={(previewHeight) =>
-						(userSettings = {
-							...userSettings,
-							inspection: { previewHeight },
-						})}
-					objectPreviewService={{
-						open: () => ({
-							dispose: async () => undefined,
-							diagnostics: () => null,
-							ready: Promise.resolve(),
-							replaceSource: async () => ({ kind: "installed" }),
-							withdrawSource: async () => undefined,
-							setViewport: () => undefined,
-						}),
-					}}
-					itemSession={interactionLifecycle}
-					hudLayout={userSettings.hudLayout}
-					onHudPlacementChange={(surface, placement) =>
-						(userSettings = {
-							...userSettings,
-							hudLayout: { ...userSettings.hudLayout, [surface]: placement },
-						})}
-					onHudReset={(hudLayout) =>
-						(userSettings = { ...userSettings, hudLayout })}
-					spellBarShape={userSettings.spellBarShape}
-					onSpellBarShapeChange={(spellBarShape) =>
-						(userSettings = { ...userSettings, spellBarShape })}
-					minimapViewDiameters={userSettings.minimapViewDiameters}
-					onMinimapViewDiametersChange={(minimapViewDiameters) =>
-						(userSettings = { ...userSettings, minimapViewDiameters })}
-					chatChannelFilters={userSettings.chatChannelFilters}
-					onChatChannelFiltersChange={(chatChannelFilters) =>
-						(userSettings = { ...userSettings, chatChannelFilters })}
-					chatFilters={userSettings.chatFilters}
-					chatTimestamps={userSettings.chatTimestamps}
-					onChatTimestampsChange={(chatTimestamps) =>
-						(userSettings = { ...userSettings, chatTimestamps })}
-					onChatFiltersChange={(chatFilters) =>
-						(userSettings = { ...userSettings, chatFilters })}
-					actionBars={characterSettings?.actionBars ?? null}
-					onActionBarsChange={(actionBars) => {
-						if (characterSettings !== null)
-							characterSettings = { ...characterSettings, actionBars };
-					}}
-					{hudMode}
-					uiShowcase={new URLSearchParams(window.location.search).has(
-						"hud-showcase",
+					};
+					if (deferGameplayUpdate) {
+						deferGameplayUpdate = false;
+						pendingGameplayUpdate = apply;
+					} else apply();
+				}}
+				{logopolisLaunchRevision}
+				theme={fixtureTheme}
+				canReturnToMenu={true}
+				canDisconnect={true}
+				onReturnToMainMenu={() => void interactionLifecycle.logout()}
+				onDisconnect={() => void interactionLifecycle.disconnect()}
+				bind:this={gameplayView}
+				{emotesEnabled}
+				nearby={nearbyOwner}
+				onSelectKnownEntity={(guid) => selection.selectKnownEntity(guid)}
+				onClearWaypoint={clearWaypoint}
+				onSetWaypoint={setWaypoint}
+				{partyHudPresent}
+				readPartyHudDisplay={() =>
+					presentPartyHud(
+						interactionLifecycle.partySnapshot(),
+						interactionLifecycle.state().playerGuid,
 					)}
-					onHudModeChange={(mode) => (hudMode = mode)}
-					{spellBar}
-					onSpellBarChange={(state) => (spellBar = state)}
-					{spellBarEnabled}
-					onSelectSpellTab={selectSpellTab}
-					onActivateSpellCell={activateSpellCell}
-					onActivateCasterSpell={activateCasterSpell}
-					combatMode={spellCombatMode}
-					{combatStatus}
-					{combatProfileSelectionRevision}
-					combatControls={characterSettings?.combatControls ?? {
-						melee: { height: "medium", power: 0.5 },
-						missile: { height: "medium", accuracy: 0.5 },
-					}}
-					onCombatProfileSelect={selectCombatProfile}
-					onStopCombat={() => {
-						combatStatus = {
-							desired: null,
-							state: "idle",
-							processedIntentSequence: 0,
-							refill: null,
-						};
-					}}
-					combatEnabled={true}
-					onToggleCombat={() => {
-						if (!showcase) return;
-						spellCombatMode = spellCombatMode === "peace" ? "melee" : "peace";
-						emitInteractionEvent("client-combat-mode-updated", {
-							mode: spellCombatMode,
-						});
-					}}
-					onCastSpell={(id) => void castSpell(id)}
-					{itemInteractions}
-					entityCollisionDisabled={false}
-					onEntityCollisionDisabledChange={() => {}}
-					cameraController={cameraEnabled ? cameraController : null}
-					mouseMovement={mouseFixture.movement}
-					{preciseJumpActive}
-					onPreciseJumpAim={() => {
-						preciseJumpAimCount += 1;
-					}}
-					onPreciseJumpPowerSet={(power) => {
-						jumpExtent = Math.max(MINIMUM_JUMP_POWER, Math.min(1, power));
-					}}
-					onPreciseJumpPowerAdjust={(steps) =>
-						preciseJumpPowerSteps.push(steps)}
-					onPreciseJumpActivate={() => {
-						preciseJumpActivationCount += 1;
-					}}
-					readCanSetCorpsePermission={() => true}
-					onCorpsePermission={(name, granted) => {
-						toast = {
-							id: 1,
-							message: `corpse-permission:${name}:${granted}`,
-							tone: "status",
-						};
-					}}
-					onSocialNotice={(message) => {
-						toast = { id: 1, message, tone: "warning" };
-					}}
-					onInventoryNotice={(message) => {
-						toast = { id: 1, message, tone: "status" };
-					}}
-					onCoordinatesCopied={() => {
-						toast = {
-							id: 2,
-							message: "Coordinates copied to clipboard.",
-							tone: "status",
-						};
-					}}
-					onPickInventoryTarget={(_x, _y, destination) => {
-						if (inventoryWorldResult === null)
-							pendingInventoryWorldPick = destination;
-						else if (destination.isCurrent())
-							destination.commit(inventoryWorldResult);
-					}}
-					onViewportSelect={(x, y, interact) => {
-						viewportSelectionPoints.push({ x, y, interact });
-						selectEntity(7);
-					}}
-					onViewportExamine={(x, y) => {
-						viewportSelectionPoints.push({ x, y, interact: false });
-						void inspectionOwner.examine(7);
-					}}
-					onViewportHover={(x, y) => {
-						viewportHoverPoints.push({ x, y });
-						// The item-use fixture supplies explicit hit-test results through hoverWorld.
-						if (activeItemUseProbe === null)
-							hoveredGuid = hoverHitEnabled ? 7 : null;
-					}}
-					onViewportHoverClear={() => (hoveredGuid = null)}
-					onMaintainEntitySelection={() => {
-						selectionMaintenanceCount += 1;
-					}}
-					onSelectPartyMember={(guid) => selection.selectKnownEntity(guid)}
-					onSelectEntity={selectEntity}
-					debugEnabled={true}
-					{unrestrictedUse}
-					onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
-					{readMinimapFrame}
-					worldMapSource={worldMapFixture.source}
-					{canTeleportFromMap}
-					recallDestinations={[]}
-					onRecall={async () => {}}
-					onTeleportToMapPosition={(position) =>
-						interactionLifecycle.teleportToMapPosition(position)}
-					{readDiagnostics}
-					{readSelectedEntity}
-					{readFrameRates}
-					readTargetIndicatorFrame={() => targetIndicatorFrame}
-					readCombatTargetFrame={() => null}
-					readLockFeedbackFrames={() => []}
-					readSelectedEntityDisplay={() =>
-						interactions.display(unrestrictedUse)}
-					{spells}
-					{enchantments}
-					{inventory}
-					{worldContainer}
-					{vendor}
-					{locks}
-					{salvage}
-					{trade}
-					onSelectContentsItem={(guid, mode) =>
-						selection.selectContentsItem(guid, mode)}
-					onInteractEntity={() =>
-						itemInteractions.interactSelected(unrestrictedUse)}
-					{inspection}
-					{bookReader}
-					onCloseBook={() => bookReaderOwner.close()}
-					onRetryBook={() => bookReaderOwner.retry()}
-					onExamineEntity={examineHarnessSelection}
-					onExamineItem={examineHarnessItem}
-					onExamineSpell={(spellId) => inspectionOwner.examineSpell(spellId)}
-					onCloseInspection={() => inspectionOwner.close()}
-					selectedEntityGuid={selectedGuid}
-					hoveredEntityGuid={hoveredGuid}
-					showRetailHiddenGeometry={false}
-					onShowRetailHiddenGeometryChange={() => undefined}
-					playerName={showcase ? "Wayfarer" : "Alice"}
-					worldName={showcase ? "Dereth" : "ACE Emulator"}
-					accountName="Fixture account"
-					{vitalWarningsEnabled}
-					vitals={warningVitals}
-					{jumpChargeActive}
-					jumpPowerKeys={["W", "S"]}
-					readJumpExtent={() => jumpExtent}
-					{toast}
-					chatMessages={messages}
-					{chatComposer}
-					{sentChatHistory}
-					onSendChat={async (message, resolution) => {
-						const generation = chatComposer.generation;
-						sentChatHistory = recordSentChat(
-							sentChatHistory,
-							message,
-							chatHistoryLimit,
+				onPartyHudDemand={(enabled) =>
+					interactionLifecycle.setPartyUpdateDemand("hud", enabled)}
+				party={socialParty}
+				friends={interactionLifecycle.friends}
+				contracts={interactionLifecycle.contracts}
+				squelch={interactionLifecycle.squelch}
+				allegiance={interactionLifecycle.allegiance}
+				characterGuid={housingCharacterGuid}
+				{houseCrystal}
+				{housing}
+				{housingManagement}
+				onSearchHousing={async (houseType) => {
+					housingSearches.push(houseType);
+					housing = {
+						...housing,
+						search: { ...housing.search, pendingType: houseType },
+					};
+				}}
+				onRefreshHousing={async () => {
+					housingRefreshes += 1;
+				}}
+				readConnection={() => interactionLifecycle.connectionSample()}
+				characterSheet={interactionLifecycle.characterSheet}
+				{appearanceOptions}
+				onAppearanceOptionChange={async (option, enabled) => {
+					appearanceOptions = {
+						...appearanceOptions,
+						[option === "helmet" ? "showHelmet" : "showCloak"]: enabled,
+					};
+				}}
+				inspectionPreviewHeight={userSettings.inspection.previewHeight}
+				audio={userSettings.audio}
+				onAudioChange={(audio) => (userSettings = { ...userSettings, audio })}
+				graphics={userSettings.graphics}
+				ui={userSettings.ui}
+				clockFormat={userSettings.clockFormat}
+				environmentOverrides={userSettings.environmentOverrides}
+				weatherPresets={environmentPresets}
+				{environmentIssue}
+				readServerEnvironment={() => environmentServer.readout()}
+				onClockFormatChange={(clockFormat) =>
+					(userSettings = { ...userSettings, clockFormat })}
+				onEnvironmentOverridesChange={changeEnvironmentOverrides}
+				input={userSettings.input}
+				textureFilteringCapabilities={{ maximumAnisotropy: 8 }}
+				onGraphicsChange={(graphics) =>
+					(userSettings = { ...userSettings, graphics })}
+				onUiChange={(ui) => (userSettings = { ...userSettings, ui })}
+				onInputChange={changeInput}
+				onInspectionPreviewHeightChange={(previewHeight) =>
+					(userSettings = {
+						...userSettings,
+						inspection: { previewHeight },
+					})}
+				objectPreviewService={{
+					open: () => ({
+						dispose: async () => undefined,
+						diagnostics: () => null,
+						ready: Promise.resolve(),
+						replaceSource: async () => ({ kind: "installed" }),
+						withdrawSource: async () => undefined,
+						setViewport: () => undefined,
+					}),
+				}}
+				itemSession={interactionLifecycle}
+				hudLayout={userSettings.hudLayout}
+				onHudPlacementChange={(surface, placement) =>
+					(userSettings = {
+						...userSettings,
+						hudLayout: { ...userSettings.hudLayout, [surface]: placement },
+					})}
+				onHudReset={(hudLayout) =>
+					(userSettings = { ...userSettings, hudLayout })}
+				spellBarShape={userSettings.spellBarShape}
+				onSpellBarShapeChange={(spellBarShape) =>
+					(userSettings = { ...userSettings, spellBarShape })}
+				minimapViewDiameters={userSettings.minimapViewDiameters}
+				onMinimapViewDiametersChange={(minimapViewDiameters) =>
+					(userSettings = { ...userSettings, minimapViewDiameters })}
+				chatChannelFilters={userSettings.chatChannelFilters}
+				onChatChannelFiltersChange={(chatChannelFilters) =>
+					(userSettings = { ...userSettings, chatChannelFilters })}
+				chatFilters={userSettings.chatFilters}
+				chatTimestamps={userSettings.chatTimestamps}
+				onChatTimestampsChange={(chatTimestamps) =>
+					(userSettings = { ...userSettings, chatTimestamps })}
+				onChatFiltersChange={(chatFilters) =>
+					(userSettings = { ...userSettings, chatFilters })}
+				actionBars={characterSettings?.actionBars ?? null}
+				onActionBarsChange={(actionBars) => {
+					if (characterSettings !== null)
+						characterSettings = { ...characterSettings, actionBars };
+				}}
+				{hudMode}
+				uiShowcase={new URLSearchParams(window.location.search).has(
+					"hud-showcase",
+				)}
+				onHudModeChange={(mode) => (hudMode = mode)}
+				{spellBar}
+				onSpellBarChange={(state) => (spellBar = state)}
+				{spellBarEnabled}
+				onSelectSpellTab={selectSpellTab}
+				onActivateSpellCell={activateSpellCell}
+				onActivateCasterSpell={activateCasterSpell}
+				combatMode={spellCombatMode}
+				{combatStatus}
+				{combatProfileSelectionRevision}
+				combatControls={characterSettings?.combatControls ?? {
+					melee: { height: "medium", power: 0.5 },
+					missile: { height: "medium", accuracy: 0.5 },
+				}}
+				onCombatProfileSelect={selectCombatProfile}
+				onStopCombat={() => {
+					combatStatus = {
+						desired: null,
+						state: "idle",
+						processedIntentSequence: 0,
+						refill: null,
+					};
+				}}
+				combatEnabled={true}
+				onToggleCombat={() => {
+					if (!showcase) return;
+					spellCombatMode = spellCombatMode === "peace" ? "melee" : "peace";
+					emitInteractionEvent("client-combat-mode-updated", {
+						mode: spellCombatMode,
+					});
+				}}
+				onCastSpell={(id) => void castSpell(id)}
+				{itemInteractions}
+				entityCollisionDisabled={false}
+				onEntityCollisionDisabledChange={() => {}}
+				cameraController={cameraEnabled ? cameraController : null}
+				mouseMovement={mouseFixture.movement}
+				{preciseJumpActive}
+				onPreciseJumpAim={() => {
+					preciseJumpAimCount += 1;
+				}}
+				onPreciseJumpPowerSet={(power) => {
+					jumpExtent = Math.max(MINIMUM_JUMP_POWER, Math.min(1, power));
+				}}
+				onPreciseJumpPowerAdjust={(steps) => preciseJumpPowerSteps.push(steps)}
+				onPreciseJumpActivate={() => {
+					preciseJumpActivationCount += 1;
+				}}
+				readCanSetCorpsePermission={() => true}
+				onCorpsePermission={(name, granted) => {
+					toast = {
+						id: 1,
+						message: `corpse-permission:${name}:${granted}`,
+						tone: "status",
+					};
+				}}
+				onSocialNotice={(message) => {
+					toast = { id: 1, message, tone: "warning" };
+				}}
+				onInventoryNotice={(message) => {
+					toast = { id: 1, message, tone: "status" };
+				}}
+				onCoordinatesCopied={() => {
+					toast = {
+						id: 2,
+						message: "Coordinates copied to clipboard.",
+						tone: "status",
+					};
+				}}
+				onPickInventoryTarget={(_x, _y, destination) => {
+					if (inventoryWorldResult === null)
+						pendingInventoryWorldPick = destination;
+					else if (destination.isCurrent())
+						destination.commit(inventoryWorldResult);
+				}}
+				onViewportSelect={(x, y, interact) => {
+					viewportSelectionPoints.push({ x, y, interact });
+					selectEntity(7);
+				}}
+				onViewportExamine={(x, y) => {
+					viewportSelectionPoints.push({ x, y, interact: false });
+					void inspectionOwner.examine(7);
+				}}
+				onViewportHover={() => {
+					// The item-use fixture supplies explicit hit-test results through hoverWorld.
+					if (activeItemUseProbe === null) hoveredGuid = 7;
+				}}
+				onViewportHoverClear={() => (hoveredGuid = null)}
+				onMaintainEntitySelection={() => {}}
+				onSelectPartyMember={(guid) => selection.selectKnownEntity(guid)}
+				onSelectEntity={selectEntity}
+				debugEnabled={true}
+				{unrestrictedUse}
+				onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
+				{readMinimapFrame}
+				worldMapSource={worldMapFixture.source}
+				{canTeleportFromMap}
+				recallDestinations={[]}
+				onRecall={async () => {}}
+				onTeleportToMapPosition={(position) =>
+					interactionLifecycle.teleportToMapPosition(position)}
+				{readDiagnostics}
+				{readSelectedEntity}
+				{readFrameRates}
+				readTargetIndicatorFrame={() => null}
+				readCombatTargetFrame={() => null}
+				readLockFeedbackFrames={() => []}
+				readSelectedEntityDisplay={() => interactions.display(unrestrictedUse)}
+				{spells}
+				{enchantments}
+				{inventory}
+				{worldContainer}
+				{vendor}
+				{locks}
+				{salvage}
+				{trade}
+				onSelectContentsItem={(guid, mode) =>
+					selection.selectContentsItem(guid, mode)}
+				onInteractEntity={() =>
+					itemInteractions.interactSelected(unrestrictedUse)}
+				{inspection}
+				{bookReader}
+				onCloseBook={() => bookReaderOwner.close()}
+				onRetryBook={() => bookReaderOwner.retry()}
+				onExamineEntity={examineHarnessSelection}
+				onExamineItem={examineHarnessItem}
+				onExamineSpell={(spellId) => inspectionOwner.examineSpell(spellId)}
+				onCloseInspection={() => inspectionOwner.close()}
+				selectedEntityGuid={selectedGuid}
+				hoveredEntityGuid={hoveredGuid}
+				showRetailHiddenGeometry={false}
+				onShowRetailHiddenGeometryChange={() => undefined}
+				playerName={showcase ? "Wayfarer" : "Alice"}
+				worldName={showcase ? "Dereth" : "ACE Emulator"}
+				accountName="Fixture account"
+				{vitalWarningsEnabled}
+				vitals={warningVitals}
+				{jumpChargeActive}
+				jumpPowerKeys={["W", "S"]}
+				readJumpExtent={() => jumpExtent}
+				{toast}
+				chatMessages={messages}
+				{chatComposer}
+				{sentChatHistory}
+				onSendChat={async (message, resolution) => {
+					const generation = chatComposer.generation;
+					sentChatHistory = recordSentChat(
+						sentChatHistory,
+						message,
+						chatHistoryLimit,
+					);
+					if (resolution.kind === "error") throw new Error(resolution.message);
+					if (resolution.kind === "send" || resolution.kind === "sequence") {
+						await emoteController.sendAll(
+							resolution.kind === "send"
+								? [resolution.request]
+								: resolution.requests,
+							{
+								sendAll: (requests, send) =>
+									chatComposer.sendAll(requests, async (request) => {
+										await send(request);
+										chatRequests.push(request);
+									}),
+							},
 						);
-						if (resolution.kind === "error")
-							throw new Error(resolution.message);
-						if (resolution.kind === "send" || resolution.kind === "sequence") {
-							await emoteController.sendAll(
-								resolution.kind === "send"
-									? [resolution.request]
-									: resolution.requests,
-								{
-									sendAll: (requests, send) =>
-										chatComposer.sendAll(requests, async (request) => {
-											await send(request);
-											chatRequests.push(request);
-										}),
-								},
-							);
-						} else if (isLogopolisCommand(message)) {
-							logopolisLaunchRevision += 1;
-						} else if (runClientHelpCommand(message, appendChat)) {
-							return;
-						} else if (runClientVersionCommand(message, appendChat)) {
-							return;
-						} else if (
-							await runClientCopyEntityCommand(
-								message,
-								readSelectedEntity,
-								(notice) => {
-									if (chatComposer.generation === generation)
-										appendChat(notice);
-								},
-							)
-						) {
-							return;
-						} else if (waypointProbeEnabled) submitWaypointChat(message);
-						else if (message.startsWith("/"))
-							throw new Error(
-								"Unknown command. Use /help for supported commands.",
-							);
-						else
-							await interactionLifecycle.sendChat({ kind: "speech", message });
-					}}
-					onChatNotice={(message) => {
-						toast = { id: 1, message, tone: "warning" };
-					}}
-					onSendChatError={(message) => {
-						appendChat({ kind: "error", message });
-					}}
-					canvasElement={gameplayCanvas}
-					{interactionRoot}
-				/>
-			{/if}
-		{/if}
-		{#if previewCharacters}
-			<div
-				class="character-preview ui-theme"
-				use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
-			>
-				<section class="ui-panel">
-					<header class="ui-frame">Asheron’s Call</header>
-					<div class="ui-body">
-						<ClientCharacterSelect
-							visualCache={null}
-							management={{ kind: "idle" }}
-							creation={null}
-							scene={null}
-							state={characterState}
-							{entryPending}
-							onChoose={(guid) =>
-								(characterState = { ...characterState, selectedGuid: guid })}
-							onEnter={() => {
-								entryPending = true;
-							}}
-							onDisconnect={() => {
-								previewCharacters = false;
-							}}
-						>
-							{#snippet musicControls()}
-								<ClientMusicControls
-									audio={userSettings.audio}
-									onAudioChange={(audio) =>
-										(userSettings = { ...userSettings, audio })}
-								/>
-							{/snippet}
-						</ClientCharacterSelect>
-					</div>
-				</section>
-			</div>
+					} else if (isLogopolisCommand(message)) {
+						logopolisLaunchRevision += 1;
+					} else if (runClientHelpCommand(message, appendChat)) {
+						return;
+					} else if (runClientVersionCommand(message, appendChat)) {
+						return;
+					} else if (
+						await runClientCopyEntityCommand(
+							message,
+							readSelectedEntity,
+							(notice) => {
+								if (chatComposer.generation === generation) appendChat(notice);
+							},
+						)
+					) {
+						return;
+					} else if (waypointProbeEnabled) submitWaypointChat(message);
+					else if (message.startsWith("/"))
+						throw new Error(
+							"Unknown command. Use /help for supported commands.",
+						);
+					else await interactionLifecycle.sendChat({ kind: "speech", message });
+				}}
+				onChatNotice={(message) => {
+					toast = { id: 1, message, tone: "warning" };
+				}}
+				onSendChatError={(message) => {
+					appendChat({ kind: "error", message });
+				}}
+				canvasElement={gameplayCanvas}
+				{interactionRoot}
+			/>
 		{/if}
 	</div>
 {/snippet}
@@ -6885,22 +5939,6 @@
 	@layer components {
 		.harness-appearance {
 			display: contents;
-		}
-		.character-preview {
-			position: fixed;
-			inset: 0;
-			z-index: 50;
-			display: grid;
-			place-items: start center;
-			padding: 32px;
-			background: var(--ui-color-well);
-		}
-		.character-preview section {
-			width: min(100%, 640px);
-		}
-		.character-preview .ui-body {
-			display: grid;
-			gap: 12px;
 		}
 		:global(body) {
 			margin: 0;

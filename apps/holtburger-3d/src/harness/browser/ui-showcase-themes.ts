@@ -8,7 +8,7 @@ import steelUrl from "./themes/steel.css?url&no-inline";
 import opaqueUrl from "./themes/opaque.css?url&no-inline";
 import { withBundledUiThemes } from "../../app/ui-bundled-themes";
 
-export { steelUrl, opaqueUrl };
+export { steelUrl };
 
 /** Extra diagnostic stylesheet; shipped choices come from the production composition. */
 const fixtureThemeTransport = withBundledUiThemes({

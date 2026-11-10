@@ -8,6 +8,7 @@ import { probeCombatBar } from "./client-combat-bar-probe.mjs";
 import { probeSalvage } from "./client-salvage-probe.mjs";
 import { probeUserThemeLifecycle } from "./user-theme-lifecycle-probe.mjs";
 import { probeClientPresentation } from "./client-presentation-probe.mjs";
+import { probeClientPresentationLifetime } from "./client-presentation-lifetime-probe.mjs";
 import { probeClientUpdates } from "./client-updates-probe.mjs";
 import { probeClientCombatEscape } from "./client-combat-escape-probe.mjs";
 import { probeClientMouseMovement } from "./client-mouse-movement-probe.mjs";
@@ -16,11 +17,8 @@ import { probeClientWaypoint } from "./client-waypoint-probe.mjs";
 import { probePreciseJumpCamera } from "./client-precise-camera-probe.mjs";
 import { probeBindingControls } from "./client-binding-controls-probe.mjs";
 import { probeVendor } from "./client-vendor-probe.mjs";
-import {
-	probeCharacterSheet,
-	probeClientHud,
-	probeClientSettingsTabs,
-} from "./client-hud-probe.mjs";
+import { probeCharacterSheet } from "./client-character-sheet-probe.mjs";
+import { probeClientSettingsTabs } from "./client-settings-tabs-probe.mjs";
 import { probeObjectInspection } from "./client-object-inspection-probe.mjs";
 import {
 	probeKeyboardPolicy,
@@ -102,12 +100,12 @@ try {
 		childEnvironment.HOLTBURGER_WORLD_MAP_CACHE = cacheRoot;
 	}
 	const contentHostUrl =
-		options.clientHud || options.characterSheet
+		options.clientHudFixture || options.characterSheet
 			? null
 			: await startContentHost();
 	const viteUrl = await startViteServer(options.vitePort);
 	const result =
-		options.clientHud || options.characterSheet
+		options.clientHudFixture || options.characterSheet
 			? await runClientHudHarness({ viteUrl })
 			: await runHarness({ contentHostUrl, viteUrl });
 	const browserErrors = result.consoleMessages.filter(
@@ -151,7 +149,9 @@ try {
 				? "user-theme-lifecycle"
 				: options.clientCombatEscape
 					? "client-combat-escape"
-					: "client-presentation",
+					: options.clientPresentationLifetime
+						? "client-presentation-lifetime"
+						: "client-presentation",
 			passed: true,
 			evidence: result.clientPresentation,
 			browserErrors,
@@ -421,39 +421,15 @@ try {
 	} else if (options.clientCombatBar) {
 		report = {
 			suite: "client-combat-bar",
-			evidence: result.clientHud.combatBar,
+			evidence: result.clientCombatBar,
 			browserErrors,
 		};
-	} else if (options.clientHud) {
-		const evidence = {
-			clientHud: result.clientHud,
-			clientHudSnapping: result.clientHudSnapping,
-			connectionBadge: result.connectionBadge,
-			clientInspection: result.clientInspection,
-			clientTargeting: result.clientTargeting,
-			clientPreciseJump: result.clientPreciseJump,
-			clientTheme: result.clientTheme,
-			clientInventory: result.clientInventory,
-			keyboardPolicy: result.keyboardPolicy,
+	} else if (options.clientHudSnapping) {
+		report = {
+			suite: "client-hud-snapping",
+			evidence: result.clientHudSnapping,
+			browserErrors,
 		};
-		report =
-			options.reportMode === "full"
-				? {
-						...evidence,
-						consoleMessages: result.consoleMessages,
-						viewport: result.state.viewport,
-					}
-				: {
-						suite: "client-hud",
-						passed: true,
-						checks: Object.keys(evidence),
-						warnings: result.consoleMessages.filter(
-							({ level }) => level === "warning",
-						).length,
-						viewport: result.state.viewport,
-					};
-	} else if (options.reportMode === "particle-sao") {
-		report = particleSaoHarnessReport(result);
 	} else if (options.reportMode === "nameplate") {
 		report = nameplateHarnessReport(result);
 	} else if (options.reportMode === "object-preview") {
@@ -472,8 +448,6 @@ try {
 	} else {
 		report = {
 			glRenderer: result.glRenderer,
-			clientHud: result.clientHud,
-			clientHudSnapping: result.clientHudSnapping,
 			clientTargeting: result.clientTargeting,
 			clientPreciseJump: result.clientPreciseJump,
 			buildingRadius: options.buildingRadius,
@@ -699,13 +673,14 @@ function parseArgs(args) {
 		clientPresentation: false,
 		clientUpdates: false,
 		clientCombatEscape: false,
+		clientPresentationLifetime: false,
 		userThemeLifecycle: false,
 		worldMap: false,
 		clientWorldMap: false,
 		clientWorldMapLifetime: false,
 		clientWaypoint: false,
 		clientHousing: false,
-		clientHud: false,
+		clientHudFixture: false,
 		clientCombatBar: false,
 		clientTargeting: false,
 		clientHudSnapping: false,
@@ -856,33 +831,33 @@ function parseArgs(args) {
 		const arg = args[index];
 		switch (arg) {
 			case "--item-cooldowns":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.itemCooldowns = true;
 				break;
 			case "--client-party-screenshots":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientPartyScreenshotDirectory = resolve(
 					requireValue(args, ++index, arg),
 				);
 				break;
 			case "--client-attention":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientAttention = true;
 				break;
 			case "--client-vitals":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientVitals = true;
 				break;
 			case "--client-environment":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientEnvironment = true;
 				break;
 			case "--client-audio":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientAudio = true;
 				break;
 			case "--client-connection":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientConnection = true;
 				break;
 			case "--user-theme-lifecycle":
@@ -900,6 +875,10 @@ function parseArgs(args) {
 				parsed.clientPresentation = true;
 				parsed.clientCombatEscape = true;
 				break;
+			case "--client-presentation-lifetime":
+				parsed.clientPresentation = true;
+				parsed.clientPresentationLifetime = true;
+				break;
 			case "--pregame-location":
 				parsed.pregameLocation = Number(args[++index]);
 				if (
@@ -915,148 +894,145 @@ function parseArgs(args) {
 				parsed.worldMap = true;
 				break;
 			case "--client-targeting":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientTargeting = true;
 				break;
 			case "--client-combat-bar":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientCombatBar = true;
 				break;
 			case "--client-waypoint":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientWaypoint = true;
 				break;
 			case "--client-world-map":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientWorldMap = true;
 				break;
 			case "--client-world-map-lifetime":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientWorldMapLifetime = true;
 				break;
 			case "--client-housing":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientHousing = true;
 				break;
 			case "--client-settings-tabs":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientSettingsTabs = true;
 				break;
 			case "--client-emotes":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientEmotes = true;
 				break;
 			case "--client-keyboard":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientKeyboard = true;
 				break;
 			case "--client-select-picker":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientSelectPicker = true;
 				break;
 			case "--client-precise-jump":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientPreciseJump = true;
 				break;
 			case "--client-locks":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientLocks = true;
 				break;
 			case "--client-inventory":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientInventory = true;
 				break;
 			case "--client-spells":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientSpells = true;
 				break;
 			case "--client-nearby":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientNearby = true;
 				break;
 			case "--client-hud-snapping":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientHudSnapping = true;
 				break;
-			case "--client-hud":
-				parsed.clientHud = true;
-				break;
 			case "--cell-tooltips":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.cellTooltips = true;
 				break;
 			case "--client-ui-scaling":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientUiScaling = true;
 				break;
 			case "--client-loadouts":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientLoadouts = true;
 				break;
 			case "--character-sheet":
 				parsed.characterSheet = true;
 				break;
 			case "--client-salvage":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientSalvage = true;
 				break;
 			case "--client-trade":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientTrade = true;
 				break;
 			case "--client-inspection":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientInspection = true;
 				break;
 			case "--client-allegiance":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientAllegiance = true;
 				break;
 			case "--client-squelch":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientSquelch = true;
 				break;
 			case "--client-binding-controls":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientBindingControls = true;
 				break;
 			case "--client-mouse-movement":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientMouseMovement = true;
 				break;
 			case "--client-barber":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientBarber = true;
 				break;
 			case "--client-bindings":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientBindings = true;
 				break;
 			case "--client-selected-actions":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientSelectedActions = true;
 				break;
 			case "--client-contracts":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientContracts = true;
 				break;
 			case "--client-friends":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientFriends = true;
 				break;
 			case "--client-party":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientParty = true;
 				break;
 			case "--client-book":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.clientBook = true;
 				break;
 			case "--ui-theme":
 				parsed.uiTheme = true;
 				break;
 			case "--ui-showcase":
-				parsed.clientHud = true;
+				parsed.clientHudFixture = true;
 				parsed.uiShowcase = true;
 				break;
 			case "--full-report":
@@ -1064,9 +1040,6 @@ function parseArgs(args) {
 				break;
 			case "--brief":
 				parsed.reportMode = "brief";
-				break;
-			case "--particle-sao-report-only":
-				parsed.reportMode = "particle-sao";
 				break;
 			case "--nameplate-report-only":
 				parsed.reportMode = "nameplate";
@@ -1864,12 +1837,12 @@ function parseArgs(args) {
 		[
 			parsed.worldMap,
 			parsed.uiTheme,
-			parsed.clientHud,
+			parsed.clientHudFixture,
 			parsed.characterSheet,
 		].filter(Boolean).length > 1
 	)
 		throw new Error(
-			"Choose one of --world-map, --ui-theme, --client-hud, or --character-sheet.",
+			"Choose one of --world-map, --ui-theme, a focused HUD scenario, or --character-sheet.",
 		);
 	if (
 		parsed.cameraLandblockId &&
@@ -2077,15 +2050,15 @@ Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
   --client-spells       Exercise the character spellbook tab and spell-bar interactions.
   --cell-tooltips       Verify cell hover/focus disclosure and synthetic artwork failures without DATs.
-  --brief               Print summary evidence (the default for --client-hud).
+  --brief               Print summary evidence.
   --client-contracts    Exercise Journal and outdoor contract map markers, tooltips, timers, and removal.
   --client-book         Exercise the book reader through the client HUD fixture.
-  --full-report         Print complete diagnostic evidence, including HUD snapshots.
-  --particle-sao-report-only
-                        Print only workload identity, particle/SAO metrics, timings, and errors.
+  --full-report         Print complete diagnostic evidence.
   --nameplate-report-only
                         Print only renderer identity, errors, profiling, and nameplate evidence.
   --client-presentation Verify actual client selection/creator/gameplay/return on one world context.
+  --client-presentation-lifetime
+                        Delay the camera's cell, resume drawing, and verify joined runtime shutdown.
   --client-updates Verify the release changes modal and pregame visibility registrations on actual client pages.
   --client-combat-escape Verify combat retry and cancellation ordering through the actual client.
   --pregame-location <index> Choose a configured pregame scene for diagnostics (default: 0).
@@ -2320,8 +2293,6 @@ Options:
   --client-mouse-movement Verify held mouse movement, steering, and cancellation.
   --client-hud-snapping Verify action-bar adjacency, alignment, and pointer release.
   --client-combat-bar   Verify attack controls, projectile supply, and HUD cancellation.
-  --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
-                         constrained viewport restoration using the deterministic client fixture.
   --client-locks        Verify locked-target HUD, manual and batched keys, Escape, and teardown.
   --client-inventory    Verify inventory gestures, item use, give confirmations, and suppression.
   --item-cooldowns      Verify shared countdowns, themed CSS fills, expiry, and untouched icon artwork.
@@ -2772,55 +2743,6 @@ function nameplateHarnessReport(result) {
 		nameplateWorkload: result.nameplateWorkload,
 		nameplateLifecycle: result.nameplateLifecycle,
 		nameplateBenchmark: result.nameplateBenchmark,
-	};
-}
-
-/** Compact evidence surface for the particle/SAO optimization plan's repeated hardware runs. */
-function particleSaoHarnessReport(result) {
-	const metrics = result.state.metrics;
-	return {
-		ambientOcclusionCoverageCensus: result.state.ambientOcclusionCoverageCensus,
-		camera: result.state.camera,
-		configuration: {
-			buildingRadius: options.buildingRadius,
-			captureFrame: options.captureFrame ?? null,
-			envCellRadius: options.envCellRadius,
-			explicitObjectRadius: options.explicitObjectRadius,
-			frameIntervalMs: options.frameIntervalMs ?? null,
-			frameMode: options.frameMode,
-			generatedObjectRadius: options.generatedObjectRadius,
-			landblockId: options.landblockId,
-			measureMs: options.measureMs,
-			particleSeed: options.particleSeed ?? null,
-			renderScale: result.state.frameSettings.quality.renderScale,
-			settleMs: options.settleMs,
-			terrainRadius: options.terrainRadius,
-		},
-		consoleMessages: result.consoleMessages.filter(
-			({ level }) => level === "error" || level === "exception",
-		),
-		frameProfile: result.state.frameProfile,
-		glRenderer: result.glRenderer,
-		metrics:
-			metrics === null
-				? null
-				: {
-						ambientOcclusion: metrics.ambientOcclusion,
-						portalAtlasTilePixelCount: metrics.portalAtlasTilePixelCount,
-						submittedParticleBatchCount: metrics.submittedParticleBatchCount,
-						submittedParticleInstanceCount:
-							metrics.submittedParticleInstanceCount,
-						unresolvedParticleBatchCount: metrics.unresolvedParticleBatchCount,
-						uploadedParticleRecordRowCount:
-							metrics.uploadedParticleRecordRowCount,
-						visibleDynamicEntityCount: metrics.visibleDynamicEntityCount,
-						visibleDynamicSourceRangeCount:
-							metrics.visibleDynamicSourceRangeCount,
-					},
-		particles: result.state.authoredDynamics?.particles ?? null,
-		tickProfile: result.state.tickProfile,
-		timing: result.state.timing,
-		viewport: result.state.viewport,
 	};
 }
 
@@ -4896,13 +4818,11 @@ async function runClientHudHarness({ viteUrl }) {
 		}
 		if (options.clientCombatBar)
 			return {
-				clientHud: {
-					combatBar: await probeCombatBar(
-						client,
-						evaluateExpression,
-						options.screenshotPath,
-					),
-				},
+				clientCombatBar: await probeCombatBar(
+					client,
+					evaluateExpression,
+					options.screenshotPath,
+				),
 				consoleMessages,
 				state: { error: null, ready: true },
 			};
@@ -5188,7 +5108,6 @@ async function runClientHudHarness({ viteUrl }) {
 					evaluateExpression,
 					delay,
 					1,
-					options.screenshotPath,
 				),
 				screenshot: options.screenshotPath
 					? (await client.send("Page.captureScreenshot")).data
@@ -5249,7 +5168,7 @@ async function runClientHudHarness({ viteUrl }) {
 			};
 		}
 		if (options.clientInspection) {
-			// Inspection verifies coexistence with the container fixture established by the full HUD suite.
+			// Open a container to exercise inspection alongside an existing interaction window.
 			await evaluate(
 				client,
 				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeWorldContainer",
@@ -5508,16 +5427,7 @@ async function runClientHudHarness({ viteUrl }) {
 				state: { error: null, ready: true },
 			};
 		}
-		return {
-			...(await probeClientHud(client, {
-				options,
-				viteUrl,
-				evaluate,
-				evaluateExpression,
-				delay,
-			})),
-			consoleMessages,
-		};
+		throw new Error("A focused HUD scenario is required.");
 	} finally {
 		client.close();
 	}
@@ -5638,7 +5548,9 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 						? probeUserThemeLifecycle
 						: options.clientCombatEscape
 							? probeClientCombatEscape
-							: probeClientPresentation
+							: options.clientPresentationLifetime
+								? probeClientPresentationLifetime
+								: probeClientPresentation
 			)(client, evaluateExpression, consoleMessages);
 			return {
 				clientPresentation,

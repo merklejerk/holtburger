@@ -49,8 +49,12 @@ export async function probeClientUpdates(client, evaluate, consoleMessages) {
 		await wait(`${trigger}?.classList.contains('update-available')`);
 		const evidence = await read(`(() => {
 			const button = ${trigger}; const bounds = button.getBoundingClientRect();
-			return {label: button.getAttribute('aria-label'), visible: button.checkVisibility(), x: bounds.left, right: bounds.right, width: innerWidth, registrations: ${updates}.read().registrations};
+			return {label: button.getAttribute('aria-label'), build: button.querySelector('span').textContent, visible: button.checkVisibility(), x: bounds.left, right: bounds.right, width: innerWidth, registrations: ${updates}.read().registrations};
 		})()`);
+		const expectedBuild = await read(
+			"import('/src/app/app-build.ts').then(module => module.APP_BUILD_LABEL)",
+		);
+		assert.equal(evidence.build, expectedBuild);
 		assert.equal(evidence.label, "Update available: v0.2.0 — view changes");
 		assert.equal(evidence.visible, true);
 		assert.ok(evidence.x >= 0 && evidence.right <= evidence.width);

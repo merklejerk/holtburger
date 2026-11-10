@@ -124,13 +124,19 @@
 		const expectedErrors: string[] = [];
 		const reportError = console.error;
 		console.error = (...args) => {
+			// Presentation logging relays stacks as strings; recognize only our injected failure.
+			const message =
+				args[0] instanceof Error
+					? args[0].message
+					: typeof args[0] === "string"
+						? args[0].split("\n")[0].replace(/^Error: /, "")
+						: null;
 			if (
 				controlledLoading &&
 				args.length === 1 &&
-				args[0] instanceof Error &&
-				args[0].message.startsWith("Presentation fixture: ")
+				message === "Presentation fixture: scene failed"
 			) {
-				expectedErrors.push(args[0].message);
+				expectedErrors.push(message);
 				return;
 			}
 			reportError(...args);

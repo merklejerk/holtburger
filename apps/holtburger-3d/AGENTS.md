@@ -154,7 +154,7 @@ for every change.
 
 - Choose the smallest runtime check that verifies the changed behavior. Focused
   harness scenarios, live-client measurements, and visual inspection can provide
-  that evidence without running an entire HUD probe.
+  that evidence without running unrelated UI checks.
 - When a probe fails, inspect whether the failure involves the changed behavior
   before expanding the investigation. If attribution needs a baseline, compare
   equivalent commands and settings, including screenshot/profiling options.

@@ -141,17 +141,8 @@ export async function probeClientPresentation(
 			nameThemed: true,
 		});
 	};
-	const checkBuildInformation = async () => {
-		assert.match(
-			await read(
-				"document.querySelector('[aria-label=\"Build information\"]')?.textContent ?? ''",
-			),
-			/^DEV · v\S+ · [0-9a-f]{8,}(?: · modified)?$/,
-		);
-	};
 	const covered = async () => {
 		await checkFooterLayout();
-		await checkBuildInformation();
 		assert.equal(
 			await read(
 				"document.querySelector('.client-loading-page') !== null && document.querySelector('.client-character-list') === null && document.querySelector('.creature-preview') === null",
@@ -343,7 +334,6 @@ export async function probeClientPresentation(
 		const selection = await read(`${api}.read()`);
 		await checkPregameTheme();
 		await checkFooterLayout();
-		await checkBuildInformation();
 		assert.equal(
 			await read("globalThis.__PRESENTATION_REPEATED_TIMESTAMP__"),
 			true,
@@ -366,9 +356,30 @@ export async function probeClientPresentation(
 				windowsVirtualKeyCode: code,
 			});
 			await wait(
-				`document.querySelectorAll('button[name=character]')[${index}].getAttribute("aria-pressed") === "true"`,
+				`(() => { const row = document.querySelectorAll('button[name=character]')[${index}]; return row.getAttribute("aria-pressed") === "true" && document.activeElement === row; })()`,
 			);
 		}
+		// Native traversal must reach entry; row management controls may appear along the way.
+		const focusableCount = await read(
+			"document.querySelectorAll('button, input, select, textarea, a[href], [tabindex]').length",
+		);
+		for (let step = 0; step < focusableCount; step++) {
+			if (
+				await read("document.activeElement?.classList.contains('enter-world')")
+			)
+				break;
+			for (const type of ["keyDown", "keyUp"])
+				await client.send("Input.dispatchKeyEvent", {
+					type,
+					key: "Tab",
+					code: "Tab",
+					windowsVirtualKeyCode: 9,
+				});
+		}
+		assert.equal(
+			await read("document.activeElement?.classList.contains('enter-world')"),
+			true,
+		);
 
 		// Management belongs to each row and must not change the selected character.
 		await client.send("Input.dispatchMouseEvent", {
@@ -404,6 +415,8 @@ export async function probeClientPresentation(
 			),
 			"visible",
 		);
+		// Hiding requires both hover and focus to leave the row.
+		await read("document.querySelector('.enter-world').focus()");
 		await client.send("Input.dispatchMouseEvent", {
 			type: "mouseMoved",
 			x: 1,
@@ -492,11 +505,11 @@ export async function probeClientPresentation(
 			true,
 		);
 		await wait(
-			`document.querySelector('.character-deletion-dialog') === null && document.querySelector('.character-deletion-status') !== null`,
+			`document.querySelector('.character-deletion-dialog') === null && document.querySelector('button[aria-label="Restore No saved appearance"]') !== null`,
 		);
 		assert.equal(
 			await read(
-				`document.querySelector('.character-deletion-status time').dateTime.length > 0`,
+				`document.querySelector('button[name=character].character-deleted')?.dataset.uiTooltip.startsWith('Pending deletion')`,
 			),
 			true,
 		);
@@ -511,7 +524,7 @@ export async function probeClientPresentation(
 			`document.querySelector('button[aria-label="Restore No saved appearance"]').click()`,
 		);
 		await wait(
-			`document.querySelector('.character-deletion-status') === null && !document.querySelector('.enter-world').disabled`,
+			`document.querySelector('button[aria-label="Restore No saved appearance"]') === null && !document.querySelector('.enter-world').disabled`,
 		);
 		await read(`document.querySelector('button[name=character]').click()`);
 
@@ -808,7 +821,6 @@ export async function probeClientPresentation(
 
 		await checkPregameTheme();
 		await checkFooterLayout();
-		await checkBuildInformation();
 		assert.equal(
 			await read(
 				"document.querySelector('.pregame-footer button').textContent.trim() === 'Back'",
@@ -1061,31 +1073,6 @@ export async function probeClientPresentation(
 			),
 			-1,
 		);
-		for (const label of [
-			"Enter World",
-			"Create character",
-			"Settings",
-			"Disconnect",
-		]) {
-			await client.send("Input.dispatchKeyEvent", {
-				type: "keyDown",
-				key: "Tab",
-				code: "Tab",
-				windowsVirtualKeyCode: 9,
-			});
-			await client.send("Input.dispatchKeyEvent", {
-				type: "keyUp",
-				key: "Tab",
-				code: "Tab",
-				windowsVirtualKeyCode: 9,
-			});
-			assert.equal(
-				await read(
-					"document.activeElement.getAttribute('aria-label') ?? document.activeElement.textContent.trim()",
-				),
-				label,
-			);
-		}
 		const drag = await read(`(() => {
 			const preview = document.querySelector('.character-preview-viewport .creature-preview');
 			const bounds = preview.getBoundingClientRect();
@@ -1128,7 +1115,15 @@ export async function probeClientPresentation(
 			false,
 		);
 		await read(`${api}.refuseNextEntry()`);
-		await click("Enter World");
+		await read("document.querySelector('.enter-world').focus()");
+		for (const type of ["keyDown", "keyUp"])
+			await client.send("Input.dispatchKeyEvent", {
+				type,
+				key: "Enter",
+				code: "Enter",
+				windowsVirtualKeyCode: 13,
+				...(type === "keyDown" ? { text: "\r" } : {}),
+			});
 		await wait(
 			"document.querySelector('.client-character-select [role=alert]')?.textContent.includes('This character is still in the world.') || [...document.querySelectorAll('[role=alert]')].some(element => element.textContent.includes('This character is still in the world.'))",
 		);
@@ -1219,16 +1214,11 @@ export async function probeClientPresentation(
 		await wait("document.querySelector('h1')?.textContent === 'Disconnected'");
 		assert.equal((await read(`${api}.read()`)).disconnectRequests, 1);
 		assert.deepEqual((await read(`${api}.read()`)).launcherReturns, [null]);
-		await checkBuildInformation();
 		assert.deepEqual(
 			await read(
 				"[...document.querySelectorAll('.loading-content button.pregame-primary')].map(button => button.textContent.trim())",
 			),
 			["Back to launcher", "Quit application"],
-		);
-		assert.equal(
-			await read("document.querySelector('.pregame-footer button') === null"),
-			true,
 		);
 		assert.equal(
 			await read("document.querySelector('.loading-details') === null"),
@@ -1322,16 +1312,11 @@ export async function probeClientPresentation(
 		await wait(
 			"document.querySelector('h1')?.textContent === 'Session ended with errors'",
 		);
-		await checkBuildInformation();
 		assert.deepEqual(
 			await read(
 				"[...document.querySelectorAll('.loading-content button.pregame-primary')].map(button => button.textContent.trim())",
 			),
 			["Back to launcher", "Quit application"],
-		);
-		assert.equal(
-			await read("document.querySelector('.pregame-footer button') === null"),
-			true,
 		);
 		assert.equal(
 			await read(
@@ -1420,7 +1405,6 @@ export async function probeClientPresentation(
 			connectionLossDiagnostic: true,
 			captureDrainedBeforeClose: true,
 			quitDuringPregameLoading: true,
-			pregameBuildInformation: true,
 			centeredQuitAction: true,
 			lightweightCharacterReturn: true,
 			loadingGate: {

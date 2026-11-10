@@ -163,7 +163,10 @@
 	import { ClientPresentationRoot } from "./client-presentation-root";
 
 	import { GamePresentationOwner } from "../lib/game/runtime/game-presentation-owner";
-	import { PresentationTeardownStack } from "../lib/game/runtime/presentation-teardown";
+	import {
+		completePresentationOperations,
+		PresentationTeardownStack,
+	} from "../lib/game/runtime/presentation-teardown";
 	import { clientDebugEnabled } from "./client-debug";
 	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
 	import ClientLoadingPage from "./ClientLoadingPage.svelte";
@@ -2481,89 +2484,99 @@
 			// Include synchronous controller cleanup in the same retained failure outcome.
 			retirement.add("barber-editor", () => barberOwner.destroy());
 			retirement.add("client-controllers", () => {
-				postureOwner.destroy();
-				if (postureController === postureOwner) postureController = null;
-				emoteOwner.destroy();
-				if (emoteController === emoteOwner) emoteController = null;
-				spellState.destroy();
-				retireCombatEscapeContext();
-				spellReferences.dispose();
-				spells = null;
-				retireCharacterSettings();
-				navigationWaypoint.acceptCharacter(null);
-				nearbyOwner.destroy();
-				nearby = null;
-				unbindSalvage();
-				locksOwner.destroy();
-				locks = null;
-				salvageOwner.destroy();
-				salvage = null;
-				inventoryOwner.destroy();
-				containerOwner.destroy();
-				barber = null;
-				tradeOwner.destroy();
-				trade = null;
-				vendorOwner.destroy();
-				partyOwner.destroy();
-				party = null;
-				unbindPartyDialogs();
-				unbindContractDialogs();
-				housingManagementOwner.destroy();
-				housingManagement = null;
-				houseCrystalOwner.destroy();
-				houseCrystal = null;
-				vendor = null;
-				worldContainer = null;
-				inventory = null;
-				icons.dispose();
-				unbindHousingDialogs();
-				unbindItems();
-				items.destroy();
-				itemInteractions = null;
-				unbindDeathDialogs();
-				deathOwner.destroy();
-				deathCommands = null;
-				dialogOwner.destroy();
-				unsubscribeDialogs();
-				dialogs = null;
-				unsubscribeToast();
-				unsubscribeInspection();
-				unsubscribeReader();
-				readerOwner.destroy();
-				if (bookReaderOwner === readerOwner) bookReaderOwner = null;
-				bookReader = { kind: "idle" };
-				sessionInspection.destroy();
-				if (inspectionOwner === sessionInspection) inspectionOwner = null;
-				inspection = { kind: "idle" };
-				contractNotifications.reset();
-				toastCenter.destroy();
-				unsubscribePrecise();
-				unsubscribeSelection();
-				pointer.clearViewportHover();
-				unsubscribeHover();
-				interactions.destroy();
-				if (selectedEntityTracking === interactions)
-					selectedEntityTracking = null;
-				input.destroy();
-				cycle.destroy();
-				detachSelectionGate();
-				pointer.destroy();
-				if (selectionInput === input) selectionInput = null;
-				if (pointerSelection === pointer) pointerSelection = null;
-				selection.destroy();
-				if (entitySelection === selection) entitySelection = null;
-				precise.destroy();
-				if (preciseJumpSession === precise) preciseJumpSession = null;
-				unsubscribe();
-				owner.stop();
-				enchantments = null;
-				session = null;
-				chatComposer.reset();
-				chatCharacterGuid = null;
-				housing = emptyHousing();
-				canTeleportFromMap = false;
-				recallDestinations = [];
-				hostTransport = null;
+				// Preserve synchronous withdrawal and release order; one failure cannot skip another owner.
+				try {
+					completePresentationOperations(
+						[
+							() => postureOwner.destroy(),
+							() => emoteOwner.destroy(),
+							() => spellState.destroy(),
+							() => retireCombatEscapeContext(),
+							() => spellReferences.dispose(),
+							() => retireCharacterSettings(),
+							() => navigationWaypoint.acceptCharacter(null),
+							() => nearbyOwner.destroy(),
+							() => unbindSalvage(),
+							() => locksOwner.destroy(),
+							() => salvageOwner.destroy(),
+							() => inventoryOwner.destroy(),
+							() => containerOwner.destroy(),
+							() => tradeOwner.destroy(),
+							() => vendorOwner.destroy(),
+							() => partyOwner.destroy(),
+							() => unbindPartyDialogs(),
+							() => unbindContractDialogs(),
+							() => housingManagementOwner.destroy(),
+							() => houseCrystalOwner.destroy(),
+							() => icons.dispose(),
+							() => unbindHousingDialogs(),
+							() => unbindItems(),
+							() => items.destroy(),
+							() => unbindDeathDialogs(),
+							() => deathOwner.destroy(),
+							() => dialogOwner.destroy(),
+							() => unsubscribeDialogs(),
+							() => unsubscribeToast(),
+							() => unsubscribeInspection(),
+							() => unsubscribeReader(),
+							() => readerOwner.destroy(),
+							() => sessionInspection.destroy(),
+							() => contractNotifications.reset(),
+							() => toastCenter.destroy(),
+							() => unsubscribePrecise(),
+							() => unsubscribeSelection(),
+							() => pointer.clearViewportHover(),
+							() => unsubscribeHover(),
+							() => interactions.destroy(),
+							() => input.destroy(),
+							() => cycle.destroy(),
+							() => detachSelectionGate(),
+							() => pointer.destroy(),
+							() => selection.destroy(),
+							() => precise.destroy(),
+							() => unsubscribe(),
+							() => owner.stop(),
+							() => chatComposer.reset(),
+						],
+						"Client controller retirement failed.",
+					);
+				} finally {
+					// Withdraw shell references even when a controller could not finish releasing its resources.
+					if (postureController === postureOwner) postureController = null;
+					if (emoteController === emoteOwner) emoteController = null;
+					spells = null;
+					nearby = null;
+					locks = null;
+					salvage = null;
+					barber = null;
+					trade = null;
+					party = null;
+					housingManagement = null;
+					houseCrystal = null;
+					vendor = null;
+					worldContainer = null;
+					inventory = null;
+					itemInteractions = null;
+					deathCommands = null;
+					dialogs = null;
+					if (bookReaderOwner === readerOwner) bookReaderOwner = null;
+					bookReader = { kind: "idle" };
+					if (inspectionOwner === sessionInspection) inspectionOwner = null;
+					inspection = { kind: "idle" };
+					if (selectedEntityTracking === interactions)
+						selectedEntityTracking = null;
+					if (selectionInput === input) selectionInput = null;
+					if (pointerSelection === pointer) pointerSelection = null;
+					if (entitySelection === selection) entitySelection = null;
+					if (preciseJumpSession === precise) preciseJumpSession = null;
+					enchantments = null;
+					session = null;
+					chatCharacterGuid = null;
+					housing = emptyHousing();
+					canTeleportFromMap = false;
+					recallDestinations = [];
+					hostTransport = null;
+				}
 			});
 			completion = retirement.close();
 			return completion;

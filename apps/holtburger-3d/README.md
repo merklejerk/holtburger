@@ -406,10 +406,8 @@ Equipment values use the appraisal response's per-stat enchantment masks. Effect
 harmful values are colorized like retail; when the response also exposes an authoritative base
 value, the inspector includes it parenthetically. It never reverse-calculates a missing base value.
 
-The asset-free `npm run harness:browser -- --client-hud --brief` suite covers the configured shortcut,
-button, viewport/item/action-cell right-click, delayed/latest-target responses, failure and lifecycle
-teardown, close/drag/resize, small-viewport fitting, and coexistence with world-container and system
-windows.
+The focused asset-free inspection diagnostic is
+`npm run harness:browser -- --client-inspection --brief`.
 
 ## Inventory interactions
 
@@ -454,7 +452,7 @@ See [item UI theme hooks](ITEM_UI_THEMING.md) for cell visuals and selection sty
 `HOLTBURGER_PROBE_MODE=inventory npm run probe:client:ui` uses the existing
 live probe credentials to check artwork and close/reopen retention without moving
 the character. This is a diagnostic command requiring local game assets. The canonical
-`npm run harness:browser -- --client-hud --brief` covers inventory behavior with
+`npm run harness:browser -- --client-inventory --brief` exercises inventory behavior with
 synthetic artwork; the scoping worksheet retains the completed burst measurements.
 
 ## Spells panel
@@ -548,6 +546,9 @@ in the **Component showcase** window. Hiding that window retains its contents.
 Edit the theme CSS and click **Reload theme** to preserve the running client and drafts.
 Visual review belongs to the user; browser probes exercise DOM and interactions,
 and the showcase probe captures screenshots only when explicitly requested.
+Keep automated checks focused on behavior such as input ownership, session commands,
+and resource lifetime. Review HUD appearance and layout manually in the showcase;
+there is no aggregate HUD acceptance suite.
 
 See the [UI style guide](UI_STYLE_GUIDE.md) for configuration, recipes, extension
 rules, semantic visualization exceptions, accessibility, and browser verification.

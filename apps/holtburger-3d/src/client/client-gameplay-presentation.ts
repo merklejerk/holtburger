@@ -92,7 +92,11 @@ import type {
 	Camera,
 	PrimaryCameraView,
 } from "../lib/game/runtime/types";
-import type { ResolvedSceneOrigin } from "../lib/game/scene";
+import type {
+	ResolvedSceneOrigin,
+	ScenePlacement,
+	SceneResidency,
+} from "../lib/game/scene";
 import type { NameplateContent } from "../lib/game/systems/dynamic-presentation-source";
 import type { RenderExtent } from "../lib/game/renderer/render-extent";
 import type {
@@ -149,7 +153,6 @@ import {
 	type MapAnchor,
 	mapHeadingFromSceneTransform,
 } from "../lib/game/map/map-view";
-import type { ScenePlacement } from "../lib/game/scene";
 import {
 	refineEntitySelectionCandidates,
 	type EntitySelectionGeometry,
@@ -266,9 +269,8 @@ type PortalDestinationReadiness =
 	| { readonly kind: "failed"; readonly diagnostic: string }
 	| {
 			readonly kind: "ready";
-			readonly origin: ResolvedSceneOrigin;
-			readonly extent: RenderExtent;
-			readonly cameraPresentation: HostKinematicBoomPresentation;
+			/** Settled camera whose own cell is installed, ready to retain for portal exit. */
+			readonly primaryView: PrimaryCameraView;
 	  };
 
 /** Settled destination view retained unchanged for every frame of one portal exit. */
@@ -355,7 +357,8 @@ export interface ClientGameplayRuntime
 	listPresentedSpawnedEntities(): Iterable<MapEntity>;
 	/** Monotonic change fact for live dynamic placements. */
 	readonly dynamicEntityPlacementRevision: number;
-	hasEnvCellScope(residency: ResolvedSceneOrigin): boolean;
+	/** Whether the exact indoor cell required by a player or camera is installed. */
+	hasEnvCellScope(residency: SceneResidency): boolean;
 	/** Commit pending loading artifacts without advancing live world presentation. */
 	pollPortalTransitionLoading(): void;
 	/** Forward confirmed outcomes and reset transient visual state. */
@@ -1237,14 +1240,7 @@ export class ClientGameplayPresentation {
 					this.#setStatus(readiness.status, readiness.diagnostic);
 					return this.#renderPortalLoadingFrame(resources, timeMs);
 				}
-				const camera = createClientCamera(
-					player,
-					readiness.origin,
-					readiness.cameraPresentation,
-					this.camera.acknowledgedProjection(timeMs),
-					this.#fieldOfView,
-				);
-				primaryView = { camera, extent: readiness.extent };
+				primaryView = readiness.primaryView;
 				this.#portalDestinationFrame = {
 					generation: portalGeneration,
 					primaryView,
@@ -1311,6 +1307,17 @@ export class ClientGameplayPresentation {
 				this.camera.acknowledgedProjection(timeMs),
 				this.#fieldOfView,
 			);
+			// A third-person boom can cross a cell boundary before the player's room changes.
+			if (
+				camera.placement.envCellId !== null &&
+				!resources.runtime.hasEnvCellScope(camera.placement)
+			) {
+				this.#setStatus(
+					"loading-activation",
+					"Waiting for the camera's room to load.",
+				);
+				return { rendered: false, status: this.#status };
+			}
 			primaryView = { camera, extent };
 		}
 		const { camera } = primaryView;
@@ -1443,6 +1450,8 @@ export class ClientGameplayPresentation {
 			if (this.#destroyed) return;
 			this.#activeResources = resources;
 			await this.#reconcileBarberPresentation(this.#session.barberSnapshot());
+			// Appearance work may outlive withdrawal; never republish a retired driver's demand.
+			if (this.#destroyed) return;
 			this.#onSceneMembership?.(resources.runtime.sceneInterestMembership());
 			const server = createClientServerEnvironmentSource(
 				resources.activeRegion,
@@ -1858,7 +1867,24 @@ export class ClientGameplayPresentation {
 				diagnostic: "Waiting for the destination boom camera to settle.",
 			};
 		}
-		return { kind: "ready", origin, extent, cameraPresentation };
+		const camera = createClientCamera(
+			player,
+			origin,
+			cameraPresentation,
+			this.camera.acknowledgedProjection(timeMs),
+			this.#fieldOfView,
+		);
+		if (
+			camera.placement.envCellId !== null &&
+			!resources.runtime.hasEnvCellScope(camera.placement)
+		) {
+			return {
+				kind: "waiting",
+				status: "loading-activation",
+				diagnostic: "Waiting for the destination camera's room to load.",
+			};
+		}
+		return { kind: "ready", primaryView: { camera, extent } };
 	}
 
 	/** Present one portal-only frame while destination prerequisites remain unavailable. */

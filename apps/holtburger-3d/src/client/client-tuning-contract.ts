@@ -242,6 +242,10 @@ export interface ClientTuning {
 		};
 		/** Pointer travel required before an inventory selection becomes a drag. */
 		readonly dragThresholdCssPixels: number;
+		/** Vertical inventory edge band for pointer-held drag scrolling. */
+		readonly dragScrollEdgeCssPixels: number;
+		/** Maximum scroll speed, reached at the viewport edge. */
+		readonly dragScrollCssPixelsPerSecond: number;
 		/** Time after a drag during which synthetic double-click activation is suppressed. */
 		readonly doubleClickSuppressionMs: number;
 		readonly displayIntervalMs: number;

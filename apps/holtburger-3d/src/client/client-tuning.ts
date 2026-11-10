@@ -285,6 +285,10 @@ export const CLIENT_TUNING = {
 		},
 		/** Pointer travel that distinguishes inventory selection from dragging. */
 		dragThresholdCssPixels: 6,
+		/** Vertical edge band that scrolls inventory contents during an item drag. */
+		dragScrollEdgeCssPixels: 40,
+		/** Maximum speed at the edge; proximity scales it down toward the middle. */
+		dragScrollCssPixelsPerSecond: 480,
 		/** Ignore double-click completion from a finished drag gesture. */
 		doubleClickSuppressionMs: 500,
 		/** Mounted inventory display cadence, independent of host publication. */

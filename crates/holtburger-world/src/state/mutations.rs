@@ -1162,6 +1162,10 @@ impl WorldState {
             }
         }
 
+        if health_fraction == 0.0 {
+            self.end_summon(guid, crate::summon::SummonEndCause::Death, events);
+        }
+
         if let Some(entity) = self.entities.get_mut(guid) {
             // QueryHealth also starts a subscription. Its response must reach a newly selected
             // target's consumer even when the world already holds the same health fraction.

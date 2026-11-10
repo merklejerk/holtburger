@@ -234,20 +234,22 @@ export class WebGL2NameplateTextureCache {
 			categoryKeys = new Map();
 			this.#visualKeys.set(visual.content, categoryKeys);
 		}
-		const cached = categoryKeys.get(visual.category);
+		const colorCategory =
+			visual.content.nameColor === "player" ? "player" : visual.category;
+		const cached = categoryKeys.get(colorCategory);
 		if (cached?.generation === style.generation) return cached.key;
 		// Content objects are replaced, never mutated. Serialize their complete value once per style
 		// generation while preserving sharing across distinct equal content objects.
 		const key = JSON.stringify([
 			NAMEPLATE_STYLE_REVISION,
 			style.generation,
-			visual.category,
+			colorCategory,
 			visual.content.name,
 			visual.content.level,
 			visual.content.strikeThrough,
 			visual.content.indicators.map(({ kind, iconId }) => [kind, iconId]),
 		]);
-		categoryKeys.set(visual.category, { generation: style.generation, key });
+		categoryKeys.set(colorCategory, { generation: style.generation, key });
 		return key;
 	}
 
@@ -326,7 +328,11 @@ export class Canvas2DNameplateRasterizer implements NameplateRasterizer {
 		context.textBaseline = "middle";
 		context.lineJoin = "round";
 		context.strokeStyle = canvasColor(appearance.outlineColor);
-		context.fillStyle = canvasColor(appearance.fillColors[visual.category]);
+		context.fillStyle = canvasColor(
+			appearance.fillColors[
+				content.nameColor === "player" ? "player" : visual.category
+			],
+		);
 		let top = appearance.verticalPaddingPixels;
 		for (const row of rows) {
 			context.font = canvasFont(row.style, appearance.fontFamily);

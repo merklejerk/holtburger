@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::{List, ListItem};
 
-use super::super::classification::{classify_entity, get_entity_color};
+use super::super::classification::{classify_entity, entity_name_color};
 use super::tab::NearbyTab;
 use crate::pages::game::panels::dashboard::tabs::classification::EntityClass;
 use crate::pages::game::{GameData, ViewState};
@@ -88,7 +88,7 @@ fn render_nearby_item(
     is_active_subject: bool,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
-    let color = get_entity_color(class);
+    let color = entity_name_color(e);
     let item_style = theme::list_item_style(highlight);
 
     let text_style = Style::default().fg(color);

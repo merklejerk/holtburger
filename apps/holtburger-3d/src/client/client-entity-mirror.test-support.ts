@@ -27,6 +27,7 @@ export function entityFacts(
 	return {
 		guid,
 		nearby: null,
+		summon: null,
 		canPickUp: false,
 		worldContainerContent: false,
 		canReceiveGive: false,

@@ -1298,6 +1298,21 @@ impl ClientRuntime {
                     self.emit_self_movement_kinematics_updated();
                 }
             }
+            WorldEvent::SummonEnded {
+                guid,
+                instance_sequence,
+                owner,
+                cause,
+            } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::SummonEnded {
+                        guid: *guid,
+                        instance_sequence: *instance_sequence,
+                        owner: *owner,
+                        cause: *cause,
+                    });
+            }
             WorldEvent::EntityHealthUpdated {
                 guid,
                 health_fraction,

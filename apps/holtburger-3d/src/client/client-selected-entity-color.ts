@@ -10,10 +10,12 @@ export function selectedEntityNameColor(
 		"mapCategory" | "objectFlags" | "itemType"
 	>,
 	isSelf: boolean,
+	isSummon: boolean,
 ): HexRgbaColor {
 	const names =
 		SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors;
 	const map = SHARED_FRONTEND_TUNING.map.blips.fillColors;
+	if (isSummon) return names.player;
 	const category = description.mapCategory;
 	switch (category) {
 		case "player":

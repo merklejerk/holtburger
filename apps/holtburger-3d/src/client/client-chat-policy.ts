@@ -43,7 +43,13 @@ export interface ClientChatFormattedSystemMessage {
 
 /** Frontend presentation input before assigning retention identity and display time. */
 export type ClientChatEntry =
-	ClientChatMessage | ClientChatFormattedSystemMessage;
+	| ClientChatMessage
+	| ClientChatFormattedSystemMessage
+	| {
+			/** App-owned combat notice, independent of server provenance and damage outcomes. */
+			readonly kind: "combat-notice";
+			readonly message: string;
+	  };
 
 /** Retained chat line with app-local ordering and display time. */
 export type ClientChatLine = ClientChatEntry & {
@@ -208,6 +214,7 @@ export function clientChatFiltersAllow(
 		case "error":
 			return true;
 		case "combat":
+		case "combat-notice":
 			return enabledTags.includes("combat");
 		case "speech":
 		case "server": {
@@ -243,6 +250,7 @@ export function clientChatTone(line: ClientChatLine): ClientChatTone {
 		case "soul-emote":
 			return "emote";
 		case "combat":
+		case "combat-notice":
 			return "combat";
 		case "formatted-system":
 		case "system":

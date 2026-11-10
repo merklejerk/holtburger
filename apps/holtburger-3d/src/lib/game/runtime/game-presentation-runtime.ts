@@ -1,3 +1,14 @@
+import { sameScope } from "../scene/scope";
+import type { SceneScope } from "../scene";
+import {
+	summonOpacityAt,
+	validateSummonPresentation,
+	type SummonVisualLevel,
+	type SummonLeashInput,
+	type SummonLeashTuning,
+	type SummonLeashColor,
+	type SummonFlickerTuning,
+} from "./summon-presentation";
 import type { EntitySelectionBounds } from "../selection/entity-selection-bounds";
 import type { DynamicPresentationOverride } from "./dynamic-presentation-override";
 import { isContentFailure } from "../../host/host-command-result";
@@ -34,6 +45,7 @@ import {
 	type MutableRenderQuaternion,
 	type ResolvedFrameRotation,
 	type SceneVector3,
+	type SceneVec3,
 } from "../../assets/ac-frame";
 import type { SetupVisualAppearance } from "../../assets/setup-visual-source";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
@@ -803,7 +815,7 @@ export class GamePresentationRuntime {
 	/** App-owned decoration survives realization; name and level always come from current authority. */
 	readonly #spawnedNameplateDecoration = new Map<
 		number,
-		Pick<NameplateContent, "indicators" | "strikeThrough">
+		Pick<NameplateContent, "indicators" | "strikeThrough" | "nameColor">
 	>();
 	readonly #spawnedVisualKeys = new Map<number, string>();
 	readonly #retainedSetupVisuals = new Map<string, RetainedSetupVisual>();
@@ -1255,6 +1267,21 @@ export class GamePresentationRuntime {
 	#frameSettings: FrameSettings;
 	/** Presentation-only transition input consumed by the renderer's final-frame compositor. */
 	#portalTransition: PortalTransitionPresentationPlan | undefined;
+	/** Semantic relationship levels are cold; endpoint and opacity preparation is frame-owned. */
+	readonly #summonVisuals = new Map<number, SummonVisualLevel>();
+	#summonTuning: {
+		readonly leash: SummonLeashTuning;
+		readonly flicker: SummonFlickerTuning;
+	} | null = null;
+	readonly #summonLeashes: SummonLeashInput[] = [];
+	readonly #summonLeashStorage: {
+		start: SceneVec3;
+		end: SceneVec3;
+		renderScope: SceneScope;
+		color: SummonLeashColor;
+		tuning: SummonLeashTuning;
+	}[] = [];
+	readonly #summonAnchorScratch = Vec3.zero();
 	/** Atomic frontend-resolved precise-jump marker and optional trajectory. */
 	#worldIndicator: WorldIndicatorInput | null = null;
 	/** Installed authored visual or an explicitly selected opaque loading surface. */
@@ -2038,12 +2065,131 @@ export class GamePresentationRuntime {
 		}
 	}
 
+	/** Replace only app-local relationship/effect policy; authoritative entity state is untouched. */
+	setSummonVisuals(
+		levels: readonly SummonVisualLevel[],
+		tuning: {
+			readonly leash: SummonLeashTuning;
+			readonly flicker: SummonFlickerTuning;
+		},
+	): void {
+		validateSummonPresentation(levels, tuning.leash, tuning.flicker);
+		for (const guid of this.#summonVisuals.keys())
+			this.#setSummonOpacity(guid, 1);
+		this.#summonVisuals.clear();
+		for (const level of levels) this.#summonVisuals.set(level.guid, level);
+		this.#summonTuning = tuning;
+		this.#summonLeashes.length = 0;
+	}
+
+	/** Attachment children share the root's cosmetic opacity while retaining their own effects. */
+	#setSummonOpacity(guid: number, opacity: 0 | 1): void {
+		const installed = this.#spawnedPresentations.get(guid);
+		if (installed !== undefined)
+			this.#dynamics.setPresentationOpacity(installed.nodeId, opacity);
+		for (const child of this.#spawnedDesiredChildren.get(guid) ?? [])
+			this.#setSummonOpacity(child, opacity);
+	}
+
+	/** Resolve a body-relative point from the same composed pose used by rendering. */
+	#summonEndpoint(
+		guid: number,
+		target: SceneVec3,
+	): readonly SceneScope[] | null {
+		const desired = this.#spawnedDesiredEntities.get(guid)?.entity;
+		const installed = this.#spawnedPresentations.get(guid);
+		if (
+			desired === undefined ||
+			installed === undefined ||
+			this.#isDynamicEntityFrontendEvicted(guid) ||
+			desired.physics.noDraw ||
+			desired.physics.hidden ||
+			desired.physics.cloaked
+		)
+			return null;
+		const bounds = this.#dynamics.getPublishedRigidPresentationBounds(
+			installed.nodeId,
+		);
+		const state = this.#scene.readResolvedState(installed.nodeId);
+		if (bounds === null || state === undefined) return null;
+		this.#summonAnchorScratch.x = (bounds.min.x + bounds.max.x) / 2;
+		this.#summonAnchorScratch.y = (bounds.min.y + bounds.max.y) / 2;
+		this.#summonAnchorScratch.z = (bounds.min.z + bounds.max.z) / 2;
+		transformPoint3(
+			state.placement.localToLandblock,
+			this.#summonAnchorScratch,
+			target,
+		);
+		const origin = createLandblockWorldOrigin(state.placement.landblockId);
+		target.x += origin.x;
+		target.y += origin.y;
+		target.z += origin.z;
+		return state.spatialMembership.scopes;
+	}
+
+	/** Reuse endpoint records across frames; each view converts their canonical positions itself. */
+	#prepareSummons(timeSeconds: number): readonly SummonLeashInput[] {
+		this.#summonLeashes.length = 0;
+		const tuning = this.#summonTuning;
+		if (tuning === null) return this.#summonLeashes;
+		for (const level of this.#summonVisuals.values()) {
+			const entity = this.#spawnedDesiredEntities.get(level.guid)?.entity;
+			if (entity === undefined || entity.generation !== level.generation)
+				continue;
+			const opacity = summonOpacityAt(
+				timeSeconds,
+				level.expiresAtSeconds,
+				tuning.flicker,
+			);
+			this.#setSummonOpacity(level.guid, opacity);
+			// The relationship shares the body's phase; faded frames submit neither visual.
+			const relationship = level.leash;
+			if (opacity === 0 || relationship === null) continue;
+			const index = this.#summonLeashes.length;
+			let leash = this.#summonLeashStorage[index];
+			if (leash === undefined) {
+				leash = {
+					start: sceneVec3(Vec3.zero()),
+					end: sceneVec3(Vec3.zero()),
+					renderScope: { kind: "outdoor" },
+					color: relationship.color,
+					tuning: tuning.leash,
+				};
+				this.#summonLeashStorage.push(leash);
+			}
+			const startScopes = this.#summonEndpoint(level.guid, leash.start);
+			const endScopes = this.#summonEndpoint(relationship.owner, leash.end);
+			if (startScopes === null || endScopes === null) continue;
+			const common = startScopes.find((scope) =>
+				endScopes.some((other) => sameScope(scope, other)),
+			);
+			if (
+				common === undefined ||
+				leash.start.distanceSquaredTo(leash.end) >=
+					tuning.leash.maximumDistance ** 2
+			)
+				continue;
+			leash.renderScope = common;
+			leash.color = relationship.color;
+			leash.tuning = tuning.leash;
+			this.#summonLeashes.push(leash);
+		}
+		return this.#summonLeashes;
+	}
+
 	/** Replace app-owned decoration without copying authoritative name or level facts. */
 	setDynamicEntityNameplateDecoration(
 		guid: number,
-		decoration: Pick<NameplateContent, "indicators" | "strikeThrough">,
+		decoration: Pick<
+			NameplateContent,
+			"indicators" | "strikeThrough" | "nameColor"
+		>,
 	): void {
-		if (decoration.indicators.length === 0 && !decoration.strikeThrough)
+		if (
+			decoration.indicators.length === 0 &&
+			!decoration.strikeThrough &&
+			decoration.nameColor === undefined
+		)
 			this.#spawnedNameplateDecoration.delete(guid);
 		else this.#spawnedNameplateDecoration.set(guid, decoration);
 		const installed = this.#spawnedPresentations.get(guid);
@@ -3954,7 +4100,11 @@ export class GamePresentationRuntime {
 	#selectedEntityRenderTarget(): EntitySelectionTarget | null {
 		if (this.#selectedEntityGuid === null) return null;
 		const installed = this.#spawnedPresentations.get(this.#selectedEntityGuid);
-		if (installed === undefined) return null;
+		if (
+			installed === undefined ||
+			this.#dynamics.getPresentationOpacity(installed.nodeId) === 0
+		)
+			return null;
 		const frame = this.#dynamicEntityFrame(this.#selectedEntityGuid);
 		if (frame === null) return null;
 		return {
@@ -4642,6 +4792,7 @@ export class GamePresentationRuntime {
 			},
 		);
 		const anchorLandblockId = this.#camera.placement.landblockId;
+		const summonLeashes = this.#prepareSummons(timeSeconds);
 		const feedback = renderer.drawFrame({
 			anchorLandblockId,
 			dynamicLights:
@@ -4680,6 +4831,7 @@ export class GamePresentationRuntime {
 				},
 			],
 			worldIndicator: this.#worldIndicator,
+			summonLeashes,
 		});
 		frameProfile?.mark("render");
 		const loadingReceipt = this.#presentOpaquePortalLoading();

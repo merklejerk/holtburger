@@ -141,6 +141,15 @@ pub fn get_entity_color(class: EntityClass) -> Color {
     }
 }
 
+/// Name palette is independent from creature identity, scripting kind and interaction policy.
+pub fn entity_name_color(entity: &Entity) -> Color {
+    get_entity_color(if entity.summon_owner().is_some() {
+        EntityClass::Player
+    } else {
+        classify_entity(entity)
+    })
+}
+
 pub fn classify_entity(entity: &Entity) -> EntityClass {
     classify_world_object(entity.flags, entity)
 }
@@ -298,6 +307,31 @@ fn classify_world_object<T: WorldObjectExt>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn summon_names_share_player_palette_without_changing_creature_kind() {
+        use holtburger_common::{
+            Guid,
+            position::WorldPosition,
+            properties::{
+                ItemType, ObjectDescriptionFlag, PropertyInstanceId, PropertyInt,
+                WorldObjectPropertyAccessorsMut,
+            },
+        };
+        let mut summon = holtburger_world::entity::Entity::new(
+            Guid(7),
+            "Owner's Golem".into(),
+            WorldPosition::default(),
+        );
+        summon.flags = ObjectDescriptionFlag::ATTACKABLE;
+        summon.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        summon.set_iid_prop(PropertyInstanceId::PetOwner, Guid(1));
+        assert_eq!(super::classify_entity(&summon), EntityClass::Monster);
+        assert_eq!(
+            super::entity_name_color(&summon),
+            super::get_entity_color(EntityClass::Player)
+        );
+    }
+
     use super::EntityClass;
     use holtburger_scripting::ScriptEntityKind;
 

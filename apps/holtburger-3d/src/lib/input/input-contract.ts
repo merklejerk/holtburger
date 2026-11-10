@@ -178,7 +178,7 @@ export type ClientInputConfiguration = ClientKeyboardConfiguration &
 	ClientMouseConfiguration & {
 		/** Restrict the default target cycler to the approximate camera view. */
 		readonly targetOnlyInView: boolean;
-		/** Restrict smart Tab taps and holds to monsters and PvP-threatening players. */
+		/** Restrict smart Tab traversal to monsters and PvP-threatening players; summons retain immediate admission. */
 		readonly smartTabHostileOnly: boolean;
 	};
 

@@ -4,7 +4,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
 
-use super::super::classification::{classify_entity, get_entity_color};
+use super::super::classification::{classify_entity, entity_name_color};
 use super::tab::InventoryTab;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme;
@@ -167,7 +167,7 @@ fn render_inventory_item(
     cooldown_seconds: Option<f64>,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
-    let color = get_entity_color(class);
+    let color = entity_name_color(e);
     let item_style = theme::list_item_style(highlight);
 
     let mut text_style = Style::default().fg(color);

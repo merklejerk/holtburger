@@ -134,6 +134,14 @@ describe("DynamicEntitySystem authored ownership", () => {
 			staged.commit();
 			installation.commit();
 			expect(system.getVisiblePresentation(prepared.nodeId)).not.toBeNull();
+			const original = system.getVisiblePresentation(prepared.nodeId);
+			system.setPresentationOpacity(prepared.nodeId, 0);
+			expect(system.getVisiblePresentation(prepared.nodeId)).toBeNull();
+			system.setPresentationOpacity(prepared.nodeId, 1);
+			expect(system.getVisiblePresentation(prepared.nodeId)?.visual).toBe(
+				original?.visual,
+			);
+
 			playback.destroy();
 			system.removeOwner("local");
 			expect(animations.getDiagnostics().referenceCount).toBe(0);

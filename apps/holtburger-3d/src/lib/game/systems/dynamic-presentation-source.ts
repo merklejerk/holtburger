@@ -29,6 +29,8 @@ interface NameplateIndicator {
 /** Complete visual value currently painted into one entity nameplate. */
 export interface NameplateContent {
 	readonly name: string;
+	/** Optional app-local palette override; absence preserves the entity category color. */
+	readonly nameColor?: "player";
 	readonly level: number | null;
 	/** App-authored strikeout applies only to the name, not the level or icon row. */
 	readonly strikeThrough: boolean;

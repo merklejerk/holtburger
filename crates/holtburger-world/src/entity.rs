@@ -1241,6 +1241,8 @@ pub struct Entity {
     /// Latest admitted command-list action stamp in retail's wrapping 15-bit domain.
     server_action_sequence: u16,
     pub health_fraction: Option<f32>,
+    /// Incarnation-scoped summon lifecycle and appraisal timing observations.
+    pub(crate) summon_observation: crate::summon::SummonObservation,
 
     pub sequences: [u16; 9],
 
@@ -1786,6 +1788,10 @@ impl Entity {
                 EntityNetworkMotion::Initialized(snapshot)
             });
 
+        // A description carrying death is a baseline, not a newly witnessed end edge.
+        self.summon_observation.ended =
+            description_motion.is_some_and(|(snapshot, _)| snapshot.indicates_death_motion());
+
         // Hydrate properties from the description (using common mapping logic)
         self.properties.hydrate_from_odd(data);
         let scale = self
@@ -1840,6 +1846,7 @@ impl Entity {
             network_motion: EntityNetworkMotion::Uninitialized,
             server_action_sequence: 0,
             health_fraction: None,
+            summon_observation: crate::summon::SummonObservation::default(),
             sequences: [0; 9],
             properties,
             public_description: None,

@@ -171,6 +171,23 @@ export function decodeClientActionFeedback(
 	return actionFeedbackSchema.parse(value);
 }
 
+/** Self-contained live observation; never reconstructed from snapshot removals. */
+const summonEndedSchema = z
+	.object({
+		guid,
+		instanceSequence: z.number().int().min(0).max(0xffff),
+		owner: guid,
+		cause: z.enum(["death", "server-removal"]),
+	})
+	.strict();
+
+export type ClientSummonEnded = z.infer<typeof summonEndedSchema>;
+
+/** Validate a host-produced summon end before session consumers observe it. */
+export function decodeClientSummonEnded(value: unknown): ClientSummonEnded {
+	return summonEndedSchema.parse(value);
+}
+
 const entityHealthSchema = z
 	.object({
 		/** Entity whose health changed; the server does not echo selection revisions. */

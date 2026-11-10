@@ -1,3 +1,4 @@
+import type { SummonLeashInput } from "../runtime/summon-presentation";
 import type { RendererCombatEffectsCapability } from "../systems/combat-effects-system";
 import type { BakedDrawMergeCensus } from "./baked-draw-merge-census";
 import type { LandblockOwnerId } from "../game-types";
@@ -197,6 +198,8 @@ export interface FrameInput {
 	readonly hoveredEntityNodeId: SceneNodeId | null;
 	/** Optional frontend-resolved precise-jump indicator; absent frames draw no marker or curve. */
 	readonly worldIndicator?: WorldIndicatorInput | null;
+	/** App-owned relationships prepared from current posed scene endpoints. */
+	readonly summonLeashes?: readonly SummonLeashInput[];
 }
 
 /** One coherent selected root and the frontend-owned interaction silhouette shape. */

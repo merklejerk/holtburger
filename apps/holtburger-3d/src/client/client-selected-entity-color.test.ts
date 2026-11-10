@@ -7,12 +7,22 @@ const names = SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors;
 const map = SHARED_FRONTEND_TUNING.map.blips.fillColors;
 
 describe("selected entity name colors", () => {
+	it("uses the ordinary player palette for summons without changing their category", () => {
+		expect(
+			selectedEntityNameColor(
+				{ mapCategory: "mob", objectFlags: 0, itemType: 0 },
+				false,
+				true,
+			),
+		).toBe(names.player);
+	});
 	it.each(["player", "npc", "mob", "portal"] as const)(
 		"uses the nameplate palette for %s",
 		(mapCategory) => {
 			expect(
 				selectedEntityNameColor(
 					{ mapCategory, objectFlags: 0, itemType: 0 },
+					false,
 					false,
 				),
 			).toBe(names[mapCategory]);
@@ -25,6 +35,7 @@ describe("selected entity name colors", () => {
 				selectedEntityNameColor(
 					{ mapCategory, objectFlags: 0, itemType: 0 },
 					false,
+					false,
 				),
 			).toBe(map[mapCategory]);
 		},
@@ -34,12 +45,14 @@ describe("selected entity name colors", () => {
 			selectedEntityNameColor(
 				{ mapCategory: "player", objectFlags: 0, itemType: 0 },
 				true,
+				false,
 			),
 		).toBe(names.selfPlayer);
 		expect(
 			selectedEntityNameColor(
 				{ mapCategory: "npc", objectFlags: 0x10000, itemType: 0x80000 },
 				true,
+				false,
 			),
 		).toBe(names.npc);
 	});
@@ -48,17 +61,20 @@ describe("selected entity name colors", () => {
 			selectedEntityNameColor(
 				{ mapCategory: "other", objectFlags: 0x10000, itemType: 0 },
 				false,
+				false,
 			),
 		).toBe(CLIENT_TUNING.selectedEntityHud.healingKitColor);
 		expect(
 			selectedEntityNameColor(
 				{ mapCategory: "other", objectFlags: 0, itemType: 0x80000 },
 				false,
+				false,
 			),
 		).toBe(CLIENT_TUNING.selectedEntityHud.manaStoneColor);
 		expect(
 			selectedEntityNameColor(
 				{ mapCategory: "other", objectFlags: 0, itemType: 1 },
+				false,
 				false,
 			),
 		).toBe(names.other);

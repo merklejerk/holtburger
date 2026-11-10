@@ -112,6 +112,7 @@ export class ClientSelectedEntityTracking {
 			nameColor: selectedEntityNameColor(
 				record.description,
 				guid === read.level.playerGuid,
+				record.summon !== null,
 			),
 			stackCount: record.description.stackCount,
 			structure: record.description.structure,

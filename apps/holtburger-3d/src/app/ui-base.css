@@ -143,6 +143,9 @@
 		--ui-combat-text-critical-color: #ffb833;
 		--ui-combat-text-avoidance-color: #a6b3bf;
 		--ui-combat-text-size: 28px;
+		/* World summon leashes include opacity; geometry and motion remain client policy. */
+		--ui-summon-leash-own-color: rgb(20% 100% 45% / 25%);
+		--ui-summon-leash-other-color: rgb(40% 75% 100% / 25%);
 		--ui-font-size-body: 15px;
 		--ui-font-size-heading-1: 22px;
 		--ui-font-size-heading-2: 18px;

@@ -1485,6 +1485,17 @@ pub enum ClientHostEvent {
     PlayerVitalsUpdated {
         vitals: Vec<ClientVitalWire>,
     },
+    /// Observed summon end, absent from reconstructible snapshots.
+    SummonEnded {
+        /// Summon identity captured before eviction.
+        guid: Guid,
+        /// Exact server incarnation that ended.
+        instance_sequence: u16,
+        /// Owner used by frontend local-notification policy, independent of owner visibility.
+        owner: Guid,
+        /// Observed trigger; a tracking removal does not prove death.
+        cause: holtburger_world::summon::SummonEndCause,
+    },
     /// Server-reported health for an entity, independent of frontend selection.
     EntityHealthUpdated {
         guid: Guid,
@@ -1885,6 +1896,17 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::PlayerEntered { guid, name } => Some(ClientHostEvent::PlayerEntered {
             player_guid: guid,
             name,
+        }),
+        ClientViewEvent::SummonEnded {
+            guid,
+            instance_sequence,
+            owner,
+            cause,
+        } => Some(ClientHostEvent::SummonEnded {
+            guid,
+            instance_sequence,
+            owner,
+            cause,
         }),
         ClientViewEvent::EntityHealthUpdated {
             guid,

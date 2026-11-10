@@ -52,8 +52,7 @@ export async function probeWorldMapLifetime(
 				await owner.drawSettled();
 				if (owner.read().kind !== "streaming")
 					throw new Error("Map fixture did not retain pending tile delivery.");
-				if (frameReads === 0)
-					throw new Error("Map overlays did not draw.");
+				if (frameReads === 0) throw new Error("Map overlays did not draw.");
 			} finally {
 				try {
 					await unmount(panel);

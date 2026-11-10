@@ -96,6 +96,17 @@ pub enum WorldEvent {
         /// Complete world-owned placement decision for consumers.
         placement: crate::ResolvedScenePlacement,
     },
+    /// An observed summon ended; snapshots and local retention cleanup do not replay this edge.
+    SummonEnded {
+        /// Summon identity, retained even if its description is evicted immediately.
+        guid: Guid,
+        /// Server incarnation that ended.
+        instance_sequence: u16,
+        /// Owning player, independent of current owner visibility.
+        owner: Guid,
+        /// Observed trigger; server removal need not mean death.
+        cause: crate::summon::SummonEndCause,
+    },
     EntitySpawned(Box<Entity>),
     EntityReplaced(Box<Entity>),
     /// An accepted health observation, including unchanged responses to a fresh health query.

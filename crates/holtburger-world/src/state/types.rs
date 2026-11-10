@@ -348,6 +348,17 @@ impl WorldState {
         server_time: f64,
         local_time: std::time::Instant,
     ) -> Vec<WorldEvent> {
+        let summons: Vec<_> = self
+            .entities
+            .iter()
+            .filter(|entity| entity.summon_owner().is_some())
+            .map(|entity| entity.guid)
+            .collect();
+        for guid in summons {
+            if let Some(entity) = self.entities.get_mut(guid) {
+                entity.rebase_summon_lifetime(server_time, local_time);
+            }
+        }
         self.server_time = Some(ServerTimeSync {
             server_time,
             local_time,

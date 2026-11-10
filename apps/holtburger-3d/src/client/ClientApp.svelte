@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ClientSummonPresentation } from "./client-summon-presentation";
 	import { clientNativePerformance } from "../app/native-performance";
 	import { PerformanceSession } from "../app/performance-session";
 	import {
@@ -58,6 +59,10 @@
 	import { compactInputHint } from "../lib/input/input-presentation";
 	import { presentPartyHud } from "./client-party-hud";
 	import { observeCombatEffectsAppearance } from "./client-combat-effects-appearance";
+	import {
+		observeSummonLeashColors,
+		type ClientSummonLeashColors,
+	} from "./client-summon-leash-appearance";
 	import type { CombatEffectsAppearance } from "../lib/game/systems/combat-effects-system";
 	import { ClientPartyState } from "./client-party-state";
 	import { ClientHousingManagementState } from "./client-housing-management-state";
@@ -816,6 +821,13 @@
 	}
 	// Cold appearance snapshot seeds replacement presentations; updates never recreate their owners.
 	let combatAppearance: CombatEffectsAppearance | null = null;
+	let summonLeashColors: ClientSummonLeashColors | null = null;
+	function observeSummonLeashAppearance(element: HTMLElement) {
+		return observeSummonLeashColors(element, (colors) => {
+			summonLeashColors = colors;
+			gameplayPresentation?.setSummonLeashColors(colors);
+		});
+	}
 	function observeCombatAppearance(element: HTMLElement) {
 		return observeCombatEffectsAppearance(
 			element,
@@ -1966,6 +1978,8 @@
 				);
 				if (combatAppearance !== null)
 					presentation.setCombatEffectsAppearance(combatAppearance);
+				if (summonLeashColors !== null)
+					presentation.setSummonLeashColors(summonLeashColors);
 				ownedGameplay = presentation;
 				gameplayPresentation = presentation;
 				// One readiness event closes recovery-before-driver races; draft events do not own the root.
@@ -2325,6 +2339,14 @@
 			appendChatError,
 		);
 		barber = barberOwner;
+		const summonOwner = new ClientSummonPresentation(
+			owner,
+			(message) => {
+				appendChatLine({ kind: "combat-notice", message });
+				toastCenter.publish({ message, tone: "status" });
+			},
+			appendChatError,
+		);
 		const tradeOwner = new ClientTradeState(owner, icons, appendChatError);
 		trade = tradeOwner;
 		const spellReferences = new SpellReferences(transport);
@@ -2525,6 +2547,7 @@
 							() => items.destroy(),
 							() => unbindDeathDialogs(),
 							() => deathOwner.destroy(),
+							() => summonOwner.destroy(),
 							() => dialogOwner.destroy(),
 							() => unsubscribeDialogs(),
 							() => unsubscribeToast(),
@@ -2603,6 +2626,7 @@
 	bind:this={interactionRoot}
 	class="client-appearance-scope ui-theme"
 	use:observeCombatAppearance
+	use:observeSummonLeashAppearance
 	style:--ui-text-scale={userSettings.ui.textScale}
 	style:--ui-scale={userSettings.ui.uiScale}
 	style:--ui-hud-window-opacity={userSettings.ui.hudWindowOpacity}

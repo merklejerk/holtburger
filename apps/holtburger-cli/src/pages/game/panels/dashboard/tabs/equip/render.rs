@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
 
-use super::super::classification::{classify_entity, get_entity_color};
+use super::super::classification::entity_name_color;
 use super::tab::EquipTab;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme;
@@ -86,10 +86,7 @@ fn get_list_items(
                     name
                 };
 
-                let mut name_style = Style::default().fg({
-                    let class = classify_entity(item);
-                    get_entity_color(class)
-                });
+                let mut name_style = Style::default().fg(entity_name_color(item));
 
                 if is_equipped_here || is_equipped_elsewhere {
                     name_style = name_style.add_modifier(Modifier::ITALIC);

@@ -1,3 +1,10 @@
+import type {
+	SummonVisualLevel,
+	SummonLeashTuning,
+	SummonFlickerTuning,
+} from "../lib/game/runtime/summon-presentation";
+import { CLIENT_SUMMON_TUNING } from "./client-tuning";
+import type { ClientSummonLeashColors } from "./client-summon-leash-appearance";
 import type { RealizedEntitySelectionSource } from "../lib/game/selection/entity-selection-bounds";
 import type { CycleSelectionPresentationFrame } from "./client-cycle-selection-controller";
 import {
@@ -329,10 +336,21 @@ export interface ClientGameplayRuntime
 	setSelectedEntityGuid(guid: number | null): void;
 	/** Force the hovered entity's nameplate without selecting it. */
 	setHoveredEntityGuid(guid: number | null): void;
-	/** Apply or clear app-owned semantic decoration without rebuilding presentation. */
+	/** Replace summon effects from the current semantic level without rebuilding presentation. */
+	setSummonVisuals(
+		levels: readonly SummonVisualLevel[],
+		tuning: {
+			readonly leash: SummonLeashTuning;
+			readonly flicker: SummonFlickerTuning;
+		},
+	): void;
+	/** Apply or clear app-owned name decoration without rebuilding presentation. */
 	setDynamicEntityNameplateDecoration(
 		guid: number,
-		decoration: Pick<NameplateContent, "indicators" | "strikeThrough">,
+		decoration: Pick<
+			NameplateContent,
+			"indicators" | "strikeThrough" | "nameColor"
+		>,
 	): void;
 	dynamicEntityPresentationState(guid: number): DynamicEntityPresentationState;
 	/** Latest authority-backed display value for one desired dynamic entity. */
@@ -453,6 +471,8 @@ export class ClientGameplayPresentation {
 	readonly #onWeatherPresets: ClientGameplayPresentationDependencies["onWeatherPresets"];
 	readonly #onEnvironmentIssue: ClientGameplayPresentationDependencies["onEnvironmentIssue"];
 	#combatEffectsTuning: CombatEffectsTuning = CLIENT_COMBAT_EFFECTS_TUNING;
+	/** Null until the appearance scope resolves; no duplicate hardcoded theme palette. */
+	#summonLeashColors: ClientSummonLeashColors | null = null;
 	#sceneInterestRadii: SceneInterestRadii = clientSceneInterestRadii(
 		CLIENT_GRAPHICS_DEFAULTS.viewDistance,
 	);
@@ -1049,6 +1069,12 @@ export class ClientGameplayPresentation {
 		this.#activeResources?.runtime.refreshCombatEffectsFontAtlas();
 	}
 
+	/** Theme changes update existing leashes without replacing the runtime or its GPU resources. */
+	setSummonLeashColors(colors: ClientSummonLeashColors): void {
+		this.#summonLeashColors = colors;
+		this.#reconcileEntityPresentationPolicy();
+	}
+
 	/** Reissue static demand on the next frame even if the player has not moved. */
 	setSceneInterestRadii(radii: SceneInterestRadii): void {
 		validateSceneInterestRadiiOrThrow(radii);
@@ -1398,6 +1424,7 @@ export class ClientGameplayPresentation {
 		if (resources !== null) {
 			resources.runtime.clearDynamicEntityCues();
 			resources.runtime.clearCombatEffects();
+			resources.runtime.setSummonVisuals([], CLIENT_SUMMON_TUNING);
 			resources.runtime.setWorldIndicator(null);
 			resources.runtime.setViewerEntity(null);
 			resources.runtime.setSelectedEntityGuid(null);
@@ -1436,7 +1463,7 @@ export class ClientGameplayPresentation {
 			this.#bindEnvironment();
 			resources.runtime.setSelectedEntityGuid(this.#selectedEntityGuid);
 			resources.runtime.setHoveredEntityGuid(this.#hoveredEntityGuid);
-			this.#reconcileEntityNameplates();
+			this.#reconcileEntityPresentationPolicy();
 			this.#sceneInterestCoordinator = new SceneInterestRequestCoordinator(
 				resources.profileSource,
 			);
@@ -1501,6 +1528,10 @@ export class ClientGameplayPresentation {
 				);
 				return;
 			case "resyncing":
+				this.#activeResources?.runtime.setSummonVisuals(
+					[],
+					CLIENT_SUMMON_TUNING,
+				);
 				this.#lockFeedback.clear();
 				this.#activeResources?.runtime.clearCombatEffects();
 				return;
@@ -1512,16 +1543,17 @@ export class ClientGameplayPresentation {
 			case "current-state":
 				this.#lockFeedback.clear();
 				this.#receiveCurrentState(event.state);
-				this.#reconcileEntityNameplates();
+				this.#reconcileEntityPresentationPolicy();
 				return;
 			case "entities":
-				this.#reconcileEntityNameplates();
+				this.#reconcileEntityPresentationPolicy();
 				return;
 			case "lifecycle":
 				if (event.lifecycle.kind !== "in-world") this.#lockFeedback.clear();
 				return;
 			case "local-player-established":
 				this.#playerGuid = event.identity.playerGuid;
+				this.#reconcileEntityPresentationPolicy();
 				return;
 			case "presentation-tick":
 				if (event.tick.dynamic !== null)
@@ -1550,6 +1582,7 @@ export class ClientGameplayPresentation {
 				return;
 			case "server-time":
 				this.#refreshEnvironment(performance.now());
+				this.#reconcileEntityPresentationPolicy();
 				return;
 			case "presentation-discontinuity":
 				this.#lockFeedback.clear();
@@ -1657,7 +1690,7 @@ export class ClientGameplayPresentation {
 				this.#observePresentationCompletion(
 					this.#requestDynamicSnapshotReplacement(event.snapshot.entities),
 				);
-				this.#reconcileEntityNameplates();
+				this.#reconcileEntityPresentationPolicy();
 				return;
 			case "upserted":
 				if (event.entity.identity.guid === this.#playerGuid)
@@ -1681,8 +1714,40 @@ export class ClientGameplayPresentation {
 		}
 	}
 
-	/** Reconcile a complete semantic baseline, including decorations that were cleared. */
-	#reconcileEntityNameplates(): void {
+	/** Reconcile app-owned summon effects and name decorations from the complete semantic level. */
+	#reconcileEntityPresentationPolicy(): void {
+		const read = this.#session.entities.read();
+		const nowMs = performance.now();
+		const serverTime = this.#session.readServerTime(nowMs);
+		const playerGuid = this.#session.state().playerGuid;
+		const levels: SummonVisualLevel[] = [];
+		const colors = this.#summonLeashColors;
+		if (read.kind === "current") {
+			for (const entity of read.level.entities.values()) {
+				const summon = entity.summon;
+				if (summon === null || summon.activity !== "active") continue;
+				levels.push({
+					guid: entity.guid,
+					generation: summon.instanceSequence,
+					leash:
+						colors === null
+							? null
+							: {
+									owner: summon.owner,
+									color:
+										summon.owner === playerGuid ? colors.own : colors.other,
+								},
+					expiresAtSeconds:
+						summon.lifetime.kind === "estimated" && serverTime !== null
+							? nowMs / 1000 + summon.lifetime.expiresAtServerTime - serverTime
+							: null,
+				});
+			}
+		}
+		this.#activeResources?.runtime.setSummonVisuals(
+			levels,
+			CLIENT_SUMMON_TUNING,
+		);
 		for (const dynamic of this.#session.mirror.currentEntities())
 			this.#reconcileEntityNameplate(dynamic.identity.guid);
 	}
@@ -1692,10 +1757,14 @@ export class ClientGameplayPresentation {
 		const runtime = this.#activeResources?.runtime;
 		const entities = this.#session.entities.read();
 		if (runtime === undefined || entities.kind !== "current") return;
-		const opened = entities.level.entities.get(guid)?.corpse === "opened";
+		const facts = entities.level.entities.get(guid);
+		const opened = facts?.corpse === "opened";
 		runtime.setDynamicEntityNameplateDecoration(guid, {
 			indicators: [],
 			strikeThrough: opened,
+			...(facts !== undefined && facts.summon !== null
+				? { nameColor: "player" as const }
+				: {}),
 		});
 	}
 

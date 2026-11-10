@@ -32,6 +32,7 @@ export function inventoryFixtureItem(
 	return {
 		guid,
 		playerThreat: false,
+		summon: null,
 		nearby: null,
 		canPickUp: false,
 		worldContainerContent: false,

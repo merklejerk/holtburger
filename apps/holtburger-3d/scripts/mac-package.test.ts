@@ -14,7 +14,11 @@ import {
 vi.mock("@electron/osx-sign", () => ({ sign: vi.fn() }));
 vi.mock("node:child_process", () => ({
 	execFileSync: vi.fn(),
-	spawnSync: vi.fn(() => ({ status: 1, stdout: "", stderr: "synthetic unsigned app" })),
+	spawnSync: vi.fn(() => ({
+		status: 1,
+		stdout: "",
+		stderr: "synthetic unsigned app",
+	})),
 }));
 const directories: string[] = [];
 

@@ -216,6 +216,29 @@ const clientEntityFactsSchema = z
 				.strict()
 				.readonly(),
 		]),
+		/** World-owned summon relation and optional appraisal deadline. */
+		summon: z
+			.object({
+				instanceSequence: z.number().int().min(0).max(0xffff),
+				owner: guid.refine(
+					(value) => value !== 0,
+					"Summon owner must be nonzero.",
+				),
+				activity: z.enum(["active", "ended"]),
+				lifetime: z.discriminatedUnion("kind", [
+					z.object({ kind: z.literal("unobserved") }).strict(),
+					z.object({ kind: z.literal("undisclosed") }).strict(),
+					z
+						.object({
+							kind: z.literal("estimated"),
+							expiresAtServerTime: z.number().finite(),
+						})
+						.strict(),
+				]),
+			})
+			.strict()
+			.readonly()
+			.nullable(),
 		ownedByPlayer: z.boolean(),
 		canPickUp: z.boolean(),
 		/** Shared descendant membership; presentation must not reconstruct access. */

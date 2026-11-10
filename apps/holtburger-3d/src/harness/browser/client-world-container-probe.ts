@@ -322,8 +322,8 @@ export async function probeWorldContainer(options: {
 			".world-container-panel .contents-scroll",
 		);
 		// Large UI scales can legitimately exhaust the space below the saved window anchor.
-		const viewportBottom = element<HTMLElement>(".gameplay-controls")
-			.getBoundingClientRect().bottom;
+		const viewportBottom =
+			element<HTMLElement>(".gameplay-controls").getBoundingClientRect().bottom;
 		const heightClamped = Math.abs(box.bottom - viewportBottom) < 1;
 		if (count > openingGrid.maxColumns * openingGrid.maxRows)
 			require(scroll.scrollHeight >

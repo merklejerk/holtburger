@@ -457,6 +457,104 @@ describe("ClientGameplayPresentation", () => {
 		}
 	});
 
+	it.each(["own", "other"] as const)(
+		"projects %s summon leash color and timing, withdrawing effects on end and resync",
+		async (relation) => {
+			const now = vi.spyOn(performance, "now").mockReturnValue(1_000);
+			const playerGuid = 0x0101_0001;
+			const summonGuid = 7;
+			const ownerGuid = relation === "own" ? playerGuid : 0x5000_0007;
+			const transport = new FakeClientTransport(currentState(playerGuid));
+			const lifecycle = new ClientLifecycleSession(transport);
+			const runtime = new FakePresentationRuntime();
+			const presentation = new ClientGameplayPresentation({
+				canvas: fakeCanvas(),
+				session: lifecycle,
+				resources: fakeOwner(runtime, activeRegion()),
+			});
+			const colors = { own: [1, 0, 0, 0.2], other: [0, 0, 1, 0.4] } as const;
+			try {
+				await lifecycle.start();
+				await presentation.start();
+				transport.emit("client-dynamic-entity", {
+					kind: "upserted",
+					entity: view(summonGuid),
+				});
+				const summon = {
+					owner: ownerGuid,
+					instanceSequence: 1,
+					activity: "active" as const,
+					lifetime: { kind: "estimated" as const, expiresAtServerTime: 85 },
+				};
+				const publish = (activity: "active" | "ended") =>
+					transport.emit("client-entity-facts-changed", {
+						projectileSupply: null,
+						salvage: null,
+						worldContainer: null,
+						removed: [],
+						upserts: [
+							entityFacts(summonGuid, { summon: { ...summon, activity } }),
+						],
+					});
+				publish("active");
+				expect(runtime.setSummonVisuals).toHaveBeenLastCalledWith(
+					[expect.objectContaining({ leash: null, expiresAtSeconds: 11 })],
+					expect.anything(),
+				);
+				presentation.setSummonLeashColors(colors);
+				expect(runtime.setSummonVisuals).toHaveBeenLastCalledWith(
+					[
+						{
+							guid: summonGuid,
+							generation: 1,
+							leash: { owner: ownerGuid, color: colors[relation] },
+							expiresAtSeconds: 11,
+						},
+					],
+					expect.anything(),
+				);
+				expect(runtime.nameplateDecoration.get(summonGuid)?.nameColor).toBe(
+					"player",
+				);
+				const replacement = {
+					own: [0, 1, 0, 0.6],
+					other: [1, 1, 0, 0.8],
+				} as const;
+				presentation.setSummonLeashColors(replacement);
+				expect(runtime.setSummonVisuals).toHaveBeenLastCalledWith(
+					[
+						expect.objectContaining({
+							leash: { owner: ownerGuid, color: replacement[relation] },
+							expiresAtSeconds: 11,
+						}),
+					],
+					expect.anything(),
+				);
+				publish("ended");
+				expect(runtime.setSummonVisuals).toHaveBeenLastCalledWith(
+					[],
+					expect.anything(),
+				);
+				publish("active");
+				transport.emit("client-state-resyncing", null);
+				expect(runtime.setSummonVisuals).toHaveBeenLastCalledWith(
+					[],
+					expect.anything(),
+				);
+				runtime.setSummonVisuals.mockClear();
+				await presentation.destroy();
+				expect(runtime.setSummonVisuals).toHaveBeenCalledWith(
+					[],
+					expect.anything(),
+				);
+			} finally {
+				await presentation.destroy();
+				lifecycle.stop();
+				now.mockRestore();
+			}
+		},
+	);
+
 	it("delivers sound cues imperatively and rejects a prior world's packets", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport(currentState(playerGuid));
@@ -1973,6 +2071,8 @@ function fallbackCameraTick(identity: {
 }
 
 class FakePresentationRuntime implements ClientGameplayRuntime {
+	readonly setSummonVisuals =
+		vi.fn<ClientGameplayRuntime["setSummonVisuals"]>();
 	readonly presentationOverrides: (DynamicPresentationOverride | null)[] = [];
 	async setDynamicPresentationOverride(
 		level: DynamicPresentationOverride | null,
@@ -2013,7 +2113,7 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 	entityPresentationState: DynamicEntityPresentationState | null = null;
 	nameplateDecoration = new Map<
 		number,
-		Pick<NameplateContent, "indicators" | "strikeThrough">
+		Pick<NameplateContent, "indicators" | "strikeThrough" | "nameColor">
 	>();
 	/** Independent streaming availability for player and third-person camera cells. */
 	readonly unavailableEnvCellIds = new Set<string>();
@@ -2046,9 +2146,16 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 
 	setDynamicEntityNameplateDecoration(
 		guid: number,
-		decoration: Pick<NameplateContent, "indicators" | "strikeThrough">,
+		decoration: Pick<
+			NameplateContent,
+			"indicators" | "strikeThrough" | "nameColor"
+		>,
 	): void {
-		if (decoration.indicators.length === 0 && !decoration.strikeThrough)
+		if (
+			decoration.indicators.length === 0 &&
+			!decoration.strikeThrough &&
+			decoration.nameColor === undefined
+		)
 			this.nameplateDecoration.delete(guid);
 		else this.nameplateDecoration.set(guid, decoration);
 	}

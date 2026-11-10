@@ -368,6 +368,33 @@ suppression control as Give. Suppression is independent for each action, survive
 and portal travel, and clears on logout. It skips only the modal; each batch still requires clicking
 Salvage and passing the current review checks.
 
+## Summon presentation
+
+Public summon ownership drives player-palette name colors and immediate-only smart Tab admission.
+Names remain server-authored. An observed local summon death or server removal produces one combat
+chat notice and toast: “Your summon is no longer active”. Local cleanup and session resets are silent.
+Server removal can mean loss of tracking rather than global destruction.
+
+`ClientSummonPresentation` requests lifetime once through the existing shared appraisal router;
+it does not open the inspector or change the health subscription. Missing timing disables expiry
+flicker. A rare late reply after GUID reuse may make cosmetic timing inaccurate.
+
+The h3d runtime draws a summon leash between current posed body anchors. The leash uses green chain
+links for your own summons and pale blue links for other players’ summons, with the same faint opacity.
+It uses one reusable link mesh and shader-instanced placement. Leashes obey depth and compatible
+scene/portal scopes. A binary presentation-opacity gate flashes the model, its equipment and its
+leash in phase near estimated expiry without changing retail alpha, cloak, motion, collision or
+selection geometry. It suppresses color,
+selection-mask and shadow submissions on faded frames. Estimated expiry never removes a summon.
+Themes own leash colors and opacity through `--ui-summon-leash-own-color` and
+`--ui-summon-leash-other-color`. CSS colors, including alpha and inherited values, are resolved on
+theme/scope changes and update existing leashes without recreating the renderer. Expiry flicker
+does not depend on the theme palette being ready. Base colors remain
+faint green for your summons and pale blue for other players' summons.
+`CLIENT_SUMMON_TUNING` in `src/client/client-tuning.ts` owns leash geometry, glow and the flicker window
+(default 10 seconds) and frequency. `npm run harness:browser -- --fixture summons --brief` exercises
+the actual GPU pass and runtime lifecycle; the targeting/HUD probe also checks chat and toast.
+
 ## Object examination
 
 Select an entity and press `E`, use the magnifying-glass button in the selected-entity HUD, or

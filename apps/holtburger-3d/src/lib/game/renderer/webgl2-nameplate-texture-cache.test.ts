@@ -58,6 +58,19 @@ function createFixture(options: { readonly width?: number } = {}) {
 }
 
 describe("WebGL2NameplateTextureCache", () => {
+	it("keeps a summon palette override distinct from ordinary mob text", () => {
+		const fixture = createFixture();
+		const summon: NameplateVisual = {
+			...PLATE,
+			content: { ...PLATE.content, nameColor: "player" },
+		};
+		fixture.cache.reconcile([PLATE, summon], APPEARANCE, 1);
+		expect(fixture.cache.acquire(summon)).not.toBe(
+			fixture.cache.acquire(PLATE),
+		);
+		expect(fixture.rasterize).toHaveBeenCalledTimes(2);
+		expect(summon.category).toBe("mob");
+	});
 	it.each([false, true])(
 		"paints name-only strikeout when enabled: %s",
 		(strikeThrough) => {

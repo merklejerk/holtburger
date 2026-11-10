@@ -1,4 +1,9 @@
 <script lang="ts">
+	import {
+		SummonRuntimeProbe,
+		type SummonRuntimeProof,
+	} from "./summon-runtime-probe";
+	import { runSummonGpuFixture, type SummonGpuProof } from "./summon-gpu-probe";
 	import { probeRealizedCycleTargeting } from "./realized-cycle-targeting-probe";
 	import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
 	import { probeCombatEffectsAppearance } from "./combat-effects-appearance-probe";
@@ -605,6 +610,7 @@
 		) => Promise<readonly DynamicEntityView[]>;
 		/** Install a deterministic catalog-independent population through the shared dynamic runtime. */
 		readonly probeRuntimeCombatEffects: () => Promise<void>;
+		readonly probeRuntimeSummons: () => Promise<void>;
 		readonly installSyntheticNameplateWorkload: (
 			workload: SyntheticNameplateWorkload,
 		) => Promise<readonly DynamicEntityView[]>;
@@ -830,6 +836,8 @@
 		readonly outdoorPssm: WebGL2PssmFixtureResult | null;
 		/** Real-browser selected-mask, compositor, resize, and teardown evidence. */
 		readonly entitySelection: WebGL2EntitySelectionFixtureResult | null;
+		readonly summons: SummonGpuProof | null;
+		readonly summonsRuntime: SummonRuntimeProof | null;
 		readonly combatEffects: CombatEffectsFixtureResult | null;
 		readonly combatEffectsRuntime: CombatEffectsRuntimeProof | null;
 		/** One read-only observation for every host source-batch response received by this harness. */
@@ -1157,6 +1165,9 @@
 	let portalScopeAtlasExecutor: WebGL2PortalScopeAtlasExecutorFixtureResult | null =
 		null;
 	let outdoorPssm: WebGL2PssmFixtureResult | null = null;
+	let summons: SummonGpuProof | null = null;
+	let summonsRuntime: SummonRuntimeProof | null = null;
+	const summonRuntimeProbe = new SummonRuntimeProbe();
 	let combatEffects: CombatEffectsFixtureResult | null = null;
 	let combatEffectsRuntime: CombatEffectsRuntimeProof | null = null;
 	const combatEffectsRuntimeProbe = new CombatEffectsRuntimeProbe();
@@ -2547,6 +2558,48 @@
 		}
 		spawnedEntities = entities;
 		return entities;
+	}
+
+	async function probeRuntimeSummons(): Promise<void> {
+		const entities = await installSyntheticNameplateWorkload("svg-icon");
+		const source = entities[0];
+		if (!runtime || source === undefined || source.placement.kind !== "world")
+			throw new Error("Summon fixture requires an installed world model.");
+		const summon: DynamicEntityView = {
+			...source,
+			display: { ...source.display, name: "Summon" },
+			placement: {
+				...source.placement,
+				pose: {
+					...source.placement.pose,
+					coords: {
+						...source.placement.pose.coords,
+						x: source.placement.pose.coords.x - 3,
+					},
+				},
+			},
+		};
+		await runtime.upsertDynamicEntity(summon);
+		if (summon.placement.kind !== "world")
+			throw new Error("Summon fixture lost its world placement.");
+		const owner: DynamicEntityView = {
+			...summon,
+			identity: { ...summon.identity, guid: summon.identity.guid + 1 },
+			display: { ...summon.display, name: "Owner" },
+			placement: {
+				...summon.placement,
+				pose: {
+					...summon.placement.pose,
+					coords: {
+						...summon.placement.pose.coords,
+						x: summon.placement.pose.coords.x + 4,
+					},
+				},
+			},
+		};
+		await runtime.upsertDynamicEntity(owner);
+		summonsRuntime = await summonRuntimeProbe.run(runtime, summon, owner);
+		spawnedEntities = [summon, owner];
 	}
 
 	async function probeRuntimeCombatEffects(): Promise<void> {
@@ -4313,6 +4366,14 @@
 				if (fixture === "outdoor-pssm") {
 					outdoorPssm = device.probeOutdoorPssm();
 				}
+				if (fixture === "summons") {
+					const gl = canvasElement?.getContext("webgl2");
+					if (gl === null || gl === undefined)
+						throw new Error(
+							"Summon probe requires an installed WebGL2 canvas.",
+						);
+					summons = runSummonGpuFixture(gl);
+				}
 				if (fixture === "combat-effects")
 					combatEffects = device.probeCombatEffects();
 				if (fixture === "entity-selection") {
@@ -4359,6 +4420,8 @@
 					{
 						buildRenderer: async (world) => {
 							renderer = await device!.buildRenderer(world);
+							if (fixture === "summons")
+								summonRuntimeProbe.attach(renderer, world);
 							if (fixture === "combat-effects")
 								combatEffectsRuntimeProbe.attach(renderer);
 							return renderer;
@@ -4872,6 +4935,7 @@
 					installSyntheticNameplateWorkload,
 					probeSyntheticNameplateLifecycle,
 					probeRuntimeCombatEffects,
+					probeRuntimeSummons,
 					probeSpawnedEntitySelection,
 					probeObjectPreviewLifecycle,
 					objectPreviewDiagnostics,
@@ -4914,6 +4978,8 @@
 							entityShadowResources: frameDiagnostics?.entityShadows ?? null,
 							dynamicResources: frameDiagnostics?.dynamicResources ?? null,
 							entitySelection,
+							summons,
+							summonsRuntime,
 							combatEffects,
 							combatEffectsRuntime,
 							compiledObjectDraws:

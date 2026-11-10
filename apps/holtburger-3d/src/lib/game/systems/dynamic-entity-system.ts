@@ -148,6 +148,8 @@ interface DynamicEntityRecord {
 	cullingBounds: AABB3 | null;
 	/** Envelope already folded into both culling bounds, so a change republishes them. */
 	appliedEnvelopeRadius: number;
+	/** Binary app-owned opacity composes after retail effects without modifying them. */
+	presentationOpacity: 0 | 1;
 	presentationState: DynamicEntityPresentationState;
 }
 
@@ -551,6 +553,7 @@ export class DynamicEntitySystem<
 			publishedPresentationBounds: rigidPresentationBounds.clone(),
 			cullingBounds: null,
 			appliedEnvelopeRadius: 0,
+			presentationOpacity: 1,
 			presentationState: resident.initialPresentationState,
 			visualRootNodeId,
 			visualRootTransform: Mat4.identity(),
@@ -999,12 +1002,33 @@ export class DynamicEntitySystem<
 		return this.#entities.get(nodeId)?.renderable ?? null;
 	}
 
+	/** Hard cosmetic opacity withdraws every color/depth submission, preserving selection geometry. */
+	setPresentationOpacity(nodeId: SceneNodeId, opacity: 0 | 1): void {
+		const entity = this.#entities.get(nodeId);
+		if (entity === undefined)
+			throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		entity.presentationOpacity = opacity;
+	}
+
+	/** Read the app-owned binary opacity for selection-mask admission. */
+	getPresentationOpacity(nodeId: SceneNodeId): 0 | 1 {
+		const entity = this.#entities.get(nodeId);
+		if (entity === undefined)
+			throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		return entity.presentationOpacity;
+	}
+
 	/** Publish one installed visual and current part payloads without visiting material ranges. */
 	getVisiblePresentation(
 		nodeId: SceneNodeId,
 	): VisibleDynamicPresentation | null {
 		const entity = this.#entities.get(nodeId);
-		if (entity === undefined || !dynamicModelIsVisible(entity)) return null;
+		if (
+			entity === undefined ||
+			entity.presentationOpacity === 0 ||
+			!dynamicModelIsVisible(entity)
+		)
+			return null;
 		const resolved = this.#scene.readResolvedState(entity.visualRootNodeId);
 		if (resolved === undefined)
 			throw new Error(
@@ -1134,6 +1158,7 @@ export class DynamicEntitySystem<
 		if (
 			entity.nameplateContent?.name === content.name &&
 			entity.nameplateContent.level === content.level &&
+			entity.nameplateContent.nameColor === content.nameColor &&
 			entity.nameplateContent.strikeThrough === content.strikeThrough &&
 			orderedIndicatorsEqual(
 				entity.nameplateContent.indicators,

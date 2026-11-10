@@ -683,6 +683,19 @@ impl WorldState {
                     .map(|current| current.position.rotation),
             );
         }
+        if let Some(previous) = self.entities.get(guid)
+            && previous.instance_sequence() == entity.instance_sequence()
+        {
+            // Same-incarnation descriptions must not restart timing or replay death edges.
+            entity.summon_observation = previous.summon_observation.clone();
+            if entity
+                .network_motion
+                .snapshot()
+                .is_some_and(|motion| motion.indicates_death_motion())
+            {
+                entity.summon_observation.ended = true;
+            }
+        }
         self.reconcile_pending_visual_description_for_create(&mut entity);
         // A public object description does not replace the local player's private qualities.
         if guid == self.player.guid

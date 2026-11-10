@@ -1,5 +1,12 @@
 /* Diagnostic theme fixture: exercise the production stylesheet boundary and CSS color syntax. */
 @layer overrides {
+	#summon-leash-theme-probe {
+		--ui-summon-leash-own-color: rgb(255 0 0 / 25%);
+		--ui-summon-leash-other-color: #00ff0080;
+	}
+}
+
+@layer overrides {
 	#combat-theme-probe {
 		--ui-combat-text-damage-color: rgb(18, 35, 52);
 		--ui-combat-text-critical-color: #abcdef;

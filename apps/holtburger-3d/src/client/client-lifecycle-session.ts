@@ -240,6 +240,8 @@ import {
 	decodeClientWorldName,
 	decodeClientPlayerEntered,
 	decodeClientVitals,
+	decodeClientSummonEnded,
+	type ClientSummonEnded,
 	decodeClientEntityHealth,
 	type ClientEntityHealth,
 	decodeClientChatMessage,
@@ -432,6 +434,7 @@ type ClientEventName = Extract<
 	| "client-combat-status-updated"
 	| "client-spell-cast-target-updated"
 	| "client-entity-health-updated"
+	| "client-summon-ended"
 	| "client-chat-message"
 	| "client-combat-outcome"
 	| "client-transient-string"
@@ -660,6 +663,7 @@ export type ClientLifecycleSessionEvent =
 	| { readonly type: "player-entered"; readonly player: ClientPlayerEntered }
 	| { readonly type: "vitals"; readonly vitals: readonly ClientVital[] }
 	| { readonly type: "entity-health"; readonly health: ClientEntityHealth }
+	| { readonly type: "summon-ended"; readonly summon: ClientSummonEnded }
 	| { readonly type: "chat"; readonly message: ClientChatMessage }
 	| {
 			readonly type: "combat-outcome";
@@ -2006,6 +2010,14 @@ export class ClientLifecycleSession {
 			unlisteners.push(
 				await listen("client-player-vitals-updated", (payload) =>
 					this.#receiveVitals(payload),
+				),
+			);
+			unlisteners.push(
+				await listen("client-summon-ended", (payload) =>
+					this.#emit({
+						type: "summon-ended",
+						summon: decodeClientSummonEnded(payload),
+					}),
 				),
 			);
 			unlisteners.push(

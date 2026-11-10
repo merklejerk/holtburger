@@ -579,6 +579,37 @@ try {
 	if (options.fixture === "outdoor-pssm") {
 		assertOutdoorPssmFixture(result.state.outdoorPssm);
 	}
+	if (options.fixture === "summons") {
+		const gpu = result.state.summons;
+		const runtime = result.state.summonsRuntime;
+		if (
+			!gpu ||
+			gpu.visiblePixels <= 0 ||
+			gpu.rebasedPixels !== gpu.visiblePixels ||
+			gpu.wallOccludedPixels !== 0 ||
+			gpu.portalVisiblePixels <= 0 ||
+			gpu.portalOccludedPixels !== 0 ||
+			gpu.verticalPixels <= 0 ||
+			gpu.coincidentPixels !== 0 ||
+			gpu.glError !== 0
+		)
+			throw new Error(`Summon GPU fixture failed: ${JSON.stringify(gpu)}`);
+		if (
+			!runtime ||
+			runtime.leashCount !== 1 ||
+			!runtime.relationshipColor ||
+			!runtime.themeAppearance ||
+			!runtime.movingEndpoint ||
+			!runtime.flickerWithdrawsModel ||
+			!runtime.flickerWithdrawsLeash ||
+			!runtime.flickerRestoresBoth ||
+			!runtime.clearRestoresModel ||
+			!runtime.missingOwnerHidesLeash
+		)
+			throw new Error(
+				`Summon runtime fixture failed: ${JSON.stringify(runtime)}`,
+			);
+	}
 	if (options.fixture === "combat-effects") {
 		const runtimeProof = result.state.combatEffectsRuntime;
 		if (
@@ -1611,13 +1642,14 @@ function parseArgs(args) {
 						"blended",
 						"entity-selection",
 						"combat-effects",
+						"summons",
 						"instanced",
 						"outdoor-pssm",
 						"portal-scope-atlas",
 					].includes(parsed.fixture)
 				) {
 					throw new Error(
-						"--fixture must be blended, combat-effects, entity-selection, instanced, outdoor-pssm, or portal-scope-atlas.",
+						"--fixture must be blended, combat-effects, summons, entity-selection, instanced, outdoor-pssm, or portal-scope-atlas.",
 					);
 				}
 				break;
@@ -2585,6 +2617,8 @@ function briefHarnessReport(result) {
 	const staticObjects = result.state.staticObjects;
 	const authoredDynamics = result.state.authoredDynamics;
 	return {
+		summons: result.state.summons,
+		summonsRuntime: result.state.summonsRuntime,
 		combatEffects: result.state.combatEffects,
 		combatEffectsRuntime: result.state.combatEffectsRuntime,
 		objectPreviewBenchmark: result.objectPreviewBenchmark,
@@ -4844,10 +4878,22 @@ async function runClientHudHarness({ viteUrl }) {
 				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeTargeting",
 				[],
 			);
+			const summonFeedback = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSummonFeedback",
+				[],
+			);
+			if (
+				!summonFeedback ||
+				Object.values(summonFeedback).some((value) => value !== true)
+			)
+				throw new Error(
+					`Summon HUD feedback failed: ${JSON.stringify(summonFeedback)}`,
+				);
 			if (!targeting?.passed)
 				throw new Error("Client targeting probe did not pass.");
 			return {
-				clientTargeting: targeting,
+				clientTargeting: { ...targeting, summonFeedback },
 				consoleMessages,
 				state: { error: null, ready: true },
 			};
@@ -5737,6 +5783,12 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			);
 			await waitForFrameMode(client, options.frameMode);
 		}
+		if (options.fixture === "summons")
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeRuntimeSummons",
+				[],
+			);
 		if (options.fixture === "combat-effects") {
 			await evaluate(
 				client,

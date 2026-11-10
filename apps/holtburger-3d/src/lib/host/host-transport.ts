@@ -94,6 +94,7 @@ import type {
 	ClientServerText,
 	ClientConfirmation,
 	ClientEntityHealth,
+	ClientSummonEnded,
 	ClientCharacterMotionCapabilities,
 	ClientCharacterMotionFeedback,
 	ClientAppearanceOptions,
@@ -346,6 +347,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-combat-status-updated",
 	"client-spell-cast-target-updated",
 	"client-entity-health-updated",
+	"client-summon-ended",
 	"client-chat-message",
 	"client-combat-outcome",
 	"client-action-feedback",
@@ -494,6 +496,7 @@ export interface HostEventPayloadMap {
 		readonly confirmation: ClientConfirmation | null;
 	};
 	"client-entity-health-updated": ClientEntityHealth;
+	"client-summon-ended": ClientSummonEnded;
 	"client-dynamic-entity": DynamicEntityEvent;
 	"client-dynamic-script-cue": ClientDynamicScriptCue;
 	"client-dynamic-sound-cue": ClientDynamicSoundCue;

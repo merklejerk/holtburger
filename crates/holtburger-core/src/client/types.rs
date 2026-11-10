@@ -1147,6 +1147,17 @@ pub enum ClientViewEvent {
     EntityReplaced {
         entity: Box<Entity>,
     },
+    /// Observed summon end edge, independent of description residency or snapshot recovery.
+    SummonEnded {
+        /// Identity of the ended summon.
+        guid: Guid,
+        /// Exact server incarnation that ended.
+        instance_sequence: u16,
+        /// Owner retained before entity eviction.
+        owner: Guid,
+        /// Observed end trigger, not a guessed timer expiration.
+        cause: holtburger_world::summon::SummonEndCause,
+    },
     EntityHealthUpdated {
         guid: Guid,
         health_fraction: f32,

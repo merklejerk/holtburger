@@ -61,7 +61,10 @@ import type {
 import { generateTerrain } from "../terrain/terrain-generator";
 import { validateTerrainGenerationValues } from "../terrain/terrain-generation-validation";
 import { compileTerrainCompositionTable } from "../terrain/composition-table";
-import { CLIENT_COMBAT_EFFECTS_TUNING } from "../../../client/client-tuning";
+import {
+	CLIENT_COMBAT_EFFECTS_TUNING,
+	CLIENT_SUMMON_TUNING,
+} from "../../../client/client-tuning";
 import type { CombatEffectInstance } from "../systems/combat-effects-system";
 import { SceneGraph, type SceneNodeId } from "../scene";
 import { sceneNodeIdOf } from "../scene/utils";
@@ -4007,6 +4010,64 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 					runtime.withSpawnedEntitySelectionGeometry(guid, () => true),
 				).toBe(true);
 			expect(child.physics.noDraw).toBe(false);
+		},
+	);
+
+	it.each([false, true])(
+		"flickers and restores the summon and nested equipment with leashReady=%s, preserving picking geometry",
+		async (leashReady) => {
+			const opacity = vi.spyOn(
+				DynamicEntitySystem.prototype,
+				"setPresentationOpacity",
+			);
+			onTestFinished(() => opacity.mockRestore());
+			const runtime = await buildSpawnRuntime({
+				load: async () => heldVisual(),
+			});
+			onTestFinished(() => runtime.destroy());
+			setTestCamera(runtime, SPAWN_TEST_CAMERA);
+			await runtime.replaceDynamicEntitySnapshot([
+				spawnedEntity(7, 1),
+				attachedEntity(8, 1, 7),
+				attachedEntity(9, 1, 8),
+			]);
+			const tuning = {
+				leash: CLIENT_SUMMON_TUNING.leash,
+				flicker: {
+					leadInSeconds: 2,
+					initialHertz: 1,
+					finalHertz: 1,
+					dutyCycle: 0.5,
+				},
+			};
+			const level = {
+				guid: 7,
+				generation: 1,
+				leash: leashReady
+					? { owner: 99, color: [0.2, 1, 0.4, 0.25] as const }
+					: null,
+				expiresAtSeconds: 2,
+			};
+			runtime.setSummonVisuals([level], tuning);
+			opacity.mockClear();
+			runtime.render(0.75);
+			expect(opacity.mock.calls.map(([, value]) => value)).toEqual([0, 0, 0]);
+			for (const guid of [7, 8, 9])
+				expect(
+					runtime.withSpawnedEntitySelectionGeometry(guid, () => true),
+				).toBe(true);
+
+			// A refreshed estimate moves the same incarnation outside the flicker window.
+			runtime.setSummonVisuals([{ ...level, expiresAtSeconds: 4 }], tuning);
+			opacity.mockClear();
+			runtime.render(0.75);
+			expect(opacity.mock.calls.map(([, value]) => value)).toEqual([1, 1, 1]);
+			runtime.setSummonVisuals([level], tuning);
+			runtime.render(0.75);
+			opacity.mockClear();
+			// Observed end/reset withdraws the policy and restores ordinary death rendering.
+			runtime.setSummonVisuals([], tuning);
+			expect(opacity.mock.calls.map(([, value]) => value)).toEqual([1, 1, 1]);
 		},
 	);
 

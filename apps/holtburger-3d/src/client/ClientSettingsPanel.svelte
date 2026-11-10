@@ -585,7 +585,7 @@
 										...input,
 										smartTabHostileOnly: event.currentTarget.checked,
 									})}
-							/>Only select hostile creatures</label
+							/>Only cycle hostile creatures</label
 						>
 					</div>
 				</details>

@@ -1,4 +1,8 @@
 <script lang="ts">
+	import {
+		ClientSummonPresentation,
+		SUMMON_ENDED_MESSAGE,
+	} from "../../client/client-summon-presentation";
 	import { STAT_ICON_FIXTURE } from "./stat-icon-fixture";
 	import { clientChatRequestSchema } from "../../client/client-host-contract";
 	import { applyUiScale } from "../../app/ui-scale";
@@ -1084,6 +1088,13 @@
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
+		readonly probeSummonFeedback: () => Promise<{
+			chatVisible: boolean;
+			toastVisible: boolean;
+			otherOwnerSilent: boolean;
+			resetSilent: boolean;
+		}>;
+
 		/** Production composer/session boundary with controlled synthetic incoming messages and failures. */
 		readonly chat: {
 			readonly setPartyPresent: (present: boolean) => void;
@@ -1524,6 +1535,7 @@
 					},
 					targeting: "non-creature",
 					playerThreat: false,
+					summon: null,
 					corpse: null,
 					scenePlacement: "available",
 					storage:
@@ -1798,6 +1810,7 @@
 						scenePlacement: "available",
 						targeting: "creature",
 						playerThreat: false,
+						summon: null,
 						corpse: null,
 						description: {
 							...recipient.description,
@@ -4160,6 +4173,17 @@
 			toast = next;
 		});
 		publishLoadoutFeedback = (feedback) => inventoryToasts.publish(feedback);
+		const summonOwner = new ClientSummonPresentation(
+			interactionLifecycle,
+			(message) => {
+				appendChat({ kind: "combat-notice", message });
+				inventoryToasts.publish({ message, tone: "status" });
+			},
+			(error) => {
+				throw error;
+			},
+		);
+
 		const inventoryOwner = new ClientInventoryState(
 			{
 				entities: { read: readInventoryEntities },
@@ -4433,6 +4457,41 @@
 			},
 		};
 		harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__ = {
+			probeSummonFeedback: async () => {
+				await sessionStarted;
+				emitInteractionBaseline();
+				const count = () =>
+					messages.filter(
+						(entry) =>
+							"message" in entry && entry.message === SUMMON_ENDED_MESSAGE,
+					).length;
+				const before = count();
+				const edge = {
+					guid: 700,
+					instanceSequence: 4,
+					owner: 1,
+					cause: "server-removal",
+				};
+				emitInteractionEvent("client-summon-ended", { ...edge, owner: 2 });
+				const otherOwnerSilent = count() === before;
+				emitInteractionEvent("client-summon-ended", edge);
+				await tick();
+				const chatVisible =
+					count() === before + 1 &&
+					Array.from(document.querySelectorAll(".chat-message")).some(
+						(node) => node.textContent === SUMMON_ENDED_MESSAGE,
+					);
+				const toastVisible =
+					document.querySelector(".client-toast")?.textContent?.trim() ===
+					SUMMON_ENDED_MESSAGE;
+				emitInteractionEvent("client-lifecycle-changed", {
+					kind: "logging-out",
+				});
+				emitInteractionEvent("client-summon-ended", edge);
+				const resetSilent = count() === before + 1;
+				emitInteractionBaseline();
+				return { chatVisible, toastVisible, otherOwnerSilent, resetSilent };
+			},
 			probeNearby: () => {
 				nearbyMapFixture = true;
 				waypointOwner.acceptCharacter(1);
@@ -5524,6 +5583,7 @@
 			houseCrystal = null;
 			vendor = null;
 			worldContainer = null;
+			summonOwner.destroy();
 			unsubscribeInventoryToasts();
 			publishLoadoutFeedback = null;
 			inventoryToasts.destroy();

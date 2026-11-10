@@ -316,6 +316,7 @@ function cycleMemberships(
 	context: CycleSelectionContext,
 	preferences: Pick<ClientInputConfiguration, "smartTabHostileOnly">,
 ): CycleCandidate["filters"] {
+	if (facts.summon !== null) return { "smart-combat": "immediate-only" };
 	if (facts.targeting === "creature") {
 		const hostile =
 			facts.playerThreat ||

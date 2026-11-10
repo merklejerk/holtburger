@@ -116,6 +116,14 @@ impl EntityFactsPublication {
     }
 
     pub(super) fn observe(&mut self, event: &WorldEvent) {
+        if matches!(event, WorldEvent::ServerTimeUpdate(_)) {
+            self.dirty.extend(
+                self.records
+                    .values()
+                    .filter(|record| record.summon.is_some())
+                    .map(|record| record.guid),
+            );
+        }
         if matches!(event, WorldEvent::VendorApproached(_)) {
             // Refreshed terms can change acceptance while retaining the same vendor GUID.
             self.dirty.extend(
@@ -142,7 +150,9 @@ impl EntityFactsPublication {
             WorldEvent::PropertiesUpdated { guid, .. }
             | WorldEvent::EntityStateUpdated { guid, .. }
             | WorldEvent::EntityScenePlacementChanged { guid, .. }
-            | WorldEvent::EntityDespawned { guid, .. } => Some(*guid),
+            | WorldEvent::EntityDespawned { guid, .. }
+            | WorldEvent::EntityHealthUpdated { guid, .. }
+            | WorldEvent::SummonEnded { guid, .. } => Some(*guid),
             _ => None,
         };
         if let Some(guid) = guid {

@@ -178,6 +178,14 @@ pub enum HostEvent {
         player_guid: holtburger_common::Guid,
         name: String,
     },
+    /// Live summon end observation; never synthesized from snapshot recovery.
+    ClientSummonEnded {
+        guid: holtburger_common::Guid,
+        #[serde(rename = "instanceSequence")]
+        instance_sequence: u16,
+        owner: holtburger_common::Guid,
+        cause: holtburger_world::summon::SummonEndCause,
+    },
     /// Entity identity and its latest server-reported health fraction.
     ClientEntityHealthUpdated {
         guid: holtburger_common::Guid,
@@ -663,6 +671,17 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::PlayerEntered { player_guid, name } => {
                 HostEvent::ClientPlayerEntered { player_guid, name }
             }
+            crate::client_projection::ClientHostEvent::SummonEnded {
+                guid,
+                instance_sequence,
+                owner,
+                cause,
+            } => HostEvent::ClientSummonEnded {
+                guid,
+                instance_sequence,
+                owner,
+                cause,
+            },
             crate::client_projection::ClientHostEvent::EntityHealthUpdated {
                 guid,
                 health_fraction,
@@ -994,6 +1013,30 @@ pub async fn run_stdio(launch: crate::host_mode::HostLaunch) -> anyhow::Result<(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn summon_end_reaches_host_wire_without_resident_description() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let sink = StdioEventSink::new(sender);
+        let event = holtburger_core::ClientViewEvent::SummonEnded {
+            guid: holtburger_common::Guid(7),
+            instance_sequence: 4,
+            owner: holtburger_common::Guid(1),
+            cause: holtburger_world::summon::SummonEndCause::ServerRemoval,
+        };
+        sink.publish_client_event(crate::client_projection::project_client_event(event).unwrap())
+            .unwrap();
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("expected summon edge")
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "event": "client-summon-ended",
+                "payload": { "guid": 7, "instanceSequence": 4, "owner": 1, "cause": "server-removal" }
+            })
+        );
+    }
+
     #[test]
     fn lock_feedback_and_use_receipts_reach_the_host_wire_with_identity() {
         use holtburger_core::client::item_use::{ItemUseCompletion, ItemUseFinished};

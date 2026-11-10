@@ -44,6 +44,7 @@ pub mod spell;
 pub mod stat_breakdown;
 pub mod state;
 pub mod stats;
+pub mod summon;
 pub mod vendor;
 
 pub use self::state::WorldState;

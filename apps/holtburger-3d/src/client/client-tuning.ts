@@ -1,3 +1,7 @@
+import type {
+	SummonLeashTuning,
+	SummonFlickerTuning,
+} from "../lib/game/runtime/summon-presentation";
 import type { CombatEffectsTuning } from "../lib/game/systems/combat-effects-system";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning.js";
 import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings.js";
@@ -339,4 +343,23 @@ export const CLIENT_ALLEGIANCE_REFRESH_INTERVAL_MS = 15_000;
 export const CLIENT_LOCK_FEEDBACK_TUNING = {
 	successLifetimeMs: 1_100,
 	failureLifetimeMs: 550,
+} as const;
+
+/** Client-only summon leash and estimated-expiry presentation. */
+export const CLIENT_SUMMON_TUNING = {
+	leash: {
+		linkRadius: 0.11,
+		linkSpacing: 0.14,
+		sagFraction: 0.04,
+		maximumDistance: 96,
+		fadeDistance: 5,
+		glowScale: 1.5,
+		glowOpacity: 0.18,
+	} satisfies SummonLeashTuning,
+	flicker: {
+		leadInSeconds: 10,
+		initialHertz: 1,
+		finalHertz: 8,
+		dutyCycle: 0.55,
+	} satisfies SummonFlickerTuning,
 } as const;

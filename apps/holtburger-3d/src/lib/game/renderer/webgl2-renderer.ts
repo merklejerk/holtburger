@@ -1,3 +1,5 @@
+import { WebGL2SummonChainPass } from "./webgl2-summon-chain-pass";
+import type { SummonLeashInput } from "../runtime/summon-presentation";
 import { WebGL2CombatEffects } from "./webgl2-combat-effects";
 import type { RendererCombatEffectsCapability } from "../systems/combat-effects-system";
 import { OCEAN_BACKDROP_BOUNDS } from "../terrain/ocean-backdrop";
@@ -908,6 +910,9 @@ export class WebGL2Renderer implements Renderer {
 	#skyPass: WebGL2SkyPass | null = null;
 	#particleResidency: ParticleMeshResidency | null = null;
 	#particlePass: WebGL2ParticlePass | null = null;
+	/** Lazily allocated procedural geometry shared by all summon relationships. */
+	#summonChainPass: WebGL2SummonChainPass | null = null;
+	#frameSummonLeashes: readonly SummonLeashInput[] = [];
 	readonly #worldMarkerPass: WebGL2WorldMarkerPass;
 	readonly #worldTrajectoryPass: WebGL2WorldTrajectoryPass;
 	readonly #desiredTrajectoryPass: WebGL2WorldTrajectoryPass;
@@ -1551,6 +1556,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#frameClockSeconds = input.timeSeconds;
 		this.#frameWorldIndicator = input.worldIndicator ?? null;
+		this.#frameSummonLeashes = input.summonLeashes ?? [];
 		this.#frameSelectionTarget = input.selectionTarget;
 		this.#frameHoveredEntityNodeId = input.hoveredEntityNodeId;
 		this.#frameViewerEntityIdentity = input.viewerEntityIdentity;
@@ -2039,6 +2045,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#drawBlendedObjects(view, objectPhases, shading, pipeline);
 		this.#drawWorldParticles(view, particlesByScope);
 		this.#drawNameplates(view, pipeline);
+		this.#drawSummonLeashes(view, pipeline, frame.atlas.visibility);
 		this.#drawCombatEffects(view, pipeline, frame.atlas.visibility);
 		const indicator = this.#frameWorldIndicator;
 		if (indicator !== null) {
@@ -2118,6 +2125,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#saoPass = null;
 		this.#skyPass?.destroy();
 		this.#skyPass = null;
+		this.#summonChainPass?.destroy();
 		this.#worldMarkerPass.destroy();
 		this.#worldTrajectoryPass.destroy();
 		this.#desiredTrajectoryPass.destroy();
@@ -3517,6 +3525,7 @@ export class WebGL2Renderer implements Renderer {
 			1.0,
 		);
 		this.#drawNameplates(view, null);
+		this.#drawSummonLeashes(view, null, null);
 		this.#drawCombatEffects(view, null, null);
 		const indicator = this.#frameWorldIndicator;
 		if (indicator?.desiredTrajectory)
@@ -3584,6 +3593,27 @@ export class WebGL2Renderer implements Renderer {
 		this.#reconciledNameplateAppearance = appearance;
 		this.#reconciledNameplateDensity = density;
 		this.#reconciledNameplateViewerIdentity = viewerEntityIdentity;
+	}
+
+	/** Depth-tested geometry participates in the same flat/deferred view routing as world effects. */
+	#drawSummonLeashes(
+		view: PreparedView,
+		routing: WebGL2PortalScopeAtlasPipeline | null,
+		visibility: DynamicRenderDomainSelection | null,
+	): void {
+		if (this.#frameSummonLeashes.length === 0) return;
+		this.#summonChainPass ??= new WebGL2SummonChainPass(this.#gl);
+		const anchor = createLandblockWorldOrigin(view.anchorLandblockId);
+		for (const leash of this.#frameSummonLeashes) {
+			const scope = leash.renderScope;
+			const admitted =
+				visibility !== null
+					? visibility.selectedRenderDomainOrdinal(scopeKey(scope)) !== null
+					: scope.kind === "outdoor" ||
+						scope.envCellId === view.camera.placement.envCellId;
+			if (admitted)
+				this.#summonChainPass.draw(leash, anchor, view.clipFromAnchor, routing);
+		}
 	}
 
 	#drawCombatEffects(

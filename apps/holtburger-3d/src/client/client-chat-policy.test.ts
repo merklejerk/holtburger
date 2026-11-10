@@ -22,6 +22,25 @@ function line(message: ClientChatEntry): ClientChatLine {
 }
 
 describe("client chat presentation policy", () => {
+	it("routes local summon notices through combat filtering without marking them as evasion", () => {
+		const notice = line({
+			kind: "combat-notice",
+			message: "Your summon is no longer active",
+		});
+		expect(clientChatTone(notice)).toBe("combat");
+		expect(clientChatFiltersAllow(["combat"], notice, channelFilters)).toBe(
+			true,
+		);
+		expect(clientChatFiltersAllow(["chat"], notice, channelFilters)).toBe(
+			false,
+		);
+		expect(
+			clientChatShouldSuppress(
+				{ hideSelfEvasionsAndResists: true, hideSpellIncantations: true },
+				notice,
+			),
+		).toBe(false);
+	});
 	it.each([
 		["general", "general"],
 		["trade", "trade"],

@@ -100,6 +100,14 @@ Files: [src/entity.rs](src/entity.rs), [src/hydration.rs](src/hydration.rs)
 - **Hydration** merges partial updates into complete entity state as object descriptions and
   property updates arrive over time.
 
+Summon ownership and lifecycle facts live in [src/summon.rs](src/summon.rs). Nonzero public pet
+ownership identifies summons independently of owner visibility. Each entity incarnation retains
+its observed end and optional appraised lifetime. Death and applicable server deletion produce one
+`SummonEnded` edge; local eviction and snapshot recovery do not. Remaining lifespan is anchored to
+monotonic receipt time and projected to a stable estimated server deadline, rebased only when the
+server clock changes. Timer expiry never establishes death or removal. Frontends consume
+`ClientEntityFacts.summon` and choose their own targeting, coloring, feedback and effects.
+
 ### Spatial / Physics helpers
 
 Files: [src/spatial.rs](src/spatial.rs), [src/spatial](src/spatial)

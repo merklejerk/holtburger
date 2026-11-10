@@ -340,6 +340,8 @@ pub struct VendorSaleEligibility {
 pub struct ClientEntityFacts {
     /// Stable key shared with selection and rendering.
     pub guid: Guid,
+    /// Summon ownership and observed activity/timing; absent without nonzero pet ownership.
+    pub summon: Option<crate::summon::SummonFacts>,
     /// Public-only independent-world catalog facts; absent for contents and attachments.
     pub nearby: Option<NearbyEntityFacts>,
     /// Cell/header/HUD and health subscription facts.
@@ -588,6 +590,7 @@ impl WorldState {
                     })
                 }),
             description,
+            summon: entity.and_then(|entity| entity.summon_facts()),
             location,
             owned_by_player,
             can_pick_up: crate::interaction::pickup_candidate(self, guid).is_some(),

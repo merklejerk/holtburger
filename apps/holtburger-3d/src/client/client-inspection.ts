@@ -347,6 +347,7 @@ export class ClientInspection {
 		return selectedEntityNameColor(
 			entity.description,
 			guid === read.level.playerGuid,
+			entity.summon !== null,
 		);
 	}
 

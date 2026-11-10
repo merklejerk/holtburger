@@ -74,7 +74,15 @@ pub(crate) fn handle_message(
             true
         }
         GameMessage::ObjectDelete(data) => {
-            state.request_entity_instance_delete(data.guid, data.instance_sequence);
+            if state.request_entity_instance_delete(data.guid, data.instance_sequence)
+                == crate::state::liveness::EntityInstanceDeleteDisposition::Applied
+            {
+                state.end_summon(
+                    data.guid,
+                    crate::summon::SummonEndCause::ServerRemoval,
+                    events,
+                );
+            }
             true
         }
         GameMessage::InventoryRemoveObject(data) => {
@@ -174,6 +182,7 @@ pub(crate) fn handle_event(
             let guid = data.object_guid;
             let character_titles = std::sync::Arc::clone(&state.character_titles);
             let inspection_context = InspectionContext::new(&character_titles);
+            let server_time = state.current_server_time();
             if let Some(entity) = state.entities.get_mut(guid) {
                 if !data.success {
                     events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
@@ -184,6 +193,7 @@ pub(crate) fn handle_event(
                 }
                 let applied = entity.apply_identify_response(data);
                 debug_assert!(applied, "successful identify response must merge");
+                entity.observe_summon_lifetime(server_time);
                 let outcome = ObjectInspection::from_entity(entity, inspection_context).into();
                 events.push(WorldEvent::EntityIdentified(Box::new(entity.clone())));
                 events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {

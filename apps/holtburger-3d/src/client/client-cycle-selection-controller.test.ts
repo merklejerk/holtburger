@@ -712,6 +712,32 @@ function doorFacts(
 }
 
 describe("realized volume candidate sampling", () => {
+	it.each([false, true])(
+		"summons remain immediate-only with hostile-only=%s",
+		(smartTabHostileOnly) => {
+			const distance = POLICY.initialDistanceBandMeters / 2;
+			const facts = entityFacts(2, {
+				targeting: "creature",
+				summon: {
+					instanceSequence: 1,
+					owner: 1,
+
+					activity: "active",
+					lifetime: { kind: "unobserved" },
+				},
+			});
+			const scene = volumeScene(
+				[facts],
+				[boxEntity(2, 0, 0, -distance, BODY_BOX)],
+			);
+			const candidates = scene.sample({
+				targetOnlyInView: false,
+				smartTabHostileOnly,
+			});
+			expect(candidates?.[0]?.filters["smart-combat"]).toBe("immediate-only");
+			expect(candidates?.[0]?.smartImmediate).not.toBeNull();
+		},
+	);
 	it("selects a close door whose surface reaches the cone even when its origin does not", () => {
 		const width = POLICY.initialDistanceBandMeters;
 		const door = boxEntity(

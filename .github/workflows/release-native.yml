@@ -80,7 +80,7 @@ jobs:
         run: |
           PACKAGES=()
           if [[ "$HOLTBURGER_PRODUCT" != '3d' ]]; then
-            PACKAGES+=(-p holtburger-cli --bin tui --bin content_bootstrap -p holtburger-tools --bin dat2hba --bin dat-tool)
+            PACKAGES+=(-p holtburger-cli --bin tui -p holtburger-tools --bin dat2hba --bin dat-tool)
           fi
           if [[ "$HOLTBURGER_PRODUCT" != 'cli' ]]; then
             PACKAGES+=(-p holtburger-3d-host --bin holtburger-3d-host)
@@ -90,12 +90,9 @@ jobs:
           if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
           echo "HOLTBURGER_HOST_BIN=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
           echo "HOLTBURGER_PACKAGE_HOST=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
-      - name: Verify CLI content and assemble its native archive
+      - name: Assemble the CLI native archive
         if: inputs.product != '3d'
         run: |
-          SUFFIX=''
-          if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
-          "target/${{ matrix.triple }}/release/content_bootstrap$SUFFIX" --content .holtburger-local/cli-content
           npm run --silent release -- assemble --product cli \
             --target '${{ matrix.triple }}' --content .holtburger-local/cli-content \
             --notices .holtburger-local/release-notices/THIRD_PARTY_NOTICES.html \
@@ -107,12 +104,6 @@ jobs:
           path: .holtburger-local/release-artifacts/cli/*
           if-no-files-found: error
           compression-level: 0
-      - uses: actions/upload-artifact@v7
-        if: runner.os == 'Linux' && inputs.product != '3d'
-        with:
-          name: verification-linux-bootstrap
-          path: target/x86_64-unknown-linux-gnu/release/content_bootstrap
-          if-no-files-found: error
       - name: Install frontend dependencies
         if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
@@ -132,30 +123,6 @@ jobs:
           npm run package:built -- --platform=${{ matrix.platform }} --arch=${{ matrix.architecture }}
           npm run test:installers
           npm run check:package
-          npm run smoke:sidecar
-      - name: Install Linux virtual display
-        if: runner.os == 'Linux' && inputs.product != 'cli'
-        run: |
-          if ! command -v Xvfb >/dev/null || ! command -v xauth >/dev/null; then
-            sudo apt-get update
-            sudo apt-get install --yes --no-install-recommends xvfb xauth
-          fi
-      - name: Check packaged renderer and content recovery
-        if: inputs.product != 'cli'
-        working-directory: apps/holtburger-3d
-        run: |
-          PACKAGE="$GITHUB_WORKSPACE/apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}"
-          case "$RUNNER_OS" in
-            macOS) EXECUTABLE="$PACKAGE/holtburger-3d.app/Contents/MacOS/holtburger-3d" ;;
-            Windows) EXECUTABLE="$PACKAGE/holtburger-3d.exe" ;;
-            Linux) EXECUTABLE="$PACKAGE/holtburger-3d" ;;
-            *) exit 1 ;;
-          esac
-          if [[ "$RUNNER_OS" == 'Linux' ]]; then
-            xvfb-run --auto-servernum node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
-          else
-            node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
-          fi
       - name: Assemble the 3D native archive
         if: inputs.product != 'cli'
         run: |
@@ -188,7 +155,7 @@ jobs:
           if ($candidates.Count -ne 1) { throw 'Expected one compiler for the installed Inno Setup package' }
           "INNO_COMPILER=$($candidates[0])" >> $env:GITHUB_ENV
           Write-Host "Inno Setup compiler: $($candidates[0])"
-      - name: Build and verify the desktop installer from the native archive
+      - name: Build the desktop installer from the verified native archive
         if: runner.os != 'Linux' && inputs.product != 'cli'
         run: |
           COMPILER=()

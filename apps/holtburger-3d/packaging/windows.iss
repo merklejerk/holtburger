@@ -34,14 +34,8 @@ OutputDir={#InstallerDir}
 OutputBaseFilename={#InstallerName}
 UninstallDisplayIcon={app}\payload\h3d\holtburger-3d.exe
 UninstallDisplayName={#DisplayName}
-; Fixtures exercise installation behavior with the full payload, without recompressing Electron.
-#ifdef FixtureInstaller
-Compression=none
-SolidCompression=no
-#else
 Compression=lzma2
 SolidCompression=yes
-#endif
 CloseApplications=no
 RestartApplications=no
 DisableProgramGroupPage=yes

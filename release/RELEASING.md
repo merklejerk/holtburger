@@ -6,14 +6,12 @@ CLI and 3D products on Linux x86-64, Windows x86-64, and macOS Apple Silicon, pl
 per product. 3D also includes a Windows setup executable and macOS DMG. Intel macOS is not
 supported. Both products share one version and original source commit.
 
-h3d owns installer construction and native acceptance through its app-local
+h3d owns installer construction through its app-local
 `package:installer` command (`--native DIR --output FILE [--iscc PATH]`). Root
 `release:installers` admits/extracts the source archive, invokes that command, then
-hashes the installer and writes its suite receipt. Windows release verification retains the
-full installation, upgrade, repair, channel-switch, lock and uninstall scenarios. Its two
-throwaway installers use the same recipe and full payload without compression; the published
-installer retains solid LZMA2 compression. From `apps/holtburger-3d/`, run
-`npm run check:installers` and `npm run test:installers` for tooling checks.
+hashes the installer and writes its suite receipt. Windows installers use solid LZMA2
+compression. From `apps/holtburger-3d/`, run `npm run check:installers` and
+`npm run test:installers` for tooling checks.
 
 Release preparation is a manually requested Copilot analysis followed by a release PR.
 Reviewing and merging that PR authorizes automatic build, verification, and publication.
@@ -126,8 +124,8 @@ npm run version:check
 
 `.github/cli-content.json` owns the approved generated ZIP SHA-256 and GitHub API asset URL.
 The current input contains exactly `bootstrap.hba` and `navigation.hnav`; the descriptor is
-the source of truth for its asset URL and digest. The production fetcher and headless
-bootstrap probe validate the downloaded input. HNAV has no runtime bootstrap digest binding.
+the source of truth for its asset URL and digest. The production fetcher validates the downloaded input; the headless bootstrap probe is
+available for manual runtime validation. HNAV has no runtime bootstrap digest binding.
 Existing content assets remain frozen. This path does not fetch legacy micro archives.
 For future updates, store approved bytes as a fresh asset
 on the repository's public, non-latest content prerelease. Read-only CI tokens cannot retrieve
@@ -204,13 +202,12 @@ no Node/Electron installation. 3D needs no compact CLI content.
 
 ### Desktop installers
 
-h3d owns installer construction and native acceptance checks through its
+h3d owns installer construction and input verification through its
 `package:installer` command. Root `release:installers` verifies/extracts the native
 archive, invokes that app command, then hashes the installer and writes the suite
 receipt. The app command accepts `--native DIR --output FILE [--iscc PATH]` and
 requires its own app dependencies. `npm run check:installers` and
 `npm run test:installers` run from `apps/holtburger-3d/`.
-and manual upgrades
 
 The desktop installer job consumes the verified 3D native ZIP. It does not rebuild
 Electron or the Rust host. Windows uses `apps/holtburger-3d/packaging/windows.iss` with
@@ -221,32 +218,24 @@ archive for diagnostics. The native job must still pass before publication.
 macOS packaging signs the Rust host first, records its Cargo and signed digests in
 `Contents/Resources/host-provenance.json`, then seals the application. Both the native
 archive and Forge's app-only diagnostic ZIP retain that receipt. Assembly checks Cargo
-provenance; package/archive/copy inspection checks the final host and bundle signatures.
-Gatekeeper assessment is recorded separately and may reject the ad-hoc identity.
+provenance; package and archive inspection check the final host and bundle signatures.
+Gatekeeper acceptance requires manual verification.
 
-`desktop_installers.py` requires the native OS and emits installer metadata only after
-its install/copy checks pass. Windows checks modify registry and Start menu state: run
-them only on ephemeral CI runners or disposable OS accounts/VMs. Local disposable
-accounts must explicitly set `HOLTBURGER_DISPOSABLE_INSTALL_TESTS=1`; an existing app
-registration or shortcut is refused. A temporary destination alone is not isolation.
-
-The checks cover install, repair, a generated predecessor upgrade, obsolete-file
-removal, retained launcher credentials, locked files, and uninstall/replacement. Windows
-also switches both ways between beta/nightly installer version headers over the current
-verified payload. This proves installer ordering behavior, while each actual distribution
-receives its own runtime probes; it does not substitute for testing two real releases. Mac
-checks also require rejection of a mutated sealed resource. The predecessor is a
-synthetic installation fixture, not proof of compatibility with every historical
-settings schema. Finder, browser-download quarantine, and visual acceptance remain
-user-owned. No update server or application updater is installed.
+The app-local installer command requires the native OS. It verifies the input
+package's identity and signatures before compiling the Windows installer or creating
+the macOS DMG. The generated installer must be nonempty, and macOS verifies the DMG
+container. Installation, repair, upgrade, profile retention, locked-file handling,
+and uninstall require manual verification.
+Finder, browser-download quarantine, and visual acceptance also require manual verification.
+No update server or application updater is installed.
 
 ## Release, nightly, and diagnostic builds
 
 `Build checks` validates main pushes/PRs and supplies reusable release validation. Root prose
 changes outside shipped inputs can skip compilation while retaining the final `Validation`
 status. Release PR merges, schedules, and manual builds receive full validation. Native jobs build
-and probe each platform, including launcher-first and direct-client update lifecycle checks
-with temporary profiles and intercepted browser opening.
+and inspect each platform's package. Runtime startup, content recovery, update lifecycle,
+and theme/font probes are manual diagnostics.
 
 The nightly wrapper runs every eight hours or by manual dispatch, always from main. It reads
 the current checked-in base version and appends `-nightly-SHORT_SOURCE_SHA`, using the first
@@ -295,12 +284,11 @@ Both products use the runtime generation selected by the 3D recipe (currently Fr
 26.08). Each product has one canonical recipe shared by beta and nightly.
 
 Portable native Linux builds use Ubuntu 22.04; Flatpak builds use headless Ubuntu 24.04 and
-its newer builder. No desktop distribution or persistent runner fleet is required. A virtual
-display and portal services are installed only for selected 3D probes. Those probes exercise
-private-host startup, packaged assets/theme recovery, document-portal input, and explicit
-output permissions using synthetic content. CLI probes load production content and invoke
-utilities; they never launch the interactive TUI. Installed inventory/bytes are compared with
-the verified native product. Renderer inspection is not repeated for identical installed bytes.
+its newer builder. CI builds and installs the Flatpak container for static inventory, byte,
+identity, helper, and runtime metadata checks against the verified native product. Runtime probes
+for sidecar startup, content loading, portal services, and tool I/O are manual diagnostics.
+The standalone `.github/flatpak/verify-installed` and `verify-cli-installed` scripts
+require a configured local Flatpak installation and their documented display/D-Bus context.
 
 Cargo, npm, and Flatpak builder caches remain enabled. Fresh hosted runners still install OS
 packages and the SDK/runtime. Measure actual job/setup duration before adding image or runner
@@ -359,9 +347,10 @@ This avoids repeating tool compilation and license collection in the release pat
 
 ## Acceptance and publication
 
-Merging the release PR or manually requesting `purpose=release` is the publication decision. Automated native packaging/runtime
-checks remain required; manual graphics, input, gameplay, Finder/browser quarantine, and
-visual acceptance are no longer publication gates. Those limitations should be understood
+Merging the release PR or manually requesting `purpose=release` is the publication decision.
+Automated builds, unit tests, static package inspection, and installer generation gate publication.
+Electron startup, graphics, input, gameplay, Finder/browser quarantine, and visual acceptance
+require manual verification. Those limitations should be understood
 when reviewing the release PR. Developer ID signing/notarization remains deferred;
 ad-hoc integrity signing does not remove the quarantine limitation in the quickstart.
 

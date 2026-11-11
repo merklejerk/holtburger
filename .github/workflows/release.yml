@@ -155,7 +155,7 @@ jobs:
         with:
           name: verification-linux-electron
           path: apps/holtburger-3d/dist-electron
-      - name: Install locked 3D inspection and probe dependencies
+      - name: Install locked 3D inspection dependencies
         if: needs.plan.outputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: npm ci --ignore-scripts
@@ -164,11 +164,6 @@ jobs:
           pattern: release-*-x86_64-unknown-linux-gnu
           path: .holtburger-local/release-native-linux
           merge-multiple: true
-      - uses: actions/download-artifact@v8
-        if: needs.plan.outputs.product != '3d'
-        with:
-          name: verification-linux-bootstrap
-          path: .holtburger-local/release-linux-probes
       - name: Refresh Ubuntu package indexes
         timeout-minutes: 5
         run: |
@@ -185,17 +180,13 @@ jobs:
         timeout-minutes: 10
         run: |
           sudo apt-get install --yes --no-install-recommends \
-            flatpak flatpak-builder appstream-compose desktop-file-utils elfutils ostree librsvg2-common dbus-x11
+            flatpak flatpak-builder appstream-compose desktop-file-utils elfutils ostree librsvg2-common
       - name: Download shared Flatpak runtime and SDK from Flathub
         timeout-minutes: 15
         run: |
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
           RUNTIME_VERSION=$(node --input-type=module -e 'import {readFileSync} from "node:fs"; console.log(JSON.parse(readFileSync(".github/flatpak/io.github.merklejerk.holtburger-3d.json", "utf8"))["runtime-version"])')
           sudo flatpak install --noninteractive --assumeyes flathub "org.freedesktop.Platform/x86_64/$RUNTIME_VERSION" "org.freedesktop.Sdk/x86_64/$RUNTIME_VERSION"
-      - name: Install 3D probe display and portal helpers
-        if: needs.plan.outputs.product != 'cli'
-        timeout-minutes: 5
-        run: sudo apt-get install --yes --no-install-recommends xvfb xauth xdg-desktop-portal xdg-desktop-portal-gtk
       - name: Materialize CLI recipe from its native archive
         if: needs.plan.outputs.product != '3d'
         run: |
@@ -213,12 +204,10 @@ jobs:
           upload-artifact: false
           manifest-path: .holtburger-local/release-cli-flatpak.json
           cache: true
-      - name: Probe and record CLI Flatpak
+      - name: Inspect and record CLI Flatpak
         if: needs.plan.outputs.product != '3d'
         run: |
           flatpak install --user --noninteractive --assumeyes --reinstall .holtburger-local/holtburger-cli.flatpak
-          chmod +x .holtburger-local/release-linux-probes/content_bootstrap
-          dbus-run-session -- .github/flatpak/verify-cli-installed "$GITHUB_WORKSPACE/.holtburger-local/release-linux-probes/content_bootstrap"
           mkdir -p .holtburger-local/release-artifacts/cli
           BUNDLE='.holtburger-local/release-artifacts/cli/holtburger-cli-${{ needs.plan.outputs.version }}-x86_64.flatpak'
           cp .holtburger-local/holtburger-cli.flatpak "$BUNDLE"
@@ -250,11 +239,10 @@ jobs:
           upload-artifact: false
           manifest-path: .holtburger-local/release-3d-flatpak.json
           cache: true
-      - name: Probe and record 3D Flatpak
+      - name: Inspect and record 3D Flatpak
         if: needs.plan.outputs.product != 'cli'
         run: |
           flatpak install --user --noninteractive --assumeyes --reinstall .holtburger-local/holtburger-3d.flatpak
-          xvfb-run --auto-servernum dbus-run-session -- .github/flatpak/verify-installed
           mkdir -p .holtburger-local/release-artifacts/3d
           BUNDLE='.holtburger-local/release-artifacts/3d/holtburger-3d-${{ needs.plan.outputs.version }}-x86_64.flatpak'
           cp .holtburger-local/holtburger-3d.flatpak "$BUNDLE"

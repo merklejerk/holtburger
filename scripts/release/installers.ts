@@ -13,7 +13,7 @@ import {
 } from "./contracts.ts";
 import { validateVersion } from "./version.ts";
 
-/** The app owns installer construction and native acceptance; root supplies admitted input/output paths. */
+/** The app owns installer construction and input verification; root supplies admitted input/output paths. */
 export function invokeInstaller(
   root: string,
   native: string,

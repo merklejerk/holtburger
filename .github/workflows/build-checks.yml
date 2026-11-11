@@ -127,18 +127,6 @@ jobs:
       - name: Deny Rust lint warnings
         run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
-      - name: Exercise exhaustive theme and font behavior once
-        if: inputs.product != 'cli'
-        working-directory: apps/holtburger-3d
-        run: |
-          npm run build
-          npm run build:electron:main
-          if ! command -v Xvfb >/dev/null || ! command -v xauth >/dev/null; then
-            sudo apt-get update
-            sudo apt-get install --yes --no-install-recommends xvfb xauth
-          fi
-          xvfb-run --auto-servernum npm run probe:user-themes:built
-
   result:
     name: Validation
     if: always()

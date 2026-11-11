@@ -999,24 +999,25 @@ assembles downloadable native archives from the inspected package.
 `npm run check:package` verifies the native host, compiled entries, branding assets, bundled fonts
 and their licenses, application license, and Electron/Chromium notices in the unpacked package.
 Required ASAR files must be nonempty.
-Desktop installer construction and setup/repair/uninstall probes belong to
-`scripts/installers/`. From this app directory, `npm run package:installer --
+Desktop installer construction belongs to `scripts/installers/`. From this app directory, `npm run package:installer --
 --native DIR --output FILE [--iscc PATH]` consumes an extracted native release
-bundle and runs the platform's acceptance checks. The repository release command
+bundle, verifies its identity/signatures, and creates the platform's installer. The repository release command
 owns archive admission and suite receipts. Use `npm run check:installers` and
 `npm run test:installers` for the app-owned tooling checks. Native installer
-acceptance runs on Windows/macOS; portable contract and process tests also run on Linux.
+generation runs on Windows/macOS; portable contract and process tests also run on Linux.
+Setup, repair, upgrade, retained settings, and uninstall require manual verification.
 The shared filesystem comparison/hash helper uses only Node built-ins and needs no
 repository-root dependency installation.
 
 Font packaging checks compare every file under `public/fonts/` with its packaged bytes,
 so adding or replacing fonts and notices does not require updating a verification inventory.
 
-The build checks workflow runs `npm run probe:user-themes:built` after building, reusing the
-compiled frontend and Electron output. It checks native theme loading and bundled font decoding
-in development HTTP and built-file modes, discovering registered faces from the Base font roles
-rather than assuming particular families or a fixed face count. Linux CI runs it under Xvfb. Use
-`npm run probe:user-themes` locally when those outputs need rebuilding first.
+Run `npm run probe:user-themes:built` manually to check native theme loading and bundled
+font decoding with compiled frontend and Electron output. It exercises development HTTP and
+built-file modes, discovering registered faces from the Base font roles. Use
+`npm run probe:user-themes` when those outputs need rebuilding first.
+Renderer startup, content recovery, and theme/font probes are manual diagnostics.
+Build and publication checks verify package contents and generate installers.
 
 The packages are unsigned experimental artifacts. Hosted CI has built and structurally inspected
 Linux x86-64, Windows x86-64, and macOS arm64 packages, but that does not certify GPU, input, audio,

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 /** App-owned installer tooling needs only native executables, never npm shell shims. */
 export const APP_ROOT = fileURLToPath(new URL("../../", import.meta.url));
-/** Injectable native command boundary for installed-app and lifecycle checks. */
+/** Injectable command boundary for native installer tools. */
 export type Runner = (
 	program: string,
 	args: readonly string[],
@@ -12,7 +12,7 @@ export type Runner = (
 ) => string;
 /** Rejected native operations remain distinguishable from execution failures. */
 export interface CommandResult {
-	/** Numeric native status, including expected locked-file refusals. */
+	/** Numeric native process status. */
 	readonly exitCode: number;
 	/** Exact diagnostic output from the native program. */
 	readonly stdout: Buffer;
@@ -42,7 +42,7 @@ export function runResult(
 	};
 }
 
-/** Default command policy requires success; explicit refusal probes inspect runResult. */
+/** Require success while preserving the native tool's diagnostic output. */
 export const run: Runner = (program, args, cwd) => {
 	const result = runResult(program, args, cwd);
 	if (result.exitCode !== 0)

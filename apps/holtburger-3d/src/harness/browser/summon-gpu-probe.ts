@@ -1,21 +1,16 @@
-import { CLIENT_SUMMON_TUNING } from "../../client/client-tuning";
 import { sceneVec3 } from "../../lib/assets/ac-frame";
 import { Mat4, Vec3 } from "../../lib/game/math/types";
 import { WebGL2SummonChainPass } from "../../lib/game/renderer/webgl2-summon-chain-pass";
-import {
-	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
-	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
-} from "../../lib/game/renderer/portal-propagation-metadata";
-import { PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT } from "../../lib/game/renderer/portal-scope-atlas-metadata-glsl";
-import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "../../lib/game/renderer/portal-scope-atlas-command-model";
 
-/** Actual GPU evidence for procedural links, world depth and deferred portal rejection. */
+/** Actual GPU evidence for procedural links, composed world depth and doorway occlusion. */
 export interface SummonGpuProof {
 	readonly visiblePixels: number;
 	readonly rebasedPixels: number;
 	readonly wallOccludedPixels: number;
-	readonly portalVisiblePixels: number;
-	readonly portalOccludedPixels: number;
+	/** Visible front links and links through the opening in a synthetic final depth buffer. */
+	readonly doorwayPixels: number;
+	/** Links behind the solid portion of the doorway wall. */
+	readonly doorwayWallPixels: number;
 	readonly verticalPixels: number;
 	readonly coincidentPixels: number;
 	readonly glError: number;
@@ -28,25 +23,18 @@ export function runSummonGpuFixture(
 	const width = gl.drawingBufferWidth;
 	const height = gl.drawingBufferHeight;
 	const pass = new WebGL2SummonChainPass(gl);
-	const envelope = gl.createTexture();
-	const metadata = gl.createBuffer();
-	if (envelope === null || metadata === null) {
-		pass.destroy();
-		gl.deleteTexture(envelope);
-		gl.deleteBuffer(metadata);
-		throw new Error(
-			"Summon fixture could not allocate portal evidence resources.",
-		);
-	}
 	const input = {
 		start: sceneVec3(new Vec3(-0.8, 0.3, 0)),
 		end: sceneVec3(new Vec3(0.8, 0.3, 0)),
-		renderScope: { kind: "outdoor" as const },
 		color: [0.2, 1, 0.45, 0.25] as const,
 		tuning: {
-			...CLIENT_SUMMON_TUNING.leash,
 			linkRadius: 0.06,
 			linkSpacing: 0.09,
+			sagFraction: 0.08,
+			maximumDistance: 10,
+			fadeDistance: 1,
+			glowScale: 1.5,
+			glowOpacity: 0.25,
 		},
 	};
 	const pixels = new Uint8Array(width * height * 4);
@@ -72,107 +60,74 @@ export function runSummonGpuFixture(
 	const anchor = Vec3.zero();
 	try {
 		clear();
-		pass.draw(input, anchor, matrix, null);
+		pass.draw(input, anchor, matrix);
 		const visiblePixels = count();
 		input.start.x += 100;
 		input.end.x += 100;
 		clear();
-		pass.draw(input, new Vec3(100, 0, 0), matrix, null);
+		pass.draw(input, new Vec3(100, 0, 0), matrix);
 		const rebasedPixels = count();
 		input.start.x -= 100;
 		input.end.x -= 100;
 		clear(0);
-		pass.draw(input, anchor, matrix, null);
+		pass.draw(input, anchor, matrix);
 		const wallOccludedPixels = count();
-		const bytes = new Uint32Array(
-			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES / 4,
-		);
-		bytes.set(
-			[0, 0, 0, 0, width, height, 0, 0],
-			PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES / 4,
-		);
-		gl.bindBuffer(gl.UNIFORM_BUFFER, metadata);
-		gl.bufferData(gl.UNIFORM_BUFFER, bytes, gl.STATIC_DRAW);
-		gl.bindBufferBase(
-			gl.UNIFORM_BUFFER,
-			PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT,
-			metadata,
-		);
-		gl.activeTexture(
-			gl.TEXTURE0 + PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth,
-		);
-		gl.bindTexture(gl.TEXTURE_2D, envelope);
-		gl.bindSampler(PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth, null);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-		const depths = new Float32Array(width * height).fill(1);
-		gl.texImage2D(
-			gl.TEXTURE_2D,
-			0,
-			gl.R32F,
-			width,
-			height,
-			0,
-			gl.RED,
-			gl.FLOAT,
-			depths,
-		);
-		const routing = {
-			routeDeferredSubmission: (
-				_scope: string,
-				uniforms: { readonly renderDomain: WebGLUniformLocation },
-			) => gl.uniform1ui(uniforms.renderDomain, 0),
-		};
-		clear();
-		pass.draw(input, anchor, matrix, routing);
-		const portalVisiblePixels = count();
-		depths.fill(0);
-		gl.texSubImage2D(
-			gl.TEXTURE_2D,
-			0,
-			0,
-			0,
-			width,
-			height,
-			gl.RED,
-			gl.FLOAT,
-			depths,
-		);
-		clear();
-		pass.draw(input, anchor, matrix, routing);
-		const portalOccludedPixels = count();
+		// Model a final composed wall at depth 0.5, with an opening in its centre.
+		// The leash crosses the wall plane: front links remain visible outside the opening.
+		input.start.z = -0.4;
+		input.end.z = 0.4;
+		clear(0.5);
+		const openingLeft = Math.floor(width * 0.4);
+		const openingRight = Math.ceil(width * 0.6);
+		gl.enable(gl.SCISSOR_TEST);
+		gl.scissor(openingLeft, 0, openingRight - openingLeft, height);
+		gl.clearDepth(1);
+		gl.clear(gl.DEPTH_BUFFER_BIT);
+		gl.disable(gl.SCISSOR_TEST);
+		pass.draw(input, anchor, matrix);
+		const doorwayPixels = count();
+		let doorwayWallPixels = 0;
+		let frontPixels = 0;
+		let openingPixels = 0;
+		for (let y = 0; y < height; y++) {
+			for (let x = 0; x < width; x++) {
+				if (pixels[(y * width + x) * 4 + 1] === 0) continue;
+				if (x < openingLeft) frontPixels++;
+				else if (x >= openingRight) doorwayWallPixels++;
+				else openingPixels++;
+			}
+		}
+		if (frontPixels === 0)
+			throw new Error(
+				"Summon doorway fixture lost links in front of the wall.",
+			);
+		if (openingPixels === 0)
+			throw new Error("Summon doorway fixture lost links through the opening.");
+		input.start.z = 0;
+		input.end.z = 0;
 		input.start.x = 0;
 		input.start.y = -0.7;
 		input.end.x = 0;
 		input.end.y = 0.7;
 		clear();
-		pass.draw(input, anchor, matrix, null);
+		pass.draw(input, anchor, matrix);
 		const verticalPixels = count();
 		input.end.copy(input.start);
 		clear();
-		pass.draw(input, anchor, matrix, null);
+		pass.draw(input, anchor, matrix);
 		const coincidentPixels = count();
 		return {
 			visiblePixels,
 			rebasedPixels,
 			wallOccludedPixels,
-			portalVisiblePixels,
-			portalOccludedPixels,
+			doorwayPixels,
+			doorwayWallPixels,
 			verticalPixels,
 			coincidentPixels,
 			glError: gl.getError(),
 		};
 	} finally {
 		pass.destroy();
-		gl.bindBufferBase(
-			gl.UNIFORM_BUFFER,
-			PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT,
-			null,
-		);
-		gl.bindBuffer(gl.UNIFORM_BUFFER, null);
-		gl.deleteBuffer(metadata);
-		gl.bindTexture(gl.TEXTURE_2D, null);
-		gl.deleteTexture(envelope);
 		gl.clearDepth(1);
 	}
 }

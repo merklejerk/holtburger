@@ -588,8 +588,8 @@ try {
 			gpu.visiblePixels <= 0 ||
 			gpu.rebasedPixels !== gpu.visiblePixels ||
 			gpu.wallOccludedPixels !== 0 ||
-			gpu.portalVisiblePixels <= 0 ||
-			gpu.portalOccludedPixels !== 0 ||
+			gpu.doorwayPixels <= 0 ||
+			gpu.doorwayWallPixels !== 0 ||
 			gpu.verticalPixels <= 0 ||
 			gpu.coincidentPixels !== 0 ||
 			gpu.glError !== 0

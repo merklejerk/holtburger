@@ -1,4 +1,3 @@
-import { scopeKey } from "../scene/scope";
 import { createSummonChainLink } from "./summon-chain-geometry";
 import type { SummonLeashInput } from "../runtime/summon-presentation";
 import type { Mat4, Vec3 } from "../math/types";
@@ -7,17 +6,10 @@ import {
 	linkWebGL2Program,
 	requireWebGL2Uniform,
 } from "../webgl/shader-program";
-import {
-	bindWebGL2PortalDeferredVisibilityProgram,
-	PORTAL_DEFERRED_VISIBILITY_GLSL,
-	type WebGL2PortalDeferredVisibilityUniforms,
-} from "./portal-deferred-visibility-glsl";
-import type { WorldMarkerPortalRouting } from "./webgl2-world-marker-pass";
 
-/** Both programs share geometry and differ only in deferred portal visibility. */
+/** Uniforms for the depth-tested procedural chain. */
 interface ChainProgram {
 	readonly handle: WebGLProgram;
-	readonly portal: WebGL2PortalDeferredVisibilityUniforms | null;
 	readonly matrix: WebGLUniformLocation;
 	readonly start: WebGLUniformLocation;
 	readonly end: WebGLUniformLocation;
@@ -31,8 +23,7 @@ export class WebGL2SummonChainPass {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #buffer: WebGLBuffer;
 	readonly #vao: WebGLVertexArrayObject;
-	readonly #flat: ChainProgram;
-	readonly #portal: ChainProgram;
+	readonly #program: ChainProgram;
 	readonly #vertexCount: number;
 	readonly #matrix = new Float32Array(16);
 
@@ -50,7 +41,6 @@ export class WebGL2SummonChainPass {
 		this.#buffer = buffer;
 		const vertices = createSummonChainLink();
 		this.#vertexCount = vertices.length / 3;
-		let flat: ChainProgram | null = null;
 		try {
 			gl.bindVertexArray(vao);
 			gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -59,23 +49,15 @@ export class WebGL2SummonChainPass {
 			gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
 			gl.bindVertexArray(null);
 			gl.bindBuffer(gl.ARRAY_BUFFER, null);
-			flat = createProgram(gl, false);
-			this.#portal = createProgram(gl, true);
-			this.#flat = flat;
+			this.#program = createProgram(gl);
 		} catch (error) {
-			if (flat !== null) gl.deleteProgram(flat.handle);
 			gl.deleteBuffer(buffer);
 			gl.deleteVertexArray(vao);
 			throw error;
 		}
 	}
 
-	draw(
-		input: SummonLeashInput,
-		anchor: Vec3,
-		matrix: Mat4,
-		portal: WorldMarkerPortalRouting | null,
-	): void {
+	draw(input: SummonLeashInput, anchor: Vec3, matrix: Mat4): void {
 		const dx = input.end.x - input.start.x;
 		const dy = input.end.y - input.start.y;
 		const dz = input.end.z - input.start.z;
@@ -89,7 +71,7 @@ export class WebGL2SummonChainPass {
 		// Sag is deliberately shallow: chord length gives adequate approximate link spacing.
 		const count = Math.max(2, Math.ceil(distance / tuning.linkSpacing));
 		const gl = this.#gl;
-		const program = portal === null ? this.#flat : this.#portal;
+		const program = this.#program;
 		gl.useProgram(program.handle);
 		gl.uniformMatrix4fv(
 			program.matrix,
@@ -114,16 +96,6 @@ export class WebGL2SummonChainPass {
 			tuning.linkRadius,
 			distance * tuning.sagFraction,
 		);
-		if (portal !== null) {
-			if (program.portal === null)
-				throw new Error(
-					"Summon chain portal program is missing visibility uniforms.",
-				);
-			portal.routeDeferredSubmission(
-				scopeKey(input.renderScope),
-				program.portal,
-			);
-		}
 		gl.enable(gl.DEPTH_TEST);
 		gl.depthMask(false);
 		gl.disable(gl.CULL_FACE);
@@ -154,17 +126,13 @@ export class WebGL2SummonChainPass {
 	}
 
 	destroy(): void {
-		this.#gl.deleteProgram(this.#flat.handle);
-		this.#gl.deleteProgram(this.#portal.handle);
+		this.#gl.deleteProgram(this.#program.handle);
 		this.#gl.deleteBuffer(this.#buffer);
 		this.#gl.deleteVertexArray(this.#vao);
 	}
 }
 
-function createProgram(
-	gl: WebGL2RenderingContext,
-	portal: boolean,
-): ChainProgram {
+function createProgram(gl: WebGL2RenderingContext): ChainProgram {
 	const vertex = `#version 300 es
 precision highp float;
 layout(location=0) in vec3 aVertex;
@@ -189,20 +157,15 @@ void main() {
 	const fragment = `#version 300 es
 precision highp float;
 precision highp int;
-${portal ? PORTAL_DEFERRED_VISIBILITY_GLSL : ""}
 uniform vec4 uColor;
 out vec4 outColor;
 void main() {
-    ${portal ? "if (!portalDeferredFragmentVisible()) discard;" : ""}
     outColor = uColor;
 }`;
 	const handle = linkWebGL2Program(gl, "summon chain", vertex, fragment);
 	try {
 		return {
 			handle,
-			portal: portal
-				? bindWebGL2PortalDeferredVisibilityProgram(gl, handle)
-				: null,
 			matrix: requireWebGL2Uniform(gl, handle, "uMatrix"),
 			start: requireWebGL2Uniform(gl, handle, "uStart"),
 			end: requireWebGL2Uniform(gl, handle, "uEnd"),

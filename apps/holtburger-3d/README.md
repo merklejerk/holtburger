@@ -381,9 +381,10 @@ flicker. A rare late reply after GUID reuse may make cosmetic timing inaccurate.
 
 The h3d runtime draws a summon leash between current posed body anchors. The leash uses green chain
 links for your own summons and pale blue links for other players’ summons, with the same faint opacity.
-It uses one reusable link mesh and shader-instanced placement. Leashes obey depth and compatible
-scene/portal scopes. A binary presentation-opacity gate flashes the model, its equipment and its
-leash in phase near estimated expiry without changing retail alpha, cloak, motion, collision or
+It uses one reusable link mesh and shader-instanced placement. Leashes draw once against composed
+scene depth, spanning indoor cells and indoor/outdoor transitions without per-fragment portal
+clipping, like particles. A binary presentation-opacity gate flashes the model, its equipment and
+its leash in phase near estimated expiry without changing retail alpha, cloak, motion, collision or
 selection geometry. It suppresses color,
 selection-mask and shadow submissions on faded frames. Estimated expiry never removes a summon.
 Themes own leash colors and opacity through `--ui-summon-leash-own-color` and

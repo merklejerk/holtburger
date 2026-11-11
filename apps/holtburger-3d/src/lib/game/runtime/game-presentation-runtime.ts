@@ -1,5 +1,3 @@
-import { sameScope } from "../scene/scope";
-import type { SceneScope } from "../scene";
 import {
 	summonOpacityAt,
 	validateSummonPresentation,
@@ -1277,7 +1275,6 @@ export class GamePresentationRuntime {
 	readonly #summonLeashStorage: {
 		start: SceneVec3;
 		end: SceneVec3;
-		renderScope: SceneScope;
 		color: SummonLeashColor;
 		tuning: SummonLeashTuning;
 	}[] = [];
@@ -2092,10 +2089,7 @@ export class GamePresentationRuntime {
 	}
 
 	/** Resolve a body-relative point from the same composed pose used by rendering. */
-	#summonEndpoint(
-		guid: number,
-		target: SceneVec3,
-	): readonly SceneScope[] | null {
+	#summonEndpoint(guid: number, target: SceneVec3): boolean {
 		const desired = this.#spawnedDesiredEntities.get(guid)?.entity;
 		const installed = this.#spawnedPresentations.get(guid);
 		if (
@@ -2106,12 +2100,12 @@ export class GamePresentationRuntime {
 			desired.physics.hidden ||
 			desired.physics.cloaked
 		)
-			return null;
+			return false;
 		const bounds = this.#dynamics.getPublishedRigidPresentationBounds(
 			installed.nodeId,
 		);
 		const state = this.#scene.readResolvedState(installed.nodeId);
-		if (bounds === null || state === undefined) return null;
+		if (bounds === null || state === undefined) return false;
 		this.#summonAnchorScratch.x = (bounds.min.x + bounds.max.x) / 2;
 		this.#summonAnchorScratch.y = (bounds.min.y + bounds.max.y) / 2;
 		this.#summonAnchorScratch.z = (bounds.min.z + bounds.max.z) / 2;
@@ -2124,7 +2118,7 @@ export class GamePresentationRuntime {
 		target.x += origin.x;
 		target.y += origin.y;
 		target.z += origin.z;
-		return state.spatialMembership.scopes;
+		return true;
 	}
 
 	/** Reuse endpoint records across frames; each view converts their canonical positions itself. */
@@ -2151,25 +2145,18 @@ export class GamePresentationRuntime {
 				leash = {
 					start: sceneVec3(Vec3.zero()),
 					end: sceneVec3(Vec3.zero()),
-					renderScope: { kind: "outdoor" },
 					color: relationship.color,
 					tuning: tuning.leash,
 				};
 				this.#summonLeashStorage.push(leash);
 			}
-			const startScopes = this.#summonEndpoint(level.guid, leash.start);
-			const endScopes = this.#summonEndpoint(relationship.owner, leash.end);
-			if (startScopes === null || endScopes === null) continue;
-			const common = startScopes.find((scope) =>
-				endScopes.some((other) => sameScope(scope, other)),
-			);
 			if (
-				common === undefined ||
+				!this.#summonEndpoint(level.guid, leash.start) ||
+				!this.#summonEndpoint(relationship.owner, leash.end) ||
 				leash.start.distanceSquaredTo(leash.end) >=
 					tuning.leash.maximumDistance ** 2
 			)
 				continue;
-			leash.renderScope = common;
 			leash.color = relationship.color;
 			leash.tuning = tuning.leash;
 			this.#summonLeashes.push(leash);

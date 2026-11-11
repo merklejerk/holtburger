@@ -2082,7 +2082,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#drawBlendedObjects(view, objectPhases, shading, pipeline);
 		this.#drawWorldParticles(view, particlesByScope);
 		this.#drawNameplates(view, pipeline);
-		this.#drawSummonLeashes(view, pipeline, frame.atlas.visibility);
+		this.#drawSummonLeashes(view);
 		this.#drawCombatEffects(view, pipeline, frame.atlas.visibility);
 		const indicator = this.#frameWorldIndicator;
 		if (indicator !== null) {
@@ -3562,7 +3562,7 @@ export class WebGL2Renderer implements Renderer {
 			1.0,
 		);
 		this.#drawNameplates(view, null);
-		this.#drawSummonLeashes(view, null, null);
+		this.#drawSummonLeashes(view);
 		this.#drawCombatEffects(view, null, null);
 		const indicator = this.#frameWorldIndicator;
 		if (indicator?.desiredTrajectory)
@@ -3632,25 +3632,13 @@ export class WebGL2Renderer implements Renderer {
 		this.#reconciledNameplateViewerIdentity = viewerEntityIdentity;
 	}
 
-	/** Depth-tested geometry participates in the same flat/deferred view routing as world effects. */
-	#drawSummonLeashes(
-		view: PreparedView,
-		routing: WebGL2PortalScopeAtlasPipeline | null,
-		visibility: DynamicRenderDomainSelection | null,
-	): void {
+	/** Like particles, spanning leashes use composed scene depth without per-domain duplication. */
+	#drawSummonLeashes(view: PreparedView): void {
 		if (this.#frameSummonLeashes.length === 0) return;
 		this.#summonChainPass ??= new WebGL2SummonChainPass(this.#gl);
 		const anchor = createLandblockWorldOrigin(view.anchorLandblockId);
-		for (const leash of this.#frameSummonLeashes) {
-			const scope = leash.renderScope;
-			const admitted =
-				visibility !== null
-					? visibility.selectedRenderDomainOrdinal(scopeKey(scope)) !== null
-					: scope.kind === "outdoor" ||
-						scope.envCellId === view.camera.placement.envCellId;
-			if (admitted)
-				this.#summonChainPass.draw(leash, anchor, view.clipFromAnchor, routing);
-		}
+		for (const leash of this.#frameSummonLeashes)
+			this.#summonChainPass.draw(leash, anchor, view.clipFromAnchor);
 	}
 
 	#drawCombatEffects(

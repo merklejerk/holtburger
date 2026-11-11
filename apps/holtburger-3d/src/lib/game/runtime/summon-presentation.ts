@@ -1,5 +1,4 @@
 import type { SceneVec3 } from "../../assets/ac-frame";
-import type { SceneScope } from "../scene";
 
 /** App-authored model flicker, independent of authoritative translucency and lifetime. */
 export interface SummonFlickerTuning {
@@ -57,8 +56,6 @@ export interface SummonLeashInput {
 	readonly start: SceneVec3;
 	/** Canonical posed body anchor of its owner. */
 	readonly end: SceneVec3;
-	/** Common endpoint scope, used for deferred portal visibility. */
-	readonly renderScope: SceneScope;
 	/** Per-relationship core RGB and opacity, shared by every view. */
 	readonly color: SummonLeashColor;
 	/** Cold artistic settings shared by every relationship. */

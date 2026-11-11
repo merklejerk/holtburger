@@ -66,7 +66,7 @@ import {
 	CLIENT_SUMMON_TUNING,
 } from "../../../client/client-tuning";
 import type { CombatEffectInstance } from "../systems/combat-effects-system";
-import { SceneGraph, type SceneNodeId } from "../scene";
+import { SceneGraph, type SceneNodeId, type SceneScope } from "../scene";
 import { sceneNodeIdOf } from "../scene/utils";
 import { resolveTerrainMaterialTable } from "../terrain/terrain-materials";
 import { resolveTerrainTextureFacts } from "../terrain/types";
@@ -4010,6 +4010,83 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 					runtime.withSpawnedEntitySelectionGeometry(guid, () => true),
 				).toBe(true);
 			expect(child.physics.noDraw).toBe(false);
+		},
+	);
+
+	it.each(["indoor/outdoor", "different indoor cells"] as const)(
+		"prepares one continuous leash across %s endpoint scopes",
+		async (boundary) => {
+			const frames: FrameInput[] = [];
+			const runtime = await buildSpawnRuntime(
+				{ load: async () => heldVisual() },
+				ANIMATION_SOURCE,
+				testRenderer({
+					drawFrame: (input) => {
+						frames.push(input);
+						return EMPTY_RENDERER_FRAME_FEEDBACK;
+					},
+				}),
+			);
+			onTestFinished(() => runtime.destroy());
+			setTestCamera(runtime, SPAWN_TEST_CAMERA);
+			const summon = spawnedEntity(7, 1);
+			const owner = spawnedEntity(8, 1);
+			if (summon.placement.kind !== "world")
+				throw new Error("Summon fixture requires world placement.");
+			const summonX = summon.placement.pose.coords.x;
+			await runtime.replaceDynamicEntitySnapshot([summon, owner]);
+			// Supply distinct memberships at the resolved scene snapshot boundary, isolating
+			// endpoint preparation from the outdoor fixture's content installation.
+			const read = SceneGraph.prototype.readResolvedState;
+			const snapshot = vi
+				.spyOn(SceneGraph.prototype, "readResolvedState")
+				.mockImplementation(function (this: SceneGraph, nodeId) {
+					const state = read.call(this, nodeId);
+					if (state === undefined) return state;
+					const isSummon = state.placement.localToLandblock.m41 === summonX;
+					const scope: SceneScope =
+						boundary === "indoor/outdoor" && isSummon
+							? { kind: "outdoor" }
+							: {
+									kind: "env-cell",
+									landblockId: "0x0001ffff",
+									envCellId: isSummon ? "0x00010100" : "0x00010101",
+								};
+					return {
+						...state,
+						placement: {
+							...state.placement,
+							scope,
+							envCellId: scope.kind === "env-cell" ? scope.envCellId : null,
+						},
+						spatialMembership: { scopes: [scope] },
+					};
+				});
+			onTestFinished(() => snapshot.mockRestore());
+			runtime.setSummonVisuals(
+				[
+					{
+						guid: 7,
+						generation: 1,
+						expiresAtSeconds: null,
+						leash: { owner: 8, color: [0.2, 1, 0.4, 0.25] },
+					},
+				],
+				{
+					...CLIENT_SUMMON_TUNING,
+					leash: {
+						...CLIENT_SUMMON_TUNING.leash,
+						maximumDistance: 10,
+						fadeDistance: 1,
+					},
+				},
+			);
+			runtime.render(0);
+			const leashes = frames.at(-1)?.summonLeashes;
+			expect(leashes).toHaveLength(1);
+			const leash = leashes?.[0];
+			if (leash === undefined) throw new Error("Missing prepared leash.");
+			expect(leash.end.x).toBeCloseTo(leash.start.x + 1);
 		},
 	);
 

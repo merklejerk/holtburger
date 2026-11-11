@@ -4,7 +4,12 @@ import {
 	PORTAL_CROSSING_TRIANGLE_POSITION_OFFSET_BYTES,
 	PORTAL_CROSSING_TRIANGLE_SOURCE_SCOPE_OFFSET_BYTES,
 	PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
+	PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT,
+	PORTAL_QUAD_EXTENT_OFFSET_BYTES,
+	PORTAL_QUAD_INSTANCE_STRIDE_BYTES,
+	PORTAL_QUAD_ORIGIN_OFFSET_BYTES,
 	type PortalCrossingTriangleStreamView,
+	type PortalPropagationExecutionScheduleView,
 	type PortalPropagationMetadataStreamView,
 } from "./portal-crossing-triangle-stream";
 import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation-metadata";
@@ -25,6 +30,8 @@ const POSITION_ATTRIBUTE_LOCATION = 0;
 const OUTPUT_ARRIVAL_ATTRIBUTE_LOCATION = 1;
 const SOURCE_SCOPE_ATTRIBUTE_LOCATION = 2;
 const POLICY_ATTRIBUTE_LOCATION = 3;
+const QUAD_ORIGIN_ATTRIBUTE_LOCATION = 0;
+const QUAD_EXTENT_ATTRIBUTE_LOCATION = 1;
 
 type SinkMethod<Name extends keyof PortalScopeAtlasWebGLSink> = Parameters<
 	PortalScopeAtlasWebGLSink[Name]
@@ -37,7 +44,8 @@ export interface WebGL2PortalScopeAtlasExecutionInput {
 	readonly outputExtent: RenderExtent;
 	/** Arena-owned bytes remain valid for the duration of this call. */
 	readonly stream: PortalCrossingTriangleStreamView &
-		PortalPropagationMetadataStreamView;
+		PortalPropagationMetadataStreamView &
+		PortalPropagationExecutionScheduleView;
 	readonly targets: WebGL2PortalScopeAtlasTargetSet;
 	readonly traversalDepth: number;
 }
@@ -45,16 +53,21 @@ export interface WebGL2PortalScopeAtlasExecutionInput {
 /** Fixed GPU owner executing the proved allocation-free propagation/reduction/resolve loop. */
 export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink {
 	readonly #crossingBuffer: WebGLBuffer;
+	readonly #crossingIndexBuffer: WebGLBuffer;
 	readonly #crossingVertexArray: WebGLVertexArrayObject;
 	readonly #gl: WebGL2RenderingContext;
+	readonly #maximumCrossingIndexCount: number;
 	readonly #maximumCrossingVertexCount: number;
 	readonly #metadataBindingPoint: number;
 	readonly #metadataBuffer: WebGLBuffer;
 	readonly #programs: WebGL2PortalScopeAtlasPrograms;
+	readonly #quadInstanceBuffer: WebGLBuffer;
+	readonly #unboundedEnvelopeDepthTexture: WebGLTexture;
 	readonly #unitQuadVertexArray: WebGLVertexArrayObject;
 	readonly #clearDepth = new Float32Array(1);
 	readonly #clearState = new Uint32Array(4);
 	#activeInput: WebGL2PortalScopeAtlasExecutionInput | null = null;
+	#boundArrayBuffer: "crossings" | "quads" | null = null;
 	#boundFramebuffer: "envelope" | "frontier-0" | "frontier-1" | "output" =
 		"output";
 	#destroyed = false;
@@ -73,16 +86,29 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 		);
 		this.#gl = gl;
 		this.#maximumCrossingVertexCount = maximumCrossingVertexCount;
+		this.#maximumCrossingIndexCount =
+			PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth *
+			maximumCrossingVertexCount;
 		this.#metadataBindingPoint = metadataBindingPoint;
 
 		let metadataBuffer: WebGLBuffer | null = null;
 		let crossingBuffer: WebGLBuffer | null = null;
+		let crossingIndexBuffer: WebGLBuffer | null = null;
+		let quadInstanceBuffer: WebGLBuffer | null = null;
 		let crossingVertexArray: WebGLVertexArrayObject | null = null;
 		let unitQuadVertexArray: WebGLVertexArrayObject | null = null;
+		let unboundedEnvelopeDepthTexture: WebGLTexture | null = null;
 		let programs: WebGL2PortalScopeAtlasPrograms | null = null;
+		const previousActiveTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as number;
 		const previousArrayBuffer = gl.getParameter(
 			gl.ARRAY_BUFFER_BINDING,
 		) as WebGLBuffer | null;
+		const previousCopyWriteBuffer = gl.getParameter(
+			gl.COPY_WRITE_BUFFER_BINDING,
+		) as WebGLBuffer | null;
+		const previousTexture2D = gl.getParameter(
+			gl.TEXTURE_BINDING_2D,
+		) as WebGLTexture | null;
 		const previousUniformBuffer = gl.getParameter(
 			gl.UNIFORM_BUFFER_BINDING,
 		) as WebGLBuffer | null;
@@ -99,6 +125,7 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 			);
 
 			crossingBuffer = requireBuffer(gl, "crossing stream");
+			crossingIndexBuffer = requireBuffer(gl, "crossing index stream");
 			crossingVertexArray = requireVertexArray(gl, "crossing stream");
 			gl.bindVertexArray(crossingVertexArray);
 			gl.bindBuffer(gl.ARRAY_BUFFER, crossingBuffer);
@@ -109,26 +136,83 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 				gl.DYNAMIC_DRAW,
 			);
 			configureCrossingAttributes(gl);
+			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, crossingIndexBuffer);
+			gl.bufferData(
+				gl.ELEMENT_ARRAY_BUFFER,
+				this.#maximumCrossingIndexCount * Uint16Array.BYTES_PER_ELEMENT,
+				gl.DYNAMIC_DRAW,
+			);
 
+			quadInstanceBuffer = requireBuffer(gl, "quad instance stream");
 			unitQuadVertexArray = requireVertexArray(gl, "unit quad");
+			gl.bindVertexArray(unitQuadVertexArray);
+			gl.bindBuffer(gl.ARRAY_BUFFER, quadInstanceBuffer);
+			gl.bufferData(
+				gl.ARRAY_BUFFER,
+				PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT * PORTAL_QUAD_INSTANCE_STRIDE_BYTES,
+				gl.DYNAMIC_DRAW,
+			);
+			configureQuadInstanceAttributes(gl);
+
+			unboundedEnvelopeDepthTexture = createUnboundedEnvelopeDepthTexture(gl);
 			programs = createWebGL2PortalScopeAtlasPrograms(gl, metadataBindingPoint);
 		} catch (cause) {
 			if (programs) destroyWebGL2PortalScopeAtlasPrograms(gl, programs);
+			if (unboundedEnvelopeDepthTexture) {
+				gl.deleteTexture(unboundedEnvelopeDepthTexture);
+			}
 			if (unitQuadVertexArray) gl.deleteVertexArray(unitQuadVertexArray);
+			if (quadInstanceBuffer) gl.deleteBuffer(quadInstanceBuffer);
 			if (crossingVertexArray) gl.deleteVertexArray(crossingVertexArray);
+			if (crossingIndexBuffer) gl.deleteBuffer(crossingIndexBuffer);
 			if (crossingBuffer) gl.deleteBuffer(crossingBuffer);
 			if (metadataBuffer) gl.deleteBuffer(metadataBuffer);
 			throw cause;
 		} finally {
 			gl.bindVertexArray(previousVertexArray);
 			gl.bindBuffer(gl.ARRAY_BUFFER, previousArrayBuffer);
+			gl.bindBuffer(gl.COPY_WRITE_BUFFER, previousCopyWriteBuffer);
 			gl.bindBuffer(gl.UNIFORM_BUFFER, previousUniformBuffer);
+			gl.activeTexture(previousActiveTexture);
+			gl.bindTexture(gl.TEXTURE_2D, previousTexture2D);
 		}
 		this.#metadataBuffer = metadataBuffer;
 		this.#crossingBuffer = crossingBuffer;
+		this.#crossingIndexBuffer = crossingIndexBuffer;
+		this.#quadInstanceBuffer = quadInstanceBuffer;
 		this.#crossingVertexArray = crossingVertexArray;
 		this.#unitQuadVertexArray = unitQuadVertexArray;
+		this.#unboundedEnvelopeDepthTexture = unboundedEnvelopeDepthTexture;
 		this.#programs = programs;
+	}
+
+	/** Sampler-complete 1x1 depth placeholder bound when deferred passes short-circuit via UBO. */
+	get unboundedEnvelopeDepthTexture(): WebGLTexture {
+		this.#requireAlive();
+		return this.#unboundedEnvelopeDepthTexture;
+	}
+
+	/** Upload and bind the metadata UBO directly when zero crossings bypass atlas targets. */
+	bindDirectRootMetadata(stream: PortalPropagationMetadataStreamView): void {
+		this.#requireAlive();
+		if (this.#activeInput) {
+			throw new Error("Portal scope-atlas execution cannot be re-entered.");
+		}
+		validateMetadataStream(stream);
+		this.#gl.bindBuffer(this.#gl.UNIFORM_BUFFER, this.#metadataBuffer);
+		this.#gl.bufferSubData(
+			this.#gl.UNIFORM_BUFFER,
+			0,
+			stream.propagationMetadataBytes,
+			0,
+			stream.usedPropagationMetadataByteLength,
+		);
+		this.#gl.bindBufferBase(
+			this.#gl.UNIFORM_BUFFER,
+			this.#metadataBindingPoint,
+			this.#metadataBuffer,
+		);
+		this.#gl.bindBuffer(this.#gl.UNIFORM_BUFFER, null);
 	}
 
 	/** Execute directly from reusable arena views; no command or upload record is materialized. */
@@ -137,17 +221,34 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 		if (this.#activeInput) {
 			throw new Error("Portal scope-atlas execution cannot be re-entered.");
 		}
-		validateExecutionInput(input, this.#maximumCrossingVertexCount);
+		validateExecutionInput(
+			input,
+			this.#maximumCrossingVertexCount,
+			this.#maximumCrossingIndexCount,
+		);
 		this.#activeInput = input;
+		this.#boundArrayBuffer = null;
 		try {
+			const stream = input.stream;
 			executePortalScopeAtlasWebGLCalls(this, {
-				crossingVertexCount: input.stream.vertexCount,
+				crossingIndexCount: stream.indexCount,
+				crossingVertexCount: stream.vertexCount,
 				metadataBindingPoint: this.#metadataBindingPoint,
-				renderDomainCount: input.stream.renderDomainMetadataStateCount,
+				quadInstanceCount: stream.quadCount,
+				renderDomainCount: stream.renderDomainMetadataStateCount,
+				resolveQuadCount: stream.resolveQuadCount,
+				resolveQuadOffset: stream.resolveQuadOffset,
+				roundIndexCount: (round) => stream.roundIndexCount(round),
+				roundIndexOffset: (round) => stream.roundIndexOffset(round),
+				roundReductionQuadCount: (round) =>
+					stream.roundReductionQuadCount(round),
+				roundReductionQuadOffset: (round) =>
+					stream.roundReductionQuadOffset(round),
 				traversalDepth: input.traversalDepth,
 			});
 		} finally {
 			this.#activeInput = null;
+			this.#boundArrayBuffer = null;
 		}
 	}
 
@@ -158,21 +259,37 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 		}
 		this.#destroyed = true;
 		destroyWebGL2PortalScopeAtlasPrograms(this.#gl, this.#programs);
+		this.#gl.deleteTexture(this.#unboundedEnvelopeDepthTexture);
 		this.#gl.deleteVertexArray(this.#unitQuadVertexArray);
+		this.#gl.deleteBuffer(this.#quadInstanceBuffer);
 		this.#gl.deleteVertexArray(this.#crossingVertexArray);
+		this.#gl.deleteBuffer(this.#crossingIndexBuffer);
 		this.#gl.deleteBuffer(this.#crossingBuffer);
 		this.#gl.deleteBuffer(this.#metadataBuffer);
 	}
 
 	bindBuffer(...[target, buffer]: SinkMethod<"bindBuffer">): void {
-		this.#gl.bindBuffer(
-			target === "array" ? this.#gl.ARRAY_BUFFER : this.#gl.UNIFORM_BUFFER,
+		const glTarget =
+			target === "array"
+				? this.#gl.ARRAY_BUFFER
+				: target === "copy-write"
+					? this.#gl.COPY_WRITE_BUFFER
+					: this.#gl.UNIFORM_BUFFER;
+		const handle =
 			buffer === null
 				? null
 				: buffer === "crossings"
 					? this.#crossingBuffer
-					: this.#metadataBuffer,
-		);
+					: buffer === "crossing-indices"
+						? this.#crossingIndexBuffer
+						: buffer === "quads"
+							? this.#quadInstanceBuffer
+							: this.#metadataBuffer;
+		if (target === "array") {
+			this.#boundArrayBuffer =
+				buffer === "crossings" || buffer === "quads" ? buffer : null;
+		}
+		this.#gl.bindBuffer(glTarget, handle);
 	}
 
 	bindBufferBase(
@@ -205,7 +322,38 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 			);
 			return;
 		}
-		if (byteLength !== stream.usedByteLength) {
+		if (target === "copy-write") {
+			if (byteLength !== stream.usedIndexByteLength) {
+				throw new Error(
+					"Portal crossing index schedule disagrees with its arena view.",
+				);
+			}
+			this.#gl.bufferSubData(
+				this.#gl.COPY_WRITE_BUFFER,
+				0,
+				stream.indexBytes,
+				0,
+				byteLength,
+			);
+			return;
+		}
+		if (this.#boundArrayBuffer === "quads") {
+			if (byteLength !== stream.usedQuadByteLength) {
+				throw new Error("Portal quad schedule disagrees with its arena view.");
+			}
+			this.#gl.bufferSubData(
+				this.#gl.ARRAY_BUFFER,
+				0,
+				stream.quadBytes,
+				0,
+				byteLength,
+			);
+			return;
+		}
+		if (
+			this.#boundArrayBuffer !== "crossings" ||
+			byteLength !== stream.usedByteLength
+		) {
 			throw new Error(
 				"Portal crossing schedule disagrees with its arena view.",
 			);
@@ -294,6 +442,25 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 		this.#gl.viewport(0, 0, extent.width, extent.height);
 	}
 
+	scissor(...[target]: SinkMethod<"scissor">): void {
+		const stream = this.#input().stream;
+		if (target === "packed-atlas") {
+			this.#gl.scissor(0, 0, stream.packedAtlasWidth, stream.packedAtlasHeight);
+			return;
+		}
+		this.#gl.scissor(0, 0, stream.rootTileWidth, stream.rootTileHeight);
+	}
+
+	scissorRoundFrontier(...[round]: SinkMethod<"scissorRoundFrontier">): void {
+		const stream = this.#input().stream;
+		this.#gl.scissor(
+			stream.roundFrontierScissorX(round),
+			stream.roundFrontierScissorY(round),
+			stream.roundFrontierScissorWidth(round),
+			stream.roundFrontierScissorHeight(round),
+		);
+	}
+
 	clearEnvelopeDepth(...[depth]: SinkMethod<"clearEnvelopeDepth">): void {
 		this.#clearDepth[0] = depth;
 		this.#gl.clearBufferfv(this.#gl.DEPTH, 0, this.#clearDepth);
@@ -335,11 +502,13 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 
 	depthFunction(...[compare]: SinkMethod<"depthFunction">): void {
 		this.#gl.depthFunc(
-			compare === "greater"
-				? this.#gl.GREATER
-				: compare === "less-equal"
-					? this.#gl.LEQUAL
-					: this.#gl.LESS,
+			compare === "always"
+				? this.#gl.ALWAYS
+				: compare === "greater"
+					? this.#gl.GREATER
+					: compare === "less-equal"
+						? this.#gl.LEQUAL
+						: this.#gl.LESS,
 		);
 	}
 
@@ -351,15 +520,45 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 		);
 	}
 
+	quadInstanceOffset(
+		...[firstInstance]: SinkMethod<"quadInstanceOffset">
+	): void {
+		if (this.#boundArrayBuffer !== "quads") {
+			throw new Error(
+				"Portal scope-atlas quad instance offset requires the quad buffer.",
+			);
+		}
+		const byteOffset = firstInstance * PORTAL_QUAD_INSTANCE_STRIDE_BYTES;
+		this.#gl.vertexAttribIPointer(
+			QUAD_ORIGIN_ATTRIBUTE_LOCATION,
+			4,
+			this.#gl.UNSIGNED_SHORT,
+			PORTAL_QUAD_INSTANCE_STRIDE_BYTES,
+			byteOffset + PORTAL_QUAD_ORIGIN_OFFSET_BYTES,
+		);
+		this.#gl.vertexAttribIPointer(
+			QUAD_EXTENT_ATTRIBUTE_LOCATION,
+			4,
+			this.#gl.UNSIGNED_SHORT,
+			PORTAL_QUAD_INSTANCE_STRIDE_BYTES,
+			byteOffset + PORTAL_QUAD_EXTENT_OFFSET_BYTES,
+		);
+	}
+
 	drawPropagation(
-		...[output, vertexCount]: SinkMethod<"drawPropagation">
+		...[output, indexOffset, indexCount]: SinkMethod<"drawPropagation">
 	): void {
 		this.#requireFramebuffer(`frontier-${output}`);
-		this.#gl.drawArrays(this.#gl.TRIANGLES, 0, vertexCount);
+		this.#gl.drawElements(
+			this.#gl.TRIANGLES,
+			indexCount,
+			this.#gl.UNSIGNED_SHORT,
+			indexOffset * Uint16Array.BYTES_PER_ELEMENT,
+		);
 	}
 
 	drawReduction(
-		...[next, renderDomainCount, terminal]: SinkMethod<"drawReduction">
+		...[next, instanceCount, terminal]: SinkMethod<"drawReduction">
 	): void {
 		this.#requireFramebuffer("envelope");
 		if (
@@ -368,12 +567,12 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 		) {
 			throw new Error("Portal scope-atlas reduction schedule is inconsistent.");
 		}
-		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, renderDomainCount);
+		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, instanceCount);
 	}
 
-	drawResolve(...[renderDomainCount]: SinkMethod<"drawResolve">): void {
+	drawResolve(...[instanceCount]: SinkMethod<"drawResolve">): void {
 		this.#requireFramebuffer("output");
-		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, renderDomainCount);
+		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, instanceCount);
 	}
 
 	#input(): WebGL2PortalScopeAtlasExecutionInput {
@@ -407,10 +606,11 @@ function validateConstructorInput(
 ): void {
 	if (
 		!Number.isSafeInteger(maximumCrossingVertexCount) ||
-		maximumCrossingVertexCount < 3
+		maximumCrossingVertexCount < 3 ||
+		maximumCrossingVertexCount > 0x1_0000
 	) {
 		throw new Error(
-			"Portal scope-atlas GPU crossing capacity must contain one triangle.",
+			"Portal scope-atlas GPU crossing capacity must contain one triangle within Uint16 index range.",
 		);
 	}
 	const maximumBlockBytes = gl.getParameter(
@@ -438,6 +638,7 @@ function validateConstructorInput(
 function validateExecutionInput(
 	input: WebGL2PortalScopeAtlasExecutionInput,
 	maximumCrossingVertexCount: number,
+	maximumCrossingIndexCount: number,
 ): void {
 	const stream = input.stream;
 	if (
@@ -459,10 +660,24 @@ function validateExecutionInput(
 		stream.vertexCount > maximumCrossingVertexCount ||
 		stream.usedByteLength !==
 			stream.vertexCount * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES ||
-		stream.usedByteLength > stream.bytes.byteLength
+		stream.usedByteLength > stream.bytes.byteLength ||
+		stream.indexCount > maximumCrossingIndexCount ||
+		stream.usedIndexByteLength !==
+			stream.indexCount * Uint16Array.BYTES_PER_ELEMENT ||
+		stream.usedIndexByteLength > stream.indexBytes.byteLength ||
+		stream.quadCount > PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT ||
+		stream.usedQuadByteLength !==
+			stream.quadCount * PORTAL_QUAD_INSTANCE_STRIDE_BYTES ||
+		stream.usedQuadByteLength > stream.quadBytes.byteLength
 	) {
 		throw new Error("Portal scope-atlas crossing stream is inconsistent.");
 	}
+	validateMetadataStream(stream);
+}
+
+function validateMetadataStream(
+	stream: PortalPropagationMetadataStreamView,
+): void {
 	if (
 		stream.usedPropagationMetadataByteLength !==
 			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES ||
@@ -508,6 +723,23 @@ function configureCrossingAttributes(gl: WebGL2RenderingContext): void {
 	}
 }
 
+function configureQuadInstanceAttributes(gl: WebGL2RenderingContext): void {
+	for (const [location, offset] of [
+		[QUAD_ORIGIN_ATTRIBUTE_LOCATION, PORTAL_QUAD_ORIGIN_OFFSET_BYTES],
+		[QUAD_EXTENT_ATTRIBUTE_LOCATION, PORTAL_QUAD_EXTENT_OFFSET_BYTES],
+	] as const) {
+		gl.enableVertexAttribArray(location);
+		gl.vertexAttribIPointer(
+			location,
+			4,
+			gl.UNSIGNED_SHORT,
+			PORTAL_QUAD_INSTANCE_STRIDE_BYTES,
+			offset,
+		);
+		gl.vertexAttribDivisor(location, 1);
+	}
+}
+
 function requireBuffer(gl: WebGL2RenderingContext, owner: string): WebGLBuffer {
 	const buffer = gl.createBuffer();
 	if (!buffer) {
@@ -527,4 +759,29 @@ function requireVertexArray(
 		);
 	}
 	return vertexArray;
+}
+
+function createUnboundedEnvelopeDepthTexture(
+	gl: WebGL2RenderingContext,
+): WebGLTexture {
+	const texture = gl.createTexture();
+	if (!texture) {
+		throw new Error(
+			"Failed to allocate portal scope-atlas unbounded envelope texture.",
+		);
+	}
+	try {
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, texture);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_MODE, gl.NONE);
+		gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT32F, 1, 1);
+		return texture;
+	} catch (cause) {
+		gl.deleteTexture(texture);
+		throw cause;
+	}
 }

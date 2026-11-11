@@ -2011,9 +2011,11 @@ export class WebGL2Renderer implements Renderer {
 		const clearColor = this.#viewClearColor(view, shading);
 		this.#executeOutdoorShadows(plan.shadows);
 		const target = this.#acquireFlatSceneTarget();
-
-		this.#beginFlatOpaqueScene(target, clearColor);
-		const portalTargets = pipeline.beginOpaqueScene(frame, clearColor);
+		const portalTargets = pipeline.beginOpaqueScene(
+			frame,
+			clearColor,
+			target.framebuffer,
+		);
 		const objectPhases = this.#createObjectSubmissionPhases(view);
 		const hasOutdoorScope =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null;
@@ -2034,28 +2036,47 @@ export class WebGL2Renderer implements Renderer {
 				);
 			}
 		}
-		this.#drawTerrain(view, shading, pipeline);
+		// Submit opaque objects before terrain so buildings, walls, and props populate hardware
+		// Early-Z before multi-layer near-terrain shading executes. Terrain uses LESS with the
+		// same positive polygon offset, keeping coplanar object-vs-terrain ties identical.
 		this.#submitOpaquePhase(view, objectPhases.opaque, shading, pipeline);
+		this.#drawTerrain(view, shading, pipeline);
 		if (shading.ambientOcclusion.kind === "enabled") {
-			this.#getSaoPass().applyPortal(
-				portalTargets.scene,
-				portalTargets.extents.atlas,
-				portalTargets.extents.drawingBuffer,
-				frame.atlas,
-				view.camera,
-				view.projection,
-				shading.ambientOcclusion,
-			);
-			this.#recordAmbientOcclusionWork(
-				frame.atlas.tileCount,
-				frame.atlas.trace.tilePixelCount,
-			);
+			if (portalTargets !== null) {
+				this.#getSaoPass().applyPortal(
+					portalTargets.scene,
+					portalTargets.extents.atlas,
+					portalTargets.extents.drawingBuffer,
+					frame.atlas,
+					view.camera,
+					view.projection,
+					shading.ambientOcclusion,
+				);
+				this.#recordAmbientOcclusionWork(
+					frame.atlas.tileCount,
+					frame.atlas.trace.tilePixelCount,
+				);
+			} else {
+				this.#getSaoPass().applyFlat(
+					target,
+					view.camera,
+					view.projection,
+					shading.ambientOcclusion,
+				);
+				this.#recordAmbientOcclusionWork(
+					1,
+					target.extent.width * target.extent.height,
+				);
+			}
 			pipeline.invalidateOpaqueTileState();
 		}
 		if (hasOutdoorScope) {
 			this.#drawSky(view, shading, "after-landscape", pipeline);
 		}
 
+		if (portalTargets !== null) {
+			this.#beginFlatOpaqueScene(target, clearColor);
+		}
 		pipeline.execute(target.framebuffer);
 		pipeline.beginDeferredScene(target.framebuffer);
 		this.#drawBlendedObjects(view, objectPhases, shading, pipeline);
@@ -3512,8 +3533,8 @@ export class WebGL2Renderer implements Renderer {
 				);
 			}
 		}
-		this.#drawTerrain(view, shading, null);
 		this.#submitOpaquePhase(view, objectPhases.opaque, shading, null);
+		this.#drawTerrain(view, shading, null);
 		if (shading.ambientOcclusion.kind === "enabled") {
 			this.#getSaoPass().applyFlat(
 				target,
@@ -4223,49 +4244,59 @@ export class WebGL2Renderer implements Renderer {
 			}
 		}
 		const gl = this.#gl;
+		gl.enable(gl.DEPTH_TEST);
+		// Opaque objects have already written depth; strict LESS keeps objects winning exact ties
+		// against offset terrain depth just as LEQUAL did when terrain drew first.
+		gl.depthFunc(gl.LESS);
 		gl.depthMask(true);
 		gl.disable(gl.BLEND);
 		gl.enable(gl.CULL_FACE);
 		gl.cullFace(gl.BACK);
 		gl.enable(gl.POLYGON_OFFSET_FILL);
 		gl.polygonOffset(TERRAIN_DEPTH_OFFSET.factor, TERRAIN_DEPTH_OFFSET.units);
-		let routedTerrainPass = false;
-		if (nearCount > 0) {
-			for (const directional of [false, true]) {
-				const count = directional
-					? directionalCount
-					: nearCount - directionalCount;
-				if (count === 0) continue;
-				const nearProgram = this.#beginNearTerrainGroup(
+		try {
+			let routedTerrainPass = false;
+			if (nearCount > 0) {
+				for (const directional of [false, true]) {
+					const count = directional
+						? directionalCount
+						: nearCount - directionalCount;
+					if (count === 0) continue;
+					const nearProgram = this.#beginNearTerrainGroup(
+						view,
+						shading,
+						passResources,
+						portalPipeline,
+						routedTerrainPass ? null : view.terrain.length,
+						directional,
+					);
+					routedTerrainPass = true;
+					this.#drawNearTerrainGroup(
+						view,
+						shading,
+						farCutoff,
+						nearProgram,
+						directional,
+					);
+				}
+			}
+			if (farCount > 0) {
+				this.#beginFarTerrainGroup(
 					view,
 					shading,
 					passResources,
 					portalPipeline,
 					routedTerrainPass ? null : view.terrain.length,
-					directional,
 				);
-				routedTerrainPass = true;
-				this.#drawNearTerrainGroup(
-					view,
-					shading,
-					farCutoff,
-					nearProgram,
-					directional,
-				);
+				this.#drawFarTerrainGroup(view, farCutoff);
 			}
+		} finally {
+			gl.depthFunc(gl.LEQUAL);
+			gl.disable(gl.CULL_FACE);
+			gl.disable(gl.POLYGON_OFFSET_FILL);
+			// Terrain mutates raw WebGL program, VAO, texture, and cull-face bindings outside #deviceState.
+			this.#deviceState.invalidate();
 		}
-		if (farCount > 0) {
-			this.#beginFarTerrainGroup(
-				view,
-				shading,
-				passResources,
-				portalPipeline,
-				routedTerrainPass ? null : view.terrain.length,
-			);
-			this.#drawFarTerrainGroup(view, farCutoff);
-		}
-		gl.disable(gl.CULL_FACE);
-		gl.disable(gl.POLYGON_OFFSET_FILL);
 	}
 
 	#beginTerrainGroup(

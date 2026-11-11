@@ -31,8 +31,11 @@ import {
 	PORTAL_CROSSING_DEPTH_POLICY_REJECT_EQUAL,
 	PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG,
 	PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
+	PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT,
+	PORTAL_QUAD_INSTANCE_STRIDE_BYTES,
 	PortalPropagationStreamArena,
 } from "./portal-crossing-triangle-stream";
+import { PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS } from "./portal-envelope-sampling-glsl";
 import {
 	PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES,
 	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
@@ -41,7 +44,12 @@ import {
 import { PortalScopeWindowCuller } from "./portal-scope-window-culler";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "./portal-render-capacity-policy";
-import { PortalScopeAtlasPlanner } from "./portal-scope-atlas-planner";
+import { compilePortalScopeAtlasWebGLCalls } from "./portal-scope-atlas-command-model";
+import {
+	PORTAL_QUAD_MODE_MAX_REDUCE,
+	PORTAL_QUAD_MODE_ROOT_ROUND0_CLAMP,
+	PortalScopeAtlasPlanner,
+} from "./portal-scope-atlas-planner";
 import { PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES } from "./portal-scope-tile-metadata";
 
 const LANDBLOCK_ID = "0x0001ffff";
@@ -367,6 +375,8 @@ describe("portal scope-atlas planning", () => {
 
 		expect(frame.visibility.status).toBe("complete");
 		expect(frame.tileCount).toBe(2);
+		expect(frame.packedWidth).toBe(150);
+		expect(frame.packedHeight).toBe(100);
 		expect(frame.tileX(0)).toBe(0);
 		expect(frame.tileY(0)).toBe(0);
 		expect(frame.tileWidth(0)).toBe(100);
@@ -635,7 +645,10 @@ describe("portal scope-atlas planning", () => {
 			maximumArrivalStateCount:
 				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
 		});
-		const stream = new PortalPropagationStreamArena(12);
+		const stream = new PortalPropagationStreamArena(
+			12,
+			TEST_ATLAS_MAXIMUM_PATH_DEPTH,
+		);
 		expect(frame.visibility.selectedCrossingNearPlaneStraddle(0)).toBe(true);
 		expect(frame.visibility.selectedCrossingNearPlaneStraddle(1)).toBe(false);
 
@@ -673,24 +686,34 @@ describe("portal scope-atlas planning", () => {
 		expect(secondView.usedByteLength).toBe(
 			12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 		);
+		expect(secondView.indexCount).toBe(12);
+		expect(secondView.roundIndexOffset(0)).toBe(0);
+		expect(secondView.roundIndexCount(0)).toBe(12);
 		expect(secondView.trace).toMatchObject({
-			arenaCapacityBytes:
-				12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES +
-				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 			arenaGrowthCount: 0,
 			arrivalMetadataStateWriteCount: 3,
 			arrivalPlaneScalarWriteCount: 8,
 			crossingInputCount: 2,
+			indexCapacityBytes:
+				TEST_ATLAS_MAXIMUM_PATH_DEPTH * 12 * Uint16Array.BYTES_PER_ELEMENT,
 			portalOwnedFrameHeapRecordCreationCount: 0,
 			positionScalarReadCount: 36,
 			propagationMetadataCapacityBytes:
 				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+			quadCapacityBytes:
+				PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT * PORTAL_QUAD_INSTANCE_STRIDE_BYTES,
 			reciprocalArrivalStateReadCount: 2,
 			renderDomainMetadataStateWriteCount: 3,
 			triangleIndexReadCount: 12,
 			triangleCapacityBytes: 12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 			vertexHighWaterCount: 12,
 		});
+		expect(secondView.trace.arenaCapacityBytes).toBeGreaterThan(
+			secondView.trace.triangleCapacityBytes +
+				secondView.trace.propagationMetadataCapacityBytes +
+				secondView.trace.indexCapacityBytes +
+				secondView.trace.quadCapacityBytes,
+		);
 		expect(secondView.arrivalMetadataStateCount).toBe(3);
 		expect(secondView.renderDomainMetadataStateCount).toBe(3);
 		expect(secondView.usedPropagationMetadataByteLength).toBe(
@@ -924,11 +947,285 @@ describe("portal scope-atlas planning", () => {
 				expect(separated, `tile overlap ${left}/${right}`).toBe(true);
 			}
 		}
+		expect(frame.commands.traversalDepth).toBe(1);
 		expect(frame.commands.maskPropagationInstanceCount).toBe(
-			TEST_ATLAS_MAXIMUM_PATH_DEPTH * TEST_ATLAS_PACKING_CHILD_COUNT,
+			TEST_ATLAS_PACKING_CHILD_COUNT,
 		);
-		expect(frame.commands.scopeEnvelopeReductionInstanceCount).toBe(
+		expect(frame.commands.scopeEnvelopeReductionInstanceCount).toBeLessThan(
 			TEST_ATLAS_MAXIMUM_PATH_DEPTH * frame.tileCount,
+		);
+	});
+
+	it("terminates shallow multi-branch graphs early and prunes unreachable side branches", () => {
+		const hall = envCellScope("hall");
+		const room = envCellScope("room");
+		const annex = envCellScope("annex");
+		const vault = envCellScope("vault");
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(hall, "hall"),
+				topologyScope(room, "room"),
+				topologyScope(annex, "annex"),
+				topologyScope(vault, "vault"),
+			],
+			[
+				crossing("0-out-hall", OUTDOOR_SCOPE, hall, {
+					aperture: rectangle(-0.6, -0.4, -0.2, 0.4, 0.2),
+				}),
+				crossing("1-hall-room", hall, room, {
+					aperture: rectangle(-0.55, -0.35, -0.25, 0.35, -0.2),
+				}),
+				crossing("2-out-annex", OUTDOOR_SCOPE, annex, {
+					aperture: rectangle(0.2, -0.4, 0.6, 0.4, 0.2),
+				}),
+				// Visually overlaps `2-out-annex` on screen so culling retains `vault`, but sits on the
+				// camera side (z = +0.35 > +0.2) of `2-out-annex`'s oriented entry half-space.
+				crossing("3-annex-vault", annex, vault, {
+					aperture: rectangle(0.25, -0.35, 0.55, 0.35, 0.35),
+				}),
+			],
+		);
+		const planner = new PortalScopeAtlasPlanner(
+			PORTAL_RENDER_CAPACITY_POLICY.culler,
+			PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
+		);
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+
+		const frame = planner.plan(graph, input, {
+			atlas: { height: 300, width: 300 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+					.maximumCrossingTriangleVertexCount,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		});
+
+		expect(frame.visibility.selectedCrossingCount).toBeGreaterThanOrEqual(3);
+		expect(frame.commands.traversalDepth).toBe(2);
+		expect(frame.roundCrossingCount(0)).toBe(2);
+		expect(frame.roundCrossingCount(1)).toBe(1);
+		expect(
+			frame.visibility.selectedCrossing(frame.roundCrossingOrdinal(1, 0)).id,
+		).toBe("portal-crossing:1-hall-room");
+		expect(
+			frame.roundFrontierScissorWidth(1) * frame.roundFrontierScissorHeight(1),
+		).toBeLessThan(100 * 100);
+	});
+
+	it("schedules all 16 rounds of a genuine depth-16 cyclic chain without full-screen root sweeps", () => {
+		const maxDepth = PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth;
+		const chainCells = Array.from({ length: maxDepth - 1 }, (_, index) =>
+			envCellScope(`chain-${String(index).padStart(2, "0")}`),
+		);
+		const crossings: ScenePortalCrossing[] = [];
+		for (let step = 0; step < maxDepth; step += 1) {
+			const source = step === 0 ? OUTDOOR_SCOPE : chainCells[step - 1]!;
+			const target = step === maxDepth - 1 ? OUTDOOR_SCOPE : chainCells[step]!;
+			const z = 0.4 - step * 0.05;
+			crossings.push(
+				crossing(`step-${String(step).padStart(2, "0")}`, source, target, {
+					aperture: rectangle(-0.18, -0.18, 0.18, 0.18, z),
+				}),
+			);
+		}
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				...chainCells.map((scope, index) =>
+					topologyScope(scope, `chain-${String(index).padStart(2, "0")}`),
+				),
+			],
+			crossings,
+		);
+		const planner = new PortalScopeAtlasPlanner(
+			PORTAL_RENDER_CAPACITY_POLICY.culler,
+			maxDepth,
+		);
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+
+		const frame = planner.plan(graph, input, {
+			atlas: { height: 400, width: 400 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+					.maximumCrossingTriangleVertexCount,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		});
+
+		expect(frame.commands.traversalDepth).toBe(maxDepth);
+		expect(frame.commands.maskPropagationInstanceCount).toBe(maxDepth);
+		for (let round = 0; round < maxDepth; round += 1) {
+			expect(frame.roundCrossingCount(round)).toBe(1);
+			expect(
+				frame.visibility.selectedCrossing(frame.roundCrossingOrdinal(round, 0))
+					.id,
+			).toBe(`portal-crossing:step-${String(round).padStart(2, "0")}`);
+		}
+		const rootTileArea = frame.tileWidth(0) * frame.tileHeight(0);
+		expect(rootTileArea).toBe(10_000);
+		let sawRound0RootClamp = false;
+		let sawTerminalRootReentryReduce = false;
+		for (let quad = 0; quad < frame.resolveQuadOffset; quad += 1) {
+			const area = frame.quadWidth(quad) * frame.quadHeight(quad);
+			// No reduction quad on any of the 16 rounds (including Round 0 and Round 15 outdoor
+			// re-entry) may sweep the full 100x100 root tile; every quad is aperture-bounded.
+			expect(area).toBeLessThanOrEqual(22 * 22);
+			if (
+				frame.quadRenderDomain(quad) === 0 &&
+				frame.quadMode(quad) === PORTAL_QUAD_MODE_ROOT_ROUND0_CLAMP
+			) {
+				sawRound0RootClamp = true;
+			}
+			if (
+				frame.quadRenderDomain(quad) === 0 &&
+				frame.quadMode(quad) === PORTAL_QUAD_MODE_MAX_REDUCE
+			) {
+				sawTerminalRootReentryReduce = true;
+			}
+		}
+		expect(sawRound0RootClamp).toBe(true);
+		expect(sawTerminalRootReentryReduce).toBe(true);
+		expect(frame.trace.arenaGrowthCount).toBe(0);
+		expect(frame.trace.portalOwnedFrameHeapRecordCreationCount).toBe(0);
+	});
+
+	it("admits equal-depth coincident-junction transits while pruning ungrouped coplanar advances", () => {
+		const middle = envCellScope("junction-middle");
+		const leaf = envCellScope("junction-leaf");
+		const buildGraph = (junctionGroupId: number | null) =>
+			topology(
+				[
+					topologyScope(OUTDOOR_SCOPE, null),
+					topologyScope(middle, "junction-middle"),
+					topologyScope(leaf, "junction-leaf"),
+				],
+				[
+					crossing("0-root-middle", OUTDOOR_SCOPE, middle, {
+						aperture: rectangle(-0.4, -0.4, 0.4, 0.4, 0),
+						junctionGroupId,
+					}),
+					crossing("1-middle-leaf", middle, leaf, {
+						aperture: rectangle(-0.4, -0.4, 0.4, 0.4, 0),
+						junctionGroupId,
+					}),
+				],
+			);
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+		const resource = {
+			atlas: { height: 300, width: 300 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+					.maximumCrossingTriangleVertexCount,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		};
+
+		const ungrouped = planner.plan(buildGraph(null), input, resource);
+		expect(ungrouped.commands.traversalDepth).toBe(1);
+		expect(ungrouped.roundCrossingCount(0)).toBe(1);
+
+		const grouped = planner.plan(buildGraph(7), input, resource);
+		expect(grouped.commands.traversalDepth).toBe(2);
+		expect(grouped.roundCrossingCount(0)).toBe(1);
+		expect(grouped.roundCrossingCount(1)).toBe(1);
+	});
+
+	it("keeps distant multi-window apertures disjoint and expands child resolve quads by the gutter radius", () => {
+		const wideHall = envCellScope("wide-hall");
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(wideHall, "wide-hall"),
+			],
+			[
+				crossing("left-window", OUTDOOR_SCOPE, wideHall, {
+					aperture: rectangle(-0.9, -0.2, -0.7, 0.2, 0),
+				}),
+				crossing("right-window", OUTDOOR_SCOPE, wideHall, {
+					aperture: rectangle(0.7, -0.2, 0.9, 0.2, 0),
+				}),
+			],
+		);
+		const planner = scopeAtlasPlanner();
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+		const frame = planner.plan(graph, input, {
+			atlas: { height: 200, width: 200 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+					.maximumCrossingTriangleVertexCount,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		});
+
+		expect(frame.tileCount).toBe(2);
+		expect(frame.tileWidth(1)).toBe(90);
+		expect(frame.tileHeight(1)).toBe(22);
+		expect(frame.commands.traversalDepth).toBe(1);
+
+		const childReductionQuads: {
+			screenX: number;
+			screenY: number;
+			width: number;
+			height: number;
+		}[] = [];
+		for (let quad = 0; quad < frame.resolveQuadOffset; quad += 1) {
+			if (frame.quadRenderDomain(quad) === 1) {
+				childReductionQuads.push({
+					height: frame.quadHeight(quad),
+					screenX: frame.quadScreenX(quad),
+					screenY: frame.quadScreenY(quad),
+					width: frame.quadWidth(quad),
+				});
+			}
+		}
+		expect(childReductionQuads).toHaveLength(2);
+
+		expect(frame.resolveQuadCount).toBe(3);
+		expect(frame.quadRenderDomain(frame.resolveQuadOffset)).toBe(0);
+		expect(frame.quadWidth(frame.resolveQuadOffset)).toBe(100);
+		expect(frame.quadHeight(frame.resolveQuadOffset)).toBe(100);
+
+		const tileMinX = frame.tileScreenX(1);
+		const tileMinY = frame.tileScreenY(1);
+		const tileMaxX = tileMinX + frame.tileWidth(1);
+		const tileMaxY = tileMinY + frame.tileHeight(1);
+		let childResolveArea = 0;
+		for (let index = 0; index < 2; index += 1) {
+			const resolveIndex = frame.resolveQuadOffset + 1 + index;
+			const base = childReductionQuads[index]!;
+			const expectedMinX = Math.max(
+				tileMinX,
+				base.screenX - PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS,
+			);
+			const expectedMinY = Math.max(
+				tileMinY,
+				base.screenY - PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS,
+			);
+			const expectedMaxX = Math.min(
+				tileMaxX,
+				base.screenX + base.width + PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS,
+			);
+			const expectedMaxY = Math.min(
+				tileMaxY,
+				base.screenY + base.height + PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS,
+			);
+			expect(frame.quadRenderDomain(resolveIndex)).toBe(1);
+			expect(frame.quadScreenX(resolveIndex)).toBe(expectedMinX);
+			expect(frame.quadScreenY(resolveIndex)).toBe(expectedMinY);
+			expect(frame.quadWidth(resolveIndex)).toBe(expectedMaxX - expectedMinX);
+			expect(frame.quadHeight(resolveIndex)).toBe(expectedMaxY - expectedMinY);
+			childResolveArea +=
+				frame.quadWidth(resolveIndex) * frame.quadHeight(resolveIndex);
+		}
+		// The uncovered 70-pixel wall gap between the two windows is never shaded in resolve.
+		expect(childResolveArea).toBeLessThan(
+			frame.tileWidth(1) * frame.tileHeight(1) * 0.5,
 		);
 	});
 
@@ -1060,6 +1357,74 @@ describe("portal scope-atlas planning", () => {
 				},
 			),
 		).toThrow("duplicate authored scope key duplicate");
+	});
+
+	it("schedules zero-depth multi-domain plans cleanly without direct-root routing", () => {
+		const child = envCellScope("zero-depth-child");
+		const graph = topology(
+			[topologyScope(OUTDOOR_SCOPE, null), topologyScope(child, "child")],
+			[crossing("a-zero-depth-child", OUTDOOR_SCOPE, child)],
+		);
+		const planner = new PortalScopeAtlasPlanner(
+			{
+				maximumDepth: TEST_ATLAS_MAXIMUM_PATH_DEPTH,
+				maximumProjectionPrimitiveCount: 100_000,
+				maximumWorkItemCount: 64,
+				windowArena: scopeWindowArenaCapacity(),
+			},
+			0,
+		);
+		const input = atlasPlanInput(OUTDOOR_SCOPE);
+		const frame = planner.plan(graph, input, {
+			atlas: { height: 300, width: 300 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount: 12,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		});
+		const stream = new PortalPropagationStreamArena(12, 0);
+		const prepared = stream.prepare(
+			frame,
+			input.anchorCoordinates,
+			input.clipFromAnchor,
+		);
+		const callPlan = compilePortalScopeAtlasWebGLCalls({
+			crossingIndexCount: prepared.indexCount,
+			crossingVertexCount: prepared.vertexCount,
+			metadataBindingPoint: 0,
+			quadInstanceCount: prepared.quadCount,
+			renderDomainCount: prepared.renderDomainMetadataStateCount,
+			resolveQuadCount: prepared.resolveQuadCount,
+			resolveQuadOffset: prepared.resolveQuadOffset,
+			roundIndexCount: (round) => prepared.roundIndexCount(round),
+			roundIndexOffset: (round) => prepared.roundIndexOffset(round),
+			roundReductionQuadCount: (round) =>
+				prepared.roundReductionQuadCount(round),
+			roundReductionQuadOffset: (round) =>
+				prepared.roundReductionQuadOffset(round),
+			traversalDepth: frame.commands.traversalDepth,
+		});
+		expect(frame.tileCount).toBe(2);
+		expect(frame.directRootOutput).toBe(false);
+		expect(frame.commands.traversalDepth).toBe(0);
+		expect(prepared.vertexCount).toBe(0);
+		expect(prepared.indexCount).toBe(0);
+		expect(prepared.resolveQuadCount).toBe(1);
+		expect(callPlan.trace).toEqual({ totalWebGLCallCount: 38 });
+
+		const rootOnlyFrame = planner.plan(
+			topology([topologyScope(OUTDOOR_SCOPE, null)], []),
+			input,
+			{
+				atlas: { height: 300, width: 300 },
+				drawingBuffer: input.portalFootprint.drawingBuffer,
+				maximumCrossingTriangleVertexCount: 12,
+				maximumArrivalStateCount:
+					PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+			},
+		);
+		expect(rootOnlyFrame.tileCount).toBe(1);
+		expect(rootOnlyFrame.directRootOutput).toBe(true);
 	});
 });
 
@@ -1208,6 +1573,7 @@ function crossing(
 		readonly acceptedSide?: ScenePortalCrossing["acceptedSide"];
 		readonly aperture?: PlanarAperture;
 		readonly exactMatch?: boolean;
+		readonly junctionGroupId?: number | null;
 		readonly maskDepthPolicy?: ScenePortalCrossing["maskDepthPolicy"];
 		readonly reciprocalCrossingId?: PortalCrossingId | null;
 		readonly spatialRelationship?: ScenePortalCrossing["spatialRelationship"];
@@ -1239,7 +1605,7 @@ function crossing(
 		exactMatch: options.exactMatch ?? true,
 		id: `portal-crossing:${id}`,
 		maskDepthPolicy: options.maskDepthPolicy ?? "allow-equal-depth",
-		junctionGroupId: null,
+		junctionGroupId: options.junctionGroupId ?? null,
 		reciprocalCrossingId: options.reciprocalCrossingId ?? null,
 		source,
 		sourceAperture: sceneAperture,

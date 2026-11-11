@@ -6,6 +6,7 @@ import {
 	PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG,
 } from "./portal-crossing-triangle-stream";
 import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-model";
+import { PORTAL_QUAD_MODE_ROOT_ROUND0_CLAMP } from "./portal-scope-atlas-planner";
 import { PORTAL_ENVELOPE_SAMPLING_GLSL } from "./portal-envelope-sampling-glsl";
 import {
 	bindPortalScopeAtlasMetadataBlock,
@@ -58,31 +59,34 @@ void main() {
 }
 `;
 
-const REDUCTION_VERTEX_SHADER = `#version 300 es
-precision highp float;
-precision highp int;
-precision highp sampler2D;
-
-${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
-
-uniform sampler2D uSceneDepth;
-flat out uint vScope;
-
-vec2 unitVertex(int vertex) {
+const UNIT_QUAD_VERTEX_GLSL = `vec2 unitVertex(int vertex) {
 	const vec2 vertices[6] = vec2[6](
 		vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),
 		vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)
 	);
 	return vertices[vertex];
-}
+}`;
+
+const REDUCTION_VERTEX_SHADER = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+
+layout(location = 0) in uvec4 aQuadOrigin;
+layout(location = 1) in uvec4 aQuadExtent;
+
+uniform sampler2D uSceneDepth;
+flat out uint vScope;
+flat out uint vMode;
+
+${UNIT_QUAD_VERTEX_GLSL}
 
 void main() {
-	uint scope = uint(gl_InstanceID);
-	PortalScopeMetadata metadata = uScopes[scope];
-	vec2 atlasPixel = vec2(metadata.atlasAndScreenOrigin.xy)
-		+ unitVertex(gl_VertexID) * vec2(metadata.extentAndReserved.xy);
+	vec2 atlasPixel = vec2(aQuadOrigin.xy)
+		+ unitVertex(gl_VertexID) * vec2(aQuadExtent.xy);
 	vec2 atlasExtent = vec2(textureSize(uSceneDepth, 0));
-	vScope = scope;
+	vScope = aQuadExtent.z;
+	vMode = aQuadExtent.w;
 	gl_Position = vec4(atlasPixel * 2.0 / atlasExtent - 1.0, 0.0, 1.0);
 }
 `;
@@ -101,6 +105,7 @@ uniform sampler2D uFrontierDepth;
 uniform int uRound;
 uniform int uTraversalDepth;
 flat in uint vScope;
+flat in uint vMode;
 
 uint arrivalScope(uint arrival) {
 	return uArrivals[arrival - 1u].route.x;
@@ -111,6 +116,18 @@ void main() {
 	ivec2 atlasPixel = ivec2(gl_FragCoord.xy);
 	ivec2 screenPixel = ivec2(scope.atlasAndScreenOrigin.zw)
 		+ atlasPixel - ivec2(scope.atlasAndScreenOrigin.xy);
+	uint next = (uRound & 1) == 0
+		? texelFetch(uFrontier0, screenPixel, 0).r
+		: texelFetch(uFrontier1, screenPixel, 0).r;
+	if (vMode == ${PORTAL_QUAD_MODE_ROOT_ROUND0_CLAMP}u) {
+		if (next == 0u) discard;
+		bool contributesRootTerminal = uTraversalDepth == 1
+			&& arrivalScope(next) == 0u;
+		gl_FragDepth = contributesRootTerminal
+			? 1.0
+			: texelFetch(uFrontierDepth, screenPixel, 0).r * 0.5;
+		return;
+	}
 	uint current;
 	if (uRound == 0) {
 		current = 1u;
@@ -119,9 +136,6 @@ void main() {
 	} else {
 		current = texelFetch(uFrontier1, screenPixel, 0).r;
 	}
-	uint next = (uRound & 1) == 0
-		? texelFetch(uFrontier0, screenPixel, 0).r
-		: texelFetch(uFrontier1, screenPixel, 0).r;
 
 	bool contributesCurrent = current != 0u && arrivalScope(current) == vScope;
 	bool contributesTerminal = uRound + 1 == uTraversalDepth
@@ -146,23 +160,18 @@ precision highp int;
 
 ${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
 
+layout(location = 0) in uvec4 aQuadOrigin;
+layout(location = 1) in uvec4 aQuadExtent;
+
 flat out uint vScope;
 
-vec2 unitVertex(int vertex) {
-	const vec2 vertices[6] = vec2[6](
-		vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0),
-		vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0)
-	);
-	return vertices[vertex];
-}
+${UNIT_QUAD_VERTEX_GLSL}
 
 void main() {
-	uint scope = uint(gl_InstanceID);
-	PortalScopeMetadata metadata = uScopes[scope];
-	vec2 screenPixel = vec2(metadata.atlasAndScreenOrigin.zw)
-		+ unitVertex(gl_VertexID) * vec2(metadata.extentAndReserved.xy);
+	vec2 screenPixel = vec2(aQuadOrigin.zw)
+		+ unitVertex(gl_VertexID) * vec2(aQuadExtent.xy);
 	vec2 drawingExtent = vec2(uScopes[0].extentAndReserved.xy);
-	vScope = scope;
+	vScope = aQuadExtent.z;
 	gl_Position = vec4(screenPixel * 2.0 / drawingExtent - 1.0, 0.0, 1.0);
 }
 `;

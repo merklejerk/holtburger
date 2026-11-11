@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES,
+	PORTAL_SCOPE_TILE_UNBOUNDED_ENVELOPE_FLAG,
 	writePortalScopeAtlasPixel,
 	writePortalScopeScreenPixel,
 	writePortalScopeTileAtlasNdc,
@@ -28,6 +29,7 @@ describe("portal scope-tile metadata", () => {
 			const atlasHeight = drawingHeight * 3;
 			const atlasX = integer(random, 0, atlasWidth - width);
 			const atlasY = integer(random, 0, atlasHeight - height);
+			const unboundedEnvelope = caseIndex % 2 === 0;
 			writePortalScopeTileMetadata(
 				metadata,
 				0,
@@ -37,6 +39,10 @@ describe("portal scope-tile metadata", () => {
 				screenY,
 				width,
 				height,
+				unboundedEnvelope,
+			);
+			expect(metadata[6]).toBe(
+				unboundedEnvelope ? PORTAL_SCOPE_TILE_UNBOUNDED_ENVELOPE_FLAG : 0,
 			);
 
 			for (const unitX of UNIT_SAMPLES) {

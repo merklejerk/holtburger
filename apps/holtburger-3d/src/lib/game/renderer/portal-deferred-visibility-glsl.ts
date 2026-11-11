@@ -33,6 +33,9 @@ bool portalDeferredFragmentVisible() {
 		|| any(greaterThanEqual(relativePixel, scopeExtent))) {
 		return false;
 	}
+	if (scope.extentAndReserved.z != 0u) {
+		return true;
+	}
 	ivec2 atlasPixel = portalScopeAtlasPixel(scope, screenPixel);
 	float envelopeDepth = portalEnvelopeDepthAtAtlasPixel(scope, atlasPixel);
 	return envelopeDepth == 1.0 || gl_FragCoord.z * 0.5 < envelopeDepth;

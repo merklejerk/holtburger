@@ -223,6 +223,7 @@ uniform float uCameraNear;
 uniform float uCameraFar;
 uniform float uResolutionScale;
 uniform float uBilateralDepthThreshold;
+uniform float uNeutralLinearDepthCutoff;
 uniform ivec2 uBlurDirection;
 flat in uint vTileOrdinal;
 layout(location = 0) out float outAmbientOcclusion;
@@ -257,6 +258,13 @@ void main() {
 		return;
 	}
 	float centerLinearDepth = linearDepth(centerDepth);
+	// Every bilateral tap with positive depthWeight has linearDepth > centerLinearDepth - threshold.
+	// Once centerLinearDepth reaches fadeEnd + threshold, every admitted tap exceeds fadeEnd in
+	// Euclidean view distance as well, so all contributing samples evaluate to 1.0 identically.
+	if (centerLinearDepth >= uNeutralLinearDepthCutoff) {
+		outAmbientOcclusion = 1.0;
+		return;
+	}
 	const float spatialWeights[5] = float[5](1.0, 4.0, 6.0, 4.0, 1.0);
 	float weightedOcclusion = 0.0;
 	float totalWeight = 0.0;
@@ -345,6 +353,7 @@ interface SaoBlurProgram extends SaoProgram {
 	readonly blurDirection: WebGLUniformLocation;
 	readonly cameraFar: WebGLUniformLocation;
 	readonly cameraNear: WebGLUniformLocation;
+	readonly neutralLinearDepthCutoff: WebGLUniformLocation;
 	readonly resolutionScale: WebGLUniformLocation;
 }
 
@@ -818,6 +827,13 @@ export class WebGL2SaoPass {
 			program.bilateralDepthThreshold,
 			tuning.bilateralDepthThreshold,
 		);
+		gl.uniform1f(
+			program.neutralLinearDepthCutoff,
+			saoBlurNeutralLinearDepthCutoff(
+				policy.distanceFade.disabledAt,
+				tuning.bilateralDepthThreshold,
+			),
+		);
 		gl.uniform2i(program.blurDirection, directionX, directionY);
 		gl.activeTexture(gl.TEXTURE0 + SAO_TEXTURE_UNIT);
 		gl.bindTexture(gl.TEXTURE_2D, ambientOcclusion);
@@ -985,6 +1001,33 @@ export class WebGL2SaoPass {
 	#assertAlive(): void {
 		if (this.#destroyed) throw new Error("SAO pass has been destroyed.");
 	}
+}
+
+/**
+ * Minimum center linear depth at which every bilaterally admitted blur tap is guaranteed neutral.
+ *
+ * A neighbor contributes positive bilateral weight only when `|sampleLinearDepth - centerLinearDepth| < threshold`.
+ * Once `centerLinearDepth >= distanceFadeEnd + threshold`, every contributing neighbor satisfies
+ * `sampleLinearDepth > distanceFadeEnd`, and Euclidean view distance is at least linear depth.
+ */
+export function saoBlurNeutralLinearDepthCutoff(
+	distanceFadeEnd: number,
+	bilateralDepthThreshold: number,
+): number {
+	if (!Number.isFinite(distanceFadeEnd) || distanceFadeEnd <= 0) {
+		throw new Error(
+			"SAO blur fade cutoff requires a positive finite distance.",
+		);
+	}
+	if (
+		!Number.isFinite(bilateralDepthThreshold) ||
+		bilateralDepthThreshold <= 0
+	) {
+		throw new Error(
+			"SAO blur fade cutoff requires a positive finite bilateral threshold.",
+		);
+	}
+	return distanceFadeEnd + bilateralDepthThreshold;
 }
 
 /** Exact bytes owned by the two resolution-scaled R8 textures. */
@@ -1221,6 +1264,11 @@ function createBlurProgram(gl: WebGL2RenderingContext): SaoBlurProgram {
 			),
 			cameraFar: requireWebGL2Uniform(gl, program.program, "uCameraFar"),
 			cameraNear: requireWebGL2Uniform(gl, program.program, "uCameraNear"),
+			neutralLinearDepthCutoff: requireWebGL2Uniform(
+				gl,
+				program.program,
+				"uNeutralLinearDepthCutoff",
+			),
 			resolutionScale: requireWebGL2Uniform(
 				gl,
 				program.program,

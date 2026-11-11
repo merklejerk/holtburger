@@ -13,7 +13,10 @@ import {
 	type PortalModelScopeId,
 } from "./portal-model";
 import { getLandblockCoordinates } from "../landblocks";
-import { createPerspectiveMat4 } from "../math/matrices";
+import {
+	createOrthographicMat4,
+	createPerspectiveMat4,
+} from "../math/matrices";
 import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type {
 	ScenePortalCrossing,
@@ -23,7 +26,10 @@ import type {
 } from "../scene";
 import type { PlanarAperture } from "../scene/planar-aperture";
 import { composePortalReferenceFrameThroughPathDepth } from "./portal-reference-compositor";
-import { createPortalRenderCapacityPolicy } from "./portal-render-capacity-policy";
+import {
+	createPortalRenderCapacityPolicy,
+	PORTAL_RENDER_CAPACITY_POLICY,
+} from "./portal-render-capacity-policy";
 import { PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS } from "./portal-envelope-sampling-glsl";
 import {
 	PORTAL_ARRIVAL_METADATA_FLAGS_OFFSET_BYTES,
@@ -39,8 +45,10 @@ import {
 	PORTAL_CROSSING_NEAR_CLIP_RAY_FLAG,
 	PORTAL_CROSSING_TRIANGLE_POLICY_OFFSET_BYTES,
 	PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
+	PORTAL_QUAD_INSTANCE_STRIDE_BYTES,
 	PortalPropagationStreamArena,
 	type PortalCrossingTriangleStreamView,
+	type PortalPropagationExecutionScheduleView,
 	type PortalPropagationMetadataStreamView,
 } from "./portal-crossing-triangle-stream";
 import {
@@ -51,6 +59,8 @@ import {
 import { writePortalScopeTileMetadata } from "./portal-scope-tile-metadata";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import {
+	PORTAL_QUAD_MODE_MAX_REDUCE,
+	PORTAL_QUAD_MODE_ROOT_ROUND0_CLAMP,
 	PortalScopeAtlasPlanner,
 	type PortalScopeAtlasFrameView,
 } from "./portal-scope-atlas-planner";
@@ -121,6 +131,8 @@ const PRODUCTION_PACKED_FIXTURE_POLICY = createPortalRenderCapacityPolicy({
 export interface WebGL2PortalScopeAtlasExecutorFixtureResult {
 	readonly deferredCompositionMatchesOracle: boolean;
 	readonly deferredPixels: readonly number[];
+	readonly depth16CyclicMultiWindowDeferredMatchesOracle: boolean;
+	readonly depth16CyclicMultiWindowResolveMatchesOracle: boolean;
 	readonly exteriorWeatherComposesBehindChildOpaque: boolean;
 	readonly frontierMatchesOracle: boolean;
 	/** Shared junction ids license the zero-thickness A->exterior->B advance at equal depth. */
@@ -166,6 +178,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		);
 	}
 	const materialBearingBoundary = runMaterialBearingBoundaryFixture(gl);
+	const depth16CyclicMultiWindow = runDepth16CyclicMultiWindowFixture(gl);
 	const state = captureState(gl, METADATA_BINDING_POINT);
 	const targetOwner = new WebGL2PortalScopeAtlasTargets(gl);
 	const executor = new WebGL2PortalScopeAtlasExecutor(
@@ -242,7 +255,10 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		const expectedStrictPixels = expectedWinnerPixels(MIDDLE_COLOR, null);
 
 		const productionPackedFrame = createProductionPackedFrame();
-		const productionPackedStream = new PortalPropagationStreamArena(6).prepare(
+		const productionPackedStream = new PortalPropagationStreamArena(
+			6,
+			PRODUCTION_PACKED_FIXTURE_POLICY.maximumPathDepth,
+		).prepare(
 			productionPackedFrame,
 			getLandblockCoordinates(FIXTURE_LANDBLOCK_ID),
 			Mat4.identity(),
@@ -263,7 +279,10 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		}
 
 		const straddleFrame = createProductionPackedFrame("near-plane-straddle");
-		const straddleStream = new PortalPropagationStreamArena(6).prepare(
+		const straddleStream = new PortalPropagationStreamArena(
+			6,
+			PRODUCTION_PACKED_FIXTURE_POLICY.maximumPathDepth,
+		).prepare(
 			straddleFrame,
 			getLandblockCoordinates(FIXTURE_LANDBLOCK_ID),
 			STRADDLE_CLIP_FROM_ANCHOR,
@@ -345,6 +364,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 				deferred.expectedTransparentPixels,
 			),
 			deferredPixels: [...deferred.transparentPixels],
+			...depth16CyclicMultiWindow,
 			exteriorWeatherComposesBehindChildOpaque: pixelsMatch(
 				weatherPixels,
 				expectedWeatherPixels,
@@ -598,8 +618,11 @@ function boundsForAperture(aperture: PlanarAperture): AABB3 {
 	return bounds;
 }
 
-function createPropagationStream(): PortalCrossingTriangleStreamView &
-	PortalPropagationMetadataStreamView {
+type SyntheticExecutorStream = PortalCrossingTriangleStreamView &
+	PortalPropagationMetadataStreamView &
+	PortalPropagationExecutionScheduleView;
+
+function createPropagationStream(): SyntheticExecutorStream {
 	const crossingDepths = [-0.4, 0, 0.4] as const;
 	const arena = new ArrayBuffer(
 		18 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
@@ -623,16 +646,20 @@ function createPropagationStream(): PortalCrossingTriangleStreamView &
 			uints[output + 5] = PORTAL_CROSSING_DEPTH_POLICY_ALLOW_EQUAL;
 		}
 	}
-	return {
-		arrivalMetadataStateCount: 4,
-		bytes: new Uint8Array(arena),
-		propagationMetadataBytes: createMetadata(4),
-		renderDomainMetadataStateCount: 4,
-		usedByteLength: arena.byteLength,
-		usedPropagationMetadataByteLength:
-			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
-		vertexCount: 18,
-	};
+	return withSyntheticFullTileSchedule(
+		{
+			arrivalMetadataStateCount: 4,
+			bytes: new Uint8Array(arena),
+			propagationMetadataBytes: createMetadata(4),
+			renderDomainMetadataStateCount: 4,
+			usedByteLength: arena.byteLength,
+			usedPropagationMetadataByteLength:
+				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+			vertexCount: 18,
+		},
+		3,
+		4,
+	);
 }
 
 /**
@@ -641,7 +668,7 @@ function createPropagationStream(): PortalCrossingTriangleStreamView &
  */
 function createMaterialBearingCoplanarStream(
 	arrivalPlaneNormalZ: -1 | 1,
-): PortalCrossingTriangleStreamView & PortalPropagationMetadataStreamView {
+): SyntheticExecutorStream {
 	const arena = new ArrayBuffer(
 		6 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 	);
@@ -667,16 +694,20 @@ function createMaterialBearingCoplanarStream(
 		arrivalPlaneNormalZ,
 		0,
 	);
-	return {
-		arrivalMetadataStateCount: 2,
-		bytes: new Uint8Array(arena),
-		propagationMetadataBytes: metadata,
-		renderDomainMetadataStateCount: 2,
-		usedByteLength: arena.byteLength,
-		usedPropagationMetadataByteLength:
-			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
-		vertexCount: 6,
-	};
+	return withSyntheticFullTileSchedule(
+		{
+			arrivalMetadataStateCount: 2,
+			bytes: new Uint8Array(arena),
+			propagationMetadataBytes: metadata,
+			renderDomainMetadataStateCount: 2,
+			usedByteLength: arena.byteLength,
+			usedPropagationMetadataByteLength:
+				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+			vertexCount: 6,
+		},
+		1,
+		2,
+	);
 }
 
 /** Check covered walls and genuine openings without changing the main fixture's atlas history. */
@@ -770,9 +801,7 @@ function seedJunctionSceneAtlas(
  * both arrival records; without it the second advance measures zero entry-plane progress and the
  * strict test must reject it.
  */
-function createJunctionStream(
-	tagJunction: boolean,
-): PortalCrossingTriangleStreamView & PortalPropagationMetadataStreamView {
+function createJunctionStream(tagJunction: boolean): SyntheticExecutorStream {
 	const arena = new ArrayBuffer(
 		12 * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES,
 	);
@@ -811,16 +840,20 @@ function createJunctionStream(
 			] = junction;
 		}
 	}
-	return {
-		arrivalMetadataStateCount: 3,
-		bytes: new Uint8Array(arena),
-		propagationMetadataBytes: metadata,
-		renderDomainMetadataStateCount: 3,
-		usedByteLength: arena.byteLength,
-		usedPropagationMetadataByteLength:
-			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
-		vertexCount: 12,
-	};
+	return withSyntheticFullTileSchedule(
+		{
+			arrivalMetadataStateCount: 3,
+			bytes: new Uint8Array(arena),
+			propagationMetadataBytes: metadata,
+			renderDomainMetadataStateCount: 3,
+			usedByteLength: arena.byteLength,
+			usedPropagationMetadataByteLength:
+				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+			vertexCount: 12,
+		},
+		2,
+		3,
+	);
 }
 
 function crossingPositions(depth: number) {
@@ -834,17 +867,95 @@ function crossingPositions(depth: number) {
 	] as const;
 }
 
-function createRootOnlyStream(): PortalCrossingTriangleStreamView &
-	PortalPropagationMetadataStreamView {
+function createRootOnlyStream(): SyntheticExecutorStream {
+	return withSyntheticFullTileSchedule(
+		{
+			arrivalMetadataStateCount: 1,
+			bytes: new Uint8Array(0),
+			propagationMetadataBytes: createMetadata(1),
+			renderDomainMetadataStateCount: 1,
+			usedByteLength: 0,
+			usedPropagationMetadataByteLength:
+				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+			vertexCount: 0,
+		},
+		0,
+		1,
+	);
+}
+
+function withSyntheticFullTileSchedule(
+	base: PortalCrossingTriangleStreamView & PortalPropagationMetadataStreamView,
+	traversalDepth: number,
+	tileCount: number,
+): SyntheticExecutorStream {
+	const indexCount = traversalDepth * base.vertexCount;
+	const indices = new Uint16Array(indexCount);
+	for (let round = 0; round < traversalDepth; round += 1) {
+		for (let vertex = 0; vertex < base.vertexCount; vertex += 1) {
+			indices[round * base.vertexCount + vertex] = vertex;
+		}
+	}
+	const quads: number[] = [];
+	const roundReductionOffsets: number[] = [];
+	const roundReductionCounts: number[] = [];
+	const pushQuad = (domain: number, mode: number) => {
+		quads.push(
+			domain * DRAWING_EXTENT.width,
+			0,
+			0,
+			0,
+			DRAWING_EXTENT.width,
+			DRAWING_EXTENT.height,
+			domain,
+			mode,
+		);
+	};
+	for (let round = 0; round < traversalDepth; round += 1) {
+		const offset = quads.length / 8;
+		if (round === 0) {
+			pushQuad(0, PORTAL_QUAD_MODE_ROOT_ROUND0_CLAMP);
+			if (traversalDepth === 1) {
+				for (let domain = 1; domain < tileCount; domain += 1) {
+					pushQuad(domain, PORTAL_QUAD_MODE_MAX_REDUCE);
+				}
+			}
+		} else {
+			for (let domain = 0; domain < tileCount; domain += 1) {
+				pushQuad(domain, PORTAL_QUAD_MODE_MAX_REDUCE);
+			}
+		}
+		roundReductionOffsets.push(offset);
+		roundReductionCounts.push(quads.length / 8 - offset);
+	}
+	const resolveQuadOffset = quads.length / 8;
+	for (let domain = 0; domain < tileCount; domain += 1) {
+		pushQuad(domain, PORTAL_QUAD_MODE_MAX_REDUCE);
+	}
+	const quadArray = new Uint16Array(quads);
+	const quadCount = quadArray.length / 8;
 	return {
-		arrivalMetadataStateCount: 1,
-		bytes: new Uint8Array(0),
-		propagationMetadataBytes: createMetadata(1),
-		renderDomainMetadataStateCount: 1,
-		usedByteLength: 0,
-		usedPropagationMetadataByteLength:
-			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
-		vertexCount: 0,
+		...base,
+		indexBytes: new Uint8Array(indices.buffer),
+		indexCount,
+		packedAtlasHeight: DRAWING_EXTENT.height,
+		packedAtlasWidth: tileCount * DRAWING_EXTENT.width,
+		quadBytes: new Uint8Array(quadArray.buffer),
+		quadCount,
+		resolveQuadCount: tileCount,
+		resolveQuadOffset,
+		rootTileHeight: DRAWING_EXTENT.height,
+		rootTileWidth: DRAWING_EXTENT.width,
+		roundFrontierScissorHeight: () => DRAWING_EXTENT.height,
+		roundFrontierScissorWidth: () => DRAWING_EXTENT.width,
+		roundFrontierScissorX: () => 0,
+		roundFrontierScissorY: () => 0,
+		roundIndexCount: () => base.vertexCount,
+		roundIndexOffset: (round) => round * base.vertexCount,
+		roundReductionQuadCount: (round) => roundReductionCounts[round]!,
+		roundReductionQuadOffset: (round) => roundReductionOffsets[round]!,
+		usedIndexByteLength: indices.byteLength,
+		usedQuadByteLength: quadCount * PORTAL_QUAD_INSTANCE_STRIDE_BYTES,
 	};
 }
 
@@ -897,6 +1008,7 @@ function createMetadata(scopeCount: 1 | 4): Uint8Array {
 		0,
 		DRAWING_EXTENT.width,
 		DRAWING_EXTENT.height,
+		scopeCount === 1,
 	);
 	if (scopeCount === 4) {
 		for (let scope = 1; scope < scopeCount; scope += 1) {
@@ -909,6 +1021,7 @@ function createMetadata(scopeCount: 1 | 4): Uint8Array {
 				0,
 				DRAWING_EXTENT.width,
 				DRAWING_EXTENT.height,
+				false,
 			);
 		}
 	}
@@ -1101,8 +1214,7 @@ function runDeferredCompositionFixture(
 	gl: WebGL2RenderingContext,
 	executor: WebGL2PortalScopeAtlasExecutor,
 	targets: WebGL2PortalScopeAtlasTargetSet,
-	stream: PortalCrossingTriangleStreamView &
-		PortalPropagationMetadataStreamView,
+	stream: SyntheticExecutorStream,
 	frame: PortalScopeAtlasFrameView,
 ): {
 	readonly expectedTransparentPixels: Uint8Array;
@@ -1844,4 +1956,735 @@ function requireNoWebGL2Error(
 	if (error !== gl.NO_ERROR) {
 		throw new Error(`WebGL2 error ${error} observed ${checkpoint}.`);
 	}
+}
+
+const DEPTH16_DRAWING_EXTENT = { height: 16, width: 24 } as const;
+const DEPTH16_ATLAS_EXTENT = { height: 48, width: 96 } as const;
+
+/**
+ * Exercise the complete planner -> stream -> executor -> deferred path on a genuine 16-hop
+ * cyclic chain returning to outdoor plus a wide 2-window child domain, and compare every pixel
+ * against `composePortalReferenceFrameThroughPathDepth`.
+ */
+function runDepth16CyclicMultiWindowFixture(
+	gl: WebGL2RenderingContext,
+): Pick<
+	WebGL2PortalScopeAtlasExecutorFixtureResult,
+	| "depth16CyclicMultiWindowDeferredMatchesOracle"
+	| "depth16CyclicMultiWindowResolveMatchesOracle"
+> {
+	const maxDepth = PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth;
+	const state = captureState(gl, METADATA_BINDING_POINT);
+	const targetOwner = new WebGL2PortalScopeAtlasTargets(gl);
+	const executor = new WebGL2PortalScopeAtlasExecutor(
+		gl,
+		120,
+		METADATA_BINDING_POINT,
+	);
+	const output = createOffscreenOutputTarget(gl, DEPTH16_DRAWING_EXTENT);
+	const deferredProgram = createDeferredFixtureProgram(gl);
+	const deferredVao = gl.createVertexArray();
+	if (!deferredVao) {
+		gl.deleteProgram(deferredProgram.program);
+		output.destroy();
+		executor.destroy();
+		targetOwner.destroy();
+		restoreState(gl, state, METADATA_BINDING_POINT);
+		throw new Error("Failed to allocate depth-16 deferred fixture VAO.");
+	}
+	try {
+		const chainScopes = Array.from({ length: maxDepth - 1 }, (_, index) => ({
+			envCellId: `depth16-cell-${String(index).padStart(2, "0")}`,
+			kind: "env-cell" as const,
+			landblockId: FIXTURE_LANDBLOCK_ID,
+		}));
+		const wideHallScope: SceneScope = {
+			envCellId: "depth16-wide-hall",
+			kind: "env-cell",
+			landblockId: FIXTURE_LANDBLOCK_ID,
+		};
+		const crossings: ScenePortalCrossing[] = [];
+		for (let step = 0; step < maxDepth; step += 1) {
+			const source = step === 0 ? FIXTURE_ROOT_SCOPE : chainScopes[step - 1]!;
+			const target =
+				step === maxDepth - 1 ? FIXTURE_ROOT_SCOPE : chainScopes[step]!;
+			crossings.push(
+				createRectCrossing(
+					`chain-${String(step).padStart(2, "0")}`,
+					source,
+					target,
+					-0.75,
+					-0.5,
+					-0.25,
+					0.5,
+					-(step + 1),
+				),
+			);
+		}
+		crossings.push(
+			createRectCrossing(
+				"wide-bottom",
+				FIXTURE_ROOT_SCOPE,
+				wideHallScope,
+				0.25,
+				-0.875,
+				0.75,
+				-0.5,
+				-2,
+			),
+			createRectCrossing(
+				"wide-top",
+				FIXTURE_ROOT_SCOPE,
+				wideHallScope,
+				0.25,
+				0.5,
+				0.75,
+				0.875,
+				-2,
+			),
+		);
+		const outgoingByKey = new Map<string, ScenePortalCrossing[]>();
+		const keyOf = (scope: SceneScope) =>
+			scope.kind === "outdoor" ? "outdoor" : scope.envCellId;
+		for (const edge of crossings) {
+			const list = outgoingByKey.get(keyOf(edge.source)) ?? [];
+			list.push(edge);
+			outgoingByKey.set(keyOf(edge.source), list);
+		}
+		const topology: SceneTopologyView = {
+			crossings,
+			outgoing: (scope) => outgoingByKey.get(keyOf(scope)) ?? [],
+			revision: 1,
+			scopes: [
+				{
+					potentiallyVisibleEnvCellIds: new Set(),
+					scope: FIXTURE_ROOT_SCOPE,
+					visibilityIslandId: null,
+				},
+				...chainScopes.map((scope) => ({
+					potentiallyVisibleEnvCellIds: new Set<string>(),
+					scope,
+					visibilityIslandId:
+						`env-cell-island:${scope.envCellId}` as SceneTopologyScope["visibilityIslandId"],
+				})),
+				{
+					potentiallyVisibleEnvCellIds: new Set(),
+					scope: wideHallScope,
+					visibilityIslandId: "env-cell-island:depth16-wide-hall",
+				},
+			],
+		};
+		const clipFromAnchor = createOrthographicMat4(-1, 1, -1, 1, 0, 20);
+		const cullInput = {
+			anchorCoordinates: getLandblockCoordinates(FIXTURE_LANDBLOCK_ID),
+			clipFromAnchor,
+			nearClipVolume: createCameraNearClipVolume(
+				{ fov: 90, near: 0.5 },
+				{ position: new Vec3(0, 0, 1), rotation: Quat.identity() },
+				DEPTH16_DRAWING_EXTENT.width / DEPTH16_DRAWING_EXTENT.height,
+			),
+			portalFootprint: {
+				drawingBuffer: DEPTH16_DRAWING_EXTENT,
+				minimumPixelArea: 0,
+			},
+			rootScope: FIXTURE_ROOT_SCOPE,
+		};
+		const planner = new PortalScopeAtlasPlanner(
+			PORTAL_RENDER_CAPACITY_POLICY.culler,
+			maxDepth,
+		);
+		const frame = planner.plan(topology, cullInput, {
+			atlas: DEPTH16_ATLAS_EXTENT,
+			drawingBuffer: DEPTH16_DRAWING_EXTENT,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+			maximumCrossingTriangleVertexCount: 120,
+		});
+		if (frame.commands.traversalDepth !== maxDepth) {
+			throw new Error(
+				`Depth-16 fixture converged early at ${frame.commands.traversalDepth} instead of ${maxDepth}.`,
+			);
+		}
+		if (frame.roundCrossingCount(0) !== 3) {
+			throw new Error(
+				`Depth-16 fixture expected 3 Round-0 crossings, got ${frame.roundCrossingCount(0)}.`,
+			);
+		}
+		for (let round = 1; round < maxDepth; round += 1) {
+			if (frame.roundCrossingCount(round) !== 1) {
+				throw new Error(
+					`Depth-16 fixture expected 1 crossing at round ${round}, got ${frame.roundCrossingCount(round)}.`,
+				);
+			}
+		}
+
+		const stream = new PortalPropagationStreamArena(120, maxDepth).prepare(
+			frame,
+			cullInput.anchorCoordinates,
+			clipFromAnchor,
+		);
+		const targets = targetOwner.resize({
+			atlas: DEPTH16_ATLAS_EXTENT,
+			drawingBuffer: DEPTH16_DRAWING_EXTENT,
+		});
+
+		const cell7Tile = frame.tileOrdinalForRenderScopeKey(
+			chainScopes[7]!.envCellId,
+		);
+		const wideHallTile = frame.tileOrdinalForRenderScopeKey(
+			wideHallScope.envCellId,
+		);
+		const seedDepth16Scene = () => {
+			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, targets.scene.framebuffer);
+			gl.viewport(
+				0,
+				0,
+				DEPTH16_ATLAS_EXTENT.width,
+				DEPTH16_ATLAS_EXTENT.height,
+			);
+			gl.colorMask(true, true, true, true);
+			gl.depthMask(true);
+			gl.disable(gl.SCISSOR_TEST);
+			clearCurrentTile(gl, CLEAR_COLOR, 1);
+
+			gl.enable(gl.SCISSOR_TEST);
+			clearPlannedSubRect(
+				gl,
+				frame,
+				0,
+				0,
+				0,
+				DEPTH16_DRAWING_EXTENT.width,
+				DEPTH16_DRAWING_EXTENT.height,
+				ROOT_COLOR,
+				0.5,
+			);
+			clearPlannedSubRect(gl, frame, 0, 4, 4, 5, 8, DEEP_COLOR, 0.95);
+			clearPlannedSubRect(gl, frame, 0, 3, 4, 1, 8, ROOT_COLOR, 0.025);
+			clearPlannedSubRect(gl, frame, 0, 4, 8, 1, 4, WEATHER_COLOR, 0.25);
+			clearPlannedSubRect(
+				gl,
+				frame,
+				cell7Tile,
+				3,
+				8,
+				6,
+				4,
+				MIDDLE_COLOR,
+				0.425,
+			);
+			clearPlannedSubRect(
+				gl,
+				frame,
+				wideHallTile,
+				frame.tileScreenX(wideHallTile),
+				frame.tileScreenY(wideHallTile),
+				frame.tileWidth(wideHallTile),
+				frame.tileHeight(wideHallTile),
+				LEAF_COLOR,
+				0.15,
+			);
+			gl.disable(gl.SCISSOR_TEST);
+
+			// Pre-dirty both frontier attachments with nonzero arrival ids and near depth so any
+			// missing scissor coverage across shrinking/disjoint rounds fails loudly.
+			for (const frontier of targets.frontiers) {
+				gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, frontier.framebuffer);
+				gl.viewport(
+					0,
+					0,
+					DEPTH16_DRAWING_EXTENT.width,
+					DEPTH16_DRAWING_EXTENT.height,
+				);
+				gl.clearBufferuiv(gl.COLOR, 0, new Uint32Array([2, 0, 0, 0]));
+				gl.clearBufferfv(gl.DEPTH, 0, new Float32Array([0.01]));
+			}
+		};
+
+		seedDepth16Scene();
+		output.clear();
+		executor.execute({
+			outputExtent: DEPTH16_DRAWING_EXTENT,
+			outputFramebuffer: output.framebuffer,
+			stream,
+			targets,
+			traversalDepth: frame.commands.traversalDepth,
+		});
+		const resolvedPixels = output.readPixels();
+
+		// Now compose deferred transparent layers on top of the resolved depth + envelope:
+		// 1. cell_7 interior layer at 0.41 (between c_7=0.40 and cell_7 wall=0.425),
+		// 2. outdoor post-cycle distant layer at 0.85 (between c_15=0.80 and backdrop=0.95),
+		// 3. outdoor upper-band layer at 0.30 (must be blocked over cell_7 at y in [8,12)).
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, output.framebuffer);
+		gl.viewport(
+			0,
+			0,
+			DEPTH16_DRAWING_EXTENT.width,
+			DEPTH16_DRAWING_EXTENT.height,
+		);
+		gl.enable(gl.DEPTH_TEST);
+		gl.depthFunc(gl.LESS);
+		gl.depthMask(false);
+		gl.enable(gl.BLEND);
+		gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+		gl.bindVertexArray(deferredVao);
+		const envelopeUnit = PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth;
+		gl.bindSampler(envelopeUnit, null);
+		gl.activeTexture(gl.TEXTURE0 + envelopeUnit);
+		gl.bindTexture(gl.TEXTURE_2D, targets.envelope.depth);
+		gl.useProgram(deferredProgram.program);
+		drawDeferredFixture(gl, deferredProgram, 0, 0.85, [1, 0, 1, 0.5]);
+		drawDeferredFixture(gl, deferredProgram, cell7Tile, 0.41, [1, 1, 0, 0.5]);
+		gl.enable(gl.SCISSOR_TEST);
+		gl.scissor(0, 8, 12, 8);
+		drawDeferredFixture(gl, deferredProgram, 0, 0.3, [0, 0, 1, 0.5]);
+		gl.disable(gl.SCISSOR_TEST);
+		const deferredPixels = output.readPixels();
+
+		const expected = expectedDepth16OraclePixels(maxDepth, {
+			height: frame.tileHeight(wideHallTile),
+			width: frame.tileWidth(wideHallTile),
+			x: frame.tileScreenX(wideHallTile),
+			y: frame.tileScreenY(wideHallTile),
+		});
+		requireNoWebGL2Error(gl, "after depth-16 cyclic multi-window fixture");
+		return {
+			depth16CyclicMultiWindowDeferredMatchesOracle: pixelRgbMatches(
+				deferredPixels,
+				expected.deferredPixels,
+			),
+			depth16CyclicMultiWindowResolveMatchesOracle: pixelsMatch(
+				resolvedPixels,
+				expected.resolvedPixels,
+			),
+		};
+	} finally {
+		gl.deleteVertexArray(deferredVao);
+		gl.deleteProgram(deferredProgram.program);
+		output.destroy();
+		executor.destroy();
+		targetOwner.destroy();
+		restoreState(gl, state, METADATA_BINDING_POINT);
+	}
+}
+
+function createRectCrossing(
+	id: string,
+	source: SceneScope,
+	target: SceneScope,
+	minX: number,
+	minY: number,
+	maxX: number,
+	maxY: number,
+	z: number,
+): ScenePortalCrossing {
+	const aperture = rectangleAperture(minX, minY, maxX, maxY, z);
+	const sceneAperture: ScenePortalCrossing["sourceAperture"] = {
+		id: `portal-aperture:${id}` as const,
+		indices: aperture.indices,
+		landblockBounds: boundsForAperture(aperture),
+		landblockId: FIXTURE_LANDBLOCK_ID,
+		plane: aperture.plane,
+		vertices: aperture.vertices,
+	};
+	return {
+		acceptedSide: "positive",
+		exactMatch: true,
+		id: `portal-crossing:${id}`,
+		junctionGroupId: null,
+		maskDepthPolicy: "allow-equal-depth",
+		reciprocalCrossingId: null,
+		source,
+		sourceAperture: sceneAperture,
+		spatialRelationship: {
+			kind: "indoor-topology-boundary",
+			reason: "synthetic-boundary",
+		},
+		target,
+		visibilityAperture: sceneAperture,
+	};
+}
+
+function clearPlannedSubRect(
+	gl: WebGL2RenderingContext,
+	frame: PortalScopeAtlasFrameView,
+	ordinal: number,
+	screenX: number,
+	screenY: number,
+	width: number,
+	height: number,
+	color: readonly [number, number, number, number],
+	depth: number,
+): void {
+	const atlasX = frame.tileX(ordinal) + (screenX - frame.tileScreenX(ordinal));
+	const atlasY = frame.tileY(ordinal) + (screenY - frame.tileScreenY(ordinal));
+	gl.scissor(atlasX, atlasY, width, height);
+	clearCurrentTile(gl, color, depth);
+}
+
+function createOffscreenOutputTarget(
+	gl: WebGL2RenderingContext,
+	extent: { readonly width: number; readonly height: number },
+) {
+	const framebuffer = gl.createFramebuffer();
+	const color = gl.createTexture();
+	const depth = gl.createRenderbuffer();
+	if (!framebuffer || !color || !depth) {
+		if (framebuffer) gl.deleteFramebuffer(framebuffer);
+		if (color) gl.deleteTexture(color);
+		if (depth) gl.deleteRenderbuffer(depth);
+		throw new Error("Failed to allocate offscreen fixture framebuffer.");
+	}
+	gl.bindTexture(gl.TEXTURE_2D, color);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+	gl.texImage2D(
+		gl.TEXTURE_2D,
+		0,
+		gl.RGBA8,
+		extent.width,
+		extent.height,
+		0,
+		gl.RGBA,
+		gl.UNSIGNED_BYTE,
+		null,
+	);
+	gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+	gl.renderbufferStorage(
+		gl.RENDERBUFFER,
+		gl.DEPTH_COMPONENT24,
+		extent.width,
+		extent.height,
+	);
+	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, framebuffer);
+	gl.framebufferTexture2D(
+		gl.DRAW_FRAMEBUFFER,
+		gl.COLOR_ATTACHMENT0,
+		gl.TEXTURE_2D,
+		color,
+		0,
+	);
+	gl.framebufferRenderbuffer(
+		gl.DRAW_FRAMEBUFFER,
+		gl.DEPTH_ATTACHMENT,
+		gl.RENDERBUFFER,
+		depth,
+	);
+	return {
+		clear() {
+			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, framebuffer);
+			gl.viewport(0, 0, extent.width, extent.height);
+			gl.disable(gl.SCISSOR_TEST);
+			gl.colorMask(true, true, true, true);
+			gl.depthMask(true);
+			clearCurrentTile(gl, CLEAR_COLOR, 1);
+		},
+		destroy() {
+			gl.deleteFramebuffer(framebuffer);
+			gl.deleteTexture(color);
+			gl.deleteRenderbuffer(depth);
+		},
+		framebuffer,
+		readPixels(): Uint8Array {
+			const pixels = new Uint8Array(extent.width * extent.height * 4);
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, framebuffer);
+			gl.readBuffer(gl.COLOR_ATTACHMENT0);
+			gl.readPixels(
+				0,
+				0,
+				extent.width,
+				extent.height,
+				gl.RGBA,
+				gl.UNSIGNED_BYTE,
+				pixels,
+			);
+			return pixels;
+		},
+	};
+}
+
+function expectedDepth16OraclePixels(
+	maxDepth: number,
+	wideHallWindow: {
+		readonly x: number;
+		readonly y: number;
+		readonly width: number;
+		readonly height: number;
+	},
+): {
+	readonly deferredPixels: Uint8Array;
+	readonly resolvedPixels: Uint8Array;
+} {
+	const width = DEPTH16_DRAWING_EXTENT.width;
+	const height = DEPTH16_DRAWING_EXTENT.height;
+	const pixelCount = width * height;
+	const rootScope = portalModelScopeId("root");
+	const rootDomain = portalModelDomainId("root-domain");
+	const chainScopeIds = Array.from({ length: maxDepth - 1 }, (_, index) =>
+		portalModelScopeId(`cell-${index}`),
+	);
+	const chainDomainIds = Array.from({ length: maxDepth - 1 }, (_, index) =>
+		portalModelDomainId(`cell-domain-${index}`),
+	);
+	const wideScope = portalModelScopeId("wide-hall");
+	const wideDomain = portalModelDomainId("wide-hall-domain");
+
+	const rectPixels = (
+		minX: number,
+		minY: number,
+		rectWidth: number,
+		rectHeight: number,
+	) => {
+		const indices: number[] = [];
+		for (let y = minY; y < minY + rectHeight; y += 1) {
+			for (let x = minX; x < minX + rectWidth; x += 1) {
+				indices.push(y * width + x);
+			}
+		}
+		return indices;
+	};
+	const chainAperturePixels = rectPixels(3, 4, 6, 8);
+	const bottomWindowPixels = rectPixels(15, 1, 6, 3);
+	const topWindowPixels = rectPixels(15, 12, 6, 3);
+	const modelDepthFromWindow = (windowDepth: number) =>
+		portalModelDepth(Math.round(windowDepth * 1000));
+
+	const rootFragments: NonNullable<
+		Parameters<typeof createPortalModelScene>[0]["domains"][number]["fragments"]
+	>[number][] = [];
+	for (let y = 0; y < height; y += 1) {
+		for (let x = 0; x < width; x += 1) {
+			const pixel = y * width + x;
+			let tag = "root-base";
+			let depth = 0.5;
+			if (x === 3 && y >= 4 && y < 12) {
+				tag = "root-near";
+				depth = 0.025;
+			} else if (x === 4 && y >= 8 && y < 12) {
+				tag = "root-mid-occluder";
+				depth = 0.25;
+			} else if (x >= 4 && x < 9 && y >= 4 && y < 12) {
+				tag = "root-distant";
+				depth = 0.95;
+			}
+			const id = `${tag}-${pixel}`;
+			rootFragments.push({
+				batchId: portalModelBatchId(id),
+				depth: modelDepthFromWindow(depth),
+				id: portalModelFragmentId(id),
+				kind: "opaque",
+				pixel: portalModelPixel(pixel, pixelCount),
+				scopeId: rootScope,
+				submissionId: portalModelSubmissionId(id),
+			});
+			const postCycleId = `blend-distant-${pixel}`;
+			rootFragments.push({
+				batchId: portalModelBatchId("blend-distant"),
+				depth: modelDepthFromWindow(0.85),
+				id: portalModelFragmentId(postCycleId),
+				kind: "alpha-blended",
+				pixel: portalModelPixel(pixel, pixelCount),
+				scopeId: rootScope,
+				submissionId: portalModelSubmissionId("2-blend-distant"),
+			});
+			if (x < 12 && y >= 8) {
+				const upperBlendId = `blend-upper-${pixel}`;
+				rootFragments.push({
+					batchId: portalModelBatchId("blend-upper"),
+					depth: modelDepthFromWindow(0.3),
+					id: portalModelFragmentId(upperBlendId),
+					kind: "alpha-blended",
+					pixel: portalModelPixel(pixel, pixelCount),
+					scopeId: rootScope,
+					submissionId: portalModelSubmissionId("3-blend-upper"),
+				});
+			}
+		}
+	}
+
+	const cell7Fragments: typeof rootFragments = [];
+	for (const pixel of rectPixels(3, 8, 6, 4)) {
+		const id = `cell7-wall-${pixel}`;
+		cell7Fragments.push({
+			batchId: portalModelBatchId(id),
+			depth: modelDepthFromWindow(0.425),
+			id: portalModelFragmentId(id),
+			kind: "opaque",
+			pixel: portalModelPixel(pixel, pixelCount),
+			scopeId: chainScopeIds[7]!,
+			submissionId: portalModelSubmissionId(id),
+		});
+	}
+	for (const pixel of chainAperturePixels) {
+		const id = `blend-cell7-${pixel}`;
+		cell7Fragments.push({
+			batchId: portalModelBatchId("blend-cell7"),
+			depth: modelDepthFromWindow(0.41),
+			id: portalModelFragmentId(id),
+			kind: "alpha-blended",
+			pixel: portalModelPixel(pixel, pixelCount),
+			scopeId: chainScopeIds[7]!,
+			submissionId: portalModelSubmissionId("1-blend-cell7"),
+		});
+	}
+
+	const wideHallFragments: typeof rootFragments = [];
+	for (const pixel of rectPixels(
+		wideHallWindow.x,
+		wideHallWindow.y,
+		wideHallWindow.width,
+		wideHallWindow.height,
+	)) {
+		const id = `wide-leaf-${pixel}`;
+		wideHallFragments.push({
+			batchId: portalModelBatchId(id),
+			depth: modelDepthFromWindow(0.15),
+			id: portalModelFragmentId(id),
+			kind: "opaque",
+			pixel: portalModelPixel(pixel, pixelCount),
+			scopeId: wideScope,
+			submissionId: portalModelSubmissionId(id),
+		});
+	}
+
+	const modelCrossings = Array.from({ length: maxDepth }, (_, step) => ({
+		aperture: createPortalModelAperture(
+			pixelCount,
+			chainAperturePixels.map((pixel) => ({
+				depth: modelDepthFromWindow((step + 1) / 20),
+				pixel: portalModelPixel(pixel, pixelCount),
+			})),
+		),
+		id: portalModelCrossingId(`chain-${step}`),
+		junctionGroupId: null,
+		reciprocalCrossingId: null,
+		relationship: "indoor-boundary" as const,
+		sourceScopeId: step === 0 ? rootScope : chainScopeIds[step - 1]!,
+		targetScopeId: step === maxDepth - 1 ? rootScope : chainScopeIds[step]!,
+	}));
+	modelCrossings.push(
+		{
+			aperture: createPortalModelAperture(
+				pixelCount,
+				bottomWindowPixels.map((pixel) => ({
+					depth: modelDepthFromWindow(0.1),
+					pixel: portalModelPixel(pixel, pixelCount),
+				})),
+			),
+			id: portalModelCrossingId("wide-bottom"),
+			junctionGroupId: null,
+			reciprocalCrossingId: null,
+			relationship: "indoor-boundary",
+			sourceScopeId: rootScope,
+			targetScopeId: wideScope,
+		},
+		{
+			aperture: createPortalModelAperture(
+				pixelCount,
+				topWindowPixels.map((pixel) => ({
+					depth: modelDepthFromWindow(0.1),
+					pixel: portalModelPixel(pixel, pixelCount),
+				})),
+			),
+			id: portalModelCrossingId("wide-top"),
+			junctionGroupId: null,
+			reciprocalCrossingId: null,
+			relationship: "indoor-boundary",
+			sourceScopeId: rootScope,
+			targetScopeId: wideScope,
+		},
+	);
+
+	const oracleFrame = composePortalReferenceFrameThroughPathDepth(
+		createPortalModelScene({
+			crossings: modelCrossings,
+			domains: [
+				{ fragments: rootFragments, id: rootDomain },
+				...chainDomainIds.map((id, index) => ({
+					fragments: index === 7 ? cell7Fragments : [],
+					id,
+				})),
+				{ fragments: wideHallFragments, id: wideDomain },
+			],
+			pixelCount,
+			rootScopeId: rootScope,
+			scopes: [
+				{ domainId: rootDomain, id: rootScope },
+				...chainScopeIds.map((id, index) => ({
+					domainId: chainDomainIds[index]!,
+					id,
+				})),
+				{ domainId: wideDomain, id: wideScope },
+			],
+		}),
+		maxDepth,
+	);
+
+	const exactWidePixels = new Set<number>();
+	for (const result of oracleFrame.pixels) {
+		if (result.opaque?.fragmentId.startsWith("wide-leaf-")) {
+			exactWidePixels.add(result.pixel);
+		}
+	}
+	const dilatedWidePixels = new Set<number>();
+	for (const base of exactWidePixels) {
+		const baseX = base % width;
+		const baseY = Math.floor(base / width);
+		for (
+			let dy = -PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS;
+			dy <= PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS;
+			dy += 1
+		) {
+			for (
+				let dx = -PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS;
+				dx <= PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS;
+				dx += 1
+			) {
+				const x = baseX + dx;
+				const y = baseY + dy;
+				if (
+					x >= wideHallWindow.x &&
+					y >= wideHallWindow.y &&
+					x < wideHallWindow.x + wideHallWindow.width &&
+					y < wideHallWindow.y + wideHallWindow.height
+				) {
+					dilatedWidePixels.add(y * width + x);
+				}
+			}
+		}
+	}
+
+	const colorForOpaqueFragment = (
+		fragmentId: string | undefined,
+	): readonly [number, number, number, number] => {
+		if (!fragmentId) return CLEAR_COLOR;
+		if (fragmentId.startsWith("wide-leaf-")) return LEAF_COLOR;
+		if (fragmentId.startsWith("cell7-wall-")) return MIDDLE_COLOR;
+		if (fragmentId.startsWith("root-distant-")) return DEEP_COLOR;
+		if (fragmentId.startsWith("root-mid-occluder-")) return WEATHER_COLOR;
+		return ROOT_COLOR;
+	};
+	const rgbForAlphaFragment = (
+		fragmentId: string,
+	): readonly [number, number, number] => {
+		if (fragmentId.startsWith("blend-cell7-")) return [255, 255, 0];
+		if (fragmentId.startsWith("blend-distant-")) return [255, 0, 255];
+		return [0, 0, 255];
+	};
+
+	const resolvedPixels = new Uint8Array(pixelCount * 4);
+	const deferredPixels = new Uint8Array(pixelCount * 4);
+	for (const result of oracleFrame.pixels) {
+		const baseColor = dilatedWidePixels.has(result.pixel)
+			? LEAF_COLOR
+			: colorForOpaqueFragment(result.opaque?.fragmentId);
+		resolvedPixels.set(baseColor, result.pixel * 4);
+		let color = baseColor;
+		for (const layer of result.alphaBlended) {
+			color = blendHalf(color, rgbForAlphaFragment(layer.fragmentId));
+		}
+		deferredPixels.set(color, result.pixel * 4);
+	}
+	return { deferredPixels, resolvedPixels };
 }

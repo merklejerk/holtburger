@@ -165,6 +165,13 @@ export interface PortalScopeWindowFrameView {
 	selectedMaximumNdcX(ordinal: number): number;
 	/** Read the selected rectangle's maximumNdcY bound directly from the arena. */
 	selectedMaximumNdcY(ordinal: number): number;
+	/** Write one selected crossing's clipped NDC bounds `[minX, minY, maxX, maxY]` without allocating. */
+	writeSelectedCrossingProjectedBounds(
+		ordinal: number,
+		projection: PreparedPortalProjection,
+		target: Float64Array,
+		targetOffset: number,
+	): boolean;
 }
 
 interface IndexedCrossing {
@@ -633,6 +640,26 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 	selectedMaximumNdcY(ordinal: number): number {
 		const arena = this.#requireArena();
 		return arena.windows.maximumNdcY(this.#selectedWindow(arena, ordinal));
+	}
+
+	writeSelectedCrossingProjectedBounds(
+		ordinal: number,
+		projection: PreparedPortalProjection,
+		target: Float64Array,
+		targetOffset: number,
+	): boolean {
+		const arena = this.#requireArena();
+		const crossingId = this.#selectedCrossingId(ordinal);
+		const indexed = this.index!.crossings[crossingId]!;
+		const nearClipRays = arena.selectedNearPlaneByCrossingId[crossingId] === 1;
+		return arena.windows.writeProjectedApertureBounds(
+			projection,
+			indexed.visibilityAperture,
+			nearClipRays,
+			crossingId,
+			target,
+			targetOffset,
+		);
 	}
 	#requireArena(): PortalScopeWindowArena {
 		const arena = this.arenaOf();

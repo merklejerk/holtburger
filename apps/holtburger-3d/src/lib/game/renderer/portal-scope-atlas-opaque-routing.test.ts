@@ -131,6 +131,26 @@ describe("portal scope-atlas opaque routing", () => {
 		});
 	});
 
+	it("routes opaque objects before terrain with identical tile ordinals and counts", () => {
+		const router = new PortalScopeAtlasOpaqueRouter();
+		const lookup = new TestTileLookup();
+		const frame = router.beginFrame(lookup);
+
+		expect(router.routeObjectSubmission("outdoor")).toBe(OUTDOOR_TILE);
+		expect(router.routeObjectSubmission("indoor-a")).toBe(FIRST_INDOOR_TILE);
+		expect(router.routeTerrainPass(TERRAIN_SUBMISSION_COUNT)).toBe(
+			OUTDOOR_TILE,
+		);
+
+		expect(lookup.requestedKeys).toEqual(["outdoor", "indoor-a", "outdoor"]);
+		expect(frame.trace).toEqual({
+			objectSubmissionCount: 2,
+			portalOwnedFrameHeapRecordCreationCount: 0,
+			terrainSubmissionCount: TERRAIN_SUBMISSION_COUNT,
+			tileResolutionCount: 3,
+		});
+	});
+
 	it("reuses its frame record and rejects invalid call order", () => {
 		const router = new PortalScopeAtlasOpaqueRouter();
 		expect(() => router.routeObjectSubmission("outdoor")).toThrow(

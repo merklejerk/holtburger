@@ -43,7 +43,12 @@ export function installPortalSeamProbe(): void {
 		propagate.apply(this, args);
 		if (readback === null || latest === null) return;
 		const { gl, rounds } = readback;
-		const { width, height } = latest.input.outputExtent;
+		const round = rounds.length;
+		const stream = latest.input.stream;
+		const scissorX = stream.roundFrontierScissorX(round);
+		const scissorY = stream.roundFrontierScissorY(round);
+		const scissorWidth = stream.roundFrontierScissorWidth(round);
+		const scissorHeight = stream.roundFrontierScissorHeight(round);
 		const previous = gl.getParameter(
 			gl.READ_FRAMEBUFFER_BINDING,
 		) as WebGLFramebuffer | null;
@@ -51,12 +56,12 @@ export function installPortalSeamProbe(): void {
 			gl.READ_FRAMEBUFFER,
 			latest.input.targets.frontiers[args[0]].framebuffer,
 		);
-		const pixels = new Uint32Array(width * height * 4);
+		const pixels = new Uint32Array(scissorWidth * scissorHeight * 4);
 		gl.readPixels(
-			0,
-			0,
-			width,
-			height,
+			scissorX,
+			scissorY,
+			scissorWidth,
+			scissorHeight,
 			gl.RGBA_INTEGER,
 			gl.UNSIGNED_INT,
 			pixels,
@@ -122,11 +127,35 @@ export function runPortalSeamProbe() {
 					bytes: stream.bytes,
 					usedByteLength: stream.usedByteLength,
 					vertexCount: stream.vertexCount,
+					indexBytes: stream.indexBytes,
+					indexCount: stream.indexCount,
+					usedIndexByteLength: stream.usedIndexByteLength,
+					quadBytes: stream.quadBytes,
+					quadCount: stream.quadCount,
+					usedQuadByteLength: stream.usedQuadByteLength,
+					packedAtlasWidth: stream.packedAtlasWidth,
+					packedAtlasHeight: stream.packedAtlasHeight,
+					rootTileWidth: stream.rootTileWidth,
+					rootTileHeight: stream.rootTileHeight,
+					resolveQuadOffset: stream.resolveQuadOffset,
+					resolveQuadCount: stream.resolveQuadCount,
 					propagationMetadataBytes: bytes,
 					arrivalMetadataStateCount: stream.arrivalMetadataStateCount,
 					renderDomainMetadataStateCount: stream.renderDomainMetadataStateCount,
 					usedPropagationMetadataByteLength:
 						stream.usedPropagationMetadataByteLength,
+					roundIndexOffset: (round) => stream.roundIndexOffset(round),
+					roundIndexCount: (round) => stream.roundIndexCount(round),
+					roundFrontierScissorX: (round) => stream.roundFrontierScissorX(round),
+					roundFrontierScissorY: (round) => stream.roundFrontierScissorY(round),
+					roundFrontierScissorWidth: (round) =>
+						stream.roundFrontierScissorWidth(round),
+					roundFrontierScissorHeight: (round) =>
+						stream.roundFrontierScissorHeight(round),
+					roundReductionQuadOffset: (round) =>
+						stream.roundReductionQuadOffset(round),
+					roundReductionQuadCount: (round) =>
+						stream.roundReductionQuadCount(round),
 				},
 			});
 			const { width, height } = captured.input.outputExtent;

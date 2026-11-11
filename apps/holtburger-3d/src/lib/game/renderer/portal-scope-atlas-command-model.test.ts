@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT } from "./portal-crossing-triangle-stream";
 import {
 	compilePortalScopeAtlasWebGLCalls,
 	PORTAL_SCOPE_ATLAS_TEXTURE_UNITS,
+	type PortalScopeAtlasExecutionInput,
 	type PortalScopeAtlasWebGLCall,
 } from "./portal-scope-atlas-command-model";
 import {
@@ -14,17 +16,27 @@ const METADATA_BINDING_POINT = 3;
 
 describe("portal scope-atlas WebGL call model", () => {
 	it("derives the exact frame-time call envelope for nested propagation", () => {
-		const plan = compilePortalScopeAtlasWebGLCalls({
-			crossingVertexCount: 18,
-			metadataBindingPoint: METADATA_BINDING_POINT,
-			renderDomainCount: 4,
-			traversalDepth: 3,
-		});
+		const plan = compilePortalScopeAtlasWebGLCalls(
+			createExecutionInput({
+				crossingIndexCount: 18,
+				crossingVertexCount: 18,
+				metadataBindingPoint: METADATA_BINDING_POINT,
+				quadInstanceCount: 16,
+				renderDomainCount: 4,
+				resolveQuadCount: 4,
+				resolveQuadOffset: 12,
+				roundIndexCount: () => 6,
+				roundIndexOffset: (round) => round * 6,
+				roundReductionQuadCount: () => 4,
+				roundReductionQuadOffset: (round) => round * 4,
+				traversalDepth: 3,
+			}),
+		);
 
-		expect(plan.trace).toEqual({ totalWebGLCallCount: 87 });
+		expect(plan.trace).toEqual({ totalWebGLCallCount: 107 });
 		expect(countCalls(plan.calls, "active-texture")).toBe(6);
-		expect(countCalls(plan.calls, "bind-buffer")).toBe(4);
-		expect(countCalls(plan.calls, "buffer-sub-data")).toBe(2);
+		expect(countCalls(plan.calls, "bind-buffer")).toBe(7);
+		expect(countCalls(plan.calls, "buffer-sub-data")).toBe(4);
 		expect(
 			countCalls(
 				plan.calls,
@@ -32,7 +44,9 @@ describe("portal scope-atlas WebGL call model", () => {
 				"clear-frontier-depth",
 				"clear-frontier-state",
 			),
-		).toBe(7);
+		).toBe(8);
+		expect(countCalls(plan.calls, "scissor", "scissor-round-frontier")).toBe(5);
+		expect(countCalls(plan.calls, "quad-instance-offset")).toBe(4);
 		expect(
 			countCalls(
 				plan.calls,
@@ -42,7 +56,7 @@ describe("portal scope-atlas WebGL call model", () => {
 			),
 		).toBe(7);
 		expect(countCalls(plan.calls, "bind-framebuffer")).toBe(8);
-		expect(countCalls(plan.calls, "depth-function", "set-capability")).toBe(13);
+		expect(countCalls(plan.calls, "depth-function", "set-capability")).toBe(18);
 		expect(countCalls(plan.calls, "color-mask", "depth-mask")).toBe(2);
 		expect(countCalls(plan.calls, "bind-buffer-base")).toBe(1);
 		expect(countCalls(plan.calls, "use-program")).toBe(7);
@@ -58,32 +72,47 @@ describe("portal scope-atlas WebGL call model", () => {
 		expect(countCalls(plan.calls, "bind-vertex-array")).toBe(6);
 		expect(countCalls(plan.calls, "viewport")).toBe(8);
 		expect(plan.calls.filter((call) => call.kind.startsWith("draw-"))).toEqual([
-			{ kind: "draw-propagation", output: 0, vertexCount: 18 },
+			{ indexCount: 6, indexOffset: 0, kind: "draw-propagation", output: 0 },
 			{
+				instanceCount: 4,
 				kind: "draw-reduction",
 				next: 0,
-				renderDomainCount: 4,
 				terminal: false,
 			},
-			{ kind: "draw-propagation", output: 1, vertexCount: 18 },
+			{ indexCount: 6, indexOffset: 6, kind: "draw-propagation", output: 1 },
 			{
+				instanceCount: 4,
 				kind: "draw-reduction",
 				next: 1,
-				renderDomainCount: 4,
 				terminal: false,
 			},
-			{ kind: "draw-propagation", output: 0, vertexCount: 18 },
+			{ indexCount: 6, indexOffset: 12, kind: "draw-propagation", output: 0 },
 			{
+				instanceCount: 4,
 				kind: "draw-reduction",
 				next: 0,
-				renderDomainCount: 4,
 				terminal: true,
 			},
-			{ kind: "draw-resolve", renderDomainCount: 4 },
+			{ instanceCount: 4, kind: "draw-resolve" },
 		]);
+		expect(plan.calls.filter((call) => call.kind === "depth-function")).toEqual(
+			[
+				{ compare: "less", kind: "depth-function" },
+				{ compare: "always", kind: "depth-function" },
+				{ compare: "less", kind: "depth-function" },
+				{ compare: "greater", kind: "depth-function" },
+				{ compare: "less", kind: "depth-function" },
+				{ compare: "greater", kind: "depth-function" },
+				{ compare: "less-equal", kind: "depth-function" },
+			],
+		);
 		expect(plan.calls.filter((call) => call.kind.includes("clear"))).toEqual([
 			{
 				depth: PORTAL_SCOPE_ENVELOPE_UNCOVERED_DEPTH,
+				kind: "clear-envelope-depth",
+			},
+			{
+				depth: PORTAL_SCOPE_ENVELOPE_UNBOUNDED_DEPTH,
 				kind: "clear-envelope-depth",
 			},
 			...frontierClears(0),
@@ -93,21 +122,29 @@ describe("portal scope-atlas WebGL call model", () => {
 	});
 
 	it("materializes root-only visibility without frontier resources or work", () => {
-		const plan = compilePortalScopeAtlasWebGLCalls({
-			crossingVertexCount: 0,
-			metadataBindingPoint: METADATA_BINDING_POINT,
-			renderDomainCount: 1,
-			traversalDepth: 0,
-		});
+		const plan = compilePortalScopeAtlasWebGLCalls(
+			createExecutionInput({
+				crossingIndexCount: 0,
+				crossingVertexCount: 0,
+				metadataBindingPoint: METADATA_BINDING_POINT,
+				quadInstanceCount: 1,
+				renderDomainCount: 1,
+				resolveQuadCount: 1,
+				resolveQuadOffset: 0,
+				traversalDepth: 0,
+			}),
+		);
 
-		expect(plan.trace).toEqual({ totalWebGLCallCount: 30 });
+		expect(plan.trace).toEqual({ totalWebGLCallCount: 36 });
 		expect(countCalls(plan.calls, "active-texture")).toBe(3);
-		expect(countCalls(plan.calls, "bind-buffer")).toBe(2);
-		expect(countCalls(plan.calls, "buffer-sub-data")).toBe(1);
+		expect(countCalls(plan.calls, "bind-buffer")).toBe(4);
+		expect(countCalls(plan.calls, "buffer-sub-data")).toBe(2);
 		expect(countCalls(plan.calls, "clear-envelope-depth")).toBe(1);
+		expect(countCalls(plan.calls, "scissor")).toBe(1);
+		expect(countCalls(plan.calls, "quad-instance-offset")).toBe(1);
 		expect(countCalls(plan.calls, "draw-resolve")).toBe(1);
 		expect(countCalls(plan.calls, "bind-framebuffer")).toBe(2);
-		expect(countCalls(plan.calls, "depth-function", "set-capability")).toBe(7);
+		expect(countCalls(plan.calls, "depth-function", "set-capability")).toBe(8);
 		expect(countCalls(plan.calls, "color-mask", "depth-mask")).toBe(2);
 		expect(countCalls(plan.calls, "bind-buffer-base")).toBe(1);
 		expect(countCalls(plan.calls, "use-program")).toBe(1);
@@ -127,11 +164,45 @@ describe("portal scope-atlas WebGL call model", () => {
 			{ kind: "bind-texture-2d", texture: "envelope-depth" },
 		]);
 		expect(plan.calls.filter((call) => call.kind.startsWith("draw-"))).toEqual([
-			{ kind: "draw-resolve", renderDomainCount: 1 },
+			{ instanceCount: 1, kind: "draw-resolve" },
 		]);
 		expect(plan.calls.filter((call) => call.kind === "depth-function")).toEqual(
 			[{ compare: "less-equal", kind: "depth-function" }],
 		);
+	});
+
+	it("clears packed non-root envelope tiles to uncovered depth when zero-depth execution retains child domains", () => {
+		const plan = compilePortalScopeAtlasWebGLCalls(
+			createExecutionInput({
+				crossingIndexCount: 0,
+				crossingVertexCount: 0,
+				metadataBindingPoint: METADATA_BINDING_POINT,
+				quadInstanceCount: 1,
+				renderDomainCount: 2,
+				resolveQuadCount: 1,
+				resolveQuadOffset: 0,
+				traversalDepth: 0,
+			}),
+		);
+
+		expect(plan.trace).toEqual({ totalWebGLCallCount: 38 });
+		expect(
+			plan.calls.filter(
+				(call) =>
+					call.kind === "scissor" || call.kind === "clear-envelope-depth",
+			),
+		).toEqual([
+			{ kind: "scissor", target: "packed-atlas" },
+			{
+				depth: PORTAL_SCOPE_ENVELOPE_UNCOVERED_DEPTH,
+				kind: "clear-envelope-depth",
+			},
+			{ kind: "scissor", target: "root-tile" },
+			{
+				depth: PORTAL_SCOPE_ENVELOPE_UNBOUNDED_DEPTH,
+				kind: "clear-envelope-depth",
+			},
+		]);
 	});
 
 	it("keeps every sampled texture disjoint from the active draw attachments", () => {
@@ -140,12 +211,9 @@ describe("portal scope-atlas WebGL call model", () => {
 			traversalDepth <= PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth;
 			traversalDepth += 1
 		) {
-			const plan = compilePortalScopeAtlasWebGLCalls({
-				crossingVertexCount: traversalDepth === 0 ? 0 : 3,
-				metadataBindingPoint: METADATA_BINDING_POINT,
-				renderDomainCount: traversalDepth + 1,
-				traversalDepth,
-			});
+			const plan = compilePortalScopeAtlasWebGLCalls(
+				createDepthInput(traversalDepth, traversalDepth + 1),
+			);
 			expect(
 				findFeedback(plan.calls),
 				`feedback at traversal depth ${traversalDepth}`,
@@ -159,17 +227,14 @@ describe("portal scope-atlas WebGL call model", () => {
 			traversalDepth <= PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth;
 			traversalDepth += 1
 		) {
-			const plan = compilePortalScopeAtlasWebGLCalls({
-				crossingVertexCount: 3,
-				metadataBindingPoint: METADATA_BINDING_POINT,
-				renderDomainCount: traversalDepth + 1,
-				traversalDepth,
-			});
+			const plan = compilePortalScopeAtlasWebGLCalls(
+				createDepthInput(traversalDepth, traversalDepth + 1),
+			);
 
-			expect(plan.trace.totalWebGLCallCount).toBe(15 * traversalDepth + 42);
+			expect(plan.trace.totalWebGLCallCount).toBe(19 * traversalDepth + 50);
 			expect(countCalls(plan.calls, "bind-texture-2d")).toBe(6);
 			expect(countCalls(plan.calls, "bind-sampler")).toBe(6);
-			expect(countCalls(plan.calls, "buffer-sub-data")).toBe(2);
+			expect(countCalls(plan.calls, "buffer-sub-data")).toBe(4);
 		}
 	});
 
@@ -179,12 +244,9 @@ describe("portal scope-atlas WebGL call model", () => {
 			traversalDepth <= PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth;
 			traversalDepth += 1
 		) {
-			const plan = compilePortalScopeAtlasWebGLCalls({
-				crossingVertexCount: traversalDepth === 0 ? 0 : 3,
-				metadataBindingPoint: METADATA_BINDING_POINT,
-				renderDomainCount: traversalDepth + 1,
-				traversalDepth,
-			});
+			const plan = compilePortalScopeAtlasWebGLCalls(
+				createDepthInput(traversalDepth, traversalDepth + 1),
+			);
 
 			expect(
 				findRedundantStateAssignments(plan.calls),
@@ -193,84 +255,133 @@ describe("portal scope-atlas WebGL call model", () => {
 		}
 	});
 
-	it("changes only instance counts when selected render-domain count changes", () => {
-		const shallow = compilePortalScopeAtlasWebGLCalls({
-			crossingVertexCount: 3,
-			metadataBindingPoint: METADATA_BINDING_POINT,
-			renderDomainCount: 1,
-			traversalDepth: 1,
-		});
-		const dense = compilePortalScopeAtlasWebGLCalls({
-			crossingVertexCount: 3,
-			metadataBindingPoint: METADATA_BINDING_POINT,
-			renderDomainCount: 255,
-			traversalDepth: 1,
-		});
+	it("changes only quad byte length and instance counts when active quad count changes", () => {
+		const shallow = compilePortalScopeAtlasWebGLCalls(createDepthInput(1, 1));
+		const dense = compilePortalScopeAtlasWebGLCalls(createDepthInput(1, 255));
 
 		expect(dense.trace).toEqual(shallow.trace);
 		expect(dense.calls.map((call) => call.kind)).toEqual(
 			shallow.calls.map((call) => call.kind),
 		);
-		expect(
-			dense.calls.filter((call) => call.kind === "buffer-sub-data"),
-		).toEqual(shallow.calls.filter((call) => call.kind === "buffer-sub-data"));
 		expect(dense.calls).not.toEqual(shallow.calls);
 	});
 
 	it.each([
 		{
 			expected: "metadata binding point",
-			input: {
-				crossingVertexCount: 0,
+			input: createExecutionInput({
 				metadataBindingPoint: -1,
-				renderDomainCount: 1,
-				traversalDepth: 0,
-			},
+			}),
 		},
 		{
 			expected: "render domain count exceeds R8UI capacity",
-			input: {
-				crossingVertexCount: 0,
-				metadataBindingPoint: 0,
+			input: createExecutionInput({
+				crossingIndexCount: 3,
+				crossingVertexCount: 3,
+				quadInstanceCount: 2,
 				renderDomainCount: 256,
-				traversalDepth: 0,
-			},
+				resolveQuadCount: 1,
+				resolveQuadOffset: 1,
+				traversalDepth: 1,
+			}),
+		},
+		{
+			expected: "quad instance count exceeds arena capacity",
+			input: createExecutionInput({
+				crossingIndexCount: 3,
+				crossingVertexCount: 3,
+				quadInstanceCount: PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT + 1,
+				renderDomainCount: 2,
+				resolveQuadCount: 1,
+				resolveQuadOffset: PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT,
+				roundReductionQuadCount: () => PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT,
+				traversalDepth: 1,
+			}),
 		},
 		{
 			expected: "traversal depth exceeds its policy",
-			input: {
+			input: createExecutionInput({
+				crossingIndexCount: 3,
 				crossingVertexCount: 3,
-				metadataBindingPoint: 0,
 				renderDomainCount: 1,
 				traversalDepth: PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth + 1,
-			},
+			}),
 		},
 		{
 			expected: "complete triangles",
-			input: {
+			input: createExecutionInput({
+				crossingIndexCount: 3,
 				crossingVertexCount: 1,
-				metadataBindingPoint: 0,
+				quadInstanceCount: 2,
 				renderDomainCount: 1,
+				resolveQuadCount: 1,
+				resolveQuadOffset: 1,
 				traversalDepth: 1,
-			},
+			}),
 		},
 		{
 			expected: "must both be empty or non-empty",
-			input: {
+			input: createExecutionInput({
+				crossingIndexCount: 0,
 				crossingVertexCount: 0,
-				metadataBindingPoint: 0,
+				quadInstanceCount: 2,
 				renderDomainCount: 1,
+				resolveQuadCount: 1,
+				resolveQuadOffset: 1,
 				traversalDepth: 1,
-			},
+			}),
 		},
 		{
-			expected: "root-only execution must contain exactly one render domain",
-			input: {
-				crossingVertexCount: 0,
-				metadataBindingPoint: 0,
+			expected: "zero-depth execution must resolve only the root quad",
+			input: createExecutionInput({
+				quadInstanceCount: 2,
 				renderDomainCount: 2,
-				traversalDepth: 0,
-			},
+				resolveQuadCount: 2,
+			}),
+		},
+		{
+			expected: "round crossing slice is inconsistent",
+			input: createExecutionInput({
+				crossingIndexCount: 6,
+				crossingVertexCount: 6,
+				quadInstanceCount: 3,
+				renderDomainCount: 2,
+				resolveQuadCount: 1,
+				resolveQuadOffset: 2,
+				roundIndexCount: () => 3,
+				roundIndexOffset: () => 0,
+				roundReductionQuadCount: () => 1,
+				roundReductionQuadOffset: (round) => round,
+				traversalDepth: 2,
+			}),
+		},
+		{
+			expected: "round reduction slice is inconsistent",
+			input: createExecutionInput({
+				crossingIndexCount: 6,
+				crossingVertexCount: 6,
+				quadInstanceCount: 3,
+				renderDomainCount: 2,
+				resolveQuadCount: 1,
+				resolveQuadOffset: 2,
+				roundIndexCount: () => 3,
+				roundIndexOffset: (round) => round * 3,
+				roundReductionQuadCount: () => 1,
+				roundReductionQuadOffset: () => 0,
+				traversalDepth: 2,
+			}),
+		},
+		{
+			expected: "slice totals disagree with uploaded counts",
+			input: createExecutionInput({
+				crossingIndexCount: 3,
+				crossingVertexCount: 3,
+				quadInstanceCount: 5,
+				renderDomainCount: 2,
+				resolveQuadCount: 1,
+				resolveQuadOffset: 1,
+				traversalDepth: 1,
+			}),
 		},
 	])("rejects invalid executor input: $expected", ({ expected, input }) => {
 		expect(() => compilePortalScopeAtlasWebGLCalls(input)).toThrow(expected);
@@ -451,6 +562,15 @@ function findRedundantStateAssignments(
 			case "depth-mask":
 				assign("depth-mask", String(call.write), call);
 				break;
+			case "quad-instance-offset":
+				assign("quad-instance-offset", String(call.firstInstance), call);
+				break;
+			case "scissor":
+				assign("scissor", call.target, call);
+				break;
+			case "scissor-round-frontier":
+				assign("scissor", `round-${call.round}`, call);
+				break;
 			case "set-capability":
 				assign(`capability:${call.capability}`, String(call.enabled), call);
 				break;
@@ -469,4 +589,55 @@ function findRedundantStateAssignments(
 		}
 	}
 	return redundant;
+}
+
+function createExecutionInput(
+	overrides: Partial<PortalScopeAtlasExecutionInput>,
+): PortalScopeAtlasExecutionInput {
+	const traversalDepth = overrides.traversalDepth ?? 0;
+	return {
+		crossingIndexCount: traversalDepth * 3,
+		crossingVertexCount: traversalDepth * 3,
+		metadataBindingPoint: METADATA_BINDING_POINT,
+		quadInstanceCount: traversalDepth + 1,
+		renderDomainCount: traversalDepth === 0 ? 1 : 2,
+		resolveQuadCount: 1,
+		resolveQuadOffset: traversalDepth,
+		roundIndexCount: () => 3,
+		roundIndexOffset: (round) => round * 3,
+		roundReductionQuadCount: () => 1,
+		roundReductionQuadOffset: (round) => round,
+		traversalDepth,
+		...overrides,
+	};
+}
+
+function createDepthInput(
+	traversalDepth: number,
+	quadPerStage: number,
+): PortalScopeAtlasExecutionInput {
+	if (traversalDepth === 0) {
+		return createExecutionInput({
+			crossingIndexCount: 0,
+			crossingVertexCount: 0,
+			quadInstanceCount: quadPerStage,
+			renderDomainCount: 1,
+			resolveQuadCount: quadPerStage,
+			resolveQuadOffset: 0,
+			traversalDepth: 0,
+		});
+	}
+	return createExecutionInput({
+		crossingIndexCount: traversalDepth * 6,
+		crossingVertexCount: 6,
+		quadInstanceCount: (traversalDepth + 1) * quadPerStage,
+		renderDomainCount: 2,
+		resolveQuadCount: quadPerStage,
+		resolveQuadOffset: traversalDepth * quadPerStage,
+		roundIndexCount: () => 6,
+		roundIndexOffset: (round) => round * 6,
+		roundReductionQuadCount: () => quadPerStage,
+		roundReductionQuadOffset: (round) => round * quadPerStage,
+		traversalDepth,
+	});
 }

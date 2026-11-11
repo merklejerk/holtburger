@@ -48,6 +48,7 @@ class MutableWebGL2PortalScopeAtlasFrame implements WebGL2PortalScopeAtlasFrame 
 	/** CPU staging only; the shared executor uploads this view when it executes. */
 	readonly stream = new PortalPropagationStreamArena(
 		PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumCrossingTriangleVertexCount,
+		PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
 	);
 	/** Extents are owned by the view because tile coordinates depend on them. */
 	readonly resource = {
@@ -143,7 +144,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 	/** The one view currently using shared GPU resources. */
 	#active: {
 		readonly frame: MutableWebGL2PortalScopeAtlasFrame;
-		readonly targets: WebGL2PortalScopeAtlasTargetSet;
+		readonly targets: WebGL2PortalScopeAtlasTargetSet | null;
 	} | null = null;
 
 	constructor(gl: WebGL2RenderingContext) {
@@ -187,11 +188,17 @@ export class WebGL2PortalScopeAtlasPipeline {
 		return frame;
 	}
 
-	/** Bind and clear the complete scope-local color/depth atlas before routed opaque draws. */
+	/**
+	 * Bind and clear the opaque destination before routed draws.
+	 *
+	 * Zero-crossing frames route directly into `directOutputFramebuffer` and return `null`,
+	 * avoiding atlas attachment allocation, offscreen clears, and the full-screen resolve pass.
+	 */
 	beginOpaqueScene(
 		prepared: WebGL2PortalScopeAtlasFrame,
 		clearColor: readonly [number, number, number, number],
-	): WebGL2PortalScopeAtlasTargetSet {
+		directOutputFramebuffer: WebGLFramebuffer | null,
+	): WebGL2PortalScopeAtlasTargetSet | null {
 		const frame = this.#views.find(
 			(view, ordinal) => ordinal < this.#viewCount && view === prepared,
 		);
@@ -200,10 +207,33 @@ export class WebGL2PortalScopeAtlasPipeline {
 				"Portal view is not prepared by this pipeline in the current frame.",
 			);
 		this.#active = null;
+		const gl = this.#gl;
+		if (frame.atlas.directRootOutput) {
+			this.#active = { frame, targets: null };
+			this.#tileState.beginFrame(frame.atlas);
+			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, directOutputFramebuffer);
+			gl.viewport(
+				0,
+				0,
+				frame.resource.drawingBuffer.width,
+				frame.resource.drawingBuffer.height,
+			);
+			gl.disable(gl.BLEND);
+			gl.disable(gl.CULL_FACE);
+			gl.disable(gl.SCISSOR_TEST);
+			gl.disable(gl.STENCIL_TEST);
+			gl.colorMask(true, true, true, true);
+			gl.enable(gl.DEPTH_TEST);
+			gl.depthFunc(gl.LEQUAL);
+			gl.depthMask(true);
+			gl.clearDepth(1);
+			gl.clearColor(...clearColor);
+			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+			return null;
+		}
 		const targets = this.#targetOwner.resize(frame.resource);
 		this.#active = { frame, targets };
 		this.#tileState.beginFrame(frame.atlas);
-		const gl = this.#gl;
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, targets.scene.framebuffer);
 		gl.viewport(
 			0,
@@ -212,7 +242,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 			targets.extents.atlas.height,
 		);
 		gl.disable(gl.BLEND);
-		gl.disable(gl.SCISSOR_TEST);
+		gl.disable(gl.CULL_FACE);
 		gl.disable(gl.STENCIL_TEST);
 		gl.colorMask(true, true, true, true);
 		// Scope-local geometry needs depth testing before the compositor establishes its own state.
@@ -221,7 +251,10 @@ export class WebGL2PortalScopeAtlasPipeline {
 		gl.depthMask(true);
 		gl.clearDepth(1);
 		gl.clearColor(...clearColor);
+		gl.enable(gl.SCISSOR_TEST);
+		gl.scissor(0, 0, frame.atlas.packedWidth, frame.atlas.packedHeight);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		gl.disable(gl.SCISSOR_TEST);
 		return targets;
 	}
 
@@ -266,6 +299,10 @@ export class WebGL2PortalScopeAtlasPipeline {
 	/** Propagate selected arrivals, reduce envelopes, and resolve scope-local opaque color/depth. */
 	execute(outputFramebuffer: WebGLFramebuffer | null): void {
 		const { frame, targets } = this.#requireActive();
+		if (targets === null) {
+			this.#executor.bindDirectRootMetadata(frame.stream);
+			return;
+		}
 		this.#executor.execute({
 			outputExtent: frame.resource.drawingBuffer,
 			outputFramebuffer,
@@ -289,7 +326,12 @@ export class WebGL2PortalScopeAtlasPipeline {
 		const unit = PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth;
 		gl.bindSampler(unit, null);
 		gl.activeTexture(gl.TEXTURE0 + unit);
-		gl.bindTexture(gl.TEXTURE_2D, targets.envelope.depth);
+		gl.bindTexture(
+			gl.TEXTURE_2D,
+			targets !== null
+				? targets.envelope.depth
+				: this.#executor.unboundedEnvelopeDepthTexture,
+		);
 		gl.activeTexture(gl.TEXTURE0);
 	}
 

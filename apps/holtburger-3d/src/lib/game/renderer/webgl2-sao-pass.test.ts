@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import {
 	WebGL2SaoScratchTargets,
+	saoBlurNeutralLinearDepthCutoff,
 	saoScratchByteLength,
 	scaledSaoExtent,
 	scaledSaoInterval,
@@ -102,6 +103,36 @@ describe("WebGL2 SAO scratch policy", () => {
 			extent: INITIAL_EXTENT,
 		});
 		expect(readBindings(state.gl)).toEqual(unrelated);
+	});
+
+	it("places the blur far-cutoff strictly past every bilaterally reachable non-neutral tap", () => {
+		const distanceFadeEnd = 120;
+		const bilateralDepthThreshold = 2.5;
+		const cutoff = saoBlurNeutralLinearDepthCutoff(
+			distanceFadeEnd,
+			bilateralDepthThreshold,
+		);
+
+		expect(cutoff).toBe(122.5);
+		// Any neighbor with positive bilateral weight (|sample - center| < threshold) at center >= cutoff
+		// remains strictly beyond distanceFadeEnd, while a slightly closer center can still reach inside.
+		const nearestPositiveWeightSampleAtCutoff =
+			cutoff - bilateralDepthThreshold + 1e-6;
+		expect(nearestPositiveWeightSampleAtCutoff).toBeGreaterThan(
+			distanceFadeEnd,
+		);
+		const nearestPositiveWeightSampleBelowCutoff =
+			cutoff - 1e-3 - (bilateralDepthThreshold - 1e-4);
+		expect(nearestPositiveWeightSampleBelowCutoff).toBeLessThan(
+			distanceFadeEnd,
+		);
+
+		expect(() => saoBlurNeutralLinearDepthCutoff(0, 1)).toThrow(
+			"positive finite distance",
+		);
+		expect(() => saoBlurNeutralLinearDepthCutoff(120, 0)).toThrow(
+			"positive finite bilateral threshold",
+		);
 	});
 });
 

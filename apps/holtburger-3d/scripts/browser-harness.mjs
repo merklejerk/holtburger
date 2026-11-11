@@ -2441,6 +2441,8 @@ function assertPortalScopeAtlasExecutorFixture(fixture) {
 	}
 	for (const field of [
 		"deferredCompositionMatchesOracle",
+		"depth16CyclicMultiWindowDeferredMatchesOracle",
+		"depth16CyclicMultiWindowResolveMatchesOracle",
 		"exteriorWeatherComposesBehindChildOpaque",
 		"frontierMatchesOracle",
 		"junctionZeroThicknessTransitMatchesOracle",

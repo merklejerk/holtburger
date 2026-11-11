@@ -5,6 +5,8 @@ export const PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES = 32;
 /** Fixed bytes for every scope ordinal addressable by one R8UI arrival route. */
 export const PORTAL_SCOPE_TILE_METADATA_CAPACITY_BYTES =
 	PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT * PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES;
+/** Marks a zero-crossing root domain whose deferred fragments need no envelope depth sample. */
+export const PORTAL_SCOPE_TILE_UNBOUNDED_ENVELOPE_FLAG = 1;
 
 /** Write one exact integer mapping between a drawing-buffer window and its atlas tile. */
 export function writePortalScopeTileMetadata(
@@ -16,6 +18,7 @@ export function writePortalScopeTileMetadata(
 	screenY: number,
 	width: number,
 	height: number,
+	unboundedEnvelope: boolean,
 ): void {
 	const slotCount =
 		PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES / Uint32Array.BYTES_PER_ELEMENT;
@@ -25,6 +28,11 @@ export function writePortalScopeTileMetadata(
 		uintOffset + slotCount > target.length
 	) {
 		throw new Error("Portal scope-tile metadata exceeds its target.");
+	}
+	if (typeof unboundedEnvelope !== "boolean") {
+		throw new Error(
+			"Portal scope-tile unbounded-envelope flag must be boolean.",
+		);
 	}
 	for (const [name, value, minimum] of [
 		["atlas x", atlasX, 0],
@@ -50,7 +58,9 @@ export function writePortalScopeTileMetadata(
 	target[uintOffset + 3] = screenY;
 	target[uintOffset + 4] = width;
 	target[uintOffset + 5] = height;
-	target[uintOffset + 6] = 0;
+	target[uintOffset + 6] = unboundedEnvelope
+		? PORTAL_SCOPE_TILE_UNBOUNDED_ENVELOPE_FLAG
+		: 0;
 	target[uintOffset + 7] = 0;
 }
 
@@ -86,7 +96,7 @@ export function writePortalScopeScreenPixel(
 		metadata[uintOffset + 3]! + atlasPixelY - metadata[uintOffset + 1]!;
 }
 
-/** Position a unit-tile vertex directly in full-atlas NDC for one instanced reduction draw. */
+/** Position a unit-tile vertex directly in full-atlas NDC for one instanced atlas-tile draw. */
 export function writePortalScopeTileAtlasNdc(
 	metadata: Uint32Array,
 	uintOffset: number,

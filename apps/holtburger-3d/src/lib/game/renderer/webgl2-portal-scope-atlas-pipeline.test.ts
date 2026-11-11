@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getLandblockCoordinates } from "../landblocks";
-import { Mat4, Quat, Vec3 } from "../math/types";
+import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import type {
+	ScenePortalCrossing,
 	SceneScope,
 	SceneTopologyScope,
 	SceneTopologyView,
@@ -11,6 +12,8 @@ import type { PortalPropagationStreamView } from "./portal-crossing-triangle-str
 import { WebGL2PortalScopeAtlasPipeline } from "./webgl2-portal-scope-atlas-pipeline";
 import { PortalScopeAtlasPlanner } from "./portal-scope-atlas-planner";
 import { PortalPropagationStreamArena } from "./portal-crossing-triangle-stream";
+import { PORTAL_SCOPE_TILE_UNBOUNDED_ENVELOPE_FLAG } from "./portal-scope-tile-metadata";
+import { PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES } from "./portal-propagation-metadata";
 
 const INDOOR_SCOPE = {
 	kind: "env-cell",
@@ -20,22 +23,49 @@ const INDOOR_SCOPE = {
 
 afterEach(() => vi.restoreAllMocks());
 
-const device = vi.hoisted(() => ({ resize: vi.fn(), execute: vi.fn() }));
+const UNBOUNDED_ENVELOPE_TEXTURE = {
+	kind: "unbounded-envelope",
+} as unknown as WebGLTexture;
+const ENVELOPE_TEXTURE = {
+	kind: "atlas-envelope",
+} as unknown as WebGLTexture;
+const ATLAS_SCENE_FRAMEBUFFER = {
+	kind: "atlas-scene",
+} as unknown as WebGLFramebuffer;
+const DIRECT_OUTPUT_FRAMEBUFFER = {
+	kind: "direct-output",
+} as unknown as WebGLFramebuffer;
+
+const device = vi.hoisted(() => ({
+	bindDirectRootMetadata: vi.fn(),
+	execute: vi.fn(),
+	resize: vi.fn(),
+}));
 
 // Keep real visibility, packing, routing, and CPU streams; replace only GPU resource owners.
 vi.mock("./webgl2-portal-scope-atlas-targets", () => ({
 	WebGL2PortalScopeAtlasTargets: class {
 		resize(extents: { atlas: { width: number; height: number } }) {
 			device.resize(extents);
-			return { extents, scene: { framebuffer: null } };
+			return {
+				envelope: { depth: ENVELOPE_TEXTURE, framebuffer: null },
+				extents,
+				scene: { framebuffer: ATLAS_SCENE_FRAMEBUFFER },
+			};
 		}
+		destroy() {}
 	},
 }));
 vi.mock("./webgl2-portal-scope-atlas-executor", () => ({
 	WebGL2PortalScopeAtlasExecutor: class {
+		readonly unboundedEnvelopeDepthTexture = UNBOUNDED_ENVELOPE_TEXTURE;
+		bindDirectRootMetadata(stream: PortalPropagationStreamView) {
+			device.bindDirectRootMetadata(stream.propagationMetadataBytes.slice());
+		}
 		execute(input: { stream: PortalPropagationStreamView }) {
 			device.execute(input.stream.propagationMetadataBytes.slice());
 		}
+		destroy() {}
 	},
 }));
 
@@ -50,7 +80,9 @@ describe("deferred portal view ownership", () => {
 		pipeline.beginFrame();
 		const first = prepare();
 		const atlas = first.atlas;
-		pipeline.beginOpaqueScene(first, [0, 0, 0, 1]);
+		expect(
+			pipeline.beginOpaqueScene(first, [0, 0, 0, 1], DIRECT_OUTPUT_FRAMEBUFFER),
+		).toBeNull();
 		pipeline.routeTerrainPass(3, {});
 		expect(first.opaqueRouting.trace.terrainSubmissionCount).toBe(3);
 		pipeline.beginFrame();
@@ -97,9 +129,11 @@ describe("deferred portal view ownership", () => {
 		expect(recovered.scopeAt(0)).toEqual(input.rootScope);
 		expect(stream).toHaveBeenCalledTimes(2);
 	});
-	it("preserves per-view plans and streams, allocating targets only during execution", () => {
+
+	it("routes zero-crossing views directly to the output target without allocating atlas targets", () => {
 		device.resize.mockClear();
 		device.execute.mockClear();
+		device.bindDirectRootMetadata.mockClear();
 		const calls = vi.fn();
 		const gl = fixtureDevice(calls);
 		const pipeline = new WebGL2PortalScopeAtlasPipeline(gl);
@@ -179,23 +213,52 @@ describe("deferred portal view ownership", () => {
 		expect(second.atlas.tileWidth(0)).not.toBe(firstTileWidth);
 		expect(calls).not.toHaveBeenCalled();
 		expect(device.resize).not.toHaveBeenCalled();
-		pipeline.beginOpaqueScene(first, [0, 0, 0, 1]);
+
+		expect(
+			pipeline.beginOpaqueScene(first, [0, 0, 0, 1], DIRECT_OUTPUT_FRAMEBUFFER),
+		).toBeNull();
 		pipeline.routeTerrainPass(3, {});
-		pipeline.execute(null);
-		pipeline.beginOpaqueScene(second, [0, 0, 0, 1]);
+		pipeline.execute(DIRECT_OUTPUT_FRAMEBUFFER);
+		pipeline.beginDeferredScene(DIRECT_OUTPUT_FRAMEBUFFER);
+
+		expect(
+			pipeline.beginOpaqueScene(
+				second,
+				[0, 0, 0, 1],
+				DIRECT_OUTPUT_FRAMEBUFFER,
+			),
+		).toBeNull();
 		pipeline.routeTerrainPass(0, {});
-		pipeline.execute(null);
+		pipeline.execute(DIRECT_OUTPUT_FRAMEBUFFER);
+		pipeline.beginDeferredScene(DIRECT_OUTPUT_FRAMEBUFFER);
+
 		expect(first.opaqueRouting.trace.terrainSubmissionCount).toBe(3);
 		expect(second.opaqueRouting.trace.terrainSubmissionCount).toBe(0);
-		expect(device.resize).toHaveBeenCalledTimes(2);
-		expect(device.execute.mock.calls[0]).not.toEqual(
-			device.execute.mock.calls[1],
+		expect(device.resize).not.toHaveBeenCalled();
+		expect(device.execute).not.toHaveBeenCalled();
+		expect(device.bindDirectRootMetadata).toHaveBeenCalledTimes(2);
+		expect(device.bindDirectRootMetadata.mock.calls[0]).not.toEqual(
+			device.bindDirectRootMetadata.mock.calls[1],
 		);
+		const uploadedUints = new Uint32Array(
+			(device.bindDirectRootMetadata.mock.calls[0]![0] as Uint8Array).buffer,
+		);
+		const scopeOffset =
+			PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES /
+			Uint32Array.BYTES_PER_ELEMENT;
+		expect(uploadedUints[scopeOffset + 6]).toBe(
+			PORTAL_SCOPE_TILE_UNBOUNDED_ENVELOPE_FLAG,
+		);
+
 		pipeline.beginFrame();
 		expect(() => first.atlas).toThrow("no prepared frame");
-		expect(() => pipeline.beginOpaqueScene(second, [0, 0, 0, 1])).toThrow(
-			"not prepared",
-		);
+		expect(() =>
+			pipeline.beginOpaqueScene(
+				second,
+				[0, 0, 0, 1],
+				DIRECT_OUTPUT_FRAMEBUFFER,
+			),
+		).toThrow("not prepared");
 		expect(prepare(otherIsland, 200)).toBe(first);
 		expect(first.count).toBe(1);
 		expect(first.scopeAt(0)).toEqual(otherIsland);
@@ -203,7 +266,101 @@ describe("deferred portal view ownership", () => {
 			first.atlas.visibility.selectedRenderDomainOrdinal(indoor.envCellId),
 		).toBeNull();
 	});
+
+	it("allocates atlas targets only during execution and scissors clears to packed bounds", () => {
+		device.resize.mockClear();
+		device.execute.mockClear();
+		device.bindDirectRootMetadata.mockClear();
+		const scissor = vi.fn();
+		const bindTexture = vi.fn();
+		const gl = {
+			...fixtureDevice(vi.fn()),
+			scissor,
+			bindTexture,
+		} as unknown as WebGL2RenderingContext;
+		const pipeline = new WebGL2PortalScopeAtlasPipeline(gl);
+		const crossing = singleOutdoorToIndoorCrossing();
+		const topology: SceneTopologyView = {
+			revision: 1,
+			crossings: [crossing],
+			outgoing: (scope) => (scope.kind === "outdoor" ? [crossing] : []),
+			scopes: [
+				{
+					scope: { kind: "outdoor" },
+					visibilityIslandId: null,
+					potentiallyVisibleEnvCellIds: new Set<string>(),
+				},
+				{
+					scope: INDOOR_SCOPE,
+					visibilityIslandId: "env-cell-island:test",
+					potentiallyVisibleEnvCellIds: new Set<string>(),
+				},
+			],
+		};
+		pipeline.beginFrame();
+		const prepared = pipeline.prepare(topology, outdoorInput());
+		expect(prepared.atlas.commands.traversalDepth).toBe(1);
+		expect(device.resize).not.toHaveBeenCalled();
+
+		const targets = pipeline.beginOpaqueScene(
+			prepared,
+			[0, 0, 0, 1],
+			DIRECT_OUTPUT_FRAMEBUFFER,
+		);
+		expect(targets).not.toBeNull();
+		expect(device.resize).toHaveBeenCalledTimes(1);
+		expect(scissor).toHaveBeenCalledWith(
+			0,
+			0,
+			prepared.atlas.packedWidth,
+			prepared.atlas.packedHeight,
+		);
+		expect(
+			prepared.atlas.packedWidth * prepared.atlas.packedHeight,
+		).toBeLessThan(
+			targets!.extents.atlas.width * targets!.extents.atlas.height,
+		);
+
+		pipeline.execute(DIRECT_OUTPUT_FRAMEBUFFER);
+		pipeline.beginDeferredScene(DIRECT_OUTPUT_FRAMEBUFFER);
+		expect(device.execute).toHaveBeenCalledTimes(1);
+		expect(device.bindDirectRootMetadata).not.toHaveBeenCalled();
+		expect(bindTexture).toHaveBeenCalledWith(undefined, ENVELOPE_TEXTURE);
+	});
 });
+
+function singleOutdoorToIndoorCrossing(): ScenePortalCrossing {
+	const vertices = new Float32Array([
+		-0.25, -0.25, 0, 0.25, -0.25, 0, 0.25, 0.25, 0, -0.25, 0.25, 0,
+	]);
+	const aperture = {
+		id: "portal-aperture:test" as const,
+		indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
+		landblockBounds: new AABB3(
+			new Vec3(-0.25, -0.25, 0),
+			new Vec3(0.25, 0.25, 0),
+		),
+		landblockId: "0x0001ffff" as const,
+		plane: { d: 0, normal: new Vec3(0, 0, 1) },
+		vertices,
+	};
+	return {
+		acceptedSide: "positive",
+		exactMatch: true,
+		id: "portal-crossing:test",
+		junctionGroupId: null,
+		maskDepthPolicy: "allow-equal-depth",
+		reciprocalCrossingId: null,
+		source: { kind: "outdoor" },
+		sourceAperture: aperture,
+		spatialRelationship: {
+			kind: "indoor-topology-boundary",
+			reason: "test",
+		},
+		target: INDOOR_SCOPE,
+		visibilityAperture: aperture,
+	};
+}
 
 function emptyTopology(): SceneTopologyView {
 	return {
@@ -246,10 +403,14 @@ function fixtureDevice(
 	calls: ReturnType<typeof vi.fn>,
 ): WebGL2RenderingContext {
 	return {
+		activeTexture: calls,
 		bindFramebuffer: calls,
+		bindSampler: calls,
+		bindTexture: calls,
 		viewport: calls,
 		disable: calls,
 		enable: calls,
+		scissor: calls,
 		colorMask: calls,
 		depthFunc: calls,
 		depthMask: calls,

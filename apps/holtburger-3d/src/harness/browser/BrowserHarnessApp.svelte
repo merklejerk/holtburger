@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { verifySelectionTheme } from "./entity-selection-theme-probe";
+	import { readEntitySelectionColors } from "../../app/entity-selection-theme";
 	import {
 		SummonRuntimeProbe,
 		type SummonRuntimeProof,
@@ -4309,6 +4311,14 @@
 			error = "Browser harness canvas was not mounted.";
 			return;
 		}
+		const canvas = canvasElement;
+		frameSettings = {
+			...frameSettings,
+			entitySelectionOutline: {
+				...frameSettings.entitySelectionOutline,
+				colors: readEntitySelectionColors(canvas),
+			},
+		};
 		const hostUrl = query.get("contentHost");
 		if (!hostUrl) {
 			error = "Browser harness requires a contentHost query parameter.";
@@ -4377,7 +4387,10 @@
 				if (fixture === "combat-effects")
 					combatEffects = device.probeCombatEffects();
 				if (fixture === "entity-selection") {
-					entitySelection = device.probeEntitySelection();
+					verifySelectionTheme(document);
+					entitySelection = device.probeEntitySelection(
+						readEntitySelectionColors(canvas),
+					);
 				}
 				pipeline =
 					fixture === "blended"

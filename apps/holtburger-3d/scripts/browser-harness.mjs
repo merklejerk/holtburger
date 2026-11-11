@@ -2571,6 +2571,7 @@ function assertEntitySelectionFixture(fixture) {
 	}
 	for (const field of [
 		"currentTransformFollowed",
+		"maskResolutionMatchesTuning",
 		"interiorPreserved",
 		"sphereProxyWorkExact",
 		"resizedTargetReplaced",
@@ -2586,8 +2587,8 @@ function assertEntitySelectionFixture(fixture) {
 	if (
 		fixture.depthIndependentMaskPixel !== 255 ||
 		fixture.sphereProxyMaskPixel !== 255 ||
-		fixture.initialActiveMaskBytes !== 64 * 64 ||
-		fixture.resizedActiveMaskBytes !== 32 * 32 ||
+		fixture.initialActiveMaskBytes <= 0 ||
+		fixture.resizedActiveMaskBytes <= 0 ||
 		fixture.outlinePixelCount <= 0 ||
 		fixture.portalWarpOutlinePixelCount <= 0 ||
 		fixture.targetGenerationsAllocated !== 2 ||

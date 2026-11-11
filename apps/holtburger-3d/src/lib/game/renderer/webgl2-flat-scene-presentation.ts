@@ -1,3 +1,4 @@
+import { WebGL2SelectionDistancePass } from "./webgl2-selection-distance-pass";
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
@@ -17,7 +18,7 @@ import {
 import type { PortalTransitionComposition } from "./portal-transition-composition";
 import type { WebGL2EntitySelectionMask } from "./webgl2-entity-selection-pass";
 import {
-	selectionHaloOpacity,
+	selectionHaloStrength,
 	type EntitySelectionOutlineSettings,
 } from "./entity-selection-outline-policy";
 import {
@@ -36,7 +37,7 @@ const SCENE_COLOR_TEXTURE_UNIT = 0;
 const COLOR_GRADE_STRIP_TEXTURE_UNIT = 1;
 const OUTGOING_SCENE_TEXTURE_UNIT = 2;
 const TUNNEL_SCENE_TEXTURE_UNIT = 3;
-const SELECTION_MASK_TEXTURE_UNIT = 4;
+const SELECTION_DISTANCE_TEXTURE_UNIT = 4;
 const PRESENTATION_SCENE_TEXTURE_UNITS = [
 	SCENE_COLOR_TEXTURE_UNIT,
 	OUTGOING_SCENE_TEXTURE_UNIT,
@@ -69,19 +70,19 @@ uniform sampler2D uSceneColor;
 uniform sampler2D uColorGradeStrip;
 uniform sampler2D uOutgoingScene;
 uniform sampler2D uTunnelScene;
-uniform sampler2D uSelectionMask;
+uniform sampler2D uSelectionDistance;
 uniform vec3 uWhiteBalance;
 uniform float uSaturation;
 uniform float uTransitionProgress;
 uniform int uColorGradeEnabled;
 uniform int uCompositionKind;
 uniform int uTunnelEnabled;
-uniform int uSelectionMaskEnabled;
+uniform int uSelectionEnabled;
 uniform vec4 uSelectionOutlineColor;
 uniform float uSelectionOutlineWidth;
 uniform vec4 uSelectionBorderColor;
 uniform vec4 uSelectionHaloColor;
-uniform vec3 uSelectionRadii; // border width, halo width, CSS pixel sampling step
+uniform vec3 uSelectionRadii; // border width, halo width, encoded distance range (CSS pixels)
 uniform float uWarpAccelerationExponent;
 uniform float uWarpMaximumZoom;
 uniform vec2 uWarpRadialSmear;
@@ -169,36 +170,23 @@ vec2 selectionSourceUv(vec2 outputPixel, vec2 textureExtent) {
 	return warpDriveSourceUv(radialPosition, textureExtent, zoom);
 }
 
-float selectionMaskAt(vec2 outputPixel, vec2 textureExtent) {
-	return texture(uSelectionMask, selectionSourceUv(outputPixel, textureExtent)).r;
-}
-
-/**
- * Approximate silhouette distance on a CSS-pixel grid. Cost grows with the square of the
- * total CSS radius; render scale increases sampling density without increasing this kernel.
- */
+/** The filtered distance field makes final composition a single filtered lookup. */
 vec4 selectionAppearance(vec2 textureExtent) {
-	if (selectionMaskAt(gl_FragCoord.xy, textureExtent) >= 0.5) return vec4(0.0);
+	vec2 field = texture(uSelectionDistance, selectionSourceUv(gl_FragCoord.xy, textureExtent)).rg;
+	float nearest = field.r * uSelectionRadii.z;
 	float borderEnd = uSelectionOutlineWidth + uSelectionRadii.x;
 	float radius = borderEnd + uSelectionRadii.y;
-	float spacing = uSelectionRadii.z;
-	int extent = int(ceil(radius / spacing));
-	float nearest = radius + spacing;
-	for (int y = -extent; y <= extent; ++y) {
-		for (int x = -extent; x <= extent; ++x) {
-			vec2 offset = vec2(float(x), float(y)) * spacing;
-			float distance = length(offset);
-			if (distance > radius || distance >= nearest) continue;
-			if (selectionMaskAt(gl_FragCoord.xy + offset, textureExtent) >= 0.5) {
-				nearest = distance;
-			}
-		}
+	vec4 appearance;
+	if (nearest <= uSelectionOutlineWidth) appearance = uSelectionOutlineColor;
+	else if (nearest <= borderEnd) appearance = uSelectionBorderColor;
+	else {
+		if (uSelectionRadii.y <= 0.0) return vec4(0.0);
+		float feather = 1.0 - smoothstep(borderEnd, radius, nearest);
+		appearance = vec4(uSelectionHaloColor.rgb, uSelectionHaloColor.a * feather);
 	}
-	if (nearest <= uSelectionOutlineWidth) return uSelectionOutlineColor;
-	if (nearest <= borderEnd) return uSelectionBorderColor;
-	if (uSelectionRadii.y <= 0.0) return vec4(0.0);
-	float feather = 1.0 - smoothstep(borderEnd, radius, nearest);
-	return vec4(uSelectionHaloColor.rgb, uSelectionHaloColor.a * feather);
+	// Linear occupancy softens the low-resolution silhouette without tinting its interior.
+	appearance.a *= 1.0 - field.g;
+	return appearance;
 }
 
 /** Forward zoom plus radial sample history, evaluated backward for destination reveal. */
@@ -271,7 +259,7 @@ void main() {
 		uColorGradeEnabled != 0
 			? vec4(applyColorGrade(scene.rgb, gl_FragCoord.xy), scene.a)
 			: scene;
-	vec4 selection = uSelectionMaskEnabled != 0 ? selectionAppearance(textureExtent) : vec4(0.0);
+	vec4 selection = uSelectionEnabled != 0 ? selectionAppearance(textureExtent) : vec4(0.0);
 	outColor = vec4(mix(presented.rgb, selection.rgb, selectionOpacity * selection.a), presented.a);
 }
 `;
@@ -282,10 +270,8 @@ export class WebGL2FlatScenePresentation {
 	readonly #program: WebGLProgram;
 	readonly #vertexArray: WebGLVertexArrayObject;
 	readonly #stripTexture: WebGLTexture;
-	/** Linear clamp sampler owning the scene, transition-origin, and transition-tunnel reads. */
+	/** Linear clamp sampler shared by scene, transition textures, and the selection distance field. */
 	readonly #sceneSampler: WebGLSampler;
-	/** Nearest clamp sampler preserving the single-channel mask's exact occupied pixels. */
-	readonly #selectionMaskSampler: WebGLSampler;
 	readonly #stripBuffer = new Float32Array(COLOR_GRADE_STRIP_LENGTH);
 	readonly #uniforms: {
 		readonly whiteBalance: WebGLUniformLocation;
@@ -293,7 +279,7 @@ export class WebGL2FlatScenePresentation {
 		readonly transitionProgress: WebGLUniformLocation;
 		readonly compositionKind: WebGLUniformLocation;
 		readonly tunnelEnabled: WebGLUniformLocation;
-		readonly selectionMaskEnabled: WebGLUniformLocation;
+		readonly selectionEnabled: WebGLUniformLocation;
 		readonly selectionOutlineColor: WebGLUniformLocation;
 		readonly selectionOutlineWidth: WebGLUniformLocation;
 		readonly selectionBorderColor: WebGLUniformLocation;
@@ -311,6 +297,8 @@ export class WebGL2FlatScenePresentation {
 	/** White balance resolved alongside the bake, so a steady frame allocates nothing. */
 	#whiteBalance: ColorGradeChannelGains = NEUTRAL_WHITE_BALANCE;
 	#destroyed = false;
+	/** Allocated lazily on the first selection; owns both reduced-resolution filter targets. */
+	#selectionDistancePass: WebGL2SelectionDistancePass | null = null;
 
 	constructor(
 		gl: WebGL2RenderingContext,
@@ -365,8 +353,8 @@ export class WebGL2FlatScenePresentation {
 				TUNNEL_SCENE_TEXTURE_UNIT,
 			);
 			gl.uniform1i(
-				requireWebGL2Uniform(gl, program, "uSelectionMask"),
-				SELECTION_MASK_TEXTURE_UNIT,
+				requireWebGL2Uniform(gl, program, "uSelectionDistance"),
+				SELECTION_DISTANCE_TEXTURE_UNIT,
 			);
 			this.#uniforms = {
 				whiteBalance: requireWebGL2Uniform(gl, program, "uWhiteBalance"),
@@ -378,10 +366,10 @@ export class WebGL2FlatScenePresentation {
 				),
 				compositionKind: requireWebGL2Uniform(gl, program, "uCompositionKind"),
 				tunnelEnabled: requireWebGL2Uniform(gl, program, "uTunnelEnabled"),
-				selectionMaskEnabled: requireWebGL2Uniform(
+				selectionEnabled: requireWebGL2Uniform(
 					gl,
 					program,
-					"uSelectionMaskEnabled",
+					"uSelectionEnabled",
 				),
 				selectionBorderColor: requireWebGL2Uniform(
 					gl,
@@ -459,16 +447,12 @@ export class WebGL2FlatScenePresentation {
 		}
 		this.#vertexArray = vertexArray;
 		let sceneSampler: WebGLSampler | null = null;
-		let selectionMaskSampler: WebGLSampler | null = null;
 		try {
 			sceneSampler = allocatePresentationSceneSampler(gl);
-			selectionMaskSampler = allocatePresentationMaskSampler(gl);
 			this.#stripTexture = allocateColorGradeStrip(gl);
 			this.#sceneSampler = sceneSampler;
-			this.#selectionMaskSampler = selectionMaskSampler;
 		} catch (cause) {
 			if (sceneSampler) gl.deleteSampler(sceneSampler);
-			if (selectionMaskSampler) gl.deleteSampler(selectionMaskSampler);
 			gl.deleteVertexArray(vertexArray);
 			gl.deleteProgram(this.#program);
 			throw cause;
@@ -495,6 +479,23 @@ export class WebGL2FlatScenePresentation {
 			throw new Error("Flat scene presentation has been destroyed.");
 		}
 		const gl = this.#gl;
+		const colors = selectionOutline.colors;
+		if (selectionMask !== null && colors === null) {
+			throw new Error("Selected-entity rendering requires theme colors.");
+		}
+		const distance =
+			selectionMask === null
+				? null
+				: (this.#selectionDistancePass ??= new WebGL2SelectionDistancePass(
+						gl,
+					)).render(
+						selectionMask,
+						target.extent.width / renderScale,
+						target.extent.height / renderScale,
+						selectionOutline.widthCssPixels +
+							selectionOutline.borderWidthCssPixels +
+							selectionOutline.haloWidthCssPixels,
+					);
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 		gl.viewport(0, 0, target.extent.width, target.extent.height);
 		gl.disable(gl.BLEND);
@@ -512,42 +513,44 @@ export class WebGL2FlatScenePresentation {
 		for (const unit of PRESENTATION_SCENE_TEXTURE_UNITS) {
 			gl.bindSampler(unit, this.#sceneSampler);
 		}
-		gl.bindSampler(SELECTION_MASK_TEXTURE_UNIT, this.#selectionMaskSampler);
+		gl.bindSampler(SELECTION_DISTANCE_TEXTURE_UNIT, this.#sceneSampler);
 		try {
 			this.#applyColorGrade(colorGrade);
-			gl.uniform4f(
-				this.#uniforms.selectionOutlineColor,
-				selectionOutline.color.red,
-				selectionOutline.color.green,
-				selectionOutline.color.blue,
-				selectionOutline.color.alpha,
-			);
-			gl.uniform1f(
-				this.#uniforms.selectionOutlineWidth,
-				selectionOutline.widthCssPixels * renderScale,
-			);
-			const border = selectionOutline.borderColor;
-			const halo = selectionOutline.haloColor;
-			gl.uniform4f(
-				this.#uniforms.selectionBorderColor,
-				border.red,
-				border.green,
-				border.blue,
-				border.alpha,
-			);
-			gl.uniform4f(
-				this.#uniforms.selectionHaloColor,
-				halo.red,
-				halo.green,
-				halo.blue,
-				selectionHaloOpacity(selectionOutline, timeSeconds),
-			);
-			gl.uniform3f(
-				this.#uniforms.selectionRadii,
-				selectionOutline.borderWidthCssPixels * renderScale,
-				selectionOutline.haloWidthCssPixels * renderScale,
-				renderScale,
-			);
+			if (colors !== null && distance !== null) {
+				gl.uniform4f(
+					this.#uniforms.selectionOutlineColor,
+					colors.color.red,
+					colors.color.green,
+					colors.color.blue,
+					colors.color.alpha,
+				);
+				gl.uniform1f(
+					this.#uniforms.selectionOutlineWidth,
+					selectionOutline.widthCssPixels,
+				);
+				const border = colors.borderColor;
+				const halo = colors.haloColor;
+				gl.uniform4f(
+					this.#uniforms.selectionBorderColor,
+					border.red,
+					border.green,
+					border.blue,
+					border.alpha,
+				);
+				gl.uniform4f(
+					this.#uniforms.selectionHaloColor,
+					halo.red,
+					halo.green,
+					halo.blue,
+					halo.alpha * selectionHaloStrength(selectionOutline, timeSeconds),
+				);
+				gl.uniform3f(
+					this.#uniforms.selectionRadii,
+					selectionOutline.borderWidthCssPixels,
+					selectionOutline.haloWidthCssPixels,
+					distance.distanceRange,
+				);
+			}
 			if (
 				composition.kind === "origin-to-tunnel" ||
 				composition.kind === "tunnel-to-destination"
@@ -584,11 +587,11 @@ export class WebGL2FlatScenePresentation {
 			}
 			gl.bindVertexArray(this.#vertexArray);
 			gl.uniform1i(
-				this.#uniforms.selectionMaskEnabled,
+				this.#uniforms.selectionEnabled,
 				selectionMask === null ? 0 : 1,
 			);
-			gl.activeTexture(gl.TEXTURE0 + SELECTION_MASK_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, selectionMask?.texture ?? null);
+			gl.activeTexture(gl.TEXTURE0 + SELECTION_DISTANCE_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, distance?.texture ?? null);
 			gl.activeTexture(gl.TEXTURE0 + SCENE_COLOR_TEXTURE_UNIT);
 			gl.bindTexture(gl.TEXTURE_2D, target.color);
 			gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -597,7 +600,7 @@ export class WebGL2FlatScenePresentation {
 			for (const unit of PRESENTATION_SCENE_TEXTURE_UNITS) {
 				gl.bindSampler(unit, null);
 			}
-			gl.bindSampler(SELECTION_MASK_TEXTURE_UNIT, null);
+			gl.bindSampler(SELECTION_DISTANCE_TEXTURE_UNIT, null);
 			gl.depthFunc(gl.LEQUAL);
 		}
 	}
@@ -651,10 +654,10 @@ export class WebGL2FlatScenePresentation {
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
+		this.#selectionDistancePass?.destroy();
 		this.#gl.deleteVertexArray(this.#vertexArray);
 		this.#gl.deleteProgram(this.#program);
 		this.#gl.deleteSampler(this.#sceneSampler);
-		this.#gl.deleteSampler(this.#selectionMaskSampler);
 		this.#gl.deleteTexture(this.#stripTexture);
 	}
 }
@@ -670,28 +673,6 @@ function allocatePresentationSceneSampler(
 	try {
 		gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 		gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-		gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-		gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-		return sampler;
-	} catch (cause) {
-		gl.deleteSampler(sampler);
-		throw cause;
-	}
-}
-
-/** Allocate the mask sampler separately so scene filtering cannot soften silhouette occupancy. */
-function allocatePresentationMaskSampler(
-	gl: WebGL2RenderingContext,
-): WebGLSampler {
-	const sampler = gl.createSampler();
-	if (!sampler) {
-		throw new Error(
-			"Failed to allocate entity selection presentation sampler.",
-		);
-	}
-	try {
-		gl.samplerParameteri(sampler, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-		gl.samplerParameteri(sampler, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 		gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 		gl.samplerParameteri(sampler, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 		return sampler;

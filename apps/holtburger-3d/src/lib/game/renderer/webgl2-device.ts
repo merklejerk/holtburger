@@ -1,3 +1,4 @@
+import type { EntitySelectionOutlineColors } from "./entity-selection-outline-policy";
 import {
 	WebGL2FailureDiagnostics,
 	type WebGL2FailureReport,
@@ -238,11 +239,14 @@ export class WebGL2Device {
 	}
 
 	/** Prove selected-mask drawing, presentation, resize, and teardown on this browser context. */
-	probeEntitySelection(): WebGL2EntitySelectionFixtureResult {
+	probeEntitySelection(
+		colors: EntitySelectionOutlineColors,
+	): WebGL2EntitySelectionFixtureResult {
 		this.#assertReady();
 		return runWebGL2EntitySelectionFixture(
 			this.#gl,
 			this.#portalWarpDriveTuning,
+			colors,
 		);
 	}
 

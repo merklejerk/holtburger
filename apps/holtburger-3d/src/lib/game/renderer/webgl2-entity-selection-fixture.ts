@@ -1,3 +1,5 @@
+import { WebGL2SelectionDistancePass } from "./webgl2-selection-distance-pass";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import type { ObjectGeometryKey } from "../geometry/types";
 import { Mat4, Vec3 } from "../math/types";
@@ -12,11 +14,17 @@ import {
 	DEFAULT_COLOR_GRADE_PARAMETERS,
 	type ColorGradeSettings,
 } from "./color-grade-policy";
-import { WebGL2EntitySelectionPass } from "./webgl2-entity-selection-pass";
+import {
+	type WebGL2EntitySelectionMask,
+	WebGL2EntitySelectionPass,
+} from "./webgl2-entity-selection-pass";
 import { WebGL2FlatScenePresentation } from "./webgl2-flat-scene-presentation";
 import { WebGL2FlatSceneTarget } from "./webgl2-flat-scene-target";
 import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
-import type { EntitySelectionOutlineSettings } from "./entity-selection-outline-policy";
+import type {
+	EntitySelectionOutlineSettings,
+	EntitySelectionOutlineColors,
+} from "./entity-selection-outline-policy";
 import type { WebGL2GeometryBinding } from "./webgl2-resource-manager";
 import type { EntitySelectionTarget } from "./renderer";
 
@@ -69,6 +77,9 @@ const APPEARANCE: DynamicAppearance = {
 		},
 	],
 };
+/** Follow the production resolution tuning in readback coordinates and storage checks. */
+const MASK_DOWNSAMPLE =
+	SHARED_FRONTEND_TUNING.rendering.entitySelectionMaskDownsample;
 const INITIAL_SIZE = 64;
 const RESIZED_SIZE = 32;
 const DISABLED_COLOR_GRADE: ColorGradeSettings = {
@@ -76,13 +87,15 @@ const DISABLED_COLOR_GRADE: ColorGradeSettings = {
 	parameters: DEFAULT_COLOR_GRADE_PARAMETERS,
 };
 const FIXTURE_OUTLINE_SETTINGS = {
-	borderColor: { red: 0.1, green: 0.1, blue: 0.1, alpha: 1 },
-	haloColor: { red: 1, green: 0.8, blue: 0.1, alpha: 0.6 },
+	colors: {
+		color: { red: 0.1, green: 0.9, blue: 0.4, alpha: 1 },
+		borderColor: { red: 0.1, green: 0.1, blue: 0.1, alpha: 1 },
+		haloColor: { red: 1, green: 0.8, blue: 0.1, alpha: 0.6 },
+	},
 	borderWidthCssPixels: 1,
 	haloWidthCssPixels: 3,
 	breathingMinimum: 0.3,
 	breathingPeriodSeconds: 2,
-	color: { red: 0.1, green: 0.9, blue: 0.4, alpha: 1 },
 	widthCssPixels: 3,
 } as const satisfies EntitySelectionOutlineSettings;
 
@@ -93,6 +106,8 @@ export interface WebGL2EntitySelectionFixtureResult {
 	readonly currentTransformFollowed: boolean;
 	readonly depthIndependentMaskPixel: number;
 	readonly initialActiveMaskBytes: number;
+	/** Raster dimensions follow the production downsample policy. */
+	readonly maskResolutionMatchesTuning: boolean;
 	readonly interiorPreserved: boolean;
 	readonly outlinePixelCount: number;
 	readonly sphereProxyMaskPixel: number;
@@ -110,8 +125,11 @@ export interface WebGL2EntitySelectionFixtureResult {
 export function runWebGL2EntitySelectionFixture(
 	gl: WebGL2RenderingContext,
 	warpDriveTuning: PortalWarpDriveTuning,
+	colors: EntitySelectionOutlineColors,
 ): WebGL2EntitySelectionFixtureResult {
 	requireNoWebGL2Error(gl, "before entity selection fixture");
+	verifySelectionDistanceField(gl);
+	requireNoWebGL2Error(gl, "after selection distance oracle");
 	const geometry = createTriangleGeometry(gl);
 	const poses = new WebGL2DynamicPosePages<SceneNodeId>(gl);
 	const appearances = new WebGL2DynamicAppearances(gl, () => ({
@@ -144,19 +162,15 @@ export function runWebGL2EntitySelectionFixture(
 		);
 		const depthIndependentMaskPixel = readTexturePixel(
 			gl,
-			initial.mask.texture,
-			INITIAL_SIZE,
-			INITIAL_SIZE,
-			INITIAL_SIZE / 2,
-			INITIAL_SIZE / 3,
+			initial.mask,
+			0.5,
+			1 / 3,
 		);
 		const initialPositionMaskPixel = readTexturePixel(
 			gl,
-			initial.mask.texture,
-			INITIAL_SIZE,
-			INITIAL_SIZE,
-			24,
-			21,
+			initial.mask,
+			24 / INITIAL_SIZE,
+			21 / INITIAL_SIZE,
 		);
 		const initialDiagnostics = pass.getDiagnostics();
 		const sameSize = pass.render(
@@ -164,19 +178,15 @@ export function runWebGL2EntitySelectionFixture(
 		);
 		const previousPositionMaskPixel = readTexturePixel(
 			gl,
-			sameSize.mask.texture,
-			INITIAL_SIZE,
-			INITIAL_SIZE,
-			24,
-			21,
+			sameSize.mask,
+			24 / INITIAL_SIZE,
+			21 / INITIAL_SIZE,
 		);
 		const currentPositionMaskPixel = readTexturePixel(
 			gl,
-			sameSize.mask.texture,
-			INITIAL_SIZE,
-			INITIAL_SIZE,
-			48,
-			21,
+			sameSize.mask,
+			48 / INITIAL_SIZE,
+			21 / INITIAL_SIZE,
 		);
 		const target = sceneTarget.resizeDimensions(INITIAL_SIZE, INITIAL_SIZE);
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
@@ -241,7 +251,10 @@ export function runWebGL2EntitySelectionFixture(
 			[0.9, 0.9, 0.9],
 			[0.9, 0.65, 0.1],
 		] as const;
-		const appearance = SHARED_FRAME_SETTINGS.entitySelectionOutline;
+		const appearance = {
+			...SHARED_FRAME_SETTINGS.entitySelectionOutline,
+			colors,
+		};
 		for (const [column, background] of backgrounds.entries()) {
 			for (let row = 0; row < 2; row += 1) {
 				gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
@@ -272,12 +285,8 @@ export function runWebGL2EntitySelectionFixture(
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, target.framebuffer);
 		gl.clearColor(0, 0, 0, 1);
 		gl.clear(gl.COLOR_BUFFER_BIT);
-		const interiorPreserved = pixelIsBlack(
-			scenePixels,
-			INITIAL_SIZE,
-			INITIAL_SIZE / 2,
-			INITIAL_SIZE / 3,
-		);
+		// Sample well inside the translated silhouette: its filtered boundary is intentionally soft.
+		const interiorPreserved = pixelIsBlack(scenePixels, INITIAL_SIZE, 48, 21);
 
 		presenter.present(
 			target,
@@ -310,11 +319,9 @@ export function runWebGL2EntitySelectionFixture(
 		);
 		const sphereProxyMaskPixel = readTexturePixel(
 			gl,
-			sphereProxy.mask.texture,
-			INITIAL_SIZE,
-			INITIAL_SIZE,
-			INITIAL_SIZE / 2,
-			INITIAL_SIZE / 2,
+			sphereProxy.mask,
+			0.5,
+			0.5,
 		);
 
 		const resized = pass.render(
@@ -333,6 +340,15 @@ export function runWebGL2EntitySelectionFixture(
 				currentPositionMaskPixel === 255,
 			depthIndependentMaskPixel,
 			initialActiveMaskBytes: initialDiagnostics.activeMaskBytes,
+			maskResolutionMatchesTuning:
+				initial.mask.width === Math.ceil(INITIAL_SIZE / MASK_DOWNSAMPLE) &&
+				initial.mask.height === Math.ceil(INITIAL_SIZE / MASK_DOWNSAMPLE) &&
+				resized.mask.width === Math.ceil(RESIZED_SIZE / MASK_DOWNSAMPLE) &&
+				resized.mask.height === Math.ceil(RESIZED_SIZE / MASK_DOWNSAMPLE) &&
+				initialDiagnostics.activeMaskBytes ===
+					initial.mask.width * initial.mask.height &&
+				resizedDiagnostics.activeMaskBytes ===
+					resized.mask.width * resized.mask.height,
 			interiorPreserved,
 			outlinePixelCount,
 			sphereProxyMaskPixel,
@@ -470,9 +486,7 @@ function destroyTriangleGeometry(
 
 function readTexturePixel(
 	gl: WebGL2RenderingContext,
-	texture: WebGLTexture,
-	width: number,
-	height: number,
+	mask: WebGL2EntitySelectionMask,
 	x: number,
 	y: number,
 ): number {
@@ -485,19 +499,27 @@ function readTexturePixel(
 			gl.READ_FRAMEBUFFER,
 			gl.COLOR_ATTACHMENT0,
 			gl.TEXTURE_2D,
-			texture,
+			mask.texture,
 			0,
 		);
 		if (
 			gl.checkFramebufferStatus(gl.READ_FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE
 		) {
 			throw new Error(
-				`Selection readback target ${width}x${height} is incomplete.`,
+				`Selection readback target ${mask.width}x${mask.height} is incomplete.`,
 			);
 		}
 		const pixel = new Uint8Array(1);
-		gl.readPixels(x, y, 1, 1, gl.RED, gl.UNSIGNED_BYTE, pixel);
-		return pixel[0] ?? 0;
+		gl.readPixels(
+			Math.floor(x * mask.width),
+			Math.floor(y * mask.height),
+			1,
+			1,
+			gl.RED,
+			gl.UNSIGNED_BYTE,
+			pixel,
+		);
+		return pixel[0];
 	} finally {
 		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
 		gl.deleteFramebuffer(framebuffer);
@@ -548,5 +570,124 @@ function requireNoWebGL2Error(
 	const error = gl.getError();
 	if (error !== gl.NO_ERROR) {
 		throw new Error(`WebGL2 error ${error} observed ${checkpoint}.`);
+	}
+}
+
+/** Compare the production separable filter against a direct distance oracle, including edges. */
+function verifySelectionDistanceField(gl: WebGL2RenderingContext): void {
+	const width = 17;
+	const height = 13;
+	const cssWidth = width * MASK_DOWNSAMPLE - 1;
+	const cssHeight = height * MASK_DOWNSAMPLE - 1;
+	const radius =
+		FIXTURE_OUTLINE_SETTINGS.widthCssPixels +
+		FIXTURE_OUTLINE_SETTINGS.borderWidthCssPixels +
+		FIXTURE_OUTLINE_SETTINGS.haloWidthCssPixels;
+	const texture = gl.createTexture();
+	const framebuffer = gl.createFramebuffer();
+	if (!texture || !framebuffer) {
+		if (texture) gl.deleteTexture(texture);
+		if (framebuffer) gl.deleteFramebuffer(framebuffer);
+		throw new Error("Failed to allocate distance-field oracle resources.");
+	}
+	let filter: WebGL2SelectionDistancePass | null = null;
+	try {
+		filter = new WebGL2SelectionDistancePass(gl);
+		const occupied = [
+			{ x: 0, y: height - 1 },
+			{ x: Math.floor(width / 2), y: Math.floor(height / 2) },
+		];
+		const maskPixels = new Uint8Array(width * height * 4);
+		for (const { x, y } of occupied) maskPixels[(y * width + x) * 4] = 255;
+		gl.activeTexture(gl.TEXTURE0);
+		gl.bindTexture(gl.TEXTURE_2D, texture);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+		gl.texImage2D(
+			gl.TEXTURE_2D,
+			0,
+			gl.RGBA8,
+			width,
+			height,
+			0,
+			gl.RGBA,
+			gl.UNSIGNED_BYTE,
+			maskPixels,
+		);
+		const mask = { texture, width, height };
+		const result = filter.render(mask, cssWidth, cssHeight, radius);
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, framebuffer);
+		gl.framebufferTexture2D(
+			gl.READ_FRAMEBUFFER,
+			gl.COLOR_ATTACHMENT0,
+			gl.TEXTURE_2D,
+			result.texture,
+			0,
+		);
+		const pixels = new Uint8Array(width * height * 4);
+		gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+		// RG8 rounds horizontal squared distances and final linear distances independently.
+		const tolerance =
+			result.distanceRange / Math.sqrt(2 * 255) +
+			result.distanceRange / (2 * 255);
+		for (let y = 0; y < height; ++y) {
+			for (let x = 0; x < width; ++x) {
+				const expected = Math.min(
+					result.distanceRange,
+					...occupied.map((point) =>
+						Math.hypot(
+							((x - point.x) * cssWidth) / width,
+							((y - point.y) * cssHeight) / height,
+						),
+					),
+				);
+				const offset = (y * width + x) * 4;
+				const actual = (pixels[offset] / 255) * result.distanceRange;
+				if (Math.abs(actual - expected) > tolerance)
+					throw new Error(
+						`Selection distance differs from oracle at ${x},${y}: ${actual} vs ${expected}.`,
+					);
+				if (pixels[offset + 1] !== maskPixels[offset])
+					throw new Error(
+						"Selection distance filter changed silhouette occupancy.",
+					);
+			}
+		}
+		if (
+			filter.render(mask, cssWidth, cssHeight, radius).texture !==
+			result.texture
+		)
+			throw new Error("Selection distance filter did not reuse its target.");
+		// A changed extent replaces and releases both attachments, including the published one.
+		gl.bindTexture(gl.TEXTURE_2D, texture);
+		gl.texImage2D(
+			gl.TEXTURE_2D,
+			0,
+			gl.RGBA8,
+			1,
+			1,
+			0,
+			gl.RGBA,
+			gl.UNSIGNED_BYTE,
+			new Uint8Array([255, 0, 0, 255]),
+		);
+		const resized = filter.render(
+			{ texture, width: 1, height: 1 },
+			1,
+			1,
+			radius,
+		);
+		if (gl.isTexture(result.texture))
+			throw new Error("Resized distance target was not released.");
+		gl.useProgram(null);
+		filter.destroy();
+		if (gl.isTexture(resized.texture))
+			throw new Error("Distance filter teardown retained its target.");
+	} finally {
+		gl.useProgram(null);
+		filter?.destroy();
+		gl.deleteTexture(texture);
+		gl.deleteFramebuffer(framebuffer);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 	}
 }

@@ -389,13 +389,12 @@ export const SHARED_FRONTEND_TUNING = {
 	},
 
 	rendering: {
+		/** Selection mask/filter resolution divisor: 1 full, 2 half, 4 quarter. Must be finite and at least 1. */
+		entitySelectionMaskDownsample: 2,
 		/** Steady contrasting bands with a softly breathing exterior halo. */
 		entitySelectionOutline: {
-			color: hexRgba("#fff0a6ff"),
 			widthCssPixels: 2,
-			borderColor: hexRgba("#960606ff"),
 			borderWidthCssPixels: 2,
-			haloColor: hexRgba("#f5a50599"),
 			haloWidthCssPixels: 4,
 			/** One keeps the halo steady; zero lets it fade completely. */
 			breathingMinimum: 0.35,

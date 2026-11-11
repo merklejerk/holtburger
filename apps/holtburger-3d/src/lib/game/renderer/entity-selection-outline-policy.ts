@@ -1,17 +1,23 @@
 import type { NormalizedRgbaColor } from "../../frontend-color";
 
+/** Theme-owned straight-alpha colors, resolved outside the rendering loop. */
+export interface EntitySelectionOutlineColors {
+	/** Inner outline color. */
+	readonly color: NormalizedRgbaColor;
+	/** Contrasting outer band. */
+	readonly borderColor: NormalizedRgbaColor;
+	/** Exterior halo color and peak opacity. */
+	readonly haloColor: NormalizedRgbaColor;
+}
+
 /** Runtime-adjustable appearance of the depth-independent selected-entity outline. */
 export interface EntitySelectionOutlineSettings {
-	/** Straight-alpha outline color mixed over the finished scene. */
-	readonly color: NormalizedRgbaColor;
+	/** Null until the frontend has resolved its theme; selection requires a resolved palette. */
+	readonly colors: EntitySelectionOutlineColors | null;
 	/** Outline radius in CSS pixels, independent of render scale. */
 	readonly widthCssPixels: number;
-	/** Contrasting separator outside the core. */
-	readonly borderColor: NormalizedRgbaColor;
 	/** Separator thickness in CSS pixels. */
 	readonly borderWidthCssPixels: number;
-	/** Feathered exterior halo color; alpha is its peak opacity. */
-	readonly haloColor: NormalizedRgbaColor;
 	/** Distance over which the halo fades to transparent, in CSS pixels. */
 	readonly haloWidthCssPixels: number;
 	/** Minimum halo opacity as a fraction of its peak; one disables breathing. */
@@ -24,16 +30,18 @@ export interface EntitySelectionOutlineSettings {
 export function validateEntitySelectionOutlineSettings(
 	settings: EntitySelectionOutlineSettings,
 ): void {
-	for (const field of ["color", "borderColor", "haloColor"] as const) {
-		const color = settings[field];
-		if (
-			![color.red, color.green, color.blue, color.alpha].every(
-				(channel) => Number.isFinite(channel) && channel >= 0 && channel <= 1,
-			)
-		) {
-			throw new Error(
-				`Entity-selection ${field} color channels must be finite and in [0, 1].`,
-			);
+	if (settings.colors !== null) {
+		for (const field of ["color", "borderColor", "haloColor"] as const) {
+			const color = settings.colors[field];
+			if (
+				![color.red, color.green, color.blue, color.alpha].every(
+					(channel) => Number.isFinite(channel) && channel >= 0 && channel <= 1,
+				)
+			) {
+				throw new Error(
+					`Entity-selection ${field} color channels must be finite and in [0, 1].`,
+				);
+			}
 		}
 	}
 	if (!Number.isFinite(settings.widthCssPixels) || settings.widthCssPixels <= 0)
@@ -58,14 +66,12 @@ export function validateEntitySelectionOutlineSettings(
 		throw new Error("Selection breathing period must be finite and positive.");
 }
 
-/** Resolve halo animation once per presentation; the core and border stay steady. */
-export function selectionHaloOpacity(
+/** Resolve the halo opacity multiplier once per presentation; colors remain theme-owned. */
+export function selectionHaloStrength(
 	settings: EntitySelectionOutlineSettings,
 	timeSeconds: number,
 ): number {
 	const phase = (timeSeconds / settings.breathingPeriodSeconds) * 2 * Math.PI;
 	const pulse = 0.5 - 0.5 * Math.cos(phase);
-	const strength =
-		settings.breathingMinimum + (1 - settings.breathingMinimum) * pulse;
-	return settings.haloColor.alpha * strength;
+	return settings.breathingMinimum + (1 - settings.breathingMinimum) * pulse;
 }

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { observeEntitySelectionColors } from "../app/entity-selection-theme";
 	import {
 		retainRendererFailure,
 		retainStartupFailure,
@@ -959,8 +960,21 @@
 		};
 	});
 
-	// Controls replace this cold policy snapshot; frame-hot consumers must receive plain objects.
 	const pregameLocation = choosePregameLocation();
+	function observeSelectionTheme(element: HTMLElement) {
+		return observeEntitySelectionColors(element, (colors) => {
+			frameSettings = {
+				...frameSettings,
+				entitySelectionOutline: {
+					...frameSettings.entitySelectionOutline,
+					colors,
+				},
+			};
+			presentationRoot?.setFrameSettings(frameSettings);
+		});
+	}
+
+	// Controls replace this cold policy snapshot; frame-hot consumers must receive plain objects.
 	let frameSettings = $state.raw<FrameSettings>(
 		frameSettingsWithGraphics(
 			CLIENT_TUNING.frameSettings,
@@ -2653,6 +2667,7 @@
 	class="client-appearance-scope ui-theme"
 	use:observeCombatAppearance
 	use:observeSummonLeashAppearance
+	use:observeSelectionTheme
 	style:--ui-text-scale={userSettings.ui.textScale}
 	style:--ui-scale={userSettings.ui.uiScale}
 	style:--ui-hud-window-opacity={userSettings.ui.hudWindowOpacity}

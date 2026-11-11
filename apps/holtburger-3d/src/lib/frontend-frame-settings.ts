@@ -61,15 +61,7 @@ export const SHARED_FRAME_SETTINGS = {
 	entityShadows: DEFAULT_ENTITY_SHADOW_SETTINGS,
 	entitySelectionOutline: {
 		...SHARED_FRONTEND_TUNING.rendering.entitySelectionOutline,
-		color: normalizedRgbaColor(
-			SHARED_FRONTEND_TUNING.rendering.entitySelectionOutline.color,
-		),
-		borderColor: normalizedRgbaColor(
-			SHARED_FRONTEND_TUNING.rendering.entitySelectionOutline.borderColor,
-		),
-		haloColor: normalizedRgbaColor(
-			SHARED_FRONTEND_TUNING.rendering.entitySelectionOutline.haloColor,
-		),
+		colors: null,
 	},
 	distanceFogEnabled:
 		SHARED_FRONTEND_TUNING.rendering.frameDefaults.distanceFogEnabled,

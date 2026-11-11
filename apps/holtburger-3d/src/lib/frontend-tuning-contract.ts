@@ -255,22 +255,17 @@ type FrontendFrameDefaultsTuning = Pick<
 
 /** Shared renderer appearance, resource budgets, and initial display choices. */
 interface FrontendRenderingTuning {
+	/** Selection mask/filter resolution divisor, finite and at least one. */
+	readonly entitySelectionMaskDownsample: number;
 	/** Fallback framebuffer color when no scene covers a pixel. */
 	readonly clearColor: HexRgbaColor;
 	/** Initial nameplate workload and Canvas appearance. */
 	readonly nameplates: FrontendNameplateTuning;
-	/** Layered selected-entity silhouette, authored with hexadecimal colors. */
+	/** Selected-entity widths and animation; colors belong to the UI theme. */
 	readonly entitySelectionOutline: Omit<
 		EntitySelectionOutlineSettings,
-		"color" | "borderColor" | "haloColor"
-	> & {
-		/** Crisp core color. */
-		readonly color: HexRgbaColor;
-		/** Contrasting separator color. */
-		readonly borderColor: HexRgbaColor;
-		/** Halo color and peak opacity. */
-		readonly haloColor: HexRgbaColor;
-	};
+		"colors"
+	>;
 	/** Initial finished-scene color grade. */
 	readonly colorGrade: FrontendColorGradeTuning;
 	/** Shared ambient-occlusion defaults and resource controls. */

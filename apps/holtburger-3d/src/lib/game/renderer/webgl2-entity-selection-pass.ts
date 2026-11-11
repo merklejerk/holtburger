@@ -1,3 +1,4 @@
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { createLandblockOffset, getLandblockCoordinates } from "../landblocks";
 import { mat4ToFloat32Array, multiplyMat4 } from "../math/matrices";
 import { Mat4 } from "../math/types";
@@ -15,6 +16,9 @@ import { withPreservedWebGL2AllocationBindings } from "./webgl2-render-target";
 import { DYNAMIC_POSE_GLSL } from "./dynamic-pose-shader";
 
 const EMPTY_MASK_COLOR = new Float32Array([0, 0, 0, 0]);
+/** Shared authored divisor; the distance filter inherits the resulting mask dimensions. */
+const MASK_DOWNSAMPLE =
+	SHARED_FRONTEND_TUNING.rendering.entitySelectionMaskDownsample;
 const MASK_RIGID_VERTEX_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
@@ -55,7 +59,7 @@ void main() {
 }
 `;
 
-/** Texture sampled by the sole fullscreen presenter after one current-pose mask draw. */
+/** Tuned-resolution occupancy sampled by the separable distance filter after a current-pose draw. */
 export interface WebGL2EntitySelectionMask {
 	readonly texture: WebGLTexture;
 	readonly width: number;
@@ -164,6 +168,11 @@ export class WebGL2EntitySelectionPass {
 	) {
 		this.#gl = gl;
 		this.#resources = resources;
+		if (!Number.isFinite(MASK_DOWNSAMPLE) || MASK_DOWNSAMPLE < 1) {
+			throw new Error(
+				"Selection mask downsample must be finite and at least one.",
+			);
+		}
 	}
 
 	/** Resolve the proxy/rigid choice over frame-cached depth geometry without GPU work. */
@@ -187,7 +196,10 @@ export class WebGL2EntitySelectionPass {
 		readonly work: WebGL2EntitySelectionPassWork;
 	} {
 		this.#requireAlive();
-		const target = this.#resizeTarget(input.width, input.height);
+		const target = this.#resizeTarget(
+			Math.max(1, Math.ceil(input.width / MASK_DOWNSAMPLE)),
+			Math.max(1, Math.ceil(input.height / MASK_DOWNSAMPLE)),
+		);
 		const work = this.#draw(input, target);
 		return {
 			mask: {

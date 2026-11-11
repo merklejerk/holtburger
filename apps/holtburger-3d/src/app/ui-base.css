@@ -257,6 +257,10 @@
 			drop-shadow(0 0 5px var(--ui-color-accent));
 		--ui-combat-breakpoint-shadow:
 			0 0 5px var(--ui-color-shadow), 0 0 10px var(--ui-color-shadow);
+		/* WebGL selected-entity silhouette: widths and animation remain renderer tuning. */
+		--ui-entity-selection-outline-color: #fff0a6;
+		--ui-entity-selection-border-color: #960606;
+		--ui-entity-selection-halo-color: #f5a50599;
 		/* Shared selection glow for inventory headers and item cells. */
 		--ui-item-selection-color: #ffe2a0;
 		--ui-item-selection-outline: 4px solid gold;

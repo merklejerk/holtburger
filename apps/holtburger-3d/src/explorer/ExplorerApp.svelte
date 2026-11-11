@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { observeEntitySelectionColors } from "../app/entity-selection-theme";
 	import {
 		retainRendererFailure,
 		retainStartupFailure,
@@ -11,7 +12,7 @@
 	import { detectInputPlatform } from "../lib/input/input-platform";
 	import { AppInput } from "../lib/input/app-input";
 	import { createInputDefaults } from "../lib/input/input-defaults";
-	import { onMount } from "svelte";
+	import { onMount, untrack } from "svelte";
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
 	} from "../app/FrameMetricsOverlay.svelte";
@@ -365,6 +366,19 @@
 		timeOfDay: EXPLORER_TUNING.environment.defaultTimeOfDay,
 		dayGroupOverride: EXPLORER_TUNING.environment.defaultDayGroupOverride,
 	});
+	function observeSelectionTheme(element: HTMLElement) {
+		return observeEntitySelectionColors(element, (colors) => {
+			frameSettings = {
+				...frameSettings,
+				entitySelectionOutline: {
+					...frameSettings.entitySelectionOutline,
+					colors,
+				},
+			};
+			applyFrameSettings();
+		});
+	}
+
 	/** Explorer-local dynamic display choices; they do not alter resolved regional data. */
 	let frameSettings = $state<FrameSettings>({
 		...EXPLORER_TUNING.frameSettings,
@@ -1879,7 +1893,7 @@
 					hostTransport,
 					presentationResources: await presentationAssets.resources(),
 					signal: construction.signal,
-					frameSettings: EXPLORER_TUNING.frameSettings,
+					frameSettings: untrack(() => frameSettings),
 					portalWarpDriveTuning: EXPLORER_TUNING.portalTransition.visual,
 					audioTuning: {
 						placementSmoothingSeconds:
@@ -2085,7 +2099,7 @@
 	});
 </script>
 
-<div class="explorer-screen ui-theme">
+<div class="explorer-screen ui-theme" use:observeSelectionTheme>
 	<canvas
 		bind:this={canvasElement}
 		class="explorer-canvas"

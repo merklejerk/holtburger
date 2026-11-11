@@ -4,7 +4,6 @@ import {
 	type SummonVisualLevel,
 	type SummonLeashInput,
 	type SummonLeashTuning,
-	type SummonLeashColor,
 	type SummonFlickerTuning,
 } from "./summon-presentation";
 import type { EntitySelectionBounds } from "../selection/entity-selection-bounds";
@@ -26,7 +25,7 @@ import {
 	type CombatEffectsTuning,
 	type CombatEffectsAppearance,
 } from "../systems/combat-effects-system";
-import { transformPoint3 } from "../math/matrices";
+import { transformPoint3, transformAffineAABB3 } from "../math/matrices";
 import {
 	resolveHumanoidBodyLayout,
 	type HumanoidBodyLayout,
@@ -1273,12 +1272,9 @@ export class GamePresentationRuntime {
 	} | null = null;
 	readonly #summonLeashes: SummonLeashInput[] = [];
 	readonly #summonLeashStorage: {
-		start: SceneVec3;
-		end: SceneVec3;
-		color: SummonLeashColor;
-		tuning: SummonLeashTuning;
+		-readonly [Key in keyof SummonLeashInput]: SummonLeashInput[Key];
 	}[] = [];
-	readonly #summonAnchorScratch = Vec3.zero();
+	readonly #summonBoundsScratch = AABB3.zero();
 	/** Atomic frontend-resolved precise-jump marker and optional trajectory. */
 	#worldIndicator: WorldIndicatorInput | null = null;
 	/** Installed authored visual or an explicitly selected opaque loading surface. */
@@ -2089,7 +2085,7 @@ export class GamePresentationRuntime {
 	}
 
 	/** Resolve a body-relative point from the same composed pose used by rendering. */
-	#summonEndpoint(guid: number, target: SceneVec3): boolean {
+	#summonEndpoint(guid: number, target: SceneVec3, halfExtents: Vec3): boolean {
 		const desired = this.#spawnedDesiredEntities.get(guid)?.entity;
 		const installed = this.#spawnedPresentations.get(guid);
 		if (
@@ -2106,14 +2102,18 @@ export class GamePresentationRuntime {
 		);
 		const state = this.#scene.readResolvedState(installed.nodeId);
 		if (bounds === null || state === undefined) return false;
-		this.#summonAnchorScratch.x = (bounds.min.x + bounds.max.x) / 2;
-		this.#summonAnchorScratch.y = (bounds.min.y + bounds.max.y) / 2;
-		this.#summonAnchorScratch.z = (bounds.min.z + bounds.max.z) / 2;
-		transformPoint3(
+		// Pose bounds exclude particle reach. Transform once into a reusable scene-axis box.
+		const posed = transformAffineAABB3(
 			state.placement.localToLandblock,
-			this.#summonAnchorScratch,
-			target,
+			bounds,
+			this.#summonBoundsScratch,
 		);
+		target.x = (posed.min.x + posed.max.x) / 2;
+		target.y = (posed.min.y + posed.max.y) / 2;
+		target.z = (posed.min.z + posed.max.z) / 2;
+		halfExtents.x = (posed.max.x - posed.min.x) / 2;
+		halfExtents.y = (posed.max.y - posed.min.y) / 2;
+		halfExtents.z = (posed.max.z - posed.min.z) / 2;
 		const origin = createLandblockWorldOrigin(state.placement.landblockId);
 		target.x += origin.x;
 		target.y += origin.y;
@@ -2145,18 +2145,30 @@ export class GamePresentationRuntime {
 				leash = {
 					start: sceneVec3(Vec3.zero()),
 					end: sceneVec3(Vec3.zero()),
+					startHalfExtents: Vec3.zero(),
+					endHalfExtents: Vec3.zero(),
+					timeSeconds,
 					color: relationship.color,
 					tuning: tuning.leash,
 				};
 				this.#summonLeashStorage.push(leash);
 			}
 			if (
-				!this.#summonEndpoint(level.guid, leash.start) ||
-				!this.#summonEndpoint(relationship.owner, leash.end) ||
+				!this.#summonEndpoint(
+					level.guid,
+					leash.start,
+					leash.startHalfExtents,
+				) ||
+				!this.#summonEndpoint(
+					relationship.owner,
+					leash.end,
+					leash.endHalfExtents,
+				) ||
 				leash.start.distanceSquaredTo(leash.end) >=
 					tuning.leash.maximumDistance ** 2
 			)
 				continue;
+			leash.timeSeconds = timeSeconds;
 			leash.color = relationship.color;
 			leash.tuning = tuning.leash;
 			this.#summonLeashes.push(leash);

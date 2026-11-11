@@ -592,6 +592,11 @@ try {
 			gpu.doorwayWallPixels !== 0 ||
 			gpu.verticalPixels <= 0 ||
 			gpu.coincidentPixels !== 0 ||
+			!gpu.endpointFade ||
+			!gpu.idleSway ||
+			!gpu.directedPulse ||
+			gpu.spacingJumpPixels > 8 ||
+			gpu.phaseWrapPixels > 8 ||
 			gpu.glError !== 0
 		)
 			throw new Error(`Summon GPU fixture failed: ${JSON.stringify(gpu)}`);

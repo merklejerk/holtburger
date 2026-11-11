@@ -13,6 +13,16 @@ export interface SummonGpuProof {
 	readonly doorwayWallPixels: number;
 	readonly verticalPixels: number;
 	readonly coincidentPixels: number;
+	/** Bounds fade only the interior; terminal overhang contributes no pixels. */
+	readonly endpointFade: boolean;
+	/** Fixed endpoints with changing interior geometry at rest. */
+	readonly idleSway: boolean;
+	/** Brightness crest moves from owner (end) toward summon (start). */
+	readonly directedPulse: boolean;
+	/** Largest changed-pixel count across an almost stationary spacing threshold. */
+	readonly spacingJumpPixels: number;
+	/** Changed pixels immediately across a full animation cycle. */
+	readonly phaseWrapPixels: number;
 	readonly glError: number;
 }
 
@@ -26,11 +36,20 @@ export function runSummonGpuFixture(
 	const input = {
 		start: sceneVec3(new Vec3(-0.8, 0.3, 0)),
 		end: sceneVec3(new Vec3(0.8, 0.3, 0)),
+		startHalfExtents: new Vec3(0.25, 0.2, 0.2),
+		endHalfExtents: new Vec3(0.25, 0.2, 0.2),
+		timeSeconds: 0,
 		color: [0.2, 1, 0.45, 0.25] as const,
 		tuning: {
 			linkRadius: 0.06,
 			linkSpacing: 0.09,
 			sagFraction: 0.08,
+			swayAmplitude: 0.04,
+			swayHertz: 0.3,
+			pulseHertz: 0.6,
+			pulseWavelength: 0.8,
+			pulseStrength: 0.7,
+			endpointFadePower: 1.5,
 			maximumDistance: 10,
 			fadeDistance: 1,
 			glowScale: 1.5,
@@ -116,7 +135,109 @@ export function runSummonGpuFixture(
 		clear();
 		pass.draw(input, anchor, matrix);
 		const coincidentPixels = count();
+		input.start.x = -0.8;
+		input.start.y = 0;
+		input.end.x = 0.8;
+		input.end.y = 0;
+		input.tuning.sagFraction = 0;
+		input.tuning.swayAmplitude = 0;
+		input.tuning.pulseStrength = 0;
+		input.tuning.glowOpacity = 0;
+		input.startHalfExtents.x = 0.4;
+		input.endHalfExtents.x = 0.4;
+		clear();
+		pass.draw(input, anchor, matrix);
+		count();
+		const faded = pixels.slice();
+		input.startHalfExtents.x = 0.0001;
+		input.endHalfExtents.x = 0.0001;
+		clear();
+		pass.draw(input, anchor, matrix);
+		count();
+		let interiorReduction = 0;
+		let exteriorDifference = 0;
+		let terminalPixels = 0;
+		for (let y = 0; y < height; y++) {
+			for (let x = 0; x < width; x++) {
+				const sceneX = (2 * (x + 0.5)) / width - 1;
+				const index = (y * width + x) * 4 + 1;
+				if (Math.abs(sceneX) < 0.35)
+					exteriorDifference += Math.abs(pixels[index] - faded[index]);
+				if (Math.abs(sceneX) > 0.45 && Math.abs(sceneX) < 0.75)
+					interiorReduction += pixels[index] - faded[index];
+				if (Math.abs(sceneX) >= 0.8) terminalPixels += faded[index];
+			}
+		}
+		const endpointFade =
+			interiorReduction > 0 && exteriorDifference === 0 && terminalPixels === 0;
+		const still = pixels.slice();
+		input.tuning.swayAmplitude = 0.08;
+		clear();
+		pass.draw(input, anchor, matrix);
+		count();
+		const firstSway = pixels.slice();
+		input.timeSeconds = 0.7;
+		clear();
+		pass.draw(input, anchor, matrix);
+		count();
+		const idleSway = pixels.some((value, index) => value !== firstSway[index]);
+		input.tuning.swayAmplitude = 0;
+		input.tuning.pulseStrength = 3;
+		input.tuning.pulseHertz = 1;
+		input.tuning.pulseWavelength = 4;
+		const pulseCentroid = (time: number) => {
+			input.timeSeconds = time;
+			clear();
+			pass.draw(input, anchor, matrix);
+			count();
+			let weight = 0;
+			let moment = 0;
+			for (let y = 0; y < height; y++) {
+				for (let x = 0; x < width; x++) {
+					const index = (y * width + x) * 4 + 1;
+					const extra = pixels[index] - still[index];
+					weight += extra;
+					moment += extra * x;
+				}
+			}
+			if (weight <= 0) throw new Error("Summon pulse did not add brightness.");
+			return moment / weight;
+		};
+		const firstCrest = pulseCentroid(0.1);
+		const directedPulse = pulseCentroid(0.25) < firstCrest;
+		const capture = (time: number) => {
+			input.timeSeconds = time;
+			clear();
+			pass.draw(input, anchor, matrix);
+			count();
+			return pixels.slice();
+		};
+		const changedPixels = (before: Uint8Array, after: Uint8Array) => {
+			let changed = 0;
+			for (let index = 1; index < before.length; index += 4)
+				if (Math.abs(before[index] - after[index]) > 8) changed++;
+			return changed;
+		};
+		input.tuning.swayAmplitude = 0.08;
+		const cycle = 1 / input.tuning.swayHertz;
+		const phaseWrapPixels = Math.max(
+			changedPixels(capture(cycle - 1e-6), capture(cycle + 1e-6)),
+			changedPixels(capture(1 - 1e-6), capture(1 + 1e-6)),
+		);
+		input.tuning.swayAmplitude = 0;
+		input.tuning.pulseStrength = 0;
+		// Cross an exact link-spacing multiple with micrometre endpoint motion.
+		const threshold = input.tuning.linkSpacing * 18;
+		input.end.x = input.start.x + threshold - 1e-6;
+		const beforeThreshold = capture(0);
+		input.end.x += 2e-6;
+		const spacingJumpPixels = changedPixels(beforeThreshold, capture(0));
 		return {
+			spacingJumpPixels,
+			phaseWrapPixels,
+			endpointFade,
+			idleSway,
+			directedPulse,
 			visiblePixels,
 			rebasedPixels,
 			wallOccludedPixels,

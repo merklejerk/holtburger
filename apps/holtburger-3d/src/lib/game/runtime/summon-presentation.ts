@@ -1,3 +1,4 @@
+import type { Vec3 } from "../math/types";
 import type { SceneVec3 } from "../../assets/ac-frame";
 
 /** App-authored model flicker, independent of authoritative translucency and lifetime. */
@@ -23,6 +24,18 @@ export interface SummonLeashTuning {
 	readonly linkSpacing: number;
 	/** Sag as a fraction of endpoint distance. */
 	readonly sagFraction: number;
+	/** Lateral idle sway in metres; zero disables motion. */
+	readonly swayAmplitude: number;
+	/** Idle sway cycles per second. */
+	readonly swayHertz: number;
+	/** Traveling glow cycles per second; travels from owner (end) to summon (start). */
+	readonly pulseHertz: number;
+	/** Distance between glow crests in metres. */
+	readonly pulseWavelength: number;
+	/** Additional brightness at a glow crest; zero disables the pulse. */
+	readonly pulseStrength: number;
+	/** Fade curve exponent inside body bounds; larger values hide more interior chain. */
+	readonly endpointFadePower: number;
 	/** Maximum displayed endpoint separation in metres. */
 	readonly maximumDistance: number;
 	/** Fade range immediately before the maximum separation. */
@@ -56,6 +69,11 @@ export interface SummonLeashInput {
 	readonly start: SceneVec3;
 	/** Canonical posed body anchor of its owner. */
 	readonly end: SceneVec3;
+	/** Half sizes of the current posed bodies' scene-axis bounds, excluding particle reach. */
+	readonly startHalfExtents: Vec3;
+	readonly endHalfExtents: Vec3;
+	/** Shared monotonic animation time, prepared once for every view. */
+	readonly timeSeconds: number;
 	/** Per-relationship core RGB and opacity, shared by every view. */
 	readonly color: SummonLeashColor;
 	/** Cold artistic settings shared by every relationship. */
@@ -92,12 +110,23 @@ export function validateSummonPresentation(
 		linkSpacing: leash.linkSpacing,
 		maximumDistance: leash.maximumDistance,
 		fadeDistance: leash.fadeDistance,
+		pulseWavelength: leash.pulseWavelength,
+		endpointFadePower: leash.endpointFadePower,
 		leadInSeconds: flicker.leadInSeconds,
 		initialHertz: flicker.initialHertz,
 		finalHertz: flicker.finalHertz,
 	})) {
 		if (!Number.isFinite(value) || value <= 0)
 			throw new Error(`Summon ${name} must be finite and positive.`);
+	}
+	for (const [name, value] of Object.entries({
+		swayAmplitude: leash.swayAmplitude,
+		swayHertz: leash.swayHertz,
+		pulseHertz: leash.pulseHertz,
+		pulseStrength: leash.pulseStrength,
+	})) {
+		if (!Number.isFinite(value) || value < 0)
+			throw new Error(`Summon ${name} must be finite and nonnegative.`);
 	}
 	if (leash.fadeDistance > leash.maximumDistance)
 		throw new Error("Summon leash fade exceeds maximum distance.");

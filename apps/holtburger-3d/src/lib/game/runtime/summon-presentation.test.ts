@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
 	summonOpacityAt,
+	validateSummonPresentation,
 	type SummonFlickerTuning,
 } from "./summon-presentation";
+import { CLIENT_SUMMON_TUNING } from "../../../client/client-tuning";
 import { createSummonChainLink } from "../renderer/summon-chain-geometry";
 
 const FLICKER: SummonFlickerTuning = {
@@ -45,5 +47,41 @@ describe("summon expiry presentation", () => {
 		const zs = vertices.filter((_, index) => index % 3 === 2);
 		expect(Math.min(...zs)).toBeLessThan(0);
 		expect(Math.max(...zs)).toBeGreaterThan(0);
+	});
+});
+
+describe("summon leash artistic tuning", () => {
+	it("allows disabling sway and pulse independently", () => {
+		expect(() =>
+			validateSummonPresentation(
+				[],
+				{
+					...CLIENT_SUMMON_TUNING.leash,
+					swayAmplitude: 0,
+					swayHertz: 0,
+					pulseStrength: 0,
+					pulseHertz: 0,
+				},
+				FLICKER,
+			),
+		).not.toThrow();
+	});
+	it.each([
+		"swayAmplitude",
+		"swayHertz",
+		"pulseHertz",
+		"pulseStrength",
+		"pulseWavelength",
+		"endpointFadePower",
+	] as const)("rejects invalid %s before frame preparation", (field) => {
+		for (const value of [-1, NaN, Infinity]) {
+			expect(() =>
+				validateSummonPresentation(
+					[],
+					{ ...CLIENT_SUMMON_TUNING.leash, [field]: value },
+					FLICKER,
+				),
+			).toThrow(field);
+		}
 	});
 });

@@ -16,6 +16,11 @@ interface ChainProgram {
 	readonly shape: WebGLUniformLocation;
 	readonly color: WebGLUniformLocation;
 	readonly shell: WebGLUniformLocation;
+	readonly startBounds: WebGLUniformLocation;
+	readonly endBounds: WebGLUniformLocation;
+	readonly motion: WebGLUniformLocation;
+	readonly pulse: WebGLUniformLocation;
+	readonly fadePower: WebGLUniformLocation;
 }
 
 /** One reusable oval mesh; the vertex shader places alternating links using gl_InstanceID. */
@@ -92,11 +97,37 @@ export class WebGL2SummonChainPass {
 		);
 		gl.uniform3f(
 			program.shape,
-			count,
+			tuning.linkSpacing,
 			tuning.linkRadius,
 			distance * tuning.sagFraction,
 		);
+		gl.uniform3f(
+			program.startBounds,
+			input.startHalfExtents.x,
+			input.startHalfExtents.y,
+			input.startHalfExtents.z,
+		);
+		gl.uniform3f(
+			program.endBounds,
+			input.endHalfExtents.x,
+			input.endHalfExtents.y,
+			input.endHalfExtents.z,
+		);
+		// Wrap on the CPU to preserve sub-second motion precision over long sessions.
+		gl.uniform2f(
+			program.motion,
+			tuning.swayAmplitude,
+			((input.timeSeconds * tuning.swayHertz) % 1) * Math.PI * 2,
+		);
+		gl.uniform3f(
+			program.pulse,
+			((input.timeSeconds * tuning.pulseHertz) % 1) * Math.PI * 2,
+			tuning.pulseWavelength,
+			tuning.pulseStrength,
+		);
+		gl.uniform1f(program.fadePower, tuning.endpointFadePower);
 		gl.enable(gl.DEPTH_TEST);
+		gl.depthFunc(gl.LEQUAL);
 		gl.depthMask(false);
 		gl.disable(gl.CULL_FACE);
 		gl.enable(gl.BLEND);
@@ -141,26 +172,65 @@ uniform vec3 uStart;
 uniform vec3 uEnd;
 uniform vec3 uShape;
 uniform float uShell;
+uniform vec2 uMotion;
+out vec3 vPoint;
+flat out float vTerminalFade;
 void main() {
-    float t = float(gl_InstanceID) / (uShape.x - 1.0);
     vec3 direction = uEnd - uStart;
-    vec3 center = mix(uStart, uEnd, t) - vec3(0.0, 4.0 * uShape.z * t * (1.0 - t), 0.0);
-    vec3 derivative = direction - vec3(0.0, 4.0 * uShape.z * (1.0 - 2.0 * t), 0.0);
+    float distance = length(direction);
+    // Fixed spacing keeps existing links stationary when endpoint motion changes the instance count.
+    float along = float(gl_InstanceID) * uShape.x;
+    float t = min(along / distance, 1.0);
+    // A new terminal link starts invisible rather than popping in at a count threshold.
+    vTerminalFade = smoothstep(0.0, uShape.y, distance - along);
+    vec3 chord = normalize(direction);
+    vec3 reference = abs(chord.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 lateral = normalize(cross(chord, reference));
+    // Fixed endpoints; a shallow standing wave keeps the chain alive even at rest.
+    float wave = sin(uMotion.y + t * 3.14159265);
+    float envelope = sin(t * 3.14159265);
+    vec3 sway = lateral * uMotion.x * envelope * wave;
+    vec3 swayDerivative = lateral * uMotion.x * 3.14159265 * (cos(t * 3.14159265) * wave + envelope * cos(uMotion.y + t * 3.14159265));
+    vec3 center = mix(uStart, uEnd, t) - vec3(0.0, 4.0 * uShape.z * t * (1.0 - t), 0.0) + sway;
+    vec3 derivative = direction - vec3(0.0, 4.0 * uShape.z * (1.0 - 2.0 * t), 0.0) + swayDerivative;
     vec3 tangent = normalize(dot(derivative, derivative) > 0.000001 ? derivative : direction);
-    vec3 reference = abs(normalize(direction).y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
     vec3 normal = normalize(cross(tangent, reference));
     vec3 binormal = cross(tangent, normal);
     if (gl_InstanceID % 2 == 1) { vec3 previous = normal; normal = binormal; binormal = -previous; }
     vec3 point = center + uShape.y * uShell * (tangent * aVertex.x + normal * aVertex.y + binormal * aVertex.z);
+    vPoint = point;
     gl_Position = uMatrix * vec4(point, 1.0);
 }`;
 	const fragment = `#version 300 es
 precision highp float;
 precision highp int;
 uniform vec4 uColor;
+uniform vec3 uStart;
+uniform vec3 uEnd;
+uniform vec3 uStartBounds;
+uniform vec3 uEndBounds;
+uniform vec3 uPulse;
+uniform vec3 uShape;
+uniform float uFadePower;
+in vec3 vPoint;
+flat in float vTerminalFade;
 out vec4 outColor;
+float bodyFade(vec3 offset, vec3 halfSize) {
+    // Collapsed bounds still fade over a tiny, finite interval.
+    vec3 relative = abs(offset) / max(halfSize, vec3(0.0001));
+    return pow(smoothstep(0.0, 1.0, max(relative.x, max(relative.y, relative.z))), uFadePower);
+}
 void main() {
-    outColor = uColor;
+    vec3 chord = normalize(uEnd - uStart);
+    // Oval geometry extends beyond its centre; trim the terminal overhang.
+    float fromStart = dot(vPoint - uStart, chord);
+    float fromEnd = dot(uEnd - vPoint, chord);
+    if (fromStart <= 0.0 || fromEnd <= 0.0) discard;
+    float fade = bodyFade(vPoint - uStart, uStartBounds) * bodyFade(vPoint - uEnd, uEndBounds);
+    float crest = pow(0.5 + 0.5 * cos(6.2831853 * fromEnd / uPulse.y - uPulse.x), 4.0);
+    fade *= smoothstep(0.0, uShape.y, fromStart) * smoothstep(0.0, uShape.y, fromEnd);
+    // Modulate the additive contribution, preserving saturated theme RGB before blending.
+    outColor = vec4(uColor.rgb, uColor.a * (1.0 + uPulse.z * crest) * fade * vTerminalFade);
 }`;
 	const handle = linkWebGL2Program(gl, "summon chain", vertex, fragment);
 	try {
@@ -172,6 +242,11 @@ void main() {
 			shape: requireWebGL2Uniform(gl, handle, "uShape"),
 			color: requireWebGL2Uniform(gl, handle, "uColor"),
 			shell: requireWebGL2Uniform(gl, handle, "uShell"),
+			startBounds: requireWebGL2Uniform(gl, handle, "uStartBounds"),
+			endBounds: requireWebGL2Uniform(gl, handle, "uEndBounds"),
+			motion: requireWebGL2Uniform(gl, handle, "uMotion"),
+			pulse: requireWebGL2Uniform(gl, handle, "uPulse"),
+			fadePower: requireWebGL2Uniform(gl, handle, "uFadePower"),
 		};
 	} catch (error) {
 		gl.deleteProgram(handle);

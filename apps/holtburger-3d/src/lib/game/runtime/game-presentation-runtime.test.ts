@@ -4018,7 +4018,19 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		async (boundary) => {
 			const frames: FrameInput[] = [];
 			const runtime = await buildSpawnRuntime(
-				{ load: async () => heldVisual() },
+				{
+					load: async () => {
+						const visual = heldVisual();
+						for (const part of visual.presentation.parts) {
+							const bounds = part.geometry.bounds;
+							if (bounds === null)
+								throw new Error("Leash fixture requires bounded geometry.");
+							bounds.min.copy(new Vec3(-1, -2, -3));
+							bounds.max.copy(new Vec3(1, 2, 3));
+						}
+						return visual;
+					},
+				},
 				ANIMATION_SOURCE,
 				testRenderer({
 					drawFrame: (input) => {
@@ -4029,7 +4041,11 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			);
 			onTestFinished(() => runtime.destroy());
 			setTestCamera(runtime, SPAWN_TEST_CAMERA);
-			const summon = spawnedEntity(7, 1);
+			const source = spawnedEntity(7, 1);
+			const summon = {
+				...source,
+				presentation: { ...source.presentation, objectScale: 2 },
+			};
 			const owner = spawnedEntity(8, 1);
 			if (summon.placement.kind !== "world")
 				throw new Error("Summon fixture requires world placement.");
@@ -4081,12 +4097,15 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 					},
 				},
 			);
-			runtime.render(0);
+			runtime.render(1.25);
 			const leashes = frames.at(-1)?.summonLeashes;
 			expect(leashes).toHaveLength(1);
 			const leash = leashes?.[0];
 			if (leash === undefined) throw new Error("Missing prepared leash.");
 			expect(leash.end.x).toBeCloseTo(leash.start.x + 1);
+			expect(leash.startHalfExtents).toEqual(new Vec3(2, 4, 6));
+			expect(leash.endHalfExtents).toEqual(new Vec3(1, 2, 3));
+			expect(leash.timeSeconds).toBe(1.25);
 		},
 	);
 

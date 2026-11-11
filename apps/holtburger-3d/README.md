@@ -381,8 +381,11 @@ flicker. A rare late reply after GUID reuse may make cosmetic timing inaccurate.
 
 The h3d runtime draws a summon leash between current posed body anchors. The leash uses green chain
 links for your own summons and pale blue links for other players’ summons, with the same faint opacity.
-It uses one reusable link mesh and shader-instanced placement. Leashes draw once against composed
-scene depth, spanning indoor cells and indoor/outdoor transitions without per-fragment portal
+It uses one reusable link mesh and shader-instanced placement. Links fade inside the current posed
+body bounds (enclosing scene-axis boxes) toward transparent center anchors, with terminal overhang trimmed. A subtle idle sway
+keeps the anchors fixed; a glow pulse travels from the summoner toward the summon. Fixed link
+spacing avoids whole-chain redistribution when moving endpoints add or remove links. Leashes draw
+once against composed scene depth, spanning indoor cells and indoor/outdoor transitions without per-fragment portal
 clipping, like particles. A binary presentation-opacity gate flashes the model, its equipment and
 its leash in phase near estimated expiry without changing retail alpha, cloak, motion, collision or
 selection geometry. It suppresses color,
@@ -392,7 +395,8 @@ Themes own leash colors and opacity through `--ui-summon-leash-own-color` and
 theme/scope changes and update existing leashes without recreating the renderer. Expiry flicker
 does not depend on the theme palette being ready. Base colors remain
 faint green for your summons and pale blue for other players' summons.
-`CLIENT_SUMMON_TUNING` in `src/client/client-tuning.ts` owns leash geometry, glow and the flicker window
+`CLIENT_SUMMON_TUNING` in `src/client/client-tuning.ts` owns leash geometry, endpoint fade power, sway amplitude/frequency, pulse
+frequency/wavelength/strength, glow and the flicker window
 (default 10 seconds) and frequency. `npm run harness:browser -- --fixture summons --brief` exercises
 the actual GPU pass and runtime lifecycle; the targeting/HUD probe also checks chat and toast.
 

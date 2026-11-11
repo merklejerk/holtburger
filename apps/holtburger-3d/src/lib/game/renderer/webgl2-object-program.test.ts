@@ -37,46 +37,42 @@ describe("createWebGL2ObjectProgram", () => {
 		}
 	});
 
-	it("initializes merged pose/material bindings across every receiver variant", () => {
+	it("initializes merged pose/material bindings for both fog variants", () => {
 		const fixture = fakeGl(null);
 		for (const distanceFog of [false, true]) {
-			for (const portalVisibility of [false, true]) {
-				for (const outdoorPssm of [false, true]) {
-					const linked = createWebGL2ObjectProgram(fixture.gl, {
-						distanceFog,
-						portalVisibility,
-						outdoorPssm,
-						transformSource: "pose-table",
-						materialSource: "table",
-					});
-					expect("fogUniforms" in linked).toBe(distanceFog);
-					expect(linked.portalVisibilityUniforms !== null).toBe(
-						portalVisibility,
-					);
-					expect(linked.outdoorPssmUniforms !== null).toBe(outdoorPssm);
-					expect(linked.uniforms.firstPoseRow).toEqual({
-						name: "uFirstPoseRow",
-					});
-					expect(
-						fixture.samplerAssignments.filter(
-							({ program, name }) =>
-								program === linked.program &&
-								(name === "uPoses" || name === "uMaterials"),
-						),
-					).toEqual([
-						{
-							name: "uMaterials",
-							program: linked.program,
-							unit: OBJECT_TEXTURE_UNITS.materials,
-						},
-						{
-							name: "uPoses",
-							program: linked.program,
-							unit: OBJECT_TEXTURE_UNITS.poses,
-						},
-					]);
-				}
-			}
+			const portalVisibility = false;
+			const outdoorPssm = false;
+			const linked = createWebGL2ObjectProgram(fixture.gl, {
+				distanceFog,
+				portalVisibility,
+				outdoorPssm,
+				transformSource: "pose-table",
+				materialSource: "table",
+			});
+			expect("fogUniforms" in linked).toBe(distanceFog);
+			expect(linked.portalVisibilityUniforms !== null).toBe(portalVisibility);
+			expect(linked.outdoorPssmUniforms !== null).toBe(outdoorPssm);
+			expect(linked.uniforms.firstPoseRow).toEqual({
+				name: "uFirstPoseRow",
+			});
+			expect(
+				fixture.samplerAssignments.filter(
+					({ program, name }) =>
+						program === linked.program &&
+						(name === "uPoses" || name === "uMaterials"),
+				),
+			).toEqual([
+				{
+					name: "uMaterials",
+					program: linked.program,
+					unit: OBJECT_TEXTURE_UNITS.materials,
+				},
+				{
+					name: "uPoses",
+					program: linked.program,
+					unit: OBJECT_TEXTURE_UNITS.poses,
+				},
+			]);
 		}
 	});
 

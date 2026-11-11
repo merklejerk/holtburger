@@ -658,7 +658,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 				activeBytes: 0,
 				allocatedGenerationCount: 0,
 				pixelCount: 0,
-				tileCount: 0,
+				applicationCount: 0,
 				disposedGenerationCount: 0,
 				effectiveDistanceFade: null,
 			},

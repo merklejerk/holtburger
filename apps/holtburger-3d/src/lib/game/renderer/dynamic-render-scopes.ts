@@ -7,6 +7,23 @@ export interface DynamicRenderDomainSelection {
 	selectedRenderDomainOrdinal(renderScopeKey: string): number | null;
 }
 
+/** Validate mesh admission without materializing the nameplate's distinct domain list. */
+export function assertSelectedDynamicRenderDomain(
+	scopes: readonly SceneScope[],
+	portalVisibility: DynamicRenderDomainSelection | null,
+): void {
+	if (scopes.length === 0)
+		throw new Error("Dynamic render contribution has no spatial membership.");
+	if (portalVisibility === null) return;
+	for (const scope of scopes) {
+		if (portalVisibility.selectedRenderDomainOrdinal(scopeKey(scope)) !== null)
+			return;
+	}
+	throw new Error(
+		"Selected dynamic entity reaches no selected portal render domain.",
+	);
+}
+
 /** Resolve plural source scopes to one submission per selected visibility-island domain. */
 export function selectedDynamicRenderScopeKeys(
 	scopes: readonly SceneScope[],

@@ -587,7 +587,13 @@ type WebGL2ObjectInputs =
 	  }
 	| {
 			readonly materialSource: "table";
-			readonly transformSource: "uniform" | "pose-table";
+			readonly transformSource: "uniform";
+	  }
+	| {
+			readonly materialSource: "table";
+			readonly transformSource: "pose-table";
+			readonly portalVisibility?: false;
+			readonly outdoorPssm?: false;
 	  };
 
 /** Compile the default fogged baked object-material program. */
@@ -663,13 +669,13 @@ export function createWebGL2ObjectProgram(
 		readonly transformSource: "attribute";
 	},
 ): WebGL2InstancedObjectProgram;
-/** Compile merged dynamic color with independently selected fog, portal, and shadow semantics. */
+/** Compile merged dynamic color against composed depth with optional distance fog. */
 export function createWebGL2ObjectProgram(
 	gl: WebGL2RenderingContext,
 	options: {
 		readonly distanceFog: boolean;
-		readonly outdoorPssm: boolean;
-		readonly portalVisibility: boolean;
+		readonly outdoorPssm: false;
+		readonly portalVisibility: false;
 		readonly transformSource: "pose-table";
 		readonly materialSource: "table";
 	},

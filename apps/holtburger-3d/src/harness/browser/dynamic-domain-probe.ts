@@ -4,7 +4,7 @@ import { cellId } from "../../lib/game/runtime/dynamic-entity-feed";
 import type { FrameSettings } from "../../lib/game/renderer/renderer";
 import { SYNTHETIC_BLEND_PALETTE_BASE } from "./synthetic-nameplate-workload";
 
-/** Verify plural-domain draw counts and pixel coverage against each single-domain control. */
+/** Verify admission scopes do not multiply entity color draws or alter admitted mesh pixels. */
 export async function probeDynamicDomains(
 	runtime: GamePresentationRuntime,
 	current: DynamicEntityView,
@@ -76,6 +76,7 @@ export async function probeDynamicDomains(
 			pixels: context.getImageData(0, 0, canvas.width, canvas.height).data,
 			image: canvas.toDataURL("image/png"),
 			metrics: diagnostics.selectionMetrics,
+			nameplates: diagnostics.nameplates,
 			poseBytes: diagnostics.dynamicResources.poses.uploadedBytes,
 		};
 	};
@@ -104,7 +105,7 @@ export async function probeDynamicDomains(
 				`Domain fixture lacks reference coverage: ${offsets.length} pixels.`,
 			);
 		const results = [];
-		for (const flags of [0x100, 0x200, 0x10000]) {
+		for (const flags of [0, 0x10, 0x100, 0x200, 0x10000]) {
 			const interior = await capture("interior", flags, false);
 			const outdoor = await capture("outdoor", flags, false);
 			const plural = await capture("plural", flags, false);
@@ -114,16 +115,21 @@ export async function probeDynamicDomains(
 			if (
 				draws(interior) !== 1 ||
 				draws(outdoor) !== 1 ||
-				draws(plural) !== 2 ||
+				draws(plural) !== 1 ||
 				interior.poseBytes !== plural.poseBytes ||
 				outdoor.poseBytes !== plural.poseBytes
 			)
 				throw new Error("Domain draw/pose union is incorrect.");
-			const phase =
-				flags === 0x10000
-					? "submittedAdditiveObjectDrawCount"
-					: "submittedTransparentObjectDrawCount";
-			if (plural.metrics[phase] - background.metrics[phase] !== 2)
+			const transparentDraws = flags !== 0 && flags !== 0x10000 ? 1 : 0;
+			const additiveDraws = flags === 0x10000 ? 1 : 0;
+			if (
+				plural.metrics.submittedTransparentObjectDrawCount -
+					background.metrics.submittedTransparentObjectDrawCount !==
+					transparentDraws ||
+				plural.metrics.submittedAdditiveObjectDrawCount -
+					background.metrics.submittedAdditiveObjectDrawCount !==
+					additiveDraws
+			)
 				throw new Error("Plural material reached the wrong color phase.");
 			let interiorPixels = 0,
 				outdoorPixels = 0;
@@ -136,9 +142,9 @@ export async function probeDynamicDomains(
 					);
 				const matchesInterior = matches(interior),
 					matchesOutdoor = matches(outdoor);
-				if (!matchesInterior && !matchesOutdoor)
+				if (!matchesInterior || !matchesOutdoor)
 					throw new Error(
-						`Plural flags ${flags} pixel ${offset / 4} matches neither single-domain control: interior=${interior.pixels.slice(offset, offset + 3)}, outdoor=${outdoor.pixels.slice(offset, offset + 3)}, plural=${plural.pixels.slice(offset, offset + 3)}, background=${background.pixels.slice(offset, offset + 3)}.`,
+						`Plural flags ${flags} pixel ${offset / 4} differs from an admitted single-scope control: interior=${interior.pixels.slice(offset, offset + 3)}, outdoor=${outdoor.pixels.slice(offset, offset + 3)}, plural=${plural.pixels.slice(offset, offset + 3)}, background=${background.pixels.slice(offset, offset + 3)}.`,
 					);
 				if (matchesInterior) interiorPixels++;
 				if (matchesOutdoor) outdoorPixels++;
@@ -152,6 +158,59 @@ export async function probeDynamicDomains(
 				poseBytes: plural.poseBytes,
 				image: plural.image,
 			});
+		}
+		const gl = canvas.getContext("webgl2");
+		if (gl === null) throw new Error("Overlay probe requires WebGL2.");
+		const draw = gl.drawArraysInstanced;
+		const overlayDraws: {
+			depthTest: boolean;
+			scoped: boolean;
+			instances: number;
+		}[] = [];
+		gl.drawArraysInstanced = function (mode, first, count, instances) {
+			const program = gl.getParameter(
+				gl.CURRENT_PROGRAM,
+			) as WebGLProgram | null;
+			if (
+				program !== null &&
+				gl.getUniformLocation(program, "uNameplateClipFromAnchor") !== null
+			) {
+				const scoped =
+					gl.getUniformLocation(program, "uPortalRenderDomain") !== null;
+				overlayDraws.push({
+					depthTest: gl.isEnabled(gl.DEPTH_TEST),
+					scoped,
+					instances,
+				});
+			}
+			draw.call(gl, mode, first, count, instances);
+		};
+		try {
+			for (const treatment of ["selected", "hovered"] as const) {
+				runtime.setSelectedEntityGuid(
+					treatment === "selected" ? current.identity.guid : null,
+				);
+				runtime.setHoveredEntityGuid(
+					treatment === "hovered" ? current.identity.guid : null,
+				);
+				overlayDraws.length = 0;
+				const sample = await capture("plural", 0, false);
+				if (
+					sample.nameplates.submittedInstanceCount !== 1 ||
+					overlayDraws.length === 0 ||
+					overlayDraws.some(
+						(sample) =>
+							sample.depthTest || sample.scoped || sample.instances !== 1,
+					)
+				)
+					throw new Error(
+						`${treatment} label did not draw once per frame as an unscoped overlay.`,
+					);
+			}
+		} finally {
+			gl.drawArraysInstanced = draw;
+			runtime.setSelectedEntityGuid(null);
+			runtime.setHoveredEntityGuid(null);
 		}
 		return { results };
 	} finally {

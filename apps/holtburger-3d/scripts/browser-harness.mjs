@@ -2291,7 +2291,7 @@ Options:
                          Requires --nameplate-workload occlusion-open and --screenshot.
   --probe-realized-targeting Verify realized-volume cycle acquisition with the real gameplay adapter. Requires --nameplate-workload occlusion-open.
   --probe-dynamic-domains
-                         Compare portal-plural material draws with single-domain controls.
+                         Verify portal-plural materials draw once and match admitted single-scope controls.
                          Requires --frame-mode portal and --screenshot.
   --nameplate-lifecycle Move one unchanged same-generation target, then retire the workload and
                          assert stable rasterization plus complete texture release. Requires

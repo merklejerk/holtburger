@@ -300,8 +300,8 @@ export interface FrameSelectionMetrics {
 		readonly disposedGenerationCount: number;
 		/** Full-resolution pixels whose SAO evaluation, blur, and composition ran. */
 		readonly pixelCount: number;
-		/** Render-domain tiles whose SAO evaluation, blur, and composition ran. */
-		readonly tileCount: number;
+		/** Views whose complete opaque scene received one SAO application. */
+		readonly applicationCount: number;
 		/** Renderer-owned distance fade when AO is enabled for the frame. */
 		readonly effectiveDistanceFade: {
 			readonly disabledAt: number;

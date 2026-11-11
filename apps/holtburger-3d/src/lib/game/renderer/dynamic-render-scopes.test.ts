@@ -6,7 +6,10 @@ import { AABB3, Mat4, Quat, Vec3 } from "../math/types";
 import { createCameraNearClipVolume } from "./portal-near-plane";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "./portal-render-capacity-policy";
 import { PortalScopeWindowCuller } from "./portal-scope-window-culler";
-import { selectedDynamicRenderScopeKeys } from "./dynamic-render-scopes";
+import {
+	assertSelectedDynamicRenderDomain,
+	selectedDynamicRenderScopeKeys,
+} from "./dynamic-render-scopes";
 
 const OUTDOOR: SceneScope = { kind: "outdoor" };
 const CELL_A: SceneScope = {
@@ -131,5 +134,28 @@ describe("dynamic render scope selection", () => {
 				selectedRenderDomainOrdinal: () => null,
 			}),
 		).toThrow("no selected portal render domain");
+	});
+});
+
+describe("dynamic mesh domain admission", () => {
+	it("accepts a selected membership even when an earlier membership is unavailable", () => {
+		const selection = {
+			selectedRenderDomainOrdinal: (key: string) =>
+				key === CELL_A.envCellId ? 0 : null,
+		};
+		expect(() =>
+			assertSelectedDynamicRenderDomain([OUTDOOR, CELL_A], selection),
+		).not.toThrow();
+		expect(() =>
+			assertSelectedDynamicRenderDomain([OUTDOOR], selection),
+		).toThrow("reaches no selected portal render domain");
+	});
+	it("requires membership in flat mode without requiring portal selection", () => {
+		expect(() =>
+			assertSelectedDynamicRenderDomain([CELL_A], null),
+		).not.toThrow();
+		expect(() => assertSelectedDynamicRenderDomain([], null)).toThrow(
+			"no spatial membership",
+		);
 	});
 });

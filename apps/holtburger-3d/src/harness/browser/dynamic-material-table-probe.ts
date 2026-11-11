@@ -220,21 +220,21 @@ export async function probeDynamicMaterialTables() {
 			transformSource: "uniform",
 			materialSource: "table",
 		}).program;
-		// Exercise every planned color-program interface, including combined portal/PSSM/fog.
+		// Exercise supported entity fog variants and independent static portal/PSSM variants.
 		let linkedTableVariants = 0;
 		let linkedStaticTableVariants = 0;
 		for (const fog of [false, true]) {
+			const variant = createWebGL2ObjectProgram(gl, {
+				distanceFog: fog,
+				portalVisibility: false,
+				outdoorPssm: false,
+				transformSource: "pose-table",
+				materialSource: "table",
+			});
+			gl.deleteProgram(variant.program);
+			linkedTableVariants += 1;
 			for (const portal of [false, true]) {
 				for (const pssm of [false, true]) {
-					const variant = createWebGL2ObjectProgram(gl, {
-						distanceFog: fog,
-						portalVisibility: portal,
-						outdoorPssm: pssm,
-						transformSource: "pose-table",
-						materialSource: "table",
-					});
-					gl.deleteProgram(variant.program);
-					linkedTableVariants += 1;
 					const staticVariant = createWebGL2ObjectProgram(gl, {
 						distanceFog: fog,
 						portalVisibility: portal,

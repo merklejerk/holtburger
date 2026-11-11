@@ -1049,25 +1049,32 @@ The packaged resources contain Holtburger's AGPLv3 license alongside the Electro
 notices supplied by Electron. The release suite adds download checksums, build identity, and
 documented build/publication instructions in `release/RELEASING.md`.
 
-The WebGL2 backend has one flat-frame schedule: opaque scene color and depth are
-rendered into a renderer-owned target, optionally receive near-field ambient
-occlusion, and are presented with depth intact before transparent objects and
-particles. Portal frames retain their packed-atlas compositor; optional ambient
-occlusion consumes its planner-owned tiles after opaque submission without
-introducing an alternate portal execution path. Sky, weather, transparent
-objects, and particles remain outside ambient occlusion.
-Particle owners still pass CPU scope admission, while admitted particles use one
-program with ordinary depth testing and blending. They omit per-fragment portal
-clipping as an accepted visual/performance trade-off; other geometry retains it.
-The Explorer's Render quality panel adjusts AO strength, radius, bias, edge
-threshold, and distance fade live without reallocating its scratch targets.
+The WebGL2 backend renders opaque color and depth into a renderer-owned scene target.
+Portal views first compose static geometry and terrain from their packed atlas, preserving
+original scene depth. Admitted dynamic entity meshes then draw once per physical range and
+applicable pass against that depth, independently of their number of spatial memberships.
+Both flat and portal views apply one optional near-field ambient occlusion pass to complete
+static/entity opaque depth. Outdoor after-landscape weather follows AO on the final target,
+so foreground rain can cover interior images seen through doorways and windows. Cameras in
+EnvCells suppress that weather pass. Transparent static and entity ranges retain one shared
+ordering sequence; particles and other overlays follow it.
+
+Particle owners still pass CPU scope admission, while admitted particles use ordinary depth
+testing and blending. Summon leashes and entity color also use composed depth without
+per-fragment portal clipping. Static transparency, ordinary nameplates and scoped overlays retain
+their portal visibility envelopes. Selected and hovered nameplates draw once as overlays
+without scene-depth or portal clipping; entity admission still determines candidate availability.
+World spatial memberships, selection feedback and
+independent shadow eligibility remain unchanged. The Explorer's Render quality panel
+adjusts AO strength, radius, bias, edge threshold, and distance fade live without reallocating
+its scratch targets.
 
 Dynamic entity meshes use one ordinary indexed-draw representation. Effective part geometry
 defines a reusable source-local merged layout; replaceable appearances own material tables and
 index batches. Per-part pose/color records retain landblock-relative transforms. The renderer
 prepares all camera, selection, and shadow consumers, uploads their union of required poses, then
-executes the prepared draws. Portal domains, texture bindings, render state, and transparent order
-still impose draw boundaries. Neither multi-draw nor dynamic mesh instancing is a fallback.
+executes the prepared draws. Texture bindings, render state, and transparent order still impose
+draw boundaries. Neither multi-draw nor dynamic mesh instancing is a fallback.
 
 The runtime stages same-generation appearance replacements and checks the current request and
 residency before committing. Animation, held-entity ancestry, particle frame targets, and CPU

@@ -2441,6 +2441,8 @@ function assertPortalScopeAtlasExecutorFixture(fixture) {
 	}
 	for (const field of [
 		"deferredCompositionMatchesOracle",
+		"depth16BranchingChildCycleDeferredMatchesOracle",
+		"depth16BranchingChildCycleResolveMatchesOracle",
 		"depth16CyclicMultiWindowDeferredMatchesOracle",
 		"depth16CyclicMultiWindowResolveMatchesOracle",
 		"exteriorWeatherComposesBehindChildOpaque",
@@ -2457,12 +2459,29 @@ function assertPortalScopeAtlasExecutorFixture(fixture) {
 		"propagatedResolveMatchesOracle",
 		"particleDepthCompositionMatchesOracle",
 		"rootOnlyResolveMatchesOracle",
+		"shrinkingMultiFrameFrontierMatchesOracle",
 	]) {
 		if (fixture[field] !== true) {
 			throw new Error(
 				`Portal scope-atlas executor fixture failed ${field}: ${JSON.stringify(fixture)}.`,
 			);
 		}
+	}
+	const metrics = fixture.depth16BranchingChildCycleMetrics;
+	if (
+		!metrics ||
+		metrics.traversalDepth !== 16 ||
+		metrics.minimumRoundCrossingCount < 2 ||
+		metrics.tileCount !== 4 ||
+		!(metrics.round0ApertureCoverageRatio >= 0.4) ||
+		!(
+			metrics.round0ScissorCoverageRatio >= 0.7 &&
+			metrics.round0ScissorCoverageRatio < 1
+		)
+	) {
+		throw new Error(
+			`Portal scope-atlas branching depth-16 metrics failed: ${JSON.stringify(metrics)}.`,
+		);
 	}
 }
 

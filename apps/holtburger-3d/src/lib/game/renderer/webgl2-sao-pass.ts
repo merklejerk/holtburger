@@ -258,9 +258,9 @@ void main() {
 		return;
 	}
 	float centerLinearDepth = linearDepth(centerDepth);
-	// Every bilateral tap with positive depthWeight has linearDepth > centerLinearDepth - threshold.
-	// Once centerLinearDepth reaches fadeEnd + threshold, every admitted tap exceeds fadeEnd in
-	// Euclidean view distance as well, so all contributing samples evaluate to 1.0 identically.
+	// Pass 1 reads raw AO (neutral beyond fadeEnd), so centerLinearDepth >= fadeEnd + threshold
+	// guarantees every positive-weight tap is neutral. Pass 2 reads Pass 1's output (neutral
+	// beyond fadeEnd + threshold), extending the exact neutral boundary to fadeEnd + 2 * threshold.
 	if (centerLinearDepth >= uNeutralLinearDepthCutoff) {
 		outAmbientOcclusion = 1.0;
 		return;
@@ -715,6 +715,7 @@ export class WebGL2SaoPass {
 				tuning.resolutionScale,
 				1,
 				0,
+				1,
 			);
 			gl.drawArraysInstanced(gl.TRIANGLES, 0, SAO_TILE_VERTEX_COUNT, tileCount);
 
@@ -728,6 +729,7 @@ export class WebGL2SaoPass {
 				tuning.resolutionScale,
 				0,
 				1,
+				2,
 			);
 			gl.drawArraysInstanced(gl.TRIANGLES, 0, SAO_TILE_VERTEX_COUNT, tileCount);
 		}
@@ -809,6 +811,7 @@ export class WebGL2SaoPass {
 		resolutionScale: number,
 		directionX: number,
 		directionY: number,
+		blurPassOrdinal: SaoBlurPassOrdinal,
 	): void {
 		const gl = this.#gl;
 		const program = this.#blurProgram;
@@ -832,6 +835,7 @@ export class WebGL2SaoPass {
 			saoBlurNeutralLinearDepthCutoff(
 				policy.distanceFade.disabledAt,
 				tuning.bilateralDepthThreshold,
+				blurPassOrdinal,
 			),
 		);
 		gl.uniform2i(program.blurDirection, directionX, directionY);
@@ -1003,16 +1007,25 @@ export class WebGL2SaoPass {
 	}
 }
 
+/** Separable bilateral blur pass ordinal (`1` horizontal from raw AO, `2` vertical from Pass 1). */
+export type SaoBlurPassOrdinal = 1 | 2;
+
+const SAO_BLUR_CUTOFF_FLOAT32_GUARD = 1 + 16 * 2 ** -23;
+
 /**
  * Minimum center linear depth at which every bilaterally admitted blur tap is guaranteed neutral.
  *
- * A neighbor contributes positive bilateral weight only when `|sampleLinearDepth - centerLinearDepth| < threshold`.
- * Once `centerLinearDepth >= distanceFadeEnd + threshold`, every contributing neighbor satisfies
- * `sampleLinearDepth > distanceFadeEnd`, and Euclidean view distance is at least linear depth.
+ * Raw evaluation outputs `1.0` once Euclidean view distance (at least linear depth) reaches
+ * `distanceFadeEnd`. Pass 1 admits positive bilateral weight only when
+ * `|sampleLinearDepth - centerLinearDepth| < threshold`, so Pass 1 is identically neutral beyond
+ * `distanceFadeEnd + threshold`. Pass 2 samples Pass 1's `R8` output, extending the neutral
+ * boundary by triangle inequality to `distanceFadeEnd + 2 * threshold`. The `float32` upward guard
+ * ensures `gl.uniform1f` and `highp` GLSL arithmetic never round below the exact real threshold.
  */
 export function saoBlurNeutralLinearDepthCutoff(
 	distanceFadeEnd: number,
 	bilateralDepthThreshold: number,
+	blurPassOrdinal: SaoBlurPassOrdinal,
 ): number {
 	if (!Number.isFinite(distanceFadeEnd) || distanceFadeEnd <= 0) {
 		throw new Error(
@@ -1027,7 +1040,13 @@ export function saoBlurNeutralLinearDepthCutoff(
 			"SAO blur fade cutoff requires a positive finite bilateral threshold.",
 		);
 	}
-	return distanceFadeEnd + bilateralDepthThreshold;
+	if (blurPassOrdinal !== 1 && blurPassOrdinal !== 2) {
+		throw new Error("SAO blur fade cutoff requires pass ordinal 1 or 2.");
+	}
+	return Math.fround(
+		(distanceFadeEnd + blurPassOrdinal * bilateralDepthThreshold) *
+			SAO_BLUR_CUTOFF_FLOAT32_GUARD,
+	);
 }
 
 /** Exact bytes owned by the two resolution-scaled R8 textures. */

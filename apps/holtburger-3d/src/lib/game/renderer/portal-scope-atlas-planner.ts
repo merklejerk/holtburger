@@ -1,6 +1,7 @@
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../landblocks";
+import type { Mat4 } from "../math/types";
 import { PORTAL_QUERY_EPSILON } from "../scene/planar-aperture";
-import type { SceneTopologyView } from "../scene";
+import type { ScenePortalCrossing, SceneTopologyView } from "../scene";
 import {
 	PORTAL_ARRIVAL_METADATA_PLANE_FLOAT_COUNT,
 	PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT,
@@ -13,32 +14,74 @@ import {
 	type PortalScopeWindowCullInput,
 	type PortalScopeWindowFrameView,
 } from "./portal-scope-window-culler";
+import { PORTAL_WINDOW_NDC_EPSILON } from "./portal-view-window";
 
 const MAXIMUM_UINT32 = 0xffff_ffff;
-/** Conservative 1-pixel rasterization pad around clipped NDC aperture bounds. */
+/** Conservative 1-pixel rasterization pad covering 0.5-pixel center + fixed-point subpixel snap. */
 const CROSSING_SCREEN_PAD_PIXELS = 1;
-/** Half-epsilon vertex plane threshold protecting float32 barycentric interpolation on GPU. */
-const CONSERVATIVE_ENTRY_PLANE_EPSILON = PORTAL_QUERY_EPSILON * 0.5;
+const FLOAT32_UNIT_ROUNDING = 2 ** -23;
+/** Minimum entry-plane margin retained at near-origin coordinates (`0.5 * PORTAL_QUERY_EPSILON`). */
+const MINIMUM_ENTRY_PLANE_MARGIN = PORTAL_QUERY_EPSILON * 0.5;
+/** Conservative float32 rounding + perspective-barycentric ULP budget on `dot(n, v) + d`. */
+const ENTRY_PLANE_ULP_BUDGET = 64;
+/** Conservative float32 homogeneous clip-coordinate ULP budget. */
+const HOMOGENEOUS_CLIP_ULP_BUDGET = 32;
+/** Conservative float64 rounding budget for homogeneous clip-edge interpolation. */
+const FLOAT64_CLIP_INTERPOLATION_SLACK = 4_096 * Number.EPSILON;
+/** Minimum positive homogeneous w lower bound required before interval perspective division. */
+const MINIMUM_WELL_CONDITIONED_HOMOGENEOUS_W = 1e-6;
+/** One triangle (3 vertices) clipped against <= 6 frustum planes produces <= 9 vertices. */
+const CLIP_POLYGON_SCRATCH_CAPACITY = 16;
+const CANONICAL_HOMOGENEOUS_CLIP_PLANE_COUNT = 6;
+const NEAR_RAY_HOMOGENEOUS_CLIP_PLANE_COUNT = 5;
 /** Maximum coalesced active-aperture rectangles emitted for one (round, domain) pair. */
 const MAXIMUM_COALESCED_RECTS_PER_DOMAIN = 8;
 /** Tiny pixel bridge tolerated when merging two nearby aperture boxes saves an instance slot. */
 const COALESCING_BRIDGE_AREA_TOLERANCE_PIXELS = 64;
 const QUAD_RECORD_SLOT_COUNT = 8;
+/** Maximum non-root arrival states representable in one R8UI frontier (`255` states minus root `1`). */
+const MAXIMUM_SELECTED_CROSSING_COUNT = PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT - 1;
 
 /** Standard monotonic max-reduction quad (`gl.depthFunc(gl.GREATER)`). */
 export const PORTAL_QUAD_MODE_MAX_REDUCE = 0;
 /** Round-0 root doorway clamp quad (`gl.depthFunc(gl.ALWAYS)` where `frontier0 != 0`). */
 export const PORTAL_QUAD_MODE_ROOT_ROUND0_CLAMP = 1;
 
-/** Exact worst-case reduction and resolve quad capacity required for `maximumPropagationDepth`. */
+/**
+ * Exact pigeonhole upper bound on combined reduction and resolve quad instances for `maximumPropagationDepth`.
+ *
+ * Let `C_max = PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT - 1 = 254` and `K = MAXIMUM_COALESCED_RECTS_PER_DOMAIN = 8`.
+ * `#coalesceRects(rawCount)` returns `<= min(rawCount, K)`, and each selected crossing belongs to a
+ * single `crossingTargetDomain`:
+ * - When `maximumPropagationDepth === 0`, zero reduction quads and `1` root resolve quad are emitted (`1`).
+ * - When `maximumPropagationDepth >= 1` (`D` rounds):
+ *   - Round `0` root doorway clamp emits `<= min(C_max, K) = K` quads.
+ *   - Every non-terminal round `1 .. D - 2` sums `min(raw_d(r - 1), K)` across domains `d`, bounded by
+ *     `sum_d raw_d(r - 1) <= C_max`.
+ *   - The terminal round `D - 1` collects `round - 1` (when `D >= 2`) plus `round`, bounded by `2 * C_max`
+ *     (`C_max` when `D === 1`), giving `<= K + D * C_max` total reduction quads across all rounds.
+ *   - Resolve emits `1` root quad plus `<= K` coalesced quads for each of at most `C_max` non-root target
+ *     domains (`1 + C_max * K`), yielding `1 + K + D * C_max + C_max * K` (`6,105` at `D = 16`).
+ */
 export function portalScopeAtlasMaximumQuadCount(
 	maximumPropagationDepth: number,
 ): number {
-	const roundCapacity = Math.max(1, maximumPropagationDepth);
+	if (
+		!Number.isSafeInteger(maximumPropagationDepth) ||
+		maximumPropagationDepth < 0
+	) {
+		throw new Error(
+			"Portal scope-atlas maximum propagation depth must be a non-negative safe integer.",
+		);
+	}
+	if (maximumPropagationDepth === 0) {
+		return 1;
+	}
 	return (
-		roundCapacity * 2 * PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT +
 		1 +
-		PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT * MAXIMUM_COALESCED_RECTS_PER_DOMAIN
+		MAXIMUM_COALESCED_RECTS_PER_DOMAIN +
+		maximumPropagationDepth * MAXIMUM_SELECTED_CROSSING_COUNT +
+		MAXIMUM_SELECTED_CROSSING_COUNT * MAXIMUM_COALESCED_RECTS_PER_DOMAIN
 	);
 }
 
@@ -218,6 +261,16 @@ class PortalScopeAtlasArena {
 	readonly activeMinX: Int32Array;
 	readonly activeMinY: Int32Array;
 	readonly canAdvance: Uint8Array;
+	readonly clipAslack = new Float64Array(CLIP_POLYGON_SCRATCH_CAPACITY);
+	readonly clipAw = new Float64Array(CLIP_POLYGON_SCRATCH_CAPACITY);
+	readonly clipAx = new Float64Array(CLIP_POLYGON_SCRATCH_CAPACITY);
+	readonly clipAy = new Float64Array(CLIP_POLYGON_SCRATCH_CAPACITY);
+	readonly clipAz = new Float64Array(CLIP_POLYGON_SCRATCH_CAPACITY);
+	readonly clipBslack = new Float64Array(CLIP_POLYGON_SCRATCH_CAPACITY);
+	readonly clipBw = new Float64Array(CLIP_POLYGON_SCRATCH_CAPACITY);
+	readonly clipBx = new Float64Array(CLIP_POLYGON_SCRATCH_CAPACITY);
+	readonly clipBy = new Float64Array(CLIP_POLYGON_SCRATCH_CAPACITY);
+	readonly clipBz = new Float64Array(CLIP_POLYGON_SCRATCH_CAPACITY);
 	readonly clipOffsetX: Float32Array;
 	readonly clipOffsetY: Float32Array;
 	readonly clipScaleX: Float32Array;
@@ -239,7 +292,6 @@ class PortalScopeAtlasArena {
 	readonly height: Uint32Array;
 	readonly minimumX: Uint32Array;
 	readonly minimumY: Uint32Array;
-	readonly ndcBoundsScratch = new Float64Array(4);
 	readonly quads: Uint32Array;
 	readonly roundCapacity: number;
 	readonly roundCrossingCounts: Uint32Array;
@@ -326,7 +378,16 @@ class PortalScopeAtlasArena {
 			this.width.byteLength +
 			this.x.byteLength +
 			this.y.byteLength +
-			this.ndcBoundsScratch.byteLength +
+			this.clipAx.byteLength +
+			this.clipAy.byteLength +
+			this.clipAz.byteLength +
+			this.clipAw.byteLength +
+			this.clipAslack.byteLength +
+			this.clipBx.byteLength +
+			this.clipBy.byteLength +
+			this.clipBz.byteLength +
+			this.clipBw.byteLength +
+			this.clipBslack.byteLength +
 			this.crossingBaseMinX.byteLength +
 			this.crossingBaseMinY.byteLength +
 			this.crossingBaseMaxX.byteLength +
@@ -1004,7 +1065,8 @@ export class PortalScopeAtlasPlanner {
 		const crossingCount = visibility.selectedCrossingCount;
 		const drawingWidth = resource.drawingBuffer.width;
 		const drawingHeight = resource.drawingBuffer.height;
-		const boundsScratch = this.#arena.ndcBoundsScratch;
+		const anchorX = input.anchorCoordinates.x;
+		const anchorY = input.anchorCoordinates.y;
 		for (let ordinal = 0; ordinal < crossingCount; ordinal += 1) {
 			const crossing = visibility.selectedCrossing(ordinal);
 			const sourceDomain =
@@ -1018,75 +1080,53 @@ export class PortalScopeAtlasPlanner {
 			this.#arena.crossingJunctionGroup[ordinal] =
 				crossing.junctionGroupId === null ? 0 : crossing.junctionGroupId;
 
-			const sourceOffsetX =
-				(visibility.selectedCrossingSourceLandblockX(ordinal) -
-					input.anchorCoordinates.x) *
-				OUTDOOR_LANDBLOCK_WORLD_SIZE;
-			const sourceOffsetZ =
-				-(
-					visibility.selectedCrossingSourceLandblockY(ordinal) -
-					input.anchorCoordinates.y
-				) * OUTDOOR_LANDBLOCK_WORLD_SIZE;
 			writeOrientedPortalArrivalPlane(
 				this.#arena.crossingPlanes,
 				ordinal * PORTAL_ARRIVAL_METADATA_PLANE_FLOAT_COUNT,
 				crossing.sourceAperture.plane,
 				crossing.acceptedSide,
-				sourceOffsetX,
-				sourceOffsetZ,
+				landblockAnchorOffsetX(
+					visibility.selectedCrossingSourceLandblockX(ordinal),
+					anchorX,
+				),
+				landblockAnchorOffsetZ(
+					visibility.selectedCrossingSourceLandblockY(ordinal),
+					anchorY,
+				),
 			);
 
-			if (
-				!visibility.writeSelectedCrossingProjectedBounds(
-					ordinal,
-					input,
-					boundsScratch,
-					0,
-				)
-			) {
-				this.#arena.crossingBaseMinX[ordinal] = 0;
-				this.#arena.crossingBaseMinY[ordinal] = 0;
-				this.#arena.crossingBaseMaxX[ordinal] = 0;
-				this.#arena.crossingBaseMaxY[ordinal] = 0;
-				continue;
-			}
 			const tileMinX = this.#arena.minimumX[sourceDomain]!;
 			const tileMinY = this.#arena.minimumY[sourceDomain]!;
-			const tileMaxX = tileMinX + this.#arena.width[sourceDomain]!;
-			const tileMaxY = tileMinY + this.#arena.height[sourceDomain]!;
-			const minX = Math.max(
+			this.#writeConservativeCrossingScreenBounds(
+				crossing,
+				ordinal,
+				visibility.selectedCrossingNearPlaneStraddle(ordinal),
+				landblockAnchorOffsetX(
+					visibility.selectedCrossingVisibilityLandblockX(ordinal),
+					anchorX,
+				),
+				landblockAnchorOffsetZ(
+					visibility.selectedCrossingVisibilityLandblockY(ordinal),
+					anchorY,
+				),
+				input.clipFromAnchor,
 				tileMinX,
-				Math.floor(((boundsScratch[0]! + 1) * drawingWidth) / 2) -
-					CROSSING_SCREEN_PAD_PIXELS,
-			);
-			const minY = Math.max(
 				tileMinY,
-				Math.floor(((boundsScratch[1]! + 1) * drawingHeight) / 2) -
-					CROSSING_SCREEN_PAD_PIXELS,
+				tileMinX + this.#arena.width[sourceDomain]!,
+				tileMinY + this.#arena.height[sourceDomain]!,
+				drawingWidth,
+				drawingHeight,
 			);
-			const maxX = Math.min(
-				tileMaxX,
-				Math.ceil(((boundsScratch[2]! + 1) * drawingWidth) / 2) +
-					CROSSING_SCREEN_PAD_PIXELS,
-			);
-			const maxY = Math.min(
-				tileMaxY,
-				Math.ceil(((boundsScratch[3]! + 1) * drawingHeight) / 2) +
-					CROSSING_SCREEN_PAD_PIXELS,
-			);
-			if (minX >= maxX || minY >= maxY) {
-				this.#arena.crossingBaseMinX[ordinal] = 0;
-				this.#arena.crossingBaseMinY[ordinal] = 0;
-				this.#arena.crossingBaseMaxX[ordinal] = 0;
-				this.#arena.crossingBaseMaxY[ordinal] = 0;
-				continue;
-			}
-			this.#arena.crossingBaseMinX[ordinal] = minX;
-			this.#arena.crossingBaseMinY[ordinal] = minY;
-			this.#arena.crossingBaseMaxX[ordinal] = maxX;
-			this.#arena.crossingBaseMaxY[ordinal] = maxY;
 		}
+		this.#populateCrossingAdvanceMatrix(visibility, anchorX, anchorY);
+	}
 
+	#populateCrossingAdvanceMatrix(
+		visibility: PortalScopeWindowFrameView,
+		anchorX: number,
+		anchorY: number,
+	): void {
+		const crossingCount = visibility.selectedCrossingCount;
 		const stride = this.#arena.crossingCapacity;
 		for (let candidate = 0; candidate < crossingCount; candidate += 1) {
 			const candidateSourceDomain =
@@ -1096,17 +1136,35 @@ export class PortalScopeAtlasPlanner {
 			const candidateEmpty =
 				this.#arena.crossingBaseMinX[candidate]! >=
 				this.#arena.crossingBaseMaxX[candidate]!;
-			const crossing = visibility.selectedCrossing(candidate);
-			const vertices = crossing.visibilityAperture.vertices;
-			const offsetX =
-				(visibility.selectedCrossingVisibilityLandblockX(candidate) -
-					input.anchorCoordinates.x) *
-				OUTDOOR_LANDBLOCK_WORLD_SIZE;
-			const offsetZ =
-				-(
-					visibility.selectedCrossingVisibilityLandblockY(candidate) -
-					input.anchorCoordinates.y
-				) * OUTDOOR_LANDBLOCK_WORLD_SIZE;
+			const vertices =
+				visibility.selectedCrossing(candidate).visibilityAperture.vertices;
+			const offsetX = landblockAnchorOffsetX(
+				visibility.selectedCrossingVisibilityLandblockX(candidate),
+				anchorX,
+			);
+			const offsetZ = landblockAnchorOffsetZ(
+				visibility.selectedCrossingVisibilityLandblockY(candidate),
+				anchorY,
+			);
+			let maxAbsVx = 0;
+			let maxAbsVy = 0;
+			let maxAbsVz = 0;
+			if (!candidateEmpty) {
+				for (let slot = 0; slot + 2 < vertices.length; slot += 3) {
+					maxAbsVx = Math.max(
+						maxAbsVx,
+						Math.abs(Math.fround(vertices[slot]! + offsetX)),
+					);
+					maxAbsVy = Math.max(
+						maxAbsVy,
+						Math.abs(Math.fround(vertices[slot + 1]!)),
+					);
+					maxAbsVz = Math.max(
+						maxAbsVz,
+						Math.abs(Math.fround(vertices[slot + 2]! + offsetZ)),
+					);
+				}
+			}
 			for (let predecessor = 0; predecessor < crossingCount; predecessor += 1) {
 				const pairIndex = predecessor * stride + candidate;
 				if (
@@ -1128,30 +1186,368 @@ export class PortalScopeAtlasPlanner {
 					this.#arena.canAdvance[pairIndex] = 1;
 					continue;
 				}
-				const planeOffset =
-					predecessor * PORTAL_ARRIVAL_METADATA_PLANE_FLOAT_COUNT;
-				const nx = this.#arena.crossingPlanes[planeOffset]!;
-				const ny = this.#arena.crossingPlanes[planeOffset + 1]!;
-				const nz = this.#arena.crossingPlanes[planeOffset + 2]!;
-				const d = this.#arena.crossingPlanes[planeOffset + 3]!;
-				let beyondEntryPlane = false;
-				for (let slot = 0; slot + 2 < vertices.length; slot += 3) {
-					const vx = Math.fround(vertices[slot]! + offsetX);
-					const vy = Math.fround(vertices[slot + 1]!);
-					const vz = Math.fround(vertices[slot + 2]! + offsetZ);
-					if (
-						nx * vx + ny * vy + nz * vz + d >
-						CONSERVATIVE_ENTRY_PLANE_EPSILON
-					) {
-						beyondEntryPlane = true;
-						break;
-					}
-				}
-				this.#arena.canAdvance[pairIndex] = beyondEntryPlane ? 1 : 0;
+				this.#arena.canAdvance[pairIndex] = this.#canAdvanceAcrossEntryPlane(
+					predecessor,
+					vertices,
+					offsetX,
+					offsetZ,
+					maxAbsVx,
+					maxAbsVy,
+					maxAbsVz,
+				)
+					? 1
+					: 0;
 			}
 		}
 	}
 
+	#canAdvanceAcrossEntryPlane(
+		predecessor: number,
+		vertices: Float32Array,
+		offsetX: number,
+		offsetZ: number,
+		maxAbsVx: number,
+		maxAbsVy: number,
+		maxAbsVz: number,
+	): boolean {
+		const planeOffset = predecessor * PORTAL_ARRIVAL_METADATA_PLANE_FLOAT_COUNT;
+		const nx = this.#arena.crossingPlanes[planeOffset]!;
+		const ny = this.#arena.crossingPlanes[planeOffset + 1]!;
+		const nz = this.#arena.crossingPlanes[planeOffset + 2]!;
+		const d = this.#arena.crossingPlanes[planeOffset + 3]!;
+		// Bound both float32 perspective-correct interpolation of `vAnchorPosition` and the GPU's
+		// `dot(entryPlane.xyz, vAnchorPosition) + entryPlane.w` rounding across any anchor-relative
+		// coordinate magnitude: any fragment admitted by `> PORTAL_QUERY_EPSILON` on GPU has at
+		// least one triangle vertex exceeding `PORTAL_QUERY_EPSILON - planeErrorSlack`.
+		const maxDotMagnitude =
+			Math.abs(nx) * maxAbsVx +
+			Math.abs(ny) * maxAbsVy +
+			Math.abs(nz) * maxAbsVz +
+			Math.abs(d);
+		const planeErrorSlack = Math.max(
+			MINIMUM_ENTRY_PLANE_MARGIN,
+			ENTRY_PLANE_ULP_BUDGET * FLOAT32_UNIT_ROUNDING * maxDotMagnitude,
+		);
+		const conservativeThreshold = PORTAL_QUERY_EPSILON - planeErrorSlack;
+		for (let slot = 0; slot + 2 < vertices.length; slot += 3) {
+			const vx = Math.fround(vertices[slot]! + offsetX);
+			const vy = Math.fround(vertices[slot + 1]!);
+			const vz = Math.fround(vertices[slot + 2]! + offsetZ);
+			if (nx * vx + ny * vy + nz * vz + d > conservativeThreshold) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	#setCrossingBaseBounds(
+		ordinal: number,
+		minX: number,
+		minY: number,
+		maxX: number,
+		maxY: number,
+	): void {
+		this.#arena.crossingBaseMinX[ordinal] = minX;
+		this.#arena.crossingBaseMinY[ordinal] = minY;
+		this.#arena.crossingBaseMaxX[ordinal] = maxX;
+		this.#arena.crossingBaseMaxY[ordinal] = maxY;
+	}
+
+	/**
+	 * Compute conservative integer screen bounds `[minX, minY, maxX, maxY]` for one selected crossing,
+	 * reproducing `PROPAGATION_VERTEX_SHADER` (`nearClipRays` override and `allow-equal-depth` entry-plane
+	 * depth bias) with relaxed homogeneous frustum clipping and interval perspective division so no
+	 * GPU-admitted fragment can fall outside the resulting rectangle.
+	 */
+	#writeConservativeCrossingScreenBounds(
+		crossing: ScenePortalCrossing,
+		ordinal: number,
+		nearClipRays: boolean,
+		offsetX: number,
+		offsetZ: number,
+		clipMatrix: Mat4,
+		tileMinX: number,
+		tileMinY: number,
+		tileMaxX: number,
+		tileMaxY: number,
+		drawingWidth: number,
+		drawingHeight: number,
+	): void {
+		if (tileMinX >= tileMaxX || tileMinY >= tileMaxY) {
+			this.#setCrossingBaseBounds(ordinal, 0, 0, 0, 0);
+			return;
+		}
+		const m11 = Math.fround(clipMatrix.m11);
+		const m12 = Math.fround(clipMatrix.m12);
+		const m13 = Math.fround(clipMatrix.m13);
+		const m14 = Math.fround(clipMatrix.m14);
+		const m21 = Math.fround(clipMatrix.m21);
+		const m22 = Math.fround(clipMatrix.m22);
+		const m23 = Math.fround(clipMatrix.m23);
+		const m24 = Math.fround(clipMatrix.m24);
+		const m31 = Math.fround(clipMatrix.m31);
+		const m32 = Math.fround(clipMatrix.m32);
+		const m33 = Math.fround(clipMatrix.m33);
+		const m34 = Math.fround(clipMatrix.m34);
+		const m41 = Math.fround(clipMatrix.m41);
+		const m42 = Math.fround(clipMatrix.m42);
+		const m43 = Math.fround(clipMatrix.m43);
+		const m44 = Math.fround(clipMatrix.m44);
+		const col1Mag =
+			Math.abs(m11) + Math.abs(m12) + Math.abs(m13) + Math.abs(m14);
+		const col2Mag =
+			Math.abs(m21) + Math.abs(m22) + Math.abs(m23) + Math.abs(m24);
+		const col3Mag =
+			Math.abs(m31) + Math.abs(m32) + Math.abs(m33) + Math.abs(m34);
+		const col4Mag =
+			Math.abs(m41) + Math.abs(m42) + Math.abs(m43) + Math.abs(m44);
+		const allowEqualBias =
+			!nearClipRays && crossing.maskDepthPolicy === "allow-equal-depth";
+		const planeOffset = ordinal * PORTAL_ARRIVAL_METADATA_PLANE_FLOAT_COUNT;
+		const biasX = allowEqualBias
+			? Math.fround(
+					this.#arena.crossingPlanes[planeOffset]! * PORTAL_QUERY_EPSILON,
+				)
+			: 0;
+		const biasY = allowEqualBias
+			? Math.fround(
+					this.#arena.crossingPlanes[planeOffset + 1]! * PORTAL_QUERY_EPSILON,
+				)
+			: 0;
+		const biasZ = allowEqualBias
+			? Math.fround(
+					this.#arena.crossingPlanes[planeOffset + 2]! * PORTAL_QUERY_EPSILON,
+				)
+			: 0;
+
+		const vertices = crossing.visibilityAperture.vertices;
+		const indices = crossing.visibilityAperture.indices;
+		const planeCount = nearClipRays
+			? NEAR_RAY_HOMOGENEOUS_CLIP_PLANE_COUNT
+			: CANONICAL_HOMOGENEOUS_CLIP_PLANE_COUNT;
+		let minNdcX = Infinity;
+		let minNdcY = Infinity;
+		let maxNdcX = -Infinity;
+		let maxNdcY = -Infinity;
+		let anyAdmitted = false;
+
+		for (let cursor = 0; cursor + 2 < indices.length; cursor += 3) {
+			for (let corner = 0; corner < 3; corner += 1) {
+				const sourceSlot = indices[cursor + corner]! * 3;
+				const ax = Math.fround(vertices[sourceSlot]! + offsetX);
+				const ay = Math.fround(vertices[sourceSlot + 1]!);
+				const az = Math.fround(vertices[sourceSlot + 2]! + offsetZ);
+				const cx = m11 * ax + m21 * ay + m31 * az + m41;
+				const cy = m12 * ax + m22 * ay + m32 * az + m42;
+				let cz = m13 * ax + m23 * ay + m33 * az + m43;
+				const cw = m14 * ax + m24 * ay + m34 * az + m44;
+				const vecMag =
+					col1Mag * Math.abs(ax) +
+					col2Mag * Math.abs(ay) +
+					col3Mag * Math.abs(az) +
+					col4Mag;
+				let slack =
+					HOMOGENEOUS_CLIP_ULP_BUDGET * FLOAT32_UNIT_ROUNDING * (vecMag + 1);
+				if (nearClipRays) {
+					cz = Math.fround(PORTAL_WINDOW_NDC_EPSILON);
+				} else if (allowEqualBias) {
+					const bx = Math.fround(ax + biasX);
+					const by = Math.fround(ay + biasY);
+					const bz = Math.fround(az + biasZ);
+					const biasedZ = m13 * bx + m23 * by + m33 * bz + m43;
+					const biasedW = m14 * bx + m24 * by + m34 * bz + m44;
+					const biasedMag =
+						(Math.abs(m13) + Math.abs(m14)) * Math.abs(bx) +
+						(Math.abs(m23) + Math.abs(m24)) * Math.abs(by) +
+						(Math.abs(m33) + Math.abs(m34)) * Math.abs(bz) +
+						Math.abs(m43) +
+						Math.abs(m44);
+					const biasedWSlack =
+						HOMOGENEOUS_CLIP_ULP_BUDGET *
+						FLOAT32_UNIT_ROUNDING *
+						(biasedMag + 1);
+					if (
+						!Number.isFinite(biasedW) ||
+						Math.abs(biasedW) <=
+							Math.max(MINIMUM_WELL_CONDITIONED_HOMOGENEOUS_W, 4 * biasedWSlack)
+					) {
+						this.#setCrossingBaseBounds(
+							ordinal,
+							tileMinX,
+							tileMinY,
+							tileMaxX,
+							tileMaxY,
+						);
+						return;
+					}
+					cz = (biasedZ * cw) / biasedW;
+					const czSlack =
+						HOMOGENEOUS_CLIP_ULP_BUDGET *
+						FLOAT32_UNIT_ROUNDING *
+						((biasedMag * Math.abs(cw) + Math.abs(biasedZ) * vecMag) /
+							Math.abs(biasedW) +
+							(Math.abs(cz) * biasedMag) / Math.abs(biasedW) +
+							Math.abs(cz) +
+							1);
+					slack = Math.max(slack, czSlack);
+				}
+				if (
+					!Number.isFinite(cx) ||
+					!Number.isFinite(cy) ||
+					!Number.isFinite(cz) ||
+					!Number.isFinite(cw) ||
+					!Number.isFinite(slack)
+				) {
+					this.#setCrossingBaseBounds(
+						ordinal,
+						tileMinX,
+						tileMinY,
+						tileMaxX,
+						tileMaxY,
+					);
+					return;
+				}
+				this.#arena.clipAx[corner] = cx;
+				this.#arena.clipAy[corner] = cy;
+				this.#arena.clipAz[corner] = cz;
+				this.#arena.clipAw[corner] = cw;
+				this.#arena.clipAslack[corner] = slack;
+			}
+
+			let activeX = this.#arena.clipAx;
+			let activeY = this.#arena.clipAy;
+			let activeZ = this.#arena.clipAz;
+			let activeW = this.#arena.clipAw;
+			let activeSlack = this.#arena.clipAslack;
+			let scratchX = this.#arena.clipBx;
+			let scratchY = this.#arena.clipBy;
+			let scratchZ = this.#arena.clipBz;
+			let scratchW = this.#arena.clipBw;
+			let scratchSlack = this.#arena.clipBslack;
+			let count = 3;
+			for (let plane = 0; plane < planeCount && count >= 3; plane += 1) {
+				count = clipRelaxedHomogeneousPolygon(
+					activeX,
+					activeY,
+					activeZ,
+					activeW,
+					activeSlack,
+					count,
+					plane,
+					nearClipRays,
+					scratchX,
+					scratchY,
+					scratchZ,
+					scratchW,
+					scratchSlack,
+				);
+				const prevX = activeX;
+				const prevY = activeY;
+				const prevZ = activeZ;
+				const prevW = activeW;
+				const prevSlack = activeSlack;
+				activeX = scratchX;
+				activeY = scratchY;
+				activeZ = scratchZ;
+				activeW = scratchW;
+				activeSlack = scratchSlack;
+				scratchX = prevX;
+				scratchY = prevY;
+				scratchZ = prevZ;
+				scratchW = prevW;
+				scratchSlack = prevSlack;
+			}
+			if (count < 3) continue;
+			for (let vertex = 0; vertex < count; vertex += 1) {
+				const s = activeSlack[vertex]!;
+				const wLower = activeW[vertex]! - s;
+				if (
+					!Number.isFinite(wLower) ||
+					wLower <= MINIMUM_WELL_CONDITIONED_HOMOGENEOUS_W
+				) {
+					this.#setCrossingBaseBounds(
+						ordinal,
+						tileMinX,
+						tileMinY,
+						tileMaxX,
+						tileMaxY,
+					);
+					return;
+				}
+				const wUpper = activeW[vertex]! + s;
+				const xMin = activeX[vertex]! - s;
+				const xMax = activeX[vertex]! + s;
+				const yMin = activeY[vertex]! - s;
+				const yMax = activeY[vertex]! + s;
+				const ndcXLow = xMin >= 0 ? xMin / wUpper : xMin / wLower;
+				const ndcXHigh = xMax >= 0 ? xMax / wLower : xMax / wUpper;
+				const ndcYLow = yMin >= 0 ? yMin / wUpper : yMin / wLower;
+				const ndcYHigh = yMax >= 0 ? yMax / wLower : yMax / wUpper;
+				minNdcX = Math.min(minNdcX, ndcXLow);
+				maxNdcX = Math.max(maxNdcX, ndcXHigh);
+				minNdcY = Math.min(minNdcY, ndcYLow);
+				maxNdcY = Math.max(maxNdcY, ndcYHigh);
+				anyAdmitted = true;
+			}
+		}
+
+		if (
+			!anyAdmitted ||
+			!Number.isFinite(minNdcX) ||
+			!Number.isFinite(minNdcY) ||
+			!Number.isFinite(maxNdcX) ||
+			!Number.isFinite(maxNdcY)
+		) {
+			this.#setCrossingBaseBounds(ordinal, 0, 0, 0, 0);
+			return;
+		}
+		const minX = Math.max(
+			tileMinX,
+			Math.floor(((minNdcX + 1) * drawingWidth) / 2) -
+				CROSSING_SCREEN_PAD_PIXELS,
+		);
+		const minY = Math.max(
+			tileMinY,
+			Math.floor(((minNdcY + 1) * drawingHeight) / 2) -
+				CROSSING_SCREEN_PAD_PIXELS,
+		);
+		const maxX = Math.min(
+			tileMaxX,
+			Math.ceil(((maxNdcX + 1) * drawingWidth) / 2) +
+				CROSSING_SCREEN_PAD_PIXELS,
+		);
+		const maxY = Math.min(
+			tileMaxY,
+			Math.ceil(((maxNdcY + 1) * drawingHeight) / 2) +
+				CROSSING_SCREEN_PAD_PIXELS,
+		);
+		if (minX >= maxX || minY >= maxY) {
+			this.#setCrossingBaseBounds(ordinal, 0, 0, 0, 0);
+			return;
+		}
+		this.#setCrossingBaseBounds(ordinal, minX, minY, maxX, maxY);
+	}
+
+	/**
+	 * Propagate per-round active crossing rectangles and derive monotonically nested frontier scissors.
+	 *
+	 * Frontier validity invariant (`S_0 >= S_1 >= ... >= S_{D-1}`):
+	 * - Let `U_r = union_c activeRect[r][c]`. For every `r >= 1` and crossing `c`,
+	 *   `activeRect[r][c] = bbox_{p : CanAdvance(p -> c)} (activeRect[r - 1][p] intersect baseRect[c])`,
+	 *   which is contained in `bbox_p activeRect[r - 1][p] = bbox(U_{r - 1})`.
+	 * - Define `S_0 = bbox(U_0)` and `S_r = bbox(U_r union U_{r - 1})` for `r >= 1`. Because
+	 *   `U_r <= bbox(U_{r - 1}) <= S_{r - 1}` and `U_{r - 1} <= S_{r - 1}`, axis-aligned bounding-box
+	 *   monotonicity establishes `S_r <= S_{r - 1}` for every `r >= 1`.
+	 * - On round `r`, `frontier[(r + 1) % 2]` (plus `frontierDepth`) is scissored-cleared across `S_r`,
+	 *   while `frontier[r % 2]` was cleared across `S_{r - 1} >= S_r` on round `r - 1` (not read when `r = 0`).
+	 * - Propagation on round `r` draws under scissor `S_r` (`<= S_{r - 1}`), and reduction on round `r`
+	 *   coalesces axis-aligned subsets of `U_0` (for `r = 0`), `U_{r - 1}` (non-terminal `r > 0`), or
+	 *   `U_{r - 1} union U_r` (terminal `r = D - 1`). Because the axis-aligned bounding box of any subset
+	 *   of `S_r` remains inside the convex rectangle `S_r <= S_{r - 1}`, every texel read from either
+	 *   ping-pong attachment or `frontierDepth` was freshly cleared or written in the current or
+	 *   immediately preceding round—never reading stale data from round `r - 2`, prior frames, shrinking
+	 *   coverage, camera motion, or alternating view parities.
+	 */
 	#computeActiveCrossingRounds(
 		crossingCount: number,
 		depthCap: number,
@@ -1558,6 +1954,120 @@ export class PortalScopeAtlasPlanner {
 
 function clampPixel(value: number, limit: number): number {
 	return Math.min(limit, Math.max(0, value));
+}
+
+function landblockAnchorOffsetX(landblockX: number, anchorX: number): number {
+	return (landblockX - anchorX) * OUTDOOR_LANDBLOCK_WORLD_SIZE;
+}
+
+function landblockAnchorOffsetZ(landblockY: number, anchorY: number): number {
+	return -(landblockY - anchorY) * OUTDOOR_LANDBLOCK_WORLD_SIZE;
+}
+
+function clipRelaxedHomogeneousPolygon(
+	x: Float64Array,
+	y: Float64Array,
+	z: Float64Array,
+	w: Float64Array,
+	slack: Float64Array,
+	count: number,
+	plane: number,
+	nearClipRays: boolean,
+	outputX: Float64Array,
+	outputY: Float64Array,
+	outputZ: Float64Array,
+	outputW: Float64Array,
+	outputSlack: Float64Array,
+): number {
+	let outputCount = 0;
+	let previous = count - 1;
+	let previousDistance = relaxedHomogeneousClipDistance(
+		x[previous]!,
+		y[previous]!,
+		z[previous]!,
+		w[previous]!,
+		slack[previous]!,
+		plane,
+		nearClipRays,
+	);
+	let previousInside = previousDistance >= 0;
+	for (let current = 0; current < count; current += 1) {
+		const currentDistance = relaxedHomogeneousClipDistance(
+			x[current]!,
+			y[current]!,
+			z[current]!,
+			w[current]!,
+			slack[current]!,
+			plane,
+			nearClipRays,
+		);
+		const currentInside = currentDistance >= 0;
+		if (currentInside !== previousInside) {
+			const denominator = previousDistance - currentDistance;
+			if (denominator !== 0) {
+				const fraction = previousDistance / denominator;
+				const ix = x[previous]! + (x[current]! - x[previous]!) * fraction;
+				const iy = y[previous]! + (y[current]! - y[previous]!) * fraction;
+				const iz = z[previous]! + (z[current]! - z[previous]!) * fraction;
+				const iw = w[previous]! + (w[current]! - w[previous]!) * fraction;
+				const islack =
+					slack[previous]! +
+					(slack[current]! - slack[previous]!) * fraction +
+					FLOAT64_CLIP_INTERPOLATION_SLACK *
+						(Math.abs(ix) + Math.abs(iy) + Math.abs(iz) + Math.abs(iw) + 1);
+				outputX[outputCount] = ix;
+				outputY[outputCount] = iy;
+				outputZ[outputCount] = iz;
+				outputW[outputCount] = iw;
+				outputSlack[outputCount] = islack;
+				outputCount += 1;
+			}
+		}
+		if (currentInside) {
+			outputX[outputCount] = x[current]!;
+			outputY[outputCount] = y[current]!;
+			outputZ[outputCount] = z[current]!;
+			outputW[outputCount] = w[current]!;
+			outputSlack[outputCount] = slack[current]!;
+			outputCount += 1;
+		}
+		previous = current;
+		previousDistance = currentDistance;
+		previousInside = currentInside;
+	}
+	return outputCount;
+}
+
+function relaxedHomogeneousClipDistance(
+	x: number,
+	y: number,
+	z: number,
+	w: number,
+	slack: number,
+	plane: number,
+	nearClipRays: boolean,
+): number {
+	const halfSpaceSlack = 2 * slack;
+	if (nearClipRays) {
+		if (plane === 0) return w - PORTAL_WINDOW_NDC_EPSILON + halfSpaceSlack;
+		plane -= 1;
+	}
+	switch (plane) {
+		case 0:
+			return x + w + halfSpaceSlack;
+		case 1:
+			return w - x + halfSpaceSlack;
+		case 2:
+			return y + w + halfSpaceSlack;
+		case 3:
+			return w - y + halfSpaceSlack;
+		case 4:
+			return z + w + halfSpaceSlack;
+		case 5:
+			return w - z + halfSpaceSlack;
+		default:
+			throw new Error(`Portal homogeneous clip plane ${plane} is unavailable.`);
+	}
 }
 
 function validateResource(

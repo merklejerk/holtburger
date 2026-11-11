@@ -105,34 +105,148 @@ describe("WebGL2 SAO scratch policy", () => {
 		expect(readBindings(state.gl)).toEqual(unrelated);
 	});
 
-	it("places the blur far-cutoff strictly past every bilaterally reachable non-neutral tap", () => {
-		const distanceFadeEnd = 120;
-		const bilateralDepthThreshold = 2.5;
-		const cutoff = saoBlurNeutralLinearDepthCutoff(
+	it("places each blur pass far-cutoff strictly past every bilaterally reachable non-neutral tap", () => {
+		const { bilateralDepthThreshold, distanceFade } =
+			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion;
+		const distanceFadeEnd = distanceFade.disabledAt;
+		const firstPassCutoff = saoBlurNeutralLinearDepthCutoff(
 			distanceFadeEnd,
 			bilateralDepthThreshold,
+			1,
+		);
+		const secondPassCutoff = saoBlurNeutralLinearDepthCutoff(
+			distanceFadeEnd,
+			bilateralDepthThreshold,
+			2,
 		);
 
-		expect(cutoff).toBe(122.5);
-		// Any neighbor with positive bilateral weight (|sample - center| < threshold) at center >= cutoff
-		// remains strictly beyond distanceFadeEnd, while a slightly closer center can still reach inside.
-		const nearestPositiveWeightSampleAtCutoff =
-			cutoff - bilateralDepthThreshold + 1e-6;
-		expect(nearestPositiveWeightSampleAtCutoff).toBeGreaterThan(
+		expect(Math.fround(firstPassCutoff)).toBe(firstPassCutoff);
+		expect(Math.fround(secondPassCutoff)).toBe(secondPassCutoff);
+		expect(firstPassCutoff).toBeGreaterThan(
+			distanceFadeEnd + bilateralDepthThreshold,
+		);
+		expect(secondPassCutoff).toBeGreaterThan(
+			distanceFadeEnd + 2 * bilateralDepthThreshold,
+		);
+		expect(firstPassCutoff - bilateralDepthThreshold).toBeGreaterThan(
 			distanceFadeEnd,
 		);
-		const nearestPositiveWeightSampleBelowCutoff =
-			cutoff - 1e-3 - (bilateralDepthThreshold - 1e-4);
-		expect(nearestPositiveWeightSampleBelowCutoff).toBeLessThan(
-			distanceFadeEnd,
+		expect(secondPassCutoff - bilateralDepthThreshold).toBeGreaterThan(
+			firstPassCutoff - 1e-3,
 		);
 
-		expect(() => saoBlurNeutralLinearDepthCutoff(0, 1)).toThrow(
+		expect(() => saoBlurNeutralLinearDepthCutoff(0, 1, 1)).toThrow(
 			"positive finite distance",
 		);
-		expect(() => saoBlurNeutralLinearDepthCutoff(120, 0)).toThrow(
-			"positive finite bilateral threshold",
+		expect(() =>
+			saoBlurNeutralLinearDepthCutoff(distanceFadeEnd, 0, 1),
+		).toThrow("positive finite bilateral threshold");
+		expect(() =>
+			saoBlurNeutralLinearDepthCutoff(
+				distanceFadeEnd,
+				bilateralDepthThreshold,
+				3 as never,
+			),
+		).toThrow("pass ordinal 1 or 2");
+	});
+
+	it("preserves exact R8 two-pass bilateral output across the fade boundary while a shared 1x cutoff truncates Pass 2", () => {
+		const { bilateralDepthThreshold, distanceFade } =
+			SHARED_FRONTEND_TUNING.rendering.ambientOcclusion;
+		const fadeEnd = distanceFade.disabledAt;
+		const width = 5;
+		const height = 5;
+		const linearDepthGrid = new Float32Array(width * height).fill(
+			Math.fround(fadeEnd + 3 * bilateralDepthThreshold),
 		);
+		const rawR8 = new Uint8Array(width * height).fill(255);
+		// Foreground occluding shelf just inside fadeEnd at (0, 1) and (1, 1), stepping across a
+		// sloped ramp through (2, 1) (fadeEnd + 0.55 * T) to (2, 2) (fadeEnd + 1.05 * T).
+		for (const x of [0, 1]) {
+			const index = 1 * width + x;
+			linearDepthGrid[index] = Math.fround(
+				fadeEnd - 0.01 * bilateralDepthThreshold,
+			);
+			rawR8[index] = 0;
+		}
+		linearDepthGrid[1 * width + 2] = Math.fround(
+			fadeEnd + 0.55 * bilateralDepthThreshold,
+		);
+		linearDepthGrid[2 * width + 2] = Math.fround(
+			fadeEnd + 1.05 * bilateralDepthThreshold,
+		);
+
+		const referencePass1 = runQuantizedBilateralBlurPass(
+			rawR8,
+			linearDepthGrid,
+			width,
+			height,
+			1,
+			0,
+			bilateralDepthThreshold,
+			Number.POSITIVE_INFINITY,
+		);
+		const referencePass2 = runQuantizedBilateralBlurPass(
+			referencePass1,
+			linearDepthGrid,
+			width,
+			height,
+			0,
+			1,
+			bilateralDepthThreshold,
+			Number.POSITIVE_INFINITY,
+		);
+
+		const pass1Cutoff = saoBlurNeutralLinearDepthCutoff(
+			fadeEnd,
+			bilateralDepthThreshold,
+			1,
+		);
+		const pass2Cutoff = saoBlurNeutralLinearDepthCutoff(
+			fadeEnd,
+			bilateralDepthThreshold,
+			2,
+		);
+		const guardedPass1 = runQuantizedBilateralBlurPass(
+			rawR8,
+			linearDepthGrid,
+			width,
+			height,
+			1,
+			0,
+			bilateralDepthThreshold,
+			pass1Cutoff,
+		);
+		const guardedPass2 = runQuantizedBilateralBlurPass(
+			guardedPass1,
+			linearDepthGrid,
+			width,
+			height,
+			0,
+			1,
+			bilateralDepthThreshold,
+			pass2Cutoff,
+		);
+		expect(guardedPass1).toEqual(referencePass1);
+		expect(guardedPass2).toEqual(referencePass2);
+
+		const prematureSharedCutoffPass2 = runQuantizedBilateralBlurPass(
+			guardedPass1,
+			linearDepthGrid,
+			width,
+			height,
+			0,
+			1,
+			bilateralDepthThreshold,
+			pass1Cutoff,
+		);
+		const straddlingIndex = 2 * width + 2;
+		expect(linearDepthGrid[straddlingIndex]).toBeGreaterThan(pass1Cutoff);
+		expect(linearDepthGrid[straddlingIndex]).toBeLessThan(pass2Cutoff);
+		expect(
+			prematureSharedCutoffPass2[straddlingIndex]! -
+				referencePass2[straddlingIndex]!,
+		).toBeGreaterThanOrEqual(10);
 	});
 });
 
@@ -295,4 +409,60 @@ function readBindings(gl: WebGL2RenderingContext): BindingSnapshot {
 
 function fakeResource<T>(kind: string, ordinal: number): T {
 	return { kind, ordinal } as T;
+}
+
+const SPATIAL_WEIGHTS = [1, 4, 6, 4, 1] as const;
+
+function runQuantizedBilateralBlurPass(
+	inputR8: Uint8Array,
+	linearDepthGrid: Float32Array,
+	width: number,
+	height: number,
+	directionX: number,
+	directionY: number,
+	bilateralDepthThreshold: number,
+	neutralLinearDepthCutoff: number,
+): Uint8Array {
+	const threshold = Math.fround(bilateralDepthThreshold);
+	const cutoff = Math.fround(neutralLinearDepthCutoff);
+	const outputR8 = new Uint8Array(width * height);
+	for (let y = 0; y < height; y += 1) {
+		for (let x = 0; x < width; x += 1) {
+			const centerIndex = y * width + x;
+			const centerLinearDepth = linearDepthGrid[centerIndex]!;
+			if (centerLinearDepth >= cutoff) {
+				outputR8[centerIndex] = 255;
+				continue;
+			}
+			let weightedOcclusion = 0;
+			let totalWeight = 0;
+			for (let tap = -2; tap <= 2; tap += 1) {
+				const sampleX = Math.min(width - 1, Math.max(0, x + directionX * tap));
+				const sampleY = Math.min(height - 1, Math.max(0, y + directionY * tap));
+				const sampleIndex = sampleY * width + sampleX;
+				const sampleLinearDepth = linearDepthGrid[sampleIndex]!;
+				const depthWeight = Math.max(
+					0,
+					Math.fround(
+						1 -
+							Math.fround(Math.abs(sampleLinearDepth - centerLinearDepth)) /
+								threshold,
+					),
+				);
+				const weight = Math.fround(SPATIAL_WEIGHTS[tap + 2]! * depthWeight);
+				const sampleValue = Math.fround(inputR8[sampleIndex]! / 255);
+				weightedOcclusion = Math.fround(
+					weightedOcclusion + Math.fround(sampleValue * weight),
+				);
+				totalWeight = Math.fround(totalWeight + weight);
+			}
+			const normalized =
+				totalWeight > 0 ? Math.fround(weightedOcclusion / totalWeight) : 1;
+			outputR8[centerIndex] = Math.min(
+				255,
+				Math.max(0, Math.round(normalized * 255)),
+			);
+		}
+	}
+	return outputR8;
 }

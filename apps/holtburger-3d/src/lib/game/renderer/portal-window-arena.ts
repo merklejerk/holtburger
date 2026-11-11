@@ -278,53 +278,6 @@ export class PortalWindowArena {
 		this.#requireWindow(window);
 		return this.#rectangles[window * 4 + 3]!;
 	}
-	/**
-	 * Copy cached clipped NDC bounds `[minX, minY, maxX, maxY]` for one crossing, projecting once
-	 * on cache miss without charging the completed culler primitive budget.
-	 */
-	writeProjectedApertureBounds(
-		projection: PreparedPortalProjection,
-		aperture: PreparedPortalApertureProjectionInput,
-		nearClipRays: boolean,
-		crossingId: number,
-		target: Float64Array,
-		targetOffset: number,
-	): boolean {
-		this.#requireCrossing(crossingId);
-		if (
-			!Number.isInteger(targetOffset) ||
-			targetOffset < 0 ||
-			targetOffset + 4 > target.length
-		) {
-			throw new Error("Portal projected-bounds target offset is out of range.");
-		}
-		const slot = crossingId * 2 + (nearClipRays ? 1 : 0);
-		const offset = slot * 4;
-		if (this.#projectionStates[slot] === 0) {
-			this.#projectAperture(projection, aperture, nearClipRays, null);
-			this.#projectedBounds.set(this.#bounds, offset);
-			this.#projectionStates[slot] = 1;
-		}
-		const minX = this.#projectedBounds[offset]!;
-		const minY = this.#projectedBounds[offset + 1]!;
-		const maxX = this.#projectedBounds[offset + 2]!;
-		const maxY = this.#projectedBounds[offset + 3]!;
-		if (
-			minX >= maxX ||
-			minY >= maxY ||
-			!Number.isFinite(minX) ||
-			!Number.isFinite(minY) ||
-			!Number.isFinite(maxX) ||
-			!Number.isFinite(maxY)
-		) {
-			return false;
-		}
-		target[targetOffset] = minX;
-		target[targetOffset + 1] = minY;
-		target[targetOffset + 2] = maxX;
-		target[targetOffset + 3] = maxY;
-		return true;
-	}
 	#requireWindow(window: number): void {
 		if (!Number.isInteger(window) || window < 0 || window >= this.#windowCount)
 			throw new Error(`Unavailable portal rectangle ${window}.`);
@@ -341,7 +294,7 @@ export class PortalWindowArena {
 		volume: CameraNearClipVolume,
 		aperture: PreparedPortalApertureProjectionInput,
 		projection: PreparedPortalProjection,
-		meter: CameraNearClipPrimitiveMeter | null,
+		meter: CameraNearClipPrimitiveMeter,
 	): boolean {
 		const vertexCount = aperture.aperture.vertices.length / 3;
 		if (vertexCount > this.#capacity.maximumApertureVertexCount) {
@@ -425,7 +378,7 @@ export class PortalWindowArena {
 		projection: PreparedPortalProjection,
 		input: PreparedPortalApertureProjectionInput,
 		nearClipRays: boolean,
-		meter: PortalWindowPrimitiveMeter | null,
+		meter: PortalWindowPrimitiveMeter,
 	): void {
 		this.#bounds.fill(Infinity, 0, 2);
 		this.#bounds.fill(-Infinity, 2);
@@ -542,7 +495,7 @@ function clipHomogeneousPolygon(
 	outputY: Float64Array,
 	outputZ: Float64Array,
 	outputW: Float64Array,
-	meter: PortalWindowPrimitiveMeter | null,
+	meter: PortalWindowPrimitiveMeter,
 ): number {
 	charge(meter, "createdPolygonCount", 1);
 	let outputCount = 0;
@@ -609,7 +562,7 @@ function clipSpatialPolygon(
 	outputX: Float64Array,
 	outputY: Float64Array,
 	outputZ: Float64Array,
-	meter: CameraNearClipPrimitiveMeter | null,
+	meter: CameraNearClipPrimitiveMeter,
 ): number {
 	chargeNear(meter, "createdPolygonCount", 1);
 	let outputCount = 0;
@@ -709,19 +662,19 @@ function ensureOutputVertex(index: number, capacity: number): void {
 }
 
 function charge(
-	meter: PortalWindowPrimitiveMeter | null,
+	meter: PortalWindowPrimitiveMeter,
 	kind: PortalWindowPrimitiveKind,
 	count: number,
 ): void {
 	if (count <= 0) return;
-	meter?.consume(kind, count);
+	meter.consume(kind, count);
 }
 
 function chargeNear(
-	meter: CameraNearClipPrimitiveMeter | null,
+	meter: CameraNearClipPrimitiveMeter,
 	kind: CameraNearClipPrimitiveKind,
 	count: number,
 ): void {
 	if (count <= 0) return;
-	meter?.consume(kind, count);
+	meter.consume(kind, count);
 }

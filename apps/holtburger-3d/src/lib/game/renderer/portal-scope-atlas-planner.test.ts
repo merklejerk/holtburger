@@ -9,7 +9,10 @@ import type {
 	SceneTopologyScope,
 	SceneTopologyView,
 } from "../scene";
-import type { PlanarAperture } from "../scene/planar-aperture";
+import {
+	PORTAL_QUERY_EPSILON,
+	type PlanarAperture,
+} from "../scene/planar-aperture";
 import {
 	createFullPortalViewWindow,
 	type PortalViewWindow,
@@ -49,6 +52,7 @@ import {
 	PORTAL_QUAD_MODE_MAX_REDUCE,
 	PORTAL_QUAD_MODE_ROOT_ROUND0_CLAMP,
 	PortalScopeAtlasPlanner,
+	portalScopeAtlasMaximumQuadCount,
 } from "./portal-scope-atlas-planner";
 import { PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES } from "./portal-scope-tile-metadata";
 
@@ -1425,6 +1429,328 @@ describe("portal scope-atlas planning", () => {
 		);
 		expect(rootOnlyFrame.tileCount).toBe(1);
 		expect(rootOnlyFrame.directRootOutput).toBe(true);
+	});
+
+	it("computes the exact pigeonhole quad capacity and coalesces > 8 disjoint windows to 8", () => {
+		expect(portalScopeAtlasMaximumQuadCount(0)).toBe(1);
+		expect(portalScopeAtlasMaximumQuadCount(1)).toBe(2_295);
+		expect(
+			portalScopeAtlasMaximumQuadCount(
+				PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
+			),
+		).toBe(PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT);
+		expect(() => portalScopeAtlasMaximumQuadCount(-1)).toThrow(
+			"non-negative safe integer",
+		);
+
+		const child = envCellScope("coalesce-child");
+		const disjointCrossings = Array.from({ length: 12 }, (_, index) => {
+			const column = index % 4;
+			const row = Math.floor(index / 4);
+			const minX = -0.9 + column * 0.52;
+			const minY = -0.8 + row * 0.65;
+			return crossing(
+				`window-${index.toString().padStart(2, "0")}`,
+				OUTDOOR_SCOPE,
+				child,
+				{
+					aperture: rectangle(minX, minY, minX + 0.04, minY + 0.04),
+				},
+			);
+		});
+		const graph = topology(
+			[topologyScope(OUTDOOR_SCOPE, null), topologyScope(child, "child")],
+			disjointCrossings,
+		);
+		const input = planInput(OUTDOOR_SCOPE, {
+			portalFootprint: {
+				drawingBuffer: { height: 400, width: 400 },
+				minimumPixelArea: 0,
+			},
+		});
+		const frame = scopeAtlasPlanner().plan(graph, input, {
+			atlas: { height: 800, width: 800 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount: 256,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		});
+
+		expect(frame.commands.traversalDepth).toBe(1);
+		// Round 0 is also terminal here: 8 coalesced root-clamp quads + 8 coalesced child quads.
+		expect(frame.roundReductionQuadCount(0)).toBe(16);
+		// Resolve: 1 root quad + 8 coalesced child quads.
+		expect(frame.resolveQuadCount).toBe(9);
+		expect(frame.quadCount).toBe(25);
+	});
+
+	it("retains far-anchor grazing entry-plane candidates while still rejecting clearly-behind crossings", () => {
+		const middle = envCellScope("far-middle");
+		const grazingTarget = envCellScope("far-grazing");
+		const behindTarget = envCellScope("far-behind");
+		// Anchor is 10 landblocks away (+1,920 world units in Z), where float32 plane evaluation error
+		// exceeds the fixed 0.5 * PORTAL_QUERY_EPSILON margin.
+		const farAnchor = getLandblockCoordinates("0x000bffff");
+		const farClipFromAnchor = Mat4.identity();
+		farClipFromAnchor.m43 = -1_920;
+		const input = planInput(OUTDOOR_SCOPE, {
+			anchorCoordinates: farAnchor,
+			clipFromAnchor: farClipFromAnchor,
+			nearClipVolume: testNearClipVolume(0.5, new Vec3(0, 0, 1_922)),
+			portalFootprint: {
+				drawingBuffer: { height: 100, width: 100 },
+				minimumPixelArea: 0,
+			},
+		});
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				topologyScope(middle, "far-middle"),
+				topologyScope(grazingTarget, "far-grazing"),
+				topologyScope(behindTarget, "far-behind"),
+			],
+			[
+				crossing("a-out-middle", OUTDOOR_SCOPE, middle, {
+					acceptedSide: "positive",
+					aperture: rectangle(-0.6, -0.6, 0.6, 0.6, 0),
+				}),
+				// z = +0.005 is 0.005 units behind z = 0 toward the camera (rejected by a naive +0.0001
+				// margin, but within the float32 ULP error envelope at 1,920 world units from the anchor).
+				crossing("b-middle-grazing", middle, grazingTarget, {
+					acceptedSide: "positive",
+					aperture: rectangle(-0.4, -0.4, 0.4, 0.4, 0.005),
+				}),
+				// z = +0.5 is far behind z = 0 even at 1,920 world units and must still be rejected.
+				crossing("c-middle-behind", middle, behindTarget, {
+					acceptedSide: "positive",
+					aperture: rectangle(-0.4, -0.4, 0.4, 0.4, 0.5),
+				}),
+			],
+		);
+		const frame = scopeAtlasPlanner().plan(graph, input, {
+			atlas: { height: 400, width: 400 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount: 64,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		});
+
+		expect(frame.visibility.selectedCrossingCount).toBe(3);
+		expect(frame.commands.traversalDepth).toBe(2);
+		expect(frame.roundCrossingCount(0)).toBe(1);
+		expect(frame.roundCrossingCount(1)).toBe(1);
+		expect(
+			frame.visibility.selectedCrossing(frame.roundCrossingOrdinal(1, 0)).id,
+		).toBe("portal-crossing:b-middle-grazing");
+	});
+
+	it("includes allow-equal-depth GPU biased triangles in conservative screen bounds while excluding unbiased ones", () => {
+		const allowTarget = envCellScope("bias-allow");
+		const rejectTarget = envCellScope("bias-reject");
+		// Camera sits at z = +2 (acceptedSide = "positive"), so oriented entryPlane.xyz = (0, 0, -1)
+		// and allow-equal-depth adds depthBias.z = -PORTAL_QUERY_EPSILON, pulling z = 1 + 0.5 * eps
+		// into canonical [-1, 1] clip space on the GPU.
+		const grazingZ = 1 + PORTAL_QUERY_EPSILON * 0.5;
+		const splitGrazingAperture: PlanarAperture = {
+			indices: new Uint32Array([0, 1, 2, 3, 4, 5]),
+			plane: { d: 0, normal: new Vec3(0, 0, 1) },
+			vertices: new Float32Array([
+				// Left triangle well inside canonical clip space (x in [-0.9, -0.8], z = 0).
+				-0.9,
+				-0.2,
+				0,
+				-0.8,
+				-0.2,
+				0,
+				-0.85,
+				0.2,
+				0,
+				// Right triangle just outside z = -1 by 0.5 * PORTAL_QUERY_EPSILON (x in [0.7, 0.8]),
+				// shifted inside [-1, 1] on GPU only when allow-equal-depth adds +PORTAL_QUERY_EPSILON.
+				0.7,
+				-0.2,
+				grazingZ,
+				0.8,
+				-0.2,
+				grazingZ,
+				0.75,
+				0.2,
+				grazingZ,
+			]),
+		};
+		const input = planInput(OUTDOOR_SCOPE, {
+			nearClipVolume: testNearClipVolume(0.25, new Vec3(0, 0, 2)),
+			portalFootprint: {
+				drawingBuffer: { height: 100, width: 100 },
+				minimumPixelArea: 0,
+			},
+		});
+		const planner = scopeAtlasPlanner();
+		const resource = {
+			atlas: { height: 300, width: 300 },
+			drawingBuffer: input.portalFootprint.drawingBuffer,
+			maximumCrossingTriangleVertexCount: 64,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		};
+
+		const rejectFrame = planner.plan(
+			topology(
+				[
+					topologyScope(OUTDOOR_SCOPE, null),
+					topologyScope(rejectTarget, "bias-reject"),
+				],
+				[
+					crossing("reject", OUTDOOR_SCOPE, rejectTarget, {
+						acceptedSide: "positive",
+						maskDepthPolicy: "reject-equal-depth",
+						visibilityAperture: splitGrazingAperture,
+					}),
+				],
+			),
+			input,
+			resource,
+		);
+		const rejectMaxX =
+			rejectFrame.roundFrontierScissorX(0) +
+			rejectFrame.roundFrontierScissorWidth(0);
+
+		const allowFrame = planner.plan(
+			topology(
+				[
+					topologyScope(OUTDOOR_SCOPE, null),
+					topologyScope(allowTarget, "bias-allow"),
+				],
+				[
+					crossing("allow", OUTDOOR_SCOPE, allowTarget, {
+						acceptedSide: "positive",
+						maskDepthPolicy: "allow-equal-depth",
+						visibilityAperture: splitGrazingAperture,
+					}),
+				],
+			),
+			input,
+			resource,
+		);
+		const allowMaxX =
+			allowFrame.roundFrontierScissorX(0) +
+			allowFrame.roundFrontierScissorWidth(0);
+
+		expect(rejectMaxX).toBeLessThanOrEqual(12);
+		expect(allowMaxX).toBeGreaterThanOrEqual(90);
+	});
+
+	it("schedules full-viewport branching and cyclic depth-16 workloads within bounded scissored clear and quad budgets", () => {
+		const maximumDepth = PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth;
+		const leftScopes = Array.from({ length: maximumDepth - 1 }, (_, index) =>
+			envCellScope(`full-left-${index.toString().padStart(2, "0")}`),
+		);
+		const rightScopes = Array.from({ length: maximumDepth - 1 }, (_, index) =>
+			envCellScope(`full-right-${index.toString().padStart(2, "0")}`),
+		);
+		const sharedIslands = ["hub-0", "hub-1", "hub-2"] as const;
+		const drawingBuffer = { height: 861, width: 1_424 };
+		const atlas = {
+			height:
+				drawingBuffer.height *
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.rowCount,
+			width:
+				drawingBuffer.width *
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.columnCount,
+		};
+		const branchCrossings: ScenePortalCrossing[] = [];
+		for (let step = 0; step < maximumDepth; step += 1) {
+			const z = 0.9 - step * 0.1;
+			branchCrossings.push(
+				crossing(
+					`left-${step.toString().padStart(2, "0")}`,
+					step === 0 ? OUTDOOR_SCOPE : leftScopes[step - 1]!,
+					step === maximumDepth - 1 ? OUTDOOR_SCOPE : leftScopes[step]!,
+					{ aperture: rectangle(-0.85, -0.7, -0.05, 0.7, z) },
+				),
+				crossing(
+					`right-${step.toString().padStart(2, "0")}`,
+					step === 0 ? OUTDOOR_SCOPE : rightScopes[step - 1]!,
+					step === maximumDepth - 1 ? OUTDOOR_SCOPE : rightScopes[step]!,
+					{ aperture: rectangle(0.05, -0.7, 0.85, 0.7, z) },
+				),
+			);
+		}
+		const graph = topology(
+			[
+				topologyScope(OUTDOOR_SCOPE, null),
+				...leftScopes.map((scope, index) =>
+					topologyScope(scope, sharedIslands[index % sharedIslands.length]!),
+				),
+				...rightScopes.map((scope, index) =>
+					topologyScope(
+						scope,
+						sharedIslands[(index + 1) % sharedIslands.length]!,
+					),
+				),
+			],
+			branchCrossings,
+		);
+		const planner = new PortalScopeAtlasPlanner(
+			PORTAL_RENDER_CAPACITY_POLICY.culler,
+			maximumDepth,
+		);
+		const input = planInput(OUTDOOR_SCOPE, {
+			nearClipVolume: testNearClipVolume(0.25, new Vec3(0, 0, 2)),
+			portalFootprint: { drawingBuffer, minimumPixelArea: 0 },
+		});
+		const frame = planner.plan(graph, input, {
+			atlas,
+			drawingBuffer,
+			maximumCrossingTriangleVertexCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
+					.maximumCrossingTriangleVertexCount,
+			maximumArrivalStateCount:
+				PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas.maximumArrivalStateCount,
+		});
+
+		expect(frame.visibility.status).toBe("complete");
+		expect(frame.tileCount).toBe(4);
+		expect(frame.packedWidth).toBeLessThanOrEqual(atlas.width);
+		expect(frame.packedHeight).toBeLessThanOrEqual(atlas.height);
+		expect(frame.commands.traversalDepth).toBe(maximumDepth);
+		expect(frame.quadCount).toBeLessThanOrEqual(
+			PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT,
+		);
+
+		let previousScissorMinX = 0;
+		let previousScissorMinY = 0;
+		let previousScissorMaxX = drawingBuffer.width;
+		let previousScissorMaxY = drawingBuffer.height;
+		let scissoredFrontierClearPixels = 0;
+		for (let round = 0; round < maximumDepth; round += 1) {
+			expect(frame.roundCrossingCount(round)).toBeGreaterThanOrEqual(2);
+			const minX = frame.roundFrontierScissorX(round);
+			const minY = frame.roundFrontierScissorY(round);
+			const width = frame.roundFrontierScissorWidth(round);
+			const height = frame.roundFrontierScissorHeight(round);
+			const maxX = minX + width;
+			const maxY = minY + height;
+			expect(minX).toBeGreaterThanOrEqual(previousScissorMinX);
+			expect(minY).toBeGreaterThanOrEqual(previousScissorMinY);
+			expect(maxX).toBeLessThanOrEqual(previousScissorMaxX);
+			expect(maxY).toBeLessThanOrEqual(previousScissorMaxY);
+			previousScissorMinX = minX;
+			previousScissorMinY = minY;
+			previousScissorMaxX = maxX;
+			previousScissorMaxY = maxY;
+			scissoredFrontierClearPixels += width * height;
+		}
+		const round0CoverageRatio =
+			(frame.roundFrontierScissorWidth(0) *
+				frame.roundFrontierScissorHeight(0)) /
+			(drawingBuffer.width * drawingBuffer.height);
+		expect(round0CoverageRatio).toBeGreaterThan(0.55);
+		const fullViewportClearPixels =
+			maximumDepth * drawingBuffer.width * drawingBuffer.height;
+		expect(scissoredFrontierClearPixels).toBeLessThan(fullViewportClearPixels);
+		expect(frame.commands.scopeEnvelopeReductionInstanceCount).toBeLessThan(80);
+		expect(frame.resolveQuadCount).toBeLessThanOrEqual(9);
 	});
 });
 

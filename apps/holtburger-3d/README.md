@@ -14,8 +14,10 @@ it through the context-isolated Electron preload boundary.
 
 The launcher's gear button opens **App settings** for process-wide graphics preferences.
 Windows defaults to OpenGL with display synchronization off, preserving the scene FPS and
-UI scrolling workarounds. GPU compositing is off by default on Windows to address intermittent
-transparent UI patches observed on NVIDIA laptops; **Use GPU compositing** enables it again.
+UI scrolling workarounds. GPU compositing is enabled by default on all platforms for performance.
+If panels or text develop intermittent transparent holes, as observed on some Windows NVIDIA
+laptops, turn off **Use GPU compositing** as a compatibility workaround. Disabling it can
+significantly reduce frame rates.
 macOS and Linux default to Automatic with synchronization and GPU compositing on.
 Existing preferences retain their backend and synchronization choices and adopt the platform's
 compositing default when the new preference is absent.

@@ -161,10 +161,15 @@
 						><input
 							type="checkbox"
 							name="gpuCompositing"
+							aria-describedby={`${id}-gpu-compositing-help`}
 							bind:checked={loaded.draft.gpuCompositing}
 							disabled={busy}
 						/> Use GPU compositing</label
 					>
+					<p id={`${id}-gpu-compositing-help`}>
+						Turning this off may resolve transparent holes in panels or text,
+						but can significantly reduce frame rates.
+					</p>
 				{:else if operation === "loading"}
 					<p role="status">Loading app settings…</p>
 				{/if}

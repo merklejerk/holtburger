@@ -10,10 +10,10 @@ import {
 import { formatError } from "../src/lib/format-error.js";
 import { replaceLocalFile } from "./replace-local-file.js";
 
-/** Windows defaults address FPS, scrolling, and intermittent missing UI patches. */
+/** Windows keeps its FPS and scrolling workarounds; compositing remains accelerated by default. */
 function defaultAppSettings(platform: NodeJS.Platform): AppSettings {
 	return platform === "win32"
-		? { graphicsBackend: "gl", vsync: false, gpuCompositing: false }
+		? { graphicsBackend: "gl", vsync: false, gpuCompositing: true }
 		: { graphicsBackend: "automatic", vsync: true, gpuCompositing: true };
 }
 

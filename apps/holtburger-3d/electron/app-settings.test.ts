@@ -55,10 +55,12 @@ describe("app graphics startup", () => {
 			if (platform === "win32") {
 				expect(startup.switches.get("use-angle")).toBe("gl");
 				expect(startup.switches.has("disable-gpu-vsync")).toBe(true);
-				expect(startup.switches.has("disable-gpu-compositing")).toBe(true);
 			} else {
 				expect(startup.switches.size).toBe(0);
 			}
+			expect(startup.switches.has("disable-gpu-compositing")).toBe(
+				!store.defaults.gpuCompositing,
+			);
 		},
 	);
 	it("applies compositing preferences, preserves launch overrides, and requires restart", () => {
@@ -151,7 +153,7 @@ describe("app settings persistence", () => {
 			expect(store.diagnostic).toBeNull();
 			expect(store.settings).toEqual({
 				...previous,
-				gpuCompositing: platform !== "win32",
+				gpuCompositing: store.defaults.gpuCompositing,
 			});
 			await store.save(store.settings);
 			expect(new AppSettingsStore(path, platform).settings).toEqual(

@@ -47,20 +47,18 @@ function commandLine(initial: readonly [string, string][]) {
 
 describe("app graphics startup", () => {
 	it.each(["win32", "darwin", "linux"] as const)(
-		"preserves established %s startup behavior through platform defaults",
+		"applies %s platform defaults at startup",
 		async (platform) => {
 			const store = new AppSettingsStore(await settingsPath(), platform);
 			const startup = commandLine([]);
 			applyAppGraphicsSettings(store.settings, startup);
 			if (platform === "win32") {
-				expect(startup.switches.get("use-angle")).toBe("gl");
+				expect(startup.switches.get("use-angle")).toBe("d3d11");
 				expect(startup.switches.has("disable-gpu-vsync")).toBe(true);
 			} else {
 				expect(startup.switches.size).toBe(0);
 			}
-			expect(startup.switches.has("disable-gpu-compositing")).toBe(
-				!store.defaults.gpuCompositing,
-			);
+			expect(startup.switches.has("disable-gpu-compositing")).toBe(false);
 		},
 	);
 	it("applies compositing preferences, preserves launch overrides, and requires restart", () => {
@@ -144,21 +142,30 @@ describe("app graphics startup", () => {
 
 describe("app settings persistence", () => {
 	it.each(["win32", "darwin", "linux"] as const)(
-		"adds the %s compositing default to older preferences without resetting other choices",
+		"loads and persists the current %s graphics scope",
 		async (platform) => {
 			const path = await settingsPath();
-			const previous = { graphicsBackend: "automatic", vsync: false };
-			await writeFile(path, JSON.stringify({ version: 1, settings: previous }));
+			const previous = {
+				graphicsBackend: platform === "darwin" ? "metal" : "gl",
+				vsync: true,
+				gpuCompositing: false,
+			} as const;
+			const legacyContents = JSON.stringify({ version: 1, settings: previous });
+			await writeFile(path, legacyContents);
 			const store = new AppSettingsStore(path, platform);
 			expect(store.diagnostic).toBeNull();
-			expect(store.settings).toEqual({
-				...previous,
-				gpuCompositing: store.defaults.gpuCompositing,
+			expect(store.settings).toEqual(store.defaults);
+			const selected = {
+				graphicsBackend: "automatic",
+				vsync: false,
+				gpuCompositing: false,
+			} as const;
+			await store.save(selected);
+			expect(new AppSettingsStore(path, platform).settings).toEqual(selected);
+			expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+				version: 1,
+				graphics: selected,
 			});
-			await store.save(store.settings);
-			expect(new AppSettingsStore(path, platform).settings).toEqual(
-				store.settings,
-			);
 		},
 	);
 	it("retains prior preferences after a failed replacement and allows an explicit retry", async () => {

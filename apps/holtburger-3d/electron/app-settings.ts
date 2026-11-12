@@ -10,10 +10,10 @@ import {
 import { formatError } from "../src/lib/format-error.js";
 import { replaceLocalFile } from "./replace-local-file.js";
 
-/** Windows keeps its FPS and scrolling workarounds; compositing remains accelerated by default. */
+/** Windows uses accelerated D3D11 presentation with display synchronization off. */
 function defaultAppSettings(platform: NodeJS.Platform): AppSettings {
 	return platform === "win32"
-		? { graphicsBackend: "gl", vsync: false, gpuCompositing: true }
+		? { graphicsBackend: "d3d11", vsync: false, gpuCompositing: true }
 		: { graphicsBackend: "automatic", vsync: true, gpuCompositing: true };
 }
 
@@ -88,15 +88,14 @@ export function applyAppGraphicsSettings(
 	return overrides.map((name) => `--${name}`);
 }
 
+// Unknown sections are retired on the next canonical save rather than imported.
 const savedAppSettingsSchema = z
 	.object({
 		version: z.literal(1),
-		// Earlier version-1 files predate this preference; resolve it at the native load boundary.
-		settings: appSettingsSchema.extend({
-			gpuCompositing: z.boolean().optional(),
-		}),
+		/** Shared policy scope starts fresh across platforms; later choices persist here. */
+		graphics: appSettingsSchema.optional(),
 	})
-	.strict();
+	.strip();
 
 /** Synchronous loading is required before Electron initializes its GPU process. */
 export class AppSettingsStore {
@@ -115,14 +114,10 @@ export class AppSettingsStore {
 		this.#defaults = defaultAppSettings(platform);
 		this.#settings = { ...this.#defaults };
 		try {
-			const { settings } = savedAppSettingsSchema.parse(
+			const { graphics } = savedAppSettingsSchema.parse(
 				JSON.parse(readFileSync(path, "utf8")),
 			);
-			this.#settings = this.#validate({
-				...settings,
-				gpuCompositing:
-					settings.gpuCompositing ?? this.#defaults.gpuCompositing,
-			});
+			if (graphics !== undefined) this.#settings = this.#validate(graphics);
 		} catch (error) {
 			if (error instanceof Error && "code" in error && error.code === "ENOENT")
 				return;
@@ -163,7 +158,8 @@ export class AppSettingsStore {
 			}
 			await replaceLocalFile(
 				this.#path,
-				JSON.stringify({ version: 1, settings }, null, 2) + "\n",
+				// Canonical saves drop retired sections on every platform.
+				JSON.stringify({ version: 1, graphics: settings }, null, 2) + "\n",
 			);
 			this.#settings = settings;
 			this.#diagnostic = null;

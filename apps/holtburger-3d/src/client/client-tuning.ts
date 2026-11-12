@@ -108,8 +108,6 @@ const CLIENT_PORTAL_TRANSITION = {
 
 /** Client-owned camera, scene-interest, diagnostics, and initial presentation policy. */
 export const CLIENT_TUNING = {
-	/** Main-view cadence above display refresh; CLI overrides this, and zero disables pacing. */
-	frameCadenceMarginPercent: 5,
 	/** Critical-vital arbitration; theme tokens own screen-edge appearance. */
 	vitalWarning: {
 		selectionMargin: 0.03,

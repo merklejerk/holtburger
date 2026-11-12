@@ -13,14 +13,14 @@ content and simulation behavior runs in the `holtburger-3d-host` Rust sidecar; t
 it through the context-isolated Electron preload boundary.
 
 The launcher's gear button opens **App settings** for process-wide graphics preferences.
-Windows defaults to OpenGL with display synchronization off, preserving the scene FPS and
-UI scrolling workarounds. GPU compositing is enabled by default on all platforms for performance.
+Windows defaults to Direct3D 11 with display synchronization off. GPU compositing is enabled by default on all platforms for performance.
 If panels or text develop intermittent transparent holes, as observed on some Windows NVIDIA
-laptops, turn off **Use GPU compositing** as a compatibility workaround. Disabling it can
+laptops, try **Use defaults** to restore Direct3D 11 and accelerated compositing first.
+If artifacts persist, turn off **Use GPU compositing** as a compatibility workaround. Disabling it can
 significantly reduce frame rates.
 macOS and Linux default to Automatic with synchronization and GPU compositing on.
-Existing preferences retain their backend and synchronization choices and adopt the platform's
-compositing default when the new preference is absent.
+Graphics preferences start fresh on every platform in a shared `graphics` section, so earlier
+choices do not override the platform defaults. Subsequent saved choices persist.
 **Use defaults** restores the current platform's defaults. Automatic backend selection delegates
 to Chromium.
 Windows offers Direct3D 11 and OpenGL overrides, macOS offers Metal, and Linux offers OpenGL.
@@ -28,7 +28,8 @@ The modal shows the renderer reported by Chromium when available, hardware accel
 and explicit launch overrides. **Save and restart** saves preferences, flushes native state,
 and restarts the application. Unsaved launcher
 entries are discarded on restart. Preferences live in `app-settings.json` in Electron's
-user-data directory, independently of server profiles and game settings. An unreadable
+user-data directory, independently of server profiles and game settings. The shared `graphics`
+section replaces the retired `settings` section, which is removed on the next save. An unreadable
 file is reported in the modal and preserved as a sibling backup on explicit save.
 During `npm run dev:client`, the development launcher restarts Electron while keeping Vite
 running on the same port. Quit still stops both processes. Packaged apps use Electron relaunch.
@@ -51,7 +52,7 @@ flag restores GPU vsync on any platform, overriding saved preferences, an explic
 `--disable-frame-rate-limit`, because Chromium's frame-rate bypass implicitly disables
 GPU vsync. Chromium has no matching native enable switch; `--disable-gpu-vsync=false`
 does not restore vsync.
-The Windows OpenGL/vsync workarounds can cause transient startup presentation artifacts on some systems.
+The optional Windows OpenGL backend can cause transient UI presentation artifacts on some systems.
 
 Windows packaging also exports `NvOptimusEnablement = 1` and
 `AmdPowerXpressRequestHighPerformance = 1` from the unsigned Electron executable.
@@ -688,19 +689,8 @@ npm run dev:client:release -- --account YOUR_ACCOUNT --uncapped
 npm run dev:explorer:release -- --uncapped
 ```
 
-The client main view renders with a 5% cadence margin above observed display refresh by default,
-authored in `CLIENT_TUNING.frameCadenceMarginPercent` in `src/client/client-tuning.ts`.
-Override it with `--frame-cadence-margin=10`, or use `--frame-cadence-margin=0` for the ordinary
-refresh-paced loop. The margin controls render submission cadence and preserves the GPU vsync setting;
-it does not increase the display's refresh rate. Extra submissions consume headroom and can hurt pacing
-on saturated machines. Background throttling and preview cadence remain independent.
-`--uncapped` bypasses the default margin unless a margin is explicitly supplied;
-`--enable-vsync` retains its existing precedence over `--uncapped`.
-
-```bash
-npm run dev:client -- --enable-vsync --frame-cadence-margin=10
-npm run dev:client -- --enable-vsync --frame-cadence-margin=0
-```
+The client main view uses the shared browser animation-frame loop. Background throttling and
+preview cadence remain independent. `--enable-vsync` takes precedence over `--uncapped`.
 
 Pass `--dev` to enable renderer diagnostics and expose Chrome DevTools on port 9222,
 including in release bundles. This flag does not change the build or optimization mode.

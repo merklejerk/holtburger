@@ -23,11 +23,11 @@ Open the launcher's gear button → **App settings** for process-wide graphics c
 
 | Setting                                     | What it controls                                                                                                                            | Windows default |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| Graphics backend                            | The graphics API used by the browser runtime. Automatic lets it choose; Windows also offers OpenGL and Direct3D 11.                         | OpenGL          |
+| Graphics backend                            | The graphics API used by the browser runtime. Automatic lets it choose; Windows also offers OpenGL and Direct3D 11.                         | Direct3D 11     |
 | Synchronize frames with the display (VSync) | Requests frame synchronization with the display.                                                                                            | Off             |
 | Use GPU compositing                         | Uses the GPU to combine interface surfaces for display. Turning it off can resolve missing UI patches but significantly reduce frame rates. | On              |
 
-macOS and Linux default to Automatic with VSync and GPU compositing on. **Use defaults** restores the choices for your platform. Change one setting at a time and restart to compare results.
+Upgrading from the earlier graphics settings resets launcher graphics preferences to platform defaults on every platform; choices saved afterward persist. Server profiles, accounts, and in-game settings are unaffected. macOS and Linux default to Automatic with VSync and GPU compositing on. **Use defaults** restores the choices for your platform. Change one setting at a time and restart to compare results.
 
 If the application will not open, start with the [installation guide for your platform](/holtburger/start/). It covers unsigned-download prompts, Linux runtime dependencies, and Flatpak folder access.
 
@@ -35,11 +35,13 @@ If the application will not open, start with the [installation guide for your pl
 
 ## Windows UI flickering
 
-If panels or text briefly develop transparent holes that reveal the content underneath, open **App settings**, turn off **Use GPU compositing**, and choose **Save and restart**. This workaround can significantly reduce frame rates. GPU compositing is enabled by default for performance.
+If panels or text briefly develop transparent holes that reveal the content underneath, open **App settings**, choose **Use defaults**, and then **Save and restart**. Windows defaults to Direct3D 11 with GPU compositing on. This configuration has resolved the corruption on a tested Windows 11 NVIDIA laptop, including fullscreen; behavior on other machines may differ.
+
+If artifacts persist with Direct3D 11, turn off **Use GPU compositing** and choose **Save and restart** as a compatibility fallback. Disabling it can significantly reduce frame rates.
 
 This corruption has been observed on Windows 11 NVIDIA laptops in the launcher, character selection, and game panels. It may occur briefly after startup or recur later. Similar Windows/NVIDIA corruption is reported in [Electron issue #43122](https://github.com/electron/electron/issues/43122), but the exact cause in Holtburger has not been established.
 
-If you previously added graphics flags to a shortcut, remove them before comparing saved settings; explicit launch overrides can take precedence. Changing VSync or switching to Direct3D 11 is not required for this workaround. Direct3D 11 can reduce frame rate on some systems, so retain OpenGL if it performs better.
+If you previously added graphics flags to a shortcut, remove them before comparing saved settings; explicit launch overrides can take precedence. If Direct3D 11 performs poorly on your system, compare OpenGL, checking both frame rate and UI stability.
 
 If flickering continues with GPU compositing off, include **Copy hardware info** and a short recording in your report. A recording is more useful than a screenshot for a glitch that lasts only a frame. See the [Windows installation troubleshooting section](/holtburger/start/3d/windows/#troubleshooting) for other startup problems.
 

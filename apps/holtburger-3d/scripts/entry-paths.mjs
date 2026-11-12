@@ -197,13 +197,6 @@ export function extractElectronLaunchArguments(args) {
 	}
 	// Use the same query assembly and first-value semantics as the renderer diagnostics flag.
 	const query = new URLSearchParams(buildEntryPath("", remainingArgs));
-	// Uncapped launches bypass the client tuning cap unless a cadence is explicitly requested.
-	if (
-		switches.has("--disable-frame-rate-limit") &&
-		!switches.has("--enable-vsync") &&
-		!query.has("frame-cadence-margin")
-	)
-		remainingArgs.push("--frame-cadence-margin=0");
 	if (debugPort !== undefined || query.get("debug") === "true") {
 		switches.add(`--remote-debugging-port=${debugPort ?? DEFAULT_DEBUG_PORT}`);
 	}

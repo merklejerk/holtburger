@@ -41,7 +41,7 @@ For failed connections, see [Help](/holtburger/3d/help/).
 
 ## Launch settings
 
-Open **App settings** in the launcher to choose a graphics backend and toggle **Synchronize frames with the display (VSync)** or **Use GPU compositing**. Apply changes with **Save and restart**. Windows defaults to OpenGL with VSync off and GPU compositing on; **Use defaults** restores your platform's choices.
+Open **App settings** in the launcher to choose a graphics backend and toggle **Synchronize frames with the display (VSync)** or **Use GPU compositing**. Apply changes with **Save and restart**. Windows defaults to Direct3D 11 with VSync off and GPU compositing on; **Use defaults** restores your platform's choices.
 
 For explanations of each setting, see [graphics troubleshooting](/holtburger/3d/help/#before-the-game-opens). If pieces of the interface briefly disappear, see [Windows UI flickering](/holtburger/3d/help/#windows-ui-flickering).
 

@@ -17,11 +17,27 @@ use crate::{
     entity_classification::{
         DynamicEntityMapBlipCategory, semantic_dynamic_entity_map_blip_category,
     },
+    spell::{CantripTier, RankedCantripTier},
     state::{
         ScenePlacementError,
         storage::{RosterCoverage, StorageLocation, StorageSlot},
     },
 };
+
+/// World-derived intrinsic equipment cantrip status, synchronized with appraisals and updates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum EquipmentCantripState {
+    /// No successful full appraisal is retained for the current entity incarnation.
+    Unappraised,
+    /// Full appraisal arrived, but at least one intrinsic item spell is missing from `spell_catalog`.
+    Incomplete,
+    /// Full appraisal resolved every intrinsic item spell against `spell_catalog`.
+    Known {
+        #[serde(rename = "highestTier")]
+        highest_tier: Option<RankedCantripTier>,
+    },
+}
 
 /// Whether the server supports a health subscription for the described object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +117,9 @@ pub enum EntityDescription {
         /// Does not establish skill/level admission; absent before valid locations arrive.
         #[serde(rename = "equipLocations")]
         equip_locations: Option<u32>,
+        /// World-derived intrinsic cantrip tier for equippable items; absent on non-equipment.
+        #[serde(rename = "equipmentCantrip")]
+        equipment_cantrip: Option<EquipmentCantripState>,
         /// Whether known equipment facts offer a distinct alternate-side request for action cells.
         #[serde(rename = "hasAlternateEquipSide")]
         has_alternate_equip_side: bool,
@@ -334,6 +353,18 @@ pub struct VendorSaleEligibility {
     pub accepted: bool,
 }
 
+/// Incarnation-scoped entity health sample projected into the host monotonic clock.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityHealthFacts {
+    /// Server entity incarnation that produced this sample.
+    pub instance_sequence: u16,
+    /// Clamped health fraction in `[0, 1]`.
+    pub fraction: f32,
+    /// Monotonic host-clock timestamp in seconds (`DynamicEntityHostTime::seconds`).
+    pub observed_at_seconds: f64,
+}
+
 /// One accepted identity's facts; browser consumers never replay raw entity properties.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -342,6 +373,8 @@ pub struct ClientEntityFacts {
     pub guid: Guid,
     /// Summon ownership and observed activity/timing; absent without nonzero pet ownership.
     pub summon: Option<crate::summon::SummonFacts>,
+    /// Retained entity health observation projected into monotonic host time for snapshot recovery.
+    pub health: Option<EntityHealthFacts>,
     /// Public-only independent-world catalog facts; absent for contents and attachments.
     pub nearby: Option<NearbyEntityFacts>,
     /// Cell/header/HUD and health subscription facts.
@@ -416,6 +449,23 @@ impl WorldState {
         &self,
         guid: Guid,
     ) -> Result<Option<ClientEntityFacts>, ScenePlacementError> {
+        self.client_entity_facts_inner(guid, None)
+    }
+
+    /// Project accepted facts with monotonic host-clock health stamps for core snapshot recovery.
+    pub fn client_entity_facts_with_host_origin(
+        &self,
+        guid: Guid,
+        host_origin: std::time::Instant,
+    ) -> Result<Option<ClientEntityFacts>, ScenePlacementError> {
+        self.client_entity_facts_inner(guid, Some(host_origin))
+    }
+
+    fn client_entity_facts_inner(
+        &self,
+        guid: Guid,
+        host_origin: Option<std::time::Instant>,
+    ) -> Result<Option<ClientEntityFacts>, ScenePlacementError> {
         let entity = self.get_visible_entity(guid);
         let owned_by_player = self.storage.owned_by(guid, self.player.guid);
         // Deletion retires the old storage links at acceptance. Any later owned declaration
@@ -451,6 +501,19 @@ impl WorldState {
         }) {
             Some((entity, name, item_type)) => {
                 let equipment = crate::equipment::EquipmentFacts::from_entity(entity).ok();
+                let equip_locations =
+                    entity
+                        .get_int_prop(PropertyInt::ValidLocations)
+                        .map(|mask| {
+                            equipment
+                                .map_or(mask as u32, |facts| facts.compatible_locations().bits())
+                        });
+                let equipment_cantrip = self.item_equipment_cantrip_state(
+                    entity,
+                    entity.flags,
+                    entity.inspection_supplement.as_ref(),
+                    &entity.spell_book,
+                );
                 EntityDescription::Known {
                     name: name.to_owned(),
                     stack_count: entity.is_stackable().then(|| entity.stack_size()),
@@ -477,12 +540,8 @@ impl WorldState {
                     // Apparel target hints need declared coverage, not the clothing priority
                     // required for replacement planning. Incomplete conflict facts must not
                     // make a known equippable item lose its equipment action classification.
-                    equip_locations: entity
-                        .get_int_prop(PropertyInt::ValidLocations)
-                        .map(|mask| {
-                            equipment
-                                .map_or(mask as u32, |facts| facts.compatible_locations().bits())
-                        }),
+                    equip_locations,
+                    equipment_cantrip,
                     object_flags: entity.flags.bits(),
                     wcid: entity.wcid,
                     pyreal_balance: entity.get_int_prop(PropertyInt::CoinValue).map(|value| {
@@ -591,6 +650,18 @@ impl WorldState {
                 }),
             description,
             summon: entity.and_then(|entity| entity.summon_facts()),
+            health: host_origin.and_then(|origin| {
+                entity.and_then(|entity| {
+                    entity.health.map(|health| EntityHealthFacts {
+                        instance_sequence: entity.instance_sequence(),
+                        fraction: health.fraction,
+                        observed_at_seconds: health
+                            .observed_at
+                            .saturating_duration_since(origin)
+                            .as_secs_f64(),
+                    })
+                })
+            }),
             location,
             owned_by_player,
             can_pick_up: crate::interaction::pickup_candidate(self, guid).is_some(),
@@ -626,6 +697,59 @@ impl WorldState {
             storage,
         }))
     }
+
+    fn item_equipment_cantrip_state(
+        &self,
+        item: &impl WorldObjectExt,
+        flags: ObjectDescriptionFlag,
+        inspection_supplement: Option<&crate::inspection::InspectionSupplement>,
+        spell_book: &[u32],
+    ) -> Option<EquipmentCantripState> {
+        compute_equipment_cantrip_state(
+            &self.spell_catalog,
+            item,
+            flags,
+            inspection_supplement,
+            spell_book,
+        )
+    }
+}
+
+/// Computes intrinsic equipment cantrip state for any described world or vendor item.
+pub(crate) fn compute_equipment_cantrip_state(
+    spell_catalog: &crate::spell::SpellCatalog,
+    item: &impl WorldObjectExt,
+    flags: ObjectDescriptionFlag,
+    inspection_supplement: Option<&crate::inspection::InspectionSupplement>,
+    spell_book: &[u32],
+) -> Option<EquipmentCantripState> {
+    let equippable = item
+        .get_int_prop(PropertyInt::ValidLocations)
+        .is_some_and(|mask| mask != 0);
+    if !equippable {
+        return None;
+    }
+    if inspection_supplement.is_none() {
+        return Some(EquipmentCantripState::Unappraised);
+    }
+    let mut highest_tier: Option<RankedCantripTier> = None;
+    for spell in crate::inspection::decode_item_spell_book(
+        flags,
+        item.spell(),
+        item.get_data_prop(PropertyDataId::ProcSpell),
+        spell_book,
+    ) {
+        if spell.role != crate::inspection::InspectionSpellRole::Item {
+            continue;
+        }
+        let Some(info) = spell_catalog.get(spell.id) else {
+            return Some(EquipmentCantripState::Incomplete);
+        };
+        if let Some(ranked) = info.cantrip_tier().and_then(CantripTier::ranked) {
+            highest_tier = Some(highest_tier.map_or(ranked, |current| current.max(ranked)));
+        }
+    }
+    Some(EquipmentCantripState::Known { highest_tier })
 }
 
 #[cfg(test)]
@@ -1366,6 +1490,7 @@ mod tests {
                 item_type: ItemType::MELEE_WEAPON.bits(),
                 map_category: DynamicEntityMapBlipCategory::Other,
                 equip_locations: None,
+                equipment_cantrip: None,
                 has_alternate_equip_side: false,
                 use_capability: crate::item_use::ItemUseCapability::Direct,
                 built_in_spell: None,
@@ -1420,6 +1545,7 @@ mod tests {
                 item_type: ItemType::CREATURE.bits(),
                 map_category: DynamicEntityMapBlipCategory::Npc,
                 equip_locations: None,
+                equipment_cantrip: None,
                 has_alternate_equip_side: false,
                 use_capability: crate::item_use::ItemUseCapability::Direct,
                 built_in_spell: None,
@@ -1436,5 +1562,475 @@ mod tests {
         assert!(!facts.owned_by_player);
         assert_eq!(world.client_entity_facts(absent_parent).unwrap(), None);
         assert_eq!(world.client_entity_guids(), BTreeSet::from([creature]));
+    }
+
+    #[test]
+    fn equipment_cantrip_tracks_highest_ranked_tier_exclusions_and_update_invalidation() {
+        use std::sync::Arc;
+
+        use holtburger_common::properties::{EquipMask, ItemType, WorldObjectPropertyAccessorsMut};
+        use holtburger_dat::file_type::spell_table::SpellBase as DatSpellBase;
+        use holtburger_protocol::messages::{
+            GameEvent, GameEventMessage, GameMessage, ObjectDescriptionData,
+            PublicWeenieDescription,
+            object::events::{IdentifyObjectResponseEventData, IdentifyResponseFlags},
+        };
+
+        use crate::spell::{SpellCatalog, SpellInfo};
+
+        fn cantrip_spell(name: &str, category: u32, bitfield: u32, power: u32) -> SpellInfo {
+            SpellInfo::from(DatSpellBase {
+                name: name.to_owned(),
+                category,
+                bitfield,
+                power,
+                ..DatSpellBase::default()
+            })
+        }
+
+        let mut catalog = SpellCatalog::default();
+        // Category 261 + beneficial bit 0x4: power 5 = Minor, power 25 = Epic, power 8 = Other
+        catalog
+            .spells
+            .insert(10, cantrip_spell("Minor Strength", 261, 0x4, 5));
+        catalog
+            .spells
+            .insert(11, cantrip_spell("Epic Strength", 261, 0x4, 25));
+        catalog
+            .spells
+            .insert(12, cantrip_spell("Thew of the Giant", 261, 0x4, 8));
+        // Excluded active enchantment / proc / on-use spells even if legendary cantrip
+        catalog
+            .spells
+            .insert(20, cantrip_spell("Legendary Strength", 261, 0x4, 35));
+        catalog
+            .spells
+            .insert(21, cantrip_spell("Legendary Quickness", 261, 0x4, 35));
+
+        let mut world = WorldState::synthetic();
+        world.spell_catalog = Arc::new(catalog);
+
+        let armor_guid = Guid(0x5000_0001);
+        let armor_desc = || ObjectDescriptionData {
+            pos: Some(Default::default()),
+            public_weenie_desc: PublicWeenieDescription {
+                guid: armor_guid,
+                name: Some("Covenant Breastplate".into()),
+                wcid: 9001,
+                item_type: ItemType::ARMOR.bits(),
+                valid_locations: Some(EquipMask::CHEST_ARMOR.bits()),
+                priority: Some(0x10),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        world.handle_message(&GameMessage::ObjectCreate(Box::new(armor_desc())));
+        let initial = world.client_entity_facts(armor_guid).unwrap().unwrap();
+        let EntityDescription::Known {
+            equipment_cantrip, ..
+        } = initial.description
+        else {
+            panic!("expected known description");
+        };
+        assert_eq!(equipment_cantrip, Some(EquipmentCantripState::Unappraised));
+
+        let identify = |spell_book: Vec<u32>, proc_spell: Option<u32>| {
+            let mut properties = holtburger_common::properties::WorldObjectProperties::default();
+            if let Some(proc_id) = proc_spell {
+                properties
+                    .dids
+                    .insert(PropertyDataId::ProcSpell, Guid(proc_id));
+            }
+            GameMessage::GameEvent(Box::new(GameEventMessage {
+                target: armor_guid,
+                sequence: 1,
+                event: GameEvent::IdentifyObjectResponse(Box::new(
+                    IdentifyObjectResponseEventData {
+                        object_guid: armor_guid,
+                        flags: IdentifyResponseFlags::SPELL_BOOK,
+                        success: true,
+                        properties,
+                        spell_book,
+                        ..IdentifyObjectResponseEventData::default()
+                    },
+                )),
+            }))
+        };
+
+        // 1. Mixed intrinsic cantrips + excluded active enchantment (high bit) + proc + missing excluded ID:
+        //    only intrinsic item spells count, Other is ignored cleanly, Epic wins over Minor.
+        world.handle_message(&identify(
+            vec![10, 12, 11, 20 | 0x8000_0000, 21, 9999 | 0x8000_0000],
+            Some(21),
+        ));
+        let identified = world.client_entity_facts(armor_guid).unwrap().unwrap();
+        assert!(matches!(
+            identified.description,
+            EntityDescription::Known {
+                equipment_cantrip: Some(EquipmentCantripState::Known {
+                    highest_tier: Some(RankedCantripTier::Epic),
+                }),
+                ..
+            }
+        ));
+
+        // 2. Same-GUID UpdateObject drops appraisal state back to Unappraised, then reappraisal restores Known.
+        world.handle_message(&GameMessage::UpdateObject(Box::new(armor_desc())));
+        let updated = world.client_entity_facts(armor_guid).unwrap().unwrap();
+        assert!(matches!(
+            updated.description,
+            EntityDescription::Known {
+                equipment_cantrip: Some(EquipmentCantripState::Unappraised),
+                ..
+            }
+        ));
+
+        // 3. Missing intrinsic Item spell in catalog yields Incomplete rather than pretending None.
+        world.handle_message(&identify(vec![10, 8888], None));
+        let incomplete = world.client_entity_facts(armor_guid).unwrap().unwrap();
+        assert!(matches!(
+            incomplete.description,
+            EntityDescription::Known {
+                equipment_cantrip: Some(EquipmentCantripState::Incomplete),
+                ..
+            }
+        ));
+
+        // 4. Appraised empty spellbook (or nonstandard-only Other) yields Known { highest_tier: None }.
+        world.handle_message(&identify(vec![12], None));
+        let nonstandard_only = world.client_entity_facts(armor_guid).unwrap().unwrap();
+        assert!(matches!(
+            nonstandard_only.description,
+            EntityDescription::Known {
+                equipment_cantrip: Some(EquipmentCantripState::Known { highest_tier: None }),
+                ..
+            }
+        ));
+
+        // 5. Food / non-equippable item carries equipment_cantrip: None even after appraisal.
+        let potion_guid = Guid(0x5000_0002);
+        let mut potion = Entity::new(potion_guid, "Healing Potion".into(), Default::default());
+        potion.flags = ObjectDescriptionFlag::FOOD;
+        potion.set_int_prop(PropertyInt::ItemType, ItemType::FOOD.bits() as i32);
+        potion.spell_book = vec![11];
+        potion.inspection_supplement = Some(Default::default());
+        world.entities.insert(potion);
+        let potion_facts = world.client_entity_facts(potion_guid).unwrap().unwrap();
+        assert!(matches!(
+            potion_facts.description,
+            EntityDescription::Known {
+                equipment_cantrip: None,
+                ..
+            }
+        ));
+
+        // 6. Open vendor offers share the exact same classification helper.
+        let vendor_guid = Guid(0x6000_0001);
+        let mut vendor_item = crate::vendor::CoreVendorItem::from_protocol(
+            &holtburger_protocol::messages::trade::events::VendorItemEventData {
+                packed_stack_size: 1,
+                description: PublicWeenieDescription {
+                    guid: vendor_guid,
+                    name: Some("Vendor Cuirass".into()),
+                    item_type: ItemType::ARMOR.bits(),
+                    valid_locations: Some(EquipMask::UPPER_LEG_WEAR.bits()),
+                    ..Default::default()
+                },
+            },
+        );
+        assert_eq!(
+            vendor_item.equipment_cantrip,
+            Some(EquipmentCantripState::Unappraised)
+        );
+        vendor_item.inspection_supplement = Some(Default::default());
+        vendor_item.spell_book = vec![10, 11];
+        vendor_item.refresh_equipment_cantrip(&world.spell_catalog);
+        assert_eq!(
+            vendor_item.equipment_cantrip,
+            Some(EquipmentCantripState::Known {
+                highest_tier: Some(RankedCantripTier::Epic),
+            })
+        );
+    }
+
+    #[test]
+    fn rejected_creature_appraisal_admits_health_and_same_incarnation_retains_it() {
+        use std::time::{Duration, Instant};
+
+        use crate::WorldEvent;
+        use holtburger_common::properties::ItemType;
+        use holtburger_protocol::messages::{
+            GameEvent, GameEventMessage, GameMessage, ObjectDescriptionData,
+            PublicWeenieDescription,
+            object::{
+                events::{IdentifyObjectResponseEventData, IdentifyResponseFlags},
+                types::{CreatureProfile, CreatureProfileFlags},
+            },
+        };
+
+        let mut world = WorldState::synthetic();
+        let origin = Instant::now();
+        let creature_guid = Guid(0x7000_0001);
+        let monster_desc = |instance_sequence: u16| {
+            let mut desc = ObjectDescriptionData {
+                pos: Some(Default::default()),
+                public_weenie_desc: PublicWeenieDescription {
+                    guid: creature_guid,
+                    name: Some("Drudge Lurker".into()),
+                    wcid: 200,
+                    item_type: ItemType::CREATURE.bits(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            desc.sequences[8] = instance_sequence;
+            desc
+        };
+
+        world.handle_message_at(
+            &GameMessage::ObjectCreate(Box::new(monster_desc(3))),
+            origin,
+        );
+
+        let rejected = |health: u32, health_max: u32| {
+            GameMessage::GameEvent(Box::new(GameEventMessage {
+                target: creature_guid,
+                sequence: 1,
+                event: GameEvent::IdentifyObjectResponse(Box::new(
+                    IdentifyObjectResponseEventData {
+                        object_guid: creature_guid,
+                        flags: IdentifyResponseFlags::CREATURE_PROFILE,
+                        success: false,
+                        creature_profile: Some(CreatureProfile {
+                            flags: CreatureProfileFlags::empty(),
+                            health,
+                            health_max,
+                            attributes: None,
+                            buffs: None,
+                        }),
+                        ..Default::default()
+                    },
+                )),
+            }))
+        };
+
+        let sample_time = origin + Duration::from_secs(5);
+        let events = world.handle_message_at(&rejected(60, 200), sample_time);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityHealthUpdated {
+                guid,
+                instance_sequence: 3,
+                health_fraction,
+                observed_at,
+            } if *guid == creature_guid && (*health_fraction - 0.3).abs() < 1e-6 && *observed_at == sample_time
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            WorldEvent::ObjectInspectionResult(result)
+                if result.guid == creature_guid
+                    && matches!(result.outcome, crate::inspection::ObjectInspectionOutcome::Rejected)
+        )));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::EntityIdentified(_)))
+        );
+
+        // Zero health_max is ignored cleanly.
+        let invalid_events =
+            world.handle_message_at(&rejected(50, 0), origin + Duration::from_secs(6));
+        assert!(
+            !invalid_events
+                .iter()
+                .any(|event| matches!(event, WorldEvent::EntityHealthUpdated { .. }))
+        );
+
+        // Same-incarnation UpdateObject preserves health and monotonic age, while clearing supplement.
+        world
+            .entities
+            .get_mut(creature_guid)
+            .unwrap()
+            .inspection_supplement = Some(Default::default());
+        world.handle_message_at(
+            &GameMessage::UpdateObject(Box::new(monster_desc(3))),
+            origin + Duration::from_secs(8),
+        );
+        assert!(
+            world
+                .entities
+                .get(creature_guid)
+                .unwrap()
+                .inspection_supplement
+                .is_none()
+        );
+        let same_incarnation = world
+            .client_entity_facts_with_host_origin(creature_guid, origin)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            same_incarnation.health,
+            Some(EntityHealthFacts {
+                instance_sequence: 3,
+                fraction: 0.3,
+                observed_at_seconds: 5.0,
+            })
+        );
+
+        // New incarnation drops stale health from the previous incarnation.
+        world.handle_message_at(
+            &GameMessage::UpdateObject(Box::new(monster_desc(4))),
+            origin + Duration::from_secs(9),
+        );
+        let new_incarnation = world
+            .client_entity_facts_with_host_origin(creature_guid, origin)
+            .unwrap()
+            .unwrap();
+        assert_eq!(new_incarnation.health, None);
+    }
+
+    #[test]
+    fn remote_hostile_attack_motion_emits_combat_observed_only_for_targeted_attacks() {
+        use std::time::{Duration, Instant};
+
+        use crate::WorldEvent;
+        use holtburger_common::properties::ItemType;
+        use holtburger_protocol::messages::{
+            GameMessage, MovementEventData, MovementType, MovementTypeData,
+            movement::{
+                InterpretedMotionState, MotionItem, MovementInvalid, MovementStateFlags,
+                TurnToObject, TurnToParameters,
+            },
+        };
+
+        let mut world = WorldState::synthetic();
+        let origin = Instant::now();
+        let player = Guid(0x5000_0001);
+        let monster = Guid(0x7000_0002);
+        let bystander = Guid(0x7000_0003);
+        world.player.guid = player;
+
+        for (guid, name) in [(player, "Hero"), (monster, "Drudge"), (bystander, "Other")] {
+            let mut entity = Entity::new(guid, name.into(), Default::default());
+            entity.sequences[8] = 11;
+            entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+            world.add_entity(entity);
+        }
+
+        // Generic TurnToObject does not establish hostile combat.
+        let turn_events = world.handle_message_at(
+            &GameMessage::UpdateMotion(Box::new(MovementEventData {
+                guid: monster,
+                object_instance_sequence: 11,
+                movement_sequence: 1,
+                server_control_sequence: 1,
+                is_autonomous: false,
+                movement_type: MovementType::TurnToObject,
+                motion_flags: 0,
+                current_style: 0x003c,
+                data: MovementTypeData::TurnToObject(TurnToObject {
+                    target: player,
+                    desired_heading: 0.0,
+                    params: TurnToParameters::default(),
+                }),
+            })),
+            origin + Duration::from_secs(1),
+        );
+        assert!(
+            !turn_events
+                .iter()
+                .any(|e| matches!(e, WorldEvent::EntityCombatObserved { .. }))
+        );
+
+        // Untargeted attack motion (no sticky target) does not emit combat observation.
+        let swing_untargeted = GameMessage::UpdateMotion(Box::new(MovementEventData {
+            guid: monster,
+            object_instance_sequence: 11,
+            movement_sequence: 2,
+            server_control_sequence: 2,
+            is_autonomous: false,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: 0x003c,
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: MovementStateFlags::INVALID,
+                    num_commands: 1,
+                    commands: vec![MotionItem::new(0x005bu16, 1, false, 1.0)],
+                    ..Default::default()
+                },
+                sticky_object: None,
+            }),
+        }));
+        let untargeted_events =
+            world.handle_message_at(&swing_untargeted, origin + Duration::from_secs(2));
+        assert!(
+            !untargeted_events
+                .iter()
+                .any(|e| matches!(e, WorldEvent::EntityCombatObserved { .. }))
+        );
+
+        // Melee swing sticky-targeting any victim (bystander or local player) emits EntityCombatObserved.
+        let bystander_combat_time = origin + Duration::from_secs(3);
+        let swing_other = GameMessage::UpdateMotion(Box::new(MovementEventData {
+            guid: monster,
+            object_instance_sequence: 11,
+            movement_sequence: 3,
+            server_control_sequence: 3,
+            is_autonomous: false,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: 0x003c,
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: MovementStateFlags::INVALID,
+                    num_commands: 1,
+                    commands: vec![MotionItem::new(0x005bu16, 2, false, 1.0)],
+                    ..Default::default()
+                },
+                sticky_object: Some(bystander),
+            }),
+        }));
+        let other_events = world.handle_message_at(&swing_other, bystander_combat_time);
+        assert!(other_events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityCombatObserved {
+                guid,
+                instance_sequence: 11,
+                observed_at,
+            } if *guid == monster && *observed_at == bystander_combat_time
+        )));
+
+        // Melee swing targeting local player emits EntityCombatObserved with instance + timestamp.
+        let swing_player = GameMessage::UpdateMotion(Box::new(MovementEventData {
+            guid: monster,
+            object_instance_sequence: 11,
+            movement_sequence: 4,
+            server_control_sequence: 4,
+            is_autonomous: false,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: 0x003c,
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: MovementStateFlags::INVALID,
+                    num_commands: 1,
+                    commands: vec![MotionItem::new(0x005bu16, 3, false, 1.0)],
+                    ..Default::default()
+                },
+                sticky_object: Some(player),
+            }),
+        }));
+        let combat_time = origin + Duration::from_secs(4);
+        let hit_events = world.handle_message_at(&swing_player, combat_time);
+        assert!(hit_events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityCombatObserved {
+                guid,
+                instance_sequence: 11,
+                observed_at,
+            } if *guid == monster && *observed_at == combat_time
+        )));
     }
 }

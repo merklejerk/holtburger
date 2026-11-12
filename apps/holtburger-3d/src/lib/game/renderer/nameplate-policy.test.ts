@@ -94,4 +94,28 @@ describe("nameplate frame policy", () => {
 			}),
 		).toThrow("outline color alpha");
 	});
+
+	it("rejects malformed health bar dimensions or color channels", () => {
+		expect(() =>
+			validateNameplateSettings({
+				...SETTINGS,
+				healthBar: { ...SETTINGS.healthBar, widthCssPixels: 0 },
+			}),
+		).toThrow("healthBar width");
+		expect(() =>
+			validateNameplateSettings({
+				...SETTINGS,
+				healthBar: { ...SETTINGS.healthBar, borderWidthCssPixels: -1 },
+			}),
+		).toThrow("healthBar border width");
+		expect(() =>
+			validateNameplateSettings({
+				...SETTINGS,
+				healthBar: {
+					...SETTINGS.healthBar,
+					fillColor: { ...SETTINGS.healthBar.fillColor, red: 2 },
+				},
+			}),
+		).toThrow("healthBar fill color red");
+	});
 });

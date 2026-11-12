@@ -119,6 +119,7 @@
 					{@const label = `${presentation.label}\n${failure !== undefined ? `${failure.reason}\nUse Retry to load salvage details.` : needsDetails ? "Loading salvage details automatically." : "Right-click or Examine to inspect.\nDrag out of the queue to remove."}`}
 					<ItemQueueCell
 						type="button"
+						itemGuid={guid}
 						removeLabel={`Remove ${name} from salvage queue`}
 						removalDisabled={view.locked}
 						onremove={() => act(() => model.remove(guid))}

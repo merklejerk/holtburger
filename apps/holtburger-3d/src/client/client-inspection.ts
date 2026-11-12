@@ -108,7 +108,7 @@ export class ClientInspection {
 		this.#resetPreviewIdentity();
 		this.#nameColor = this.#resolveNameColor(guid);
 		this.#replace({ kind: "pending", guid });
-		const request = this.#requestAppraisal(guid);
+		const request = this.#requestAppraisal(guid, false);
 		try {
 			await request.sent;
 		} catch (error) {
@@ -215,6 +215,10 @@ export class ClientInspection {
 				this.#scheduleRefresh();
 				return;
 			case "rejected":
+				if (this.#state.kind === "ready") {
+					this.#scheduleRefresh();
+					return;
+				}
 				this.close();
 				this.#reportFailure("You could not examine that object.");
 				return;
@@ -276,7 +280,7 @@ export class ClientInspection {
 		)
 			return;
 		const guid = this.#state.guid;
-		const request = this.#requestAppraisal(guid);
+		const request = this.#requestAppraisal(guid, true);
 		try {
 			await request.sent;
 		} catch (error) {
@@ -295,12 +299,16 @@ export class ClientInspection {
 		}
 	}
 
-	#requestAppraisal(guid: number): AppraisalRequest {
-		const request = this.#session.appraisals.request(guid, (result) => {
-			if (this.#appraisal !== request) return;
-			this.#appraisal = null;
-			this.#accept(result);
-		});
+	#requestAppraisal(guid: number, refresh: boolean): AppraisalRequest {
+		const request = this.#session.appraisals.request(
+			guid,
+			(result) => {
+				if (this.#appraisal !== request) return;
+				this.#appraisal = null;
+				this.#accept(result);
+			},
+			{ refresh },
+		);
 		this.#appraisal = request;
 		return request;
 	}

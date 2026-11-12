@@ -31,6 +31,7 @@ const stackOffer: VendorOffer = {
 	supply: null,
 	icon: { base: 1, overlay: null, underlay: null, uiEffects: 0 },
 	price: { kind: "quoted", amount: 20, quantity: 10 },
+	equipment_cantrip: null,
 };
 const singleOffer: VendorOffer = {
 	...stackOffer,

@@ -1086,6 +1086,13 @@ describe("DynamicEntitySystem authored ownership", () => {
 			strikeThrough: false,
 		});
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 4);
+		expect(system.getNameplateFacts(nodeId)?.healthFraction).toBeNull();
+		system.updateNameplateHealth(nodeId, 0.42);
+		expect(system.getNameplateFacts(nodeId)?.healthFraction).toBe(0.42);
+		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 4);
+		system.updateNameplateHealth(nodeId, null);
+		expect(system.getNameplateFacts(nodeId)?.healthFraction).toBeNull();
+		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 4);
 		system.removeOwner("layer");
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 5);
 	});

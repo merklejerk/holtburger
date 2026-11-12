@@ -1138,10 +1138,11 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn update_health_fraction(
+    pub(crate) fn update_health_fraction_at(
         &mut self,
         guid: Guid,
         health_fraction: f32,
+        observed_at: std::time::Instant,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
         if guid == Guid::NULL || !health_fraction.is_finite() {
@@ -1167,12 +1168,18 @@ impl WorldState {
         }
 
         if let Some(entity) = self.entities.get_mut(guid) {
+            let instance_sequence = entity.instance_sequence();
             // QueryHealth also starts a subscription. Its response must reach a newly selected
             // target's consumer even when the world already holds the same health fraction.
-            entity.health_fraction = Some(health_fraction);
+            entity.health = Some(crate::entity::HealthObservation {
+                fraction: health_fraction,
+                observed_at,
+            });
             events.push(WorldEvent::EntityHealthUpdated {
                 guid,
+                instance_sequence,
                 health_fraction,
+                observed_at,
             });
             updated = true;
         }
@@ -1378,6 +1385,7 @@ impl WorldState {
                 .find(|item| item.guid == target_guid)
         {
             item.set_property(update.clone());
+            item.refresh_equipment_cantrip(&self.spell_catalog);
         }
         if let PropertyUpdate::Int(PropertyInt::CurrentWieldedLocation, mask) = update
             && let Some(super::storage::StorageLocation::Equipped { wearer, .. }) =
@@ -1646,10 +1654,15 @@ impl WorldState {
         data: &ApproachVendorEventData,
         events: &mut Vec<WorldEvent>,
     ) {
+        let spell_catalog = &self.spell_catalog;
         let items = data
             .items
             .iter()
-            .map(CoreVendorItem::from_protocol)
+            .map(|entry| {
+                let mut item = CoreVendorItem::from_protocol(entry);
+                item.refresh_equipment_cantrip(spell_catalog);
+                item
+            })
             .collect();
 
         let vendor_state = VendorState {

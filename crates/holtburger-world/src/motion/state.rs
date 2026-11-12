@@ -217,6 +217,18 @@ impl MotionCommand {
         )
     }
 
+    /// Melee or missile attack swing/shot action, excluding locomotion, turns, emotes, and self-gestures.
+    pub const fn is_hostile_attack_action(self) -> bool {
+        matches!(
+            self.0,
+            0x1000_0058..=0x1000_006e
+                | 0x1000_00cd..=0x1000_00d2
+                | 0x1000_00e3
+                | 0x1000_011f..=0x1000_012a
+                | 0x1000_0173..=0x1000_019a
+        )
+    }
+
     /// The motion-table command a server-reported interpreted command names.
     ///
     /// The wire carries only the low 16 bits; the table keys on the full 32-bit value whose

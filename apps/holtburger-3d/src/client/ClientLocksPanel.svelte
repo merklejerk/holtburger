@@ -8,6 +8,8 @@
 	import type { ClientLocksState, LocksView } from "./client-locks-state";
 	import type { ClientInventoryState } from "./client-inventory-state";
 	import { CLIENT_TUNING } from "./client-tuning";
+	import { useItemCantrips } from "../app/item-cantrips";
+	const itemCantrips = useItemCantrips();
 	interface Props {
 		readonly model: ClientLocksState;
 		readonly inventory: ClientInventoryState;
@@ -112,6 +114,7 @@
 							<span
 								class="preferred-pick-cell ui-item-cell"
 								data-item-guid={pick.item.guid}
+								data-cantrip-tier={itemCantrips.tierFor(pick.item.guid)}
 								title=""
 								data-ui-tooltip={presentation.label}
 								role="img"
@@ -183,6 +186,8 @@
 			position: relative;
 			display: block;
 			flex: none;
+			box-sizing: border-box;
+			padding: var(--ui-item-cell-padding);
 			aspect-ratio: 1;
 			overflow: hidden;
 			width: var(--ui-item-cell-min-size);

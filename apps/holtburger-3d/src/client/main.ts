@@ -1,5 +1,6 @@
 import { detectInputPlatform } from "../lib/input/input-platform";
 import { createElectronVisualCacheTransport } from "./client-visual-cache-transport";
+import { createElectronEquipmentCacheTransport } from "./client-equipment-cache-transport";
 import "../app/base.css";
 import ContentStartup from "../app/ContentStartup.svelte";
 import ClientApp from "./ClientApp.svelte";
@@ -72,6 +73,7 @@ async function startGame(
 				initialSettingsIssue,
 				settingsTransport,
 				visualCacheTransport: createElectronVisualCacheTransport(),
+				equipmentCacheTransport: createElectronEquipmentCacheTransport(),
 			},
 		});
 		return true;

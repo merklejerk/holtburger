@@ -2677,6 +2677,23 @@
 		await runtime.upsertDynamicEntity(movedEntity);
 		await waitForTwoAnimationFrames();
 		const moved = readNameplates();
+		// Exercise live WebGL2 health-bar drawing without re-rasterizing the nameplate texture.
+		runtime.setDynamicEntityNameplateHealth(movedEntity.identity.guid, 0.55);
+		await waitForTwoAnimationFrames();
+		const withHealth = readNameplates();
+		if (
+			withHealth.cache.rasterizationCount !== moved.cache.rasterizationCount ||
+			withHealth.cache.releaseCount !== moved.cache.releaseCount
+		)
+			throw new Error(
+				"Updating nameplate health caused a nameplate texture re-rasterization.",
+			);
+		if (withHealth.submittedInstanceCount !== moved.submittedInstanceCount)
+			throw new Error(
+				"Updating nameplate health altered submitted nameplate instance count.",
+			);
+		runtime.setDynamicEntityNameplateHealth(movedEntity.identity.guid, null);
+		await waitForTwoAnimationFrames();
 		await runtime.replaceDynamicEntitySnapshot([]);
 		spawnedEntities = [];
 		await waitForTwoAnimationFrames();

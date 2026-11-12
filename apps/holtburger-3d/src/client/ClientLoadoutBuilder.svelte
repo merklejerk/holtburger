@@ -15,6 +15,8 @@
 		type EquipmentSlotMask,
 	} from "./client-loadout";
 	import type { ClientItemDrag } from "./client-item-drag";
+	import { useItemCantrips } from "../app/item-cantrips";
+	const itemCantrips = useItemCantrips();
 	import type {
 		ClientHudPlacement,
 		ClientHudViewport,
@@ -143,6 +145,7 @@
 							data-loadout-slot={slot.mask}
 							data-item-guid={binding?.item ?? undefined}
 							data-empty={binding?.item == null}
+							data-cantrip-tier={itemCantrips.tierFor(binding?.item ?? null)}
 							title=""
 							data-ui-tooltip={label}
 							aria-label={label}
@@ -226,7 +229,7 @@
 			align-items: center;
 			justify-content: space-between;
 		}
-		.ui-item-cell.loadout-item-cell {
+		.loadout-item-cell {
 			position: relative;
 			width: 100%;
 			aspect-ratio: 1;

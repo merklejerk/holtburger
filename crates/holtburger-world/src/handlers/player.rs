@@ -222,6 +222,7 @@ pub(crate) fn handle_message(
 pub(crate) fn handle_event(
     state: &mut WorldState,
     event: &GameEventMessage,
+    observed_at: std::time::Instant,
     events: &mut Vec<WorldEvent>,
 ) -> bool {
     match &event.event {
@@ -351,7 +352,7 @@ pub(crate) fn handle_event(
             true
         }
         GameEvent::UpdateHealth(data) => {
-            state.update_health_fraction(data.target, data.health, events)
+            state.update_health_fraction_at(data.target, data.health, observed_at, events)
         }
         _ => false,
     }

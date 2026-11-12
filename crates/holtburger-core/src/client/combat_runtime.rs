@@ -236,6 +236,7 @@ impl ClientRuntime {
             .get(target)
             .and_then(|entity| entity.get_string_prop(PropertyString::Name));
         self.combat_attribution.sent(target, name, now);
+        self.emit_entity_combat_observed(target, now);
         Ok(())
     }
 
@@ -245,9 +246,10 @@ impl ClientRuntime {
         name: &str,
         now: Instant,
     ) -> super::types::CombatOutcomeContext {
+        let attribution = self.combat_attribution.resolve(name, now);
         super::types::CombatOutcomeContext {
             world_generation: self.world_generation,
-            attribution: self.combat_attribution.resolve(name, now),
+            attribution,
         }
     }
 
@@ -259,14 +261,13 @@ impl ClientRuntime {
         now: Instant,
     ) -> Option<super::types::ServerTextCombatOutcome> {
         let parsed = super::server_combat_text::recognize(chat_type, message)?;
+        let attribution =
+            self.combat_attribution
+                .resolve_text(parsed.defender_name, parsed.source, now);
         Some(super::types::ServerTextCombatOutcome {
             context: super::types::CombatOutcomeContext {
                 world_generation: self.world_generation,
-                attribution: self.combat_attribution.resolve_text(
-                    parsed.defender_name,
-                    parsed.source,
-                    now,
-                ),
+                attribution,
             },
             kind: parsed.kind,
         })
@@ -540,13 +541,44 @@ impl ClientRuntime {
         let Some(spell) = self.world.spell_catalog.get(spell_id) else {
             return;
         };
+        let now = Instant::now();
         let name = self
             .world
             .entities
             .get(target)
             .and_then(|entity| entity.get_string_prop(PropertyString::Name));
         self.combat_attribution
-            .sent_cast(target, name, &spell.name, Instant::now());
+            .sent_cast(target, name, &spell.name, now);
+        if !spell.is_beneficial() {
+            self.emit_entity_combat_observed(target, now);
+        }
+    }
+
+    pub(super) fn emit_attributed_combat_observation(
+        &self,
+        attribution: super::types::CombatOutcomeAttribution,
+        observed_at: Instant,
+    ) {
+        if let super::types::CombatOutcomeAttribution::Attributed { target } = attribution {
+            self.emit_entity_combat_observed(target, observed_at);
+        }
+    }
+
+    pub(super) fn emit_entity_combat_observed(&self, target: Guid, observed_at: Instant) {
+        if target == self.world.player.guid || target == Guid::NULL {
+            return;
+        }
+        let Some(entity) = self.world.entities.get(target) else {
+            return;
+        };
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::EntityCombatObserved {
+                guid: target,
+                world_generation: self.world_generation,
+                instance_sequence: entity.instance_sequence(),
+                observed_at: self.dynamic_entity_host_time_at(observed_at),
+            });
     }
 
     fn reject_combat_request(&mut self, message: &str) {
@@ -1949,5 +1981,126 @@ mod tests {
                 .player
                 .character_option_enabled(CharacterOption::AutoRepeatAttacks)
         );
+    }
+
+    #[tokio::test]
+    async fn outgoing_combat_and_attributed_outcomes_emit_combat_observed_with_order_preserved() {
+        use holtburger_protocol::messages::AttackHeight;
+        use holtburger_world::entity::Entity;
+
+        let mut client = client(0);
+        let monster_guid = Guid(0x7000_0055);
+        let mut monster = Entity::new(monster_guid, "Drudge".into(), WorldPosition::default());
+        monster.sequences[8] = 9;
+        monster.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        client.world.entities.insert(monster);
+
+        let mut beneficial_spell = spell_info(MagicSchool::LifeMagic, 0x4, 0);
+        beneficial_spell.name = "Heal Other".into();
+        beneficial_spell.components = [1, 2, 3, 4, 0x31, 0, 0, 0];
+        let mut harmful_spell = spell_info(MagicSchool::WarMagic, 0, 0);
+        harmful_spell.name = "Flame Bolt".into();
+        harmful_spell.components = [1, 2, 3, 4, 0x31, 0, 0, 0];
+        client.world.spell_catalog = Arc::new(SpellCatalog {
+            spells: HashMap::from([(42, harmful_spell), (43, beneficial_spell)]),
+            ..Default::default()
+        });
+        client.world.player.spells = [(42, 0.0), (43, 0.0)].into_iter().collect();
+
+        let mut events = client.subscribe_client_view_events();
+
+        // Targeted melee send emits EntityCombatObserved for the target entity.
+        client
+            .send_targeted_attack(
+                monster_guid,
+                ClientAttackProfile::Melee {
+                    height: AttackHeight::Medium,
+                    power: 0.5,
+                },
+                Instant::now(),
+            )
+            .await
+            .unwrap();
+        let ev = events.try_recv().unwrap();
+        assert!(matches!(
+            ev,
+            ClientViewEvent::EntityCombatObserved {
+                guid,
+                instance_sequence: 9,
+                ..
+            } if guid == monster_guid
+        ));
+
+        // Attributed damage text emits ServerMessage first, then EntityCombatObserved.
+        let outcome = receive_text(
+            &mut client,
+            ChatMessageType::CombatSelf as u32,
+            "You bleed Drudge for 1 points of periodic health damage!",
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            outcome.context.attribution,
+            super::super::types::CombatOutcomeAttribution::Attributed { target } if target == monster_guid
+        ));
+        while events.try_recv().is_ok() {}
+
+        // Non-beneficial targeted spell emits EntityCombatObserved.
+        client
+            .cast_spell(
+                42,
+                SpellCastAim::Normal {
+                    selection: Some(monster_guid),
+                },
+            )
+            .await
+            .unwrap();
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        let mut saw_harmful_combat = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::EntityCombatObserved { guid, .. } if guid == monster_guid
+            ) {
+                saw_harmful_combat = true;
+            }
+        }
+        assert!(saw_harmful_combat);
+
+        // Beneficial targeted spell does NOT emit EntityCombatObserved.
+        client
+            .cast_spell(
+                43,
+                SpellCastAim::Normal {
+                    selection: Some(monster_guid),
+                },
+            )
+            .await
+            .unwrap();
+        client
+            .finish_busy_operation_from_use_done(WeenieError::None)
+            .await
+            .unwrap();
+        while let Ok(event) = events.try_recv() {
+            assert!(
+                !matches!(event, ClientViewEvent::EntityCombatObserved { .. }),
+                "beneficial spell must not emit EntityCombatObserved: {event:?}"
+            );
+        }
+
+        // Unplaced server text does NOT emit EntityCombatObserved.
+        client
+            .combat_attribution
+            .retire(Instant::now() + Duration::from_secs(60));
+        receive_text(
+            &mut client,
+            ChatMessageType::Magic as u32,
+            "With Harm Other VII you drain 12 points of health from Drudge.",
+        )
+        .await
+        .unwrap();
     }
 }

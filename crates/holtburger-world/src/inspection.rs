@@ -1285,6 +1285,24 @@ impl InspectionSpell {
     }
 }
 
+/// Decodes wire spell-book entries using retail's item-spell vs activation-role precedence.
+pub(crate) fn decode_item_spell_book<'a>(
+    public_flags: ObjectDescriptionFlag,
+    spell_id: Option<Guid>,
+    proc_spell_id: Option<Guid>,
+    spell_book: &'a [u32],
+) -> impl Iterator<Item = InspectionSpell> + 'a {
+    let on_use_spell = public_flags
+        .contains(ObjectDescriptionFlag::FOOD)
+        .then(|| spell_id.filter(|id| *id != Guid::NULL).map(|id| id.0))
+        .flatten();
+    let proc_spell = proc_spell_id.map(|id| id.0);
+    spell_book
+        .iter()
+        .copied()
+        .map(move |value| InspectionSpell::from_wire_id(value, on_use_spell, proc_spell))
+}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Display)]
 #[serde(rename_all = "kebab-case")]
 pub enum BondedStatus {
@@ -1493,14 +1511,6 @@ impl ItemInspection {
     fn from_object(object: &InspectionSource<'_>) -> Result<Self, ObjectInspectionError> {
         // ACE Food.cs applies SpellDID on consumption. Other item spells may be procs or
         // equipment spells, so neither appraisal order nor mere spell presence proves on-use.
-        let on_use_spell = object
-            .public_flags
-            .contains(ObjectDescriptionFlag::FOOD)
-            .then(|| object.spell().filter(|id| *id != Guid::NULL).map(|id| id.0))
-            .flatten();
-        let proc_spell = object
-            .get_data_prop(PropertyDataId::ProcSpell)
-            .map(|id| id.0);
         Ok(Self {
             augmentation_cost: object
                 .get_int64_prop(PropertyInt64::AugmentationCost)
@@ -1596,12 +1606,13 @@ impl ItemInspection {
             use_text: object
                 .get_string_prop(PropertyString::Use)
                 .map(|s| s.to_string()),
-            spells: object
-                .spell_book
-                .iter()
-                .copied()
-                .map(|value| InspectionSpell::from_wire_id(value, on_use_spell, proc_spell))
-                .collect(),
+            spells: decode_item_spell_book(
+                object.public_flags,
+                object.spell(),
+                object.get_data_prop(PropertyDataId::ProcSpell),
+                object.spell_book,
+            )
+            .collect(),
         })
     }
 }

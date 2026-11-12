@@ -58,6 +58,7 @@ export function entityFacts(
 			cooldown: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+			equipmentCantrip: null,
 		},
 		location: { kind: "none" },
 		ownedByPlayer: false,
@@ -66,5 +67,6 @@ export function entityFacts(
 		storage: { kind: "not-established" },
 		...overrides,
 		corpse: overrides.corpse ?? null,
+		health: overrides.health ?? null,
 	};
 }

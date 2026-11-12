@@ -42,7 +42,21 @@ export interface ClientPortalTransitionTuning extends FrontendPortalTransitionTu
 	readonly timing: PortalTransitionPolicy;
 }
 
-/** Exhaustive client-owned tuning contract used to drive authoring completion. */
+/** Client-owned hostile combat nameplate health policy and bounded recency rules. */
+export interface ClientNameplateHealthTuning {
+	/** Maximum player-to-mob distance in meters to maintain combat interest or show a health bar. */
+	readonly maxDistanceMeters: number;
+	/** How long a mob retains combat interest after combat observation or target change. */
+	readonly combatInterestMs: number;
+	/** Host-time window during which an entity health update remains visible on the nameplate. */
+	readonly recentWindowMs: number;
+	/** Periodic background facts-appraisal refresh cadence while combat interest remains active. */
+	readonly refreshIntervalMs: number;
+	/** Whether entering combat interest issues an immediate bootstrap facts appraisal when health is absent or stale. */
+	readonly bootstrapOnCombatEnter: boolean;
+}
+
+/** Complete starting renderer display policy. */
 export interface ClientTuning {
 	/** Screen-edge warnings are client presentation policy only. */
 	readonly vitalWarning: ClientVitalWarningTuning;
@@ -265,6 +279,8 @@ export interface ClientTuning {
 		/** Bounded cadence for refreshing selected-entity display text. */
 		readonly displayIntervalMs: number;
 	};
+	/** Hostile combat nameplate health bars and bounded recent health recency policy. */
+	readonly nameplateHealth: ClientNameplateHealthTuning;
 	/** Complete starting renderer display policy. */
 	readonly frameSettings: FrameSettings;
 }

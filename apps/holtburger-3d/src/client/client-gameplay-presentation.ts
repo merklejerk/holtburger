@@ -11,6 +11,12 @@ import {
 	ClientLockFeedbackEffects,
 	type ClientLockFeedbackFrame,
 } from "./client-lock-feedback";
+import {
+	ClientNameplateHealth,
+	type NameplateHealthCandidate,
+	type NameplateHealthUpdate,
+} from "./client-nameplate-health";
+import { sampleEntityDistanceMeters } from "./client-entity-distance";
 import { projectClientEntityCenter } from "./client-entity-projection";
 import type { BarberPreview, BarberSnapshot } from "./client-barber-contract";
 import type { DynamicPresentationOverride } from "../lib/game/runtime/dynamic-presentation-override";
@@ -352,6 +358,11 @@ export interface ClientGameplayRuntime
 			"indicators" | "strikeThrough" | "nameColor"
 		>,
 	): void;
+	/** Apply or clear nameplate health bar fraction without rebuilding texture resources. */
+	setDynamicEntityNameplateHealth(
+		guid: number,
+		healthFraction: number | null,
+	): void;
 	dynamicEntityPresentationState(guid: number): DynamicEntityPresentationState;
 	/** Latest authority-backed display value for one desired dynamic entity. */
 	setPortalTransition(
@@ -482,6 +493,7 @@ export class ClientGameplayPresentation {
 	#sceneInterestCoordinator: SceneInterestRequestCoordinator | null = null;
 	#unsubscribe: (() => void) | null = null;
 	readonly #lockFeedback = new ClientLockFeedbackEffects();
+	readonly #nameplateHealth: ClientNameplateHealth;
 	#playerGuid: number | null = null;
 	#startPromise: Promise<void> | null = null;
 	#sceneTargetKey: string | null = null;
@@ -521,6 +533,11 @@ export class ClientGameplayPresentation {
 		this.#canvas = dependencies.canvas;
 		this.#onError = dependencies.onError ?? (() => undefined);
 		this.#resources = dependencies.resources;
+		this.#nameplateHealth = new ClientNameplateHealth({
+			tuning: CLIENT_TUNING.nameplateHealth,
+			requestFacts: (guid, priority) =>
+				this.#session.appraisals.requestFacts(guid, priority),
+		});
 		const cameraSession = new ClientCameraSession(this.#session);
 		this.camera = new PossessionCameraController({
 			initialLook: {
@@ -618,6 +635,7 @@ export class ClientGameplayPresentation {
 	/** Forward the cold identity level once; presentation resolves realization and pose per frame. */
 	setSelectedEntityGuid(guid: number | null): void {
 		this.#selectedEntityGuid = guid;
+		this.#nameplateHealth.setSelectedTarget(guid);
 		this.#activeResources?.runtime.setSelectedEntityGuid(guid);
 	}
 
@@ -1221,7 +1239,10 @@ export class ClientGameplayPresentation {
 			this.#syncSceneInterest(player);
 		}
 		resources.runtime.setViewerEntity(playerGuid);
-		if (!portal) resources.runtime.tick();
+		if (!portal) {
+			this.#reconcileNameplateHealth(timeMs);
+			resources.runtime.tick();
+		}
 		let primaryView: PrimaryCameraView;
 		if (portal) {
 			if (portalGeneration === null) {
@@ -1394,6 +1415,7 @@ export class ClientGameplayPresentation {
 		await attempt("camera-stop", () => this.camera.stop());
 		// Withdraw desired entities before awaiting startup/realization so late visuals cannot publish.
 		this.#lockFeedback.clear();
+		this.#applyNameplateHealthUpdates(this.#nameplateHealth.destroy());
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
 		this.#sceneInterestCoordinator?.invalidate();
@@ -1472,6 +1494,8 @@ export class ClientGameplayPresentation {
 			this.#bindEnvironment();
 			resources.runtime.setSelectedEntityGuid(this.#selectedEntityGuid);
 			resources.runtime.setHoveredEntityGuid(this.#hoveredEntityGuid);
+			this.#syncNameplateHealthWorld(true);
+			this.#nameplateHealth.setSelectedTarget(this.#selectedEntityGuid);
 			this.#reconcileEntityPresentationPolicy();
 			this.#sceneInterestCoordinator = new SceneInterestRequestCoordinator(
 				resources.profileSource,
@@ -1527,6 +1551,12 @@ export class ClientGameplayPresentation {
 				) {
 					return;
 				}
+				if (event.outcome.attribution.kind === "attributed") {
+					this.#nameplateHealth.acceptPlayerAttack(
+						event.outcome.attribution.target,
+						event.receivedAtMs,
+					);
+				}
 				this.#activeResources?.runtime.acceptCombatOutcome(
 					event.outcome.outcome,
 					event.outcome.attribution.kind === "attributed"
@@ -1542,6 +1572,7 @@ export class ClientGameplayPresentation {
 					CLIENT_SUMMON_TUNING,
 				);
 				this.#lockFeedback.clear();
+				this.#syncNameplateHealthWorld(true);
 				this.#activeResources?.runtime.clearCombatEffects();
 				return;
 			case "barber-updated":
@@ -1549,16 +1580,46 @@ export class ClientGameplayPresentation {
 					this.#reconcileBarberPresentation(event.barber),
 				);
 				return;
+			case "combat-mode":
+				this.#nameplateHealth.setCombatMode(event.mode);
+				return;
+			case "combat":
+				this.#nameplateHealth.setCombatTarget(
+					event.status.desired?.target ?? null,
+					performance.now(),
+				);
+				return;
+			case "entity-health":
+				this.#nameplateHealth.acceptEntityHealth(
+					event.health,
+					performance.now(),
+				);
+				return;
+			case "entity-combat-observed":
+				this.#nameplateHealth.acceptCombatObserved(
+					event.combat,
+					performance.now(),
+				);
+				return;
+			case "appraisal-facts-settled":
+				this.#nameplateHealth.acceptAppraisalFactsSettled(event.guid);
+				return;
 			case "current-state":
 				this.#lockFeedback.clear();
 				this.#receiveCurrentState(event.state);
+				this.#syncNameplateHealthWorld(true);
 				this.#reconcileEntityPresentationPolicy();
 				return;
 			case "entities":
 				this.#reconcileEntityPresentationPolicy();
 				return;
 			case "lifecycle":
-				if (event.lifecycle.kind !== "in-world") this.#lockFeedback.clear();
+				if (event.lifecycle.kind !== "in-world") {
+					this.#lockFeedback.clear();
+					this.#syncNameplateHealthWorld(true);
+				} else {
+					this.#syncNameplateHealthWorld(false);
+				}
 				return;
 			case "local-player-established":
 				this.#playerGuid = event.identity.playerGuid;
@@ -1595,6 +1656,7 @@ export class ClientGameplayPresentation {
 				return;
 			case "presentation-discontinuity":
 				this.#lockFeedback.clear();
+				this.#syncNameplateHealthWorld(true);
 				this.#receivePresentationDiscontinuity(event.discontinuity);
 				return;
 			case "exit-requested":
@@ -1713,6 +1775,9 @@ export class ClientGameplayPresentation {
 				return;
 			case "removed":
 				this.#lockFeedback.remove(event.guid, event.generation);
+				this.#applyNameplateHealthUpdates(
+					this.#nameplateHealth.removeEntity(event.guid),
+				);
 				if (event.guid === this.#playerGuid)
 					this.#invalidatePlayerPresentationConvergence();
 				this.#activeResources?.runtime.removeDynamicEntity(
@@ -1720,6 +1785,70 @@ export class ClientGameplayPresentation {
 					event.generation,
 				);
 				return;
+		}
+	}
+
+	#syncNameplateHealthWorld(forceReset: boolean): void {
+		const sessionState = this.#session.state();
+		if (
+			forceReset ||
+			this.#nameplateHealth.worldGeneration() !== sessionState.worldGeneration
+		) {
+			this.#applyNameplateHealthUpdates(
+				this.#nameplateHealth.resetWorld(sessionState.worldGeneration),
+			);
+		}
+		this.#nameplateHealth.setCombatMode(sessionState.combatMode);
+		this.#nameplateHealth.setCombatTarget(
+			sessionState.combat.desired?.target ?? null,
+		);
+	}
+
+	#reconcileNameplateHealth(nowMs: number): void {
+		const read = this.#session.entities.read();
+		if (read.kind !== "current") {
+			this.#applyNameplateHealthUpdates(
+				this.#nameplateHealth.reconcile([], nowMs),
+			);
+			return;
+		}
+		const levelEntities = read.level.entities;
+		const candidates: NameplateHealthCandidate[] = [];
+		for (const dynamic of this.#session.mirror.currentEntities()) {
+			const guid = dynamic.identity.guid;
+			const facts = levelEntities.get(guid);
+			const isHostileMob =
+				dynamic.presentation.entityClass === "mob" &&
+				(facts === undefined ||
+					(facts.corpse === null && facts.summon === null));
+			candidates.push({
+				guid,
+				generation: dynamic.generation,
+				isHostileMob,
+				distanceMeters: isHostileMob
+					? sampleEntityDistanceMeters(
+							this.#session.entities,
+							this.#session.mirror,
+							guid,
+						)
+					: null,
+			});
+		}
+		this.#applyNameplateHealthUpdates(
+			this.#nameplateHealth.reconcile(candidates, nowMs),
+		);
+	}
+
+	#applyNameplateHealthUpdates(
+		updates: readonly NameplateHealthUpdate[],
+	): void {
+		const runtime = this.#activeResources?.runtime;
+		if (runtime === undefined || updates.length === 0) return;
+		for (const update of updates) {
+			runtime.setDynamicEntityNameplateHealth(
+				update.guid,
+				update.healthFraction,
+			);
 		}
 	}
 

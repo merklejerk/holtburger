@@ -787,6 +787,20 @@ describe("ClientLifecycleSession", () => {
 			session.appraisals.request(-1, receive).sent,
 		).rejects.toThrow();
 		expect(transport.invocations).toHaveLength(1);
+
+		const factsHandle = session.appraisals.requestFacts(
+			inspectionFixture.item.guid,
+		);
+		await factsHandle.sent;
+		expect(transport.invocations[1]).toEqual({
+			command: "request_client_facts_appraisal",
+			args: { guid: inspectionFixture.item.guid },
+		});
+		factsHandle.cancel();
+		expect(transport.invocations[2]).toEqual({
+			command: "cancel_client_appraisal",
+			args: { guid: inspectionFixture.item.guid, demand: "facts-only" },
+		});
 		session.stop();
 	});
 
@@ -1565,6 +1579,7 @@ describe("ClientLifecycleSession", () => {
 							stackCount: null,
 							structure: { current: null, max: null },
 							icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+							equipmentCantrip: null,
 						},
 					}),
 				],
@@ -1595,6 +1610,7 @@ describe("ClientLifecycleSession", () => {
 				stackCount: null,
 				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+				equipmentCantrip: null,
 			});
 			// Leaving the character retains the cache until the next entry replaces it.
 			transport.emit("client-lifecycle-changed", { kind: "logging-out" });
@@ -1717,6 +1733,7 @@ describe("ClientLifecycleSession", () => {
 						stackCount: null,
 						structure: { current: null, max: null },
 						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+						equipmentCantrip: null,
 					},
 				}),
 			],
@@ -1747,6 +1764,7 @@ describe("ClientLifecycleSession", () => {
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+			equipmentCantrip: null,
 		});
 		session.stop();
 	});

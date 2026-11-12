@@ -75,9 +75,13 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
         ClientViewEvent::EntityHealthUpdated {
             guid,
             health_fraction,
+            ..
         } => {
             if let Some(entity) = state.data.entities.get_mut(guid) {
-                entity.health_fraction = Some(*health_fraction);
+                entity.health = Some(holtburger_world::entity::HealthObservation {
+                    fraction: *health_fraction,
+                    observed_at: std::time::Instant::now(),
+                });
             }
             inventory::refresh_entity_context_if_visible(state, *guid, &mut result);
             result.request_redraw(RedrawPriority::Immediate);

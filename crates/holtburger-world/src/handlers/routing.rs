@@ -21,6 +21,15 @@ fn resolve_spell_names(state: &WorldState, events: &mut [WorldEvent]) {
 /// This is the entry point for all game messages received from the server.
 /// It orchestrates mutations across [PlayerState] and [WorldState].
 pub fn handle_message(state: &mut WorldState, message: &GameMessage, events: &mut Vec<WorldEvent>) {
+    handle_message_at(state, message, std::time::Instant::now(), events);
+}
+
+pub fn handle_message_at(
+    state: &mut WorldState,
+    message: &GameMessage,
+    observed_at: std::time::Instant,
+    events: &mut Vec<WorldEvent>,
+) {
     if player::handle_message(state, message, events) {
         resolve_spell_names(state, events);
         return;
@@ -31,7 +40,7 @@ pub fn handle_message(state: &mut WorldState, message: &GameMessage, events: &mu
         return;
     }
 
-    if movement::handle_message(state, message, events)
+    if movement::handle_message(state, message, observed_at, events)
         || properties::handle_message(state, message, events)
         || inventory::handle_message(state, message, events)
     {
@@ -40,7 +49,7 @@ pub fn handle_message(state: &mut WorldState, message: &GameMessage, events: &mu
     }
 
     if let GameMessage::GameEvent(event) = message {
-        let player_handled = player::handle_event(state, event, events);
+        let player_handled = player::handle_event(state, event, observed_at, events);
 
         if player_handled
             || housing::handle_event(state, event, events)
@@ -50,7 +59,7 @@ pub fn handle_message(state: &mut WorldState, message: &GameMessage, events: &mu
             || super::squelch::handle_event(state, event, events)
             || super::allegiance::handle_event(state, event, events)
             || trade::handle_event(state, event, events)
-            || inventory::handle_event(state, event, events)
+            || inventory::handle_event(state, event, observed_at, events)
             || system::handle_event(state, event, events)
         {
             resolve_spell_names(state, events);

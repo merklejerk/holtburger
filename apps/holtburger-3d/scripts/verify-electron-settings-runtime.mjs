@@ -16,6 +16,12 @@ await import(
 		import.meta.url,
 	).href
 );
+await import(
+	new URL(
+		"../dist-electron/electron/client-equipment-cache-store.js",
+		import.meta.url,
+	).href
+);
 
 // Client close policy and its acknowledgement codec must also survive Node ESM emission.
 await import(

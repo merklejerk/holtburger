@@ -1726,7 +1726,7 @@ fn health_responses_publish_even_when_reselection_returns_unchanged_health() {
             state
                 .entities
                 .get(guid)
-                .and_then(|entity| entity.health_fraction),
+                .and_then(|entity| entity.health.map(|health| health.fraction)),
             Some(health)
         );
         let health_updates: Vec<_> = events
@@ -1735,6 +1735,7 @@ fn health_responses_publish_even_when_reselection_returns_unchanged_health() {
                 WorldEvent::EntityHealthUpdated {
                     guid,
                     health_fraction,
+                    ..
                 } => Some((*guid, *health_fraction)),
                 _ => None,
             })

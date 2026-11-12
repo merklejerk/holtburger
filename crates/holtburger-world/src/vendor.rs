@@ -1,10 +1,12 @@
+use crate::entity_facts::{EquipmentCantripState, compute_equipment_cantrip_state};
 use crate::hydration::{WorldObjectPropertiesHydrationExt, decode_vendor_item_supply};
 use crate::identify::{self, IdentifyTarget};
 use crate::inspection::InspectionSupplement;
+use crate::spell::SpellCatalog;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PropertyUpdate, WorldObjectExt,
-    WorldObjectProperties,
+    HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PropertyInt, PropertyUpdate,
+    WorldObjectExt, WorldObjectProperties, WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::object::events::IdentifyObjectResponseEventData;
 use holtburger_protocol::messages::object::types::{
@@ -45,6 +47,9 @@ pub struct CoreVendorItem {
     pub weapon_color: Option<u16>,
     pub resist_highlight: Option<u16>,
     pub resist_color: Option<u16>,
+    /// World-derived intrinsic equipment cantrip status; absent on non-equipment offers.
+    #[serde(default)]
+    pub equipment_cantrip: Option<EquipmentCantripState>,
 }
 
 impl HasProperties for CoreVendorItem {
@@ -73,6 +78,10 @@ impl CoreVendorItem {
             supply => supply,
         };
 
+        let equippable = properties
+            .get_int_prop(PropertyInt::ValidLocations)
+            .is_some_and(|mask| mask != 0);
+
         Self {
             guid: item.description.guid,
             wcid: item.description.wcid,
@@ -93,11 +102,22 @@ impl CoreVendorItem {
             weapon_color: None,
             resist_highlight: None,
             resist_color: None,
+            equipment_cantrip: equippable.then_some(EquipmentCantripState::Unappraised),
         }
     }
 
     pub fn set_property(&mut self, update: PropertyUpdate) {
         self.properties.apply(update);
+    }
+
+    pub fn refresh_equipment_cantrip(&mut self, spell_catalog: &SpellCatalog) {
+        self.equipment_cantrip = compute_equipment_cantrip_state(
+            spell_catalog,
+            self,
+            self.public_flags,
+            self.inspection_supplement.as_ref(),
+            &self.spell_book,
+        );
     }
 
     pub fn apply_identify_response(&mut self, data: &IdentifyObjectResponseEventData) -> bool {

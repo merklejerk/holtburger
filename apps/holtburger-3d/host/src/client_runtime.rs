@@ -373,6 +373,18 @@ pub enum ClientHostCommand {
     /// Request authoritative examination facts for one selected entity.
     ExamineClientEntity {
         guid: holtburger_common::Guid,
+        /// Periodic inspection refreshes allow suppressed identical creature previews.
+        #[serde(default)]
+        refresh: bool,
+    },
+    /// Request background facts-only appraisal without delivering inspector results to frontends.
+    RequestClientFactsAppraisal {
+        guid: holtburger_common::Guid,
+    },
+    /// Cancel a pending queued/inflight client appraisal demand for `guid`.
+    CancelClientAppraisal {
+        guid: holtburger_common::Guid,
+        demand: holtburger_core::AppraisalOutputDemand,
     },
     /// Request one missing page for the character that opened the reader.
     ReadClientBookPage {
@@ -663,6 +675,8 @@ pub enum ClientHostCommand {
 pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "client_performance",
     "examine_client_entity",
+    "request_client_facts_appraisal",
+    "cancel_client_appraisal",
     "read_client_book_page",
     "close_client_container",
     "preview_client_inventory",
@@ -866,6 +880,10 @@ impl ClientHostRuntime {
             ));
         if let Some(distance) = startup.melee_max_chase_distance {
             builder = builder.combat_tuning(holtburger_core::ClientCombatTuning::new(distance)?);
+        }
+        if let Some(appraisal) = startup.appraisal_tuning {
+            builder = builder
+                .appraisal_tuning(holtburger_core::ClientAppraisalTuning::try_from(appraisal)?);
         }
         let connection = tokio::select! {
             result = builder.connect() => result,
@@ -1265,8 +1283,29 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
-        ExamineClientEntity { guid } => runtime
-            .send_command(ClientCommand::Identify(guid))
+        ExamineClientEntity { guid, refresh } => runtime
+            .send_command(ClientCommand::RequestAppraisal {
+                guid,
+                output: holtburger_core::AppraisalOutputDemand::Full,
+                allow_cached_preview: refresh,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        RequestClientFactsAppraisal { guid } => runtime
+            .send_command(ClientCommand::RequestAppraisal {
+                guid,
+                output: holtburger_core::AppraisalOutputDemand::FactsOnly,
+                allow_cached_preview: false,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        CancelClientAppraisal { guid, demand } => runtime
+            .send_command(ClientCommand::CancelAppraisal {
+                guid,
+                output: demand,
+            })
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
@@ -1658,6 +1697,7 @@ mod tests {
                 account: "retired-startup-test".into(),
                 password: String::new(),
                 melee_max_chase_distance: None,
+                appraisal_tuning: None,
             })
             .await
             .unwrap_err();
@@ -1847,7 +1887,48 @@ mod tests {
         assert!(matches!(
             command,
             ClientHostCommand::ExamineClientEntity {
-                guid: holtburger_common::Guid(0x6000_0042)
+                guid: holtburger_common::Guid(0x6000_0042),
+                refresh: false,
+            }
+        ));
+
+        let refresh_command = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "examine_client_entity",
+            "guid": 0x6000_0042_u32,
+            "refresh": true,
+        }))
+        .expect("valid examine refresh command");
+        assert!(matches!(
+            refresh_command,
+            ClientHostCommand::ExamineClientEntity {
+                guid: holtburger_common::Guid(0x6000_0042),
+                refresh: true,
+            }
+        ));
+
+        let facts_command = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "request_client_facts_appraisal",
+            "guid": 0x6000_0042_u32,
+        }))
+        .expect("valid facts command");
+        assert!(matches!(
+            facts_command,
+            ClientHostCommand::RequestClientFactsAppraisal {
+                guid: holtburger_common::Guid(0x6000_0042),
+            }
+        ));
+
+        let cancel_command = serde_json::from_value::<ClientHostCommand>(serde_json::json!({
+            "command": "cancel_client_appraisal",
+            "guid": 0x6000_0042_u32,
+            "demand": "facts-only",
+        }))
+        .expect("valid cancel command");
+        assert!(matches!(
+            cancel_command,
+            ClientHostCommand::CancelClientAppraisal {
+                guid: holtburger_common::Guid(0x6000_0042),
+                demand: holtburger_core::AppraisalOutputDemand::FactsOnly,
             }
         ));
 

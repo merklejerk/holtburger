@@ -1,3 +1,4 @@
+import { equipmentCantripStateSchema } from "../app/item-cantrips";
 import { itemCooldownDefinitionSchema } from "./client-item-cooldowns-contract";
 import {
 	salvageCandidateSchema,
@@ -188,6 +189,8 @@ const clientEntityFactsSchema = z
 						.nullable(),
 					/** World-owned local-player burden ratio, unknown before hydration. */
 					burden: z.number().finite().nonnegative().nullable(),
+					/** World-derived highest ranked equipment cantrip tier; null when unappraisable/non-equipment. */
+					equipmentCantrip: equipmentCantripStateSchema.nullable(),
 					healthQuery: z.enum(["eligible", "ineligible"]),
 				})
 				.strict()
@@ -263,6 +266,16 @@ const clientEntityFactsSchema = z
 		playerThreat: z.boolean(),
 		/** Session-local confirmed-open state; null identifies every non-corpse entity. */
 		corpse: z.enum(["unopened", "opened"]).nullable(),
+		/** Monotonic health sample bound to one incarnation; null when unobserved or reset. */
+		health: z
+			.object({
+				instanceSequence: z.number().int().min(0).max(0xffff),
+				fraction: z.number().finite().min(0).max(1),
+				observedAtSeconds: z.number().finite().nonnegative(),
+			})
+			.strict()
+			.readonly()
+			.nullable(),
 		storage: z.discriminatedUnion("kind", [
 			z
 				.object({ kind: z.literal("not-established") })

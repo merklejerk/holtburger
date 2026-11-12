@@ -12,4 +12,4 @@ pub mod squelch;
 pub mod system;
 pub mod trade;
 
-pub use routing::handle_message;
+pub use routing::{handle_message, handle_message_at};

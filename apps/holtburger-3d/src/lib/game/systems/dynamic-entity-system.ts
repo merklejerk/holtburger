@@ -100,6 +100,8 @@ interface DynamicEntityRecord {
 	selectionGeometryMorphology: SelectionGeometryMorphology | null;
 	/** Mutable display content updated independently from immutable visual setup facts. */
 	nameplateContent: NameplateContent | null;
+	/** Optional fractional health bar value in `[0, 1]`; updating it never re-rasterizes the texture. */
+	nameplateHealthFraction: number | null;
 	renderable: DynamicEntityRenderable;
 	/** Sparse attachment nodes and owned rigid matrices published with the visual root atomically. */
 	attachmentFrames: DynamicAttachmentFrame[];
@@ -548,6 +550,7 @@ export class DynamicEntitySystem<
 			rootScale,
 			source,
 			nameplateContent: source.nameplate,
+			nameplateHealthFraction: null,
 			preparedAnimation: null,
 			rigidPresentationBounds,
 			publishedPresentationBounds: rigidPresentationBounds.clone(),
@@ -1139,6 +1142,7 @@ export class DynamicEntitySystem<
 	/** Return display content and current rigid bounds for one already-selected entity. */
 	getNameplateFacts(nodeId: SceneNodeId): {
 		readonly content: NameplateContent;
+		readonly healthFraction: number | null;
 		readonly identity: string;
 		readonly rigidBounds: AABB3;
 	} | null {
@@ -1146,6 +1150,7 @@ export class DynamicEntitySystem<
 		if (entity === undefined || entity.nameplateContent === null) return null;
 		return {
 			content: entity.nameplateContent,
+			healthFraction: entity.nameplateHealthFraction,
 			identity: entity.source.identity,
 			rigidBounds: entity.rigidPresentationBounds,
 		};
@@ -1168,6 +1173,16 @@ export class DynamicEntitySystem<
 			return;
 		entity.nameplateContent = content;
 		this.#nameplatePopulationRevision += 1;
+	}
+
+	/** Update one installed entity's nameplate health bar fraction without re-rasterizing its nameplate texture. */
+	updateNameplateHealth(
+		nodeId: SceneNodeId,
+		healthFraction: number | null,
+	): void {
+		const entity = this.#entities.get(nodeId);
+		if (!entity) throw new Error(`Dynamic entity ${nodeId} does not exist.`);
+		entity.nameplateHealthFraction = healthFraction;
 	}
 
 	/** Borrow current particle-expanded bounds until the next publication; clone to retain a snapshot. */

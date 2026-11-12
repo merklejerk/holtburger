@@ -5,6 +5,8 @@
 	import { onMount } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
+	import { useItemCantrips } from "../app/item-cantrips";
+	const itemCantrips = useItemCantrips();
 	import ItemCellVisual from "../app/ItemCellVisual.svelte";
 	import { itemCellPresentation } from "../app/item-cell-presentation";
 	import { startUiIconDisplay } from "../app/ui-icon-display";
@@ -137,6 +139,7 @@
 									type="button"
 									class="trade-cell ui-item-cell ui-item-selection ui-hud-control"
 									data-trade-item={cell.guid}
+									data-cantrip-tier={itemCantrips.tierFor(cell.guid)}
 									aria-pressed={selectedGuid === cell.guid}
 									aria-label={label}
 									title=""

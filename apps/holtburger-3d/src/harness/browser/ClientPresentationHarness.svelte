@@ -514,6 +514,11 @@
 					},
 					listenFailures: () => () => {},
 				},
+				equipmentCacheTransport: {
+					readAll: async () => ({}),
+					stage: () => {},
+					listenFailures: () => () => {},
+				},
 			};
 		};
 		void start().catch((error: unknown) => {

@@ -1,7 +1,5 @@
 //! App-local spell reference projection and artwork selection over static content.
 
-mod cantrips;
-
 use std::{collections::HashSet, num::NonZeroU32};
 
 use anyhow::{Result, ensure};
@@ -10,11 +8,9 @@ use holtburger_content::{
     ui_assets::{UiAssetReader, UiAssets},
 };
 use holtburger_dat::file_type::SpellTable;
-use holtburger_world::spell::SpellCastingRoute;
+pub use holtburger_world::spell::CantripTier;
+use holtburger_world::spell::{SpellCastingRoute, classify_cantrip};
 use serde::{Deserialize, Serialize};
-
-pub use cantrips::CantripTier;
-use cantrips::classify_cantrip;
 
 use crate::{
     shared_host_content::SharedHostContent,

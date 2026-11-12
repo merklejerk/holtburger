@@ -80,6 +80,7 @@ impl ClientRuntime {
 
     /// Stop request plans as soon as the character can no longer submit their next step.
     pub(super) fn stop_character_actions(&mut self) {
+        self.appraisal.reset();
         self.cancel_rest_posture();
         self.reset_combat_engagement();
         self.clear_busy_operation();
@@ -116,7 +117,6 @@ impl ClientRuntime {
         self.bump_world_generation();
         self.entity_cue_inbox.clear();
         self.trade_additions.clear();
-        self.projectile_appraisal = None;
         self.character_selection.entry_rejection = None;
         self.character_selection.character_id = None;
         self.character_selection.enter_world_sent = false;

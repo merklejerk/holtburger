@@ -17,6 +17,14 @@
 	/* Reset inherited theme tokens at the pregame boundary before its own palette applies. */
 	:root,
 	.client-pregame-screen {
+		/* Shared cantrip tier palette across inspection pills and equipment cell borders. */
+		--ui-cantrip-tier-feeble-color: #b8b6af;
+		--ui-cantrip-tier-minor-color: #82d998;
+		--ui-cantrip-tier-moderate-color: #79cbea;
+		--ui-cantrip-tier-major-color: #c0a2ff;
+		--ui-cantrip-tier-epic-color: #ff9d6c;
+		--ui-cantrip-tier-legendary-color: #f2d05c;
+		--ui-cantrip-tier-other-color: #e6a4cf;
 		/* Palette-dependent component defaults resolve at the consumer. */
 		/* Frosted HUD backings shared by the combat gauge and social wheel. */
 		--ui-hud-glass-color: color-mix(
@@ -261,11 +269,13 @@
 		--ui-entity-selection-outline-color: #fff0a6;
 		--ui-entity-selection-border-color: #960606;
 		--ui-entity-selection-halo-color: #f5a50599;
-		/* Shared selection glow for inventory headers and item cells. */
+		/* Shared selection glow for inventory headers, vendor rows, and item cells. */
 		--ui-item-selection-color: #ffe2a0;
 		--ui-item-selection-outline: 4px solid gold;
 		--ui-item-selection-shadow: inset 0 0 9px #eab94a99, 0 0 6px #eab94a99;
 		--ui-item-selection-background: #ad751622;
+		/* Distinct corner-bracket selection reticle for item cells so rarity borders stay visible. */
+		--ui-item-cell-selection-color: #fff7e2;
 		/* Item grid density, artwork scaling, strip controls and inventory layout. */
 		/* Shared item-grid minimum and fixed strip cell size. */
 		--ui-item-cell-min-size: 36px;
@@ -1364,6 +1374,39 @@
 		border-radius: var(--ui-item-cell-radius, 0);
 		color: var(--ui-item-cell-color, var(--ui-color-text));
 	}
+	.ui-theme .ui-item-cell[data-cantrip-tier="feeble"] {
+		--ui-cantrip-cell-color: var(--ui-cantrip-tier-feeble-color);
+	}
+	.ui-theme .ui-item-cell[data-cantrip-tier="minor"] {
+		--ui-cantrip-cell-color: var(--ui-cantrip-tier-minor-color);
+	}
+	.ui-theme .ui-item-cell[data-cantrip-tier="moderate"] {
+		--ui-cantrip-cell-color: var(--ui-cantrip-tier-moderate-color);
+	}
+	.ui-theme .ui-item-cell[data-cantrip-tier="major"] {
+		--ui-cantrip-cell-color: var(--ui-cantrip-tier-major-color);
+	}
+	.ui-theme .ui-item-cell[data-cantrip-tier="epic"] {
+		--ui-cantrip-cell-color: var(--ui-cantrip-tier-epic-color);
+	}
+	.ui-theme .ui-item-cell[data-cantrip-tier="legendary"] {
+		--ui-cantrip-cell-color: var(--ui-cantrip-tier-legendary-color);
+	}
+	.ui-theme .ui-item-cell[data-cantrip-tier]:not([data-empty="true"]) {
+		border: 1px solid var(--ui-cantrip-cell-color);
+		background:
+			radial-gradient(
+				circle at 50% 50%,
+				color-mix(in srgb, var(--ui-cantrip-cell-color) 10%, transparent) 0%,
+				color-mix(in srgb, var(--ui-cantrip-cell-color) 30%, transparent) 100%
+			),
+			var(--ui-item-cell-background, transparent);
+		/* Add the second border pixel via inset shadow so cantrip borders match plain cell box sizing. */
+		box-shadow:
+			inset 0 0 0 1px var(--ui-cantrip-cell-color),
+			inset 0 0 7px
+				color-mix(in srgb, var(--ui-cantrip-cell-color) 45%, transparent);
+	}
 	.ui-theme .ui-item-cell:where(:hover:not(:disabled)) {
 		color: var(--ui-item-cell-hover-color, var(--ui-color-highlight));
 	}
@@ -1386,6 +1429,13 @@
 		box-shadow: var(--ui-item-selection-shadow, none);
 		background: var(--ui-item-selection-background, transparent);
 	}
+	/* Keep cantrip borders unobstructed on item cells; selection uses the corner reticle in ::after. */
+	.ui-theme .ui-item-cell:is([aria-pressed="true"], [data-selected="true"]) {
+		position: relative;
+		z-index: 2;
+		overflow: visible;
+		outline: none;
+	}
 	/* Combining owns cell opacity while its authoritative target cue is mounted. */
 	.ui-theme .ui-item-cell[data-dimmed="true"]:not([data-combine-dimmed]),
 	.ui-theme .ui-item-cell[data-combine-dimmed="true"],
@@ -1397,16 +1447,55 @@
 			transition: none;
 		}
 	}
-	/* Draw selection above opaque artwork as well as on the cell itself. */
-	.ui-theme .ui-item-cell[aria-pressed="true"]::after {
+	/* Draw corner-bracket selection above opaque artwork without masking cantrip borders. */
+	.ui-theme
+		.ui-item-cell:is([aria-pressed="true"], [data-selected="true"])::after {
 		content: "";
 		position: absolute;
-		inset: 0;
+		inset: 1px;
 		pointer-events: none;
 		border-radius: inherit;
-		outline: var(--ui-item-selection-outline, 2px solid currentColor);
-		outline-offset: var(--ui-item-selection-outline-offset, -2px);
-		box-shadow: var(--ui-item-selection-shadow, none);
+		--_bracket: var(--ui-item-cell-selection-color, #fff7e2);
+		--_arm: clamp(7px, 28%, 11px);
+		--_thick: 3px;
+		background-image:
+			linear-gradient(var(--_bracket), var(--_bracket)),
+			linear-gradient(var(--_bracket), var(--_bracket)),
+			linear-gradient(var(--_bracket), var(--_bracket)),
+			linear-gradient(var(--_bracket), var(--_bracket)),
+			linear-gradient(var(--_bracket), var(--_bracket)),
+			linear-gradient(var(--_bracket), var(--_bracket)),
+			linear-gradient(var(--_bracket), var(--_bracket)),
+			linear-gradient(var(--_bracket), var(--_bracket));
+		background-position:
+			top left,
+			top left,
+			top right,
+			top right,
+			bottom left,
+			bottom left,
+			bottom right,
+			bottom right;
+		background-size:
+			var(--_arm) var(--_thick),
+			var(--_thick) var(--_arm),
+			var(--_arm) var(--_thick),
+			var(--_thick) var(--_arm),
+			var(--_arm) var(--_thick),
+			var(--_thick) var(--_arm),
+			var(--_arm) var(--_thick),
+			var(--_thick) var(--_arm);
+		background-repeat: no-repeat;
+		filter: drop-shadow(0 0 1px #0d0806) drop-shadow(0 0 2px #0d0806);
+		animation:
+			ui-item-selection-snap 180ms cubic-bezier(0.22, 1, 0.36, 1) 1,
+			ui-item-selection-breathe 0.75s ease-in-out 180ms infinite;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.ui-theme
+			.ui-item-cell:is([aria-pressed="true"], [data-selected="true"])::after {
+			animation: none;
+		}
 	}
 	.ui-theme .ui-item-strip-arrow {
 		color: var(--ui-item-strip-arrow-color, var(--ui-color-text));
@@ -1697,6 +1786,28 @@
 	}
 	.ui-stat-action[data-direction="down"] .ui-stat-action-shape {
 		transform: translateX(-50%) rotate(180deg);
+	}
+}
+
+@keyframes ui-item-selection-snap {
+	from {
+		transform: scale(1.48);
+		opacity: 0.9;
+	}
+	to {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+@keyframes ui-item-selection-breathe {
+	0%,
+	100% {
+		transform: scale(1);
+		opacity: 1;
+	}
+	50% {
+		transform: scale(1.12);
+		opacity: 0.88;
 	}
 }
 

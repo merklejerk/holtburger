@@ -22,7 +22,11 @@ function fixture() {
 	const send = vi
 		.fn<(guid: number) => Promise<void>>()
 		.mockResolvedValue(undefined);
-	const appraisals = new ClientAppraisalRequests(send);
+	const appraisals = new ClientAppraisalRequests({
+		sendFull: (guid) => send(guid),
+		sendFacts: vi.fn().mockResolvedValue(undefined),
+		cancel: vi.fn().mockResolvedValue(undefined),
+	});
 	const listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
 	let awaiting = false;
 	const notify = vi.fn();

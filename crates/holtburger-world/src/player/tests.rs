@@ -1175,7 +1175,10 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
 
     let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
     entity.sequences[8] = 7;
-    entity.health_fraction = Some(0.42);
+    entity.health = Some(crate::entity::HealthObservation {
+        fraction: 0.42,
+        observed_at: std::time::Instant::now(),
+    });
     state.add_entity(entity);
 
     let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
@@ -1217,7 +1220,7 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
         state
             .entities
             .get(guid)
-            .and_then(|entity| entity.health_fraction),
+            .and_then(|entity| entity.health.map(|health| health.fraction)),
         Some(0.0)
     );
     assert!(events.iter().any(|event| matches!(
@@ -1232,6 +1235,7 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
         WorldEvent::EntityHealthUpdated {
             guid: event_guid,
             health_fraction,
+            ..
         } if *event_guid == guid && *health_fraction == 0.0
     )));
 }

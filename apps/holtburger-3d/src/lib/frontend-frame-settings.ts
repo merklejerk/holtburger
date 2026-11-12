@@ -30,6 +30,14 @@ const SHARED_NAMEPLATE_SETTINGS = {
 		},
 		outlineColor: normalizedRgbaColor(NAMEPLATE_TUNING.appearance.outlineColor),
 	},
+	healthBar: {
+		...NAMEPLATE_TUNING.healthBar,
+		fillColor: normalizedRgbaColor(NAMEPLATE_TUNING.healthBar.fillColor),
+		backgroundColor: normalizedRgbaColor(
+			NAMEPLATE_TUNING.healthBar.backgroundColor,
+		),
+		borderColor: normalizedRgbaColor(NAMEPLATE_TUNING.healthBar.borderColor),
+	},
 } satisfies NameplateSettings;
 
 /**

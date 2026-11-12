@@ -67,6 +67,11 @@ it("defers Client construction and composes saved HUD placements after content r
 			stage: vi.fn(),
 			listenFailures: vi.fn(),
 		},
+		holtburgerEquipmentCache: {
+			readAll: vi.fn().mockResolvedValue({}),
+			stage: vi.fn().mockResolvedValue(undefined),
+			listenFailures: vi.fn(),
+		},
 		innerWidth: viewport.width,
 		innerHeight: viewport.height,
 		location: { search: "" },
@@ -129,6 +134,11 @@ function savedTheme(id: string) {
 		holtburgerVisualCache: {
 			read: vi.fn(),
 			stage: vi.fn(),
+			listenFailures: vi.fn(),
+		},
+		holtburgerEquipmentCache: {
+			readAll: vi.fn().mockResolvedValue({}),
+			stage: vi.fn().mockResolvedValue(undefined),
 			listenFailures: vi.fn(),
 		},
 	});

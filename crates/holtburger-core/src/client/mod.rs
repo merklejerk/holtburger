@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 
 pub mod allegiance;
+pub mod appraisal;
 pub mod barber;
 mod builder;
 mod busy_operation;
@@ -243,8 +244,8 @@ pub struct ClientRuntime {
     entity_facts: entity_facts::EntityFactsPublication,
     /// Retained complete player visual, invalidated only by cold accepted changes.
     player_visual: player_visual::PlayerVisualPublication,
-    /// Equipped source already requested while its consumption policy remains unknown.
-    projectile_appraisal: Option<Guid>,
+    /// Single owner of IdentifyObject queueing, cooldown pacing, and delivery filtering.
+    appraisal: appraisal::AppraisalSystem,
     active_busy_operation: Option<PendingBusyOperation>,
     /// Direct-use evidence outlives admission because sound and UseDone arrive independently.
     lock_use: Option<lock_feedback::LockUse>,
@@ -529,9 +530,10 @@ impl ClientRuntime {
                 self.dynamic_entity_host_time(),
                 self.current_dynamic_entity_views(),
             ),
-            entities: entity_facts::ClientEntitySnapshot::from_world_with_opened(
+            entities: entity_facts::ClientEntitySnapshot::from_world_with_opened_at_origin(
                 &self.world,
                 self.opened_corpses.ids(),
+                self.dynamic_entity_time_origin,
             )
             .expect("accepted world relationships must produce an entity baseline"),
             runtime_bodies: self.world.runtime_body_views().into(),
@@ -968,6 +970,14 @@ impl ClientRuntime {
         })
     }
 
+    pub(super) fn emit_settled_appraisal_facts(&mut self) {
+        for guid in self.appraisal.drain_settled_facts() {
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::AppraisalFactsSettled { guid });
+        }
+    }
+
     fn emit_vendor_state_updated(&self) {
         let _ = self
             .client_view_event_tx
@@ -1172,12 +1182,8 @@ impl ClientRuntime {
     }
 
     fn emit_world_view_projection(&mut self, event: &WorldEvent, suppress_vital_projection: bool) {
-        // A fresh description retires any outstanding request for the old instance.
-        if let WorldEvent::EntitySpawned(entity) | WorldEvent::EntityReplaced(entity) = event
-            && self.projectile_appraisal == Some(entity.guid)
-        {
-            self.projectile_appraisal = None;
-        }
+        self.appraisal.observe_world_event(event);
+        self.emit_settled_appraisal_facts();
         self.entity_facts.observe(event);
         self.player_visual.observe(&self.world, event);
         match event {
@@ -1315,13 +1321,32 @@ impl ClientRuntime {
             }
             WorldEvent::EntityHealthUpdated {
                 guid,
+                instance_sequence,
                 health_fraction,
+                observed_at,
             } => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityHealthUpdated {
                         guid: *guid,
+                        world_generation: self.world_generation,
+                        instance_sequence: *instance_sequence,
                         health_fraction: *health_fraction,
+                        observed_at: self.dynamic_entity_host_time_at(*observed_at),
+                    });
+            }
+            WorldEvent::EntityCombatObserved {
+                guid,
+                instance_sequence,
+                observed_at,
+            } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityCombatObserved {
+                        guid: *guid,
+                        world_generation: self.world_generation,
+                        instance_sequence: *instance_sequence,
+                        observed_at: self.dynamic_entity_host_time_at(*observed_at),
                     });
             }
             WorldEvent::EntityBookOpened { guid, name, book } => {
@@ -1352,22 +1377,39 @@ impl ClientRuntime {
                 self.observe_selection_envelope_entity(entity.guid);
             }
             WorldEvent::ObjectInspectionResult(result) => {
-                let preview = matches!(
-                    &result.outcome,
-                    holtburger_world::inspection::ObjectInspectionOutcome::Ready { inspection }
-                        if matches!(
-                            inspection.details,
-                            holtburger_world::inspection::ObjectInspectionDetails::Creature(_)
-                        )
-                )
-                .then(|| object_preview::capture_object_preview(&self.world, result.guid));
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ObjectInspectionResult(result.clone()));
-                if let Some(preview) = preview {
+                let policy = self.appraisal.complete_inspection(result.guid);
+                self.emit_settled_appraisal_facts();
+                if policy.deliver_full {
+                    let preview = if matches!(
+                        &result.outcome,
+                        holtburger_world::inspection::ObjectInspectionOutcome::Ready { inspection }
+                            if matches!(
+                                inspection.details,
+                                holtburger_world::inspection::ObjectInspectionDetails::Creature(_)
+                            )
+                    ) {
+                        let inputs =
+                            object_preview::capture_object_preview_inputs(&self.world, result.guid);
+                        self.appraisal
+                            .should_emit_creature_preview(
+                                result.guid,
+                                policy.allow_cached_preview,
+                                inputs,
+                            )
+                            .then(|| {
+                                object_preview::capture_object_preview(&self.world, result.guid)
+                            })
+                    } else {
+                        None
+                    };
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::ObjectPreviewResult(preview));
+                        .send(ClientViewEvent::ObjectInspectionResult(result.clone()));
+                    if let Some(preview) = preview {
+                        let _ = self
+                            .client_view_event_tx
+                            .send(ClientViewEvent::ObjectPreviewResult(preview));
+                    }
                 }
             }
             WorldEvent::EntityAppearanceUpdated { guid } => {
@@ -1657,14 +1699,42 @@ mod tests {
     const JUMP_FIXTURE_ACTION_COMMAND: u32 = 0x1000_004A;
 
     #[test]
-    fn object_inspection_result_is_forwarded_without_reconstruction() {
+    fn object_inspection_result_is_forwarded_only_for_full_appraisal_demand() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let mut events = client.subscribe_client_view_events();
+        let guid = Guid(0x5000_0042);
         let result = holtburger_world::inspection::ObjectInspectionResult {
-            guid: Guid(0x5000_0042),
+            guid,
             outcome: holtburger_world::inspection::ObjectInspectionOutcome::Missing,
         };
 
+        // Background facts-only appraisal suppresses ObjectInspectionResult and emits AppraisalFactsSettled.
+        client.appraisal.request(
+            guid,
+            Some(1),
+            appraisal::AppraisalOutputDemand::FactsOnly,
+            false,
+        );
+        assert!(
+            client
+                .appraisal
+                .pop_next_dispatch(Instant::now(), |_| Some(1))
+                == Some(guid)
+        );
+        client.handle_world_event(&WorldEvent::ObjectInspectionResult(result.clone()));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            ClientViewEvent::AppraisalFactsSettled { guid: settled } if settled == guid
+        ));
+        assert!(events.try_recv().is_err());
+
+        // Foreground full appraisal forwards ObjectInspectionResult without reconstruction.
+        client
+            .appraisal
+            .request(guid, Some(1), appraisal::AppraisalOutputDemand::Full, false);
+        let later =
+            Instant::now() + Duration::from_millis(appraisal::DEFAULT_APPRAISAL_RETRY_INTERVAL_MS);
+        assert!(client.appraisal.pop_next_dispatch(later, |_| Some(1)) == Some(guid));
         client.handle_world_event(&WorldEvent::ObjectInspectionResult(result.clone()));
 
         assert!(matches!(

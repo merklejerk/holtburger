@@ -19,7 +19,8 @@
 						"underlay": null,
 						"uiEffects": 0
 					},
-					"price": { "kind": "quoted", "amount": 100, "quantity": 10 }
+					"price": { "kind": "quoted", "amount": 100, "quantity": 10 },
+					"equipment_cantrip": null
 				}
 			]
 		}

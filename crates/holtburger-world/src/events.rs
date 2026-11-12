@@ -112,7 +112,15 @@ pub enum WorldEvent {
     /// An accepted health observation, including unchanged responses to a fresh health query.
     EntityHealthUpdated {
         guid: Guid,
+        instance_sequence: u16,
         health_fraction: f32,
+        observed_at: std::time::Instant,
+    },
+    /// Proven sticky-targeted hostile attack action admitted from a remote entity.
+    EntityCombatObserved {
+        guid: Guid,
+        instance_sequence: u16,
+        observed_at: std::time::Instant,
     },
     /// Complete book data received after use; consumers may open a reader.
     EntityBookOpened {

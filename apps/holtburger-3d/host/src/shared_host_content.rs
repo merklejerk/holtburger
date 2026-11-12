@@ -544,6 +544,7 @@ mod tests {
                             account: "startup-stack-test".into(),
                             password: String::new(),
                             melee_max_chase_distance: None,
+                            appraisal_tuning: None,
                         },
                     }),
                 )

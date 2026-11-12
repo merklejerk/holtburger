@@ -189,8 +189,28 @@ pub enum HostEvent {
     /// Entity identity and its latest server-reported health fraction.
     ClientEntityHealthUpdated {
         guid: holtburger_common::Guid,
+        #[serde(rename = "worldGeneration")]
+        world_generation: u64,
+        #[serde(rename = "instanceSequence")]
+        instance_sequence: u16,
         #[serde(rename = "healthFraction")]
         health_fraction: f32,
+        #[serde(rename = "observedAt")]
+        observed_at: holtburger_core::DynamicEntityHostTime,
+    },
+    /// Proven sticky-targeted hostile attack action or offensive player combat action.
+    ClientEntityCombatObserved {
+        guid: holtburger_common::Guid,
+        #[serde(rename = "worldGeneration")]
+        world_generation: u64,
+        #[serde(rename = "instanceSequence")]
+        instance_sequence: u16,
+        #[serde(rename = "observedAt")]
+        observed_at: holtburger_core::DynamicEntityHostTime,
+    },
+    /// Terminal notice that a client `FactsOnly` appraisal demand settled.
+    ClientAppraisalFactsSettled {
+        guid: holtburger_common::Guid,
     },
     /// Shared readiness for social command admission.
     ClientSocialMotionReadyUpdated {
@@ -684,11 +704,31 @@ impl ClientEventSink for StdioEventSink {
             },
             crate::client_projection::ClientHostEvent::EntityHealthUpdated {
                 guid,
+                world_generation,
+                instance_sequence,
                 health_fraction,
+                observed_at,
             } => HostEvent::ClientEntityHealthUpdated {
                 guid,
+                world_generation,
+                instance_sequence,
                 health_fraction,
+                observed_at,
             },
+            crate::client_projection::ClientHostEvent::EntityCombatObserved {
+                guid,
+                world_generation,
+                instance_sequence,
+                observed_at,
+            } => HostEvent::ClientEntityCombatObserved {
+                guid,
+                world_generation,
+                instance_sequence,
+                observed_at,
+            },
+            crate::client_projection::ClientHostEvent::AppraisalFactsSettled { guid } => {
+                HostEvent::ClientAppraisalFactsSettled { guid }
+            }
             crate::client_projection::ClientHostEvent::SocialMotionReadyUpdated { ready } => {
                 HostEvent::ClientSocialMotionReadyUpdated { ready }
             }
@@ -1486,6 +1526,7 @@ mod tests {
                     account: "test".to_string(),
                     password: "secret".to_string(),
                     melee_max_chase_distance: None,
+                    appraisal_tuning: None,
                 },
             })
             .required_mode(),

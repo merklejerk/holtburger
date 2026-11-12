@@ -1212,6 +1212,13 @@ mod tests {
     }
 }
 
+/// Incarnation-scoped creature health observation in the client monotonic clock.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HealthObservation {
+    pub fraction: f32,
+    pub observed_at: std::time::Instant,
+}
+
 #[derive(Debug, Clone)]
 pub struct Entity {
     pub guid: Guid,
@@ -1240,7 +1247,7 @@ pub struct Entity {
     pub network_motion: EntityNetworkMotion,
     /// Latest admitted command-list action stamp in retail's wrapping 15-bit domain.
     server_action_sequence: u16,
-    pub health_fraction: Option<f32>,
+    pub health: Option<HealthObservation>,
     /// Incarnation-scoped summon lifecycle and appraisal timing observations.
     pub(crate) summon_observation: crate::summon::SummonObservation,
 
@@ -1845,7 +1852,7 @@ impl Entity {
             autonomous_movement: false,
             network_motion: EntityNetworkMotion::Uninitialized,
             server_action_sequence: 0,
-            health_fraction: None,
+            health: None,
             summon_observation: crate::summon::SummonObservation::default(),
             sequences: [0; 9],
             properties,

@@ -686,8 +686,9 @@ impl WorldState {
         if let Some(previous) = self.entities.get(guid)
             && previous.instance_sequence() == entity.instance_sequence()
         {
-            // Same-incarnation descriptions must not restart timing or replay death edges.
+            // Same-incarnation descriptions must not restart timing, lose retained health, or replay death edges.
             entity.summon_observation = previous.summon_observation.clone();
+            entity.health = previous.health;
             if entity
                 .network_motion
                 .snapshot()

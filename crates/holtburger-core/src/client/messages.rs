@@ -497,7 +497,7 @@ impl ClientRuntime {
             }
             Vec::new()
         } else {
-            self.world.handle_message(&message)
+            self.world.handle_message_at(&message, Instant::now())
         };
         if let GameMessage::GameEvent(event) = &message
             && let GameEvent::PlayerDescription(description) = &event.event
@@ -505,6 +505,7 @@ impl ClientRuntime {
             self.described_character = Some(description.guid);
         }
         self.handle_world_events(world_events.clone()).await?;
+        self.advance_appraisals(Instant::now()).await?;
         if self.state == ClientState::InWorld && self.allegiance_refresh_required(&world_events) {
             self.query_allegiance().await?;
         }
@@ -713,8 +714,9 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::AttackerNotification(data) => {
-                    let context =
-                        self.attribute_combat_outcome(&data.defender_name, Instant::now());
+                    let now = Instant::now();
+                    let context = self.attribute_combat_outcome(&data.defender_name, now);
+                    let attribution = context.attribution;
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::CombatFeedback(
@@ -728,6 +730,7 @@ impl ClientRuntime {
                                 attack_conditions: data.attack_conditions,
                             },
                         ));
+                    self.emit_attributed_combat_observation(attribution, now);
                     Ok(())
                 }
                 GameEvent::DefenderNotification(data) => {
@@ -747,8 +750,9 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::EvasionAttackerNotification(data) => {
-                    let context =
-                        self.attribute_combat_outcome(&data.defender_name, Instant::now());
+                    let now = Instant::now();
+                    let context = self.attribute_combat_outcome(&data.defender_name, now);
+                    let attribution = context.attribution;
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::CombatFeedback(
@@ -757,6 +761,7 @@ impl ClientRuntime {
                                 defender_name: data.defender_name.clone(),
                             },
                         ));
+                    self.emit_attributed_combat_observation(attribution, now);
                     Ok(())
                 }
                 GameEvent::EvasionDefenderNotification(data) => {
@@ -1047,11 +1052,12 @@ impl ClientRuntime {
             ),
             GameMessage::GameAction(data) => self.handle_game_action(&data.action).await,
             GameMessage::ServerMessage(data) => {
-                let combat_outcome = self.interpret_server_combat_text(
-                    data.chat_type.into(),
-                    &data.message,
-                    Instant::now(),
-                );
+                let now = Instant::now();
+                let combat_outcome =
+                    self.interpret_server_combat_text(data.chat_type.into(), &data.message, now);
+                let attribution = combat_outcome
+                    .as_ref()
+                    .map(|outcome| outcome.context.attribution);
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ServerMessage {
@@ -1059,6 +1065,9 @@ impl ClientRuntime {
                         message: data.message.clone(),
                         chat_type: data.chat_type.into(),
                     });
+                if let Some(attribution) = attribution {
+                    self.emit_attributed_combat_observation(attribution, now);
+                }
                 Ok(())
             }
             GameMessage::CharacterError(data) => {

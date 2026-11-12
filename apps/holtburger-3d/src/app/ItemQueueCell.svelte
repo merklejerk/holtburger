@@ -1,11 +1,16 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
+	import { useItemCantrips } from "./item-cantrips";
 	import RemovableItemCell from "./RemovableItemCell.svelte";
 	import type { HTMLButtonAttributes } from "svelte/elements";
+
+	const itemCantrips = useItemCantrips();
 
 	/** Shared square queue cell and removal affordance; feature owners supply artwork and actions. */
 	type Props = HTMLButtonAttributes & {
 		readonly children: Snippet;
+		/** Backing item GUID used to resolve shared cantrip borders. */
+		readonly itemGuid?: number | null;
 		/** Accessible removal action, supplied by the queue owner. */
 		readonly removeLabel: string;
 		/** Removal may be locked independently of selection and inspection. */
@@ -14,6 +19,7 @@
 	};
 	const {
 		children,
+		itemGuid = null,
 		removeLabel,
 		removalDisabled,
 		onremove,
@@ -29,6 +35,7 @@
 		{...button}
 		type="button"
 		class="item-queue-cell ui-item-cell ui-item-selection ui-hud-control {className}"
+		data-cantrip-tier={itemCantrips.tierFor(itemGuid)}
 	>
 		{@render children()}
 	</button>

@@ -259,7 +259,8 @@ mod tests {
         let mut world = WorldState::synthetic();
         world.add_entity(entity);
         let mut events = Vec::new();
-        world.update_health_fraction(SUMMON, 0.0, &mut events);
+        let now = std::time::Instant::now();
+        world.update_health_fraction_at(SUMMON, 0.0, now, &mut events);
         delete(&mut world, INSTANCE, &mut events);
         assert!(
             !events
@@ -270,18 +271,19 @@ mod tests {
 
     #[test]
     fn summon_death_and_removal_emit_only_the_first_end_in_either_order() {
+        let now = std::time::Instant::now();
         for death_first in [true, false] {
             let mut world = WorldState::synthetic();
             world.add_entity(summon(INSTANCE));
             let mut events = Vec::new();
             if death_first {
-                world.update_health_fraction(SUMMON, 0.0, &mut events);
+                world.update_health_fraction_at(SUMMON, 0.0, now, &mut events);
                 delete(&mut world, INSTANCE, &mut events);
             } else {
                 delete(&mut world, INSTANCE, &mut events);
-                world.update_health_fraction(SUMMON, 0.0, &mut events);
+                world.update_health_fraction_at(SUMMON, 0.0, now, &mut events);
             }
-            world.update_health_fraction(SUMMON, 0.0, &mut events);
+            world.update_health_fraction_at(SUMMON, 0.0, now, &mut events);
             delete(&mut world, INSTANCE, &mut events);
             let endings: Vec<_> = events
                 .iter()
@@ -368,7 +370,8 @@ mod tests {
         let timing = entity.summon_facts().unwrap().lifetime;
         world.add_entity(entity);
         let mut events = Vec::new();
-        world.update_health_fraction(SUMMON, 0.0, &mut events);
+        let now = std::time::Instant::now();
+        world.update_health_fraction_at(SUMMON, 0.0, now, &mut events);
         world.upsert_entity_from_create(summon(INSTANCE), &mut events);
         assert_eq!(
             world
@@ -380,7 +383,7 @@ mod tests {
                 .lifetime,
             timing
         );
-        world.update_health_fraction(SUMMON, 0.0, &mut events);
+        world.update_health_fraction_at(SUMMON, 0.0, now, &mut events);
         world.upsert_entity_from_create(summon(INSTANCE + 1), &mut events);
         assert_eq!(
             world
@@ -392,7 +395,7 @@ mod tests {
                 .lifetime,
             SummonLifetime::Unobserved
         );
-        world.update_health_fraction(SUMMON, 0.0, &mut events);
+        world.update_health_fraction_at(SUMMON, 0.0, now, &mut events);
         assert_eq!(
             events
                 .iter()

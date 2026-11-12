@@ -320,11 +320,20 @@ impl WorldState {
     /// Feature handlers own the orchestration order; this method preserves the external API while
     /// keeping routing separate from the state model itself.
     pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<WorldEvent> {
+        self.handle_message_at(msg, std::time::Instant::now())
+    }
+
+    /// Applies one decoded game message using an explicit monotonic observation instant.
+    pub fn handle_message_at(
+        &mut self,
+        msg: &GameMessage,
+        observed_at: std::time::Instant,
+    ) -> Vec<WorldEvent> {
         self.expire_missing_entity_dependencies();
         self.seed_scene_placements();
         let previous_player = self.player.guid;
         let mut events = Vec::new();
-        crate::handlers::handle_message(self, msg, &mut events);
+        crate::handlers::handle_message_at(self, msg, observed_at, &mut events);
         if self
             .world_container
             .root()

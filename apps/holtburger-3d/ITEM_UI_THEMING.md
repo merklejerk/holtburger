@@ -12,28 +12,34 @@ their fallbacks at the consumer.
 ## Selection
 
 Cells and inventory section headers share `.ui-item-selection[aria-pressed="true"]`.
-Selection does not change their geometry. These optional properties control the
-whole selection decoration, rather than prescribing a colored border:
+Selection does not change their geometry. Non-cell `.ui-item-selection` elements
+(such as section headers and catalog rows) use these optional properties, while
+`.ui-item-cell` uses a corner-bracket reticle colored by `--ui-item-cell-selection-color`:
 
-| Property                             | Recipe fallback          |
-| ------------------------------------ | ------------------------ |
-| `--ui-item-selection-color`          | `--ui-color-active`      |
-| `--ui-item-selection-outline`        | `2px solid currentColor` |
-| `--ui-item-selection-outline-offset` | `-2px`                   |
-| `--ui-item-selection-shadow`         | `none`                   |
-| `--ui-item-selection-background`     | `transparent`            |
+| Property                             | Recipe fallback             |
+| ------------------------------------ | --------------------------- |
+| `--ui-item-selection-color`          | `--ui-color-active`         |
+| `--ui-item-selection-outline`        | `2px solid currentColor`    |
+| `--ui-item-selection-outline-offset` | `-2px`                      |
+| `--ui-item-selection-shadow`         | `none`                      |
+| `--ui-item-selection-background`     | `transparent`               |
+| `--ui-item-cell-selection-color`     | `--ui-item-selection-color` |
 
-The shipped base appearance sets a gold outline, adds an inset/outer golden glow,
-and uses warm gold text and a light gold tint. These defaults live on `:root` in
-`ui-base.css`; the table describes recipe fallbacks when those properties are unset. The inset glow remains visible
-when a cell is against a clipping boundary. Keyboard focus has its own outline
-using `--ui-color-focus`, independent of selection. Cells repeat the selection
-outline/glow on a pointer-transparent overlay above opaque icon artwork.
+The shipped base appearance sets a gold outline and glow on section headers,
+while selected item cells render `--ui-item-cell-selection-color` corner-bracket
+reticles above opaque artwork so equipment cantrip borders stay unobstructed.
+These defaults live on `:root` in `ui-base.css`; the table describes recipe
+fallbacks when those properties are unset. Keyboard focus has its own outline
+using `--ui-color-focus`, independent of selection.
 
-## Cells and empty slots
+## Cells, empty slots, and cantrip tiers
 
 `.ui-item-cell` supports `--ui-item-cell-background`, `--ui-item-cell-border`,
 `--ui-item-cell-radius`, `--ui-item-cell-color`, and `--ui-item-cell-hover-color`.
+Occupied equipment cells with known ranked cantrips expose
+`[data-cantrip-tier="feeble" | "minor" | "moderate" | "major" | "epic" | "legendary"]`
+and color their border from `--ui-cantrip-tier-<tier>-color` (shared with inspection
+cantrip pills, including `--ui-cantrip-tier-other-color`).
 Empty cells expose `[data-empty="true"]` and support `--ui-item-empty-background`,
 `--ui-item-empty-border`, and `--ui-item-empty-opacity`. They remain disabled.
 The inherited HUD backing can also be changed with the existing

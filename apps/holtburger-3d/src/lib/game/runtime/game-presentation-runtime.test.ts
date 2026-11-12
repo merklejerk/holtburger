@@ -4502,6 +4502,36 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		}
 	});
 
+	it("applies and retains nameplate health without triggering nameplate texture re-rasterization", async () => {
+		const delayed = controlledPromise<DecodedStaticPresentation>();
+		const runtime = await buildSpawnRuntime({ load: () => delayed.promise });
+		const updateHealth = vi.spyOn(
+			DynamicEntitySystem.prototype,
+			"updateNameplateHealth",
+		);
+		const updateContent = vi.spyOn(
+			DynamicEntitySystem.prototype,
+			"updateNameplateContent",
+		);
+		try {
+			const pending = runtime.upsertDynamicEntity(spawnedEntity(7, 1));
+			runtime.setDynamicEntityNameplateHealth(7, 0.75);
+			delayed.resolve(spawnedVisual());
+			await pending;
+			expect(updateHealth).toHaveBeenLastCalledWith(expect.anything(), 0.75);
+			const contentCallsAtInstall = updateContent.mock.calls.length;
+			runtime.setDynamicEntityNameplateHealth(7, 0.25);
+			expect(updateHealth).toHaveBeenLastCalledWith(expect.anything(), 0.25);
+			expect(updateContent.mock.calls.length).toBe(contentCallsAtInstall);
+			runtime.setDynamicEntityNameplateHealth(7, null);
+			expect(updateHealth).toHaveBeenLastCalledWith(expect.anything(), null);
+		} finally {
+			updateHealth.mockRestore();
+			updateContent.mockRestore();
+			await runtime.destroy();
+		}
+	});
+
 	it("replaces one GUID generation and updates same-generation state without reloading", async () => {
 		const load = vi.fn(async () => spawnedVisual());
 		const runtime = await buildSpawnRuntime({ load });

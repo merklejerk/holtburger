@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { equipmentCantripStateSchema } from "../app/item-cantrips";
 import { clientIconAppearanceSchema } from "./client-entity-mirror";
 
 const unsigned = z.number().int().nonnegative().max(0xffff_ffff);
@@ -38,6 +39,7 @@ const vendorOfferSchema = z
 				.strict(),
 			z.object({ kind: z.literal("unavailable"), reason: z.string() }).strict(),
 		]),
+		equipment_cantrip: equipmentCantripStateSchema.nullable(),
 	})
 	.strict();
 

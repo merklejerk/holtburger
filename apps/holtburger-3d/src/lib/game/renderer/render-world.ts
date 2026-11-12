@@ -108,6 +108,7 @@ interface RenderWorldSystems {
 		): void;
 		getNameplateFacts(nodeId: SceneNodeId): {
 			readonly content: NameplateContent;
+			readonly healthFraction: number | null;
 			readonly identity: string;
 			readonly rigidBounds: AABB3;
 		} | null;
@@ -206,6 +207,7 @@ export interface EntityShadowDynamicFacts {
 /** Display value and exact current rigid bounds for one selected dynamic entity. */
 export interface EntityNameplateFacts {
 	readonly content: NameplateContent;
+	readonly healthFraction: number | null;
 	readonly identity: string;
 	readonly rigidBounds: AABB3;
 }

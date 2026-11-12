@@ -13,8 +13,8 @@ use tokio::sync::broadcast;
 
 use super::{
     ClientRuntime, ClientState, PublishedCharacterMotionCapabilities, TurbineChatState,
-    character_selection::CharacterSelectionState, combat_tuning::ClientCombatTuning,
-    movement::MovementSystem,
+    appraisal::ClientAppraisalTuning, character_selection::CharacterSelectionState,
+    combat_tuning::ClientCombatTuning, movement::MovementSystem,
 };
 
 #[derive(Clone)]
@@ -36,6 +36,7 @@ pub struct ClientRuntimeBuilder {
     selection_envelope_source:
         Option<Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>>,
     combat_tuning: ClientCombatTuning,
+    appraisal_tuning: ClientAppraisalTuning,
     /// Placement selected by this frontend; default clients retain append behavior.
     inventory_placement: super::inventory_storage::InventoryPlacementPolicy,
     /// Whether an external 3D presentation must acknowledge the first pure-destination frame.
@@ -62,6 +63,7 @@ impl ClientRuntimeBuilder {
             dynamic_script_source: None,
             selection_envelope_source: None,
             combat_tuning: ClientCombatTuning::default(),
+            appraisal_tuning: ClientAppraisalTuning::default(),
             inventory_placement: Default::default(),
             requires_external_world_reveal: false,
             message_dump_dir: None,
@@ -189,6 +191,12 @@ impl ClientRuntimeBuilder {
         self
     }
 
+    /// Replaces the shared appraisal pacing and recency policy for this client composition.
+    pub fn appraisal_tuning(mut self, tuning: ClientAppraisalTuning) -> Self {
+        self.appraisal_tuning = tuning;
+        self
+    }
+
     /// Requires a presentation adapter to acknowledge the first pure-destination frame before
     /// core sends ACE's `LoginComplete` action. Desktop 3D mode enables this; the TUI keeps the
     /// immediate non-rendering adapter.
@@ -295,7 +303,7 @@ impl ClientRuntimeBuilder {
             housing_queries: Default::default(),
             entity_facts: super::entity_facts::EntityFactsPublication::default(),
             player_visual: super::player_visual::PlayerVisualPublication::default(),
-            projectile_appraisal: None,
+            appraisal: super::appraisal::AppraisalSystem::new(self.appraisal_tuning),
             active_busy_operation: None,
             lock_use: None,
             closing_containers: Default::default(),
@@ -373,7 +381,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         housing_queries: Default::default(),
         entity_facts: super::entity_facts::EntityFactsPublication::default(),
         player_visual: super::player_visual::PlayerVisualPublication::default(),
-        projectile_appraisal: None,
+        appraisal: super::appraisal::AppraisalSystem::new(ClientAppraisalTuning::default()),
         active_busy_operation: None,
         lock_use: None,
         closing_containers: Default::default(),

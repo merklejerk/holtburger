@@ -814,6 +814,8 @@ export class GamePresentationRuntime {
 		number,
 		Pick<NameplateContent, "indicators" | "strikeThrough" | "nameColor">
 	>();
+	/** App-owned nameplate health bar fraction keyed by entity GUID; survives re-realization without rebuilding textures. */
+	readonly #spawnedNameplateHealth = new Map<number, number>();
 	readonly #spawnedVisualKeys = new Map<number, string>();
 	readonly #retainedSetupVisuals = new Map<string, RetainedSetupVisual>();
 	/** Env-cell scopes, crossings, shell nodes, and portal contributions. */
@@ -2046,6 +2048,7 @@ export class GamePresentationRuntime {
 		const desired = this.#spawnedDesiredEntities.get(guid);
 		if (desired?.entity.generation !== generation) return;
 		this.#spawnedNameplateDecoration.delete(guid);
+		this.#spawnedNameplateHealth.delete(guid);
 		this.#retireDynamicPresentationTree(guid);
 		this.#forgetDesiredDynamicEntity(guid, "release-visual");
 		for (const childGuid of this.#spawnedDesiredChildren.get(guid) ?? []) {
@@ -2198,6 +2201,18 @@ export class GamePresentationRuntime {
 				...desired.entity.display,
 				...decoration,
 			});
+	}
+
+	/** Replace app-owned nameplate health fraction without re-rasterizing the nameplate texture. */
+	setDynamicEntityNameplateHealth(
+		guid: number,
+		healthFraction: number | null,
+	): void {
+		if (healthFraction === null) this.#spawnedNameplateHealth.delete(guid);
+		else this.#spawnedNameplateHealth.set(guid, healthFraction);
+		const installed = this.#spawnedPresentations.get(guid);
+		if (installed !== undefined)
+			this.#dynamics.updateNameplateHealth(installed.nodeId, healthFraction);
 	}
 
 	/** Queue one server or locally triggered PlayScript cue for the exact entity generation. */
@@ -3352,6 +3367,10 @@ export class GamePresentationRuntime {
 				strikeThrough: false,
 			}),
 		});
+		this.#dynamics.updateNameplateHealth(
+			installed.nodeId,
+			this.#spawnedNameplateHealth.get(entity.identity.guid) ?? null,
+		);
 		this.#applyDynamicEntityMotion(
 			installed,
 			entity.motion,
@@ -4882,6 +4901,7 @@ export class GamePresentationRuntime {
 		this.#contentFailures.clear();
 		this.#spawnedVisualKeys.clear();
 		this.#spawnedNameplateDecoration.clear();
+		this.#spawnedNameplateHealth.clear();
 		this.#pendingDynamicEntityCues.clear();
 		this.#presentationLights = [];
 		// Register repositories before their users; reverse-order teardown retires users first,

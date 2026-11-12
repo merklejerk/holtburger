@@ -142,6 +142,94 @@ fn preview_children(
     Ok(children)
 }
 
+/// Visual fields required to detect whether a creature preview has changed.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ObjectPreviewVisualInputs {
+    setup_did: u32,
+    appearance: EntityAppearance,
+    scale: f32,
+    translucency: f32,
+}
+
+/// Owned presentation-input key captured cheaply before building idle animation clip arrays.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum ObjectPreviewPresentationInputs {
+    PendingEquipment,
+    Unavailable,
+    Ready {
+        instance_sequence: u16,
+        motion_table_id: Option<u32>,
+        body: ObjectPreviewVisualInputs,
+        attachments: Vec<(
+            Guid,
+            u16,
+            ParentLocation,
+            Placement,
+            ObjectPreviewVisualInputs,
+        )>,
+    },
+}
+
+fn capture_visual_inputs(
+    entity: &holtburger_world::entity::Entity,
+) -> Option<ObjectPreviewVisualInputs> {
+    let facts = entity_visual_facts(entity).ok()?;
+    if !facts.scale.is_finite() || facts.scale <= 0.0 {
+        return None;
+    }
+    Some(ObjectPreviewVisualInputs {
+        setup_did: facts.setup_did,
+        appearance: facts.appearance.clone(),
+        scale: facts.scale,
+        translucency: facts.translucency,
+    })
+}
+
+/// Captures creature preview inputs so identical periodic refreshes avoid rebuilding previews.
+pub(super) fn capture_object_preview_inputs(
+    world: &WorldState,
+    guid: Guid,
+) -> ObjectPreviewPresentationInputs {
+    let Some(entity) = world.entities.get(guid) else {
+        return ObjectPreviewPresentationInputs::Unavailable;
+    };
+    let children = match preview_children(world, guid) {
+        Ok(children) => children,
+        Err(ObjectPreviewOutcome::PendingEquipment) => {
+            return ObjectPreviewPresentationInputs::PendingEquipment;
+        }
+        Err(_) => return ObjectPreviewPresentationInputs::Unavailable,
+    };
+    let mut attachments = Vec::with_capacity(children.len());
+    for child_guid in children {
+        let Some(child) = world.entities.get(child_guid) else {
+            return ObjectPreviewPresentationInputs::PendingEquipment;
+        };
+        let Some(link) = child.attachment().filter(|link| link.parent == guid) else {
+            return ObjectPreviewPresentationInputs::PendingEquipment;
+        };
+        let Some(visual) = capture_visual_inputs(child) else {
+            return ObjectPreviewPresentationInputs::PendingEquipment;
+        };
+        attachments.push((
+            child_guid,
+            child.instance_sequence(),
+            link.location,
+            link.placement,
+            visual,
+        ));
+    }
+    let Some(body) = capture_visual_inputs(entity) else {
+        return ObjectPreviewPresentationInputs::Unavailable;
+    };
+    ObjectPreviewPresentationInputs::Ready {
+        instance_sequence: entity.instance_sequence(),
+        motion_table_id: world.effective_motion_table_id_for_guid(guid),
+        body,
+        attachments,
+    }
+}
+
 /// Capture one creature without loading assets or joining it to a scene.
 pub fn capture_object_preview(world: &WorldState, guid: Guid) -> ObjectPreviewResult {
     ObjectPreviewResult {

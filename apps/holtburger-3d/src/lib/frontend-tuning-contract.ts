@@ -59,7 +59,7 @@ export interface FrontendColorGradeTuning {
 /** Nameplate policy as authored in tuning, before hex colors become runtime channels. */
 interface FrontendNameplateTuning extends Omit<
 	NameplateSettings,
-	"appearance"
+	"appearance" | "healthBar"
 > {
 	/** Canvas appearance with tuning-friendly hexadecimal colors. */
 	readonly appearance: Omit<
@@ -72,6 +72,15 @@ interface FrontendNameplateTuning extends Omit<
 		>;
 		/** Straight-alpha outline surrounding every text line. */
 		readonly outlineColor: HexRgbaColor;
+	};
+	/** Combat nameplate health bar styling with hexadecimal colors. */
+	readonly healthBar: Omit<
+		NameplateSettings["healthBar"],
+		"fillColor" | "backgroundColor" | "borderColor"
+	> & {
+		readonly fillColor: HexRgbaColor;
+		readonly backgroundColor: HexRgbaColor;
+		readonly borderColor: HexRgbaColor;
 	};
 }
 

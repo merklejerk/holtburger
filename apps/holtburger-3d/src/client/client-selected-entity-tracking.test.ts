@@ -120,6 +120,7 @@ async function fixture() {
 							stackCount: null,
 							structure: { current: null, max: null },
 							icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+							equipmentCantrip: null,
 						},
 					}),
 				),
@@ -277,7 +278,13 @@ describe("ClientSelectedEntityTracking", () => {
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "awaiting-response",
 		});
-		f.emit("client-entity-health-updated", { guid: 7, healthFraction: 0.4 });
+		f.emit("client-entity-health-updated", {
+			guid: 7,
+			worldGeneration: 1,
+			instanceSequence: 1,
+			healthFraction: 0.4,
+			observedAt: { seconds: 1 },
+		});
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "known",
 			fraction: 0.4,
@@ -290,17 +297,35 @@ describe("ClientSelectedEntityTracking", () => {
 		expect(f.invoke).toHaveBeenLastCalledWith("query_client_entity_health", {
 			guid: 7,
 		});
-		f.emit("client-entity-health-updated", { guid: 7, healthFraction: 0.4 });
+		f.emit("client-entity-health-updated", {
+			guid: 7,
+			worldGeneration: 1,
+			instanceSequence: 1,
+			healthFraction: 0.4,
+			observedAt: { seconds: 2 },
+		});
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "known",
 			fraction: 0.4,
 		});
 		f.selection.select(8);
-		f.emit("client-entity-health-updated", { guid: 7, healthFraction: 0.2 });
+		f.emit("client-entity-health-updated", {
+			guid: 7,
+			worldGeneration: 1,
+			instanceSequence: 1,
+			healthFraction: 0.2,
+			observedAt: { seconds: 3 },
+		});
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "awaiting-response",
 		});
-		f.emit("client-entity-health-updated", { guid: 8, healthFraction: 0 });
+		f.emit("client-entity-health-updated", {
+			guid: 8,
+			worldGeneration: 1,
+			instanceSequence: 1,
+			healthFraction: 0,
+			observedAt: { seconds: 4 },
+		});
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "known",
 			fraction: 0,
@@ -365,6 +390,7 @@ describe("ClientSelectedEntityTracking", () => {
 				stackCount: null,
 				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+				equipmentCantrip: null,
 			},
 		});
 		f.emit("client-entity-facts-changed", {
@@ -377,7 +403,13 @@ describe("ClientSelectedEntityTracking", () => {
 		expect(f.interactions.display(false).nameColor).toBe(
 			SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.mob,
 		);
-		f.emit("client-entity-health-updated", { guid: 11, healthFraction: 0.5 });
+		f.emit("client-entity-health-updated", {
+			guid: 11,
+			worldGeneration: 1,
+			instanceSequence: 1,
+			healthFraction: 0.5,
+			observedAt: { seconds: 5 },
+		});
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
 			salvage: null,
@@ -406,6 +438,7 @@ describe("ClientSelectedEntityTracking", () => {
 						stackCount: null,
 						structure: { current: null, max: null },
 						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+						equipmentCantrip: null,
 					},
 				},
 			],
@@ -473,7 +506,13 @@ describe("ClientSelectedEntityTracking", () => {
 		f.interactions.destroy();
 		f.interactions.destroy();
 		f.selection.select(8);
-		f.emit("client-entity-health-updated", { guid: 8, healthFraction: 0.9 });
+		f.emit("client-entity-health-updated", {
+			guid: 8,
+			worldGeneration: 1,
+			instanceSequence: 1,
+			healthFraction: 0.9,
+			observedAt: { seconds: 6 },
+		});
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "unavailable",
 		});

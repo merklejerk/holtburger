@@ -107,6 +107,7 @@ import {
 	clientUserDataPath,
 } from "./client-user-data.js";
 import { ClientVisualCacheStore } from "./client-visual-cache-store.js";
+import { ClientEquipmentCacheStore } from "./client-equipment-cache-store.js";
 import { UiThemeCatalog } from "./ui-theme-catalog.js";
 import {
 	registerUiThemeScheme,
@@ -114,6 +115,7 @@ import {
 } from "./ui-theme-protocol.js";
 import { uiThemeIdSchema } from "../src/app/ui-theme-contract.js";
 import { playerVisualCaptureSchema } from "../src/client/client-object-preview-contract.js";
+import { equipmentCacheStageSchema } from "../src/client/client-equipment-cache-contract.js";
 
 registerUiThemeScheme();
 
@@ -183,6 +185,7 @@ interface NativeAttempt extends ApplicationAttempt {
 				readonly kind: "ready";
 				readonly settings: ClientSettingsStore;
 				readonly cache: ClientVisualCacheStore;
+				readonly equipmentCache: ClientEquipmentCacheStore;
 		  };
 	/** Settings/navigation barrier; excludes host readiness so cancellation cannot deadlock on handshake. */
 	opening: Promise<void>;
@@ -207,6 +210,12 @@ function requireCache(): ClientVisualCacheStore {
 	if (resources.kind !== "ready")
 		throw new Error("Character visual cache is not ready");
 	return resources.cache;
+}
+function requireEquipmentCache(): ClientEquipmentCacheStore {
+	const resources = requireAttempt().resources;
+	if (resources.kind !== "ready")
+		throw new Error("Equipment cantrip cache is not ready");
+	return resources.equipmentCache;
 }
 /** IPC is registered once; each preload attaches its document identity before feature arguments. */
 function handle<Args extends unknown[], Result>(
@@ -1138,6 +1147,9 @@ void (async () => {
 			attempt.resources.kind === "ready"
 				? attempt.resources.cache.close()
 				: Promise.resolve(),
+			attempt.resources.kind === "ready"
+				? attempt.resources.equipmentCache.close()
+				: Promise.resolve(),
 		]);
 		attempt.startup.password = "";
 		const failures = results.filter(
@@ -1222,7 +1234,17 @@ void (async () => {
 							window.webContents.send("visual-cache:failure", message);
 					},
 				);
-				attempt.resources = { kind: "ready", settings, cache };
+				const equipmentCache = new ClientEquipmentCacheStore(
+					join(app.getPath("userData"), "equipment-cache"),
+					attempt.startup,
+					APP_PERSISTENCE_TUNING.visualCacheWriteDelayMs,
+					(message) => {
+						console.error(message);
+						if (owner.attempt === attempt && !window.native.isDestroyed())
+							window.webContents.send("equipment-cache:failure", message);
+					},
+				);
+				attempt.resources = { kind: "ready", settings, cache, equipmentCache };
 				documentRetirement = undefined;
 				await navigate("client", gamePath);
 				attempt.cancellation.signal.throwIfAborted();
@@ -1317,6 +1339,12 @@ void (async () => {
 	);
 	handle("visual-cache:stage", "client", (_event, capture: unknown) =>
 		requireCache().stage(playerVisualCaptureSchema.parse(capture)),
+	);
+	handle("equipment-cache:read-all", "client", () =>
+		requireEquipmentCache().readAll(),
+	);
+	handle("equipment-cache:stage", "client", (_event, entry: unknown) =>
+		requireEquipmentCache().stage(equipmentCacheStageSchema.parse(entry)),
 	);
 	handle("launcher:snapshot", "picker", () =>
 		launcher.snapshot(pickerFailure, owner.canPlay),

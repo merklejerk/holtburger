@@ -486,9 +486,7 @@ See [item UI theme hooks](ITEM_UI_THEMING.md) for cell visuals and selection sty
 
 `HOLTBURGER_PROBE_MODE=inventory npm run probe:client:ui` uses the existing
 live probe credentials to check artwork and close/reopen retention without moving
-the character. This is a diagnostic command requiring local game assets. The canonical
-`npm run harness:browser -- --client-inventory --brief` exercises inventory behavior with
-synthetic artwork; the scoping worksheet retains the completed burst measurements.
+the character. This is a diagnostic command requiring local game assets.
 
 ## Spells panel
 

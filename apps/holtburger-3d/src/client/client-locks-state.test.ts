@@ -78,7 +78,11 @@ function fixture(
 	const examine = vi
 		.fn<(guid: number) => Promise<void>>()
 		.mockResolvedValue(undefined);
-	const appraisals = new ClientAppraisalRequests(examine);
+	const appraisals = new ClientAppraisalRequests({
+		sendFull: (guid) => examine(guid),
+		sendFacts: vi.fn().mockResolvedValue(undefined),
+		cancel: vi.fn().mockResolvedValue(undefined),
+	});
 	const emit = (event: ClientLifecycleSessionEvent) => {
 		appraisals.receive(event);
 		for (const receive of listeners) receive(event);

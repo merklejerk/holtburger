@@ -290,6 +290,7 @@ describe("sortContentsItems", () => {
 				stackCount: null,
 				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+				equipmentCantrip: null,
 			},
 		});
 		const native = [

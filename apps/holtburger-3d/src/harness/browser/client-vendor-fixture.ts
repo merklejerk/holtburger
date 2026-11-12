@@ -45,6 +45,8 @@ export function createVendorFixture(options: {
 			amount: 10 * stack_count,
 			quantity: stack_count,
 		},
+		equipment_cantrip:
+			item_type === 1 ? ({ kind: "unappraised" } as const) : null,
 	});
 	const snapshot: VendorSnapshot = {
 		vendor,

@@ -234,8 +234,19 @@ pub fn project_client_dynamic_entities(
 
 impl ClientRuntime {
     pub(super) fn dynamic_entity_host_time(&self) -> DynamicEntityHostTime {
-        DynamicEntityHostTime::new(self.dynamic_entity_time_origin.elapsed().as_secs_f64())
-            .expect("monotonic elapsed time must be finite and nonnegative")
+        self.dynamic_entity_host_time_at(std::time::Instant::now())
+    }
+
+    pub(super) fn dynamic_entity_host_time_at(
+        &self,
+        instant: std::time::Instant,
+    ) -> DynamicEntityHostTime {
+        DynamicEntityHostTime::new(
+            instant
+                .saturating_duration_since(self.dynamic_entity_time_origin)
+                .as_secs_f64(),
+        )
+        .expect("monotonic elapsed time must be finite and nonnegative")
     }
 
     pub(super) fn current_dynamic_entity_views(&self) -> Vec<crate::DynamicEntityView> {

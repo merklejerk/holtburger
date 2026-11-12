@@ -2,7 +2,7 @@
 
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt;
-use holtburger_world::entity_facts::EntityIconAppearance;
+use holtburger_world::entity_facts::{EntityIconAppearance, EquipmentCantripState};
 use holtburger_world::vendor::VendorState;
 use serde::Serialize;
 
@@ -35,6 +35,8 @@ pub struct ClientVendorOffer {
     pub icon: EntityIconAppearance,
     /// Whole offered-stack price for catalog rows and labels, using the draft quote rules.
     pub price: ClientVendorPrice,
+    /// World-derived intrinsic equipment cantrip status; absent on non-equipment offers.
+    pub equipment_cantrip: Option<EquipmentCantripState>,
 }
 
 /// Cold catalog snapshot; the frontend owns the draft and presentation lifetime.
@@ -79,6 +81,7 @@ impl From<VendorState> for ClientVendorSnapshot {
                         reason: error.to_string(),
                     },
                 },
+                equipment_cantrip: item.equipment_cantrip,
             })
             .collect();
         Self {
@@ -116,7 +119,8 @@ mod tests {
     use holtburger_protocol::messages::object::messages::description::PublicWeenieDescription;
     use holtburger_protocol::messages::trade::events::VendorItemEventData;
     use holtburger_world::vendor::{
-        CoreVendorItem, VendorCurrencyQuote, VendorDraftQuote, VendorLineQuote, VendorValueLimits,
+        CoreVendorItem, VendorCurrencyQuote, VendorDraftQuote, VendorLineQuote, VendorState,
+        VendorValueLimits,
     };
 
     #[test]

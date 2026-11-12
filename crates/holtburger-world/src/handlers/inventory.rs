@@ -110,6 +110,7 @@ pub(crate) fn handle_message(
 pub(crate) fn handle_event(
     state: &mut WorldState,
     event: &GameEventMessage,
+    observed_at: std::time::Instant,
     events: &mut Vec<WorldEvent>,
 ) -> bool {
     match &event.event {
@@ -183,41 +184,74 @@ pub(crate) fn handle_event(
             let character_titles = std::sync::Arc::clone(&state.character_titles);
             let inspection_context = InspectionContext::new(&character_titles);
             let server_time = state.current_server_time();
-            if let Some(entity) = state.entities.get_mut(guid) {
+            if state.entities.get(guid).is_some() {
+                let creature_health = data
+                    .flags
+                    .contains(holtburger_protocol::messages::object::events::IdentifyResponseFlags::CREATURE_PROFILE)
+                    .then_some(data.creature_profile.as_ref())
+                    .flatten()
+                    .filter(|profile| profile.health_max > 0)
+                    .map(|profile| profile.health as f32 / profile.health_max as f32)
+                    .filter(|fraction| fraction.is_finite());
                 if !data.success {
+                    if let Some(health_fraction) = creature_health {
+                        state.update_health_fraction_at(guid, health_fraction, observed_at, events);
+                    }
                     events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
                         guid,
                         outcome: ObjectInspectionOutcome::Rejected,
                     }));
                     return true;
                 }
-                let applied = entity.apply_identify_response(data);
-                debug_assert!(applied, "successful identify response must merge");
-                entity.observe_summon_lifetime(server_time);
-                let outcome = ObjectInspection::from_entity(entity, inspection_context).into();
-                events.push(WorldEvent::EntityIdentified(Box::new(entity.clone())));
+                let (applied, entity_clone) = {
+                    let entity = state
+                        .entities
+                        .get_mut(guid)
+                        .expect("world entity existence verified above");
+                    let applied = entity.apply_identify_response(data);
+                    debug_assert!(applied, "successful identify response must merge");
+                    entity.observe_summon_lifetime(server_time);
+                    (applied, entity.clone())
+                };
+                let _ = applied;
+                let outcome =
+                    ObjectInspection::from_entity(&entity_clone, inspection_context).into();
+                events.push(WorldEvent::EntityIdentified(Box::new(entity_clone)));
                 events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
                     guid,
                     outcome,
                 }));
+                if let Some(health_fraction) = creature_health {
+                    state.update_health_fraction_at(guid, health_fraction, observed_at, events);
+                }
                 true
-            } else if let Some(vendor) = state.vendor.as_mut()
-                && let Some(item) = vendor.items.iter_mut().find(|item| item.guid == guid)
-            {
-                if !data.success {
+            } else if state.vendor.is_some() {
+                let spell_catalog = std::sync::Arc::clone(&state.spell_catalog);
+                if let Some(vendor) = state.vendor.as_mut()
+                    && let Some(item) = vendor.items.iter_mut().find(|item| item.guid == guid)
+                {
+                    if !data.success {
+                        events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
+                            guid,
+                            outcome: ObjectInspectionOutcome::Rejected,
+                        }));
+                        return true;
+                    }
+                    let applied = item.apply_identify_response(data);
+                    debug_assert!(applied, "successful identify response must merge");
+                    item.refresh_equipment_cantrip(&spell_catalog);
+                    let outcome =
+                        ObjectInspection::from_vendor_item(item, inspection_context).into();
+                    events.push(WorldEvent::VendorItemIdentified(Box::new(item.clone())));
                     events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
                         guid,
-                        outcome: ObjectInspectionOutcome::Rejected,
+                        outcome,
                     }));
                     return true;
                 }
-                let applied = item.apply_identify_response(data);
-                debug_assert!(applied, "successful identify response must merge");
-                let outcome = ObjectInspection::from_vendor_item(item, inspection_context).into();
-                events.push(WorldEvent::VendorItemIdentified(Box::new(item.clone())));
                 events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
                     guid,
-                    outcome,
+                    outcome: ObjectInspectionOutcome::Missing,
                 }));
                 true
             } else {

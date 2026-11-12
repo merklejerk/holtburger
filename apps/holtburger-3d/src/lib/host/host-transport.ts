@@ -94,6 +94,8 @@ import type {
 	ClientServerText,
 	ClientConfirmation,
 	ClientEntityHealth,
+	ClientEntityCombatObserved,
+	ClientAppraisalFactsSettled,
 	ClientSummonEnded,
 	ClientCharacterMotionCapabilities,
 	ClientCharacterMotionFeedback,
@@ -172,6 +174,8 @@ const EXPLORER_HOST_COMMAND_NAMES = [
 const CLIENT_HOST_COMMAND_NAMES = [
 	"client_performance",
 	"examine_client_entity",
+	"request_client_facts_appraisal",
+	"cancel_client_appraisal",
 	"read_client_book_page",
 	"request_client_current_state",
 	"refresh_client_housing",
@@ -347,6 +351,8 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-combat-status-updated",
 	"client-spell-cast-target-updated",
 	"client-entity-health-updated",
+	"client-entity-combat-observed",
+	"client-appraisal-facts-settled",
 	"client-summon-ended",
 	"client-chat-message",
 	"client-combat-outcome",
@@ -496,6 +502,8 @@ export interface HostEventPayloadMap {
 		readonly confirmation: ClientConfirmation | null;
 	};
 	"client-entity-health-updated": ClientEntityHealth;
+	"client-entity-combat-observed": ClientEntityCombatObserved;
+	"client-appraisal-facts-settled": ClientAppraisalFactsSettled;
 	"client-summon-ended": ClientSummonEnded;
 	"client-dynamic-entity": DynamicEntityEvent;
 	"client-dynamic-script-cue": ClientDynamicScriptCue;

@@ -56,6 +56,17 @@ export interface NameplateVisual {
 	readonly content: NameplateContent;
 }
 
+/** World-independent nameplate health bar styling authored at baseline density. */
+export interface NameplateHealthBarSettings {
+	readonly widthCssPixels: number;
+	readonly heightCssPixels: number;
+	readonly gapCssPixels: number;
+	readonly borderWidthCssPixels: number;
+	readonly fillColor: NameplateColor;
+	readonly backgroundColor: NameplateColor;
+	readonly borderColor: NameplateColor;
+}
+
 /** Cold frame policy bounding which entity nameplates may be submitted. */
 export interface NameplateSettings {
 	/** World-space clearance above the current rigid-pose top. */
@@ -67,6 +78,8 @@ export interface NameplateSettings {
 	readonly minimumLegibleNamePixels: number;
 	/** Forward camera distance where a plate retains its Canvas pixel dimensions. */
 	readonly referenceDistance: number;
+	/** Optional combat health bar styling drawn under active hostile mob plates. */
+	readonly healthBar: NameplateHealthBarSettings;
 }
 
 /** Reject malformed runtime policy at the frame boundary rather than coercing it. */
@@ -119,6 +132,25 @@ export function validateNameplateSettings(settings: NameplateSettings): void {
 	);
 	validateTextAppearance(settings.appearance.name, "name");
 	validateTextAppearance(settings.appearance.level, "level");
+	validateHealthBarSettings(settings.healthBar);
+}
+
+function validateHealthBarSettings(settings: NameplateHealthBarSettings): void {
+	if (!Number.isFinite(settings.widthCssPixels) || settings.widthCssPixels <= 0)
+		throw new Error("Nameplate healthBar width must be finite and positive.");
+	if (
+		!Number.isFinite(settings.heightCssPixels) ||
+		settings.heightCssPixels <= 0
+	)
+		throw new Error("Nameplate healthBar height must be finite and positive.");
+	validateNonnegativeFinite(settings.gapCssPixels, "healthBar gap");
+	validateNonnegativeFinite(
+		settings.borderWidthCssPixels,
+		"healthBar border width",
+	);
+	validateColor(settings.fillColor, "healthBar fill");
+	validateColor(settings.backgroundColor, "healthBar background");
+	validateColor(settings.borderColor, "healthBar border");
 }
 
 /** Refine only the locally driven player; every other producer class remains authoritative. */

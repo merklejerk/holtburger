@@ -1499,7 +1499,21 @@ pub enum ClientHostEvent {
     /// Server-reported health for an entity, independent of frontend selection.
     EntityHealthUpdated {
         guid: Guid,
+        world_generation: u64,
+        instance_sequence: u16,
         health_fraction: f32,
+        observed_at: holtburger_core::DynamicEntityHostTime,
+    },
+    /// Proven sticky-targeted hostile attack action or offensive player combat action.
+    EntityCombatObserved {
+        guid: Guid,
+        world_generation: u64,
+        instance_sequence: u16,
+        observed_at: holtburger_core::DynamicEntityHostTime,
+    },
+    /// Terminal notice that a client `FactsOnly` appraisal demand settled.
+    AppraisalFactsSettled {
+        guid: Guid,
     },
     /// Brief server text for app-owned notice presentation.
     TransientString {
@@ -1910,11 +1924,31 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         }),
         ClientViewEvent::EntityHealthUpdated {
             guid,
+            world_generation,
+            instance_sequence,
             health_fraction,
+            observed_at,
         } => Some(ClientHostEvent::EntityHealthUpdated {
             guid,
+            world_generation,
+            instance_sequence,
             health_fraction,
+            observed_at,
         }),
+        ClientViewEvent::EntityCombatObserved {
+            guid,
+            world_generation,
+            instance_sequence,
+            observed_at,
+        } => Some(ClientHostEvent::EntityCombatObserved {
+            guid,
+            world_generation,
+            instance_sequence,
+            observed_at,
+        }),
+        ClientViewEvent::AppraisalFactsSettled { guid } => {
+            Some(ClientHostEvent::AppraisalFactsSettled { guid })
+        }
         ClientViewEvent::SocialMotionReadyUpdated { ready } => {
             Some(ClientHostEvent::SocialMotionReadyUpdated { ready })
         }
@@ -3434,7 +3468,10 @@ mod tests {
     fn entity_health_reaches_the_renderer_with_identity_and_fraction() {
         let projected = project_client_event(ClientViewEvent::EntityHealthUpdated {
             guid: Guid(7),
+            world_generation: 2,
+            instance_sequence: 5,
             health_fraction: 0.5,
+            observed_at: holtburger_core::DynamicEntityHostTime::new(12.5).unwrap(),
         })
         .expect("entity health must reach the host");
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
@@ -3449,7 +3486,44 @@ mod tests {
             wire,
             serde_json::json!({
                 "event": "client-entity-health-updated",
-                "payload": { "guid": 7, "healthFraction": 0.5 }
+                "payload": {
+                    "guid": 7,
+                    "worldGeneration": 2,
+                    "instanceSequence": 5,
+                    "healthFraction": 0.5,
+                    "observedAt": { "seconds": 12.5 }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn entity_combat_observed_reaches_the_renderer_with_scope() {
+        let projected = project_client_event(ClientViewEvent::EntityCombatObserved {
+            guid: Guid(7),
+            world_generation: 2,
+            instance_sequence: 5,
+            observed_at: holtburger_core::DynamicEntityHostTime::new(14.25).unwrap(),
+        })
+        .expect("combat observation must reach the host");
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        StdioEventSink::new(sender)
+            .publish_client_event(projected)
+            .unwrap();
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("combat observation must be published as an event");
+        };
+        let wire = serde_json::to_value(event).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "event": "client-entity-combat-observed",
+                "payload": {
+                    "guid": 7,
+                    "worldGeneration": 2,
+                    "instanceSequence": 5,
+                    "observedAt": { "seconds": 14.25 }
+                }
             })
         );
     }

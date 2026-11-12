@@ -118,10 +118,6 @@
 		EQUIPMENT_SLOTS,
 		inventoryEquipment,
 	} from "../../client/client-inventory-equipment";
-	import type {
-		ClientViewportTargetDestination,
-		ClientViewportTargetResult,
-	} from "../../client/client-pointer-selection-controller";
 	import { createInputDefaults } from "../../lib/input/input-defaults";
 	import { entityFacts } from "../../client/client-entity-mirror.test-support";
 	import { probeClientBindings } from "./client-binding-probe";
@@ -139,7 +135,6 @@
 	} from "../../client/client-item-use-contract";
 	import { ClientItemInteractions } from "../../client/client-item-interactions";
 	import { probeClientTargeting } from "./client-targeting-probe";
-	import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
 	import { isLogopolisCommand } from "../../client/client-logopolis";
 	import { installKeyboardPolicyFixture } from "./keyboard-policy-fixture";
 	import { clientSelectedEntity } from "../../client/client-selected-entity";
@@ -159,7 +154,6 @@
 	import { probeParty } from "./client-party-probe";
 	import { probeWorldContainer } from "./client-world-container-probe";
 	import { probeClientLocks } from "./client-locks-probe";
-	import { probeClientInventory } from "./client-inventory-probe";
 	import type { DynamicEntityMapBlipCategory } from "../../lib/game/map/map-blip-category";
 	import { probeBoomCameraCorrection } from "./boom-camera-probe";
 	import { probeClientAudio } from "./client-audio-probe";
@@ -196,8 +190,6 @@
 	import { CLIENT_NEARBY_TUNING } from "../../client/client-tuning";
 	import { ClientEntitySelection } from "../../client/client-entity-selection";
 	import { ClientLifecycleSession } from "../../client/client-lifecycle-session";
-	import { captureLoadout } from "../../client/client-loadout";
-	import type { ClientActionFeedback } from "../../client/client-host-contract";
 	import {
 		ClientBookReader,
 		type ClientBookReaderState,
@@ -1050,40 +1042,6 @@
 		activeItemUseProbe = fixture;
 		return fixture;
 	}
-	const probeInventory = () => {
-		// The inventory baseline has no enchantments; clear the retained HUD fixture too.
-		enchantments = null;
-		return probeClientInventory({
-			readInput: () => userSettings.input,
-			changeInput,
-			emit: emitInteractionEvent,
-			selection,
-			commands: interactionCommands,
-
-			prepareTellRecipient: (guid) => {
-				const read = interactionLifecycle.entities.read();
-				chatComposer.setSelection(
-					selectedChatRecipient(
-						guid,
-						guid !== null && read.kind === "current"
-							? read.level.entities.get(guid)
-							: undefined,
-					),
-				);
-			},
-			readSampleCount: () => inventorySampleCount,
-			readPreparedIconCount: () => preparedIconCount,
-			holdIconPreparation,
-			failIcon: (base) => {
-				iconFailures.add(base);
-			},
-			readViewportInput: () => ({
-				clicks: viewportSelectionPoints.length,
-				orbits: orbitDeltas.length,
-				zooms: zoomDeltas.length,
-			}),
-		});
-	};
 
 	let logopolisLaunchRevision = $state(0);
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
@@ -1215,8 +1173,6 @@
 		readonly keyboardProbe: () => ReturnType<
 			typeof installKeyboardPolicyFixture
 		>;
-		/** Verify live inventory, shared placement, geometry, selection, and recovery. */
-		readonly probeInventory: typeof probeInventory;
 		readonly probeLocks: () => ReturnType<typeof probeClientLocks>;
 		/** Salvage authority replies exercise the production window and session. */
 		readonly salvageProbe: ReturnType<typeof createSalvageFixture>;
@@ -1295,35 +1251,10 @@
 		readonly spellBarProbe: typeof spellBarProbe;
 		/** Render and manipulate the production melee/missile HUD without a live server. */
 		readonly combatBarProbe: typeof combatBarProbe;
-		/** Controlled sigil activation exercises production drop admission. */
-		readonly aetheriaDropProbe: typeof aetheriaDropProbe;
 		/** Inspect real session requests while CDP drives production inventory pointers. */
 		readonly inventoryDragCommands: () => typeof interactionCommands;
-		/** Controlled incoming facts exercise production pack context menus and toast decoding. */
-		readonly autoMergeProbe: {
-			readonly begin: () => void;
-			readonly resync: () => void;
-			readonly feedback: (feedback: ClientActionFeedback) => void;
-			readonly toast: () => ReturnType<ClientToastCenter["snapshot"]>;
-			readonly timing: typeof CLIENT_TUNING.inventory.autoMerge;
-		};
-		/** Observe immutable captures and exercise failure feedback without a live server. */
-		readonly loadoutProbe: typeof loadoutProbe;
 		/** Replace selected inventory identity while a panel interaction is active. */
 		readonly selectInventoryItem: (guid: number) => void;
-		/** Controlled viewport answers exercise production drag ownership. */
-		readonly giveProbe: typeof giveProbe;
-		/** Delay one submission acknowledgement to test gesture lifetime independence. */
-		/** Controlled use outcomes with production UI, controller, and session decoding. */
-		readonly beginItemUseProbe: () => void;
-		readonly itemUseProbe: () => NonNullable<typeof activeItemUseProbe>;
-		readonly deferNextInventorySubmission: () => void;
-		/** Reject the delayed acknowledgement through the real session promise. */
-		readonly rejectDeferredInventorySubmission: () => void;
-		/** Deliver a controlled authority response through the production session decoder. */
-		readonly replyInventoryPreview: (
-			result: ClientInventoryPreviewResult,
-		) => void;
 		/** Verify action warning presentation independently of selected-entity fixtures. */
 		readonly probeActionFeedback: typeof probeActionFeedback;
 		readonly probeConnectionBadge: typeof probeConnectionBadge;
@@ -1358,24 +1289,7 @@
 	let preciseJumpActivationCount = 0;
 	/** Counts aim publication for the precise click/drag ownership probe. */
 	let preciseJumpAimCount = 0;
-	/** Counts synthetic artwork preparation independently of inventory sampling. */
-	let preparedIconCount = 0;
-	let iconPreparationGate: Promise<void> | null = null;
 	const iconFailures = new Set<number>();
-	function holdIconPreparation(): () => void {
-		if (iconPreparationGate !== null)
-			throw new Error("Icon preparation is already held.");
-		let release = () => {};
-		iconPreparationGate = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		return () => {
-			iconPreparationGate = null;
-			release();
-		};
-	}
-	/** Counts persistent inventory pulls, including while its panel is hidden. */
-	let inventorySampleCount = 0;
 	let spellReferenceGate: Promise<void> | null = null;
 	let releaseEnchantmentReferences: (() => void) | null = null;
 	function holdSpellReferences(): () => void {
@@ -1415,16 +1329,10 @@
 	let housingManagement = $state<ClientHousingManagementState | null>(null);
 	let trade = $state<ClientTradeState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
-	function readInventoryEntities() {
-		inventorySampleCount += 1;
-		return interactionLifecycle.entities.read();
-	}
 	let preciseJumpActive = $state(false);
 	let cameraEnabled = $state(true);
 	let selectedGuid = $state<number | null>(null);
 	const interactionHandlers = new Map<string, (payload: unknown) => void>();
-	let deferInventorySubmission = false;
-	let rejectInventorySubmission: ((error: Error) => void) | null = null;
 	const interactionCommands: {
 		command: string;
 		args: Record<string, unknown> | undefined;
@@ -1517,6 +1425,7 @@
 						stackCount: null,
 						structure: { current: null, max: null },
 						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+						equipmentCantrip: null,
 					},
 					location: { kind: "none" },
 					ownedByPlayer: false,
@@ -1536,6 +1445,7 @@
 					playerThreat: false,
 					summon: null,
 					corpse: null,
+					health: null,
 					scenePlacement: "available",
 					storage:
 						guid === playerGuid
@@ -1604,12 +1514,6 @@
 					},
 				});
 			}
-			if (command === "submit_client_inventory" && deferInventorySubmission) {
-				deferInventorySubmission = false;
-				await new Promise<void>((_resolve, reject) => {
-					rejectInventorySubmission = reject;
-				});
-			}
 			if (command === "request_client_current_state") emitInteractionBaseline();
 		},
 	});
@@ -1636,35 +1540,6 @@
 		lastKnownName: null,
 	});
 
-	let publishLoadoutFeedback:
-		((feedback: ClientActionFeedback) => void) | null = null;
-	const loadoutProbe = {
-		capture: () => captureLoadout(interactionLifecycle.entities.read()),
-		bars: () => characterSettings?.actionBars,
-		restore: (settings: NonNullable<typeof characterSettings>) =>
-			(characterSettings = settings),
-		settings: () => characterSettings,
-		fail: async (
-			equipment: readonly { item: number | null; target: number }[],
-		) => {
-			const publish = publishLoadoutFeedback;
-			if (publish === null)
-				throw new Error("Loadout toast probe is not mounted");
-			const unsubscribe = interactionLifecycle.subscribe((event) => {
-				if (event.type === "action-feedback") publish(event.feedback);
-			});
-			try {
-				emitInteractionEvent("client-action-feedback", {
-					message: "The server rejected the equipment request",
-					tone: "warning",
-					equipment,
-				});
-				await tick();
-			} finally {
-				unsubscribe();
-			}
-		},
-	};
 	// Feed the real Social window as well as the isolated domain probes.
 	const socialParty = new ClientPartyState(
 		interactionLifecycle,
@@ -1718,168 +1593,6 @@
 		},
 		beginAcquisition: () => keyboard.returnToGame(),
 	});
-	let inventoryWorldResult: ClientViewportTargetResult | null = {
-		kind: "empty",
-	};
-	/** Original authority retained while CDP exercises sigil drop admission. */
-	let aetheriaDropRecords: readonly ClientEntityFacts[] = [];
-	const aetheriaDropProbe = {
-		setActivation: (activated: boolean | null) => {
-			const slot = EQUIPMENT_SLOTS.find(
-				(slot) => "activation" in slot && slot.activation === "red",
-			);
-			if (slot === undefined) throw new Error("Red aetheria slot missing");
-			const read = interactionLifecycle.entities.read();
-			if (read.kind !== "current")
-				throw new Error("Aetheria fixture requires current authority");
-			if (aetheriaDropRecords.length === 0) {
-				aetheriaDropRecords = [1, 91].map((guid) => {
-					const record = read.level.entities.get(guid);
-					if (record?.description.kind !== "known")
-						throw new Error("Aetheria fixture record missing");
-					return record;
-				});
-			}
-			emitInteractionEvent("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				removed: [],
-				upserts: aetheriaDropRecords.map((record) => {
-					if (record.description.kind !== "known")
-						throw new Error("Aetheria fixture requires known descriptions");
-					return {
-						...record,
-						description:
-							record.guid === 1
-								? {
-										...record.description,
-										aetheriaActivation:
-											activated === null
-												? null
-												: { blue: false, yellow: false, red: activated },
-									}
-								: { ...record.description, equipLocations: slot.mask },
-					};
-				}),
-			});
-		},
-		restore: () => {
-			emitInteractionEvent("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				removed: [],
-				upserts: aetheriaDropRecords,
-			});
-			aetheriaDropRecords = [];
-		},
-	};
-
-	let pendingInventoryWorldPick: ClientViewportTargetDestination | null = null;
-	let releaseGiveKeys: (() => void) | null = null;
-	const giveProbe = {
-		binding: createInputDefaults("windows").client.give[0],
-		begin: () => {
-			const read = interactionLifecycle.entities.read();
-			if (read.kind !== "current")
-				throw new Error("Give fixture requires current entities");
-			const recipient = read.level.entities.get(91);
-			if (recipient?.description.kind !== "known")
-				throw new Error("Give fixture recipient missing");
-			emitInteractionEvent("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				upserts: [
-					{
-						...recipient,
-						guid: 7,
-						canReceiveGive: true,
-						canTrade: false,
-						canOfferTrade: false,
-						lockTool: null,
-						isLocked: null,
-						salvage: {
-							kind: "ineligible",
-							reason: "Fixture item cannot be salvaged.",
-						},
-						ownedByPlayer: false,
-						location: { kind: "none" },
-						scenePlacement: "available",
-						targeting: "creature",
-						playerThreat: false,
-						summon: null,
-						corpse: null,
-						description: {
-							...recipient.description,
-							name: "Give recipient",
-							healthQuery: "eligible",
-						},
-					},
-				],
-				removed: [],
-			});
-			selection.select(7);
-			releaseGiveKeys = keyboard.bindGame({
-				keydown: (event) => {
-					if (clientInput.shortcut("give", event) && !event.isComposing) {
-						event.preventDefault();
-						if (!event.repeat) itemInteractions.giveSelected();
-					}
-				},
-				keyup: () => {},
-				cancel: () => {},
-			});
-			keyboard.returnToGame();
-		},
-		removeSource: (guid: number): ClientEntityFacts => {
-			const read = interactionLifecycle.entities.read();
-			if (read.kind !== "current")
-				throw new Error("Source removal requires current authority");
-			const source = read.level.entities.get(guid);
-			if (source === undefined)
-				throw new Error("Source removal requires an existing source");
-			emitInteractionEvent("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				upserts: [],
-				removed: [guid],
-			});
-			return source;
-		},
-		restoreSource: (source: ClientEntityFacts) =>
-			emitInteractionEvent("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				upserts: [source],
-				removed: [],
-			}),
-		setTarget: (result: ClientViewportTargetResult | null) => {
-			inventoryWorldResult = result;
-		},
-		reply: (result: ClientViewportTargetResult) => {
-			const pending = pendingInventoryWorldPick;
-			pendingInventoryWorldPick = null;
-			if (pending === null) throw new Error("No pending viewport pick");
-			if (pending.isCurrent()) pending.commit(result);
-		},
-		end: () => {
-			emitInteractionEvent("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				upserts: [],
-				removed: [7],
-			});
-			inventoryWorldResult = { kind: "empty" };
-			pendingInventoryWorldPick = null;
-			releaseGiveKeys?.();
-			releaseGiveKeys = null;
-		},
-	};
 	const interactionFailures: string[] = [];
 	const unsubscribeSelection = selection.subscribe((guid) => {
 		selectedGuid = guid;
@@ -4142,8 +3855,6 @@
 			(character) => character.charCodeAt(0),
 		);
 		const icons = browserUiIconRepository(async (requests) => {
-			preparedIconCount += requests.length;
-			if (iconPreparationGate !== null) await iconPreparationGate;
 			return requests.map(({ key, spec }) =>
 				spec.kind === "item" &&
 				spec.base !== null &&
@@ -4173,7 +3884,6 @@
 		const unsubscribeInventoryToasts = inventoryToasts.subscribe((next) => {
 			toast = next;
 		});
-		publishLoadoutFeedback = (feedback) => inventoryToasts.publish(feedback);
 		const summonOwner = new ClientSummonPresentation(
 			interactionLifecycle,
 			(message) => {
@@ -4187,7 +3897,7 @@
 
 		const inventoryOwner = new ClientInventoryState(
 			{
-				entities: { read: readInventoryEntities },
+				entities: interactionLifecycle.entities,
 				previewInventory: (request) =>
 					interactionLifecycle.previewInventory(request),
 				submitInventory: (intent) =>
@@ -4893,7 +4603,6 @@
 					throw new Error("Keyboard fixture has not been installed.");
 				return keyboardFixture;
 			},
-			probeInventory,
 			probeLocks: () =>
 				probeClientLocks({
 					selection,
@@ -5072,13 +4781,6 @@
 					unsubscribe();
 				}
 			},
-			beginItemUseProbe: () => {
-				beginItemUseProbe();
-			},
-			itemUseProbe: () => {
-				if (activeItemUseProbe === null) throw new Error("No item-use probe");
-				return activeItemUseProbe;
-			},
 			spellBarProbe,
 			combatBarProbe,
 			probeSpells: () =>
@@ -5173,71 +4875,8 @@
 				},
 			},
 			inventoryDragCommands: () => interactionCommands,
-			autoMergeProbe: {
-				begin: () => {
-					emitInteractionBaseline();
-					const pack = (
-						guid: number,
-						entryKind: "container" | "foci",
-						index: number,
-					) =>
-						entityFacts(guid, {
-							ownedByPlayer: true,
-							location: {
-								kind: "contained",
-								parentGuid: 1,
-								slot: { kind: "pack", entryKind, index },
-							},
-							// Even contradictory storage facts must not offer the action for a focus.
-							storage: {
-								kind: "container",
-								roster: "announced",
-								itemCapacity: 24,
-								packCapacity: 0,
-							},
-						});
-					emitInteractionEvent("client-entity-facts-changed", {
-						projectileSupply: null,
-						salvage: null,
-						worldContainer: null,
-						removed: [],
-						upserts: [pack(1001, "container", 0), pack(1002, "foci", 1)],
-					});
-					gameplayView?.showInventory();
-				},
-				resync: () => emitInteractionEvent("client-state-resyncing", null),
-				feedback: (feedback) => {
-					const release = interactionLifecycle.subscribe((event) => {
-						if (event.type === "action-feedback")
-							inventoryToasts.publish(event.feedback);
-					});
-					try {
-						emitInteractionEvent("client-action-feedback", feedback);
-					} finally {
-						release();
-					}
-				},
-				toast: () => inventoryToasts.snapshot(),
-				timing: CLIENT_TUNING.inventory.autoMerge,
-			},
-			aetheriaDropProbe,
-			loadoutProbe,
 			selectInventoryItem: (guid) =>
 				selection.selectContentsItem(guid, "select"),
-			giveProbe,
-			deferNextInventorySubmission: () => {
-				deferInventorySubmission = true;
-			},
-			rejectDeferredInventorySubmission: () => {
-				if (rejectInventorySubmission === null)
-					throw new Error("No deferred inventory submission");
-				rejectInventorySubmission(
-					new Error("Injected late submission failure"),
-				);
-				rejectInventorySubmission = null;
-			},
-			replyInventoryPreview: (result) =>
-				emitInteractionEvent("client-inventory-preview", result),
 			probeActionFeedback,
 			probeConnectionBadge,
 			probePartyHud,
@@ -5345,7 +4984,10 @@
 			});
 			emitInteractionEvent("client-entity-health-updated", {
 				guid: 7,
+				worldGeneration: 1,
+				instanceSequence: 1,
 				healthFraction: 0.68,
+				observedAt: { seconds: 1 },
 			});
 		}
 		async function openShowcasePanel(panel: ShowcasePanel): Promise<void> {
@@ -5574,7 +5216,6 @@
 			worldContainer = null;
 			summonOwner.destroy();
 			unsubscribeInventoryToasts();
-			publishLoadoutFeedback = null;
 			inventoryToasts.destroy();
 			inventory = null;
 			icons.dispose();
@@ -5840,10 +5481,7 @@
 					};
 				}}
 				onPickInventoryTarget={(_x, _y, destination) => {
-					if (inventoryWorldResult === null)
-						pendingInventoryWorldPick = destination;
-					else if (destination.isCurrent())
-						destination.commit(inventoryWorldResult);
+					if (destination.isCurrent()) destination.commit({ kind: "empty" });
 				}}
 				onViewportSelect={(x, y, interact) => {
 					viewportSelectionPoints.push({ x, y, interact });

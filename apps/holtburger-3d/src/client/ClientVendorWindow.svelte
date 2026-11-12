@@ -5,6 +5,7 @@
 	import { onMount, tick } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
+	import { useItemCantrips } from "../app/item-cantrips";
 	import ItemCellVisual from "../app/ItemCellVisual.svelte";
 	import ItemQueueCell from "../app/ItemQueueCell.svelte";
 	import UiIcon from "../app/UiIcon.svelte";
@@ -21,6 +22,8 @@
 		ClientHudViewport,
 	} from "./client-hud-layout";
 	import type { ClientVendorState, VendorView } from "./client-vendor-state";
+
+	const itemCantrips = useItemCantrips();
 
 	interface Props {
 		/** Accepted keyboard settings keep contextual inspection hints reactive. */
@@ -213,7 +216,10 @@
 												onExamineItem(offer.guid);
 											}}
 										>
-											<span class="offer-icon"
+											<span
+												class="offer-icon ui-item-cell"
+												data-cantrip-tier={itemCantrips.tierFor(offer.guid)}
+												data-selected={selected === offer.guid || undefined}
 												><UiIcon display={displays.get(cell.iconKey)} /></span
 											>
 											<span class="offer-name"
@@ -309,6 +315,7 @@
 											{@const label = `${cell.name}\nQuantity: ${cell.amount.toLocaleString()}\nTotal: ${cell.total.toLocaleString()} ${currency.name}\nClick to select.\nExamine (${examineShortcut.description}) or right-click to inspect.`}
 											<ItemQueueCell
 												type="button"
+												itemGuid={cell.sources[0]}
 												removeLabel={`Remove ${cell.name} from ${side === "buy" ? "buying" : "selling"} queue`}
 												removalDisabled={locked}
 												onremove={() => act(() => model.remove(cell))}
@@ -415,6 +422,7 @@
 			gap: var(--ui-vendor-offer-row-gap);
 		}
 		.vendor-offer-row {
+			--ui-item-selection-outline: none;
 			display: grid;
 			grid-template-columns:
 				var(--ui-vendor-offer-icon-size) minmax(0, 1fr)
@@ -432,6 +440,10 @@
 			cursor: pointer;
 			user-select: none;
 		}
+		.vendor-offer-row[aria-pressed="true"] {
+			position: relative;
+			z-index: 2;
+		}
 		.vendor-offer-row:hover:not(:disabled) {
 			border-color: var(--ui-color-border);
 		}
@@ -440,9 +452,13 @@
 			cursor: not-allowed;
 		}
 		.offer-icon {
+			display: grid;
+			place-items: center;
+			box-sizing: border-box;
 			width: var(--ui-vendor-offer-icon-size);
 			height: var(--ui-vendor-offer-icon-size);
 			min-width: 0;
+			padding: var(--ui-item-cell-padding);
 			overflow: hidden;
 		}
 		.offer-name {

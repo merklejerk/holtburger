@@ -13,6 +13,7 @@ import type {
 	ClientTuning,
 } from "./client-tuning-contract";
 import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout.js";
+import { CLIENT_APPRAISAL_TUNING } from "./client-appraisal-tuning.js";
 
 /** Horizontal proximity suppresses unstable compass bearings without clearing navigation intent. */
 export const CLIENT_WAYPOINT_NEAR_RADIUS_METERS = 25;
@@ -178,7 +179,7 @@ export const CLIENT_TUNING = {
 	diagnostics: CLIENT_DIAGNOSTICS,
 	portalTransition: CLIENT_PORTAL_TRANSITION,
 	objectInspection: {
-		refreshIntervalMs: 1_000,
+		refreshIntervalMs: CLIENT_APPRAISAL_TUNING.refreshIntervalMs,
 		collapsedDescriptionCharacters: 140,
 	},
 	objectPreview: {
@@ -303,6 +304,18 @@ export const CLIENT_TUNING = {
 		manaStoneColor: hexRgba("#67e8f9ff"),
 		/** Names change rarely and do not need to follow pointer sampling cadence. */
 		displayIntervalMs: 250,
+	},
+	nameplateHealth: {
+		/** Combat interest and nameplate health stay bounded within practical engagement range. */
+		maxDistanceMeters: 35,
+		/** Hold combat interest briefly after attacks or target switches before expiring. */
+		combatInterestMs: 12_000,
+		/** Shared recency bound with core AppraisalSystem (`recentWindowMs > refreshIntervalMs`). */
+		recentWindowMs: CLIENT_APPRAISAL_TUNING.recentWindowMs,
+		/** Refresh cadence while interested and not already queried as selected target. */
+		refreshIntervalMs: CLIENT_APPRAISAL_TUNING.refreshIntervalMs,
+		/** Request initial health once when entering combat interest without fresh health. */
+		bootstrapOnCombatEnter: true,
 	},
 	/** Client-owned starting display policy. */
 	frameSettings: CLIENT_FRAME_SETTINGS,

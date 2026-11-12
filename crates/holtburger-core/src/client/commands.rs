@@ -253,6 +253,8 @@ impl ClientRuntime {
             | ClientCommand::SoulEmote { .. } => self.handle_chat_command(cmd).await,
 
             ClientCommand::Identify(_)
+            | ClientCommand::RequestAppraisal { .. }
+            | ClientCommand::CancelAppraisal { .. }
             | ClientCommand::ReadBookPage { .. }
             | ClientCommand::QueryHealth(_)
             | ClientCommand::Use { .. }
@@ -769,14 +771,64 @@ impl ClientRuntime {
         }
     }
 
+    fn resolve_appraisal_instance(world: &holtburger_world::WorldState, guid: Guid) -> Option<u16> {
+        world
+            .entities
+            .get(guid)
+            .map(|entity| entity.instance_sequence())
+            .or_else(|| {
+                world
+                    .vendor
+                    .as_ref()
+                    .is_some_and(|vendor| vendor.items.iter().any(|item| item.guid == guid))
+                    .then_some(0)
+            })
+    }
+
+    pub(super) async fn advance_appraisals(&mut self, now: Instant) -> Result<()> {
+        if !matches!(self.state, ClientState::InWorld) {
+            return Ok(());
+        }
+        let world = &self.world;
+        let next = self
+            .appraisal
+            .pop_next_dispatch(now, |guid| Self::resolve_appraisal_instance(world, guid));
+        self.emit_settled_appraisal_facts();
+        if let Some(guid) = next {
+            log::info!(">>> Identifying: 0x{:08X}", guid);
+            self.send_game_action(GameAction::IdentifyObject(Box::new(
+                IdentifyObjectActionData { guid },
+            )))
+            .await?;
+        }
+        Ok(())
+    }
+
     async fn handle_interaction_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
             ClientCommand::Identify(guid) => {
-                log::info!(">>> Identifying: 0x{:08X}", guid);
-                self.send_game_action(GameAction::IdentifyObject(Box::new(
-                    IdentifyObjectActionData { guid },
-                )))
-                .await
+                let instance = Self::resolve_appraisal_instance(&self.world, guid);
+                self.appraisal.request(
+                    guid,
+                    instance,
+                    super::appraisal::AppraisalOutputDemand::Full,
+                    false,
+                );
+                self.advance_appraisals(Instant::now()).await
+            }
+            ClientCommand::RequestAppraisal {
+                guid,
+                output,
+                allow_cached_preview,
+            } => {
+                let instance = Self::resolve_appraisal_instance(&self.world, guid);
+                self.appraisal
+                    .request(guid, instance, output, allow_cached_preview);
+                self.advance_appraisals(Instant::now()).await
+            }
+            ClientCommand::CancelAppraisal { guid, output } => {
+                self.appraisal.cancel_client(guid, output);
+                self.advance_appraisals(Instant::now()).await
             }
             ClientCommand::ReadBookPage {
                 player,
@@ -1752,6 +1804,16 @@ mod tests {
 
         assert!(saw_vendor);
         assert!(saw_trade);
+
+        assert_eq!(
+            ClientRuntime::resolve_appraisal_instance(&client.world, Guid(0x7000_1001)),
+            Some(0)
+        );
+        client.world.vendor = None;
+        assert_eq!(
+            ClientRuntime::resolve_appraisal_instance(&client.world, Guid(0x7000_1001)),
+            None
+        );
     }
 
     #[tokio::test]

@@ -7,6 +7,8 @@
 	import { loadoutTooltip } from "./client-loadout";
 	import ActionAlternateIcon from "../assets/icons/action-alternate.svg?component";
 	import { useClientInput } from "./client-input-context";
+	import { useItemCantrips } from "../app/item-cantrips";
+	const itemCantrips = useItemCantrips();
 	import ItemCellVisual from "../app/ItemCellVisual.svelte";
 	import { itemCellPresentation } from "../app/item-cell-presentation";
 	import type { ItemStructure } from "../app/item-structure";
@@ -108,6 +110,9 @@
 	style:anchor-name={anchorName}
 	data-action-item={content !== null && content.kind !== "loadout"
 		? content.item
+		: undefined}
+	data-cantrip-tier={content !== null && content.kind !== "loadout"
+		? itemCantrips.tierFor(content.item)
 		: undefined}
 	data-empty={content === null}
 	data-dimmed={content !== null && !available}

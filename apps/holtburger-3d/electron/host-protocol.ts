@@ -1,4 +1,5 @@
 import { APP_LIFECYCLE_TUNING } from "../src/app/app-tuning.js";
+import { CLIENT_APPRAISAL_TUNING } from "../src/client/client-appraisal-tuning.js";
 import { decode, encode } from "@msgpack/msgpack";
 import { z } from "zod";
 import {
@@ -391,7 +392,14 @@ export class SidecarHostClient {
 	async startClient(startup: ClientLaunchConfiguration): Promise<void> {
 		try {
 			// Content was selected when the host process launched; the game command owns connection data.
-			const { host, port, account, password, meleeMaxChaseDistance } = startup;
+			const {
+				host,
+				port,
+				account,
+				password,
+				meleeMaxChaseDistance,
+				appraisalTuning,
+			} = startup;
 			await this.#invokeWire({
 				command: "start_client",
 				startup: {
@@ -399,6 +407,11 @@ export class SidecarHostClient {
 					port,
 					account,
 					password,
+					appraisalTuning: appraisalTuning ?? {
+						assessmentRetryIntervalMs:
+							CLIENT_APPRAISAL_TUNING.assessmentRetryIntervalMs,
+						responseTimeoutMs: CLIENT_APPRAISAL_TUNING.responseTimeoutMs,
+					},
 					...(meleeMaxChaseDistance === undefined
 						? {}
 						: { meleeMaxChaseDistance }),

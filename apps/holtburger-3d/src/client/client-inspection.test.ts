@@ -48,9 +48,15 @@ const itemInspectionFixture = itemFixture.outcome.inspection;
 
 class FakeInspectionSession {
 	readonly requests: number[] = [];
-	readonly appraisals = new ClientAppraisalRequests((guid) => {
-		this.requests.push(guid);
-		return this.#nextRequest;
+	readonly refreshFlags: boolean[] = [];
+	readonly appraisals = new ClientAppraisalRequests({
+		sendFull: (guid, refresh) => {
+			this.requests.push(guid);
+			this.refreshFlags.push(refresh);
+			return this.#nextRequest;
+		},
+		sendFacts: async () => {},
+		cancel: async () => {},
 	});
 	readonly entities: { readonly read: () => ClientEntityRead };
 	readonly #listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
@@ -337,6 +343,7 @@ describe("ClientInspection", () => {
 			CLIENT_TUNING.objectInspection.refreshIntervalMs,
 		);
 		expect(session.requests).toEqual([itemFixture.guid, itemFixture.guid]);
+		expect(session.refreshFlags).toEqual([false, true]);
 		expect(owner.read()).toBe(visible);
 		await vi.advanceTimersByTimeAsync(
 			CLIENT_TUNING.objectInspection.refreshIntervalMs,
@@ -364,6 +371,31 @@ describe("ClientInspection", () => {
 		expect(session.requests).toHaveLength(3);
 
 		owner.close();
+		await vi.advanceTimersByTimeAsync(
+			CLIENT_TUNING.objectInspection.refreshIntervalMs,
+		);
+		expect(session.requests).toHaveLength(3);
+	});
+
+	it("preserves ready snapshot and keeps refreshing when periodic refresh is rejected", async () => {
+		const session = new FakeInspectionSession();
+		const reportFailure = vi.fn();
+		const owner = new ClientInspection(session, reportFailure);
+		await owner.examine(itemFixture.guid);
+		session.emit({ type: "object-inspection-result", result: itemFixture });
+		const ready = owner.read();
+
+		await vi.advanceTimersByTimeAsync(
+			CLIENT_TUNING.objectInspection.refreshIntervalMs,
+		);
+		expect(session.requests).toHaveLength(2);
+		session.emit({
+			type: "object-inspection-result",
+			result: { guid: itemFixture.guid, outcome: { kind: "rejected" } },
+		});
+		expect(owner.read()).toBe(ready);
+		expect(reportFailure).not.toHaveBeenCalled();
+
 		await vi.advanceTimersByTimeAsync(
 			CLIENT_TUNING.objectInspection.refreshIntervalMs,
 		);

@@ -2,14 +2,66 @@ import { allocateItemUseOperation } from "../../client/client-item-use-sequence"
 import type { ClientEntitySelection } from "../../client/client-entity-selection";
 import { SHOWCASE_CHARACTER_SHEET } from "./ui-showcase-fixture";
 import type { CharacterSheet } from "../../client/client-character-sheet-contract";
+import type { ClientEntityFacts } from "../../client/client-entity-mirror";
 import type { ClientToast } from "../../client/client-toast-center";
-import { inventoryFixtureItem } from "./client-inventory-probe";
 import type { ClientLocksState } from "../../client/client-locks-state";
 import {
 	itemUseRequestSchema,
 	itemUseTargetQuerySchema,
 } from "../../client/client-item-use-contract";
 import { CLIENT_TUNING } from "../../client/client-tuning";
+
+/** Browser-only fixture record; wire delivery still passes through the real session decoder. */
+function inventoryFixtureItem(
+	guid: number,
+	overrides: Partial<ClientEntityFacts> = {},
+): ClientEntityFacts {
+	return {
+		guid,
+		playerThreat: false,
+		summon: null,
+		nearby: null,
+		canPickUp: false,
+		worldContainerContent: false,
+		canReceiveGive: false,
+		canTrade: false,
+		canOfferTrade: false,
+		vendorSale: null,
+		lockTool: null,
+		isLocked: null,
+		salvage: { kind: "ineligible", reason: "Fixture item cannot be salvaged." },
+		description: {
+			kind: "known",
+			name: `Inventory item ${guid}`,
+			healthQuery: "ineligible",
+			itemType: 0,
+			hasAlternateEquipSide: false,
+			builtInSpell: null,
+			mapCategory: "other",
+			objectFlags: 0,
+			wcid: null,
+			pyrealBalance: null,
+			aetheriaActivation: null,
+			burden: null,
+			equipLocations: null,
+			consumable: null,
+			useCapability: "direct" as const,
+			cooldown: null,
+			stackCount: null,
+			structure: { current: null, max: null },
+			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
+			equipmentCantrip: null,
+		},
+		location: { kind: "none" },
+		ownedByPlayer: false,
+		targeting: "non-creature",
+		scenePlacement: "available",
+		storage: { kind: "not-established" },
+		...overrides,
+		corpse: overrides.corpse ?? null,
+		health: overrides.health ?? null,
+	};
+}
 
 /** Synthetic server replies exercise the real session, window, rows, and keyboard routing. */
 export async function probeClientLocks(options: {

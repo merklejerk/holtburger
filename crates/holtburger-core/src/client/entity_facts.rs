@@ -3,7 +3,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use holtburger_common::{Guid, properties::ObjectDescriptionFlag};
-use holtburger_protocol::messages::{GameAction, IdentifyObjectActionData};
 use holtburger_world::crafting::salvage::SalvageContext;
 use holtburger_world::{
     WorldEvent, WorldState,
@@ -38,9 +37,26 @@ impl ClientEntitySnapshot {
         world: &WorldState,
         opened_corpses: &BTreeSet<Guid>,
     ) -> Result<Self, ScenePlacementError> {
+        Self::from_world_with_opened_inner(world, opened_corpses, None)
+    }
+
+    /// Apply client-session corpse history and host-clock origin to the reconstructible baseline.
+    pub fn from_world_with_opened_at_origin(
+        world: &WorldState,
+        opened_corpses: &BTreeSet<Guid>,
+        host_origin: std::time::Instant,
+    ) -> Result<Self, ScenePlacementError> {
+        Self::from_world_with_opened_inner(world, opened_corpses, Some(host_origin))
+    }
+
+    fn from_world_with_opened_inner(
+        world: &WorldState,
+        opened_corpses: &BTreeSet<Guid>,
+        host_origin: Option<std::time::Instant>,
+    ) -> Result<Self, ScenePlacementError> {
         let mut entities = Vec::new();
         for guid in world.client_entity_guids() {
-            if let Some(record) = session_entity_facts(world, guid, opened_corpses)? {
+            if let Some(record) = session_entity_facts(world, guid, opened_corpses, host_origin)? {
                 entities.push(record);
             }
         }
@@ -58,8 +74,12 @@ fn session_entity_facts(
     world: &WorldState,
     guid: Guid,
     opened_corpses: &BTreeSet<Guid>,
+    host_origin: Option<std::time::Instant>,
 ) -> Result<Option<ClientEntityFacts>, ScenePlacementError> {
-    let mut record = world.client_entity_facts(guid)?;
+    let mut record = match host_origin {
+        Some(origin) => world.client_entity_facts_with_host_origin(guid, origin)?,
+        None => world.client_entity_facts(guid)?,
+    };
     if let Some(record) = &mut record
         && record.corpse.is_some()
         && opened_corpses.contains(&guid)
@@ -165,14 +185,24 @@ impl EntityFactsPublication {
         &mut self,
         world: &mut WorldState,
     ) -> Result<ClientEntityDelta, ScenePlacementError> {
-        self.collect_with_opened(world, &BTreeSet::new())
+        self.collect_with_opened_inner(world, &BTreeSet::new(), None)
             .map(|collected| collected.delta)
     }
 
-    fn collect_with_opened(
+    fn collect_with_opened_at_origin(
         &mut self,
         world: &mut WorldState,
         opened_corpses: &BTreeSet<Guid>,
+        host_origin: std::time::Instant,
+    ) -> Result<CollectedEntityFacts, ScenePlacementError> {
+        self.collect_with_opened_inner(world, opened_corpses, Some(host_origin))
+    }
+
+    fn collect_with_opened_inner(
+        &mut self,
+        world: &mut WorldState,
+        opened_corpses: &BTreeSet<Guid>,
+        host_origin: Option<std::time::Instant>,
     ) -> Result<CollectedEntityFacts, ScenePlacementError> {
         let revision = world.trade.as_ref().map(|trade| trade.revision);
         let vendor = world.vendor.as_ref().map(|vendor| vendor.vendor_guid);
@@ -232,7 +262,10 @@ impl EntityFactsPublication {
         // Prepare before mutating the published cache so invalid world graphs fail coherently.
         let mut prepared = Vec::new();
         for guid in &self.dirty {
-            prepared.push((*guid, session_entity_facts(world, *guid, opened_corpses)?));
+            prepared.push((
+                *guid,
+                session_entity_facts(world, *guid, opened_corpses, host_origin)?,
+            ));
         }
         // Reuse projected ownership to invalidate burden, including items just transferred out.
         // The player may already be prepared through an ordinary property/storage update.
@@ -247,7 +280,7 @@ impl EntityFactsPublication {
         {
             prepared.push((
                 world.player.guid,
-                session_entity_facts(world, world.player.guid, opened_corpses)?,
+                session_entity_facts(world, world.player.guid, opened_corpses, host_origin)?,
             ));
         }
         for (guid, record) in prepared {
@@ -276,7 +309,11 @@ impl super::ClientRuntime {
     pub(super) fn publish_entity_facts(&mut self) {
         let collected = self
             .entity_facts
-            .collect_with_opened(&mut self.world, self.opened_corpses.ids())
+            .collect_with_opened_at_origin(
+                &mut self.world,
+                self.opened_corpses.ids(),
+                self.dynamic_entity_time_origin,
+            )
             .expect("accepted world relationships must project into coherent entity facts");
         if collected.storage_changed {
             self.player_visual.invalidate();
@@ -294,6 +331,19 @@ impl super::ClientRuntime {
                 .client_view_event_tx
                 .send(super::ClientViewEvent::EntityFactsChanged(delta));
         }
+        let core_target = match self.entity_facts.projectile_supply {
+            ProjectileSupply::Pending {
+                appraisal: Some(guid),
+            } => Some((
+                guid,
+                self.world
+                    .entities
+                    .get(guid)
+                    .map(|entity| entity.instance_sequence()),
+            )),
+            _ => None,
+        };
+        self.appraisal.set_core_facts_target(core_target);
         let active = matches!(
             self.state,
             super::ClientState::EnteringWorld | super::ClientState::InWorld
@@ -305,26 +355,6 @@ impl super::ClientRuntime {
                         self.player_visual.snapshot(),
                     ));
         }
-    }
-
-    /// Appraise only an unresolved equipped source, once per continuous pending source.
-    /// Successful appraisal feeds ordinary entity publication; no frontend panel must open.
-    pub(super) async fn hydrate_projectile_supply(&mut self) -> anyhow::Result<()> {
-        let requested = match self.entity_facts.projectile_supply {
-            ProjectileSupply::Pending { appraisal } => appraisal,
-            _ => None,
-        };
-        if requested != self.projectile_appraisal {
-            if let Some(guid) = requested {
-                self.send_game_action(GameAction::IdentifyObject(Box::new(
-                    IdentifyObjectActionData { guid },
-                )))
-                .await?;
-            }
-            // Failed/rejected appraisal remains unknown, without retrying every tick.
-            self.projectile_appraisal = requested;
-        }
-        Ok(())
     }
 }
 
@@ -818,20 +848,36 @@ mod tests {
                 appraisal: Some(ITEM)
             }
         );
-        client.hydrate_projectile_supply().await.unwrap();
+        let now = std::time::Instant::now();
+        client.advance_appraisals(now).await.unwrap();
         let sent = std::fs::metadata(capture.path()).unwrap().len();
         assert!(sent > 0);
-        client.hydrate_projectile_supply().await.unwrap();
+        client
+            .advance_appraisals(
+                now + std::time::Duration::from_millis(
+                    crate::client::appraisal::DEFAULT_APPRAISAL_RETRY_INTERVAL_MS,
+                ),
+            )
+            .await
+            .unwrap();
         assert_eq!(std::fs::metadata(capture.path()).unwrap().len(), sent);
 
-        // Recreation while a request is outstanding must not strand the new instance.
+        // Recreation while a request is outstanding must not strand the new instance once the
+        // single-slot inflight window settles or expires.
         for change in client
             .world
             .handle_message(&GameMessage::UpdateObject(Box::new(weapon)))
         {
             client.handle_world_event(&change);
         }
-        client.hydrate_projectile_supply().await.unwrap();
+        client
+            .advance_appraisals(
+                now + std::time::Duration::from_millis(
+                    crate::client::appraisal::DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS,
+                ),
+            )
+            .await
+            .unwrap();
         assert!(std::fs::metadata(capture.path()).unwrap().len() > sent);
 
         for (message, expected) in [
@@ -1806,5 +1852,131 @@ mod tests {
             publisher.collect(&mut world).unwrap(),
             ClientEntityDelta::default()
         );
+    }
+
+    #[test]
+    fn cantrip_state_republishes_known_to_unappraised_to_known_deltas_on_update_object() {
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
+
+        use holtburger_common::properties::{EquipMask, ItemType};
+        use holtburger_dat::file_type::spell_table::SpellBase as DatSpellBase;
+        use holtburger_protocol::messages::{
+            GameEvent, GameEventMessage, GameMessage, ObjectDescriptionData,
+            PublicWeenieDescription,
+            object::events::{IdentifyObjectResponseEventData, IdentifyResponseFlags},
+        };
+        use holtburger_world::entity_facts::{EntityDescription, EquipmentCantripState};
+        use holtburger_world::spell::{RankedCantripTier, SpellCatalog, SpellInfo};
+
+        let mut world = WorldState::synthetic();
+        let mut catalog = SpellCatalog::default();
+        catalog.spells.insert(
+            10,
+            SpellInfo::from(DatSpellBase {
+                name: "Major Strength".into(),
+                category: 261,
+                bitfield: 0x4,
+                power: 15,
+                ..DatSpellBase::default()
+            }),
+        );
+        world.spell_catalog = Arc::new(catalog);
+
+        let origin = Instant::now();
+        let mut publisher = EntityFactsPublication::default();
+        let sword_desc = || ObjectDescriptionData {
+            pos: Some(Default::default()),
+            public_weenie_desc: PublicWeenieDescription {
+                guid: ITEM,
+                name: Some("Sword".into()),
+                wcid: 77,
+                item_type: ItemType::MELEE_WEAPON.bits(),
+                valid_locations: Some(EquipMask::MELEE_WEAPON.bits()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let identify = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: ITEM,
+            sequence: 1,
+            event: GameEvent::IdentifyObjectResponse(Box::new(IdentifyObjectResponseEventData {
+                object_guid: ITEM,
+                flags: IdentifyResponseFlags::SPELL_BOOK,
+                success: true,
+                spell_book: vec![10],
+                ..Default::default()
+            })),
+        }));
+
+        for event in
+            world.handle_message_at(&GameMessage::ObjectCreate(Box::new(sword_desc())), origin)
+        {
+            publisher.observe(&event);
+        }
+        let _ = publisher
+            .collect_with_opened_at_origin(&mut world, &BTreeSet::new(), origin)
+            .unwrap();
+
+        for event in world.handle_message_at(&identify, origin + Duration::from_secs(1)) {
+            publisher.observe(&event);
+        }
+        let known_delta = publisher
+            .collect_with_opened_at_origin(&mut world, &BTreeSet::new(), origin)
+            .unwrap()
+            .delta;
+        assert!(matches!(
+            known_delta.upserts.as_slice(),
+            [record] if record.guid == ITEM && matches!(
+                record.description,
+                EntityDescription::Known {
+                    equipment_cantrip: Some(EquipmentCantripState::Known {
+                        highest_tier: Some(RankedCantripTier::Major)
+                    }),
+                    ..
+                }
+            )
+        ));
+
+        for event in world.handle_message_at(
+            &GameMessage::UpdateObject(Box::new(sword_desc())),
+            origin + Duration::from_secs(2),
+        ) {
+            publisher.observe(&event);
+        }
+        let invalidated_delta = publisher
+            .collect_with_opened_at_origin(&mut world, &BTreeSet::new(), origin)
+            .unwrap()
+            .delta;
+        assert!(matches!(
+            invalidated_delta.upserts.as_slice(),
+            [record] if record.guid == ITEM && matches!(
+                record.description,
+                EntityDescription::Known {
+                    equipment_cantrip: Some(EquipmentCantripState::Unappraised),
+                    ..
+                }
+            )
+        ));
+
+        for event in world.handle_message_at(&identify, origin + Duration::from_secs(3)) {
+            publisher.observe(&event);
+        }
+        let restored_delta = publisher
+            .collect_with_opened_at_origin(&mut world, &BTreeSet::new(), origin)
+            .unwrap()
+            .delta;
+        assert!(matches!(
+            restored_delta.upserts.as_slice(),
+            [record] if record.guid == ITEM && matches!(
+                record.description,
+                EntityDescription::Known {
+                    equipment_cantrip: Some(EquipmentCantripState::Known {
+                        highest_tier: Some(RankedCantripTier::Major)
+                    }),
+                    ..
+                }
+            )
+        ));
     }
 }

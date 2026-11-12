@@ -1,11 +1,11 @@
-//! App-owned classification for compact item-inspector cantrip summaries.
+//! Shared classification for intrinsic item cantrip tiers.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const BENEFICIAL_SPELL: u32 = 0x4;
 
 /// Conventional cantrip tiers plus a lossless bucket for nonstandard strengths.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CantripTier {
     Feeble,
@@ -17,20 +17,44 @@ pub enum CantripTier {
     Other,
 }
 
+/// Ordered conventional cantrip tiers used for equipment border hierarchy.
+///
+/// Excludes nonstandard [`CantripTier::Other`] cantrips so borders never rank ambiguous strengths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RankedCantripTier {
+    Feeble,
+    Minor,
+    Moderate,
+    Major,
+    Epic,
+    Legendary,
+}
+
+impl CantripTier {
+    /// Converts conventional tiers into an ordered border tier; [`Self::Other`] yields `None`.
+    pub const fn ranked(self) -> Option<RankedCantripTier> {
+        match self {
+            Self::Feeble => Some(RankedCantripTier::Feeble),
+            Self::Minor => Some(RankedCantripTier::Minor),
+            Self::Moderate => Some(RankedCantripTier::Moderate),
+            Self::Major => Some(RankedCantripTier::Major),
+            Self::Epic => Some(RankedCantripTier::Epic),
+            Self::Legendary => Some(RankedCantripTier::Legendary),
+            Self::Other => None,
+        }
+    }
+}
+
 use CantripTier::{Epic, Feeble, Legendary, Major, Minor, Moderate, Other};
 
 /// Identify item-enchantment spell families and classify their authored strength.
 ///
-/// The category and power profiles come from a full 2026-09-20 client DAT census,
-/// checked against ACE's canonical loot spell families. Names are authoritative for
-/// conventional prefixes; exact powers recover named variants without inventing
-/// tiers between authored breakpoints.
-pub(super) fn classify_cantrip(
-    name: &str,
-    category: u32,
-    flags: u32,
-    power: u32,
-) -> Option<CantripTier> {
+/// The category and power profiles come from a full 2026-09-20 client DAT census
+/// of retail loot spell families. Names are authoritative for conventional
+/// prefixes; exact powers recover named variants without inventing tiers between
+/// authored breakpoints.
+pub fn classify_cantrip(name: &str, category: u32, flags: u32, power: u32) -> Option<CantripTier> {
     if flags & BENEFICIAL_SPELL == 0 {
         return None;
     }
@@ -219,5 +243,15 @@ mod tests {
             classify_cantrip("Minor Strength", 261, BENEFICIAL_SPELL, 5),
             Some(Minor)
         );
+    }
+
+    #[test]
+    fn ranked_tier_orders_conventional_tiers_and_excludes_other() {
+        assert!(RankedCantripTier::Feeble < RankedCantripTier::Minor);
+        assert!(RankedCantripTier::Minor < RankedCantripTier::Moderate);
+        assert!(RankedCantripTier::Moderate < RankedCantripTier::Major);
+        assert!(RankedCantripTier::Major < RankedCantripTier::Epic);
+        assert!(RankedCantripTier::Epic < RankedCantripTier::Legendary);
+        assert_eq!(Other.ranked(), None);
     }
 }

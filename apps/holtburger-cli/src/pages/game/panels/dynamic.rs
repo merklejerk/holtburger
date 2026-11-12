@@ -132,7 +132,11 @@ pub fn render_dynamic_pane(f: &mut Frame, data: &GameData, view: &ViewState, are
         };
 
         let (name, guid, health_fraction) = if let Some(entity) = data.entities.get(&target_guid) {
-            (entity.name(), entity.guid.0, entity.health_fraction)
+            (
+                entity.name(),
+                entity.guid.0,
+                entity.health.map(|health| health.fraction),
+            )
         } else {
             ("Unknown Entity", target_guid.0, None)
         };
@@ -554,7 +558,10 @@ mod tests {
             "World".to_string(),
         );
         let mut entity = Entity::new(target_guid, "Drudge".to_string(), WorldPosition::default());
-        entity.health_fraction = Some(0.66);
+        entity.health = Some(holtburger_world::entity::HealthObservation {
+            fraction: 0.66,
+            observed_at: std::time::Instant::now(),
+        });
         data.entities.insert(target_guid, entity);
 
         let view = ViewState {

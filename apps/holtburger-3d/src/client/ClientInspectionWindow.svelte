@@ -446,26 +446,26 @@
 			white-space: nowrap;
 		}
 		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="feeble"]) {
-			--cantrip-tier-color: #b8b6af;
+			--cantrip-tier-color: var(--ui-cantrip-tier-feeble-color);
 		}
 		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="minor"]) {
-			--cantrip-tier-color: #82d998;
+			--cantrip-tier-color: var(--ui-cantrip-tier-minor-color);
 		}
 		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="moderate"]) {
-			--cantrip-tier-color: #79cbea;
+			--cantrip-tier-color: var(--ui-cantrip-tier-moderate-color);
 		}
 		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="major"]) {
-			--cantrip-tier-color: #c0a2ff;
+			--cantrip-tier-color: var(--ui-cantrip-tier-major-color);
 		}
 		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="epic"]) {
-			--cantrip-tier-color: #ff9d6c;
+			--cantrip-tier-color: var(--ui-cantrip-tier-epic-color);
 		}
 		.inspection-scroll
 			:global(.inspection-cantrip-pill[data-tier="legendary"]) {
-			--cantrip-tier-color: #f2d05c;
+			--cantrip-tier-color: var(--ui-cantrip-tier-legendary-color);
 		}
 		.inspection-scroll :global(.inspection-cantrip-pill[data-tier="other"]) {
-			--cantrip-tier-color: #e6a4cf;
+			--cantrip-tier-color: var(--ui-cantrip-tier-other-color);
 		}
 		.inspection-scroll :global(.inspection-cantrip-pending),
 		.inspection-scroll :global(.inspection-cantrip-incomplete) {

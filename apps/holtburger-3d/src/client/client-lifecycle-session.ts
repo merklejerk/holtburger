@@ -244,6 +244,9 @@ import {
 	type ClientSummonEnded,
 	decodeClientEntityHealth,
 	type ClientEntityHealth,
+	decodeClientEntityCombatObserved,
+	type ClientEntityCombatObserved,
+	decodeClientAppraisalFactsSettled,
 	decodeClientChatMessage,
 	decodeClientActionFeedback,
 	decodeClientServerText,
@@ -294,6 +297,8 @@ import type { ClientSpellCastAim } from "./client-spell-casting";
 type ClientCommandName = Extract<
 	HostCommandName,
 	| "examine_client_entity"
+	| "request_client_facts_appraisal"
+	| "cancel_client_appraisal"
 	| "read_client_book_page"
 	| "request_client_current_state"
 	| "refresh_client_housing"
@@ -411,6 +416,7 @@ type ClientEventName = Extract<
 	| "client-precise-jump-evaluation"
 	| "client-precise-jump-transaction-feedback"
 	| "client-entity-selection-query-result"
+	| "client-entity-combat-observed"
 	| "client-local-player-established"
 	| "client-server-time-updated"
 	| "client-world-name-updated"
@@ -434,6 +440,7 @@ type ClientEventName = Extract<
 	| "client-combat-status-updated"
 	| "client-spell-cast-target-updated"
 	| "client-entity-health-updated"
+	| "client-appraisal-facts-settled"
 	| "client-summon-ended"
 	| "client-chat-message"
 	| "client-combat-outcome"
@@ -663,6 +670,11 @@ export type ClientLifecycleSessionEvent =
 	| { readonly type: "player-entered"; readonly player: ClientPlayerEntered }
 	| { readonly type: "vitals"; readonly vitals: readonly ClientVital[] }
 	| { readonly type: "entity-health"; readonly health: ClientEntityHealth }
+	| {
+			readonly type: "entity-combat-observed";
+			readonly combat: ClientEntityCombatObserved;
+	  }
+	| { readonly type: "appraisal-facts-settled"; readonly guid: number }
 	| { readonly type: "summon-ended"; readonly summon: ClientSummonEnded }
 	| { readonly type: "chat"; readonly message: ClientChatMessage }
 	| {
@@ -782,11 +794,26 @@ export class ClientLifecycleSession {
 					message: error instanceof Error ? error.message : String(error),
 				}),
 		});
-		this.appraisals = new ClientAppraisalRequests(async (guid) => {
-			await transport.invoke(
-				"examine_client_entity",
-				objectInspectionTargetSchema.parse({ guid }),
-			);
+		this.appraisals = new ClientAppraisalRequests({
+			sendFull: async (guid, refresh) => {
+				const target = objectInspectionTargetSchema.parse({ guid });
+				await transport.invoke(
+					"examine_client_entity",
+					refresh ? { ...target, refresh: true } : target,
+				);
+			},
+			sendFacts: async (guid) => {
+				await transport.invoke(
+					"request_client_facts_appraisal",
+					objectInspectionTargetSchema.parse({ guid }),
+				);
+			},
+			cancel: async (guid, demand) => {
+				await transport.invoke("cancel_client_appraisal", {
+					...objectInspectionTargetSchema.parse({ guid }),
+					demand,
+				});
+			},
 		});
 		this.#partyUpdates = new ClientPartyUpdates(
 			async (enabled) => {
@@ -2025,6 +2052,22 @@ export class ClientLifecycleSession {
 					this.#emit({
 						type: "entity-health",
 						health: decodeClientEntityHealth(payload),
+					}),
+				),
+			);
+			unlisteners.push(
+				await listen("client-entity-combat-observed", (payload) =>
+					this.#emit({
+						type: "entity-combat-observed",
+						combat: decodeClientEntityCombatObserved(payload),
+					}),
+				),
+			);
+			unlisteners.push(
+				await listen("client-appraisal-facts-settled", (payload) =>
+					this.#emit({
+						type: "appraisal-facts-settled",
+						guid: decodeClientAppraisalFactsSettled(payload).guid,
 					}),
 				),
 			);

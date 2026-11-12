@@ -236,6 +236,20 @@ if (process.argv.includes("--holtburger-mode=client")) {
 			return () => ipcRenderer.removeListener("visual-cache:failure", listener);
 		},
 	});
+	contextBridge.exposeInMainWorld("holtburgerEquipmentCache", {
+		readAll(): Promise<unknown> {
+			return invoke("equipment-cache:read-all");
+		},
+		stage(entry: unknown): Promise<void> {
+			return invoke("equipment-cache:stage", entry);
+		},
+		listenFailures(handler: (message: unknown) => void): () => void {
+			const listener = (_event: unknown, message: unknown) => handler(message);
+			ipcRenderer.on("equipment-cache:failure", listener);
+			return () =>
+				ipcRenderer.removeListener("equipment-cache:failure", listener);
+		},
+	});
 	contextBridge.exposeInMainWorld("holtburgerDisplay", {
 		snapshot: (): Promise<unknown> => invoke("window:display-snapshot"),
 		change: (request: unknown): Promise<void> =>

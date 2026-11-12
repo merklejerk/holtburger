@@ -1,5 +1,8 @@
+pub mod cantrips;
 pub mod formula;
 use std::collections::HashMap;
+
+pub use cantrips::{CantripTier, RankedCantripTier, classify_cantrip};
 
 use holtburger_dat::file_type::spell_table::{
     SpellBase as DatSpellBase, SpellExtras as DatSpellExtras, SpellSet as DatSpellSet,
@@ -109,6 +112,16 @@ pub enum SpellCastingRoute {
 }
 
 impl SpellInfo {
+    /// Whether this spell is beneficial rather than harmful according to retail flags.
+    pub const fn is_beneficial(&self) -> bool {
+        self.bitfield & 0x4 != 0
+    }
+
+    /// Conventional or nonstandard equipment cantrip tier when recognized.
+    pub fn cantrip_tier(&self) -> Option<CantripTier> {
+        classify_cantrip(&self.name, self.category, self.bitfield, self.power)
+    }
+
     /// The shared ordinary-cast decision, also exposed to reference views.
     pub fn casting_route(&self) -> SpellCastingRoute {
         SpellCastingRoute::from_decoded_formula(self.bitfield, &self.components)

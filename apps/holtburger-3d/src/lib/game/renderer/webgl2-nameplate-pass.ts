@@ -4,6 +4,7 @@ import {
 	requireWebGL2Uniform,
 } from "../webgl/shader-program";
 import type { NameplateTextureBinding } from "./webgl2-nameplate-texture-cache";
+import type { NameplateColor } from "./nameplate-policy";
 import type { Vec3 } from "../math/types";
 import {
 	bindWebGL2PortalDeferredVisibilityProgram,
@@ -13,6 +14,10 @@ import {
 
 const CORNER_ATTRIBUTE = 0;
 const ANCHOR_ATTRIBUTE = 1;
+const HEALTH_ATTRIBUTE = 2;
+const INSTANCE_FLOATS = 4;
+const INSTANCE_STRIDE_BYTES = INSTANCE_FLOATS * Float32Array.BYTES_PER_ELEMENT;
+const HIDDEN_HEALTH_SENTINEL = -1;
 
 export interface NameplateDrawInstance {
 	/** Anchor-relative bottom-center position. */
@@ -20,6 +25,8 @@ export interface NameplateDrawInstance {
 	readonly binding: NameplateTextureBinding;
 	/** Selected and hovered entity plates overlay scene geometry; ordinary plates test depth. */
 	readonly depthTest: boolean;
+	/** Recent health fraction in [0, 1], or null/undefined when hidden. */
+	readonly healthFraction?: number | null;
 }
 
 export interface NameplateScopedDrawInstance extends NameplateDrawInstance {
@@ -34,11 +41,22 @@ export interface NameplatePortalScopeRouting {
 	): void;
 }
 
+interface NameplateHealthBarDrawStyle {
+	/** Raster-pixel [width, height] scaled by current rendering density. */
+	readonly sizePixels: readonly [number, number];
+	readonly gapPixels: number;
+	readonly borderWidthPixels: number;
+	readonly fillColor: NameplateColor;
+	readonly backgroundColor: NameplateColor;
+	readonly borderColor: NameplateColor;
+}
+
 export interface NameplateDrawContext {
 	readonly clipFromAnchor: Float32Array;
 	readonly referenceDistance: number;
 	readonly viewportHeight: number;
 	readonly viewportWidth: number;
+	readonly healthBar: NameplateHealthBarDrawStyle;
 }
 
 export interface NameplateDrawDiagnostics {
@@ -51,6 +69,11 @@ interface NameplateProgram {
 	readonly portal: WebGL2PortalDeferredVisibilityUniforms | null;
 	readonly uniforms: {
 		readonly clipFromAnchor: WebGLUniformLocation;
+		readonly healthBarBackgroundColor: WebGLUniformLocation;
+		readonly healthBarBorderColor: WebGLUniformLocation;
+		readonly healthBarFillColor: WebGLUniformLocation;
+		readonly healthBarGapBorder: WebGLUniformLocation;
+		readonly healthBarSize: WebGLUniformLocation;
 		readonly plate: WebGLUniformLocation;
 		readonly plateSize: WebGLUniformLocation;
 		readonly referenceDistance: WebGLUniformLocation;
@@ -98,8 +121,25 @@ export class WebGL2NameplatePass {
 		gl.vertexAttribPointer(CORNER_ATTRIBUTE, 2, gl.FLOAT, false, 0, 0);
 		gl.bindBuffer(gl.ARRAY_BUFFER, anchorBuffer);
 		gl.enableVertexAttribArray(ANCHOR_ATTRIBUTE);
-		gl.vertexAttribPointer(ANCHOR_ATTRIBUTE, 3, gl.FLOAT, false, 0, 0);
+		gl.vertexAttribPointer(
+			ANCHOR_ATTRIBUTE,
+			3,
+			gl.FLOAT,
+			false,
+			INSTANCE_STRIDE_BYTES,
+			0,
+		);
 		gl.vertexAttribDivisor(ANCHOR_ATTRIBUTE, 1);
+		gl.enableVertexAttribArray(HEALTH_ATTRIBUTE);
+		gl.vertexAttribPointer(
+			HEALTH_ATTRIBUTE,
+			1,
+			gl.FLOAT,
+			false,
+			INSTANCE_STRIDE_BYTES,
+			3 * Float32Array.BYTES_PER_ELEMENT,
+		);
+		gl.vertexAttribDivisor(HEALTH_ATTRIBUTE, 1);
 		gl.bindVertexArray(null);
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
 		let flatProgram: NameplateProgram | null = null;
@@ -141,7 +181,7 @@ export class WebGL2NameplatePass {
 		routing: NameplatePortalScopeRouting | null,
 	): void {
 		this.#requireAlive();
-		const floatCount = instances.length * 3;
+		const floatCount = instances.length * INSTANCE_FLOATS;
 		if (floatCount === 0) {
 			this.#diagnostics = { drawCount: 0, instanceCount: 0 };
 			return;
@@ -149,11 +189,17 @@ export class WebGL2NameplatePass {
 		if (this.#anchorScratch.length < floatCount)
 			this.#anchorScratch = new Float32Array(floatCount);
 		let floatOffset = 0;
-		for (const { anchor } of instances) {
+		for (const { anchor, healthFraction } of instances) {
 			this.#anchorScratch[floatOffset] = anchor.x;
 			this.#anchorScratch[floatOffset + 1] = anchor.y;
 			this.#anchorScratch[floatOffset + 2] = anchor.z;
-			floatOffset += 3;
+			this.#anchorScratch[floatOffset + 3] =
+				healthFraction !== undefined &&
+				healthFraction !== null &&
+				Number.isFinite(healthFraction)
+					? Math.max(0, Math.min(1, healthFraction))
+					: HIDDEN_HEALTH_SENTINEL;
+			floatOffset += INSTANCE_FLOATS;
 		}
 
 		const gl = this.#gl;
@@ -171,6 +217,37 @@ export class WebGL2NameplatePass {
 		);
 		gl.uniform1i(program.uniforms.plate, 0);
 		gl.uniform1f(program.uniforms.referenceDistance, context.referenceDistance);
+		gl.uniform2f(
+			program.uniforms.healthBarSize,
+			context.healthBar.sizePixels[0],
+			context.healthBar.sizePixels[1],
+		);
+		gl.uniform2f(
+			program.uniforms.healthBarGapBorder,
+			context.healthBar.gapPixels,
+			context.healthBar.borderWidthPixels,
+		);
+		gl.uniform4f(
+			program.uniforms.healthBarFillColor,
+			context.healthBar.fillColor.red,
+			context.healthBar.fillColor.green,
+			context.healthBar.fillColor.blue,
+			context.healthBar.fillColor.alpha,
+		);
+		gl.uniform4f(
+			program.uniforms.healthBarBackgroundColor,
+			context.healthBar.backgroundColor.red,
+			context.healthBar.backgroundColor.green,
+			context.healthBar.backgroundColor.blue,
+			context.healthBar.backgroundColor.alpha,
+		);
+		gl.uniform4f(
+			program.uniforms.healthBarBorderColor,
+			context.healthBar.borderColor.red,
+			context.healthBar.borderColor.green,
+			context.healthBar.borderColor.blue,
+			context.healthBar.borderColor.alpha,
+		);
 		gl.bindVertexArray(this.#vertexArray);
 		gl.bindBuffer(gl.ARRAY_BUFFER, this.#anchorBuffer);
 		gl.bufferData(
@@ -213,13 +290,22 @@ export class WebGL2NameplatePass {
 			const count = endInstance - firstInstance;
 			if (first.depthTest) gl.enable(gl.DEPTH_TEST);
 			else gl.disable(gl.DEPTH_TEST);
+			const baseByteOffset = firstInstance * INSTANCE_STRIDE_BYTES;
 			gl.vertexAttribPointer(
 				ANCHOR_ATTRIBUTE,
 				3,
 				gl.FLOAT,
 				false,
-				0,
-				firstInstance * 3 * Float32Array.BYTES_PER_ELEMENT,
+				INSTANCE_STRIDE_BYTES,
+				baseByteOffset,
+			);
+			gl.vertexAttribPointer(
+				HEALTH_ATTRIBUTE,
+				1,
+				gl.FLOAT,
+				false,
+				INSTANCE_STRIDE_BYTES,
+				baseByteOffset + 3 * Float32Array.BYTES_PER_ELEMENT,
 			);
 			gl.uniform2f(
 				program.uniforms.plateSize,
@@ -277,28 +363,70 @@ function createNameplateProgram(
 precision highp float;
 layout(location = ${CORNER_ATTRIBUTE}) in vec2 aCorner;
 layout(location = ${ANCHOR_ATTRIBUTE}) in vec3 aAnchor;
+layout(location = ${HEALTH_ATTRIBUTE}) in float aHealthFraction;
 uniform mat4 uNameplateClipFromAnchor;
 uniform vec2 uPlateSize;
 uniform float uReferenceDistance;
 uniform vec2 uViewportSize;
-out vec2 vUv;
+uniform vec2 uHealthBarSize;
+uniform vec2 uHealthBarGapBorder;
+out vec2 vLocalPixel;
+out float vHealthFraction;
 ${BILLBOARD_CLIP_GLSL}
 void main() {
 	vec4 clip = uNameplateClipFromAnchor * vec4(aAnchor, 1.0);
-	vec2 pixelOffset = vec2(aCorner.x * uPlateSize.x, aCorner.y * uPlateSize.y);
-	clip = offsetBillboardClip(clip, pixelOffset, uViewportSize, uReferenceDistance);
+	float hasBar = step(0.0, aHealthFraction);
+	float barFootprintH = hasBar * (uHealthBarSize.y + uHealthBarGapBorder.x);
+	float totalWidth = max(uPlateSize.x, hasBar * uHealthBarSize.x);
+	float totalHeight = uPlateSize.y + barFootprintH;
+	vec2 localPixel = vec2(aCorner.x * totalWidth, aCorner.y * totalHeight);
+	clip = offsetBillboardClip(clip, localPixel, uViewportSize, uReferenceDistance);
 	gl_Position = clip;
-	vUv = vec2(aCorner.x + 0.5, 1.0 - aCorner.y);
+	vLocalPixel = localPixel;
+	vHealthFraction = aHealthFraction;
 }`;
 	const fragment = `#version 300 es
 precision highp float;
 precision highp int;
 ${portal ? PORTAL_DEFERRED_VISIBILITY_GLSL : ""}
 uniform sampler2D uPlate;
-in vec2 vUv;
+uniform vec2 uPlateSize;
+uniform vec2 uHealthBarSize;
+uniform vec2 uHealthBarGapBorder;
+uniform vec4 uHealthBarFillColor;
+uniform vec4 uHealthBarBackgroundColor;
+uniform vec4 uHealthBarBorderColor;
+in vec2 vLocalPixel;
+in float vHealthFraction;
 out vec4 outColor;
 void main() {
-	vec4 color = texture(uPlate, vUv);
+	float hasBar = step(0.0, vHealthFraction);
+	float barFootprintH = hasBar * (uHealthBarSize.y + uHealthBarGapBorder.x);
+	bool inPlate = abs(vLocalPixel.x) <= uPlateSize.x * 0.5 && vLocalPixel.y >= barFootprintH && vLocalPixel.y <= barFootprintH + uPlateSize.y;
+	vec4 color = vec4(0.0);
+	if (inPlate) {
+		vec2 plateUv = vec2(
+			vLocalPixel.x / uPlateSize.x + 0.5,
+			1.0 - (vLocalPixel.y - barFootprintH) / uPlateSize.y
+		);
+		color = texture(uPlate, plateUv);
+	} else if (
+		vHealthFraction >= 0.0 &&
+		abs(vLocalPixel.x) <= uHealthBarSize.x * 0.5 &&
+		vLocalPixel.y >= 0.0 &&
+		vLocalPixel.y <= uHealthBarSize.y
+	) {
+		float dx = uHealthBarSize.x * 0.5 - abs(vLocalPixel.x);
+		float dy = min(vLocalPixel.y, uHealthBarSize.y - vLocalPixel.y);
+		float border = uHealthBarGapBorder.y;
+		if (dx < border || dy < border) {
+			color = uHealthBarBorderColor;
+		} else {
+			float innerWidth = max(uHealthBarSize.x - 2.0 * border, 1.0);
+			float fillT = (vLocalPixel.x + uHealthBarSize.x * 0.5 - border) / innerWidth;
+			color = fillT <= vHealthFraction ? uHealthBarFillColor : uHealthBarBackgroundColor;
+		}
+	}
 	if (color.a <= 0.01) discard;
 	${portal ? "if (!portalDeferredFragmentVisible()) discard;" : ""}
 	outColor = color;
@@ -320,6 +448,27 @@ void main() {
 				program,
 				"uNameplateClipFromAnchor",
 			),
+			healthBarBackgroundColor: requireWebGL2Uniform(
+				gl,
+				program,
+				"uHealthBarBackgroundColor",
+			),
+			healthBarBorderColor: requireWebGL2Uniform(
+				gl,
+				program,
+				"uHealthBarBorderColor",
+			),
+			healthBarFillColor: requireWebGL2Uniform(
+				gl,
+				program,
+				"uHealthBarFillColor",
+			),
+			healthBarGapBorder: requireWebGL2Uniform(
+				gl,
+				program,
+				"uHealthBarGapBorder",
+			),
+			healthBarSize: requireWebGL2Uniform(gl, program, "uHealthBarSize"),
 			plate: requireWebGL2Uniform(gl, program, "uPlate"),
 			plateSize: requireWebGL2Uniform(gl, program, "uPlateSize"),
 			referenceDistance: requireWebGL2Uniform(

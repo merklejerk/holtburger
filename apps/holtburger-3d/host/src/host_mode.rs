@@ -129,6 +129,9 @@ pub struct ClientLaunchConfiguration {
     /// Optional developer override for the shared melee pursuit leash, in meters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub melee_max_chase_distance: Option<f32>,
+    /// Shared appraisal pacing and recency configuration validated by the host at startup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appraisal_tuning: Option<holtburger_core::ClientAppraisalTuningConfig>,
 }
 
 impl fmt::Debug for ClientLaunchConfiguration {
@@ -140,6 +143,7 @@ impl fmt::Debug for ClientLaunchConfiguration {
             .field("account", &self.account)
             .field("password", &"<redacted>")
             .field("melee_max_chase_distance", &self.melee_max_chase_distance)
+            .field("appraisal_tuning", &self.appraisal_tuning)
             .finish()
     }
 }

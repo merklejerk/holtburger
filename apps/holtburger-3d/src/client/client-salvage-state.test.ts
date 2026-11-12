@@ -57,7 +57,11 @@ function fixture() {
 		.fn<SalvageSession["submitSalvage"]>()
 		.mockResolvedValue(undefined);
 	const appraise = vi.fn().mockResolvedValue(undefined);
-	const appraisals = new ClientAppraisalRequests(appraise);
+	const appraisals = new ClientAppraisalRequests({
+		sendFull: (guid) => appraise(guid),
+		sendFacts: vi.fn().mockResolvedValue(undefined),
+		cancel: vi.fn().mockResolvedValue(undefined),
+	});
 	const notice = vi.fn();
 	const showInventory = vi.fn();
 	const replace = () => {

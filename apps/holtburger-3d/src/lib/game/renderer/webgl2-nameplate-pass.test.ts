@@ -7,6 +7,7 @@ import {
 } from "./webgl2-nameplate-pass";
 import type { NameplateTextureBinding } from "./webgl2-nameplate-texture-cache";
 import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation-metadata";
+import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import { Vec3 } from "../math/types";
 
 function binding(
@@ -22,8 +23,11 @@ function createFixture() {
 	const drawDepthTests: boolean[] = [];
 	let depthTest = false;
 	const uploadedFloatCounts: number[] = [];
+	const uploadedFloats: number[][] = [];
 	const anchorOffsets: number[] = [];
+	const attribDivisors: Array<readonly [number, number]> = [];
 	const plateSizes: Array<readonly [number, number]> = [];
+	const healthBarSizes: Array<readonly [number, number]> = [];
 	const referenceDistances: number[] = [];
 	const sampler = { key: "nameplate" } as unknown as WebGLSampler;
 	const samplerBindings: Array<WebGLSampler | null> = [];
@@ -58,7 +62,11 @@ function createFixture() {
 		bindVertexArray: () => undefined,
 		blendFunc: () => undefined,
 		bufferData: (_target: number, data: BufferSource, usage: number) => {
-			if (usage === 13) uploadedFloatCounts.push((data as Float32Array).length);
+			if (usage === 13) {
+				const array = data as Float32Array;
+				uploadedFloatCounts.push(array.length);
+				uploadedFloats.push(Array.from(array));
+			}
 		},
 		compileShader: () => undefined,
 		createBuffer: () => ({}) as WebGLBuffer,
@@ -117,10 +125,15 @@ function createFixture() {
 			second: number,
 		) => {
 			if (location.name === "uPlateSize") plateSizes.push([first, second]);
+			if (location.name === "uHealthBarSize")
+				healthBarSizes.push([first, second]);
 		},
+		uniform4f: () => undefined,
 		uniformMatrix4fv: () => undefined,
 		useProgram: () => undefined,
-		vertexAttribDivisor: () => undefined,
+		vertexAttribDivisor: (index: number, divisor: number) => {
+			attribDivisors.push([index, divisor]);
+		},
 		vertexAttribPointer: (
 			index: number,
 			_size: number,
@@ -134,24 +147,39 @@ function createFixture() {
 	} as unknown as WebGL2RenderingContext;
 	return {
 		anchorOffsets,
+		attribDivisors,
 		deleted,
 		draws,
 		drawDepthTests,
 		gl,
+		healthBarSizes,
 		plateSizes,
 		referenceDistances,
 		sampler,
 		samplerBindings,
 		shaderSources,
 		uploadedFloatCounts,
+		uploadedFloats,
 	};
 }
 
+const barSettings = SHARED_FRAME_SETTINGS.nameplates.healthBar;
 const context = {
 	clipFromAnchor: new Float32Array(16),
 	referenceDistance: 6.25,
 	viewportHeight: 720,
 	viewportWidth: 1_280,
+	healthBar: {
+		sizePixels: [
+			barSettings.widthCssPixels,
+			barSettings.heightCssPixels,
+		] as const,
+		gapPixels: barSettings.gapCssPixels,
+		borderWidthPixels: barSettings.borderWidthCssPixels,
+		fillColor: barSettings.fillColor,
+		backgroundColor: barSettings.backgroundColor,
+		borderColor: barSettings.borderColor,
+	},
 };
 
 describe("WebGL2NameplatePass", () => {
@@ -213,11 +241,11 @@ describe("WebGL2NameplatePass", () => {
 
 		pass.draw(context, instances);
 
-		expect(fixture.uploadedFloatCounts).toEqual([9]);
+		expect(fixture.uploadedFloatCounts).toEqual([12]);
 		expect(fixture.draws).toEqual([2, 1]);
 		expect(fixture.anchorOffsets.slice(-2)).toEqual([
 			0,
-			6 * Float32Array.BYTES_PER_ELEMENT,
+			8 * Float32Array.BYTES_PER_ELEMENT,
 		]);
 		expect(fixture.plateSizes).toEqual([
 			[128, 32],
@@ -291,6 +319,45 @@ describe("WebGL2NameplatePass", () => {
 			[128, 32],
 			[96, 48],
 			[128, 32],
+		]);
+	});
+
+	it("packs instanced health fractions with divisor 1 and negative sentinels without splitting matching batches", () => {
+		const fixture = createFixture();
+		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+		const drudge = binding("drudge", 128, 32);
+
+		pass.draw(context, [
+			{
+				depthTest: true,
+				anchor: new Vec3(1, 2, 3),
+				binding: drudge,
+				healthFraction: 0.625,
+			},
+			{
+				depthTest: true,
+				anchor: new Vec3(4, 5, 6),
+				binding: drudge,
+				healthFraction: null,
+			},
+			{
+				depthTest: true,
+				anchor: new Vec3(7, 8, 9),
+				binding: drudge,
+				healthFraction: 1.5,
+			},
+		]);
+
+		expect(fixture.attribDivisors).toEqual([
+			[1, 1],
+			[2, 1],
+		]);
+		expect(fixture.draws).toEqual([3]);
+		expect(fixture.uploadedFloats[0]).toEqual([
+			1, 2, 3, 0.625, 4, 5, 6, -1, 7, 8, 9, 1,
+		]);
+		expect(fixture.healthBarSizes).toEqual([
+			[barSettings.widthCssPixels, barSettings.heightCssPixels],
 		]);
 	});
 

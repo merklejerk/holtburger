@@ -126,6 +126,7 @@ import {
 import {
 	resolveNameplateCategory,
 	type NameplateAppearance,
+	type NameplateHealthBarSettings,
 	type NameplateVisual,
 } from "./nameplate-policy";
 import {
@@ -704,6 +705,7 @@ interface PreparedEntityAnalyticShadows {
 type PreparedNameplateCandidate = {
 	readonly anchor: Vec3;
 	readonly distanceSquared: number;
+	readonly healthFraction: number | null;
 	readonly identity: string;
 	readonly visual: NameplateVisual;
 } & (
@@ -720,12 +722,14 @@ interface MutableNameplateDrawInstance extends NameplateDrawInstance {
 	depthTest: boolean;
 	anchor: Vec3;
 	binding: NameplateTextureBinding;
+	healthFraction: number | null;
 }
 
 interface MutableNameplateScopedDrawInstance extends NameplateScopedDrawInstance {
 	depthTest: boolean;
 	anchor: Vec3;
 	binding: NameplateTextureBinding;
+	healthFraction: number | null;
 	renderScopeKey: string;
 }
 
@@ -753,6 +757,8 @@ interface PreparedSceneContributions {
 	readonly nameplates: readonly PreparedNameplateCandidate[];
 	/** Perspective scale applied by the nameplate pass for this prepared view. */
 	readonly nameplateReferenceDistance: number;
+	/** Health bar geometry and colors drawn beneath combat-tracked monster nameplates. */
+	readonly nameplateHealthBar: NameplateHealthBarSettings;
 }
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
@@ -2671,6 +2677,7 @@ export class WebGL2Renderer implements Renderer {
 							nameplates.push({
 								anchor,
 								distanceSquared,
+								healthFraction: facts.healthFraction,
 								identity: facts.identity,
 								...(required
 									? { required: true as const }
@@ -2842,6 +2849,7 @@ export class WebGL2Renderer implements Renderer {
 			landblockOffsets,
 			nameplates,
 			nameplateReferenceDistance: frameSettings.nameplates.referenceDistance,
+			nameplateHealthBar: frameSettings.nameplates.healthBar,
 			objects,
 			particles: [],
 			skyParticles: [],
@@ -3648,11 +3656,24 @@ export class WebGL2Renderer implements Renderer {
 		view: PreparedView,
 		portalRouting: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
+		const bar = view.nameplateHealthBar;
+		const density = this.#renderScale;
 		const context = {
 			clipFromAnchor: mat4ToFloat32Array(
 				view.clipFromAnchor,
 				this.#matrixScratch,
 			),
+			healthBar: {
+				sizePixels: [
+					bar.widthCssPixels * density,
+					bar.heightCssPixels * density,
+				] as const,
+				gapPixels: bar.gapCssPixels * density,
+				borderWidthPixels: bar.borderWidthCssPixels * density,
+				fillColor: bar.fillColor,
+				backgroundColor: bar.backgroundColor,
+				borderColor: bar.borderColor,
+			},
 			referenceDistance: view.nameplateReferenceDistance,
 			viewportHeight: this.#frameHeight,
 			viewportWidth: this.#frameWidth,
@@ -3675,12 +3696,14 @@ export class WebGL2Renderer implements Renderer {
 							anchor: candidate.anchor,
 							depthTest: !candidate.required,
 							binding,
+							healthFraction: candidate.healthFraction,
 							renderScopeKey,
 						});
 					} else {
 						instance.anchor = candidate.anchor;
 						instance.depthTest = !candidate.required;
 						instance.binding = binding;
+						instance.healthFraction = candidate.healthFraction;
 						instance.renderScopeKey = renderScopeKey;
 					}
 					instanceCount += 1;
@@ -3707,11 +3730,13 @@ export class WebGL2Renderer implements Renderer {
 					anchor: candidate.anchor,
 					depthTest: !candidate.required,
 					binding,
+					healthFraction: candidate.healthFraction,
 				});
 			} else {
 				instance.anchor = candidate.anchor;
 				instance.depthTest = !candidate.required;
 				instance.binding = binding;
+				instance.healthFraction = candidate.healthFraction;
 			}
 			instanceCount += 1;
 		}
@@ -3909,7 +3934,8 @@ export class WebGL2Renderer implements Renderer {
 				// Portal space is a presentation-only authored setup, never a dynamic-entity view.
 				nameplates: [],
 				nameplateReferenceDistance:
-					SHARED_FRONTEND_TUNING.rendering.nameplates.referenceDistance,
+					SHARED_FRAME_SETTINGS.nameplates.referenceDistance,
+				nameplateHealthBar: SHARED_FRAME_SETTINGS.nameplates.healthBar,
 				objects,
 				particles: [],
 				skyParticles: [],

@@ -1933,6 +1933,191 @@ describe("ClientGameplayPresentation", () => {
 		expect(presentation.frame(1_016).status.kind).toBe("loading-player");
 		await presentation.destroy();
 	});
+
+	it("reconciles combat nameplate health and background appraisals across stance changes", async () => {
+		const playerGuid = 0x0101_0001;
+		const mobGuid = 0x0200_0001;
+		const state = currentState(playerGuid);
+		const transport = new FakeClientTransport(state);
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientGameplayPresentation({
+			canvas: fakeCanvas(),
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+		});
+		const requestFacts = vi.spyOn(lifecycle.appraisals, "requestFacts");
+		await presentation.start();
+		try {
+			const mob = {
+				...view(mobGuid, 0x0101_0100),
+				presentation: {
+					...view(mobGuid, 0x0101_0100).presentation,
+					entityClass: "mob" as const,
+				},
+			};
+			transport.emit("client-dynamic-entity", {
+				kind: "upserted",
+				entity: mob,
+			});
+			transport.emit("client-combat-mode-updated", { mode: "melee" });
+			transport.emit("client-entity-combat-observed", {
+				worldGeneration: state.worldGeneration,
+				guid: mobGuid,
+				instanceSequence: 1,
+				observedAt: { seconds: 76 },
+			});
+			presentation.frame(1_000);
+			expect(requestFacts).toHaveBeenCalledWith(
+				mobGuid,
+				expect.objectContaining({ kind: "combat-health" }),
+			);
+			expect(runtime.nameplateHealth.has(mobGuid)).toBe(false);
+
+			transport.emit("client-entity-health-updated", {
+				worldGeneration: state.worldGeneration,
+				guid: mobGuid,
+				instanceSequence: 1,
+				healthFraction: 0.65,
+				observedAt: { seconds: 76.5 },
+			});
+			presentation.frame(1_050);
+			expect(runtime.nameplateHealth.get(mobGuid)).toBe(0.65);
+
+			transport.emit("client-combat-mode-updated", { mode: "peace" });
+			presentation.frame(1_100);
+			expect(runtime.nameplateHealth.has(mobGuid)).toBe(false);
+		} finally {
+			requestFacts.mockRestore();
+			await presentation.destroy();
+		}
+	});
+
+	it("syncs nameplate health world generation across portal entry, teleports, and discontinuities while suppressing portal polling", async () => {
+		const playerGuid = 0x0101_0001;
+		const mobGuid = 0x0200_0002;
+		const state = {
+			...currentState(playerGuid),
+			lifecycle: portalLifecycle(1, "initial-entry"),
+			worldGeneration: 1,
+			combatMode: "melee" as const,
+		};
+		const transport = new FakeClientTransport(state);
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientGameplayPresentation({
+			canvas: fakeCanvas(),
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+		});
+		const requestFacts = vi.spyOn(lifecycle.appraisals, "requestFacts");
+		await presentation.start();
+		try {
+			const mob = {
+				...view(mobGuid, 0x0101_0100),
+				presentation: {
+					...view(mobGuid, 0x0101_0100).presentation,
+					entityClass: "mob" as const,
+				},
+			};
+
+			// Initial entry baseline arrives in portal-space(worldGeneration: 1): no nameplate polling while in portal.
+			transport.emit("client-dynamic-entity", {
+				kind: "upserted",
+				entity: mob,
+			});
+			transport.emit("client-entity-combat-observed", {
+				worldGeneration: 1,
+				guid: mobGuid,
+				instanceSequence: 1,
+				observedAt: { seconds: 80 },
+			});
+			presentation.frame(1_000);
+			expect(requestFacts).not.toHaveBeenCalled();
+			expect(runtime.nameplateHealth.has(mobGuid)).toBe(false);
+
+			// Entering in-world keeps worldGeneration 1 synced and allows polling + health display.
+			transport.emit("client-lifecycle-changed", { kind: "in-world" });
+			presentation.frame(1_050);
+			expect(requestFacts).toHaveBeenCalledWith(
+				mobGuid,
+				expect.objectContaining({ kind: "combat-health" }),
+			);
+			transport.emit("client-entity-health-updated", {
+				worldGeneration: 1,
+				guid: mobGuid,
+				instanceSequence: 1,
+				healthFraction: 0.55,
+				observedAt: { seconds: 80.5 },
+			});
+			presentation.frame(1_100);
+			expect(runtime.nameplateHealth.get(mobGuid)).toBe(0.55);
+
+			// Teleport portal-space advances worldGeneration to 2, clears generation-1 bars, and suppresses portal polling.
+			requestFacts.mockClear();
+			transport.emit(
+				"client-lifecycle-changed",
+				portalLifecycle(2, "teleport"),
+			);
+			expect(runtime.nameplateHealth.has(mobGuid)).toBe(false);
+			transport.emit("client-entity-combat-observed", {
+				worldGeneration: 2,
+				guid: mobGuid,
+				instanceSequence: 1,
+				observedAt: { seconds: 81 },
+			});
+			presentation.frame(1_150);
+			expect(requestFacts).not.toHaveBeenCalled();
+
+			transport.emit("client-lifecycle-changed", { kind: "in-world" });
+			presentation.frame(1_200);
+			expect(requestFacts).toHaveBeenCalledWith(
+				mobGuid,
+				expect.objectContaining({ kind: "combat-health" }),
+			);
+			transport.emit("client-entity-health-updated", {
+				worldGeneration: 2,
+				guid: mobGuid,
+				instanceSequence: 1,
+				healthFraction: 0.45,
+				observedAt: { seconds: 81.5 },
+			});
+			presentation.frame(1_250);
+			expect(runtime.nameplateHealth.get(mobGuid)).toBe(0.45);
+
+			// Forced-reposition discontinuity advances worldGeneration to 3, clearing generation-2 bars and accepting generation-3 health.
+			transport.emit("client-presentation-discontinuity", {
+				kind: "forced-reposition",
+				worldGeneration: 3,
+			});
+			expect(runtime.nameplateHealth.has(mobGuid)).toBe(false);
+
+			transport.emit("client-dynamic-entity", {
+				kind: "upserted",
+				entity: mob,
+			});
+			transport.emit("client-entity-combat-observed", {
+				worldGeneration: 3,
+				guid: mobGuid,
+				instanceSequence: 1,
+				observedAt: { seconds: 82 },
+			});
+			transport.emit("client-entity-health-updated", {
+				worldGeneration: 3,
+				guid: mobGuid,
+				instanceSequence: 1,
+				healthFraction: 0.3,
+				observedAt: { seconds: 82.5 },
+			});
+			presentation.frame(1_300);
+			expect(runtime.nameplateHealth.get(mobGuid)).toBe(0.3);
+		} finally {
+			requestFacts.mockRestore();
+			await presentation.destroy();
+		}
+	});
 });
 
 class FakeClientTransport implements ClientLifecycleTransport {
@@ -2144,6 +2329,7 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 		number,
 		Pick<NameplateContent, "indicators" | "strikeThrough" | "nameColor">
 	>();
+	nameplateHealth = new Map<number, number>();
 	/** Independent streaming availability for player and third-person camera cells. */
 	readonly unavailableEnvCellIds = new Set<string>();
 	#activationRevision = 0;
@@ -2187,6 +2373,14 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 		)
 			this.nameplateDecoration.delete(guid);
 		else this.nameplateDecoration.set(guid, decoration);
+	}
+
+	setDynamicEntityNameplateHealth(
+		guid: number,
+		healthFraction: number | null,
+	): void {
+		if (healthFraction === null) this.nameplateHealth.delete(guid);
+		else this.nameplateHealth.set(guid, healthFraction);
 	}
 
 	async replaceDynamicEntitySnapshot(

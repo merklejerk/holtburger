@@ -123,6 +123,9 @@
 	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
 	import { AppInput } from "../lib/input/app-input";
 	import { provideClientInput } from "./client-input-context";
+	import { provideItemCantrips } from "../app/item-cantrips";
+	import { ClientEquipmentAppraisals } from "./client-equipment-appraisals";
+	import type { ClientEquipmentCacheTransport } from "./client-equipment-cache-transport";
 	import {
 		clientInputConfiguration,
 		clientInputSettingsSchema,
@@ -300,6 +303,7 @@
 		readonly initialSettingsIssue: string | null;
 		readonly settingsTransport: ClientSettingsTransport;
 		readonly visualCacheTransport: ClientVisualCacheTransport;
+		readonly equipmentCacheTransport: ClientEquipmentCacheTransport;
 	}
 
 	const {
@@ -310,6 +314,7 @@
 		initialSettingsIssue,
 		settingsTransport,
 		visualCacheTransport,
+		equipmentCacheTransport,
 	}: Props = $props();
 	// Bootstrap completes before mount; later prop replacement cannot own live settings lifetime.
 	const startupThemeSelection = untrack(() => themeSelection);
@@ -318,6 +323,7 @@
 	const startupSettingsIssue = untrack(() => initialSettingsIssue);
 	const startupSettingsTransport = untrack(() => settingsTransport);
 	const startupVisualCacheTransport = untrack(() => visualCacheTransport);
+	const startupEquipmentCacheTransport = untrack(() => equipmentCacheTransport);
 	/** Capture staging must cross IPC before native close seals cache admission. */
 	const pendingVisualCaptures = new Set<Promise<void>>();
 
@@ -327,6 +333,14 @@
 			clientInputConfiguration(startupUserSettings.input, startupPlatform),
 		),
 	);
+	let equipmentCantripRevision = $state(0);
+	let equipmentCantripsOwner: ClientEquipmentAppraisals | null = null;
+	provideItemCantrips({
+		tierFor(guid) {
+			void equipmentCantripRevision;
+			return equipmentCantripsOwner?.tierFor(guid);
+		},
+	});
 
 	let entityCollisionDisabled = $state(false);
 	/** Cold core admission consumed by the World panel's click gesture. */
@@ -2235,6 +2249,10 @@
 			startupVisualCacheTransport.listenFailures((message) =>
 				toastCenter.publish({ message, tone: "warning" }),
 			);
+		const unsubscribeEquipmentCacheFailure =
+			startupEquipmentCacheTransport.listenFailures((message) =>
+				toastCenter.publish({ message, tone: "warning" }),
+			);
 		const unsubscribeToast = toastCenter.subscribe((next) => (toast = next));
 		const transport = createElectronHostTransport();
 		const assets = new HostPresentationAssets(transport);
@@ -2255,6 +2273,16 @@
 			hostClientLifecycleTransport(transport),
 		);
 		session = owner;
+		const equipmentCantrips = new ClientEquipmentAppraisals(
+			owner,
+			startupEquipmentCacheTransport,
+			() => {
+				if (!disposed && equipmentCantripsOwner === equipmentCantrips) {
+					equipmentCantripRevision += 1;
+				}
+			},
+		);
+		equipmentCantripsOwner = equipmentCantrips;
 		const emoteOwner = new ClientEmoteController(owner, keyboard, (error) =>
 			toastCenter.publish({ message: formatError(error), tone: "warning" }),
 		);
@@ -2512,6 +2540,7 @@
 			if (completion !== null) return completion;
 			disposed = true;
 			unsubscribeVisualCacheFailure();
+			unsubscribeEquipmentCacheFailure();
 			presentationAssets = null;
 			if (presentationRoot !== null) {
 				const retirement = presentationRoot.destroy();
@@ -2544,6 +2573,7 @@
 							() => postureOwner.destroy(),
 							() => emoteOwner.destroy(),
 							() => spellState.destroy(),
+							() => equipmentCantrips.destroy(),
 							() => retireCombatEscapeContext(),
 							() => spellReferences.dispose(),
 							() => retireCharacterSettings(),
@@ -2598,6 +2628,8 @@
 					// Withdraw shell references even when a controller could not finish releasing its resources.
 					if (postureController === postureOwner) postureController = null;
 					if (emoteController === emoteOwner) emoteController = null;
+					if (equipmentCantripsOwner === equipmentCantrips)
+						equipmentCantripsOwner = null;
 					spells = null;
 					nearby = null;
 					locks = null;

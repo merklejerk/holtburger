@@ -14,6 +14,11 @@ pub mod soul_emote_motion;
 pub use character_gen::{
     CharacterGenBuild, CharacterGenBuilder, CharacterGenPolicy, CharacterGenValidationError,
 };
+pub use client::appraisal::{
+    AppraisalOutputDemand, ClientAppraisalTuning, ClientAppraisalTuningConfig,
+    ClientAppraisalTuningError, DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS,
+    DEFAULT_APPRAISAL_RETRY_INTERVAL_MS,
+};
 pub use client::character_axes::{
     AdjustedCharacterAxes, AdjustedForwardAxis, CharacterAxisAdjustmentError,
     adjust_character_axes, adjust_character_axes_for_run_rate, motion_order_for_drive,
@@ -72,8 +77,8 @@ pub use client::types::{
     ClientCharacterMotionRejection, ClientCharacterSummary, ClientCombatControlState,
     ClientCombatEngagement, ClientCombatRefillEstimate, ClientCombatStatus, ClientCommand,
     ClientDynamicScriptCue, ClientDynamicSoundCue, ClientExitCause, ClientLifecycleState,
-    ClientPresentationDiscontinuityKind, ClientState, ClientViewEvent, ClientWorldActivationCause,
-    RetryState,
+    ClientPresentationDiscontinuityKind, ClientState, ClientViewEvent,
+    ClientWorldActivationCause, RetryState,
 };
 pub use client::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,

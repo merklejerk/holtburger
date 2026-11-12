@@ -456,6 +456,16 @@ export const SHARED_FRONTEND_TUNING = {
 			minimumLegibleNamePixels: 4,
 			/** Camera-forward distance where raster pixels map one-for-one to viewport pixels. */
 			referenceDistance: 4,
+			/** Combat health bar drawn cleanly beneath active hostile monster plates. */
+			healthBar: {
+				widthCssPixels: 136,
+				heightCssPixels: 14,
+				gapCssPixels: 6,
+				borderWidthCssPixels: 2,
+				fillColor: hexRgba("#d93b34ff"),
+				backgroundColor: hexRgba("#140d0be6"),
+				borderColor: hexRgba("#705a46ff"),
+			},
 		},
 		/**
 		 * Presentation color grade, applied once to the finished scene.

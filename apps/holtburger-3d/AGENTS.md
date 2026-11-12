@@ -285,13 +285,19 @@ arrive delayed by a frame or more, and a disjoint GPU clock discards them.
 Corroborate surprising results against the underlying code path before
 optimizing.
 
-The browser harness is agent-owned diagnostic infrastructure:
+The browser harness is agent-owned diagnostic infrastructure for reusable renderer,
+WebGL, profiling, and generic UI-showcase checks — **do not check in one-off
+per-feature UI or DOM probes**:
 
-- Modify it freely to investigate and verify the current task.
-- Add or retain fixtures, browser globals, probes, counters, controls,
-  instrumentation, screenshots, and machine-readable output whenever useful.
-- Use production content, synthetic content, targeted fault injection, or a
-  combination of them.
+- Put durable invariants and regressions in Vitest (`npm run test:ts`), not in
+  checked-in feature probe scripts.
+- During a task, add temporary browser/DOM checks locally when useful for
+  runtime or GPU verification, and delete temporary one-off feature probes once
+  verified instead of accumulating permanent `--client-*` suites that rot when
+  unrelated UI evolves.
+- Retain shared harness additions only when they serve durable cross-feature
+  diagnostics (renderer telemetry, WebGL lifecycle checks, profiling hooks, or
+  generic scene/UI fixtures).
 - Reshape the canonical harness as its diagnostic role evolves. Harness API
   stability and product-level cleanliness are not requirements.
 - Create another harness when that is more convenient, not because the
@@ -432,11 +438,12 @@ routine adjustment, not constants whose current values are behavioral invariants
   diagnostics requirements.
 - Comment new domain types, fields, and unintuitive invariants so their intent
   survives future iteration.
-- Add focused tests for implemented invariants and pure behavior. Do not write
-  tests whose only purpose is asserting that an intentionally absent feature is
-  still absent.
-- Pair automated checks with browser-harness verification whenever the changed
-  behavior depends on a real browser or GPU execution path.
+- Add focused Vitest tests (`npm run test:ts`) for implemented invariants and
+  pure behavior. Do not write tests whose only purpose is asserting that an
+  intentionally absent feature is still absent.
+- Use `harness:browser` when changed behavior depends on a real browser or GPU
+  execution path, keeping verification scoped to reusable harness capabilities
+  or temporary task-local checks removed before completion.
 - Be mindful of hot path operations that can cause GC churn in the renderer. Use reusable buffers, in-place, or output-to-target semantics where appropriate.
 - Don't hide magic numbers and constants that are likely to need tweaking. Put them in places that can be easily found and accessed.
 

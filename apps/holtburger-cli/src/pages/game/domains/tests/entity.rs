@@ -49,7 +49,10 @@ fn health_update_event_updates_cached_entity_state() {
 
     let result = state.handle_view_event(ClientViewEvent::EntityHealthUpdated {
         guid: entity_guid,
+        world_generation: 1,
+        instance_sequence: 1,
         health_fraction: 0.25,
+        observed_at: holtburger_core::DynamicEntityHostTime::new(1.0).unwrap(),
     });
 
     assert!(result.redraw_requested());
@@ -58,7 +61,7 @@ fn health_update_event_updates_cached_entity_state() {
             .data
             .entities
             .get(&entity_guid)
-            .and_then(|entity| entity.health_fraction),
+            .and_then(|entity| entity.health.map(|health| health.fraction)),
         Some(0.25)
     );
 }

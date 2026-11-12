@@ -188,12 +188,24 @@ export function decodeClientSummonEnded(value: unknown): ClientSummonEnded {
 	return summonEndedSchema.parse(value);
 }
 
+const dynamicEntityObservedAtSchema = z
+	.object({
+		seconds: finiteNumber.nonnegative(),
+	})
+	.strict();
+
 const entityHealthSchema = z
 	.object({
 		/** Entity whose health changed; the server does not echo selection revisions. */
 		guid,
+		/** World generation at the time of observation. */
+		worldGeneration: z.number().int().nonnegative(),
+		/** Entity incarnation sequence to prevent stale cross-incarnation health carryover. */
+		instanceSequence: z.number().int().min(0).max(0xffff),
 		/** Latest health fraction reported by the server. */
-		healthFraction: finiteNumber,
+		healthFraction: finiteNumber.min(0).max(1),
+		/** Host monotonic observation time matching the dynamic-entity timeline origin. */
+		observedAt: dynamicEntityObservedAtSchema,
 	})
 	.strict();
 
@@ -202,6 +214,47 @@ export type ClientEntityHealth = z.infer<typeof entityHealthSchema>;
 
 export function decodeClientEntityHealth(value: unknown): ClientEntityHealth {
 	return entityHealthSchema.parse(value);
+}
+
+const entityCombatObservedSchema = z
+	.object({
+		/** Remote or attacked entity incarnation observed in hostile combat with local player. */
+		guid,
+		/** World generation at the time of observation. */
+		worldGeneration: z.number().int().nonnegative(),
+		/** Entity incarnation sequence at the time of combat observation. */
+		instanceSequence: z.number().int().min(0).max(0xffff),
+		/** Host monotonic observation time matching the dynamic-entity timeline origin. */
+		observedAt: dynamicEntityObservedAtSchema,
+	})
+	.strict();
+
+/** Proven hostile combat observation involving the local player. */
+export type ClientEntityCombatObserved = z.infer<
+	typeof entityCombatObservedSchema
+>;
+
+export function decodeClientEntityCombatObserved(
+	value: unknown,
+): ClientEntityCombatObserved {
+	return entityCombatObservedSchema.parse(value);
+}
+
+const appraisalFactsSettledSchema = z
+	.object({
+		/** Target object whose background `FactsOnly` appraisal demand settled. */
+		guid,
+	})
+	.strict();
+
+export type ClientAppraisalFactsSettled = z.infer<
+	typeof appraisalFactsSettledSchema
+>;
+
+export function decodeClientAppraisalFactsSettled(
+	value: unknown,
+): ClientAppraisalFactsSettled {
+	return appraisalFactsSettledSchema.parse(value);
 }
 
 const vitalSchema = z

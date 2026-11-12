@@ -1160,7 +1160,21 @@ pub enum ClientViewEvent {
     },
     EntityHealthUpdated {
         guid: Guid,
+        world_generation: u64,
+        instance_sequence: u16,
         health_fraction: f32,
+        observed_at: crate::DynamicEntityHostTime,
+    },
+    /// Proven sticky-targeted hostile attack action or offensive player combat action.
+    EntityCombatObserved {
+        guid: Guid,
+        world_generation: u64,
+        instance_sequence: u16,
+        observed_at: crate::DynamicEntityHostTime,
+    },
+    /// Terminal notice that a client `FactsOnly` appraisal demand settled (ready, rejected, missing, or expired).
+    AppraisalFactsSettled {
+        guid: Guid,
     },
     /// Full book receipt; a frontend may open its reader.
     EntityBookOpened {
@@ -1500,6 +1514,17 @@ pub enum ClientCommand {
         enabled: bool,
     },
     Identify(Guid),
+    /// Priority/output-aware object appraisal request routed through shared `AppraisalSystem`.
+    RequestAppraisal {
+        guid: Guid,
+        output: super::appraisal::AppraisalOutputDemand,
+        allow_cached_preview: bool,
+    },
+    /// Cancels a client-initiated appraisal demand so closed UIs do not consume wire slots.
+    CancelAppraisal {
+        guid: Guid,
+        output: super::appraisal::AppraisalOutputDemand,
+    },
     /// Request one page for the character that opened the reader.
     ReadBookPage {
         /// Character identity checked before sending the wire action.

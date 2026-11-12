@@ -8,6 +8,8 @@
 	import { itemCellPresentation } from "./item-cell-presentation";
 	import type { UiIconDisplay } from "./ui-icon-repository";
 	import type { ItemStructure } from "./item-structure";
+	import { useItemCantrips } from "./item-cantrips";
+	const itemCantrips = useItemCantrips();
 	interface CellProps {
 		/** Stable accessible name and tooltip, also used when no visual is supplied. */
 		readonly label: string;
@@ -105,6 +107,7 @@
 	data-template-wcid={templateWcid}
 	data-dimmed={dimmed}
 	data-item-guid={itemGuid}
+	data-cantrip-tier={empty ? undefined : itemCantrips.tierFor(itemGuid)}
 	title=""
 	data-ui-tooltip={presentation.label}
 	aria-label={presentation.label}

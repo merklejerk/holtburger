@@ -25,15 +25,8 @@ import {
 	probeSelectPicker,
 } from "./keyboard-policy-probe.mjs";
 import { probeTrade } from "./client-trade-probe.mjs";
-import { probeInventoryAutoMerge } from "./client-inventory-auto-merge-probe.mjs";
-import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
-import {
-	probeActionBars,
-	probeHudSnapping,
-} from "./client-action-bar-probe.mjs";
-import { probeItemUse } from "./client-item-use-probe.mjs";
+import { probeHudSnapping } from "./client-action-bar-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
-import { probeLoadouts } from "./client-loadout-probe.mjs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { decode } from "@msgpack/msgpack";
 import { tmpdir } from "node:os";
@@ -391,8 +384,6 @@ try {
 			connectionBadge: result.connectionBadge,
 			consoleMessages: result.consoleMessages,
 		};
-	} else if (options.clientLoadouts) {
-		report = { clientLoadouts: result.clientLoadouts, browserErrors };
 	} else if (options.clientPreciseJump) {
 		report = {
 			suite: "client-precise-jump",
@@ -401,13 +392,6 @@ try {
 		};
 	} else if (options.clientLocks) {
 		report = { suite: "client-locks", ...result.clientLocks, browserErrors };
-	} else if (options.clientInventory) {
-		report = {
-			suite: "client-inventory",
-			passed: true,
-			...result.clientInventory,
-			browserErrors,
-		};
 	} else if (options.clientSpells) {
 		report = { suite: "client-spells", ...result.clientSpells, browserErrors };
 	} else if (options.clientNearby) {
@@ -732,9 +716,7 @@ function parseArgs(args) {
 		cellTooltips: false,
 		clientNearby: false,
 		clientSpells: false,
-		clientInventory: false,
 		clientLocks: false,
-		clientLoadouts: false,
 		clientPreciseJump: false,
 		clientSettingsTabs: false,
 		performanceSurfaces: false,
@@ -989,10 +971,6 @@ function parseArgs(args) {
 				parsed.clientHudFixture = true;
 				parsed.clientLocks = true;
 				break;
-			case "--client-inventory":
-				parsed.clientHudFixture = true;
-				parsed.clientInventory = true;
-				break;
 			case "--client-spells":
 				parsed.clientHudFixture = true;
 				parsed.clientSpells = true;
@@ -1012,10 +990,6 @@ function parseArgs(args) {
 			case "--client-ui-scaling":
 				parsed.clientHudFixture = true;
 				parsed.clientUiScaling = true;
-				break;
-			case "--client-loadouts":
-				parsed.clientHudFixture = true;
-				parsed.clientLoadouts = true;
 				break;
 			case "--character-sheet":
 				parsed.characterSheet = true;
@@ -2344,9 +2318,7 @@ Options:
   --client-hud-snapping Verify action-bar adjacency, alignment, and pointer release.
   --client-combat-bar   Verify attack controls, projectile supply, and HUD cancellation.
   --client-locks        Verify locked-target HUD, manual and batched keys, Escape, and teardown.
-  --client-inventory    Verify inventory gestures, item use, give confirmations, and suppression.
   --item-cooldowns      Verify shared countdowns, themed CSS fills, expiry, and untouched icon artwork.
-  --client-loadouts     Exercise loadout capture, exclusions, shortcut placement, and warning feedback.
   --relocate-sequence <hex,hex,...>
                          Re-issue scene interest at each landblock in turn, so sustained streaming
                          churn can be measured without the interactive client. Reports per-hop
@@ -5018,27 +4990,6 @@ async function runClientHudHarness({ viteUrl }) {
 				state: { error: null, ready: true },
 			};
 		}
-		if (options.clientInventory) {
-			await evaluate(
-				client,
-				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeInventory",
-				[],
-			);
-			return {
-				clientInventory: {
-					drag: await probeInventoryDrag(client, evaluateExpression),
-					actionBars: await probeActionBars(
-						client,
-						evaluateExpression,
-						options.screenshotPath,
-					),
-					itemUse: await probeItemUse(client, evaluateExpression),
-					autoMerge: await probeInventoryAutoMerge(client, evaluateExpression),
-				},
-				consoleMessages,
-				state: { error: null, ready: true },
-			};
-		}
 		if (options.clientPartyScreenshotDirectory !== null) {
 			await mkdir(options.clientPartyScreenshotDirectory, { recursive: true });
 			// Isolate the real party surface for crops; its production styling remains untouched.
@@ -5481,18 +5432,6 @@ async function runClientHudHarness({ viteUrl }) {
 					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeParty",
 					[],
 				),
-				consoleMessages,
-				state: { error: null, ready: true },
-			};
-		}
-		if (options.clientLoadouts) {
-			await evaluate(
-				client,
-				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeInventory",
-				[],
-			);
-			return {
-				clientLoadouts: await probeLoadouts(client, evaluateExpression),
 				consoleMessages,
 				state: { error: null, ready: true },
 			};

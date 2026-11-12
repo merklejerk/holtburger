@@ -1,3 +1,4 @@
+import type { ClientHostAppraisalTuningConfig } from "../src/client/client-appraisal-tuning.js";
 import { parseClientLaunchArgument } from "../scripts/entry-paths.mjs";
 import { resolve } from "node:path";
 
@@ -11,6 +12,8 @@ export interface ClientLaunchConfiguration {
 	password: string;
 	/** Optional developer override for the shared melee pursuit leash, in meters. */
 	meleeMaxChaseDistance?: number;
+	/** Shared appraisal cooldown and response-timeout bounds forwarded to the native host at startup. */
+	appraisalTuning?: ClientHostAppraisalTuningConfig;
 }
 
 export interface ParsedClientLaunchArguments {

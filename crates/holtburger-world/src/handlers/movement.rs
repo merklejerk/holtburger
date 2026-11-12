@@ -65,6 +65,7 @@ fn report_rejected_motion_commands(
 pub(crate) fn handle_message(
     state: &mut WorldState,
     message: &GameMessage,
+    observed_at: std::time::Instant,
     events: &mut Vec<WorldEvent>,
 ) -> bool {
     match message {
@@ -140,6 +141,12 @@ pub(crate) fn handle_message(
                 }
                 _ => None,
             };
+            let is_hostile_attack = !is_local
+                && state.player.guid != Guid::NULL
+                && sticky_target.is_some_and(|target| target != Guid::NULL)
+                && actions
+                    .iter()
+                    .any(|action| action.command.is_hostile_attack_action());
             report_unsupported_interpreted_commands(state, guid, snapshot);
             report_rejected_motion_commands(guid, rejected_commands);
             let playback_changed =
@@ -154,7 +161,13 @@ pub(crate) fn handle_message(
             }
 
             if snapshot.indicates_death_motion() {
-                state.update_health_fraction(guid, 0.0, events);
+                state.update_health_fraction_at(guid, 0.0, observed_at, events);
+            } else if is_hostile_attack && let Some(entity) = state.entities.get(guid) {
+                events.push(WorldEvent::EntityCombatObserved {
+                    guid,
+                    instance_sequence: entity.instance_sequence(),
+                    observed_at,
+                });
             }
 
             true

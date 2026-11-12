@@ -17,7 +17,116 @@ import {
 	dmgLayout,
 	compileWindows,
 	numericVersion,
+	verifyDmg,
+	DMG_VERIFY_RETRY_DELAYS_MS,
+	DMG_VERIFY_TIMEOUT_MS,
 } from "./desktop.ts";
+
+const temporaryDmgRefusal = {
+	exitCode: 1,
+	stdout: Buffer.alloc(0),
+	stderr: Buffer.from(
+		'hdiutil: verify: unable to recognize "/tmp/image.dmg" as a disk image. (Resource temporarily unavailable)\n' +
+			"hdiutil: verify failed - Resource temporarily unavailable\n",
+	),
+};
+
+test("DMG verification accepts immediate success without waiting", async () => {
+	await verifyDmg(
+		"image with spaces.dmg",
+		(program, args, cwd, timeoutMs) => {
+			assert.equal(program, "hdiutil");
+			assert.deepEqual(args, ["verify", "image with spaces.dmg"]);
+			assert.equal(cwd, APP_ROOT);
+			assert.equal(timeoutMs, DMG_VERIFY_TIMEOUT_MS);
+			return { exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+		},
+		async () => assert.fail("Successful verification must not wait"),
+	);
+});
+
+test("DMG verification recovers after temporary refusals", async () => {
+	let attempts = 0;
+	const delays: number[] = [];
+	await verifyDmg(
+		"image.dmg",
+		() => {
+			attempts++;
+			return attempts <= DMG_VERIFY_RETRY_DELAYS_MS.length
+				? temporaryDmgRefusal
+				: { exitCode: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+		},
+		async (delay) => {
+			delays.push(delay);
+		},
+	);
+	assert.equal(attempts, DMG_VERIFY_RETRY_DELAYS_MS.length + 1);
+	assert.deepEqual(delays, [...DMG_VERIFY_RETRY_DELAYS_MS]);
+});
+
+test("DMG verification exhausts its bounded retries and preserves diagnostics", async () => {
+	let attempts = 0;
+	const delays: number[] = [];
+	await assert.rejects(
+		verifyDmg(
+			"image.dmg",
+			() => {
+				attempts++;
+				return temporaryDmgRefusal;
+			},
+			async (delay) => {
+				delays.push(delay);
+			},
+		),
+		{
+			message: `hdiutil exited ${temporaryDmgRefusal.exitCode}: ${temporaryDmgRefusal.stderr.toString()}`,
+		},
+	);
+	assert.equal(attempts, DMG_VERIFY_RETRY_DELAYS_MS.length + 1);
+	assert.deepEqual(delays, [...DMG_VERIFY_RETRY_DELAYS_MS]);
+});
+
+test("DMG verification immediately rejects permanent failures, even after a temporary refusal", async () => {
+	let attempts = 0;
+	const delays: number[] = [];
+	await assert.rejects(
+		verifyDmg(
+			"image.dmg",
+			() => {
+				attempts++;
+				return attempts === 1
+					? temporaryDmgRefusal
+					: {
+							exitCode: 1,
+							stdout: Buffer.from("checksum mismatch\n"),
+							stderr: Buffer.from(
+								"hdiutil: verify failed - image data corrupted\n",
+							),
+						};
+			},
+			async (delay) => {
+				delays.push(delay);
+			},
+		),
+		/exited 1: checksum mismatch\nhdiutil: verify failed - image data corrupted/,
+	);
+	assert.equal(attempts, 2);
+	assert.deepEqual(delays, DMG_VERIFY_RETRY_DELAYS_MS.slice(0, 1));
+});
+
+test("DMG verification propagates execution failures without retrying", async () => {
+	const timeout = new Error("ETIMEDOUT");
+	await assert.rejects(
+		verifyDmg(
+			"image.dmg",
+			() => {
+				throw timeout;
+			},
+			async () => assert.fail("Execution failures must not wait"),
+		),
+		(error) => error === timeout,
+	);
+});
 
 test("Windows compilation uses the native payload and distribution version", () => {
 	compileWindows(

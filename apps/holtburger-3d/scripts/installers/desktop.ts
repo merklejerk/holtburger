@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, parse, resolve } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { fileURLToPath } from "node:url";
@@ -19,11 +20,47 @@ import {
 	distributionKindSchema,
 	releaseVersionSchema,
 } from "../../src/app/app-build-contract.ts";
-import { APP_ROOT, readJson, run, type Runner } from "./native.ts";
+import { APP_ROOT, readJson, run, runResult, type Runner } from "./native.ts";
 /** Stable application identity used by installer compilation. */
 const WINDOWS_APP_ID = "io.github.merklejerk.holtburger-3d";
 /** Start-menu identity shared by all distribution versions. */
 const WINDOWS_APP_NAME = "Holtburger 3D";
+/** Allow macOS disk-image resources to settle without rebuilding the installer. */
+export const DMG_VERIFY_RETRY_DELAYS_MS = [2_000, 5_000, 10_000] as const;
+/** Bound each verification attempt, including the initial attempt. */
+export const DMG_VERIFY_TIMEOUT_MS = 60_000;
+
+/** Retry only macOS's explicit temporary resource refusal; verification remains mandatory. */
+export async function verifyDmg(
+	destination: string,
+	command: typeof runResult = runResult,
+	wait: (milliseconds: number) => Promise<void> = setTimeout,
+): Promise<void> {
+	for (let attempt = 0; ; attempt++) {
+		const result = command(
+			"hdiutil",
+			["verify", destination],
+			APP_ROOT,
+			DMG_VERIFY_TIMEOUT_MS,
+		);
+		if (result.exitCode === 0) return;
+		const diagnostic = `${result.stdout.toString()}${result.stderr.toString()}`;
+		const delay = DMG_VERIFY_RETRY_DELAYS_MS[attempt];
+		// Exit status 1 also covers invalid images; only this diagnostic admits a retry.
+		if (
+			delay === undefined ||
+			!result.stderr
+				.toString()
+				.split(/\r?\n/)
+				.includes("hdiutil: verify failed - Resource temporarily unavailable")
+		)
+			throw new Error(`hdiutil exited ${result.exitCode}: ${diagnostic}`);
+		console.warn(
+			`${diagnostic.trim()}\nRetrying DMG verification in ${delay} ms.`,
+		);
+		await wait(delay);
+	}
+}
 
 /** Native bundle identity used to compile installers. */
 const installerInput = z.object({
@@ -153,7 +190,7 @@ export async function buildInstaller(
 				],
 				APP_ROOT,
 			);
-			run("hdiutil", ["verify", destination], APP_ROOT);
+			await verifyDmg(destination);
 		}
 
 		if (statSync(destination).size === 0)

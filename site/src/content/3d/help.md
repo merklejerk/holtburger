@@ -21,11 +21,11 @@ On Windows, if Play returns you to the launcher with `host exited before complet
 
 Open the launcher's gear button → **App settings** for process-wide graphics choices. Apply changes with **Save and restart**. These choices are separate from the graphics controls inside the game.
 
-| Setting                                     | What it controls                                                                                                    | Windows default |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------- |
-| Graphics backend                            | The graphics API used by the browser runtime. Automatic lets it choose; Windows also offers OpenGL and Direct3D 11. | OpenGL          |
-| Synchronize frames with the display (VSync) | Requests frame synchronization with the display.                                                                    | Off             |
-| Use GPU compositing                         | Uses the GPU to combine interface surfaces for display. Turning it off can resolve flickering UI patches.           | Off             |
+| Setting                                     | What it controls                                                                                                                            | Windows default |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| Graphics backend                            | The graphics API used by the browser runtime. Automatic lets it choose; Windows also offers OpenGL and Direct3D 11.                         | OpenGL          |
+| Synchronize frames with the display (VSync) | Requests frame synchronization with the display.                                                                                            | Off             |
+| Use GPU compositing                         | Uses the GPU to combine interface surfaces for display. Turning it off can resolve missing UI patches but significantly reduce frame rates. | On              |
 
 macOS and Linux default to Automatic with VSync and GPU compositing on. **Use defaults** restores the choices for your platform. Change one setting at a time and restart to compare results.
 
@@ -35,13 +35,17 @@ If the application will not open, start with the [installation guide for your pl
 
 ## Windows UI flickering
 
-Intermittent transparent or missing patches have been observed on NVIDIA laptops, including in game panels, character selection, and the launcher logo. Turning off **Use GPU compositing** resolved the flicker in a reported on/off comparison; the underlying cause has not been established. Windows now defaults to this workaround, including when loading older app settings that have no compositing preference.
+If panels or text briefly develop transparent holes that reveal the content underneath, open **App settings**, turn off **Use GPU compositing**, and choose **Save and restart**. This workaround can significantly reduce frame rates. GPU compositing is enabled by default for performance.
 
-If you see this problem, open **App settings**, turn off **Use GPU compositing**, and choose **Save and restart**. If you previously added graphics flags to a shortcut, remove them before comparing saved settings; explicit launch overrides can take precedence. Changing VSync or switching to Direct3D 11 is not required for this workaround. Direct3D 11 can reduce frame rate on some systems, so retain OpenGL if it performs better.
+This corruption has been observed on Windows 11 NVIDIA laptops in the launcher, character selection, and game panels. It may occur briefly after startup or recur later. Similar Windows/NVIDIA corruption is reported in [Electron issue #43122](https://github.com/electron/electron/issues/43122), but the exact cause in Holtburger has not been established.
+
+If you previously added graphics flags to a shortcut, remove them before comparing saved settings; explicit launch overrides can take precedence. Changing VSync or switching to Direct3D 11 is not required for this workaround. Direct3D 11 can reduce frame rate on some systems, so retain OpenGL if it performs better.
 
 If flickering continues with GPU compositing off, include **Copy hardware info** and a short recording in your report. A recording is more useful than a screenshot for a glitch that lasts only a frame. See the [Windows installation troubleshooting section](/holtburger/start/3d/windows/#troubleshooting) for other startup problems.
 
 ## If the game runs slowly
+
+First check **App settings → Use GPU compositing** in the launcher. If it is off, enabling it and choosing **Save and restart** can substantially improve frame rates. A previously saved preference may still have it disabled. If enabling it causes transparent UI holes, see [Windows UI flickering](#windows-ui-flickering) for the compatibility tradeoff.
 
 Change one setting at a time so you can judge the result:
 

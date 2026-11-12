@@ -189,11 +189,21 @@ export function installKeyboardPolicyFixture(
 		onCharacterInput() {},
 	});
 	controller.setControlScheme({ kind: "physical-fly" });
+	let releaseWorld: (() => void) | null = null;
 	let disposed = false;
 	/** Synthetic activity competes with production windows through the real keyboard boundary. */
 	let activity: EscapeContextHandle | null = null;
 	let activityCancellations = 0;
 	return {
+		/** Mirror the app's portal suspension without constructing a live server. */
+		suspendWorld: () => {
+			if (releaseWorld === null) releaseWorld = inputGate.block();
+			inputGate.cancel("reset");
+		},
+		resumeWorld: () => {
+			releaseWorld?.();
+			releaseWorld = null;
+		},
 		beginEscapeActivity: () => {
 			if (activity !== null) activity.promote();
 			else
@@ -251,6 +261,7 @@ export function installKeyboardPolicyFixture(
 		dispose: () => {
 			if (disposed) return;
 			disposed = true;
+			releaseWorld?.();
 			activity?.release();
 			closeModal();
 			scope.destroy();

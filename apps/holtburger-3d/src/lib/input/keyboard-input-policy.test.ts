@@ -273,18 +273,95 @@ describe("game keyboard routing", () => {
 		expect(game.keydown).not.toHaveBeenCalled();
 	});
 
-	it("keeps modal/scene blockers ahead of app contexts", () => {
-		const { keyboard, viewport } = fixture();
+	it("keeps UI Escape contexts available while world controls are blocked", () => {
+		const { keyboard, viewport, game } = fixture();
 		const cancel = vi.fn();
 		keyboard.bindEscapeContext(cancel);
-		const release = viewport.block();
+		viewport.block();
 		keyboard.keydown(keyEvent("Escape"));
-		expect(cancel).not.toHaveBeenCalled();
-		release();
 		keyboard.keydown(keyEvent("Escape", true));
-		expect(cancel).not.toHaveBeenCalled();
-		keyboard.keydown(keyEvent("Escape"));
 		expect(cancel).toHaveBeenCalledOnce();
+		expect(game.keydown).not.toHaveBeenCalled();
+	});
+
+	it("routes app shortcuts independently of world controls and quarantines consumed releases", () => {
+		const { keyboard, viewport, game } = fixture();
+		const shortcut = vi.fn((event: KeyboardEvent) => event.preventDefault());
+		const retire = keyboard.bindShortcuts(shortcut);
+		expect(() => keyboard.bindShortcuts(shortcut)).toThrow(
+			"already registered",
+		);
+		const reveal = viewport.block();
+		keyboard.keydown(keyEvent("KeyB"));
+		expect(shortcut).toHaveBeenCalledOnce();
+		reveal();
+		keyboard.keyup(keyEvent("KeyB"));
+		expect(game.keyup).not.toHaveBeenCalled();
+		retire();
+		const replacement = keyboard.bindShortcuts(shortcut);
+		retire();
+		keyboard.keydown(keyEvent("KeyB"));
+		expect(shortcut).toHaveBeenCalledTimes(2);
+		expect(game.keydown).not.toHaveBeenCalled();
+		replacement();
+		keyboard.keydown(keyEvent("KeyB"));
+		expect(game.keydown).toHaveBeenCalledOnce();
+	});
+
+	it("preserves editor input and held UI releases across world suspension and consumer replacement", () => {
+		const { keyboard, viewport, game, detach } = fixture();
+		const shortcut = vi.fn();
+		keyboard.bindShortcuts(shortcut);
+		const keydown = vi.fn();
+		const keyup = vi.fn();
+		const cancel = vi.fn();
+		const editor = {
+			isConnected: true,
+			isContentEditable: true,
+			parentElement: null,
+			closest: () => null,
+			focus: vi.fn(),
+		} as unknown as HTMLElement;
+		keyboard.scope(editor, {
+			activation: (event) => event.key === "Enter",
+			keydown,
+			keyup,
+			cancel,
+		});
+		const reveal = viewport.block();
+		keyboard.keydown(keyEvent("Enter"));
+		expect(editor.focus).toHaveBeenCalledOnce();
+		keyboard.keyup(keyEvent("Enter"));
+		keyboard.keydown(keyEvent("KeyA"));
+		const release = vi.fn();
+		keyboard.bindKeyRelease(keyEvent("KeyA"), release);
+		const before = cancel.mock.calls.length;
+		viewport.cancel("reset");
+		detach();
+		keyboard.bindGame(game);
+		expect(cancel).toHaveBeenCalledTimes(before);
+		keyboard.keyup(keyEvent("KeyA"));
+		expect(release).toHaveBeenCalledOnce();
+		expect(keyup).toHaveBeenCalledOnce();
+		expect(shortcut).not.toHaveBeenCalled();
+		reveal();
+		keyboard.keydown(keyEvent("KeyB"));
+		expect(keydown).toHaveBeenCalledTimes(2);
+		expect(game.keydown).not.toHaveBeenCalled();
+	});
+
+	it("keeps foreground pages ahead of app shortcuts during recovery", () => {
+		const { keyboard, viewport } = fixture();
+		const shortcut = vi.fn();
+		keyboard.bindShortcuts(shortcut);
+		viewport.block();
+		const page = keyboard.nativePage({
+			isConnected: true,
+			closest: () => null,
+		} as unknown as HTMLElement);
+		keyboard.keydown(keyEvent("KeyB"));
+		expect(shortcut).not.toHaveBeenCalled();
+		page.destroy();
 	});
 
 	it("cancels without release actions and rejects repeats across scene availability", () => {
@@ -383,6 +460,32 @@ describe("game keyboard routing", () => {
 		expect(viewport.allowed).toBe(true);
 		keyboard.keydown(keyEvent("KeyW"));
 		expect(game.keydown).toHaveBeenCalledOnce();
+	});
+
+	it("releases modal admission when the outgoing UI cancellation fails", () => {
+		const { keyboard, viewport } = fixture();
+		const editor = {
+			isConnected: true,
+			isContentEditable: true,
+			parentElement: null,
+			closest: () => null,
+			focus: vi.fn(),
+		} as unknown as HTMLElement;
+		keyboard.scope(editor, {
+			keydown: vi.fn(),
+			cancel: () => {
+				throw new Error("Outgoing UI cancellation failed.");
+			},
+		});
+		keyboard.activate(editor);
+		const dialog = { showModal: vi.fn() } as unknown as HTMLDialogElement;
+
+		expect(() => keyboard.modal(dialog)).toThrow(
+			"Outgoing UI cancellation failed.",
+		);
+		expect(dialog.showModal).not.toHaveBeenCalled();
+		expect(keyboard.activeModal).toBeNull();
+		expect(viewport.allowed).toBe(true);
 	});
 
 	it.each(["release-held", "reset"] as const)(

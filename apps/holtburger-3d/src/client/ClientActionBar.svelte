@@ -68,7 +68,7 @@
 		onmenu,
 		onactivate,
 	}: Props = $props();
-	const { keyboard } = useAppInputPolicy();
+	const { keyboard, viewport: inputGate } = useAppInputPolicy();
 	const clientInput = useClientInput();
 	const focusSlot = $derived.by(() => {
 		const slot = ACTION_SLOT_INDICES.find((index) => index + 1 === sequence);
@@ -196,6 +196,12 @@
 		} else onmenu(operation);
 	}
 	onMount(() => onmount(() => extent));
+	onMount(() =>
+		inputGate.attach(() => {
+			// Bar commands use world actions; suspension retires their keyboard selection.
+			if (focused !== null) keyboard.returnToGame();
+		}),
+	);
 	const focusBinding = $derived(
 		presentClientBinding(
 			input,
@@ -236,6 +242,7 @@
 			transient: true,
 			passthrough: true,
 			activation: (event) => {
+				if (!inputGate.allowed) return false;
 				if (
 					!ACTION_SLOT_INDICES.some(
 						(index) =>

@@ -56,9 +56,6 @@ export async function probeBindingControls(client, evaluateExpression) {
 		},
 	};
 
-	await read(
-		`globalThis.__releaseSystemPanelKeys = ${api}.bindSystemPanelKeys()`,
-	);
 	try {
 		await read(
 			`${api}.bindingSettings.replace(${JSON.stringify(panelSettings)})`,
@@ -243,13 +240,15 @@ export async function probeBindingControls(client, evaluateExpression) {
 		await key("b");
 	} finally {
 		await read(
-			`globalThis.__panelEditor?.remove(); delete globalThis.__panelEditor; globalThis.__releaseSystemPanelKeys(); delete globalThis.__releaseSystemPanelKeys; ${api}.bindingSettings.replace(${JSON.stringify(initial)})`,
+			`globalThis.__panelEditor?.remove(); delete globalThis.__panelEditor; ${api}.bindingSettings.replace(${JSON.stringify(initial)})`,
 		);
 		await settle();
 	}
 
 	const settings = {
 		...initial,
+		// This scenario assigns F10 to the caster; app UI commands retain precedence.
+		client: { ...initial.client, toggleSettings: [] },
 		actionBars: {
 			...initial.actionBars,
 			focus: { ...initial.actionBars.focus, 0: [{ key: "F11" }] },

@@ -37,7 +37,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 			button: "left",
 			buttons: 1,
 		});
-		if (target === offer || target === catalogHint) {
+		if (target === offer || target === catalogHeading) {
 			const admission = await read(
 				`document.querySelector('[data-vendor-catalog="5000"]').dataset.inventoryDrop`,
 			);
@@ -60,7 +60,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		read(`document.querySelector(${JSON.stringify(selector)}).click()`);
 	const offer = '[data-vendor-offer="7001"]';
 	const queue = '[data-vendor-queue="5000"]';
-	const catalogHint = '[data-vendor-catalog="5000"] .vendor-hint';
+	const catalogHeading = '[data-vendor-catalog="5000"] h3';
 	const owned = (id) =>
 		`.client-inventory .contents-scroll [data-item-guid="${id}"]`;
 	const countInventoryRequests = () =>
@@ -138,7 +138,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		`${api}.bindingSettings.replace({...${JSON.stringify(inputSettings)}, client: {...${JSON.stringify(inputSettings.client)}, examine: [{key: "F8"}]}})`,
 	);
 	await wait(
-		`document.querySelector('.vendor-hint')?.textContent.includes('Examine (F8)')`,
+		`document.querySelector(${JSON.stringify(offer)})?.getAttribute('aria-label').includes('Examine (F8)')`,
 	);
 	await read(`document.querySelector(${JSON.stringify(offer)}).focus()`);
 	for (const type of ["keyDown", "keyUp"])
@@ -238,7 +238,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	if ((await read(`${api}.capture().selectedGuid`)) !== selectionBefore)
 		throw new Error("Vendor offer was selected as a world entity");
 	const previewBeforeCatalogDrop = await read(`${fixture}.pending().sequence`);
-	await drag(offer, catalogHint);
+	await drag(offer, catalogHeading);
 	if (
 		(await read(`${fixture}.pending().sequence`)) !==
 			previewBeforeCatalogDrop ||
@@ -340,7 +340,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	buys.push({ item: 7002, amount: 1, total: 10, merge_key: null });
 	await quote(buys, sells);
 	const previewBeforeRejectedSale = await read(`${fixture}.pending().sequence`);
-	await drag(owned(6003), catalogHint);
+	await drag(owned(6003), catalogHeading);
 	if (
 		(await read(`${fixture}.pending().sequence`)) !== previewBeforeRejectedSale
 	)
@@ -739,7 +739,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	await quote([], [], unchangedCurrencies);
 	await drag(
 		'.client-inventory .contents-header[data-item-guid="8000"]',
-		catalogHint,
+		catalogHeading,
 	);
 	const headerPackDraft = await read(`${fixture}.pending().draft`);
 	if (JSON.stringify(headerPackDraft.sells) !== JSON.stringify(packDraft.sells))
@@ -779,7 +779,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	await quote([], [], unchangedCurrencies);
 	await drag(
 		'.client-inventory .contents-header[data-item-guid="1"]',
-		catalogHint,
+		catalogHeading,
 	);
 	const mainHeaderDraft = await read(`${fixture}.pending().draft`);
 	if (

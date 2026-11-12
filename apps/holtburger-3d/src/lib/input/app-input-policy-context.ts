@@ -6,7 +6,7 @@ import { ViewportInputGate } from "./viewport-input-gate";
 interface AppInputPolicy {
 	/** Explicit UI keyboard ownership and event routing. */
 	readonly keyboard: KeyboardInputPolicy;
-	/** Scene/modal availability and cancellation of world gestures. */
+	/** World-controller availability and gesture cancellation; UI shortcuts have independent ownership. */
 	readonly viewport: ViewportInputGate;
 }
 

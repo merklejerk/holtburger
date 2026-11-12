@@ -135,7 +135,7 @@ export function createInputDefaults(platform: InputPlatform) {
 			preciseJump: [{ code: "Space", ctrl: true }],
 			/** Cancel the active context, then clear selection when gameplay owns Escape. */
 			cancel: [{ key: "Escape" }],
-			/** Activate chat while the game owns the keyboard. */
+			/** Activate chat outside editors and modal interactions. */
 			chat: [{ key: "Enter", ctrl: false, alt: false, meta: false }],
 			/** Hold to browse curated social emotes while gameplay owns input. */
 			openEmotes: [

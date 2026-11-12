@@ -1512,12 +1512,9 @@
 		if (resolution.kind === "send" || resolution.kind === "sequence") {
 			const currentSession = session;
 			const emotes = emoteController;
-			if (
-				currentSession === null ||
-				emotes === null ||
-				lifecycle.kind !== "in-world"
-			)
-				throw new Error("Chat session is not in the world.");
+			if (currentSession === null)
+				throw new Error("Chat session is unavailable.");
+			if (emotes === null) throw new Error("Emote controller is unavailable.");
 			const requests =
 				resolution.kind === "send"
 					? ([resolution.request] as const)
@@ -1610,8 +1607,6 @@
 				throw new Error(
 					`Unknown command: ${message.split(/\s/, 1)[0]}. Use /help for supported commands.`,
 				);
-			if (lifecycle.kind !== "in-world")
-				throw new Error("Chat session is not in the world.");
 			await currentSession.sendChat({ kind: "speech", message });
 		}
 	}
@@ -1658,7 +1653,6 @@
 
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
-		if (gameplayView?.handleSystemPanelKeydown(event)) return;
 		if (preciseJumpActive && !event.isComposing) {
 			if (
 				inputArbiter?.applyPowerKey(event, true) ||
@@ -1750,11 +1744,6 @@
 		if (clientInput.shortcut("interact", event) && !event.isComposing) {
 			event.preventDefault();
 			if (!event.repeat) itemInteractions?.interactSelected(unrestrictedUse);
-			return;
-		}
-		if (event.key === "Escape") {
-			gameplayView?.openSystemMenu();
-			event.preventDefault();
 			return;
 		}
 		if (inputArbiter !== null && characterInput.apply(event, true))
@@ -2218,7 +2207,7 @@
 			activeJumpBeginSequence = null;
 			preciseEscapeContext?.release();
 			preciseEscapeContext = null;
-			keyboard.cancel();
+			inputGate.cancel("reset");
 			controller.releaseOwnership();
 			if (inputArbiter === arbiter) inputArbiter = null;
 			if (inputController === controller) inputController = null;

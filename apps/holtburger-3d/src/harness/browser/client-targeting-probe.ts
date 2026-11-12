@@ -1,3 +1,4 @@
+import { tick } from "svelte";
 import { probeClientLockFeedback } from "./client-lock-feedback-probe";
 import { probeClientCombatTargetIndicator } from "./client-combat-target-indicator-probe";
 import {
@@ -161,11 +162,15 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		cycle,
 		holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
 	});
-	let systemMenuRequests = 0;
+	const menu = document.querySelector<HTMLButtonElement>(
+		'[aria-label="System menu"]',
+	);
+	if (menu === null)
+		throw new Error("Targeting probe requires the production system menu.");
+	const menuOpen = () => menu.getAttribute("aria-expanded") === "true";
 	const unbind = keyboard.bindGame({
 		keydown: (event) => {
-			if (!input.keydown(event, nowMs) && event.key === "Escape")
-				systemMenuRequests++;
+			input.keydown(event, nowMs);
 		},
 		keyup: (event) => input.keyup(event, nowMs),
 		cancel: () => {
@@ -637,12 +642,14 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		const window = keyboard.bindEscapeContext(() => closeRequests++, {
 			untilRelease: true,
 		});
-		const beforeMenu = systemMenuRequests;
+		if (menuOpen())
+			throw new Error("Targeting probe started with an open system menu.");
 		try {
 			press("Escape");
 			press("Escape");
 			expectSelected(2, "server-delayed window retains Escape");
-			if (closeRequests !== 2 || systemMenuRequests !== beforeMenu)
+			await tick();
+			if (closeRequests !== 2 || menuOpen())
 				throw new Error(
 					"Pending window close let Escape reach the system menu.",
 				);
@@ -651,11 +658,15 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		}
 		press("Escape");
 		expectSelected(null, "selection precedes system menu");
-		if (systemMenuRequests !== beforeMenu)
+		await tick();
+		if (menuOpen())
 			throw new Error("Selection cancellation also opened the system menu.");
 		press("Escape");
-		if (systemMenuRequests !== beforeMenu + 1)
+		await tick();
+		if (!menuOpen())
 			throw new Error("Empty Escape stack did not reach the system menu.");
+		press("Escape");
+		await tick();
 
 		// Ranking includes vertical displacement for the explicit realized box population.
 		selection.select(null);

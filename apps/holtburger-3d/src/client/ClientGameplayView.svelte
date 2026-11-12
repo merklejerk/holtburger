@@ -479,11 +479,6 @@
 	}
 
 	let systemMenu: ClientSystemMenu | undefined;
-	/** Fallback game Escape action after existing cancellation contexts. */
-	export function openSystemMenu(): void {
-		systemMenu?.show();
-	}
-
 	let {
 		lockInteractions,
 		onLockInteractionsChange,
@@ -835,8 +830,8 @@
 	function toggleSystemPanel(panel: ClientSystemPanel): void {
 		activePanel = activePanel === panel ? null : panel;
 	}
-	/** Called only after the app keyboard policy admits a gameplay press. */
-	export function handleSystemPanelKeydown(event: KeyboardEvent): boolean {
+	/** UI panel commands remain available while world controls are suspended. */
+	function handleSystemPanelKeydown(event: KeyboardEvent): boolean {
 		if (event.defaultPrevented || event.isComposing || hudMode !== "runtime")
 			return false;
 		if (nearby !== null && clientInput.shortcut("toggleNearby", event)) {
@@ -852,6 +847,16 @@
 		if (!event.repeat) toggleSystemPanel(PANEL_SHORTCUTS[action]);
 		return true;
 	}
+	onMount(() =>
+		keyboard.bindShortcuts((event) => {
+			if (handleSystemPanelKeydown(event)) return;
+			if (event.key === "Escape" && hudMode === "runtime") {
+				// The router has already offered Escape to editors and cancellation contexts.
+				systemMenu?.show();
+				event.preventDefault();
+			}
+		}),
+	);
 	let enchantmentsOpen = $state(false);
 	let enchantmentLaunch = $state<{
 		kind: "beneficial" | "harmful";

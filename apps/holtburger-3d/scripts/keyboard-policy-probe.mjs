@@ -55,12 +55,144 @@ function keyboardProbeDriver(client, evaluateExpression) {
 	};
 }
 
+/** Exercise UI routing across the same world suspension used during portal travel. */
+async function probePortalKeyboard(driver) {
+	const { api, evaluate, invoke, capture, key, press, insertText } = driver;
+	const settle = () =>
+		evaluate(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+	const chatValue = () =>
+		evaluate(`document.querySelector('[aria-label="Chat message"]').value`);
+	try {
+		await key("keyDown", "w", "KeyW", 87);
+		assert.equal((await capture()).movement.forward, 1);
+		await invoke("suspendWorld");
+		assert.equal((await capture()).movement.forward, 0);
+		await press("Enter", "Enter", 13);
+		assert.equal(
+			(await capture()).focusLabel,
+			"Chat message",
+			"Portal suspension permits Enter to activate chat",
+		);
+		await insertText("portal draft");
+		await settle();
+		await invoke("suspendWorld");
+		assert.equal(
+			(await capture()).focusLabel,
+			"Chat message",
+			"Repeated world cancellation preserves editor ownership",
+		);
+		assert.equal(await chatValue(), "portal draft");
+		await press("b", "KeyB", 66, { text: "b" });
+		assert.equal(
+			await chatValue(),
+			"portal draftb",
+			"UI panel bindings cannot steal editor text",
+		);
+		await press("Enter", "Enter", 13, { text: "\r" });
+		await settle();
+		assert.equal(
+			await chatValue(),
+			"",
+			"Chat submits while world controls are suspended",
+		);
+		assert.deepEqual(await evaluate(`${api}.chat.read().requests.at(-1)`), {
+			kind: "speech",
+			message: "portal draftb",
+		});
+		await key("keyDown", "Control", "ControlLeft", 17, { modifiers: 2 });
+		await settle();
+		assert.equal(
+			await evaluate(
+				`document.querySelector('[aria-label="Interact with chat history"]').getAttribute("aria-pressed") === "true"`,
+			),
+			true,
+			"History hold works during suspension",
+		);
+		await invoke("suspendWorld");
+		await key("keyUp", "Control", "ControlLeft", 17);
+		await press("c", "KeyC", 67, { modifiers: 2 });
+		assert.equal((await capture()).focusLabel, "Chat messages");
+		await press("Escape", "Escape", 27);
+		await press("b", "KeyB", 66);
+		await settle();
+		const inventoryOpen = () =>
+			evaluate(
+				`document.querySelector('.shortcut-dock button[aria-label="Inventory"]').getAttribute("aria-pressed") === "true"`,
+			);
+		assert.equal(
+			await inventoryOpen(),
+			true,
+			"Panel shortcuts remain available during suspension",
+		);
+		await press("Escape", "Escape", 27);
+		await settle();
+		assert.equal(
+			await inventoryOpen(),
+			false,
+			"Escape closes retained windows during suspension",
+		);
+		await press("Escape", "Escape", 27);
+		await settle();
+		assert.equal(
+			await evaluate(
+				`document.querySelector('[aria-label="System menu"]').getAttribute("aria-expanded")`,
+			),
+			"true",
+			"Fallback Escape opens the system menu during suspension",
+		);
+		await press("Escape", "Escape", 27);
+		await press("1", "Digit1", 49, { modifiers: 2 });
+		assert.equal(
+			await evaluate('document.querySelector(".action-bar-focused") === null'),
+			true,
+			"World-action bar focus remains suspended",
+		);
+		await press("Enter", "Enter", 13);
+		await insertText("retained draft");
+		await invoke("openModal");
+		await press("Enter", "Enter", 13);
+		assert.equal(
+			await evaluate(
+				'document.querySelector("#keyboard-modal").contains(document.activeElement)',
+			),
+			true,
+			"Modal ownership precedes chat activation",
+		);
+		await press("Escape", "Escape", 27);
+		assert.equal((await capture()).focusLabel, "Chat message");
+		assert.equal(await chatValue(), "retained draft");
+		await invoke("resumeWorld");
+		assert.equal(
+			(await capture()).focusLabel,
+			"Chat message",
+			"World return preserves chat focus",
+		);
+		await press("Escape", "Escape", 27);
+		await key("keyDown", "w", "KeyW", 87, { autoRepeat: true });
+		await key("keyUp", "w", "KeyW", 87);
+		assert.equal(
+			(await capture()).movement.forward,
+			0,
+			"Outgoing world presses cannot resume after portal travel",
+		);
+	} finally {
+		await invoke("closeModal");
+		await invoke("resumeWorld");
+		await key("keyUp", "w", "KeyW", 87);
+		await evaluate(`${api}.chat.reset()`);
+		await settle();
+	}
+}
+
 /** Drive actual browser defaults; DOM-dispatched keys cannot prove native focus behavior. */
 export async function probeKeyboardPolicy(client, evaluateExpression) {
 	const driver = keyboardProbeDriver(client, evaluateExpression);
 	const { api, evaluate, invoke, capture, click, key, press } = driver;
 	await evaluate(`${api}.beginKeyboardProbe()`);
 	try {
+		await probePortalKeyboard(driver);
 		await key("keyDown", "w", "KeyW", 87);
 		assert.equal(
 			(await capture()).movement.forward,
@@ -744,6 +876,13 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 			"Noninteractive chat exposes the gameplay viewport beneath it",
 		);
 		await press("Escape", "Escape", 27);
+		assert.equal(
+			await evaluate(
+				`document.querySelector('[aria-label="System menu"]').getAttribute("aria-expanded")`,
+			),
+			"true",
+		);
+		await press("Escape", "Escape", 27);
 		assert.equal((await capture()).gameActive, true);
 		assert.equal((await historyState()).pressed, "false");
 
@@ -930,6 +1069,7 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 			tabSuppressed: true,
 			heldKeyCancellation: true,
 			chatActivation: true,
+			portalUiRouting: true,
 			ordinaryTextCopy: true,
 			chatHistoryCopy: true,
 		};

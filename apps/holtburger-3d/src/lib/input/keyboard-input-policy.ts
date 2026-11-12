@@ -145,6 +145,8 @@ export class KeyboardInputPolicy {
 	#hintDismissal: (() => boolean) | null = null;
 	/** Opt-in app contexts ordered from least to most recently engaged. */
 	readonly #escapeContexts: EscapeContextEntry[] = [];
+	/** App UI shortcuts remain available independently of world-controller availability. */
+	#shortcuts: ((event: KeyboardEvent) => void) | null = null;
 	/** One mode-specific controller, independent of pointer handlers. */
 	#game: KeyboardConsumer | null = null;
 	/** The DOM boundary exists only during the mounted app lifetime. */
@@ -152,7 +154,7 @@ export class KeyboardInputPolicy {
 
 	constructor(private readonly viewport: ViewportInputGate) {
 		// The gate and policy share the app lifetime, including periods without a game controller.
-		viewport.attach((mode) => this.#cancel(mode));
+		viewport.attach((mode) => this.#cancelGame(mode));
 	}
 
 	/** Most recently opened modal; DOM order does not determine interaction ownership. */
@@ -185,7 +187,10 @@ export class KeyboardInputPolicy {
 			attributes: true,
 			attributeFilter: ["disabled", "hidden", "inert", "open"],
 		});
-		const blur = () => this.viewport.cancel("release-held");
+		const blur = () => {
+			this.viewport.cancel("release-held");
+			this.#cancelInteraction();
+		};
 		const visibility = () => {
 			if (document.hidden) blur();
 		};
@@ -228,12 +233,25 @@ export class KeyboardInputPolicy {
 	bindGame(consumer: KeyboardConsumer): () => void {
 		if (this.#game !== null)
 			throw new Error("A game keyboard consumer is already registered.");
-		this.cancel();
+		this.#cancelGame("reset");
 		this.#game = consumer;
 		return () => {
 			if (this.#game !== consumer) return;
-			this.cancel();
+			this.#cancelGame("reset");
 			this.#game = null;
+		};
+	}
+
+	/** Register app UI commands after scopes and contextual Escape, before world controls. */
+	bindShortcuts(keydown: (event: KeyboardEvent) => void): () => void {
+		if (this.#shortcuts !== null)
+			throw new Error("App keyboard shortcuts are already registered.");
+		this.#shortcuts = keydown;
+		let active = true;
+		return () => {
+			if (!active) return;
+			active = false;
+			this.#shortcuts = null;
 		};
 	}
 
@@ -365,17 +383,18 @@ export class KeyboardInputPolicy {
 					? null
 					: previous,
 		};
-		// An existing blocker leaves UI scopes active; nested modality must cancel them too.
-		if (!this.viewport.allowed) this.cancel();
+		// Modality cancels UI interaction even when world controls were already unavailable.
 		const release = this.viewport.block();
-		this.#modals.push(entry);
-		// block() already cancelled the outgoing owner.
-		this.#owner = element;
 		try {
+			this.#cancelInteraction();
+			this.#modals.push(entry);
+			// The outgoing interaction is cancelled before native focus transfers.
+			this.#owner = element;
 			element.showModal();
 			initialFocus.focus({ preventScroll: true });
 		} catch (error) {
-			this.#modals.pop();
+			const index = this.#modals.indexOf(entry);
+			if (index !== -1) this.#modals.splice(index, 1);
 			release();
 			this.#setOwner(entry.previous);
 			throw error;
@@ -435,9 +454,21 @@ export class KeyboardInputPolicy {
 	}
 
 	#cancel(reason: InputCancellationMode): void {
+		this.#cancelGame(reason);
+		this.#cancelInteraction();
+	}
+
+	/** World suspension cannot end an editor or an explicitly held UI interaction. */
+	#cancelGame(reason: InputCancellationMode): void {
+		for (const [key, destination] of this.#presses) {
+			if (destination === "game") this.#presses.set(key, "cancelled");
+		}
+		this.#game?.cancel(reason);
+	}
+
+	#cancelInteraction(): void {
 		this.#focusReturnGesture = null;
 		for (const key of this.#presses.keys()) this.#presses.set(key, "cancelled");
-		this.#game?.cancel(reason);
 		if (this.#owner !== null) {
 			const owner = this.#owner;
 			const scope = this.#scopeFor(owner);
@@ -525,7 +556,6 @@ export class KeyboardInputPolicy {
 			!editor &&
 			(owner === null || !this.#nativeControlsFor(owner)) &&
 			this.#modals.length === 0 &&
-			this.viewport.allowed &&
 			!nativePage &&
 			fresh
 		) {
@@ -553,7 +583,6 @@ export class KeyboardInputPolicy {
 			!event.defaultPrevented &&
 			this.#owner === null &&
 			this.#modals.length === 0 &&
-			this.viewport.allowed &&
 			!nativePage &&
 			fresh &&
 			event.key === "Escape" &&
@@ -563,6 +592,15 @@ export class KeyboardInputPolicy {
 			event.stopImmediatePropagation();
 			this.#presses.set(key, "cancelled");
 			return;
+		}
+		if (
+			!event.defaultPrevented &&
+			this.#allowsGame(this.#owner) &&
+			this.#modals.length === 0 &&
+			!nativePage
+		) {
+			this.#shortcuts?.(event);
+			if (event.defaultPrevented) this.#presses.set(key, "cancelled");
 		}
 		if (!event.defaultPrevented && this.gameActive) {
 			this.#presses.set(key, "game");

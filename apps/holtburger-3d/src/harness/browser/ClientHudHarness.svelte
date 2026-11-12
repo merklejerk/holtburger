@@ -1235,8 +1235,6 @@
 		readonly probeUiScaling: () => ReturnType<typeof probeUiScaling>;
 		/** Verify accepted Settings changes, shortcut presentation, and feature dispatch. */
 		readonly probeBindings: typeof probeBindings;
-		/** Route real browser presses to the production main-panel owner. */
-		readonly bindSystemPanelKeys: () => () => void;
 		/** Production arbiter and semantic mouse port for real DOM movement probes. */
 		readonly mouseMovement: {
 			fixture: typeof mouseFixture;
@@ -2264,6 +2262,7 @@
 							stack: { current: 3, max: 10 },
 							cooldown: null,
 							uses: { current: 42, max: 50 },
+							coverage: [],
 							armor: {
 								effective: 315,
 								unbuffed: null,
@@ -5000,17 +4999,6 @@
 				}
 			},
 			probeBindings,
-			bindSystemPanelKeys: () => {
-				hudMode = "runtime";
-				keyboard.returnToGame();
-				return keyboard.bindGame({
-					keydown: (event) => {
-						gameplayView?.handleSystemPanelKeydown(event);
-					},
-					keyup: () => {},
-					cancel: () => {},
-				});
-			},
 			mouseMovement: {
 				fixture: mouseFixture,
 				lookDirection: mouseLookDirection,
@@ -5475,7 +5463,6 @@
 					restartCooldown();
 					releaseShowcaseKeys = keyboard.bindGame({
 						keydown: (event) => {
-							if (gameplayView?.handleSystemPanelKeydown(event)) return;
 							if (
 								handleSpellBarKeydown(
 									clientInput,

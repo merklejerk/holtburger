@@ -1,4 +1,4 @@
-import type { ClientHostAppraisalTuningConfig } from "../src/client/client-appraisal-tuning.js";
+import type { ClientHostAppraisalTuningConfig } from "../src/client/client-tuning-contract.js";
 import { parseClientLaunchArgument } from "../scripts/entry-paths.mjs";
 import { resolve } from "node:path";
 

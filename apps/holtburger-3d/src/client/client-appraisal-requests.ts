@@ -1,4 +1,4 @@
-import { CLIENT_APPRAISAL_TUNING } from "./client-appraisal-tuning";
+import { CLIENT_APPRAISAL_TUNING } from "./client-tuning";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 import type { ObjectInspectionResult } from "./client-object-inspection-contract";
 
@@ -39,6 +39,8 @@ export interface FullAppraisalOptions {
 export interface ClientAppraisalRequestOptions {
 	/** Fallback release bound if core expires a `FactsOnly` slot without an entity update. */
 	readonly factsTimeoutMs?: number;
+	/** Maximum `FactsOnly` requests held in core simultaneously before queuing locally. */
+	readonly maxConcurrentFacts?: number;
 }
 
 /** Transport seam backing deduplicated client appraisal requests. */
@@ -80,7 +82,6 @@ interface PendingFactsAppraisal {
 }
 
 interface ActiveFactsSlot {
-	readonly guid: number;
 	readonly entry: PendingFactsAppraisal;
 	readonly watchdog: ReturnType<typeof setTimeout>;
 }
@@ -136,17 +137,17 @@ function effectiveEntryPriority(
 /**
  * Session-local appraisal deduplication and priority scheduling across TS consumers.
  *
- * Foreground `Full` vs background `FactsOnly` preemption and server cooldown pacing live in core's
- * `AppraisalSystem`. TS keeps at most one `FactsOnly` request dispatched into core at a time so
- * higher-priority container and combat health queries never stall behind bulk vendor or inventory
- * queues.
+ * Foreground `Full` vs background `FactsOnly` preemption and burst window pacing live in core's
+ * `AppraisalSystem`. TS holds up to `maxConcurrentFacts` `FactsOnly` requests in core at a time
+ * so bulk background queues cannot stall newly opened containers or combat health refreshes.
  */
 export class ClientAppraisalRequests {
 	readonly #transport: ClientAppraisalTransport;
 	readonly #factsTimeoutMs: number;
+	readonly #maxConcurrentFacts: number;
 	readonly #pendingFull = new Map<number, PendingFullAppraisal>();
 	readonly #pendingFacts = new Map<number, PendingFactsAppraisal>();
-	#activeFacts: ActiveFactsSlot | null = null;
+	readonly #activeFacts = new Map<number, ActiveFactsSlot>();
 	#flushScheduled = false;
 	#factsSequence = 0;
 	#playerGuid: number | null = null;
@@ -158,7 +159,14 @@ export class ClientAppraisalRequests {
 		this.#transport = transport;
 		this.#factsTimeoutMs =
 			options?.factsTimeoutMs ??
-			CLIENT_APPRAISAL_TUNING.responseTimeoutMs + 250;
+			CLIENT_APPRAISAL_TUNING.responseTimeoutMs +
+				CLIENT_APPRAISAL_TUNING.factsTimeoutSlackMs;
+		this.#maxConcurrentFacts = Math.max(
+			1,
+			Math.floor(
+				options?.maxConcurrentFacts ?? CLIENT_APPRAISAL_TUNING.burstLimit,
+			),
+		);
 	}
 
 	/** Subscribe before dispatch; callers handle send failures and cancel when their purpose ends. */
@@ -255,9 +263,9 @@ export class ClientAppraisalRequests {
 			if (this.#pendingFacts.get(guid) !== current) return;
 			this.#pendingFacts.delete(guid);
 			this.#resolveSentOnce(current);
-			const wasActive = this.#activeFacts?.entry === current;
+			const wasActive = this.#activeFacts.get(guid)?.entry === current;
 			if (wasActive) {
-				this.#clearActiveFacts();
+				this.#clearActiveFacts(guid);
 			}
 			if (current.dispatched && !current.settledLocally) {
 				void this.#transport.cancel(guid, "facts-only").catch(() => {});
@@ -321,8 +329,8 @@ export class ClientAppraisalRequests {
 		this.#pendingFacts.delete(guid);
 		entry.consumers.clear();
 		this.#resolveSentOnce(entry);
-		if (this.#activeFacts?.entry === entry) {
-			this.#clearActiveFacts();
+		if (this.#activeFacts.get(guid)?.entry === entry) {
+			this.#clearActiveFacts(guid);
 			this.#scheduleFactsFlush();
 		}
 	}
@@ -337,56 +345,57 @@ export class ClientAppraisalRequests {
 	}
 
 	#flushNextFacts(): void {
-		if (this.#activeFacts !== null) return;
-		let next: PendingFactsAppraisal | null = null;
-		let nextPriority: FactsAppraisalPriority | null = null;
+		while (this.#activeFacts.size < this.#maxConcurrentFacts) {
+			let next: PendingFactsAppraisal | null = null;
+			let nextPriority: FactsAppraisalPriority | null = null;
 
-		for (const [guid, entry] of this.#pendingFacts) {
-			if (entry.consumers.size === 0) {
-				this.#pendingFacts.delete(guid);
-				this.#resolveSentOnce(entry);
-				continue;
+			for (const [guid, entry] of this.#pendingFacts) {
+				if (entry.consumers.size === 0) {
+					this.#pendingFacts.delete(guid);
+					this.#resolveSentOnce(entry);
+					continue;
+				}
+				if (entry.dispatched) continue;
+				const priority = effectiveEntryPriority(entry);
+				if (
+					next === null ||
+					nextPriority === null ||
+					compareFactsPriority(priority, nextPriority) < 0 ||
+					(compareFactsPriority(priority, nextPriority) === 0 &&
+						(next.sequence > entry.sequence ||
+							(next.sequence === entry.sequence && entry.guid < next.guid)))
+				) {
+					next = entry;
+					nextPriority = priority;
+				}
 			}
-			if (entry.dispatched) continue;
-			const priority = effectiveEntryPriority(entry);
-			if (
-				next === null ||
-				nextPriority === null ||
-				compareFactsPriority(priority, nextPriority) < 0 ||
-				(compareFactsPriority(priority, nextPriority) === 0 &&
-					(next.sequence > entry.sequence ||
-						(next.sequence === entry.sequence && entry.guid < next.guid)))
-			) {
-				next = entry;
-				nextPriority = priority;
-			}
+
+			if (next === null) return;
+			const entry = next;
+			entry.dispatched = true;
+			const watchdog = setTimeout(() => {
+				if (this.#activeFacts.get(entry.guid)?.entry !== entry) return;
+				this.#settleFactsEntry(entry.guid);
+			}, this.#factsTimeoutMs);
+			this.#activeFacts.set(entry.guid, { entry, watchdog });
+
+			void this.#transport.sendFacts(entry.guid).then(
+				() => {
+					this.#resolveSentOnce(entry);
+				},
+				(error: unknown) => {
+					this.#rejectSentOnce(entry, error);
+					if (this.#pendingFacts.get(entry.guid) === entry) {
+						this.#pendingFacts.delete(entry.guid);
+						entry.consumers.clear();
+					}
+					if (this.#activeFacts.get(entry.guid)?.entry === entry) {
+						this.#clearActiveFacts(entry.guid);
+						this.#scheduleFactsFlush();
+					}
+				},
+			);
 		}
-
-		if (next === null) return;
-		const entry = next;
-		entry.dispatched = true;
-		const watchdog = setTimeout(() => {
-			if (this.#activeFacts?.entry !== entry) return;
-			this.#settleFactsEntry(entry.guid);
-		}, this.#factsTimeoutMs);
-		this.#activeFacts = { guid: entry.guid, entry, watchdog };
-
-		void this.#transport.sendFacts(entry.guid).then(
-			() => {
-				this.#resolveSentOnce(entry);
-			},
-			(error: unknown) => {
-				this.#rejectSentOnce(entry, error);
-				if (this.#pendingFacts.get(entry.guid) === entry) {
-					this.#pendingFacts.delete(entry.guid);
-					entry.consumers.clear();
-				}
-				if (this.#activeFacts?.entry === entry) {
-					this.#clearActiveFacts();
-					this.#scheduleFactsFlush();
-				}
-			},
-		);
 	}
 
 	#resolveSentOnce(entry: PendingFactsAppraisal): void {
@@ -401,16 +410,18 @@ export class ClientAppraisalRequests {
 		entry.rejectSent(error);
 	}
 
-	#clearActiveFacts(): void {
-		if (this.#activeFacts === null) return;
-		clearTimeout(this.#activeFacts.watchdog);
-		this.#activeFacts = null;
+	#clearActiveFacts(guid: number): void {
+		const slot = this.#activeFacts.get(guid);
+		if (slot === undefined) return;
+		clearTimeout(slot.watchdog);
+		this.#activeFacts.delete(guid);
 	}
 
 	#reset(): void {
 		for (const pending of this.#pendingFull.values()) pending.consumers.clear();
 		this.#pendingFull.clear();
-		this.#clearActiveFacts();
+		for (const slot of this.#activeFacts.values()) clearTimeout(slot.watchdog);
+		this.#activeFacts.clear();
 		for (const pending of this.#pendingFacts.values()) {
 			pending.consumers.clear();
 			this.#resolveSentOnce(pending);

@@ -9,11 +9,24 @@ import { hexRgba } from "../lib/frontend-color.js";
 import type { FrameSettings } from "../lib/game/renderer/renderer";
 import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning-contract";
 import type {
+	ClientAppraisalTuningConfig,
 	ClientPortalTransitionTuning,
 	ClientTuning,
 } from "./client-tuning-contract";
 import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout.js";
-import { CLIENT_APPRAISAL_TUNING } from "./client-appraisal-tuning.js";
+
+/**
+ * Appraisal pacing, watchdog headroom, refresh cadence, and health recency bounds
+ * shared by Electron main (validated by the native host at startup) and browser client owners.
+ */
+export const CLIENT_APPRAISAL_TUNING = {
+	assessmentRetryIntervalMs: 100,
+	burstLimit: 3,
+	responseTimeoutMs: 3_000,
+	factsTimeoutSlackMs: 250,
+	refreshIntervalMs: 1_000,
+	recentWindowMs: 5_000,
+} as const satisfies ClientAppraisalTuningConfig;
 
 /** Horizontal proximity suppresses unstable compass bearings without clearing navigation intent. */
 export const CLIENT_WAYPOINT_NEAR_RADIUS_METERS = 25;

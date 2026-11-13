@@ -8,13 +8,14 @@
 	import ActionAlternateIcon from "../assets/icons/action-alternate.svg?component";
 	import { useClientInput } from "./client-input-context";
 	import { useItemCantrips } from "../app/item-cantrips";
-	const itemCantrips = useItemCantrips();
+	import CantripBorderSpecular from "../app/CantripBorderSpecular.svelte";
 	import ItemCellVisual from "../app/ItemCellVisual.svelte";
 	import { itemCellPresentation } from "../app/item-cell-presentation";
 	import type { ItemStructure } from "../app/item-structure";
 	import type { ItemCapacity } from "../app/item-capacity";
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import type { ActionContent } from "./client-action-bar-state";
+	const itemCantrips = useItemCantrips();
 	const clientInput = useClientInput();
 	interface Props {
 		/** Stable bar identity for binding gestures. */
@@ -100,6 +101,11 @@
 				: [`Alternate: ${alternateAction} (${alternateModifier}+click)`]),
 		].join("\n"),
 	);
+	const cantripTier = $derived(
+		content !== null && content.kind !== "loadout"
+			? itemCantrips.tierFor(content.item)
+			: undefined,
+	);
 </script>
 
 <button
@@ -111,9 +117,7 @@
 	data-action-item={content !== null && content.kind !== "loadout"
 		? content.item
 		: undefined}
-	data-cantrip-tier={content !== null && content.kind !== "loadout"
-		? itemCantrips.tierFor(content.item)
-		: undefined}
+	data-cantrip-tier={cantripTier}
 	data-empty={content === null}
 	data-dimmed={content !== null && !available}
 	aria-label={tooltip}
@@ -131,6 +135,7 @@
 			{presentation}
 		/>
 	{/if}
+	<CantripBorderSpecular tier={cantripTier} />
 	{#if activeAlternate !== null}<span
 			class="action-alternate"
 			popover="manual"

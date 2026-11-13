@@ -42,6 +42,28 @@ export interface ClientPortalTransitionTuning extends FrontendPortalTransitionTu
 	readonly timing: PortalTransitionPolicy;
 }
 
+/** Appraisal burst window, concurrency cap, timeout, refresh cadence, and health recency tuning. */
+export interface ClientAppraisalTuningConfig {
+	/** Sliding window duration for `burstLimit` IdentifyObject sends, in milliseconds. */
+	readonly assessmentRetryIntervalMs: number;
+	/** Maximum IdentifyObject requests allowed per window and in flight simultaneously. */
+	readonly burstLimit: number;
+	/** Maximum wait before expiring an unanswered inflight appraisal, in milliseconds. */
+	readonly responseTimeoutMs: number;
+	/** Extra TS-side watchdog headroom above core's `responseTimeoutMs`, in milliseconds. */
+	readonly factsTimeoutSlackMs: number;
+	/** Periodic refresh cadence for active inspectors and interested nameplates, in milliseconds. */
+	readonly refreshIntervalMs: number;
+	/** Host-time window during which a mob health update stays visible on nameplates, in milliseconds. */
+	readonly recentWindowMs: number;
+}
+
+/** Narrow pacing and concurrency bounds validated by the native host at client startup. */
+export type ClientHostAppraisalTuningConfig = Pick<
+	ClientAppraisalTuningConfig,
+	"assessmentRetryIntervalMs" | "burstLimit" | "responseTimeoutMs"
+>;
+
 /** Client-owned hostile combat nameplate health policy and bounded recency rules. */
 export interface ClientNameplateHealthTuning {
 	/** Maximum player-to-mob distance in meters to maintain combat interest or show a health bar. */

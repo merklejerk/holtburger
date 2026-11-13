@@ -789,12 +789,19 @@ impl ClientRuntime {
         if !matches!(self.state, ClientState::InWorld) {
             return Ok(());
         }
-        let world = &self.world;
-        let next = self
-            .appraisal
-            .pop_next_dispatch(now, |guid| Self::resolve_appraisal_instance(world, guid));
+        let mut to_send = Vec::new();
+        loop {
+            let world = &self.world;
+            let Some(guid) = self
+                .appraisal
+                .pop_next_dispatch(now, |guid| Self::resolve_appraisal_instance(world, guid))
+            else {
+                break;
+            };
+            to_send.push(guid);
+        }
         self.emit_settled_appraisal_facts();
-        if let Some(guid) = next {
+        for guid in to_send {
             log::info!(">>> Identifying: 0x{:08X}", guid);
             self.send_game_action(GameAction::IdentifyObject(Box::new(
                 IdentifyObjectActionData { guid },

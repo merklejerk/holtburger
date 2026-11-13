@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
+	import CantripBorderSpecular from "./CantripBorderSpecular.svelte";
 	import { useItemCantrips } from "./item-cantrips";
 	import RemovableItemCell from "./RemovableItemCell.svelte";
 	import type { HTMLButtonAttributes } from "svelte/elements";
@@ -26,6 +27,7 @@
 		class: className = "",
 		...button
 	}: Props = $props();
+	const cantripTier = $derived(itemCantrips.tierFor(itemGuid));
 </script>
 
 <RemovableItemCell
@@ -35,9 +37,10 @@
 		{...button}
 		type="button"
 		class="item-queue-cell ui-item-cell ui-item-selection ui-hud-control {className}"
-		data-cantrip-tier={itemCantrips.tierFor(itemGuid)}
+		data-cantrip-tier={cantripTier}
 	>
 		{@render children()}
+		<CantripBorderSpecular tier={cantripTier} />
 	</button>
 </RemovableItemCell>
 

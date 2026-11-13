@@ -4,6 +4,7 @@
 		type ItemCooldownDefinition,
 	} from "./item-cooldowns.svelte";
 	import type { ItemCapacity } from "./item-capacity";
+	import CantripBorderSpecular from "./CantripBorderSpecular.svelte";
 	import ItemCellVisual from "./ItemCellVisual.svelte";
 	import { itemCellPresentation } from "./item-cell-presentation";
 	import type { UiIconDisplay } from "./ui-icon-repository";
@@ -83,6 +84,9 @@
 		"tooltip",
 	);
 	const empty = $derived(itemGuid === null && templateWcid === null);
+	const cantripTier = $derived(
+		empty ? undefined : itemCantrips.tierFor(itemGuid),
+	);
 	const placeholderReady = $derived(
 		placeholderDisplay?.kind === "ready" ||
 			placeholderDisplay?.kind === "degraded",
@@ -107,7 +111,7 @@
 	data-template-wcid={templateWcid}
 	data-dimmed={dimmed}
 	data-item-guid={itemGuid}
-	data-cantrip-tier={empty ? undefined : itemCantrips.tierFor(itemGuid)}
+	data-cantrip-tier={cantripTier}
 	title=""
 	data-ui-tooltip={presentation.label}
 	aria-label={presentation.label}
@@ -126,6 +130,7 @@
 			{showEquipped}
 		/>
 	{/if}
+	<CantripBorderSpecular tier={cantripTier} />
 </button>
 
 <style>

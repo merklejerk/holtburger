@@ -1,5 +1,6 @@
 <script lang="ts">
 	import KeysIcon from "../assets/icons/locks-keys.svg?component";
+	import CantripBorderSpecular from "../app/CantripBorderSpecular.svelte";
 	import ItemCellVisual from "../app/ItemCellVisual.svelte";
 	import { itemCellPresentation } from "../app/item-cell-presentation";
 	import { useItemCooldown } from "../app/item-cooldowns.svelte";
@@ -78,6 +79,7 @@
 			{/if}
 			{#if view.preferredPick !== null}
 				{@const pick = view.preferredPick}
+				{@const cantripTier = itemCantrips.tierFor(pick.item.guid)}
 				{@const key = items?.iconKeys.get(pick.item.guid)}
 				{@const item = items?.items.get(pick.item.guid)}
 				{@const description =
@@ -114,7 +116,7 @@
 							<span
 								class="preferred-pick-cell ui-item-cell"
 								data-item-guid={pick.item.guid}
-								data-cantrip-tier={itemCantrips.tierFor(pick.item.guid)}
+								data-cantrip-tier={cantripTier}
 								title=""
 								data-ui-tooltip={presentation.label}
 								role="img"
@@ -125,6 +127,7 @@
 									{presentation}
 									cooldownAnimation={cooldown.animation}
 								/>
+								<CantripBorderSpecular tier={cantripTier} />
 							</span>
 						</span>
 						<span class="locks-action-label"

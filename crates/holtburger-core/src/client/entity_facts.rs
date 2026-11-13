@@ -863,7 +863,7 @@ mod tests {
         assert_eq!(std::fs::metadata(capture.path()).unwrap().len(), sent);
 
         // Recreation while a request is outstanding must not strand the new instance once the
-        // single-slot inflight window settles or expires.
+        // inflight appraisal settles or expires.
         for change in client
             .world
             .handle_message(&GameMessage::UpdateObject(Box::new(weapon)))

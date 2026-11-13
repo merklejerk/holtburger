@@ -2,6 +2,7 @@
 	import ClientLoadoutIconDropdown from "./ClientLoadoutIconDropdown.svelte";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import EquipmentSlotIcon from "./EquipmentSlotIcon.svelte";
+	import CantripBorderSpecular from "../app/CantripBorderSpecular.svelte";
 	import ItemCellVisual from "../app/ItemCellVisual.svelte";
 	import { itemCellPresentation } from "../app/item-cell-presentation";
 	import { startUiIconDisplay } from "../app/ui-icon-display";
@@ -16,7 +17,6 @@
 	} from "./client-loadout";
 	import type { ClientItemDrag } from "./client-item-drag";
 	import { useItemCantrips } from "../app/item-cantrips";
-	const itemCantrips = useItemCantrips();
 	import type {
 		ClientHudPlacement,
 		ClientHudViewport,
@@ -26,6 +26,8 @@
 		CLIENT_TUNING,
 	} from "./client-tuning";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
+
+	const itemCantrips = useItemCantrips();
 
 	interface Props {
 		/** Opening snapshot; null hides the window and discards its unplaced draft. */
@@ -129,6 +131,7 @@
 						(candidate) => candidate.slot === slot.mask,
 					)}
 					{@const label = `${slot.label}\n${binding?.item == null ? "Empty (unequip)" : binding.name}`}
+					{@const cantripTier = itemCantrips.tierFor(binding?.item ?? null)}
 					<div class="loadout-slot">
 						<div class="loadout-slot-heading" title={slot.label}>
 							<EquipmentSlotIcon {slot} /><input
@@ -145,7 +148,7 @@
 							data-loadout-slot={slot.mask}
 							data-item-guid={binding?.item ?? undefined}
 							data-empty={binding?.item == null}
-							data-cantrip-tier={itemCantrips.tierFor(binding?.item ?? null)}
+							data-cantrip-tier={cantripTier}
 							title=""
 							data-ui-tooltip={label}
 							aria-label={label}
@@ -164,6 +167,7 @@
 									})}
 								/>
 							{:else}<EquipmentSlotIcon {slot} />{/if}
+							<CantripBorderSpecular tier={cantripTier} />
 						</button>
 						<span class="loadout-slot-label" title={slot.label}
 							>{slot.compactLabel}</span

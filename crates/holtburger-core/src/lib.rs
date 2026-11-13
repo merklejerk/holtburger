@@ -16,8 +16,8 @@ pub use character_gen::{
 };
 pub use client::appraisal::{
     AppraisalOutputDemand, ClientAppraisalTuning, ClientAppraisalTuningConfig,
-    ClientAppraisalTuningError, DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS,
-    DEFAULT_APPRAISAL_RETRY_INTERVAL_MS,
+    ClientAppraisalTuningError, DEFAULT_APPRAISAL_BURST_LIMIT,
+    DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS, DEFAULT_APPRAISAL_RETRY_INTERVAL_MS,
 };
 pub use client::character_axes::{
     AdjustedCharacterAxes, AdjustedForwardAxis, CharacterAxisAdjustmentError,
@@ -77,8 +77,8 @@ pub use client::types::{
     ClientCharacterMotionRejection, ClientCharacterSummary, ClientCombatControlState,
     ClientCombatEngagement, ClientCombatRefillEstimate, ClientCombatStatus, ClientCommand,
     ClientDynamicScriptCue, ClientDynamicSoundCue, ClientExitCause, ClientLifecycleState,
-    ClientPresentationDiscontinuityKind, ClientState, ClientViewEvent,
-    ClientWorldActivationCause, RetryState,
+    ClientPresentationDiscontinuityKind, ClientState, ClientViewEvent, ClientWorldActivationCause,
+    RetryState,
 };
 pub use client::{
     ClientCameraClearance, ClientCameraClearanceRequest, ClientCameraCollisionProof,

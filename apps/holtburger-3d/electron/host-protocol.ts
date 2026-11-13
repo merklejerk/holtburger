@@ -1,5 +1,6 @@
 import { APP_LIFECYCLE_TUNING } from "../src/app/app-tuning.js";
-import { CLIENT_APPRAISAL_TUNING } from "../src/client/client-appraisal-tuning.js";
+import { CLIENT_APPRAISAL_TUNING } from "../src/client/client-tuning.js";
+import type { ClientHostAppraisalTuningConfig } from "../src/client/client-tuning-contract.js";
 import { decode, encode } from "@msgpack/msgpack";
 import { z } from "zod";
 import {
@@ -407,11 +408,14 @@ export class SidecarHostClient {
 					port,
 					account,
 					password,
-					appraisalTuning: appraisalTuning ?? {
-						assessmentRetryIntervalMs:
-							CLIENT_APPRAISAL_TUNING.assessmentRetryIntervalMs,
-						responseTimeoutMs: CLIENT_APPRAISAL_TUNING.responseTimeoutMs,
-					},
+					appraisalTuning:
+						appraisalTuning ??
+						({
+							assessmentRetryIntervalMs:
+								CLIENT_APPRAISAL_TUNING.assessmentRetryIntervalMs,
+							burstLimit: CLIENT_APPRAISAL_TUNING.burstLimit,
+							responseTimeoutMs: CLIENT_APPRAISAL_TUNING.responseTimeoutMs,
+						} satisfies ClientHostAppraisalTuningConfig),
 					...(meleeMaxChaseDistance === undefined
 						? {}
 						: { meleeMaxChaseDistance }),

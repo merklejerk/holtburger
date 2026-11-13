@@ -1,4 +1,4 @@
-//! Shared object-appraisal queue, single-slot cooldown pacing, and output gating.
+//! Shared object-appraisal queue, sliding-window burst pacing, and output gating.
 
 use holtburger_common::Guid;
 use holtburger_world::WorldEvent;
@@ -9,10 +9,14 @@ use thiserror::Error;
 
 use super::object_preview::ObjectPreviewPresentationInputs;
 
-/// Default minimum spacing between consecutive `IdentifyObject` sends (ms).
+/// Conservative default sliding-window duration for `IdentifyObject` sends (ms).
 ///
-/// Clears the server's 500 ms per-player assessment cooldown with headroom for clock jitter.
+/// Servers only throttle repeated failed assessments of the immediately preceding target; interactive
+/// frontends supply tighter burst windows explicitly at startup.
 pub const DEFAULT_APPRAISAL_RETRY_INTERVAL_MS: u64 = 550;
+
+/// Default maximum `IdentifyObject` requests permitted per interval and in flight simultaneously.
+pub const DEFAULT_APPRAISAL_BURST_LIMIT: usize = 1;
 
 /// Default timeout before an unacknowledged inflight `IdentifyObject` releases its slot (ms).
 pub const DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS: u64 = 3_000;
@@ -22,36 +26,47 @@ pub const DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS: u64 = 3_000;
 #[serde(rename_all = "camelCase")]
 pub struct ClientAppraisalTuningConfig {
     pub assessment_retry_interval_ms: u64,
+    pub burst_limit: usize,
     pub response_timeout_ms: u64,
 }
 
-/// Validated object-appraisal scheduling and cooldown policy.
+/// Validated object-appraisal scheduling, burst window, and timeout policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientAppraisalTuning {
     assessment_retry_interval_ms: u64,
+    burst_limit: usize,
     response_timeout_ms: u64,
 }
 
 impl ClientAppraisalTuning {
-    /// Validates positive cooldown and inflight response-timeout bounds.
+    /// Validates positive window, burst capacity, and inflight response-timeout bounds.
     pub fn new(
         assessment_retry_interval_ms: u64,
+        burst_limit: usize,
         response_timeout_ms: u64,
     ) -> Result<Self, ClientAppraisalTuningError> {
         if assessment_retry_interval_ms == 0 {
             return Err(ClientAppraisalTuningError::InvalidRetryInterval);
+        }
+        if burst_limit == 0 {
+            return Err(ClientAppraisalTuningError::InvalidBurstLimit);
         }
         if response_timeout_ms == 0 {
             return Err(ClientAppraisalTuningError::InvalidResponseTimeout);
         }
         Ok(Self {
             assessment_retry_interval_ms,
+            burst_limit,
             response_timeout_ms,
         })
     }
 
     pub const fn assessment_retry_interval_ms(self) -> u64 {
         self.assessment_retry_interval_ms
+    }
+
+    pub const fn burst_limit(self) -> usize {
+        self.burst_limit
     }
 
     pub const fn response_timeout_ms(self) -> u64 {
@@ -63,6 +78,7 @@ impl Default for ClientAppraisalTuning {
     fn default() -> Self {
         Self {
             assessment_retry_interval_ms: DEFAULT_APPRAISAL_RETRY_INTERVAL_MS,
+            burst_limit: DEFAULT_APPRAISAL_BURST_LIMIT,
             response_timeout_ms: DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS,
         }
     }
@@ -72,7 +88,11 @@ impl TryFrom<ClientAppraisalTuningConfig> for ClientAppraisalTuning {
     type Error = ClientAppraisalTuningError;
 
     fn try_from(value: ClientAppraisalTuningConfig) -> Result<Self, Self::Error> {
-        Self::new(value.assessment_retry_interval_ms, value.response_timeout_ms)
+        Self::new(
+            value.assessment_retry_interval_ms,
+            value.burst_limit,
+            value.response_timeout_ms,
+        )
     }
 }
 
@@ -81,6 +101,8 @@ impl TryFrom<ClientAppraisalTuningConfig> for ClientAppraisalTuning {
 pub enum ClientAppraisalTuningError {
     #[error("appraisal retry interval must be greater than zero")]
     InvalidRetryInterval,
+    #[error("appraisal burst limit must be greater than zero")]
+    InvalidBurstLimit,
     #[error("appraisal response timeout must be greater than zero")]
     InvalidResponseTimeout,
 }
@@ -134,7 +156,6 @@ impl GuidDemand {
 
 #[derive(Debug, Clone, Copy)]
 struct InflightAppraisal {
-    guid: Guid,
     instance_sequence: Option<u16>,
     sent_at: Instant,
     deliver_full: bool,
@@ -149,15 +170,15 @@ pub(super) struct InspectionDeliveryPolicy {
     pub allow_cached_preview: bool,
 }
 
-/// Coordinates every outgoing `IdentifyObject` request in FIFO priority order with single-slot pacing.
+/// Coordinates outgoing `IdentifyObject` requests in FIFO priority order with sliding-window burst pacing.
 #[derive(Debug)]
 pub(super) struct AppraisalSystem {
     tuning: ClientAppraisalTuning,
     demands: HashMap<Guid, GuidDemand>,
     foreground_queue: VecDeque<Guid>,
     background_queue: VecDeque<Guid>,
-    inflight: Option<InflightAppraisal>,
-    last_sent_at: Option<Instant>,
+    inflight: HashMap<Guid, InflightAppraisal>,
+    recent_sends: VecDeque<Instant>,
     core_facts_target: Option<Guid>,
     core_facts_settled: Option<(Guid, Option<u16>)>,
     cached_creature_preview: Option<(Guid, ObjectPreviewPresentationInputs)>,
@@ -171,8 +192,8 @@ impl AppraisalSystem {
             demands: HashMap::new(),
             foreground_queue: VecDeque::new(),
             background_queue: VecDeque::new(),
-            inflight: None,
-            last_sent_at: None,
+            inflight: HashMap::new(),
+            recent_sends: VecDeque::new(),
             core_facts_target: None,
             core_facts_settled: None,
             cached_creature_preview: None,
@@ -194,9 +215,7 @@ impl AppraisalSystem {
         if output == AppraisalOutputDemand::Full && !allow_cached_preview {
             self.clear_preview_cache_for(guid);
         }
-        if let Some(inflight) = self.inflight.as_mut()
-            && inflight.guid == guid
-        {
+        if let Some(inflight) = self.inflight.get_mut(&guid) {
             if inflight.instance_sequence == instance_sequence {
                 match output {
                     AppraisalOutputDemand::Full => {
@@ -251,9 +270,7 @@ impl AppraisalSystem {
         if guid == Guid::NULL || self.core_facts_settled == Some((guid, instance_sequence)) {
             return;
         }
-        if let Some(inflight) = self.inflight.as_mut()
-            && inflight.guid == guid
-        {
+        if let Some(inflight) = self.inflight.get_mut(&guid) {
             if inflight.instance_sequence != instance_sequence {
                 inflight.replacement_followup = true;
                 let entry = self.demands.entry(guid).or_default();
@@ -275,9 +292,7 @@ impl AppraisalSystem {
         match output {
             AppraisalOutputDemand::Full => {
                 self.clear_preview_cache_for(guid);
-                if let Some(inflight) = self.inflight.as_mut()
-                    && inflight.guid == guid
-                {
+                if let Some(inflight) = self.inflight.get_mut(&guid) {
                     inflight.deliver_full = false;
                     if !inflight.background_facts
                         && self.core_facts_target != Some(guid)
@@ -291,9 +306,7 @@ impl AppraisalSystem {
                 }
             }
             AppraisalOutputDemand::FactsOnly => {
-                if let Some(inflight) = self.inflight.as_mut()
-                    && inflight.guid == guid
-                {
+                if let Some(inflight) = self.inflight.get_mut(&guid) {
                     inflight.background_facts = false;
                     if !inflight.deliver_full
                         && self.core_facts_target != Some(guid)
@@ -333,9 +346,7 @@ impl AppraisalSystem {
                     self.core_facts_target = None;
                 }
                 let mut had_background_facts = false;
-                if let Some(inflight) = self.inflight.as_mut()
-                    && inflight.guid == *guid
-                {
+                if let Some(inflight) = self.inflight.get_mut(guid) {
                     had_background_facts |= inflight.background_facts;
                     inflight.background_facts = false;
                     inflight.replacement_followup = false;
@@ -356,14 +367,14 @@ impl AppraisalSystem {
                         self.core_facts_settled = None;
                     }
                 }
-                if let Some(inflight) = self.inflight.as_mut()
-                    && inflight.guid == guid
+                let has_demand = self.demands.get(&guid).is_some_and(|d| d.any());
+                if let Some(inflight) = self.inflight.get_mut(&guid)
                     && (matches!(event, WorldEvent::EntityReplaced(_))
                         || inflight.instance_sequence != Some(entity.instance_sequence()))
                     && (inflight.deliver_full
                         || inflight.background_facts
                         || self.core_facts_target == Some(guid)
-                        || self.demands.get(&guid).is_some_and(|d| d.any()))
+                        || has_demand)
                 {
                     inflight.replacement_followup = true;
                 }
@@ -374,31 +385,8 @@ impl AppraisalSystem {
 
     /// Completes any matching inflight/pending request when `ObjectInspectionResult` arrives.
     pub(super) fn complete_inspection(&mut self, guid: Guid) -> InspectionDeliveryPolicy {
-        if let Some(inflight) = self.inflight
-            && inflight.guid == guid
-        {
-            self.inflight = None;
-            if self.core_facts_target == Some(guid) && !inflight.replacement_followup {
-                self.core_facts_settled = Some((guid, inflight.instance_sequence));
-            }
-            if inflight.replacement_followup {
-                if inflight.deliver_full {
-                    let entry = self.demands.entry(guid).or_default();
-                    entry.foreground_full = true;
-                    entry.allow_cached_preview = false;
-                }
-                if inflight.background_facts {
-                    let entry = self.demands.entry(guid).or_default();
-                    entry.background_facts = true;
-                }
-                if self.core_facts_target == Some(guid) {
-                    let entry = self.demands.entry(guid).or_default();
-                    entry.core_facts = true;
-                }
-                self.sync_queue_membership(guid);
-            } else if inflight.background_facts {
-                self.record_settled_facts(guid);
-            }
+        if let Some(inflight) = self.inflight.remove(&guid) {
+            self.settle_or_requeue_inflight(guid, inflight);
             return InspectionDeliveryPolicy {
                 deliver_full: inflight.deliver_full,
                 allow_cached_preview: inflight.allow_cached_preview,
@@ -458,27 +446,29 @@ impl AppraisalSystem {
         self.settled_facts.drain(..)
     }
 
-    /// Pops at most one ready `Guid` when single-slot and retry pacing allow dispatch.
+    /// Pops at most one ready `Guid` when inflight capacity and the sliding burst window allow dispatch.
     pub(super) fn pop_next_dispatch<F>(&mut self, now: Instant, resolve_instance: F) -> Option<Guid>
     where
         F: Fn(Guid) -> Option<u16>,
     {
         self.expire_timed_out_inflight(now);
-        if self.inflight.is_some() {
+        if self.inflight.len() >= self.tuning.burst_limit {
             return None;
         }
         let retry_interval = Duration::from_millis(self.tuning.assessment_retry_interval_ms);
-        if let Some(last_sent) = self.last_sent_at
-            && now.saturating_duration_since(last_sent) < retry_interval
+        while self
+            .recent_sends
+            .front()
+            .is_some_and(|sent_at| now.saturating_duration_since(*sent_at) >= retry_interval)
         {
+            self.recent_sends.pop_front();
+        }
+        if self.recent_sends.len() >= self.tuning.burst_limit {
             return None;
         }
 
         loop {
-            let next_guid = self
-                .foreground_queue
-                .pop_front()
-                .or_else(|| self.background_queue.pop_front())?;
+            let next_guid = self.pop_next_non_inflight_guid()?;
             let Some(demand) = self.demands.remove(&next_guid) else {
                 continue;
             };
@@ -497,51 +487,38 @@ impl AppraisalSystem {
                 continue;
             }
             let deliver_full = demand.output_demand() == AppraisalOutputDemand::Full;
-            self.inflight = Some(InflightAppraisal {
-                guid: next_guid,
-                instance_sequence,
-                sent_at: now,
-                deliver_full,
-                background_facts: demand.background_facts,
-                allow_cached_preview: deliver_full && demand.allow_cached_preview,
-                replacement_followup: false,
-            });
-            self.last_sent_at = Some(now);
+            self.inflight.insert(
+                next_guid,
+                InflightAppraisal {
+                    instance_sequence,
+                    sent_at: now,
+                    deliver_full,
+                    background_facts: demand.background_facts,
+                    allow_cached_preview: deliver_full && demand.allow_cached_preview,
+                    replacement_followup: false,
+                },
+            );
+            self.recent_sends.push_back(now);
             return Some(next_guid);
         }
     }
 
     /// Expires hung inflight work after `response_timeout_ms`, re-queuing replacements when needed.
     pub(super) fn expire_timed_out_inflight(&mut self, now: Instant) -> bool {
-        let Some(inflight) = self.inflight else {
-            return false;
-        };
         let timeout = Duration::from_millis(self.tuning.response_timeout_ms);
-        if now.saturating_duration_since(inflight.sent_at) < timeout {
+        let expired: Vec<Guid> = self
+            .inflight
+            .iter()
+            .filter_map(|(guid, inflight)| {
+                (now.saturating_duration_since(inflight.sent_at) >= timeout).then_some(*guid)
+            })
+            .collect();
+        if expired.is_empty() {
             return false;
         }
-        self.inflight = None;
-        if inflight.replacement_followup {
-            if inflight.deliver_full {
-                let entry = self.demands.entry(inflight.guid).or_default();
-                entry.foreground_full = true;
-                entry.allow_cached_preview = false;
-            }
-            if inflight.background_facts {
-                let entry = self.demands.entry(inflight.guid).or_default();
-                entry.background_facts = true;
-            }
-            if self.core_facts_target == Some(inflight.guid) {
-                let entry = self.demands.entry(inflight.guid).or_default();
-                entry.core_facts = true;
-            }
-            self.sync_queue_membership(inflight.guid);
-        } else {
-            if self.core_facts_target == Some(inflight.guid) {
-                self.core_facts_settled = Some((inflight.guid, inflight.instance_sequence));
-            }
-            if inflight.background_facts {
-                self.record_settled_facts(inflight.guid);
+        for guid in expired {
+            if let Some(inflight) = self.inflight.remove(&guid) {
+                self.settle_or_requeue_inflight(guid, inflight);
             }
         }
         true
@@ -551,12 +528,48 @@ impl AppraisalSystem {
         self.demands.clear();
         self.foreground_queue.clear();
         self.background_queue.clear();
-        self.inflight = None;
-        self.last_sent_at = None;
+        self.inflight.clear();
+        self.recent_sends.clear();
         self.core_facts_target = None;
         self.core_facts_settled = None;
         self.cached_creature_preview = None;
         self.settled_facts.clear();
+    }
+
+    fn pop_next_non_inflight_guid(&mut self) -> Option<Guid> {
+        for queue in [&mut self.foreground_queue, &mut self.background_queue] {
+            if let Some(index) = queue
+                .iter()
+                .position(|guid| !self.inflight.contains_key(guid))
+            {
+                return queue.remove(index);
+            }
+        }
+        None
+    }
+
+    fn settle_or_requeue_inflight(&mut self, guid: Guid, inflight: InflightAppraisal) {
+        if self.core_facts_target == Some(guid) && !inflight.replacement_followup {
+            self.core_facts_settled = Some((guid, inflight.instance_sequence));
+        }
+        if inflight.replacement_followup {
+            if inflight.deliver_full {
+                let entry = self.demands.entry(guid).or_default();
+                entry.foreground_full = true;
+                entry.allow_cached_preview = false;
+            }
+            if inflight.background_facts {
+                let entry = self.demands.entry(guid).or_default();
+                entry.background_facts = true;
+            }
+            if self.core_facts_target == Some(guid) {
+                let entry = self.demands.entry(guid).or_default();
+                entry.core_facts = true;
+            }
+            self.sync_queue_membership(guid);
+        } else if inflight.background_facts {
+            self.record_settled_facts(guid);
+        }
     }
 
     fn record_settled_facts(&mut self, guid: Guid) {
@@ -604,16 +617,33 @@ mod tests {
     #[test]
     fn tuning_validates_positive_bounds() {
         assert_eq!(
-            ClientAppraisalTuning::new(0, DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS),
+            ClientAppraisalTuning::new(
+                0,
+                DEFAULT_APPRAISAL_BURST_LIMIT,
+                DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS,
+            ),
             Err(ClientAppraisalTuningError::InvalidRetryInterval)
         );
         assert_eq!(
-            ClientAppraisalTuning::new(DEFAULT_APPRAISAL_RETRY_INTERVAL_MS, 0),
+            ClientAppraisalTuning::new(
+                DEFAULT_APPRAISAL_RETRY_INTERVAL_MS,
+                0,
+                DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS,
+            ),
+            Err(ClientAppraisalTuningError::InvalidBurstLimit)
+        );
+        assert_eq!(
+            ClientAppraisalTuning::new(
+                DEFAULT_APPRAISAL_RETRY_INTERVAL_MS,
+                DEFAULT_APPRAISAL_BURST_LIMIT,
+                0,
+            ),
             Err(ClientAppraisalTuningError::InvalidResponseTimeout)
         );
 
         let valid = ClientAppraisalTuning::new(
             DEFAULT_APPRAISAL_RETRY_INTERVAL_MS,
+            3,
             DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS,
         )
         .unwrap();
@@ -621,6 +651,7 @@ mod tests {
             valid.assessment_retry_interval_ms(),
             DEFAULT_APPRAISAL_RETRY_INTERVAL_MS
         );
+        assert_eq!(valid.burst_limit(), 3);
         assert_eq!(
             valid.response_timeout_ms(),
             DEFAULT_APPRAISAL_RESPONSE_TIMEOUT_MS
@@ -702,11 +733,8 @@ mod tests {
         let t1 = start + retry;
         system.request(guid, Some(1), AppraisalOutputDemand::FactsOnly, false);
         assert_eq!(system.pop_next_dispatch(t1, |_| Some(1)), Some(guid));
-        let replaced = holtburger_world::entity::Entity::new(
-            guid,
-            "Replaced".into(),
-            Default::default(),
-        );
+        let replaced =
+            holtburger_world::entity::Entity::new(guid, "Replaced".into(), Default::default());
         system.observe_world_event(&WorldEvent::EntityReplaced(Box::new(replaced)));
         assert!(!system.complete_inspection(guid).deliver_full);
         assert!(system.drain_settled_facts().next().is_none());
@@ -816,5 +844,46 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn sliding_window_burst_pipelines_up_to_limit_and_caps_rate() {
+        let interval = Duration::from_millis(100);
+        let timeout = Duration::from_millis(3_000);
+        let mut system = AppraisalSystem::new(ClientAppraisalTuning::new(100, 3, 3_000).unwrap());
+        let start = Instant::now();
+        let guids: Vec<Guid> = (1..=6).map(Guid).collect();
+        for &guid in &guids {
+            system.request(guid, Some(1), AppraisalOutputDemand::FactsOnly, false);
+        }
+
+        // First burst of 3 dispatches immediately at t=0, fourth blocked by both inflight and window.
+        assert_eq!(system.pop_next_dispatch(start, |_| Some(1)), Some(Guid(1)));
+        assert_eq!(system.pop_next_dispatch(start, |_| Some(1)), Some(Guid(2)));
+        assert_eq!(system.pop_next_dispatch(start, |_| Some(1)), Some(Guid(3)));
+        assert_eq!(system.pop_next_dispatch(start, |_| Some(1)), None);
+
+        // Completing all 3 at t=20ms frees inflight slots, but window still blocks until t=100ms.
+        for guid in [Guid(1), Guid(2), Guid(3)] {
+            assert!(!system.complete_inspection(guid).deliver_full);
+        }
+        assert_eq!(
+            system.pop_next_dispatch(start + Duration::from_millis(99), |_| Some(1)),
+            None
+        );
+
+        // At t=100ms the 3-slot window reopens; dispatch 4 and 5, leaving 1 window slot.
+        let t1 = start + interval;
+        assert_eq!(system.pop_next_dispatch(t1, |_| Some(1)), Some(Guid(4)));
+        assert_eq!(system.pop_next_dispatch(t1, |_| Some(1)), Some(Guid(5)));
+        // Replacement for inflight Guid(4) stays queued without double-dispatching Guid(4).
+        system.request(Guid(4), Some(2), AppraisalOutputDemand::Full, false);
+        assert_eq!(system.pop_next_dispatch(t1, |_| Some(2)), Some(Guid(6)));
+        assert_eq!(system.pop_next_dispatch(t1, |_| Some(2)), None);
+
+        // Timeout expires only hung entries (4, 5, 6), re-queueing Guid(4)'s replacement follow-up.
+        let t2 = t1 + timeout;
+        assert_eq!(system.pop_next_dispatch(t2, |_| Some(2)), Some(Guid(4)));
+        assert!(system.complete_inspection(Guid(4)).deliver_full);
     }
 }

@@ -6,6 +6,7 @@
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
 	import { useItemCantrips } from "../app/item-cantrips";
+	import CantripBorderSpecular from "../app/CantripBorderSpecular.svelte";
 	import ItemCellVisual from "../app/ItemCellVisual.svelte";
 	import ItemQueueCell from "../app/ItemQueueCell.svelte";
 	import UiIcon from "../app/UiIcon.svelte";
@@ -191,6 +192,7 @@
 								<div class="vendor-list">
 									{#each section.cells as cell (cell.offer.guid)}
 										{@const offer = cell.offer}
+										{@const cantripTier = itemCantrips.tierFor(offer.guid)}
 										{@const price =
 											offer.price.kind === "quoted"
 												? `${offer.price.amount.toLocaleString()} ${current.currency.name} for ${offer.price.quantity.toLocaleString()}`
@@ -218,9 +220,11 @@
 										>
 											<span
 												class="offer-icon ui-item-cell"
-												data-cantrip-tier={itemCantrips.tierFor(offer.guid)}
+												data-cantrip-tier={cantripTier}
 												data-selected={selected === offer.guid || undefined}
-												><UiIcon display={displays.get(cell.iconKey)} /></span
+												><UiIcon
+													display={displays.get(cell.iconKey)}
+												/><CantripBorderSpecular tier={cantripTier} /></span
 											>
 											<span class="offer-name"
 												>{cell.name}{#if offer.stack_count > 1}

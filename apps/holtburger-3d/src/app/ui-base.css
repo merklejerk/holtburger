@@ -21,7 +21,7 @@
 		--ui-cantrip-tier-feeble-color: #b8b6af;
 		--ui-cantrip-tier-minor-color: #82d998;
 		--ui-cantrip-tier-moderate-color: #79cbea;
-		--ui-cantrip-tier-major-color: #c0a2ff;
+		--ui-cantrip-tier-major-color: #b366ff;
 		--ui-cantrip-tier-epic-color: #ff9d6c;
 		--ui-cantrip-tier-legendary-color: #f2d05c;
 		--ui-cantrip-tier-other-color: #e6a4cf;
@@ -1367,6 +1367,9 @@
 		);
 		gap: var(--ui-item-grid-gap);
 	}
+	.ui-theme :where(.ui-item-cell) {
+		position: relative;
+	}
 	.ui-theme .ui-item-cell {
 		transition: opacity var(--ui-item-dim-duration, 150ms) ease-out;
 		background: var(--ui-item-cell-background, transparent);
@@ -1407,6 +1410,57 @@
 			inset 0 0 7px
 				color-mix(in srgb, var(--ui-cantrip-cell-color) 45%, transparent);
 	}
+	/* Static conic sprite rotated on the GPU compositor inside a 2px border mask; avoids per-frame gradient rasterization and ::before/::after collisions. */
+	.ui-theme .ui-cantrip-specular {
+		display: none;
+	}
+	.ui-theme
+		.ui-item-cell[data-cantrip-tier="legendary"]:not([data-empty="true"])
+		> .ui-cantrip-specular {
+		display: block;
+		position: absolute;
+		inset: 0;
+		padding: 2px;
+		overflow: hidden;
+		pointer-events: none;
+		mask:
+			linear-gradient(#000 0 0) content-box,
+			linear-gradient(#000 0 0);
+		mask-composite: exclude;
+	}
+	.ui-theme .ui-cantrip-specular::before {
+		content: "";
+		position: absolute;
+		inset: -50%;
+		--_cantrip-shadow: color-mix(
+			in srgb,
+			var(--ui-cantrip-cell-color) 62%,
+			#4a2c00
+		);
+		--_cantrip-glint: color-mix(
+			in srgb,
+			#fff 36%,
+			var(--ui-cantrip-cell-color)
+		);
+		--_cantrip-peak: color-mix(in srgb, #fff 68%, var(--ui-cantrip-cell-color));
+		background: conic-gradient(
+			var(--_cantrip-shadow) 0deg 8deg,
+			var(--ui-cantrip-cell-color) 24deg,
+			var(--_cantrip-glint) 34deg,
+			var(--_cantrip-peak) 42deg,
+			var(--_cantrip-glint) 50deg,
+			var(--ui-cantrip-cell-color) 60deg,
+			var(--_cantrip-shadow) 76deg 188deg,
+			var(--ui-cantrip-cell-color) 204deg,
+			var(--_cantrip-glint) 214deg,
+			var(--_cantrip-peak) 222deg,
+			var(--_cantrip-glint) 230deg,
+			var(--ui-cantrip-cell-color) 240deg,
+			var(--_cantrip-shadow) 256deg 360deg
+		);
+		will-change: transform;
+		animation: ui-cantrip-specular-spin 2s linear infinite;
+	}
 	.ui-theme .ui-item-cell:where(:hover:not(:disabled)) {
 		color: var(--ui-item-cell-hover-color, var(--ui-color-highlight));
 	}
@@ -1445,6 +1499,11 @@
 	@media (prefers-reduced-motion: reduce) {
 		.ui-theme .ui-item-cell {
 			transition: none;
+		}
+		.ui-theme
+			.ui-item-cell[data-cantrip-tier="legendary"]:not([data-empty="true"])
+			> .ui-cantrip-specular {
+			display: none;
 		}
 	}
 	/* Draw corner-bracket selection above opaque artwork without masking cantrip borders. */
@@ -1786,6 +1845,15 @@
 	}
 	.ui-stat-action[data-direction="down"] .ui-stat-action-shape {
 		transform: translateX(-50%) rotate(180deg);
+	}
+}
+
+@keyframes ui-cantrip-specular-spin {
+	from {
+		transform: rotate(0deg);
+	}
+	to {
+		transform: rotate(360deg);
 	}
 }
 

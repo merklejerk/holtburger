@@ -5,6 +5,7 @@ import {
 	type ClientAppraisalRequestOptions,
 } from "./client-appraisal-requests";
 import type { ObjectInspectionResult } from "./client-object-inspection-contract";
+import { CLIENT_APPRAISAL_TUNING } from "./client-tuning";
 
 const result: ObjectInspectionResult = {
 	guid: 7,
@@ -188,6 +189,7 @@ describe("ClientAppraisalRequests", () => {
 			sendFacts: async (guid) => {
 				sentGuids.push(guid);
 			},
+			options: { maxConcurrentFacts: 1 },
 		});
 
 		const vendor = requests.requestFacts(100, { kind: "vendor-offer" });
@@ -273,7 +275,7 @@ describe("ClientAppraisalRequests", () => {
 				sendFacts: async (guid) => {
 					sentGuids.push(guid);
 				},
-				options: { factsTimeoutMs: timeoutMs },
+				options: { factsTimeoutMs: timeoutMs, maxConcurrentFacts: 1 },
 			});
 			const stalled = requests.requestFacts(200, { kind: "world-container" });
 			const queued = requests.requestFacts(201, { kind: "vendor-offer" });
@@ -296,6 +298,7 @@ describe("ClientAppraisalRequests", () => {
 			sendFacts: async (guid) => {
 				sentGuids.push(guid);
 			},
+			options: { maxConcurrentFacts: 1 },
 		});
 
 		const first = requests.requestFacts(301, { kind: "world-container" });
@@ -316,5 +319,47 @@ describe("ClientAppraisalRequests", () => {
 
 		third.settle?.();
 		expect(cancel).not.toHaveBeenCalled();
+	});
+
+	it("pipelines up to burstLimit FactsOnly requests simultaneously in priority order", async () => {
+		const sentGuids: number[] = [];
+		const { requests } = makeRequests({
+			sendFacts: async (guid) => {
+				sentGuids.push(guid);
+			},
+		});
+
+		const low = requests.requestFacts(400, { kind: "vendor-offer" });
+		const first = {
+			guid: 401,
+			handle: requests.requestFacts(401, { kind: "world-container" }),
+		};
+		const remaining = Array.from(
+			{ length: CLIENT_APPRAISAL_TUNING.burstLimit - 1 },
+			(_, index) => {
+				const guid = 402 + index;
+				return {
+					guid,
+					handle: requests.requestFacts(guid, { kind: "world-container" }),
+				};
+			},
+		);
+		const burst = [first, ...remaining];
+
+		await Promise.all(burst.map((entry) => entry.handle.sent));
+		const expectedBurstGuids = burst.map((entry) => entry.guid);
+		expect(sentGuids).toEqual(expectedBurstGuids);
+
+		requests.receive({
+			type: "appraisal-facts-settled",
+			guid: first.guid,
+		});
+		await low.sent;
+		expect(sentGuids).toEqual([...expectedBurstGuids, 400]);
+
+		for (const entry of remaining) {
+			entry.handle.settle?.();
+		}
+		low.settle?.();
 	});
 });

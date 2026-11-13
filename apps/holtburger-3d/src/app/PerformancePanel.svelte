@@ -2,7 +2,9 @@
 	import { onMount } from "svelte";
 	import type { PerformanceSession } from "./performance-session";
 	import {
+		RENDERER_CPU_PHASES,
 		RENDERER_GPU_SYSTEMS,
+		type RendererCpuPhase,
 		type RendererGpuSystem,
 	} from "../lib/game/renderer/renderer";
 	import {
@@ -27,6 +29,16 @@
 	const gpu = $derived(profile?.gpu ?? null);
 	const recording = $derived(report?.capture.state === "recording");
 	const native = $derived(report?.native);
+	const cpuPhaseLabels: Record<RendererCpuPhase, string> = {
+		portalPlanning: "Portal planning",
+		sceneSelection: "Scene selection & culling",
+		opaqueSubmission: "Opaque & shadow submission",
+		terrainSubmission: "Terrain submission",
+		portalComposition: "Portal composition",
+		transparencyAndOverlays: "Transparency & overlays",
+		postAndPresentation: "Post-processing & presentation",
+		other: "Other renderer setup",
+	};
 	const gpuSystemLabels: Record<RendererGpuSystem, string> = {
 		terrain: "Terrain",
 		opaqueGeometry: "Opaque geometry",
@@ -190,6 +202,29 @@
 							<tr><td>↳ Renderer CPU</td><td>{ms(profile?.cpu.meanMs)}</td></tr>
 						</tbody>
 					</table>
+				</div>
+			</details>
+			<details class="ui-disclosure">
+				<summary>Renderer CPU</summary>
+				<div class="performance-subsection">
+					{#if profile}
+						<table>
+							<thead><tr><th>Phase</th><th>Latest</th><th>Mean</th></tr></thead>
+							<tbody>
+								{#each RENDERER_CPU_PHASES as phase (phase)}
+									<tr data-cpu-phase={phase}
+										><th>{cpuPhaseLabels[phase]}</th><td
+											>{ms(profile.cpu.latestPhaseMs[phase])}</td
+										><td>{ms(profile.cpu.meanPhaseMs[phase])}</td></tr
+									>
+								{/each}
+							</tbody>
+						</table>
+						<p class="ui-muted">
+							All phases share the renderer CPU frame window. Inactive phases
+							contribute zero.
+						</p>
+					{:else}<p class="ui-muted">pending</p>{/if}
 				</div>
 			</details>
 			<details class="ui-disclosure">

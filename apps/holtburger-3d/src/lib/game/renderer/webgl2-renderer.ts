@@ -1437,8 +1437,10 @@ export class WebGL2Renderer implements Renderer {
 		const profile = this.#frameProfiler?.beginFrame() ?? null;
 		try {
 			this.#drawFrameContent(input);
-			if (this.#combatEffectAdapters.size > 0)
+			if (this.#combatEffectAdapters.size > 0) {
+				this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
 				this.#frameProfiler?.setGpuSystem("transparencyAndEffects");
+			}
 			for (const adapter of this.#combatEffectAdapters)
 				adapter.drawLane(
 					this.#canvas.width,
@@ -1446,6 +1448,7 @@ export class WebGL2Renderer implements Renderer {
 					this.#renderScale,
 				);
 			this.#frameProfiler?.setGpuSystem("other");
+			this.#frameProfiler?.setCpuPhase("other");
 			return Object.freeze({
 				portalTransitionReceipt: portalTransitionPresentationReceipt(
 					input.portalTransition,
@@ -1455,7 +1458,7 @@ export class WebGL2Renderer implements Renderer {
 				]),
 			});
 		} catch (error) {
-			profile?.discardGpuFrame();
+			profile?.discard();
 			reportWebGL2Failure(
 				this.#gl,
 				error instanceof Error ? error.message : String(error),
@@ -1477,7 +1480,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#drawPortalTransitionFrameContent(input);
 			return portalTransitionPresentationReceipt(input.portalTransition);
 		} catch (error) {
-			profile?.discardGpuFrame();
+			profile?.discard();
 			reportWebGL2Failure(
 				this.#gl,
 				error instanceof Error ? error.message : String(error),
@@ -1693,6 +1696,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#particlePass?.beginFrame(this.#particleRecords);
 
 		if (input.frameSettings.envCellRenderMode === "flat") {
+			this.#frameProfiler?.setCpuPhase("sceneSelection");
 			const plans = input.views.map((view) => {
 				const geometry = this.#prepareViewGeometry(
 					input.anchorLandblockId,
@@ -1712,11 +1716,13 @@ export class WebGL2Renderer implements Renderer {
 				);
 				return { view: { ...geometry, ...contributions }, shadows };
 			});
+			this.#frameProfiler?.setCpuPhase("opaqueSubmission");
 			this.#dynamicPosePages.upload(
 				this.#poseUploadParts,
 				this.#frameClockSeconds,
 			);
 			for (const plan of plans) {
+				this.#frameProfiler?.setCpuPhase("opaqueSubmission");
 				this.#executeOutdoorShadows(plan.shadows);
 				this.#drawFlatView(
 					plan.view,
@@ -1725,10 +1731,12 @@ export class WebGL2Renderer implements Renderer {
 					input.frameSettings.showRetailHiddenGeometry,
 				);
 			}
+			this.#frameProfiler?.setCpuPhase("other");
 		} else {
 			const pipeline = (this.#portalScopeAtlasPipeline ??=
 				new WebGL2PortalScopeAtlasPipeline(this.#gl));
 			const plans = input.views.map((view) => {
+				this.#frameProfiler?.setCpuPhase("sceneSelection");
 				const prepared = this.#prepareViewGeometry(
 					input.anchorLandblockId,
 					view,
@@ -1743,6 +1751,7 @@ export class WebGL2Renderer implements Renderer {
 					pipeline,
 				);
 			});
+			this.#frameProfiler?.setCpuPhase("opaqueSubmission");
 			this.#dynamicPosePages.upload(
 				this.#poseUploadParts,
 				this.#frameClockSeconds,
@@ -1755,6 +1764,7 @@ export class WebGL2Renderer implements Renderer {
 					pipeline,
 				);
 			}
+			this.#frameProfiler?.setCpuPhase("other");
 		}
 
 		this.#updateRenderTargetMetrics();
@@ -1788,11 +1798,13 @@ export class WebGL2Renderer implements Renderer {
 
 		const target = this.#acquireFlatSceneTarget();
 		this.#beginFlatOpaqueScene(target, BLACK_SCENE_CLEAR_COLOR);
+		this.#frameProfiler?.setCpuPhase("postAndPresentation");
 		this.#drawPortalTransitionTunnel(
 			target,
 			input.frameSettings.showRetailHiddenGeometry,
 		);
 		this.#presentFlatScene(target, null);
+		this.#frameProfiler?.setCpuPhase("other");
 		this.#updateRenderTargetMetrics();
 		this.#finishFrameSelectionMetrics();
 	}
@@ -1816,6 +1828,7 @@ export class WebGL2Renderer implements Renderer {
 		entityShadows: EntityShadowSettings,
 		pipeline: WebGL2PortalScopeAtlasPipeline,
 	): PreparedPortalView {
+		this.#frameProfiler?.setCpuPhase("portalPlanning");
 		const placement = viewInput.camera.placement;
 		const rootScope = scopeFor(placement.landblockId, placement.envCellId);
 
@@ -1825,6 +1838,7 @@ export class WebGL2Renderer implements Renderer {
 		);
 
 		this.#accumulatePortalScopeAtlasMetrics(frame);
+		this.#frameProfiler?.setCpuPhase("sceneSelection");
 		const shadows =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null
 				? this.#prepareOutdoorShadows(
@@ -2023,10 +2037,13 @@ export class WebGL2Renderer implements Renderer {
 	): void {
 		const { view, frame, particlesByScope } = plan;
 		const clearColor = this.#viewClearColor(view, shading);
+		this.#frameProfiler?.setCpuPhase("opaqueSubmission");
 		this.#executeOutdoorShadows(plan.shadows);
+		this.#frameProfiler?.setCpuPhase("other");
 		const target = this.#acquireFlatSceneTarget();
 		const usesPortalAtlas = !frame.atlas.directRootOutput;
 		if (usesPortalAtlas) {
+			this.#frameProfiler?.setCpuPhase("portalComposition");
 			this.#frameProfiler?.setGpuSystem("portalComposition");
 		}
 		const portalTargets = pipeline.beginOpaqueScene(
@@ -2037,10 +2054,12 @@ export class WebGL2Renderer implements Renderer {
 		if (usesPortalAtlas) {
 			this.#frameProfiler?.setGpuSystem("other");
 		}
+		this.#frameProfiler?.setCpuPhase("sceneSelection");
 		const objectPhases = this.#createObjectSubmissionPhases(view);
 		const hasOutdoorScope =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null;
 		if (hasOutdoorScope) {
+			this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
 			this.#drawSky(view, shading, "before-world", pipeline);
 			const skyBatches = particlesByScope.get("sky");
 			if (
@@ -2060,10 +2079,15 @@ export class WebGL2Renderer implements Renderer {
 		// Submit opaque objects before terrain so buildings, walls, and props populate hardware
 		// Early-Z before multi-layer near-terrain shading executes. Terrain uses LESS with the
 		// same positive polygon offset, keeping coplanar object-vs-terrain ties identical.
+		this.#frameProfiler?.setCpuPhase("opaqueSubmission");
 		this.#drawOpaqueObjects(view, objectPhases.opaque, shading, pipeline);
+		this.#frameProfiler?.setCpuPhase("terrainSubmission");
 		this.#drawTerrain(view, shading, pipeline);
 		if (portalTargets !== null) {
+			this.#frameProfiler?.setCpuPhase("portalComposition");
 			this.#frameProfiler?.setGpuSystem("portalComposition");
+		} else {
+			this.#frameProfiler?.setCpuPhase("other");
 		}
 		pipeline.execute(target.framebuffer);
 		pipeline.beginDeferredScene(target.framebuffer);
@@ -2072,8 +2096,10 @@ export class WebGL2Renderer implements Renderer {
 		}
 		// Entity color participates once, after static portal composition. Its depth both
 		// occludes later draws and contributes to the same AO evaluation as static geometry.
+		this.#frameProfiler?.setCpuPhase("opaqueSubmission");
 		this.#drawDynamicOpaque(view, shading);
 		if (shading.ambientOcclusion.kind === "enabled") {
+			this.#frameProfiler?.setCpuPhase("postAndPresentation");
 			this.#frameProfiler?.setGpuSystem("ambientOcclusion");
 			this.#getSaoPass().apply(
 				target,
@@ -2086,12 +2112,17 @@ export class WebGL2Renderer implements Renderer {
 			);
 			this.#frameProfiler?.setGpuSystem("other");
 		}
+		this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
 		// Outdoor foreground weather follows complete-scene AO, including doorway images.
 		if (hasOutdoorScope) {
 			this.#drawSky(view, shading, "after-landscape", null);
 		}
 		// AO and sky change framebuffer, viewport and sampler bindings.
+		this.#frameProfiler?.setCpuPhase(
+			portalTargets !== null ? "portalComposition" : "other",
+		);
 		pipeline.beginDeferredScene(target.framebuffer);
+		this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
 		this.#drawBlendedObjects(view, objectPhases, shading, pipeline);
 		this.#drawWorldParticles(view, particlesByScope);
 		this.#drawNameplates(view, pipeline);
@@ -2126,11 +2157,13 @@ export class WebGL2Renderer implements Renderer {
 					});
 			}
 		}
+		this.#frameProfiler?.setCpuPhase("postAndPresentation");
 		this.#drawPortalTransitionTunnel(
 			target,
 			frameSettings.showRetailHiddenGeometry,
 		);
 		this.#presentFlatScene(target, view);
+		this.#frameProfiler?.setCpuPhase("other");
 	}
 
 	async destroy(): Promise<void> {
@@ -2425,11 +2458,13 @@ export class WebGL2Renderer implements Renderer {
 		portalVisibility: DynamicRenderDomainSelection | null,
 		shadows: PreparedOutdoorShadowView | null,
 	): PreparedSceneContributions {
+		this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
 		this.#reconcileNameplateTextureCache(
 			frameSettings.nameplates.appearance,
 			frameSettings.quality.renderScale,
 			this.#frameViewerEntityIdentity,
 		);
+		this.#frameProfiler?.setCpuPhase("sceneSelection");
 		const terrain: TerrainFrameInput[] = [];
 		const objects: ObjectColorSubmission[] = [];
 		const dynamicOpaque: PreparedDynamicOpaque[] = [];
@@ -3521,10 +3556,13 @@ export class WebGL2Renderer implements Renderer {
 		domain: SceneRenderDomain,
 		showRetailHiddenGeometry: boolean,
 	): void {
+		this.#frameProfiler?.setCpuPhase("other");
 		const target = this.#acquireFlatSceneTarget();
 		this.#beginFlatOpaqueScene(target, this.#viewClearColor(view, shading));
+		this.#frameProfiler?.setCpuPhase("sceneSelection");
 		const objectPhases = this.#createObjectSubmissionPhases(view);
 		if (domain === "exterior") {
+			this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
 			this.#drawSky(view, shading, "before-world", null);
 			if (
 				view.skyParticles.length > 0 &&
@@ -3539,10 +3577,13 @@ export class WebGL2Renderer implements Renderer {
 				);
 			}
 		}
+		this.#frameProfiler?.setCpuPhase("opaqueSubmission");
 		this.#drawOpaqueObjects(view, objectPhases.opaque, shading, null);
 		this.#drawDynamicOpaque(view, shading);
+		this.#frameProfiler?.setCpuPhase("terrainSubmission");
 		this.#drawTerrain(view, shading, null);
 		if (shading.ambientOcclusion.kind === "enabled") {
+			this.#frameProfiler?.setCpuPhase("postAndPresentation");
 			this.#frameProfiler?.setGpuSystem("ambientOcclusion");
 			this.#getSaoPass().apply(
 				target,
@@ -3555,6 +3596,7 @@ export class WebGL2Renderer implements Renderer {
 			);
 			this.#frameProfiler?.setGpuSystem("other");
 		}
+		this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
 		// Retail's after-landscape weather: drawn once the landblock loop is down but before
 		// the deferred translucent flush, which is legitimately allowed to cover it.
 		if (domain === "exterior") {
@@ -3593,8 +3635,10 @@ export class WebGL2Renderer implements Renderer {
 				this.#drawWorldMarker(view, indicator.landingMarker, null);
 		}
 		this.#gl.bindVertexArray(null);
+		this.#frameProfiler?.setCpuPhase("postAndPresentation");
 		this.#drawPortalTransitionTunnel(target, showRetailHiddenGeometry);
 		this.#presentFlatScene(target, view);
+		this.#frameProfiler?.setCpuPhase("other");
 	}
 
 	#reconcileNameplateTextureCache(

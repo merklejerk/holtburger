@@ -506,11 +506,33 @@ export interface FrameSelectionMetrics {
 	readonly objectSuppressedUniformUploads: number;
 }
 
-/** Whole-renderer CPU elapsed statistics. */
+/** Coarse CPU execution phases inside one renderer frame; setup and teardown stay in `other`. */
+export const RENDERER_CPU_PHASES = [
+	"portalPlanning",
+	"sceneSelection",
+	"opaqueSubmission",
+	"terrainSubmission",
+	"portalComposition",
+	"transparencyAndOverlays",
+	"postAndPresentation",
+	"other",
+] as const;
+
+/** A synchronous CPU attribution boundary inside the renderer. */
+export type RendererCpuPhase = (typeof RENDERER_CPU_PHASES)[number];
+
+/** Milliseconds per renderer CPU phase, including zero for phases absent from a frame. */
+type RendererCpuPhaseTimes = Readonly<Record<RendererCpuPhase, number>>;
+
+/** Whole-renderer and per-phase CPU elapsed statistics. */
 interface RendererCpuFrameProfileWindow {
 	readonly latestFrameNumber: number;
 	readonly latestMs: number;
 	readonly meanMs: number;
+	/** Complete latest frame; repeated phase entries and views are summed. */
+	readonly latestPhaseMs: RendererCpuPhaseTimes;
+	/** Same frame denominator as `meanMs`, including absent phases as zero. */
+	readonly meanPhaseMs: RendererCpuPhaseTimes;
 	/** Recent hitch indicator, independent of the capture-wide mean. */
 	readonly p95RecentMs: number;
 	readonly sampleCount: number;

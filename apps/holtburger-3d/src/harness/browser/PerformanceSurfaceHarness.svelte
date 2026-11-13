@@ -3,6 +3,7 @@
 	import ClientDebugPanel from "../../client/ClientDebugPanel.svelte";
 	import ExplorerFramePanel from "../../explorer/ExplorerFramePanel.svelte";
 	import {
+		RENDERER_CPU_PHASES,
 		RENDERER_GPU_SYSTEMS,
 		type RendererFrameDiagnosticsSnapshot,
 	} from "../../lib/game/renderer/renderer";
@@ -80,6 +81,31 @@
 		return result;
 	}
 
+	async function verifyBreakdownTable<K extends string>(
+		mode: string,
+		attribute: "data-cpu-phase" | "data-gpu-system",
+		keys: readonly K[],
+		latest: Readonly<Record<K, number>>,
+		mean: Readonly<Record<K, number>>,
+		label: string,
+	): Promise<void> {
+		await waitFor(
+			() =>
+				document.querySelectorAll(`[data-mode="${mode}"] [${attribute}]`)
+					.length === keys.length,
+		);
+		for (const key of keys) {
+			const cells = document.querySelectorAll(
+				`[data-mode="${mode}"] [${attribute}="${key}"] td`,
+			);
+			if (
+				cells[0]?.textContent !== `${latest[key].toFixed(2)} ms` ||
+				cells[1]?.textContent !== `${mean[key].toFixed(2)} ms`
+			)
+				throw new Error(`Incorrect ${label} timing in ${mode}: ${key}`);
+		}
+	}
+
 	/** Exercise production panel compositions; fixture timings are not performance evidence. */
 	export async function probe(): Promise<{ passed: true; modes: string[] }> {
 		const modes = ["client", "explorer"] as const;
@@ -102,27 +128,27 @@
 					),
 				);
 			}
+			const cpu = diagnostics?.profile?.cpu;
+			if (cpu) {
+				await verifyBreakdownTable(
+					mode,
+					"data-cpu-phase",
+					RENDERER_CPU_PHASES,
+					cpu.latestPhaseMs,
+					cpu.meanPhaseMs,
+					"CPU phase",
+				);
+			}
 			const gpu = diagnostics?.profile?.gpu;
 			if (gpu?.kind === "available") {
-				await waitFor(
-					() =>
-						document.querySelectorAll(`[data-mode="${mode}"] [data-gpu-system]`)
-							.length === RENDERER_GPU_SYSTEMS.length,
+				await verifyBreakdownTable(
+					mode,
+					"data-gpu-system",
+					RENDERER_GPU_SYSTEMS,
+					gpu.latestSystemMs,
+					gpu.meanSystemMs,
+					"GPU system",
 				);
-				for (const system of RENDERER_GPU_SYSTEMS) {
-					const cells = document.querySelectorAll(
-						`[data-mode="${mode}"] [data-gpu-system="${system}"] td`,
-					);
-					if (
-						cells[0]?.textContent !==
-							`${gpu.latestSystemMs[system].toFixed(2)} ms` ||
-						cells[1]?.textContent !==
-							`${gpu.meanSystemMs[system].toFixed(2)} ms`
-					)
-						throw new Error(
-							`Incorrect GPU system timing in ${mode}: ${system}`,
-						);
-				}
 			}
 			await waitFor(
 				() => findButton(mode, "Reset capture")?.disabled === false,

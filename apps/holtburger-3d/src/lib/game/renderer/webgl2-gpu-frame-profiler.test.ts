@@ -205,23 +205,31 @@ describe("renderer profiling", () => {
 		});
 	});
 
-	it("discards partial GPU work when rendering fails, including query allocation failure", () => {
+	it("discards partial CPU and GPU work when rendering fails, including query allocation failure", () => {
 		const fixture = createGpuHarness(true);
 		const profiler = new WebGL2FrameProfiler(fixture.gl);
 		const frame = profiler.beginFrame();
+		profiler.setCpuPhase("terrainSubmission");
 		profiler.setGpuSystem("terrain");
 		fixture.createQuery.mockReturnValueOnce(null);
 		expect(() => profiler.setGpuSystem("opaqueGeometry")).toThrow(
 			"Failed to allocate",
 		);
-		frame.discardGpuFrame();
+		frame.discard();
+		profiler.setCpuPhase("opaqueSubmission");
 		frame.finish();
+		expect(profiler.getProfile()).toBeNull();
 		expect(fixture.deleteQuery).toHaveBeenCalledTimes(2);
 		const next = profiler.beginFrame();
 		next.finish();
 		fixture.resultsAvailable = true;
 		// Poll by admitting another frame, just as the renderer does.
 		profiler.beginFrame().finish();
+		expect(profiler.getProfile()?.cpu).toMatchObject({
+			latestFrameNumber: 3,
+			sampleCount: 2,
+			meanPhaseMs: { terrainSubmission: 0 },
+		});
 		expect(profiler.getProfile()?.gpu).toMatchObject({
 			kind: "available",
 			frameNumber: 2,
@@ -231,34 +239,89 @@ describe("renderer profiling", () => {
 		profiler.destroy();
 	});
 
-	it("averages whole CPU frames and isolates reset windows", () => {
+	it("attributes sequential CPU phases across frames and isolates reset windows", () => {
 		const fixture = createGpuHarness(false);
 		let now = 0;
 		const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
 		try {
 			const profiler = new WebGL2FrameProfiler(fixture.gl);
+			// Ignored outside an active frame capture (e.g. standalone probes).
+			profiler.setCpuPhase("portalPlanning");
+
 			const first = profiler.beginFrame();
-			now += 2;
+			now += 0.5;
+			profiler.setCpuPhase("portalPlanning");
+			now += 0.75;
+			// Adjacent identical phases must not drop or double-count elapsed time.
+			profiler.setCpuPhase("portalPlanning");
+			now += 0.25;
+			profiler.setCpuPhase("sceneSelection");
+			now += 0.5;
 			first.finish();
+
 			const second = profiler.beginFrame();
-			now += 8;
+			now += 1;
+			profiler.setCpuPhase("opaqueSubmission");
+			now += 4;
+			profiler.setCpuPhase("portalPlanning");
+			now += 1;
+			profiler.setCpuPhase("postAndPresentation");
+			now += 2;
 			second.finish();
-			expect(profiler.getProfile()?.cpu).toMatchObject({
+
+			expect(profiler.getProfile()?.cpu).toEqual({
+				latestFrameNumber: 2,
+				latestMs: 8,
 				meanMs: 5,
+				latestPhaseMs: {
+					portalPlanning: 1,
+					sceneSelection: 0,
+					opaqueSubmission: 4,
+					terrainSubmission: 0,
+					portalComposition: 0,
+					transparencyAndOverlays: 0,
+					postAndPresentation: 2,
+					other: 1,
+				},
+				meanPhaseMs: {
+					portalPlanning: 1,
+					sceneSelection: 0.25,
+					opaqueSubmission: 2,
+					terrainSubmission: 0,
+					portalComposition: 0,
+					transparencyAndOverlays: 0,
+					postAndPresentation: 1,
+					other: 0.75,
+				},
 				sampleCount: 2,
 				p95RecentMs: 8,
 			});
+
 			const old = profiler.beginFrame();
+			profiler.setCpuPhase("terrainSubmission");
 			profiler.reset();
 			now += 100;
+			profiler.setCpuPhase("opaqueSubmission");
 			old.finish();
 			expect(profiler.getProfile()).toBeNull();
+
 			const next = profiler.beginFrame();
-			now += 3;
+			now += 1;
+			profiler.setCpuPhase("terrainSubmission");
+			now += 2;
 			next.finish();
 			expect(profiler.getProfile()?.cpu).toMatchObject({
 				latestFrameNumber: 4,
+				latestMs: 3,
 				meanMs: 3,
+				latestPhaseMs: {
+					terrainSubmission: 2,
+					other: 1,
+				},
+				meanPhaseMs: {
+					terrainSubmission: 2,
+					other: 1,
+				},
 				sampleCount: 1,
 			});
 		} finally {

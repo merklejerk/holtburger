@@ -1,5 +1,7 @@
 import {
+	RENDERER_CPU_PHASES,
 	RENDERER_GPU_SYSTEMS,
+	type RendererCpuPhase,
 	type RendererFrameProfile,
 	type RendererGpuFrameProfile,
 	type RendererGpuSystem,
@@ -275,49 +277,106 @@ export class WebGL2GpuFrameProfiler {
 	}
 }
 
-/** Two CPU clock reads around a renderer frame, with optional segmented GPU attribution. */
+/** Renderer frame capture lifetime covering sequential CPU phases and optional GPU segments. */
 export class WebGL2FrameProfileCapture {
 	#finished = false;
-	constructor(
-		readonly finishFrame: () => void,
-		readonly discardGpuFrame: () => void,
-	) {}
+	readonly #finishFrame: () => void;
+	readonly #discardFrame: () => void;
+	constructor(finishFrame: () => void, discardFrame: () => void) {
+		this.#finishFrame = finishFrame;
+		this.#discardFrame = discardFrame;
+	}
+	discard(): void {
+		this.#discardFrame();
+	}
 	finish(): void {
 		if (this.#finished)
 			throw new Error("Renderer frame profile finished more than once.");
 		this.#finished = true;
-		this.finishFrame();
+		this.#finishFrame();
 	}
 }
 
-/** Whole-renderer CPU timing and coarse, sequential GPU system attribution. */
+/** Fresh mutable CPU phase accumulators; only completed frame snapshots cross the public boundary. */
+function emptyCpuPhaseTimes(): Record<RendererCpuPhase, number> {
+	return {
+		portalPlanning: 0,
+		sceneSelection: 0,
+		opaqueSubmission: 0,
+		terrainSubmission: 0,
+		portalComposition: 0,
+		transparencyAndOverlays: 0,
+		postAndPresentation: 0,
+		other: 0,
+	};
+}
+
+/** In-flight synchronous CPU attribution window, or `phaseMs: null` after aborting the frame. */
+interface ActiveCpuFrame {
+	readonly epoch: number;
+	readonly frameNumber: number;
+	phaseMs: Record<RendererCpuPhase, number> | null;
+	currentPhase: RendererCpuPhase;
+	lastMarkAt: number;
+}
+
+/** Sequential CPU phase attribution and coarse, sequential GPU system attribution. */
 export class WebGL2FrameProfiler {
 	readonly #gpu: WebGL2GpuFrameProfiler;
 	readonly #recentCpuMs: number[] = [];
+	#activeCpu: ActiveCpuFrame | null = null;
 	#frameNumber = 0;
 	#epoch = 0;
-	#totalMs = 0;
+	#totalPhaseMs = emptyCpuPhaseTimes();
 	#sampleCount = 0;
-	#latest: { readonly frameNumber: number; readonly totalMs: number } | null =
-		null;
+	#latest: {
+		readonly frameNumber: number;
+		readonly phaseMs: Readonly<Record<RendererCpuPhase, number>>;
+		readonly totalMs: number;
+	} | null = null;
 
 	constructor(gl: WebGL2RenderingContext) {
 		this.#gpu = new WebGL2GpuFrameProfiler(gl);
 	}
 
 	beginFrame(): WebGL2FrameProfileCapture {
+		if (this.#activeCpu)
+			throw new Error("A CPU frame profile is already active.");
 		const startedAt = performance.now();
 		const frameNumber = ++this.#frameNumber;
 		const epoch = this.#epoch;
 		const gpu = this.#gpu.beginFrame(frameNumber);
+		const activeCpu: ActiveCpuFrame = {
+			epoch,
+			frameNumber,
+			phaseMs: emptyCpuPhaseTimes(),
+			currentPhase: "other",
+			lastMarkAt: startedAt,
+		};
+		this.#activeCpu = activeCpu;
 		return new WebGL2FrameProfileCapture(
 			() => {
 				gpu?.finish();
 				if (epoch !== this.#epoch) return;
-				const totalMs = performance.now() - startedAt;
-				this.#totalMs += totalMs;
+				if (this.#activeCpu !== activeCpu)
+					throw new Error("CPU frame profile is not active.");
+				this.#activeCpu = null;
+				const phaseMs = activeCpu.phaseMs;
+				if (!phaseMs) return;
+				const endedAt = performance.now();
+				phaseMs[activeCpu.currentPhase] += endedAt - activeCpu.lastMarkAt;
+				let totalMs = 0;
+				for (const phase of RENDERER_CPU_PHASES) {
+					const elapsedMs = phaseMs[phase];
+					this.#totalPhaseMs[phase] += elapsedMs;
+					totalMs += elapsedMs;
+				}
 				this.#sampleCount++;
-				this.#latest = { frameNumber, totalMs };
+				this.#latest = {
+					frameNumber,
+					phaseMs: { ...phaseMs },
+					totalMs,
+				};
 				this.#recentCpuMs.push(totalMs);
 				if (
 					this.#recentCpuMs.length >
@@ -325,8 +384,31 @@ export class WebGL2FrameProfiler {
 				)
 					this.#recentCpuMs.shift();
 			},
-			() => gpu?.discard(),
+			() => {
+				gpu?.discard();
+				if (epoch !== this.#epoch) return;
+				if (this.#activeCpu !== activeCpu)
+					throw new Error("CPU frame profile is not active.");
+				activeCpu.phaseMs = null;
+			},
 		);
+	}
+
+	/** Switch synchronous CPU phase attribution; ignored outside an active, undiscarded frame. */
+	setCpuPhase(phase: RendererCpuPhase): void {
+		const active = this.#activeCpu;
+		const phaseMs = active?.phaseMs;
+		if (
+			!active ||
+			!phaseMs ||
+			active.epoch !== this.#epoch ||
+			active.currentPhase === phase
+		)
+			return;
+		const now = performance.now();
+		phaseMs[active.currentPhase] += now - active.lastMarkAt;
+		active.lastMarkAt = now;
+		active.currentPhase = phase;
 	}
 
 	/** Ignored when the GPU capture was not admitted or elapsed queries are unsupported. */
@@ -337,11 +419,19 @@ export class WebGL2FrameProfiler {
 	getProfile(): RendererFrameProfile | null {
 		if (!this.#latest) return null;
 		const sorted = [...this.#recentCpuMs].sort((left, right) => left - right);
+		const meanPhaseMs = emptyCpuPhaseTimes();
+		let meanMs = 0;
+		for (const phase of RENDERER_CPU_PHASES) {
+			meanPhaseMs[phase] = this.#totalPhaseMs[phase] / this.#sampleCount;
+			meanMs += meanPhaseMs[phase];
+		}
 		return {
 			cpu: {
 				latestFrameNumber: this.#latest.frameNumber,
 				latestMs: this.#latest.totalMs,
-				meanMs: this.#totalMs / this.#sampleCount,
+				meanMs,
+				latestPhaseMs: { ...this.#latest.phaseMs },
+				meanPhaseMs,
 				sampleCount: this.#sampleCount,
 				p95RecentMs: sorted[Math.ceil(sorted.length * 0.95) - 1],
 			},
@@ -351,8 +441,9 @@ export class WebGL2FrameProfiler {
 
 	reset(): void {
 		this.#epoch++;
+		this.#activeCpu = null;
 		this.#recentCpuMs.length = 0;
-		this.#totalMs = 0;
+		this.#totalPhaseMs = emptyCpuPhaseTimes();
 		this.#sampleCount = 0;
 		this.#latest = null;
 		this.#gpu.reset();

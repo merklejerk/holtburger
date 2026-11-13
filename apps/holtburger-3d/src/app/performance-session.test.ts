@@ -10,6 +10,7 @@ import type {
 } from "./native-performance";
 import { terrainCaptureDelta } from "./performance-report";
 import { EXPLORER_TUNING } from "../explorer/explorer-tuning";
+import { WebGL2FrameProfiler } from "../lib/game/renderer/webgl2-gpu-frame-profiler";
 import type { ClosedWorkerPoolDiagnostics } from "../lib/game/workers/closed-worker";
 
 function pool(): ClosedWorkerPoolDiagnostics {
@@ -209,37 +210,58 @@ describe("PerformanceSession", () => {
 		await expect(session.start()).rejects.toThrow("retired");
 	});
 
-	it("exports schema v4 portal workload counts from renderer diagnostics", async () => {
-		const diagnostics: PerformanceRendererDiagnostics = {
-			profile: null,
-			selectionMetrics: {
-				visibleSceneEntries: 244,
-				submittedStaticObjectDrawCount: 287,
-				submittedDynamicDrawCount: 52,
-				portalSelectedScopeCount: 4,
-				portalSelectedCrossingCount: 3,
-				portalPropagationDrawCount: 6,
-				portalAtlasTilePixelCount: 1_450_000,
-				portalTargetBytes: 184_320_000,
-			},
-		};
-		const { session } = build(undefined, () => diagnostics);
-		await session.start();
-		const report = session.snapshot();
-		expect(report?.schemaVersion).toBe(4);
-		expect(report?.workload).toEqual({
-			sceneEntries: 244,
-			staticDraws: 287,
-			dynamicDraws: 52,
-			portal: {
-				scopes: 4,
-				crossings: 3,
-				propagationDraws: 6,
-				tilePixels: 1_450_000,
-				targetBytes: 184_320_000,
-			},
-		});
-		await session.stop();
+	it("exports schema v5 renderer CPU phases and portal workload counts", async () => {
+		let now = 0;
+		const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+		try {
+			const profiler = new WebGL2FrameProfiler({
+				getExtension: () => null,
+			} as unknown as WebGL2RenderingContext);
+			const capture = profiler.beginFrame();
+			now += 1;
+			profiler.setCpuPhase("portalPlanning");
+			now += 2;
+			capture.finish();
+			const diagnostics: PerformanceRendererDiagnostics = {
+				profile: profiler.getProfile(),
+				selectionMetrics: {
+					visibleSceneEntries: 244,
+					submittedStaticObjectDrawCount: 287,
+					submittedDynamicDrawCount: 52,
+					portalSelectedScopeCount: 4,
+					portalSelectedCrossingCount: 3,
+					portalPropagationDrawCount: 6,
+					portalAtlasTilePixelCount: 1_450_000,
+					portalTargetBytes: 184_320_000,
+				},
+			};
+			const { session } = build(undefined, () => diagnostics);
+			await session.start();
+			const report = session.snapshot();
+			expect(report?.schemaVersion).toBe(5);
+			expect(report?.renderer?.cpu).toMatchObject({
+				latestMs: 3,
+				meanMs: 3,
+				latestPhaseMs: { portalPlanning: 2, other: 1, terrainSubmission: 0 },
+				meanPhaseMs: { portalPlanning: 2, other: 1, terrainSubmission: 0 },
+			});
+			expect(report?.workload).toEqual({
+				sceneEntries: 244,
+				staticDraws: 287,
+				dynamicDraws: 52,
+				portal: {
+					scopes: 4,
+					crossings: 3,
+					propagationDraws: 6,
+					tilePixels: 1_450_000,
+					targetBytes: 184_320_000,
+				},
+			});
+			await session.stop();
+			profiler.destroy();
+		} finally {
+			clock.mockRestore();
+		}
 	});
 });
 

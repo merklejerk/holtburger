@@ -179,8 +179,8 @@ performance-sensitive path.
 
 Profiling is intentionally opt-in. When disabled, renderer hot paths must not
 perform profiling clocks, GPU-query work, or retain profiling samples. Enabling
-it may add CPU clocks and one asynchronous elapsed GPU query per admitted renderer frame; disabling it must
-tear down those resources again.
+it may add CPU clocks and bounded sequential elapsed GPU queries per admitted renderer frame;
+disabling it must tear down those resources again.
 
 **The harness renders on the real GPU with `--gpu`, and CPU and GPU timing both
 work there.**
@@ -200,8 +200,10 @@ profiler needs no extra tooling: `--cpu-profile <path>` samples the page at
 standard `.cpuprofile` JSON, loadable in the Chrome DevTools Performance panel
 or speedscope.
 
-The built-in profiler measures major runtime systems and the whole renderer CPU/GPU
-boundary. It deliberately has no per-pass hooks. Use V8 sampling for function-level
+The built-in profiler measures major runtime systems, whole-renderer CPU time, and six coarse
+GPU workloads: terrain, opaque geometry, shadow maps, ambient occlusion, portal composition,
+and transparency/effects. Other renderer work remains in a remainder bucket. Use V8 sampling
+for function-level
 attribution, including allocation and GC costs. Compare equivalent workloads and
 normalize function self-times per frame when frame counts differ.
 
@@ -276,9 +278,14 @@ Emitter positions are discoverable rather than guessable: the scene-space
 origin of every live emitter passes through `collectCohorts`, so a temporary
 probe there yields real coordinates to point a camera at.
 
-GPU timing uses one `TIME_ELAPSED_EXT` query around the complete renderer command
-stream. It reports an elapsed device span, not utilization or a sum of pass times.
-Queries are bounded, read asynchronously, and discarded on reset or clock disjoint.
+GPU timing sums sequential, non-overlapping `TIME_ELAPSED_EXT` segments, including a
+remainder bucket. This measured total differs from the former uninterrupted frame span
+and is not GPU utilization. All system means use the same fully resolved frames, including
+zero for absent work. Repeated systems and views accumulate within a frame. Both pending
+frames and segments per frame are bounded; capacity exhaustion or aborted rendering discards
+the entire frame and increments the skipped count. Queries are read asynchronously and
+released on stop, reset, or clock disjoint. GPU uploads outside the renderer frame and browser
+compositing are outside this measurement.
 
 Treat the profile as attribution evidence, not a final diagnosis. GPU results
 arrive delayed by a frame or more, and a disjoint GPU clock discards them.

@@ -506,7 +506,7 @@ export interface FrameSelectionMetrics {
 	readonly objectSuppressedUniformUploads: number;
 }
 
-/** Whole-renderer elapsed statistics; there are no per-pass measurements. */
+/** Whole-renderer CPU elapsed statistics. */
 interface RendererCpuFrameProfileWindow {
 	readonly latestFrameNumber: number;
 	readonly latestMs: number;
@@ -516,30 +516,45 @@ interface RendererCpuFrameProfileWindow {
 	readonly sampleCount: number;
 }
 
-/** One complete renderer command-stream span, not GPU utilization. */
+/** Coarse GPU workloads; everything outside these hotspots remains in the remainder. */
+export const RENDERER_GPU_SYSTEMS = [
+	"terrain",
+	"opaqueGeometry",
+	"shadowMaps",
+	"ambientOcclusion",
+	"portalComposition",
+	"transparencyAndEffects",
+	"other",
+] as const;
+
+/** A GPU attribution boundary, shared by renderer instrumentation and diagnostics. */
+export type RendererGpuSystem = (typeof RENDERER_GPU_SYSTEMS)[number];
+
+/** Milliseconds per system, including zero for work absent from a resolved frame. */
+type RendererGpuSystemTimes = Readonly<Record<RendererGpuSystem, number>>;
+
+/** Sum of sequential elapsed-query segments, not utilization or an uninterrupted frame span. */
 interface RendererGpuFrameSample {
 	readonly frameNumber: number;
 	readonly kind: "available";
 	readonly latestMs: number;
 	readonly meanMs: number;
-	readonly pendingFrameCount: number;
 	readonly sampleCount: number;
+	/** Complete latest frame; repeated system segments and views are summed. */
+	readonly latestSystemMs: RendererGpuSystemTimes;
+	/** Same resolved-frame denominator as meanMs, including absent systems as zero. */
+	readonly meanSystemMs: RendererGpuSystemTimes;
 }
 
 /** Latest asynchronous GPU timing outcome for an explicitly enabled profiling session. */
 export type RendererGpuFrameProfile =
 	| { readonly kind: "unsupported" }
-	| {
-			readonly kind: "pending";
-			/** Submitted GPU frames whose timestamp results are not yet readable. */
+	| (({ readonly kind: "pending" | "disjoint" } | RendererGpuFrameSample) & {
+			/** Frames awaiting complete asynchronous segment results. */
 			readonly pendingFrameCount: number;
-	  }
-	| {
-			readonly kind: "disjoint";
-			/** New GPU frames submitted since invalid timing queries were discarded. */
-			readonly pendingFrameCount: number;
-	  }
-	| RendererGpuFrameSample;
+			/** Frames omitted for query capacity or aborted rendering since reset/disjoint. */
+			readonly skippedFrameCount: number;
+	  });
 
 /** Latest CPU frame and delayed GPU result from an explicitly enabled profiling session. */
 export interface RendererFrameProfile {

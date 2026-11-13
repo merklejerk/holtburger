@@ -70,6 +70,8 @@ export const SHARED_FRONTEND_TUNING = {
 	diagnostics: {
 		/** GPU query frames allowed to await asynchronous device results. */
 		maximumPendingGpuFrames: 4,
+		/** Bound query ownership even when a frame contains many views or system switches. */
+		maximumGpuSegmentsPerFrame: 64,
 		/**
 		 * Recent CPU frame profiles retained only so the profile's percentile has samples to rank.
 		 *

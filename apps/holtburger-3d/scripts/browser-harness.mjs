@@ -2700,7 +2700,7 @@ function briefHarnessReport(result) {
 		nameplateWorkload: result.nameplateWorkload,
 		nameplateLifecycle: result.nameplateLifecycle,
 		presentationProfile: result.state.presentationProfile,
-		unsupportedGpuSurfaces: result.unsupportedGpuSurfaces,
+		gpuSurfaces: result.gpuSurfaces,
 		frameSettings: result.state.frameSettings,
 		entityShadowResources: result.state.entityShadowResources,
 		portalScopeAtlasExecutorFixture: result.state.portalScopeAtlasExecutor,
@@ -7011,15 +7011,15 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				);
 			contentFailures.continuedFrameSamples = continued.timing.sampleCount;
 		}
-		let unsupportedGpuSurfaces = null;
+		let gpuSurfaces = null;
 		if (options.profileRenderer) {
-			unsupportedGpuSurfaces = await evaluateExpression(
+			gpuSurfaces = await evaluateExpression(
 				client,
 				`(async () => {
 				const state = globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state();
 				if (!state.frameProfile || !state.metrics || !state.dynamicResources || !state.entityShadowResources || !state.nameplates) throw new Error('Renderer diagnostic fixture is incomplete');
-				const { probeUnsupportedGpuSurfaces } = await import('/src/harness/browser/performance-surface-probe.ts');
-				return probeUnsupportedGpuSurfaces({
+				const { probeGpuSurfaces } = await import('/src/harness/browser/performance-surface-probe.ts');
+				return probeGpuSurfaces({
 					profile: state.frameProfile, profilingEnabled: true, selectionMetrics: state.metrics,
 					dynamicResources: state.dynamicResources, entityShadows: state.entityShadowResources,
 					nameplates: state.nameplates, compiledObjectDraws: state.compiledObjectDraws,
@@ -7044,10 +7044,35 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					"Stopping profiling retained active presentation or GPU collectors.",
 				);
 			}
+			gpuSurfaces.inactive = await evaluateExpression(
+				client,
+				`(async () => {
+				const harness = globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__;
+				const prototype = WebGL2RenderingContext.prototype;
+				const methods = ['createQuery', 'beginQuery', 'endQuery', 'getQueryParameter'];
+				const originals = new Map(methods.map(name => [name, prototype[name]]));
+				const startedAtFrame = harness.state().timing.sampleCount;
+				let queryCalls = 0;
+				try {
+					for (const [name, original] of originals) prototype[name] = function(...args) {
+						queryCalls++;
+						return Reflect.apply(original, this, args);
+					};
+					await new Promise(requestAnimationFrame);
+					await new Promise(requestAnimationFrame);
+					const renderedFrames = harness.state().timing.sampleCount - startedAtFrame;
+					if (renderedFrames <= 0) throw new Error('Inactive profiler probe observed no rendering');
+					if (queryCalls !== 0) throw new Error('Disabled profiling performed GPU query work');
+					return { renderedFrames, queryCalls };
+				} finally {
+					for (const [name, original] of originals) prototype[name] = original;
+				}
+				})()`,
+			);
 		}
 
 		return {
-			unsupportedGpuSurfaces,
+			gpuSurfaces,
 			contentFailures,
 			bakedDrawMergeCensus,
 			cpuProfile,

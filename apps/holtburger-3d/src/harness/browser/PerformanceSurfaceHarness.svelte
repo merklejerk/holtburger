@@ -2,7 +2,10 @@
 	import { onMount, tick } from "svelte";
 	import ClientDebugPanel from "../../client/ClientDebugPanel.svelte";
 	import ExplorerFramePanel from "../../explorer/ExplorerFramePanel.svelte";
-	import type { RendererFrameDiagnosticsSnapshot } from "../../lib/game/renderer/renderer";
+	import {
+		RENDERER_GPU_SYSTEMS,
+		type RendererFrameDiagnosticsSnapshot,
+	} from "../../lib/game/renderer/renderer";
 	import { PerformanceSession } from "../../app/performance-session";
 	import { EXPLORER_TUNING } from "../../explorer/explorer-tuning";
 
@@ -99,6 +102,28 @@
 					),
 				);
 			}
+			const gpu = diagnostics?.profile?.gpu;
+			if (gpu?.kind === "available") {
+				await waitFor(
+					() =>
+						document.querySelectorAll(`[data-mode="${mode}"] [data-gpu-system]`)
+							.length === RENDERER_GPU_SYSTEMS.length,
+				);
+				for (const system of RENDERER_GPU_SYSTEMS) {
+					const cells = document.querySelectorAll(
+						`[data-mode="${mode}"] [data-gpu-system="${system}"] td`,
+					);
+					if (
+						cells[0]?.textContent !==
+							`${gpu.latestSystemMs[system].toFixed(2)} ms` ||
+						cells[1]?.textContent !==
+							`${gpu.meanSystemMs[system].toFixed(2)} ms`
+					)
+						throw new Error(
+							`Incorrect GPU system timing in ${mode}: ${system}`,
+						);
+				}
+			}
 			await waitFor(
 				() => findButton(mode, "Reset capture")?.disabled === false,
 			);
@@ -136,6 +161,11 @@
 			);
 			button(mode, "Stop profiling").click();
 			await waitFor(() => !session.recording);
+			if (
+				JSON.stringify(session.snapshot()?.renderer) !==
+				JSON.stringify(diagnostics?.profile ?? null)
+			)
+				throw new Error("Stopped report lost renderer system timings.");
 			if (enabled[mode] || session.snapshot()?.capture.state !== "stopped")
 				throw new Error(
 					"Stop did not release collection and preserve its report.",

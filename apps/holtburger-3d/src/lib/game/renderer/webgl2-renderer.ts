@@ -1431,12 +1431,15 @@ export class WebGL2Renderer implements Renderer {
 		const profile = this.#frameProfiler?.beginFrame() ?? null;
 		try {
 			this.#drawFrameContent(input);
+			if (this.#combatEffectAdapters.size > 0)
+				this.#frameProfiler?.setGpuSystem("transparencyAndEffects");
 			for (const adapter of this.#combatEffectAdapters)
 				adapter.drawLane(
 					this.#canvas.width,
 					this.#canvas.height,
 					this.#renderScale,
 				);
+			this.#frameProfiler?.setGpuSystem("other");
 			return Object.freeze({
 				portalTransitionReceipt: portalTransitionPresentationReceipt(
 					input.portalTransition,
@@ -1446,6 +1449,7 @@ export class WebGL2Renderer implements Renderer {
 				]),
 			});
 		} catch (error) {
+			profile?.discardGpuFrame();
 			reportWebGL2Failure(
 				this.#gl,
 				error instanceof Error ? error.message : String(error),
@@ -1467,6 +1471,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#drawPortalTransitionFrameContent(input);
 			return portalTransitionPresentationReceipt(input.portalTransition);
 		} catch (error) {
+			profile?.discardGpuFrame();
 			reportWebGL2Failure(
 				this.#gl,
 				error instanceof Error ? error.message : String(error),
@@ -1808,11 +1813,13 @@ export class WebGL2Renderer implements Renderer {
 		const placement = viewInput.camera.placement;
 		const rootScope = scopeFor(placement.landblockId, placement.envCellId);
 
+		this.#frameProfiler?.setGpuSystem("portalComposition");
 		const frame = pipeline.prepare(
 			this.#world.getPortalTopologyView(),
 			this.#createPortalScopeWindowCullInput(prepared, viewInput, rootScope),
 		);
 
+		this.#frameProfiler?.setGpuSystem("other");
 		this.#accumulatePortalScopeAtlasMetrics(frame);
 		const shadows =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null
@@ -2014,11 +2021,13 @@ export class WebGL2Renderer implements Renderer {
 		const clearColor = this.#viewClearColor(view, shading);
 		this.#executeOutdoorShadows(plan.shadows);
 		const target = this.#acquireFlatSceneTarget();
+		this.#frameProfiler?.setGpuSystem("portalComposition");
 		const portalTargets = pipeline.beginOpaqueScene(
 			frame,
 			clearColor,
 			target.framebuffer,
 		);
+		this.#frameProfiler?.setGpuSystem("other");
 		const objectPhases = this.#createObjectSubmissionPhases(view);
 		const hasOutdoorScope =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null;
@@ -2044,15 +2053,18 @@ export class WebGL2Renderer implements Renderer {
 		// same positive polygon offset, keeping coplanar object-vs-terrain ties identical.
 		this.#drawOpaqueObjects(view, objectPhases.opaque, shading, pipeline);
 		this.#drawTerrain(view, shading, pipeline);
+		this.#frameProfiler?.setGpuSystem("portalComposition");
 		if (portalTargets !== null) {
 			this.#beginFlatOpaqueScene(target, clearColor);
 		}
 		pipeline.execute(target.framebuffer);
 		pipeline.beginDeferredScene(target.framebuffer);
+		this.#frameProfiler?.setGpuSystem("other");
 		// Entity color participates once, after static portal composition. Its depth both
 		// occludes later draws and contributes to the same AO evaluation as static geometry.
 		this.#drawDynamicOpaque(view, shading);
 		if (shading.ambientOcclusion.kind === "enabled") {
+			this.#frameProfiler?.setGpuSystem("ambientOcclusion");
 			this.#getSaoPass().apply(
 				target,
 				view.camera,
@@ -2062,6 +2074,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#recordAmbientOcclusionWork(
 				target.extent.width * target.extent.height,
 			);
+			this.#frameProfiler?.setGpuSystem("other");
 		}
 		// Outdoor foreground weather follows complete-scene AO, including doorway images.
 		if (hasOutdoorScope) {
@@ -2263,11 +2276,13 @@ export class WebGL2Renderer implements Renderer {
 		if (prepared === null || prepared.maps === null) return;
 		const { maps } = prepared;
 
+		this.#frameProfiler?.setGpuSystem("shadowMaps");
 		this.#activeOutdoorPssmFrame = this.#outdoorPssmPass.render(maps);
 
 		if (this.#activeOutdoorPssmFrame) {
 			this.#deviceState.invalidate();
 		}
+		this.#frameProfiler?.setGpuSystem("other");
 	}
 
 	#viewClearColor(
@@ -3442,6 +3457,7 @@ export class WebGL2Renderer implements Renderer {
 		const pass = this.#particlePass;
 		if (!pass) return;
 
+		this.#frameProfiler?.setGpuSystem("transparencyAndEffects");
 		execute(pass);
 		const diagnostics = pass.getDiagnostics();
 		this.#frameSelectionMetrics.submittedParticleBatchCount +=
@@ -3452,6 +3468,7 @@ export class WebGL2Renderer implements Renderer {
 			diagnostics.unresolvedBatchCount;
 		this.#frameSelectionMetrics.uploadedParticleRecordRowCount +=
 			diagnostics.uploadedRecordRowCount;
+		this.#frameProfiler?.setGpuSystem("other");
 	}
 
 	#drawParticleBatches(
@@ -3514,6 +3531,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#drawDynamicOpaque(view, shading);
 		this.#drawTerrain(view, shading, null);
 		if (shading.ambientOcclusion.kind === "enabled") {
+			this.#frameProfiler?.setGpuSystem("ambientOcclusion");
 			this.#getSaoPass().apply(
 				target,
 				view.camera,
@@ -3523,6 +3541,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#recordAmbientOcclusionWork(
 				target.extent.width * target.extent.height,
 			);
+			this.#frameProfiler?.setGpuSystem("other");
 		}
 		// Retail's after-landscape weather: drawn once the landblock loop is down but before
 		// the deferred translucent flush, which is legitimately allowed to cover it.
@@ -3623,6 +3642,8 @@ export class WebGL2Renderer implements Renderer {
 		routing: WebGL2PortalScopeAtlasPipeline | null,
 		visibility: DynamicRenderDomainSelection | null,
 	): void {
+		if (this.#combatEffectAdapters.size === 0) return;
+		this.#frameProfiler?.setGpuSystem("transparencyAndEffects");
 		for (const adapter of this.#combatEffectAdapters)
 			adapter.drawWorld({
 				clipFromAnchor: mat4ToFloat32Array(
@@ -3642,6 +3663,7 @@ export class WebGL2Renderer implements Renderer {
 							? 0
 							: null,
 			});
+		this.#frameProfiler?.setGpuSystem("other");
 	}
 
 	#drawNameplates(
@@ -4181,6 +4203,7 @@ export class WebGL2Renderer implements Renderer {
 			);
 			return;
 		}
+		this.#frameProfiler?.setGpuSystem("terrain");
 		const farCutoff = farTerrainCutoffLandblocks(shading.fog);
 		this.#frameSelectionMetrics.farTerrainCutoffLandblocks = farCutoff;
 		let nearCount = 0;
@@ -4255,6 +4278,7 @@ export class WebGL2Renderer implements Renderer {
 			gl.disable(gl.POLYGON_OFFSET_FILL);
 			// Terrain mutates raw WebGL program, VAO, texture, and cull-face bindings outside #deviceState.
 			this.#deviceState.invalidate();
+			this.#frameProfiler?.setGpuSystem("other");
 		}
 	}
 
@@ -4869,6 +4893,7 @@ export class WebGL2Renderer implements Renderer {
 		if (program === null)
 			throw new Error("Merged opaque color was not prepared before execution.");
 
+		this.#frameProfiler?.setGpuSystem("opaqueGeometry");
 		const gl = this.#gl;
 		const state = this.#deviceState;
 
@@ -4889,6 +4914,7 @@ export class WebGL2Renderer implements Renderer {
 				this.#drawDynamicColorSpan(range, span.indexCount);
 			}
 		}
+		this.#frameProfiler?.setGpuSystem("other");
 	}
 
 	#drawOpaqueObjects(
@@ -4898,6 +4924,7 @@ export class WebGL2Renderer implements Renderer {
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
 		if (candidates.length === 0) return;
+		this.#frameProfiler?.setGpuSystem("opaqueGeometry");
 		const objects = this.#prepareFrameInstanceRuns(
 			[candidates],
 			[{ cohort: "ignore", grouping: "grouped" }],
@@ -4946,6 +4973,7 @@ export class WebGL2Renderer implements Renderer {
 			);
 			this.#drawObjectRange(program, object, view.landblockOffsets);
 		}
+		this.#frameProfiler?.setGpuSystem("other");
 	}
 
 	/** Draw one selected span exactly where the shared transparent/additive ordering placed it. */
@@ -4980,6 +5008,7 @@ export class WebGL2Renderer implements Renderer {
 		});
 		if (sortedBlended.length === 0) return;
 
+		this.#frameProfiler?.setGpuSystem("transparencyAndEffects");
 		const gl = this.#gl;
 
 		// Primes every object sampler unit, not just the cache, exactly as the opaque pass does.
@@ -5053,6 +5082,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#deviceState.applyBlend(object.blendPolicy);
 			this.#drawObjectRange(program, object, view.landblockOffsets);
 		}
+		this.#frameProfiler?.setGpuSystem("other");
 	}
 
 	/** Compile the two portal-only material variants on the first replacement-compositor frame. */

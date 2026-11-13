@@ -10,7 +10,7 @@ import type { ClosedWorkerPoolDiagnostics } from "../lib/game/workers/closed-wor
 
 /** Report shared by both frontends and their automated probes. No game/account payloads. */
 export interface PerformanceReport {
-	readonly schemaVersion: 2;
+	readonly schemaVersion: 3;
 	readonly mode: "client" | "explorer";
 	readonly capture: {
 		readonly generation: number;

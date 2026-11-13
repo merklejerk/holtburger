@@ -10,7 +10,7 @@
 	<title>Holtburger · The Asheron's Call client, reengineered.</title>
 	<meta
 		name="description"
-		content="The Asheron's Call client, reengineered. A Rust core, a 3D Electron interface, and a scriptable terminal client."
+		content="An independently built, open-source Asheron's Call client. A fresh approach to movement, combat, visuals, and everyday play."
 	/>
 </svelte:head>
 
@@ -19,8 +19,8 @@
 		<div class="cover-copy">
 			<h1>The Asheron's Call client,<br />reengineered.</h1>
 			<p class="cover-deck">
-				Built from the protocol up: a Rust core, a 3D Electron interface, and a
-				scriptable terminal client.
+				An independently built, open-source client for Asheron’s Call, with a
+				fresh approach to movement, combat, visuals, and everyday play.
 			</p>
 			<div class="hero-actions">
 				<a class="button" href={guide('start')}
@@ -44,30 +44,41 @@
 
 	<MediaCarousel
 		label="Holtburger 3D screenshots"
-		images={['outdoors', 'combat', 'jump', 'map', 'characters', 'holtburg']}
+		images={[
+			'outdoors',
+			'combat',
+			'combat-phalanx',
+			'jump',
+			'map',
+			'characters',
+			'holtburg'
+		]}
 	/>
 
 	<div class="home-editorial">
 		<section class="opening-argument">
 			<h2>Keep Dereth.<br />Rethink the client.</h2>
 			<p>
-				You know the world. The interface should help you play it. Holtburger
-				brings a fresh client to the existing game, with room to question the
-				layouts, controls and workarounds you have lived with for years.
+				You know the world, its challenges, and the people who keep you coming
+				back. Holtburger brings a fresh client to that existing game. Its own
+				rendering, movement, and physics leave room to reconsider how you
+				experience Dereth, right down to the controls and everyday tools.
 			</p>
 		</section>
 		<section class="player-argument">
 			<h2>Built for the player at the keyboard</h2>
 			<DecorativeArt name="lugian" class="creature-vignette" />
 			<p>
-				A long-running game accumulates friction. Plugins fill the gaps, windows
-				crowd the view, and familiar workarounds become muscle memory. A new
-				client is a chance to make those everyday interactions work together.
+				Keep moving while casting or healing, using your normal movement
+				controls. Plan a jump with a visible trajectory. Follow a fight through
+				enemy health bars and floating damage numbers, and recognize equipment
+				cantrip tiers at a glance.
 			</p>
 			<p>
-				h3d puts active play first: less time arranging the interface or digging
-				through it, more attention on the fight, the route and the people beside
-				you. Its compact HUD and integrated tools are designed around that goal.
+				h3d brings those decisions together with combined inventory views, saved
+				gear swaps, and maps that connect your quests and destinations. The goal
+				is less routine management and more attention on the fight, the route,
+				and the people beside you.
 			</p>
 		</section>
 	</div>
@@ -75,18 +86,23 @@
 	<section class="foundation-spread">
 		<DecorativeArt name="black-hills" class="editorial-vignette" />
 		<div>
-			<h2>Reengineered,<br />from the protocol up</h2>
+			<h2>Open source.<br />Yours to inspect.</h2>
 			<p>
-				Holtburger began with a Rust client core built against ACE. Its
-				interface, renderer and physics were designed from the ground up, with
-				retail research used to align behavior where compatibility requires it.
+				A client is software you trust with your game account. Holtburger’s
+				source is available for anyone to inspect, from how it connects to the
+				server to how it handles your actions in the world.
 			</p>
 			<p>
-				That leaves room for the client to evolve with today’s tools. A
-				browser-based desktop interface makes expressive themes possible; a
-				shared core supports different ways to play the same game.
+				You can study how it works, modify it, and build it yourself. That same
+				openness gives the project a future others can carry forward.
 			</p>
-			<p><a href={guide('3d')}>Explore the 3D client →</a></p>
+			<p>
+				<a href={guide('3d')}>Explore the 3D client →</a>
+				·
+				<a href="https://github.com/merklejerk/holtburger"
+					>Browse the source →</a
+				>
+			</p>
 		</div>
 	</section>
 
@@ -94,9 +110,9 @@
 		<div>
 			<h2>A lighter form<br />for a different job</h2>
 			<p>
-				Automation does not need a rendered world. The terminal client uses the
-				same core in a form suited to scripts and bots, with JavaScript access
-				to game state and actions.
+				Holtburger began as a terminal client built against ACE. That client
+				gives scripts and bots a home without rendering a 3D world, with access
+				to game state and actions and bundled combat scripts to study and adapt.
 			</p>
 			<p>
 				h3d’s focus on active play is a design direction. Plugins and scripting
@@ -110,7 +126,7 @@
 				aria-label="View the terminal screenshot at full size"
 				><img
 					src={asset('assets/screenshots/tui.webp')}
-					alt="Terminal gameplay showing nearby creatures, item appraisal and combat feedback"
+					alt="Terminal gameplay showing nearby creatures, item appraisal, and combat feedback"
 					width="1055"
 					height="818"
 					loading="lazy"

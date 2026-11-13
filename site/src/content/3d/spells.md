@@ -33,6 +33,8 @@ Spell bindings are saved per character. Customize shortcuts in **Settings → In
 
 ## Browse your spellbook
 
+The Character shortcut pulses when you learn a new spell.
+
 Search by name or combine filters for school, level, damage type and targeting. Select a spell’s name for its description, mana cost, range and components.
 
 Unlike retail, you can **cast directly from the list**. In magic stance, select your target and press **Cast** beside a spell—useful for an occasional cast you have not put on a bar.

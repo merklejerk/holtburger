@@ -11,7 +11,7 @@ import Media from '#lib/components/Media.svelte';
 
 ## Find a contract
 
-Open **Journal** and search by contract name. Use the status filters to narrow the list to available, in-progress, completed, or waiting-to-repeat contracts. **All** clears the status restriction.
+The Journal shortcut pulses when you acquire a new contract. Open **Journal** and search by contract name. Use the status filters to narrow the list to available, in-progress, completed, or waiting-to-repeat contracts. **All** clears the status restriction.
 
 Select an entry to read its status, progress and available details. Timed contracts show remaining time; repeatable contracts can show when they become available again.
 

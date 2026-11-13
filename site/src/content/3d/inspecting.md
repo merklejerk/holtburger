@@ -31,6 +31,8 @@ Check a creature’s level, vitals, attributes and protection when sizing up a f
 
 ## Items
 
-Read requirements, combat values, effects, descriptions and inscriptions before equipping, trading or using an item.
+Read requirements, combat values, effects, descriptions and inscriptions before equipping, trading or using an item. Apparel shows **Covers** alongside its armor facts when body coverage is known. Augmentation items show their unspent XP cost and consumption explanation under **On use**; hover over an abbreviated cost for the exact amount.
+
+[Cantrip-tier borders](/holtburger/3d/inventory/#recognize-cantrip-tiers) help you spot equipment worth examining. The border represents the highest known tier; inspect the spell details to judge whether the item suits your build.
 
 <Media id="item-appraisal" detail />

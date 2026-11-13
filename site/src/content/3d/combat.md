@@ -24,6 +24,8 @@ Choosing power, accuracy or height **starts attacking your selection**, or updat
 
 The outer arc shows power or accuracy; the inner rows show attack height. You can also click these controls or drag the arc for a precise value. **▶** starts an attack with the current settings, then becomes a pause control while attacking. Missile stance also shows your ammunition supply.
 
+If you have trained or specialized **Recklessness**, the arc marks its **10–90%** power/accuracy range. A skull and **Reckless** label show when your chosen setting is inside that range.
+
 In magic stance, use your [spell bar](/holtburger/3d/spells/) instead.
 
 {#snippet illustration()}
@@ -61,6 +63,16 @@ A separate combat reticle marks the target you are actively attacking or casting
 {/snippet}
 
 </EditorialSpread>
+
+## Read health and damage in the world
+
+In combat stance, health bars appear beneath the names of nearby hostile creatures involved in combat when recent health information is available. You can follow several enemies’ remaining health without selecting each one in turn.
+
+Holtburger refreshes that information automatically, prioritizing enemies you have attacked most recently. Bars disappear when you return to peace stance.
+
+Floating damage numbers show hit amounts, with an emphasized **CRITICAL** label for critical hits. **MISS** and **RESIST** indicators show when an attack is evaded or a spell is resisted, so you can read the outcome without watching chat.
+
+<Media id="combat-health-bars" detail />
 
 ## Recognize summons
 

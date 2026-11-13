@@ -33,7 +33,7 @@ See [movement](/holtburger/3d/movement-camera/) and [jumping](/holtburger/3d/mov
 | Cycle smart combat targets                 | Tap Tab / Shift+Tab              |
 | Acquire immediate target                   | Hold Tab or Shift+Tab            |
 | Cycle world objects                        | Ctrl+Tab / Ctrl+Shift+Tab        |
-| Cycle unopened corpses                     | V / Shift+V                      |
+| Cycle corpses (unopened first)             | V / Shift+V                      |
 | Open Nearby entities and alerts            | Ctrl+F                           |
 | Select self                                | X                                |
 | Interact with selection                    | R                                |

@@ -15,7 +15,7 @@ Click a particular object when you know what you want, or find it in the [Nearby
 
 You can also select by name with [`/scan NAME`](/holtburger/3d/nearby/#select-by-name-from-chat), such as `/scan diamond golem`.
 
-For looting, the [controls reference](/holtburger/3d/controls/#select-and-interact) includes dedicated object and unopened-corpse cyclers.
+For looting, the [controls reference](/holtburger/3d/controls/#select-and-interact) includes dedicated object and corpse cyclers.
 
 ## Use the selected-entity HUD
 
@@ -35,7 +35,9 @@ Some items need a target. Activate the item first, then choose what to use it on
 
 ## Loot and world containers
 
-Select a container or corpse and press **R** to open it. Use its contents to move items into your inventory. **V** cycles unopened corpses; **Shift+V** cycles in reverse.
+Select a container or corpse and press **R** to open it. Use its contents to move items into your inventory. **V** cycles corpses; **Shift+V** cycles in reverse. Unopened corpses take priority. When none remain in range, the same shortcuts cycle opened corpses so you can revisit them.
+
+Equipment in an open container is appraised automatically so its [cantrip-tier borders](/holtburger/3d/inventory/#recognize-cantrip-tiers) can appear while you browse.
 
 For locked doors and containers, use the [key and lockpick helper](/holtburger/3d/locks/). To clear unwanted gear, [sell it](/holtburger/3d/trading/#buy-or-sell-at-a-vendor) or [salvage it](/holtburger/3d/crafting/#salvaging-items).
 

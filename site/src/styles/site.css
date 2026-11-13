@@ -859,6 +859,8 @@ figcaption {
 }
 .media-carousel-slide {
 	flex: 0 0 100%;
+	display: grid;
+	align-items: center;
 	min-width: 0;
 	scroll-snap-align: start;
 	scroll-snap-stop: always;

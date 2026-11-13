@@ -5,7 +5,7 @@ import {
 } from "./webgl2-gpu-frame-profiler";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
-describe("whole-renderer profiling", () => {
+describe("renderer profiling", () => {
 	it("reports unsupported without allocating queries", () => {
 		const fixture = createGpuHarness(false);
 		const profiler = new WebGL2GpuFrameProfiler(fixture.gl);
@@ -17,7 +17,7 @@ describe("whole-renderer profiling", () => {
 		const fixture = createGpuHarness(true, 0);
 		expect(new WebGL2GpuFrameProfiler(fixture.gl).beginFrame(1)).toBeNull();
 	});
-	it("uses one asynchronous query per frame and accumulates a mean", () => {
+	it("accumulates complete asynchronous frames", () => {
 		const fixture = createGpuHarness(true);
 		const profiler = new WebGL2GpuFrameProfiler(fixture.gl);
 		profiler.beginFrame(1)?.finish();
@@ -26,6 +26,7 @@ describe("whole-renderer profiling", () => {
 		expect(profiler.getProfile()).toEqual({
 			kind: "pending",
 			pendingFrameCount: 2,
+			skippedFrameCount: 0,
 		});
 		fixture.resultsAvailable = true;
 		profiler.poll();
@@ -36,6 +37,25 @@ describe("whole-renderer profiling", () => {
 			meanMs: 1,
 			sampleCount: 2,
 			pendingFrameCount: 0,
+			skippedFrameCount: 0,
+			latestSystemMs: {
+				terrain: 0,
+				opaqueGeometry: 0,
+				shadowMaps: 0,
+				ambientOcclusion: 0,
+				portalComposition: 0,
+				transparencyAndEffects: 0,
+				other: 1,
+			},
+			meanSystemMs: {
+				terrain: 0,
+				opaqueGeometry: 0,
+				shadowMaps: 0,
+				ambientOcclusion: 0,
+				portalComposition: 0,
+				transparencyAndEffects: 0,
+				other: 1,
+			},
 		});
 		expect(fixture.deleteQuery).toHaveBeenCalledTimes(2);
 	});
@@ -65,6 +85,7 @@ describe("whole-renderer profiling", () => {
 		expect(profiler.getProfile()).toEqual({
 			kind: "disjoint",
 			pendingFrameCount: 0,
+			skippedFrameCount: 0,
 		});
 		fixture.disjoint = false;
 		profiler.beginFrame(2)?.finish();
@@ -84,6 +105,130 @@ describe("whole-renderer profiling", () => {
 		expect(fixture.deleteQuery).toHaveBeenCalledTimes(maximum);
 		expect(() => profiler.beginFrame(maximum)).toThrow("destroyed");
 	});
+	it("sums repeated systems and views, and includes absent systems in the frame mean", () => {
+		const fixture = createGpuHarness(true);
+		const profiler = new WebGL2GpuFrameProfiler(fixture.gl);
+		const frame = profiler.beginFrame(1);
+		profiler.setSystem("terrain");
+		profiler.setSystem("terrain"); // Adjacent equal boundaries do not create another query.
+		profiler.setSystem("opaqueGeometry");
+		profiler.setSystem("terrain"); // A second view contributes to the same frame.
+		frame?.finish();
+		expect(fixture.createQuery).toHaveBeenCalledTimes(4);
+		profiler.beginFrame(2)?.finish(); // No terrain or objects in this frame.
+		fixture.resultsAvailable = true;
+		profiler.poll();
+		expect(profiler.getProfile()).toMatchObject({
+			frameNumber: 2,
+			sampleCount: 2,
+			latestMs: 1,
+			meanMs: 2.5,
+			latestSystemMs: { terrain: 0, opaqueGeometry: 0, other: 1 },
+			meanSystemMs: { terrain: 1, opaqueGeometry: 0.5, other: 1 },
+		});
+	});
+
+	it("waits for every segment before reading or publishing any part of a frame", () => {
+		const fixture = createGpuHarness(true);
+		const profiler = new WebGL2GpuFrameProfiler(fixture.gl);
+		const frame = profiler.beginFrame(1);
+		profiler.setSystem("terrain");
+		profiler.setSystem("other");
+		frame?.finish();
+		fixture.availableQueryCount = 2;
+		profiler.poll();
+		expect(profiler.getProfile()).toMatchObject({
+			kind: "pending",
+			pendingFrameCount: 1,
+		});
+		expect(fixture.readResult).not.toHaveBeenCalled();
+		fixture.resultsAvailable = true;
+		profiler.poll();
+		expect(profiler.getProfile()).toMatchObject({
+			kind: "available",
+			sampleCount: 1,
+			latestMs: 3,
+		});
+	});
+
+	it("discards an entire over-budget frame and resumes on the next frame", () => {
+		const fixture = createGpuHarness(true);
+		const profiler = new WebGL2GpuFrameProfiler(fixture.gl);
+		const frame = profiler.beginFrame(1);
+		const maximum =
+			SHARED_FRONTEND_TUNING.diagnostics.maximumGpuSegmentsPerFrame;
+		for (let index = 0; index < maximum; index++)
+			profiler.setSystem(index % 2 === 0 ? "terrain" : "other");
+		frame?.finish();
+		expect(fixture.createQuery).toHaveBeenCalledTimes(maximum);
+		expect(fixture.deleteQuery).toHaveBeenCalledTimes(maximum);
+		expect(profiler.getProfile()).toMatchObject({
+			kind: "pending",
+			pendingFrameCount: 0,
+			skippedFrameCount: 1,
+		});
+		profiler.beginFrame(2)?.finish();
+		fixture.resultsAvailable = true;
+		profiler.poll();
+		expect(profiler.getProfile()).toMatchObject({
+			frameNumber: 2,
+			sampleCount: 1,
+			latestMs: 1,
+			skippedFrameCount: 1,
+		});
+	});
+
+	it("releases all active and pending segments on reset and disjoint", () => {
+		const fixture = createGpuHarness(true);
+		const profiler = new WebGL2GpuFrameProfiler(fixture.gl);
+		const pending = profiler.beginFrame(1);
+		profiler.setSystem("shadowMaps");
+		pending?.finish();
+		const active = profiler.beginFrame(2);
+		profiler.setSystem("ambientOcclusion");
+		fixture.disjoint = true;
+		profiler.poll();
+		active?.finish();
+		expect(fixture.deleteQuery).toHaveBeenCalledTimes(4);
+		fixture.disjoint = false;
+		const next = profiler.beginFrame(3);
+		profiler.setSystem("portalComposition");
+		profiler.reset();
+		next?.discard();
+		next?.finish();
+		expect(fixture.deleteQuery).toHaveBeenCalledTimes(6);
+		expect(profiler.getProfile()).toMatchObject({
+			kind: "pending",
+			skippedFrameCount: 0,
+		});
+	});
+
+	it("discards partial GPU work when rendering fails, including query allocation failure", () => {
+		const fixture = createGpuHarness(true);
+		const profiler = new WebGL2FrameProfiler(fixture.gl);
+		const frame = profiler.beginFrame();
+		profiler.setGpuSystem("terrain");
+		fixture.createQuery.mockReturnValueOnce(null);
+		expect(() => profiler.setGpuSystem("opaqueGeometry")).toThrow(
+			"Failed to allocate",
+		);
+		frame.discardGpuFrame();
+		frame.finish();
+		expect(fixture.deleteQuery).toHaveBeenCalledTimes(2);
+		const next = profiler.beginFrame();
+		next.finish();
+		fixture.resultsAvailable = true;
+		// Poll by admitting another frame, just as the renderer does.
+		profiler.beginFrame().finish();
+		expect(profiler.getProfile()?.gpu).toMatchObject({
+			kind: "available",
+			frameNumber: 2,
+			sampleCount: 1,
+			latestSystemMs: { terrain: 0 },
+		});
+		profiler.destroy();
+	});
+
 	it("averages whole CPU frames and isolates reset windows", () => {
 		const fixture = createGpuHarness(false);
 		let now = 0;
@@ -124,20 +269,29 @@ function createGpuHarness(
 	supported: boolean,
 	elapsedBits = 64,
 ): {
-	readonly createQuery: ReturnType<typeof vi.fn>;
+	readonly createQuery: ReturnType<typeof vi.fn<() => WebGLQuery | null>>;
+	readonly readResult: ReturnType<typeof vi.fn>;
+	availableQueryCount: number;
 	readonly deleteQuery: ReturnType<typeof vi.fn>;
 	disjoint: boolean;
 	readonly gl: WebGL2RenderingContext;
 	resultsAvailable: boolean;
 } {
-	// Each whole-frame query resolves to a fixed 1 ms.
+	// Each segment resolves to a fixed 1 ms; availability can advance independently.
 	const elapsed = new Map<WebGLQuery, number>();
+	const createdQueries: WebGLQuery[] = [];
+	const readResult = vi.fn((query: WebGLQuery) => elapsed.get(query));
 	const state = {
+		availableQueryCount: 0,
 		disjoint: false,
 		resultsAvailable: false,
 	};
 	let active: WebGLQuery | null = null;
-	const createQuery = vi.fn(() => ({}) as WebGLQuery);
+	const createQuery = vi.fn((): WebGLQuery | null => {
+		const query = {} as WebGLQuery;
+		createdQueries.push(query);
+		return query;
+	});
 	const deleteQuery = vi.fn();
 	const extension = supported
 		? {
@@ -164,11 +318,21 @@ function createGpuHarness(
 		getParameter: () => state.disjoint,
 		getQuery: () => elapsedBits,
 		getQueryParameter: (query: WebGLQuery, parameter: GLenum) =>
-			parameter === 0x8867 ? state.resultsAvailable : elapsed.get(query),
+			parameter === 0x8867
+				? state.resultsAvailable ||
+					createdQueries.indexOf(query) < state.availableQueryCount
+				: readResult(query),
 	} as unknown as WebGL2RenderingContext;
 	return {
 		createQuery,
 		deleteQuery,
+		readResult,
+		get availableQueryCount() {
+			return state.availableQueryCount;
+		},
+		set availableQueryCount(value: number) {
+			state.availableQueryCount = value;
+		},
 		get disjoint() {
 			return state.disjoint;
 		},

@@ -2,6 +2,10 @@
 	import { onMount } from "svelte";
 	import type { PerformanceSession } from "./performance-session";
 	import {
+		RENDERER_GPU_SYSTEMS,
+		type RendererGpuSystem,
+	} from "../lib/game/renderer/renderer";
+	import {
 		serializePerformanceReport,
 		type PerformanceReport,
 	} from "./performance-report";
@@ -23,6 +27,15 @@
 	const gpu = $derived(profile?.gpu ?? null);
 	const recording = $derived(report?.capture.state === "recording");
 	const native = $derived(report?.native);
+	const gpuSystemLabels: Record<RendererGpuSystem, string> = {
+		terrain: "Terrain",
+		opaqueGeometry: "Opaque geometry",
+		shadowMaps: "Shadow maps",
+		ambientOcclusion: "Ambient occlusion",
+		portalComposition: "Portal composition",
+		transparencyAndEffects: "Transparency and effects",
+		other: "Other renderer work",
+	};
 	const ms = (value: number | null | undefined): string =>
 		value == null ? "—" : `${value.toFixed(2)} ms`;
 
@@ -133,7 +146,9 @@
 						></tr
 					>
 					<tr
-						><th>GPU frame span</th><td
+						><th title="Sum of sequential GPU timing segments"
+							>GPU measured total</th
+						><td
 							>{gpu?.kind === "available"
 								? ms(gpu.meanMs)
 								: (gpu?.kind ?? "pending")}</td
@@ -174,6 +189,30 @@
 							<tr><td>↳ Renderer CPU</td><td>{ms(profile?.cpu.meanMs)}</td></tr>
 						</tbody>
 					</table>
+				</div>
+			</details>
+			<details class="ui-disclosure">
+				<summary>GPU systems</summary>
+				<div class="performance-subsection">
+					{#if gpu?.kind === "available"}
+						<table>
+							<thead><tr><th>System</th><th>Latest</th><th>Mean</th></tr></thead
+							>
+							<tbody>
+								{#each RENDERER_GPU_SYSTEMS as system (system)}
+									<tr data-gpu-system={system}
+										><th>{gpuSystemLabels[system]}</th><td
+											>{ms(gpu.latestSystemMs[system])}</td
+										><td>{ms(gpu.meanSystemMs[system])}</td></tr
+									>
+								{/each}
+							</tbody>
+						</table>
+						<p class="ui-muted">
+							All systems use the same resolved frames. Frames without a system
+							contribute zero.
+						</p>
+					{:else}<p class="ui-muted">{gpu?.kind ?? "pending"}</p>{/if}
 				</div>
 			</details>
 			<details class="ui-disclosure">
@@ -268,6 +307,13 @@
 									>{gpu?.kind === "available"
 										? `${gpu.sampleCount} / ${gpu.pendingFrameCount}`
 										: (gpu?.kind ?? "pending")}</td
+								></tr
+							>
+							<tr
+								><th>GPU skipped frames</th><td
+									>{gpu && gpu.kind !== "unsupported"
+										? gpu.skippedFrameCount
+										: "—"}</td
 								></tr
 							>
 							{#if report.workload}<tr

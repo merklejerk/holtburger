@@ -375,6 +375,8 @@ export interface FrontendTuning {
 	readonly diagnostics: {
 		/** GPU query frames allowed to await device results. */
 		readonly maximumPendingGpuFrames: number;
+		/** Maximum sequential queries in one GPU frame before its whole sample is discarded. */
+		readonly maximumGpuSegmentsPerFrame: number;
 		/** CPU frame samples retained for tail percentiles. */
 		readonly percentileCpuFrameTail: number;
 		/** Recent authored-effect observations retained for diagnostics. */

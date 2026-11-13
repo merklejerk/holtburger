@@ -123,6 +123,7 @@ function framebuffersComplete(
 			targets.frontiers[0].framebuffer,
 			targets.frontiers[1].framebuffer,
 			targets.envelope.framebuffer,
+			targets.dilation.framebuffer,
 		]) {
 			gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
 			if (
@@ -147,12 +148,14 @@ function resourcesValid(
 		gl.isFramebuffer(targets.frontiers[0].framebuffer) &&
 		gl.isFramebuffer(targets.frontiers[1].framebuffer) &&
 		gl.isFramebuffer(targets.envelope.framebuffer) &&
+		gl.isFramebuffer(targets.dilation.framebuffer) &&
 		gl.isTexture(targets.frontierDepth) &&
 		gl.isTexture(targets.scene.color) &&
 		gl.isTexture(targets.scene.depth) &&
 		gl.isTexture(targets.frontiers[0].state) &&
 		gl.isTexture(targets.frontiers[1].state) &&
-		gl.isTexture(targets.envelope.depth)
+		gl.isTexture(targets.envelope.depth) &&
+		gl.isTexture(targets.dilation.scratch)
 	);
 }
 

@@ -311,7 +311,7 @@ function bindLightArray(
 	cap: number,
 	scratch: DynamicLightScratch,
 ): void {
-	const count = Math.min(lights.length, cap);
+	const count = colorScale > 0 ? Math.min(lights.length, cap) : 0;
 	gl.uniform1i(countUniform, count);
 	if (count === 0) return;
 	for (let index = 0; index < count; index += 1) {

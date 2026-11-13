@@ -2482,9 +2482,9 @@ function assertPortalScopeAtlasTargetsFixture(fixture) {
 		}
 	}
 	assertScopeAtlasTargetDiagnostics(fixture.initialDiagnostics, {
-		activeBytes: 864,
-		activeFramebufferCount: 4,
-		activeTextureCount: 6,
+		activeBytes: 1_120,
+		activeFramebufferCount: 5,
+		activeTextureCount: 7,
 		allocatedGenerationCount: 1,
 		disposedGenerationCount: 0,
 		extents: {
@@ -2493,9 +2493,9 @@ function assertPortalScopeAtlasTargetsFixture(fixture) {
 		},
 	});
 	assertScopeAtlasTargetDiagnostics(fixture.resizedDiagnostics, {
-		activeBytes: 1_728,
-		activeFramebufferCount: 4,
-		activeTextureCount: 6,
+		activeBytes: 2_240,
+		activeFramebufferCount: 5,
+		activeTextureCount: 7,
 		allocatedGenerationCount: 2,
 		disposedGenerationCount: 1,
 		extents: {

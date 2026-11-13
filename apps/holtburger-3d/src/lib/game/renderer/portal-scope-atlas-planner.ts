@@ -107,9 +107,9 @@ interface PortalScopeAtlasCommandLedger {
 	readonly maskPropagationInstanceCount: number;
 	/** One batched aperture-stream propagation command per retained round. */
 	readonly maskPropagationCommandCount: number;
-	/** One instanced resolve command when at least one scope tile exists. */
-	readonly opaqueCompositeCommandCount: 0 | 1;
-	/** Quad instances consumed by the single opaque composite command. */
+	/** Instanced resolve commands: one full-screen root pass plus an optional child-quad pass. */
+	readonly opaqueCompositeCommandCount: 0 | 1 | 2;
+	/** Quad instances consumed across the opaque composite commands. */
 	readonly opaqueCompositeInstanceCount: number;
 	/** Active-aperture quad instances reduced across every retained propagation round. */
 	readonly scopeEnvelopeReductionInstanceCount: number;
@@ -156,7 +156,7 @@ interface MutablePortalScopeAtlasCommandLedger extends PortalScopeAtlasCommandLe
 	frontierClearCommandCount: number;
 	maskPropagationInstanceCount: number;
 	maskPropagationCommandCount: number;
-	opaqueCompositeCommandCount: 0 | 1;
+	opaqueCompositeCommandCount: 0 | 1 | 2;
 	opaqueCompositeInstanceCount: number;
 	scopeEnvelopeReductionInstanceCount: number;
 	scopeEnvelopeReductionCommandCount: number;
@@ -1047,7 +1047,8 @@ export class PortalScopeAtlasPlanner {
 		this.#frame.commands.maskPropagationCommandCount = effectiveTraversalDepth;
 		this.#frame.commands.maskPropagationInstanceCount =
 			propagationInstanceCount;
-		this.#frame.commands.opaqueCompositeCommandCount = 1;
+		this.#frame.commands.opaqueCompositeCommandCount =
+			this.#frame.resolveQuadCount > 1 ? 2 : 1;
 		this.#frame.commands.opaqueCompositeInstanceCount =
 			this.#frame.resolveQuadCount;
 		this.#frame.commands.scopeEnvelopeReductionCommandCount =

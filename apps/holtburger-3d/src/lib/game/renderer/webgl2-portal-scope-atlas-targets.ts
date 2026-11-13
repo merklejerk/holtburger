@@ -4,6 +4,7 @@ import { type RenderExtent, validateRenderExtent } from "./render-extent";
 const RGBA8_BYTES_PER_PIXEL = 4;
 const DEPTH_COMPONENT24_BYTES_PER_PIXEL = 4;
 const DEPTH_COMPONENT32F_BYTES_PER_PIXEL = 4;
+const R32UI_BYTES_PER_PIXEL = 4;
 const R8UI_BYTES_PER_PIXEL = 1;
 
 /** Independent extents for atlas-local scene data and screen-space propagation state. */
@@ -33,8 +34,15 @@ interface WebGL2PortalScopeEnvelopeTarget {
 	readonly framebuffer: WebGLFramebuffer;
 }
 
+/** Packed horizontal-dilation scratch (`R32UI` depth bits + original-coverage MSB) at atlas extent. */
+interface WebGL2PortalScopeDilationTarget {
+	readonly framebuffer: WebGLFramebuffer;
+	readonly scratch: WebGLTexture;
+}
+
 /** One complete generation of fixed portal-compositing attachments. */
 export interface WebGL2PortalScopeAtlasTargetSet {
+	readonly dilation: WebGL2PortalScopeDilationTarget;
 	readonly envelope: WebGL2PortalScopeEnvelopeTarget;
 	readonly extents: PortalScopeAtlasTargetExtents;
 	/** Shared sampleable nearest-crossing depth, cleared before writing either frontier output. */
@@ -108,8 +116,8 @@ export class WebGL2PortalScopeAtlasTargets {
 		const extents = this.#targets?.extents ?? null;
 		return {
 			activeBytes: extents ? portalScopeAtlasTargetByteLength(extents) : 0,
-			activeFramebufferCount: this.#targets ? 4 : 0,
-			activeTextureCount: this.#targets ? 6 : 0,
+			activeFramebufferCount: this.#targets ? 5 : 0,
+			activeTextureCount: this.#targets ? 7 : 0,
 			allocatedGenerationCount: this.#allocatedGenerationCount,
 			disposedGenerationCount: this.#disposedGenerationCount,
 			extents: extents ? copyTargetExtents(extents) : null,
@@ -239,7 +247,30 @@ function allocateTargetSet(
 		gl.readBuffer(gl.NONE);
 		requireCompleteFramebuffer(gl, "scope-envelope framebuffer");
 
+		const dilationFramebuffer = createFramebuffer(
+			gl,
+			framebuffers,
+			"envelope-dilation framebuffer",
+		);
+		const dilationScratch = createTexture(
+			gl,
+			textures,
+			"envelope-dilation scratch texture",
+		);
+		initializeTexture(gl, dilationScratch, gl.R32UI, extents.atlas);
+		gl.bindFramebuffer(gl.FRAMEBUFFER, dilationFramebuffer);
+		gl.framebufferTexture2D(
+			gl.FRAMEBUFFER,
+			gl.COLOR_ATTACHMENT0,
+			gl.TEXTURE_2D,
+			dilationScratch,
+			0,
+		);
+		configureColorFramebuffer(gl);
+		requireCompleteFramebuffer(gl, "envelope-dilation framebuffer");
+
 		return {
+			dilation: { framebuffer: dilationFramebuffer, scratch: dilationScratch },
 			envelope: { depth: envelopeDepth, framebuffer: envelopeFramebuffer },
 			extents: copyTargetExtents(extents),
 			frontierDepth,
@@ -368,12 +399,14 @@ function disposeTargetSet(
 	gl.deleteFramebuffer(targets.frontiers[0].framebuffer);
 	gl.deleteFramebuffer(targets.frontiers[1].framebuffer);
 	gl.deleteFramebuffer(targets.envelope.framebuffer);
+	gl.deleteFramebuffer(targets.dilation.framebuffer);
 	gl.deleteTexture(targets.scene.color);
 	gl.deleteTexture(targets.scene.depth);
 	gl.deleteTexture(targets.frontiers[0].state);
 	gl.deleteTexture(targets.frontiers[1].state);
 	gl.deleteTexture(targets.frontierDepth);
 	gl.deleteTexture(targets.envelope.depth);
+	gl.deleteTexture(targets.dilation.scratch);
 }
 
 function validateTargetExtents(extents: PortalScopeAtlasTargetExtents): void {
@@ -409,7 +442,8 @@ function portalScopeAtlasTargetByteLength(
 		atlasPixels *
 			(RGBA8_BYTES_PER_PIXEL +
 				DEPTH_COMPONENT24_BYTES_PER_PIXEL +
-				DEPTH_COMPONENT32F_BYTES_PER_PIXEL) +
+				DEPTH_COMPONENT32F_BYTES_PER_PIXEL +
+				R32UI_BYTES_PER_PIXEL) +
 		drawingBufferPixels *
 			(2 * R8UI_BYTES_PER_PIXEL + DEPTH_COMPONENT24_BYTES_PER_PIXEL)
 	);

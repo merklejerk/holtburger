@@ -19,6 +19,7 @@ import {
 	PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES,
 	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
+	portalPropagationMetadataUsedByteLength,
 } from "./portal-propagation-metadata";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "./portal-render-capacity-policy";
 import {
@@ -118,7 +119,7 @@ export interface PortalCrossingTriangleStreamView {
 
 /** Reused non-retained view over the fixed camera/arrival/scope propagation block. */
 export interface PortalPropagationMetadataStreamView {
-	/** Complete guaranteed-size uniform block uploaded without slicing. */
+	/** Complete fixed-capacity uniform block backing; uploads transfer `usedPropagationMetadataByteLength`. */
 	readonly propagationMetadataBytes: Uint8Array;
 	readonly arrivalMetadataStateCount: number;
 	readonly renderDomainMetadataStateCount: number;
@@ -135,10 +136,6 @@ export interface PortalPropagationExecutionScheduleView {
 	readonly quadBytes: Uint8Array;
 	readonly quadCount: number;
 	readonly usedQuadByteLength: number;
-	readonly packedAtlasWidth: number;
-	readonly packedAtlasHeight: number;
-	readonly rootTileWidth: number;
-	readonly rootTileHeight: number;
 	readonly resolveQuadOffset: number;
 	readonly resolveQuadCount: number;
 	roundIndexOffset(round: number): number;
@@ -197,14 +194,10 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 	readonly #uintSlots: Uint32Array;
 	arrivalMetadataStateCount = 0;
 	indexCount = 0;
-	packedAtlasHeight = 0;
-	packedAtlasWidth = 0;
 	quadCount = 0;
 	renderDomainMetadataStateCount = 0;
 	resolveQuadCount = 0;
 	resolveQuadOffset = 0;
-	rootTileHeight = 0;
-	rootTileWidth = 0;
 	usedByteLength = 0;
 	usedIndexByteLength = 0;
 	usedPropagationMetadataByteLength = 0;
@@ -372,10 +365,6 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 		this.usedIndexByteLength = 0;
 		this.usedPropagationMetadataByteLength = 0;
 		this.usedQuadByteLength = 0;
-		this.packedAtlasWidth = 0;
-		this.packedAtlasHeight = 0;
-		this.rootTileWidth = 0;
-		this.rootTileHeight = 0;
 		this.resolveQuadOffset = 0;
 		this.resolveQuadCount = 0;
 		this.#traversalDepth = 0;
@@ -530,7 +519,9 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 			this.vertexCount * PORTAL_CROSSING_TRIANGLE_VERTEX_STRIDE_BYTES;
 		this.usedIndexByteLength = this.indexCount * Uint16Array.BYTES_PER_ELEMENT;
 		this.usedPropagationMetadataByteLength =
-			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES;
+			portalPropagationMetadataUsedByteLength(
+				this.renderDomainMetadataStateCount,
+			);
 		this.usedQuadByteLength =
 			this.quadCount * PORTAL_QUAD_INSTANCE_STRIDE_BYTES;
 		this.trace.arrivalMetadataStateWriteCount = this.arrivalMetadataStateCount;
@@ -545,10 +536,6 @@ export class PortalPropagationStreamArena implements PortalPropagationStreamView
 		traversalDepth: number,
 	): void {
 		this.#traversalDepth = traversalDepth;
-		this.packedAtlasWidth = frame.packedWidth;
-		this.packedAtlasHeight = frame.packedHeight;
-		this.rootTileWidth = frame.tileCount > 0 ? frame.tileWidth(0) : 0;
-		this.rootTileHeight = frame.tileCount > 0 ? frame.tileHeight(0) : 0;
 		this.resolveQuadOffset = frame.resolveQuadOffset;
 		this.resolveQuadCount = frame.resolveQuadCount;
 

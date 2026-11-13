@@ -43,6 +43,7 @@ import {
 	PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES,
 	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
+	portalPropagationMetadataUsedByteLength,
 } from "./portal-propagation-metadata";
 import { PortalScopeWindowCuller } from "./portal-scope-window-culler";
 import { createCameraNearClipVolume } from "./portal-near-plane";
@@ -535,7 +536,7 @@ describe("portal scope-atlas planning", () => {
 			frontierClearCommandCount: 1,
 			maskPropagationCommandCount: 1,
 			maskPropagationInstanceCount: 1,
-			opaqueCompositeCommandCount: 1,
+			opaqueCompositeCommandCount: 2,
 			opaqueCompositeInstanceCount: 2,
 			scopeEnvelopeReductionCommandCount: 1,
 			scopeEnvelopeReductionInstanceCount: 2,
@@ -721,7 +722,7 @@ describe("portal scope-atlas planning", () => {
 		expect(secondView.arrivalMetadataStateCount).toBe(3);
 		expect(secondView.renderDomainMetadataStateCount).toBe(3);
 		expect(secondView.usedPropagationMetadataByteLength).toBe(
-			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+			portalPropagationMetadataUsedByteLength(3),
 		);
 		const arrivalFloats = new Float32Array(
 			stream.propagationMetadataBytes.buffer,
@@ -1414,7 +1415,7 @@ describe("portal scope-atlas planning", () => {
 		expect(prepared.vertexCount).toBe(0);
 		expect(prepared.indexCount).toBe(0);
 		expect(prepared.resolveQuadCount).toBe(1);
-		expect(callPlan.trace).toEqual({ totalWebGLCallCount: 38 });
+		expect(callPlan.trace).toEqual({ totalWebGLCallCount: 39 });
 
 		const rootOnlyFrame = planner.plan(
 			topology([topologyScope(OUTDOOR_SCOPE, null)], []),

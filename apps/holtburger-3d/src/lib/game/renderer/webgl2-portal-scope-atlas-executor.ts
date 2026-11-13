@@ -12,8 +12,19 @@ import {
 	type PortalPropagationExecutionScheduleView,
 	type PortalPropagationMetadataStreamView,
 } from "./portal-crossing-triangle-stream";
-import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation-metadata";
+import {
+	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
+	portalPropagationMetadataUsedByteLength,
+} from "./portal-propagation-metadata";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "./portal-render-capacity-policy";
+import {
+	PORTAL_SCOPE_TILE_ATLAS_X_OFFSET_BYTES,
+	PORTAL_SCOPE_TILE_ATLAS_Y_OFFSET_BYTES,
+	PORTAL_SCOPE_TILE_HEIGHT_OFFSET_BYTES,
+	PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES,
+	PORTAL_SCOPE_TILE_WIDTH_OFFSET_BYTES,
+} from "./portal-scope-tile-metadata";
 import {
 	executePortalScopeAtlasWebGLCalls,
 	type PortalScopeAtlasWebGLSink,
@@ -39,6 +50,8 @@ type SinkMethod<Name extends keyof PortalScopeAtlasWebGLSink> = Parameters<
 
 /** Complete non-retained input consumed synchronously by one scope-atlas execution. */
 export interface WebGL2PortalScopeAtlasExecutionInput {
+	/** Background clear color written by the root resolve pass at pixels owned by child portals. */
+	readonly clearColor: readonly [number, number, number, number];
 	/** External color/depth destination; null selects the drawing buffer. */
 	readonly outputFramebuffer: WebGLFramebuffer | null;
 	readonly outputExtent: RenderExtent;
@@ -68,8 +81,8 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 	readonly #clearState = new Uint32Array(4);
 	#activeInput: WebGL2PortalScopeAtlasExecutionInput | null = null;
 	#boundArrayBuffer: "crossings" | "quads" | null = null;
-	#boundFramebuffer: "envelope" | "frontier-0" | "frontier-1" | "output" =
-		"output";
+	#boundFramebuffer:
+		"dilation" | "envelope" | "frontier-0" | "frontier-1" | "output" = "output";
 	#destroyed = false;
 	#reductionRound = -1;
 	#traversalDepth = -1;
@@ -384,7 +397,9 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 							? targets.scene.color
 							: texture === "scene-depth"
 								? targets.scene.depth
-								: targets.envelope.depth;
+								: texture === "dilation-scratch"
+									? targets.dilation.scratch
+									: targets.envelope.depth;
 		this.#gl.bindTexture(this.#gl.TEXTURE_2D, handle);
 	}
 
@@ -422,11 +437,13 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 		const framebuffer =
 			target === "output"
 				? input.outputFramebuffer
-				: target === "envelope"
-					? input.targets.envelope.framebuffer
-					: target === "frontier-0"
-						? input.targets.frontiers[0].framebuffer
-						: input.targets.frontiers[1].framebuffer;
+				: target === "dilation"
+					? input.targets.dilation.framebuffer
+					: target === "envelope"
+						? input.targets.envelope.framebuffer
+						: target === "frontier-0"
+							? input.targets.frontiers[0].framebuffer
+							: input.targets.frontiers[1].framebuffer;
 		this.#gl.bindFramebuffer(this.#gl.DRAW_FRAMEBUFFER, framebuffer);
 		this.#boundFramebuffer = target;
 	}
@@ -442,13 +459,39 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 		this.#gl.viewport(0, 0, extent.width, extent.height);
 	}
 
-	scissor(...[target]: SinkMethod<"scissor">): void {
+	scissorTile(...[domain]: SinkMethod<"scissorTile">): void {
 		const stream = this.#input().stream;
-		if (target === "packed-atlas") {
-			this.#gl.scissor(0, 0, stream.packedAtlasWidth, stream.packedAtlasHeight);
-			return;
+		if (
+			!Number.isInteger(domain) ||
+			domain < 0 ||
+			domain >= stream.renderDomainMetadataStateCount
+		) {
+			throw new Error(
+				`Portal scope-atlas tile scissor domain ${domain} is unavailable.`,
+			);
 		}
-		this.#gl.scissor(0, 0, stream.rootTileWidth, stream.rootTileHeight);
+		const bytes = stream.propagationMetadataBytes;
+		const baseOffset =
+			PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES +
+			domain * PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES;
+		this.#gl.scissor(
+			readUint32LittleEndian(
+				bytes,
+				baseOffset + PORTAL_SCOPE_TILE_ATLAS_X_OFFSET_BYTES,
+			),
+			readUint32LittleEndian(
+				bytes,
+				baseOffset + PORTAL_SCOPE_TILE_ATLAS_Y_OFFSET_BYTES,
+			),
+			readUint32LittleEndian(
+				bytes,
+				baseOffset + PORTAL_SCOPE_TILE_WIDTH_OFFSET_BYTES,
+			),
+			readUint32LittleEndian(
+				bytes,
+				baseOffset + PORTAL_SCOPE_TILE_HEIGHT_OFFSET_BYTES,
+			),
+		);
 	}
 
 	scissorRoundFrontier(...[round]: SinkMethod<"scissorRoundFrontier">): void {
@@ -486,7 +529,11 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 						? this.#programs.propagationFrom1
 						: program === "reduction"
 							? this.#programs.reduction
-							: this.#programs.resolve;
+							: program === "dilation-horizontal"
+								? this.#programs.dilationHorizontal
+								: program === "dilation-vertical"
+									? this.#programs.dilationVertical
+									: this.#programs.resolve;
 		this.#gl.useProgram(handle);
 	}
 
@@ -498,6 +545,17 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 	uniformReductionRound(...[round]: SinkMethod<"uniformReductionRound">): void {
 		this.#gl.uniform1i(this.#programs.reductionUniforms.round, round);
 		this.#reductionRound = round;
+	}
+
+	uniformResolveClearColor(): void {
+		const [red, green, blue, alpha] = this.#input().clearColor;
+		this.#gl.uniform4f(
+			this.#programs.resolveUniforms.clearColor,
+			red,
+			green,
+			blue,
+			alpha,
+		);
 	}
 
 	depthFunction(...[compare]: SinkMethod<"depthFunction">): void {
@@ -570,6 +628,20 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, instanceCount);
 	}
 
+	drawDilationHorizontal(
+		...[instanceCount]: SinkMethod<"drawDilationHorizontal">
+	): void {
+		this.#requireFramebuffer("dilation");
+		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, instanceCount);
+	}
+
+	drawDilationVertical(
+		...[instanceCount]: SinkMethod<"drawDilationVertical">
+	): void {
+		this.#requireFramebuffer("envelope");
+		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, instanceCount);
+	}
+
 	drawResolve(...[instanceCount]: SinkMethod<"drawResolve">): void {
 		this.#requireFramebuffer("output");
 		this.#gl.drawArraysInstanced(this.#gl.TRIANGLES, 0, 6, instanceCount);
@@ -589,7 +661,7 @@ export class WebGL2PortalScopeAtlasExecutor implements PortalScopeAtlasWebGLSink
 	}
 
 	#requireFramebuffer(
-		expected: "envelope" | "frontier-0" | "frontier-1" | "output",
+		expected: "dilation" | "envelope" | "frontier-0" | "frontier-1" | "output",
 	): void {
 		if (this.#boundFramebuffer !== expected) {
 			throw new Error(
@@ -640,6 +712,14 @@ function validateExecutionInput(
 	maximumCrossingVertexCount: number,
 	maximumCrossingIndexCount: number,
 ): void {
+	if (
+		input.clearColor.length !== 4 ||
+		!input.clearColor.every(Number.isFinite)
+	) {
+		throw new Error(
+			"Portal scope-atlas clear color must contain 4 finite channels.",
+		);
+	}
 	const stream = input.stream;
 	if (
 		input.outputExtent.width !== input.targets.extents.drawingBuffer.width ||
@@ -679,16 +759,28 @@ function validateMetadataStream(
 	stream: PortalPropagationMetadataStreamView,
 ): void {
 	if (
-		stream.usedPropagationMetadataByteLength !==
-			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES ||
-		stream.propagationMetadataBytes.byteLength <
-			PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES ||
 		stream.arrivalMetadataStateCount < 1 ||
 		stream.renderDomainMetadataStateCount < 1 ||
-		stream.renderDomainMetadataStateCount > stream.arrivalMetadataStateCount
+		stream.renderDomainMetadataStateCount > stream.arrivalMetadataStateCount ||
+		stream.usedPropagationMetadataByteLength !==
+			portalPropagationMetadataUsedByteLength(
+				stream.renderDomainMetadataStateCount,
+			) ||
+		stream.propagationMetadataBytes.byteLength <
+			stream.usedPropagationMetadataByteLength
 	) {
 		throw new Error("Portal scope-atlas metadata stream is inconsistent.");
 	}
+}
+
+function readUint32LittleEndian(bytes: Uint8Array, byteOffset: number): number {
+	return (
+		(bytes[byteOffset]! |
+			(bytes[byteOffset + 1]! << 8) |
+			(bytes[byteOffset + 2]! << 16) |
+			(bytes[byteOffset + 3]! << 24)) >>>
+		0
+	);
 }
 
 function configureCrossingAttributes(gl: WebGL2RenderingContext): void {

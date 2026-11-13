@@ -10,6 +10,12 @@ describe("near terrain outdoor PSSM variant", () => {
 		const source = `${createTerrainVertexShader()}\n${createTerrainFragmentShader()}`;
 		expect(source).not.toContain("uOutdoorPssmDepth");
 		expect(source).not.toContain("vAmbientWithoutSun");
+		expect(source).toContain("UNIFORM_TERRAIN_MULTIPLIER = 33825u");
+		expect(source).toContain("textureGrad(");
+		expect(source).not.toContain("texture(uColors");
+		expect(source).not.toContain("texture(uBlendMasks");
+		expect(source).not.toContain("texture(uRoadMasks");
+		expect(source).not.toContain("texture(uDetail");
 	});
 
 	it("evaluates visibility per fragment and preserves non-sun lighting", () => {

@@ -4,7 +4,8 @@ import {
 	PORTAL_MAXIMUM_QUAD_INSTANCE_COUNT,
 	PORTAL_QUAD_INSTANCE_STRIDE_BYTES,
 } from "./portal-crossing-triangle-stream";
-import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation-metadata";
+import { PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS } from "./portal-envelope-sampling-glsl";
+import { portalPropagationMetadataUsedByteLength } from "./portal-propagation-metadata";
 import { PORTAL_RENDER_CAPACITY_POLICY } from "./portal-render-capacity-policy";
 import {
 	PORTAL_SCOPE_ENVELOPE_UNBOUNDED_DEPTH,
@@ -17,7 +18,6 @@ type PortalScopeAtlasBuffer =
 type PortalScopeAtlasBufferTarget = "array" | "copy-write" | "uniform";
 type PortalScopeAtlasDepthComparison =
 	"always" | "greater" | "less" | "less-equal";
-type PortalScopeAtlasScissorTarget = "packed-atlas" | "root-tile";
 type PortalScopeAtlasCapability =
 	| "blend"
 	| "cull-face"
@@ -26,14 +26,17 @@ type PortalScopeAtlasCapability =
 	| "scissor-test"
 	| "stencil-test";
 type PortalScopeAtlasFramebuffer =
-	"envelope" | "output" | `frontier-${FrontierOrdinal}`;
+	"dilation" | "envelope" | "output" | `frontier-${FrontierOrdinal}`;
 type PortalScopeAtlasProgram =
+	| "dilation-horizontal"
+	| "dilation-vertical"
 	| "propagation-root"
 	| "propagation-from-0"
 	| "propagation-from-1"
 	| "reduction"
 	| "resolve";
 type PortalScopeAtlasTexture =
+	| "dilation-scratch"
 	| "envelope-depth"
 	| "frontier-0-state"
 	| "frontier-1-state"
@@ -42,8 +45,9 @@ type PortalScopeAtlasTexture =
 	| "scene-depth";
 type PortalScopeAtlasVertexArray = "crossings" | "unit-quad";
 
-/** Stable texture units configured into the three portal programs at program construction. */
+/** Stable texture units configured into the portal programs at program construction. */
 export const PORTAL_SCOPE_ATLAS_TEXTURE_UNITS = Object.freeze({
+	dilationScratch: 6,
 	envelopeDepth: 5,
 	frontier0: 0,
 	frontier1: 1,
@@ -108,8 +112,8 @@ export interface PortalScopeAtlasWebGLSink {
 	bindFramebuffer(target: PortalScopeAtlasFramebuffer): void;
 	/** Select the extent owned by the next clear or draw. */
 	viewport(target: "atlas" | "drawing-buffer" | "output"): void;
-	/** Restrict envelope clears to packed shelf capacity or the root drawing-buffer tile. */
-	scissor(target: PortalScopeAtlasScissorTarget): void;
+	/** Restrict an envelope clear to one active render-domain tile in the scope atlas. */
+	scissorTile(domain: number): void;
 	/** Restrict frontier clears and propagation rasterization to the round's active screen box. */
 	scissorRoundFrontier(round: number): void;
 	/** Clear the scissored scope envelope region. */
@@ -124,6 +128,8 @@ export interface PortalScopeAtlasWebGLSink {
 	uniformReductionDepth(depth: number): void;
 	/** Select current/next frontier parity for one reduction round. */
 	uniformReductionRound(round: number): void;
+	/** Upload the frame's background clear color to resolve so non-root holes need no output pre-clear. */
+	uniformResolveClearColor(): void;
 	/** Select the comparison used by the next depth-writing pass. */
 	depthFunction(compare: PortalScopeAtlasDepthComparison): void;
 	/** Select crossing geometry or the shared unit quad. */
@@ -142,7 +148,11 @@ export interface PortalScopeAtlasWebGLSink {
 		instanceCount: number,
 		terminal: boolean,
 	): void;
-	/** Submit the root and active child-gutter quad slice to the external output. */
+	/** Submit horizontal envelope pre-dilation across active child resolve quads into `dilation`. */
+	drawDilationHorizontal(instanceCount: number): void;
+	/** Submit vertical envelope pre-dilation across active child resolve quads into `envelope`. */
+	drawDilationVertical(instanceCount: number): void;
+	/** Submit the root or active child-gutter quad slice to the external output. */
 	drawResolve(instanceCount: number): void;
 }
 
@@ -188,10 +198,7 @@ export type PortalScopeAtlasWebGLCall =
 			readonly kind: "viewport";
 			readonly target: "atlas" | "drawing-buffer" | "output";
 	  }
-	| {
-			readonly kind: "scissor";
-			readonly target: PortalScopeAtlasScissorTarget;
-	  }
+	| { readonly domain: number; readonly kind: "scissor-tile" }
 	| { readonly kind: "scissor-round-frontier"; readonly round: number }
 	| { readonly depth: number; readonly kind: "clear-envelope-depth" }
 	| { readonly kind: "clear-frontier-state"; readonly target: FrontierOrdinal }
@@ -199,6 +206,7 @@ export type PortalScopeAtlasWebGLCall =
 	| { readonly kind: "use-program"; readonly program: PortalScopeAtlasProgram }
 	| { readonly depth: number; readonly kind: "uniform-reduction-depth" }
 	| { readonly kind: "uniform-reduction-round"; readonly round: number }
+	| { readonly kind: "uniform-resolve-clear-color" }
 	| {
 			readonly compare: PortalScopeAtlasDepthComparison;
 			readonly kind: "depth-function";
@@ -222,6 +230,14 @@ export type PortalScopeAtlasWebGLCall =
 			readonly kind: "draw-reduction";
 			readonly next: FrontierOrdinal;
 			readonly terminal: boolean;
+	  }
+	| {
+			readonly instanceCount: number;
+			readonly kind: "draw-dilation-horizontal";
+	  }
+	| {
+			readonly instanceCount: number;
+			readonly kind: "draw-dilation-vertical";
 	  }
 	| { readonly instanceCount: number; readonly kind: "draw-resolve" };
 
@@ -264,17 +280,20 @@ export function executePortalScopeAtlasWebGLCalls(
 	input: PortalScopeAtlasExecutionInput,
 ): void {
 	validateExecutionInput(input);
+	const childResolveQuadCount = input.resolveQuadCount - 1;
+	const hasDilation =
+		PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS > 0 && childResolveQuadCount > 0;
 	appendUploads(sink, input);
 	appendFixedState(sink);
-	appendTextureBindings(sink, input.traversalDepth > 0);
+	appendTextureBindings(sink, input.traversalDepth > 0, hasDilation);
 	sink.bindFramebuffer("envelope");
 	sink.viewport("atlas");
-	if (input.traversalDepth > 0 || input.renderDomainCount > 1) {
-		sink.scissor("packed-atlas");
+	sink.scissorTile(0);
+	sink.clearEnvelopeDepth(PORTAL_SCOPE_ENVELOPE_UNBOUNDED_DEPTH);
+	for (let domain = 1; domain < input.renderDomainCount; domain += 1) {
+		sink.scissorTile(domain);
 		sink.clearEnvelopeDepth(PORTAL_SCOPE_ENVELOPE_UNCOVERED_DEPTH);
 	}
-	sink.scissor("root-tile");
-	sink.clearEnvelopeDepth(PORTAL_SCOPE_ENVELOPE_UNBOUNDED_DEPTH);
 	if (input.traversalDepth === 0) {
 		sink.setCapability("scissor-test", false);
 	}
@@ -313,16 +332,39 @@ export function executePortalScopeAtlasWebGLCalls(
 		);
 	}
 
+	if (hasDilation) {
+		sink.setCapability("depth-test", false);
+		sink.bindFramebuffer("dilation");
+		sink.useProgram("dilation-horizontal");
+		sink.quadInstanceOffset(input.resolveQuadOffset + 1);
+		sink.drawDilationHorizontal(childResolveQuadCount);
+
+		sink.setCapability("depth-test", true);
+		sink.bindFramebuffer("envelope");
+		sink.useProgram("dilation-vertical");
+		if (input.traversalDepth === 1) sink.depthFunction("greater");
+		sink.drawDilationVertical(childResolveQuadCount);
+	}
+
 	sink.bindFramebuffer("output");
 	sink.viewport("output");
 	sink.useProgram("resolve");
-	// Sky and empty terminal backgrounds intentionally retain the clear depth of one. The envelope
-	// rejects every nonterminal scope at that depth, so equality admits exactly the ray's terminal
-	// scope without weakening opaque nearest-depth selection.
-	sink.depthFunction("less-equal");
+	sink.uniformResolveClearColor();
+	// The full-screen root quad initializes every output pixel unconditionally (writing background
+	// clear color and depth 1.0 where non-root portals supersede the root domain), eliminating the
+	// separate full-screen output clear pass. Child quads then select nearest depth with LEQUAL so
+	// sky and empty terminal backgrounds at clear depth 1.0 still resolve cleanly.
+	if (input.traversalDepth !== 1 || hasDilation) {
+		sink.depthFunction("always");
+	}
 	if (input.traversalDepth === 0) sink.bindVertexArray("unit-quad");
 	sink.quadInstanceOffset(input.resolveQuadOffset);
-	sink.drawResolve(input.resolveQuadCount);
+	sink.drawResolve(1);
+	if (childResolveQuadCount > 0) {
+		sink.depthFunction("less-equal");
+		sink.quadInstanceOffset(input.resolveQuadOffset + 1);
+		sink.drawResolve(childResolveQuadCount);
+	}
 	sink.bindBuffer("array", null);
 }
 
@@ -427,7 +469,10 @@ function appendUploads(
 	input: PortalScopeAtlasExecutionInput,
 ): void {
 	sink.bindBuffer("uniform", "metadata");
-	sink.bufferSubData("uniform", PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES);
+	sink.bufferSubData(
+		"uniform",
+		portalPropagationMetadataUsedByteLength(input.renderDomainCount),
+	);
 	sink.bindBuffer("uniform", null);
 	if (input.crossingVertexCount > 0) {
 		sink.bindBuffer("copy-write", "crossing-indices");
@@ -472,6 +517,7 @@ function appendFixedState(sink: PortalScopeAtlasWebGLSink): void {
 function appendTextureBindings(
 	sink: PortalScopeAtlasWebGLSink,
 	hasPropagation: boolean,
+	hasDilation: boolean,
 ): void {
 	if (hasPropagation) {
 		bindTexture(
@@ -499,6 +545,13 @@ function appendTextureBindings(
 		PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth,
 		"envelope-depth",
 	);
+	if (hasDilation) {
+		bindTexture(
+			sink,
+			PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.dilationScratch,
+			"dilation-scratch",
+		);
+	}
 }
 
 function bindTexture(
@@ -539,6 +592,10 @@ function createRecordingSink(
 		colorMask: (write) => calls.push({ kind: "color-mask", write }),
 		depthFunction: (compare) => calls.push({ compare, kind: "depth-function" }),
 		depthMask: (write) => calls.push({ kind: "depth-mask", write }),
+		drawDilationHorizontal: (instanceCount) =>
+			calls.push({ instanceCount, kind: "draw-dilation-horizontal" }),
+		drawDilationVertical: (instanceCount) =>
+			calls.push({ instanceCount, kind: "draw-dilation-vertical" }),
 		drawPropagation: (output, indexOffset, indexCount) =>
 			calls.push({
 				indexCount,
@@ -557,15 +614,17 @@ function createRecordingSink(
 			calls.push({ instanceCount, kind: "draw-resolve" }),
 		quadInstanceOffset: (firstInstance) =>
 			calls.push({ firstInstance, kind: "quad-instance-offset" }),
-		scissor: (target) => calls.push({ kind: "scissor", target }),
 		scissorRoundFrontier: (round) =>
 			calls.push({ kind: "scissor-round-frontier", round }),
+		scissorTile: (domain) => calls.push({ domain, kind: "scissor-tile" }),
 		setCapability: (capability, enabled) =>
 			calls.push({ capability, enabled, kind: "set-capability" }),
 		uniformReductionDepth: (depth) =>
 			calls.push({ depth, kind: "uniform-reduction-depth" }),
 		uniformReductionRound: (round) =>
 			calls.push({ kind: "uniform-reduction-round", round }),
+		uniformResolveClearColor: () =>
+			calls.push({ kind: "uniform-resolve-clear-color" }),
 		useProgram: (program) => calls.push({ kind: "use-program", program }),
 		viewport: (target) => calls.push({ kind: "viewport", target }),
 	};

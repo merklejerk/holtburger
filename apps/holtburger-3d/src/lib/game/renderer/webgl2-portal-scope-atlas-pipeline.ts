@@ -143,6 +143,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 	#viewCount = 0;
 	/** The one view currently using shared GPU resources. */
 	#active: {
+		readonly clearColor: readonly [number, number, number, number];
 		readonly frame: MutableWebGL2PortalScopeAtlasFrame;
 		readonly targets: WebGL2PortalScopeAtlasTargetSet | null;
 	} | null = null;
@@ -209,7 +210,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 		this.#active = null;
 		const gl = this.#gl;
 		if (frame.atlas.directRootOutput) {
-			this.#active = { frame, targets: null };
+			this.#active = { clearColor, frame, targets: null };
 			this.#tileState.beginFrame(frame.atlas);
 			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, directOutputFramebuffer);
 			gl.viewport(
@@ -232,7 +233,7 @@ export class WebGL2PortalScopeAtlasPipeline {
 			return null;
 		}
 		const targets = this.#targetOwner.resize(frame.resource);
-		this.#active = { frame, targets };
+		this.#active = { clearColor, frame, targets };
 		this.#tileState.beginFrame(frame.atlas);
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, targets.scene.framebuffer);
 		gl.viewport(
@@ -252,8 +253,15 @@ export class WebGL2PortalScopeAtlasPipeline {
 		gl.clearDepth(1);
 		gl.clearColor(...clearColor);
 		gl.enable(gl.SCISSOR_TEST);
-		gl.scissor(0, 0, frame.atlas.packedWidth, frame.atlas.packedHeight);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		for (let ordinal = 0; ordinal < frame.atlas.tileCount; ordinal += 1) {
+			gl.scissor(
+				frame.atlas.tileX(ordinal),
+				frame.atlas.tileY(ordinal),
+				frame.atlas.tileWidth(ordinal),
+				frame.atlas.tileHeight(ordinal),
+			);
+			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		}
 		gl.disable(gl.SCISSOR_TEST);
 		return targets;
 	}
@@ -292,12 +300,13 @@ export class WebGL2PortalScopeAtlasPipeline {
 
 	/** Propagate selected arrivals, reduce envelopes, and resolve scope-local opaque color/depth. */
 	execute(outputFramebuffer: WebGLFramebuffer | null): void {
-		const { frame, targets } = this.#requireActive();
+		const { clearColor, frame, targets } = this.#requireActive();
 		if (targets === null) {
 			this.#executor.bindDirectRootMetadata(frame.stream);
 			return;
 		}
 		this.#executor.execute({
+			clearColor,
 			outputExtent: frame.resource.drawingBuffer,
 			outputFramebuffer,
 			stream: frame.stream,

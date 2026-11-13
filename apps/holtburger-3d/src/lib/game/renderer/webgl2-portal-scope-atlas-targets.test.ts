@@ -36,10 +36,10 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		expect(reused).toBe(first);
 		expect(targets.getTargets()).toBe(first);
 		expect(state.created).toEqual({
-			framebuffers: 4,
-			textures: 6,
+			framebuffers: 5,
+			textures: 7,
 		});
-		expect(state.framebufferStatusCheckCount).toBe(4);
+		expect(state.framebufferStatusCheckCount).toBe(5);
 		expect(state.textureStorage).toEqual([
 			{ format: state.gl.RGBA8, height: 4, width: 4 },
 			{ format: state.gl.DEPTH_COMPONENT24, height: 4, width: 4 },
@@ -47,11 +47,12 @@ describe("WebGL2 portal scope-atlas targets", () => {
 			{ format: state.gl.R8UI, height: 2, width: 2 },
 			{ format: state.gl.R8UI, height: 2, width: 2 },
 			{ format: state.gl.DEPTH_COMPONENT32F, height: 4, width: 4 },
+			{ format: state.gl.R32UI, height: 4, width: 4 },
 		]);
 		expect(targets.getDiagnostics()).toEqual({
-			activeBytes: 216,
-			activeFramebufferCount: 4,
-			activeTextureCount: 6,
+			activeBytes: 280,
+			activeFramebufferCount: 5,
+			activeTextureCount: 7,
 			allocatedGenerationCount: 1,
 			disposedGenerationCount: 0,
 			extents: INITIAL_EXTENTS,
@@ -68,13 +69,13 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		expect(second).not.toBe(first);
 		expect(targets.getTargets()).toBe(second);
 		expect(state.deleted).toEqual({
-			framebuffers: 4,
-			textures: 6,
+			framebuffers: 5,
+			textures: 7,
 		});
 		expect(targets.getDiagnostics()).toEqual({
-			activeBytes: 432,
-			activeFramebufferCount: 4,
-			activeTextureCount: 6,
+			activeBytes: 560,
+			activeFramebufferCount: 5,
+			activeTextureCount: 7,
 			allocatedGenerationCount: 2,
 			disposedGenerationCount: 1,
 			extents: RESIZED_EXTENTS,
@@ -83,8 +84,8 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		targets.destroy();
 		targets.destroy();
 		expect(state.deleted).toEqual({
-			framebuffers: 8,
-			textures: 12,
+			framebuffers: 10,
+			textures: 14,
 		});
 		expect(targets.getDiagnostics()).toMatchObject({
 			activeBytes: 0,
@@ -208,6 +209,7 @@ function createFakeWebGL2(options: FakeWebGL2Options): FakeWebGL2State {
 		MAX_TEXTURE_SIZE: 0x0d33,
 		NEAREST: 0x2600,
 		NONE: 0,
+		R32UI: 0x8236,
 		R8UI: 0x8232,
 		READ_FRAMEBUFFER: 0x8ca8,
 		READ_FRAMEBUFFER_BINDING: 0x8caa,

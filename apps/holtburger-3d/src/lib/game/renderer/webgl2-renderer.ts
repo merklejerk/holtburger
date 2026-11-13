@@ -2063,7 +2063,6 @@ export class WebGL2Renderer implements Renderer {
 		this.#drawOpaqueObjects(view, objectPhases.opaque, shading, pipeline);
 		this.#drawTerrain(view, shading, pipeline);
 		if (portalTargets !== null) {
-			this.#beginFlatOpaqueScene(target, clearColor);
 			this.#frameProfiler?.setGpuSystem("portalComposition");
 		}
 		pipeline.execute(target.framebuffer);
@@ -4460,6 +4459,7 @@ export class WebGL2Renderer implements Renderer {
 		program: WebGL2NearTerrainProgram,
 		directional: boolean,
 	): void {
+		let previousStaticLightsEmpty = false;
 		for (const terrain of view.terrain) {
 			if (this.#isFarTerrain(terrain, view, farCutoff)) continue;
 			if (this.#hasTerrainDirectionalShadow(terrain, view) !== directional)
@@ -4469,21 +4469,28 @@ export class WebGL2Renderer implements Renderer {
 				view.anchorCoordinates,
 				this.#offsetScratch,
 			);
-			this.#bindTerrainSurfaceField(terrain, program);
+			this.#bindTerrainSurfaceField(terrain);
 			const landblockLights =
 				terrain.drawUnit.kind === "landblock"
 					? shading.staticLights(terrain.drawUnit.landblockId)
 					: EMPTY_LANDBLOCK_LIGHTS;
-			bindWebGL2StaticLights(
-				this.#gl,
-				program.uniforms,
-				landblockLights.lights,
-				shading.anchorOrigin,
-				shading.authoredLightResponse,
-				this.#dynamicLightScratch,
-			);
-			this.#uploadTerrainLightMask(landblockLights);
-			this.#frameSelectionMetrics.staticLightBinds += 1;
+			const hasActiveStaticLights =
+				shading.authoredLightResponse > 0 && landblockLights.lights.length > 0;
+			if (hasActiveStaticLights || !previousStaticLightsEmpty) {
+				bindWebGL2StaticLights(
+					this.#gl,
+					program.uniforms,
+					landblockLights.lights,
+					shading.anchorOrigin,
+					shading.authoredLightResponse,
+					this.#dynamicLightScratch,
+				);
+				this.#frameSelectionMetrics.staticLightBinds += 1;
+			}
+			if (hasActiveStaticLights) {
+				this.#uploadTerrainLightMask(landblockLights);
+			}
+			previousStaticLightsEmpty = !hasActiveStaticLights;
 			if (directional) {
 				this.#applyTerrainDirectionalShadow(program, terrain, view);
 			}
@@ -4656,30 +4663,26 @@ export class WebGL2Renderer implements Renderer {
 			TextureWrapMode.Repeat,
 		);
 		gl.activeTexture(gl.TEXTURE0);
+		this.#textureSamplers.bind(0, {
+			mipLevels: 1,
+			policy: this.#frameTextureFiltering,
+			samplingClass: "exact",
+			wrap: TextureWrapMode.Clamp,
+		});
+		gl.uniform1i(program.uniforms.surfaceField, 0);
 	}
 
 	/**
-	 * Bind the one genuinely per-landblock terrain texture.
+	 * Bind the one genuinely per-landblock terrain texture on already-configured unit 0.
 	 *
-	 * Everything else the terrain shader samples is region-constant and already bound for the pass
-	 * by `#beginTerrainPassResources`.
+	 * Everything else the terrain shader samples, including unit 0's sampler and uniform, is
+	 * region-constant and already bound for the pass by `#beginTerrainPassResources`.
 	 */
-	#bindTerrainSurfaceField(
-		input: TerrainFrameInput,
-		program: WebGL2NearTerrainProgram,
-	): void {
+	#bindTerrainSurfaceField(input: TerrainFrameInput): void {
 		const surfaceField = this.#resources.getTexture2D(
 			input.program.surfaceField,
 		);
-		const gl = this.#gl;
-		this.#bindTexture2D(
-			0,
-			surfaceField,
-			program.uniforms.surfaceField,
-			"exact",
-			TextureWrapMode.Clamp,
-		);
-		gl.activeTexture(gl.TEXTURE0);
+		this.#gl.bindTexture(this.#gl.TEXTURE_2D, surfaceField.texture);
 	}
 
 	/**
@@ -5593,17 +5596,21 @@ export class WebGL2Renderer implements Renderer {
 			);
 			this.#frameSelectionMetrics.objectLightingBinds += 1;
 		}
-		// Interior geometry already carries its static lighting in baked vertex colours, so it
-		// binds an empty set rather than the landblock's outdoor lamps.
-		const scope =
-			role === "interior-object" || object.source === "portal-transition"
-				? null
-				: object.landblockId;
+		// Interior geometry already carries its static lighting in baked vertex colours, and
+		// daylight or lamp-free outdoor landblocks contribute zero static lights; share the empty
+		// `null` scope across all of them so landblock transitions do not re-upload `uStaticLightCount = 0`.
+		const lights =
+			role === "interior-object" ||
+			object.source === "portal-transition" ||
+			shading.authoredLightResponse <= 0
+				? EMPTY_LIGHTS
+				: shading.staticLights(object.landblockId).lights;
+		const scope = lights.length > 0 ? object.landblockId : null;
 		if (!this.#deviceState.applyStaticLightScope(scope)) return;
 		bindWebGL2StaticLights(
 			this.#gl,
 			program.uniforms,
-			scope === null ? EMPTY_LIGHTS : shading.staticLights(scope).lights,
+			lights,
 			shading.anchorOrigin,
 			shading.authoredLightResponse,
 			this.#dynamicLightScratch,

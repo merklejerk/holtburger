@@ -56,6 +56,7 @@ import {
 	PORTAL_PROPAGATION_ARRIVAL_METADATA_OFFSET_BYTES,
 	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
+	portalPropagationMetadataUsedByteLength,
 } from "./portal-propagation-metadata";
 import { writePortalScopeTileMetadata } from "./portal-scope-tile-metadata";
 import { createCameraNearClipVolume } from "./portal-near-plane";
@@ -94,6 +95,13 @@ const DEEP_COLOR = [26, 204, 204, 255] as const;
 const LEAF_COLOR = [51, 204, 51, 255] as const;
 const WEATHER_COLOR = [77, 128, 230, 255] as const;
 const CLEAR_COLOR = [26, 51, 204, 255] as const;
+const CLEAR_COLOR_NORMALIZED = [
+	CLEAR_COLOR[0] / 255,
+	CLEAR_COLOR[1] / 255,
+	CLEAR_COLOR[2] / 255,
+	CLEAR_COLOR[3] / 255,
+] as const;
+const STALE_OUTPUT_COLOR = [13, 240, 99, 255] as const;
 /** Screen pixels covered by the fixture crossings' NDC [-0.5, 0.5] quad. */
 const CENTER_PIXELS = new Set(
 	Array.from(
@@ -216,6 +224,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		clearOutput(gl);
 		const propagatedStream = createPropagationStream();
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream: propagatedStream,
@@ -229,6 +238,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		seedSceneAtlas(gl, targets, 0.2);
 		clearOutput(gl);
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream: propagatedStream,
@@ -241,6 +251,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		seedSceneAtlas(gl, targets);
 		clearOutput(gl);
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream: createRootOnlyStream(),
@@ -253,6 +264,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		seedJunctionSceneAtlas(gl, targets);
 		clearOutput(gl);
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream: junctionStream,
@@ -266,6 +278,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		seedJunctionSceneAtlas(gl, targets);
 		clearOutput(gl);
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream: strictStream,
@@ -287,6 +300,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		seedProductionPackedSceneAtlas(gl, targets, productionPackedFrame);
 		clearOutput(gl);
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream: productionPackedStream,
@@ -315,6 +329,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		seedProductionPackedSceneAtlas(gl, targets, straddleFrame);
 		clearOutput(gl);
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream: straddleStream,
@@ -326,6 +341,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		seedProductionPackedSceneAtlas(gl, targets, straddleFrame);
 		clearOutput(gl);
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream: straddleStream,
@@ -346,6 +362,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 			gl,
 			() => {
 				executor.execute({
+					clearColor: CLEAR_COLOR_NORMALIZED,
 					outputExtent: DRAWING_EXTENT,
 					outputFramebuffer: null,
 					stream: productionPackedStream,
@@ -359,6 +376,7 @@ export function runWebGL2PortalScopeAtlasExecutorFixture(
 		paintPlannedTileColor(gl, targets, productionPackedFrame, 0, WEATHER_COLOR);
 		clearOutput(gl);
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream: productionPackedStream,
@@ -677,7 +695,7 @@ function createPropagationStream(): SyntheticExecutorStream {
 			renderDomainMetadataStateCount: 4,
 			usedByteLength: arena.byteLength,
 			usedPropagationMetadataByteLength:
-				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+				portalPropagationMetadataUsedByteLength(4),
 			vertexCount: 18,
 		},
 		3,
@@ -725,7 +743,7 @@ function createMaterialBearingCoplanarStream(
 			renderDomainMetadataStateCount: 2,
 			usedByteLength: arena.byteLength,
 			usedPropagationMetadataByteLength:
-				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+				portalPropagationMetadataUsedByteLength(2),
 			vertexCount: 6,
 		},
 		1,
@@ -758,6 +776,7 @@ function runMaterialBearingBoundaryFixture(
 		for (const arrivalPlaneNormalZ of [-1, 1] as const) {
 			clearOutput(gl);
 			executor.execute({
+				clearColor: CLEAR_COLOR_NORMALIZED,
 				outputExtent: DRAWING_EXTENT,
 				outputFramebuffer: null,
 				stream: createMaterialBearingCoplanarStream(arrivalPlaneNormalZ),
@@ -784,6 +803,7 @@ function runMaterialBearingBoundaryFixture(
 		gl.disable(gl.SCISSOR_TEST);
 		clearOutput(gl);
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream: createMaterialBearingCoplanarStream(1),
@@ -871,7 +891,7 @@ function createJunctionStream(tagJunction: boolean): SyntheticExecutorStream {
 			renderDomainMetadataStateCount: 3,
 			usedByteLength: arena.byteLength,
 			usedPropagationMetadataByteLength:
-				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+				portalPropagationMetadataUsedByteLength(3),
 			vertexCount: 12,
 		},
 		2,
@@ -899,7 +919,7 @@ function createRootOnlyStream(): SyntheticExecutorStream {
 			renderDomainMetadataStateCount: 1,
 			usedByteLength: 0,
 			usedPropagationMetadataByteLength:
-				PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
+				portalPropagationMetadataUsedByteLength(1),
 			vertexCount: 0,
 		},
 		0,
@@ -961,14 +981,10 @@ function withSyntheticFullTileSchedule(
 		...base,
 		indexBytes: new Uint8Array(indices.buffer),
 		indexCount,
-		packedAtlasHeight: DRAWING_EXTENT.height,
-		packedAtlasWidth: tileCount * DRAWING_EXTENT.width,
 		quadBytes: new Uint8Array(quadArray.buffer),
 		quadCount,
 		resolveQuadCount: tileCount,
 		resolveQuadOffset,
-		rootTileHeight: DRAWING_EXTENT.height,
-		rootTileWidth: DRAWING_EXTENT.width,
 		roundFrontierScissorHeight: () => DRAWING_EXTENT.height,
 		roundFrontierScissorWidth: () => DRAWING_EXTENT.width,
 		roundFrontierScissorX: () => 0,
@@ -1187,17 +1203,17 @@ function clearOutput(gl: WebGL2RenderingContext): void {
 	gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
 	gl.viewport(0, 0, DRAWING_EXTENT.width, DRAWING_EXTENT.height);
 	gl.disable(gl.SCISSOR_TEST);
-	// Fixture stages deliberately leave depth writes disabled. Reset both attachments so a repeated
-	// executor resolve cannot retain stale color or depth. Resolve deliberately accepts equal clear
-	// depth because terminal sky/background pixels remain at one.
+	// Pre-dirty the output with stale color and near depth so the root `ALWAYS` resolve pass must
+	// overwrite every output pixel (filling uncovered root holes from `uClearColor`) without any
+	// caller pre-clear.
 	gl.colorMask(true, true, true, true);
 	gl.depthMask(true);
 	gl.clearBufferfv(
 		gl.COLOR,
 		0,
-		new Float32Array(CLEAR_COLOR.map((component) => component / 255)),
+		new Float32Array(STALE_OUTPUT_COLOR.map((component) => component / 255)),
 	);
-	gl.clearBufferfv(gl.DEPTH, 0, new Float32Array([1]));
+	gl.clearBufferfv(gl.DEPTH, 0, new Float32Array([0.05]));
 }
 
 function readOutput(gl: WebGL2RenderingContext): Uint8Array {
@@ -1259,6 +1275,7 @@ function runDeferredCompositionFixture(
 		seedProductionPackedSceneAtlas(gl, targets, frame);
 		clearOutput(gl);
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream,
@@ -1272,6 +1289,7 @@ function runDeferredCompositionFixture(
 		seedProductionPackedSceneAtlas(gl, targets, frame);
 		clearOutput(gl);
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DRAWING_EXTENT,
 			outputFramebuffer: null,
 			stream,
@@ -1558,7 +1576,7 @@ function executeWithHostileSamplers(
 	execute: () => Uint8Array,
 ): { readonly error: GLenum; readonly pixels: Uint8Array } {
 	const activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as GLenum;
-	const previousSamplers = Array.from({ length: 6 }, (_, unit) => {
+	const previousSamplers = Array.from({ length: 7 }, (_, unit) => {
 		gl.activeTexture(gl.TEXTURE0 + unit);
 		return gl.getParameter(gl.SAMPLER_BINDING) as WebGLSampler | null;
 	});
@@ -1900,7 +1918,7 @@ function captureState(
 	const activeTexture = gl.getParameter(gl.ACTIVE_TEXTURE) as GLenum;
 	const textures: (WebGLTexture | null)[] = [];
 	const samplers: (WebGLSampler | null)[] = [];
-	for (let unit = 0; unit <= 5; unit += 1) {
+	for (let unit = 0; unit <= 6; unit += 1) {
 		gl.activeTexture(gl.TEXTURE0 + unit);
 		textures.push(
 			gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null,
@@ -2270,6 +2288,7 @@ function runDepth16CyclicMultiWindowFixture(
 		seedDepth16Scene();
 		output.clear();
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: DEPTH16_DRAWING_EXTENT,
 			outputFramebuffer: output.framebuffer,
 			stream,
@@ -2444,7 +2463,7 @@ function createOffscreenOutputTarget(
 			gl.disable(gl.SCISSOR_TEST);
 			gl.colorMask(true, true, true, true);
 			gl.depthMask(true);
-			clearCurrentTile(gl, CLEAR_COLOR, 1);
+			clearCurrentTile(gl, STALE_OUTPUT_COLOR, 0.05);
 		},
 		destroy() {
 			gl.deleteFramebuffer(framebuffer);
@@ -2966,6 +2985,7 @@ function runDepth16BranchingChildCycleFixture(
 
 		output.clear();
 		executor.execute({
+			clearColor: CLEAR_COLOR_NORMALIZED,
 			outputExtent: branchingDrawingExtent,
 			outputFramebuffer: output.framebuffer,
 			stream,
@@ -3564,6 +3584,7 @@ function runShrinkingMultiFrameFrontierFixture(
 
 			output.clear();
 			executor.execute({
+				clearColor: CLEAR_COLOR_NORMALIZED,
 				outputExtent: DEPTH16_DRAWING_EXTENT,
 				outputFramebuffer: output.framebuffer,
 				stream,

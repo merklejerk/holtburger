@@ -109,21 +109,24 @@ in vec3 vSurfaceNormal;
 out vec4 fragmentColor;
 
 const uint ROAD_TERRAIN_TYPE = 32u;
+const uint UNIFORM_TERRAIN_MULTIPLIER = 33825u;
 const int LIGHT_GRID_CELLS = ${OUTDOOR_TERRAIN_GRID_CELLS};
 
-/**
- * The two terrain surface coordinates a fragment needs, both in surface-field cell units.
- *
- * \`cell\` is cell-local [0,1) and addresses the per-cell alpha masks, whose rotation and flip math
- * is only defined inside one cell. \`field\` is the landblock-wide coordinate of the same point, and
- * it is what tiled color lookups must use: the two differ by a whole number of cells, so a
- * repeat-wrapped sampler reads the identical texel while screen-space derivatives stay continuous
- * across cell boundaries. Tiling from \`cell\` instead makes every boundary pixel quad report a
- * full-texture derivative, collapse to the 1x1 mip, and draw a flat one-pixel seam.
- */
+// The two terrain surface coordinates a fragment needs, both in surface-field cell units, paired
+// with unconditional screen-space derivatives of field.
+//
+// cell is cell-local [0,1) and addresses the per-cell alpha masks, whose rotation and flip math
+// is only defined inside one cell. field is the landblock-wide coordinate of the same point, and
+// it is what tiled color lookups must use: the two differ by a whole number of cells, so a
+// repeat-wrapped sampler reads the identical texel while screen-space derivatives stay continuous
+// across cell boundaries. Computing fieldDx and fieldDy unconditionally at fragment entry lets
+// every filterable lookup use textureGrad safely inside dynamic branches on D3D11/FXC while
+// keeping mask mip selection free of fract(field) boundary spikes.
 struct TerrainUv {
 	vec2 cell;
 	vec2 field;
+	vec2 fieldDx;
+	vec2 fieldDy;
 };
 
 // The light grid is the landblock's authored 8x8, kept as its own constant rather than derived from
@@ -131,6 +134,7 @@ struct TerrainUv {
 // one is how finely lamps are bucketed, the other how finely terrain is composited -- so tying the
 // lamp bucket to the composition grid would silently change lighting if either were ever retuned.
 vec3 evaluateMaskedStaticLights(vec3 position, vec3 unitNormal) {
+	if (uStaticLightCount <= 0) return vec3(0.0);
 	ivec2 cell = clamp(
 		ivec2(vGridUv * float(LIGHT_GRID_CELLS)),
 		ivec2(0),
@@ -152,11 +156,13 @@ uint terrainCodeAt(uint pcode, int corner) {
 	return pcode & 31u;
 }
 
-uint roadCodeAt(uint pcode, int corner) {
-	if (corner == 0) return (pcode >> 26u) & 3u;
-	if (corner == 1) return (pcode >> 24u) & 3u;
-	if (corner == 2) return (pcode >> 22u) & 3u;
-	return (pcode >> 20u) & 3u;
+uint roadMaskFromPcode(uint pcode) {
+	uint roadBits = (pcode >> 20u) & 255u;
+	if (roadBits == 0u) return 0u;
+	return ((roadBits & 192u) != 0u ? 1u : 0u)
+		| ((roadBits & 48u) != 0u ? 2u : 0u)
+		| ((roadBits & 12u) != 0u ? 4u : 0u)
+		| ((roadBits & 3u) != 0u ? 8u : 0u);
 }
 
 uint rotateCode(uint code) {
@@ -194,23 +200,36 @@ vec2 rotateSourceAlphaUv(vec2 uv, int rotation) {
 	return uv;
 }
 
-vec4 sampleTerrainColor(uint terrainCode, TerrainUv uv) {
-	uvec4 record = compositionRecord(int(terrainCode), 0);
-	return texture(uColors, vec3(uv.field * float(record.y), float(record.x)));
+vec2 rotateSourceAlphaDelta(vec2 fieldDelta, int rotation) {
+	vec2 delta = vec2(fieldDelta.x, -fieldDelta.y);
+	if (rotation == 1) return vec2(-delta.y, delta.x);
+	if (rotation == 2) return vec2(-delta.x, -delta.y);
+	if (rotation == 3) return vec2(delta.y, -delta.x);
+	return delta;
 }
 
-ivec2 findTerrainMap(uint pcode, uint shapeCode) {
+vec4 sampleTerrainColor(uint terrainCode, TerrainUv uv) {
+	uvec4 record = compositionRecord(int(terrainCode), 0);
+	float scale = float(record.y);
+	return textureGrad(
+		uColors,
+		vec3(uv.field * scale, float(record.x)),
+		uv.fieldDx * scale,
+		uv.fieldDy * scale
+	);
+}
+
+ivec2 findTerrainMap(uint pcode, uint shapeCode, uvec2 mapCounts) {
 	bool cornerShape = shapeCode == 1u || shapeCode == 2u || shapeCode == 4u || shapeCode == 8u;
 	int row = cornerShape ? 1 : 2;
-	uint count = compositionRecord(0, 4)[cornerShape ? 0 : 1];
+	uint count = cornerShape ? mapCounts.x : mapCounts.y;
 	if (count == 0u) return ivec2(-1, 0);
 	uvec4 map = compositionRecord(int(variationIndex(pcode, count)), row);
 	int rotations = rotationsToMatch(map.y, shapeCode);
 	return rotations < 0 ? ivec2(-1, 0) : ivec2(int(map.x), rotations);
 }
 
-ivec2 findRoadMap(uint pcode, uint roadCode) {
-	uint count = compositionRecord(0, 4).z;
+ivec2 findRoadMap(uint pcode, uint roadCode, uint count) {
 	if (count == 0u) return ivec2(-1, 0);
 	uint first = variationIndex(pcode, count);
 	for (uint offset = 0u; offset < count; offset += 1u) {
@@ -221,16 +240,29 @@ ivec2 findRoadMap(uint pcode, uint roadCode) {
 	return ivec2(-1, 0);
 }
 
-vec3 applyTerrainOverlay(vec3 color, uint pcode, uint terrainCode, uint shapeCode, TerrainUv uv) {
-	ivec2 map = findTerrainMap(pcode, shapeCode);
+vec3 applyTerrainOverlay(
+	vec3 color,
+	uint pcode,
+	uint terrainCode,
+	uint shapeCode,
+	uvec2 mapCounts,
+	TerrainUv uv
+) {
+	ivec2 map = findTerrainMap(pcode, shapeCode, mapCounts);
 	if (map.x < 0) return color;
-	float mask = texture(uBlendMasks, vec3(rotateSourceAlphaUv(sourceAlphaUv(uv.cell), map.y), float(map.x))).r;
+	vec2 maskUv = rotateSourceAlphaUv(sourceAlphaUv(uv.cell), map.y);
+	float mask = textureGrad(
+		uBlendMasks,
+		vec3(maskUv, float(map.x)),
+		rotateSourceAlphaDelta(uv.fieldDx, map.y),
+		rotateSourceAlphaDelta(uv.fieldDy, map.y)
+	).r;
 	return mix(color, sampleTerrainColor(terrainCode, uv).rgb, clamp(1.0 - mask, 0.0, 1.0));
 }
 
 // Read packed codes directly: storing them in a dynamically indexed local array here caused
 // persistent rendering corruption on Iris Xe's Windows OpenGL driver 32.0.101.7077.
-vec3 composeTerrain(uint pcode, TerrainUv uv) {
+vec3 composeTerrain(uint pcode, uvec2 mapCounts, TerrainUv uv) {
 	int baseIndex = -1;
 	for (int first = 0; first < 3 && baseIndex < 0; first += 1) {
 		for (int second = first + 1; second < 4; second += 1) {
@@ -242,9 +274,9 @@ vec3 composeTerrain(uint pcode, TerrainUv uv) {
 	}
 	if (baseIndex < 0) {
 		vec3 color = sampleTerrainColor(terrainCodeAt(pcode, 0), uv).rgb;
-		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, 1), 2u, uv);
-		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, 2), 4u, uv);
-		return applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, 3), 8u, uv);
+		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, 1), 2u, mapCounts, uv);
+		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, 2), 4u, mapCounts, uv);
+		return applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, 3), 8u, mapCounts, uv);
 	}
 
 	uint baseCode = terrainCodeAt(pcode, baseIndex);
@@ -263,23 +295,23 @@ vec3 composeTerrain(uint pcode, TerrainUv uv) {
 			firstShape += 1u << uint(corner);
 			continue;
 		}
-		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, firstOverlayIndex), firstShape, uv);
-		return applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, corner), 1u << uint(corner), uv);
+		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, firstOverlayIndex), firstShape, mapCounts, uv);
+		return applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, corner), 1u << uint(corner), mapCounts, uv);
 	}
 	if (firstOverlayIndex >= 0) {
-		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, firstOverlayIndex), firstShape, uv);
+		color = applyTerrainOverlay(color, pcode, terrainCodeAt(pcode, firstOverlayIndex), firstShape, mapCounts, uv);
 	}
 	return color;
 }
 
-vec3 applyRoads(vec3 color, uint pcode, TerrainUv uv) {
-	uint mask = 0u;
-	for (int corner = 0; corner < 4; corner += 1) {
-		if (roadCodeAt(pcode, corner) != 0u) mask |= 1u << uint(corner);
-	}
-	if (mask == 0u) return color;
+vec3 applyPartialRoads(
+	vec3 color,
+	uint pcode,
+	uint mask,
+	uint roadMapCount,
+	TerrainUv uv
+) {
 	vec3 roadColor = sampleTerrainColor(ROAD_TERRAIN_TYPE, uv).rgb;
-	if (mask == 15u) return roadColor;
 	uint codes[2];
 	int count = 1;
 	codes[0] = mask;
@@ -290,9 +322,15 @@ vec3 applyRoads(vec3 color, uint pcode, TerrainUv uv) {
 	float product = 1.0;
 	for (int index = 0; index < 2; index += 1) {
 		if (index >= count) break;
-		ivec2 map = findRoadMap(pcode, codes[index]);
+		ivec2 map = findRoadMap(pcode, codes[index], roadMapCount);
 		if (map.x < 0) continue;
-		product *= texture(uRoadMasks, vec3(rotateSourceAlphaUv(sourceAlphaUv(uv.cell), map.y), float(map.x))).r;
+		vec2 maskUv = rotateSourceAlphaUv(sourceAlphaUv(uv.cell), map.y);
+		product *= textureGrad(
+			uRoadMasks,
+			vec3(maskUv, float(map.x)),
+			rotateSourceAlphaDelta(uv.fieldDx, map.y),
+			rotateSourceAlphaDelta(uv.fieldDy, map.y)
+		).r;
 	}
 	return mix(color, roadColor, clamp(1.0 - product, 0.0, 1.0));
 }
@@ -301,22 +339,56 @@ void main() {
 	ivec2 fieldSize = textureSize(uSurfaceField, 0);
 	TerrainUv uv;
 	uv.field = vGridUv * vec2(fieldSize);
+	uv.fieldDx = dFdx(uv.field);
+	uv.fieldDy = dFdy(uv.field);
 	uv.cell = fract(uv.field);
 	ivec2 cell = min(ivec2(uv.field), fieldSize - ivec2(1));
 	uint pcode = texelFetch(uSurfaceField, cell, 0).r;
-	vec3 color = applyRoads(composeTerrain(pcode, uv), pcode, uv);
-	uvec4 metadata = compositionRecord(0, 4);
-	vec4 detail = texture(uDetail, uv.field * float(metadata.w));
-	float fade = clamp((uDetailFadeFar - vViewDepth) / max(uDetailFadeFar - uDetailFadeNear, 0.0001), 0.0, 1.0);
-	color = mix(color, detail.rgb, clamp(detail.a * fade, 0.0, 1.0));
+	uint cornerCode = pcode & 31u;
+	bool uniformTerrain = (pcode & 1048575u) == cornerCode * UNIFORM_TERRAIN_MULTIPLIER;
+	uint roadMask = roadMaskFromPcode(pcode);
+	bool fullRoad = roadMask == 15u;
+	bool needsDetail = vViewDepth < uDetailFadeFar;
+	uvec4 metadata = (!fullRoad && (!uniformTerrain || roadMask != 0u)) || needsDetail
+		? compositionRecord(0, 4)
+		: uvec4(0u);
+	vec3 color;
+	if (fullRoad) {
+		color = sampleTerrainColor(ROAD_TERRAIN_TYPE, uv).rgb;
+	} else {
+		color = uniformTerrain
+			? sampleTerrainColor(cornerCode, uv).rgb
+			: composeTerrain(pcode, metadata.xy, uv);
+		if (roadMask != 0u) {
+			color = applyPartialRoads(color, pcode, roadMask, metadata.z, uv);
+		}
+	}
+	if (needsDetail) {
+		float detailScale = float(metadata.w);
+		vec4 detail = textureGrad(
+			uDetail,
+			uv.field * detailScale,
+			uv.fieldDx * detailScale,
+			uv.fieldDy * detailScale
+		);
+		float fade = clamp(
+			(uDetailFadeFar - vViewDepth) / max(uDetailFadeFar - uDetailFadeNear, 0.0001),
+			0.0,
+			1.0
+		);
+		color = mix(color, detail.rgb, clamp(detail.a * fade, 0.0, 1.0));
+	}
 	// Lighting modulates the complete surface albedo, then fog applies as a raster stage. The
 	// directional terms arrive interpolated; point lights evaluate here so a lamp produces a pool
 	// rather than a whole-quad gradient.
-	vec3 surfaceNormal = safeNormal(vSurfaceNormal);
-	vec3 runtimeLighting = uTerrainPointLightIntensityScale * (
-		evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
-			+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal)
-	);
+	vec3 runtimeLighting = vec3(0.0);
+	if (uTerrainPointLightIntensityScale > 0.0 && (uDynamicLightCount > 0 || uStaticLightCount > 0)) {
+		vec3 surfaceNormal = safeNormal(vSurfaceNormal);
+		runtimeLighting = uTerrainPointLightIntensityScale * (
+			evaluateDynamicLights(vAnchoredPosition, surfaceNormal)
+				+ evaluateMaskedStaticLights(vAnchoredPosition, surfaceNormal)
+		);
+	}
 	color *= min(
 		vAmbientSun + runtimeLighting,
 		vec3(1.0)
@@ -378,7 +450,7 @@ export function createTerrainFragmentShader(
 		)`;
 	const directionalVisibility = `evaluateOutdoorDirectionalShadowVisibility(
 			vAnchoredPosition,
-			dot(surfaceNormal, vec3(0.0, 1.0, 0.0))
+			safeNormal(vSurfaceNormal).y
 		)`;
 	const visibility = mapped
 		? directional

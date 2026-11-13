@@ -62,8 +62,14 @@ vi.mock("./webgl2-portal-scope-atlas-executor", () => ({
 		bindDirectRootMetadata(stream: PortalPropagationStreamView) {
 			device.bindDirectRootMetadata(stream.propagationMetadataBytes.slice());
 		}
-		execute(input: { stream: PortalPropagationStreamView }) {
-			device.execute(input.stream.propagationMetadataBytes.slice());
+		execute(input: {
+			clearColor: readonly [number, number, number, number];
+			stream: PortalPropagationStreamView;
+		}) {
+			device.execute({
+				clearColor: input.clearColor,
+				metadata: input.stream.propagationMetadataBytes.slice(),
+			});
 		}
 		destroy() {}
 	},
@@ -267,7 +273,7 @@ describe("deferred portal view ownership", () => {
 		).toBeNull();
 	});
 
-	it("allocates atlas targets only during execution and scissors clears to packed bounds", () => {
+	it("allocates atlas targets only during execution and scissors clears to active tiles", () => {
 		device.resize.mockClear();
 		device.execute.mockClear();
 		device.bindDirectRootMetadata.mockClear();
@@ -302,28 +308,37 @@ describe("deferred portal view ownership", () => {
 		expect(prepared.atlas.commands.traversalDepth).toBe(1);
 		expect(device.resize).not.toHaveBeenCalled();
 
+		const clearColor = [0.1, 0.2, 0.3, 1] as const;
 		const targets = pipeline.beginOpaqueScene(
 			prepared,
-			[0, 0, 0, 1],
+			clearColor,
 			DIRECT_OUTPUT_FRAMEBUFFER,
 		);
 		expect(targets).not.toBeNull();
 		expect(device.resize).toHaveBeenCalledTimes(1);
-		expect(scissor).toHaveBeenCalledWith(
-			0,
-			0,
-			prepared.atlas.packedWidth,
-			prepared.atlas.packedHeight,
+		expect(scissor.mock.calls).toEqual(
+			Array.from({ length: prepared.atlas.tileCount }, (_, ordinal) => [
+				prepared.atlas.tileX(ordinal),
+				prepared.atlas.tileY(ordinal),
+				prepared.atlas.tileWidth(ordinal),
+				prepared.atlas.tileHeight(ordinal),
+			]),
 		);
-		expect(
+		const clearedPixels = Array.from(
+			{ length: prepared.atlas.tileCount },
+			(_, ordinal) =>
+				prepared.atlas.tileWidth(ordinal) * prepared.atlas.tileHeight(ordinal),
+		).reduce((sum, area) => sum + area, 0);
+		expect(clearedPixels).toBeLessThan(
 			prepared.atlas.packedWidth * prepared.atlas.packedHeight,
-		).toBeLessThan(
-			targets!.extents.atlas.width * targets!.extents.atlas.height,
 		);
 
 		pipeline.execute(DIRECT_OUTPUT_FRAMEBUFFER);
 		pipeline.beginDeferredScene(DIRECT_OUTPUT_FRAMEBUFFER);
 		expect(device.execute).toHaveBeenCalledTimes(1);
+		expect(device.execute.mock.calls[0]![0]).toMatchObject({
+			clearColor,
+		});
 		expect(device.bindDirectRootMetadata).not.toHaveBeenCalled();
 		expect(bindTexture).toHaveBeenCalledWith(undefined, ENVELOPE_TEXTURE);
 	});

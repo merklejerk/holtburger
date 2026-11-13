@@ -7,7 +7,10 @@ import {
 } from "./portal-crossing-triangle-stream";
 import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-model";
 import { PORTAL_QUAD_MODE_ROOT_ROUND0_CLAMP } from "./portal-scope-atlas-planner";
-import { PORTAL_ENVELOPE_SAMPLING_GLSL } from "./portal-envelope-sampling-glsl";
+import {
+	PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS,
+	PORTAL_ENVELOPE_SAMPLING_GLSL,
+} from "./portal-envelope-sampling-glsl";
 import {
 	bindPortalScopeAtlasMetadataBlock,
 	PORTAL_SCOPE_ATLAS_METADATA_GLSL,
@@ -154,6 +157,114 @@ void main() {
 }
 `;
 
+/**
+ * Separable pre-dilation clamps X to the scope tile (`uScopes[vScope]`) and Y to each quad's
+ * atlas span (`vQuadYBounds`). Horizontal dilation writes `dilationScratch` with depth testing
+ * disabled, so tile-clamped X makes unmerged overlapping quads of the same domain produce the
+ * exact same `uint32` regardless of instance order. Vertical dilation reads `dilationScratch`
+ * without clearing it between frames, so quad-clamped Y keeps taps inside freshly written rows
+ * while `GREATER` depth-max merges overlapping quads of the same domain.
+ */
+const DILATION_HORIZONTAL_VERTEX_SHADER = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+
+layout(location = 0) in uvec4 aQuadOrigin;
+layout(location = 1) in uvec4 aQuadExtent;
+
+uniform highp sampler2D uPortalEnvelopeDepth;
+flat out uint vScope;
+
+${UNIT_QUAD_VERTEX_GLSL}
+
+void main() {
+	vec2 atlasPixel = vec2(aQuadOrigin.xy)
+		+ unitVertex(gl_VertexID) * vec2(aQuadExtent.xy);
+	vec2 atlasExtent = vec2(textureSize(uPortalEnvelopeDepth, 0));
+	vScope = aQuadExtent.z;
+	gl_Position = vec4(atlasPixel * 2.0 / atlasExtent - 1.0, 0.0, 1.0);
+}
+`;
+
+const DILATION_HORIZONTAL_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+
+${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
+
+uniform highp sampler2D uPortalEnvelopeDepth;
+flat in uint vScope;
+layout(location = 0) out uint outPackedEnvelope;
+
+void main() {
+	PortalScopeMetadata scope = uScopes[vScope];
+	ivec2 atlasPixel = ivec2(gl_FragCoord.xy);
+	int minX = int(scope.atlasAndScreenOrigin.x);
+	int maxX = minX + int(scope.extentAndReserved.x) - 1;
+	float center = texelFetch(uPortalEnvelopeDepth, atlasPixel, 0).r;
+	float maxDepth = center;
+	for (int dx = -${PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS}; dx <= ${PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS}; dx += 1) {
+		if (dx == 0) continue;
+		int sampleX = clamp(atlasPixel.x + dx, minX, maxX);
+		maxDepth = max(
+			maxDepth,
+			texelFetch(uPortalEnvelopeDepth, ivec2(sampleX, atlasPixel.y), 0).r
+		);
+	}
+	uint depthBits = floatBitsToUint(maxDepth) & 0x7fffffffu;
+	outPackedEnvelope = depthBits | (center > 0.0 ? 0x80000000u : 0u);
+}
+`;
+
+const DILATION_VERTICAL_VERTEX_SHADER = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp usampler2D;
+
+layout(location = 0) in uvec4 aQuadOrigin;
+layout(location = 1) in uvec4 aQuadExtent;
+
+uniform highp usampler2D uDilationScratch;
+flat out ivec2 vQuadYBounds;
+
+${UNIT_QUAD_VERTEX_GLSL}
+
+void main() {
+	vec2 atlasPixel = vec2(aQuadOrigin.xy)
+		+ unitVertex(gl_VertexID) * vec2(aQuadExtent.xy);
+	vec2 atlasExtent = vec2(textureSize(uDilationScratch, 0));
+	int minY = int(aQuadOrigin.y);
+	vQuadYBounds = ivec2(minY, minY + int(aQuadExtent.y) - 1);
+	gl_Position = vec4(atlasPixel * 2.0 / atlasExtent - 1.0, 0.0, 1.0);
+}
+`;
+
+const DILATION_VERTICAL_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp usampler2D;
+
+uniform highp usampler2D uDilationScratch;
+flat in ivec2 vQuadYBounds;
+
+void main() {
+	ivec2 atlasPixel = ivec2(gl_FragCoord.xy);
+	uint centerPacked = texelFetch(uDilationScratch, atlasPixel, 0).r;
+	if ((centerPacked & 0x80000000u) != 0u) discard;
+	uint maxBits = centerPacked & 0x7fffffffu;
+	for (int dy = -${PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS}; dy <= ${PORTAL_ENVELOPE_GUTTER_RADIUS_TEXELS}; dy += 1) {
+		if (dy == 0) continue;
+		int sampleY = clamp(atlasPixel.y + dy, vQuadYBounds.x, vQuadYBounds.y);
+		uint sampleBits = texelFetch(uDilationScratch, ivec2(atlasPixel.x, sampleY), 0).r & 0x7fffffffu;
+		maxBits = max(maxBits, sampleBits);
+	}
+	if (maxBits == 0u) discard;
+	gl_FragDepth = uintBitsToFloat(maxBits);
+}
+`;
+
 const RESOLVE_VERTEX_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
@@ -186,6 +297,7 @@ ${PORTAL_ENVELOPE_SAMPLING_GLSL}
 
 uniform sampler2D uSceneColor;
 uniform sampler2D uSceneDepth;
+uniform vec4 uClearColor;
 flat in uint vScope;
 layout(location = 0) out vec4 outColor;
 
@@ -193,7 +305,19 @@ void main() {
 	PortalScopeMetadata scope = uScopes[vScope];
 	ivec2 screenPixel = ivec2(gl_FragCoord.xy);
 	ivec2 atlasPixel = portalScopeAtlasPixel(scope, screenPixel);
-	float envelopeDepth = portalEnvelopeDepthAtAtlasPixel(scope, atlasPixel);
+	float envelopeDepth = portalEnvelopeDepthAtAtlasPixel(atlasPixel);
+	if (vScope == 0u) {
+		float sceneDepth = texelFetch(uSceneDepth, atlasPixel, 0).r;
+		if (envelopeDepth != 1.0 && sceneDepth * 0.5 >= envelopeDepth) {
+			outColor = uClearColor;
+			gl_FragDepth = 1.0;
+			return;
+		}
+		outColor = texelFetch(uSceneColor, atlasPixel, 0);
+		gl_FragDepth = sceneDepth;
+		return;
+	}
+	if (envelopeDepth == 0.0) discard;
 	float sceneDepth = texelFetch(uSceneDepth, atlasPixel, 0).r;
 	if (envelopeDepth != 1.0 && sceneDepth * 0.5 >= envelopeDepth) discard;
 	outColor = texelFetch(uSceneColor, atlasPixel, 0);
@@ -201,8 +325,10 @@ void main() {
 }
 `;
 
-/** Linked program set and the only frame-varying reduction uniforms. */
+/** Linked program set and the frame-varying reduction and resolve uniforms. */
 export interface WebGL2PortalScopeAtlasPrograms {
+	readonly dilationHorizontal: WebGLProgram;
+	readonly dilationVertical: WebGLProgram;
 	readonly propagationFrom0: WebGLProgram;
 	readonly propagationFrom1: WebGLProgram;
 	readonly propagationRoot: WebGLProgram;
@@ -212,6 +338,9 @@ export interface WebGL2PortalScopeAtlasPrograms {
 		readonly traversalDepth: WebGLUniformLocation;
 	};
 	readonly resolve: WebGLProgram;
+	readonly resolveUniforms: {
+		readonly clearColor: WebGLUniformLocation;
+	};
 }
 
 /** Link the shader substrate and bind every sampler/block decision once. */
@@ -252,6 +381,20 @@ export function createWebGL2PortalScopeAtlasPrograms(
 			"envelope reduction",
 		);
 		programs.push(reduction);
+		const dilationHorizontal = linkProgram(
+			gl,
+			DILATION_HORIZONTAL_VERTEX_SHADER,
+			DILATION_HORIZONTAL_FRAGMENT_SHADER,
+			"envelope horizontal dilation",
+		);
+		programs.push(dilationHorizontal);
+		const dilationVertical = linkProgram(
+			gl,
+			DILATION_VERTICAL_VERTEX_SHADER,
+			DILATION_VERTICAL_FRAGMENT_SHADER,
+			"envelope vertical dilation",
+		);
+		programs.push(dilationVertical);
 		const resolve = linkProgram(
 			gl,
 			RESOLVE_VERTEX_SHADER,
@@ -260,7 +403,14 @@ export function createWebGL2PortalScopeAtlasPrograms(
 		);
 		programs.push(resolve);
 
-		for (const program of programs) {
+		for (const program of [
+			propagationRoot,
+			propagationFrom0,
+			propagationFrom1,
+			reduction,
+			dilationHorizontal,
+			resolve,
+		]) {
 			bindPortalScopeAtlasMetadataBlock(gl, program, metadataBindingPoint);
 		}
 		configurePropagationSamplers(gl, propagationRoot, null);
@@ -291,6 +441,16 @@ export function createWebGL2PortalScopeAtlasPrograms(
 			requireWebGL2Uniform(gl, reduction, "uFrontierDepth"),
 			PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.frontierDepth,
 		);
+		gl.useProgram(dilationHorizontal);
+		gl.uniform1i(
+			requireWebGL2Uniform(gl, dilationHorizontal, "uPortalEnvelopeDepth"),
+			PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth,
+		);
+		gl.useProgram(dilationVertical);
+		gl.uniform1i(
+			requireWebGL2Uniform(gl, dilationVertical, "uDilationScratch"),
+			PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.dilationScratch,
+		);
 		gl.useProgram(resolve);
 		gl.uniform1i(
 			requireWebGL2Uniform(gl, resolve, "uSceneColor"),
@@ -305,6 +465,8 @@ export function createWebGL2PortalScopeAtlasPrograms(
 			PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth,
 		);
 		return {
+			dilationHorizontal,
+			dilationVertical,
 			propagationFrom0,
 			propagationFrom1,
 			propagationRoot,
@@ -314,6 +476,9 @@ export function createWebGL2PortalScopeAtlasPrograms(
 				traversalDepth: requireWebGL2Uniform(gl, reduction, "uTraversalDepth"),
 			},
 			resolve,
+			resolveUniforms: {
+				clearColor: requireWebGL2Uniform(gl, resolve, "uClearColor"),
+			},
 		};
 	} catch (cause) {
 		for (const program of programs) gl.deleteProgram(program);
@@ -332,6 +497,8 @@ export function destroyWebGL2PortalScopeAtlasPrograms(
 	gl.deleteProgram(programs.propagationFrom0);
 	gl.deleteProgram(programs.propagationFrom1);
 	gl.deleteProgram(programs.reduction);
+	gl.deleteProgram(programs.dilationHorizontal);
+	gl.deleteProgram(programs.dilationVertical);
 	gl.deleteProgram(programs.resolve);
 }
 

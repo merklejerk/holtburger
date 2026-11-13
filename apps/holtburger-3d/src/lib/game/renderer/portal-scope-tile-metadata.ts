@@ -5,8 +5,37 @@ export const PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES = 32;
 /** Fixed bytes for every scope ordinal addressable by one R8UI arrival route. */
 export const PORTAL_SCOPE_TILE_METADATA_CAPACITY_BYTES =
 	PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT * PORTAL_SCOPE_TILE_METADATA_RECORD_BYTES;
+/** Byte offset of the tile's atlas X origin within one scope-tile metadata record. */
+export const PORTAL_SCOPE_TILE_ATLAS_X_OFFSET_BYTES = 0;
+/** Byte offset of the tile's atlas Y origin within one scope-tile metadata record. */
+export const PORTAL_SCOPE_TILE_ATLAS_Y_OFFSET_BYTES = 4;
+const PORTAL_SCOPE_TILE_SCREEN_X_OFFSET_BYTES = 8;
+const PORTAL_SCOPE_TILE_SCREEN_Y_OFFSET_BYTES = 12;
+/** Byte offset of the tile width within one scope-tile metadata record. */
+export const PORTAL_SCOPE_TILE_WIDTH_OFFSET_BYTES = 16;
+/** Byte offset of the tile height within one scope-tile metadata record. */
+export const PORTAL_SCOPE_TILE_HEIGHT_OFFSET_BYTES = 20;
+const PORTAL_SCOPE_TILE_FLAGS_OFFSET_BYTES = 24;
+const PORTAL_SCOPE_TILE_RESERVED_OFFSET_BYTES = 28;
 /** Marks a zero-crossing root domain whose deferred fragments need no envelope depth sample. */
 export const PORTAL_SCOPE_TILE_UNBOUNDED_ENVELOPE_FLAG = 1;
+
+const ATLAS_X_SLOT =
+	PORTAL_SCOPE_TILE_ATLAS_X_OFFSET_BYTES / Uint32Array.BYTES_PER_ELEMENT;
+const ATLAS_Y_SLOT =
+	PORTAL_SCOPE_TILE_ATLAS_Y_OFFSET_BYTES / Uint32Array.BYTES_PER_ELEMENT;
+const SCREEN_X_SLOT =
+	PORTAL_SCOPE_TILE_SCREEN_X_OFFSET_BYTES / Uint32Array.BYTES_PER_ELEMENT;
+const SCREEN_Y_SLOT =
+	PORTAL_SCOPE_TILE_SCREEN_Y_OFFSET_BYTES / Uint32Array.BYTES_PER_ELEMENT;
+const WIDTH_SLOT =
+	PORTAL_SCOPE_TILE_WIDTH_OFFSET_BYTES / Uint32Array.BYTES_PER_ELEMENT;
+const HEIGHT_SLOT =
+	PORTAL_SCOPE_TILE_HEIGHT_OFFSET_BYTES / Uint32Array.BYTES_PER_ELEMENT;
+const FLAGS_SLOT =
+	PORTAL_SCOPE_TILE_FLAGS_OFFSET_BYTES / Uint32Array.BYTES_PER_ELEMENT;
+const RESERVED_SLOT =
+	PORTAL_SCOPE_TILE_RESERVED_OFFSET_BYTES / Uint32Array.BYTES_PER_ELEMENT;
 
 /** Write one exact integer mapping between a drawing-buffer window and its atlas tile. */
 export function writePortalScopeTileMetadata(
@@ -52,16 +81,16 @@ export function writePortalScopeTileMetadata(
 			);
 		}
 	}
-	target[uintOffset] = atlasX;
-	target[uintOffset + 1] = atlasY;
-	target[uintOffset + 2] = screenX;
-	target[uintOffset + 3] = screenY;
-	target[uintOffset + 4] = width;
-	target[uintOffset + 5] = height;
-	target[uintOffset + 6] = unboundedEnvelope
+	target[uintOffset + ATLAS_X_SLOT] = atlasX;
+	target[uintOffset + ATLAS_Y_SLOT] = atlasY;
+	target[uintOffset + SCREEN_X_SLOT] = screenX;
+	target[uintOffset + SCREEN_Y_SLOT] = screenY;
+	target[uintOffset + WIDTH_SLOT] = width;
+	target[uintOffset + HEIGHT_SLOT] = height;
+	target[uintOffset + FLAGS_SLOT] = unboundedEnvelope
 		? PORTAL_SCOPE_TILE_UNBOUNDED_ENVELOPE_FLAG
 		: 0;
-	target[uintOffset + 7] = 0;
+	target[uintOffset + RESERVED_SLOT] = 0;
 }
 
 /** Map a drawing-buffer pixel edge into atlas pixel coordinates without constructing a point. */
@@ -75,9 +104,13 @@ export function writePortalScopeAtlasPixel(
 ): void {
 	requirePointTarget(target, targetOffset);
 	target[targetOffset] =
-		metadata[uintOffset]! + screenPixelX - metadata[uintOffset + 2]!;
+		metadata[uintOffset + ATLAS_X_SLOT]! +
+		screenPixelX -
+		metadata[uintOffset + SCREEN_X_SLOT]!;
 	target[targetOffset + 1] =
-		metadata[uintOffset + 1]! + screenPixelY - metadata[uintOffset + 3]!;
+		metadata[uintOffset + ATLAS_Y_SLOT]! +
+		screenPixelY -
+		metadata[uintOffset + SCREEN_Y_SLOT]!;
 }
 
 /** Invert one atlas pixel edge back into the drawing-buffer coordinates sampled by reduction. */
@@ -91,9 +124,13 @@ export function writePortalScopeScreenPixel(
 ): void {
 	requirePointTarget(target, targetOffset);
 	target[targetOffset] =
-		metadata[uintOffset + 2]! + atlasPixelX - metadata[uintOffset]!;
+		metadata[uintOffset + SCREEN_X_SLOT]! +
+		atlasPixelX -
+		metadata[uintOffset + ATLAS_X_SLOT]!;
 	target[targetOffset + 1] =
-		metadata[uintOffset + 3]! + atlasPixelY - metadata[uintOffset + 1]!;
+		metadata[uintOffset + SCREEN_Y_SLOT]! +
+		atlasPixelY -
+		metadata[uintOffset + ATLAS_Y_SLOT]!;
 }
 
 /** Position a unit-tile vertex directly in full-atlas NDC for one instanced atlas-tile draw. */
@@ -118,9 +155,12 @@ export function writePortalScopeTileAtlasNdc(
 		throw new Error("Portal scope-tile NDC input is invalid.");
 	}
 	requirePointTarget(target, targetOffset);
-	const atlasPixelX = metadata[uintOffset]! + metadata[uintOffset + 4]! * unitX;
+	const atlasPixelX =
+		metadata[uintOffset + ATLAS_X_SLOT]! +
+		metadata[uintOffset + WIDTH_SLOT]! * unitX;
 	const atlasPixelY =
-		metadata[uintOffset + 1]! + metadata[uintOffset + 5]! * unitY;
+		metadata[uintOffset + ATLAS_Y_SLOT]! +
+		metadata[uintOffset + HEIGHT_SLOT]! * unitY;
 	target[targetOffset] = (2 * atlasPixelX) / atlasWidth - 1;
 	target[targetOffset + 1] = (2 * atlasPixelY) / atlasHeight - 1;
 }

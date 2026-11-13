@@ -33,8 +33,8 @@ describe("portal scope-atlas WebGL call model", () => {
 			}),
 		);
 
-		expect(plan.trace).toEqual({ totalWebGLCallCount: 107 });
-		expect(countCalls(plan.calls, "active-texture")).toBe(6);
+		expect(plan.trace).toEqual({ totalWebGLCallCount: 127 });
+		expect(countCalls(plan.calls, "active-texture")).toBe(7);
 		expect(countCalls(plan.calls, "bind-buffer")).toBe(7);
 		expect(countCalls(plan.calls, "buffer-sub-data")).toBe(4);
 		expect(
@@ -44,31 +44,36 @@ describe("portal scope-atlas WebGL call model", () => {
 				"clear-frontier-depth",
 				"clear-frontier-state",
 			),
-		).toBe(8);
-		expect(countCalls(plan.calls, "scissor", "scissor-round-frontier")).toBe(5);
-		expect(countCalls(plan.calls, "quad-instance-offset")).toBe(4);
+		).toBe(10);
+		expect(
+			countCalls(plan.calls, "scissor-tile", "scissor-round-frontier"),
+		).toBe(7);
+		expect(countCalls(plan.calls, "quad-instance-offset")).toBe(6);
 		expect(
 			countCalls(
 				plan.calls,
 				"draw-propagation",
 				"draw-reduction",
+				"draw-dilation-horizontal",
+				"draw-dilation-vertical",
 				"draw-resolve",
 			),
-		).toBe(7);
-		expect(countCalls(plan.calls, "bind-framebuffer")).toBe(8);
-		expect(countCalls(plan.calls, "depth-function", "set-capability")).toBe(18);
+		).toBe(10);
+		expect(countCalls(plan.calls, "bind-framebuffer")).toBe(10);
+		expect(countCalls(plan.calls, "depth-function", "set-capability")).toBe(21);
 		expect(countCalls(plan.calls, "color-mask", "depth-mask")).toBe(2);
 		expect(countCalls(plan.calls, "bind-buffer-base")).toBe(1);
-		expect(countCalls(plan.calls, "use-program")).toBe(7);
-		expect(countCalls(plan.calls, "bind-texture-2d")).toBe(6);
-		expect(countCalls(plan.calls, "bind-sampler")).toBe(6);
+		expect(countCalls(plan.calls, "use-program")).toBe(9);
+		expect(countCalls(plan.calls, "bind-texture-2d")).toBe(7);
+		expect(countCalls(plan.calls, "bind-sampler")).toBe(7);
 		expect(
 			countCalls(
 				plan.calls,
 				"uniform-reduction-depth",
 				"uniform-reduction-round",
+				"uniform-resolve-clear-color",
 			),
-		).toBe(4);
+		).toBe(5);
 		expect(countCalls(plan.calls, "bind-vertex-array")).toBe(6);
 		expect(countCalls(plan.calls, "viewport")).toBe(8);
 		expect(plan.calls.filter((call) => call.kind.startsWith("draw-"))).toEqual([
@@ -93,7 +98,10 @@ describe("portal scope-atlas WebGL call model", () => {
 				next: 0,
 				terminal: true,
 			},
-			{ instanceCount: 4, kind: "draw-resolve" },
+			{ instanceCount: 3, kind: "draw-dilation-horizontal" },
+			{ instanceCount: 3, kind: "draw-dilation-vertical" },
+			{ instanceCount: 1, kind: "draw-resolve" },
+			{ instanceCount: 3, kind: "draw-resolve" },
 		]);
 		expect(plan.calls.filter((call) => call.kind === "depth-function")).toEqual(
 			[
@@ -103,21 +111,31 @@ describe("portal scope-atlas WebGL call model", () => {
 				{ compare: "greater", kind: "depth-function" },
 				{ compare: "less", kind: "depth-function" },
 				{ compare: "greater", kind: "depth-function" },
+				{ compare: "always", kind: "depth-function" },
 				{ compare: "less-equal", kind: "depth-function" },
 			],
 		);
 		expect(plan.calls.filter((call) => call.kind.includes("clear"))).toEqual([
 			{
+				depth: PORTAL_SCOPE_ENVELOPE_UNBOUNDED_DEPTH,
+				kind: "clear-envelope-depth",
+			},
+			{
 				depth: PORTAL_SCOPE_ENVELOPE_UNCOVERED_DEPTH,
 				kind: "clear-envelope-depth",
 			},
 			{
-				depth: PORTAL_SCOPE_ENVELOPE_UNBOUNDED_DEPTH,
+				depth: PORTAL_SCOPE_ENVELOPE_UNCOVERED_DEPTH,
+				kind: "clear-envelope-depth",
+			},
+			{
+				depth: PORTAL_SCOPE_ENVELOPE_UNCOVERED_DEPTH,
 				kind: "clear-envelope-depth",
 			},
 			...frontierClears(0),
 			...frontierClears(1),
 			...frontierClears(0),
+			{ kind: "uniform-resolve-clear-color" },
 		]);
 	});
 
@@ -135,12 +153,12 @@ describe("portal scope-atlas WebGL call model", () => {
 			}),
 		);
 
-		expect(plan.trace).toEqual({ totalWebGLCallCount: 36 });
+		expect(plan.trace).toEqual({ totalWebGLCallCount: 37 });
 		expect(countCalls(plan.calls, "active-texture")).toBe(3);
 		expect(countCalls(plan.calls, "bind-buffer")).toBe(4);
 		expect(countCalls(plan.calls, "buffer-sub-data")).toBe(2);
 		expect(countCalls(plan.calls, "clear-envelope-depth")).toBe(1);
-		expect(countCalls(plan.calls, "scissor")).toBe(1);
+		expect(countCalls(plan.calls, "scissor-tile")).toBe(1);
 		expect(countCalls(plan.calls, "quad-instance-offset")).toBe(1);
 		expect(countCalls(plan.calls, "draw-resolve")).toBe(1);
 		expect(countCalls(plan.calls, "bind-framebuffer")).toBe(2);
@@ -150,6 +168,7 @@ describe("portal scope-atlas WebGL call model", () => {
 		expect(countCalls(plan.calls, "use-program")).toBe(1);
 		expect(countCalls(plan.calls, "bind-texture-2d")).toBe(3);
 		expect(countCalls(plan.calls, "bind-sampler")).toBe(3);
+		expect(countCalls(plan.calls, "uniform-resolve-clear-color")).toBe(1);
 		expect(countCalls(plan.calls, "bind-vertex-array")).toBe(1);
 		expect(countCalls(plan.calls, "viewport")).toBe(2);
 		expect(plan.calls).toContainEqual({
@@ -167,7 +186,7 @@ describe("portal scope-atlas WebGL call model", () => {
 			{ instanceCount: 1, kind: "draw-resolve" },
 		]);
 		expect(plan.calls.filter((call) => call.kind === "depth-function")).toEqual(
-			[{ compare: "less-equal", kind: "depth-function" }],
+			[{ compare: "always", kind: "depth-function" }],
 		);
 	});
 
@@ -185,21 +204,21 @@ describe("portal scope-atlas WebGL call model", () => {
 			}),
 		);
 
-		expect(plan.trace).toEqual({ totalWebGLCallCount: 38 });
+		expect(plan.trace).toEqual({ totalWebGLCallCount: 39 });
 		expect(
 			plan.calls.filter(
 				(call) =>
-					call.kind === "scissor" || call.kind === "clear-envelope-depth",
+					call.kind === "scissor-tile" || call.kind === "clear-envelope-depth",
 			),
 		).toEqual([
-			{ kind: "scissor", target: "packed-atlas" },
-			{
-				depth: PORTAL_SCOPE_ENVELOPE_UNCOVERED_DEPTH,
-				kind: "clear-envelope-depth",
-			},
-			{ kind: "scissor", target: "root-tile" },
+			{ domain: 0, kind: "scissor-tile" },
 			{
 				depth: PORTAL_SCOPE_ENVELOPE_UNBOUNDED_DEPTH,
+				kind: "clear-envelope-depth",
+			},
+			{ domain: 1, kind: "scissor-tile" },
+			{
+				depth: PORTAL_SCOPE_ENVELOPE_UNCOVERED_DEPTH,
 				kind: "clear-envelope-depth",
 			},
 		]);
@@ -218,6 +237,25 @@ describe("portal scope-atlas WebGL call model", () => {
 				findFeedback(plan.calls),
 				`feedback at traversal depth ${traversalDepth}`,
 			).toBeNull();
+			if (traversalDepth > 0) {
+				const rootOnlyCyclePlan = compilePortalScopeAtlasWebGLCalls(
+					createExecutionInput({
+						crossingIndexCount: traversalDepth * 6,
+						crossingVertexCount: 6,
+						quadInstanceCount: traversalDepth + 1,
+						renderDomainCount: 1,
+						resolveQuadCount: 1,
+						resolveQuadOffset: traversalDepth,
+						roundIndexCount: () => 6,
+						roundIndexOffset: (round) => round * 6,
+						traversalDepth,
+					}),
+				);
+				expect(
+					findFeedback(rootOnlyCyclePlan.calls),
+					`root-only feedback at traversal depth ${traversalDepth}`,
+				).toBeNull();
+			}
 		}
 	});
 
@@ -231,9 +269,11 @@ describe("portal scope-atlas WebGL call model", () => {
 				createDepthInput(traversalDepth, traversalDepth + 1),
 			);
 
-			expect(plan.trace.totalWebGLCallCount).toBe(19 * traversalDepth + 50);
-			expect(countCalls(plan.calls, "bind-texture-2d")).toBe(6);
-			expect(countCalls(plan.calls, "bind-sampler")).toBe(6);
+			expect(plan.trace.totalWebGLCallCount).toBe(
+				19 * traversalDepth + (traversalDepth === 1 ? 67 : 66),
+			);
+			expect(countCalls(plan.calls, "bind-texture-2d")).toBe(7);
+			expect(countCalls(plan.calls, "bind-sampler")).toBe(7);
 			expect(countCalls(plan.calls, "buffer-sub-data")).toBe(4);
 		}
 	});
@@ -252,6 +292,25 @@ describe("portal scope-atlas WebGL call model", () => {
 				findRedundantStateAssignments(plan.calls),
 				`redundant state at traversal depth ${traversalDepth}`,
 			).toEqual([]);
+			if (traversalDepth > 0) {
+				const rootOnlyCyclePlan = compilePortalScopeAtlasWebGLCalls(
+					createExecutionInput({
+						crossingIndexCount: traversalDepth * 6,
+						crossingVertexCount: 6,
+						quadInstanceCount: traversalDepth + 1,
+						renderDomainCount: 1,
+						resolveQuadCount: 1,
+						resolveQuadOffset: traversalDepth,
+						roundIndexCount: () => 6,
+						roundIndexOffset: (round) => round * 6,
+						traversalDepth,
+					}),
+				);
+				expect(
+					findRedundantStateAssignments(rootOnlyCyclePlan.calls),
+					`root-only redundant state at traversal depth ${traversalDepth}`,
+				).toEqual([]);
+			}
 		}
 	});
 
@@ -422,6 +481,8 @@ function findFeedback(
 			case "use-program":
 				program = call.program;
 				break;
+			case "draw-dilation-horizontal":
+			case "draw-dilation-vertical":
 			case "draw-propagation":
 			case "draw-reduction":
 			case "draw-resolve": {
@@ -444,11 +505,14 @@ function framebufferAttachments(framebuffer: string): ReadonlySet<string> {
 		return new Set(["frontier-1-state", "frontier-depth"]);
 	}
 	if (framebuffer === "envelope") return new Set(["envelope-depth"]);
+	if (framebuffer === "dilation") return new Set(["dilation-scratch"]);
 	return new Set();
 }
 
 function sampledTextures(
 	program:
+		| "dilation-horizontal"
+		| "dilation-vertical"
 		| "propagation-root"
 		| "propagation-from-0"
 		| "propagation-from-1"
@@ -456,6 +520,22 @@ function sampledTextures(
 		| "resolve",
 	textureByUnit: ReadonlyMap<number, string>,
 ): readonly string[] {
+	if (program === "dilation-horizontal") {
+		return [
+			requireTexture(
+				textureByUnit,
+				PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth,
+			),
+		];
+	}
+	if (program === "dilation-vertical") {
+		return [
+			requireTexture(
+				textureByUnit,
+				PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.dilationScratch,
+			),
+		];
+	}
 	if (program.startsWith("propagation")) {
 		return [
 			...(program === "propagation-root"
@@ -565,8 +645,8 @@ function findRedundantStateAssignments(
 			case "quad-instance-offset":
 				assign("quad-instance-offset", String(call.firstInstance), call);
 				break;
-			case "scissor":
-				assign("scissor", call.target, call);
+			case "scissor-tile":
+				assign("scissor", `tile-${call.domain}`, call);
 				break;
 			case "scissor-round-frontier":
 				assign("scissor", `round-${call.round}`, call);
@@ -579,6 +659,9 @@ function findRedundantStateAssignments(
 				break;
 			case "uniform-reduction-round":
 				assign("uniform-reduction-round", String(call.round), call);
+				break;
+			case "uniform-resolve-clear-color":
+				assign("uniform-resolve-clear-color", "set", call);
 				break;
 			case "use-program":
 				assign("program", call.program, call);
@@ -627,12 +710,13 @@ function createDepthInput(
 			traversalDepth: 0,
 		});
 	}
+	const resolveQuadCount = 1 + quadPerStage;
 	return createExecutionInput({
 		crossingIndexCount: traversalDepth * 6,
 		crossingVertexCount: 6,
-		quadInstanceCount: (traversalDepth + 1) * quadPerStage,
+		quadInstanceCount: traversalDepth * quadPerStage + resolveQuadCount,
 		renderDomainCount: 2,
-		resolveQuadCount: quadPerStage,
+		resolveQuadCount,
 		resolveQuadOffset: traversalDepth * quadPerStage,
 		roundIndexCount: () => 6,
 		roundIndexOffset: (round) => round * 6,

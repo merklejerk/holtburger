@@ -2,14 +2,15 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, startup:** Fixed a startup failure in packaged release builds caused by cantrip item code depending on a package that releases do not include.
+- **3D client, performance:** Rendering of terrain and portal views, such as building interiors and doorways, is cheaper on the GPU, which should improve frame rates.
+- **3D client, performance panel:** The panel breaks out portal and presentation work and reports portal workload figures, which makes slowdowns easier to trace.
 
 ## Known issues
 
 - Windows and macOS may warn when opening the app because it is not signed by a verified publisher. The installation guides below explain how to open it.
 - Windows and macOS behavior of the display controls, including borderless mode and the confirmation flow, has not been verified natively. Borderless window sizing is best effort and may not match the requested size exactly.
 - Some Windows NVIDIA laptops have shown intermittent transparent holes in the UI with GPU compositing on. Turning it off in App settings is a workaround, but it can significantly reduce frame rates. The cause has not been established, and the Direct3D 11 default has not been verified on native hardware. If panels or text show transparent holes, first try **Use defaults** in App settings.
-- The terrain rendering change for Intel Iris Xe has not been verified on that hardware.
+- The terrain and portal rendering changes, including the earlier Intel Iris Xe terrain change, have not been verified visually or on native hardware, including Intel Iris Xe.
 - The visual quality and performance of the reduced-cost selection outline have not been verified on Intel Iris Xe or other native hardware.
 - Healing animation blending while moving, and autorun during healing, have not been visually verified in live play.
 - The combat health bars, cantrip borders and indoor map floor ordering have not been visually verified on native hardware.

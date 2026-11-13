@@ -11,7 +11,11 @@ import {
   validateReleaseChanges,
   validateReleasePullRequest,
 } from "./identity.ts";
-import { openReleasePullRequest, proposeRelease } from "./preparation.ts";
+import {
+  openReleasePullRequest,
+  proposeRelease,
+  releaseAnalysisConfig,
+} from "./preparation.ts";
 import { createSourceFixture } from "./test-fixtures.ts";
 import {
   bumpVersion,
@@ -72,32 +76,137 @@ test("release increments are exact patch/minor steps with an enforced zero-major
   assert.throws(() => nextReleaseVersion("1.0.0", "patch"));
 });
 
-test("Copilot output crosses a strict data boundary and receives read permissions only", (t) => {
+test("Copilot output crosses a strict data boundary with immutable source inspection", async (t) => {
   const root = createSourceFixture(t);
-  const command: Runner = (program, args) => {
-    assert.equal(program, "copilot");
-    assert.ok(args.includes("--deny-tool=write"));
-    assert.ok(args.includes("--disable-builtin-mcps"));
-    assert.ok(args.includes("--no-custom-instructions"));
-    const directory = args[args.indexOf("--add-dir") + 1];
-    assert.ok(
-      readFileSync(join(directory, "context.json"), "utf8").includes(
-        "Previous release notes",
-      ),
-    );
-    return JSON.stringify(recommendation);
-  };
-  const proposal = proposeRelease(root, emptyApi, command);
+  const proposal = await proposeRelease(
+    root,
+    emptyApi,
+    async (analysisRoot, prompt, commit, baseline) => {
+      assert.equal(analysisRoot, root);
+      assert.equal(baseline, null);
+      assert.equal(commit, sourceDistribution(root, "release").commit);
+      assert.ok(prompt.includes("Previous release notes"));
+      assert.ok(prompt.includes('"history":'));
+      assert.ok(prompt.includes('"tree":'));
+      return recommendation;
+    },
+  );
   assert.equal(proposal.source.version, "0.2.0");
   assert.equal(proposal.baseline, null);
   assert.deepEqual(proposal.recommendation, recommendation);
   for (const response of [
     "not JSON",
-    JSON.stringify({ ...recommendation, bump: "major" }),
-    JSON.stringify({ ...recommendation, version: "1.0.0" }),
-    JSON.stringify({ ...recommendation, notes: " " }),
+    { ...recommendation, bump: "major" },
+    { ...recommendation, version: "1.0.0" },
+    { ...recommendation, notes: " " },
   ])
-    assert.throws(() => proposeRelease(root, emptyApi, () => response));
+    await assert.rejects(proposeRelease(root, emptyApi, async () => response));
+  await assert.rejects(
+    proposeRelease(root, emptyApi, async () => {
+      throw new Error("provider unavailable");
+    }),
+    /provider unavailable/,
+  );
+});
+
+test("release analysis exposes only source inspection and denies other permission requests", async (t) => {
+  const root = createSourceFixture(t);
+  const config = releaseAnalysisConfig(
+    root,
+    sourceDistribution(root, "release").commit,
+    null,
+  );
+  assert.deepEqual(config.availableTools, [
+    "custom:read_source",
+    "custom:read_diff",
+  ]);
+  assert.equal(config.skipCustomInstructions, true);
+  assert.equal(config.enableConfigDiscovery, false);
+  assert.equal(config.enableSkills, false);
+  assert.ok(config.onPermissionRequest);
+  assert.deepEqual(
+    await config.onPermissionRequest(
+      {
+        kind: "custom-tool",
+        toolName: "read_source",
+        toolDescription: "Read source",
+      },
+      { sessionId: "test" },
+    ),
+    { kind: "approved" },
+  );
+  assert.deepEqual(
+    await config.onPermissionRequest(
+      { kind: "custom-tool", toolName: "other", toolDescription: "Other tool" },
+      { sessionId: "test" },
+    ),
+    { kind: "denied-interactively-by-user" },
+  );
+  const tool = config.tools?.[0];
+  assert.ok(tool?.handler);
+  // The tool reads Git objects rather than mutable working-tree files.
+  writeFileSync(
+    join(root, "release/RELEASE_NOTES.md"),
+    "Changed after preparation",
+  );
+  const result = await tool.handler(
+    { path: "release/RELEASE_NOTES.md" },
+    {
+      sessionId: "test",
+      toolCallId: "test",
+      toolName: "read_source",
+      arguments: {},
+    },
+  );
+  assert.match(String(result), /Previous release notes/);
+  assert.throws(() =>
+    tool.handler?.(
+      { path: "../outside" },
+      {
+        sessionId: "test",
+        toolCallId: "test",
+        toolName: "read_source",
+        arguments: {},
+      },
+    ),
+  );
+});
+
+test("per-file patches are pinned to the published baseline and source commit", async (t) => {
+  const root = createSourceFixture(t);
+  const baseline = sourceDistribution(root, "release").commit;
+  writeFileSync(join(root, "member/src/lib.rs"), "// Updated source.\n");
+  git(root, "add", "member/src/lib.rs");
+  git(root, "commit", "-m", "Update source");
+  const commit = sourceDistribution(root, "release").commit;
+  const config = releaseAnalysisConfig(root, commit, baseline);
+  const tool = config.tools?.find((tool) => tool.name === "read_diff");
+  assert.ok(tool?.handler);
+  const invocation = {
+    sessionId: "test",
+    toolCallId: "test",
+    toolName: "read_diff",
+    arguments: {},
+  };
+  writeFileSync(join(root, "member/src/lib.rs"), "// Uncommitted source.\n");
+  const patch = String(
+    await tool.handler({ path: "member/src/lib.rs" }, invocation),
+  );
+  assert.match(patch, /Updated source/);
+  assert.doesNotMatch(patch, /Uncommitted source/);
+  assert.equal(await tool.handler({ path: "Cargo.toml" }, invocation), "");
+  const firstReleaseTool = releaseAnalysisConfig(
+    root,
+    commit,
+    null,
+  ).tools?.find((tool) => tool.name === "read_diff");
+  assert.ok(firstReleaseTool?.handler);
+  assert.match(
+    String(
+      await firstReleaseTool.handler({ path: "member/src/lib.rs" }, invocation),
+    ),
+    /No published baseline/,
+  );
 });
 
 test("the writer rejects invalid recommendations, stale sources/baselines and concurrent release PRs before writing", (t) => {

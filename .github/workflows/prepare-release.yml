@@ -40,8 +40,6 @@ jobs:
       - id: source
         name: Record the immutable preparation source
         run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Install Copilot CLI
-        run: npm install --global @github/copilot
       - name: Recommend an increment and write release notes
         env:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_RELEASE_TOKEN }}

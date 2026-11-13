@@ -32,6 +32,47 @@ const itemNames = new Intl.Collator(undefined, {
 	numeric: true,
 });
 
+/** Browsing order for public item-type flags; numeric flag values are not UX ranks. */
+const itemTypeOrder: readonly number[] = [
+	0x00000001, // Melee weapon
+	0x00000100, // Missile weapon
+	0x00008000, // Caster
+	0x00000002, // Armor
+	0x00000004, // Clothing
+	0x00000008, // Jewelry
+	0x00200000, // Magic wieldable
+	0x00000020, // Food
+	0x00000800, // Gem
+	0x00080000, // Mana stone
+	0x00001000, // Spell components
+	0x00000040, // Money
+	0x00040000, // Promissory note
+	0x00004000, // Key
+	0x00002000, // Writable
+	0x00000200, // Container
+	0x20000000, // Tinkering tool
+	0x40000000, // Tinkering material
+	0x00400000, // Craft cooking base
+	0x00800000, // Craft alchemy base
+	0x04000000, // Craft alchemy intermediate
+	0x02000000, // Craft fletching base
+	0x08000000, // Craft fletching intermediate
+	0x00000080, // Miscellaneous
+	0x80000000, // Gameboard
+	0x00000400, // Useless
+	0x00100000, // Service
+	0x00000010, // Creature
+	0x00010000, // Portal
+	0x00020000, // Lockable
+	0x10000000, // Life stone
+];
+
+/** Combined flags use the first matching category; zero and unknown-only masks sort last. */
+function itemTypeRank(itemType: number): number {
+	const rank = itemTypeOrder.findIndex((flag) => (itemType & flag) !== 0);
+	return rank === -1 ? itemTypeOrder.length : rank;
+}
+
 /** Sort a section's existing subgroup, preserving unknown descriptions and stable slot ties. */
 export function sortContentsItems(
 	items: readonly ClientEntityFacts[],
@@ -46,7 +87,10 @@ export function sortContentsItems(
 			const left = a.description;
 			const right = b.description;
 			if (left.itemType !== right.itemType)
-				return left.itemType - right.itemType;
+				return (
+					itemTypeRank(left.itemType) - itemTypeRank(right.itemType) ||
+					left.itemType - right.itemType
+				);
 			if (left.wcid !== right.wcid) {
 				if (left.wcid === null) return 1;
 				if (right.wcid === null) return -1;

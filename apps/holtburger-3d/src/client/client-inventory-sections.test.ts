@@ -314,21 +314,22 @@ describe("sortContentsItems", () => {
 });
 
 describe("inventory type precedence", () => {
-	it("orders public item type and WCID before names, with missing templates last", () => {
-		const classified = (
-			guid: number,
-			name: string,
-			itemType: number,
-			wcid: number | null,
-		): ClientEntityFacts => {
-			const entity = child(guid, 1, { kind: "item", index: guid });
-			if (entity.description.kind !== "known")
-				throw new Error("Known fixture required.");
-			return {
-				...entity,
-				description: { ...entity.description, name, itemType, wcid },
-			};
+	const classified = (
+		guid: number,
+		name: string,
+		itemType: number,
+		wcid: number | null,
+	): ClientEntityFacts => {
+		const entity = child(guid, 1, { kind: "item", index: guid });
+		if (entity.description.kind !== "known")
+			throw new Error("Known fixture required.");
+		return {
+			...entity,
+			description: { ...entity.description, name, itemType, wcid },
 		};
+	};
+
+	it("orders public item type and WCID before names, with missing templates last", () => {
 		const items = [
 			classified(1, "First category", 1, 900),
 			classified(2, "Zebra", 2, 10),
@@ -347,5 +348,68 @@ describe("inventory type precedence", () => {
 			sortContentsItems(items, "alphabetical").map((item) => item.guid),
 		).toEqual([3, 6, 7, 1, 4, 5, 2]);
 		expect(sortContentsItems(items, "native")).toBe(items);
+	});
+
+	it("groups weapons, wearables, supplies and crafting in browsing order", () => {
+		const orderedTypes = [
+			0x1,
+			0x100,
+			0x8000, // Weapons
+			0x2,
+			0x4,
+			0x8,
+			0x200000, // Wearables
+			0x20,
+			0x800,
+			0x80000,
+			0x1000, // Consumables and components
+			0x40,
+			0x40000, // Currency
+			0x4000,
+			0x2000,
+			0x200, // Utility
+			0x20000000,
+			0x40000000, // Tinkering
+			0x400000,
+			0x800000,
+			0x4000000,
+			0x2000000,
+			0x8000000, // Crafting
+			0x80,
+			0x80000000,
+			0x400, // Miscellaneous
+			0x100000,
+			0x10,
+			0x10000,
+			0x20000,
+			0x10000000, // Other
+		];
+		const items = orderedTypes.map((itemType, index) =>
+			classified(index + 1, "Item", itemType, null),
+		);
+		expect(
+			sortContentsItems([...items].reverse(), "item-type").map((item) =>
+				item.description.kind === "known" ? item.description.itemType : null,
+			),
+		).toEqual(orderedTypes);
+	});
+
+	it("ranks combined flags by their first browsing category and unknown types last", () => {
+		const items = [
+			classified(1, "Unknown bits", 0x01000000, 1),
+			classified(2, "Undeclared type", 0, 1),
+			classified(3, "Armor", 0x2, 1),
+			classified(4, "Combined caster and armor", 0x8002, 1),
+			classified(5, "Caster", 0x8000, 99),
+			classified(6, "Missile with unknown bit", 0x01000100, 1),
+			classified(7, "Missile", 0x100, 99),
+			{
+				...child(8, 1, { kind: "item", index: 8 }),
+				description: { kind: "pending" as const },
+			},
+		];
+		expect(
+			sortContentsItems(items, "item-type").map((item) => item.guid),
+		).toEqual([7, 6, 5, 4, 3, 2, 1, 8]);
 	});
 });

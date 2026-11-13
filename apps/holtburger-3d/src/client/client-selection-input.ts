@@ -80,8 +80,8 @@ export class ClientSelectionInput {
 				"previousSmartCombat",
 				"nextNonCreature",
 				"previousNonCreature",
-				"nextUnopenedCorpse",
-				"previousUnopenedCorpse",
+				"nextCorpse",
+				"previousCorpse",
 				"cancel",
 			] as const
 		).find((action) => this.#input.shortcut(action, event));
@@ -115,11 +115,11 @@ export class ClientSelectionInput {
 			case "previousNonCreature":
 				this.#beginPress(event, "non-creature", -1, nowMs);
 				break;
-			case "nextUnopenedCorpse":
-				this.#beginPress(event, "unopened-corpse", 1, nowMs);
+			case "nextCorpse":
+				this.#beginPress(event, "corpse", 1, nowMs);
 				break;
-			case "previousUnopenedCorpse":
-				this.#beginPress(event, "unopened-corpse", -1, nowMs);
+			case "previousCorpse":
+				this.#beginPress(event, "corpse", -1, nowMs);
 				break;
 		}
 		return true;

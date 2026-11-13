@@ -85,12 +85,18 @@ describe("client binding catalog", () => {
 		expect(restored.character.jump).toEqual([{ code: "Space", ctrl: false }]);
 	});
 
-	it.each(["Interactable", "Creature"])(
-		"renames saved %s shortcuts without losing remaps or overriding smart combat bindings",
-		(legacy) => {
+	it.each([
+		["Interactable", "SmartCombat"],
+		["Creature", "SmartCombat"],
+		["UnopenedCorpse", "Corpse"],
+	] as const)(
+		"renames saved %s shortcuts without losing remaps or overriding %s bindings",
+		(legacy, current) => {
+			const nextAction = `next${current}` as const;
+			const previousAction = `previous${current}` as const;
 			const savedClient = { ...defaults.client };
-			Reflect.deleteProperty(savedClient, "nextSmartCombat");
-			Reflect.deleteProperty(savedClient, "previousSmartCombat");
+			Reflect.deleteProperty(savedClient, nextAction);
+			Reflect.deleteProperty(savedClient, previousAction);
 			Reflect.set(savedClient, `next${legacy}`, [{ key: "F8" }]);
 			Reflect.set(savedClient, `previous${legacy}`, []);
 			Reflect.set(savedClient, "nextHostile", [{ key: "F9" }]);
@@ -100,13 +106,13 @@ describe("client binding catalog", () => {
 				client: savedClient,
 			};
 			const restored = clientKeyboardSettingsSchema.parse(saved);
-			expect(restored.client.nextSmartCombat).toEqual([{ key: "F8" }]);
-			expect(restored.client.previousSmartCombat).toEqual([]);
+			expect(restored.client[nextAction]).toEqual([{ key: "F8" }]);
+			expect(restored.client[previousAction]).toEqual([]);
 			const explicit = clientKeyboardSettingsSchema.parse({
 				...saved,
-				client: { ...savedClient, nextSmartCombat: [] },
+				client: { ...savedClient, [nextAction]: [] },
 			});
-			expect(explicit.client.nextSmartCombat).toEqual([]);
+			expect(explicit.client[nextAction]).toEqual([]);
 		},
 	);
 

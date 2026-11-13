@@ -61,6 +61,8 @@ const keyboardSettingsBaseSchema = z
 					["previousInteractable", "previousSmartCombat"],
 					["nextCreature", "nextSmartCombat"],
 					["previousCreature", "previousSmartCombat"],
+					["nextUnopenedCorpse", "nextCorpse"],
+					["previousUnopenedCorpse", "previousCorpse"],
 				] as const) {
 					if (!Reflect.has(current, action) && Reflect.has(current, oldAction))
 						Reflect.set(current, action, Reflect.get(current, oldAction));

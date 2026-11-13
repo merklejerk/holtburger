@@ -26,8 +26,8 @@ const TEST_INPUT = {
 		previousSmartCombat: [{ key: "Tab", shift: true, ctrl: false }],
 		nextNonCreature: [{ key: "Tab", shift: false, ctrl: true }],
 		previousNonCreature: [{ key: "Tab", shift: true, ctrl: true }],
-		nextUnopenedCorpse: [{ key: "v", shift: false, ctrl: false }],
-		previousUnopenedCorpse: [{ key: "v", shift: true, ctrl: false }],
+		nextCorpse: [{ key: "v", shift: false, ctrl: false }],
+		previousCorpse: [{ key: "v", shift: true, ctrl: false }],
 		cancel: [{ key: "Escape" }],
 	},
 } satisfies InputConfiguration;
@@ -101,7 +101,7 @@ function fixture() {
 				forwardAlignment: 1,
 				smartImmediate: null,
 				distanceSquared: 4,
-				filters: { "non-creature": "cycle", "unopened-corpse": "cycle" },
+				filters: { "non-creature": "cycle", corpse: "cycle" },
 			},
 		],
 	};
@@ -206,7 +206,7 @@ describe("selection press lifecycle", () => {
 		f.input.destroy();
 	});
 	it.each([false, true])(
-		"V cycles unopened corpses in direction Shift=%s",
+		"V cycles corpses in direction Shift=%s",
 		(shiftKey) => {
 			const f = fixture();
 			const event = key({ key: shiftKey ? "V" : "v", code: "KeyV", shiftKey });

@@ -100,12 +100,12 @@ export function createInputDefaults(platform: InputPlatform) {
 			previousNonCreature: [
 				{ key: "Tab", shift: true, ctrl: true, alt: false, meta: false },
 			],
-			/** Forward traversal over unopened corpses. */
-			nextUnopenedCorpse: [
+			/** Forward traversal over corpses, preferring unopened corpses while any are in range. */
+			nextCorpse: [
 				{ key: "v", shift: false, ctrl: false, alt: false, meta: false },
 			],
-			/** Reverse traversal over unopened corpses. */
-			previousUnopenedCorpse: [
+			/** Reverse traversal over corpses, preferring unopened corpses while any are in range. */
+			previousCorpse: [
 				{ key: "v", shift: true, ctrl: false, alt: false, meta: false },
 			],
 			/** Use the currently selected entity. */

@@ -95,9 +95,8 @@ function fixture() {
 
 describe("immediate target traversal", () => {
 	it.each(
-		(["smart-combat", "non-creature", "unopened-corpse"] as const).flatMap(
-			(filter) =>
-				(["tap", "hold"] as const).map((action) => ({ filter, action })),
+		(["smart-combat", "non-creature", "corpse"] as const).flatMap((filter) =>
+			(["tap", "hold"] as const).map((action) => ({ filter, action })),
 		),
 	)(
 		"$filter $action acquires the immediate, then traverses the remaining targets in ranked order",
@@ -176,7 +175,7 @@ describe("immediate target traversal", () => {
 			expect(f.selection.selectedGuid()).toBe(farther.guid);
 		},
 	);
-	it.each(["non-creature", "unopened-corpse"] as const)(
+	it.each(["non-creature", "corpse"] as const)(
 		"%s acquires the nearest target behind, beside, or coincident with the player",
 		(filter) => {
 			for (const [distance, alignment] of [
@@ -296,7 +295,7 @@ describe("immediate target traversal", () => {
 		f.cycle.cycle("smart-combat", 1);
 		expect(f.selection.selectedGuid()).toBe(4);
 	});
-	it.each(["smart-combat", "non-creature", "unopened-corpse"] as const)(
+	it.each(["smart-combat", "non-creature", "corpse"] as const)(
 		"orders %s by band, alignment, distance, and GUID, wrapping in either direction",
 		(filter) => {
 			const f = fixture();
@@ -576,7 +575,7 @@ describe("smart combat stance policy", () => {
 			}
 			f.cycle.cycle("non-creature", 1);
 			expect(f.selection.selectedGuid()).toBe(2);
-			f.cycle.cycle("unopened-corpse", 1);
+			f.cycle.cycle("corpse", 1);
 			expect(f.selection.selectedGuid()).toBe(9);
 		},
 	);
@@ -953,8 +952,8 @@ describe("realized volume candidate sampling", () => {
 			[boxEntity(2, 0, 0, 2, BODY_BOX), boxEntity(3, 0, 0, 3, BODY_BOX)],
 		);
 		expect(f.sample()?.map((c) => c.filters)).toEqual([
-			{ "non-creature": "cycle", "unopened-corpse": "cycle" },
-			{ "non-creature": "cycle" },
+			{ "non-creature": "cycle", corpse: "cycle" },
+			{ "non-creature": "cycle", corpse: "fallback" },
 		]);
 		expect(
 			f
@@ -965,8 +964,8 @@ describe("realized volume candidate sampling", () => {
 				)
 				?.map((c) => c.filters),
 		).toEqual([
-			{ "non-creature": "cycle", "unopened-corpse": "cycle" },
-			{ "non-creature": "cycle" },
+			{ "non-creature": "cycle", corpse: "cycle" },
+			{ "non-creature": "cycle", corpse: "fallback" },
 		]);
 	});
 	it("does not produce Smart immediate admission for excluded semantics or a missing required camera", () => {
@@ -1107,5 +1106,63 @@ describe("realized volume candidate sampling", () => {
 		]);
 		f.cycle.cycle("smart-combat", 1);
 		expect(f.selection.selectedGuid()).toBe(3);
+	});
+	it("prefers unopened corpses while any exist and admits opened corpses once unopened corpses are exhausted", () => {
+		const f = fixture();
+		const boxes = [
+			boxEntity(2, 0, 0, -1, BODY_BOX),
+			boxEntity(3, 0, 0, -4, BODY_BOX),
+			boxEntity(4, 0, 0, -3, BODY_BOX),
+		];
+		f.set(
+			volumeScene(
+				[
+					entityFacts(2, { corpse: "opened" }),
+					entityFacts(3, { corpse: "opened" }),
+					entityFacts(4, { corpse: "unopened" }),
+				],
+				boxes,
+			).sample(),
+		);
+		f.cycle.selectImmediate("corpse");
+		expect(f.selection.selectedGuid()).toBe(4);
+		f.cycle.cycle("corpse", 1);
+		expect(f.selection.selectedGuid()).toBe(4);
+		f.cycle.cycle("corpse", -1);
+		expect(f.selection.selectedGuid()).toBe(4);
+
+		// Opening the last unopened corpse exhausts the primary tier and continues from cursor 4 in [2, 4, 3].
+		f.set(
+			volumeScene(
+				[
+					entityFacts(2, { corpse: "opened" }),
+					entityFacts(3, { corpse: "opened" }),
+					entityFacts(4, { corpse: "opened" }),
+				],
+				boxes,
+			).sample(),
+		);
+		f.cycle.cycle("corpse", 1);
+		expect(f.selection.selectedGuid()).toBe(3);
+		f.cycle.cycle("corpse", 1);
+		expect(f.selection.selectedGuid()).toBe(2);
+		f.cycle.cycle("corpse", -1);
+		expect(f.selection.selectedGuid()).toBe(3);
+		f.cycle.selectImmediate("corpse");
+		expect(f.selection.selectedGuid()).toBe(2);
+
+		// A newly appearing unopened corpse re-preempts opened corpses immediately.
+		f.set(
+			volumeScene(
+				[
+					entityFacts(2, { corpse: "opened" }),
+					entityFacts(3, { corpse: "opened" }),
+					entityFacts(5, { corpse: "unopened" }),
+				],
+				[...boxes.slice(0, 2), boxEntity(5, 0, 0, -8, BODY_BOX)],
+			).sample(),
+		);
+		f.cycle.cycle("corpse", 1);
+		expect(f.selection.selectedGuid()).toBe(5);
 	});
 });

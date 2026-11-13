@@ -33,9 +33,14 @@ export interface CycleSelectionPresentationFrame extends RealizedEntitySelection
 }
 
 /** Binding-specific eligibility over one shared traversal cursor; memberships may overlap. */
-export type CycleFilter = "smart-combat" | "non-creature" | "unopened-corpse";
-/** Whether a filter admits ordinary traversal or only its best-ranked candidate. */
-type CycleMembership = "cycle" | "immediate-only";
+export type CycleFilter = "smart-combat" | "non-creature" | "corpse";
+/**
+ * Filter admission tier:
+ * - `"cycle"`: ordinary traversal and immediate acquisition
+ * - `"immediate-only"`: eligible only as the immediate acquisition winner
+ * - `"fallback"`: admitted into traversal and immediate acquisition when no primary candidates exist
+ */
+type CycleMembership = "cycle" | "immediate-only" | "fallback";
 /** Cold gameplay facts sampled with each acquisition, independent of panel visibility. */
 export interface CycleSelectionContext {
 	/** Confirmed stance; unknown uses unrestricted player admission until confirmation. */
@@ -329,7 +334,8 @@ function cycleMemberships(
 	const filters: Partial<Record<CycleFilter, CycleMembership>> = {
 		"non-creature": "cycle",
 	};
-	if (facts.corpse === "unopened") filters["unopened-corpse"] = "cycle";
+	if (facts.corpse === "unopened") filters.corpse = "cycle";
+	else if (facts.corpse === "opened") filters.corpse = "fallback";
 	if (
 		!preferences.smartTabHostileOnly &&
 		facts.targeting !== "projectile" &&
@@ -465,9 +471,19 @@ export class ClientCycleSelectionController {
 			this.#reset();
 			return null;
 		}
-		const ranked = candidates
-			.filter((candidate) => candidate.filters[filter] !== undefined)
-			.sort(preferredFirst);
+		const eligible = candidates.filter(
+			(candidate) => candidate.filters[filter] !== undefined,
+		);
+		const hasPrimary = eligible.some(
+			(candidate) => candidate.filters[filter] !== "fallback",
+		);
+		const ranked = (
+			hasPrimary
+				? eligible.filter(
+						(candidate) => candidate.filters[filter] !== "fallback",
+					)
+				: eligible
+		).sort(preferredFirst);
 		// Resolve immediate from the broad pool before restricting traversal. The winning
 		// immediate-only entity stays in the ring; all other immediate-only entities are skipped.
 		// Acquisition uses the sampler-owned volume distance so a farther, better-aligned object cannot beat
@@ -492,7 +508,8 @@ export class ClientCycleSelectionController {
 		const immediate = winner?.candidate;
 		const matching = ranked.filter(
 			(candidate) =>
-				candidate !== immediate && candidate.filters[filter] === "cycle",
+				candidate !== immediate &&
+				candidate.filters[filter] !== "immediate-only",
 		);
 		// Promote the winner rather than rotating the ring: otherwise higher-ranked
 		// targets preceding it would be deferred until traversal wraps around.

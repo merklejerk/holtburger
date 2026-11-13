@@ -357,7 +357,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		expectSelected(9, "reverse corpse traversal");
 
 		selection.select(null);
-		replace([
+		const mixed: Parameters<typeof replace>[0] = [
 			{ guid: 50, distance: 7, creature: true, monster: true },
 			{ guid: 51, distance: 6, creature: false, usable: true },
 			{ guid: 52, distance: 6.5, creature: false },
@@ -378,7 +378,8 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 				corpse: "unopened",
 			},
 			{ guid: 57, distance: -5.25, creature: true, monster: true },
-		]);
+		];
+		replace(mixed);
 		for (const guid of [51, 50, 53]) {
 			press("Tab");
 			expectSelected(
@@ -400,7 +401,20 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		press("Tab", true);
 		expectSelected(52, "object traversal includes unsupported uses");
 		press("v");
-		expectSelected(56, "corpse filter excludes opened corpses");
+		expectSelected(
+			56,
+			"corpse filter prefers unopened corpses over opened corpses",
+		);
+		replace(
+			mixed.map((record) =>
+				record.guid === 56 ? { ...record, corpse: "opened" } : record,
+			),
+		);
+		press("v");
+		expectSelected(
+			55,
+			"corpse filter admits opened corpses once unopened corpses are exhausted",
+		);
 		targetOnlyInView = false;
 		selection.select(null);
 		for (const guid of [51, 50, 53, 57, 54]) {

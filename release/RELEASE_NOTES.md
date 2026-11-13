@@ -2,12 +2,7 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, combat:** Hostile mobs in combat stance now show health bars on their nameplates.
-- **3D client, items:** Equipment, vendor items and inspection headers now show cantrip-tier borders, with a metallic glint on legendary items and a unified corner-bracket selection reticle.
-- **3D client, item details:** Item details for open containers, equipment, trade offers and vendor catalogs now load in the background without delaying direct inspections.
-- **3D client, targeting:** The corpse-cycling shortcut now includes opened corpses once no unopened corpses are in range, and saved key bindings are migrated.
-- **3D client, interface:** Chat, history and panel shortcuts, and the Escape key, keep working during portal travel.
-- **3D client, map and profiling:** Overhead map floors in multi-level dungeons now stack correctly, and the opt-in performance panel shows GPU timing by rendering system.
+- **3D client, startup:** Fixed a startup failure in packaged release builds caused by cantrip item code depending on a package that releases do not include.
 
 ## Known issues
 
@@ -17,8 +12,9 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 - The terrain rendering change for Intel Iris Xe has not been verified on that hardware.
 - The visual quality and performance of the reduced-cost selection outline have not been verified on Intel Iris Xe or other native hardware.
 - Healing animation blending while moving, and autorun during healing, have not been visually verified in live play.
-- The new combat health bars, cantrip borders and indoor map floor ordering have not been visually verified on native hardware.
+- The combat health bars, cantrip borders and indoor map floor ordering have not been visually verified on native hardware.
 - The performance panel and GPU timing have not been verified on native Windows or macOS.
+- The startup fix has not been verified by launching rebuilt platform release bundles.
 - CLI movement is simplified: jumping, falling, gravity, and stairs are not simulated locally. The server may correct your position or reject actions.
 
 ## Updating

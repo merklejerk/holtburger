@@ -1,8 +1,8 @@
 import type {
 	EquipmentCantripState,
-	ItemCantripLookup,
 	RankedCantripTier,
-} from "../app/item-cantrips";
+} from "../app/item-cantrip-contract.js";
+import type { ItemCantripLookup } from "../app/item-cantrips";
 import type {
 	AppraisalRequest,
 	FactsAppraisalPriority,

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { RankedCantripTier } from "./item-cantrips";
+	import type { RankedCantripTier } from "./item-cantrip-contract.js";
 
 	interface Props {
 		/** Resolved cantrip tier for the enclosing item cell; mounts only for legendary items. */

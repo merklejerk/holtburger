@@ -1,5 +1,37 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+import { isBuiltin, registerHooks } from "node:module";
+
+const emittedRoot = new URL("../dist-electron/", import.meta.url).href;
+const { dependencies } = JSON.parse(
+	readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+);
+
+// Development installs contain packages that Forge prunes. Reject those imports before
+// Node can resolve them locally and give a broken release a passing runtime check.
+registerHooks({
+	resolve(specifier, context, nextResolve) {
+		if (
+			context.parentURL?.startsWith(emittedRoot) &&
+			!specifier.startsWith(".") &&
+			!specifier.startsWith("/") &&
+			!URL.canParse(specifier) &&
+			!isBuiltin(specifier) &&
+			specifier !== "electron"
+		) {
+			const packageName = specifier.startsWith("@")
+				? specifier.split("/").slice(0, 2).join("/")
+				: specifier.split("/")[0];
+			if (!Object.hasOwn(dependencies, packageName))
+				throw new Error(
+					`Electron runtime imports undeclared production dependency ${packageName} from ${context.parentURL}`,
+				);
+		}
+		return nextResolve(specifier, context);
+	},
+});
+
 // TypeScript's bundler resolution accepts extensionless imports that Node ESM cannot load from
 // emitted Electron code. Import the shared settings codec exactly as Electron main does so the
 // build fails before launch when its runtime dependency graph is not Node-resolvable.

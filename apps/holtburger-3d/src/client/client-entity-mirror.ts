@@ -1,4 +1,4 @@
-import { equipmentCantripStateSchema } from "../app/item-cantrips";
+import { equipmentCantripStateSchema } from "../app/item-cantrip-contract.js";
 import { itemCooldownDefinitionSchema } from "./client-item-cooldowns-contract";
 import {
 	salvageCandidateSchema,

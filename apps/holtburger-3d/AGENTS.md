@@ -52,6 +52,18 @@ target.
   and genuinely event-driven UI state should remain reactive where that keeps
   ownership and code clearer.
 
+### Electron Runtime Contracts
+
+- Keep schemas, codecs, and types consumed by Electron in framework-independent
+  contract modules. Svelte context helpers, stores, and other renderer behavior
+  belong in separate modules; importing a schema must not load a UI framework.
+- Check the emitted Node ESM dependency graph when changing contracts consumed by
+  Electron. Development installs can hide missing release dependencies because
+  packaging prunes development dependencies. Runtime verification must reject
+  imports of undeclared production dependencies, even when installed locally.
+- Fix misplaced renderer dependencies at the module boundary rather than adding
+  a UI framework to production dependencies merely to make Electron start.
+
 ### UI Reuse
 
 - Before adding UI markup, a component, or CSS, search existing client and

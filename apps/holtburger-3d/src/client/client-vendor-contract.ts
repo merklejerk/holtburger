@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { equipmentCantripStateSchema } from "../app/item-cantrips";
+import { equipmentCantripStateSchema } from "../app/item-cantrip-contract.js";
 import { clientIconAppearanceSchema } from "./client-entity-mirror";
 
 const unsigned = z.number().int().nonnegative().max(0xffff_ffff);

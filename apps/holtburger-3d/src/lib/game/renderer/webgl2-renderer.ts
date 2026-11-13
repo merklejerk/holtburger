@@ -1792,7 +1792,7 @@ export class WebGL2Renderer implements Renderer {
 			target,
 			input.frameSettings.showRetailHiddenGeometry,
 		);
-		this.#presentFlatScene(target);
+		this.#presentFlatScene(target, null);
 		this.#updateRenderTargetMetrics();
 		this.#finishFrameSelectionMetrics();
 	}
@@ -1819,13 +1819,11 @@ export class WebGL2Renderer implements Renderer {
 		const placement = viewInput.camera.placement;
 		const rootScope = scopeFor(placement.landblockId, placement.envCellId);
 
-		this.#frameProfiler?.setGpuSystem("portalComposition");
 		const frame = pipeline.prepare(
 			this.#world.getPortalTopologyView(),
 			this.#createPortalScopeWindowCullInput(prepared, viewInput, rootScope),
 		);
 
-		this.#frameProfiler?.setGpuSystem("other");
 		this.#accumulatePortalScopeAtlasMetrics(frame);
 		const shadows =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null
@@ -2027,13 +2025,18 @@ export class WebGL2Renderer implements Renderer {
 		const clearColor = this.#viewClearColor(view, shading);
 		this.#executeOutdoorShadows(plan.shadows);
 		const target = this.#acquireFlatSceneTarget();
-		this.#frameProfiler?.setGpuSystem("portalComposition");
+		const usesPortalAtlas = !frame.atlas.directRootOutput;
+		if (usesPortalAtlas) {
+			this.#frameProfiler?.setGpuSystem("portalComposition");
+		}
 		const portalTargets = pipeline.beginOpaqueScene(
 			frame,
 			clearColor,
 			target.framebuffer,
 		);
-		this.#frameProfiler?.setGpuSystem("other");
+		if (usesPortalAtlas) {
+			this.#frameProfiler?.setGpuSystem("other");
+		}
 		const objectPhases = this.#createObjectSubmissionPhases(view);
 		const hasOutdoorScope =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null;
@@ -2059,13 +2062,15 @@ export class WebGL2Renderer implements Renderer {
 		// same positive polygon offset, keeping coplanar object-vs-terrain ties identical.
 		this.#drawOpaqueObjects(view, objectPhases.opaque, shading, pipeline);
 		this.#drawTerrain(view, shading, pipeline);
-		this.#frameProfiler?.setGpuSystem("portalComposition");
 		if (portalTargets !== null) {
 			this.#beginFlatOpaqueScene(target, clearColor);
+			this.#frameProfiler?.setGpuSystem("portalComposition");
 		}
 		pipeline.execute(target.framebuffer);
 		pipeline.beginDeferredScene(target.framebuffer);
-		this.#frameProfiler?.setGpuSystem("other");
+		if (portalTargets !== null) {
+			this.#frameProfiler?.setGpuSystem("other");
+		}
 		// Entity color participates once, after static portal composition. Its depth both
 		// occludes later draws and contributes to the same AO evaluation as static geometry.
 		this.#drawDynamicOpaque(view, shading);
@@ -2126,7 +2131,7 @@ export class WebGL2Renderer implements Renderer {
 			target,
 			frameSettings.showRetailHiddenGeometry,
 		);
-		this.#presentFlatScene(target, this.#drawEntitySelectionMask(view));
+		this.#presentFlatScene(target, view);
 	}
 
 	async destroy(): Promise<void> {
@@ -3590,7 +3595,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#gl.bindVertexArray(null);
 		this.#drawPortalTransitionTunnel(target, showRetailHiddenGeometry);
-		this.#presentFlatScene(target, this.#drawEntitySelectionMask(view));
+		this.#presentFlatScene(target, view);
 	}
 
 	#reconcileNameplateTextureCache(
@@ -4100,8 +4105,11 @@ export class WebGL2Renderer implements Renderer {
 	 */
 	#presentFlatScene(
 		target: WebGL2FlatSceneTargetSet,
-		selectionMask: WebGL2EntitySelectionMask | null = null,
+		view: PreparedViewGeometry | null,
 	): void {
+		this.#frameProfiler?.setGpuSystem("presentation");
+		const selectionMask =
+			view === null ? null : this.#drawEntitySelectionMask(view);
 		const transition = this.#transitionPresentationInput();
 		(this.#flatScenePresentation ??= new WebGL2FlatScenePresentation(
 			this.#gl,
@@ -4132,6 +4140,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		// Presentation changes program and texture bindings outside the device-state mirror.
 		this.#beginObjectPhase();
+		this.#frameProfiler?.setGpuSystem("other");
 	}
 
 	/** Capture or retire transition-only resources at frame entry, before the scene target is drawn. */

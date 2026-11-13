@@ -524,6 +524,7 @@ export const RENDERER_GPU_SYSTEMS = [
 	"ambientOcclusion",
 	"portalComposition",
 	"transparencyAndEffects",
+	"presentation",
 	"other",
 ] as const;
 

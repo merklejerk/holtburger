@@ -61,6 +61,7 @@ function emptySystemTimes(): Record<RendererGpuSystem, number> {
 		ambientOcclusion: 0,
 		portalComposition: 0,
 		transparencyAndEffects: 0,
+		presentation: 0,
 		other: 0,
 	};
 }

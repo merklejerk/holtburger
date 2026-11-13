@@ -34,6 +34,7 @@
 		ambientOcclusion: "Ambient occlusion",
 		portalComposition: "Portal composition",
 		transparencyAndEffects: "Transparency and effects",
+		presentation: "Presentation & grading",
 		other: "Other renderer work",
 	};
 	const ms = (value: number | null | undefined): string =>
@@ -323,6 +324,19 @@
 									><th>Static / dynamic draws</th><td
 										>{report.workload.staticDraws} / {report.workload
 											.dynamicDraws}</td
+									></tr
+								><tr
+									><th>Portal scopes / crossings</th><td
+										>{report.workload.portal.scopes} / {report.workload.portal
+											.crossings}</td
+									></tr
+								><tr
+									><th>Portal propagation / tile pixels</th><td
+										>{report.workload.portal.propagationDraws} / {report.workload.portal.tilePixels.toLocaleString()}</td
+									></tr
+								><tr
+									><th>Portal target bytes</th><td
+										>{report.workload.portal.targetBytes.toLocaleString()}</td
 									></tr
 								>{/if}
 							<tr

@@ -8,9 +8,29 @@ import type {
 	NativePerformanceState,
 } from "./native-performance";
 import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
-import type { FrameSettings } from "../lib/game/renderer/renderer";
+import type {
+	FrameSelectionMetrics,
+	FrameSettings,
+	RendererFrameProfile,
+} from "../lib/game/renderer/renderer";
 import type { WebGL2DeviceDiagnosticIdentity } from "../lib/game/renderer/webgl2-diagnostic-identity";
 import type { ClosedWorkerPoolDiagnostics } from "../lib/game/workers/closed-worker";
+
+/** Subset of renderer frame diagnostics consumed by session reports. */
+export interface PerformanceRendererDiagnostics {
+	readonly profile: RendererFrameProfile | null;
+	readonly selectionMetrics: Pick<
+		FrameSelectionMetrics,
+		| "visibleSceneEntries"
+		| "submittedStaticObjectDrawCount"
+		| "submittedDynamicDrawCount"
+		| "portalSelectedScopeCount"
+		| "portalSelectedCrossingCount"
+		| "portalPropagationDrawCount"
+		| "portalAtlasTilePixelCount"
+		| "portalTargetBytes"
+	>;
+}
 
 /** Dependencies borrowed for exactly one presentation runtime lifetime. */
 export interface PerformanceSessionSource {
@@ -19,10 +39,11 @@ export interface PerformanceSessionSource {
 		GamePresentationRuntime,
 		| "setFrameProfilingEnabled"
 		| "resetFrameProfile"
-		| "getRendererFrameDiagnostics"
 		| "getPresentationProfile"
 		| "getTerrainWorkerDiagnostics"
-	>;
+	> & {
+		readonly getRendererFrameDiagnostics: () => PerformanceRendererDiagnostics | null;
+	};
 	readonly canvas: Pick<
 		HTMLCanvasElement,
 		"clientWidth" | "clientHeight" | "width" | "height"
@@ -191,7 +212,7 @@ export class PerformanceSession {
 		const presentation = runtime.getPresentationProfile();
 		const renderer = runtime.getRendererFrameDiagnostics();
 		return {
-			schemaVersion: 3,
+			schemaVersion: 4,
 			mode: this.#source.mode,
 			capture: {
 				generation: this.#generation,
@@ -227,6 +248,14 @@ export class PerformanceSession {
 						staticDraws:
 							renderer.selectionMetrics.submittedStaticObjectDrawCount,
 						dynamicDraws: renderer.selectionMetrics.submittedDynamicDrawCount,
+						portal: {
+							scopes: renderer.selectionMetrics.portalSelectedScopeCount,
+							crossings: renderer.selectionMetrics.portalSelectedCrossingCount,
+							propagationDraws:
+								renderer.selectionMetrics.portalPropagationDrawCount,
+							tilePixels: renderer.selectionMetrics.portalAtlasTilePixelCount,
+							targetBytes: renderer.selectionMetrics.portalTargetBytes,
+						},
 					}
 				: null,
 			native: this.#native,

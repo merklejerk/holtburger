@@ -10,7 +10,7 @@ import type { ClosedWorkerPoolDiagnostics } from "../lib/game/workers/closed-wor
 
 /** Report shared by both frontends and their automated probes. No game/account payloads. */
 export interface PerformanceReport {
-	readonly schemaVersion: 3;
+	readonly schemaVersion: 4;
 	readonly mode: "client" | "explorer";
 	readonly capture: {
 		readonly generation: number;
@@ -47,6 +47,14 @@ export interface PerformanceReport {
 		readonly sceneEntries: number;
 		readonly staticDraws: number;
 		readonly dynamicDraws: number;
+		/** Portal scope-atlas traversal and offscreen target footprint for the latest frame. */
+		readonly portal: {
+			readonly scopes: number;
+			readonly crossings: number;
+			readonly propagationDraws: number;
+			readonly tilePixels: number;
+			readonly targetBytes: number;
+		};
 	} | null;
 	readonly terrainWorker: {
 		/** Current depth, not an accumulated amount of work. */

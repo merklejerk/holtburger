@@ -45,6 +45,7 @@ describe("renderer profiling", () => {
 				ambientOcclusion: 0,
 				portalComposition: 0,
 				transparencyAndEffects: 0,
+				presentation: 0,
 				other: 1,
 			},
 			meanSystemMs: {
@@ -54,6 +55,7 @@ describe("renderer profiling", () => {
 				ambientOcclusion: 0,
 				portalComposition: 0,
 				transparencyAndEffects: 0,
+				presentation: 0,
 				other: 1,
 			},
 		});

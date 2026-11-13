@@ -212,9 +212,9 @@ profiler needs no extra tooling: `--cpu-profile <path>` samples the page at
 standard `.cpuprofile` JSON, loadable in the Chrome DevTools Performance panel
 or speedscope.
 
-The built-in profiler measures major runtime systems, whole-renderer CPU time, and six coarse
+The built-in profiler measures major runtime systems, whole-renderer CPU time, and seven coarse
 GPU workloads: terrain, opaque geometry, shadow maps, ambient occlusion, portal composition,
-and transparency/effects. Other renderer work remains in a remainder bucket. Use V8 sampling
+transparency/effects, and presentation. Other renderer work remains in a remainder bucket. Use V8 sampling
 for function-level
 attribution, including allocation and GC costs. Compare equivalent workloads and
 normalize function self-times per frame when frame counts differ.

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
 	PerformanceSession,
+	type PerformanceRendererDiagnostics,
 	type PerformanceSessionSource,
 } from "./performance-session";
 import type {
@@ -43,11 +44,13 @@ function build(
 		kind: "unavailable",
 		reason: "fixture has no host",
 	},
+	getRendererFrameDiagnostics: () => PerformanceRendererDiagnostics | null = () =>
+		null,
 ) {
 	const runtime = {
 		setFrameProfilingEnabled: vi.fn(),
 		resetFrameProfile: vi.fn(),
-		getRendererFrameDiagnostics: () => null,
+		getRendererFrameDiagnostics,
 		getPresentationProfile: () => null,
 		getTerrainWorkerDiagnostics: () => pool(),
 	};
@@ -204,6 +207,39 @@ describe("PerformanceSession", () => {
 			state: "stopped",
 		});
 		await expect(session.start()).rejects.toThrow("retired");
+	});
+
+	it("exports schema v4 portal workload counts from renderer diagnostics", async () => {
+		const diagnostics: PerformanceRendererDiagnostics = {
+			profile: null,
+			selectionMetrics: {
+				visibleSceneEntries: 244,
+				submittedStaticObjectDrawCount: 287,
+				submittedDynamicDrawCount: 52,
+				portalSelectedScopeCount: 4,
+				portalSelectedCrossingCount: 3,
+				portalPropagationDrawCount: 6,
+				portalAtlasTilePixelCount: 1_450_000,
+				portalTargetBytes: 184_320_000,
+			},
+		};
+		const { session } = build(undefined, () => diagnostics);
+		await session.start();
+		const report = session.snapshot();
+		expect(report?.schemaVersion).toBe(4);
+		expect(report?.workload).toEqual({
+			sceneEntries: 244,
+			staticDraws: 287,
+			dynamicDraws: 52,
+			portal: {
+				scopes: 4,
+				crossings: 3,
+				propagationDraws: 6,
+				tilePixels: 1_450_000,
+				targetBytes: 184_320_000,
+			},
+		});
+		await session.stop();
 	});
 });
 

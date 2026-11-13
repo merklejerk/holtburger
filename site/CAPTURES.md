@@ -118,6 +118,15 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Expected result: Locate the control that opens the entity list and alerts.
 - Used in: [3d/nearby/#narrow-the-nearby-list](https://merklejerk.github.io/holtburger/3d/nearby/#narrow-the-nearby-list)
 
+### Read the fight at a glance
+
+**First · user · available · still** — ID: `combat-health-bars`
+
+- Setup: Enter combat with several hostile creatures. Damage more than one so recent health observations show different remaining health levels.
+- Frame: Show a compact combat view with readable creature names and health bars, plus enough of the character and selected-target indicator to orient the reader. Close unrelated panels.
+- Expected result: Several combat-relevant enemies have visible health bars at different levels without requiring each one to be selected. A still is sufficient.
+- Used in: [3d/combat/#read-health-and-damage-in-the-world](https://merklejerk.github.io/holtburger/3d/combat/#read-health-and-damage-in-the-world)
+
 ### Choose an emote
 
 **Later · agent · available · still** — ID: `emotes`
@@ -265,6 +274,15 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Frame: Crop the controls beneath the equipment strip.
 - Expected result: Locate the helmet and cloak appearance toggles.
 - Used in: [3d/appearance/#show-or-hide-your-helmet-and-cloak](https://merklejerk.github.io/holtburger/3d/appearance/#show-or-hide-your-helmet-and-cloak)
+
+### Cantrip tiers
+
+**First · agent · available · still** — ID: `cantrip-borders`
+
+- Setup: Temporary browser fixture using real equipment artwork decoded from game assets and production item cells and theme, with one cell per ranked cantrip tier.
+- Frame: A compact row of six different equipment icons with labels Feeble through Legendary; no containing window frame or title.
+- Expected result: All six ranked borders are readable, including the Legendary specular highlight.
+- Used in: [3d/inventory/#recognize-cantrip-tiers](https://merklejerk.github.io/holtburger/3d/inventory/#recognize-cantrip-tiers)
 
 ### Open a locked container
 

@@ -73,6 +73,17 @@ export const media = {
 		width: 1740,
 		height: 1189
 	},
+	'combat-phalanx': {
+		kind: 'image',
+		title: 'Facing the invasion',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/combat-phalanx-v1.webp'
+		},
+		alt: 'Fighting an Invading Iron Blade Phalanx with enemy health bars, a floating damage number, a summon ownership leash, and inventory open beside the combat HUD.',
+		width: 1756,
+		height: 1029
+	},
 	jump: {
 		kind: 'image',
 		title: 'Plan the leap',
@@ -105,6 +116,28 @@ export const media = {
 		alt: 'Terminal gameplay with nearby creatures, item appraisal and combat feedback.',
 		width: 1055,
 		height: 818
+	},
+	'combat-health-bars': {
+		kind: 'image',
+		title: 'Read the fight at a glance',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/combat-health-bars-v1.webp'
+		},
+		alt: 'Dungeon combat with health bars beneath several Dark Revenant nameplates and a floating 60 damage indicator beside the outlined target.',
+		width: 676,
+		height: 797
+	},
+	'cantrip-borders': {
+		kind: 'image',
+		title: 'Cantrip tiers',
+		source: {
+			kind: 'remote',
+			url: 'https://merklejerk.github.io/holtburger-media/3d/cantrip-borders-v2.webp'
+		},
+		alt: 'Six equipment icons with labeled Feeble, Minor, Moderate, Major, Epic and Legendary cantrip borders.',
+		width: 776,
+		height: 176
 	},
 	'selection-outline': {
 		kind: 'image',
@@ -917,6 +950,7 @@ export const galleryImages: MediaId[] = [
 	'holtburg',
 	'outdoors',
 	'combat',
+	'combat-phalanx',
 	'jump',
 	'map',
 	'characters',

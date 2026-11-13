@@ -36,6 +36,14 @@ Helmet and cloak visibility controls sit below the strip, alongside **Create loa
 
 </EditorialSpread>
 
+## Recognize cantrip tiers
+
+Equipment icons have colored borders showing their highest known cantrip tier, from Feeble through Legendary. Legendary borders also have an animated metallic glint. Scan loot or compare equipment at a glance, then [inspect an item](/holtburger/3d/inspecting/#items) for its actual spells and requirements.
+
+The same borders appear in loot containers, vendor stock, trade offers and item shortcuts. Holtburger appraises equipment in the background to fill in missing tiers; an item without a tier border may not have been appraised yet.
+
+<Media id="cantrip-borders" detail />
+
 ## Check your currencies
 
 Hover over the pyreal total at the bottom of Inventory to see **Alternate currencies**. Holtburger totals currencies such as Mhoire Coins, venom sacs and trade notes across your packs—no hunting through bags or counting stacks as in retail.
@@ -47,6 +55,8 @@ Hover over the pyreal total at the bottom of Inventory to see **Alternate curren
 - Drag an item onto a compatible stack to merge them.
 - In **Native** sorting, drag an item onto another item to place it before that item when they cannot merge.
 - In **Native** sorting, drag items to pack headers to move them between packs.
+
+While dragging an item, hold it near the top or bottom edge of the inventory contents to scroll toward another bag or row. Move away from the edge to stop scrolling.
 
 You can also reorder ordinary packs. Main Pack stays first and spell foci stay last.
 

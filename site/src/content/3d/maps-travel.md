@@ -14,7 +14,7 @@ import EditorialSpread from '#lib/components/EditorialSpread.svelte';
 
 <EditorialSpread>
 
-The minimap puts the surrounding terrain under your radar markers: buildings, elevation and impassable areas help you read the route ahead. Inside dungeons, it shows the dungeon layout so you can follow passages and keep your bearings.
+The minimap puts the surrounding terrain under your radar markers: buildings, elevation and impassable areas help you read the route ahead. Inside dungeons, it shows the dungeon layout so you can follow passages and keep your bearings. Where floors overlap, the map favors surfaces closest to your current elevation.
 
 A breadcrumb trail marks where you have recently walked, helping you retrace your steps through winding passages.
 

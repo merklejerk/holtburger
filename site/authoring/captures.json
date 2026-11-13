@@ -565,6 +565,22 @@
 			"framing": "Crop the button with its minimap rim for orientation.",
 			"expected": "Locate the control that opens the entity list and alerts.",
 			"priority": "first"
+		},
+		"combat-health-bars": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "Enter combat with several hostile creatures. Damage more than one so recent health observations show different remaining health levels.",
+			"framing": "Show a compact combat view with readable creature names and health bars, plus enough of the character and selected-target indicator to orient the reader. Close unrelated panels.",
+			"expected": "Several combat-relevant enemies have visible health bars at different levels without requiring each one to be selected. A still is sufficient.",
+			"priority": "first"
+		},
+		"cantrip-borders": {
+			"owner": "agent",
+			"session": "gear",
+			"setup": "Temporary browser fixture using real equipment artwork decoded from game assets and production item cells and theme, with one cell per ranked cantrip tier.",
+			"framing": "A compact row of six different equipment icons with labels Feeble through Legendary; no containing window frame or title.",
+			"expected": "All six ranked borders are readable, including the Legendary specular highlight.",
+			"priority": "first"
 		}
 	}
 }

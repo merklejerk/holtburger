@@ -36,7 +36,7 @@ Press **Enter** to type a message. Choose the destination, type, and send; sendi
 
 Start typing a command to see matching suggestions, their syntax and a short description. Browse with the arrow keys and accept with **Tab** or **Enter**—handy for finding a command without leaving the game to look it up.
 
-Input history lets you reuse commands you have already sent.
+Input history lets you reuse commands you have already sent. Chat entry, drafts and history interaction remain available during portal travel; panel shortcuts remain usable too.
 
 Type `/help` for the command list or `/help COMMAND` for one command. Both `/` and `@` can introduce commands. Chat commands also include utilities such as waypoints, recalls and corpse permissions.
 

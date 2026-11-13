@@ -170,31 +170,23 @@ export async function probeClientNearby(dependencies: {
 		await wait(0);
 	};
 	await submitScan("/scan twn crr");
-	require(
-		dependencies.selected() === 9,
-		"scan ignores panel filters and selects a fuzzy name match",
-	);
+	require(dependencies.selected() ===
+		9, "scan ignores panel filters and selects a fuzzy name match");
 	await submitScan("@scan golem");
-	require(
-		dependencies.selected() === 7,
-		"scan breaks equal substring ranks by player distance",
-	);
+	require(dependencies.selected() ===
+		7, "scan breaks equal substring ranks by player distance");
 	await submitScan("/scan unmatchedentity");
-	require(
-		dependencies.selected() === 7 &&
-			dependencies.messages().some(
+	require(dependencies.selected() === 7 &&
+		dependencies
+			.messages()
+			.some(
 				(line) => line.kind === "error" && line.message === "No entity found",
-			),
-		"failed scan reports in chat and preserves selection",
-	);
-	require(
-		Array.from(document.querySelectorAll(".chat-tone-error")).some(
-			(line) =>
-				line.textContent?.includes("No entity found") &&
-				line.querySelector(".chat-channel-prefix") === null,
-		),
-		"failed scan uses the chat error color without a channel prefix",
-	);
+			), "failed scan reports in chat and preserves selection");
+	require(Array.from(document.querySelectorAll(".chat-tone-error")).some(
+		(line) =>
+			line.textContent?.includes("No entity found") &&
+			line.querySelector(".chat-channel-prefix") === null,
+	), "failed scan uses the chat error color without a channel prefix");
 	input('[aria-label="Search entity names"]', "");
 	await tick();
 	const pickup = nearbyFacts(7, "Loose Gem");

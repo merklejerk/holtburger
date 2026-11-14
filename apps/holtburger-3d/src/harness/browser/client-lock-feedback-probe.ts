@@ -1,7 +1,7 @@
 import { createUiThemeLoader } from "../../app/ui-theme";
 import themeUrl from "./themes/combat-indicators.css?url&no-inline";
 import { mount, tick, unmount } from "svelte";
-import ClientLockFeedback from "../../client/ClientLockFeedback.svelte";
+import ClientLockFeedbackProbeHost from "./ClientLockFeedbackProbeHost.svelte";
 import { ClientLockFeedbackEffects } from "../../client/client-lock-feedback";
 import { CLIENT_LOCK_FEEDBACK_TUNING } from "../../client/client-tuning";
 import type { ClientLockFeedback as Feedback } from "../../client/client-lock-feedback-contract";
@@ -22,9 +22,10 @@ export async function probeClientLockFeedback() {
 	let nowMs = 0;
 	let position = { x: 120, y: 210 };
 	let reads = 0;
-	const overlay = mount(ClientLockFeedback, {
+	const overlay = mount(ClientLockFeedbackProbeHost, {
 		target,
 		props: {
+			isActive: () => effects.active,
 			readFrames: () => {
 				reads++;
 				return effects.readFrames(nowMs, 3, () => position);
@@ -41,7 +42,13 @@ export async function probeClientLockFeedback() {
 		await nextFrame();
 		if (marker() !== null)
 			throw new Error("Idle lock feedback displayed an icon.");
+		const idleReads = reads;
+		await nextFrame();
+		if (reads !== idleReads)
+			throw new Error("Idle lock feedback kept polling animation frames.");
 		effects.accept(feedback, nowMs, CLIENT_LOCK_FEEDBACK_TUNING);
+		overlay.wake();
+		await tick();
 		await nextFrame();
 		const first = marker();
 		const icon = first?.querySelector(".lock-feedback-icon");
@@ -193,6 +200,8 @@ export async function probeClientLockFeedback() {
 		if (marker() !== null)
 			throw new Error("Expired lock feedback retained its DOM.");
 		effects.accept(feedback, nowMs, CLIENT_LOCK_FEEDBACK_TUNING);
+		overlay.wake();
+		await tick();
 		await nextFrame();
 		effects.clear();
 		await nextFrame();

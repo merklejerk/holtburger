@@ -217,6 +217,27 @@ describe("DynamicEntityPlacementSystem", () => {
 			},
 		]);
 	});
+
+	it("rejects invalid later-leg membership before installing a path", () => {
+		const scene = new SceneGraph();
+		const placements = new DynamicEntityPlacementSystem(scene);
+		const root = placements.createRoot(
+			{
+				envCellId: null,
+				landblockId: "0x0102ffff",
+				localTransform: Mat4.identity(),
+				spatialMembership: { scopes: [{ kind: "outdoor" }] },
+			},
+			null,
+		);
+		const invalid = advance(0, 10);
+		invalid.path.legs[0].end.pose.landblockId = cellId(0x01020100);
+		expect(() => placements.applyPath(root, invalid, 100, 1_000)).toThrow(
+			"omits resident scope",
+		);
+		placements.advance(1_050);
+		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(0);
+	});
 });
 
 function advance(startX: number, endX: number): DynamicEntityAdvance {

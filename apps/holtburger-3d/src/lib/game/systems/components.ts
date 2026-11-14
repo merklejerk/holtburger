@@ -118,6 +118,8 @@ export interface VisibleDynamicPresentation {
 	readonly identity: string;
 	/** Installed layout/appearance; ready parts are in dense selector order, without range expansion. */
 	readonly visual: Extract<DynamicEntityRenderable, { kind: "ready" }>;
+	/** Effect-owned opacity summary, updated with each part render state publication. */
+	readonly allPartsOpaque: boolean;
 	/** Landblock coordinate frame of every current part payload. */
 	readonly landblockId: LandblockOwnerId;
 	/** All source-domain scopes; the renderer selects applicable portal views. */

@@ -104,6 +104,56 @@ describe("PossessionCameraController", () => {
 		).toHaveLength(1);
 	});
 
+	it("advances rear-follow before IPC and queues no work for an unchanged frame", async () => {
+		const transport = new RecordingTransport();
+		const controller = new PossessionCameraController({
+			initialLook: { pitchRadians: 0, yawRadians: 0 },
+			orbit: ORBIT,
+			recenter: { delayMs: 0, durationMs: 0 },
+			transport,
+		});
+		await controller.start(TARGET, DISTANCE, PROJECTION);
+		controller.followRear(0);
+		controller.advance(0, Math.PI / 2);
+		expect(controller.desiredLook().yawRadians).toBeCloseTo(Math.PI / 2);
+		const submit = controller.queueSynchronization(PROJECTION);
+		if (submit === null) throw new Error("Expected changed camera input.");
+		expect(controller.queueSynchronization(PROJECTION)).toBeNull();
+		const callsBeforeSubmission = transport.calls.length;
+		await submit();
+		expect(transport.calls.length).toBeGreaterThan(callsBeforeSubmission);
+
+		controller.advance(1, Math.PI);
+		expect(controller.queueSynchronization(PROJECTION)).not.toBeNull();
+	});
+
+	it.each([false, true])(
+		"retires deferred camera input on replacement (stop first: %s)",
+		async (stopFirst) => {
+			const transport = new RecordingTransport();
+			const controller = new PossessionCameraController({
+				initialLook: { pitchRadians: 0, yawRadians: 0 },
+				orbit: ORBIT,
+				recenter: { delayMs: 0, durationMs: 0 },
+				transport,
+			});
+			await controller.start(TARGET, DISTANCE, PROJECTION);
+			controller.zoom(1);
+			const stale = controller.queueSynchronization(PROJECTION);
+			if (stale === null) throw new Error("Expected queued zoom.");
+			if (stopFirst) await controller.stop();
+			await controller.start(TARGET, DISTANCE, PROJECTION);
+			const count = transport.calls.length;
+			await stale();
+			expect(transport.calls).toHaveLength(count);
+			controller.zoom(0.5);
+			await controller.synchronize(PROJECTION, 0, 0);
+			expect(transport.calls.at(-1)?.args?.request).toMatchObject({
+				cumulativeZoomDisplacement: 0.5,
+			});
+		},
+	);
+
 	it("rearms rear-facing recentering for continuous translation and preserves pitch", async () => {
 		const transport = new RecordingTransport();
 		const controller = new PossessionCameraController({

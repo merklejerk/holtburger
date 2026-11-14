@@ -75,6 +75,7 @@ describe("entity shadow policy", () => {
 			envCellId: null,
 			landblockId: "0x0101ffff",
 			localToLandblock: Mat4.identity(),
+			transformRevision: 0,
 			scope: { kind: "outdoor" as const },
 		};
 		expect(

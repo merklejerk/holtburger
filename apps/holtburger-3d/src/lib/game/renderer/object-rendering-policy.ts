@@ -183,6 +183,37 @@ export interface ObjectSubmissionPhases<T> {
 	};
 }
 
+/** Cold or view-owned phase lists before transparent distance sorting. */
+export interface ObjectSubmissionBuckets<T> {
+	readonly opaque: readonly T[];
+	readonly additive: readonly T[];
+	readonly transparent: readonly T[];
+}
+
+/** Partition immutable submissions when their publication is compiled. */
+export function bucketObjectSubmissions<
+	T extends ObjectSubmissionOrderingInput,
+>(objects: readonly T[]): ObjectSubmissionBuckets<T> {
+	const opaque: T[] = [];
+	const additive: T[] = [];
+	const transparent: T[] = [];
+	for (const object of objects) {
+		switch (object.ordering) {
+			case "opaque":
+			case "alpha-test":
+				opaque.push(object);
+				break;
+			case "additive":
+				additive.push(object);
+				break;
+			case "transparent":
+				transparent.push(object);
+				break;
+		}
+	}
+	return { opaque, additive, transparent };
+}
+
 /** One phase-ordered transparent submission after adjacent frame cohorts are identified. */
 export type ObjectFrameSubmission<T> =
 	| { readonly kind: "single"; readonly value: T }
@@ -431,47 +462,50 @@ export function createObjectSubmissionPhases<
 	transparentBatchKey: (object: T) => string | null,
 	transparentCameraDepth: (object: T) => number,
 ): ObjectSubmissionPhases<T> {
-	const opaque: T[] = [];
-	const additive: T[] = [];
+	return createObjectSubmissionPhasesFromBuckets(
+		bucketObjectSubmissions(objects),
+		transparentSortFacts,
+		transparentBatchKey,
+		transparentCameraDepth,
+	);
+}
+
+/** Sort only transparent candidates; opaque/additive buckets keep publication order. */
+export function createObjectSubmissionPhasesFromBuckets<
+	T extends ObjectSubmissionOrderingInput,
+>(
+	buckets: ObjectSubmissionBuckets<T>,
+	transparentSortFacts: (object: T) => TransparentObjectSortFacts,
+	transparentBatchKey: (object: T) => string | null,
+	transparentCameraDepth: (object: T) => number,
+): ObjectSubmissionPhases<T> {
 	const near: NearTransparentObject<T>[] = [];
 	const farGroups: T[][] = [];
 	const farGroupByKey = new Map<string, T[]>();
-	for (const object of objects) {
-		switch (object.ordering) {
-			case "opaque":
-			case "alpha-test":
-				opaque.push(object);
-				break;
-			case "additive":
-				additive.push(object);
-				break;
-			case "transparent": {
-				const facts = transparentSortFacts(object);
-				validateTransparentObjectSortFacts(facts);
-				if (facts.distanceSquared <= TRANSPARENT_NEAR_DISTANCE_SQUARED) {
-					const cameraDepth = transparentCameraDepth(object);
-					if (!Number.isFinite(cameraDepth)) {
-						throw new Error("Transparent object camera depth must be finite.");
-					}
-					near.push({ cameraDepth, object, stableId: facts.stableId });
-					break;
-				}
-				const key = transparentBatchKey(object);
-				// Unbatchable objects keep their own position among first-seen cohorts.
-				if (key === null) {
-					farGroups.push([object]);
-					break;
-				}
-				let group = farGroupByKey.get(key);
-				if (!group) {
-					group = [];
-					farGroupByKey.set(key, group);
-					farGroups.push(group);
-				}
-				group.push(object);
-				break;
+	for (const object of buckets.transparent) {
+		const facts = transparentSortFacts(object);
+		validateTransparentObjectSortFacts(facts);
+		if (facts.distanceSquared <= TRANSPARENT_NEAR_DISTANCE_SQUARED) {
+			const cameraDepth = transparentCameraDepth(object);
+			if (!Number.isFinite(cameraDepth)) {
+				throw new Error("Transparent object camera depth must be finite.");
 			}
+			near.push({ cameraDepth, object, stableId: facts.stableId });
+			continue;
 		}
+		const key = transparentBatchKey(object);
+		// Unbatchable objects keep their own position among first-seen cohorts.
+		if (key === null) {
+			farGroups.push([object]);
+			continue;
+		}
+		let group = farGroupByKey.get(key);
+		if (!group) {
+			group = [];
+			farGroupByKey.set(key, group);
+			farGroups.push(group);
+		}
+		group.push(object);
 	}
 	near.sort(
 		(left, right) =>
@@ -483,8 +517,8 @@ export function createObjectSubmissionPhases<
 		for (const object of group) far.push(object);
 	}
 	return {
-		additive,
-		opaque,
+		additive: buckets.additive,
+		opaque: buckets.opaque,
 		transparent: { far, near: near.map(({ object }) => object) },
 	};
 }

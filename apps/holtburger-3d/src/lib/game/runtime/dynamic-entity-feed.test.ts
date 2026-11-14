@@ -444,6 +444,8 @@ describe("DynamicEntityMirror", () => {
 			1, 2,
 		]);
 		expect(mirror.entity(2, 1)).toEqual(entity(2, 1));
+		expect(mirror.entityByGuid(2)).toEqual(entity(2, 1));
+		expect(mirror.entityByGuid(3)).toBeNull();
 		expect(mirror.entity(2, 2)).toBeNull();
 		expect(mirror.isAwaitingSnapshot()).toBe(false);
 		expect(mirror.hostTimeSeconds(12)).toBe(3);
@@ -456,6 +458,7 @@ describe("DynamicEntityMirror", () => {
 		]);
 		mirror.apply(snapshot(entity(4, 1)));
 		expect(mirror.entities()).toEqual([entity(4, 1)]);
+		expect(mirror.entityByGuid(2)).toBeNull();
 	});
 
 	it("uses instance generation to reject late upserts and removals", () => {

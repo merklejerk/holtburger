@@ -1025,6 +1025,7 @@ describe("ClientGameplayPresentation", () => {
 				envCellId: null,
 				landblockId: "0x0100ffff",
 				localToLandblock,
+				transformRevision: 0,
 				scope: { kind: "outdoor" },
 			},
 		};
@@ -2300,6 +2301,7 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 	readonly mapGeometry = { revision: 0 } as MapTerrainSource["mapGeometry"];
 	readonly terrainInstallationRevision = 0;
 	readonly dynamicEntityPlacementRevision = 0;
+	readonly mapEntityRevision = 0;
 	snapshotReplacements: DynamicEntityView[][] = [];
 	upserted: DynamicEntityView[] = [];
 	removed: Array<{ guid: number; generation: number }> = [];
@@ -2668,6 +2670,7 @@ function entityFrameInCamera(
 			envCellId: null,
 			landblockId: view.camera.placement.landblockId,
 			localToLandblock,
+			transformRevision: 0,
 			scope: { kind: "outdoor" },
 		},
 	};

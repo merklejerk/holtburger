@@ -27,7 +27,7 @@ const emptyRecordFrame = () => ({
 	data: new Float32Array(
 		PARTICLE_RECORDS_PER_ROW * PARTICLE_INSTANCE_FLOAT_COUNT,
 	),
-	dirtySlots: null,
+	dirtyRows: null,
 });
 
 let nextBaseSlot = 0;
@@ -227,7 +227,7 @@ describe("WebGL2ParticlePass", () => {
 			data: new Float32Array(
 				PARTICLE_RECORDS_PER_ROW * PARTICLE_INSTANCE_FLOAT_COUNT,
 			),
-			dirtySlots: { first: 0, last: 0 },
+			dirtyRows: new Uint32Array([1]),
 		};
 		const drawContext = context(gl);
 		const sky = [batch(2, 1)];
@@ -243,7 +243,7 @@ describe("WebGL2ParticlePass", () => {
 		expect(calls.texSubImage2D).not.toHaveBeenCalled();
 		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(0);
 
-		// The mirror and dirty-range identities persist while their contents change.
+		// The mirror and dirty-row identities persist while their contents change.
 		records.data[0] = 42;
 		pass.beginFrame(records);
 		pass.drawWorld(drawContext, world);
@@ -254,7 +254,7 @@ describe("WebGL2ParticlePass", () => {
 		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(0);
 		expect(draws).toEqual([1, 2, 2, 1]);
 
-		pass.beginFrame({ data: records.data, dirtySlots: null });
+		pass.beginFrame({ data: records.data, dirtyRows: null });
 		pass.draw(drawContext, sky);
 		pass.drawWorld(drawContext, world);
 		expect(calls.texSubImage2D).toHaveBeenCalledTimes(1);
@@ -275,11 +275,11 @@ describe("WebGL2ParticlePass", () => {
 		const rowFloats = PARTICLE_RECORDS_PER_ROW * PARTICLE_INSTANCE_FLOAT_COUNT;
 		const drawContext = context(gl);
 		const batches = [batch(2, 1)];
-		pass.beginFrame({ data: new Float32Array(rowFloats), dirtySlots: null });
+		pass.beginFrame({ data: new Float32Array(rowFloats), dirtyRows: null });
 		pass.draw(drawContext, batches);
 		pass.beginFrame({
 			data: new Float32Array(rowFloats * 2),
-			dirtySlots: null,
+			dirtyRows: null,
 		});
 		pass.draw(drawContext, batches);
 		expect(pass.getDiagnostics().uploadedRecordRowCount).toBe(2);

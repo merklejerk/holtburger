@@ -35,12 +35,14 @@ describe("target-local lock feedback", () => {
 		effects.accept(failed, 0, timing);
 		effects.accept({ ...failed, target: 8, outcome: "unlocked" }, 0, timing);
 		expect(effects.readFrames(10, 3, () => null)).toEqual([]);
+		expect(effects.active).toBe(true);
 		expect(
 			effects
 				.readFrames(timing.failureLifetimeMs, 3, point)
 				.map((frame) => frame.target),
 		).toEqual([8]);
 		expect(effects.readFrames(timing.successLifetimeMs, 3, point)).toEqual([]);
+		expect(effects.active).toBe(false);
 	});
 	it("retires only the removed target incarnation", () => {
 		const effects = new ClientLockFeedbackEffects();

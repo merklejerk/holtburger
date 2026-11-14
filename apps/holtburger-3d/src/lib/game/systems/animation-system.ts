@@ -129,6 +129,30 @@ type NodeAnimation =
 			readonly sequence: SequenceAnimationRecord;
 	  };
 
+/** Last successfully published clip pose, including both tracks used by gesture composition. */
+interface PublishedMotionSignature {
+	readonly ordinary: ClipAnimationRecord | null;
+	readonly ordinaryClip: PlayingClip | null;
+	readonly ordinaryFrame: number | null;
+	readonly ordinaryActivity: AnimationMotionActivity | null;
+	readonly locomotion: ClipAnimationRecord | null;
+	readonly locomotionClip: PlayingClip | null;
+	readonly locomotionFrame: number | null;
+	readonly selected: ClipAnimationRecord;
+	readonly poseComposition: AnimationPoseComposition;
+}
+
+function samePoseComposition(
+	left: AnimationPoseComposition,
+	right: AnimationPoseComposition,
+): boolean {
+	return left.kind === "ordinary"
+		? right.kind === "ordinary"
+		: right.kind === "humanoid-gesture" &&
+				left.layout === right.layout &&
+				left.chestLocomotionWeight === right.chestLocomotionWeight;
+}
+
 function ordinaryPlayback(node: MotionNodeAnimation): OrdinaryPlayback | null {
 	return node.kind === "locomotion" ? null : node.ordinary;
 }
@@ -200,6 +224,8 @@ export interface DynamicPresentationSample {
 	readonly articulatedPose: ArticulatedPose;
 	readonly effects: EffectPresentationSample;
 	readonly nodeId: SceneNodeId;
+	/** Whether the composed local part pose differs from the last published pose. */
+	readonly localPoseChanged: boolean;
 }
 
 /** Fully initialized playback generation that leaves the active owner untouched until commit. */
@@ -214,6 +240,10 @@ export class AnimationSystem<TOwnerId extends string> {
 	readonly #effects: EffectSystem;
 	readonly #router: BehaviorEventRouter;
 	readonly #records = new Map<SceneNodeId, NodeAnimation>();
+	readonly #lastPublishedSignature = new Map<
+		SceneNodeId,
+		PublishedMotionSignature
+	>();
 	readonly #owners = new Map<TOwnerId, Set<SceneNodeId>>();
 	readonly #stagedNodeIds = new Set<SceneNodeId>();
 	#destroyed = false;
@@ -318,6 +348,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		const node = composePlayback(ordinary, locomotion, poseComposition);
 		if (node === null) {
 			this.#records.delete(nodeId);
+			this.#lastPublishedSignature.delete(nodeId);
 		} else {
 			// A newly visible track may have render-only fractional time accumulated while
 			// hidden. Consume it silently before any future visible semantic step.
@@ -374,6 +405,14 @@ export class AnimationSystem<TOwnerId extends string> {
 	}
 
 	#visualFramePosition(record: ClipAnimationRecord): number {
+		if (
+			record.clip.framesPerSecond === 0 ||
+			(record.clip.completion === "hold" &&
+				(record.clip.framesPerSecond > 0
+					? record.framePosition >= record.clip.highFrame
+					: record.framePosition <= record.clip.lowFrame))
+		)
+			return record.framePosition;
 		return advancePlayingFrame(
 			record.clip,
 			record.framePosition,
@@ -462,8 +501,10 @@ export class AnimationSystem<TOwnerId extends string> {
 					locomotion,
 					node.poseComposition,
 				);
-				if (next === null) this.#records.delete(nodeId);
-				else {
+				if (next === null) {
+					this.#records.delete(nodeId);
+					this.#lastPublishedSignature.delete(nodeId);
+				} else {
 					this.#consumeFraction(selectedPlayback(next), false);
 					this.#records.set(nodeId, next);
 				}
@@ -500,34 +541,93 @@ export class AnimationSystem<TOwnerId extends string> {
 			if (!record)
 				throw new Error(`Animation sample request contains unknown ${nodeId}.`);
 			const selected = selectedPlayback(record);
-			const sample = this.#sample(nodeId, selected);
+			const sample = this.#sample(
+				nodeId,
+				selected,
+				this.#poseSignatureChanged(nodeId, record),
+			);
 			// Inventory reach keeps its authored pelvis and legs, including during local retirement.
+			let published = sample;
 			if (
-				record.kind !== "layered" ||
-				record.poseComposition.kind === "ordinary" ||
-				selected === record.locomotion ||
-				record.ordinary.activity !== "gesture"
-			)
-				return sample;
-			const locomotionPose = this.#samplePartPose(record.locomotion);
-			return {
-				...sample,
-				articulatedPose: {
-					...sample.articulatedPose,
-					partToObjectTransforms: composeHumanoidGesturePose(
-						sample.articulatedPose.partToObjectTransforms,
-						locomotionPose,
-						record.poseComposition.layout,
-						record.poseComposition.chestLocomotionWeight,
-					),
-				},
-			};
+				record.kind === "layered" &&
+				record.poseComposition.kind === "humanoid-gesture" &&
+				selected !== record.locomotion &&
+				record.ordinary.activity === "gesture"
+			) {
+				const locomotionPose = this.#samplePartPose(record.locomotion);
+				published = {
+					...sample,
+					articulatedPose: {
+						...sample.articulatedPose,
+						partToObjectTransforms: composeHumanoidGesturePose(
+							sample.articulatedPose.partToObjectTransforms,
+							locomotionPose,
+							record.poseComposition.layout,
+							record.poseComposition.chestLocomotionWeight,
+						),
+					},
+				};
+			}
+			if (record.kind !== "sequence")
+				this.#lastPublishedSignature.set(nodeId, this.#motionSignature(record));
+			return published;
 		});
 		this.#diagnostics = {
 			...this.#diagnostics,
 			lastSampledPresentationCount: samples.length,
 		};
 		return samples;
+	}
+
+	/** Whether a selected playback would change its last published pose or effect sample. */
+	needsPresentation(nodeId: SceneNodeId): boolean {
+		const node = this.#records.get(nodeId);
+		if (!node) throw new Error(`Animation state for ${nodeId} does not exist.`);
+		if (node.kind === "sequence") return true;
+		if (this.#effects.needsPresentation(nodeId)) return true;
+		return this.#poseSignatureChanged(nodeId, node);
+	}
+
+	/** Animation owns the clip and composition decision; effects do not change local part pose. */
+	#poseSignatureChanged(nodeId: SceneNodeId, node: NodeAnimation): boolean {
+		if (node.kind === "sequence") return true;
+		const last = this.#lastPublishedSignature.get(nodeId);
+		if (!last) return true;
+		const ordinary = ordinaryPlayback(node);
+		const locomotion = locomotionPlayback(node);
+		return (
+			last.ordinary !== (ordinary?.current ?? null) ||
+			last.ordinaryClip !== (ordinary?.current.clip ?? null) ||
+			last.ordinaryFrame !==
+				(ordinary === null
+					? null
+					: this.#visualFramePosition(ordinary.current)) ||
+			last.ordinaryActivity !== (ordinary?.activity ?? null) ||
+			last.locomotion !== locomotion ||
+			last.locomotionClip !== (locomotion?.clip ?? null) ||
+			last.locomotionFrame !==
+				(locomotion === null ? null : this.#visualFramePosition(locomotion)) ||
+			last.selected !== selectedPlayback(node) ||
+			!samePoseComposition(last.poseComposition, node.poseComposition)
+		);
+	}
+
+	#motionSignature(node: MotionNodeAnimation): PublishedMotionSignature {
+		const ordinary = ordinaryPlayback(node);
+		const locomotion = locomotionPlayback(node);
+		return {
+			ordinary: ordinary?.current ?? null,
+			ordinaryClip: ordinary?.current.clip ?? null,
+			ordinaryFrame:
+				ordinary === null ? null : this.#visualFramePosition(ordinary.current),
+			ordinaryActivity: ordinary?.activity ?? null,
+			locomotion,
+			locomotionClip: locomotion?.clip ?? null,
+			locomotionFrame:
+				locomotion === null ? null : this.#visualFramePosition(locomotion),
+			selected: selectedPlayback(node),
+			poseComposition: node.poseComposition,
+		};
 	}
 
 	getDiagnostics(): AnimationRuntimeDiagnostics {
@@ -589,7 +689,7 @@ export class AnimationSystem<TOwnerId extends string> {
 							},
 				);
 				this.#stagedNodeIds.add(nodeId);
-				samples.push(this.#sample(nodeId, record));
+				samples.push(this.#sample(nodeId, record, true));
 			}
 		} catch (cause) {
 			for (const nodeId of records.keys()) this.#stagedNodeIds.delete(nodeId);
@@ -606,6 +706,11 @@ export class AnimationSystem<TOwnerId extends string> {
 				for (const [nodeId, record] of records) {
 					this.#records.set(nodeId, record);
 					this.#stagedNodeIds.delete(nodeId);
+					if (record.kind !== "sequence")
+						this.#lastPublishedSignature.set(
+							nodeId,
+							this.#motionSignature(record),
+						);
 				}
 				this.#owners.set(ownerId, new Set(records.keys()));
 				this.#latestAdvancedFrame = null;
@@ -630,6 +735,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		this.#destroyed = true;
 		// Effect state belongs to the entity, not to playback, so its owner tears it down.
 		this.#records.clear();
+		this.#lastPublishedSignature.clear();
 		this.#owners.clear();
 		this.#stagedNodeIds.clear();
 		this.#latestAdvancedFrame = null;
@@ -638,7 +744,10 @@ export class AnimationSystem<TOwnerId extends string> {
 	#removeOwnerRecords(ownerId: TOwnerId): void {
 		const nodes = this.#owners.get(ownerId);
 		if (!nodes) return;
-		for (const nodeId of nodes) this.#records.delete(nodeId);
+		for (const nodeId of nodes) {
+			this.#records.delete(nodeId);
+			this.#lastPublishedSignature.delete(nodeId);
+		}
 		this.#owners.delete(ownerId);
 	}
 
@@ -679,12 +788,14 @@ export class AnimationSystem<TOwnerId extends string> {
 	#sample(
 		nodeId: SceneNodeId,
 		record: AnimationRecord,
+		localPoseChanged: boolean,
 	): DynamicPresentationSample {
 		if (record.kind === "sequence")
 			return {
 				articulatedPose: record.sequence.sample(record.fractionalSeconds),
 				effects: this.#effects.samplePresentation(nodeId),
 				nodeId,
+				localPoseChanged,
 			};
 		const framePosition = this.#visualFramePosition(record);
 		return {
@@ -700,6 +811,7 @@ export class AnimationSystem<TOwnerId extends string> {
 			},
 			effects: this.#effects.samplePresentation(nodeId),
 			nodeId,
+			localPoseChanged,
 		};
 	}
 

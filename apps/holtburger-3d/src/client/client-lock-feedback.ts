@@ -64,6 +64,11 @@ export class ClientLockFeedbackEffects {
 		this.#active.clear();
 	}
 
+	/** Whether an accepted feedback lifetime remains active, even while clipped offscreen. */
+	get active(): boolean {
+		return this.#active.size > 0;
+	}
+
 	/** Expire while offscreen too; project only an exact live target incarnation. */
 	readFrames(
 		nowMs: number,

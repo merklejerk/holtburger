@@ -3,6 +3,7 @@ import { createObjectGeometryKey } from "../geometry/types";
 import { Mat4 } from "../math/types";
 import type { SceneNodeId } from "../scene";
 import type { PreparedDynamicDepth } from "./dynamic-depth-preparation";
+import { compileOpaqueDynamicAppearanceVariants } from "./webgl2-dynamic-appearances";
 
 /** Inject a compiled material-free contract into selection/pass unit tests without GPU allocation. */
 export function createDynamicDepthTestFixture(
@@ -10,6 +11,13 @@ export function createDynamicDepthTestFixture(
 	landblockId: LandblockOwnerId,
 	indexCount: number,
 ): PreparedDynamicDepth {
+	const plan = {
+		indices: new Uint32Array(indexCount),
+		batches: [],
+		ranges: [],
+		physicalRanges: [],
+		colorRanges: { opaque: [], additive: [] },
+	};
 	return {
 		nodeId,
 		landblockId,
@@ -21,13 +29,8 @@ export function createDynamicDepthTestFixture(
 			table: {} as WebGLTexture,
 			indexBuffer: {} as WebGLBuffer,
 			// Pass tests consume the prepared spans, not cold material compilation (tested separately).
-			plan: {
-				indices: new Uint32Array(indexCount),
-				batches: [],
-				ranges: [],
-				physicalRanges: [],
-				colorRanges: { opaque: [], additive: [] },
-			},
+			plan,
+			opaqueVariants: compileOpaqueDynamicAppearanceVariants(plan, []),
 		},
 		parts: [
 			{

@@ -449,6 +449,19 @@ describe("EffectSystem", () => {
 		);
 	});
 
+	it("reuses settled samples and keeps the previous active sample stable", () => {
+		const effects = install(1);
+		const settled = effects.samplePresentation(NODE_ID);
+		expect(effects.samplePresentation(NODE_ID)).toBe(settled);
+		effects.applySetOmega(TARGET, new Vec3(0, 0, 1));
+		const before = effects.samplePresentation(NODE_ID);
+		advance(effects, BEHAVIOR_STEP_SECONDS / 2);
+		const after = effects.samplePresentation(NODE_ID);
+		expect(after).not.toBe(before);
+		expect(before.rootTransformModifier.m11).toBe(1);
+		expect(after.rootTransformModifier.m11).toBeLessThan(1);
+	});
+
 	it("applies a sub-threshold ramp instantly and a timed ramp progressively", () => {
 		const effects = install();
 		effects.applyTranslucency(
@@ -561,7 +574,7 @@ describe("EffectSystem", () => {
 				"live",
 			);
 			translucencies(effects);
-			expect(effects.needsPresentation(NODE_ID)).toBe(false);
+			expect(effects.needsPresentation(NODE_ID)).toBe(true);
 
 			// The first absent slot and the reported failing index both leave state untouched.
 			for (const partIndex of [1, 10]) {
@@ -577,7 +590,7 @@ describe("EffectSystem", () => {
 					"live",
 				);
 			}
-			expect(effects.needsPresentation(NODE_ID)).toBe(false);
+			expect(effects.needsPresentation(NODE_ID)).toBe(true);
 			expect(translucencies(effects)).toEqual([0]);
 			advance(effects, 0.5);
 			expect(translucencies(effects)[0]).toBeCloseTo(0.5);

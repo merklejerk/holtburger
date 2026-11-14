@@ -406,10 +406,10 @@ describe("portal scope-atlas planning", () => {
 			atlasPackedExtentPixelCount: 15_000,
 			atlasPixelCapacity: 20_000,
 			frontierRetreatCount: 0,
-			packingAttemptCount: 1,
+			packingAttemptCount: 2,
 			portalOwnedFrameHeapRecordCreationCount: 0,
 			tilePixelCount: 12_500,
-			tilePlacementAttemptCount: 2,
+			tilePlacementAttemptCount: 4,
 		});
 		expect(frame.trace.arenaCapacityBytes).toBeGreaterThan(0);
 	});

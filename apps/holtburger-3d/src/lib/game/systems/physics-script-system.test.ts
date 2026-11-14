@@ -272,6 +272,7 @@ describe("PhysicsScriptSystem", () => {
 		]);
 		stage.commit();
 		expect(harness.system.getDiagnostics().activeScriptCount).toBe(0);
+		harness.system.advance(10);
 		expect(
 			harness.system.scheduleActivation(TARGET, {
 				scriptId: "0x3300ffff",
@@ -284,10 +285,11 @@ describe("PhysicsScriptSystem", () => {
 				pauseSeconds: 0,
 			}),
 		).toBe(true);
-		harness.system.advance(0);
+		harness.system.advance(10);
 		expect(harness.system.getDiagnostics().activeScriptCount).toBeGreaterThan(
 			0,
 		);
+		expect(sounds(harness.router.getObservations())).toHaveLength(1);
 	});
 
 	it("releases an uncommitted stage without disturbing the active owner", async () => {

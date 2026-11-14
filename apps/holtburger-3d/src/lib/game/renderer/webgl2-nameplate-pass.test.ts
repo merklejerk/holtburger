@@ -10,12 +10,19 @@ import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation
 import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import { Vec3 } from "../math/types";
 
+const ATLAS_TEXTURE = { key: "shared-atlas" } as unknown as WebGLTexture;
+
 function binding(
-	key: string,
+	_key: string,
 	width: number,
 	height: number,
 ): NameplateTextureBinding {
-	return { height, texture: { key } as unknown as WebGLTexture, width };
+	return {
+		height,
+		texture: ATLAS_TEXTURE,
+		width,
+		atlasUvRect: new Float32Array([0, 0, 1, 1]),
+	};
 }
 
 function createFixture() {
@@ -61,12 +68,16 @@ function createFixture() {
 		bindTexture: () => undefined,
 		bindVertexArray: () => undefined,
 		blendFunc: () => undefined,
-		bufferData: (_target: number, data: BufferSource, usage: number) => {
-			if (usage === 13) {
-				const array = data as Float32Array;
-				uploadedFloatCounts.push(array.length);
-				uploadedFloats.push(Array.from(array));
-			}
+		bufferData: () => undefined,
+		bufferSubData: (
+			_target: number,
+			_offset: number,
+			data: Float32Array,
+			_sourceOffset: number,
+			length: number,
+		) => {
+			uploadedFloatCounts.push(length);
+			uploadedFloats.push(Array.from(data.subarray(0, length)));
 		},
 		compileShader: () => undefined,
 		createBuffer: () => ({}) as WebGLBuffer,
@@ -196,7 +207,9 @@ describe("WebGL2NameplatePass", () => {
 				renderScopeKey: "env:one",
 			}));
 			if (path === "portal")
-				pass.drawScoped(context, instances, { routeDeferredSubmission() {} });
+				pass.drawScoped(context, instances, {
+					deferredRenderDomainOrdinal: () => 0,
+				});
 			else pass.draw(context, instances);
 			expect(fixture.draws).toEqual([1, 1, 1]);
 			expect(fixture.drawDepthTests).toEqual([true, false, true]);
@@ -217,7 +230,7 @@ describe("WebGL2NameplatePass", () => {
 		expect(fixture.referenceDistances).toEqual([context.referenceDistance]);
 	});
 
-	it("uploads all anchors once and coalesces adjacent matching textures", () => {
+	it("uploads one ordered instance stream and draws different plates from one atlas", () => {
 		const fixture = createFixture();
 		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
 		const drudge = binding("drudge", 128, 32);
@@ -241,18 +254,13 @@ describe("WebGL2NameplatePass", () => {
 
 		pass.draw(context, instances);
 
-		expect(fixture.uploadedFloatCounts).toEqual([12]);
-		expect(fixture.draws).toEqual([2, 1]);
-		expect(fixture.anchorOffsets.slice(-2)).toEqual([
-			0,
-			8 * Float32Array.BYTES_PER_ELEMENT,
-		]);
-		expect(fixture.plateSizes).toEqual([
-			[128, 32],
-			[96, 48],
-		]);
+		expect(fixture.uploadedFloatCounts).toEqual([33]);
+		expect(fixture.draws).toEqual([3]);
+		expect(
+			fixture.uploadedFloats[0]?.filter((_, index) => index % 11 === 4),
+		).toEqual([128, 128, 96]);
 		expect(fixture.samplerBindings).toEqual([fixture.sampler, null]);
-		expect(pass.diagnostics()).toEqual({ drawCount: 2, instanceCount: 3 });
+		expect(pass.diagnostics()).toEqual({ drawCount: 1, instanceCount: 3 });
 	});
 
 	it("does no upload or draw work for an empty submission", () => {
@@ -267,7 +275,7 @@ describe("WebGL2NameplatePass", () => {
 		expect(pass.diagnostics()).toEqual({ drawCount: 0, instanceCount: 0 });
 	});
 
-	it("coalesces only adjacent instances sharing both texture and portal domain", () => {
+	it("coalesces ordered instances across portal domains when they share one atlas", () => {
 		const fixture = createFixture();
 		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
 		const drudge = binding("drudge", 128, 32);
@@ -294,15 +302,35 @@ describe("WebGL2NameplatePass", () => {
 		const routed: string[] = [];
 
 		pass.drawScoped(context, instances, {
-			routeDeferredSubmission: (renderScopeKey) => routed.push(renderScopeKey),
+			deferredRenderDomainOrdinal: (renderScopeKey) => {
+				routed.push(renderScopeKey);
+				return renderScopeKey === "outdoor" ? 0 : 1;
+			},
 		});
 
-		expect(routed).toEqual(["env:one", "outdoor"]);
-		expect(fixture.draws).toEqual([2, 1]);
-		expect(pass.diagnostics()).toEqual({ drawCount: 2, instanceCount: 3 });
+		expect(routed).toEqual(["env:one", "env:one", "outdoor"]);
+		expect(fixture.draws).toEqual([3]);
+		expect(pass.diagnostics()).toEqual({ drawCount: 1, instanceCount: 3 });
 	});
 
-	it("does not reorder separated matching textures to improve batching", () => {
+	it("submits fifty ordered scoped plates with one depth-tested draw", () => {
+		const fixture = createFixture();
+		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+		const plates = Array.from({ length: 50 }, (_, index) => ({
+			anchor: new Vec3(index, 0, 0),
+			binding: binding(`plate:${index}`, 64 + index, 24),
+			depthTest: true,
+			renderScopeKey: index % 2 === 0 ? "outdoor" : "indoor",
+		}));
+		pass.drawScoped(context, plates, {
+			deferredRenderDomainOrdinal: (key) => (key === "outdoor" ? 0 : 1),
+		});
+		expect(fixture.draws).toEqual([50]);
+		expect(fixture.drawDepthTests).toEqual([true]);
+		expect(pass.diagnostics()).toEqual({ drawCount: 1, instanceCount: 50 });
+	});
+
+	it("preserves plate order while batching distinct atlas rectangles", () => {
 		const fixture = createFixture();
 		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
 		const drudge = binding("drudge", 128, 32);
@@ -314,12 +342,10 @@ describe("WebGL2NameplatePass", () => {
 			{ depthTest: true, anchor: new Vec3(7, 8, 9), binding: drudge },
 		]);
 
-		expect(fixture.draws).toEqual([1, 1, 1]);
-		expect(fixture.plateSizes).toEqual([
-			[128, 32],
-			[96, 48],
-			[128, 32],
-		]);
+		expect(fixture.draws).toEqual([3]);
+		expect(
+			fixture.uploadedFloats[0]?.filter((_, index) => index % 11 === 4),
+		).toEqual([128, 96, 128]);
 	});
 
 	it("packs instanced health fractions with divisor 1 and negative sentinels without splitting matching batches", () => {
@@ -351,11 +377,14 @@ describe("WebGL2NameplatePass", () => {
 		expect(fixture.attribDivisors).toEqual([
 			[1, 1],
 			[2, 1],
+			[3, 1],
+			[4, 1],
+			[5, 1],
 		]);
 		expect(fixture.draws).toEqual([3]);
-		expect(fixture.uploadedFloats[0]).toEqual([
-			1, 2, 3, 0.625, 4, 5, 6, -1, 7, 8, 9, 1,
-		]);
+		expect(
+			fixture.uploadedFloats[0]?.filter((_, index) => index % 11 === 3),
+		).toEqual([0.625, -1, 1]);
 		expect(fixture.healthBarSizes).toEqual([
 			[barSettings.widthCssPixels, barSettings.heightCssPixels],
 		]);

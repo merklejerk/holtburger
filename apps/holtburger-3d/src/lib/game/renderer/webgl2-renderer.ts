@@ -28,6 +28,7 @@ import { Mat4, Quat, Vec3 } from "../math/types";
 import {
 	type SceneNodeId,
 	type SceneScope,
+	type SceneTopologyView,
 	type SceneVisibilityIslandId,
 } from "../scene";
 import { scopeFor, scopeKey } from "../scene/scope";
@@ -244,8 +245,10 @@ import {
 	formGroupedObjectInstanceRuns,
 	areStaticObjectDrawsCompatible,
 	type ObjectBlendPolicy,
-	createObjectSubmissionPhases,
+	bucketObjectSubmissions,
+	createObjectSubmissionPhasesFromBuckets,
 	type ObjectFrameSubmission,
+	type ObjectSubmissionBuckets,
 	type ObjectSubmissionPhases,
 	type PreparedObjectTextureBinding,
 	type TransparentObjectSortFacts,
@@ -314,6 +317,7 @@ import {
 } from "./webgl2-object-draw-compiler";
 import {
 	WebGL2DynamicAppearances,
+	selectOpaqueDynamicAppearanceVariant,
 	type PreparedDynamicAppearance,
 } from "./webgl2-dynamic-appearances";
 import { DynamicBatchedRanges } from "./dynamic-batched-ranges";
@@ -369,7 +373,7 @@ const BLACK_SCENE_CLEAR_COLOR = [0, 0, 0, 1] as const;
 /** Stand-in before any emitter has published records, so the context is never partially built. */
 const EMPTY_PARTICLE_RECORDS: ParticleRecordFrame = {
 	data: new Float32Array(0),
-	dirtySlots: null,
+	dirtyRows: null,
 };
 
 /** Keep terrain behind authored outdoor geometry at near-coplanar depth intersections. */
@@ -609,7 +613,7 @@ type LandblockRenderOffset = readonly [number, number, number];
  * of rebuilding a submission, a scope key, and a layer key for every draw unit it owns.
  */
 interface CompiledStaticNodeSubmissions {
-	readonly objects: readonly PreparedObjectFrameInput[];
+	readonly objectBuckets: ObjectSubmissionBuckets<PreparedObjectFrameInput>;
 	readonly landblockId: LandblockOwnerId;
 	readonly source: ObjectFrameInput["source"];
 	/** Key this publication contributes to the visible-layer census. */
@@ -738,8 +742,8 @@ interface PreparedSceneContributions {
 	readonly dynamicOpaque: readonly PreparedDynamicOpaque[];
 	/** Terrain selected by this renderer from its RenderWorld. */
 	readonly terrain: readonly TerrainFrameInput[];
-	/** Opaque and alpha-test static-object ranges visible to this view. */
-	readonly objects: readonly ObjectColorSubmission[];
+	/** Ordered phase populations assembled from compiled static and dynamic sources. */
+	readonly objectBuckets: ObjectSubmissionBuckets<ObjectColorSubmission>;
 	/**
 	 * Anchor-relative offset per visible landblock for this frame.
 	 *
@@ -1057,6 +1061,8 @@ export class WebGL2Renderer implements Renderer {
 		string,
 		SceneVisibilityIslandId
 	>();
+	/** Last topology indexed into the retained indoor-island lookup. */
+	#indoorVisibilityTopology: SceneTopologyView | null = null;
 	/** Reusable dynamic-light upload staging; renderer-owned to keep draw loops allocation-free. */
 	readonly #dynamicLightScratch: ReturnType<typeof createDynamicLightScratch>;
 	readonly #terrainLightMask: WebGL2TerrainLightMaskTexture;
@@ -1333,12 +1339,17 @@ export class WebGL2Renderer implements Renderer {
 			{
 				getDynamicDepth: (nodeId, showRetailHiddenGeometry) =>
 					this.#dynamicDepths.prepare(nodeId, showRetailHiddenGeometry),
+				hasOutdoorDynamicShadowGeometry: (nodeId, showRetailHiddenGeometry) =>
+					this.#dynamicDepths.hasOutdoorDynamicShadowGeometry(
+						nodeId,
+						showRetailHiddenGeometry,
+					),
 				readRenderContribution: (nodeId) =>
 					world.readRenderContribution(nodeId),
 				getEntityShadowDynamicFacts: (nodeId) =>
 					world.getEntityShadowDynamicFacts(nodeId),
-				queryOutdoorShadowCasters: (...args) =>
-					world.queryOutdoorShadowCasters(...args),
+				queryOutdoorShadowCasterMasks: (...args) =>
+					world.queryOutdoorShadowCasterMasks(...args),
 			},
 		);
 		this.#outdoorPssmReceiverPrograms = new WebGL2OutdoorPssmReceiverPrograms(
@@ -1990,8 +2001,9 @@ export class WebGL2Renderer implements Renderer {
 		frameSettings: FrameSettings,
 		shadows: PreparedOutdoorShadowView | null,
 	): PreparedPortalView {
-		const visible = this.#world.queryScopeSelectionScene(
-			prepared.frustum,
+		const visible = this.#world.queryScopeWindowSelectionScene(
+			prepared.clipFromAnchor,
+			prepared.frustum.cameraPosition,
 			prepared.anchorLandblockId,
 			frame,
 			renderCullingGroupFilter(frameSettings.layerVisibility),
@@ -2056,6 +2068,7 @@ export class WebGL2Renderer implements Renderer {
 		}
 		this.#frameProfiler?.setCpuPhase("sceneSelection");
 		const objectPhases = this.#createObjectSubmissionPhases(view);
+		const objectRuns = this.#prepareViewObjectRuns(objectPhases);
 		const hasOutdoorScope =
 			frame.atlas.visibility.selectedScopeOrdinal("outdoor") !== null;
 		if (hasOutdoorScope) {
@@ -2080,7 +2093,7 @@ export class WebGL2Renderer implements Renderer {
 		// Early-Z before multi-layer near-terrain shading executes. Terrain uses LESS with the
 		// same positive polygon offset, keeping coplanar object-vs-terrain ties identical.
 		this.#frameProfiler?.setCpuPhase("opaqueSubmission");
-		this.#drawOpaqueObjects(view, objectPhases.opaque, shading, pipeline);
+		this.#drawOpaqueObjects(view, objectRuns.opaque, shading, pipeline);
 		this.#frameProfiler?.setCpuPhase("terrainSubmission");
 		this.#drawTerrain(view, shading, pipeline);
 		if (portalTargets !== null) {
@@ -2123,7 +2136,7 @@ export class WebGL2Renderer implements Renderer {
 		);
 		pipeline.beginDeferredScene(target.framebuffer);
 		this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
-		this.#drawBlendedObjects(view, objectPhases, shading, pipeline);
+		this.#drawBlendedObjects(view, objectRuns.blended, shading, pipeline);
 		this.#drawWorldParticles(view, particlesByScope);
 		this.#drawNameplates(view, pipeline);
 		this.#drawSummonLeashes(view);
@@ -2466,7 +2479,11 @@ export class WebGL2Renderer implements Renderer {
 		);
 		this.#frameProfiler?.setCpuPhase("sceneSelection");
 		const terrain: TerrainFrameInput[] = [];
-		const objects: ObjectColorSubmission[] = [];
+		const objectBuckets: {
+			opaque: ObjectColorSubmission[];
+			additive: ObjectColorSubmission[];
+			transparent: ObjectColorSubmission[];
+		} = { opaque: [], additive: [], transparent: [] };
 		const dynamicOpaque: PreparedDynamicOpaque[] = [];
 		const nameplates: PreparedNameplateCandidate[] = [];
 		const entityShadowsEnabled = frameSettings.entityShadows.mode !== "none";
@@ -2476,10 +2493,14 @@ export class WebGL2Renderer implements Renderer {
 		this.#outdoorDirectionalCasters.length = 0;
 		this.#indoorGroundingCells.clear();
 		if (entityShadowsEnabled) {
-			indexIndoorVisibilityIslands(
-				this.#world.getPortalTopologyView(),
-				this.#indoorVisibilityIslands,
-			);
+			const topology = this.#world.getPortalTopologyView();
+			if (
+				this.#indoorVisibilityTopology !== topology ||
+				this.#indoorVisibilityTopology.revision !== topology.revision
+			) {
+				indexIndoorVisibilityIslands(topology, this.#indoorVisibilityIslands);
+				this.#indoorVisibilityTopology = topology;
+			}
 		}
 
 		// One offset per visible landblock, not one per object: it is the same value for every
@@ -2518,17 +2539,15 @@ export class WebGL2Renderer implements Renderer {
 					this.#visibleEnvCellScopes.add(compiled.envCellScopeKey);
 				}
 				retainOffset(compiled.landblockId);
-				for (const object of compiled.objects) {
-					if (
-						!retainsRetailGeometry(
-							object.retailVisibility,
-							frameSettings.showRetailHiddenGeometry,
+				for (const phase of ["opaque", "additive", "transparent"] as const)
+					for (const object of compiled.objectBuckets[phase])
+						if (
+							retainsRetailGeometry(
+								object.retailVisibility,
+								frameSettings.showRetailHiddenGeometry,
+							)
 						)
-					)
-						continue;
-
-					objects.push(object);
-				}
+							objectBuckets[phase].push(object);
 				continue;
 			}
 			if (contribution.kind === "dynamic") {
@@ -2547,18 +2566,28 @@ export class WebGL2Renderer implements Renderer {
 					const appearance = this.#dynamicAppearances.get(
 						presentation.visual.appearance,
 					);
-					admission = summarizeDynamicRangeAdmission(
-						appearance.rangeGroupsByPart,
-						presentation.visual.parts,
+					const opaqueVariant = selectOpaqueDynamicAppearanceVariant(
+						appearance,
+						presentation.visual.parts.length,
+						presentation.allPartsOpaque,
 						frameSettings.showRetailHiddenGeometry,
 					);
+					admission = opaqueVariant
+						? opaqueVariant.admission
+						: summarizeDynamicRangeAdmission(
+								appearance.rangeGroupsByPart,
+								presentation.visual.parts,
+								frameSettings.showRetailHiddenGeometry,
+							);
 					if (appearance.kind === "drawable") {
-						const ranges = this.#dynamicOpaqueRanges.prepare(
-							nodeId,
-							appearance.plan,
-							presentation.visual.parts,
-							frameSettings.showRetailHiddenGeometry,
-						);
+						const ranges = opaqueVariant
+							? opaqueVariant.opaqueSpans
+							: this.#dynamicOpaqueRanges.prepare(
+									nodeId,
+									appearance.plan,
+									presentation.visual.parts,
+									frameSettings.showRetailHiddenGeometry,
+								);
 						if (ranges.length > 0) {
 							this.#dynamicOpaqueProgram ??= createWebGL2ObjectProgram(
 								this.#gl,
@@ -2618,7 +2647,7 @@ export class WebGL2Renderer implements Renderer {
 								this.#world.resolveGeometry(presentation.visual.layout.key),
 							);
 							this.#poseUploadParts.set(nodeId, presentation.visual.parts);
-							objects.push({
+							objectBuckets[ordering].push({
 								source: "dynamic",
 								drawKind: "merged",
 								nodeId,
@@ -2633,18 +2662,22 @@ export class WebGL2Renderer implements Renderer {
 								transparentCohortKey: `${presentation.landblockId}/${range.source.transparentSort.key}`,
 							});
 						};
-						for (const span of this.#dynamicAdditiveRanges.prepare(
-							nodeId,
-							appearance.plan,
-							presentation.visual.parts,
-							frameSettings.showRetailHiddenGeometry,
-						)) {
+						for (const span of opaqueVariant
+							? opaqueVariant.additiveSpans
+							: this.#dynamicAdditiveRanges.prepare(
+									nodeId,
+									appearance.plan,
+									presentation.visual.parts,
+									frameSettings.showRetailHiddenGeometry,
+								)) {
 							const range = appearance.plan.physicalRanges[span.rangeIndex];
 							if (range === undefined)
 								throw new Error("Additive span lost its physical range.");
 							appendBlended(range, span.indexCount, "additive");
 						}
-						for (const range of appearance.plan.ranges) {
+						for (const range of opaqueVariant
+							? opaqueVariant.transparentRanges
+							: appearance.plan.ranges) {
 							const part = presentation.visual.parts[range.source.partSelector];
 							if (part === undefined)
 								throw new Error("Ordered range references a missing part.");
@@ -2663,7 +2696,8 @@ export class WebGL2Renderer implements Renderer {
 				if (
 					entityShadowsEnabled &&
 					isEntityShadowCasterClass(contribution.entityClass) &&
-					admission.hasMaterialFreeShadowGeometry
+					admission.hasMaterialFreeShadowGeometry &&
+					(simpleOutdoorShadows || this.#world.hasIndoorShadowScope(nodeId))
 				) {
 					const facts = this.#world.getEntityShadowDynamicFacts(nodeId);
 					const reachesIndoor = facts.spatialMembership.scopes.some(
@@ -2783,7 +2817,8 @@ export class WebGL2Renderer implements Renderer {
 				this.#visibleStaticLayers.add(compiled.visibleLayerKey);
 				retainOffset(compiled.landblockId);
 
-				for (const object of compiled.objects) objects.push(object);
+				for (const phase of ["opaque", "additive", "transparent"] as const)
+					objectBuckets[phase].push(...compiled.objectBuckets[phase]);
 				continue;
 			}
 			terrain.push(this.#resolveTerrainFrameInput(contribution.drawUnit));
@@ -2888,6 +2923,31 @@ export class WebGL2Renderer implements Renderer {
 		this.#eligibleNameplateCandidateCount += eligibleNameplateCandidateCount;
 		this.#budgetRejectedNameplateCandidateCount +=
 			eligibleNameplateCandidateCount - nameplates.length;
+		// Keep adjacent roots in the same landblock and physical appearance so their
+		// landblock uniform, material table, and VAO-local index binding stay resident.
+		const appearanceOrder = new Map<WebGLBuffer, number>();
+		for (const object of dynamicOpaque) {
+			const buffer = object.appearance.indexBuffer;
+			if (!appearanceOrder.has(buffer))
+				appearanceOrder.set(buffer, appearanceOrder.size);
+		}
+		const appearanceRank = (buffer: WebGLBuffer): number => {
+			const rank = appearanceOrder.get(buffer);
+			if (rank === undefined)
+				throw new Error("Dynamic appearance was not ranked before sorting.");
+			return rank;
+		};
+		dynamicOpaque.sort(
+			(left, right) =>
+				(left.landblockId < right.landblockId
+					? -1
+					: left.landblockId > right.landblockId
+						? 1
+						: 0) ||
+				appearanceRank(left.appearance.indexBuffer) -
+					appearanceRank(right.appearance.indexBuffer) ||
+				(left.nodeId < right.nodeId ? -1 : left.nodeId > right.nodeId ? 1 : 0),
+		);
 
 		return {
 			entityAnalyticShadows: entityShadowsEnabled
@@ -2904,7 +2964,7 @@ export class WebGL2Renderer implements Renderer {
 			nameplates,
 			nameplateReferenceDistance: frameSettings.nameplates.referenceDistance,
 			nameplateHealthBar: frameSettings.nameplates.healthBar,
-			objects,
+			objectBuckets,
 			particles: [],
 			skyParticles: [],
 			terrain,
@@ -3029,7 +3089,7 @@ export class WebGL2Renderer implements Renderer {
 		return {
 			envCellScopeKey,
 			landblockId: node.placement.landblockId,
-			objects,
+			objectBuckets: bucketObjectSubmissions(objects),
 			source: "env-cell-shell",
 			visibleLayerKey: `${envCellScopeKey}/env-cell-shell`,
 		};
@@ -3151,7 +3211,7 @@ export class WebGL2Renderer implements Renderer {
 					? `${scope.landblockId}/${scope.envCellId}`
 					: null,
 			landblockId: node.placement.landblockId,
-			objects,
+			objectBuckets: bucketObjectSubmissions(objects),
 			source,
 			visibleLayerKey:
 				scope.kind === "outdoor"
@@ -3561,6 +3621,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#beginFlatOpaqueScene(target, this.#viewClearColor(view, shading));
 		this.#frameProfiler?.setCpuPhase("sceneSelection");
 		const objectPhases = this.#createObjectSubmissionPhases(view);
+		const objectRuns = this.#prepareViewObjectRuns(objectPhases);
 		if (domain === "exterior") {
 			this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
 			this.#drawSky(view, shading, "before-world", null);
@@ -3578,7 +3639,7 @@ export class WebGL2Renderer implements Renderer {
 			}
 		}
 		this.#frameProfiler?.setCpuPhase("opaqueSubmission");
-		this.#drawOpaqueObjects(view, objectPhases.opaque, shading, null);
+		this.#drawOpaqueObjects(view, objectRuns.opaque, shading, null);
 		this.#drawDynamicOpaque(view, shading);
 		this.#frameProfiler?.setCpuPhase("terrainSubmission");
 		this.#drawTerrain(view, shading, null);
@@ -3602,7 +3663,7 @@ export class WebGL2Renderer implements Renderer {
 		if (domain === "exterior") {
 			this.#drawSky(view, shading, "after-landscape", null);
 		}
-		this.#drawBlendedObjects(view, objectPhases, shading, null);
+		this.#drawBlendedObjects(view, objectRuns.blended, shading, null);
 		// After the blended pass: particles are transparent and must not occlude the geometry they
 		// sort against.
 		this.#drawParticleBatches(
@@ -3754,6 +3815,7 @@ export class WebGL2Renderer implements Renderer {
 			else this.#nameplatePass.draw(context, []);
 			return;
 		}
+		this.#nameplateTextureCache.beginDraw();
 		if (portalRouting) {
 			let instanceCount = 0;
 			for (const candidate of view.nameplates) {
@@ -4006,7 +4068,7 @@ export class WebGL2Renderer implements Renderer {
 				nameplateReferenceDistance:
 					SHARED_FRAME_SETTINGS.nameplates.referenceDistance,
 				nameplateHealthBar: SHARED_FRAME_SETTINGS.nameplates.healthBar,
-				objects,
+				objectBuckets: bucketObjectSubmissions(objects),
 				particles: [],
 				skyParticles: [],
 				terrain: [],
@@ -4025,13 +4087,19 @@ export class WebGL2Renderer implements Renderer {
 				lighting: resolveSceneLightingByRole(PORTAL_TRANSITION_LIGHTING, null),
 			};
 			const phases = this.#createObjectSubmissionPhases(portalViewInput);
+			const runs = this.#prepareViewObjectRuns(phases);
 			this.#drawOpaqueObjects(
 				portalViewInput,
-				phases.opaque,
+				runs.opaque,
 				portalShading,
 				null,
 			);
-			this.#drawBlendedObjects(portalViewInput, phases, portalShading, null);
+			this.#drawBlendedObjects(
+				portalViewInput,
+				runs.blended,
+				portalShading,
+				null,
+			);
 		} finally {
 			// The presenter samples the scene target next; restore its framebuffer and viewport even
 			// when an authored material fails loudly during this transition-only pass.
@@ -4829,8 +4897,8 @@ export class WebGL2Renderer implements Renderer {
 	#createObjectSubmissionPhases(
 		view: PreparedView,
 	): ObjectSubmissionPhases<ObjectColorSubmission> {
-		const phases = createObjectSubmissionPhases(
-			view.objects,
+		const phases = createObjectSubmissionPhasesFromBuckets(
+			view.objectBuckets,
 			(object) => this.#transparentSortFacts(object, view),
 			(object) =>
 				object.drawKind === "merged"
@@ -4913,7 +4981,6 @@ export class WebGL2Renderer implements Renderer {
 		object: PreparedDynamicColor,
 		view: PreparedView,
 	): void {
-		const gl = this.#gl;
 		const state = this.#deviceState;
 		const offset = view.landblockOffsets.get(object.landblockId);
 		if (offset === undefined)
@@ -4938,7 +5005,7 @@ export class WebGL2Renderer implements Renderer {
 			state.applyUniform1i(program.uniforms.firstPoseRow, pose.firstRow),
 		);
 		state.applyVertexArray(object.geometry.vertexArray);
-		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, object.appearance.indexBuffer);
+		state.applyElementArrayBuffer(object.appearance.indexBuffer);
 	}
 
 	/** Submit one compatible physical span after its entity and pass state have been bound. */
@@ -4949,15 +5016,10 @@ export class WebGL2Renderer implements Renderer {
 		const gl = this.#gl;
 		const state = this.#deviceState;
 		state.applyCullFace(range.batch.cullFace);
-		const material = range.batch.material;
-		if (material.kind !== "solid-color") {
-			this.#bindPreparedObjectTexture(OBJECT_TEXTURE_UNITS.base, material.base);
-			if (material.kind !== "direct-color")
-				this.#bindPreparedObjectTexture(
-					OBJECT_TEXTURE_UNITS.palette,
-					material.palette,
-				);
-		}
+		const { base, palette } = range.batch.textures;
+		if (base) this.#bindPreparedObjectTexture(OBJECT_TEXTURE_UNITS.base, base);
+		if (palette)
+			this.#bindPreparedObjectTexture(OBJECT_TEXTURE_UNITS.palette, palette);
 		gl.drawElements(
 			gl.TRIANGLES,
 			indexCount,
@@ -4985,8 +5047,9 @@ export class WebGL2Renderer implements Renderer {
 		gl.depthMask(true);
 		state.applyBlend(null);
 		for (const object of view.dynamicOpaque) {
-			const changed = state.applyProgram(program.program);
-			if (changed) this.#activateObjectProgram(program, view, shading);
+			state.applyProgram(program.program);
+			if (state.applyViewStamp(view))
+				this.#activateObjectProgram(program, view, shading);
 			this.#applyObjectLighting(program, object, shading);
 			this.#bindDynamicColor(program, object, view);
 			for (const span of object.ranges) {
@@ -5001,16 +5064,12 @@ export class WebGL2Renderer implements Renderer {
 
 	#drawOpaqueObjects(
 		view: PreparedView,
-		candidates: readonly ObjectColorSubmission[],
+		objects: readonly ObjectColorSubmission[],
 		shading: SceneShading,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
-		if (candidates.length === 0) return;
+		if (objects.length === 0) return;
 		this.#frameProfiler?.setGpuSystem("opaqueGeometry");
-		const objects = this.#prepareFrameInstanceRuns(
-			[candidates],
-			[{ cohort: "ignore", grouping: "grouped" }],
-		).objects;
 
 		const gl = this.#gl;
 
@@ -5043,7 +5102,8 @@ export class WebGL2Renderer implements Renderer {
 							? this.#instancedObjectProgram
 							: this.#objectProgram;
 			const programChanged = this.#deviceState.applyProgram(program.program);
-			if (programChanged) {
+			const viewChanged = this.#deviceState.applyViewStamp(view);
+			if (viewChanged) {
 				this.#activateObjectProgram(program, view, shading);
 			}
 			this.#applyObjectLighting(program, object, shading);
@@ -5051,7 +5111,7 @@ export class WebGL2Renderer implements Renderer {
 			portalPipeline?.routeObjectSubmission(
 				object.renderScopeKey,
 				program.uniforms.clipTransform,
-				programChanged,
+				programChanged || viewChanged,
 			);
 			this.#drawObjectRange(program, object, view.landblockOffsets);
 		}
@@ -5066,7 +5126,8 @@ export class WebGL2Renderer implements Renderer {
 	): void {
 		const { program, range } = object;
 		const state = this.#deviceState;
-		if (state.applyProgram(program.program))
+		state.applyProgram(program.program);
+		if (state.applyViewStamp(view))
 			this.#activateObjectProgram(program, view, shading);
 		this.#applyObjectLighting(program, object, shading);
 		state.applyBlend(range.batch.blendPolicy);
@@ -5079,15 +5140,10 @@ export class WebGL2Renderer implements Renderer {
 
 	#drawBlendedObjects(
 		view: PreparedView,
-		phases: ObjectSubmissionPhases<ObjectColorSubmission>,
+		sortedBlended: readonly ObjectColorSubmission[],
 		shading: SceneShading,
 		portalPipeline: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
-		const sortedBlended = this.#prepareFrameBlendedRuns({
-			additive: phases.additive,
-			far: phases.transparent.far,
-			near: phases.transparent.near,
-		});
 		if (sortedBlended.length === 0) return;
 
 		this.#frameProfiler?.setGpuSystem("transparencyAndEffects");
@@ -5147,7 +5203,8 @@ export class WebGL2Renderer implements Renderer {
 						? (portalPrograms?.instanced ?? this.#blendedInstancedObjectProgram)
 						: (portalPrograms?.baked ?? this.#blendedObjectProgram);
 			}
-			if (this.#deviceState.applyProgram(program.program)) {
+			this.#deviceState.applyProgram(program.program);
+			if (this.#deviceState.applyViewStamp(view)) {
 				this.#activateObjectProgram(program, view, shading);
 			}
 			if (portalPipeline) {
@@ -5214,17 +5271,25 @@ export class WebGL2Renderer implements Renderer {
 		return program;
 	}
 
-	/**
-	 * Upload both transparent phases once while keeping their independent run boundaries.
-	 */
-	#prepareFrameBlendedRuns(ordered: {
-		readonly additive: readonly ObjectColorSubmission[];
-		readonly far: readonly ObjectColorSubmission[];
-		readonly near: readonly ObjectColorSubmission[];
-	}): readonly ObjectColorSubmission[] {
+	/** Form every phase's runs and upload their combined instance stream once per view. */
+	#prepareViewObjectRuns(
+		phases: ObjectSubmissionPhases<ObjectColorSubmission>,
+	): {
+		readonly opaque: readonly ObjectColorSubmission[];
+		readonly blended: readonly ObjectColorSubmission[];
+	} {
 		const prepared = this.#prepareFrameInstanceRuns(
-			[ordered.far, ordered.near, ordered.additive],
 			[
+				phases.opaque,
+				phases.transparent.far,
+				phases.transparent.near,
+				phases.additive,
+			],
+			[
+				{
+					cohort: "ignore",
+					grouping: "grouped",
+				},
 				{
 					cohort: "require",
 					grouping: "adjacent",
@@ -5239,12 +5304,17 @@ export class WebGL2Renderer implements Renderer {
 				},
 			],
 		);
-		const [farRunCount = 0, nearRunCount = 0] = prepared.runCounts;
+		const farRunCount = prepared.runCounts[1] ?? 0;
+		const nearRunCount = prepared.runCounts[2] ?? 0;
 		this.#frameSelectionMetrics.transparentFrameRunCount +=
 			farRunCount + nearRunCount;
 		this.#frameSelectionMetrics.farTransparentFrameRunCount += farRunCount;
 		this.#frameSelectionMetrics.nearTransparentFrameRunCount += nearRunCount;
-		return prepared.objects;
+		const opaqueCount = prepared.phaseObjectCounts[0] ?? 0;
+		return {
+			opaque: prepared.objects.slice(0, opaqueCount),
+			blended: prepared.objects.slice(opaqueCount),
+		};
 	}
 
 	/** Form phase-local compatible runs and upload their complete sequential instance population. */
@@ -5254,12 +5324,15 @@ export class WebGL2Renderer implements Renderer {
 	): {
 		readonly objects: readonly ObjectColorSubmission[];
 		readonly runCounts: readonly number[];
+		readonly phaseObjectCounts: readonly number[];
 	} {
 		const orderedInstances: ObjectInstanceData[] = [];
 		const objects: ObjectColorSubmission[] = [];
 		const runCounts: number[] = [];
+		const phaseObjectCounts: number[] = [];
 
 		for (const [phaseIndex, phase] of phases.entries()) {
+			const firstObject = objects.length;
 			const policy = policies[phaseIndex];
 			if (!policy) {
 				throw new Error(
@@ -5303,6 +5376,7 @@ export class WebGL2Renderer implements Renderer {
 					},
 				});
 			}
+			phaseObjectCounts.push(objects.length - firstObject);
 		}
 
 		this.#frameInstances.prepareView(orderedInstances);
@@ -5312,7 +5386,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#frameSelectionMetrics.frameInstanceUploadBytes +=
 				orderedInstances.length * OBJECT_INSTANCE_RECORD_BYTES;
 		}
-		return { objects, runCounts };
+		return { objects, runCounts, phaseObjectCounts };
 	}
 
 	/**

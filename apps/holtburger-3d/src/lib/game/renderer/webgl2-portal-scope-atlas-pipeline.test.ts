@@ -45,13 +45,27 @@ const device = vi.hoisted(() => ({
 // Keep real visibility, packing, routing, and CPU streams; replace only GPU resource owners.
 vi.mock("./webgl2-portal-scope-atlas-targets", () => ({
 	WebGL2PortalScopeAtlasTargets: class {
-		resize(extents: { atlas: { width: number; height: number } }) {
+		#extents: {
+			atlas: { width: number; height: number };
+			drawingBuffer: { width: number; height: number };
+		} | null = null;
+		getActiveExtents() {
+			return this.#extents;
+		}
+		resize(extents: {
+			atlas: { width: number; height: number };
+			drawingBuffer: { width: number; height: number };
+		}) {
 			device.resize(extents);
+			this.#extents = extents;
 			return {
 				envelope: { depth: ENVELOPE_TEXTURE, framebuffer: null },
 				extents,
 				scene: { framebuffer: ATLAS_SCENE_FRAMEBUFFER },
 			};
+		}
+		release() {
+			this.#extents = null;
 		}
 		destroy() {}
 	},
@@ -316,6 +330,10 @@ describe("deferred portal view ownership", () => {
 		);
 		expect(targets).not.toBeNull();
 		expect(device.resize).toHaveBeenCalledTimes(1);
+		expect(targets?.extents.atlas.width).toBeLessThanOrEqual(
+			prepared.atlas.packedWidth +
+				WebGL2PortalScopeAtlasPipeline.TARGET_DIMENSION_QUANTUM,
+		);
 		expect(scissor.mock.calls).toEqual(
 			Array.from({ length: prepared.atlas.tileCount }, (_, ordinal) => [
 				prepared.atlas.tileX(ordinal),

@@ -46,9 +46,15 @@ type AnimationSampleIntervalPolicy = (
 export class AnimationPresentationScheduler {
 	/** Frontend overrides can protect a pose dependency even when the model itself is offscreen. */
 	readonly #sampleIntervalPolicy: AnimationSampleIntervalPolicy;
+	/** Animation owner decides whether the selected pose or effects changed since publication. */
+	readonly #needsPresentation: (nodeId: SceneNodeId) => boolean;
 
-	constructor(sampleIntervalPolicy: AnimationSampleIntervalPolicy) {
+	constructor(
+		sampleIntervalPolicy: AnimationSampleIntervalPolicy,
+		needsPresentation: (nodeId: SceneNodeId) => boolean,
+	) {
 		this.#sampleIntervalPolicy = sampleIntervalPolicy;
+		this.#needsPresentation = needsPresentation;
 	}
 
 	readonly #lastSampleTimeSeconds = new Map<SceneNodeId, number>();
@@ -121,8 +127,12 @@ export class AnimationPresentationScheduler {
 				timeSeconds - lastSampleTime + TIME_EPSILON_SECONDS < intervalSeconds
 			)
 				continue;
-			selectedNodeIds.push(nodeId);
+			const needsPresentation = this.#needsPresentation(nodeId);
+			// An unchanged pose is current even without a new publication. Confirm its time so
+			// completeFrame can account for newly visible settled playbacks accurately.
 			this.#lastSampleTimeSeconds.set(nodeId, timeSeconds);
+			if (!needsPresentation) continue;
+			selectedNodeIds.push(nodeId);
 			if (visible) visibleNodeCount += 1;
 			else offscreenNodeCount += 1;
 		}

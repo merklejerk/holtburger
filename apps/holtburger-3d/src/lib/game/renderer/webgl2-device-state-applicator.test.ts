@@ -168,6 +168,48 @@ describe("WebGL2DeviceStateApplicator", () => {
 		expect(state.applyUniform1f(fixture.locationA, 0.5)).toBe(false);
 	});
 
+	it("retains each program's view and lighting facts across shader switches", () => {
+		const fixture = createFixture();
+		const state = new WebGL2DeviceStateApplicator(fixture.gl);
+		const firstView = {};
+		const secondView = {};
+		state.applyProgram(fixture.programA);
+		expect(state.applyViewStamp(firstView)).toBe(true);
+		expect(state.applyLightingRole("outdoor-object")).toBe(true);
+		expect(state.applyStaticLightScope("landblock-a")).toBe(true);
+		state.applyProgram(fixture.programB);
+		expect(state.applyViewStamp(firstView)).toBe(true);
+		state.applyProgram(fixture.programA);
+		expect(state.applyViewStamp(firstView)).toBe(false);
+		expect(state.applyLightingRole("outdoor-object")).toBe(false);
+		expect(state.applyStaticLightScope("landblock-a")).toBe(false);
+		expect(state.applyViewStamp(secondView)).toBe(true);
+		expect(state.applyLightingRole("outdoor-object")).toBe(true);
+	});
+
+	it("tracks index buffers per vertex array and forgets external mutations", () => {
+		const fixture = createFixture();
+		const state = new WebGL2DeviceStateApplicator(fixture.gl);
+		state.applyVertexArray(fixture.vertexArrayA);
+		state.applyElementArrayBuffer(fixture.bufferA);
+		state.applyElementArrayBuffer(fixture.bufferA);
+		state.applyVertexArray(fixture.vertexArrayB);
+		state.applyElementArrayBuffer(fixture.bufferA);
+		state.applyVertexArray(fixture.vertexArrayA);
+		state.applyElementArrayBuffer(fixture.bufferB);
+		state.invalidate();
+		state.applyVertexArray(fixture.vertexArrayA);
+		state.applyElementArrayBuffer(fixture.bufferB);
+		expect(
+			fixture.calls.filter((call) => call.startsWith("bindBuffer")),
+		).toEqual([
+			"bindBuffer:13:a",
+			"bindBuffer:13:a",
+			"bindBuffer:13:b",
+			"bindBuffer:13:b",
+		]);
+	});
+
 	it("treats an unseen location as changed and does not confuse zero with negative zero", () => {
 		const fixture = createFixture();
 		const state = new WebGL2DeviceStateApplicator(fixture.gl);
@@ -206,6 +248,8 @@ describe("WebGL2DeviceStateApplicator", () => {
 function createFixture() {
 	const calls: string[] = [];
 	const identities = {
+		bufferA: { name: "a" } as WebGLBuffer,
+		bufferB: { name: "b" } as WebGLBuffer,
 		programA: { name: "a" } as WebGLProgram,
 		programB: { name: "b" } as WebGLProgram,
 		samplerA: { name: "a" } as WebGLSampler,
@@ -213,6 +257,7 @@ function createFixture() {
 		textureA: { name: "a" } as WebGLTexture,
 		textureB: { name: "b" } as WebGLTexture,
 		vertexArrayA: { name: "a" } as WebGLVertexArrayObject,
+		vertexArrayB: { name: "b" } as WebGLVertexArrayObject,
 		locationA: { name: "ua" } as WebGLUniformLocation,
 		locationB: { name: "ub" } as WebGLUniformLocation,
 	};
@@ -220,6 +265,7 @@ function createFixture() {
 		value:
 			| null
 			| WebGLProgram
+			| WebGLBuffer
 			| WebGLSampler
 			| WebGLTexture
 			| WebGLUniformLocation
@@ -236,6 +282,7 @@ function createFixture() {
 		ONE: 6,
 		ONE_MINUS_SRC_ALPHA: 8,
 		SRC_ALPHA: 7,
+		ELEMENT_ARRAY_BUFFER: 13,
 		TEXTURE0: 10,
 		TEXTURE_2D: 9,
 		TEXTURE_2D_ARRAY: 12,
@@ -244,6 +291,8 @@ function createFixture() {
 			calls.push(`bindSampler:${unit}:${named(sampler)}`),
 		bindTexture: (target: number, texture: WebGLTexture) =>
 			calls.push(`bindTexture:${target}:${named(texture)}`),
+		bindBuffer: (target: number, buffer: WebGLBuffer) =>
+			calls.push(`bindBuffer:${target}:${named(buffer)}`),
 		bindVertexArray: (vertexArray: WebGLVertexArrayObject) =>
 			calls.push(`bindVertexArray:${named(vertexArray)}`),
 		blendFunc: (source: number, destination: number) =>

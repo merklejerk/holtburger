@@ -74,7 +74,7 @@ describe("ObjectPreviewModelPresentation", () => {
 		]);
 		// The particle record stores the part-frame origin used by the GPU particle pass.
 		expect(frame.particleRecords.data[0]).toBe(3);
-		expect(frame.particleRecords.dirtySlots).toEqual({ first: 0, last: 0 });
+		expect(frame.particleRecords.dirtyRows).toEqual(new Uint32Array([1]));
 
 		presentation.dispose();
 		expect(() => presentation.advance(1, Mat4.identity())).toThrow("disposed");

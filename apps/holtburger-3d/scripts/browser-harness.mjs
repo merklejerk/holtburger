@@ -2262,7 +2262,7 @@ Options:
                          Verify portal-plural materials draw once and match admitted single-scope controls.
                          Requires --frame-mode portal and --screenshot.
   --nameplate-lifecycle Move one unchanged same-generation target, then retire the workload and
-                         assert stable rasterization plus complete texture release. Requires
+                         assert stable rasterization plus atlas release. Requires
                          --nameplate-workload.
   --nameplate-benchmark-pairs <n>
                          Measure n paired enabled/disabled windows in one hardware-GPU session.
@@ -2807,7 +2807,7 @@ function assertNameplateWorkload(
 		eligibleCandidateCount,
 		maximumVisible,
 	);
-	// Deferred nameplates carry a draw-constant domain uniform; plural portal scopes split draws.
+	// Per-instance portal domains preserve sorted plate order in one shared-atlas draw.
 	const scopeCount =
 		workload === "portal-plural" && hasEnvCellCamera && frameMode === "portal"
 			? 2
@@ -2827,8 +2827,7 @@ function assertNameplateWorkload(
 					eligibleCandidateCount,
 					liveEntryCount:
 						workload === "unique-100" ? submittedCandidateCount : 1,
-					submittedDrawCount:
-						workload === "unique-100" ? submittedCandidateCount : scopeCount,
+					submittedDrawCount: 1,
 					submittedInstanceCount: submittedCandidateCount * scopeCount,
 				};
 	const actual = {

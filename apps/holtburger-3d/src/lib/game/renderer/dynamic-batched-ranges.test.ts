@@ -3,7 +3,10 @@ import { Mat4, Vec3 } from "../math/types";
 import type { DynamicAppearance } from "../systems/dynamic-appearance";
 import { TextureWrapMode } from "../textures/types";
 import { compileDynamicIndexBatches } from "./dynamic-index-batches";
-import { DynamicBatchedRanges } from "./dynamic-batched-ranges";
+import {
+	DynamicBatchedRanges,
+	compileOpaqueDynamicBatchedSpans,
+} from "./dynamic-batched-ranges";
 
 function fixture(additive = false) {
 	const appearance: DynamicAppearance = {
@@ -72,6 +75,21 @@ function fixture(additive = false) {
 }
 
 describe("DynamicBatchedRanges", () => {
+	it("precompiles the same physical spans as full-opacity frame selection", () => {
+		for (const additive of [false, true]) {
+			const { cache, plan, parts } = fixture(additive);
+			for (const showHidden of [false, true]) {
+				cache.beginFrame();
+				expect(
+					compileOpaqueDynamicBatchedSpans(
+						plan,
+						additive ? "additive" : "opaque",
+						showHidden,
+					),
+				).toEqual(cache.prepare("scene-node:1", plan, parts, showHidden));
+			}
+		}
+	});
 	it("retains partial additive fades, splits hidden parts, and reselects an appearance replacement", () => {
 		const { cache, plan, parts } = fixture(true);
 		parts[0].frameInstance.color.a = 0.25;
@@ -102,19 +120,15 @@ describe("DynamicBatchedRanges", () => {
 		}));
 		otherParts[3].frameInstance.color.a = 0.4;
 		expect(cache.prepare("scene-node:2", plan, otherParts, false)).toEqual([
-			{ rangeIndex: 3, indexCount: 3 },
+			{ rangeIndex: 2, indexCount: 3 },
 		]);
-		expect(first).toEqual([
-			{ rangeIndex: 0, indexCount: 6 },
-			{ rangeIndex: 3, indexCount: 3 },
-		]);
+		expect(first).toEqual([{ rangeIndex: 0, indexCount: 9 }]);
 	});
 
-	it("coalesces physical opaque neighbors while retaining alpha-test and excluding ordered residue", () => {
+	it("coalesces physical opaque and alpha-tested neighbors while excluding ordered residue", () => {
 		const { cache, plan, parts } = fixture();
 		expect(cache.prepare("scene-node:1", plan, parts, false)).toEqual([
-			{ rangeIndex: 0, indexCount: 6 },
-			{ rangeIndex: 3, indexCount: 3 },
+			{ rangeIndex: 0, indexCount: 9 },
 		]);
 	});
 

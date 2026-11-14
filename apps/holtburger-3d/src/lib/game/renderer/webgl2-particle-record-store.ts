@@ -49,15 +49,11 @@ export class WebGL2ParticleRecordStore {
 	}
 
 	/**
-	 * Copy the rows covering `dirtySlots` out of the mirror, reallocating first if it has grown.
+	 * Copy only dirty rows out of the mirror, reallocating first if it has grown.
 	 *
-	 * Whole rows rather than exact slots: a texture upload is row-addressed anyway, and spawns are
-	 * rare enough per frame that the rounding costs less than tracking sub-row spans would.
+	 * Adjacent dirty rows share one texture call; distant births never bridge untouched rows.
 	 */
-	sync(
-		mirror: Float32Array,
-		dirtySlots: { readonly first: number; readonly last: number } | null,
-	): void {
+	sync(mirror: Float32Array, dirtyRows: Uint32Array | null): void {
 		this.#requireAlive();
 		this.#uploadedRowCount = 0;
 		const width = this.#recordsPerRow * PARTICLE_RECORD_TEXELS;
@@ -65,7 +61,7 @@ export class WebGL2ParticleRecordStore {
 		const gl = this.#gl;
 		if (requiredRows > this.#rows) {
 			// A grown mirror is a different texture, so every row is uploaded regardless of what
-			// the dirty range claimed.
+			// the dirty bits claimed.
 			this.#rows = requiredRows;
 			gl.bindTexture(gl.TEXTURE_2D, this.#texture);
 			gl.texImage2D(
@@ -84,25 +80,47 @@ export class WebGL2ParticleRecordStore {
 			this.#uploadedRowCount = this.#rows;
 			return;
 		}
-		if (dirtySlots === null || this.#rows === 0) return;
-		const firstRow = Math.floor(dirtySlots.first / this.#recordsPerRow);
-		const lastRow = Math.floor(dirtySlots.last / this.#recordsPerRow);
-		const rowCount = lastRow - firstRow + 1;
+		if (dirtyRows === null || this.#rows === 0) return;
 		gl.bindTexture(gl.TEXTURE_2D, this.#texture);
-		gl.texSubImage2D(
-			gl.TEXTURE_2D,
-			0,
-			0,
-			firstRow,
-			width,
-			rowCount,
-			gl.RGBA,
-			gl.FLOAT,
-			mirror,
-			firstRow * width * FLOATS_PER_TEXEL,
-		);
+		let firstRow = -1;
+		let lastRow = -1;
+		const upload = (): void => {
+			if (firstRow < 0) return;
+			const rowCount = lastRow - firstRow + 1;
+			gl.texSubImage2D(
+				gl.TEXTURE_2D,
+				0,
+				0,
+				firstRow,
+				width,
+				rowCount,
+				gl.RGBA,
+				gl.FLOAT,
+				mirror,
+				firstRow * width * FLOATS_PER_TEXEL,
+			);
+			this.#uploadedRowCount += rowCount;
+		};
+		for (let wordIndex = 0; wordIndex < dirtyRows.length; wordIndex += 1) {
+			let word = dirtyRows[wordIndex] ?? 0;
+			while (word !== 0) {
+				const bit = 31 - Math.clz32(word & -word);
+				const row = wordIndex * 32 + bit;
+				if (row >= this.#rows)
+					throw new Error(
+						`Dirty particle row ${row} exceeds texture height ${this.#rows}.`,
+					);
+				if (firstRow < 0) firstRow = row;
+				else if (row !== lastRow + 1) {
+					upload();
+					firstRow = row;
+				}
+				lastRow = row;
+				word &= word - 1;
+			}
+		}
+		upload();
 		gl.bindTexture(gl.TEXTURE_2D, null);
-		this.#uploadedRowCount = rowCount;
 	}
 
 	destroy(): void {

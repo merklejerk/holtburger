@@ -747,6 +747,34 @@ describe("ParticleSystem", () => {
 		expect(particles.collectDrawRanges(() => null)).toHaveLength(0);
 	});
 
+	it("resolves one live rotation for several births and refreshes it next advancement", () => {
+		let rotation = UNROTATED;
+		let reads = 0;
+		const particles = runtime({
+			sceneRotationOf: () => {
+				reads += 1;
+				return rotation;
+			},
+		});
+		particles.create(
+			TARGET,
+			prepared({ initialParticles: 3 }),
+			NO_OFFSET,
+			1,
+			0,
+			ORIGIN,
+		);
+		expect(reads).toBe(1);
+		rotation = YAWED_QUARTER_TURN;
+		particles.advance(1);
+		expect(reads).toBe(2);
+		const spawnedRotation = storedRecord(particles, 3).rotation;
+		expect(spawnedRotation[0]).toBeCloseTo(rotation.render.w);
+		expect(spawnedRotation[1]).toBeCloseTo(rotation.render.x);
+		expect(spawnedRotation[2]).toBeCloseTo(rotation.render.y);
+		expect(spawnedRotation[3]).toBeCloseTo(rotation.render.z);
+	});
+
 	it("refuses a part the owner does not have rather than falling back to the object", () => {
 		const staged = prepared();
 		const particles = runtime({
@@ -841,8 +869,16 @@ describe("ParticleSystem", () => {
 		expect(particles.hasEmitterOwner(TARGET.targetId)).toBe(false);
 		particles.create(TARGET, prepared(), NO_OFFSET, 1, 0, ORIGIN);
 		expect(particles.hasEmitterOwner(TARGET.targetId)).toBe(true);
+		expect(particles.takeDirtyEnvelopeOwnerIds()).toEqual(
+			new Set([TARGET.targetId]),
+		);
+		expect(particles.takeDirtyEnvelopeOwnerIds().size).toBe(0);
 		particles.destroy(TARGET, 1);
 		expect(particles.hasEmitterOwner(TARGET.targetId)).toBe(false);
+		expect(particles.takeDirtyEnvelopeOwnerIds()).toEqual(
+			new Set([TARGET.targetId]),
+		);
+		expect(particles.envelopeRadiusFor(TARGET.targetId)).toBe(0);
 	});
 
 	it("takes the widest emitter when a target runs several", () => {

@@ -54,6 +54,7 @@ function frame(
 			envCellId: null,
 			landblockId,
 			localToLandblock,
+			transformRevision: 0,
 			scope: { kind: "outdoor" },
 		},
 	};

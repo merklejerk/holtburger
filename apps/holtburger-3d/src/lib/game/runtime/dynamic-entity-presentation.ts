@@ -1,6 +1,7 @@
 import {
 	acFrameTransform,
 	sceneVec3,
+	writeAcFrameTransform,
 	type SceneVec3,
 } from "../../assets/ac-frame";
 import type { DecodedStaticPresentation } from "../../assets/decode-static-source-record";
@@ -9,7 +10,7 @@ import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 	createLandblockWorldOrigin,
 } from "../landblocks";
-import { Vec3 } from "../math/types";
+import { Mat4, Vec3 } from "../math/types";
 import type { ResolvedObjectBehavior } from "../resolution/landblock-layer";
 import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import type {
@@ -195,39 +196,68 @@ export function interpolateDynamicEntityPlacement(
 	end: DynamicEntityAdvance["path"]["initial"],
 	fraction: number,
 ): SceneSpatialPlacement {
-	const startPlacement = dynamicEntityPlacementFromPoint(start);
-	const startOwner = landblockCoordinates(start.pose.landblockId);
-	const endOwner = landblockCoordinates(end.pose.landblockId);
-	const startWorldX =
-		startOwner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + start.pose.coords.x;
-	const startWorldY =
-		startOwner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + start.pose.coords.y;
-	const endWorldX =
-		endOwner.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.pose.coords.x;
-	const endWorldY =
-		endOwner.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.pose.coords.y;
-	const rotation = interpolateQuaternion(
-		start.pose.rotation,
-		end.pose.rotation,
-		fraction,
-	);
+	const residency = dynamicEntityResidency(start);
 	return {
-		envCellId: startPlacement.envCellId,
-		landblockId: startPlacement.landblockId,
-		localTransform: acFrameTransform(
-			{
-				origin: [
-					start.pose.coords.x + (endWorldX - startWorldX) * fraction,
-					start.pose.coords.y + (endWorldY - startWorldY) * fraction,
-					start.pose.coords.z +
-						(end.pose.coords.z - start.pose.coords.z) * fraction,
-				],
-				orientation: [rotation.w, rotation.x, rotation.y, rotation.z],
-			},
-			[1, 1, 1],
+		...residency,
+		localTransform: interpolateDynamicEntityTransform(
+			start,
+			end,
+			fraction,
+			Mat4.zero(),
 		),
-		spatialMembership: startPlacement.spatialMembership,
+		spatialMembership: {
+			scopes: spatialMembershipScopes(start.spatialMembership),
+		},
 	};
+}
+
+/** Interpolate only the mutable root transform; path residency is selected at leg boundaries. */
+export function interpolateDynamicEntityTransform(
+	start: DynamicEntityAdvance["path"]["initial"],
+	end: DynamicEntityAdvance["path"]["initial"],
+	fraction: number,
+	target: Mat4,
+): Mat4 {
+	const startId = start.pose.landblockId;
+	const endId = end.pose.landblockId;
+	const startWorldX =
+		((startId >>> 24) & 0xff) * OUTDOOR_LANDBLOCK_WORLD_SIZE +
+		start.pose.coords.x;
+	const startWorldY =
+		((startId >>> 16) & 0xff) * OUTDOOR_LANDBLOCK_WORLD_SIZE +
+		start.pose.coords.y;
+	const endWorldX =
+		((endId >>> 24) & 0xff) * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.pose.coords.x;
+	const endWorldY =
+		((endId >>> 16) & 0xff) * OUTDOOR_LANDBLOCK_WORLD_SIZE + end.pose.coords.y;
+	const from = start.pose.rotation;
+	const to = end.pose.rotation;
+	const dot = from.w * to.w + from.x * to.x + from.y * to.y + from.z * to.z;
+	const sign = dot < 0 ? -1 : 1;
+	let w = from.w + (to.w * sign - from.w) * fraction;
+	let x = from.x + (to.x * sign - from.x) * fraction;
+	let y = from.y + (to.y * sign - from.y) * fraction;
+	let z = from.z + (to.z * sign - from.z) * fraction;
+	const length = Math.hypot(w, x, y, z);
+	if (!Number.isFinite(length) || length <= Number.EPSILON)
+		throw new Error("Dynamic-entity path produced an invalid rotation.");
+	w /= length;
+	x /= length;
+	y /= length;
+	z /= length;
+	return writeAcFrameTransform(
+		start.pose.coords.x + (endWorldX - startWorldX) * fraction,
+		start.pose.coords.y + (endWorldY - startWorldY) * fraction,
+		start.pose.coords.z + (end.pose.coords.z - start.pose.coords.z) * fraction,
+		w,
+		x,
+		y,
+		z,
+		1,
+		1,
+		1,
+		target,
+	);
 }
 
 function spatialMembershipScopes(
@@ -256,25 +286,6 @@ function spatialMembershipScopes(
 
 function landblockCoordinates(cellId: number): { x: number; y: number } {
 	return { x: (cellId >>> 24) & 0xff, y: (cellId >>> 16) & 0xff };
-}
-
-function interpolateQuaternion(
-	start: DynamicEntityWorldPlacement["pose"]["rotation"],
-	end: DynamicEntityWorldPlacement["pose"]["rotation"],
-	fraction: number,
-): DynamicEntityWorldPlacement["pose"]["rotation"] {
-	const dot =
-		start.w * end.w + start.x * end.x + start.y * end.y + start.z * end.z;
-	const sign = dot < 0 ? -1 : 1;
-	const w = start.w + (end.w * sign - start.w) * fraction;
-	const x = start.x + (end.x * sign - start.x) * fraction;
-	const y = start.y + (end.y * sign - start.y) * fraction;
-	const z = start.z + (end.z * sign - start.z) * fraction;
-	const length = Math.hypot(w, x, y, z);
-	if (!Number.isFinite(length) || length <= Number.EPSILON) {
-		throw new Error("Dynamic-entity path produced an invalid rotation.");
-	}
-	return { w: w / length, x: x / length, y: y / length, z: z / length };
 }
 
 /** The feed carries dat ids as numbers; every asset repository keys on the canonical hex form. */

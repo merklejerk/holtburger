@@ -46,14 +46,22 @@ describe("outdoor PSSM caster selection", () => {
 		});
 		const world: OutdoorPssmCasterWorld = {
 			getDynamicDepth,
+			hasOutdoorDynamicShadowGeometry: (id) => {
+				const presentation = presentations.get(id);
+				return (
+					presentation?.renderScopes.some(
+						(scope) => scope.kind === "outdoor",
+					) ?? false
+				);
+			},
 			getEntityShadowDynamicFacts: dynamicFacts,
 			readRenderContribution: (id) =>
 				dynamicDescriptor(
 					id === player ? "player" : id === npc ? "npc" : "mob",
 				),
-			queryOutdoorShadowCasters: (_frustum, anchor) => {
+			queryOutdoorShadowCasterMasks: (_frusta, anchor, out) => {
 				expect(anchor).toBe(ANCHOR);
-				return { entries: [player, npc, indoor, empty] };
+				for (const id of [player, npc, indoor, empty]) out.set(id, 1);
 			},
 		};
 		const selected = new Set<SceneNodeId>();
@@ -88,16 +96,16 @@ describe("outdoor PSSM caster selection", () => {
 		const first = node(10),
 			shared = node(11),
 			last = node(12);
-		const entries = [first, shared];
-		let queries = 0;
 		const getDynamicDepth = vi.fn(depth);
 		const world: OutdoorPssmCasterWorld = {
 			getDynamicDepth,
+			hasOutdoorDynamicShadowGeometry: () => true,
 			getEntityShadowDynamicFacts: dynamicFacts,
 			readRenderContribution: () => dynamicDescriptor("mob"),
-			queryOutdoorShadowCasters: () => {
-				if (queries++ === 1) entries.splice(0, 2, shared, last);
-				return { entries };
+			queryOutdoorShadowCasterMasks: (_frusta, _anchor, out) => {
+				out.set(first, 1);
+				out.set(shared, 3);
+				out.set(last, 2);
 			},
 		};
 		const batches = [
@@ -131,7 +139,6 @@ describe("outdoor PSSM caster selection", () => {
 			last,
 		]);
 		expect(batches[0]?.casters[1]).toBe(batches[1]?.casters[0]);
-		entries.length = 0;
 		expect(batches[0]?.casters).toHaveLength(2);
 	});
 
@@ -150,14 +157,15 @@ describe("outdoor PSSM caster selection", () => {
 		const getDynamicDepth = vi.fn(depth);
 		const world: OutdoorPssmCasterWorld = {
 			getDynamicDepth,
+			hasOutdoorDynamicShadowGeometry: () => true,
 			getEntityShadowDynamicFacts: (id) => ({
 				...dynamicFacts(id),
 				identity: find(id).identity,
 			}),
 			readRenderContribution: (id) => dynamicDescriptorAt(find(id).x),
-			queryOutdoorShadowCasters: () => ({
-				entries: roots.map(({ nodeId }) => nodeId),
-			}),
+			queryOutdoorShadowCasterMasks: (_frusta, _anchor, out) => {
+				for (const root of roots) out.set(root.nodeId, 1);
+			},
 		};
 		const analytic: EntityShadowCasterShape[] = [];
 
@@ -177,11 +185,7 @@ describe("outdoor PSSM caster selection", () => {
 			[createOutdoorPssmCasterBatch()],
 			createOutdoorPssmCasterSelectionScratch(),
 		);
-		expect(getDynamicDepth.mock.calls.map(([id]) => id)).toEqual([
-			node(32),
-			node(31),
-			node(33),
-		]);
+		expect(getDynamicDepth.mock.calls.map(([id]) => id)).toEqual([node(32)]);
 		expect(analytic.map(({ identity }) => identity)).toEqual(["b", "c"]);
 		expect(selected).toEqual(new Set([node(31), node(32), node(33)]));
 	});
@@ -219,14 +223,22 @@ describe("outdoor PSSM caster selection", () => {
 		};
 		const world: OutdoorPssmCasterWorld = {
 			getDynamicDepth,
+			hasOutdoorDynamicShadowGeometry: (id) => {
+				const presentation = presentations.get(id);
+				return (
+					presentation?.renderScopes.some(
+						(scope) => scope.kind === "outdoor",
+					) ?? false
+				);
+			},
 			getEntityShadowDynamicFacts: (id) => ({
 				...dynamicFacts(id),
 				identity: find(id).identity,
 			}),
 			readRenderContribution: (id) => dynamicDescriptorAt(find(id).x),
-			queryOutdoorShadowCasters: () => ({
-				entries: roots.map(({ nodeId }) => nodeId),
-			}),
+			queryOutdoorShadowCasterMasks: (_frusta, _anchor, out) => {
+				for (const root of roots) out.set(root.nodeId, 1);
+			},
 		};
 		const analytic: EntityShadowCasterShape[] = [];
 		const selected = new Set<SceneNodeId>();
@@ -246,6 +258,40 @@ describe("outdoor PSSM caster selection", () => {
 		expect(analytic.map(({ identity }) => identity)).toEqual([
 			"opaque-analytic",
 		]);
+	});
+
+	it("does not keep an off-camera analytic caster alive for animation", () => {
+		const visible = node(50);
+		const offCamera = node(51);
+		const selected = new Set<SceneNodeId>();
+		const analytic: EntityShadowCasterShape[] = [];
+		planOutdoorShadowCastersForView(
+			{
+				getDynamicDepth: depth,
+				hasOutdoorDynamicShadowGeometry: () => true,
+				getEntityShadowDynamicFacts: dynamicFacts,
+				readRenderContribution: (id) =>
+					dynamicDescriptorAt(id === visible ? 2 : -4),
+				queryOutdoorShadowCasterMasks: (_frusta, _anchor, out) => {
+					out.set(visible, 1);
+					out.set(offCamera, 1);
+				},
+			},
+			[FRUSTUM],
+			{
+				cameraPosition: Vec3.zero(),
+				planes: [{ constant: 0, x: 1, y: 0, z: 0 }],
+			},
+			ANCHOR,
+			{ maximumMappedRoots: 0, maximumSelectedRoots: 2 },
+			selected,
+			analytic,
+			false,
+			[createOutdoorPssmCasterBatch()],
+			createOutdoorPssmCasterSelectionScratch(),
+		);
+		expect(analytic).toHaveLength(2);
+		expect(selected).toEqual(new Set([visible]));
 	});
 });
 
@@ -270,6 +316,7 @@ function dynamicDescriptor(
 				envCellId: null,
 				landblockId: ANCHOR,
 				localToLandblock: Mat4.identity(),
+				transformRevision: 0,
 				scope: { kind: "outdoor" },
 			},
 		},

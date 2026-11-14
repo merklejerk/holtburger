@@ -19,13 +19,11 @@ export interface WebGL2PortalDeferredVisibilityUniforms {
  * the fragment lies inside any admitted appearance of its owning domain and before that domain's
  * farthest admitted exit at the current pixel.
  */
-export const PORTAL_DEFERRED_VISIBILITY_GLSL = `
+const PORTAL_DEFERRED_VISIBILITY_BODY_GLSL = `
 ${PORTAL_SCOPE_ATLAS_METADATA_GLSL}
 ${PORTAL_ENVELOPE_SAMPLING_GLSL}
-uniform uint uPortalRenderDomain;
-
-bool portalDeferredFragmentVisible() {
-	PortalScopeMetadata scope = uScopes[uPortalRenderDomain];
+bool portalDeferredFragmentVisible(uint renderDomain) {
+	PortalScopeMetadata scope = uScopes[renderDomain];
 	ivec2 screenPixel = ivec2(gl_FragCoord.xy);
 	ivec2 relativePixel = screenPixel - ivec2(scope.atlasAndScreenOrigin.zw);
 	ivec2 scopeExtent = ivec2(scope.extentAndReserved.xy);
@@ -42,11 +40,24 @@ bool portalDeferredFragmentVisible() {
 }
 `;
 
-/** Bind invariant metadata/sampler state and return the sole per-draw scope uniform. */
-export function bindWebGL2PortalDeferredVisibilityProgram(
+/** Draw-uniform selector for ordinary transparent submissions. */
+export const PORTAL_DEFERRED_VISIBILITY_GLSL = `
+${PORTAL_DEFERRED_VISIBILITY_BODY_GLSL}
+uniform uint uPortalRenderDomain;
+bool portalDeferredFragmentVisible() {
+	return portalDeferredFragmentVisible(uPortalRenderDomain);
+}
+`;
+
+/** Per-instance selector for ordered scoped overlays sharing one physical draw. */
+export const PORTAL_DEFERRED_VISIBILITY_INSTANCE_GLSL =
+	PORTAL_DEFERRED_VISIBILITY_BODY_GLSL;
+
+/** Bind the shared metadata and envelope sampler for an instance-routed program. */
+export function bindWebGL2PortalDeferredVisibilityInstanceProgram(
 	gl: WebGL2RenderingContext,
 	program: WebGLProgram,
-): WebGL2PortalDeferredVisibilityUniforms {
+): void {
 	bindPortalScopeAtlasMetadataBlock(
 		gl,
 		program,
@@ -57,7 +68,23 @@ export function bindWebGL2PortalDeferredVisibilityProgram(
 		requireWebGL2Uniform(gl, program, "uPortalEnvelopeDepth"),
 		PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.envelopeDepth,
 	);
+}
+
+/** Bind invariant metadata/sampler state and return the sole per-draw scope uniform. */
+export function bindWebGL2PortalDeferredVisibilityProgram(
+	gl: WebGL2RenderingContext,
+	program: WebGLProgram,
+): WebGL2PortalDeferredVisibilityUniforms {
+	bindWebGL2PortalDeferredVisibilityInstanceProgram(gl, program);
 	return {
 		renderDomain: requireWebGL2Uniform(gl, program, "uPortalRenderDomain"),
 	};
+}
+
+/** Scope routing supplied by the active portal view to deferred overlay passes. */
+export interface PortalDeferredScopeRouting {
+	routeDeferredSubmission(
+		renderScopeKey: string,
+		uniforms: WebGL2PortalDeferredVisibilityUniforms,
+	): void;
 }

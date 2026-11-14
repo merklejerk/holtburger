@@ -3,12 +3,45 @@ import type { ActiveDynamicPart } from "../systems/components";
 import type { PreparedDynamicAppearance } from "./webgl2-dynamic-appearances";
 import { dynamicObjectPhase } from "./object-rendering-policy";
 
-/** Physical range ordinal supplies batch state and start; the count may span adjacent ranges. */
-interface DynamicBatchedSpan {
+/** Immutable physical span selected once for a fully opaque appearance. */
+export interface DynamicBatchedSpan {
 	/** First retained range in the appearance's physical index order. */
 	rangeIndex: number;
 	/** Contiguous eligible index elements sharing the first range's physical batch. */
 	indexCount: number;
+}
+
+/** Compile ordinary/additive physical spans once when every part has full opacity. */
+export function compileOpaqueDynamicBatchedSpans(
+	plan: Extract<PreparedDynamicAppearance, { kind: "drawable" }>["plan"],
+	phase: "opaque" | "additive",
+	showRetailHiddenGeometry: boolean,
+): readonly Readonly<DynamicBatchedSpan>[] {
+	const spans: DynamicBatchedSpan[] = [];
+	let previousBatch: (typeof plan.batches)[number] | null = null;
+	let end = -1;
+	for (const range of plan.colorRanges[phase]) {
+		if (
+			dynamicObjectPhase(
+				range.source.ordering,
+				1,
+				range.source.retailVisibility,
+				showRetailHiddenGeometry,
+			) !== phase
+		)
+			continue;
+		const last = spans.at(-1);
+		if (last && previousBatch === range.batch && end === range.indexStart)
+			last.indexCount += range.source.indexCount;
+		else
+			spans.push({
+				rangeIndex: range.physicalOrdinal,
+				indexCount: range.source.indexCount,
+			});
+		previousBatch = range.batch;
+		end = range.indexStart + range.source.indexCount;
+	}
+	return spans;
 }
 
 /** Frame cache with reusable scalar spans; pooled entries retain no scene or GPU resources. */

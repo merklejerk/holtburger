@@ -66,7 +66,8 @@ export interface ParticleDrawContext {
 /** The emitter runtime's record storage and what changed in it since the last frame. */
 export interface ParticleRecordFrame {
 	readonly data: Float32Array;
-	readonly dirtySlots: { readonly first: number; readonly last: number } | null;
+	/** One bit per 256-record texture row. */
+	readonly dirtyRows: Uint32Array | null;
 }
 
 export interface ParticleDrawDiagnostics {
@@ -74,9 +75,7 @@ export interface ParticleDrawDiagnostics {
 	/**
 	 * Texture rows uploaded this frame.
 	 *
-	 * Worth surfacing rather than assuming: the dirty span is a single min/max range, so scattered
-	 * spawns across many emitters can widen it to cover most of the store. A row count near the
-	 * store's height means the span has degenerated and the upload is no longer incremental.
+	 * Scattered births mark only their touched rows; a high count now reflects actual churn.
 	 */
 	readonly uploadedRecordRowCount: number;
 	readonly drawnParticleCount: number;
@@ -171,7 +170,7 @@ export class WebGL2ParticlePass {
 				gl,
 				PARTICLE_RECORDS_PER_ROW,
 			));
-			records.sync(this.#pendingFrame.data, this.#pendingFrame.dirtySlots);
+			records.sync(this.#pendingFrame.data, this.#pendingFrame.dirtyRows);
 			uploadedRecordRowCount = records.uploadedRowCount;
 			this.#pendingFrame = null;
 		}
@@ -234,10 +233,17 @@ export class WebGL2ParticlePass {
 		// Ranges each address their own slots, so this is an accounting total rather than a cursor:
 		// every prepared instance must be either drawn or counted unresolved.
 		let accountedInstanceCount = 0;
+		let previousHwGfxObjId: DatAssetId | null = null;
+		let previousGeometry: ParticleDrawGeometry | null = null;
 		for (const batch of batches) {
 			const instanceCount = batch.count;
 			if (instanceCount === 0) continue;
-			const geometry = this.#resolveGeometry(batch.hwGfxObjId);
+			const geometry: ParticleDrawGeometry | null =
+				batch.hwGfxObjId === previousHwGfxObjId
+					? previousGeometry
+					: this.#resolveGeometry(batch.hwGfxObjId);
+			previousHwGfxObjId = batch.hwGfxObjId;
+			previousGeometry = geometry;
 			// A batch whose mesh has not landed is counted, not silently dropped: the emitter is
 			// live and the viewer is missing it.
 			if (geometry === null) {

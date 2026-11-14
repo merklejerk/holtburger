@@ -88,7 +88,7 @@ describe("WebGL2OutdoorPssmPass", () => {
 		expect(active?.targets).toBe(fixture.targets);
 		expect(fixture.state.targetResizes).toBe(1);
 		expect(fixture.state.attachedLayers).toEqual([0, 1]);
-		expect(fixture.state.queries).toBe(2);
+		expect(fixture.state.queries).toBe(1);
 		expect(fixture.state.programCreations).toBe(1);
 		expect(fixture.state.poseReads).toEqual([NODE, NODE]);
 
@@ -116,12 +116,12 @@ describe("WebGL2OutdoorPssmPass", () => {
 
 		expect(fixture.state.targetResizes).toBe(0);
 		expect(fixture.state.attachedLayers).toEqual([]);
-		expect(fixture.state.queries).toBe(2);
+		expect(fixture.state.queries).toBe(1);
 		expect(fixture.state.programCreations).toBe(0);
 		expect(fixture.state.draws).toEqual([]);
 	});
 
-	it("keeps M=0 casters analytic with depth verification and without mapped GPU work", () => {
+	it("keeps M=0 casters analytic without preparing mapped depth geometry", () => {
 		const fixture = createFixture(true);
 		const input = {
 			...createInput(new Vec3(0, 1, 0)),
@@ -131,7 +131,7 @@ describe("WebGL2OutdoorPssmPass", () => {
 		expect(prepared?.storage.analyticCasters).toHaveLength(1);
 		expect(fixture.pass.render(prepared)).toBeNull();
 		expect(input.selectedDynamicNodeIds).toEqual(new Set([NODE]));
-		expect(fixture.state.depthPreparations).toBe(1);
+		expect(fixture.state.depthPreparations).toBe(0);
 		expect(fixture.state.targetResizes).toBe(0);
 		expect(fixture.state.programCreations).toBe(0);
 		expect(fixture.state.attachedLayers).toEqual([]);
@@ -216,15 +216,19 @@ function createFixture(withCaster = false): {
 			state.depthPreparations += 1;
 			return withCaster ? contribution : null;
 		},
+		hasOutdoorDynamicShadowGeometry: () => withCaster,
 		readRenderContribution: () => descriptor,
 		getEntityShadowDynamicFacts: () => ({
 			identity: NODE,
-			rigidBounds: new AABB3(Vec3.zero(), new Vec3(1, 2, 1)),
+			rigidBounds: new AABB3(
+				new Vec3(-1000, -1000, -1000),
+				new Vec3(1000, 1000, 1000),
+			),
 			spatialMembership: { scopes: [{ kind: "outdoor" }] },
 		}),
-		queryOutdoorShadowCasters: () => {
+		queryOutdoorShadowCasterMasks: (frusta, _anchor, out) => {
 			state.queries += 1;
-			return { entries: withCaster ? [NODE] : [] };
+			if (withCaster) out.set(NODE, (1 << frusta.length) - 1);
 		},
 	};
 	const resources = {
@@ -390,6 +394,7 @@ function dynamicDescriptor(): RenderContribution {
 				envCellId: null,
 				landblockId: ANCHOR,
 				localToLandblock: Mat4.identity(),
+				transformRevision: 0,
 				scope: { kind: "outdoor" },
 			},
 		},

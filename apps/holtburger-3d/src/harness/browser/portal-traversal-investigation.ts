@@ -39,14 +39,22 @@ export function installPortalTraversalInvestigation(): void {
 		frame = original.apply(this, args);
 		return frame;
 	};
-	const originalQuery = RenderWorld.prototype.queryScopeSelectionScene;
-	RenderWorld.prototype.queryScopeSelectionScene = function (
-		frustum,
+	const originalQuery = RenderWorld.prototype.queryScopeWindowSelectionScene;
+	RenderWorld.prototype.queryScopeWindowSelectionScene = function (
+		clipFromAnchor,
+		cameraPosition,
 		anchor,
 		scopes,
 		filter,
 	) {
-		const result = originalQuery.call(this, frustum, anchor, scopes, filter);
+		const result = originalQuery.call(
+			this,
+			clipFromAnchor,
+			cameraPosition,
+			anchor,
+			scopes,
+			filter,
+		);
 		sceneQuery.world = this;
 		sceneQuery.entries = result.entries;
 		return result;

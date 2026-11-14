@@ -99,6 +99,27 @@ describe("WebGL2 portal scope-atlas targets", () => {
 		);
 	});
 
+	it("releases idle targets and allocates a fresh generation when portals return", () => {
+		const state = createDefaultFakeWebGL2();
+		const targets = new WebGL2PortalScopeAtlasTargets(state.gl);
+		targets.resize(INITIAL_EXTENTS);
+		expect(targets.getActiveExtents()).toEqual(INITIAL_EXTENTS);
+		targets.release();
+		targets.release();
+		expect(targets.getDiagnostics()).toMatchObject({
+			activeBytes: 0,
+			allocatedGenerationCount: 1,
+			disposedGenerationCount: 1,
+		});
+		expect(() => targets.getTargets()).toThrow("have no render extents");
+		targets.resize(RESIZED_EXTENTS);
+		expect(targets.getDiagnostics()).toMatchObject({
+			allocatedGenerationCount: 2,
+			disposedGenerationCount: 1,
+			extents: RESIZED_EXTENTS,
+		});
+	});
+
 	it("retains the previous generation and restores bindings after replacement failure", () => {
 		const state = createDefaultFakeWebGL2();
 		const targets = new WebGL2PortalScopeAtlasTargets(state.gl);

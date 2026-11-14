@@ -193,7 +193,7 @@ describe("template-retained dynamic appearance resources", () => {
 		const current = resources.get(visual);
 		if (current.kind !== "drawable")
 			throw new Error("Fixture requires geometry.");
-		expect(current.plan.batches[0]?.material).toMatchObject({
+		expect(current.plan.batches[0]?.textures).toMatchObject({
 			base: { texture, sampler },
 		});
 		const data = gl.texImage2D.mock.lastCall?.[8] as Float32Array;

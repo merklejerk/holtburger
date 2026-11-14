@@ -4,7 +4,10 @@ import {
 	sceneVector3,
 } from "../../assets/ac-frame";
 import { describe, expect, it } from "vitest";
-import type { ParticleInstanceRecord } from "../renderer/particle-record-layout";
+import {
+	PARTICLE_RECORDS_PER_ROW,
+	type ParticleInstanceRecord,
+} from "../renderer/particle-record-layout";
 import {
 	ParticleRecordSlots,
 	PARTICLE_RECORD_STRIDE_FLOATS,
@@ -94,19 +97,24 @@ describe("ParticleRecordSlots", () => {
 		expect(birthTimeAt(slots, region.base)).toBe(3);
 	});
 
-	it("reports the written slot span once and then forgets it", () => {
+	it("reports touched texture rows once and then forgets them", () => {
 		const slots = new ParticleRecordSlots();
 		const region = slots.allocate(8);
 
 		slots.writeRecord(region.base + 5, record(1));
 		slots.writeRecord(region.base + 2, record(2));
 
-		expect(slots.takeDirtySlotRange()).toEqual({
-			first: region.base + 2,
-			last: region.base + 5,
-		});
+		expect(slots.takeDirtyRows()).toEqual(new Uint32Array([1]));
 		// Nothing written since, so the next frame uploads nothing.
-		expect(slots.takeDirtySlotRange()).toBeNull();
+		expect(slots.takeDirtyRows()).toBeNull();
+	});
+
+	it("marks distant rows without marking intervening rows", () => {
+		const slots = new ParticleRecordSlots();
+		const region = slots.allocate(PARTICLE_RECORDS_PER_ROW * 4);
+		slots.writeRecord(region.base, record(1));
+		slots.writeRecord(region.base + PARTICLE_RECORDS_PER_ROW * 3, record(2));
+		expect(slots.takeDirtyRows()).toEqual(new Uint32Array([0b1001]));
 	});
 
 	it("refuses a slot outside the store rather than corrupting a neighbour", () => {

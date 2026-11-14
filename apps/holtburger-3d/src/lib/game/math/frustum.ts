@@ -85,6 +85,65 @@ export function createFrustumFromClipMatrix(
 	return resolved;
 }
 
+/** Clip one camera frustum to a padded portal window without changing near/far planes. */
+export function createPortalWindowFrustum(
+	clip: Mat4,
+	cameraPosition: Vec3,
+	window: {
+		readonly minimumNdcX: number;
+		readonly minimumNdcY: number;
+		readonly maximumNdcX: number;
+		readonly maximumNdcY: number;
+	},
+	target: Frustum,
+): Frustum {
+	const padding = 1e-4;
+	const minimumX = Math.max(-1, window.minimumNdcX - padding);
+	const minimumY = Math.max(-1, window.minimumNdcY - padding);
+	const maximumX = Math.min(1, window.maximumNdcX + padding);
+	const maximumY = Math.min(1, window.maximumNdcY + padding);
+	if (
+		!Number.isFinite(minimumX) ||
+		!Number.isFinite(minimumY) ||
+		!Number.isFinite(maximumX) ||
+		!Number.isFinite(maximumY) ||
+		minimumX > maximumX ||
+		minimumY > maximumY
+	)
+		throw new Error("Portal window has invalid NDC bounds.");
+	const result = createFrustumFromClipMatrix(clip, cameraPosition, target);
+	const planes = result.planes as FrustumPlane[];
+	planes[0] = normalizePlane(
+		clip.m11 - minimumX * clip.m14,
+		clip.m21 - minimumX * clip.m24,
+		clip.m31 - minimumX * clip.m34,
+		clip.m41 - minimumX * clip.m44,
+		planes[0],
+	);
+	planes[1] = normalizePlane(
+		maximumX * clip.m14 - clip.m11,
+		maximumX * clip.m24 - clip.m21,
+		maximumX * clip.m34 - clip.m31,
+		maximumX * clip.m44 - clip.m41,
+		planes[1],
+	);
+	planes[2] = normalizePlane(
+		clip.m12 - minimumY * clip.m14,
+		clip.m22 - minimumY * clip.m24,
+		clip.m32 - minimumY * clip.m34,
+		clip.m42 - minimumY * clip.m44,
+		planes[2],
+	);
+	planes[3] = normalizePlane(
+		maximumY * clip.m14 - clip.m12,
+		maximumY * clip.m24 - clip.m22,
+		maximumY * clip.m34 - clip.m32,
+		maximumY * clip.m44 - clip.m42,
+		planes[3],
+	);
+	return result;
+}
+
 /** Conservatively test one offset AABB against every frustum plane. */
 export function frustumIntersectsAABB(
 	frustum: Frustum,

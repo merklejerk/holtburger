@@ -208,6 +208,7 @@ function placement(x: number, y: number, z: number): ResolvedScenePlacement {
 		envCellId: null,
 		landblockId: LAND_BLOCK,
 		localToLandblock,
+		transformRevision: 0,
 		scope: { kind: "outdoor" },
 	};
 }

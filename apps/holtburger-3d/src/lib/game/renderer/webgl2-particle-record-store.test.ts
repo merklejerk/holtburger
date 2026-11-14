@@ -51,13 +51,13 @@ describe("WebGL2ParticleRecordStore", () => {
 		expect(records.uploadedRowCount).toBe(2);
 	});
 
-	// A grown mirror is a different texture, so a dirty range describing the old one must not be
+	// A grown mirror is a different texture, so dirty bits describing the old one must not be
 	// trusted to bound the upload.
-	it("uploads every row when the mirror grows, ignoring the dirty range", () => {
+	it("uploads every row when the mirror grows, ignoring dirty bits", () => {
 		const { calls, store: records } = store();
 		records.sync(new Float32Array(FLOATS_PER_ROW), null);
 
-		records.sync(new Float32Array(FLOATS_PER_ROW * 3), { first: 0, last: 0 });
+		records.sync(new Float32Array(FLOATS_PER_ROW * 3), new Uint32Array([1]));
 
 		expect(calls.texImage2D).toHaveBeenCalledTimes(2);
 		expect(records.uploadedRowCount).toBe(3);
@@ -70,13 +70,28 @@ describe("WebGL2ParticleRecordStore", () => {
 		calls.texImage2D.mockClear();
 
 		// Slots inside rows 1 and 2 of a four-row store.
-		records.sync(mirror, {
-			first: PARTICLE_RECORDS_PER_ROW,
-			last: PARTICLE_RECORDS_PER_ROW * 2 + 5,
-		});
+		records.sync(mirror, new Uint32Array([0b110]));
 
 		expect(calls.texImage2D).not.toHaveBeenCalled();
 		expect(calls.texSubImage2D).toHaveBeenCalledTimes(1);
+		expect(records.uploadedRowCount).toBe(2);
+	});
+
+	it("uploads distant dirty rows separately without copying the gap", () => {
+		const { calls, store: records } = store();
+		const mirror = new Float32Array(FLOATS_PER_ROW * 8);
+		records.sync(mirror, null);
+		calls.texSubImage2D.mockClear();
+
+		records.sync(mirror, new Uint32Array([(1 << 1) | (1 << 7)]));
+
+		expect(calls.texSubImage2D).toHaveBeenCalledTimes(2);
+		expect(
+			calls.texSubImage2D.mock.calls.map((call) => [call[3], call[5]]),
+		).toEqual([
+			[1, 1],
+			[7, 1],
+		]);
 		expect(records.uploadedRowCount).toBe(2);
 	});
 

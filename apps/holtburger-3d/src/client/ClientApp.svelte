@@ -435,6 +435,9 @@
 		processedIntentSequence: 0,
 		refill: null,
 	});
+	/** Cold cast-target and lock events wake indicators whose frame loops are asleep. */
+	let spellCastTarget = $state<number | null>(null);
+	let lockFeedbackWakeRevision = $state(0);
 	/** Accepted profile selections, including repeated selections of the current value. */
 	let combatProfileSelectionRevision = $state(0);
 	const defaultCombatControls: ClientCharacterSettings["combatControls"] = {
@@ -1278,6 +1281,9 @@
 			case "combat":
 				acceptCombatStatus(event.status);
 				return;
+			case "spell-cast-target":
+				spellCastTarget = event.target;
+				return;
 			case "gameplay-preferences":
 				gameplayPreferences = event.preferences;
 				return;
@@ -1301,6 +1307,7 @@
 				refreshSelectedChatRecipient();
 				combatMode = event.state.combatMode;
 				acceptCombatStatus(event.state.combat);
+				spellCastTarget = event.state.spellCastTarget;
 				appearanceOptions = event.state.appearanceOptions;
 				gameplayPreferences = event.state.gameplayPreferences;
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
@@ -1845,6 +1852,8 @@
 			...frame,
 			landmarkCategory: (guid) =>
 				clientMinimapLandmark(facts?.get(guid), playerName),
+			landmarkRevision:
+				entities?.kind === "current" ? entities.level.revision : 0,
 			trackedGuids: nearby?.trackedGuids() ?? EMPTY_TRACKED_GUIDS,
 			waypoint: navigationWaypoint.read(
 				frame,
@@ -1876,6 +1885,9 @@
 
 	function readLockFeedbackFrames() {
 		return gameplayPresentation?.readLockFeedbackFrames() ?? [];
+	}
+	function hasActiveLockFeedback(): boolean {
+		return gameplayPresentation?.hasActiveLockFeedback() ?? false;
 	}
 	function readCombatTargetFrame() {
 		return gameplayPresentation?.readCombatTargetFrame() ?? null;
@@ -1996,6 +2008,9 @@
 					resources,
 					session: currentSession,
 					onError: reportPresentationError,
+					onLockFeedback: () => {
+						if (!cancelled) lockFeedbackWakeRevision += 1;
+					},
 					onSceneMembership: (source) => {
 						if (cancelled) return;
 						nearbySceneMembership = source;
@@ -2863,6 +2878,9 @@
 			{readTargetIndicatorFrame}
 			{readCombatTargetFrame}
 			{readLockFeedbackFrames}
+			{hasActiveLockFeedback}
+			{spellCastTarget}
+			{lockFeedbackWakeRevision}
 			{readSelectedEntityDisplay}
 			{spells}
 			{enchantments}

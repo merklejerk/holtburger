@@ -465,6 +465,57 @@ describe("AnimationSystem", () => {
 		expect(sparse.getDiagnostics().lastSampledPresentationCount).toBe(1);
 	});
 
+	it("publishes a new held motion pose once and wakes for effect changes", () => {
+		const effects = new EffectSystem();
+		const system = buildAnimationSystemOver(effects);
+		const target = testTarget("scene-node:1");
+		installEffectState(effects, target.targetId);
+		const animation = fixedPoseAnimation("0x03000044", [7]);
+		system.applyMotion(
+			"owner",
+			target,
+			"explicit",
+			{ kind: "install", clip: playingClip(animation, 0, 0, 0, "hold") },
+			{ kind: "remove" },
+			initialPose(),
+			{ kind: "ordinary" },
+		);
+		effects.advance(0);
+		const firstFrame = system.advance(0);
+		expect(system.needsPresentation("scene-node:1")).toBe(true);
+		expect(
+			system.sample(firstFrame, ["scene-node:1"])[0]?.localPoseChanged,
+		).toBe(true);
+		expect(system.needsPresentation("scene-node:1")).toBe(false);
+		effects.advance(1 / 60);
+		system.advance(1 / 60);
+		expect(system.needsPresentation("scene-node:1")).toBe(false);
+
+		effects.applyScale(target, { end: 2, durationSeconds: 0 });
+		expect(system.needsPresentation("scene-node:1")).toBe(true);
+		const changedFrame = system.advance(1 / 60);
+		expect(
+			system.sample(changedFrame, ["scene-node:1"])[0]?.localPoseChanged,
+		).toBe(false);
+		expect(system.needsPresentation("scene-node:1")).toBe(false);
+	});
+
+	it("treats an already staged entry pose as its first publication", () => {
+		const system = buildAnimationSystem();
+		const animation = fixedPoseAnimation("0x03000045", [5]);
+		const samples = install(system, "owner", [
+			{
+				animation,
+				residentIdentity: "resident:held",
+				target: testTarget("scene-node:1"),
+			},
+		]);
+		expect(samples).toHaveLength(1);
+		expect(samples[0]?.localPoseChanged).toBe(true);
+		system.advance(0);
+		expect(system.needsPresentation("scene-node:1")).toBe(false);
+	});
+
 	it("keeps traversing and looping while speed updates arrive every frame", () => {
 		const effects = new EffectSystem();
 		const system = buildAnimationSystemOver(effects);

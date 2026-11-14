@@ -635,7 +635,7 @@ export const SHARED_FRONTEND_TUNING = {
 			/** CSS-pixel cutoff for independently optional object presentations. */
 			minimumObjectFootprintCssPixelArea: 64,
 			/** CSS-pixel cutoff for non-near-plane recursive portal windows. */
-			minimumPortalFootprintCssPixelArea: 4,
+			minimumPortalFootprintCssPixelArea: 64,
 			/**
 			 * Device pixels per CSS pixel.
 			 *

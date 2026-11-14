@@ -3,13 +3,17 @@ import {
 	objectBlendPolicy,
 	type ObjectBlendPolicy,
 	type PreparedObjectMaterial,
+	type PreparedObjectTextureBinding,
 	type PreparedObjectSurface,
 } from "./object-rendering-policy";
 
 /** Physical state shared by one contiguous dynamic index batch. */
 interface DynamicIndexBatch<TTexture, TSampler> {
-	/** Material exemplar supplies only encoding and physical texture/sampler bindings. */
-	readonly material: PreparedObjectMaterial<TTexture, TSampler>;
+	/** Promoted bindings used by every table-selected material in this physical span. */
+	readonly textures: {
+		readonly base: PreparedObjectTextureBinding<TTexture, TSampler> | null;
+		readonly palette: PreparedObjectTextureBinding<TTexture, TSampler> | null;
+	};
 	/** Source phase, before frame-current part opacity routing. */
 	readonly ordering: DynamicAppearance["ranges"][number]["ordering"];
 	/** Effective raster face rejection; stippling provenance remains on individual ranges. */
@@ -33,6 +37,8 @@ interface DynamicIndexPlan<TTexture, TSampler> {
 	readonly ranges: readonly {
 		/** Original logical range, including part/material selectors and polygon provenance. */
 		readonly source: DynamicAppearance["ranges"][number];
+		/** Resolved source material, retained for diagnostics independent of physical batching. */
+		readonly material: PreparedObjectMaterial<TTexture, TSampler>;
 		/** Owning physical batch, shared rather than re-derived for each range. */
 		readonly batch: DynamicIndexBatch<TTexture, TSampler>;
 		/** New first index inside the appearance's buffer. */
@@ -65,7 +71,11 @@ export function compileDynamicIndexBatches<TTexture, TSampler>(
 			DynamicIndexBatch<TTexture, TSampler>,
 			"indexStart" | "indexCount"
 		>;
-		ranges: { source: DynamicAppearance["ranges"][number]; ordinal: number }[];
+		ranges: {
+			source: DynamicAppearance["ranges"][number];
+			material: PreparedObjectMaterial<TTexture, TSampler>;
+			ordinal: number;
+		}[];
 	}[] = [];
 	let additiveSegment = 0;
 	for (const [ordinal, range] of appearance.ranges.entries()) {
@@ -76,7 +86,7 @@ export function compileDynamicIndexBatches<TTexture, TSampler>(
 				`Dynamic range references missing material selector ${range.materialSelector}.`,
 			);
 		const state = {
-			material: surface.material,
+			textures: physicalTextures(surface.material),
 			ordering: range.ordering,
 			cullFace: range.polygon.cullFace,
 			retailVisibility: range.retailVisibility,
@@ -95,20 +105,31 @@ export function compileDynamicIndexBatches<TTexture, TSampler>(
 				? groups.find(
 						({ state: previous, additiveSegment: segment }) =>
 							(!additive || segment === additiveSegment) &&
-							previous.ordering === state.ordering &&
+							(previous.ordering === state.ordering ||
+								(previous.ordering !== "additive" &&
+									state.ordering !== "additive")) &&
 							previous.cullFace === state.cullFace &&
 							previous.retailVisibility === state.retailVisibility &&
 							previous.blendPolicy.source === state.blendPolicy.source &&
 							previous.blendPolicy.destination ===
 								state.blendPolicy.destination &&
-							samePhysicalMaterial(previous.material, state.material),
+							compatiblePhysicalTextures(previous.textures, state.textures),
 					)
 				: undefined;
 		if (group === undefined) {
 			group = { state, ranges: [], additiveSegment };
 			groups.push(group);
+		} else {
+			// Solid and direct-color table entries leave unused texture units unconstrained.
+			group.state = {
+				...group.state,
+				textures: {
+					base: group.state.textures.base ?? state.textures.base,
+					palette: group.state.textures.palette ?? state.textures.palette,
+				},
+			};
 		}
-		group.ranges.push({ source: range, ordinal });
+		group.ranges.push({ source: range, material: surface.material, ordinal });
 	}
 	const count = appearance.ranges.reduce(
 		(sum, range) => sum + range.indexCount,
@@ -122,6 +143,14 @@ export function compileDynamicIndexBatches<TTexture, TSampler>(
 	}[] = [];
 	let offset = 0;
 	for (const group of groups) {
+		// Shadow depth accepts opaque ranges only; keep them adjacent inside a merged
+		// opaque/alpha-test span so it can submit one contiguous index range.
+		if (group.state.ordering !== "additive")
+			group.ranges.sort(
+				(left, right) =>
+					Number(left.source.ordering === "alpha-test") -
+					Number(right.source.ordering === "alpha-test"),
+			);
 		const batch = {
 			...group.state,
 			indexStart: offset,
@@ -131,7 +160,7 @@ export function compileDynamicIndexBatches<TTexture, TSampler>(
 			),
 		};
 		batches.push(batch);
-		for (const { source, ordinal } of group.ranges) {
+		for (const { source, material, ordinal } of group.ranges) {
 			if (
 				source.indexStart < 0 ||
 				source.indexStart + source.indexCount > sourceIndices.length
@@ -150,6 +179,7 @@ export function compileDynamicIndexBatches<TTexture, TSampler>(
 				ordinal,
 				range: {
 					source,
+					material,
 					batch,
 					indexStart: offset,
 					physicalOrdinal: remapped.length,
@@ -181,21 +211,35 @@ export function compileDynamicIndexBatches<TTexture, TSampler>(
 }
 
 /** Compare only actual bind state; all other surface differences are table-selected. */
-function samePhysicalMaterial<TTexture, TSampler>(
-	left: PreparedObjectMaterial<TTexture, TSampler>,
-	right: PreparedObjectMaterial<TTexture, TSampler>,
+function physicalTextures<TTexture, TSampler>(
+	material: PreparedObjectMaterial<TTexture, TSampler>,
+): DynamicIndexBatch<TTexture, TSampler>["textures"] {
+	return {
+		base: material.kind === "solid-color" ? null : material.base,
+		palette:
+			material.kind === "index8" || material.kind === "index16"
+				? material.palette
+				: null,
+	};
+}
+
+function compatiblePhysicalTextures<TTexture, TSampler>(
+	left: DynamicIndexBatch<TTexture, TSampler>["textures"],
+	right: DynamicIndexBatch<TTexture, TSampler>["textures"],
 ): boolean {
-	if (left.kind !== right.kind) return false;
-	if (left.kind === "solid-color" || right.kind === "solid-color") return true;
-	if (
-		left.base.texture !== right.base.texture ||
-		left.base.sampler !== right.base.sampler
-	)
-		return false;
-	if (left.kind === "direct-color" || right.kind === "direct-color")
-		return true;
 	return (
-		left.palette.texture === right.palette.texture &&
-		left.palette.sampler === right.palette.sampler
+		compatibleBinding(left.base, right.base) &&
+		compatibleBinding(left.palette, right.palette)
+	);
+}
+
+function compatibleBinding<TTexture, TSampler>(
+	left: PreparedObjectTextureBinding<TTexture, TSampler> | null,
+	right: PreparedObjectTextureBinding<TTexture, TSampler> | null,
+): boolean {
+	return (
+		left === null ||
+		right === null ||
+		(left.texture === right.texture && left.sampler === right.sampler)
 	);
 }

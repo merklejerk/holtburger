@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { packAffinitiesSchema } from "./client-pack-affinity-contract.js";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning.js";
 import { uiThemeIdSchema } from "../app/ui-theme-contract.js";
 import { entityAlertRulesSchema } from "./client-entity-alerts.js";
@@ -404,6 +405,8 @@ const attackHeightSchema = z.enum(["low", "medium", "high"]);
 /** Character-scoped local shortcuts and combat controls, never server authority. */
 export const clientCharacterSettingsSchema = z
 	.object({
+		/** Last confirmed carried container, retained while an item is equipped. */
+		packAffinities: packAffinitiesSchema,
 		/** Character-local entity name alerts, never server authority. */
 		entityAlerts: entityAlertRulesSchema,
 		actionBars: z

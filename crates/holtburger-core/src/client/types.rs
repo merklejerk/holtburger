@@ -1424,7 +1424,12 @@ pub enum ClientCommand {
     /// Character-bound barber candidate, submission, or local cancellation.
     Barber(super::barber::BarberRequest),
     /// Apply exact equipment bindings after one confirmed-peace prerequisite when needed.
-    ApplyEquipmentSet(Vec<super::equipment_set::EquipmentBinding>),
+    ApplyEquipmentSet {
+        /// Exact desired equipment assignments.
+        bindings: Vec<super::equipment_set::EquipmentBinding>,
+        /// Caller-selected destinations for displaced items.
+        storage: super::inventory_storage::EquipmentStoragePolicy,
+    },
     /// Explicit refresh of the active character/account effective home.
     RefreshHousing,
     /// Read named access records after effective-home initialization completes.
@@ -1446,7 +1451,12 @@ pub enum ClientCommand {
     /// Evaluate the current drag target without issuing inventory mutations.
     PreviewInventory(super::inventory_plan::InventoryPreviewRequest),
     /// Re-evaluate and execute an identity-based inventory gesture.
-    SubmitInventory(super::inventory_plan::InventoryIntent),
+    SubmitInventory {
+        /// Desired interaction, re-evaluated against current state.
+        intent: super::inventory_plan::InventoryIntent,
+        /// Caller-selected destinations when this interaction removes equipment.
+        storage: super::inventory_storage::EquipmentStoragePolicy,
+    },
     /// Consolidate direct partial stacks using an explicit frontend timeout policy.
     AutoMergeContainer {
         /// Player root or a directly carried real bag.
@@ -1561,11 +1571,15 @@ pub enum ClientCommand {
     GetAndWield {
         item: Guid,
         slot: Option<TargetSlot>,
+        /// Caller-selected destinations for displaced items.
+        storage: super::inventory_storage::EquipmentStoragePolicy,
     },
     SplitToWield {
         item: Guid,
         slot: Option<TargetSlot>,
         amount: u32,
+        /// Caller-selected destinations for displaced items.
+        storage: super::inventory_storage::EquipmentStoragePolicy,
     },
     DriveSelf(PlayerDriveIntent),
     /// Applies one ordered, non-coalescible character-motion lifecycle edge.

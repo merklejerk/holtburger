@@ -786,6 +786,7 @@
 		transport: startupSettingsTransport,
 		publish: (state) => {
 			characterSettings = state;
+			syncPackAffinities();
 			nearby?.acceptSettings(state);
 			if (state.kind !== "ready") selectedSpellTab = 0;
 		},
@@ -893,6 +894,14 @@
 		characterSettingsOwner.change(key, value);
 	}
 
+	function syncPackAffinities(): void {
+		const next = session?.packAffinities.acceptSettings(
+			characterSettingsOwner.state(),
+		);
+		if (next !== null && next !== undefined)
+			characterSettingsOwner.change("packAffinities", next);
+	}
+
 	function acceptCharacterName(characterGuid: number, name: string): void {
 		characterSettingsOwner.acceptName(characterGuid, name);
 	}
@@ -907,6 +916,7 @@
 				session !== null && session.partySnapshot() !== null;
 		}
 		characterSettingsOwner.acceptGuid(characterGuid);
+		syncPackAffinities();
 	}
 
 	function retireChatCharacter(): void {
@@ -1237,6 +1247,7 @@
 				return;
 
 			case "entities":
+				syncPackAffinities();
 				refreshSelectedChatRecipient();
 				return;
 			case "party-presence":

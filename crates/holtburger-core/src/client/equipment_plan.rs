@@ -12,7 +12,10 @@ use holtburger_world::{
 };
 
 use super::{
-    inventory_storage::{InventoryInsertion, StorageAllocationError, allocate_storage},
+    inventory_storage::{
+        EquipmentStoragePolicy, InventoryInsertion, StorageAllocationError,
+        allocate_equipment_storage,
+    },
     types::TargetSlot,
 };
 
@@ -38,6 +41,8 @@ pub struct EquipmentPlan {
     pub source: StorageLocation,
     /// Insertion preference used to revalidate the remaining conflict removals.
     pub insertion: InventoryInsertion,
+    /// Caller-selected preferences retained unchanged during execution revalidation.
+    pub storage: EquipmentStoragePolicy,
     /// Exact wire wield location, including complete apparel coverage.
     pub target: EquipMask,
     /// Ordered removals which must succeed before wielding.
@@ -79,30 +84,27 @@ pub enum EquipmentPlanError {
     Storage(#[from] StorageAllocationError),
 }
 
-/// Allocate replacement capacity with the frontend's insertion preference.
+/// Allocate replacement capacity with the caller's container and insertion preferences.
 pub fn plan_equipment_change(
     world: &WorldState,
     item: Guid,
     slot: Option<TargetSlot>,
     insertion: InventoryInsertion,
+    storage: &EquipmentStoragePolicy,
 ) -> Result<EquipmentPlan, EquipmentPlanError> {
     let replacement = resolve_equipment_change(world, item, slot)?;
-    let preferred = match replacement.source {
-        StorageLocation::Contained { parent, .. } => parent,
-        StorageLocation::Equipped { wearer, .. } => wearer,
-    };
-    let pack_slots = replacement
+    let storage_items = replacement
         .conflicts
         .iter()
         .map(|(guid, _)| {
             world
                 .entities
                 .get(*guid)
-                .map(|entity| entity.uses_player_container_slot())
+                .map(|entity| (*guid, entity.uses_player_container_slot()))
                 .ok_or(EquipmentPlanError::MissingEntity(*guid))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let destinations = allocate_storage(world, preferred, &pack_slots)?;
+    let destinations = allocate_equipment_storage(world, storage, &storage_items, &[])?;
     let unequips = replacement
         .conflicts
         .into_iter()
@@ -116,6 +118,7 @@ pub fn plan_equipment_change(
         .collect();
     Ok(EquipmentPlan {
         insertion,
+        storage: storage.clone(),
         item,
         source: replacement.source,
         target: replacement.target,
@@ -217,6 +220,27 @@ pub(super) mod tests {
         ViewContentsEventData, ViewContentsEventItem, WieldObjectEventData,
     };
     use holtburger_world::entity::Entity;
+
+    /// Explicit Main-Pack-first caller policy for shared planner fixtures.
+    pub(in crate::client) fn storage_policy(world: &WorldState) -> EquipmentStoragePolicy {
+        let mut packs: Vec<_> = world
+            .container_contents(world.player.guid)
+            .filter_map(|(guid, slot)| match slot {
+                holtburger_world::state::storage::StorageSlot::Pack {
+                    index,
+                    kind: holtburger_world::state::storage::PackEntryKind::Container,
+                } => Some((index, guid)),
+                _ => None,
+            })
+            .collect();
+        packs.sort_unstable();
+        EquipmentStoragePolicy {
+            preferred: Default::default(),
+            fallback: std::iter::once(world.player.guid)
+                .chain(packs.into_iter().map(|(_, guid)| guid))
+                .collect(),
+        }
+    }
 
     const PLAYER: Guid = Guid(1);
     const PACK: Guid = Guid(2);
@@ -331,6 +355,7 @@ pub(super) mod tests {
                     INCOMING,
                     Some(TargetSlot::PreferredSide { alternate }),
                     Default::default(),
+                    &storage_policy(&world),
                 )
                 .expect("valid preference");
                 let main = locations & MAIN_HAND_LOCATIONS;
@@ -353,6 +378,7 @@ pub(super) mod tests {
                 INCOMING,
                 Some(TargetSlot::PreferredSide { alternate: false }),
                 Default::default(),
+                &storage_policy(&world),
             )
             .expect("already worn item remains movable");
             let main = locations & MAIN_HAND_LOCATIONS;
@@ -433,6 +459,7 @@ pub(super) mod tests {
                             INCOMING,
                             Some(TargetSlot::PreferredSide { alternate }),
                             Default::default(),
+                            &storage_policy(&world),
                         )
                         .expect("jewelry plan");
                         assert_eq!(plan.target, expected);
@@ -458,6 +485,7 @@ pub(super) mod tests {
             INCOMING,
             Some(TargetSlot::EquipMask(EquipMask::CHEST_ARMOR)),
             Default::default(),
+            &storage_policy(&world),
         )
         .expect("root fits both displaced items");
         assert_eq!(
@@ -479,16 +507,24 @@ pub(super) mod tests {
     fn does_not_credit_the_incoming_items_future_free_slot() {
         let world = outfit(1, 1);
         assert_eq!(
-            plan_equipment_change(&world, INCOMING, None, Default::default()),
+            plan_equipment_change(
+                &world,
+                INCOMING,
+                None,
+                Default::default(),
+                &storage_policy(&world)
+            ),
             Err(EquipmentPlanError::Storage(StorageAllocationError::NoSpace))
         );
         assert_eq!(world.player_equipment().count(), 2);
     }
 
     #[test]
-    fn uses_source_pack_first_then_falls_back_without_overallocating() {
+    fn uses_each_outgoing_items_preference_without_overallocating() {
         let world = outfit(1, 2);
-        let plan = plan_equipment_change(&world, INCOMING, None, Default::default())
+        let mut storage = storage_policy(&world);
+        storage.preferred = [(CHEST, PACK), (ARMS, PLAYER)].into();
+        let plan = plan_equipment_change(&world, INCOMING, None, Default::default(), &storage)
             .expect("one slot in each container");
         assert_eq!(
             plan.unequips
@@ -512,6 +548,15 @@ pub(super) mod tests {
                 },
             )),
         );
-        assert!(plan_equipment_change(&world, INCOMING, None, Default::default()).is_ok());
+        assert!(
+            plan_equipment_change(
+                &world,
+                INCOMING,
+                None,
+                Default::default(),
+                &storage_policy(&world)
+            )
+            .is_ok()
+        );
     }
 }

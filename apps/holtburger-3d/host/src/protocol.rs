@@ -1669,7 +1669,7 @@ mod tests {
         let request = rmp_serde::to_vec_named(&serde_json::json!({
             "kind": "request",
             "id": 1,
-            "command": { "command": "equip_client_item", "guid": 91, "alternate": true },
+            "command": { "command": "equip_client_item", "guid": 91, "alternate": true, "storage": { "preferred": { "92": 7 }, "fallback": [1, 7] } },
         }))
         .unwrap();
         let mut reader = Cursor::new(framed_payload(request));
@@ -1678,6 +1678,7 @@ mod tests {
                 HostCommand::Client(ClientHostCommand::EquipClientItem {
                     guid,
                     alternate: true,
+                    storage,
                 }),
             ..
         }) = read_frame(&mut reader).unwrap()
@@ -1685,6 +1686,65 @@ mod tests {
             panic!("equipment request did not decode into the client command");
         };
         assert_eq!(guid, holtburger_common::Guid(91));
+        assert_eq!(
+            storage.preferred[&holtburger_common::Guid(92)],
+            holtburger_common::Guid(7)
+        );
+        assert_eq!(
+            storage.fallback,
+            vec![holtburger_common::Guid(1), holtburger_common::Guid(7)]
+        );
+    }
+
+    #[test]
+    fn inventory_preview_and_submission_decode_browser_equipment_preferences() {
+        for preview in [false, true] {
+            let intent = serde_json::json!({ "item": 92, "target": { "kind": "unequip" } });
+            let storage = serde_json::json!({ "preferred": { "92": 7 }, "fallback": [1, 7] });
+            let command = if preview {
+                serde_json::json!({ "command": "preview_client_inventory", "request": { "sequence": 3, "intent": intent, "storage": storage } })
+            } else {
+                serde_json::json!({ "command": "submit_client_inventory", "intent": intent, "storage": storage })
+            };
+            let request = rmp_serde::to_vec_named(
+                &serde_json::json!({ "kind": "request", "id": 1, "command": command }),
+            )
+            .unwrap();
+            let mut reader = Cursor::new(framed_payload(request));
+            let Some(InboundFrame::Request {
+                command: HostCommand::Client(command),
+                ..
+            }) = read_frame(&mut reader).unwrap()
+            else {
+                panic!("Expected client command")
+            };
+            let storage = match command {
+                ClientHostCommand::PreviewClientInventory { request } => request.storage,
+                ClientHostCommand::SubmitClientInventory { storage, .. } => storage,
+                _ => panic!("Expected inventory command"),
+            };
+            assert_eq!(
+                storage.preferred[&holtburger_common::Guid(92)],
+                holtburger_common::Guid(7)
+            );
+        }
+    }
+
+    #[test]
+    fn equipment_preferences_reject_noncanonical_and_out_of_range_item_keys() {
+        for key in ["01", "0", "invalid", "4294967296"] {
+            let request = rmp_serde::to_vec_named(&serde_json::json!({
+                "kind": "request", "id": 1,
+                "command": { "command": "equip_client_item", "guid": 91, "alternate": false,
+                    "storage": { "preferred": { key: 7 }, "fallback": [1] } },
+            }))
+            .unwrap();
+            let mut reader = Cursor::new(framed_payload(request));
+            assert!(
+                read_frame(&mut reader).is_err(),
+                "Accepted invalid key {key}"
+            );
+        }
     }
 
     #[test]
@@ -1692,11 +1752,12 @@ mod tests {
         let target = EquipMask::FINGER_WEAR_LEFT.bits();
         let request = rmp_serde::to_vec_named(&serde_json::json!({
             "kind": "request", "id": 1,
-            "command": { "command": "apply_client_equipment_set", "bindings": [{ "item": 91, "target": target }, { "item": null, "target": target }] },
+            "command": { "command": "apply_client_equipment_set", "storage": { "preferred": {}, "fallback": [1] }, "bindings": [{ "item": 91, "target": target }, { "item": null, "target": target }] },
         })).unwrap();
         let mut reader = Cursor::new(framed_payload(request));
         let Some(InboundFrame::Request {
-            command: HostCommand::Client(ClientHostCommand::ApplyClientEquipmentSet { bindings }),
+            command:
+                HostCommand::Client(ClientHostCommand::ApplyClientEquipmentSet { bindings, .. }),
             ..
         }) = read_frame(&mut reader).unwrap()
         else {

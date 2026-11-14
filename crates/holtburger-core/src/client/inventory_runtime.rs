@@ -4,6 +4,7 @@ use super::{
     ClientRuntime,
     container_auto_merge::{AutoMergeOutcome, ContainerAutoMerge},
     inventory_plan::{InventoryIntent, InventoryMove, InventoryPlan},
+    inventory_storage::EquipmentStoragePolicy,
     types::{ActionResultReason, ActionResultSource},
 };
 use anyhow::Result;
@@ -100,8 +101,12 @@ impl ClientRuntime {
         }
     }
 
-    pub(super) async fn submit_inventory_intent(&mut self, intent: InventoryIntent) -> Result<()> {
-        let plan = match self.evaluate_inventory_intent(intent) {
+    pub(super) async fn submit_inventory_intent(
+        &mut self,
+        intent: InventoryIntent,
+        storage: &EquipmentStoragePolicy,
+    ) -> Result<()> {
+        let plan = match self.evaluate_inventory_intent(intent, storage) {
             Ok(plan) => plan,
             Err(reason) => {
                 self.emit_action_result(
@@ -208,6 +213,7 @@ mod tests {
         equipment_plan::tests::{event, outfit},
     };
     use super::*;
+    use crate::client::equipment_plan::tests::storage_policy;
     use holtburger_common::Vector3;
     use holtburger_common::properties::{
         InventoryEntryKind, PropertyDataId, WorldObjectPropertyAccessorsMut,
@@ -322,12 +328,15 @@ mod tests {
         client.world = ammo_inventory();
         let before = client.session.game_action_sequence;
         client
-            .submit_inventory_intent(InventoryIntent {
-                item: Guid(3),
-                target: InventoryTarget::Equipment {
-                    mask: holtburger_common::properties::EquipMask::MISSILE_AMMO.bits(),
+            .submit_inventory_intent(
+                InventoryIntent {
+                    item: Guid(3),
+                    target: InventoryTarget::Equipment {
+                        mask: holtburger_common::properties::EquipMask::MISSILE_AMMO.bits(),
+                    },
                 },
-            })
+                &storage_policy(&client.world),
+            )
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, before + 1);
@@ -343,12 +352,15 @@ mod tests {
             .insert(holtburger_common::properties::PropertyInt::StackSize, 100);
         let mut events = client.subscribe_client_view_events();
         client
-            .submit_inventory_intent(InventoryIntent {
-                item: Guid(3),
-                target: InventoryTarget::Equipment {
-                    mask: holtburger_common::properties::EquipMask::MISSILE_AMMO.bits(),
+            .submit_inventory_intent(
+                InventoryIntent {
+                    item: Guid(3),
+                    target: InventoryTarget::Equipment {
+                        mask: holtburger_common::properties::EquipMask::MISSILE_AMMO.bits(),
+                    },
                 },
-            })
+                &storage_policy(&client.world),
+            )
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, before + 1);
@@ -393,7 +405,10 @@ mod tests {
         };
         let mut events = client.subscribe_client_view_events();
         let before = client.session.game_action_sequence;
-        client.submit_inventory_intent(intent).await.unwrap();
+        client
+            .submit_inventory_intent(intent, &storage_policy(&client.world))
+            .await
+            .unwrap();
         assert_eq!(client.session.game_action_sequence, before);
         assert!(
             matches!(events.try_recv().unwrap(), ClientViewEvent::ActionResult {
@@ -409,7 +424,10 @@ mod tests {
             .properties
             .ints
             .insert(PropertyInt::StackSize, MAXIMUM - QUANTITY);
-        client.submit_inventory_intent(intent).await.unwrap();
+        client
+            .submit_inventory_intent(intent, &storage_policy(&client.world))
+            .await
+            .unwrap();
         assert_eq!(client.session.game_action_sequence, before + 1);
         assert!(client.inventory_operation.is_none());
         assert!(client.equipment_operation.is_none());
@@ -443,17 +461,23 @@ mod tests {
             .set_capture(capture.path().to_str().expect("capture path"))
             .expect("capture");
         client
-            .submit_inventory_intent(InventoryIntent {
-                item: ground,
-                target: InventoryTarget::Pickup { container: None },
-            })
+            .submit_inventory_intent(
+                InventoryIntent {
+                    item: ground,
+                    target: InventoryTarget::Pickup { container: None },
+                },
+                &storage_policy(&client.world),
+            )
             .await
             .expect("pickup");
         client
-            .submit_inventory_intent(InventoryIntent {
-                item: equipped,
-                target: InventoryTarget::Ground,
-            })
+            .submit_inventory_intent(
+                InventoryIntent {
+                    item: equipped,
+                    target: InventoryTarget::Ground,
+                },
+                &storage_policy(&client.world),
+            )
             .await
             .expect("drop equipped");
         let recipient = Guid(0x8000_0050);
@@ -469,10 +493,13 @@ mod tests {
             .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
         client.world.add_entity(entity);
         client
-            .submit_inventory_intent(InventoryIntent {
-                item: equipped,
-                target: InventoryTarget::Give { guid: recipient },
-            })
+            .submit_inventory_intent(
+                InventoryIntent {
+                    item: equipped,
+                    target: InventoryTarget::Give { guid: recipient },
+                },
+                &storage_policy(&client.world),
+            )
             .await
             .expect("give equipped");
         let bytes = std::fs::read(capture.path()).expect("captured packets");
@@ -518,10 +545,13 @@ mod tests {
         let equipped = client.world.player_equipment().next().expect("armor").0;
         let before = client.session.game_action_sequence;
         client
-            .submit_inventory_intent(InventoryIntent {
-                item: equipped,
-                target: InventoryTarget::Ground,
-            })
+            .submit_inventory_intent(
+                InventoryIntent {
+                    item: equipped,
+                    target: InventoryTarget::Ground,
+                },
+                &storage_policy(&client.world),
+            )
             .await
             .expect("drop");
         move_during_reach(&mut client.world);
@@ -542,10 +572,13 @@ mod tests {
         assert!(client.world.equipment_mask(equipped).is_none());
         assert_eq!(client.session.game_action_sequence, before + 1);
         client
-            .submit_inventory_intent(InventoryIntent {
-                item: Guid(3),
-                target: InventoryTarget::Container { guid: PLAYER },
-            })
+            .submit_inventory_intent(
+                InventoryIntent {
+                    item: Guid(3),
+                    target: InventoryTarget::Container { guid: PLAYER },
+                },
+                &storage_policy(&client.world),
+            )
             .await
             .expect("move");
         assert_eq!(client.session.game_action_sequence, before + 2);

@@ -5,7 +5,9 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use holtburger_common::CharacterOption;
 use holtburger_core::ClientCommand;
-use holtburger_core::client::inventory_storage::{InventoryInsertion, InventoryPlacementPolicy};
+use holtburger_core::client::inventory_storage::{
+    EquipmentStoragePolicy, InventoryInsertion, InventoryPlacementPolicy,
+};
 use holtburger_core::client::types::{ChatChannelDestination, ChatTellTarget};
 use serde::Deserialize;
 
@@ -334,6 +336,63 @@ impl ClientAttackProfileRequest {
     }
 }
 
+/// Browser object keys remain strings in MessagePack; convert them only at the app boundary.
+fn deserialize_equipment_storage<'de, D>(
+    deserializer: D,
+) -> std::result::Result<EquipmentStoragePolicy, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    struct Wire {
+        preferred: std::collections::BTreeMap<String, holtburger_common::Guid>,
+        fallback: Vec<holtburger_common::Guid>,
+    }
+    let wire = Wire::deserialize(deserializer)?;
+    let preferred = wire
+        .preferred
+        .into_iter()
+        .map(|(key, container)| {
+            let item = key.parse::<u32>().map_err(serde::de::Error::custom)?;
+            // Canonical keys prevent aliases such as "01" from replacing another entry.
+            if item == 0 || item.to_string() != key {
+                return Err(serde::de::Error::custom(
+                    "Equipment item GUID must be a positive canonical decimal string",
+                ));
+            }
+            Ok((holtburger_common::Guid(item), container))
+        })
+        .collect::<std::result::Result<_, D::Error>>()?;
+    Ok(EquipmentStoragePolicy {
+        preferred,
+        fallback: wire.fallback,
+    })
+}
+
+/// Keep the browser's container-key codec out of the shared preview contract.
+fn deserialize_inventory_preview<'de, D>(
+    deserializer: D,
+) -> std::result::Result<holtburger_core::client::inventory_plan::InventoryPreviewRequest, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    struct Wire {
+        sequence: u32,
+        intent: holtburger_core::client::inventory_plan::InventoryIntent,
+        #[serde(deserialize_with = "deserialize_equipment_storage")]
+        storage: EquipmentStoragePolicy,
+    }
+    let wire = Wire::deserialize(deserializer)?;
+    Ok(
+        holtburger_core::client::inventory_plan::InventoryPreviewRequest {
+            sequence: wire.sequence,
+            intent: wire.intent,
+            storage: wire.storage,
+        },
+    )
+}
+
 /// JSON uses JavaScript's exact integer range; the shared controller only owns durations.
 fn deserialize_auto_merge_policy<'de, D>(
     deserializer: D,
@@ -369,6 +428,9 @@ pub enum ClientHostCommand {
     /// Submit reusable equipment bindings, with one peace prerequisite if required.
     ApplyClientEquipmentSet {
         bindings: Vec<super::client_projection::ClientEquipmentBindingWire>,
+        /// Browser-selected outgoing-item preferences and fallback order.
+        #[serde(deserialize_with = "deserialize_equipment_storage")]
+        storage: EquipmentStoragePolicy,
     },
     /// Request authoritative examination facts for one selected entity.
     ExamineClientEntity {
@@ -439,6 +501,9 @@ pub enum ClientHostCommand {
         guid: holtburger_common::Guid,
         /// Prefer the off hand when supported, or the right side for paired jewelry.
         alternate: bool,
+        /// Browser-selected destinations for displaced equipment.
+        #[serde(deserialize_with = "deserialize_equipment_storage")]
+        storage: EquipmentStoragePolicy,
     },
     /// Consolidate direct carried contents using the application's explicit timeout policy.
     AutoMergeClientContainer {
@@ -451,6 +516,9 @@ pub enum ClientHostCommand {
     /// Execute a semantic inventory gesture against the latest authoritative world.
     SubmitClientInventory {
         intent: holtburger_core::client::inventory_plan::InventoryIntent,
+        /// Browser-selected destinations when this gesture removes equipment.
+        #[serde(deserialize_with = "deserialize_equipment_storage")]
+        storage: EquipmentStoragePolicy,
     },
     /// Close only the named confirmed external root through shared coordination.
     CloseClientContainer {
@@ -458,6 +526,7 @@ pub enum ClientHostCommand {
     },
     /// Shared, mutation-free evaluation of an inventory target.
     PreviewClientInventory {
+        #[serde(deserialize_with = "deserialize_inventory_preview")]
         request: holtburger_core::client::inventory_plan::InventoryPreviewRequest,
     },
     /// Evaluate a candidate vendor draft using shared world semantics.
@@ -1383,17 +1452,22 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
-        EquipClientItem { guid, alternate } => runtime
+        EquipClientItem {
+            guid,
+            alternate,
+            storage,
+        } => runtime
             .send_command(ClientCommand::GetAndWield {
                 item: guid,
                 slot: Some(holtburger_core::client::types::TargetSlot::PreferredSide { alternate }),
+                storage,
             })
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
-        ApplyClientEquipmentSet { bindings } => runtime
-            .send_command(ClientCommand::ApplyEquipmentSet(
-                bindings
+        ApplyClientEquipmentSet { bindings, storage } => runtime
+            .send_command(ClientCommand::ApplyEquipmentSet {
+                bindings: bindings
                     .into_iter()
                     .map(
                         |binding| holtburger_core::client::equipment_set::EquipmentBinding {
@@ -1404,7 +1478,8 @@ pub async fn dispatch_client(
                         },
                     )
                     .collect(),
-            ))
+                storage,
+            })
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
@@ -1418,8 +1493,8 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
-        SubmitClientInventory { intent } => runtime
-            .send_command(ClientCommand::SubmitInventory(intent))
+        SubmitClientInventory { intent, storage } => runtime
+            .send_command(ClientCommand::SubmitInventory { intent, storage })
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

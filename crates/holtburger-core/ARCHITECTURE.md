@@ -465,7 +465,7 @@ character-only preparation and do not acquire motion-table/run-stat requirements
 
 ### Equipment changes
 
-`client/equipment_plan.rs` resolves a single requested assignment through world-owned public equipment facts and allocates every displaced item before mutation. Source-pack storage is preferred, then the main pack and carried packs in native order. The incoming item’s future free slot is not credited.
+`client/equipment_plan.rs` resolves a single requested assignment through world-owned public equipment facts and allocates every displaced item before mutation. Callers supply per-outgoing-item preferred containers and an explicit fallback order. Core validates currently carried real containers and reserves capacity across all removals; it does not choose inventory organization policy. The incoming item’s future free slot is not credited.
 
 The entity snapshot/delta feed also carries world's equipped `ProjectileSupply`, independently
 of attack timing and engagement state. Core appraises an unresolved projectile source once per
@@ -473,7 +473,7 @@ continuous pending source; a fresh entity description permits a new request. Rej
 appraisals leave supply unknown without repeated requests. Frontends consume the published supply
 at their display cadence; they do not classify weapons or subtract locally for shots.
 
-`client/equipment_runtime.rs` owns combat staging, ordered unequips, and wield completion for all command consumers. It waits for accepted storage/equipment state between requests, revalidates the remaining plan, and stops on rejection, lifecycle invalidation, or timeout without rollback. Manual combat commands cancel pending restoration. Timeout reports uncertainty because the outstanding wire request may still complete. Ownership is released when sending the final request; wield confirmation is needed only when combat restoration depends on it. Frontends submit equipment intent and do not maintain a second equipment executor.
+`client/equipment_runtime.rs` owns combat staging, ordered unequips, and wield completion for all command consumers. It waits for accepted storage/equipment state between requests, revalidates the remaining plan, and stops on rejection, lifecycle invalidation, or timeout without rollback. Manual combat commands cancel pending restoration. Timeout reports uncertainty because the outstanding wire request may still complete. Ownership is released when sending the final request; wield confirmation is needed only when combat restoration depends on it. Frontends submit equipment intent and do not maintain a second equipment executor. Placement policy is retained across peace prerequisites and execution revalidation. H3D learns each item’s last observed owned container from accepted entity facts and persists that history in a character settings section; equipped items and recovery gaps retain their history. Automatic overflow becomes the newly remembered container.
 
 `client/salvage.rs` evaluates ordered whole-item batches and compares world-produced review
 inputs again before dispatch. Read-only discovery/preview and guarded submission have correlated

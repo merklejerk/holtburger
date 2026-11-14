@@ -2,8 +2,55 @@
 use holtburger_common::{Guid, properties::WorldObjectExt};
 use holtburger_world::{
     WorldState,
-    state::storage::{PackEntryKind, RosterCoverage, StorageSlot},
+    state::storage::{PackEntryKind, RosterCoverage, StorageLocation, StorageSlot},
 };
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Caller-owned container preferences for outgoing equipment; core only allocates capacity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EquipmentStoragePolicy {
+    /// Preferred carried container for each outgoing item, independent of the incoming item.
+    pub preferred: BTreeMap<Guid, Guid>,
+    /// Explicit fallback order, including the player root when the caller permits it.
+    pub fallback: Vec<Guid>,
+}
+
+/// Reserve each outgoing item in caller order without changing the caller's preferences.
+pub(super) fn allocate_equipment_storage(
+    world: &WorldState,
+    policy: &EquipmentStoragePolicy,
+    items: &[(Guid, bool)],
+    reserved: &[(StorageDestination, bool)],
+) -> Result<Vec<StorageDestination>, StorageAllocationError> {
+    let mut reservations = reserved.to_vec();
+    let mut destinations = Vec::with_capacity(items.len());
+    for &(item, pack_slot) in items {
+        let mut seen = BTreeSet::new();
+        let containers = policy
+            .preferred
+            .get(&item)
+            .copied()
+            .into_iter()
+            .chain(policy.fallback.iter().copied())
+            .filter(|guid| seen.insert(*guid))
+            // Persisted bags may have been sold or transferred. They are preferences,
+            // never authorization to put equipment into unowned or external storage.
+            .filter(|&guid| {
+                guid == world.player.guid
+                    || matches!(
+                        world.storage_location(guid),
+                        Some(StorageLocation::Contained { parent, slot: StorageSlot::Pack {
+                            kind: PackEntryKind::Container, ..
+                        } }) if parent == world.player.guid
+                    )
+            });
+        let destination =
+            allocate_in_containers(world, containers, &[pack_slot], &reservations)?[0];
+        reservations.push((destination, pack_slot));
+        destinations.push(destination);
+    }
+    Ok(destinations)
+}
 
 /// Frontend-selected placement for operations without an explicit drop position.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -79,17 +126,6 @@ pub fn allocate_storage(
     preferred: Guid,
     pack_slots: &[bool],
 ) -> Result<Vec<StorageDestination>, StorageAllocationError> {
-    allocate_storage_with_reservations(world, preferred, pack_slots, &[])
-}
-
-/// Allocate against confirmed capacity and earlier temporary set reservations.
-/// Each reservation retains its slot domain; failed allocations reserve nothing.
-pub(super) fn allocate_storage_with_reservations(
-    world: &WorldState,
-    preferred: Guid,
-    pack_slots: &[bool],
-    reserved: &[(StorageDestination, bool)],
-) -> Result<Vec<StorageDestination>, StorageAllocationError> {
     let mut containers = vec![preferred];
     if preferred != world.player.guid {
         containers.push(world.player.guid);
@@ -106,6 +142,16 @@ pub(super) fn allocate_storage_with_reservations(
         .collect();
     packs.sort_unstable();
     containers.extend(packs.into_iter().map(|(_, guid)| guid));
+    allocate_in_containers(world, containers, pack_slots, &[])
+}
+
+/// Capacity mechanics shared by equipment policy and ordinary pickup/split allocation.
+fn allocate_in_containers(
+    world: &WorldState,
+    containers: impl IntoIterator<Item = Guid>,
+    pack_slots: &[bool],
+    reserved: &[(StorageDestination, bool)],
+) -> Result<Vec<StorageDestination>, StorageAllocationError> {
     let mut candidates = containers.into_iter().map(|guid| {
         let mut budget = storage_budget(world, guid)?;
         for &(destination, pack_slot) in reserved {
@@ -158,6 +204,9 @@ impl StorageBudget {
     }
 
     fn allocate(&mut self, pack_slot: bool) -> Result<u32, StorageAllocationError> {
+        if self.space(pack_slot) == 0 {
+            return Err(StorageAllocationError::NoSpace);
+        }
         let (space, next) = if pack_slot {
             &mut self.packs
         } else {
@@ -217,16 +266,105 @@ mod tests {
     use holtburger_world::entity::Entity;
 
     #[test]
+    fn equipment_preferences_share_capacity_and_honor_the_supplied_fallback_order() {
+        let world = outfit(2, 2);
+        let storage = EquipmentStoragePolicy {
+            preferred: [(Guid(4), Guid(2)), (Guid(5), Guid(2))].into(),
+            fallback: vec![Guid(2), Guid(1)],
+        };
+        assert_eq!(
+            allocate_equipment_storage(
+                &world,
+                &storage,
+                &[(Guid(4), false), (Guid(5), false)],
+                &[]
+            ),
+            Ok(vec![
+                StorageDestination {
+                    container: Guid(2),
+                    placement: 1
+                },
+                StorageDestination {
+                    container: Guid(1),
+                    placement: 0
+                },
+            ])
+        );
+        let storage = EquipmentStoragePolicy {
+            preferred: BTreeMap::new(),
+            fallback: vec![Guid(2), Guid(1)],
+        };
+        assert_eq!(
+            allocate_equipment_storage(&world, &storage, &[(Guid(4), false)], &[]).unwrap()[0]
+                .container,
+            Guid(2)
+        );
+    }
+
+    #[test]
+    fn stale_and_external_container_preferences_cannot_authorize_a_transfer() {
+        let mut world = outfit(2, 2);
+        let external = Guid(99);
+        let mut pack = Entity::new(external, "External pack".into(), Default::default());
+        pack.properties.ints.insert(PropertyInt::ItemsCapacity, 10);
+        world.entities.insert(pack);
+        for preferred in [external, Guid(999)] {
+            let storage = EquipmentStoragePolicy {
+                preferred: [(Guid(4), preferred)].into(),
+                fallback: vec![external, Guid(1)],
+            };
+            assert_eq!(
+                allocate_equipment_storage(&world, &storage, &[(Guid(4), false)], &[]).unwrap()[0]
+                    .container,
+                Guid(1)
+            );
+        }
+        let storage = EquipmentStoragePolicy {
+            preferred: [(Guid(4), external)].into(),
+            fallback: vec![],
+        };
+        assert_eq!(
+            allocate_equipment_storage(&world, &storage, &[(Guid(4), false)], &[]),
+            Err(StorageAllocationError::NoSpace)
+        );
+    }
+
+    #[test]
+    fn equipment_allocation_keeps_incomplete_storage_distinct_from_full_storage() {
+        let mut world = outfit(2, 2);
+        world
+            .entities
+            .get_mut(Guid(2))
+            .unwrap()
+            .properties
+            .ints
+            .0
+            .remove(&PropertyInt::ItemsCapacity);
+        let storage = EquipmentStoragePolicy {
+            preferred: [(Guid(4), Guid(2))].into(),
+            fallback: vec![Guid(1)],
+        };
+        assert_eq!(
+            allocate_equipment_storage(&world, &storage, &[(Guid(4), false)], &[]),
+            Err(StorageAllocationError::IncompleteStorage(Guid(2)))
+        );
+    }
+
+    #[test]
     fn separate_bindings_share_reservations_without_overallocating() {
         let world = outfit(1, 2);
-        let first = allocate_storage_with_reservations(&world, Guid(2), &[false], &[]).unwrap();
+        let storage = EquipmentStoragePolicy {
+            preferred: BTreeMap::new(),
+            fallback: vec![Guid(2), Guid(1)],
+        };
+        let first = allocate_equipment_storage(&world, &storage, &[(Guid(4), false)], &[]).unwrap();
         let mut reserved = vec![(first[0], false)];
         let second =
-            allocate_storage_with_reservations(&world, Guid(2), &[false], &reserved).unwrap();
+            allocate_equipment_storage(&world, &storage, &[(Guid(5), false)], &reserved).unwrap();
         assert_ne!(first[0].container, second[0].container);
         reserved.push((second[0], false));
         assert_eq!(
-            allocate_storage_with_reservations(&world, Guid(2), &[false], &reserved),
+            allocate_equipment_storage(&world, &storage, &[(Guid(6), false)], &reserved),
             Err(StorageAllocationError::NoSpace)
         );
     }
@@ -234,14 +372,23 @@ mod tests {
     #[test]
     fn rejected_allocation_leaves_earlier_reservations_unchanged() {
         let world = outfit(1, 2);
-        let first = allocate_storage_with_reservations(&world, Guid(2), &[false], &[]).unwrap();
+        let storage = EquipmentStoragePolicy {
+            preferred: BTreeMap::new(),
+            fallback: vec![Guid(2), Guid(1)],
+        };
+        let first = allocate_equipment_storage(&world, &storage, &[(Guid(4), false)], &[]).unwrap();
         let reserved = vec![(first[0], false)];
         assert_eq!(
-            allocate_storage_with_reservations(&world, Guid(2), &[false, false], &reserved),
+            allocate_equipment_storage(
+                &world,
+                &storage,
+                &[(Guid(5), false), (Guid(6), false)],
+                &reserved
+            ),
             Err(StorageAllocationError::NoSpace)
         );
         let admitted =
-            allocate_storage_with_reservations(&world, Guid(2), &[false], &reserved).unwrap();
+            allocate_equipment_storage(&world, &storage, &[(Guid(5), false)], &reserved).unwrap();
         assert_eq!(admitted[0].container, Guid(1));
     }
 

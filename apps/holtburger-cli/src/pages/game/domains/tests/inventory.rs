@@ -257,6 +257,6 @@ fn equip_request_preserves_explicit_target_for_core() {
         })
         .unwrap();
     assert!(
-        matches!(result.commands.as_slice(), [ClientCommand::GetAndWield { item, slot: Some(holtburger_core::client::types::TargetSlot::OffHand) }] if *item == weapon_guid)
+        matches!(result.commands.as_slice(), [ClientCommand::GetAndWield { item, slot: Some(holtburger_core::client::types::TargetSlot::OffHand), .. }] if *item == weapon_guid)
     );
 }

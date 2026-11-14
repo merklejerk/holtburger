@@ -502,11 +502,11 @@ impl ClientRuntime {
         let conflicts = super::commands::inventory_command_requires_guard(cmd)
             || matches!(
                 cmd,
-                ClientCommand::SubmitInventory(_)
+                ClientCommand::SubmitInventory { .. }
                     | ClientCommand::GetAndWield { .. }
                     | ClientCommand::SplitToWield { .. }
                     | ClientCommand::SubmitItemUse(_)
-                    | ClientCommand::ApplyEquipmentSet(_)
+                    | ClientCommand::ApplyEquipmentSet { .. }
                     | ClientCommand::SubmitSalvage(_)
                     | ClientCommand::Trade(_)
                     | ClientCommand::BeginCombatEngagement { .. }

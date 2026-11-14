@@ -49,12 +49,12 @@ impl ClientRuntime {
             | ClientCommand::TargetedMeleeAttack { .. }
             | ClientCommand::TargetedMissileAttack { .. }
             | ClientCommand::SoulEmote { .. }
-            | ClientCommand::ApplyEquipmentSet(_)
+            | ClientCommand::ApplyEquipmentSet { .. }
             | ClientCommand::Recall(_)
             | ClientCommand::Use { .. }
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::AutoMergeContainer { .. }
-            | ClientCommand::SubmitInventory(_)
+            | ClientCommand::SubmitInventory { .. }
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. }
             | ClientCommand::Quit

@@ -389,6 +389,7 @@ async fn conflict_stops_continuation_without_queuing_or_extending_wait() {
             crate::client::inventory_plan::InventoryPreviewRequest {
                 sequence: 1,
                 intent,
+                storage: crate::client::equipment_plan::tests::storage_policy(&client.world),
             },
         ))
         .await
@@ -398,11 +399,17 @@ async fn conflict_stops_continuation_without_queuing_or_extending_wait() {
         Continuation::Continue
     ));
     client
-        .handle_command(ClientCommand::SubmitInventory(intent))
+        .handle_command(ClientCommand::SubmitInventory {
+            intent,
+            storage: crate::client::equipment_plan::tests::storage_policy(&client.world),
+        })
         .await
         .unwrap();
     client
-        .handle_command(ClientCommand::SubmitInventory(intent))
+        .handle_command(ClientCommand::SubmitInventory {
+            intent,
+            storage: crate::client::equipment_plan::tests::storage_policy(&client.world),
+        })
         .await
         .unwrap();
     assert_eq!(pending(&client).deadline, deadline);

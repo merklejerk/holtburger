@@ -281,7 +281,7 @@ mod tests {
             let result =
                 super::super::reduce::reduce_action(&mut state, pickup.action.clone()).unwrap();
             assert!(
-                matches!(result.commands.as_slice(), [ClientCommand::SubmitInventory(intent)] if intent.item == guid && intent.target == holtburger_core::client::inventory_plan::InventoryTarget::Pickup { container: None })
+                matches!(result.commands.as_slice(), [ClientCommand::SubmitInventory { intent, .. }] if intent.item == guid && intent.target == holtburger_core::client::inventory_plan::InventoryTarget::Pickup { container: None })
             );
             assert!(
                 !verbs

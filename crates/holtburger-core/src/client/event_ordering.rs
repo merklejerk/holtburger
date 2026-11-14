@@ -107,6 +107,7 @@ impl GameEventOrdering {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::equipment_plan::tests::storage_policy;
     use crate::client::{
         ClientState, builder,
         inventory_plan::{InventoryIntent, InventoryPlan, InventoryTarget, plan_inventory_intent},
@@ -205,7 +206,7 @@ mod tests {
         assert!(
             matches!(plan_inventory_intent(&client.world, InventoryIntent {
             item, target: InventoryTarget::Container { guid: sack },
-        }, Default::default()), Ok(InventoryPlan::Move(step)) if step.container == sack && step.placement == 0)
+        }, Default::default(), &storage_policy(&client.world)), Ok(InventoryPlan::Move(step)) if step.container == sack && step.placement == 0)
         );
         assert!(
             client

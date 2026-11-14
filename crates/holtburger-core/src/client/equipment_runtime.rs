@@ -3,6 +3,7 @@
 use super::{
     ClientRuntime, ClientState,
     equipment_plan::{EquipmentPlan, plan_equipment_change},
+    inventory_storage::EquipmentStoragePolicy,
     types::{ActionResultReason, ActionResultSource, TargetSlot},
 };
 use anyhow::Result;
@@ -165,6 +166,7 @@ impl EquipmentOperation {
             self.plan.item,
             Some(TargetSlot::EquipMask(self.plan.target)),
             self.plan.insertion,
+            &self.plan.storage,
         )
         .map_err(|error| error.to_string())?;
         // Conflict removals can prepend into the source pack and shift its index.
@@ -249,6 +251,7 @@ impl ClientRuntime {
         item: Guid,
         slot: Option<TargetSlot>,
         split: Option<u32>,
+        storage: &EquipmentStoragePolicy,
     ) -> Result<()> {
         if self.inventory_change_pending() || self.active_busy_operation.is_some() {
             self.emit_action_result(
@@ -269,6 +272,7 @@ impl ClientRuntime {
             item,
             slot,
             self.inventory_placement.automatic,
+            storage,
         ) {
             Ok(plan) => plan,
             Err(error) => {
@@ -376,6 +380,7 @@ impl ClientRuntime {
 mod tests {
     use super::super::equipment_plan::tests::{event, outfit};
     use super::*;
+    use crate::client::equipment_plan::tests::storage_policy;
     use crate::client::inventory_storage::InventoryInsertion;
     use holtburger_common::properties::{InventoryEntryKind, PropertyInt};
     use holtburger_protocol::messages::{
@@ -387,8 +392,14 @@ mod tests {
 
     fn operation(world: &WorldState, now: Instant) -> EquipmentOperation {
         EquipmentOperation {
-            plan: plan_equipment_change(world, INCOMING, None, InventoryInsertion::Append)
-                .expect("complete outfit plan"),
+            plan: plan_equipment_change(
+                world,
+                INCOMING,
+                None,
+                InventoryInsertion::Append,
+                &storage_policy(world),
+            )
+            .expect("complete outfit plan"),
             completed: 0,
             stage: EquipmentStage::Ready,
             deadline: now + EQUIPMENT_STEP_TIMEOUT,
@@ -415,7 +426,9 @@ mod tests {
             let mut world = outfit(2, 1);
             let now = Instant::now();
             let mut operation = operation(&world, now);
-            operation.plan = plan_equipment_change(&world, INCOMING, None, insertion).unwrap();
+            operation.plan =
+                plan_equipment_change(&world, INCOMING, None, insertion, &storage_policy(&world))
+                    .unwrap();
             let mut next = operation.advance(&world, now);
             for step in operation.plan.unequips.clone() {
                 assert!(
@@ -435,12 +448,24 @@ mod tests {
     }
 
     #[test]
-    fn prepending_conflicts_to_source_pack_keeps_replacement_valid() {
-        let mut world = outfit(0, 3);
+    fn prepending_to_preferred_pack_retains_policy_during_revalidation() {
+        let mut world = outfit(2, 3);
         let now = Instant::now();
         let mut pending = operation(&world, now);
-        pending.plan =
-            plan_equipment_change(&world, INCOMING, None, InventoryInsertion::Prepend).unwrap();
+        let mut storage = storage_policy(&world);
+        let source_parent = pending.plan.source.parent();
+        storage.preferred = world
+            .player_equipment()
+            .map(|(item, _)| (item, source_parent))
+            .collect();
+        pending.plan = plan_equipment_change(
+            &world,
+            INCOMING,
+            None,
+            InventoryInsertion::Prepend,
+            &storage,
+        )
+        .unwrap();
         let source_parent = pending.plan.source.parent();
         for step in pending.plan.unequips.clone() {
             assert_eq!(step.container, source_parent);
@@ -635,7 +660,7 @@ mod tests {
         client.world = outfit(2, 1);
         client.equipment_operation = Some(operation(&client.world, Instant::now()));
         client
-            .start_equipment_change(Guid(99), None, None)
+            .start_equipment_change(Guid(99), None, None, &storage_policy(&client.world))
             .await
             .expect("busy rejection");
         assert_eq!(
@@ -685,7 +710,7 @@ mod tests {
                 holtburger_common::properties::ItemType::MELEE_WEAPON.bits() as i32,
             );
             client
-                .start_equipment_change(INCOMING, None, None)
+                .start_equipment_change(INCOMING, None, None, &storage_policy(&client.world))
                 .await
                 .expect("weapon change");
             let active = matches!(

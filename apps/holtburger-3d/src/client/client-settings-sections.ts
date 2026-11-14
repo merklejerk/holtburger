@@ -61,6 +61,7 @@ export type ClientHudPlacementKey = keyof ClientHudLayout;
 
 /** Independently saved character preferences and display metadata. */
 export const clientCharacterSectionSchemas = {
+	packAffinities: characterShape.packAffinities,
 	entityAlerts: characterShape.entityAlerts,
 	actionBars: characterShape.actionBars,
 	spellBarBindings: characterShape.spellBarBindings,

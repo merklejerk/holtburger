@@ -1,3 +1,4 @@
+import { ClientPackAffinities } from "./client-pack-affinities";
 import {
 	localMotionFeedbackSchema,
 	socialMotionReadySchema,
@@ -729,6 +730,8 @@ interface SessionAttachment {
 }
 
 export class ClientLifecycleSession {
+	/** App-owned last-container memory and outgoing-equipment placement policy. */
+	readonly packAffinities = new ClientPackAffinities();
 	/** Latest submitted snapshot names outlive shortcut removal, without retaining past activations. */
 	#equipmentNames = new Map<number, string>();
 	/** Imperative progression owner retained across character-panel mounts. */
@@ -938,6 +941,7 @@ export class ClientLifecycleSession {
 
 	/** Stop all listeners and require replacement state if this owner starts again. */
 	stop(): void {
+		this.packAffinities.reset();
 		this.#cameras.close();
 		this.#equipmentNames = new Map();
 		this.#partyUpdates.stop();
@@ -1213,7 +1217,10 @@ export class ClientLifecycleSession {
 		request: ClientInventoryPreviewRequest,
 	): Promise<void> {
 		await this.#transport.invoke("preview_client_inventory", {
-			request: inventoryPreviewRequestSchema.parse(request),
+			request: {
+				...inventoryPreviewRequestSchema.parse(request),
+				storage: this.packAffinities.storage(this.entities.read()),
+			},
 		});
 	}
 
@@ -1222,6 +1229,7 @@ export class ClientLifecycleSession {
 		this.#equipmentNames.delete(intent.item);
 		await this.#transport.invoke("submit_client_inventory", {
 			intent: inventoryIntentSchema.parse(intent),
+			storage: this.packAffinities.storage(this.entities.read()),
 		});
 	}
 
@@ -1305,6 +1313,7 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("equip_client_item", {
 			guid,
 			alternate,
+			storage: this.packAffinities.storage(this.entities.read()),
 		});
 	}
 
@@ -1316,6 +1325,7 @@ export class ClientLifecycleSession {
 			),
 		);
 		await this.#transport.invoke("apply_client_equipment_set", {
+			storage: this.packAffinities.storage(this.entities.read()),
 			bindings: bindings.map((binding) => ({
 				item: binding.item,
 				target: binding.slot,
@@ -1654,6 +1664,7 @@ export class ClientLifecycleSession {
 					);
 					if (prepared === null) return;
 					this.entities.commit(prepared);
+					this.packAffinities.observe(this.entities.read());
 					this.#emit({ type: "entities" });
 				}),
 			);
@@ -2253,6 +2264,7 @@ export class ClientLifecycleSession {
 				? null
 				: { sample: state.connection, receivedAtMs: performance.now() };
 		this.entities.commit(semantic);
+		this.packAffinities.observe(this.entities.read());
 		commitDynamic();
 		this.#emit({ type: "current-state", state });
 		this.#emit({ type: "dynamic", event: dynamic });

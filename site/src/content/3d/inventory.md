@@ -26,6 +26,8 @@ Cycle the sort control through **Native**, **Alphabetical**, and **Item type** t
 
 <EditorialSpread illustrationSide="left">
 
+Items remember the last pack they were in, even across restarts. Unequipping gear or switching loadouts tries each outgoing item’s remembered pack first, then your main pack and other bags. If that pack is full or no longer carried, the item remembers whichever pack receives it instead.
+
 The equipment strip keeps worn gear beside your pack contents. Hover a slot to dim items that cannot go there; drag an item to narrow the strip to compatible slots. Drop it onto a slot to equip it, or drag worn gear back into a bag to unequip it.
 
 Helmet and cloak visibility controls sit below the strip, alongside **Create loadout** for [saved gear swaps](/holtburger/3d/equipment-loadouts/).

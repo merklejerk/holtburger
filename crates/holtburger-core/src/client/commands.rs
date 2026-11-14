@@ -139,7 +139,7 @@ impl ClientRuntime {
             | ClientCommand::Split { item, .. }
             | ClientCommand::Drop(item)
             | ClientCommand::Get(item) => self.equipment_set.supersede_item(*item),
-            ClientCommand::SubmitInventory(intent) => {
+            ClientCommand::SubmitInventory { intent, .. } => {
                 self.equipment_set.supersede_item(intent.item)
             }
             ClientCommand::Stack {
@@ -174,7 +174,9 @@ impl ClientRuntime {
                 Ok(())
             }
             ClientCommand::Barber(request) => self.handle_barber_request(request).await,
-            ClientCommand::ApplyEquipmentSet(bindings) => self.apply_equipment_set(bindings).await,
+            ClientCommand::ApplyEquipmentSet { bindings, storage } => {
+                self.apply_equipment_set(bindings, storage).await
+            }
             ClientCommand::SubmitHousingManagement(request) => {
                 self.submit_housing_management(request).await
             }
@@ -207,7 +209,9 @@ impl ClientRuntime {
                 self.query_item_use_target(query);
                 Ok(())
             }
-            ClientCommand::SubmitInventory(intent) => self.submit_inventory_intent(intent).await,
+            ClientCommand::SubmitInventory { intent, storage } => {
+                self.submit_inventory_intent(intent, &storage).await
+            }
             ClientCommand::AutoMergeContainer { container, policy } => {
                 self.start_auto_merge(container, policy).await
             }
@@ -401,8 +405,8 @@ impl ClientRuntime {
             // receipt their frontend is awaiting. A generic toast would strand that workflow.
             ClientCommand::SubmitItemUse(request) => return self.submit_item_use(request).await,
             ClientCommand::SubmitSalvage(request) => return self.submit_salvage(request).await,
-            ClientCommand::ApplyEquipmentSet(bindings) => {
-                return self.apply_equipment_set(bindings).await;
+            ClientCommand::ApplyEquipmentSet { bindings, storage } => {
+                return self.apply_equipment_set(bindings, storage).await;
             }
             ClientCommand::VendorTrade(request) => {
                 self.reject_vendor_request(&request, REASON.into());
@@ -1109,11 +1113,22 @@ impl ClientRuntime {
                 )))
                 .await
             }
-            ClientCommand::GetAndWield { item, slot } => {
-                self.start_equipment_change(item, slot, None).await
+            ClientCommand::GetAndWield {
+                item,
+                slot,
+                storage,
+            } => {
+                self.start_equipment_change(item, slot, None, &storage)
+                    .await
             }
-            ClientCommand::SplitToWield { item, slot, amount } => {
-                self.start_equipment_change(item, slot, Some(amount)).await
+            ClientCommand::SplitToWield {
+                item,
+                slot,
+                amount,
+                storage,
+            } => {
+                self.start_equipment_change(item, slot, Some(amount), &storage)
+                    .await
             }
             _ => unreachable!(),
         }

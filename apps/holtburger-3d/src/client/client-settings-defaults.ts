@@ -106,6 +106,7 @@ export function createDefaultClientUserSections(
 /** Create a genuinely absent character profile without any server-derived settings. */
 export function createDefaultClientCharacterSettings(): ClientCharacterSettings {
 	return {
+		packAffinities: {},
 		entityAlerts: [],
 		actionBars: [initialActionBar()],
 		spellBarBindings: initialSpellBarBindings(),

@@ -1200,6 +1200,7 @@ describe("ClientLifecycleSession", () => {
 		expect(transport.invocations.at(-1)).toEqual({
 			command: "apply_client_equipment_set",
 			args: {
+				storage: { preferred: {}, fallback: [0x5000_0001] },
 				bindings: [
 					{ item: 91, target: slot.mask },
 					{ item: null, target: EQUIPMENT_SLOTS[0].mask },
@@ -1235,7 +1236,11 @@ describe("ClientLifecycleSession", () => {
 			expect(transport.invocations).toEqual([
 				{
 					command: "equip_client_item",
-					args: { guid: 91, alternate: alternate },
+					args: {
+						guid: 91,
+						alternate: alternate,
+						storage: { preferred: {}, fallback: [] },
+					},
 				},
 			]);
 		},
@@ -1294,9 +1299,18 @@ describe("ClientLifecycleSession", () => {
 		expect(transport.invocations.slice(-2)).toEqual([
 			{
 				command: "preview_client_inventory",
-				args: { request: { sequence: 8, intent } },
+				args: {
+					request: {
+						sequence: 8,
+						intent,
+						storage: { preferred: {}, fallback: [0x5000_0001] },
+					},
+				},
 			},
-			{ command: "submit_client_inventory", args: { intent } },
+			{
+				command: "submit_client_inventory",
+				args: { intent, storage: { preferred: {}, fallback: [0x5000_0001] } },
+			},
 		]);
 		expect(() =>
 			transport.emit("client-inventory-preview", {
@@ -1306,6 +1320,72 @@ describe("ClientLifecycleSession", () => {
 		).toThrow();
 		await session.stop();
 		expect(transport.handlers.has("client-inventory-preview")).toBe(false);
+	});
+	it("supplies observed pack affinity to every equipment entry point", async () => {
+		const player = 0x5000_0001;
+		const pack = 7;
+		const item = 91;
+		const state = currentState(player);
+		const transport = new FakeClientTransport();
+		const carried = entityFacts(item, {
+			ownedByPlayer: true,
+			location: {
+				kind: "contained",
+				parentGuid: pack,
+				slot: { kind: "item", index: 0 },
+			},
+		});
+		transport.setCurrentState({
+			...state,
+			entities: {
+				...state.entities,
+				entities: [
+					...state.entities.entities,
+					entityFacts(pack, {
+						ownedByPlayer: true,
+						location: {
+							kind: "contained",
+							parentGuid: player,
+							slot: { kind: "pack", entryKind: "container", index: 0 },
+						},
+					}),
+					carried,
+				],
+			},
+		});
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.emit("client-entity-facts-changed", {
+			projectileSupply: null,
+			salvage: null,
+			worldContainer: null,
+			removed: [],
+			upserts: [
+				{
+					...carried,
+					location: {
+						kind: "equipped",
+						wearerGuid: player,
+						mask: EQUIPMENT_SLOTS[0].mask,
+					},
+				},
+			],
+		});
+		const storage = { preferred: { [item]: pack }, fallback: [player, pack] };
+		await session.equipItem(92, false);
+		expect(transport.invocations.at(-1)?.args?.storage).toEqual(storage);
+		await session.applyEquipmentSet([
+			{ slot: EQUIPMENT_SLOTS[0].mask, item: null, name: null },
+		]);
+		expect(transport.invocations.at(-1)?.args?.storage).toEqual(storage);
+		const intent = { item, target: { kind: "unequip" as const } };
+		await session.previewInventory({ sequence: 1, intent });
+		expect(transport.invocations.at(-1)?.args).toEqual({
+			request: { sequence: 1, intent, storage },
+		});
+		await session.submitInventory(intent);
+		expect(transport.invocations.at(-1)?.args?.storage).toEqual(storage);
+		session.stop();
 	});
 
 	it("delivers validated action feedback and detaches its listener on stop", async () => {

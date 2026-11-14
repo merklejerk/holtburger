@@ -1,12 +1,51 @@
 use super::super::{SalvageAssessment, SalvagingPhase};
 use super::object_interaction;
 use super::*;
+use holtburger_core::client::inventory_storage::EquipmentStoragePolicy;
 use holtburger_core::client::salvage::{
     SalvagePreviewRequest, SalvageSubmitOutcome, SalvageSubmitRequest, SalvageToolSelection,
 };
 use holtburger_world::crafting::salvage::SalvageEvaluation;
+use holtburger_world::entity_facts::EntityStorageLocation;
 use holtburger_world::inspection::ObjectInspectionOutcome;
+use holtburger_world::state::storage::{PackEntryKind, StorageSlot};
 use std::collections::{HashMap, hash_map::Entry};
+
+/// The TUI keeps its source-pack preference, then Main Pack and known carried bags.
+fn equipment_storage(state: &GameState, incoming: Option<Guid>) -> EquipmentStoragePolicy {
+    let mut packs: Vec<_> = state
+        .data
+        .entity_facts
+        .values()
+        .filter_map(|facts| match facts.location {
+            EntityStorageLocation::Contained {
+                parent_guid,
+                slot:
+                    StorageSlot::Pack {
+                        index,
+                        kind: PackEntryKind::Container,
+                    },
+            } if Some(parent_guid) == state.data.player_guid && facts.owned_by_player => {
+                Some((index, facts.guid))
+            }
+            _ => None,
+        })
+        .collect();
+    packs.sort_unstable();
+    EquipmentStoragePolicy {
+        preferred: incoming
+            .and_then(|item| state.data.container_parent(item))
+            .into_iter()
+            .flat_map(|parent| state.data.equipment.keys().map(move |&item| (item, parent)))
+            .collect(),
+        fallback: state
+            .data
+            .player_guid
+            .into_iter()
+            .chain(packs.into_iter().map(|(_, guid)| guid))
+            .collect(),
+    }
+}
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
@@ -81,12 +120,14 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             result.commands.push(ClientCommand::GetAndWield {
                 item: guid,
                 slot: None,
+                storage: equipment_storage(state, Some(guid)),
             });
         }
         AppAction::EquipInSlot { guid, slot } => {
             result.commands.push(ClientCommand::GetAndWield {
                 item: guid,
                 slot: Some(slot),
+                storage: equipment_storage(state, Some(guid)),
             });
         }
         AppAction::Unequip { guid } => {
@@ -136,14 +177,15 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             });
         }
         AppAction::PickUp { item, container } => {
-            result.commands.push(ClientCommand::SubmitInventory(
-                holtburger_core::client::inventory_plan::InventoryIntent {
+            result.commands.push(ClientCommand::SubmitInventory {
+                intent: holtburger_core::client::inventory_plan::InventoryIntent {
                     item,
                     target: holtburger_core::client::inventory_plan::InventoryTarget::Pickup {
                         container,
                     },
                 },
-            ));
+                storage: equipment_storage(state, None),
+            });
         }
         AppAction::Give {
             item,

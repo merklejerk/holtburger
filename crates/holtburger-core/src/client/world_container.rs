@@ -257,6 +257,7 @@ impl ClientRuntime {
 mod tests {
     use super::*;
     use crate::client::builder::build_test_client;
+    use crate::client::equipment_plan::tests::storage_policy;
     use holtburger_common::properties::{InventoryEntryKind, ItemType, PropertyInt};
     use holtburger_protocol::{
         errors::WeenieError,
@@ -718,10 +719,13 @@ mod tests {
             client.world.confirm_world_container(ROOT);
             let location = client.world.storage_location(OWNED_STACK);
             client
-                .submit_inventory_intent(InventoryIntent {
-                    item: PACK,
-                    target: InventoryTarget::Stack { guid: OWNED_STACK },
-                })
+                .submit_inventory_intent(
+                    InventoryIntent {
+                        item: PACK,
+                        target: InventoryTarget::Stack { guid: OWNED_STACK },
+                    },
+                    &storage_policy(&client.world),
+                )
                 .await
                 .unwrap();
             assert_eq!(client.session.game_action_sequence, 1);
@@ -789,10 +793,13 @@ mod tests {
             client.world.confirm_world_container(ROOT);
             let original = client.world.storage_location(OWNED_ITEM);
             client
-                .submit_inventory_intent(InventoryIntent {
-                    item: OWNED_ITEM,
-                    target: InventoryTarget::Container { guid: ROOT },
-                })
+                .submit_inventory_intent(
+                    InventoryIntent {
+                        item: OWNED_ITEM,
+                        target: InventoryTarget::Container { guid: ROOT },
+                    },
+                    &storage_policy(&client.world),
+                )
                 .await
                 .unwrap();
             assert_eq!(client.session.game_action_sequence, 1);
@@ -886,16 +893,19 @@ mod tests {
             .await;
             client.world.confirm_world_container(ROOT);
             client
-                .submit_inventory_intent(InventoryIntent {
-                    item: PACK,
-                    target: if explicit {
-                        InventoryTarget::Container {
-                            guid: client.world.player.guid,
-                        }
-                    } else {
-                        InventoryTarget::Pickup { container: None }
+                .submit_inventory_intent(
+                    InventoryIntent {
+                        item: PACK,
+                        target: if explicit {
+                            InventoryTarget::Container {
+                                guid: client.world.player.guid,
+                            }
+                        } else {
+                            InventoryTarget::Pickup { container: None }
+                        },
                     },
-                })
+                    &storage_policy(&client.world),
+                )
                 .await
                 .unwrap();
             assert_eq!(
@@ -959,10 +969,13 @@ mod tests {
         receive(&mut client, roster(ROOT, &[PACK])).await;
         client.world.confirm_world_container(ROOT);
         client
-            .submit_inventory_intent(InventoryIntent {
-                item: PACK,
-                target: InventoryTarget::Pickup { container: None },
-            })
+            .submit_inventory_intent(
+                InventoryIntent {
+                    item: PACK,
+                    target: InventoryTarget::Pickup { container: None },
+                },
+                &storage_policy(&client.world),
+            )
             .await
             .unwrap();
         receive(

@@ -62,6 +62,56 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("persists pack affinities independently for each server and character", async () => {
+		const path = await temporarySettingsPath();
+		const profiles = [
+			"first:9000/0x50000001",
+			"first:9000/0x50000002",
+			"second:9000/0x50000001",
+		];
+		try {
+			const store = new ClientSettingsStore(path, initialWindow);
+			await store.load();
+			await store.saveCharacterPatch(profiles[0], {
+				packAffinities: { "3": 2 },
+			});
+			await store.saveCharacterPatch(profiles[1], {
+				packAffinities: { "3": 4 },
+			});
+			const reloaded = new ClientSettingsStore(path, initialWindow);
+			await reloaded.load();
+			expect(
+				(
+					await reloaded.loadCharacter(
+						profiles[0],
+						defaultCharacter,
+						"persisted",
+					)
+				).sections.packAffinities,
+			).toEqual({ "3": 2 });
+			expect(
+				(
+					await reloaded.loadCharacter(
+						profiles[1],
+						defaultCharacter,
+						"persisted",
+					)
+				).sections.packAffinities,
+			).toEqual({ "3": 4 });
+			expect(
+				(
+					await reloaded.loadCharacter(
+						profiles[2],
+						defaultCharacter,
+						"persisted",
+					)
+				).sections.packAffinities,
+			).toBeUndefined();
+		} finally {
+			await rm(dirname(path), { recursive: true, force: true });
+		}
+	});
+
 	it.each(["mac", "windows", "linux", "unknown"] as const)(
 		"uses %s input defaults for fresh, absent, and incomplete settings",
 		async (platform) => {

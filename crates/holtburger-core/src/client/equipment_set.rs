@@ -10,7 +10,7 @@ use super::{
         EquipmentPlanError, EquipmentReplacement, EquipmentUnequip, resolve_equipment_change,
     },
     inventory_storage::{
-        InventoryInsertion, StorageDestination, allocate_storage_with_reservations,
+        EquipmentStoragePolicy, InventoryInsertion, StorageDestination, allocate_equipment_storage,
     },
     types::TargetSlot,
 };
@@ -76,6 +76,8 @@ pub(super) struct EquipmentSetWield {
 pub(super) struct EquipmentSetRemoval {
     /// Exact whole-item inventory destination.
     pub step: EquipmentUnequip,
+    /// Native slot domain retained for capacity reservations while admitting bindings.
+    pack_slot: bool,
     /// Original equip/empty requests consumed by server refusal feedback.
     pub bindings: Vec<EquipmentBinding>,
 }
@@ -100,24 +102,24 @@ fn plan_equipment_set(
     world: &WorldState,
     bindings: &[EquipmentBinding],
     insertion: InventoryInsertion,
+    storage: &EquipmentStoragePolicy,
 ) -> EquipmentSetPlan {
     let mut admitted: Vec<EquipmentSetWield> = Vec::new();
     let mut removals: Vec<EquipmentSetRemoval> = Vec::new();
-    let mut reserved: Vec<(StorageDestination, bool)> = Vec::new();
     let mut issues = Vec::new();
     let mut empty_targets = EquipMask::NONE;
     for &binding in bindings {
         let result = match binding.item {
             Some(item) => admit_binding(
                 world,
+                storage,
                 item,
                 binding,
                 empty_targets,
                 &mut admitted,
                 &mut removals,
-                &mut reserved,
             ),
-            None => admit_empty_binding(world, binding, &admitted, &mut removals, &mut reserved)
+            None => admit_empty_binding(world, storage, binding, &admitted, &mut removals)
                 .map(|()| empty_targets |= binding.target),
         };
         if let Err(reason) = result {
@@ -169,12 +171,12 @@ fn plan_equipment_set(
 /// Admit atomically: rejected requests must neither consume capacity nor schedule removals.
 fn admit_binding(
     world: &WorldState,
+    storage: &EquipmentStoragePolicy,
     item: Guid,
     binding: EquipmentBinding,
     empty_targets: EquipMask,
     admitted: &mut Vec<EquipmentSetWield>,
     removals: &mut Vec<EquipmentSetRemoval>,
-    reserved: &mut Vec<(StorageDestination, bool)>,
 ) -> Result<(), EquipmentSetIssueReason> {
     let incoming =
         resolve_equipment_change(world, item, Some(TargetSlot::EquipMask(binding.target)))?;
@@ -204,18 +206,7 @@ fn admit_binding(
     }) {
         return Err(EquipmentSetIssueReason::ConflictingTargets);
     }
-    let preferred = match incoming.source {
-        StorageLocation::Contained { parent, .. } => parent,
-        StorageLocation::Equipped { wearer, .. } => wearer,
-    };
-    reserve_removals(
-        world,
-        preferred,
-        &incoming.conflicts,
-        binding,
-        removals,
-        reserved,
-    )?;
+    reserve_removals(world, storage, &incoming.conflicts, binding, removals)?;
     admitted.push(EquipmentSetWield {
         bindings: vec![binding],
         replacement: incoming,
@@ -226,10 +217,10 @@ fn admit_binding(
 /// An empty request removes whole items; partial apparel unequips do not exist on the wire.
 fn admit_empty_binding(
     world: &WorldState,
+    storage: &EquipmentStoragePolicy,
     binding: EquipmentBinding,
     admitted: &[EquipmentSetWield],
     removals: &mut Vec<EquipmentSetRemoval>,
-    reserved: &mut Vec<(StorageDestination, bool)>,
 ) -> Result<(), EquipmentSetIssueReason> {
     if binding.target.is_empty() {
         return Err(EquipmentPlanError::InvalidTarget.into());
@@ -249,44 +240,50 @@ fn admit_empty_binding(
             conflicts.push((item, mask));
         }
     }
-    reserve_removals(
-        world,
-        world.player.guid,
-        &conflicts,
-        binding,
-        removals,
-        reserved,
-    )
+    reserve_removals(world, storage, &conflicts, binding, removals)
 }
 
 /// Reserve all new removals before attributing any of them, so failure leaves prior requests intact.
 fn reserve_removals(
     world: &WorldState,
-    preferred: Guid,
+    storage: &EquipmentStoragePolicy,
     conflicts: &[(Guid, EquipMask)],
     binding: EquipmentBinding,
     removals: &mut Vec<EquipmentSetRemoval>,
-    reserved: &mut Vec<(StorageDestination, bool)>,
 ) -> Result<(), EquipmentSetIssueReason> {
     let new_conflicts: Vec<_> = conflicts
         .iter()
         .copied()
         .filter(|(guid, _)| !removals.iter().any(|removal| removal.step.item == *guid))
         .collect();
-    let pack_slots = new_conflicts
+    let storage_items = new_conflicts
         .iter()
         .map(|(guid, _)| {
             world
                 .entities
                 .get(*guid)
-                .map(|entity| entity.uses_player_container_slot())
+                .map(|entity| (*guid, entity.uses_player_container_slot()))
                 .ok_or(EquipmentPlanError::MissingEntity(*guid))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let destinations = allocate_storage_with_reservations(world, preferred, &pack_slots, reserved)
+    let reserved: Vec<_> = removals
+        .iter()
+        .map(|removal| {
+            (
+                StorageDestination {
+                    container: removal.step.container,
+                    placement: removal.step.placement,
+                },
+                removal.pack_slot,
+            )
+        })
+        .collect();
+    let destinations = allocate_equipment_storage(world, storage, &storage_items, &reserved)
         .map_err(EquipmentPlanError::from)?;
-    for (((item, from), destination), pack_slot) in
-        new_conflicts.into_iter().zip(destinations).zip(pack_slots)
+    for (((item, from), destination), (_, pack_slot)) in new_conflicts
+        .into_iter()
+        .zip(destinations)
+        .zip(storage_items)
     {
         removals.push(EquipmentSetRemoval {
             step: EquipmentUnequip {
@@ -296,8 +293,8 @@ fn reserve_removals(
                 placement: destination.placement,
             },
             bindings: Vec::new(),
+            pack_slot,
         });
-        reserved.push((destination, pack_slot));
     }
     for removal in removals
         .iter_mut()
@@ -315,6 +312,8 @@ fn reserve_removals(
 struct PendingEquipmentPeace {
     /// Original requests are replanned against fresh confirmed state after peace.
     bindings: Vec<EquipmentBinding>,
+    /// Preserve the caller's preferences while waiting for peace.
+    storage: EquipmentStoragePolicy,
     /// Bounded prerequisite; timeout submits no equipment changes.
     deadline: Instant,
 }
@@ -378,6 +377,7 @@ impl ClientRuntime {
     pub(super) async fn apply_equipment_set(
         &mut self,
         bindings: Vec<EquipmentBinding>,
+        storage: EquipmentStoragePolicy,
     ) -> RuntimeResult<()> {
         if self.inventory_change_pending() || self.active_busy_operation.is_some() {
             self.equipment_set_failure(
@@ -393,7 +393,12 @@ impl ClientRuntime {
             );
             return Ok(());
         }
-        let plan = plan_equipment_set(&self.world, &bindings, self.inventory_placement.automatic);
+        let plan = plan_equipment_set(
+            &self.world,
+            &bindings,
+            self.inventory_placement.automatic,
+            &storage,
+        );
         if plan.requires_stable_stance && self.pending_combat_mode.is_some() {
             self.equipment_set_failure(
                 bindings,
@@ -406,6 +411,7 @@ impl ClientRuntime {
         if plan.requires_peace {
             self.equipment_set.peace = Some(PendingEquipmentPeace {
                 bindings,
+                storage,
                 deadline: Instant::now() + EQUIPMENT_STEP_TIMEOUT,
             });
             if let Err(error) = self
@@ -448,6 +454,7 @@ impl ClientRuntime {
             &self.world,
             &pending.bindings,
             self.inventory_placement.automatic,
+            &pending.storage,
         );
         self.submit_equipment_set(plan, true).await
     }
@@ -572,6 +579,7 @@ mod tests {
         equipment_plan::tests::{event, outfit},
     };
     use super::*;
+    use crate::client::equipment_plan::tests::storage_policy;
     use holtburger_common::properties::{ItemType, PropertyInt};
     use holtburger_protocol::messages::GameEvent;
 
@@ -591,7 +599,10 @@ mod tests {
             .unwrap();
         assert_eq!(client.pending_combat_mode, Some(CombatMode::Magic));
         client
-            .apply_equipment_set(vec![binding(INCOMING, EquipMask::MELEE_WEAPON)])
+            .apply_equipment_set(
+                vec![binding(INCOMING, EquipMask::MELEE_WEAPON)],
+                storage_policy(&client.world),
+            )
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 1);
@@ -612,7 +623,10 @@ mod tests {
             .ints
             .insert(PropertyInt::CombatMode, CombatMode::Magic as i32);
         client
-            .apply_equipment_set(vec![binding(INCOMING, EquipMask::MELEE_WEAPON)])
+            .apply_equipment_set(
+                vec![binding(INCOMING, EquipMask::MELEE_WEAPON)],
+                storage_policy(&client.world),
+            )
             .await
             .unwrap();
         assert!(client.equipment_set.awaiting_peace());
@@ -660,7 +674,10 @@ mod tests {
             .await
             .unwrap();
         client
-            .apply_equipment_set(vec![binding(INCOMING, EquipMask::CHEST_ARMOR)])
+            .apply_equipment_set(
+                vec![binding(INCOMING, EquipMask::CHEST_ARMOR)],
+                storage_policy(&client.world),
+            )
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 4);
@@ -673,13 +690,41 @@ mod tests {
     }
 
     #[test]
+    fn set_removals_use_each_items_preference_including_explicit_empty_bindings() {
+        let world = outfit(2, 2);
+        let mut storage = storage_policy(&world);
+        storage.preferred = [(Guid(4), Guid(2)), (Guid(5), Guid(1))].into();
+        for requested in [
+            vec![binding(INCOMING, EquipMask::CHEST_ARMOR)],
+            vec![
+                empty(EquipMask::CHEST_ARMOR),
+                empty(EquipMask::UPPER_ARM_ARMOR),
+            ],
+        ] {
+            let plan = plan_equipment_set(&world, &requested, InventoryInsertion::Append, &storage);
+            assert!(plan.issues.is_empty());
+            let destinations: BTreeMap<_, _> = plan
+                .removals
+                .iter()
+                .map(|removal| (removal.step.item, removal.step.container))
+                .collect();
+            assert_eq!(destinations, storage.preferred);
+        }
+    }
+
+    #[test]
     fn prepend_set_reserves_capacity_for_every_displaced_item() {
         let world = outfit(2, 1);
         let requested = [
             empty(EquipMask::CHEST_ARMOR),
             empty(EquipMask::UPPER_ARM_ARMOR),
         ];
-        let plan = plan_equipment_set(&world, &requested, InventoryInsertion::Prepend);
+        let plan = plan_equipment_set(
+            &world,
+            &requested,
+            InventoryInsertion::Prepend,
+            &storage_policy(&world),
+        );
         assert!(plan.issues.is_empty());
         assert_eq!(plan.removals.len(), requested.len());
         assert!(
@@ -688,7 +733,12 @@ mod tests {
                 .all(|removal| removal.step.placement == 0)
         );
         let full = outfit(1, 1);
-        let plan = plan_equipment_set(&full, &requested, InventoryInsertion::Prepend);
+        let plan = plan_equipment_set(
+            &full,
+            &requested,
+            InventoryInsertion::Prepend,
+            &storage_policy(&full),
+        );
         assert_eq!(plan.removals.len(), 1);
         assert_eq!(plan.issues.len(), 1);
     }
@@ -700,7 +750,12 @@ mod tests {
             empty(EquipMask::CHEST_ARMOR),
             empty(EquipMask::UPPER_ARM_ARMOR),
         ];
-        let plan = plan_equipment_set(&world, &requested, Default::default());
+        let plan = plan_equipment_set(
+            &world,
+            &requested,
+            Default::default(),
+            &storage_policy(&world),
+        );
         assert!(plan.issues.is_empty());
         assert!(plan.wields.is_empty());
         assert_eq!(plan.removals.len(), 2);
@@ -717,8 +772,12 @@ mod tests {
                 },
             )),
         );
-        let partial =
-            plan_equipment_set(&world, &[empty(EquipMask::FOOT_WEAR)], Default::default());
+        let partial = plan_equipment_set(
+            &world,
+            &[empty(EquipMask::FOOT_WEAR)],
+            Default::default(),
+            &storage_policy(&world),
+        );
         assert_eq!(partial.removals.len(), 1);
         assert_eq!(partial.removals[0].step.from, coverage);
         assert!(partial.wields.is_empty());
@@ -730,7 +789,12 @@ mod tests {
         let clear = empty(EquipMask::CHEST_ARMOR);
         let equip = binding(INCOMING, EquipMask::CHEST_ARMOR);
         for requested in [[clear, equip], [equip, clear]] {
-            let plan = plan_equipment_set(&world, &requested, Default::default());
+            let plan = plan_equipment_set(
+                &world,
+                &requested,
+                Default::default(),
+                &storage_policy(&world),
+            );
             assert_eq!(plan.issues.len(), 1);
             assert_eq!(plan.issues[0].binding, requested[1]);
             assert_eq!(
@@ -757,6 +821,7 @@ mod tests {
             &world,
             &[clear, binding(INCOMING, EquipMask::NECK_WEAR)],
             Default::default(),
+            &storage_policy(&world),
         );
         assert_eq!(plan.issues.len(), 1);
         assert_eq!(plan.issues[0].binding, clear);
@@ -778,7 +843,10 @@ mod tests {
             )),
         );
         let requested = empty(MAIN_HAND_LOCATIONS);
-        client.apply_equipment_set(vec![requested]).await.unwrap();
+        client
+            .apply_equipment_set(vec![requested], storage_policy(&client.world))
+            .await
+            .unwrap();
         assert!(client.equipment_set.awaiting_peace());
         client
             .world
@@ -871,6 +939,7 @@ mod tests {
                 binding(INCOMING, EquipMask::UPPER_ARM_ARMOR),
             ],
             Default::default(),
+            &storage_policy(&world),
         );
         assert!(plan.issues.is_empty());
         assert_eq!(plan.wields.len(), 1);
@@ -895,6 +964,7 @@ mod tests {
                 binding(Guid(4), EquipMask::CHEST_ARMOR),
             ],
             Default::default(),
+            &storage_policy(&world),
         );
         assert_eq!(plan.wields.len(), 1);
         assert_eq!(plan.issues.len(), 2);
@@ -911,6 +981,7 @@ mod tests {
             &world,
             &[binding(Guid(4), EquipMask::CHEST_ARMOR)],
             Default::default(),
+            &storage_policy(&world),
         );
         assert!(plan.wields.is_empty());
         assert!(plan.removals.is_empty());
@@ -927,6 +998,7 @@ mod tests {
                 binding(Guid(4), EquipMask::CHEST_ARMOR),
             ],
             Default::default(),
+            &storage_policy(&world),
         );
         assert_eq!(plan.issues.len(), 1);
         assert!(plan.wields.is_empty());
@@ -938,7 +1010,10 @@ mod tests {
         let mut client = build_test_client(ClientState::InWorld);
         client.world = weapon_world(CombatMode::Magic);
         client
-            .apply_equipment_set(vec![binding(INCOMING, EquipMask::MELEE_WEAPON)])
+            .apply_equipment_set(
+                vec![binding(INCOMING, EquipMask::MELEE_WEAPON)],
+                storage_policy(&client.world),
+            )
             .await
             .unwrap();
         assert!(client.equipment_set.awaiting_peace());
@@ -974,7 +1049,10 @@ mod tests {
         let mut client = build_test_client(ClientState::InWorld);
         client.world = weapon_world(CombatMode::NonCombat);
         client
-            .apply_equipment_set(vec![binding(INCOMING, EquipMask::MELEE_WEAPON)])
+            .apply_equipment_set(
+                vec![binding(INCOMING, EquipMask::MELEE_WEAPON)],
+                storage_policy(&client.world),
+            )
             .await
             .unwrap();
         assert!(!client.equipment_set.awaiting_peace());
@@ -1017,6 +1095,7 @@ mod tests {
                 &world,
                 &[binding(INCOMING, EquipMask::MISSILE_AMMO)],
                 Default::default(),
+                &storage_policy(&world),
             );
             assert!(plan.issues.is_empty());
             assert_eq!(plan.requires_peace, mode == CombatMode::Missile);
@@ -1028,7 +1107,10 @@ mod tests {
         let mut client = build_test_client(ClientState::InWorld);
         client.world = weapon_world(CombatMode::Magic);
         client
-            .apply_equipment_set(vec![binding(INCOMING, EquipMask::MELEE_WEAPON)])
+            .apply_equipment_set(
+                vec![binding(INCOMING, EquipMask::MELEE_WEAPON)],
+                storage_policy(&client.world),
+            )
             .await
             .unwrap();
         client
@@ -1073,7 +1155,10 @@ mod tests {
             .ints
             .insert(PropertyInt::CombatMode, CombatMode::Magic as i32);
         client
-            .apply_equipment_set(vec![binding(INCOMING, EquipMask::CHEST_ARMOR)])
+            .apply_equipment_set(
+                vec![binding(INCOMING, EquipMask::CHEST_ARMOR)],
+                storage_policy(&client.world),
+            )
             .await
             .unwrap();
         assert!(!client.equipment_set.awaiting_peace());
@@ -1089,7 +1174,10 @@ mod tests {
         let mut client = build_test_client(ClientState::InWorld);
         client.world = weapon_world(CombatMode::Magic);
         client
-            .apply_equipment_set(vec![binding(INCOMING, EquipMask::MELEE_WEAPON)])
+            .apply_equipment_set(
+                vec![binding(INCOMING, EquipMask::MELEE_WEAPON)],
+                storage_policy(&client.world),
+            )
             .await
             .unwrap();
         let deadline = client.equipment_set.peace.as_ref().unwrap().deadline;
@@ -1100,7 +1188,10 @@ mod tests {
             CombatMode::NonCombat,
         ));
         client
-            .apply_equipment_set(vec![binding(INCOMING, EquipMask::MELEE_WEAPON)])
+            .apply_equipment_set(
+                vec![binding(INCOMING, EquipMask::MELEE_WEAPON)],
+                storage_policy(&client.world),
+            )
             .await
             .unwrap();
         client.set_exit_cause(super::super::types::ClientExitCause::ExplicitDisconnect);
@@ -1139,6 +1230,7 @@ mod tests {
                 &world,
                 &[binding(Guid(4), right), binding(Guid(5), left)],
                 Default::default(),
+                &storage_policy(&world),
             );
             assert!(plan.issues.is_empty());
             assert_eq!(plan.removals.len(), 2);
@@ -1171,6 +1263,7 @@ mod tests {
             &world,
             &[binding(INCOMING, EquipMask::SHIELD)],
             Default::default(),
+            &storage_policy(&world),
         );
         assert!(plan.issues.is_empty());
         assert!(plan.removals.is_empty());

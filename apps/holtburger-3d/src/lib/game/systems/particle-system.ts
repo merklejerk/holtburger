@@ -341,6 +341,9 @@ interface EmitterInstance {
 	readonly target: BehaviorTarget;
 	/** Node whose frame positions and aims the particles; the owner itself for a whole-object emitter. */
 	readonly frameTarget: BehaviorTarget;
+	/** Live frame rotation reused by births and distance checks within one advancement. */
+	rotationEpoch: number;
+	rotation: ResolvedFrameRotation | null;
 	/** Authored id: nonzero replaces any same-id emitter on the same target. */
 	readonly emitterId: number;
 	/**
@@ -515,6 +518,10 @@ export class ParticleSystem {
 		BehaviorTargetId,
 		ParticleOwnerAggregate
 	>();
+	/** Owners whose culling radius may have changed since presentation last consumed it. */
+	#dirtyEnvelopeOwnerIds = new Set<BehaviorTargetId>();
+	/** Incremented before each advancement to invalidate per-emitter live frame rotations. */
+	#rotationEpoch = 0;
 	/** Persistent record storage reused across frames and read by the GPU after spawn-time writes. */
 	readonly #slots = new ParticleRecordSlots();
 	/**
@@ -630,10 +637,22 @@ export class ParticleSystem {
 			if (existing >= 0) this.#removeEmitter(existing, "replaced");
 		}
 		const envelopeRadius = drawableEnvelopeRadius(emitter, hookOffset);
-		const initialOrigin =
+		const initialRotation =
 			!emitter.info.emitsPerSecond && emitter.info.emitsPerMeter
-				? this.#attachedOrigin(frameTarget, hookOffset, parentOrigin)
+				? this.#dependencies.sceneRotationOf(frameTarget)
 				: null;
+		const initialOrigin =
+			initialRotation !== null
+				? attachedEmitterOrigin(parentOrigin, hookOffset, initialRotation)
+				: null;
+		if (
+			!emitter.info.emitsPerSecond &&
+			emitter.info.emitsPerMeter &&
+			initialOrigin === null
+		)
+			throw new Error(
+				`Emitter frame ${frameTarget.targetId} published an origin but no rotation.`,
+			);
 		const instance: EmitterInstance = {
 			drawFrame: emitter.info.followsParent
 				? new FollowingRangeFrame()
@@ -644,6 +663,8 @@ export class ParticleSystem {
 			emitterId,
 			envelopeRadius,
 			frameTarget,
+			rotationEpoch: initialRotation === null ? -1 : this.#rotationEpoch,
+			rotation: initialRotation,
 			hookOffset,
 			hiddenSince: null,
 			lastEmissionTime: null,
@@ -666,6 +687,7 @@ export class ParticleSystem {
 		};
 		this.#instances.push(instance);
 		this.#createdEmitterTotal += 1;
+		this.#dirtyEnvelopeOwnerIds.add(target.targetId);
 		const owner = this.#ownerAggregates.get(target.targetId);
 		if (owner) {
 			owner.emitterCount += 1;
@@ -718,6 +740,7 @@ export class ParticleSystem {
 		timeSeconds: number,
 		isVisible: (target: BehaviorTarget) => boolean = () => true,
 	): void {
+		this.#rotationEpoch += 1;
 		this.#hiddenEmitterCount = 0;
 		this.#visibleEmitterCount = 0;
 		for (let index = this.#instances.length - 1; index >= 0; index -= 1) {
@@ -810,12 +833,9 @@ export class ParticleSystem {
 		return this.#slots.data;
 	}
 
-	/** Slots written since the last call, or `null` when no record changed. */
-	takeDirtyRecordSlots(): {
-		readonly first: number;
-		readonly last: number;
-	} | null {
-		return this.#slots.takeDirtySlotRange();
+	/** Texture rows written since the last call, or `null` when no record changed. */
+	takeDirtyRecordRows(): Uint32Array | null {
+		return this.#slots.takeDirtyRows();
 	}
 
 	/**
@@ -871,6 +891,15 @@ export class ParticleSystem {
 	 */
 	envelopeRadiusFor(targetId: BehaviorTargetId): number {
 		return this.#ownerAggregates.get(targetId)?.envelopeRadius ?? 0;
+	}
+
+	/** Transfer changed owners to the presentation layer, including owners now at radius zero. */
+	takeDirtyEnvelopeOwnerIds(): ReadonlySet<BehaviorTargetId> {
+		if (this.#dirtyEnvelopeOwnerIds.size === 0)
+			return this.#dirtyEnvelopeOwnerIds;
+		const dirty = this.#dirtyEnvelopeOwnerIds;
+		this.#dirtyEnvelopeOwnerIds = new Set<BehaviorTargetId>();
+		return dirty;
 	}
 
 	/** Whether this target currently owns any live emitter instance; one aggregate lookup. */
@@ -1031,6 +1060,7 @@ export class ParticleSystem {
 				break;
 		}
 		this.#repairOwnerAggregateAfterRemoval(instance);
+		this.#dirtyEnvelopeOwnerIds.add(instance.target.targetId);
 	}
 
 	/**
@@ -1099,11 +1129,7 @@ export class ParticleSystem {
 		const state = instance.distanceEmission;
 		if (state === null) return;
 		const parentOrigin = this.#liveOriginOf(instance);
-		const origin = this.#attachedOrigin(
-			instance.frameTarget,
-			instance.hookOffset,
-			parentOrigin,
-		);
+		const origin = this.#attachedOrigin(instance, parentOrigin);
 		const previous = state.lastOrigin;
 		const previousTime = state.lastTime;
 		state.lastOrigin = origin;
@@ -1211,7 +1237,7 @@ export class ParticleSystem {
 		// Retail snapshots the owner's frame at spawn (`start_frame`) and rotates the
 		// constants into it once, so `Update` never sees a frame again. Doing the same here
 		// keeps the motion evaluators — CPU and GLSL alike — free of any notion of an owner.
-		const rotation = this.#dependencies.sceneRotationOf(instance.frameTarget);
+		const rotation = this.#rotationFor(instance);
 		// The caller already resolved this target's origin from the same placement, so a missing
 		// rotation is a broken contract rather than a target that has gone away.
 		if (rotation === null) {
@@ -1331,6 +1357,7 @@ export class ParticleSystem {
 				instance.distanceEmission === null
 			)
 				continue;
+			instance.rotationEpoch = -1;
 			this.#resetDistanceEmission(instance, this.#dependencies.clock());
 		}
 	}
@@ -1340,8 +1367,7 @@ export class ParticleSystem {
 		const state = instance.distanceEmission;
 		if (state === null) return;
 		state.lastOrigin = this.#attachedOrigin(
-			instance.frameTarget,
-			instance.hookOffset,
+			instance,
 			this.#liveOriginOf(instance),
 		);
 		state.lastTime = timeSeconds;
@@ -1352,16 +1378,26 @@ export class ParticleSystem {
 
 	/** Resolve the authored offset in the live attached frame, excluding random spawn offsets. */
 	#attachedOrigin(
-		target: BehaviorTarget,
-		hookOffset: AcVector3,
+		instance: EmitterInstance,
 		parentOrigin: SceneVector3,
 	): SceneVector3 {
-		const rotation = this.#dependencies.sceneRotationOf(target);
+		const rotation = this.#rotationFor(instance);
 		if (rotation === null)
 			throw new Error(
-				`Emitter frame ${target.targetId} published an origin but no rotation.`,
+				`Emitter frame ${instance.frameTarget.targetId} published an origin but no rotation.`,
 			);
-		return attachedEmitterOrigin(parentOrigin, hookOffset, rotation);
+		return attachedEmitterOrigin(parentOrigin, instance.hookOffset, rotation);
+	}
+
+	/** Resolve once per synchronous advancement; reanchor invalidates after a placement snap. */
+	#rotationFor(instance: EmitterInstance): ResolvedFrameRotation | null {
+		if (instance.rotationEpoch !== this.#rotationEpoch) {
+			instance.rotation = this.#dependencies.sceneRotationOf(
+				instance.frameTarget,
+			);
+			instance.rotationEpoch = this.#rotationEpoch;
+		}
+		return instance.rotation;
 	}
 
 	/**

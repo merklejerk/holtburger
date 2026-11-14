@@ -15,7 +15,7 @@ function model(capacity: number, marker: number, slot: number) {
 		motionType: 1,
 	};
 	return {
-		particleRecords: { data, dirtySlots: null },
+		particleRecords: { data, dirtyRows: null },
 		particleRanges: [range],
 	};
 }
@@ -28,7 +28,7 @@ describe("preview particle composition", () => {
 		const first = merge.merge([body, equipment]);
 		const data = first.particleRecords.data;
 		expect(first.particleRanges.map((range) => range.baseSlot)).toEqual([1, 2]);
-		expect(first.particleRecords.dirtySlots).toEqual({ first: 0, last: 2 });
+		expect(first.particleRecords.dirtyRows).toEqual(new Uint32Array([1]));
 		expect(data[2 * PARTICLE_INSTANCE_FLOAT_COUNT]).toBe(20);
 		equipment.particleRecords.data[0] = 30;
 		const edited = merge.merge([
@@ -37,20 +37,18 @@ describe("preview particle composition", () => {
 				...equipment,
 				particleRecords: {
 					data: equipment.particleRecords.data,
-					dirtySlots: { first: 0, last: 0 },
+					dirtyRows: new Uint32Array([1]),
 				},
 			},
 		]);
 		expect(edited.particleRecords.data).toBe(data);
-		expect(edited.particleRecords.dirtySlots).toEqual({ first: 2, last: 2 });
+		expect(edited.particleRecords.dirtyRows).toEqual(new Uint32Array([1]));
 		expect(data[0]).toBe(10);
 		expect(data[2 * PARTICLE_INSTANCE_FLOAT_COUNT]).toBe(30);
-		expect(
-			merge.merge([body, equipment]).particleRecords.dirtySlots,
-		).toBeNull();
+		expect(merge.merge([body, equipment]).particleRecords.dirtyRows).toBeNull();
 	});
 
-	it("rebuilds offsets on pool growth even when a displaced model has no dirty slots", () => {
+	it("rebuilds offsets on pool growth even when a displaced model has no dirty rows", () => {
 		const merge = new ObjectPreviewParticleFrame();
 		const equipment = model(1, 20, 0);
 		merge.merge([model(1, 10, 0), equipment]);
@@ -59,7 +57,7 @@ describe("preview particle composition", () => {
 		expect(grown.particleRecords.data[3 * PARTICLE_INSTANCE_FLOAT_COUNT]).toBe(
 			20,
 		);
-		expect(grown.particleRecords.dirtySlots).toEqual({ first: 0, last: 3 });
+		expect(grown.particleRecords.dirtyRows).toEqual(new Uint32Array([1]));
 	});
 
 	it("leaves empty pools without a fabricated dirty interval", () => {
@@ -67,11 +65,11 @@ describe("preview particle composition", () => {
 		const result = merge.merge([
 			{
 				particleRanges: [],
-				particleRecords: { data: new Float32Array(0), dirtySlots: null },
+				particleRecords: { data: new Float32Array(0), dirtyRows: null },
 			},
 		]);
 		expect(result.particleRanges).toEqual([]);
 		expect(result.particleRecords.data.length).toBe(0);
-		expect(result.particleRecords.dirtySlots).toBeNull();
+		expect(result.particleRecords.dirtyRows).toBeNull();
 	});
 });

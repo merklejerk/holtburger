@@ -411,8 +411,11 @@
 		readonly onExamineSpell: (spellId: number) => void;
 		readonly onCloseInspection: () => void;
 		readonly readCombatTargetFrame: () => ClientCombatTargetFrame | null;
+		readonly spellCastTarget: number | null;
 		/** Pull transient target feedback independently of helper visibility. */
 		readonly readLockFeedbackFrames: () => readonly ClientLockFeedbackFrame[];
+		readonly hasActiveLockFeedback: () => boolean;
+		readonly lockFeedbackWakeRevision: number;
 		readonly readTargetIndicatorFrame: () => ClientTargetIndicatorFrame | null;
 		readonly selectedEntityGuid: number | null;
 		readonly hoveredEntityGuid: number | null;
@@ -610,7 +613,10 @@
 		onCloseInspection,
 		readTargetIndicatorFrame,
 		readCombatTargetFrame,
+		spellCastTarget,
 		readLockFeedbackFrames,
+		hasActiveLockFeedback,
+		lockFeedbackWakeRevision,
 		selectedEntityGuid,
 		hoveredEntityGuid,
 		entityCollisionDisabled,
@@ -1227,8 +1233,15 @@
 			thresholds={ui.vitalWarningThresholds}
 		/>
 	{/key}
-	<ClientCombatTargetIndicator readFrame={readCombatTargetFrame} />
-	<ClientLockFeedback readFrames={readLockFeedbackFrames} />
+	<ClientCombatTargetIndicator
+		readFrame={readCombatTargetFrame}
+		active={combatStatus.desired !== null || spellCastTarget !== null}
+	/>
+	<ClientLockFeedback
+		readFrames={readLockFeedbackFrames}
+		isActive={hasActiveLockFeedback}
+		wakeRevision={lockFeedbackWakeRevision}
+	/>
 	<ClientTargetIndicator
 		readFrame={readTargetIndicatorFrame}
 		selectedGuid={selectedEntityGuid}

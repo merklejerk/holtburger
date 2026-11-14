@@ -540,7 +540,10 @@ describe("object fragment variants", () => {
 		);
 
 		expect(shader).toContain("uniform uint uPortalRenderDomain;");
-		expect(shader).toContain("uScopes[uPortalRenderDomain]");
+		expect(shader).toContain("uScopes[renderDomain]");
+		expect(shader).toContain(
+			"portalDeferredFragmentVisible(uPortalRenderDomain)",
+		);
 		expect(shader).toContain("gl_FragCoord.z * 0.5 < envelopeDepth");
 		expect(visibility).toBeGreaterThan(-1);
 		expect(visibility).toBeLessThan(material);

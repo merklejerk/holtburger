@@ -131,8 +131,12 @@ export interface MinimapFrame {
 	/** Null until there is a coherent subject position and ownership. */
 	readonly subject: MinimapSubject | null;
 	readonly presentedEntities: () => Iterable<MapEntity>;
+	/** Owner-produced blip change fact; absent frames redraw conservatively. */
+	readonly presentedEntitiesRevision?: number;
 	/** Optional mode-owned public landmarks, sampled with this frame's semantic facts. */
 	readonly landmarkCategory?: (guid: number) => MapLandmarkCategory | null;
+	/** Change fact for category lookups whose callback identity may be stable or recreated. */
+	readonly landmarkRevision?: number;
 	/** Cold selected identity; the widget samples it with the rest of its bounded frame. */
 	readonly selectedGuid: number | null;
 	/** Optional app-owned tracked identities; absent in Explorer and undecorated frames. */

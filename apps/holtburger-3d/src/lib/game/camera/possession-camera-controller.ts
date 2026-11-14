@@ -103,6 +103,12 @@ export class PossessionCameraController<
 	/** Explicit state prevents an armed dwell, transition, and pin from coexisting. */
 	#recenterState: PossessionCameraRecenterState = { kind: "free" };
 	#pendingZoomDisplacement = 0;
+	/** Last queued input, recorded before async transport so idle frames queue no work. */
+	#queuedLook: CameraLook | null = null;
+	#queuedProjectionRevision: number | null = null;
+	#queueRevision = 0;
+	/** Invalidates deferred input when its camera registration is retired or replaced. */
+	#sessionGeneration = 0;
 
 	constructor(options: {
 		readonly initialLook: CameraLook;
@@ -146,7 +152,10 @@ export class PossessionCameraController<
 		distance: HostKinematicBoomDistancePolicy,
 		projection: ProjectionClearanceRevision,
 	): Promise<void> {
+		this.#sessionGeneration += 1;
 		this.#resetRecenter();
+		this.#queuedLook = null;
+		this.#queuedProjectionRevision = null;
 		return this.#session.start(
 			target,
 			distance,
@@ -238,24 +247,62 @@ export class PossessionCameraController<
 		}
 	}
 
-	/**
-	 * Submit the latest projection, desired orbit, and accumulated zoom through separate sequences.
-	 * `targetFacingYawRadians` is the current renderer yaw for the possessed entity's rear direction.
-	 */
-	async synchronize(
+	/** Advance rear-follow synchronously so a pending IPC cannot delay the visible camera pose. */
+	advance(nowMs: number, targetFacingYawRadians: number): void {
+		assertFiniteTimestamp(nowMs);
+		assertFiniteYaw(targetFacingYawRadians);
+		this.#advanceRecenter(nowMs, targetFacingYawRadians);
+	}
+
+	/** Capture changed input once; the returned submission may be serialized by the caller. */
+	queueSynchronization(
+		projection: ProjectionClearanceRevision,
+	): (() => Promise<void>) | null {
+		const look = this.#look.snapshot();
+		const queued = this.#queuedLook;
+		if (
+			this.#queuedProjectionRevision === projection.revision &&
+			queued !== null &&
+			queued.yawRadians === look.yawRadians &&
+			queued.pitchRadians === look.pitchRadians &&
+			this.#pendingZoomDisplacement === 0
+		)
+			return null;
+		const direction = this.#boomDirection();
+		const zoom = this.#pendingZoomDisplacement;
+		this.#pendingZoomDisplacement = 0;
+		this.#queuedLook = look;
+		this.#queuedProjectionRevision = projection.revision;
+		const revision = ++this.#queueRevision;
+		const generation = this.#sessionGeneration;
+		return async () => {
+			if (generation !== this.#sessionGeneration) return;
+			try {
+				await Promise.all([
+					this.#session.setClearance(projection),
+					this.#session.setIntent(direction, zoom),
+				]);
+			} catch (error) {
+				if (
+					generation === this.#sessionGeneration &&
+					this.#queueRevision === revision
+				) {
+					this.#queuedLook = null;
+					this.#queuedProjectionRevision = null;
+				}
+				throw error;
+			}
+		};
+	}
+
+	/** Submit one frame directly for consumers that do not serialize camera transport. */
+	synchronize(
 		projection: ProjectionClearanceRevision,
 		nowMs: number,
 		targetFacingYawRadians: number,
 	): Promise<void> {
-		assertFiniteTimestamp(nowMs);
-		assertFiniteYaw(targetFacingYawRadians);
-		this.#advanceRecenter(nowMs, targetFacingYawRadians);
-		const zoom = this.#pendingZoomDisplacement;
-		this.#pendingZoomDisplacement = 0;
-		await Promise.all([
-			this.#session.setClearance(projection),
-			this.#session.setIntent(this.#boomDirection(), zoom),
-		]);
+		this.advance(nowMs, targetFacingYawRadians);
+		return this.queueSynchronization(projection)?.() ?? Promise.resolve();
 	}
 
 	/** Accept one fixed-tick host result without owning its delivery subscription. */
@@ -280,7 +327,10 @@ export class PossessionCameraController<
 	}
 
 	stop(): Promise<void> {
+		this.#sessionGeneration += 1;
 		this.#pendingZoomDisplacement = 0;
+		this.#queuedLook = null;
+		this.#queuedProjectionRevision = null;
 		this.#orbitHeld = false;
 		this.#resetRecenter();
 		return this.#session.stop();

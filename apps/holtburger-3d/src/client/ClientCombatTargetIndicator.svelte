@@ -6,14 +6,24 @@
 	interface Props {
 		/** Pull coherent projected presentation facts without routing poses through Svelte. */
 		readonly readFrame: () => ClientCombatTargetFrame | null;
+		/** Cold engagement state that wakes projection when attack or casting begins. */
+		readonly active: boolean;
 	}
-	let { readFrame }: Props = $props();
+	let { readFrame, active }: Props = $props();
 	let marker: HTMLDivElement;
 	let edgeMarker: HTMLDivElement;
+	let wake: (active: boolean) => void = () => {};
+	$effect(() => {
+		wake(active);
+	});
 
 	onMount(() => {
 		let handle = 0;
+		const schedule = (): void => {
+			if (handle === 0) handle = requestAnimationFrame(update);
+		};
 		const update = (): void => {
+			handle = 0;
 			const frame = readFrame();
 			if (frame !== null && marker.dataset.combatType !== frame.combatType) {
 				marker.dataset.combatType = frame.combatType;
@@ -28,10 +38,14 @@
 			if (frame?.kind === "edge")
 				edgeMarker.style.transform = `translate3d(${frame.x}px, ${frame.y}px, 0) translate(-50%, -50%) rotate(${frame.rotationRadians}rad)`;
 
-			handle = requestAnimationFrame(update);
+			if (active) schedule();
 		};
-		handle = requestAnimationFrame(update);
-		return () => cancelAnimationFrame(handle);
+		wake = schedule;
+		schedule();
+		return () => {
+			wake = () => {};
+			if (handle !== 0) cancelAnimationFrame(handle);
+		};
 	});
 </script>
 

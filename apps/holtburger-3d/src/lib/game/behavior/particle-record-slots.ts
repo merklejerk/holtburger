@@ -50,9 +50,8 @@ export class ParticleRecordSlots {
 	#capacity = 0;
 	/** Free spans in ascending base order, which is what lets neighbours merge on release. */
 	#freeSpans: FreeSpan[] = [];
-	/** Lowest and highest slot written since the last `takeDirtySlotRange`. */
-	#dirtyFirstSlot = Number.POSITIVE_INFINITY;
-	#dirtyLastSlot = -1;
+	/** One bit per texture row; scattered writes do not bridge untouched rows. */
+	#dirtyRows = new Uint32Array(0);
 
 	/** Backing mirror, in the exact layout the record texture holds. */
 	get data(): Float32Array {
@@ -148,26 +147,17 @@ export class ParticleRecordSlots {
 		this.#markDirty(slot);
 	}
 
-	/**
-	 * Take the slot range written since the last call, or `null` when nothing changed.
-	 *
-	 * A range rather than a set: spawns and deaths are rare relative to frames, and uploading one
-	 * span keeps the per-frame cost to a single texture call.
-	 */
-	takeDirtySlotRange(): {
-		readonly first: number;
-		readonly last: number;
-	} | null {
-		if (this.#dirtyLastSlot < 0) return null;
-		const range = { first: this.#dirtyFirstSlot, last: this.#dirtyLastSlot };
-		this.#dirtyFirstSlot = Number.POSITIVE_INFINITY;
-		this.#dirtyLastSlot = -1;
-		return range;
+	/** Snapshot dirty texture rows and clear them for the next publication. */
+	takeDirtyRows(): Uint32Array | null {
+		if (!this.#dirtyRows.some((word) => word !== 0)) return null;
+		const rows = this.#dirtyRows.slice();
+		this.#dirtyRows.fill(0);
+		return rows;
 	}
 
 	#markDirty(slot: number): void {
-		if (slot < this.#dirtyFirstSlot) this.#dirtyFirstSlot = slot;
-		if (slot > this.#dirtyLastSlot) this.#dirtyLastSlot = slot;
+		const row = Math.floor(slot / PARTICLE_RECORDS_PER_ROW);
+		this.#dirtyRows[row >>> 5] |= 1 << (row & 31);
 	}
 
 	#mergeSpanWithNeighbours(index: number): void {
@@ -195,6 +185,13 @@ export class ParticleRecordSlots {
 		);
 		grown.set(this.#data);
 		this.#data = grown;
+		const rowCount = Math.ceil(this.#capacity / PARTICLE_RECORDS_PER_ROW);
+		const wordCount = Math.ceil(rowCount / 32);
+		if (wordCount > this.#dirtyRows.length) {
+			const bits = new Uint32Array(wordCount);
+			bits.set(this.#dirtyRows);
+			this.#dirtyRows = bits;
+		}
 		if (added > required) {
 			this.release({ base: base + required, capacity: added - required });
 		}

@@ -1,6 +1,7 @@
 import { HUMANOID_BODY_LAYOUT } from "../animation/humanoid-body-layout";
 import { composeHumanoidGesturePose } from "../animation/humanoid-gesture-pose";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as matrices from "../math/matrices";
 import { expandBounds } from "../math/geometry-utils";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import { compileDynamicLayout } from "../geometry/dynamic-layout";
@@ -34,6 +35,7 @@ import type {
 import {
 	INCLUDE_ALL_SCENE_CULLING_GROUPS,
 	SceneGraph,
+	type SceneNodeId,
 	type SceneScope,
 } from "../scene";
 import type { DynamicPresentationSample } from "./animation-system";
@@ -56,6 +58,8 @@ import {
 import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { HostCommandError } from "../../host/host-command-result";
+
+afterEach(() => vi.restoreAllMocks());
 
 describe("DynamicEntitySystem authored ownership", () => {
 	it.each(["source-owned", "resolved"] as const)(
@@ -1533,6 +1537,98 @@ describe("DynamicEntitySystem authored ownership", () => {
 		]);
 	});
 
+	it("publishes a script-only effect once and skips the idle resident afterward", async () => {
+		const { effects, system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const base = source("effect-only");
+		const installation = system.replaceOwner("layer", [
+			{
+				...base,
+				source: {
+					...base.source,
+					behavior: {
+						...base.source.behavior,
+						animationId: null,
+						kind: "script-only",
+						physicsScriptId: "0x330003d8",
+					},
+				},
+			},
+		]);
+		expect(await installation.ready).toBe("ready");
+		commit(installation);
+		const nodeId = requiredAt(installation.nodeIds, 0);
+		system.publishPresentation([]);
+		system.publishPresentation([]);
+		expect(system.getDiagnostics()).toMatchObject({
+			lastPresentationEntityVisitCount: 0,
+			lastPublishedPresentationCount: 0,
+		});
+
+		effects.applyScale(
+			{
+				generation: installation.generation,
+				targetId: behaviorTargetId(nodeId),
+			},
+			{ end: 2, durationSeconds: 0 },
+		);
+		system.publishPresentation([]);
+		expect(system.getDiagnostics()).toMatchObject({
+			lastEffectOnlyPresentationCount: 1,
+			lastPresentationEntityVisitCount: 1,
+		});
+		system.publishPresentation([]);
+		expect(system.getDiagnostics()).toMatchObject({
+			lastPresentationEntityVisitCount: 0,
+			lastPublishedPresentationCount: 0,
+		});
+	});
+
+	it("reuses part world matrices until pose or scene transform changes", async () => {
+		const { effects, scene, system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const installation = system.replaceOwner("layer", [
+			source("cached-matrices"),
+		]);
+		expect(await installation.ready).toBe("ready");
+		const prepared = requiredAt(installation.getPreparedEntities(), 0);
+		commit(installation);
+		const nodeId = requiredAt(installation.nodeIds, 0);
+		const compose = vi.spyOn(matrices, "multiplyMat4");
+		system.getVisiblePresentation(nodeId);
+		expect(compose).toHaveBeenCalled();
+		compose.mockClear();
+		system.getVisiblePresentation(nodeId);
+		expect(compose).not.toHaveBeenCalled();
+
+		effects.applyObjectTranslucency(nodeId, 0.5);
+		system.publishPresentation([
+			{
+				...presentationSample(prepared, 0.5),
+				effects: effects.samplePresentation(nodeId),
+				localPoseChanged: false,
+			},
+		]);
+		compose.mockClear();
+		expect(
+			system.getVisiblePresentation(nodeId)?.visual.parts[0]?.frameInstance
+				.color.a,
+		).toBe(0.5);
+		expect(compose).not.toHaveBeenCalled();
+
+		const moved = Mat4.identity();
+		moved.m41 = 3;
+		scene.updateRootLocalTransform(nodeId, moved);
+		compose.mockClear();
+		const visible = system.getVisiblePresentation(nodeId);
+		expect(compose).toHaveBeenCalledTimes(1);
+		expect(visible?.visual.parts[0]?.frameInstance.sourceToLandblock.m41).toBe(
+			3,
+		);
+	});
+
 	it("keeps the previous owner generation when replacement construction fails", async () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		const previous = system.replaceOwner("layer", [source("previous")]);
@@ -1801,6 +1897,15 @@ describe("DynamicEntitySystem authored ownership", () => {
 			translucency: 0,
 		});
 		expect(system.getRuntimeLights()).toEqual([]);
+		system.updatePresentationState(nodeId, {
+			cloaked: false,
+			hidden: false,
+			lighting: true,
+			noDraw: false,
+			translucency: 0,
+		});
+		system.removeOwner("layer");
+		expect(system.getRuntimeLights()).toEqual([]);
 	});
 
 	it("publishes independent part opacity while preserving shared appearance and cloak semantics", async () => {
@@ -1952,7 +2057,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		).toBeCloseTo(0.8);
 		expect(system.getDiagnostics()).toMatchObject({
 			lastParticleEnvelopeChangeCount: 0,
-			lastParticleEnvelopeQueryCount: 1,
+			lastParticleEnvelopeQueryCount: 2,
 			lastPresentationEntityVisitCount: 2,
 			lastPublishedPresentationCount: 1,
 		});
@@ -1984,6 +2089,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 
 		const initial = system.getVisiblePresentation(nodeId)?.visual.parts[0];
 		expect(initial?.frameInstance.color.a).toBe(0.5);
+		expect(system.getVisiblePresentation(nodeId)?.allPartsOpaque).toBe(false);
 		const visual = system.getVisiblePresentation(nodeId)?.visual;
 		const geometryUpserts = geometry.upserted.length;
 
@@ -1996,6 +2102,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		]);
 		const updated = system.getVisiblePresentation(nodeId)?.visual.parts[0];
 		expect(updated?.frameInstance.color.a).toBe(0.75);
+		expect(system.getVisiblePresentation(nodeId)?.allPartsOpaque).toBe(false);
 		expect(updated).toBe(initial);
 		expect(system.getVisiblePresentation(nodeId)?.visual).toBe(visual);
 		expect(system.getRenderable(nodeId)).not.toBeNull();
@@ -2229,6 +2336,50 @@ describe("DynamicEntitySystem authored ownership", () => {
 					initialCullingBounds.max.z * 2,
 				),
 			),
+		);
+	});
+
+	it("updates an animated resident's envelope without sampling its held pose", async () => {
+		let radius = 0;
+		const { effects, markParticleEnvelopeDirty, system } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+			new FixtureAnimationSource(),
+			() => radius,
+		);
+		const installation = system.replaceOwner("layer", [
+			source("idle-envelope"),
+		]);
+		expect(await installation.ready).toBe("ready");
+		commit(installation);
+		const nodeId = requiredAt(installation.nodeIds, 0);
+		const retainedBounds = system.getPublishedPresentationBounds(nodeId);
+		if (retainedBounds === null) throw new Error("Missing initial bounds.");
+
+		// In the live runtime, animation takes the initial effect sample before idle frames.
+		effects.samplePresentation(nodeId);
+		system.publishPresentation([]);
+		expect(system.getDiagnostics().lastPresentationEntityVisitCount).toBe(0);
+		radius = 5;
+		markParticleEnvelopeDirty(nodeId);
+		system.publishPresentation([]);
+		expect(system.getPublishedPresentationBounds(nodeId)).toBe(retainedBounds);
+		const rigidBounds = system.getPublishedRigidPresentationBounds(nodeId);
+		if (rigidBounds === null) throw new Error("Missing rigid bounds.");
+		expect(system.getPublishedPresentationBounds(nodeId)).toEqual(
+			expandBounds(rigidBounds, 5),
+		);
+		expect(system.getDiagnostics()).toMatchObject({
+			lastParticleEnvelopeChangeCount: 1,
+			lastParticleEnvelopeQueryCount: 1,
+			lastPresentationEntityVisitCount: 1,
+			lastPublishedPresentationCount: 0,
+		});
+
+		radius = 0;
+		markParticleEnvelopeDirty(nodeId);
+		system.publishPresentation([]);
+		expect(retainedBounds).toEqual(
+			system.getPublishedRigidPresentationBounds(nodeId),
 		);
 	});
 
@@ -2537,6 +2688,7 @@ function presentationSample(
 			rootTransformModifier: Mat4.identity(),
 		},
 		nodeId,
+		localPoseChanged: true,
 	};
 }
 
@@ -2546,6 +2698,7 @@ function createSystem(
 	// No emitters in most fixtures, so presentation bounds are the mesh alone.
 	particleEnvelopeRadiusOf: () => number = () => 0,
 ) {
+	let dirtyEnvelopeOwnerIds = new Set<ReturnType<typeof behaviorTargetId>>();
 	const scene = new SceneGraph();
 	const effects = new EffectSystem();
 	const geometry = new FixtureGeometry();
@@ -2586,8 +2739,23 @@ function createSystem(
 		(ownerId: string, generation: number) =>
 			`${ownerId}:generation:${generation}`,
 		() => particleEnvelopeRadiusOf(),
+		() => {
+			const dirty = dirtyEnvelopeOwnerIds;
+			dirtyEnvelopeOwnerIds = new Set();
+			return dirty;
+		},
 	);
-	return { effects, geometry, scene, system, animations, templates, scripts };
+	return {
+		effects,
+		geometry,
+		scene,
+		system,
+		animations,
+		templates,
+		scripts,
+		markParticleEnvelopeDirty: (nodeId: SceneNodeId) =>
+			dirtyEnvelopeOwnerIds.add(behaviorTargetId(nodeId)),
+	};
 }
 
 function source(

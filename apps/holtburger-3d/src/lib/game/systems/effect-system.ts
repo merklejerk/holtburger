@@ -5,14 +5,9 @@ import type {
 } from "../behavior/behavior-event-router";
 import {
 	multiplyQuaternion,
-	rotationVectorQuaternion,
 	retailRotationVectorQuaternion,
 } from "../animation/animation-playback";
-import {
-	createRotationMat4,
-	createScaleMat4,
-	multiplyMat4,
-} from "../math/matrices";
+import { createRotationMat4FromQuaternionComponents } from "../math/matrices";
 import { Mat4, Quat, Vec3 } from "../math/types";
 import { requireSceneNodeId } from "../scene/utils";
 import type { SceneNodeId } from "../scene";
@@ -73,6 +68,12 @@ interface EffectState {
 	 * each committed step marks it again.
 	 */
 	dirty: boolean;
+	/** Two reusable samples keep the previously published frame stable for one further sample. */
+	readonly presentationSlots: [
+		MutableEffectPresentationSample,
+		MutableEffectPresentationSample,
+	];
+	currentPresentationSlot: number;
 	committedOrientation: Quat;
 	omega: Vec3;
 	/**
@@ -99,6 +100,26 @@ export interface EffectPresentationSample {
 	readonly rootTransformModifier: Mat4;
 }
 
+/** Storage owned by an effect state; consumers only receive the read-only sample view. */
+interface MutableEffectPresentationSample extends EffectPresentationSample {
+	readonly partRenderStates: {
+		textureVelocity: readonly [number, number];
+		translucency: number;
+	}[];
+}
+
+function createPresentationSlot(
+	partCount: number,
+): MutableEffectPresentationSample {
+	return {
+		partRenderStates: Array.from({ length: partCount }, () => ({
+			textureVelocity: [0, 0],
+			translucency: 0,
+		})),
+		rootTransformModifier: Mat4.identity(),
+	};
+}
+
 /**
  * Retail's behavior tick, and the cadence every effect ramp advances on.
  *
@@ -111,6 +132,10 @@ export const BEHAVIOR_CLOCK_EPSILON_SECONDS = 1e-9;
 /** Owns the shared effect clock, committed visual state, and render-cadence material samples. */
 export class EffectSystem implements EffectCommandPort {
 	readonly #states = new Map<SceneNodeId, EffectState>();
+	/** Only states with timed hooks, scale ramps, or omega need behavior-step work. */
+	readonly #activeNodeIds = new Set<SceneNodeId>();
+	/** Dirty or continuously changing states that may need a new visual sample. */
+	readonly #presentationNodeIds = new Set<SceneNodeId>();
 	#appliedCommandCount = 0;
 	/** Behavior-step accumulator, shared by every installed state. */
 	#fractionalSeconds = 0;
@@ -142,6 +167,11 @@ export class EffectSystem implements EffectCommandPort {
 			scale: 1,
 			scaleRamp: null,
 			dirty: true,
+			presentationSlots: [
+				createPresentationSlot(partCount),
+				createPresentationSlot(partCount),
+			],
+			currentPresentationSlot: -1,
 			parts: Array.from({ length: partCount }, () => ({
 				translucency: {
 					committed: source.cloaked ? 0 : source.translucency,
@@ -150,6 +180,7 @@ export class EffectSystem implements EffectCommandPort {
 				textureVelocity: [0, 0],
 			})),
 		});
+		this.#presentationNodeIds.add(nodeId);
 	}
 
 	/** Apply one current whole-object translucency level without disturbing part-local ramps. */
@@ -161,6 +192,7 @@ export class EffectSystem implements EffectCommandPort {
 		for (const part of state.parts)
 			writePartTranslucency(part, translucency, "committed");
 		state.dirty = true;
+		this.#presentationNodeIds.add(nodeId);
 	}
 
 	/** Preserve permitted material values when cloak starts; ignored writes never replay later. */
@@ -173,6 +205,7 @@ export class EffectSystem implements EffectCommandPort {
 		}
 		state.cloaked = cloaked;
 		state.dirty = true;
+		this.#presentationNodeIds.add(nodeId);
 	}
 
 	/**
@@ -192,11 +225,13 @@ export class EffectSystem implements EffectCommandPort {
 			throw new Error("Effect clock time must be finite.");
 		const previous = this.#lastTimeSeconds;
 		this.#lastTimeSeconds = timeSeconds;
-		for (const state of this.#states.values()) {
+		for (const nodeId of this.#activeNodeIds) {
+			const state = this.#requiredState(nodeId);
 			if (state.translucencyHooks.length > 0) state.dirty = true;
 		}
 		if (previous === null) {
-			for (const state of this.#states.values()) {
+			for (const nodeId of this.#activeNodeIds) {
+				const state = this.#requiredState(nodeId);
 				if (state.translucencyHooks.length > 0)
 					sampleTranslucencyHooks(state, this.#fractionalSeconds);
 			}
@@ -215,11 +250,12 @@ export class EffectSystem implements EffectCommandPort {
 				0,
 				this.#fractionalSeconds - BEHAVIOR_STEP_SECONDS,
 			);
-			for (const nodeId of this.#states.keys()) {
+			for (const nodeId of this.#activeNodeIds) {
 				this.#commitStep(nodeId, BEHAVIOR_STEP_SECONDS);
 			}
 		}
-		for (const state of this.#states.values()) {
+		for (const nodeId of this.#activeNodeIds) {
+			const state = this.#requiredState(nodeId);
 			if (
 				state.translucencyHooks.length > 0 &&
 				(!committed || this.#fractionalSeconds > BEHAVIOR_CLOCK_EPSILON_SECONDS)
@@ -266,6 +302,7 @@ export class EffectSystem implements EffectCommandPort {
 	/** Advance exactly one committed behavior step for one state. */
 	#commitStep(nodeId: SceneNodeId, stepSeconds: number): void {
 		const state = this.#requiredState(nodeId);
+		if (!hasActiveContinuousEffect(state)) return;
 		// A state with nothing in flight presents identically after this step, so leaving it clean
 		// is what lets an idle resident stop publishing.
 		const animating =
@@ -310,6 +347,7 @@ export class EffectSystem implements EffectCommandPort {
 					hook.durationSeconds,
 			);
 		}
+		this.#syncActiveState(nodeId, state);
 	}
 
 	/**
@@ -323,14 +361,15 @@ export class EffectSystem implements EffectCommandPort {
 		target: BehaviorTarget,
 		values: { readonly end: number; readonly durationSeconds: number },
 	): void {
-		const state = this.#requiredState(
-			requireSceneNodeId(target.targetId, "EffectSystem"),
-		);
+		const nodeId = requireSceneNodeId(target.targetId, "EffectSystem");
+		const state = this.#requiredState(nodeId);
 		state.dirty = true;
+		this.#presentationNodeIds.add(nodeId);
 		this.#appliedCommandCount += 1;
 		if (values.durationSeconds < MINIMUM_TIMED_EFFECT_SECONDS) {
 			state.scale = values.end;
 			state.scaleRamp = null;
+			this.#syncActiveState(nodeId, state);
 			return;
 		}
 		state.scaleRamp = {
@@ -339,6 +378,7 @@ export class EffectSystem implements EffectCommandPort {
 			end: values.end,
 			start: state.scale,
 		};
+		this.#activeNodeIds.add(nodeId);
 	}
 
 	/**
@@ -365,11 +405,12 @@ export class EffectSystem implements EffectCommandPort {
 	 * `prepareDynamicAnimation` pays for the visual half with `rotationInvariantBounds`.
 	 */
 	applySetOmega(target: BehaviorTarget, omega: Vec3): void {
-		const state = this.#requiredState(
-			requireSceneNodeId(target.targetId, "EffectSystem"),
-		);
+		const nodeId = requireSceneNodeId(target.targetId, "EffectSystem");
+		const state = this.#requiredState(nodeId);
 		state.dirty = true;
+		this.#presentationNodeIds.add(nodeId);
 		state.omega = new Vec3(omega.x, omega.y, omega.z);
+		this.#syncActiveState(nodeId, state);
 		this.#appliedCommandCount += 1;
 	}
 
@@ -387,9 +428,8 @@ export class EffectSystem implements EffectCommandPort {
 		>,
 		mode: BehaviorDispatchMode,
 	): void {
-		const state = this.#requiredState(
-			requireSceneNodeId(target.targetId, "EffectSystem"),
-		);
+		const nodeId = requireSceneNodeId(target.targetId, "EffectSystem");
+		const state = this.#requiredState(nodeId);
 		let writeTarget: TranslucencyHook["target"];
 		if (command.kind === "transparent") writeTarget = { kind: "object" };
 		else {
@@ -403,6 +443,7 @@ export class EffectSystem implements EffectCommandPort {
 			if (!state.cloaked) {
 				writeTranslucency(state, writeTarget, command.end, "committed");
 				state.dirty = true;
+				this.#presentationNodeIds.add(nodeId);
 			}
 			return;
 		}
@@ -415,7 +456,9 @@ export class EffectSystem implements EffectCommandPort {
 			// rather than inheriting the shared clock's already elapsed fractional remainder.
 			elapsedSeconds: mode === "live" ? -this.#fractionalSeconds : 0,
 		});
+		this.#activeNodeIds.add(nodeId);
 		state.dirty = true;
+		this.#presentationNodeIds.add(nodeId);
 	}
 
 	/**
@@ -434,9 +477,8 @@ export class EffectSystem implements EffectCommandPort {
 			{ kind: "texture-velocity" | "texture-velocity-part" }
 		>,
 	): void {
-		const state = this.#requiredState(
-			requireSceneNodeId(target.targetId, "EffectSystem"),
-		);
+		const nodeId = requireSceneNodeId(target.targetId, "EffectSystem");
+		const state = this.#requiredState(nodeId);
 		let selected: readonly PartEffectState[] = state.parts;
 		if (command.kind === "texture-velocity-part") {
 			const part = state.parts[command.partIndex];
@@ -458,6 +500,7 @@ export class EffectSystem implements EffectCommandPort {
 				continue;
 			part.textureVelocity = velocity;
 			state.dirty = true;
+			this.#presentationNodeIds.add(nodeId);
 		}
 		this.#appliedCommandCount += 1;
 	}
@@ -470,32 +513,37 @@ export class EffectSystem implements EffectCommandPort {
 	 * became coupled.
 	 */
 	samplePresentation(nodeId: SceneNodeId): EffectPresentationSample {
-		const fractionalSeconds = this.#fractionalSeconds;
-		const semanticStepFraction = fractionalSeconds / BEHAVIOR_STEP_SECONDS;
 		const state = this.#requiredState(nodeId);
-		state.dirty = false;
-		const delta = rotationVectorQuaternion(
-			new Vec3(
-				state.omega.x * semanticStepFraction,
-				state.omega.y * semanticStepFraction,
-				state.omega.z * semanticStepFraction,
-			),
+		if (
+			state.currentPresentationSlot >= 0 &&
+			!state.dirty &&
+			!hasActiveContinuousEffect(state)
+		)
+			return state.presentationSlots[state.currentPresentationSlot];
+		const nextSlot = state.currentPresentationSlot === 0 ? 1 : 0;
+		const sample = state.presentationSlots[nextSlot];
+		for (let index = 0; index < state.parts.length; index += 1) {
+			const part = state.parts[index];
+			const renderState = sample.partRenderStates[index];
+			// The slot owns these objects, so changing them cannot alter the previous frame's sample.
+			renderState.textureVelocity = part.textureVelocity;
+			renderState.translucency = part.translucency.sampled;
+		}
+		writeSampledRootTransform(
+			state,
+			this.#fractionalSeconds,
+			sample.rootTransformModifier,
 		);
-		return {
-			partRenderStates: state.parts.map((part) => ({
-				textureVelocity: part.textureVelocity,
-				translucency: part.translucency.sampled,
-			})),
-			rootTransformModifier: multiplyMat4(
-				createRotationMat4(
-					multiplyQuaternion(delta, state.committedOrientation),
-				),
-				createScaleMat4(sampledScale(state, fractionalSeconds)),
-			),
-		};
+		state.currentPresentationSlot = nextSlot;
+		state.dirty = false;
+		if (!hasActiveContinuousEffect(state))
+			this.#presentationNodeIds.delete(nodeId);
+		return sample;
 	}
 
 	remove(nodeId: SceneNodeId): void {
+		this.#activeNodeIds.delete(nodeId);
+		this.#presentationNodeIds.delete(nodeId);
 		this.#states.delete(nodeId);
 	}
 
@@ -508,7 +556,13 @@ export class EffectSystem implements EffectCommandPort {
 
 	/** Whether this state would present differently from the last sample taken of it. */
 	needsPresentation(nodeId: SceneNodeId): boolean {
-		return this.#requiredState(nodeId).dirty;
+		const state = this.#requiredState(nodeId);
+		return state.dirty || hasActiveContinuousEffect(state);
+	}
+
+	/** Sparse candidates for publication, including a final sample after an effect ends. */
+	presentationNodeIds(): ReadonlySet<SceneNodeId> {
+		return this.#presentationNodeIds;
 	}
 
 	#requiredState(nodeId: SceneNodeId): EffectState {
@@ -516,17 +570,71 @@ export class EffectSystem implements EffectCommandPort {
 		if (!state) throw new Error(`Effect state for ${nodeId} does not exist.`);
 		return state;
 	}
+
+	#syncActiveState(nodeId: SceneNodeId, state: EffectState): void {
+		if (hasActiveContinuousEffect(state)) {
+			this.#activeNodeIds.add(nodeId);
+			this.#presentationNodeIds.add(nodeId);
+		} else this.#activeNodeIds.delete(nodeId);
+	}
 }
 
-/** Scale at a fractional instant, without committing that time to the ramp. */
-function sampledScale(state: EffectState, fractionalSeconds: number): Vec3 {
+/** Any effect that changes at behavior or fractional frame cadence. */
+function hasActiveContinuousEffect(state: EffectState): boolean {
+	return (
+		state.scaleRamp !== null ||
+		state.omega.x !== 0 ||
+		state.omega.y !== 0 ||
+		state.omega.z !== 0 ||
+		state.translucencyHooks.length > 0
+	);
+}
+
+/** Write rotation and uniform scale directly into the inactive sample's matrix. */
+function writeSampledRootTransform(
+	state: EffectState,
+	fractionalSeconds: number,
+	target: Mat4,
+): void {
+	const phase = fractionalSeconds / BEHAVIOR_STEP_SECONDS;
+	const x = state.omega.x * phase;
+	const y = state.omega.y * phase;
+	const z = state.omega.z * phase;
+	const magnitude = Math.hypot(x, y, z);
+	const half = magnitude / 2;
+	const factor = magnitude === 0 ? 0 : Math.sin(half) / magnitude;
+	const dw = magnitude === 0 ? 1 : Math.cos(half);
+	const dx = x * factor;
+	const dy = y * factor;
+	const dz = z * factor;
+	const current = state.committedOrientation;
+	let w = dw * current.w - dx * current.x - dy * current.y - dz * current.z;
+	let qx = dw * current.x + dx * current.w + dy * current.z - dz * current.y;
+	let qy = dw * current.y - dx * current.z + dy * current.w + dz * current.x;
+	let qz = dw * current.z + dx * current.y - dy * current.x + dz * current.w;
+	const length = Math.hypot(w, qx, qy, qz);
+	if (length === 0) throw new Error("Cannot normalize a zero effect rotation.");
+	w /= length;
+	qx /= length;
+	qy /= length;
+	qz /= length;
+	createRotationMat4FromQuaternionComponents(w, qx, qy, qz, target);
 	const scale = state.scaleRamp
 		? sampleScaleRamp(
 				state.scaleRamp,
 				state.scaleRamp.elapsedSeconds + fractionalSeconds,
 			)
 		: state.scale;
-	return new Vec3(scale, scale, scale);
+	// Rotation * uniform scale has no cross terms, so scale its basis columns in place.
+	target.m11 *= scale;
+	target.m12 *= scale;
+	target.m13 *= scale;
+	target.m21 *= scale;
+	target.m22 *= scale;
+	target.m23 *= scale;
+	target.m31 *= scale;
+	target.m32 *= scale;
+	target.m33 *= scale;
 }
 
 function sampleScaleRamp(ramp: ScaleRamp, elapsedSeconds: number): number {

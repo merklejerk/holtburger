@@ -5,15 +5,34 @@ import {
 import type { DynamicLayout } from "../geometry/dynamic-layout";
 import type { DynamicAppearance } from "../systems/dynamic-appearance";
 import { compileDynamicIndexBatches } from "./dynamic-index-batches";
+import { compileOpaqueDynamicBatchedSpans } from "./dynamic-batched-ranges";
+import { compileOpaqueDynamicDepth } from "./dynamic-depth-preparation";
 import {
 	createObjectMaterialTable,
 	OBJECT_MATERIAL_TEXELS,
 } from "./object-material-table";
 import {
 	compileDynamicPartRangeGroups,
+	dynamicObjectPhase,
 	type DynamicPartRangeGroups,
+	type DynamicRangeAdmission,
 	type PreparedObjectSurface,
 } from "./object-rendering-policy";
+
+/** Fully opaque range decisions shared by every root using one appearance generation. */
+export interface OpaqueDynamicAppearanceVariant {
+	/** Dense part array must cover every referenced source selector. */
+	readonly requiredPartCount: number;
+	readonly admission: DynamicRangeAdmission;
+	readonly opaqueSpans: ReturnType<typeof compileOpaqueDynamicBatchedSpans>;
+	readonly additiveSpans: ReturnType<typeof compileOpaqueDynamicBatchedSpans>;
+	readonly transparentRanges: Extract<
+		PreparedDynamicAppearance,
+		{ kind: "drawable" }
+	>["plan"]["ranges"];
+	readonly shadowDepth: ReturnType<typeof compileOpaqueDynamicDepth>;
+	readonly selectionDepth: ReturnType<typeof compileOpaqueDynamicDepth>;
+}
 
 /** Physical resources and draw plan for one retained appearance, or explicit empty geometry. */
 export type PreparedDynamicAppearance = {
@@ -31,8 +50,27 @@ export type PreparedDynamicAppearance = {
 			readonly plan: ReturnType<
 				typeof compileDynamicIndexBatches<WebGLTexture, WebGLSampler>
 			>;
+			/** Normal and retail-hidden decisions, compiled with physical index organization. */
+			readonly opaqueVariants: readonly [
+				OpaqueDynamicAppearanceVariant,
+				OpaqueDynamicAppearanceVariant,
+			];
 	  }
 );
+
+/** Borrow compiled range decisions only when the published part array satisfies their selectors. */
+export function selectOpaqueDynamicAppearanceVariant(
+	appearance: PreparedDynamicAppearance,
+	partCount: number,
+	allPartsOpaque: boolean,
+	showRetailHiddenGeometry: boolean,
+): OpaqueDynamicAppearanceVariant | null {
+	if (appearance.kind === "empty" || !allPartsOpaque) return null;
+	const variant = appearance.opaqueVariants[showRetailHiddenGeometry ? 1 : 0];
+	if (partCount < variant.requiredPartCount)
+		throw new Error("Dynamic appearance references a missing part.");
+	return variant;
+}
 
 /** Renderer-supplied material policy and physical atlas resolution. */
 type PrepareSurface = (
@@ -176,6 +214,10 @@ export class WebGL2DynamicAppearances {
 			appearance,
 			surfaces,
 		);
+		const opaqueVariants = compileOpaqueDynamicAppearanceVariants(
+			plan,
+			rangeGroupsByPart,
+		);
 		const data = createObjectMaterialTable(surfaces);
 		const gl = this.#gl;
 		requireWebGL2NoError(gl, "Before dynamic appearance upload");
@@ -215,7 +257,14 @@ export class WebGL2DynamicAppearances {
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, plan.indices, gl.STATIC_DRAW);
 			requireWebGL2NoError(gl, "After dynamic appearance upload");
-			return { kind: "drawable", table, indexBuffer, plan, rangeGroupsByPart };
+			return {
+				kind: "drawable",
+				table,
+				indexBuffer,
+				plan,
+				opaqueVariants,
+				rangeGroupsByPart,
+			};
 		} catch (cause) {
 			gl.deleteTexture(table);
 			gl.deleteBuffer(indexBuffer);
@@ -228,4 +277,66 @@ export class WebGL2DynamicAppearances {
 		this.#gl.deleteTexture(resource.table);
 		this.#gl.deleteBuffer(resource.indexBuffer);
 	}
+}
+
+/** Compile both retail visibility policies for one appearance generation. */
+export function compileOpaqueDynamicAppearanceVariants(
+	plan: Extract<PreparedDynamicAppearance, { kind: "drawable" }>["plan"],
+	rangeGroupsByPart: readonly DynamicPartRangeGroups[],
+): readonly [OpaqueDynamicAppearanceVariant, OpaqueDynamicAppearanceVariant] {
+	return [
+		compileOpaqueVariant(plan, rangeGroupsByPart, false),
+		compileOpaqueVariant(plan, rangeGroupsByPart, true),
+	];
+}
+
+function compileOpaqueVariant(
+	plan: Extract<PreparedDynamicAppearance, { kind: "drawable" }>["plan"],
+	rangeGroupsByPart: readonly DynamicPartRangeGroups[],
+	showRetailHiddenGeometry: boolean,
+): OpaqueDynamicAppearanceVariant {
+	let sourceRangeGroupCount = 0;
+	let hasMaterialFreeShadowGeometry = false;
+	let requiredPartCount = 0;
+	for (const groups of rangeGroupsByPart) {
+		const summary = showRetailHiddenGeometry
+			? groups.includingRetailHidden
+			: groups.normallyVisible;
+		sourceRangeGroupCount += summary.sourceRangeGroupCount;
+		hasMaterialFreeShadowGeometry ||= summary.hasOpaqueGeometry;
+		requiredPartCount = Math.max(requiredPartCount, groups.partSelector + 1);
+	}
+	return {
+		requiredPartCount,
+		admission: { sourceRangeGroupCount, hasMaterialFreeShadowGeometry },
+		opaqueSpans: compileOpaqueDynamicBatchedSpans(
+			plan,
+			"opaque",
+			showRetailHiddenGeometry,
+		),
+		additiveSpans: compileOpaqueDynamicBatchedSpans(
+			plan,
+			"additive",
+			showRetailHiddenGeometry,
+		),
+		transparentRanges: plan.ranges.filter(
+			(range) =>
+				dynamicObjectPhase(
+					range.source.ordering,
+					1,
+					range.source.retailVisibility,
+					showRetailHiddenGeometry,
+				) === "transparent",
+		),
+		shadowDepth: compileOpaqueDynamicDepth(
+			plan,
+			showRetailHiddenGeometry,
+			true,
+		),
+		selectionDepth: compileOpaqueDynamicDepth(
+			plan,
+			showRetailHiddenGeometry,
+			false,
+		),
+	};
 }

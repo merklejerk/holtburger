@@ -30,15 +30,24 @@ export class WebGL2DeviceStateApplicator {
 	#blendEnabled: boolean | UnknownState = UNKNOWN_STATE;
 	#blendPolicy: ObjectBlendPolicy | UnknownState = UNKNOWN_STATE;
 	#cullFace: "back" | "front" | UnknownState = UNKNOWN_STATE;
-	#lightingRole: SceneLightingRole | UnknownState = UNKNOWN_STATE;
-	#staticLightScope: LandblockOwnerId | null | UnknownState = UNKNOWN_STATE;
 	#program: WebGLProgram | UnknownState = UNKNOWN_STATE;
+	/** GL retains uniforms per program; each program records the view and light facts it holds. */
+	readonly #programStates = new WeakMap<
+		WebGLProgram,
+		{
+			viewStamp: object | null;
+			lightingRole: SceneLightingRole | UnknownState;
+			staticLightScope: LandblockOwnerId | null | UnknownState;
+		}
+	>();
 	readonly #texture2DUnits = new Map<number, WebGLTexture>();
 	/** Samplers are physical per unit and therefore shared by the 2D and array binding paths. */
 	readonly #samplerUnits = new Map<number, WebGLSampler | null>();
 	/** Array textures are independent bindings but share the context's active-unit selector. */
 	readonly #textureArrayUnits = new Map<number, WebGLTexture>();
 	#vertexArray: WebGLVertexArrayObject | UnknownState = UNKNOWN_STATE;
+	/** Element array binding is VAO-local in WebGL2, including across program switches. */
+	#elementArrayBuffers = new WeakMap<WebGLVertexArrayObject, WebGLBuffer>();
 	/**
 	 * Last applied components per uniform location, for redundancy filtering.
 	 *
@@ -70,13 +79,12 @@ export class WebGL2DeviceStateApplicator {
 		this.#blendEnabled = UNKNOWN_STATE;
 		this.#blendPolicy = UNKNOWN_STATE;
 		this.#cullFace = UNKNOWN_STATE;
-		this.#lightingRole = UNKNOWN_STATE;
-		this.#staticLightScope = UNKNOWN_STATE;
 		this.#program = UNKNOWN_STATE;
 		this.#texture2DUnits.clear();
 		this.#samplerUnits.clear();
 		this.#textureArrayUnits.clear();
 		this.#vertexArray = UNKNOWN_STATE;
+		this.#elementArrayBuffers = new WeakMap();
 	}
 
 	/** Apply one linked program and report whether pass uniforms must be refreshed. */
@@ -84,16 +92,24 @@ export class WebGL2DeviceStateApplicator {
 		if (this.#program === program) return false;
 		this.#gl.useProgram(program);
 		this.#program = program;
-		// Uniform state belongs to the program object, so a switch always re-binds lighting.
-		this.#lightingRole = UNKNOWN_STATE;
-		this.#staticLightScope = UNKNOWN_STATE;
+		return true;
+	}
+
+	/** Report whether this program has received the current camera's view uniforms. */
+	applyViewStamp(viewStamp: object): boolean {
+		const state = this.#currentProgramState();
+		if (state.viewStamp === viewStamp) return false;
+		state.viewStamp = viewStamp;
+		state.lightingRole = UNKNOWN_STATE;
+		state.staticLightScope = UNKNOWN_STATE;
 		return true;
 	}
 
 	/** Report whether this draw's lighting role still needs its uniforms bound. */
 	applyLightingRole(role: SceneLightingRole): boolean {
-		if (this.#lightingRole === role) return false;
-		this.#lightingRole = role;
+		const state = this.#currentProgramState();
+		if (state.lightingRole === role) return false;
+		state.lightingRole = role;
 		return true;
 	}
 
@@ -104,8 +120,9 @@ export class WebGL2DeviceStateApplicator {
 	 * different landblocks and therefore need different sets.
 	 */
 	applyStaticLightScope(landblockId: LandblockOwnerId | null): boolean {
-		if (this.#staticLightScope === landblockId) return false;
-		this.#staticLightScope = landblockId;
+		const state = this.#currentProgramState();
+		if (state.staticLightScope === landblockId) return false;
+		state.staticLightScope = landblockId;
 		return true;
 	}
 
@@ -310,6 +327,32 @@ export class WebGL2DeviceStateApplicator {
 		if (this.#vertexArray === vertexArray) return;
 		this.#gl.bindVertexArray(vertexArray);
 		this.#vertexArray = vertexArray;
+	}
+
+	/** Bind an index generation only when the selected VAO holds a different one. */
+	applyElementArrayBuffer(buffer: WebGLBuffer): void {
+		if (this.#vertexArray === UNKNOWN_STATE)
+			throw new Error("Bind a vertex array before its element array buffer.");
+		if (this.#elementArrayBuffers.get(this.#vertexArray) === buffer) return;
+		this.#gl.bindBuffer(this.#gl.ELEMENT_ARRAY_BUFFER, buffer);
+		this.#elementArrayBuffers.set(this.#vertexArray, buffer);
+	}
+
+	#currentProgramState() {
+		if (this.#program === UNKNOWN_STATE)
+			throw new Error(
+				"Bind a program before applying its view or lighting state.",
+			);
+		let state = this.#programStates.get(this.#program);
+		if (state === undefined) {
+			state = {
+				viewStamp: null,
+				lightingRole: UNKNOWN_STATE,
+				staticLightScope: UNKNOWN_STATE,
+			};
+			this.#programStates.set(this.#program, state);
+		}
+		return state;
 	}
 }
 

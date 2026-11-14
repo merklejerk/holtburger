@@ -5516,6 +5516,9 @@
 				readTargetIndicatorFrame={() => null}
 				readCombatTargetFrame={() => null}
 				readLockFeedbackFrames={() => []}
+				hasActiveLockFeedback={() => false}
+				spellCastTarget={null}
+				lockFeedbackWakeRevision={0}
 				readSelectedEntityDisplay={() => interactions.display(unrestrictedUse)}
 				{spells}
 				{enchantments}

@@ -1,7 +1,7 @@
 import { createUiThemeLoader } from "../../app/ui-theme";
 import themeUrl from "./themes/combat-indicators.css?url&no-inline";
 import { mount, tick, unmount } from "svelte";
-import ClientCombatTargetIndicator from "../../client/ClientCombatTargetIndicator.svelte";
+import ClientCombatIndicatorProbeHost from "./ClientCombatIndicatorProbeHost.svelte";
 import ClientTargetIndicator from "../../client/ClientTargetIndicator.svelte";
 import type { ClientCombatTargetFrame } from "../../client/client-target-indicator";
 import { projectClientCombatTarget } from "../../client/client-target-indicator";
@@ -17,7 +17,7 @@ export async function probeClientCombatTargetIndicator() {
 	document.body.append(target);
 	let frame: ClientCombatTargetFrame | null = null;
 	let reads = 0;
-	const reticle = mount(ClientCombatTargetIndicator, {
+	const reticle = mount(ClientCombatIndicatorProbeHost, {
 		target,
 		props: {
 			readFrame: () => {
@@ -51,7 +51,13 @@ export async function probeClientCombatTargetIndicator() {
 		};
 		if (!marker.hidden || !combatEdge.hidden)
 			throw new Error("Absent engagement displayed a combat reticle.");
+		const idleReads = reads;
+		await nextFrame();
+		if (reads !== idleReads)
+			throw new Error("Idle combat indicator kept polling animation frames.");
 		frame = { combatType: "melee", kind: "reticle", x: 125, y: 210 };
+		reticle.setActive(true);
+		await tick();
 		await nextFrame();
 		if (marker.hidden || arrow.hidden)
 			throw new Error(
@@ -223,6 +229,7 @@ export async function probeClientCombatTargetIndicator() {
 				heightFraction,
 				bounds: new AABB3(new Vec3(-1, 0, -1), new Vec3(1, 2, 1)),
 				placement: {
+					transformRevision: 0,
 					landblockId: TARGETING_TEST_VIEW.camera.placement.landblockId,
 					envCellId: null,
 					scope: { kind: "outdoor" },
@@ -253,6 +260,8 @@ export async function probeClientCombatTargetIndicator() {
 		await nextFrame();
 		expectPosition("translate3d(230px, 175px, 0px)");
 		frame = null;
+		reticle.setActive(false);
+		await tick();
 		await nextFrame();
 		if (!marker.hidden || !combatEdge.hidden || arrow.hidden)
 			throw new Error(

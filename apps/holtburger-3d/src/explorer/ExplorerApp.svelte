@@ -325,6 +325,8 @@
 			cameraFovRadians: (EXPLORER_TUNING.camera.framing.fov * Math.PI) / 180,
 			cameraHeadingRadians: cameraYawRadians,
 			presentedEntities: readPresentedMapEntities,
+			presentedEntitiesRevision: runtime?.mapEntityRevision ?? 0,
+			landmarkRevision: 0,
 			selectedGuid: selectedExplorerEntity?.guid ?? null,
 			source: runtime,
 			subject:

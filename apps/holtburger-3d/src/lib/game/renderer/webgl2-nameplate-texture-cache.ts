@@ -12,6 +12,10 @@ import type {
 
 const NAMEPLATE_STYLE_REVISION = 4;
 const MAX_NAMEPLATE_TEXTURE_BYTES = 16 * 1024 * 1024;
+const NAMEPLATE_ATLAS_HEIGHT = 2048;
+const NAMEPLATE_ATLAS_WIDTH = 2048;
+const NAMEPLATE_ATLAS_WIDE_WIDTH = 4096;
+const NAMEPLATE_ATLAS_GUTTER = 1;
 
 export interface RasterizedNameplate {
 	readonly height: number;
@@ -32,9 +36,12 @@ export interface NameplateTextureBinding {
 	readonly height: number;
 	readonly texture: WebGLTexture;
 	readonly width: number;
+	/** Mutable atlas placement; repacking updates existing draw references in place. */
+	readonly atlasUvRect: Float32Array;
 }
 
 export interface NameplateTextureCacheDiagnostics {
+	/** Physical atlas storage currently resident on the GPU. */
 	readonly byteCount: number;
 	readonly hitCount: number;
 	readonly liveEntryCount: number;
@@ -48,6 +55,8 @@ export interface NameplateTextureCacheDiagnostics {
 interface CacheEntry {
 	readonly binding: NameplateTextureBinding;
 	readonly iconIds: NameplateContent["indicators"][number]["iconId"][];
+	readonly rasterized: RasterizedNameplate;
+	lastDraw: number;
 }
 
 interface ActiveNameplateStyle {
@@ -72,17 +81,28 @@ export class WebGL2NameplateTextureCache {
 	>();
 	#activeStyle: ActiveNameplateStyle | null = null;
 	#nextStyleGeneration = 1;
-	#byteCount = 0;
 	#hitCount = 0;
 	#missCount = 0;
 	#rasterizationCount = 0;
 	#rejectedRasterCount = 0;
 	#releaseCount = 0;
 	#destroyed = false;
+	#atlas: WebGLTexture | null = null;
+	#atlasWidth = NAMEPLATE_ATLAS_WIDTH;
+	#shelfX = 0;
+	#shelfY = 0;
+	#shelfHeight = 0;
+	#drawGeneration = 0;
 
 	constructor(gl: WebGL2RenderingContext, rasterizer: NameplateRasterizer) {
 		this.#gl = gl;
 		this.#rasterizer = rasterizer;
+	}
+
+	/** Pin bindings already handed to this draw while a full page is compacted. */
+	beginDraw(): void {
+		this.#requireAlive();
+		this.#drawGeneration += 1;
 	}
 
 	/** Reconcile exact installed references only when the owner population revision changes. */
@@ -95,10 +115,11 @@ export class WebGL2NameplateTextureCache {
 		this.#activateStyle(appearance, density);
 		const referencedKeys = new Set<string>();
 		for (const visual of visuals) referencedKeys.add(this.#key(visual));
-		for (const [key, entry] of this.#entries) {
+		for (const [key] of this.#entries) {
 			if (referencedKeys.has(key)) continue;
-			this.#deleteEntry(key, entry);
+			this.#deleteEntry(key);
 		}
+		this.#releaseEmptyAtlas();
 	}
 
 	/** Resolve one visible value, creating its Canvas and GPU resource only on first use. */
@@ -111,6 +132,7 @@ export class WebGL2NameplateTextureCache {
 		const existing = this.#entries.get(key);
 		if (existing) {
 			this.#hitCount += 1;
+			existing.lastDraw = this.#drawGeneration;
 			return existing.binding;
 		}
 		this.#missCount += 1;
@@ -121,40 +143,28 @@ export class WebGL2NameplateTextureCache {
 		);
 		this.#rasterizationCount += 1;
 		this.#validateDimensions(rasterized);
-		const texture = this.#gl.createTexture();
-		if (!texture) throw new Error("Failed to allocate nameplate texture.");
-		try {
-			const gl = this.#gl;
-			gl.bindTexture(gl.TEXTURE_2D, texture);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-			gl.texImage2D(
-				gl.TEXTURE_2D,
-				0,
-				gl.RGBA,
-				gl.RGBA,
-				gl.UNSIGNED_BYTE,
-				rasterized.pixels,
-			);
-			gl.bindTexture(gl.TEXTURE_2D, null);
-		} catch (cause) {
-			this.#gl.bindTexture(this.#gl.TEXTURE_2D, null);
-			this.#gl.deleteTexture(texture);
-			throw cause;
+		const texture = this.#ensureAtlas();
+		let placement = this.#place(rasterized);
+		if (placement === null) {
+			this.#repack();
+			placement = this.#place(rasterized);
+			if (placement === null)
+				throw new Error("Visible nameplate rasters exceed atlas capacity.");
 		}
+		this.#upload(rasterized, placement.x, placement.y);
 		const binding: NameplateTextureBinding = {
 			height: rasterized.height,
 			texture,
 			width: rasterized.width,
+			atlasUvRect: this.#uvRect(placement.x, placement.y, rasterized),
 		};
 		const entry: CacheEntry = {
 			binding,
 			iconIds: visual.content.indicators.map(({ iconId }) => iconId),
+			rasterized,
+			lastDraw: this.#drawGeneration,
 		};
 		this.#entries.set(key, entry);
-		this.#byteCount += rasterized.width * rasterized.height * 4;
 		return binding;
 	}
 
@@ -166,13 +176,15 @@ export class WebGL2NameplateTextureCache {
 		const changed = new Set(ids);
 		if (changed.size === 0) return;
 		for (const [key, entry] of this.#entries)
-			if (entry.iconIds.some((id) => changed.has(id)))
-				this.#deleteEntry(key, entry);
+			if (entry.iconIds.some((id) => changed.has(id))) this.#deleteEntry(key);
+		this.#releaseEmptyAtlas();
 	}
 
 	diagnostics(): NameplateTextureCacheDiagnostics {
 		return {
-			byteCount: this.#byteCount,
+			byteCount: this.#atlas
+				? this.#atlasWidth * NAMEPLATE_ATLAS_HEIGHT * 4
+				: 0,
 			hitCount: this.#hitCount,
 			liveEntryCount: this.#entries.size,
 			missCount: this.#missCount,
@@ -185,7 +197,9 @@ export class WebGL2NameplateTextureCache {
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
-		for (const [key, entry] of this.#entries) this.#deleteEntry(key, entry);
+		for (const [key] of this.#entries) this.#deleteEntry(key);
+		if (this.#atlas) this.#gl.deleteTexture(this.#atlas);
+		this.#atlas = null;
 	}
 
 	#validateDimensions(rasterized: RasterizedNameplate): void {
@@ -223,6 +237,14 @@ export class WebGL2NameplateTextureCache {
 			generation: this.#nextStyleGeneration,
 		};
 		this.#nextStyleGeneration += 1;
+		for (const [key] of this.#entries) this.#deleteEntry(key);
+		if (this.#atlas) this.#gl.deleteTexture(this.#atlas);
+		this.#atlas = null;
+		this.#atlasWidth =
+			density > 1.25 ? NAMEPLATE_ATLAS_WIDE_WIDTH : NAMEPLATE_ATLAS_WIDTH;
+		this.#shelfX = 0;
+		this.#shelfY = 0;
+		this.#shelfHeight = 0;
 	}
 
 	#key(visual: NameplateVisual): string {
@@ -253,11 +275,131 @@ export class WebGL2NameplateTextureCache {
 		return key;
 	}
 
-	#deleteEntry(key: string, entry: CacheEntry): void {
-		this.#gl.deleteTexture(entry.binding.texture);
+	#deleteEntry(key: string): void {
 		this.#entries.delete(key);
-		this.#byteCount -= entry.binding.width * entry.binding.height * 4;
 		this.#releaseCount += 1;
+	}
+
+	#releaseEmptyAtlas(): void {
+		if (this.#entries.size !== 0 || this.#atlas === null) return;
+		this.#gl.deleteTexture(this.#atlas);
+		this.#atlas = null;
+		this.#shelfX = 0;
+		this.#shelfY = 0;
+		this.#shelfHeight = 0;
+	}
+
+	#ensureAtlas(): WebGLTexture {
+		if (this.#atlas) return this.#atlas;
+		const gl = this.#gl;
+		const maximumDimension = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+		if (
+			this.#atlasWidth > maximumDimension ||
+			NAMEPLATE_ATLAS_HEIGHT > maximumDimension
+		)
+			throw new Error("Nameplate atlas exceeds device texture size.");
+		const texture = gl.createTexture();
+		if (!texture) throw new Error("Failed to allocate nameplate atlas.");
+		try {
+			gl.bindTexture(gl.TEXTURE_2D, texture);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+			gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				gl.RGBA,
+				this.#atlasWidth,
+				NAMEPLATE_ATLAS_HEIGHT,
+				0,
+				gl.RGBA,
+				gl.UNSIGNED_BYTE,
+				null,
+			);
+			gl.bindTexture(gl.TEXTURE_2D, null);
+		} catch (cause) {
+			gl.bindTexture(gl.TEXTURE_2D, null);
+			gl.deleteTexture(texture);
+			throw cause;
+		}
+		this.#atlas = texture;
+		return texture;
+	}
+
+	#place(rasterized: RasterizedNameplate): { x: number; y: number } | null {
+		const width = rasterized.width + 2 * NAMEPLATE_ATLAS_GUTTER;
+		const height = rasterized.height + 2 * NAMEPLATE_ATLAS_GUTTER;
+		if (width > this.#atlasWidth || height > NAMEPLATE_ATLAS_HEIGHT)
+			return null;
+		if (this.#shelfX + width > this.#atlasWidth) {
+			this.#shelfX = 0;
+			this.#shelfY += this.#shelfHeight;
+			this.#shelfHeight = 0;
+		}
+		if (this.#shelfY + height > NAMEPLATE_ATLAS_HEIGHT) return null;
+		const x = this.#shelfX + NAMEPLATE_ATLAS_GUTTER;
+		const y = this.#shelfY + NAMEPLATE_ATLAS_GUTTER;
+		this.#shelfX += width;
+		this.#shelfHeight = Math.max(this.#shelfHeight, height);
+		return { x, y };
+	}
+
+	#uvRect(x: number, y: number, rasterized: RasterizedNameplate): Float32Array {
+		return new Float32Array([
+			x / this.#atlasWidth,
+			y / NAMEPLATE_ATLAS_HEIGHT,
+			rasterized.width / this.#atlasWidth,
+			rasterized.height / NAMEPLATE_ATLAS_HEIGHT,
+		]);
+	}
+
+	#upload(rasterized: RasterizedNameplate, x: number, y: number): void {
+		const gl = this.#gl;
+		gl.bindTexture(gl.TEXTURE_2D, this.#ensureAtlas());
+		gl.texSubImage2D(
+			gl.TEXTURE_2D,
+			0,
+			x,
+			y,
+			gl.RGBA,
+			gl.UNSIGNED_BYTE,
+			rasterized.pixels,
+		);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+	}
+
+	#repack(): void {
+		// Entries already handed to this draw remain live; cold cache entries can be
+		// rasterized again on demand after the page is cleared.
+		for (const [key, entry] of this.#entries)
+			if (entry.lastDraw !== this.#drawGeneration) this.#deleteEntry(key);
+		const gl = this.#gl;
+		gl.bindTexture(gl.TEXTURE_2D, this.#ensureAtlas());
+		gl.texImage2D(
+			gl.TEXTURE_2D,
+			0,
+			gl.RGBA,
+			this.#atlasWidth,
+			NAMEPLATE_ATLAS_HEIGHT,
+			0,
+			gl.RGBA,
+			gl.UNSIGNED_BYTE,
+			null,
+		);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+		this.#shelfX = 0;
+		this.#shelfY = 0;
+		this.#shelfHeight = 0;
+		for (const entry of this.#entries.values()) {
+			const placement = this.#place(entry.rasterized);
+			if (placement === null)
+				throw new Error("Visible nameplate rasters exceed atlas capacity.");
+			entry.binding.atlasUvRect.set(
+				this.#uvRect(placement.x, placement.y, entry.rasterized),
+			);
+			this.#upload(entry.rasterized, placement.x, placement.y);
+		}
 	}
 
 	#requireAlive(): void {

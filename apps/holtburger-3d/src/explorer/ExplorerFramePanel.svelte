@@ -193,7 +193,7 @@
 					>
 				</div>
 				<div class="explorer-param-row">
-					<span class="explorer-param-key">Live textures / cache bytes</span>
+					<span class="explorer-param-key">Cached plates / atlas bytes</span>
 					<code
 						>{diagnostics?.nameplates.cache.liveEntryCount ?? 0} / {diagnostics
 							?.nameplates.cache.byteCount ?? 0}</code

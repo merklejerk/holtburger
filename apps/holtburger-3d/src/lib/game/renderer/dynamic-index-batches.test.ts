@@ -143,12 +143,11 @@ describe("dynamic physical index batches", () => {
 			expect(result.indices).toEqual(sourceIndices);
 		},
 	);
-	it("partitions culling, visibility and authored phase", () => {
+	it("partitions culling and visibility while merging opaque and alpha-tested phases", () => {
 		const logical = appearance();
 		for (const patch of [
 			{ polygon: { cullFace: "front", stippled: false } },
 			{ retailVisibility: "degrade-hidden" },
-			{ ordering: "alpha-test" },
 		] as const) {
 			const ranges = logical.ranges.map((range, index) =>
 				index === 1 ? { ...range, ...patch } : range,
@@ -160,6 +159,54 @@ describe("dynamic physical index batches", () => {
 			);
 			expect(result.batches).toHaveLength(2);
 		}
+	});
+	it("places opaque before alpha-tested indices in one span for contiguous shadow depth", () => {
+		const logical = appearance();
+		const result = compileDynamicIndexBatches(
+			sourceIndices,
+			{
+				...logical,
+				ranges: logical.ranges.map((range, index) => ({
+					...range,
+					ordering: index === 0 ? "alpha-test" : "opaque",
+				})),
+			},
+			[surface("a"), surface("a"), surface("a")],
+		);
+		expect(result.batches).toHaveLength(1);
+		expect([...result.indices]).toEqual([3, 4, 5, 6, 7, 8, 0, 1, 2]);
+		expect(result.physicalRanges.map((range) => range.source.ordering)).toEqual(
+			["opaque", "opaque", "alpha-test"],
+		);
+	});
+	it("promotes texture bindings across solid, direct, and indexed materials", () => {
+		const logical = appearance();
+		const indexed = surface("a");
+		const solid: PreparedObjectSurface<string, string> = {
+			...indexed,
+			material: { kind: "solid-color", color: [1, 1, 1, 1] },
+		};
+		const direct: PreparedObjectSurface<string, string> = {
+			...indexed,
+			material: {
+				kind: "direct-color",
+				color: [1, 1, 1, 1],
+				base: { texture: "a", sampler: "exact", rect: [0, 0, 4, 4] },
+			},
+		};
+		const result = compileDynamicIndexBatches(sourceIndices, logical, [
+			solid,
+			direct,
+			indexed,
+		]);
+		expect(result.batches).toHaveLength(1);
+		expect(result.batches[0]?.textures.base?.texture).toBe("a");
+		expect(result.batches[0]?.textures.palette?.texture).toBe("palette");
+		expect(result.ranges.map((range) => range.material.kind)).toEqual([
+			"solid-color",
+			"direct-color",
+			"index8",
+		]);
 	});
 	it("partitions physical palette pages and samplers but not atlas rectangles or colors", () => {
 		const left = surface("a");

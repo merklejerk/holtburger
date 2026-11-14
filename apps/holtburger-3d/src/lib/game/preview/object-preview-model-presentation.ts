@@ -243,7 +243,7 @@ export class ObjectPreviewModelPresentation {
 			particleRanges: this.#particleRanges,
 			particleRecords: {
 				data: this.#particles.recordData,
-				dirtySlots: this.#particles.takeDirtyRecordSlots(),
+				dirtyRows: this.#particles.takeDirtyRecordRows(),
 			},
 			partRenderStates: this.#partRenderStates,
 			partToPreview: this.#partToPreview,

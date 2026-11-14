@@ -455,9 +455,9 @@ interface DynamicEntityPresentationRecord {
 	/** Last world-owned absolute scale applied to the installed visual root. */
 	objectScale: number;
 	/** Exact desired placement already applied to this scene root. */
-	placementIdentity: string;
+	placementIdentity: DynamicEntityView["placement"];
 	/** Mutable visibility/lighting level already applied to the dynamic system. */
-	presentationStateIdentity: string;
+	presentationStateIdentity: DynamicEntityView["physics"];
 	/**
 	 * Accepted levels and installation outcomes for each track, so restated levels are not re-entered.
 	 *
@@ -539,8 +539,10 @@ interface DesiredDynamicEntityRecord {
 	readonly override: DynamicPresentationOverride | null;
 	/** Exact immutable visual lookup identity. */
 	readonly visualKey: string;
+	/** Stable immutable visual fields; callers may mutate an accepted view before the next upsert. */
+	readonly visualIdentity: DynamicEntityView["presentation"];
 	/** Placement comparison identity computed once when this desired level is accepted. */
-	placementIdentity: string;
+	placementIdentity: DynamicEntityView["placement"];
 	/** Current missing prerequisite, or null while eligible/installed. */
 	deferral: DynamicEntityDeferral | null;
 	/** Effective cue table: undefined until visual metadata resolves; null means no table. */
@@ -678,41 +680,153 @@ export interface EnvCellLayerRuntimeDiagnostics
 	readonly visibilityIslandCount: number;
 }
 
-/** Exact immutable visual lookup identity; motion and mutable physics never enter this key. */
-function dynamicVisualKey(entity: DynamicEntityView): string {
-	return JSON.stringify({
-		appearance: entity.presentation.appearance,
-		placementFrame: entity.presentation.placementFrame,
-		setupDid: entity.presentation.content.setupDid,
-	});
+/** Compare the immutable setup substitutions without serializing every authoritative tick. */
+function sameDynamicVisual(
+	a: DynamicEntityView["presentation"],
+	b: DynamicEntityView["presentation"],
+): boolean {
+	if (
+		a.content.setupDid !== b.content.setupDid ||
+		a.placementFrame !== b.placementFrame ||
+		a.appearance.paletteDid !== b.appearance.paletteDid
+	)
+		return false;
+	const aa = a.appearance;
+	const bb = b.appearance;
+	if (
+		aa.subPalettes.length !== bb.subPalettes.length ||
+		aa.textureChanges.length !== bb.textureChanges.length ||
+		aa.partChanges.length !== bb.partChanges.length
+	)
+		return false;
+	for (let index = 0; index < aa.subPalettes.length; index += 1) {
+		const left = aa.subPalettes[index];
+		const right = bb.subPalettes[index];
+		if (
+			left.paletteDid !== right.paletteDid ||
+			left.offset !== right.offset ||
+			left.colorCount !== right.colorCount
+		)
+			return false;
+	}
+	for (let index = 0; index < aa.textureChanges.length; index += 1) {
+		const left = aa.textureChanges[index];
+		const right = bb.textureChanges[index];
+		if (
+			left.partIndex !== right.partIndex ||
+			left.oldTextureDid !== right.oldTextureDid ||
+			left.newTextureDid !== right.newTextureDid
+		)
+			return false;
+	}
+	for (let index = 0; index < aa.partChanges.length; index += 1) {
+		const left = aa.partChanges[index];
+		const right = bb.partChanges[index];
+		if (
+			left.partIndex !== right.partIndex ||
+			left.gfxObjDid !== right.gfxObjDid
+		)
+			return false;
+	}
+	return true;
 }
 
-/** Exact scene-spatial placement used to avoid kinematic-level upserts clearing an active path. */
-function dynamicPlacementIdentity(entity: DynamicEntityView): string {
-	return entity.placement.kind === "world"
-		? JSON.stringify({
-				pose: entity.placement.pose,
-				spatialMembership: entity.placement.spatialMembership,
-			})
-		: JSON.stringify(entity.placement);
+/** Retain a stable visual identity without copying frame-rate pose or physics fields. */
+function snapshotDynamicVisual(
+	presentation: DynamicEntityView["presentation"],
+): DynamicEntityView["presentation"] {
+	const appearance = presentation.appearance;
+	return {
+		...presentation,
+		content: { ...presentation.content },
+		appearance: {
+			paletteDid: appearance.paletteDid,
+			subPalettes: appearance.subPalettes.map((part) => ({ ...part })),
+			textureChanges: appearance.textureChanges.map((part) => ({ ...part })),
+			partChanges: appearance.partChanges.map((part) => ({ ...part })),
+		},
+	};
 }
 
-/** Pose changes require travel; membership can refresh independently while a body is stationary. */
-function dynamicPathIdentity(entity: DynamicEntityView): string {
-	return entity.placement.kind === "world"
-		? JSON.stringify(entity.placement.pose)
-		: JSON.stringify(entity.placement);
+/** World pose changes require travel; membership can refresh while a body is stationary. */
+function sameDynamicPath(
+	left: DynamicEntityView["placement"],
+	right: DynamicEntityView["placement"],
+): boolean {
+	if (left.kind !== right.kind) return false;
+	if (left.kind === "attached")
+		return (
+			right.kind === "attached" &&
+			left.parent === right.parent &&
+			left.parentLocation === right.parentLocation &&
+			left.placement === right.placement
+		);
+	if (right.kind !== "world") return false;
+	const a = left.pose;
+	const b = right.pose;
+	return (
+		a.landblockId === b.landblockId &&
+		a.coords.x === b.coords.x &&
+		a.coords.y === b.coords.y &&
+		a.coords.z === b.coords.z &&
+		a.rotation.w === b.rotation.w &&
+		a.rotation.x === b.rotation.x &&
+		a.rotation.y === b.rotation.y &&
+		a.rotation.z === b.rotation.z
+	);
 }
 
-/** Mutable presentation level applied independently from placement and visual identity. */
-function dynamicPresentationStateIdentity(entity: DynamicEntityView): string {
-	return JSON.stringify({
-		cloaked: entity.physics.cloaked,
-		hidden: entity.physics.hidden,
-		lighting: entity.physics.lighting,
-		noDraw: entity.physics.noDraw,
-		translucency: entity.physics.translucency,
-	});
+/** Contact and simulation mode do not change scene placement or path ownership. */
+function sameDynamicPlacement(
+	left: DynamicEntityView["placement"],
+	right: DynamicEntityView["placement"],
+): boolean {
+	if (!sameDynamicPath(left, right)) return false;
+	if (left.kind === "attached") return true;
+	if (right.kind !== "world") return false;
+	const a = left.spatialMembership;
+	const b = right.spatialMembership;
+	if (
+		a.reachesOutdoors !== b.reachesOutdoors ||
+		a.reachedEnvCellIds.length !== b.reachedEnvCellIds.length
+	)
+		return false;
+	for (let index = 0; index < a.reachedEnvCellIds.length; index += 1)
+		if (a.reachedEnvCellIds[index] !== b.reachedEnvCellIds[index]) return false;
+	return true;
+}
+
+/** Retain only the placement shape used by path and membership comparisons. */
+function snapshotDynamicPlacement(
+	placement: DynamicEntityView["placement"],
+): DynamicEntityView["placement"] {
+	if (placement.kind === "attached") return { ...placement };
+	return {
+		...placement,
+		pose: {
+			...placement.pose,
+			coords: { ...placement.pose.coords },
+			rotation: { ...placement.pose.rotation },
+		},
+		spatialMembership: {
+			...placement.spatialMembership,
+			reachedEnvCellIds: [...placement.spatialMembership.reachedEnvCellIds],
+		},
+	};
+}
+
+/** Only fields consumed by dynamic presentation contribute to this level. */
+function sameDynamicPresentationState(
+	left: DynamicEntityView["physics"],
+	right: DynamicEntityView["physics"],
+): boolean {
+	return (
+		left.cloaked === right.cloaked &&
+		left.hidden === right.hidden &&
+		left.lighting === right.lighting &&
+		left.noDraw === right.noDraw &&
+		left.translucency === right.translucency
+	);
 }
 
 /** Resident scope that can wake one deferred world-root entity. */
@@ -809,6 +923,8 @@ export class GamePresentationRuntime {
 		number,
 		DynamicEntityPresentationRecord
 	>();
+	/** Change fact for the overhead map's realized entity and radar picture. */
+	#mapEntityRevision = 0;
 	/** App-owned decoration survives realization; name and level always come from current authority. */
 	readonly #spawnedNameplateDecoration = new Map<
 		number,
@@ -832,6 +948,7 @@ export class GamePresentationRuntime {
 	readonly #animationPresentation = new AnimationPresentationScheduler(
 		(nodeId, selected, ordinaryInterval) =>
 			this.#animationSampleIntervalSeconds(nodeId, selected, ordinaryInterval),
+		(nodeId) => this.#animation.needsPresentation(nodeId),
 	);
 	/** Persistent visual-effect state advanced only by the authored behavior clock. */
 	readonly #effects: EffectSystem;
@@ -976,14 +1093,14 @@ export class GamePresentationRuntime {
 	 * decay the moment the camera crosses a boundary. This frame is the only one safe to retain.
 	 */
 	#sceneOriginOf(nodeId: SceneNodeId): SceneVector3 | null {
-		const resolved = this.#scene.getResolvedOrigin(nodeId);
+		const resolved = this.#scene.readResolvedState(nodeId)?.placement;
 		if (!resolved) return null;
-		const origin = resolved.landblockOrigin;
+		const origin = resolved.localToLandblock;
 		const landblockOrigin = createLandblockWorldOrigin(resolved.landblockId);
 		return sceneVector3([
-			origin.x + landblockOrigin.x,
-			origin.y + landblockOrigin.y,
-			origin.z + landblockOrigin.z,
+			origin.m41 + landblockOrigin.x,
+			origin.m42 + landblockOrigin.y,
+			origin.m43 + landblockOrigin.z,
 		]);
 	}
 
@@ -994,7 +1111,7 @@ export class GamePresentationRuntime {
 	 * whatever a script has rotated the owner to rather than its authored pose.
 	 */
 	#sceneRotationOf(nodeId: SceneNodeId): ResolvedFrameRotation | null {
-		const placement = this.#scene.getResolvedPlacement(nodeId);
+		const placement = this.#scene.readResolvedState(nodeId)?.placement;
 		if (!placement) return null;
 		return resolvedFrameRotationFromRenderTransform(placement.localToLandblock);
 	}
@@ -1132,7 +1249,7 @@ export class GamePresentationRuntime {
 		}
 		const nodeId = sceneNodeIdOf(target.targetId);
 		if (nodeId === null) return false;
-		const placement = this.#scene.getResolvedPlacement(nodeId);
+		const placement = this.#scene.readResolvedState(nodeId)?.placement;
 		if (!placement) return false;
 		writeRenderQuaternionFromRenderTransform(
 			placement.localToLandblock,
@@ -1565,6 +1682,7 @@ export class GamePresentationRuntime {
 			// Emitters ride their owner's visibility: its bounds grow to contain what it emits, so
 			// the renderer's existing footprint test covers particles without a parallel path.
 			(nodeId) => this.#particles.envelopeRadiusFor(behaviorTargetId(nodeId)),
+			() => this.#particles.takeDirtyEnvelopeOwnerIds(),
 		);
 		this.#audio = new AudioSystem(
 			dependencies.audioDevice,
@@ -2665,18 +2783,30 @@ export class GamePresentationRuntime {
 		const previous = this.#spawnedDesiredEntities.get(guid);
 		const hiddenChanged =
 			previous?.entity.physics.hidden !== entity.physics.hidden;
-		// Preserve the ordinary tick path's existing key work; only the locally overridden player
-		// needs additional visual/effect identity.
-		const acceptedVisualKey = dynamicVisualKey(entity);
-		const visualKey =
-			override === null
-				? acceptedVisualKey
-				: JSON.stringify([
-						acceptedVisualKey,
-						override.particles?.key ?? null,
-						override.body !== null,
-					]);
-		const placementIdentity = dynamicPlacementIdentity(entity);
+		const sameVisual =
+			previous !== undefined &&
+			sameDynamicVisual(previous.visualIdentity, entity.presentation) &&
+			(previous.override?.particles?.key ?? null) ===
+				(override?.particles?.key ?? null) &&
+			((previous.override?.body ?? null) !== null) ===
+				((override?.body ?? null) !== null);
+		// This key also names retained visual resources; build it only when its typed inputs change.
+		const visualKey = sameVisual
+			? previous.visualKey
+			: JSON.stringify([
+					setupVisualKey(
+						entity.presentation.content.setupDid,
+						entity.presentation.appearance,
+					),
+					entity.presentation.placementFrame,
+					override?.particles?.key ?? null,
+					(override?.body ?? null) !== null,
+				]);
+		const placementIdentity =
+			previous !== undefined &&
+			sameDynamicPlacement(previous.placementIdentity, entity.placement)
+				? previous.placementIdentity
+				: snapshotDynamicPlacement(entity.placement);
 		if (
 			previous !== undefined &&
 			previous.entity.generation > entity.generation
@@ -2689,7 +2819,7 @@ export class GamePresentationRuntime {
 		this.#retainPendingDynamicEntityCues(guid, entity.generation);
 		const attachmentTopologyChanged =
 			previous !== undefined &&
-			previous.placementIdentity !== placementIdentity &&
+			!sameDynamicPlacement(previous.placementIdentity, placementIdentity) &&
 			(previous.entity.placement.kind === "attached" ||
 				entity.placement.kind === "attached");
 		if (
@@ -2701,6 +2831,7 @@ export class GamePresentationRuntime {
 			previous.authoritative = authoritative;
 			previous.entity = entity;
 			previous.placementIdentity = placementIdentity;
+			this.#mapEntityRevision += 1;
 			this.#reconcileIntrinsicHiddenCue(previous);
 			if (hiddenChanged) this.#refreshAttachmentVisibility(guid);
 			return previous;
@@ -2731,8 +2862,13 @@ export class GamePresentationRuntime {
 			realization: { kind: "idle" },
 			scriptTableId: undefined,
 			visualKey,
+			visualIdentity:
+				sameVisual && previous !== undefined
+					? previous.visualIdentity
+					: snapshotDynamicVisual(entity.presentation),
 		};
 		this.#spawnedDesiredEntities.set(guid, record);
+		this.#mapEntityRevision += 1;
 		if (entity.placement.kind === "attached") {
 			let children = this.#spawnedDesiredChildren.get(entity.placement.parent);
 			if (children === undefined) {
@@ -2754,13 +2890,14 @@ export class GamePresentationRuntime {
 		const record = this.#spawnedDesiredEntities.get(guid);
 		if (record === undefined) return;
 		this.#clearDynamicEntityDeferral(record);
-		if (record.entity.placement.kind === "attached") {
-			const parentGuid = record.entity.placement.parent;
+		if (record.placementIdentity.kind === "attached") {
+			const parentGuid = record.placementIdentity.parent;
 			const children = this.#spawnedDesiredChildren.get(parentGuid);
 			children?.delete(guid);
 			if (children?.size === 0) this.#spawnedDesiredChildren.delete(parentGuid);
 		}
 		this.#spawnedDesiredEntities.delete(guid);
+		this.#mapEntityRevision += 1;
 		if (visualDisposition === "release-visual") {
 			const visualKey = this.#spawnedVisualKeys.get(guid);
 			if (visualKey !== undefined) this.#releaseSpawnedVisual(guid, visualKey);
@@ -2957,15 +3094,15 @@ export class GamePresentationRuntime {
 			const guid = entity.identity.guid;
 			const previous = this.#spawnedDesiredEntities.get(guid);
 			if (previous?.entity.generation !== entity.generation) continue;
-			if (
-				dynamicPathIdentity(previous.entity) !== dynamicPathIdentity(entity)
-			) {
+			if (!sameDynamicPath(previous.placementIdentity, entity.placement)) {
 				throw new Error(
 					`Dynamic entity ${formatDynamicGuid(guid)} received a path-changing tick update without an advance.`,
 				);
 			}
-			const membershipChanged =
-				previous.placementIdentity !== dynamicPlacementIdentity(entity);
+			const membershipChanged = !sameDynamicPlacement(
+				previous.placementIdentity,
+				entity.placement,
+			);
 			const desired = this.#acceptDynamicTickEntity(entity, previous);
 			const installed = this.#spawnedPresentations.get(guid);
 			if (installed?.generation !== entity.generation) continue;
@@ -3253,10 +3390,11 @@ export class GamePresentationRuntime {
 			objectScale: entity.presentation.objectScale,
 			// Installation already seeded this state before behavior replay. Mark it current so the
 			// convergence pass cannot erase part-local replay results.
-			presentationStateIdentity: dynamicPresentationStateIdentity(entity),
+			presentationStateIdentity: { ...entity.physics },
 			visualKey: record.visualKey,
 		};
 		this.#spawnedPresentations.set(guid, installed);
+		this.#mapEntityRevision += 1;
 		this.#commitBareBodyVisibility(record);
 		this.#drainDynamicEntityCues(guid);
 		if (entity.placement.kind === "attached") {
@@ -3276,6 +3414,7 @@ export class GamePresentationRuntime {
 			} catch (cause) {
 				this.#retireDynamicOwner(ownerId);
 				this.#spawnedPresentations.delete(guid);
+				this.#mapEntityRevision += 1;
 				throw cause;
 			}
 		}
@@ -3296,7 +3435,10 @@ export class GamePresentationRuntime {
 		const entity = record.entity;
 		if (
 			entity.placement.kind === "world" &&
-			installed.placementIdentity !== record.placementIdentity
+			!sameDynamicPlacement(
+				installed.placementIdentity,
+				record.placementIdentity,
+			)
 		) {
 			this.#dynamics.updatePlacement(
 				installed.nodeId,
@@ -3343,8 +3485,13 @@ export class GamePresentationRuntime {
 			);
 			installed.objectScale = entity.presentation.objectScale;
 		}
-		const identity = dynamicPresentationStateIdentity(entity);
-		if (installed.presentationStateIdentity !== identity) {
+		const identity = entity.physics;
+		if (
+			!sameDynamicPresentationState(
+				installed.presentationStateIdentity,
+				identity,
+			)
+		) {
 			this.#dynamics.updatePresentationState(installed.nodeId, {
 				cloaked: entity.physics.cloaked,
 				hidden: entity.physics.hidden,
@@ -3352,7 +3499,7 @@ export class GamePresentationRuntime {
 				noDraw: entity.physics.noDraw,
 				translucency: entity.physics.translucency,
 			});
-			installed.presentationStateIdentity = identity;
+			installed.presentationStateIdentity = { ...identity };
 		}
 		const desired = this.#spawnedDesiredEntities.get(entity.identity.guid);
 		if (
@@ -3460,6 +3607,7 @@ export class GamePresentationRuntime {
 		if (desired !== undefined) desired.cueHidden = false;
 		this.#retireDynamicOwner(installed.ownerId);
 		this.#spawnedPresentations.delete(guid);
+		this.#mapEntityRevision += 1;
 	}
 
 	/** Retire one installed presentation subtree while preserving every desired child level. */
@@ -4637,6 +4785,11 @@ export class GamePresentationRuntime {
 		return this.#dynamicPlacements.revision;
 	}
 
+	/** Map blips change with desired levels, realization, and live placement. */
+	get mapEntityRevision(): number {
+		return this.#mapEntityRevision + this.#dynamicPlacements.revision;
+	}
+
 	/** Derived map geometry currently resident, for the overhead map to draw. */
 	get mapGeometry(): MapGeometryStore {
 		return this.#mapGeometry;
@@ -4806,7 +4959,7 @@ export class GamePresentationRuntime {
 			),
 			{
 				data: this.#particles.recordData,
-				dirtySlots: this.#particles.takeDirtyRecordSlots(),
+				dirtyRows: this.#particles.takeDirtyRecordRows(),
 			},
 		);
 		const anchorLandblockId = this.#camera.placement.landblockId;

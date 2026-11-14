@@ -628,7 +628,7 @@ interface RendererNameplateDiagnostics {
 	readonly budgetRejectedCandidateCount: number;
 	/** Instanced quads submitted across all views in the latest frame. */
 	readonly submittedInstanceCount: number;
-	/** Physical per-texture instanced draws submitted across all views in the latest frame. */
+	/** Physical atlas instanced draws submitted across all views in the latest frame. */
 	readonly submittedDrawCount: number;
 	/** Browser SVG preparation state for installed indicator sources. */
 	readonly icons: {
@@ -640,11 +640,11 @@ interface RendererNameplateDiagnostics {
 		readonly revision: number;
 	};
 	readonly cache: {
-		/** Exact RGBA8 bytes owned by live complete-plate textures. */
+		/** Exact RGBA8 bytes owned by the resident nameplate atlas. */
 		readonly byteCount: number;
 		/** Reused visible-key acquisitions over this renderer lifetime. */
 		readonly hitCount: number;
-		/** Complete plate textures currently resident. */
+		/** Cached complete plate rasters currently resident. */
 		readonly liveEntryCount: number;
 		/** Visible-key acquisitions that required rasterization over this renderer lifetime. */
 		readonly missCount: number;
@@ -652,7 +652,7 @@ interface RendererNameplateDiagnostics {
 		readonly rasterizationCount: number;
 		/** Oversized rasters rejected before texture allocation over this renderer lifetime. */
 		readonly rejectedRasterCount: number;
-		/** Complete plate textures explicitly released over this renderer lifetime. */
+		/** Cached plate rasters retired over this renderer lifetime. */
 		readonly releaseCount: number;
 	};
 }

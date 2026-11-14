@@ -461,6 +461,11 @@ export class DynamicEntityMirror {
 		return current?.generation === generation ? current : null;
 	}
 
+	/** Borrow the current record by GUID when the caller does not have a generation. */
+	entityByGuid(guid: number): DynamicEntityView | null {
+		return this.#entities.get(guid) ?? null;
+	}
+
 	/** Whether deltas are intentionally being ignored pending replacement state. */
 	isAwaitingSnapshot(): boolean {
 		return this.#awaitingSnapshot;

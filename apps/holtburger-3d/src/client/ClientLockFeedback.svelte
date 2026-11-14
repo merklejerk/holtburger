@@ -6,9 +6,16 @@
 	interface Props {
 		/** Frame-current positions stay imperative, outside Svelte's reactive graph. */
 		readonly readFrames: () => readonly ClientLockFeedbackFrame[];
+		readonly isActive: () => boolean;
+		/** Cold feedback event revision; wakes an overlay whose frame loop has finished. */
+		readonly wakeRevision: number;
 	}
-	let { readFrames }: Props = $props();
+	let { readFrames, isActive, wakeRevision }: Props = $props();
 	let root: HTMLDivElement;
+	let wake: (revision: number) => void = () => {};
+	$effect(() => {
+		wake(wakeRevision);
+	});
 
 	onMount(() => {
 		const template = document.createElement("template");
@@ -18,7 +25,11 @@
 			{ node: HTMLDivElement; revision: number }
 		>();
 		let handle = 0;
+		const schedule = (): void => {
+			if (handle === 0) handle = requestAnimationFrame(update);
+		};
 		const update = (): void => {
+			handle = 0;
 			const frames = readFrames();
 			const visible = new Set<number>();
 			for (const frame of frames) {
@@ -47,11 +58,13 @@
 				marker.node.remove();
 				markers.delete(target);
 			}
-			handle = requestAnimationFrame(update);
+			if (isActive()) schedule();
 		};
-		handle = requestAnimationFrame(update);
+		wake = schedule;
+		schedule();
 		return () => {
-			cancelAnimationFrame(handle);
+			wake = () => {};
+			if (handle !== 0) cancelAnimationFrame(handle);
 			markers.clear();
 			root.replaceChildren();
 		};

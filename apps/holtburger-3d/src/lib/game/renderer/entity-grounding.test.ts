@@ -353,6 +353,7 @@ function placementAt(x: number, z: number, y = 0): ResolvedScenePlacement {
 		envCellId: CELL_A.envCellId,
 		landblockId: CELL_A.landblockId,
 		localToLandblock,
+		transformRevision: 0,
 		scope: CELL_A,
 	};
 }
@@ -394,6 +395,7 @@ function outdoorCaster(identity: string, x: number) {
 				envCellId: null,
 				landblockId: "0x0000ffff",
 				localToLandblock,
+				transformRevision: 0,
 				scope: { kind: "outdoor" },
 			},
 			spatialMembership: membership({ kind: "outdoor" }),

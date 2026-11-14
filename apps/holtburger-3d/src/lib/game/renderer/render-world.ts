@@ -4,17 +4,16 @@ import type { Frustum } from "../math/frustum";
 import type {
 	ResolvedScenePlacement,
 	ResolvedSceneState,
-	ResolvedSceneBounds,
 	SceneSpatialMembership,
 	SceneNodeId,
 	SceneScope,
-	SceneScopeSelection,
+	SceneScopeWindowSelection,
 	SceneTopologyView,
 	VisibleScene,
 	SceneCullingGroupFilter,
 	SceneNodeFilter,
 } from "../scene";
-import type { AABB3 } from "../math/types";
+import type { AABB3, Mat4, Vec3 } from "../math/types";
 import type { OceanBackdropDrawUnit, TerrainDrawUnit } from "../terrain/types";
 import type { VisibleDynamicPresentation } from "../systems/components";
 import type {
@@ -61,7 +60,7 @@ interface RenderWorldSystems {
 	readonly scene: {
 		getCullingGroup(nodeId: SceneNodeId): string | null;
 		readResolvedState(nodeId: SceneNodeId): ResolvedSceneState | undefined;
-		readResolvedBounds(nodeId: SceneNodeId): ResolvedSceneBounds | null;
+		readLocalBounds(nodeId: SceneNodeId): AABB3 | null;
 		getResolvedPlacement(
 			nodeId: SceneNodeId,
 		): ResolvedScenePlacement | undefined;
@@ -77,10 +76,19 @@ interface RenderWorldSystems {
 			cullingGroupFilter: SceneCullingGroupFilter,
 			nodeFilter: SceneNodeFilter | null,
 		): VisibleScene;
-		queryScopeSelectionFrustum(
-			frustum: Frustum,
+		queryScopesMultiFrustumMasks(
+			frusta: readonly Frustum[],
 			anchorLandblockId: LandblockOwnerId,
-			scopes: SceneScopeSelection,
+			scopes: readonly SceneScope[],
+			cullingGroupFilter: SceneCullingGroupFilter,
+			nodeFilter: SceneNodeFilter | null,
+			out: Map<SceneNodeId, number>,
+		): void;
+		queryScopeWindowSelectionFrustum(
+			clipFromAnchor: Mat4,
+			cameraPosition: Vec3,
+			anchorLandblockId: LandblockOwnerId,
+			scopes: SceneScopeWindowSelection,
 			cullingGroupFilter: SceneCullingGroupFilter,
 		): VisibleScene;
 		queryFlatFrustum(
@@ -179,6 +187,33 @@ export type RenderContribution =
 	| { readonly kind: "env-cell"; readonly renderable: EnvCellRenderable }
 	| { readonly kind: "terrain"; readonly drawUnit: TerrainDrawUnit };
 
+type StaticContribution = Extract<
+	RenderContribution,
+	{ readonly kind: "static-object" }
+>;
+type DynamicContribution = Extract<
+	RenderContribution,
+	{ readonly kind: "dynamic" }
+>;
+
+/** Cached wrappers are mutable only within the synchronous read boundary. */
+type MutableStaticContribution = {
+	-readonly [K in keyof StaticContribution]: StaticContribution[K];
+};
+type MutableDynamicContribution = {
+	-readonly [K in keyof DynamicContribution]: DynamicContribution[K];
+};
+type MutableEligibleFootprint = {
+	-readonly [
+		K in keyof Extract<ObjectPresentationFootprint, { kind: "eligible" }>
+	]: Extract<ObjectPresentationFootprint, { kind: "eligible" }>[K];
+};
+
+const GENERATED_FOOTPRINT: ObjectPresentationFootprint = {
+	kind: "ineligible",
+	reason: "generated-instance-container",
+};
+
 /** Backend selections for one static draw, without renderer pass policy. */
 export interface ResolvedStaticDrawUnit {
 	readonly drawUnit: StaticObjectDrawUnit;
@@ -227,6 +262,22 @@ export interface ResolvedGeometryDrawUnit<TDrawUnit> {
 /** Read-only renderer view of the runtime systems that own scene and resource state. */
 export class RenderWorld {
 	readonly #systems: RenderWorldSystems;
+	readonly #staticContributions = new WeakMap<
+		StaticObjectRenderable,
+		MutableStaticContribution
+	>();
+	readonly #dynamicContributions = new WeakMap<
+		AABB3,
+		MutableDynamicContribution
+	>();
+	readonly #cellContributions = new WeakMap<
+		EnvCellRenderable,
+		RenderContribution
+	>();
+	readonly #terrainContributions = new WeakMap<
+		TerrainDrawUnit,
+		RenderContribution
+	>();
 	/** Read current publication policy before a shadow query tests or expands a root. */
 	readonly #isShadowCaster: SceneNodeFilter = (nodeId) => {
 		const entityClass = this.#systems.dynamics.getPresentationClass(nodeId);
@@ -249,28 +300,32 @@ export class RenderWorld {
 		);
 	}
 
-	/** Select current outdoor actor casters without expanding non-caster contributions. */
-	queryOutdoorShadowCasters(
-		frustum: Frustum,
+	/** Select outdoor caster roots once for all shadow cascades. */
+	queryOutdoorShadowCasterMasks(
+		frusta: readonly Frustum[],
 		anchorLandblockId: LandblockOwnerId,
-	): VisibleScene {
-		return this.#systems.scene.queryScopesFrustum(
-			frustum,
+		out: Map<SceneNodeId, number>,
+	): void {
+		this.#systems.scene.queryScopesMultiFrustumMasks(
+			frusta,
 			anchorLandblockId,
 			OUTDOOR_SCOPE,
 			isDynamicCullingGroup,
 			this.#isShadowCaster,
+			out,
 		);
 	}
 
-	queryScopeSelectionScene(
-		frustum: Frustum,
+	queryScopeWindowSelectionScene(
+		clipFromAnchor: Mat4,
+		cameraPosition: Vec3,
 		anchorLandblockId: LandblockOwnerId,
-		scopes: SceneScopeSelection,
+		scopes: SceneScopeWindowSelection,
 		cullingGroupFilter: SceneCullingGroupFilter,
 	): VisibleScene {
-		return this.#systems.scene.queryScopeSelectionFrustum(
-			frustum,
+		return this.#systems.scene.queryScopeWindowSelectionFrustum(
+			clipFromAnchor,
+			cameraPosition,
 			anchorLandblockId,
 			scopes,
 			cullingGroupFilter,
@@ -298,44 +353,89 @@ export class RenderWorld {
 
 	/** Borrow scene facts for immediate preparation; retained static submissions copy at compilation. */
 	readRenderContribution(nodeId: SceneNodeId): RenderContribution | null {
-		const staticObject = this.#systems.staticObjects.getRenderable(nodeId);
-		if (staticObject) {
-			const cullingGroup = this.#systems.scene.getCullingGroup(nodeId);
-			if (cullingGroup === null) {
-				throw new Error(`Static object node ${nodeId} has no culling group.`);
+		const group = this.#systems.scene.getCullingGroup(nodeId);
+		switch (group) {
+			case LandblockLayerKind.Buildings:
+			case LandblockLayerKind.Objects:
+			case LandblockLayerKind.Generated:
+			case "env-cell-static-residents": {
+				const renderable = this.#systems.staticObjects.getRenderable(nodeId);
+				if (!renderable) return null;
+				let cached = this.#staticContributions.get(renderable);
+				const footprint = this.#staticObjectFootprint(
+					nodeId,
+					group,
+					cached?.footprint,
+				);
+				if (!cached) {
+					cached = {
+						cullingGroup: group,
+						footprint,
+						kind: "static-object",
+						renderable,
+					};
+					this.#staticContributions.set(renderable, cached);
+				} else {
+					cached.cullingGroup = group;
+					cached.footprint = footprint;
+				}
+				return cached;
 			}
-			return {
-				cullingGroup,
-				footprint: this.#staticObjectFootprint(nodeId, cullingGroup),
-				kind: "static-object",
-				renderable: staticObject,
-			};
-		}
-		const dynamicBounds =
-			this.#systems.dynamics.getPublishedPresentationBounds(nodeId);
-		if (dynamicBounds) {
-			const entityClass = this.#systems.dynamics.getPresentationClass(nodeId);
-			if (entityClass === null) {
-				throw new Error(`Dynamic entity ${nodeId} has no presentation class.`);
+			case "dynamic": {
+				const bounds =
+					this.#systems.dynamics.getPublishedPresentationBounds(nodeId);
+				if (!bounds) return null;
+				const entityClass = this.#systems.dynamics.getPresentationClass(nodeId);
+				if (entityClass === null)
+					throw new Error(
+						`Dynamic entity ${nodeId} has no presentation class.`,
+					);
+				const resolved = this.#systems.scene.readResolvedState(nodeId);
+				if (!resolved)
+					throw new Error(`Dynamic entity ${nodeId} no longer exists.`);
+				let cached = this.#dynamicContributions.get(bounds);
+				if (!cached) {
+					cached = {
+						entityClass,
+						footprint: {
+							kind: "eligible",
+							localBounds: bounds,
+							objectClass: "authored-dynamic",
+							placement: resolved.placement,
+						},
+						kind: "dynamic",
+					};
+					this.#dynamicContributions.set(bounds, cached);
+				} else {
+					cached.entityClass = entityClass;
+					(cached.footprint as MutableEligibleFootprint).placement =
+						resolved.placement;
+				}
+				return cached;
 			}
-			const resolved = this.#systems.scene.readResolvedState(nodeId);
-			if (resolved === undefined)
-				throw new Error(`Dynamic entity ${nodeId} no longer exists.`);
-			return {
-				entityClass,
-				footprint: {
-					kind: "eligible",
-					localBounds: dynamicBounds,
-					objectClass: "authored-dynamic",
-					placement: resolved.placement,
-				},
-				kind: "dynamic",
-			};
+			case "env-cell-shell": {
+				const renderable = this.#systems.envCells.getCellRenderable(nodeId);
+				if (!renderable) return null;
+				let cached = this.#cellContributions.get(renderable);
+				if (!cached) {
+					cached = { kind: "env-cell", renderable };
+					this.#cellContributions.set(renderable, cached);
+				}
+				return cached;
+			}
+			case LandblockLayerKind.Terrain: {
+				const drawUnit = this.resolveTerrainDrawUnit(nodeId);
+				if (!drawUnit) return null;
+				let cached = this.#terrainContributions.get(drawUnit);
+				if (!cached) {
+					cached = { drawUnit, kind: "terrain" };
+					this.#terrainContributions.set(drawUnit, cached);
+				}
+				return cached;
+			}
+			default:
+				return null;
 		}
-		const cell = this.#systems.envCells.getCellRenderable(nodeId);
-		if (cell) return { kind: "env-cell", renderable: cell };
-		const terrain = this.resolveTerrainDrawUnit(nodeId);
-		return terrain ? { drawUnit: terrain, kind: "terrain" } : null;
 	}
 
 	/** Publish installed layout, appearance, and dense part poses without expanding material ranges. */
@@ -357,6 +457,14 @@ export class RenderWorld {
 
 	getEntityNameplateFacts(nodeId: SceneNodeId): EntityNameplateFacts | null {
 		return this.#systems.dynamics.getNameplateFacts(nodeId);
+	}
+
+	/** Check scope admission before reading exact pose bounds for indoor grounding. */
+	hasIndoorShadowScope(nodeId: SceneNodeId): boolean {
+		const membership = this.#systems.scene.getResolvedSpatialMembership(nodeId);
+		if (membership === undefined)
+			throw new Error(`Dynamic entity ${nodeId} lacks spatial membership.`);
+		return membership.scopes.some((scope) => scope.kind === "env-cell");
 	}
 
 	/** Resolve the two facts not already carried by a visible dynamic contribution. */
@@ -437,9 +545,10 @@ export class RenderWorld {
 	#staticObjectFootprint(
 		nodeId: SceneNodeId,
 		cullingGroup: string,
+		previous?: ObjectPresentationFootprint,
 	): ObjectPresentationFootprint {
 		if (cullingGroup === LandblockLayerKind.Generated) {
-			return { kind: "ineligible", reason: "generated-instance-container" };
+			return GENERATED_FOOTPRINT;
 		}
 		const objectClass =
 			cullingGroup === LandblockLayerKind.Buildings
@@ -454,14 +563,22 @@ export class RenderWorld {
 				`Static object node ${nodeId} has unsupported culling group ${cullingGroup}.`,
 			);
 		}
-		const resolvedBounds = this.#systems.scene.readResolvedBounds(nodeId);
-		if (!resolvedBounds)
+		const localBounds = this.#systems.scene.readLocalBounds(nodeId);
+		const resolved = this.#systems.scene.readResolvedState(nodeId);
+		if (!localBounds || !resolved)
 			throw new Error(`Static object node ${nodeId} has no resolved bounds.`);
+		if (previous?.kind === "eligible") {
+			const footprint = previous as MutableEligibleFootprint;
+			footprint.localBounds = localBounds;
+			footprint.objectClass = objectClass;
+			footprint.placement = resolved.placement;
+			return footprint;
+		}
 		return {
 			kind: "eligible",
-			localBounds: resolvedBounds.localBounds,
+			localBounds,
 			objectClass,
-			placement: resolvedBounds.placement,
+			placement: resolved.placement,
 		};
 	}
 

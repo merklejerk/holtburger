@@ -72,6 +72,7 @@ describe("ClientNameplateHealth", () => {
 
 		// Peace mode ignores combat interest and hides all bars.
 		policy.setCombatMode("peace");
+		expect(policy.isIdle()).toBe(true);
 		policy.acceptCombatObserved(
 			{
 				guid: 10,
@@ -98,6 +99,7 @@ describe("ClientNameplateHealth", () => {
 
 		// Enter melee mode and observe combat on 10, 11 (too far), and 12 (non-mob).
 		policy.setCombatMode("melee");
+		expect(policy.isIdle()).toBe(false);
 		for (const guid of [10, 11, 12]) {
 			policy.acceptCombatObserved(
 				{
@@ -212,10 +214,12 @@ describe("ClientNameplateHealth", () => {
 
 		// Leaving combat mode cancels outstanding requests and withdraws bars immediately.
 		policy.setCombatMode("peace");
+		expect(policy.isIdle()).toBe(false);
 		expect(policy.reconcile([mobA, selectedMob], nowMs)).toEqual([
 			{ guid: 20, healthFraction: null },
 			{ guid: 21, healthFraction: null },
 		]);
+		expect(policy.isIdle()).toBe(true);
 		expect(cancels.get(20)).toHaveBeenCalledTimes(1);
 		policy.destroy();
 	});

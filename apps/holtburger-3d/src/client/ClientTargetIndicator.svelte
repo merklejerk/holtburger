@@ -13,20 +13,32 @@
 	let { readFrame, selectedGuid }: Props = $props();
 	let marker: HTMLDivElement;
 	const tuning = CLIENT_TUNING.entitySelection.offscreenIndicator;
+	let wake: (selectedGuid: number | null) => void = () => {};
+	$effect(() => {
+		wake(selectedGuid);
+	});
 
 	onMount(() => {
 		let frameHandle = 0;
+		const schedule = (): void => {
+			if (frameHandle === 0) frameHandle = requestAnimationFrame(update);
+		};
 		const update = (): void => {
+			frameHandle = 0;
 			const frame = readFrame();
 			const hidden = frame === null;
 			if (marker.hidden !== hidden) marker.hidden = hidden;
 			if (frame !== null) {
 				marker.style.transform = `translate3d(${frame.x}px, ${frame.y}px, 0) translate(-50%, -50%) rotate(${frame.rotationRadians}rad)`;
 			}
-			frameHandle = requestAnimationFrame(update);
+			if (selectedGuid !== null) schedule();
 		};
-		frameHandle = requestAnimationFrame(update);
-		return () => cancelAnimationFrame(frameHandle);
+		wake = schedule;
+		schedule();
+		return () => {
+			wake = () => {};
+			if (frameHandle !== 0) cancelAnimationFrame(frameHandle);
+		};
 	});
 </script>
 

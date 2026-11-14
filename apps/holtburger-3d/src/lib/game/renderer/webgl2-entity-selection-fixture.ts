@@ -309,6 +309,7 @@ export function runWebGL2EntitySelectionFixture(
 			selectionInput(pass, poses, appearances, INITIAL_SIZE, INITIAL_SIZE, 0, {
 				kind: "sphere-proxy",
 				placement: {
+					transformRevision: 0,
 					envCellId: null,
 					landblockId: "0x0000ffff",
 					localToLandblock: Mat4.identity(),
@@ -403,6 +404,7 @@ function selectionInput(
 	];
 	const depths = new DynamicDepthPreparations(
 		() => ({
+			allPartsOpaque: false,
 			landblockId: "0x0000ffff",
 			renderScopes: [{ kind: "outdoor" }],
 			visual: { layout: LAYOUT, appearance: APPEARANCE, parts },

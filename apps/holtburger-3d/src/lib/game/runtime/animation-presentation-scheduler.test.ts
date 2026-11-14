@@ -41,10 +41,32 @@ function buildAnimationSystem() {
 }
 
 describe("AnimationPresentationScheduler", () => {
+	it("confirms a settled visible pose without issuing another sample", () => {
+		const { frame } = advancedFrame(["scene-node:1"], 0);
+		let changed = true;
+		const scheduler = new AnimationPresentationScheduler(
+			(_nodeId, _selected, ordinary) => ordinary,
+			() => changed,
+		);
+		const initial = scheduler.select(frame, 0);
+		expect(initial.selectedNodeIds).toEqual(["scene-node:1"]);
+		scheduler.completeFrame({ selectedDynamicNodeIds: ["scene-node:1"] }, 0);
+		changed = false;
+		expect(scheduler.select(frame, 1 / 60).selectedNodeIds).toEqual([]);
+		scheduler.completeFrame(
+			{ selectedDynamicNodeIds: ["scene-node:1"] },
+			1 / 60,
+		);
+		expect(
+			scheduler.getDiagnostics().lastMaximumVisiblePresentationAgeSeconds,
+		).toBe(0);
+	});
+
 	it("preserves full cadence when the offscreen interval is zero", () => {
 		const { frame } = advancedFrame(["scene-node:1", "scene-node:2"], 0);
 		const scheduler = new AnimationPresentationScheduler(
 			(_nodeId, _selected, ordinary) => ordinary,
+			() => true,
 		);
 		scheduler.setOffscreenSampleIntervalSeconds(0);
 
@@ -65,6 +87,7 @@ describe("AnimationPresentationScheduler", () => {
 		play("scene-node:2");
 		const scheduler = new AnimationPresentationScheduler(
 			(_nodeId, _selected, ordinary) => ordinary,
+			() => true,
 		);
 		scheduler.setOffscreenSampleIntervalSeconds(0.1);
 
@@ -89,6 +112,7 @@ describe("AnimationPresentationScheduler", () => {
 		play("scene-node:1");
 		const scheduler = new AnimationPresentationScheduler(
 			(_nodeId, _selected, ordinary) => ordinary,
+			() => true,
 		);
 		scheduler.setOffscreenSampleIntervalSeconds(1);
 		scheduler.select(system.advance(0), 0);
@@ -111,6 +135,7 @@ describe("AnimationPresentationScheduler", () => {
 		play("scene-node:1");
 		const scheduler = new AnimationPresentationScheduler(
 			(_nodeId, _selected, ordinary) => ordinary,
+			() => true,
 		);
 		scheduler.setOffscreenSampleIntervalSeconds(1);
 		scheduler.select(system.advance(0), 0);
@@ -129,6 +154,7 @@ describe("AnimationPresentationScheduler", () => {
 		play("scene-node:2");
 		const scheduler = new AnimationPresentationScheduler(
 			(_nodeId, _selected, ordinary) => ordinary,
+			() => true,
 		);
 		scheduler.setOffscreenSampleIntervalSeconds(1);
 		scheduler.select(system.advance(0), 0);
@@ -164,6 +190,7 @@ describe("AnimationPresentationScheduler", () => {
 		play("scene-node:1");
 		const scheduler = new AnimationPresentationScheduler(
 			(_nodeId, _selected, ordinary) => ordinary,
+			() => true,
 		);
 		scheduler.setOffscreenSampleIntervalSeconds(1);
 		scheduler.select(system.advance(10), 10);
@@ -181,6 +208,7 @@ describe("AnimationPresentationScheduler", () => {
 		let interval = 0.5;
 		const scheduler = new AnimationPresentationScheduler(
 			(_nodeId, selected, ordinary) => (selected ? interval : ordinary),
+			() => true,
 		);
 		scheduler.select(frame, 0);
 		scheduler.completeFrame({ selectedDynamicNodeIds: frame.activeNodeIds }, 0);
@@ -236,6 +264,7 @@ describe("AnimationPresentationScheduler", () => {
 			);
 			const scheduler = new AnimationPresentationScheduler(
 				(_nodeId, selected, ordinary) => (selected ? interval : ordinary),
+				() => true,
 			);
 			let samples = 0;
 			let semanticSteps = 0;
@@ -274,6 +303,7 @@ describe("AnimationPresentationScheduler", () => {
 		const { frame } = advancedFrame(["scene-node:1"], 0);
 		const scheduler = new AnimationPresentationScheduler(
 			(_nodeId, selected, ordinary) => (selected ? Number.NaN : ordinary),
+			() => true,
 		);
 		scheduler.select(frame, 0);
 		scheduler.completeFrame({ selectedDynamicNodeIds: frame.activeNodeIds }, 0);
@@ -285,6 +315,7 @@ describe("AnimationPresentationScheduler", () => {
 	it("rejects invalid policy and duplicate renderer feedback", () => {
 		const scheduler = new AnimationPresentationScheduler(
 			(_nodeId, _selected, ordinary) => ordinary,
+			() => true,
 		);
 
 		expect(() => scheduler.setOffscreenSampleIntervalSeconds(-1)).toThrow(

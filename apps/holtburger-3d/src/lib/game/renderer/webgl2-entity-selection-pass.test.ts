@@ -25,6 +25,7 @@ describe("WebGL2EntitySelectionPass", () => {
 							envCellId: null,
 							landblockId: "0x0000ffff",
 							localToLandblock: Mat4.identity(),
+							transformRevision: 0,
 							scope: { kind: "outdoor" },
 						},
 						sphere: { center: Vec3.zero(), radius: 1 },

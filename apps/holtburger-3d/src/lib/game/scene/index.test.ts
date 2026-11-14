@@ -100,12 +100,45 @@ describe("SceneGraph", () => {
 			parentId: null,
 		});
 		expect(scene.getNode(childId)?.parentId).toBe(rootId);
-		expect(visiblePlacement(scene, childId)).toEqual({
+		expect(visiblePlacement(scene, childId)).toMatchObject({
 			envCellId: rootPlacement.envCellId,
 			landblockId: rootPlacement.landblockId,
 			localToLandblock: rootPlacement.localTransform,
 			scope: { kind: "outdoor" },
 		});
+	});
+
+	it("revises inherited transforms only when a published transform changes", () => {
+		const scene = new SceneGraph();
+		const root = scene.createNode(rootInput);
+		const child = scene.createNode({ ...boundedChildFields, parentId: root });
+		const rootBefore =
+			scene.readResolvedState(root)?.placement.transformRevision;
+		const childBefore =
+			scene.readResolvedState(child)?.placement.transformRevision;
+		if (rootBefore === undefined || childBefore === undefined)
+			throw new Error("Missing resolved scene placements.");
+		const moved = createTranslationMat4(new Vec3(3, 0, 0));
+		scene.updateRootLocalTransform(root, moved);
+		const rootMoved =
+			scene.readResolvedState(root)?.placement.transformRevision;
+		const childMoved =
+			scene.readResolvedState(child)?.placement.transformRevision;
+		if (rootMoved === undefined || childMoved === undefined)
+			throw new Error("Missing updated scene placements.");
+		expect(rootMoved).toBeGreaterThan(rootBefore);
+		expect(childMoved).toBeGreaterThan(childBefore);
+		scene.updateRootLocalTransform(root, moved);
+		expect(scene.readResolvedState(root)?.placement.transformRevision).toBe(
+			rootMoved,
+		);
+		expect(scene.readResolvedState(child)?.placement.transformRevision).toBe(
+			childMoved,
+		);
+		scene.updateLocalTransform(child, createTranslationMat4(new Vec3(0, 2, 0)));
+		expect(
+			scene.readResolvedState(child)?.placement.transformRevision,
+		).toBeGreaterThan(childMoved);
 	});
 
 	it("reindexes descendants when a parent transform changes", () => {
@@ -140,6 +173,38 @@ describe("SceneGraph", () => {
 				visiblePlacement(scene, grandchildId).localToLandblock,
 			),
 		).toEqual(new Vec3(10, 40, 30));
+	});
+
+	it("moves a root and bounded descendants within unchanged scope membership", () => {
+		const scene = new SceneGraph();
+		const root = scene.createNode({ ...rootInput, localBounds: AABB3.zero() });
+		const child = scene.createNode({
+			...boundedChildFields,
+			localTransform: createTranslationMat4(new Vec3(1, 0, 0)),
+			parentId: root,
+		});
+		const rightOfFive: Frustum = {
+			cameraPosition: Vec3.zero(),
+			planes: [{ x: 1, y: 0, z: 0, constant: -5 }],
+		};
+		const query = () =>
+			scene.queryScopesFrustum(
+				rightOfFive,
+				rootPlacement.landblockId,
+				[{ kind: "outdoor" }],
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+				null,
+			).entries;
+		expect(query()).toEqual([]);
+		scene.updateRootLocalTransform(
+			root,
+			createTranslationMat4(new Vec3(10, 0, 0)),
+		);
+		expect(query()).toEqual([root, child]);
+		expect(scene.getResolvedPlacement(child)?.localToLandblock.m41).toBe(11);
+		expect(() =>
+			scene.updateRootLocalTransform(child, Mat4.identity()),
+		).toThrow("not a root");
 	});
 
 	it("publishes parent and part transforms coherently through unbounded attachment nodes", () => {
@@ -406,6 +471,46 @@ describe("SceneGraph", () => {
 		).toThrow("at least one scope");
 	});
 
+	it("clips portal scope selection to its padded NDC window", () => {
+		const scene = new SceneGraph();
+		const left = createGroupedRoot(scene, "static");
+		const right = createGroupedRoot(scene, "static");
+		scene.updateBounds(
+			left,
+			new AABB3(new Vec3(-0.6, -0.1, -0.1), new Vec3(-0.4, 0.1, 0.1)),
+		);
+		scene.updateBounds(
+			right,
+			new AABB3(new Vec3(0.4, -0.1, -0.1), new Vec3(0.6, 0.1, 0.1)),
+		);
+		const selection = {
+			count: 1,
+			scopeAt: () => outdoorScope(),
+			minimumNdcX: () => -1,
+			minimumNdcY: () => -1,
+			maximumNdcX: () => 0,
+			maximumNdcY: () => 1,
+		};
+		const query = () =>
+			scene.queryScopeWindowSelectionFrustum(
+				Mat4.identity(),
+				Vec3.zero(),
+				"0x0001ffff",
+				selection,
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			).entries;
+		expect(query()).toEqual([left]);
+		expect(
+			scene.queryScopeWindowSelectionFrustum(
+				Mat4.identity(),
+				Vec3.zero(),
+				"0x0001ffff",
+				{ ...selection, minimumNdcX: () => 0, maximumNdcX: () => 1 },
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+			).entries,
+		).toEqual([right]);
+	});
+
 	it("rebuilds dirty culling-group bounds after member changes", () => {
 		const scene = new SceneGraph();
 		const visible = scene.createNode({
@@ -586,7 +691,7 @@ describe("SceneGraph", () => {
 				landblockId: envCellPlacement.landblockId,
 			}).entries,
 		).toContain(childId);
-		expect(scene.getResolvedPlacement(childId)).toEqual({
+		expect(scene.getResolvedPlacement(childId)).toMatchObject({
 			envCellId: envCellPlacement.envCellId,
 			landblockId: envCellPlacement.landblockId,
 			localToLandblock: envCellPlacement.localTransform,

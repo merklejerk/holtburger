@@ -63,12 +63,14 @@ const PLACEMENT = {
 	envCellId: null,
 	landblockId: "0x0001ffff",
 	localToLandblock: Mat4.identity(),
+	transformRevision: 0,
 	scope: { kind: "outdoor" },
 } as const satisfies ResolvedScenePlacement;
 const ENV_CELL_PLACEMENT = {
 	envCellId: "0x00010100",
 	landblockId: "0x0001ffff",
 	localToLandblock: Mat4.identity(),
+	transformRevision: 0,
 	scope: {
 		kind: "env-cell",
 		landblockId: "0x0001ffff",
@@ -270,7 +272,7 @@ describe("RenderWorld", () => {
 			return id === indoorVisual ? { ...depth, renderScopes: [indoor] } : depth;
 		};
 		const select = (
-			query: OutdoorPssmCasterWorld["queryOutdoorShadowCasters"],
+			query: OutdoorPssmCasterWorld["queryOutdoorShadowCasterMasks"],
 			budget: { maximumMappedRoots: number; maximumSelectedRoots: number },
 		) => {
 			const batches = frusta.map(() => createOutdoorPssmCasterBatch());
@@ -278,8 +280,10 @@ describe("RenderWorld", () => {
 			const analytic: EntityShadowCasterShape[] = [];
 			planOutdoorShadowCastersForView(
 				{
-					queryOutdoorShadowCasters: query,
+					queryOutdoorShadowCasterMasks: query,
 					getDynamicDepth,
+					hasOutdoorDynamicShadowGeometry: (id) =>
+						getDynamicDepth(id, false) !== null,
 					readRenderContribution: (id) => world.readRenderContribution(id),
 					getEntityShadowDynamicFacts: (id) =>
 						world.getEntityShadowDynamicFacts(id),
@@ -297,26 +301,30 @@ describe("RenderWorld", () => {
 			return { batches, selected: [...selected], analytic };
 		};
 		// Independent reference: query the unchanged scene, then apply the original late class rule.
-		const reference: OutdoorPssmCasterWorld["queryOutdoorShadowCasters"] = (
-			frustum,
+		const reference: OutdoorPssmCasterWorld["queryOutdoorShadowCasterMasks"] = (
+			cascadeFrusta,
 			anchor,
-		) => ({
-			entries: [
-				...scene.queryScopesFrustum(
+			out,
+		) => {
+			for (let index = 0; index < cascadeFrusta.length; index += 1) {
+				const frustum = cascadeFrusta[index];
+				if (!frustum) throw new Error("Missing reference cascade.");
+				for (const id of scene.queryScopesFrustum(
 					frustum,
 					anchor,
 					[outdoor],
 					(group) => group === "dynamic",
 					null,
-				).entries,
-			].filter((id) => {
-				const descriptor = world.readRenderContribution(id);
-				return (
-					descriptor?.kind === "dynamic" &&
-					isEntityShadowCasterClass(descriptor.entityClass)
-				);
-			}),
-		});
+				).entries) {
+					const descriptor = world.readRenderContribution(id);
+					if (
+						descriptor?.kind === "dynamic" &&
+						isEntityShadowCasterClass(descriptor.entityClass)
+					)
+						out.set(id, (out.get(id) ?? 0) | (1 << index));
+				}
+			}
+		};
 		const colorBefore = [
 			...world.queryFlatScene(
 				FRUSTUM,
@@ -331,13 +339,15 @@ describe("RenderWorld", () => {
 		]) {
 			expect(
 				select(
-					(frustum, anchor) => world.queryOutdoorShadowCasters(frustum, anchor),
+					(frusta, anchor, out) =>
+						world.queryOutdoorShadowCasterMasks(frusta, anchor, out),
 					budget,
 				),
 			).toEqual(select(reference, budget));
 		}
 		const complete = select(
-			(frustum, anchor) => world.queryOutdoorShadowCasters(frustum, anchor),
+			(frusta, anchor, out) =>
+				world.queryOutdoorShadowCasterMasks(frusta, anchor, out),
 			{ maximumMappedRoots: 8, maximumSelectedRoots: 8 },
 		);
 		expect(complete.selected).toEqual([npc, mob, player]);
@@ -349,21 +359,28 @@ describe("RenderWorld", () => {
 			[npc, mob],
 			[npc, player],
 		]);
-		expect([
-			...world.queryOutdoorShadowCasters(FRUSTUM, PLACEMENT.landblockId)
-				.entries,
-		]).toEqual([npc, mob, player, empty, indoorVisual]);
+		const casterIds = (): SceneNodeId[] => {
+			const masks = new Map<SceneNodeId, number>();
+			world.queryOutdoorShadowCasterMasks(
+				[FRUSTUM],
+				PLACEMENT.landblockId,
+				masks,
+			);
+			return [...masks.keys()];
+		};
+		expect(casterIds()).toEqual([npc, mob, player, empty, indoorVisual]);
 		// A committed source-class change is visible immediately, without scene reindexing.
 		classes.set(effect, "mob");
-		expect([
-			...world.queryOutdoorShadowCasters(FRUSTUM, PLACEMENT.landblockId)
-				.entries,
-		]).toEqual([effect, npc, mob, player, empty, indoorVisual]);
+		expect(casterIds()).toEqual([
+			effect,
+			npc,
+			mob,
+			player,
+			empty,
+			indoorVisual,
+		]);
 		classes.delete(effect);
-		expect([
-			...world.queryOutdoorShadowCasters(FRUSTUM, PLACEMENT.landblockId)
-				.entries,
-		]).toEqual([npc, mob, player, empty, indoorVisual]);
+		expect(casterIds()).toEqual([npc, mob, player, empty, indoorVisual]);
 		expect(
 			world.queryFlatScene(
 				FRUSTUM,
@@ -375,7 +392,9 @@ describe("RenderWorld", () => {
 
 	it("exposes only renderer queries over live runtime systems", () => {
 		const calls: string[] = [];
+		const presentationBounds = AABB3.zero();
 		const presentation: VisibleDynamicPresentation = {
+			allPartsOpaque: true,
 			identity: "fixture:dynamic",
 			visual: {
 				kind: "ready",
@@ -402,7 +421,14 @@ describe("RenderWorld", () => {
 					calls.push("topology");
 					return TOPOLOGY;
 				},
-				getCullingGroup: () => staticCullingGroup,
+				getCullingGroup: (nodeId) =>
+					nodeId === "scene-node:9"
+						? "dynamic"
+						: nodeId === "scene-node:7"
+							? "env-cell-shell"
+							: nodeId === "scene-node:1"
+								? "terrain"
+								: staticCullingGroup,
 				readResolvedState: (nodeId) => {
 					const placement =
 						nodeId === "scene-node:7"
@@ -414,13 +440,8 @@ describe("RenderWorld", () => {
 						? undefined
 						: { placement, spatialMembership: { scopes: [placement.scope] } };
 				},
-				readResolvedBounds: (nodeId) =>
-					nodeId === "scene-node:8"
-						? {
-								localBounds: AABB3.zero(),
-								placement: PLACEMENT,
-							}
-						: null,
+				readLocalBounds: (nodeId) =>
+					nodeId === "scene-node:8" ? AABB3.zero() : null,
 				getResolvedPlacement: (nodeId) =>
 					nodeId === "scene-node:7"
 						? ENV_CELL_PLACEMENT
@@ -435,7 +456,10 @@ describe("RenderWorld", () => {
 					calls.push("scene-scopes");
 					return VISIBLE_SCENE;
 				},
-				queryScopeSelectionFrustum: () => {
+				queryScopesMultiFrustumMasks: () => {
+					throw new Error("not used");
+				},
+				queryScopeWindowSelectionFrustum: () => {
 					throw new Error("not used");
 				},
 				queryFlatFrustum: () => {
@@ -464,7 +488,7 @@ describe("RenderWorld", () => {
 				getPresentationIdentity: (nodeId) =>
 					nodeId === "scene-node:9" ? "guid:9" : null,
 				getPublishedPresentationBounds: (nodeId) =>
-					nodeId === "scene-node:9" ? AABB3.zero() : null,
+					nodeId === "scene-node:9" ? presentationBounds : null,
 				getPublishedRigidPresentationBounds: (nodeId) =>
 					nodeId === "scene-node:9" ? RIGID_DYNAMIC_BOUNDS : null,
 			},
@@ -489,9 +513,6 @@ describe("RenderWorld", () => {
 			},
 		});
 
-		expect(world.queryOutdoorShadowCasters(FRUSTUM, "0001")).toBe(
-			VISIBLE_SCENE,
-		);
 		expect(
 			world.queryFlatScene(FRUSTUM, "0001", INCLUDE_ALL_SCENE_CULLING_GROUPS),
 		).toBe(VISIBLE_SCENE);
@@ -507,6 +528,9 @@ describe("RenderWorld", () => {
 			},
 			kind: "dynamic",
 		});
+		expect(world.readRenderContribution("scene-node:9")).toBe(
+			world.readRenderContribution("scene-node:9"),
+		);
 		expect(world.getEntityShadowDynamicFacts("scene-node:9")).toEqual({
 			identity: "guid:9",
 			rigidBounds: RIGID_DYNAMIC_BOUNDS,
@@ -566,6 +590,9 @@ describe("RenderWorld", () => {
 			kind: "static-object",
 			renderable: staticRenderable,
 		});
+		expect(world.readRenderContribution("scene-node:8")).toBe(
+			world.readRenderContribution("scene-node:8"),
+		);
 		staticCullingGroup = "generated";
 		expect(world.readRenderContribution("scene-node:8")).toMatchObject({
 			footprint: {
@@ -580,7 +607,6 @@ describe("RenderWorld", () => {
 			},
 		]);
 		expect(calls).toEqual([
-			"scene-scopes",
 			"scene-flat",
 			"topology",
 			"terrain",

@@ -1,19 +1,36 @@
-import type { DynamicEntityView } from "../lib/game/runtime/dynamic-entity-feed";
-import { dynamicEntityWorldOrigin } from "../lib/game/runtime/dynamic-entity-presentation";
+import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../lib/game/landblocks";
+import type {
+	DynamicEntityMirror,
+	DynamicEntityWorldPlacement,
+} from "../lib/game/runtime/dynamic-entity-feed";
 import type { ClientEntityMirror } from "./client-entity-mirror";
 
-/** Borrow just the accepted identity and pose facts needed by this policy. */
-interface EntityPoseSource {
-	currentEntities(): Iterable<
-		Pick<DynamicEntityView, "identity" | "placement">
-	>;
-	isAwaitingSnapshot(): boolean;
+type WorldPose = DynamicEntityWorldPlacement["pose"];
+
+/** Distance between accepted AC poses in canonical scene space without allocating origins. */
+export function distanceBetweenDynamicWorldPoses(
+	player: WorldPose,
+	target: WorldPose,
+): number {
+	const x =
+		(((player.landblockId >>> 24) & 0xff) -
+			((target.landblockId >>> 24) & 0xff)) *
+			OUTDOOR_LANDBLOCK_WORLD_SIZE +
+		player.coords.x -
+		target.coords.x;
+	const z =
+		(((player.landblockId >>> 16) & 0xff) -
+			((target.landblockId >>> 16) & 0xff)) *
+			OUTDOOR_LANDBLOCK_WORLD_SIZE +
+		player.coords.y -
+		target.coords.y;
+	return Math.hypot(x, z, player.coords.z - target.coords.z);
 }
 
-/** App-local distance from accepted world poses, independent of renderer residency. */
+/** Event-driven distance query for vendor and house interaction policy. */
 export function sampleEntityDistanceMeters(
 	entities: Pick<ClientEntityMirror, "read">,
-	motion: EntityPoseSource,
+	motion: Pick<DynamicEntityMirror, "entityByGuid" | "isAwaitingSnapshot">,
 	entityGuid: number,
 ): number | null {
 	const read = entities.read();
@@ -23,17 +40,13 @@ export function sampleEntityDistanceMeters(
 		motion.isAwaitingSnapshot()
 	)
 		return null;
-	let player = null;
-	let target = null;
-	for (const entity of motion.currentEntities()) {
-		if (entity.placement.kind !== "world") continue;
-		if (entity.identity.guid === read.level.playerGuid)
-			player = dynamicEntityWorldOrigin(entity.placement);
-		else if (entity.identity.guid === entityGuid)
-			target = dynamicEntityWorldOrigin(entity.placement);
-		if (player !== null && target !== null) break;
-	}
-	return player === null || target === null
+	const player = motion.entityByGuid(read.level.playerGuid);
+	const target = motion.entityByGuid(entityGuid);
+	return player?.placement.kind !== "world" ||
+		target?.placement.kind !== "world"
 		? null
-		: Math.hypot(player.x - target.x, player.y - target.y, player.z - target.z);
+		: distanceBetweenDynamicWorldPoses(
+				player.placement.pose,
+				target.placement.pose,
+			);
 }

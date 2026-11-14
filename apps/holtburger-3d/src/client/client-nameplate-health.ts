@@ -94,6 +94,15 @@ export class ClientNameplateHealth {
 		return this.#worldGeneration;
 	}
 
+	/** No combat timer or displayed bar needs a frame reconciliation in this state. */
+	isIdle(): boolean {
+		return (
+			!isActiveCombatMode(this.#combatMode) &&
+			this.#interestByGuid.size === 0 &&
+			this.#displayedByGuid.size === 0
+		);
+	}
+
 	/** Reset all retained combat interest and health history across world changes. */
 	resetWorld(worldGeneration: number): readonly NameplateHealthUpdate[] {
 		this.#worldGeneration = worldGeneration;

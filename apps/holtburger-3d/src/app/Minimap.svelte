@@ -109,6 +109,7 @@
 	import {
 		EMPTY_MINIMAP_BREADCRUMB_TRAIL,
 		observeMinimapBreadcrumbTrail,
+		type MinimapBreadcrumbHistory,
 		type MinimapBreadcrumbTrail,
 	} from "./minimap-breadcrumb-trail";
 	import { drawMinimapBreadcrumbTrail } from "./minimap-breadcrumb-renderer";
@@ -317,6 +318,31 @@
 	let minimapPanState: MinimapPanState = ANCHORED_MINIMAP_PAN_STATE;
 	let minimapPanGesture: MinimapPanGesture | null = null;
 	let breadcrumbTrail: MinimapBreadcrumbTrail = EMPTY_MINIMAP_BREADCRUMB_TRAIL;
+	let markerRevision = 0;
+	type MinimapCanvasDrawState = {
+		/** Revisions are local to one runtime and may restart after replacement. */
+		readonly source: MinimapFrame["source"];
+		readonly anchorX: number | null;
+		readonly anchorY: number | null;
+		readonly anchorZ: number | null;
+		readonly anchorHeading: number | null;
+		readonly landblockId: string | null;
+		readonly envCellId: string | null;
+		readonly centerX: number | null;
+		readonly centerZ: number | null;
+		readonly diameter: number | null;
+		readonly cameraHeading: number;
+		readonly cameraFov: number;
+		readonly subjectKind: MinimapSubject["kind"] | null;
+		readonly selectedGuid: number | null;
+		readonly trackedGuids: ReadonlySet<number> | undefined;
+		readonly entityRevision: number | undefined;
+		readonly landmarkRevision: number | undefined;
+		readonly trailSamples: MinimapBreadcrumbHistory | null;
+		readonly markerRevision: number;
+		readonly size: number;
+		readonly scale: number;
+	};
 	let cancelPointerGesture: (() => void) | null = null;
 	/** Cold boundary scale controls sampling density; map projection remains in logical units. */
 	let drawingScale = 1;
@@ -332,6 +358,7 @@
 		drawingScale = uiScale(minimapElement);
 		const stopTheme = observeUiTheme(minimapElement, () => {
 			markers = readMinimapMarkers(minimapElement);
+			markerRevision += 1;
 		});
 		const element = footerElement;
 		const observer = new ResizeObserver(() => {
@@ -344,10 +371,12 @@
 		let frameHandle: number | undefined;
 		let lastGpuAttemptedAt = Number.NEGATIVE_INFINITY;
 		let lastGpuDrawn: MinimapGpuDrawState | null = null;
+		let lastCanvasDrawn: MinimapCanvasDrawState | null = null;
 		const scaleChanged = () => {
 			cancelMinimapPan();
 			drawingScale = uiScale(minimapElement);
 			lastGpuDrawn = null;
+			lastCanvasDrawn = null;
 		};
 		window.addEventListener(UI_SCALE_CHANGE_EVENT, scaleChanged);
 		const step = (now: number): void => {
@@ -369,7 +398,13 @@
 			}
 			const parameters = view(frame);
 			const size = discLogicalSize();
-			drawOverlay(frame, parameters, size);
+			const canvasState = captureCanvasDrawState(frame, parameters, size);
+			const redrawCanvas =
+				frame.presentedEntitiesRevision === undefined ||
+				frame.landmarkRevision === undefined ||
+				!sameCanvasDrawState(lastCanvasDrawn, canvasState);
+			drawOverlay(frame, parameters, size, redrawCanvas);
+			if (redrawCanvas) lastCanvasDrawn = canvasState;
 			const next = captureMinimapGpuDrawState(frame, viewState, parameters);
 			if (sameMinimapGpuDrawState(lastGpuDrawn, next)) return;
 			if (now - lastGpuAttemptedAt < MINIMUM_GPU_FRAME_INTERVAL_MS) return;
@@ -414,11 +449,75 @@
 		return Math.max(1, Math.round(viewState.size * (1 - 2 * RIM_FRACTION)));
 	}
 
+	/** Capture only values that can alter Canvas2D blips, trail, or camera cone. */
+	function captureCanvasDrawState(
+		frame: MinimapFrame,
+		parameters: MapViewParameters | null,
+		size: number,
+	): MinimapCanvasDrawState {
+		const anchor = parameters?.anchor;
+		return {
+			source: frame.source,
+			anchorX: anchor?.worldX ?? null,
+			anchorY: anchor?.worldY ?? null,
+			anchorZ: anchor?.worldZ ?? null,
+			anchorHeading: anchor?.headingRadians ?? null,
+			landblockId: anchor?.residency?.landblockId ?? null,
+			envCellId: anchor?.residency?.envCellId ?? null,
+			centerX: parameters?.center.worldX ?? null,
+			centerZ: parameters?.center.worldZ ?? null,
+			diameter: parameters?.viewDiameter ?? null,
+			cameraHeading: frame.cameraHeadingRadians,
+			cameraFov: frame.cameraFovRadians,
+			subjectKind: frame.subject?.kind ?? null,
+			selectedGuid: frame.selectedGuid,
+			trackedGuids: frame.trackedGuids,
+			entityRevision: frame.presentedEntitiesRevision,
+			landmarkRevision: frame.landmarkRevision,
+			trailSamples:
+				breadcrumbTrail.kind === "tracking" ? breadcrumbTrail.samples : null,
+			markerRevision,
+			size,
+			scale: drawingScale,
+		};
+	}
+
+	function sameCanvasDrawState(
+		left: MinimapCanvasDrawState | null,
+		right: MinimapCanvasDrawState,
+	): boolean {
+		return (
+			left !== null &&
+			left.source === right.source &&
+			left.anchorX === right.anchorX &&
+			left.anchorY === right.anchorY &&
+			left.anchorZ === right.anchorZ &&
+			left.anchorHeading === right.anchorHeading &&
+			left.landblockId === right.landblockId &&
+			left.envCellId === right.envCellId &&
+			left.centerX === right.centerX &&
+			left.centerZ === right.centerZ &&
+			left.diameter === right.diameter &&
+			left.cameraHeading === right.cameraHeading &&
+			left.cameraFov === right.cameraFov &&
+			left.subjectKind === right.subjectKind &&
+			left.selectedGuid === right.selectedGuid &&
+			left.trackedGuids === right.trackedGuids &&
+			left.entityRevision === right.entityRevision &&
+			left.landmarkRevision === right.landmarkRevision &&
+			left.trailSamples === right.trailSamples &&
+			left.markerRevision === right.markerRevision &&
+			left.size === right.size &&
+			left.scale === right.scale
+		);
+	}
+
 	/** Draw DOM and 2D overlay work at the display's animation cadence. */
 	function drawOverlay(
 		frame: MinimapFrame,
 		parameters: MapViewParameters | null,
 		size: number,
+		redrawCanvas: boolean,
 	): void {
 		const overlay =
 			parameters === null ? null : projectMapView(parameters, size, size);
@@ -437,6 +536,7 @@
 							frame.cameraHeadingRadians - subject.anchor.headingRadians,
 					};
 		drawChrome(frame, overlay, projectedSubject);
+		if (!redrawCanvas) return;
 		if (overlay === null) {
 			clearOverlayCanvas();
 			return;

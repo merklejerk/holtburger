@@ -13,10 +13,9 @@ import {
 } from "./client-lock-feedback";
 import {
 	ClientNameplateHealth,
-	type NameplateHealthCandidate,
 	type NameplateHealthUpdate,
 } from "./client-nameplate-health";
-import { sampleEntityDistanceMeters } from "./client-entity-distance";
+import { distanceBetweenDynamicWorldPoses } from "./client-entity-distance";
 import { projectClientEntityCenter } from "./client-entity-projection";
 import type { BarberPreview, BarberSnapshot } from "./client-barber-contract";
 import type { DynamicPresentationOverride } from "../lib/game/runtime/dynamic-presentation-override";
@@ -383,6 +382,8 @@ export interface ClientGameplayRuntime
 	listPresentedSpawnedEntities(): Iterable<MapEntity>;
 	/** Monotonic change fact for live dynamic placements. */
 	readonly dynamicEntityPlacementRevision: number;
+	/** Monotonic change fact for the overhead map's entity and radar picture. */
+	readonly mapEntityRevision: number;
 	/** Whether the exact indoor cell required by a player or camera is installed. */
 	hasEnvCellScope(residency: SceneResidency): boolean;
 	/** Commit pending loading artifacts without advancing live world presentation. */
@@ -424,6 +425,8 @@ export interface ClientGameplayPresentationDependencies {
 	readonly session: ClientLifecycleSession;
 	readonly canvas: HTMLCanvasElement;
 	readonly onError?: (error: unknown) => void;
+	/** Wake the mounted lock overlay after one accepted transient feedback event. */
+	readonly onLockFeedback?: () => void;
 	/** Bind/unbind the runtime-owned scene demand source for app-local consumers. */
 	readonly onSceneMembership?: (source: SceneInterestMembership | null) => void;
 	/** Cold preset catalog published when content is installed or retired. */
@@ -481,6 +484,7 @@ export class ClientGameplayPresentation {
 	readonly #onSceneMembership: ClientGameplayPresentationDependencies["onSceneMembership"];
 	readonly #onWeatherPresets: ClientGameplayPresentationDependencies["onWeatherPresets"];
 	readonly #onEnvironmentIssue: ClientGameplayPresentationDependencies["onEnvironmentIssue"];
+	readonly #onLockFeedback: ClientGameplayPresentationDependencies["onLockFeedback"];
 	#combatEffectsTuning: CombatEffectsTuning = CLIENT_COMBAT_EFFECTS_TUNING;
 	/** Null until the appearance scope resolves; no duplicate hardcoded theme palette. */
 	#summonLeashColors: ClientSummonLeashColors | null = null;
@@ -494,6 +498,13 @@ export class ClientGameplayPresentation {
 	#unsubscribe: (() => void) | null = null;
 	readonly #lockFeedback = new ClientLockFeedbackEffects();
 	readonly #nameplateHealth: ClientNameplateHealth;
+	/** Reused candidate records for the active combat pass; reconciliation does not retain them. */
+	readonly #nameplateCandidates: Array<{
+		guid: number;
+		generation: number;
+		isHostileMob: boolean;
+		distanceMeters: number | null;
+	}> = [];
 	#playerGuid: number | null = null;
 	#startPromise: Promise<void> | null = null;
 	#sceneTargetKey: string | null = null;
@@ -530,6 +541,7 @@ export class ClientGameplayPresentation {
 		this.#onSceneMembership = dependencies.onSceneMembership;
 		this.#onWeatherPresets = dependencies.onWeatherPresets;
 		this.#onEnvironmentIssue = dependencies.onEnvironmentIssue;
+		this.#onLockFeedback = dependencies.onLockFeedback;
 		this.#canvas = dependencies.canvas;
 		this.#onError = dependencies.onError ?? (() => undefined);
 		this.#resources = dependencies.resources;
@@ -603,6 +615,7 @@ export class ClientGameplayPresentation {
 			cameraHeadingRadians: this.camera.desiredLook().yawRadians,
 			presentedEntities: () =>
 				resources?.runtime.listPresentedSpawnedEntities() ?? [],
+			presentedEntitiesRevision: resources?.runtime.mapEntityRevision ?? 0,
 			selectedGuid: this.#selectedEntityGuid,
 			source: resources?.runtime ?? null,
 			subject:
@@ -666,6 +679,11 @@ export class ClientGameplayPresentation {
 				});
 			},
 		);
+	}
+
+	/** A clipped feedback still needs polling until its existing lifetime expires. */
+	hasActiveLockFeedback(): boolean {
+		return this.#lockFeedback.active;
 	}
 
 	/** Pull the combat bound and presented camera without publishing frame-hot UI state. */
@@ -1313,12 +1331,15 @@ export class ClientGameplayPresentation {
 			const facingYaw = createEntityFacingCameraYaw(
 				player.placement.pose.rotation,
 			);
-			this.#cameraSynchronization = this.#cameraSynchronization
-				.then(() => {
-					if (!this.#destroyed)
-						return this.camera.synchronize(projection, timeMs, facingYaw);
-				})
-				.catch((error: unknown) => this.#reportError(error));
+			this.camera.advance(timeMs, facingYaw);
+			const submitCamera = this.camera.queueSynchronization(projection);
+			if (submitCamera !== null) {
+				this.#cameraSynchronization = this.#cameraSynchronization
+					.then(() => {
+						if (!this.#destroyed) return submitCamera();
+					})
+					.catch((error: unknown) => this.#reportError(error));
+			}
 			const presentation = this.camera.presentation(timeMs);
 			if (presentation === null) {
 				const cameraStatus = this.camera.status();
@@ -1536,12 +1557,14 @@ export class ClientGameplayPresentation {
 					!this.#session.mirror.isAwaitingSnapshot() &&
 					event.feedback.worldGeneration ===
 						this.#session.state().worldGeneration
-				)
+				) {
 					this.#lockFeedback.accept(
 						event.feedback,
 						performance.now(),
 						CLIENT_LOCK_FEEDBACK_TUNING,
 					);
+					this.#onLockFeedback?.();
+				}
 				return;
 			case "combat-outcome":
 				if (
@@ -1805,6 +1828,7 @@ export class ClientGameplayPresentation {
 	}
 
 	#reconcileNameplateHealth(nowMs: number): void {
+		if (this.#nameplateHealth.isIdle()) return;
 		const read = this.#session.entities.read();
 		if (read.kind !== "current") {
 			this.#applyNameplateHealthUpdates(
@@ -1813,7 +1837,15 @@ export class ClientGameplayPresentation {
 			return;
 		}
 		const levelEntities = read.level.entities;
-		const candidates: NameplateHealthCandidate[] = [];
+		const player =
+			read.level.playerGuid === null ||
+			this.#session.mirror.isAwaitingSnapshot()
+				? null
+				: this.#session.mirror.entityByGuid(read.level.playerGuid);
+		const playerPose =
+			player?.placement.kind === "world" ? player.placement.pose : null;
+		const candidates = this.#nameplateCandidates;
+		let candidateCount = 0;
 		for (const dynamic of this.#session.mirror.currentEntities()) {
 			const guid = dynamic.identity.guid;
 			const facts = levelEntities.get(guid);
@@ -1821,19 +1853,29 @@ export class ClientGameplayPresentation {
 				dynamic.presentation.entityClass === "mob" &&
 				(facts === undefined ||
 					(facts.corpse === null && facts.summon === null));
-			candidates.push({
-				guid,
-				generation: dynamic.generation,
-				isHostileMob,
-				distanceMeters: isHostileMob
-					? sampleEntityDistanceMeters(
-							this.#session.entities,
-							this.#session.mirror,
-							guid,
-						)
-					: null,
-			});
+			const distanceMeters =
+				isHostileMob &&
+				playerPose !== null &&
+				dynamic.placement.kind === "world"
+					? distanceBetweenDynamicWorldPoses(playerPose, dynamic.placement.pose)
+					: null;
+			const candidate = candidates[candidateCount];
+			if (candidate === undefined)
+				candidates.push({
+					guid,
+					generation: dynamic.generation,
+					isHostileMob,
+					distanceMeters,
+				});
+			else {
+				candidate.guid = guid;
+				candidate.generation = dynamic.generation;
+				candidate.isHostileMob = isHostileMob;
+				candidate.distanceMeters = distanceMeters;
+			}
+			candidateCount += 1;
 		}
+		candidates.length = candidateCount;
 		this.#applyNameplateHealthUpdates(
 			this.#nameplateHealth.reconcile(candidates, nowMs),
 		);
@@ -2165,11 +2207,7 @@ export class ClientGameplayPresentation {
 	}
 
 	#authoritativePlayer(guid: number): DynamicEntityView | null {
-		return (
-			this.#session.mirror
-				.entities()
-				.find((entity) => entity.identity.guid === guid) ?? null
-		);
+		return this.#session.mirror.entityByGuid(guid);
 	}
 
 	#requestDynamicSnapshotReplacement(

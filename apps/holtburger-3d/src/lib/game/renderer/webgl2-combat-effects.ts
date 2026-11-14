@@ -18,8 +18,8 @@ import {
 	bindWebGL2PortalDeferredVisibilityProgram,
 	PORTAL_DEFERRED_VISIBILITY_GLSL,
 	type WebGL2PortalDeferredVisibilityUniforms,
+	type PortalDeferredScopeRouting,
 } from "./portal-deferred-visibility-glsl";
-import type { NameplatePortalScopeRouting } from "./webgl2-nameplate-pass";
 
 /** Whole labels share one atlas entry; rasterization and lookup use the same vocabulary. */
 const WHOLE_WORD_TOKENS: readonly string[] = ["MISS", "RESIST", "CRITICAL"];
@@ -32,7 +32,7 @@ export interface CombatEffectsView {
 	readonly height: number;
 	readonly density: number;
 	readonly selectedScope: (scope: SceneScope) => number | null;
-	readonly routing: NameplatePortalScopeRouting | null;
+	readonly routing: PortalDeferredScopeRouting | null;
 }
 
 interface Glyph {

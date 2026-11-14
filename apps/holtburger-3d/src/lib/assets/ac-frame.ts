@@ -1,4 +1,4 @@
-import { Mat4, Quat, Vec3 } from "../game/math/types.js";
+import { Mat4, Vec3 } from "../game/math/types.js";
 import {
 	quaternionFromRotationMat4,
 	writeQuaternionFromRotationMat4,
@@ -346,34 +346,61 @@ export function landblockVec3(vector: Vec3): LandblockVec3 {
 export function acFrameTransform(
 	input: AcFrame,
 	scale: readonly [number, number, number],
+	targetMatrix?: Mat4,
 ): Mat4 {
 	const [w, x, y, z] = input.orientation;
-	const rotation = new Quat(w, x, z, -y);
-	const magnitude = Math.hypot(rotation.w, rotation.x, rotation.y, rotation.z);
-	if (magnitude === 0) throw new Error("AC frame contains a zero orientation.");
-	const qw = rotation.w / magnitude;
-	const qx = rotation.x / magnitude;
-	const qy = rotation.y / magnitude;
-	const qz = rotation.z / magnitude;
-	const transformedScale = renderScale(scale);
-	return new Mat4(
-		(1 - 2 * (qy * qy + qz * qz)) * transformedScale.x,
-		2 * (qx * qy + qw * qz) * transformedScale.x,
-		2 * (qx * qz - qw * qy) * transformedScale.x,
-		0,
-		2 * (qx * qy - qw * qz) * transformedScale.y,
-		(1 - 2 * (qx * qx + qz * qz)) * transformedScale.y,
-		2 * (qy * qz + qw * qx) * transformedScale.y,
-		0,
-		2 * (qx * qz + qw * qy) * transformedScale.z,
-		2 * (qy * qz - qw * qx) * transformedScale.z,
-		(1 - 2 * (qx * qx + qy * qy)) * transformedScale.z,
-		0,
+	return writeAcFrameTransform(
 		input.origin[0],
+		input.origin[1],
 		input.origin[2],
-		-input.origin[1],
-		1,
+		w,
+		x,
+		y,
+		z,
+		scale[0],
+		scale[1],
+		scale[2],
+		targetMatrix ?? Mat4.zero(),
 	);
+}
+
+/** Write an AC frame directly into caller-owned storage on frame-hot placement paths. */
+export function writeAcFrameTransform(
+	originX: number,
+	originY: number,
+	originZ: number,
+	w: number,
+	x: number,
+	y: number,
+	z: number,
+	scaleX: number,
+	scaleY: number,
+	scaleZ: number,
+	target: Mat4,
+): Mat4 {
+	const magnitude = Math.hypot(w, x, z, -y);
+	if (magnitude === 0) throw new Error("AC frame contains a zero orientation.");
+	const qw = w / magnitude;
+	const qx = x / magnitude;
+	const qy = z / magnitude;
+	const qz = -y / magnitude;
+	target.m11 = (1 - 2 * (qy * qy + qz * qz)) * scaleX;
+	target.m12 = 2 * (qx * qy + qw * qz) * scaleX;
+	target.m13 = 2 * (qx * qz - qw * qy) * scaleX;
+	target.m14 = 0;
+	target.m21 = 2 * (qx * qy - qw * qz) * scaleZ;
+	target.m22 = (1 - 2 * (qx * qx + qz * qz)) * scaleZ;
+	target.m23 = 2 * (qy * qz + qw * qx) * scaleZ;
+	target.m24 = 0;
+	target.m31 = 2 * (qx * qz + qw * qy) * scaleY;
+	target.m32 = 2 * (qy * qz - qw * qx) * scaleY;
+	target.m33 = (1 - 2 * (qx * qx + qy * qy)) * scaleY;
+	target.m34 = 0;
+	target.m41 = originX;
+	target.m42 = originZ;
+	target.m43 = -originY;
+	target.m44 = 1;
+	return target;
 }
 
 /** Convert one AC-authored scale vector into render-axis order. */

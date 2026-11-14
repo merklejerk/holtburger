@@ -574,6 +574,7 @@ export type ClientLifecycleSessionEvent =
 	  }
 	| { readonly type: "combat-mode"; readonly mode: ClientCombatMode }
 	| { readonly type: "combat"; readonly status: ClientCombatStatus }
+	| { readonly type: "spell-cast-target"; readonly target: number | null }
 	| {
 			readonly type: "appearance-options";
 			readonly options: ClientAppearanceOptions;
@@ -1771,6 +1772,7 @@ export class ClientLifecycleSession {
 				await listen("client-spell-cast-target-updated", (payload) => {
 					const { target } = spellCastTargetSchema.parse(payload);
 					this.#state = { ...this.#state, spellCastTarget: target };
+					this.#emit({ type: "spell-cast-target", target });
 				}),
 			);
 			unlisteners.push(

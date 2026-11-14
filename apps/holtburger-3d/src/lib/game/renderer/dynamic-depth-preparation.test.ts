@@ -9,7 +9,11 @@ import {
 	compileDynamicPartRangeGroups,
 	summarizeDynamicRangeAdmission,
 } from "./object-rendering-policy";
-import { DynamicDepthPreparations } from "./dynamic-depth-preparation";
+import {
+	DynamicDepthPreparations,
+	compileOpaqueDynamicDepth,
+} from "./dynamic-depth-preparation";
+import { compileOpaqueDynamicAppearanceVariants } from "./webgl2-dynamic-appearances";
 
 const NODE_ID = "scene-node:selection-test" as SceneNodeId;
 
@@ -75,6 +79,9 @@ function fixture(
 		},
 	}));
 	const visible = {
+		get allPartsOpaque() {
+			return parts.every((part) => part.frameInstance.color.a === 1);
+		},
 		landblockId: "0x0000ffff" as const,
 		renderScopes: [{ kind: "outdoor" as const }],
 		visual: {
@@ -83,18 +90,35 @@ function fixture(
 			parts,
 		},
 	};
+	const rangeGroupsByPart = compileDynamicPartRangeGroups(appearance);
 	const read = vi.fn(() => visible);
 	const pass = new DynamicDepthPreparations(read, () => ({
 		kind: "drawable",
 		table: {} as WebGLTexture,
 		indexBuffer: {} as WebGLBuffer,
 		plan,
-		rangeGroupsByPart: compileDynamicPartRangeGroups(appearance),
+		opaqueVariants: compileOpaqueDynamicAppearanceVariants(
+			plan,
+			rangeGroupsByPart,
+		),
+		rangeGroupsByPart,
 	}));
-	return { pass, read, parts, appearance };
+	return { pass, read, parts, appearance, plan };
 }
 
 describe("DynamicDepthPreparations", () => {
+	it("borrows precompiled shadow and selection spans for fully opaque parts", () => {
+		const { pass, parts, plan } = fixture();
+		for (const part of parts) part.frameInstance.color.a = 1;
+		const shadow = pass.prepare(NODE_ID, false);
+		const selection = pass.prepareSelection(NODE_ID, false);
+		expect(shadow?.ranges).toEqual(
+			compileOpaqueDynamicDepth(plan, false, true).ranges,
+		);
+		expect(selection?.ranges).toEqual(
+			compileOpaqueDynamicDepth(plan, false, false).ranges,
+		);
+	});
 	it("counts split source cohorts once and reads opacity changes from compiled part facts", () => {
 		const { appearance, parts } = fixture();
 		const first = appearance.ranges[0];

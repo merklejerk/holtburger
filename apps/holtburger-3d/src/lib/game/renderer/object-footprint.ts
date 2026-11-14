@@ -42,6 +42,10 @@ function classifyObjectFootprint(
 	) {
 		throw new Error("Object-footprint projection dimensions are invalid.");
 	}
+	// A sphere inscribed in the local box provides a safe lower bound on its projected
+	// area. An enclosing sphere would be unsafe here: it can be large while the object
+	// itself covers fewer pixels than the cutoff.
+	if (acceptsInscribedSphereFootprint(input)) return "visible";
 
 	const bounds = input.bounds;
 	const local = input.localToLandblock;
@@ -133,6 +137,80 @@ function classifyObjectFootprint(
 		visibleNdcHeight *
 		(input.viewportHeight / 2);
 	return pixelArea < input.minimumPixelArea ? "below-threshold" : "visible";
+}
+
+/** Accept only when four points inside the local box prove enough visible screen area. */
+function acceptsInscribedSphereFootprint(
+	input: ObjectFootprintProjectionInput,
+): boolean {
+	const { bounds, localToLandblock: local, clipFromAnchor: clip } = input;
+	const radius = Math.min(
+		(bounds.max.x - bounds.min.x) * 0.5,
+		(bounds.max.y - bounds.min.y) * 0.5,
+		(bounds.max.z - bounds.min.z) * 0.5,
+	);
+	if (!Number.isFinite(radius) || radius <= 0) return false;
+	const centerX = (bounds.min.x + bounds.max.x) * 0.5;
+	const centerY = (bounds.min.y + bounds.max.y) * 0.5;
+	const centerZ = (bounds.min.z + bounds.max.z) * 0.5;
+	let minX = Number.POSITIVE_INFINITY;
+	let maxX = Number.NEGATIVE_INFINITY;
+	let minY = Number.POSITIVE_INFINITY;
+	let maxY = Number.NEGATIVE_INFINITY;
+	for (let point = 0; point < 4; point += 1) {
+		const x = centerX + (point === 0 ? -radius : point === 1 ? radius : 0);
+		const y = centerY + (point === 2 ? -radius : point === 3 ? radius : 0);
+		const anchorX =
+			local.m11 * x +
+			local.m21 * y +
+			local.m31 * centerZ +
+			local.m41 +
+			input.landblockOffsetX;
+		const anchorY =
+			local.m12 * x +
+			local.m22 * y +
+			local.m32 * centerZ +
+			local.m42 +
+			input.landblockOffsetY;
+		const anchorZ =
+			local.m13 * x +
+			local.m23 * y +
+			local.m33 * centerZ +
+			local.m43 +
+			input.landblockOffsetZ;
+		const clipX =
+			clip.m11 * anchorX + clip.m21 * anchorY + clip.m31 * anchorZ + clip.m41;
+		const clipY =
+			clip.m12 * anchorX + clip.m22 * anchorY + clip.m32 * anchorZ + clip.m42;
+		const clipZ =
+			clip.m13 * anchorX + clip.m23 * anchorY + clip.m33 * anchorZ + clip.m43;
+		const clipW =
+			clip.m14 * anchorX + clip.m24 * anchorY + clip.m34 * anchorZ + clip.m44;
+		if (
+			!Number.isFinite(clipX) ||
+			!Number.isFinite(clipY) ||
+			!Number.isFinite(clipZ) ||
+			!Number.isFinite(clipW) ||
+			clipW <= CLIP_EPSILON ||
+			clipZ + clipW <= CLIP_EPSILON ||
+			clipZ > clipW ||
+			Math.abs(clipX) > clipW ||
+			Math.abs(clipY) > clipW
+		)
+			return false;
+		const ndcX = clipX / clipW;
+		const ndcY = clipY / clipW;
+		minX = Math.min(minX, ndcX);
+		maxX = Math.max(maxX, ndcX);
+		minY = Math.min(minY, ndcY);
+		maxY = Math.max(maxY, ndcY);
+	}
+	const pixelArea =
+		(maxX - minX) *
+		(input.viewportWidth / 2) *
+		(maxY - minY) *
+		(input.viewportHeight / 2);
+	return pixelArea >= input.minimumPixelArea;
 }
 
 /**

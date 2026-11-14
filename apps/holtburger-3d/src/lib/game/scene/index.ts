@@ -38,6 +38,14 @@ export interface SceneScopeSelection {
 	scopeAt(ordinal: number): SceneScope;
 }
 
+/** Selected scope source with a conservative unioned clip window per scope. */
+export interface SceneScopeWindowSelection extends SceneScopeSelection {
+	minimumNdcX(ordinal: number): number;
+	minimumNdcY(ordinal: number): number;
+	maximumNdcX(ordinal: number): number;
+	maximumNdcY(ordinal: number): number;
+}
+
 /** Canonical env-cell scope data projected from prepared host topology. */
 export interface SceneEnvCellScopeInput {
 	readonly scope: Extract<SceneScope, { readonly kind: "env-cell" }>;
@@ -154,6 +162,8 @@ export interface ResolvedScenePlacement extends SceneResidency {
 	readonly scope: SceneScope;
 	/** Node transform composed through its parents into landblock-local coordinates. */
 	readonly localToLandblock: Mat4;
+	/** Monotonic per-node transform change fact, including changes inherited from an ancestor. */
+	readonly transformRevision: number;
 }
 
 /** Scene-owned facts borrowed synchronously; nested matrices must not be mutated or retained. */

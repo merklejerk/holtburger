@@ -79,7 +79,10 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 	readonly #router: BehaviorEventRouter;
 	readonly #roll: UniformRoll;
 	readonly #records = new Map<BehaviorTargetId, ScriptRecord>();
+	/** Owners with an activation or pending start; inert retained libraries stay out of advance. */
+	readonly #runningRecords = new Set<ScriptRecord>();
 	readonly #owners = new Map<TOwnerId, Set<BehaviorTargetId>>();
+	#lastAdvanceTimeSeconds: number | null = null;
 	#resynchronizedCount = 0;
 	#destroyed = false;
 
@@ -110,10 +113,9 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			throw new Error("Cannot install into a destroyed physics script system.");
 		if (this.#records.has(target.targetId))
 			throw new Error(`Script state for ${target.targetId} already exists.`);
-		this.#records.set(
-			target.targetId,
-			createScriptRecord(target, closure, timeSeconds),
-		);
+		const record = createScriptRecord(target, closure, timeSeconds);
+		this.#records.set(target.targetId, record);
+		this.#runningRecords.add(record);
 		let targets = this.#owners.get(ownerId);
 		if (!targets) {
 			targets = new Set();
@@ -160,6 +162,7 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			scriptId: root.id,
 			startTime: Math.max(timeSeconds, this.#chainedStartTime(existing)),
 		});
+		this.#runningRecords.add(existing);
 		return true;
 	}
 
@@ -210,8 +213,11 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 						"Cannot commit into a destroyed physics script system.",
 					);
 				this.removeOwner(ownerId);
-				for (const [targetId, record] of records)
+				for (const [targetId, record] of records) {
 					this.#records.set(targetId, record);
+					if (record.activations.length > 0 || record.pending.length > 0)
+						this.#runningRecords.add(record);
+				}
 				if (records.size > 0)
 					this.#owners.set(ownerId, new Set(records.keys()));
 				state = "committed";
@@ -234,7 +240,13 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			throw new Error("Cannot advance a destroyed physics script system.");
 		if (!Number.isFinite(timeSeconds))
 			throw new Error("Script time must be finite.");
-		for (const record of this.#records.values())
+		if (
+			this.#lastAdvanceTimeSeconds !== null &&
+			timeSeconds < this.#lastAdvanceTimeSeconds
+		)
+			throw new Error("Script clock moved backwards.");
+		this.#lastAdvanceTimeSeconds = timeSeconds;
+		for (const record of this.#runningRecords)
 			this.#advanceRecord(record, timeSeconds);
 	}
 
@@ -248,6 +260,7 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 	remove(ownerId: TOwnerId, targetId: BehaviorTargetId): void {
 		const record = this.#records.get(targetId);
 		if (!record) return;
+		this.#runningRecords.delete(record);
 		this.#records.delete(targetId);
 		const targets = this.#owners.get(ownerId);
 		targets?.delete(targetId);
@@ -264,6 +277,7 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 		this.#destroyed = true;
 		// Closures are borrowed; their owner releases them.
 		this.#records.clear();
+		this.#runningRecords.clear();
 		this.#owners.clear();
 	}
 
@@ -300,6 +314,8 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 				return;
 			}
 		}
+		if (record.activations.length === 0 && record.pending.length === 0)
+			this.#runningRecords.delete(record);
 	}
 
 	/**
@@ -451,12 +467,20 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			!record.scripts.has(activation.scriptId)
 		)
 			return false;
+		// An idle record skipped intervening advances; a new external command starts from the
+		// system's current clock, while a command dispatched during advance already has that time.
+		if (
+			!this.#runningRecords.has(record) &&
+			this.#lastAdvanceTimeSeconds !== null
+		)
+			record.lastTimeSeconds = this.#lastAdvanceTimeSeconds;
 		const startTime =
 			activation.pauseSeconds < INSTANT_PAUSE_SECONDS
 				? this.#chainedStartTime(record)
 				: (record.lastTimeSeconds ?? 0) +
 					this.#roll() * activation.pauseSeconds;
 		record.pending.push({ scriptId: activation.scriptId, startTime });
+		this.#runningRecords.add(record);
 		return true;
 	}
 

@@ -1,6 +1,6 @@
 import type {
 	SceneScope,
-	SceneScopeSelection,
+	SceneScopeWindowSelection,
 	SceneTopologyView,
 } from "../scene";
 import { PortalPropagationStreamArena } from "./portal-crossing-triangle-stream";
@@ -23,12 +23,13 @@ import { WebGL2PortalScopeAtlasExecutor } from "./webgl2-portal-scope-atlas-exec
 import {
 	WebGL2PortalScopeAtlasTargets,
 	type WebGL2PortalScopeAtlasTargetDiagnostics,
+	type PortalScopeAtlasTargetExtents,
 	type WebGL2PortalScopeAtlasTargetSet,
 } from "./webgl2-portal-scope-atlas-targets";
 import { WebGL2PortalTileStateApplicator } from "./webgl2-portal-tile-state-applicator";
 
 /** CPU planning state for one camera, valid until the next pipeline frame reset. */
-export interface WebGL2PortalScopeAtlasFrame extends SceneScopeSelection {
+export interface WebGL2PortalScopeAtlasFrame extends SceneScopeWindowSelection {
 	/** View-owned selected visibility and packed tile commands. */
 	readonly atlas: PortalScopeAtlasFrameView;
 	/** View-owned submission diagnostics populated during execution. */
@@ -91,6 +92,22 @@ class MutableWebGL2PortalScopeAtlasFrame implements WebGL2PortalScopeAtlasFrame 
 		return this.atlas.visibility.selectedScope(ordinal);
 	}
 
+	minimumNdcX(ordinal: number): number {
+		return this.atlas.visibility.selectedMinimumNdcX(ordinal);
+	}
+
+	minimumNdcY(ordinal: number): number {
+		return this.atlas.visibility.selectedMinimumNdcY(ordinal);
+	}
+
+	maximumNdcX(ordinal: number): number {
+		return this.atlas.visibility.selectedMaximumNdcX(ordinal);
+	}
+
+	maximumNdcY(ordinal: number): number {
+		return this.atlas.visibility.selectedMaximumNdcY(ordinal);
+	}
+
 	prepare(
 		topology: SceneTopologyView,
 		input: PortalScopeWindowCullInput,
@@ -133,6 +150,9 @@ class MutableWebGL2PortalScopeAtlasFrame implements WebGL2PortalScopeAtlasFrame 
  * All cameras may be prepared first; each must finish rendering before another is activated.
  */
 export class WebGL2PortalScopeAtlasPipeline {
+	/** Stable views avoid reallocating attachments for transient doorway size changes. */
+	static readonly TARGET_IDLE_FRAME_COUNT = 120;
+	static readonly TARGET_DIMENSION_QUANTUM = 256;
 	readonly #executor: WebGL2PortalScopeAtlasExecutor;
 	readonly #gl: WebGL2RenderingContext;
 	readonly #targetOwner: WebGL2PortalScopeAtlasTargets;
@@ -141,6 +161,8 @@ export class WebGL2PortalScopeAtlasPipeline {
 	readonly #views: MutableWebGL2PortalScopeAtlasFrame[] = [];
 	/** Number of successfully prepared views in the current frame. */
 	#viewCount = 0;
+	#directRootFrames = 0;
+	#underusedFrames = 0;
 	/** The one view currently using shared GPU resources. */
 	#active: {
 		readonly clearColor: readonly [number, number, number, number];
@@ -210,6 +232,13 @@ export class WebGL2PortalScopeAtlasPipeline {
 		this.#active = null;
 		const gl = this.#gl;
 		if (frame.atlas.directRootOutput) {
+			this.#underusedFrames = 0;
+			this.#directRootFrames += 1;
+			if (
+				this.#directRootFrames >=
+				WebGL2PortalScopeAtlasPipeline.TARGET_IDLE_FRAME_COUNT
+			)
+				this.#targetOwner.release();
 			this.#active = { clearColor, frame, targets: null };
 			this.#tileState.beginFrame(frame.atlas);
 			gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, directOutputFramebuffer);
@@ -232,7 +261,8 @@ export class WebGL2PortalScopeAtlasPipeline {
 			gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 			return null;
 		}
-		const targets = this.#targetOwner.resize(frame.resource);
+		this.#directRootFrames = 0;
+		const targets = this.#targetOwner.resize(this.#targetExtents(frame));
 		this.#active = { clearColor, frame, targets };
 		this.#tileState.beginFrame(frame.atlas);
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, targets.scene.framebuffer);
@@ -348,6 +378,13 @@ export class WebGL2PortalScopeAtlasPipeline {
 		this.#gl.uniform1ui(uniforms.renderDomain, ordinal);
 	}
 
+	/** Resolve one scoped overlay's domain for its instance record. */
+	deferredRenderDomainOrdinal(renderScopeKey: string): number {
+		return this.#requireFrame().atlas.tileOrdinalForRenderScopeKey(
+			renderScopeKey,
+		);
+	}
+
 	getDiagnostics(): WebGL2PortalScopeAtlasTargetDiagnostics {
 		return this.#targetOwner.getDiagnostics();
 	}
@@ -357,6 +394,56 @@ export class WebGL2PortalScopeAtlasPipeline {
 		this.#targetOwner.destroy();
 		this.beginFrame();
 		this.#views.length = 0;
+	}
+
+	/** Keep the fixed planner capacity while allocating only the packed GPU footprint. */
+	#targetExtents(
+		frame: MutableWebGL2PortalScopeAtlasFrame,
+	): PortalScopeAtlasTargetExtents {
+		const { drawingBuffer, atlas } = frame.resource;
+		const quantum = WebGL2PortalScopeAtlasPipeline.TARGET_DIMENSION_QUANTUM;
+		const demand = {
+			atlas: {
+				width: Math.min(
+					atlas.width,
+					Math.max(
+						drawingBuffer.width,
+						Math.ceil(frame.atlas.packedWidth / quantum) * quantum,
+					),
+				),
+				height: Math.min(
+					atlas.height,
+					Math.max(
+						drawingBuffer.height,
+						Math.ceil(frame.atlas.packedHeight / quantum) * quantum,
+					),
+				),
+			},
+			drawingBuffer,
+		};
+		const current = this.#targetOwner.getActiveExtents();
+		if (
+			current === null ||
+			current.drawingBuffer.width !== drawingBuffer.width ||
+			current.drawingBuffer.height !== drawingBuffer.height ||
+			current.atlas.width < demand.atlas.width ||
+			current.atlas.height < demand.atlas.height
+		) {
+			this.#underusedFrames = 0;
+			return demand;
+		}
+		const currentArea = current.atlas.width * current.atlas.height;
+		const demandArea = demand.atlas.width * demand.atlas.height;
+		this.#underusedFrames =
+			demandArea * 4 <= currentArea * 3 ? this.#underusedFrames + 1 : 0;
+		if (
+			this.#underusedFrames >=
+			WebGL2PortalScopeAtlasPipeline.TARGET_IDLE_FRAME_COUNT
+		) {
+			this.#underusedFrames = 0;
+			return demand;
+		}
+		return current;
 	}
 
 	#bindTile(

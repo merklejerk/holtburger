@@ -16,7 +16,9 @@ const PLATE: NameplateVisual = {
 	content: { strikeThrough: false, indicators: [], level: 42, name: "Drudge" },
 };
 
-function createFixture(options: { readonly width?: number } = {}) {
+function createFixture(
+	options: { readonly width?: number; readonly height?: number } = {},
+) {
 	const createdTextures: WebGLTexture[] = [];
 	const deletedTextures: WebGLTexture[] = [];
 	const texImage2D = vi.fn();
@@ -40,10 +42,11 @@ function createFixture(options: { readonly width?: number } = {}) {
 		deleteTexture: (texture: WebGLTexture) => deletedTextures.push(texture),
 		getParameter: () => 4_096,
 		texImage2D,
+		texSubImage2D: vi.fn(),
 		texParameteri: () => undefined,
 	} as unknown as WebGL2RenderingContext;
 	const rasterize = vi.fn(() => ({
-		height: 32,
+		height: options.height ?? 32,
 		pixels: {} as TexImageSource,
 		width: options.width ?? 128,
 	}));
@@ -234,7 +237,7 @@ describe("WebGL2NameplateTextureCache", () => {
 		expect(fixture.rasterize).toHaveBeenCalledWith(PLATE, APPEARANCE, 1);
 		expect(fixture.texImage2D).toHaveBeenCalledOnce();
 		expect(fixture.cache.diagnostics()).toEqual({
-			byteCount: 128 * 32 * 4,
+			byteCount: 2048 * 2048 * 4,
 			hitCount: 1,
 			liveEntryCount: 1,
 			missCount: 1,
@@ -244,7 +247,7 @@ describe("WebGL2NameplateTextureCache", () => {
 		});
 	});
 
-	it("releases a texture only after its last installed visual value disappears", () => {
+	it("releases the shared atlas when the last installed raster disappears", () => {
 		const fixture = createFixture();
 		fixture.cache.reconcile([PLATE, PLATE], APPEARANCE, 1);
 		fixture.cache.acquire(PLATE);
@@ -259,6 +262,31 @@ describe("WebGL2NameplateTextureCache", () => {
 			liveEntryCount: 0,
 			releaseCount: 1,
 		});
+	});
+
+	it("repositions pinned bindings when a full page is compacted", () => {
+		const fixture = createFixture({ width: 2000, height: 1000 });
+		const second: NameplateVisual = {
+			...PLATE,
+			content: { ...PLATE.content, name: "Second" },
+		};
+		const third: NameplateVisual = {
+			...PLATE,
+			content: { ...PLATE.content, name: "Third" },
+		};
+		fixture.cache.reconcile([PLATE, second, third], APPEARANCE, 1);
+		fixture.cache.beginDraw();
+		fixture.cache.acquire(PLATE);
+		const pinned = fixture.cache.acquire(second);
+		const oldY = pinned.atlasUvRect[1];
+		fixture.cache.beginDraw();
+		fixture.cache.acquire(second);
+		const added = fixture.cache.acquire(third);
+		expect(pinned.atlasUvRect[1]).toBeLessThan(oldY);
+		expect(added.texture).toBe(pinned.texture);
+		expect(fixture.cache.diagnostics().liveEntryCount).toBe(2);
+		expect(fixture.createdTextures).toHaveLength(1);
+		expect(fixture.deletedTextures).toHaveLength(0);
 	});
 
 	it("rerasterizes the active population when raster density changes", () => {
@@ -362,7 +390,7 @@ describe("WebGL2NameplateTextureCache", () => {
 			liveEntryCount: 1,
 			releaseCount: 1,
 		});
-		expect(fixture.deletedTextures).toHaveLength(1);
+		expect(fixture.deletedTextures).toHaveLength(0);
 		fixture.cache.acquire(opened);
 		expect(fixture.rasterize).toHaveBeenCalledTimes(3);
 	});

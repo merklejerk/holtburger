@@ -9,6 +9,7 @@ import { containsPoint, translateBounds } from "../math/geometry-utils";
 import {
 	frustumIntersectsAABB,
 	filterFrustumPlanesForAABB,
+	createPortalWindowFrustum,
 	type Frustum,
 	type FrustumPlane,
 } from "../math/frustum";
@@ -29,6 +30,7 @@ import type {
 	ScenePortalCrossing,
 	SceneScope,
 	SceneScopeSelection,
+	SceneScopeWindowSelection,
 	SceneTopologyScope,
 	SceneTopologyView,
 	PortalCrossingId,
@@ -53,11 +55,29 @@ const EMPTY_PORTAL_CROSSINGS: readonly ScenePortalCrossing[] = Object.freeze(
 	[],
 );
 
+const preparedRootMembershipBrand: unique symbol = Symbol(
+	"prepared-root-membership",
+);
+
+/** Scene-validated residency and scopes reusable at a later path boundary. */
+export interface PreparedSceneRootMembership extends SceneResidency {
+	readonly spatialMembership: SceneSpatialMembership;
+	readonly [preparedRootMembershipBrand]: true;
+}
+
 type ScenePortalAperture = ScenePortalCrossing["sourceAperture"];
+
+/** Scene-owned mutable revision; readers receive its readonly public placement contract. */
+interface MutableResolvedScenePlacement extends ResolvedScenePlacement {
+	transformRevision: number;
+}
 
 type SceneNodeRecord = {
 	/** Scene-owned resolved facts, refreshed before any descendant or query consumes them. */
-	resolved: ResolvedSceneState;
+	resolved: {
+		placement: MutableResolvedScenePlacement;
+		spatialMembership: SceneSpatialMembership;
+	};
 	cullingGroup: string;
 	id: SceneNodeId;
 	localBounds: AABB3 | null;
@@ -83,6 +103,8 @@ interface SpatialEntry {
 	placement: ResolvedScenePlacement;
 	/** Every source-domain scope in which this one node must be selected. */
 	readonly scopes: readonly SceneScope[];
+	/** Registration targets retained so transform-only movement does no scope-key lookup. */
+	readonly groups: CullingGroup[];
 	/** Conservative bounds in the root landblock coordinate frame. */
 	readonly landblockBounds: AABB3;
 }
@@ -119,6 +141,19 @@ export class SceneGraph {
 	readonly #visibleEntries: SceneNodeId[] = [];
 	/** Deduplicates nodes whose plural membership intersects several selected scopes. */
 	readonly #visibleEntryIds = new Set<SceneNodeId>();
+	/** Scope-window selection needs one retained union after each reusable single-scope query. */
+	readonly #scopeWindowEntries: SceneNodeId[] = [];
+	readonly #scopeWindowEntryIds = new Set<SceneNodeId>();
+	readonly #scopeWindowFrustum: Frustum = {
+		cameraPosition: Vec3.zero(),
+		planes: [],
+	};
+	readonly #scopeWindowBounds = {
+		minimumNdcX: -1,
+		minimumNdcY: -1,
+		maximumNdcX: 1,
+		maximumNdcY: 1,
+	};
 	readonly #visibleScene: VisibleScene = {
 		entries: this.#visibleEntries,
 	};
@@ -247,6 +282,11 @@ export class SceneGraph {
 		};
 	}
 
+	/** Borrow local envelope without constructing a bounds/placement pair. */
+	readLocalBounds(nodeId: SceneNodeId): AABB3 | null {
+		return this.#nodes.get(nodeId)?.localBounds ?? null;
+	}
+
 	updateRootPlacement(nodeId: SceneNodeId, placement: ScenePlacement): void {
 		const node = this.#requireNode(nodeId);
 		if (node.parentId !== null) {
@@ -264,18 +304,53 @@ export class SceneGraph {
 		nodeId: SceneNodeId,
 		placement: SceneSpatialPlacement,
 	): void {
+		this.updateRootPreparedSpatialPlacement(
+			nodeId,
+			this.prepareRootSpatialMembership(placement),
+			placement.localTransform,
+		);
+	}
+
+	/** Validate a path point once, before any frame can select its membership. */
+	prepareRootSpatialMembership(
+		placement: SceneSpatialPlacement,
+	): PreparedSceneRootMembership {
+		return Object.freeze({
+			envCellId: placement.envCellId,
+			landblockId: placement.landblockId,
+			spatialMembership: validateSpatialMembership(
+				placement,
+				placement.spatialMembership,
+			),
+			[preparedRootMembershipBrand]: true as const,
+		});
+	}
+
+	/** Apply a prevalidated path point and its current transform atomically. */
+	updateRootPreparedSpatialPlacement(
+		nodeId: SceneNodeId,
+		prepared: PreparedSceneRootMembership,
+		transform: Mat4,
+	): void {
 		const node = this.#requireNode(nodeId);
 		if (node.parentId !== null) {
 			throw new Error(`Scene node ${nodeId} is not a root.`);
 		}
-		node.envCellId = placement.envCellId;
-		node.landblockId = placement.landblockId;
-		node.localTransform.copy(placement.localTransform);
-		node.spatialMembership = validateSpatialMembership(
-			placement,
-			placement.spatialMembership,
-		);
+		node.envCellId = prepared.envCellId;
+		node.landblockId = prepared.landblockId;
+		node.localTransform.copy(transform);
+		node.spatialMembership = prepared.spatialMembership;
 		this.#syncSpatialSubtree(node.id);
+	}
+
+	/** Move a root within its current residency and validated plural membership. */
+	updateRootLocalTransform(nodeId: SceneNodeId, transform: Mat4): void {
+		const node = this.#requireNode(nodeId);
+		if (node.parentId !== null)
+			throw new Error(`Scene node ${nodeId} is not a root.`);
+		if (samePublishedTransform(node.localTransform, transform)) return;
+		node.localTransform.copy(transform);
+		this.#syncTransformSubtree(node.id);
 	}
 
 	/**
@@ -475,6 +550,77 @@ export class SceneGraph {
 		return this.#visibleScene;
 	}
 
+	/** Walk selected scope groups once and record frustum membership for each bounded node. */
+	queryScopesMultiFrustumMasks(
+		frusta: readonly Frustum[],
+		anchorLandblockId: ScenePlacement["landblockId"],
+		scopes: readonly SceneScope[],
+		cullingGroupFilter: SceneCullingGroupFilter,
+		nodeFilter: SceneNodeFilter | null,
+		out: Map<SceneNodeId, number>,
+	): void {
+		if (frusta.length < 1 || frusta.length > 31)
+			throw new Error("Scene multi-frustum query requires 1 to 31 frusta.");
+		out.clear();
+		const anchorCoordinates = getLandblockCoordinates(anchorLandblockId);
+		for (const scope of scopes) {
+			this.#requireResidentScope(scope);
+			const landblockGroups = this.#cullingGroups.get(scopeKey(scope));
+			if (!landblockGroups) continue;
+			for (const [landblockId, groups] of landblockGroups) {
+				const offset = createLandblockOffset(
+					getLandblockCoordinates(landblockId),
+					anchorCoordinates,
+					this.#queryOffset,
+				);
+				for (const [cullingGroup, group] of groups) {
+					if (!cullingGroupFilter(cullingGroup)) continue;
+					const bounds = this.#resolveCullingGroupBounds(group);
+					if (!bounds) continue;
+					let groupMask = 0;
+					for (let index = 0; index < frusta.length; index += 1) {
+						const frustum = frusta[index];
+						if (
+							frustum &&
+							frustumIntersectsAABB(
+								frustum,
+								bounds,
+								offset.x,
+								offset.y,
+								offset.z,
+							)
+						)
+							groupMask |= 1 << index;
+					}
+					if (groupMask === 0) continue;
+					for (const nodeId of group.entries) {
+						if (nodeFilter !== null && !nodeFilter(nodeId)) continue;
+						const entry = this.#spatialEntries.get(nodeId);
+						if (!entry) continue;
+						let mask = out.get(nodeId) ?? 0;
+						for (let index = 0; index < frusta.length; index += 1) {
+							const bit = 1 << index;
+							if ((groupMask & bit) === 0 || (mask & bit) !== 0) continue;
+							const frustum = frusta[index];
+							if (
+								frustum &&
+								frustumIntersectsAABB(
+									frustum,
+									entry.landblockBounds,
+									offset.x,
+									offset.y,
+									offset.z,
+								)
+							)
+								mask |= bit;
+						}
+						if (mask !== 0) out.set(nodeId, mask);
+					}
+				}
+			}
+		}
+	}
+
 	/** Select bounded nodes from an indexed scope view without allocating a scope array. */
 	queryScopeSelectionFrustum(
 		frustum: Frustum,
@@ -492,6 +638,53 @@ export class SceneGraph {
 			this.#selectedScopeKeys.add(scopeKey(scope));
 		}
 		this.#selectEntries(frustum, anchorLandblockId, cullingGroupFilter, null);
+		return this.#visibleScene;
+	}
+
+	/** Query each admitted portal scope through its unioned padded camera window. */
+	queryScopeWindowSelectionFrustum(
+		clipFromAnchor: Mat4,
+		cameraPosition: Vec3,
+		anchorLandblockId: ScenePlacement["landblockId"],
+		scopes: SceneScopeWindowSelection,
+		cullingGroupFilter: SceneCullingGroupFilter,
+	): VisibleScene {
+		if (!Number.isSafeInteger(scopes.count) || scopes.count < 1)
+			throw new Error(
+				"Scene scope window selection must contain at least one scope.",
+			);
+		const selected = this.#scopeWindowEntries;
+		selected.length = 0;
+		this.#scopeWindowEntryIds.clear();
+		for (let ordinal = 0; ordinal < scopes.count; ordinal += 1) {
+			const scope = scopes.scopeAt(ordinal);
+			this.#requireResidentScope(scope);
+			this.#scopeWindowBounds.minimumNdcX = scopes.minimumNdcX(ordinal);
+			this.#scopeWindowBounds.minimumNdcY = scopes.minimumNdcY(ordinal);
+			this.#scopeWindowBounds.maximumNdcX = scopes.maximumNdcX(ordinal);
+			this.#scopeWindowBounds.maximumNdcY = scopes.maximumNdcY(ordinal);
+			createPortalWindowFrustum(
+				clipFromAnchor,
+				cameraPosition,
+				this.#scopeWindowBounds,
+				this.#scopeWindowFrustum,
+			);
+			this.#selectedScopeKeys.clear();
+			this.#selectedScopeKeys.add(scopeKey(scope));
+			this.#selectEntries(
+				this.#scopeWindowFrustum,
+				anchorLandblockId,
+				cullingGroupFilter,
+				null,
+			);
+			for (const nodeId of this.#visibleEntries) {
+				if (this.#scopeWindowEntryIds.has(nodeId)) continue;
+				this.#scopeWindowEntryIds.add(nodeId);
+				selected.push(nodeId);
+			}
+		}
+		this.#visibleEntries.length = 0;
+		for (const nodeId of selected) this.#visibleEntries.push(nodeId);
 		return this.#visibleScene;
 	}
 
@@ -760,6 +953,7 @@ export class SceneGraph {
 					localToLandblock: previous.placement.localToLandblock.copy(
 						node.localTransform,
 					),
+					transformRevision: previous.placement.transformRevision + 1,
 				},
 				spatialMembership: node.spatialMembership,
 			};
@@ -773,12 +967,35 @@ export class SceneGraph {
 						node.localTransform,
 						previous.placement.localToLandblock,
 					),
+					transformRevision: previous.placement.transformRevision + 1,
 				},
 				spatialMembership: parent.spatialMembership,
 			};
 		}
 		this.#syncSpatialEntry(node);
 		for (const childId of node.children) this.#syncSpatialSubtree(childId);
+	}
+
+	/** Residency and membership are unchanged; reuse every resolved wrapper and registration. */
+	#syncTransformSubtree(nodeId: SceneNodeId): void {
+		const node = this.#requireNode(nodeId);
+		const resolved = node.resolved.placement.localToLandblock;
+		node.resolved.placement.transformRevision += 1;
+		if (node.parentId === null) resolved.copy(node.localTransform);
+		else
+			multiplyMat4(
+				this.#requireNode(node.parentId).resolved.placement.localToLandblock,
+				node.localTransform,
+				resolved,
+			);
+		const entry = this.#spatialEntries.get(nodeId);
+		if (entry !== undefined) {
+			if (node.localBounds === null)
+				throw new Error(`Spatial entry ${nodeId} has no local bounds.`);
+			transformAABB3(resolved, node.localBounds, entry.landblockBounds);
+			for (const group of entry.groups) group.dirty = true;
+		}
+		for (const childId of node.children) this.#syncTransformSubtree(childId);
 	}
 
 	#syncSpatialEntry(node: SceneNodeRecord): void {
@@ -811,15 +1028,7 @@ export class SceneGraph {
 				node.localBounds,
 				existingEntry.landblockBounds,
 			);
-			for (const scope of existingEntry.scopes) {
-				const group = this.#cullingGroups
-					.get(scopeKey(scope))
-					?.get(placement.landblockId)
-					?.get(node.cullingGroup);
-				if (!group)
-					throw new Error(`Scene node ${node.id} lost its culling group.`);
-				group.dirty = true;
-			}
+			for (const group of existingEntry.groups) group.dirty = true;
 			return;
 		}
 		this.#removeSpatialEntry(node.id);
@@ -833,6 +1042,7 @@ export class SceneGraph {
 			nodeId: node.id,
 			placement,
 			scopes,
+			groups: [],
 		};
 		this.#spatialEntries.set(node.id, entry);
 		this.#addSpatialEntry(entry);
@@ -883,6 +1093,7 @@ export class SceneGraph {
 			);
 		group.entries.add(entry.nodeId);
 		group.dirty = true;
+		entry.groups.push(group);
 	}
 
 	#resolveCullingGroupBounds(group: CullingGroup): AABB3 | null {
@@ -986,6 +1197,7 @@ function createSceneNodeRecord(
 					landblockId: input.landblockId,
 					scope: scopeFor(input.landblockId, input.envCellId),
 					localToLandblock: input.localTransform.clone(),
+					transformRevision: 0,
 				},
 				spatialMembership,
 			},
@@ -1002,6 +1214,7 @@ function createSceneNodeRecord(
 					parent.placement.localToLandblock,
 					input.localTransform,
 				),
+				transformRevision: 0,
 			},
 			spatialMembership: parent.spatialMembership,
 		},

@@ -625,7 +625,7 @@ class WebGL2PreviewVisual {
 		for (const range of this.#appearance.plan.ranges) {
 			minimumMaterialOpacity = Math.min(
 				minimumMaterialOpacity,
-				range.batch.material.color[3],
+				range.material.color[3],
 			);
 			if (range.source.ordering === "transparent") {
 				transparentRangeCount += 1;
@@ -731,7 +731,7 @@ class WebGL2PreviewVisual {
 		);
 		state.applyUniform1i(this.#program.uniforms.firstPoseRow, pose.firstRow);
 		state.applyVertexArray(this.#geometry.vertexArray);
-		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.#appearance.indexBuffer);
+		state.applyElementArrayBuffer(this.#appearance.indexBuffer);
 
 		this.#opaqueRanges.beginFrame();
 		for (const span of this.#opaqueRanges.prepare(
@@ -813,15 +813,10 @@ class WebGL2PreviewVisual {
 
 	#drawSpan(range: PreviewDynamicRange, indexCount: number): void {
 		this.#state.applyCullFace(range.batch.cullFace);
-		const material = range.batch.material;
-		if (material.kind !== "solid-color") {
-			this.#state.applyTextureUnit(OBJECT_TEXTURE_UNITS.base, material.base);
-			if (material.kind !== "direct-color")
-				this.#state.applyTextureUnit(
-					OBJECT_TEXTURE_UNITS.palette,
-					material.palette,
-				);
-		}
+		const { base, palette } = range.batch.textures;
+		if (base) this.#state.applyTextureUnit(OBJECT_TEXTURE_UNITS.base, base);
+		if (palette)
+			this.#state.applyTextureUnit(OBJECT_TEXTURE_UNITS.palette, palette);
 		this.#gl.drawElements(
 			this.#gl.TRIANGLES,
 			indexCount,

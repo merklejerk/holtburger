@@ -111,6 +111,19 @@ export class WebGL2PortalScopeAtlasTargets {
 		return this.#targets;
 	}
 
+	/** Borrow the active extent for the pipeline's resize hysteresis decision. */
+	getActiveExtents(): PortalScopeAtlasTargetExtents | null {
+		return this.#targets?.extents ?? null;
+	}
+
+	/** Drop idle atlas and frontier attachments without retiring the reusable target owner. */
+	release(): void {
+		this.#assertAlive();
+		if (!this.#targets) return;
+		this.#disposeTargetSet(this.#targets);
+		this.#targets = null;
+	}
+
 	/** Copy cold lifecycle diagnostics without retaining them in frame state. */
 	getDiagnostics(): WebGL2PortalScopeAtlasTargetDiagnostics {
 		const extents = this.#targets?.extents ?? null;
@@ -127,10 +140,8 @@ export class WebGL2PortalScopeAtlasTargets {
 	/** Release the active generation once; context restoration is owned by whole-device restart. */
 	destroy(): void {
 		if (this.#destroyed) return;
+		this.release();
 		this.#destroyed = true;
-		if (!this.#targets) return;
-		this.#disposeTargetSet(this.#targets);
-		this.#targets = null;
 	}
 
 	#disposeTargetSet(targets: WebGL2PortalScopeAtlasTargetSet): void {

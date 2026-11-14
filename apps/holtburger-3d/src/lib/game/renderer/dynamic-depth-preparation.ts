@@ -3,14 +3,20 @@ import type {
 	ActiveDynamicPart,
 	VisibleDynamicPresentation,
 } from "../systems/components";
-import type { PreparedDynamicAppearance } from "./webgl2-dynamic-appearances";
+import {
+	selectOpaqueDynamicAppearanceVariant,
+	type PreparedDynamicAppearance,
+} from "./webgl2-dynamic-appearances";
 import { retainsRetailGeometry } from "./retail-geometry-visibility";
-import { retainsDynamicShadowRange } from "./object-rendering-policy";
+import {
+	retainsDynamicShadowRange,
+	summarizeDynamicRangeAdmission,
+} from "./object-rendering-policy";
 
 /** Compact inputs shared by material-free mask and mapped-shadow preparation. */
 export type DynamicDepthPresentation = Pick<
 	VisibleDynamicPresentation,
-	"landblockId" | "renderScopes"
+	"allPartsOpaque" | "landblockId" | "renderScopes"
 > & {
 	/** Installed geometry identity, appearance, and dense current poses; no legacy draw units. */
 	readonly visual: {
@@ -57,6 +63,58 @@ export interface PreparedDynamicDepth {
 	/** Exact distinct part and triangle counts, resolved once during preparation. */
 	readonly selectedPartCount: number;
 	readonly selectedTriangleCount: number;
+}
+
+/** Immutable depth spans and accounting for a fully opaque appearance. */
+export interface CompiledOpaqueDynamicDepth {
+	readonly ranges: readonly Readonly<DynamicDepthRange>[];
+	readonly selectedPartCount: number;
+	readonly selectedTriangleCount: number;
+}
+
+/** Preselect shadow or selection spans without requiring a frame-current part scan. */
+export function compileOpaqueDynamicDepth(
+	plan: Extract<PreparedDynamicAppearance, { kind: "drawable" }>["plan"],
+	showRetailHiddenGeometry: boolean,
+	opaqueOnly: boolean,
+): CompiledOpaqueDynamicDepth {
+	const ranges: DynamicDepthRange[] = [];
+	const selectedParts = new Set<number>();
+	let selectedTriangleCount = 0;
+	for (const range of plan.physicalRanges) {
+		const retained = opaqueOnly
+			? retainsDynamicShadowRange(
+					range.source.ordering,
+					1,
+					range.source.retailVisibility,
+					showRetailHiddenGeometry,
+				)
+			: retainsRetailGeometry(
+					range.source.retailVisibility,
+					showRetailHiddenGeometry,
+				);
+		if (!retained) continue;
+		const last = ranges.at(-1);
+		if (
+			last &&
+			last.cullFace === range.batch.cullFace &&
+			last.indexStart + last.indexCount === range.indexStart
+		)
+			last.indexCount += range.source.indexCount;
+		else
+			ranges.push({
+				cullFace: range.batch.cullFace,
+				indexStart: range.indexStart,
+				indexCount: range.source.indexCount,
+			});
+		selectedParts.add(range.source.partSelector);
+		selectedTriangleCount += range.source.indexCount / 3;
+	}
+	return {
+		ranges,
+		selectedPartCount: selectedParts.size,
+		selectedTriangleCount,
+	};
 }
 
 /** High-water scalar span storage contains no scene or GPU-resource references. */
@@ -112,6 +170,33 @@ export class DynamicDepthPreparations {
 		this.#selectedParts.clear();
 	}
 
+	/** Check analytic eligibility without building depth spans or uploading pose rows. */
+	hasOutdoorDynamicShadowGeometry(
+		nodeId: SceneNodeId,
+		showRetailHiddenGeometry: boolean,
+	): boolean {
+		const visible = this.#getPresentation(nodeId);
+		if (
+			visible === null ||
+			!visible.renderScopes.some((scope) => scope.kind === "outdoor")
+		)
+			return false;
+		const appearance = this.#getAppearance(visible.visual.appearance);
+		const opaqueVariant = selectOpaqueDynamicAppearanceVariant(
+			appearance,
+			visible.visual.parts.length,
+			visible.allPartsOpaque,
+			showRetailHiddenGeometry,
+		);
+		return opaqueVariant
+			? opaqueVariant.admission.hasMaterialFreeShadowGeometry
+			: summarizeDynamicRangeAdmission(
+					appearance.rangeGroupsByPart,
+					visible.visual.parts,
+					showRetailHiddenGeometry,
+				).hasMaterialFreeShadowGeometry;
+	}
+
 	/** Prepare opaque spans only for material-free shadow depth and shadow caster tiers. */
 	prepare(
 		nodeId: SceneNodeId,
@@ -145,6 +230,29 @@ export class DynamicDepthPreparations {
 		if (visible === null) return null;
 		const appearance = this.#getAppearance(visible.visual.appearance);
 		if (appearance.kind === "empty") return null;
+		const opaqueVariant = selectOpaqueDynamicAppearanceVariant(
+			appearance,
+			visible.visual.parts.length,
+			visible.allPartsOpaque,
+			showRetailHiddenGeometry,
+		);
+		if (opaqueVariant) {
+			const depth = opaqueOnly
+				? opaqueVariant.shadowDepth
+				: opaqueVariant.selectionDepth;
+			if (depth.ranges.length === 0) return null;
+			return {
+				nodeId,
+				landblockId: visible.landblockId,
+				renderScopes: visible.renderScopes,
+				geometry: visible.visual.layout.key,
+				appearance,
+				parts: visible.visual.parts,
+				ranges: depth.ranges,
+				selectedPartCount: depth.selectedPartCount,
+				selectedTriangleCount: depth.selectedTriangleCount,
+			};
+		}
 		let storage = this.#storage[this.#usedStorage];
 		if (storage === undefined) {
 			storage = { ranges: [], pool: [] };

@@ -18,13 +18,18 @@ export type OutdoorPssmCasterWorld = Pick<
 	RenderWorld,
 	| "getEntityShadowDynamicFacts"
 	| "readRenderContribution"
-	| "queryOutdoorShadowCasters"
+	| "queryOutdoorShadowCasterMasks"
 > & {
 	/** Frame-cached material-free geometry; querying does not upload poses or draw. */
 	getDynamicDepth(
 		nodeId: SceneNodeId,
 		showRetailHiddenGeometry: boolean,
 	): PreparedDynamicDepth | null;
+	/** Material-free outdoor eligibility without preparing geometry for analytic roots. */
+	hasOutdoorDynamicShadowGeometry(
+		nodeId: SceneNodeId,
+		showRetailHiddenGeometry: boolean,
+	): boolean;
 };
 
 /** Whole-root depth geometry shared across the cascades that selected it. */
@@ -46,7 +51,7 @@ interface OutdoorShadowCasterCandidate extends EntityShadowCasterShape {
 	distanceSquared: number;
 }
 
-/** Reusable frame scratch for consuming reused cascade-query storage into owned membership. */
+/** Reusable frame scratch for one multi-cascade scene query and ranked candidates. */
 interface OutdoorPssmCasterSelectionScratch {
 	/** Bit `n` means the root was selected by cascade array index `n`. */
 	readonly rootCascadeMasks: Map<SceneNodeId, number>;
@@ -68,7 +73,7 @@ export function createOutdoorPssmCasterSelectionScratch(): OutdoorPssmCasterSele
 }
 
 /**
- * Consume one light-frustum query before SceneGraph reuses its entry storage.
+ * Consume one multi-frustum scene query before expanding any depth geometry.
  *
  * The query admits caster classes before individual bounds tests; outdoor-domain checks precede
  * depth preparation. A root enters the shared animation-liveness set only after at least one
@@ -103,25 +108,11 @@ export function planOutdoorShadowCastersForView(
 	const rootCascadeMasks = scratch.rootCascadeMasks;
 	rootCascadeMasks.clear();
 
-	for (
-		let cascadeIndex = 0;
-		cascadeIndex < cascadeFrusta.length;
-		cascadeIndex += 1
-	) {
-		const frustum = cascadeFrusta[cascadeIndex];
-		if (frustum === undefined) {
-			throw new Error(`Outdoor PSSM cascade ${cascadeIndex} has no frustum.`);
-		}
-		const visible = world.queryOutdoorShadowCasters(frustum, anchorLandblockId);
-		const cascadeBit = 1 << cascadeIndex;
-		// SceneGraph reuses `entries`, so consume every root before issuing the next query.
-		for (const nodeId of visible.entries) {
-			rootCascadeMasks.set(
-				nodeId,
-				(rootCascadeMasks.get(nodeId) ?? 0) | cascadeBit,
-			);
-		}
-	}
+	world.queryOutdoorShadowCasterMasks(
+		cascadeFrusta,
+		anchorLandblockId,
+		rootCascadeMasks,
+	);
 	const candidates = scratch.candidates;
 	const anchorOrigin = createLandblockWorldOrigin(anchorLandblockId);
 	let candidateCount = 0;
@@ -174,7 +165,19 @@ export function planOutdoorShadowCastersForView(
 			continue;
 		candidate.identity = facts.identity;
 		candidate.nodeId = nodeId;
-		candidate.cascadeMask = cascadeMask;
+		let rigidCascadeMask = 0;
+		for (let index = 0; index < cascadeFrusta.length; index += 1) {
+			const bit = 1 << index;
+			const frustum = cascadeFrusta[index];
+			if (
+				(cascadeMask & bit) !== 0 &&
+				frustum &&
+				frustumIntersectsAABB(frustum, candidate.bounds, 0, 0, 0)
+			)
+				rigidCascadeMask |= bit;
+		}
+		if (rigidCascadeMask === 0) continue;
+		candidate.cascadeMask = rigidCascadeMask;
 		candidate.radius = radius;
 		candidate.height = height;
 		candidate.contactAnchor.x =
@@ -229,13 +232,15 @@ export function planOutdoorShadowCastersForView(
 	) {
 		const candidate = candidates[analyticIndex];
 		if (candidate === undefined) break;
-		const depth = world.getDynamicDepth(
-			candidate.nodeId,
-			showRetailHiddenGeometry,
-		);
-		if (depth === null || !depth.renderScopes.some(isOutdoorScope)) continue;
+		if (
+			!world.hasOutdoorDynamicShadowGeometry(
+				candidate.nodeId,
+				showRetailHiddenGeometry,
+			)
+		)
+			continue;
 		analyticCasters.push(candidate);
-		selectedDynamicNodeIds.add(candidate.nodeId);
+		if (candidate.cameraVisible) selectedDynamicNodeIds.add(candidate.nodeId);
 	}
 }
 

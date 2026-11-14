@@ -919,6 +919,30 @@ export class PortalScopeAtlasPlanner {
 		count: number,
 		resource: PortalScopeAtlasResource,
 	): boolean {
+		// A full-screen root already owns one drawing-buffer-wide row. Start there;
+		// widen only when child shelves cannot fit the fixed vertical capacity.
+		const preferredWidth = Math.min(
+			resource.drawingBuffer.width,
+			resource.atlas.width,
+		);
+		if (this.#tryPackTiles(sortedOrdinals, count, resource, preferredWidth))
+			return true;
+		if (preferredWidth === resource.atlas.width) return false;
+		this.#frame.trace.packingAttemptCount += 1;
+		return this.#tryPackTiles(
+			sortedOrdinals,
+			count,
+			resource,
+			resource.atlas.width,
+		);
+	}
+
+	#tryPackTiles(
+		sortedOrdinals: Uint32Array,
+		count: number,
+		resource: PortalScopeAtlasResource,
+		shelfWidth: number,
+	): boolean {
 		let cursorX = 0;
 		let cursorY = 0;
 		let shelfHeight = 0;
@@ -929,10 +953,10 @@ export class PortalScopeAtlasPlanner {
 			const width = this.#arena.width[ordinal]!;
 			const height = this.#arena.height[ordinal]!;
 			this.#frame.trace.tilePlacementAttemptCount += 1;
-			if (width > resource.atlas.width || height > resource.atlas.height) {
+			if (width > shelfWidth || height > resource.atlas.height) {
 				return false;
 			}
-			if (cursorX > 0 && cursorX + width > resource.atlas.width) {
+			if (cursorX > 0 && cursorX + width > shelfWidth) {
 				cursorX = 0;
 				cursorY += shelfHeight;
 				shelfHeight = 0;

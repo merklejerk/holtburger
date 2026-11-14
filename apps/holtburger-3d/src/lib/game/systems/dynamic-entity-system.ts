@@ -24,6 +24,8 @@ import { multiplyMat4, transformAffineAABB3 } from "../math/matrices";
 import type { LandblockOwnerId } from "../game-types";
 import type { SceneChildTransform, SceneGraph, SceneNodeId } from "../scene";
 import type { SceneSpatialPlacement } from "../scene";
+import { sceneNodeIdOf } from "../scene/utils";
+import type { BehaviorTargetId } from "../behavior/behavior-event-router";
 import {
 	type ParentLocation,
 	type ResolvedAttachPoint,
@@ -103,6 +105,13 @@ interface DynamicEntityRecord {
 	/** Optional fractional health bar value in `[0, 1]`; updating it never re-rasterizes the texture. */
 	nameplateHealthFraction: number | null;
 	renderable: DynamicEntityRenderable;
+	/** Current effect opacity across all installed parts. */
+	allPartsOpaque: boolean;
+	/** Local part transform changes, independent of root/ancestor placement and materials. */
+	localPartsRevision: number;
+	/** Revisions last composed into retained part source-to-landblock matrices. */
+	composedTransformRevision: number;
+	composedLocalPartsRevision: number;
 	/** Sparse attachment nodes and owned rigid matrices published with the visual root atomically. */
 	attachmentFrames: DynamicAttachmentFrame[];
 	articulatedPose: ArticulatedPose;
@@ -291,12 +300,15 @@ export class DynamicEntitySystem<
 	readonly #effects: EffectSystem;
 	readonly #soundTables: SoundTableRepository;
 	readonly #particleEnvelopeRadiusOf: (nodeId: SceneNodeId) => number;
+	readonly #takeDirtyParticleEnvelopeOwners: () => ReadonlySet<BehaviorTargetId>;
 	readonly #templateOwnerId: (
 		ownerId: TOwnerId,
 		generation: number,
 	) => TTemplateOwnerId;
 	readonly #owners = new Map<TOwnerId, DynamicOwnerRecord<TTemplateOwnerId>>();
 	readonly #entities = new Map<SceneNodeId, DynamicEntityRecord>();
+	/** Published residents that currently contribute authored runtime lights. */
+	readonly #litEntities = new Set<DynamicEntityRecord>();
 	/** Scratch used only by synchronous bounds derivation, never returned to consumers. */
 	readonly #boundsScratch = {
 		transform: Mat4.identity(),
@@ -311,7 +323,7 @@ export class DynamicEntitySystem<
 		StagedObjectVisualTemplateOwner<TTemplateOwnerId>
 	>();
 	#destroyed = false;
-	/** Entities visited by the last complete presentation sweep. */
+	/** Residents visited by the last sparse presentation publication. */
 	#lastPresentationEntityVisitCount = 0;
 	#lastPublishedPresentationCount = 0;
 	/** Publications for residents with behavior but no playback, which animation cannot cover. */
@@ -344,6 +356,8 @@ export class DynamicEntitySystem<
 		 * the authored hook offsets that displace it — belong to the particle system, not here.
 		 */
 		particleEnvelopeRadiusOf: (nodeId: SceneNodeId) => number,
+		/** Owners whose emitter lifetime changed since the previous publication. */
+		takeDirtyParticleEnvelopeOwners: () => ReadonlySet<BehaviorTargetId>,
 	) {
 		this.#scene = scene;
 		this.#placements = placements;
@@ -355,6 +369,7 @@ export class DynamicEntitySystem<
 		this.#soundTables = soundTables;
 		this.#templateOwnerId = templateOwnerId;
 		this.#particleEnvelopeRadiusOf = particleEnvelopeRadiusOf;
+		this.#takeDirtyParticleEnvelopeOwners = takeDirtyParticleEnvelopeOwners;
 	}
 
 	/** Replace one producer's complete dynamic population as a single owner generation. */
@@ -534,6 +549,7 @@ export class DynamicEntitySystem<
 		});
 		const rigidPresentationBounds = staticPresentationBounds(source);
 		const record: DynamicEntityRecord = {
+			allPartsOpaque: true,
 			setupBounds: rigidPresentationBounds.clone(),
 			playback: resident.playback,
 			animationHandles: new Map(),
@@ -545,6 +561,9 @@ export class DynamicEntitySystem<
 			soundTableHandle: null,
 			articulatedPose: pose,
 			renderable: { kind: "preparing", parts },
+			localPartsRevision: 0,
+			composedTransformRevision: -1,
+			composedLocalPartsRevision: -1,
 			attachmentFrames: [],
 			rootNodeId,
 			rootScale,
@@ -728,6 +747,8 @@ export class DynamicEntitySystem<
 				entity.articulatedPose = replacementPose;
 				entity.setupBounds = setupBounds;
 				entity.renderable = renderable;
+				entity.allPartsOpaque = true;
+				entity.localPartsRevision += 1;
 				entity.motionPlayback = visual.motionPlayback;
 				entity.preparedAnimation = visual.animation;
 				entity.cullingBounds = visual.animation.localBounds
@@ -945,6 +966,7 @@ export class DynamicEntitySystem<
 		}
 		this.#publishAttachmentFrames(child, child.visualRootTransform, pose);
 		child.articulatedPose = pose;
+		child.localPartsRevision += 1;
 		const placedBounds = this.#presentationBoundsForSample(
 			child.renderable.parts,
 			child.visualRootTransform,
@@ -1038,16 +1060,22 @@ export class DynamicEntitySystem<
 				`Dynamic visual root ${entity.visualRootNodeId} no longer exists.`,
 			);
 		const { placement, spatialMembership: membership } = resolved;
-		for (const part of entity.renderable.parts) {
-			multiplyMat4(
-				placement.localToLandblock,
-				part.localToVisualRoot,
-				part.frameInstance.sourceToLandblock,
-			);
-			// Hidden parts still occupy their dense layout selector; the shader clips zero opacity.
-			part.frameInstance.color.a = 1 - part.renderState.translucency;
+		if (
+			entity.composedTransformRevision !== placement.transformRevision ||
+			entity.composedLocalPartsRevision !== entity.localPartsRevision
+		) {
+			for (const part of entity.renderable.parts) {
+				multiplyMat4(
+					placement.localToLandblock,
+					part.localToVisualRoot,
+					part.frameInstance.sourceToLandblock,
+				);
+			}
+			entity.composedTransformRevision = placement.transformRevision;
+			entity.composedLocalPartsRevision = entity.localPartsRevision;
 		}
 		return {
+			allPartsOpaque: entity.allPartsOpaque,
 			visual: entity.renderable,
 			identity: entity.source.identity,
 			landblockId: placement.landblockId,
@@ -1268,6 +1296,7 @@ export class DynamicEntitySystem<
 				part.localToVisualRoot,
 			);
 		}
+		entity.localPartsRevision += 1;
 		this.#publishAttachmentFrames(
 			entity,
 			entity.visualRootTransform,
@@ -1318,13 +1347,13 @@ export class DynamicEntitySystem<
 		}
 		this.#effects.setCloaked(nodeId, state.cloaked);
 		entity.presentationState = state;
+		this.#syncLitEntity(entity);
 	}
 
 	/** Resolve every enabled setup light from its current object frame into canonical scene space. */
 	getRuntimeLights(): readonly RuntimeLight[] {
 		const lights: RuntimeLight[] = [];
-		for (const entity of this.#entities.values()) {
-			if (!entity.presentationState.lighting) continue;
+		for (const entity of this.#litEntities) {
 			const placement = this.#scene.getResolvedPlacement(entity.rootNodeId);
 			if (!placement)
 				throw new Error(
@@ -1401,8 +1430,16 @@ export class DynamicEntitySystem<
 	/** Publish sparse current samples to entity-owned state before the frame is selected. */
 	publishPresentation(samples: readonly DynamicPresentationSample[]): void {
 		const publishedNodeIds = new Set<SceneNodeId>();
+		const candidateNodeIds = new Set<SceneNodeId>(
+			this.#effects.presentationNodeIds(),
+		);
+		for (const targetId of this.#takeDirtyParticleEnvelopeOwners()) {
+			const nodeId = sceneNodeIdOf(targetId);
+			if (nodeId !== null) candidateNodeIds.add(nodeId);
+		}
 		let particleEnvelopeChangeCount = 0;
 		let particleEnvelopeQueryCount = 0;
+		let visitedEntityCount = 0;
 		const publications = samples.map((sample) => {
 			if (publishedNodeIds.has(sample.nodeId))
 				throw new Error(
@@ -1412,6 +1449,7 @@ export class DynamicEntitySystem<
 			const entity = this.#entities.get(sample.nodeId);
 			if (!entity)
 				throw new Error(`Dynamic entity ${sample.nodeId} does not exist.`);
+			visitedEntityCount += 1;
 			return { entity, sample };
 		});
 		for (const { entity, sample } of publications) {
@@ -1422,7 +1460,15 @@ export class DynamicEntitySystem<
 			this.#applySample(entity, sample);
 		}
 		let effectOnlyCount = 0;
-		for (const [nodeId, entity] of this.#entities) {
+		for (const nodeId of candidateNodeIds) {
+			if (publishedNodeIds.has(nodeId)) continue;
+			const entity = this.#entities.get(nodeId);
+			if (!entity) continue;
+			visitedEntityCount += 1;
+			const effectNeedsPresentation = this.#effects.needsPresentation(nodeId);
+			particleEnvelopeQueryCount += 1;
+			if (this.#refreshParticleEnvelope(entity))
+				particleEnvelopeChangeCount += 1;
 			// An entity animation covers is either in this frame's samples or was deliberately
 			// skipped by the presentation cadence; publishing it here would override that choice.
 			if (
@@ -1430,28 +1476,18 @@ export class DynamicEntitySystem<
 				entity.playback.kind === "resolved"
 			)
 				continue;
-			if (publishedNodeIds.has(nodeId)) continue;
-			// An idle resident resolves to the same presentation every frame; republishing it is
-			// the per-frame streaming this split was meant to remove, not add. Its particle
-			// envelope is not idle, though: emitters start and stop independently of effect state,
-			// and skipping on effects alone left the envelope out of the bounds entirely, so a
-			// swarm vanished the moment its owner's mesh left the frustum.
-			particleEnvelopeQueryCount += 1;
-			const envelopeChanged = this.#refreshParticleEnvelope(entity);
-			if (envelopeChanged) particleEnvelopeChangeCount += 1;
-			if (!this.#effects.needsPresentation(nodeId) && !envelopeChanged) {
-				continue;
-			}
+			if (!effectNeedsPresentation) continue;
 			// A script-only resident holds the pose it was installed with. Its effect state still
 			// ramps, rotates, and fades, and before this had no path to the scene at all.
 			this.#applySample(entity, {
 				articulatedPose: entity.articulatedPose,
 				effects: this.#effects.samplePresentation(nodeId),
 				nodeId,
+				localPoseChanged: false,
 			});
 			effectOnlyCount += 1;
 		}
-		this.#lastPresentationEntityVisitCount = this.#entities.size;
+		this.#lastPresentationEntityVisitCount = visitedEntityCount;
 		this.#lastPublishedPresentationCount = samples.length + effectOnlyCount;
 		this.#lastEffectOnlyPresentationCount = effectOnlyCount;
 		this.#lastParticleEnvelopeChangeCount = particleEnvelopeChangeCount;
@@ -1474,6 +1510,11 @@ export class DynamicEntitySystem<
 		if (radius === entity.appliedEnvelopeRadius) return false;
 		entity.appliedEnvelopeRadius = radius;
 		this.#publishCullingBounds(entity);
+		expandBounds(
+			entity.rigidPresentationBounds,
+			radius,
+			entity.publishedPresentationBounds,
+		);
 		return true;
 	}
 
@@ -1771,6 +1812,7 @@ export class DynamicEntitySystem<
 				entity.soundTableHandle = result.soundTableHandle;
 				entity.preparedAnimation = result.animation;
 				entity.renderable = result.renderable;
+				entity.allPartsOpaque = true;
 				entity.selectionGeometryMorphology = result.selectionGeometryMorphology;
 			}
 		} catch (cause) {
@@ -1845,6 +1887,7 @@ export class DynamicEntitySystem<
 		const previous = this.#owners.get(ownerId);
 		for (const entity of entities)
 			this.#entities.set(entity.rootNodeId, entity);
+		for (const entity of entities) this.#syncLitEntity(entity);
 		if (
 			entities.some((entity) => entity.nameplateContent !== null) ||
 			previous?.entities.some((entity) => entity.nameplateContent !== null)
@@ -1852,9 +1895,20 @@ export class DynamicEntitySystem<
 			this.#nameplatePopulationRevision += 1;
 		this.#owners.set(ownerId, { entities, generation, templateOwnerId });
 		if (previous !== undefined)
-			for (const entity of previous.entities)
+			for (const entity of previous.entities) {
+				this.#litEntities.delete(entity);
 				this.#entities.delete(entity.rootNodeId);
+			}
 		return previous;
+	}
+
+	#syncLitEntity(entity: DynamicEntityRecord): void {
+		if (
+			entity.presentationState.lighting &&
+			entity.source.presentation.lights.length > 0
+		)
+			this.#litEntities.add(entity);
+		else this.#litEntities.delete(entity);
 	}
 
 	#applySample(
@@ -1868,6 +1922,7 @@ export class DynamicEntitySystem<
 				`Dynamic entity ${entity.rootNodeId} effect sample has ${sample.effects.partRenderStates.length} parts, expected ${entity.renderable.parts.length}.`,
 			);
 		}
+		let allPartsOpaque = true;
 		for (const part of entity.renderable.parts) {
 			const transform =
 				sample.articulatedPose.partToObjectTransforms[part.partIndex];
@@ -1879,22 +1934,31 @@ export class DynamicEntitySystem<
 				);
 		}
 		for (const part of entity.renderable.parts) {
-			const transform =
-				sample.articulatedPose.partToObjectTransforms[part.partIndex];
 			const sampledRenderState =
 				sample.effects.partRenderStates[part.partIndex];
-			if (!transform || !sampledRenderState) {
+			if (!sampledRenderState) {
 				throw new Error("Validated dynamic sample became incomplete.");
 			}
 			// Effect ownership admits material writes, including cloak behavior, before publication.
 			part.renderState = sampledRenderState;
-			composeObjectPartTransform(
-				transform,
-				entity.rootScale,
-				part.defaultScale,
-				part.localToVisualRoot,
-			);
+			// Hidden parts retain their dense selector; the shader clips zero opacity.
+			part.frameInstance.color.a = 1 - sampledRenderState.translucency;
+			allPartsOpaque &&= part.frameInstance.color.a === 1;
+			if (sample.localPoseChanged) {
+				const transform =
+					sample.articulatedPose.partToObjectTransforms[part.partIndex];
+				if (!transform)
+					throw new Error("Validated dynamic pose became incomplete.");
+				composeObjectPartTransform(
+					transform,
+					entity.rootScale,
+					part.defaultScale,
+					part.localToVisualRoot,
+				);
+			}
 		}
+		entity.allPartsOpaque = allPartsOpaque;
+		if (sample.localPoseChanged) entity.localPartsRevision += 1;
 		// Two independent sources can turn the visual root: continuous effect omega and an
 		// authored root frame. They compose rather than compete, with the authored frame innermost
 		// because it is part of the pose the clip describes.
@@ -2020,6 +2084,7 @@ export class DynamicEntitySystem<
 		if (owner.entities.some((entity) => entity.nameplateContent !== null))
 			this.#nameplatePopulationRevision++;
 		this.#owners.delete(ownerId);
+		for (const entity of owner.entities) this.#litEntities.delete(entity);
 		for (const entity of owner.entities)
 			this.#entities.delete(entity.rootNodeId);
 		this.#releaseStagedOwner(owner.entities, owner.templateOwnerId);

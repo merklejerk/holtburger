@@ -83,9 +83,9 @@ boundaries. The main layers are:
 | [`3D`](apps/holtburger-3d) and [`CLI`](apps/holtburger-cli) | Frontend presentation, input, and interaction policy |
 
 The 3D app also includes an offline Explorer for inspecting environments, assets,
-and simulation behavior. [Command-line tools](apps/holtburger-tools) and the
-[debug harness](crates/holtburger-debug-harness) support asset conversion, protocol
-investigation, and focused diagnostics.
+and simulation behavior. [Command-line tools](apps/holtburger-tools) support asset
+conversion; the [debug harness](crates/holtburger-debug-harness) is reserved for
+temporary, focused diagnostics.
 
 For terminal scripting, see the [scripting guide](https://merklejerk.github.io/holtburger/tui/scripting/)
 and the bundled [example combat bots](apps/holtburger-cli/scripts).

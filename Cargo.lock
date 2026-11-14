@@ -1716,25 +1716,6 @@ dependencies = [
 [[package]]
 name = "holtburger-debug-harness"
 version = "0.8.4"
-dependencies = [
- "anyhow",
- "clap",
- "env_logger",
- "hex",
- "holtburger-common",
- "holtburger-content",
- "holtburger-core",
- "holtburger-dat",
- "holtburger-protocol",
- "holtburger-weenie-catalog",
- "holtburger-world",
- "log",
- "rmp-serde",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
-]
 
 [[package]]
 name = "holtburger-protocol"

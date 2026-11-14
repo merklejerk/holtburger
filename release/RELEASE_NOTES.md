@@ -2,10 +2,8 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, inspection:** Inspected items now appear as interactive item cells that you can select or use for combining, and they show counts, uses and cooldowns like inventory cells.
-- **3D client, inspection:** Item inspection lists the highest cantrip tiers first.
-- **3D client, inventory:** Inventory contents are ordered by item type, so related gear and supplies sit together.
-- **3D client, performance panel:** A new Renderer CPU section breaks frame time into phases, which makes CPU-bound slowdowns easier to trace.
+- **3D client, performance:** Crowded scenes should cost less CPU time, because steady-state collision and world-state updates for nearby characters and creatures are cheaper.
+- **3D client, performance panel:** The native timing table now breaks physics tick time into phases, which makes crowd-related slowdowns easier to trace.
 
 ## Known issues
 
@@ -16,7 +14,7 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 - The visual quality and performance of the reduced-cost selection outline have not been verified on Intel Iris Xe or other native hardware.
 - Healing animation blending while moving, and autorun during healing, have not been visually verified in live play.
 - The combat health bars, cantrip borders and indoor map floor ordering have not been visually verified on native hardware.
-- The performance panel and GPU timing have not been verified on native Windows or macOS.
+- The performance panel and GPU timing have not been verified on native Windows or macOS. The crowd performance improvement has not been measured on native hardware.
 - The startup fix has not been verified by launching rebuilt platform release bundles.
 - CLI movement is simplified: jumping, falling, gravity, and stairs are not simulated locally. The server may correct your position or reject actions.
 

@@ -2,8 +2,10 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, performance:** Rendering of terrain and portal views, such as building interiors and doorways, is cheaper on the GPU, which should improve frame rates.
-- **3D client, performance panel:** The panel breaks out portal and presentation work and reports portal workload figures, which makes slowdowns easier to trace.
+- **3D client, inspection:** Inspected items now appear as interactive item cells that you can select or use for combining, and they show counts, uses and cooldowns like inventory cells.
+- **3D client, inspection:** Item inspection lists the highest cantrip tiers first.
+- **3D client, inventory:** Inventory contents are ordered by item type, so related gear and supplies sit together.
+- **3D client, performance panel:** A new Renderer CPU section breaks frame time into phases, which makes CPU-bound slowdowns easier to trace.
 
 ## Known issues
 

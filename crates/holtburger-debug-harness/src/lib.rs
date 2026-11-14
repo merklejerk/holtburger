@@ -1,4 +1,4 @@
-//! Temporary, headless experiments for protocol and client behavior.
+//! Maintained, headless diagnostics for protocol and client behavior.
 //!
-//! Add a focused binary under `src/bin/` for an active investigation, then remove
-//! it when its findings have been recorded in durable source or documentation.
+//! Keep one-off experiments in the ignored `local/probes/` package. Commit a
+//! diagnostic here only when it has an ongoing use and will be maintained.

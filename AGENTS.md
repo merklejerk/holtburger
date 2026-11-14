@@ -1,7 +1,12 @@
 The ultimate goal of this project is to develop a third-party client for Asheron's Call.
 - Reverse engineer the Asheron's Call protocol and file formats, recording established behavior in source types, codec comments, and focused tests. Do not guess; establish behavior from available evidence and preserve uncertainty where evidence is incomplete.
-- DO NOT RUN THE TUI CLIENT for diagnostics/testing. It is interactive so will just hang. That's for me to use. You can just write your own bespoke client in the [harness](crates/holtburger-debug-harness/) if you need live data.
+- DO NOT RUN THE TUI CLIENT for diagnostics/testing. It is interactive so will just hang. That's for me to use. Use a headless client in the ignored `local/probes/` scratch package for live data; see the [harness guide](crates/holtburger-debug-harness/ARCHITECTURE.md) for setup.
 - Temporary planning docs can go into the [local plan folder](local/plans/). Plan docs are working notes, not durable project artifacts. Non-active plans do not need to be maintained or retroactively updated when the code changes unless explicitly requested; stale plans may be removed during routine cleanup.
+
+## Diagnostic lifecycle
+
+- Keep one-off probes and content censuses in ignored `local/probes/`, outside the Cargo workspace. Do not commit their binaries to `src/bin/` in a workspace crate: full workspace CI discovers and compiles them.
+- When an investigation ends, record established behavior in source types, codec comments, focused tests, or documentation, then delete the scratch probe. Commit a diagnostic tool only if it has an ongoing, named use and will be maintained as part of the workspace.
 
 ## Architectural Direction
 

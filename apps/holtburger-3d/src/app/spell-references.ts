@@ -3,14 +3,14 @@ import type { HostTransport } from "../lib/host/host-transport";
 
 /** Bound static lookup work independently from image preparation. */
 export const MAX_SPELL_REFERENCE_BATCH = 128;
-/** Stable display order for item cantrip summaries. */
+/** Highest-to-lowest display order for item cantrip summaries, with unranked tiers last. */
 export const CANTRIP_TIERS = [
-	"feeble",
-	"minor",
-	"moderate",
-	"major",
-	"epic",
 	"legendary",
+	"epic",
+	"major",
+	"moderate",
+	"minor",
+	"feeble",
 	"other",
 ] as const;
 const cantripTierSchema = z.enum(CANTRIP_TIERS);

@@ -41,7 +41,7 @@ describe("item cantrip summary", () => {
 			),
 		).toEqual({ kind: "hidden" });
 	});
-	it("uses the compact label vocabulary for every tier", () => {
+	it("displays compact labels highest tier first, with unranked tiers last", () => {
 		const tiers: readonly CantripTier[] = [
 			"feeble",
 			"minor",
@@ -57,7 +57,7 @@ describe("item cantrip summary", () => {
 			false,
 		);
 		expect(summary.kind === "ready" ? summary.pills : []).toMatchObject(
-			["Feeb.", "Min.", "Mod.", "Maj.", "Epic", "Leg.", "Other"].map(
+			["Leg.", "Epic", "Maj.", "Mod.", "Min.", "Feeb.", "Other"].map(
 				(abbreviatedLabel) => ({ abbreviatedLabel }),
 			),
 		);
@@ -85,16 +85,16 @@ describe("item cantrip summary", () => {
 			kind: "ready",
 			pills: [
 				{
-					tier: "minor",
-					label: "Minor",
-					abbreviatedLabel: "Min.",
-					count: 1,
-				},
-				{
 					tier: "legendary",
 					label: "Legendary",
 					abbreviatedLabel: "Leg.",
 					count: 2,
+				},
+				{
+					tier: "minor",
+					label: "Minor",
+					abbreviatedLabel: "Min.",
+					count: 1,
 				},
 			],
 			incompleteCount: 0,

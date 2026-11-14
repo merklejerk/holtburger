@@ -37,7 +37,7 @@ pub use self_movement::{
     SelfMovementKinematicsError,
 };
 pub use trade::{TradeSide, TradeState};
-pub use types::{ServerTimeSync, WorldState};
+pub use types::{ServerTimeSync, WorldObservationChanges, WorldObservationCursor, WorldState};
 
 use super::WorldEvent;
 use super::vendor::{CoreVendorItem, VendorState};

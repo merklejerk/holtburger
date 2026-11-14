@@ -14,6 +14,7 @@ pub mod context;
 pub mod crafting;
 pub mod currency;
 pub mod damage;
+pub mod dirty_log;
 pub mod enchantments;
 pub mod entity;
 pub mod entity_appearance;
@@ -47,7 +48,7 @@ pub mod stats;
 pub mod summon;
 pub mod vendor;
 
-pub use self::state::WorldState;
+pub use self::state::{WorldObservationChanges, WorldObservationCursor, WorldState};
 pub use attachment::{AttachmentError, EntityPlacement, EntityPlacementIntent, PhysicsAttachment};
 pub use bootstrap::WorldBootstrap;
 pub use entity_appearance::{

@@ -326,6 +326,7 @@ impl ClientRuntimeBuilder {
             spell_inspection: super::spell_inspection::SpellInspectionState::default(),
             exit_outcome: None,
             client_view_event_tx,
+            coalesced_dynamic_entity_upserts: None,
             dynamic_entity_time_origin: Instant::now(),
             published_character_motion_capabilities:
                 PublishedCharacterMotionCapabilities::Unpublished,
@@ -404,6 +405,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         spell_inspection: super::spell_inspection::SpellInspectionState::default(),
         exit_outcome: None,
         client_view_event_tx,
+        coalesced_dynamic_entity_upserts: None,
         dynamic_entity_time_origin: Instant::now(),
         published_character_motion_capabilities: PublishedCharacterMotionCapabilities::Unpublished,
         command_rx: None,
@@ -667,7 +669,7 @@ mod tests {
         assert!(client.world.soul_emote_catalog.is_known_token("wave"));
         let walk = client
             .world
-            .motion_sequences
+            .motion_sequences()
             .table(TEST_MOTION_TABLE_ID)
             .expect("motion contract should carry the bundled table")
             .cycle(TEST_STYLE, MotionTable::WALK_FORWARD_COMMAND)

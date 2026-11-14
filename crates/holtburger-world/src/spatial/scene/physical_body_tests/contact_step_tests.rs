@@ -597,12 +597,7 @@ fn contact_advance_keeps_projectile_speed_and_sweeps_small_mobile_targets() {
                 .missile = true;
             physical.response_policy.restitution = PhysicalRestitution::Inelastic;
             physical.response_policy.align_path = true;
-            let bodies = scene
-                .body_store
-                .bodies
-                .values()
-                .cloned()
-                .collect::<Vec<_>>();
+            let bodies = scene.body_store.iter_bodies().cloned().collect::<Vec<_>>();
             let duration = crate::spatial::MOBILE_CONTACT_TICK_SECONDS;
             let updates = crate::spatial::advance_body_contacts(
                 &collision,
@@ -705,12 +700,7 @@ fn contact_advance_keeps_pinned_mobile_body_out_of_hard_geometry() {
     let target_speed = 2.0;
     let mut sampled = 0;
     for _ in 0..steps {
-        let bodies = scene
-            .body_store
-            .bodies
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
+        let bodies = scene.body_store.iter_bodies().cloned().collect::<Vec<_>>();
         let updates = crate::spatial::advance_body_contacts(
             &collision,
             &bodies,
@@ -822,12 +812,7 @@ fn contact_advance_slides_ordinary_velocity_along_a_hard_entity() {
         .unwrap()
         .demand
         .integration = LocalIntegrationDemand::Excluded;
-    let bodies = scene
-        .body_store
-        .bodies
-        .values()
-        .cloned()
-        .collect::<Vec<_>>();
+    let bodies = scene.body_store.iter_bodies().cloned().collect::<Vec<_>>();
     let updates = crate::spatial::advance_body_contacts(
         &collision,
         &bodies,
@@ -1056,12 +1041,7 @@ fn contact_relaxation_yields_on_floor_and_respects_hard_entities_over_multiple_s
         // Observe two seconds of recovery, independent of the configured tick duration.
         let recovery_ticks = (2.0 / crate::spatial::MOBILE_CONTACT_TICK_SECONDS).ceil() as usize;
         for _ in 0..recovery_ticks {
-            let bodies = scene
-                .body_store
-                .bodies
-                .values()
-                .cloned()
-                .collect::<Vec<_>>();
+            let bodies = scene.body_store.iter_bodies().cloned().collect::<Vec<_>>();
             let updates = crate::spatial::advance_body_contacts(
                 &collision,
                 &bodies,
@@ -1152,12 +1132,7 @@ fn contact_relaxation_bounds_total_travel_across_many_contacts() {
             )
             .unwrap();
     }
-    let bodies = scene
-        .body_store
-        .bodies
-        .values()
-        .cloned()
-        .collect::<Vec<_>>();
+    let bodies = scene.body_store.iter_bodies().cloned().collect::<Vec<_>>();
     let updates = crate::spatial::advance_body_contacts(
         &collision,
         &bodies,
@@ -1217,12 +1192,7 @@ fn contact_relaxation_preserves_other_progress_when_one_correction_lacks_coverag
             )
             .unwrap();
     }
-    let bodies = scene
-        .body_store
-        .bodies
-        .values()
-        .cloned()
-        .collect::<Vec<_>>();
+    let bodies = scene.body_store.iter_bodies().cloned().collect::<Vec<_>>();
     let updates = crate::spatial::advance_body_contacts(
         &collision,
         &bodies,
@@ -1866,12 +1836,7 @@ fn bsp_stairs_allow_forward_progress_with_a_mobile_body_on_the_steps() {
             2.0
         };
         for _ in 0..(seconds / MOBILE_CONTACT_TICK_SECONDS).round() as usize {
-            let bodies = scene
-                .body_store
-                .bodies
-                .values()
-                .cloned()
-                .collect::<Vec<_>>();
+            let bodies = scene.body_store.iter_bodies().cloned().collect::<Vec<_>>();
             let updates = advance_body_contacts(
                 &collision,
                 &bodies,
@@ -1898,7 +1863,7 @@ fn bsp_stairs_allow_forward_progress_with_a_mobile_body_on_the_steps() {
                 }
             }
             publish_contact_updates(&mut scene, updates);
-            for body in scene.body_store.bodies.values() {
+            for body in scene.body_store.iter_bodies() {
                 assert!(body.pose.coords.z >= floor_z - CONTACT_EPSILON);
             }
         }
@@ -2624,12 +2589,7 @@ fn offset_rotation_preserves_root_and_checks_hard_obstacles_during_full_turns() 
                     .demand
                     .integration = LocalIntegrationDemand::Excluded;
             }
-            let bodies = scene
-                .body_store
-                .bodies
-                .values()
-                .cloned()
-                .collect::<Vec<_>>();
+            let bodies = scene.body_store.iter_bodies().cloned().collect::<Vec<_>>();
             let updates = advance_body_contacts(
                 &collision,
                 &bodies,
@@ -3201,12 +3161,7 @@ fn contact_collection_reports_crossed_ethereal_trigger_without_blocking() {
         let travel = 0.6;
         let velocity = Vector3::new(travel / MOBILE_CONTACT_TICK_SECONDS, 0.0, 0.0);
         scene.body_mut(mover).unwrap().retained.velocity = velocity;
-        let bodies = scene
-            .body_store
-            .bodies
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
+        let bodies = scene.body_store.iter_bodies().cloned().collect::<Vec<_>>();
         let result = crate::spatial::advance_body_contact_collection(
             &collision,
             &bodies,
@@ -7916,4 +7871,75 @@ fn ledge_protected_character_slides_flared_walls_without_losing_support() {
             "yaw={yaw} travel={travel}"
         );
     }
+}
+
+#[test]
+fn coaxial_angular_rotation_with_offset_upper_sphere_preserves_grounded_support() {
+    let now = Instant::now();
+    let collision = flat_collision_scene();
+    let player = SpatialBodyId::LocalPlayer(Guid(1));
+    let spheres = PhysicalSphereSet::new(
+        Sphere {
+            center: Vector3::new(0.0, 0.0, 0.3),
+            radius: 0.3,
+        },
+        Some(Sphere {
+            center: Vector3::new(0.4, 0.0, 1.0),
+            radius: 0.3,
+        }),
+    )
+    .unwrap();
+    let definition = PhysicalBodyDefinition::grounded(spheres, GROUNDED_CONFIG).unwrap();
+    let mut scene = SpatialScene::new();
+    scene.register_body(SpatialBody::new(
+        player,
+        pose(Vector3::new(90.0, 96.0, 0.0)),
+        now,
+    ));
+    scene
+        .set_dynamic_physical_body(
+            player,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+
+    // Establish resting ground support on sphere 0.
+    let settle = advance_body_contacts(
+        &collision,
+        &[scene.body(player).unwrap().clone()],
+        Guid(0xda55_ffff),
+        MOBILE_CONTACT_TICK_SECONDS,
+        |_, _| ContactStepActuation::ballistic(Vector3::zero()),
+    )
+    .unwrap();
+    let mut grounded_body = scene.body(player).unwrap().clone();
+    settle[0].apply_physical_state(&mut grounded_body).unwrap();
+    assert!(matches!(
+        settle[0].ground,
+        GroundState::Supported(support)
+            if matches!(support.source, crate::spatial::SupportSource::World(_))
+    ));
+
+    // Rotating about +Z keeps sphere 0 fixed on the rotation axis while swinging the upper
+    // sphere; grounded support must remain intact without clearing to Airborne.
+    grounded_body.retained.omega = Vector3::new(0.0, 0.0, 12.0);
+    let rotated = advance_body_contacts(
+        &collision,
+        &[grounded_body],
+        Guid(0xda55_ffff),
+        MOBILE_CONTACT_TICK_SECONDS,
+        |_, _| ContactStepActuation::ballistic(Vector3::zero()),
+    )
+    .unwrap();
+    let update = &rotated[0];
+    assert!(matches!(
+        update.ground,
+        GroundState::Supported(support)
+            if matches!(support.source, crate::spatial::SupportSource::World(_))
+    ));
+    assert_eq!(update.displacement, Vector3::zero());
+    assert_ne!(update.rotation, Quaternion::identity());
+    assert!(!update.motion.is_empty());
 }

@@ -73,13 +73,15 @@ pub(crate) struct EntityDependencies {
     pending: VecDeque<DeferredEntityEntry>,
     /// Last reconciled incarnation/placement, used only to emit placement transitions once.
     reconciled: HashMap<Guid, (u16, ResolvedScenePlacement)>,
+    /// Last local-player identity reconciled across the full entity set.
+    pub(super) last_reconciled_player_guid: Guid,
 }
 
-/// Message commits can restrict discovery; periodic maintenance rechecks all retained bodies.
+/// Scope selected for scene-placement reconciliation during world maintenance.
 pub(super) enum ScenePlacementScope {
-    /// Includes out-of-band body readiness and ordinary world maintenance.
+    /// Full sweep used when the local-player identity changes.
     All,
-    /// Includes entity/lifecycle mutations and every current attachment descendant.
+    /// Incremental sweep over mutated entities, lifecycle invalidations, and attached descendants.
     ChangedEntities(BTreeSet<Guid>),
 }
 

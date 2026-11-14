@@ -1,6 +1,6 @@
 //! Tick-local resistance to walking into mobile characters, independent of overlap recovery.
 
-use super::{Envelope, MOBILE_PUSH_THROUGH_SPEED, WorkingBody, envelope_pairs, limited};
+use super::{Envelope, MOBILE_PUSH_THROUGH_SPEED, WorkingBody, envelope_pairs_into, limited};
 use holtburger_common::{Sphere, Vector3};
 
 /// One horizontal half-plane containing zero: existing penetration never requests a retreat.
@@ -15,7 +15,12 @@ struct MovementLimit {
 /// Reduces prepared supported character velocity before its single ordinary hard-navigation pass.
 /// Neighbor intentions remain immutable here; hard-blocked neighbors can leave residual overlap
 /// for the existing bounded separation pass, rather than triggering a crowd convergence solve.
-pub(super) fn admit_character_movement(bodies: &mut [WorkingBody<'_>], seconds: f32) {
+pub(super) fn admit_character_movement(
+    bodies: &mut [WorkingBody<'_>],
+    seconds: f32,
+    envelopes: &mut Vec<Envelope>,
+    pairs: &mut Vec<(usize, usize)>,
+) {
     let participants = bodies
         .iter()
         .enumerate()
@@ -35,15 +40,24 @@ pub(super) fn admit_character_movement(bodies: &mut [WorkingBody<'_>], seconds: 
             Some((index, travel, support.normal))
         })
         .collect::<Vec<_>>();
-    let envelopes = participants
-        .iter()
-        .enumerate()
-        .map(|(index, (body_index, travel, _))| {
-            Envelope::new(index, bodies[*body_index].mobile.spheres, *travel, 0.0)
-        })
-        .collect();
+    if participants.len() <= 1 {
+        return;
+    }
+    envelopes.clear();
+    envelopes.extend(
+        participants
+            .iter()
+            .enumerate()
+            .map(|(index, (body_index, travel, _))| {
+                Envelope::new(index, bodies[*body_index].mobile.spheres, *travel, 0.0)
+            }),
+    );
+    envelope_pairs_into(envelopes, pairs);
+    if pairs.is_empty() {
+        return;
+    }
     let mut constraints = vec![Vec::new(); participants.len()];
-    for (first, second) in envelope_pairs(envelopes) {
+    for &(first, second) in pairs.iter() {
         let (first_index, first_travel, _) = participants[first];
         let (second_index, second_travel, _) = participants[second];
         let first_body = &bodies[first_index];

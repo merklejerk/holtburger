@@ -34,7 +34,6 @@ use holtburger_protocol::messages::object::types::{
 };
 use holtburger_protocol::traits::ProtocolUnpack;
 use std::collections::{BTreeSet, HashMap};
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EntityMotionSnapshot {
@@ -1875,20 +1874,20 @@ impl Entity {
     }
 }
 
-/// An observed entity-journal boundary; consuming the journal invalidates earlier observations.
-///
-/// The shared identity also distinguishes different stores and keeps replaced boundaries alive
-/// while readers hold them. It carries no entity data and is not a per-entity revision cache.
-#[derive(Clone)]
-pub struct EntityMutationBoundary(Arc<()>);
-
-/// Pending changes and the boundary needed to interpret their absence as evidence.
+/// Pending entity mutations for placement reconciliation and multi-reader observation diffs.
 #[derive(Default)]
 struct EntityMutationJournal {
     /// Conservative identities changed since the last reconciliation selection.
     pending: BTreeSet<Guid>,
-    /// Detaches on journal consumption only while an earlier reader still holds this identity.
-    boundary: Arc<()>,
+    /// Multi-reader bounded change log incremented on every entity store or delete-request mutation.
+    log: crate::dirty_log::DirtyGuidLog,
+}
+
+impl EntityMutationJournal {
+    fn record(&mut self, guid: Guid) {
+        self.pending.insert(guid);
+        self.log.record(guid, false);
+    }
 }
 
 pub struct EntityManager {
@@ -1930,8 +1929,6 @@ impl EntityManager {
     /// Carry mutation identities into world reconciliation, including non-network world APIs.
     /// Mutable access that changes no fields can produce harmless extra work.
     pub(crate) fn take_mutations(&mut self) -> BTreeSet<Guid> {
-        // A held observation keeps the old identity alive; detach before erasing its evidence.
-        Arc::make_mut(&mut self.mutations.boundary);
         std::mem::take(&mut self.mutations.pending)
     }
 
@@ -1942,25 +1939,25 @@ impl EntityManager {
 
     /// Full periodic reconciliation already includes every retained identity and stale baseline.
     pub(crate) fn clear_mutations(&mut self) {
-        Arc::make_mut(&mut self.mutations.boundary);
         self.mutations.pending.clear();
     }
 
-    /// Observe the journal before deriving entity metadata that may be reused in one operation.
-    pub fn mutation_boundary(&self) -> EntityMutationBoundary {
-        EntityMutationBoundary(Arc::clone(&self.mutations.boundary))
+    /// Opaque cursor incremented on every insert, mutable borrow, removal, or lifecycle mutation.
+    pub fn mutation_cursor(&self) -> crate::dirty_log::DirtyGuidCursor {
+        self.mutations.log.cursor()
     }
 
-    /// Proves no mutable access/lifecycle invalidation for this identity across an intact journal.
-    /// A consumed journal or a boundary from another store conservatively returns false.
-    pub fn unchanged_since(&self, guid: Guid, boundary: &EntityMutationBoundary) -> bool {
-        Arc::ptr_eq(&self.mutations.boundary, &boundary.0)
-            && !self.mutations.pending.contains(&guid)
+    /// Returns incremental entity mutation entries recorded after `cursor`.
+    pub fn mutation_log_since(
+        &self,
+        cursor: crate::dirty_log::DirtyGuidCursor,
+    ) -> crate::dirty_log::GuidChanges {
+        self.mutations.log.changes_since(cursor)
     }
 
     /// Lifecycle metadata can change visibility without mutating the retained description.
     pub(crate) fn record_mutation(&mut self, guid: Guid) {
-        self.mutations.pending.insert(guid);
+        self.mutations.record(guid);
     }
 
     pub fn contains(&self, guid: impl Into<Guid>) -> bool {
@@ -1982,7 +1979,7 @@ impl EntityManager {
     pub fn get_mut(&mut self, guid: impl Into<Guid>) -> Option<&mut Entity> {
         let guid = guid.into();
         let entity = self.entities.get_mut(&guid)?;
-        self.mutations.pending.insert(guid);
+        self.mutations.record(guid);
         Some(entity)
     }
 
@@ -2010,11 +2007,11 @@ impl EntityManager {
 #[cfg(test)]
 mod entity_manager_tests {
     use super::*;
+    use crate::dirty_log::{DirtyGuidEntry, GuidChanges};
 
     #[test]
-    fn metadata_observation_requires_untouched_identity_and_unconsumed_journal() {
+    fn mutation_log_persists_across_reconciliation_consumption_and_detects_store_reset() {
         let changed = Guid(1);
-        let untouched = Guid(2);
         let mut entities = EntityManager::new();
         entities.insert(Entity::new(
             changed,
@@ -2022,24 +2019,34 @@ mod entity_manager_tests {
             WorldPosition::default(),
         ));
         entities.clear_mutations();
-        let boundary = entities.mutation_boundary();
-        assert!(entities.unchanged_since(changed, &boundary));
+        let cursor = entities.mutation_cursor();
+        assert_eq!(entities.mutation_log_since(cursor), GuidChanges::UpToDate);
+
         entities
             .get_mut(changed)
             .unwrap()
             .set_string_prop(PropertyString::Name, "Changed".into());
-        assert!(!entities.unchanged_since(changed, &boundary));
-        assert!(entities.unchanged_since(untouched, &boundary));
 
         let pending = entities.take_mutations();
         assert_eq!(pending, BTreeSet::from([changed]));
-        assert!(!entities.unchanged_since(changed, &boundary));
-        assert!(!entities.unchanged_since(untouched, &boundary));
-        let after_take = entities.mutation_boundary();
-        assert!(entities.unchanged_since(changed, &after_take));
+        assert_eq!(
+            entities.mutation_log_since(cursor),
+            GuidChanges::Delta(vec![DirtyGuidEntry {
+                guid: changed,
+                pose_may_have_changed: false,
+            }])
+        );
+
+        let after_take = entities.mutation_cursor();
         entities.clear_mutations();
-        assert!(!entities.unchanged_since(changed, &after_take));
-        assert!(!EntityManager::new().unchanged_since(changed, &entities.mutation_boundary()));
+        assert_eq!(
+            entities.mutation_log_since(after_take),
+            GuidChanges::UpToDate
+        );
+        assert_eq!(
+            EntityManager::new().mutation_log_since(after_take),
+            GuidChanges::FullResync
+        );
     }
 }
 

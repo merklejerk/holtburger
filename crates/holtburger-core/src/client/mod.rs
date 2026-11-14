@@ -7,7 +7,7 @@ use holtburger_protocol::errors::WeenieError;
 use holtburger_session::Session;
 use holtburger_world::player::PlayerCharacterOptions;
 use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 
@@ -283,6 +283,8 @@ pub struct ClientRuntime {
     /// Terminal cause selected by the authority before it publishes `Exiting`.
     exit_outcome: Option<ClientExitOutcome>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
+    /// Entity GUIDs queued for a single coalesced upsert while an active batch runs.
+    coalesced_dynamic_entity_upserts: Option<BTreeSet<Guid>>,
     /// Monotonic origin shared by focused dynamic-entity snapshots and deltas.
     dynamic_entity_time_origin: Instant,
     /// Last character-motion capability level projected on the current event baseline.
@@ -2129,11 +2131,12 @@ mod tests {
 
                 // The next tick starts after admission. Its unchanged clip cannot rescue a
                 // missed packet publication; only completion produces another changed level.
-                let before = client.capture_dynamic_entity_tick_baseline();
+                let before_views = client.current_dynamic_entity_views();
+                let before = client.capture_dynamic_entity_tick_cursor();
                 client
                     .world
                     .advance_authored_motion(Duration::from_millis(10));
-                assert_eq!(before.views, client.current_dynamic_entity_views());
+                assert_eq!(before_views, client.current_dynamic_entity_views());
                 client.world.advance_authored_motion(Duration::from_secs(1));
                 let batch = client
                     .dynamic_entity_tick_batch(
@@ -2175,7 +2178,7 @@ mod tests {
                 .await
                 .is_empty()
         );
-        let before = client.capture_dynamic_entity_tick_baseline();
+        let before = client.capture_dynamic_entity_tick_cursor();
         client.world.advance_authored_motion(Duration::from_secs(1));
         let batch = client
             .dynamic_entity_tick_batch(
@@ -4147,9 +4150,10 @@ mod tests {
                 },
             ))));
         client.world.advance_authored_motion(Duration::ZERO);
-        let before = client.capture_dynamic_entity_tick_baseline();
+        let before_views = client.current_dynamic_entity_views();
+        let before = client.capture_dynamic_entity_tick_cursor();
         assert_eq!(
-            before.views[0]
+            before_views[0]
                 .motion
                 .as_ref()
                 .and_then(|motion| motion.ordinary.as_ref())
@@ -4174,7 +4178,7 @@ mod tests {
             ))));
         client.world.advance_authored_motion(Duration::ZERO);
         let after = client.current_dynamic_entity_views();
-        assert_eq!(before.views[0].placement, after[0].placement);
+        assert_eq!(before_views[0].placement, after[0].placement);
 
         let batch = client
             .dynamic_entity_tick_batch(
@@ -5600,7 +5604,7 @@ mod tests {
                 Some(pose.landblock_id),
             )
             .unwrap();
-        let before = client.capture_dynamic_entity_tick_baseline();
+        let before = client.capture_dynamic_entity_tick_cursor();
         let before_membership = client
             .world
             .scene
@@ -5783,7 +5787,7 @@ mod tests {
                     .await
                     .unwrap();
                 // Match live ordering: movement commands precede the dynamic publication baseline.
-                let before = client.capture_dynamic_entity_tick_baseline();
+                let before = client.capture_dynamic_entity_tick_cursor();
                 let tick = simulation::tick(
                     now,
                     dt,
@@ -5941,8 +5945,7 @@ mod tests {
             flat_collision_scene_for_interest(&interest),
         );
         client.world.tick(None);
-        let metadata_boundary = client.world.entities.mutation_boundary();
-        let before = client.capture_dynamic_entity_tick_baseline();
+        let before = client.capture_dynamic_entity_tick_cursor();
         let dt = Duration::from_millis(PHYSICS_TICK_MS);
         let tick = simulation::tick(
             Instant::now(),
@@ -5952,13 +5955,9 @@ mod tests {
             Some(&collision),
         )
         .unwrap();
-        assert!(
-            client
-                .world
-                .entities
-                .unchanged_since(guid, &metadata_boundary)
-        );
-        let simulation::ClientBodyMotion::Physical(accepted) = &tick.body_motions[&guid] else {
+        let simulation::ClientBodyMotion::Physical { path: accepted, .. } =
+            &tick.body_motions[&guid]
+        else {
             panic!("expected a physical route")
         };
         assert!(

@@ -193,17 +193,16 @@ impl MotionRuntimeRegistry {
         rotation: Quaternion,
         order: MotionOrder,
     ) -> bool {
-        let Some(runtime) = self.bodies.get_mut(&guid) else {
-            return false;
-        };
-        let remote = runtime
-            .remote_motion
-            .get_or_insert_with(|| RemoteMotionState::new(rotation));
-        remote.directive = Some(RemoteDirective {
-            directive,
-            progress: RemoteDirectiveProgress::Terminal(order),
-        });
-        true
+        self.mutate_body(guid, |runtime| {
+            let remote = runtime
+                .remote_motion
+                .get_or_insert_with(|| RemoteMotionState::new(rotation));
+            remote.directive = Some(RemoteDirective {
+                directive,
+                progress: RemoteDirectiveProgress::Terminal(order),
+            });
+        })
+        .is_some()
     }
 
     /// Applies one accepted packet in order, before any later packet or positive-duration tick.
@@ -215,42 +214,40 @@ impl MotionRuntimeRegistry {
         actions: impl IntoIterator<Item = EntityMotionAction>,
         sticky_target: Option<Guid>,
     ) {
-        let runtime = self
-            .bodies
-            .entry(guid)
-            .or_insert_with(|| BodyMotionRuntime::new(table));
-        runtime.bind_table(table);
-        runtime.local_command_owned = false;
         let actions: Vec<_> = actions.into_iter().collect();
-        let incoming_gesture_actions = !actions.is_empty()
-            && actions
-                .iter()
-                .all(|action| action.command.is_movement_override_action());
-        let order = runtime.remote_order(table, guid, input, incoming_gesture_actions);
-        let previous_resolution = runtime.ordinary_resolution;
-        runtime.accept_order(table, order);
-        for action in actions {
-            if runtime.enqueue_action(action) == super::MotionActionEnqueueOutcome::Overflow {
-                log::warn!(
-                    "body 0x{guid:08X} rejected action 0x{:08X}: retail six-action queue is full",
-                    action.command.raw()
-                );
+        self.upsert_body(table, guid, |runtime| {
+            runtime.bind_table(table);
+            runtime.local_command_owned = false;
+            let incoming_gesture_actions = !actions.is_empty()
+                && actions
+                    .iter()
+                    .all(|action| action.command.is_movement_override_action());
+            let order = runtime.remote_order(table, guid, input, incoming_gesture_actions);
+            let previous_resolution = runtime.ordinary_resolution;
+            runtime.accept_order(table, order);
+            for action in actions {
+                if runtime.enqueue_action(action) == super::MotionActionEnqueueOutcome::Overflow {
+                    log::warn!(
+                        "body 0x{guid:08X} rejected action 0x{:08X}: retail six-action queue is full",
+                        action.command.raw()
+                    );
+                }
             }
-        }
-        // Packet admission updates ordinary playback without taking ownership of displacement.
-        // The local controller decides whether this is a gesture or an actual source takeover;
-        // retaining manual playback here preserves its cursor across windup/release packets.
-        runtime.advance_authored(table, order, 0.0);
-        runtime.report_selection(
-            table,
-            guid,
-            previous_resolution,
-            runtime.ordinary_resolution,
-        );
-        // Retail move_to_interpreted_state applies motion before re-establishing packet sticky.
-        runtime
-            .sticky
-            .admit(sticky_target, std::time::Instant::now());
+            // Packet admission updates ordinary playback without taking ownership of displacement.
+            // The local controller decides whether this is a gesture or an actual source takeover;
+            // retaining manual playback here preserves its cursor across windup/release packets.
+            runtime.advance_authored(table, order, 0.0);
+            runtime.report_selection(
+                table,
+                guid,
+                previous_resolution,
+                runtime.ordinary_resolution,
+            );
+            // Retail move_to_interpreted_state applies motion before re-establishing packet sticky.
+            runtime
+                .sticky
+                .admit(sticky_target, std::time::Instant::now());
+        });
     }
 
     /// Interpret and advance remote intent through the same playback owner as local commands.
@@ -261,25 +258,26 @@ impl MotionRuntimeRegistry {
         input: RemoteMotionInput,
         quantum: f32,
     ) -> &SequenceTick {
-        let runtime = self
+        self.upsert_body(table, guid, |runtime| {
+            runtime.bind_table(table);
+            if runtime.local_command_owned {
+                runtime.advance_local_command(table, quantum);
+            } else {
+                let order = runtime.remote_order(table, guid, input, false);
+                runtime.drive_for_guid(table, guid, order, quantum);
+            }
+        });
+        &self
             .bodies
-            .entry(guid)
-            .or_insert_with(|| BodyMotionRuntime::new(table));
-        runtime.bind_table(table);
-        if runtime.local_command_owned {
-            return runtime.advance_local_command(table, quantum);
-        }
-        let order = runtime.remote_order(table, guid, input, false);
-        runtime.drive_for_guid(table, guid, order, quantum)
+            .get(&guid)
+            .expect("upserted remote runtime disappeared")
+            .tick
     }
 
     /// Authority updates source heading once when the event is admitted, independently of the
     /// physical body's pending correction. A rejected physical transaction cannot replay it here.
     pub(crate) fn apply_remote_pose_effect(&mut self, guid: Guid, effect: AuthoritativePoseEffect) {
-        let Some(runtime) = self.bodies.get_mut(&guid) else {
-            return;
-        };
-        match effect {
+        self.mutate_body(guid, |runtime| match effect {
             AuthoritativePoseEffect::Initialize { .. } | AuthoritativePoseEffect::Reset { .. } => {
                 runtime.remote_motion = None;
                 runtime.sticky = super::StickyMotion::default();
@@ -300,7 +298,7 @@ impl MotionRuntimeRegistry {
             | AuthoritativePoseEffect::Interpolate {
                 keep_heading: true, ..
             } => {}
-        }
+        });
     }
 }
 

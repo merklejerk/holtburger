@@ -578,3 +578,521 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
             .is_none()
     );
 }
+
+#[test]
+fn collection_collision_pose_updates_hard_targets_and_masks_stale_snapshot_reports() {
+    let animation_id = 0x0300_0099;
+    let animation = Animation {
+        id: animation_id,
+        flags: AnimationFlags::empty(),
+        num_parts: 1,
+        num_frames: 2,
+        pos_frames: Vec::new(),
+        part_frames: [0.0, 20.0]
+            .into_iter()
+            .map(|y| AnimationFrame {
+                frames: vec![Frame {
+                    origin: Vector3::new(0.0, y, 0.0),
+                    orientation: Quaternion::identity(),
+                }],
+                hooks: Vec::new(),
+            })
+            .collect(),
+    };
+    let geometry = PreparedEntityTargetGeometry {
+        setup_radius: 2.0,
+        setup_height: 2.0,
+        collision_animations: CollisionPoseLibrary::project([Arc::new(animation)], &[0]).unwrap(),
+        physics_bsp_parts: vec![crate::PreparedEntityBspPart {
+            part_index: 0,
+            gfx_obj_did: 0x0100_0001,
+            local_origin: Vector3::zero(),
+            local_orientation: Quaternion::identity(),
+            scale: ColliderScale::uniform(1.0).unwrap(),
+            shape: polygon_wall_shape(),
+        }],
+        fallback_setup_did: 0x0200_0001,
+        fallback_shapes: Vec::new(),
+        fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+    };
+    let mut door_def = dynamic_definition_with_geometry(
+        free_definition(Vector3::zero(), 0.25),
+        false,
+        geometry.clone(),
+        true,
+    )
+    .definition()
+    .clone();
+    door_def.entity_collision.contact_response = crate::spatial::EntityContactResponse::Obstacle;
+    let closed_pose = AuthoredCollisionPose::Animation {
+        animation_id,
+        frame: 0,
+    };
+    let open_pose = AuthoredCollisionPose::Animation {
+        animation_id,
+        frame: 1,
+    };
+    let door_config = DynamicPhysicalBodyConfiguration::new(
+        door_def,
+        LocalPhysicalDemand {
+            target: LocalTargetDemand::Retained,
+            integration: LocalIntegrationDemand::Eligible,
+        },
+    )
+    .unwrap()
+    .with_collision_pose(closed_pose, None)
+    .unwrap();
+
+    let mut bystander_def = dynamic_definition_with_geometry(
+        PhysicalBodyDefinition::fixed_position(
+            PhysicalSphereSet::new(
+                Sphere {
+                    center: Vector3::zero(),
+                    radius: 0.25,
+                },
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap(),
+        false,
+        PreparedEntityTargetGeometry {
+            setup_radius: 0.5,
+            setup_height: 1.0,
+            collision_animations: CollisionPoseLibrary::default(),
+            physics_bsp_parts: Vec::new(),
+            fallback_setup_did: 0x0200_0002,
+            fallback_shapes: vec![bsp_shape(Vector3::zero(), 0.5)],
+            fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+        },
+        false,
+    )
+    .definition()
+    .clone();
+    bystander_def.entity_collision.contact_response =
+        crate::spatial::EntityContactResponse::Obstacle;
+    let bystander_config = DynamicPhysicalBodyConfiguration::new(
+        bystander_def,
+        LocalPhysicalDemand {
+            target: LocalTargetDemand::Retained,
+            integration: LocalIntegrationDemand::Excluded,
+        },
+    )
+    .unwrap();
+
+    let mover_config = dynamic_definition_with_geometry(
+        free_definition(Vector3::zero(), 0.25),
+        false,
+        PreparedEntityTargetGeometry {
+            setup_radius: 0.25,
+            setup_height: 0.5,
+            collision_animations: CollisionPoseLibrary::default(),
+            physics_bsp_parts: Vec::new(),
+            fallback_setup_did: 0x0200_0003,
+            fallback_shapes: vec![bsp_shape(Vector3::zero(), 0.25)],
+            fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+        },
+        false,
+    );
+
+    let collision = flat_collision_scene();
+    let now = Instant::now();
+    let door_id = SpatialBodyId::Entity(Guid(0x6100_0001));
+    let bystander_id = SpatialBodyId::Entity(Guid(0x6100_0002));
+    let mover_id = SpatialBodyId::Entity(Guid(0x6100_0003));
+    let mut scene = SpatialScene::new();
+
+    scene.register_body(SpatialBody::new(
+        door_id,
+        pose(Vector3::new(96.0, 96.0, 1.0)),
+        now,
+    ));
+    scene
+        .set_dynamic_physical_body(
+            door_id,
+            Some(door_config),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    scene.register_body(SpatialBody::new(
+        bystander_id,
+        pose(Vector3::new(140.0, 140.0, 1.0)),
+        now,
+    ));
+    scene
+        .set_dynamic_physical_body(
+            bystander_id,
+            Some(bystander_config),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    scene.register_body(SpatialBody::new(
+        mover_id,
+        pose(Vector3::new(95.0, 96.0, 1.0)),
+        now,
+    ));
+    scene
+        .set_dynamic_physical_body(
+            mover_id,
+            Some(mover_config),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+
+    // Settle all bodies first and warm the shared snapshot + hard-target caches.
+    let step_dt = Duration::from_secs_f32(CONTACT_INTERVAL);
+    scene
+        .advance_dynamic_entity_collection(&collision, CONTACT_INTERVAL, now + step_dt, |_| {
+            Ok(PhysicalBodyInput::autonomous(
+                PhysicalBodyActuation::free_flight(Vector3::zero())?,
+            ))
+        })
+        .unwrap();
+    let _ = scene.entity_collision_snapshot().unwrap();
+
+    // Tick 1: Door opens via `input_for` in the same tick the mover sweeps across x = 96.0.
+    scene.wake_dynamic_body(mover_id);
+    let open_tick = scene
+        .advance_dynamic_entity_collection(
+            &collision,
+            CONTACT_INTERVAL,
+            now + step_dt * 2,
+            |body| {
+                if body.id == door_id {
+                    Ok(
+                        PhysicalBodyInput::autonomous(PhysicalBodyActuation::free_flight(
+                            Vector3::zero(),
+                        )?)
+                        .with_collision_pose(open_pose),
+                    )
+                } else if body.id == mover_id {
+                    Ok(PhysicalBodyInput::autonomous(
+                        PhysicalBodyActuation::free_flight(Vector3::new(60.0, 0.0, 0.0))?,
+                    ))
+                } else {
+                    collection_input(body)
+                }
+            },
+        )
+        .unwrap();
+    assert!(
+        scene.body(mover_id).unwrap().pose.coords.x > 96.5,
+        "mover should pass through opened door: {:?}",
+        scene.body(mover_id).unwrap().pose.coords
+    );
+    assert!(
+        open_tick.collision_reports.is_empty(),
+        "stale closed-door snapshot must not emit ghost reports: {:?}",
+        open_tick.collision_reports
+    );
+
+    // Reset mover to x = 95.0, settle, then close the door in the same tick the mover sweeps in.
+    scene
+        .relocate_dynamic_body(
+            mover_id,
+            pose(Vector3::new(95.0, 96.0, 1.0)),
+            now + step_dt * 3,
+        )
+        .unwrap();
+    scene
+        .advance_dynamic_entity_collection(&collision, CONTACT_INTERVAL, now + step_dt * 4, |_| {
+            Ok(PhysicalBodyInput::autonomous(
+                PhysicalBodyActuation::free_flight(Vector3::zero())?,
+            ))
+        })
+        .unwrap();
+    let _ = scene.entity_collision_snapshot().unwrap();
+
+    scene.wake_dynamic_body(mover_id);
+    let close_tick = scene
+        .advance_dynamic_entity_collection(
+            &collision,
+            CONTACT_INTERVAL,
+            now + step_dt * 5,
+            |body| {
+                if body.id == door_id {
+                    Ok(
+                        PhysicalBodyInput::autonomous(PhysicalBodyActuation::free_flight(
+                            Vector3::zero(),
+                        )?)
+                        .with_collision_pose(closed_pose),
+                    )
+                } else if body.id == mover_id {
+                    Ok(PhysicalBodyInput::autonomous(
+                        PhysicalBodyActuation::free_flight(Vector3::new(60.0, 0.0, 0.0))?,
+                    ))
+                } else {
+                    collection_input(body)
+                }
+            },
+        )
+        .unwrap();
+    assert!(
+        scene.body(mover_id).unwrap().pose.coords.x <= 95.76,
+        "mover should be blocked by newly closed door: {:?}",
+        scene.body(mover_id).unwrap().pose.coords
+    );
+    assert_eq!(close_tick.collision_reports.len(), 2);
+}
+
+#[test]
+fn projectile_hits_settled_local_player_target_shape_above_movement_sphere() {
+    let collision = flat_collision_scene();
+    let now = Instant::now();
+    let step_dt = Duration::from_secs_f32(CONTACT_INTERVAL);
+    let player_id = SpatialBodyId::LocalPlayer(Guid(0x6200_0001));
+    let missile_id = SpatialBodyId::Entity(Guid(0x6200_0002));
+
+    let player_config = dynamic_definition_with_geometry(
+        PhysicalBodyDefinition::free_sphere(
+            PhysicalSphereSet::new(
+                Sphere {
+                    center: Vector3::new(0.0, 0.0, 0.4),
+                    radius: 0.35,
+                },
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap(),
+        false,
+        PreparedEntityTargetGeometry {
+            setup_radius: 0.5,
+            setup_height: 3.0,
+            collision_animations: CollisionPoseLibrary::default(),
+            physics_bsp_parts: Vec::new(),
+            fallback_setup_did: 0x0200_0010,
+            fallback_shapes: vec![Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::new(0.0, 0.0, 2.5),
+                radius: 0.4,
+            }))],
+            fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+        },
+        false,
+    );
+
+    let mut missile_def = dynamic_definition_with_geometry(
+        free_definition(Vector3::zero(), 0.15),
+        true,
+        PreparedEntityTargetGeometry {
+            setup_radius: 0.15,
+            setup_height: 0.3,
+            collision_animations: CollisionPoseLibrary::default(),
+            physics_bsp_parts: Vec::new(),
+            fallback_setup_did: 0x0200_0011,
+            fallback_shapes: Vec::new(),
+            fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+        },
+        false,
+    )
+    .definition()
+    .clone();
+    missile_def.entity_collision.dynamic_collision.missile = true;
+    missile_def.entity_collision.dynamic_collision.path_clipped = true;
+    let missile_config = DynamicPhysicalBodyConfiguration::new(
+        missile_def,
+        LocalPhysicalDemand {
+            target: LocalTargetDemand::Absent,
+            integration: LocalIntegrationDemand::Eligible,
+        },
+    )
+    .unwrap();
+
+    let mut scene = SpatialScene::new();
+    scene.register_body(SpatialBody::new(
+        player_id,
+        pose(Vector3::new(96.0, 96.0, 0.5)),
+        now,
+    ));
+    scene
+        .set_dynamic_physical_body(
+            player_id,
+            Some(player_config),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    // Settle `LocalPlayer` first so its movement sphere (z in [0.55, 1.25]) sleeps far below z = 3.0.
+    scene
+        .advance_dynamic_entity_collection(&collision, CONTACT_INTERVAL, now + step_dt, |_| {
+            Ok(PhysicalBodyInput::autonomous(
+                PhysicalBodyActuation::free_flight(Vector3::zero())?,
+            ))
+        })
+        .unwrap();
+    assert_eq!(
+        dynamic_activity(&scene, player_id),
+        DynamicBodyActivity::Settled
+    );
+
+    // Register an active missile at z = 3.0 (hitting the tall target shape at z = 0.5 + 2.5 = 3.0).
+    scene.register_body(SpatialBody::new(
+        missile_id,
+        pose(Vector3::new(94.8, 96.0, 3.0)),
+        now + step_dt,
+    ));
+    scene
+        .set_dynamic_physical_body(
+            missile_id,
+            Some(missile_config),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+
+    let tick = scene
+        .advance_dynamic_entity_collection(
+            &collision,
+            CONTACT_INTERVAL,
+            now + step_dt * 2,
+            |body| {
+                if body.id == missile_id {
+                    Ok(PhysicalBodyInput::autonomous(
+                        PhysicalBodyActuation::free_flight(Vector3::new(60.0, 0.0, 0.0))?,
+                    ))
+                } else {
+                    Ok(PhysicalBodyInput::autonomous(
+                        PhysicalBodyActuation::free_flight(Vector3::zero())?,
+                    ))
+                }
+            },
+        )
+        .unwrap();
+    assert!(
+        scene.body(missile_id).unwrap().pose.coords.x < 96.0,
+        "projectile missed settled LocalPlayer tall target shape: {:?}",
+        scene.body(missile_id).unwrap().pose.coords
+    );
+    let missile_outcome = tick
+        .outcomes
+        .iter()
+        .find_map(|outcome| match outcome {
+            DynamicEntityBodyOutcome::Integrated(accepted) if accepted.body_id == missile_id => {
+                Some(accepted)
+            }
+            _ => None,
+        })
+        .expect("missile should produce an integrated outcome");
+    assert!(missile_outcome.dynamic_state_change.is_some());
+}
+
+#[test]
+fn mover_hard_impact_reports_against_stationary_excluded_indexed_entity() {
+    let collision = flat_collision_scene();
+    let now = Instant::now();
+    let step_dt = Duration::from_secs_f32(CONTACT_INTERVAL);
+    let obstacle_id = SpatialBodyId::Entity(Guid(0x6300_0001));
+    let mover_id = SpatialBodyId::Entity(Guid(0x6300_0002));
+
+    let mut obstacle_def = dynamic_definition_with_geometry(
+        PhysicalBodyDefinition::fixed_position(
+            PhysicalSphereSet::new(
+                Sphere {
+                    center: Vector3::zero(),
+                    radius: 0.25,
+                },
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap(),
+        false,
+        PreparedEntityTargetGeometry {
+            setup_radius: 1.0,
+            setup_height: 2.0,
+            collision_animations: CollisionPoseLibrary::default(),
+            physics_bsp_parts: Vec::new(),
+            fallback_setup_did: 0x0200_0020,
+            fallback_shapes: vec![polygon_wall_shape()],
+            fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+        },
+        false,
+    )
+    .definition()
+    .clone();
+    obstacle_def.entity_collision.contact_response =
+        crate::spatial::EntityContactResponse::Obstacle;
+    let obstacle_config = DynamicPhysicalBodyConfiguration::new(
+        obstacle_def,
+        LocalPhysicalDemand {
+            target: LocalTargetDemand::Retained,
+            integration: LocalIntegrationDemand::Excluded,
+        },
+    )
+    .unwrap();
+
+    let mover_config = dynamic_definition_with_geometry(
+        free_definition(Vector3::zero(), 0.25),
+        false,
+        PreparedEntityTargetGeometry {
+            setup_radius: 0.25,
+            setup_height: 0.5,
+            collision_animations: CollisionPoseLibrary::default(),
+            physics_bsp_parts: Vec::new(),
+            fallback_setup_did: 0x0200_0021,
+            fallback_shapes: vec![bsp_shape(Vector3::zero(), 0.25)],
+            fallback_scale: ColliderScale::uniform(1.0).unwrap(),
+        },
+        false,
+    );
+
+    let mut scene = SpatialScene::new();
+    scene.register_body(SpatialBody::new(
+        obstacle_id,
+        pose(Vector3::new(96.0, 96.0, 1.0)),
+        now,
+    ));
+    scene
+        .set_dynamic_physical_body(
+            obstacle_id,
+            Some(obstacle_config),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    scene.register_body(SpatialBody::new(
+        mover_id,
+        pose(Vector3::new(95.0, 96.0, 1.0)),
+        now,
+    ));
+    scene
+        .set_dynamic_physical_body(
+            mover_id,
+            Some(mover_config),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+
+    // Refresh stationary obstacle placement once so the second tick takes the stationary fast path.
+    scene
+        .advance_dynamic_entity_collection(&collision, CONTACT_INTERVAL, now + step_dt, |_| {
+            Ok(PhysicalBodyInput::autonomous(
+                PhysicalBodyActuation::free_flight(Vector3::zero())?,
+            ))
+        })
+        .unwrap();
+
+    scene.wake_dynamic_body(mover_id);
+    let tick = scene
+        .advance_dynamic_entity_collection(
+            &collision,
+            CONTACT_INTERVAL,
+            now + step_dt * 2,
+            |body| {
+                if body.id == mover_id {
+                    Ok(PhysicalBodyInput::autonomous(
+                        PhysicalBodyActuation::free_flight(Vector3::new(60.0, 0.0, 0.0))?,
+                    ))
+                } else {
+                    collection_input(body)
+                }
+            },
+        )
+        .unwrap();
+    assert!(scene.body(mover_id).unwrap().pose.coords.x <= 95.76);
+    assert_eq!(tick.collision_reports.len(), 2);
+}

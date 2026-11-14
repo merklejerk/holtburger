@@ -1,10 +1,13 @@
 //! Bounded hard movement and fixed-pass mobile contacts over one tick's working poses.
 
-mod targets;
-use targets::HardTargets;
+pub(crate) mod targets;
+pub(crate) use targets::HardTargets;
 
 mod collection;
-pub(crate) use collection::advance_body_contact_collection_without_reports;
+pub(crate) use collection::{
+    SceneContactPreparation, SceneContactReportOverride, advance_body_contact_collection_prepared,
+    advance_body_contact_collection_without_reports,
+};
 mod report;
 pub use collection::{ContactCollectionUpdate, advance_body_contact_collection};
 
@@ -731,11 +734,65 @@ impl<'a> WorkingBody<'a> {
 
 /// Immutable authored geometry admitted as a one-way sweep target.
 #[derive(Debug, Clone)]
-struct SweepTarget {
+pub(crate) struct SweepTarget {
     /// Identity, filtering, and current collision-domain membership.
-    contact: ContactParticipant,
+    pub(crate) contact: ContactParticipant,
+    /// Monotonic geometry stamp from `SpatialBodyStore` (`0` for unversioned test/direct sweeps).
+    pub(crate) geometry_stamp: u64,
     /// Authored hard-target shapes placed once in the collection’s common frame.
-    shapes: Vec<PlacedCollisionShape>,
+    pub(crate) shapes: std::sync::Arc<[PlacedCollisionShape]>,
+}
+
+pub(crate) fn step_sweep_target(
+    contact: ContactParticipant,
+    geometry_stamp: u64,
+    shapes: std::sync::Arc<[PlacedCollisionShape]>,
+) -> SweepTarget {
+    SweepTarget {
+        contact,
+        geometry_stamp,
+        shapes,
+    }
+}
+
+/// Strategy for supplying hard obstacles and projectile targets to `advance_contacts`.
+enum HardTargetSource<'a> {
+    /// Compile hard targets directly from the passed body slice (standalone / test callers).
+    Compile,
+    /// Immutable single-body prediction against a frozen snapshot.
+    Frozen(&'a HardTargets),
+    /// Active cluster solve sharing cached scene hard targets and optional static snapshots.
+    ScenePrepared {
+        hard: &'a HardTargets,
+        entity_snapshot: Option<&'a crate::spatial::dynamic_index::EntityCollisionSnapshot>,
+    },
+}
+
+/// Reusable scratch buffers shared across collection ticks on one scene.
+#[derive(Debug, Default)]
+pub(crate) struct ContactStepScratch {
+    identities: Vec<SpatialBodyId>,
+    tentative: Vec<MobileContactBody>,
+    remaining: Vec<f32>,
+    corrections: Vec<Vector3>,
+    envelopes: Vec<Envelope>,
+    pairs: Vec<(usize, usize)>,
+    slots: Vec<u32>,
+    static_sweep: crate::spatial::collision::StaticSweepScratch,
+    report: report::ReportScratch,
+    report_touches: Vec<crate::spatial::CollisionReportTouch>,
+    report_sorted_bodies: Vec<(SpatialBodyId, usize)>,
+}
+
+struct MotionSweepScratch<'a> {
+    slots: &'a mut Vec<u32>,
+    static_sweep: &'a mut crate::spatial::collision::StaticSweepScratch,
+}
+
+impl Clone for ContactStepScratch {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
 }
 
 /// Integrates local force/motor inputs, then advances hard movement and mobile contacts.
@@ -754,13 +811,15 @@ pub fn advance_body_contacts(
     delta_seconds: f32,
     actuation_for: impl FnMut(&SpatialBody, GroundState) -> Result<ContactStepActuation>,
 ) -> Result<Vec<ContactBodyUpdate>> {
+    let mut scratch = ContactStepScratch::default();
     advance_contacts(
         collision,
         bodies,
         anchor,
         delta_seconds,
         actuation_for,
-        None,
+        HardTargetSource::Compile,
+        &mut scratch,
     )
 }
 
@@ -846,13 +905,15 @@ impl FrozenContactTargets {
         seconds: f32,
         actuation: impl FnMut(&SpatialBody, GroundState) -> Result<ContactStepActuation>,
     ) -> Result<ContactBodyUpdate> {
+        let mut scratch = ContactStepScratch::default();
         let updates = advance_contacts(
             collision,
             std::slice::from_ref(body),
             self.anchor,
             seconds,
             actuation,
-            Some(&self.hard),
+            HardTargetSource::Frozen(&self.hard),
+            &mut scratch,
         )?;
         let [update]: [ContactBodyUpdate; 1] = updates
             .try_into()
@@ -867,7 +928,8 @@ fn advance_contacts(
     anchor: Guid,
     delta_seconds: f32,
     mut actuation_for: impl FnMut(&SpatialBody, GroundState) -> Result<ContactStepActuation>,
-    frozen: Option<&HardTargets>,
+    target_source: HardTargetSource<'_>,
+    scratch: &mut ContactStepScratch,
 ) -> Result<Vec<ContactBodyUpdate>> {
     let mut profile = ContactPhaseProfile::begin("contact_integration");
     ensure!(
@@ -876,10 +938,11 @@ fn advance_contacts(
             && delta_seconds <= MOBILE_CONTACT_TICK_SECONDS,
         "contact advance requires one positive admitted physical tick"
     );
-    let mut identities = bodies.iter().map(|body| body.id).collect::<Vec<_>>();
-    identities.sort_unstable();
+    scratch.identities.clear();
+    scratch.identities.extend(bodies.iter().map(|body| body.id));
+    scratch.identities.sort_unstable();
     ensure!(
-        identities.windows(2).all(|pair| pair[0] != pair[1]),
+        scratch.identities.windows(2).all(|pair| pair[0] != pair[1]),
         "contact collection contains duplicate body IDs"
     );
     let mut moving = Vec::new();
@@ -891,11 +954,12 @@ fn advance_contacts(
         else {
             continue;
         };
-        if frozen.is_none()
+        if matches!(target_source, HardTargetSource::Compile)
             && let PreparedContactTarget::Hard(geometry) = contact.source.target
         {
             hard.push(SweepTarget {
-                shapes: placed_target_shapes(geometry, body.pose, anchor)?,
+                shapes: placed_target_shapes(geometry, body.pose, anchor)?.into(),
+                geometry_stamp: 0,
                 contact: contact.participant.clone(),
             });
         }
@@ -953,9 +1017,10 @@ fn advance_contacts(
             body.contact.body_id,
         )
     });
-    let mut hard = match frozen {
-        Some(hard) => Cow::Borrowed(hard),
-        None => Cow::Owned(HardTargets::new(hard)?),
+    let mut hard = match target_source {
+        HardTargetSource::Compile => Cow::Owned(HardTargets::new(hard)?),
+        HardTargetSource::Frozen(targets)
+        | HardTargetSource::ScenePrepared { hard: targets, .. } => Cow::Borrowed(targets),
     };
     profile.checkpoint("hard_target_index");
     let moving_count = moving.len();
@@ -965,7 +1030,16 @@ fn advance_contacts(
         if let Some(grounded) = body.grounded {
             let valid = match grounded.ground {
                 GroundState::Supported(support) | GroundState::Sliding(support) => {
-                    matches!(support.source, crate::spatial::SupportSource::World(proof) | crate::spatial::SupportSource::StationaryFall(proof) if collision.proves(proof))
+                    let source_valid = match support.source {
+                        crate::spatial::SupportSource::World(proof)
+                        | crate::spatial::SupportSource::StationaryFall(proof) => {
+                            collision.proves(proof)
+                        }
+                        crate::spatial::SupportSource::Entity(peer_id, stamp) => {
+                            hard.accepts_entity_support(peer_id, stamp, &body.contact)
+                        }
+                    };
+                    source_valid
                         && body.mobile.velocity.dot(&support.normal)
                             <= crate::spatial::bsp_query::CONTACT_EPSILON
                 }
@@ -1001,90 +1075,169 @@ fn advance_contacts(
                 "contact integration produced non-finite velocity"
             );
             if body.mobile.response_mobility.is_none() {
-                advance_ordinary_motion(collision, &hard, anchor, body, delta_seconds)?;
+                let mut sweep_scratch = MotionSweepScratch {
+                    slots: &mut scratch.slots,
+                    static_sweep: &mut scratch.static_sweep,
+                };
+                advance_ordinary_motion(
+                    collision,
+                    &hard,
+                    anchor,
+                    body,
+                    delta_seconds,
+                    &mut sweep_scratch,
+                )?;
             }
         }
-        if frozen.is_none()
+        if !matches!(target_source, HardTargetSource::Frozen(_))
             && let PreparedContactTarget::Hard(geometry) = body.source.target
+            && (body.displacement() != Vector3::zero()
+                || body.rotation != body.source.body.pose.rotation)
         {
             let mut pose = body.source.body.pose;
             pose.coords = pose.coords + body.displacement();
             pose.rotation = body.rotation;
             let shapes = placed_target_shapes(geometry, pose, anchor)?;
+            // Moved hard geometry is unversioned within this tick so riders re-verify support;
+            // scene publication allocates a monotonic stamp for subsequent stationary ticks.
             hard.to_mut().replace(SweepTarget {
                 contact: body.contact.clone(),
-                shapes,
+                geometry_stamp: 0,
+                shapes: shapes.into(),
             })?;
         }
     }
     profile.checkpoint("support_and_hard_movement");
     // All yielding intent is sampled before mobile admission. Hard authored targets above
     // already expose their accepted poses; no neighbor can cause another input sample.
-    admission::admit_character_movement(&mut moving, delta_seconds);
+    admission::admit_character_movement(
+        &mut moving,
+        delta_seconds,
+        &mut scratch.envelopes,
+        &mut scratch.pairs,
+    );
     profile.checkpoint("crowd_admission");
-    for body in &mut moving {
-        if body.mobile.response_mobility.is_some()
-            && body.integrate_ordinary
-            && body.unavailable_owner.is_none()
-        {
-            advance_ordinary_motion(collision, &hard, anchor, body, delta_seconds)?;
+    {
+        let mut sweep_scratch = MotionSweepScratch {
+            slots: &mut scratch.slots,
+            static_sweep: &mut scratch.static_sweep,
+        };
+        for body in &mut moving {
+            if body.mobile.response_mobility.is_some()
+                && body.integrate_ordinary
+                && body.unavailable_owner.is_none()
+            {
+                advance_ordinary_motion(
+                    collision,
+                    &hard,
+                    anchor,
+                    body,
+                    delta_seconds,
+                    &mut sweep_scratch,
+                )?;
+            }
         }
     }
     profile.checkpoint("mobile_movement_sweeps");
-    let mut tentative = moving.iter().map(|body| body.mobile).collect::<Vec<_>>();
-    let mut remaining = moving
-        .iter()
-        .map(|body| body.correction_limit)
-        .collect::<Vec<_>>();
-    let mut corrections = vec![Vector3::zero(); moving.len()];
+    scratch.tentative.clear();
+    scratch
+        .tentative
+        .extend(moving.iter().map(|body| body.mobile));
+    scratch.remaining.clear();
+    scratch
+        .remaining
+        .extend(moving.iter().map(|body| body.correction_limit));
+    scratch.corrections.resize(moving.len(), Vector3::zero());
     // Each body's total correction path length is bounded by its initial allowance.
     // Later positions plus remaining travel therefore stay inside these initial envelopes.
     // Keep pair order stable while rechecking actual overlap on every pass.
-    let pairs = candidate_pairs(&tentative, &remaining);
+    candidate_pairs_into(
+        &scratch.tentative,
+        &scratch.remaining,
+        &mut scratch.envelopes,
+        &mut scratch.pairs,
+    );
     profile.checkpoint("crowd_candidates");
     for _ in 0..MOBILE_CONTACT_PASSES {
-        corrections.fill(Vector3::zero());
-        for &(first, second) in &pairs {
+        scratch.corrections.fill(Vector3::zero());
+        let mut any_correction = false;
+        let mut velocity_changed = false;
+        for &(first, second) in &scratch.pairs {
             let Some(response) = resolve_participant_pair(
                 &moving[first].contact,
-                tentative[first],
+                scratch.tentative[first],
                 &moving[second].contact,
-                tentative[second],
+                scratch.tentative[second],
             ) else {
                 continue;
             };
             for (index, change) in [(first, response.first), (second, response.second)] {
                 if moving[index].unavailable_owner.is_none() {
-                    corrections[index] = corrections[index] + change.displacement;
-                    tentative[index].velocity = tentative[index].velocity + change.velocity_change;
+                    if change.displacement != Vector3::zero() {
+                        scratch.corrections[index] =
+                            scratch.corrections[index] + change.displacement;
+                        any_correction = true;
+                    }
+                    if change.velocity_change != Vector3::zero() {
+                        scratch.tentative[index].velocity =
+                            scratch.tentative[index].velocity + change.velocity_change;
+                        velocity_changed = true;
+                    }
                 }
             }
         }
-        for ((mobile, remaining), correction) in
-            tentative.iter_mut().zip(&mut remaining).zip(&corrections)
+        if !any_correction && !velocity_changed {
+            break;
+        }
+        let mut displaced = false;
+        for ((mobile, remaining), correction) in scratch
+            .tentative
+            .iter_mut()
+            .zip(&mut scratch.remaining)
+            .zip(&scratch.corrections)
         {
             let displacement = limited(*correction, *remaining);
-            mobile.spheres = translated_spheres(mobile.spheres, displacement)?;
-            *remaining = (*remaining - displacement.length()).max(0.0);
+            if displacement != Vector3::zero() {
+                mobile.spheres = translated_spheres(mobile.spheres, displacement)?;
+                *remaining = (*remaining - displacement.length()).max(0.0);
+                displaced = true;
+            }
+        }
+        if !displaced && !velocity_changed {
+            break;
         }
     }
     profile.checkpoint("crowd_response");
     // Hard geometry has the final say. Tentative yielding may be clipped or rejected;
     // residual mobile overlap is accepted until a later tick, without a feedback solve.
-    for (body, tentative) in moving.iter_mut().zip(tentative) {
-        let correction = tentative.spheres.primary().center - body.mobile.spheres.primary().center;
-        body.mobile.velocity = tentative.velocity;
-        let correction_start = body.root;
-        let was_supported = body.ground().walkable_support().is_some();
-        apply_correction(collision, &hard, anchor, body, correction)?;
-        if was_supported && body.ground().walkable_support().is_some() {
-            // The gait must follow accepted displacement, not walk toward the reference
-            // while separation carries the body the other way. Observe only the final
-            // hard-clipped correction; neither tentative motion nor stair lift is a gait.
-            let accepted = body.root - correction_start;
-            body.supported_push |= accepted.x != 0.0 || accepted.y != 0.0;
-            body.observed_travel.supported =
-                body.observed_travel.supported + Vector3::new(accepted.x, accepted.y, 0.0);
+    {
+        let mut sweep_scratch = MotionSweepScratch {
+            slots: &mut scratch.slots,
+            static_sweep: &mut scratch.static_sweep,
+        };
+        for (body, &tentative) in moving.iter_mut().zip(&scratch.tentative) {
+            let correction =
+                tentative.spheres.primary().center - body.mobile.spheres.primary().center;
+            body.mobile.velocity = tentative.velocity;
+            let correction_start = body.root;
+            let was_supported = body.ground().walkable_support().is_some();
+            apply_correction(
+                collision,
+                &hard,
+                anchor,
+                body,
+                correction,
+                &mut sweep_scratch,
+            )?;
+            if was_supported && body.ground().walkable_support().is_some() {
+                // The gait must follow accepted displacement, not walk toward the reference
+                // while separation carries the body the other way. Observe only the final
+                // hard-clipped correction; neither tentative motion nor stair lift is a gait.
+                let accepted = body.root - correction_start;
+                body.supported_push |= accepted.x != 0.0 || accepted.y != 0.0;
+                body.observed_travel.supported =
+                    body.observed_travel.supported + Vector3::new(accepted.x, accepted.y, 0.0);
+            }
         }
     }
     profile.checkpoint("correction_sweeps");
@@ -1097,25 +1250,111 @@ fn advance_contacts(
         body.constrain_supported_velocity();
     }
     profile.checkpoint("support_confirmation");
+    let projectile_bounds = (!projectiles.is_empty()).then(|| {
+        let mut minimum = Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
+        let mut maximum = Vector3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+        for projectile in &projectiles {
+            let requested =
+                (projectile.mobile.velocity + projectile.kinematic_velocity) * delta_seconds;
+            for sphere in projectile.mobile.spheres.iter() {
+                let offset_reach = 2.0 * (sphere.center - projectile.root).length();
+                let reach =
+                    sphere.radius + offset_reach + crate::spatial::bsp_query::CONTACT_EPSILON;
+                let end = sphere.center + requested;
+                minimum.x = minimum.x.min(sphere.center.x.min(end.x) - reach);
+                minimum.y = minimum.y.min(sphere.center.y.min(end.y) - reach);
+                minimum.z = minimum.z.min(sphere.center.z.min(end.z) - reach);
+                maximum.x = maximum.x.max(sphere.center.x.max(end.x) + reach);
+                maximum.y = maximum.y.max(sphere.center.y.max(end.y) + reach);
+                maximum.z = maximum.z.max(sphere.center.z.max(end.z) + reach);
+            }
+        }
+        (minimum, maximum)
+    });
     let mut updates = Vec::new();
     let mut projectile_targets = hard;
     for body in moving {
         let displacement = body.displacement();
-        if !projectiles.is_empty()
+        if let Some((proj_min, proj_max)) = projectile_bounds
             && let PreparedContactTarget::Mobile(geometry) = body.source.target
         {
             // Projectile targets use accepted crowd end poses, without trajectory negotiation.
             let mut pose = body.source.body.pose;
             pose.coords = pose.coords + displacement;
             pose.rotation = body.rotation;
-            projectile_targets.to_mut().push(SweepTarget {
-                contact: body.contact.clone(),
-                shapes: placed_target_shapes(geometry, pose, anchor)?,
-            })?;
+            let shapes = placed_target_shapes(geometry, pose, anchor)?;
+            if shapes.iter().any(|shape| {
+                let smin = shape.bounds.minimum();
+                let smax = shape.bounds.maximum();
+                proj_min.x <= smax.x
+                    && smin.x <= proj_max.x
+                    && proj_min.y <= smax.y
+                    && smin.y <= proj_max.y
+                    && proj_min.z <= smax.z
+                    && smin.z <= proj_max.z
+            }) {
+                projectile_targets.to_mut().push(SweepTarget {
+                    contact: body.contact.clone(),
+                    geometry_stamp: 0,
+                    shapes: shapes.into(),
+                })?;
+            }
         }
         updates.push(body.into_update(None, delta_seconds));
     }
-    if !projectiles.is_empty() {
+    if let Some((proj_min, proj_max)) = projectile_bounds {
+        if let HardTargetSource::ScenePrepared {
+            entity_snapshot: Some(entity_snapshot),
+            ..
+        } = target_source
+        {
+            for target in entity_snapshot.targets.values() {
+                if target.is_hard_target
+                    || target.shapes.is_empty()
+                    || bodies
+                        .binary_search_by_key(&target.contact.body_id, |b| b.id)
+                        .is_ok()
+                {
+                    continue;
+                }
+                let shift = if target.anchor == anchor {
+                    Vector3::zero()
+                } else {
+                    WorldPosition {
+                        landblock_id: target.anchor,
+                        ..Default::default()
+                    }
+                    .reanchor_to_landblock_owner(anchor)?
+                    .coords
+                };
+                let overlaps = target.shapes.iter().any(|shape| {
+                    let smin = shape.bounds.minimum() + shift;
+                    let smax = shape.bounds.maximum() + shift;
+                    proj_min.x <= smax.x
+                        && smin.x <= proj_max.x
+                        && proj_min.y <= smax.y
+                        && smin.y <= proj_max.y
+                        && proj_min.z <= smax.z
+                        && smin.z <= proj_max.z
+                });
+                if overlaps {
+                    let shapes = crate::spatial::dynamic_index::reanchor_placed_shapes_arc(
+                        target.anchor,
+                        &target.shapes,
+                        anchor,
+                    )?;
+                    projectile_targets.to_mut().push(SweepTarget {
+                        contact: target.contact.clone(),
+                        geometry_stamp: target.geometry_stamp,
+                        shapes,
+                    })?;
+                }
+            }
+        }
+        let mut sweep_scratch = MotionSweepScratch {
+            slots: &mut scratch.slots,
+            static_sweep: &mut scratch.static_sweep,
+        };
         for projectile in projectiles {
             updates.push(advance_projectile(
                 collision,
@@ -1123,6 +1362,7 @@ fn advance_contacts(
                 anchor,
                 projectile,
                 delta_seconds,
+                &mut sweep_scratch,
             )?);
         }
     }
@@ -1133,7 +1373,7 @@ fn advance_contacts(
         bodies.len(),
         moving_count,
         projectile_count,
-        pairs.len(),
+        scratch.pairs.len(),
         updates.len(),
     ));
     Ok(updates)
@@ -1146,6 +1386,7 @@ fn advance_ordinary_motion(
     anchor: Guid,
     body: &mut WorkingBody<'_>,
     delta_seconds: f32,
+    scratch: &mut MotionSweepScratch<'_>,
 ) -> Result<()> {
     advance_hard_motion(
         collision,
@@ -1153,6 +1394,7 @@ fn advance_ordinary_motion(
         anchor,
         body,
         HardMovement::Timed(delta_seconds),
+        scratch,
     )
     .with_context(|| format!("contact movement rejected for {:?}", body.contact.body_id))?;
     if body.unavailable_owner.is_none()
@@ -1214,9 +1456,16 @@ fn advance_projectile(
     anchor: Guid,
     mut projectile: WorkingBody<'_>,
     delta_seconds: f32,
+    scratch: &mut MotionSweepScratch<'_>,
 ) -> Result<ContactBodyUpdate> {
-    let impact =
-        advance_projectile_translation(collision, targets, anchor, &mut projectile, delta_seconds)?;
+    let impact = advance_projectile_translation(
+        collision,
+        targets,
+        anchor,
+        &mut projectile,
+        delta_seconds,
+        scratch,
+    )?;
     projectile.observe_travel();
     let angular_impact = if projectile.unavailable_owner.is_none() {
         angular::advance_orientation(collision, targets, anchor, &mut projectile, delta_seconds)?
@@ -1247,18 +1496,20 @@ fn advance_projectile_translation(
     anchor: Guid,
     projectile: &mut WorkingBody<'_>,
     delta_seconds: f32,
+    scratch: &mut MotionSweepScratch<'_>,
 ) -> Result<Option<HardSphereSweepHit>> {
     let requested = (projectile.mobile.velocity + projectile.kinematic_velocity) * delta_seconds;
     if requested.length_squared() == 0.0 {
         return Ok(None);
     }
-    let swept = sweep_body_motion(
+    let swept = sweep_body_motion_with_scratch(
         collision,
         targets,
         anchor,
         &projectile.contact,
         projectile.mobile.spheres,
         requested,
+        scratch,
     );
     let Some(swept) = projectile.accept_query(swept.map_err(Into::into))? else {
         return Ok(None);
@@ -1365,10 +1616,11 @@ fn advance_hard_motion(
     anchor: Guid,
     body: &mut WorkingBody<'_>,
     movement: HardMovement,
+    scratch: &mut MotionSweepScratch<'_>,
 ) -> Result<()> {
     let motion_start = body.motion.len();
     let protected = stairs::ProtectedFooting::capture(body, movement);
-    let mut footing = advance_hard_candidate(collision, hard, anchor, body, movement)?;
+    let mut footing = advance_hard_candidate(collision, hard, anchor, body, movement, scratch)?;
     if matches!(footing, stairs::NavigationFooting::Unsupported)
         && let Some(start) = protected
     {
@@ -1432,6 +1684,7 @@ fn advance_hard_candidate(
     anchor: Guid,
     body: &mut WorkingBody<'_>,
     mut movement: HardMovement,
+    scratch: &mut MotionSweepScratch<'_>,
 ) -> Result<stairs::NavigationFooting> {
     let mut elapsed = 0.0;
     let mut stair_attempted = false;
@@ -1440,13 +1693,14 @@ fn advance_hard_candidate(
         if requested.length_squared() == 0.0 {
             break;
         }
-        let swept = sweep_body_motion(
+        let swept = sweep_body_motion_with_scratch(
             collision,
             hard,
             anchor,
             &body.contact,
             body.mobile.spheres,
             requested,
+            scratch,
         );
         let Some(swept) = body.accept_query(swept.map_err(Into::into))? else {
             break;
@@ -1657,6 +1911,7 @@ fn translated_spheres(
 }
 
 /// Sweep-and-prune envelope, expanded by the body's remaining correction travel this pass.
+#[derive(Debug)]
 struct Envelope {
     /// Stable index into the working mobile-body array.
     index: usize,
@@ -1690,25 +1945,42 @@ impl Envelope {
     }
 }
 
+#[cfg(test)]
 fn candidate_pairs(bodies: &[MobileContactBody], remaining: &[f32]) -> Vec<(usize, usize)> {
-    let envelopes = bodies
-        .iter()
-        .enumerate()
-        .filter(|(_, body)| body.response_mobility.is_some())
-        .map(|(index, body)| Envelope::new(index, body.spheres, Vector3::zero(), remaining[index]))
-        .collect::<Vec<_>>();
-    envelope_pairs(envelopes)
+    let mut envelopes = Vec::new();
+    let mut pairs = Vec::new();
+    candidate_pairs_into(bodies, remaining, &mut envelopes, &mut pairs);
+    pairs
+}
+
+fn candidate_pairs_into(
+    bodies: &[MobileContactBody],
+    remaining: &[f32],
+    envelopes: &mut Vec<Envelope>,
+    pairs: &mut Vec<(usize, usize)>,
+) {
+    envelopes.clear();
+    envelopes.extend(
+        bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, body)| body.response_mobility.is_some())
+            .map(|(index, body)| {
+                Envelope::new(index, body.spheres, Vector3::zero(), remaining[index])
+            }),
+    );
+    envelope_pairs_into(envelopes, pairs);
 }
 
 /// Shared sweep-and-prune over caller-prepared reachable bounds.
-fn envelope_pairs(mut envelopes: Vec<Envelope>) -> Vec<(usize, usize)> {
+fn envelope_pairs_into(envelopes: &mut [Envelope], pairs: &mut Vec<(usize, usize)>) {
     envelopes.sort_unstable_by(|a, b| {
         a.minimum
             .x
             .total_cmp(&b.minimum.x)
             .then(a.index.cmp(&b.index))
     });
-    let mut pairs = Vec::new();
+    pairs.clear();
     for (offset, first) in envelopes.iter().enumerate() {
         for second in &envelopes[offset + 1..] {
             if second.minimum.x > first.maximum.x {
@@ -1724,7 +1996,6 @@ fn envelope_pairs(mut envelopes: Vec<Envelope>) -> Vec<(usize, usize)> {
         }
     }
     pairs.sort_unstable();
-    pairs
 }
 
 fn limited(vector: Vector3, maximum: f32) -> Vector3 {
@@ -1742,6 +2013,7 @@ fn apply_correction(
     anchor: Guid,
     body: &mut WorkingBody<'_>,
     correction: Vector3,
+    scratch: &mut MotionSweepScratch<'_>,
 ) -> Result<()> {
     if body.unavailable_owner.is_some() || correction.length_squared() == 0.0 {
         return Ok(());
@@ -1752,6 +2024,7 @@ fn apply_correction(
         anchor,
         body,
         HardMovement::Correction(correction),
+        scratch,
     )
 }
 
@@ -1764,7 +2037,41 @@ fn sweep_body_motion(
     spheres: PhysicalSphereSet,
     requested: Vector3,
 ) -> std::result::Result<BodySweep, CollisionQueryError> {
-    sweep_body_chords(collision, hard, anchor, contact, spheres, |_| requested)
+    let mut slot_scratch = Vec::new();
+    let mut static_sweep = crate::spatial::collision::StaticSweepScratch::default();
+    let mut scratch = MotionSweepScratch {
+        slots: &mut slot_scratch,
+        static_sweep: &mut static_sweep,
+    };
+    sweep_body_motion_with_scratch(
+        collision,
+        hard,
+        anchor,
+        contact,
+        spheres,
+        requested,
+        &mut scratch,
+    )
+}
+
+fn sweep_body_motion_with_scratch(
+    collision: &CollisionScene,
+    hard: &HardTargets,
+    anchor: Guid,
+    contact: &ContactParticipant,
+    spheres: PhysicalSphereSet,
+    requested: Vector3,
+    scratch: &mut MotionSweepScratch<'_>,
+) -> std::result::Result<BodySweep, CollisionQueryError> {
+    sweep_body_chords_with_scratch(
+        collision,
+        hard,
+        anchor,
+        contact,
+        spheres,
+        |_| requested,
+        scratch,
+    )
 }
 
 /// Shared hard admission for translation or independently moving rotational sphere centers.
@@ -1776,23 +2083,57 @@ fn sweep_body_chords(
     spheres: PhysicalSphereSet,
     displacement: impl Fn(GroundedSphere) -> Vector3,
 ) -> std::result::Result<BodySweep, CollisionQueryError> {
-    let primary = sweep_motion_sphere(
+    let mut slot_scratch = Vec::new();
+    let mut static_sweep = crate::spatial::collision::StaticSweepScratch::default();
+    let mut scratch = MotionSweepScratch {
+        slots: &mut slot_scratch,
+        static_sweep: &mut static_sweep,
+    };
+    sweep_body_chords_with_scratch(
         collision,
         hard,
         anchor,
         contact,
+        spheres,
+        displacement,
+        &mut scratch,
+    )
+}
+
+struct SphereSweepContext<'a> {
+    collision: &'a CollisionScene,
+    hard: &'a HardTargets,
+    anchor: Guid,
+    contact: &'a ContactParticipant,
+}
+
+fn sweep_body_chords_with_scratch(
+    collision: &CollisionScene,
+    hard: &HardTargets,
+    anchor: Guid,
+    contact: &ContactParticipant,
+    spheres: PhysicalSphereSet,
+    displacement: impl Fn(GroundedSphere) -> Vector3,
+    scratch: &mut MotionSweepScratch<'_>,
+) -> std::result::Result<BodySweep, CollisionQueryError> {
+    let ctx = SphereSweepContext {
+        collision,
+        hard,
+        anchor,
+        contact,
+    };
+    let primary = sweep_motion_sphere(
+        &ctx,
         displacement(spheres.primary()),
         spheres.primary(),
         contact.filter,
+        scratch,
     )?;
     let upper = spheres
         .upper_constraint()
         .map(|sphere| {
             sweep_motion_sphere(
-                collision,
-                hard,
-                anchor,
-                contact,
+                &ctx,
                 displacement(sphere),
                 sphere,
                 // Whole-landblock restrictions belong to the primary center. The upper
@@ -1800,6 +2141,7 @@ fn sweep_body_chords(
                 contact
                     .filter
                     .with_exclusion(PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER, true),
+                scratch,
             )
         })
         .transpose()?;
@@ -1823,19 +2165,21 @@ fn sweep_body_chords(
 }
 
 fn sweep_motion_sphere(
-    collision: &CollisionScene,
-    hard: &HardTargets,
-    anchor: Guid,
-    contact: &ContactParticipant,
+    ctx: &SphereSweepContext<'_>,
     requested: Vector3,
     sphere: GroundedSphere,
     filter: PhysicalCollisionFilter,
+    scratch: &mut MotionSweepScratch<'_>,
 ) -> std::result::Result<PreparedHardSphereSweep, CollisionQueryError> {
     let center = sphere.center + requested * 0.5;
     let reach = sphere.radius + requested.length() * 0.5;
-    let candidates = hard
-        .sphere_candidates(center, reach)?
-        .filter(|target| contact.receives_response_from(&target.contact))
+    ctx.hard
+        .sphere_candidates_into(center, reach, scratch.slots)?;
+    let candidates = scratch
+        .slots
+        .iter()
+        .map(|&slot| ctx.hard.resolved_slot(slot))
+        .filter(|target| ctx.contact.receives_response_from(&target.contact))
         .flat_map(|target| {
             target
                 .shapes
@@ -1847,16 +2191,17 @@ fn sweep_motion_sphere(
                     membership: &target.contact.membership,
                 })
         });
-    collision.prepare_hard_sphere(
+    ctx.collision.prepare_hard_sphere_with_scratch(
         StaticSphereSweepRequest {
-            anchor,
+            anchor: ctx.anchor,
             start: sphere.center,
             displacement: requested,
-            previous_cell: contact.membership.committed_cell(),
+            previous_cell: ctx.contact.membership.committed_cell(),
             radius: sphere.radius,
             filter,
         },
         candidates,
+        scratch.static_sweep,
     )
 }
 

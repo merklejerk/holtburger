@@ -4,8 +4,7 @@ use anyhow::{Context, Result};
 use holtburger_common::Vector3;
 use parry3d::query::Ray;
 
-use super::static_sphere_sweep::parry_vector;
-use super::static_surface_ray::{SurfaceCandidate, cast_placed_collision_shape};
+use super::static_surface_ray::{SurfaceCandidate, cast_placed_collision_shape, parry_vector};
 use super::{
     CollisionQueryPolicy, CollisionScene, SpatialMembership, StaticSurfaceRayHit,
     StaticSurfaceRayRequest,

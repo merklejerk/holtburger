@@ -1,4 +1,4 @@
-use super::runtime_profile::{RuntimeProfileScope, RuntimeScopeProfile};
+use super::runtime_profile::{PhysicsTickPhase, RuntimeProfileScope, RuntimeScopeProfile};
 use super::*;
 use anyhow::Result;
 use futures::FutureExt;
@@ -20,8 +20,20 @@ const NETWORK_BATCH_LIMIT: usize = 64;
 const NETWORK_BATCH_BUDGET: Duration = Duration::from_millis(8);
 
 impl ClientRuntime {
-    /// Handle the selected packet and a bounded prefix of already-ready ordered packets.
-    async fn process_network_batch(
+    /// Handle the selected packet and a bounded prefix of already-ready ordered packets,
+    /// coalescing repeated dynamic-entity upserts per entity until the batch finishes.
+    async fn process_network_batch(&mut self, received: Result<Vec<SessionEvent>>) -> Result<()> {
+        self.begin_dynamic_entity_upsert_coalescing();
+        let result = self.process_network_batch_inner(received).await;
+        if result.is_ok() && !matches!(self.state, ClientState::Disconnected) {
+            self.flush_dynamic_entity_upserts();
+        } else {
+            self.cancel_dynamic_entity_upsert_coalescing();
+        }
+        result
+    }
+
+    async fn process_network_batch_inner(
         &mut self,
         mut received: Result<Vec<SessionEvent>>,
     ) -> Result<()> {
@@ -71,8 +83,23 @@ impl ClientRuntime {
         Ok(())
     }
 
-    /// Consume the selected command first, then a bounded FIFO prefix of pending input.
-    async fn process_command_batch(&mut self, mut first: Option<ClientCommand>) -> Result<()> {
+    /// Consume the selected command first, then a bounded FIFO prefix of pending input,
+    /// coalescing repeated dynamic-entity upserts per entity until the batch finishes.
+    async fn process_command_batch(&mut self, first: Option<ClientCommand>) -> Result<()> {
+        self.begin_dynamic_entity_upsert_coalescing();
+        let result = self.process_command_batch_inner(first).await;
+        if result.is_ok() && !matches!(self.state, ClientState::Disconnected) {
+            self.flush_dynamic_entity_upserts();
+        } else {
+            self.cancel_dynamic_entity_upsert_coalescing();
+        }
+        result
+    }
+
+    async fn process_command_batch_inner(
+        &mut self,
+        mut first: Option<ClientCommand>,
+    ) -> Result<()> {
         let started = Instant::now();
         for _ in 0..COMMAND_BATCH_LIMIT {
             if matches!(self.state, ClientState::Disconnected) {
@@ -292,13 +319,14 @@ impl ClientRuntime {
                     self.publish_precise_jump_progress();
                 }
                 _ = physics_tick.tick() => {
-                    let profile = RuntimeScopeProfile::begin(RuntimeProfileScope::PhysicsTick, self.runtime_profile.as_ref());
+                    let mut profile = RuntimeScopeProfile::begin(RuntimeProfileScope::PhysicsTick, self.runtime_profile.as_ref());
                     // A ready physics deadline must not bypass all queued input. Preserve command
                     // order, but leave a backlog for later turns rather than starving simulation.
                     self.process_command_batch(None).await?;
                     if matches!(self.state, ClientState::Disconnected) {
                         break;
                     }
+                    profile.checkpoint(PhysicsTickPhase::CommandDrain);
                     let now = Instant::now();
                     let dt_duration = now.duration_since(last_physics_time);
                     last_physics_time = now;
@@ -333,7 +361,7 @@ impl ClientRuntime {
         &mut self,
         now: Instant,
         dt_duration: Duration,
-        profile: RuntimeScopeProfile,
+        mut profile: RuntimeScopeProfile,
         #[cfg(feature = "runtime-fixture")] fixture_content_wait: Option<&mut Duration>,
     ) -> Result<()> {
         self.advance_equipment_change(now).await?;
@@ -377,6 +405,7 @@ impl ClientRuntime {
                     .send(ClientViewEvent::CharacterMotionFeedback(feedback));
             }
         }
+        profile.checkpoint(PhysicsTickPhase::PreTick);
 
         let scene_snapshot = self
             .collision_coordinator
@@ -390,6 +419,7 @@ impl ClientRuntime {
         for event in physics_events {
             self.handle_runtime_world_event(&event);
         }
+        profile.checkpoint(PhysicsTickPhase::WorldTick);
 
         if let Some(coordinator) = self.collision_coordinator.as_mut() {
             let mut collision_events = coordinator.observe(&mut self.world);
@@ -409,6 +439,7 @@ impl ClientRuntime {
                 self.handle_runtime_world_event(&event);
             }
         }
+        profile.checkpoint(PhysicsTickPhase::CollisionCoordinator);
 
         self.publish_precise_jump_progress();
 
@@ -418,14 +449,16 @@ impl ClientRuntime {
         self.advance_equipment_set(now).await?;
         self.advance_inventory_operation(now).await?;
         let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
-
-        let before_dynamic = active_world.then(|| self.capture_dynamic_entity_tick_baseline());
         let collision_snapshot = self
             .collision_coordinator
             .as_ref()
             .map(super::collision::ClientCollisionCoordinator::snapshot);
         let mut body_motions = std::collections::HashMap::new();
         self.publish_social_motion_readiness();
+        profile.checkpoint(PhysicsTickPhase::PreTick);
+
+        let before_dynamic = active_world.then(|| self.capture_dynamic_entity_tick_cursor());
+        profile.checkpoint(PhysicsTickPhase::DynamicEntityDiff);
 
         if active_world {
             let prepared_precise_jump = match self
@@ -452,6 +485,7 @@ impl ClientRuntime {
             .inspect_err(|_| {
                 self.set_exit_cause(ClientExitCause::RuntimeFailure);
             })?;
+            profile.checkpoint(PhysicsTickPhase::Simulation);
 
             for feedback in self
                 .movement
@@ -529,19 +563,20 @@ impl ClientRuntime {
             self.advance_appraisals(now).await?;
         }
         self.publish_character_motion_capabilities_if_changed();
+        profile.checkpoint(PhysicsTickPhase::PostSimulation);
 
-        let dynamic_batch = if let Some(before_dynamic) =
-            before_dynamic.filter(|before| !before.views.is_empty())
-        {
-            self.dynamic_entity_tick_batch(
-                before_dynamic,
-                || self.dynamic_entity_host_time(),
-                dt_duration.as_secs_f64() * 1_000.0,
-                &body_motions,
-            )?
-        } else {
-            None
-        };
+        let dynamic_batch =
+            if let Some(before_dynamic) = before_dynamic.filter(|before| before.has_entities) {
+                self.dynamic_entity_tick_batch(
+                    before_dynamic,
+                    || self.dynamic_entity_host_time(),
+                    dt_duration.as_secs_f64() * 1_000.0,
+                    &body_motions,
+                )?
+            } else {
+                None
+            };
+        profile.checkpoint(PhysicsTickPhase::DynamicEntityDiff);
 
         let camera_input = (active_world && self.camera.identity().is_some()).then(|| {
             camera::ClientCameraSceneInput::capture(
@@ -554,6 +589,7 @@ impl ClientRuntime {
             Some(input) => self.camera.advance_world(&input, dt_duration)?,
             None => None,
         };
+        profile.checkpoint(PhysicsTickPhase::Camera);
 
         if dynamic_batch.is_some() || camera.is_some() {
             let _ = self
@@ -563,6 +599,7 @@ impl ClientRuntime {
                     camera,
                 });
         }
+        profile.checkpoint(PhysicsTickPhase::PostSimulation);
 
         profile.finish(format_args!(
             "interval_ms={:.3} entities={} advanced_bodies={}",
@@ -823,5 +860,107 @@ mod tests {
                     .contains("Malformed server lifecycle reply")
             );
         }
+    }
+
+    #[tokio::test]
+    async fn process_network_batch_coalesces_burst_upserts_and_cancels_on_removal() {
+        use crate::{ClientViewEvent, DynamicEntityEvent};
+        use holtburger_common::Guid;
+        use holtburger_common::position::WorldPosition;
+        use holtburger_common::properties::{
+            PropertyDataId, PropertyInt, WorldObjectPropertyAccessorsMut as _,
+        };
+        use holtburger_protocol::messages::GameMessage;
+        use holtburger_protocol::messages::object::messages::properties::{
+            PickupEventData, UpdatePropertyInt,
+        };
+        use holtburger_protocol::traits::ProtocolPack as _;
+        use holtburger_world::entity::Entity;
+
+        fn pack_message(message: GameMessage) -> SessionEvent {
+            let mut bytes = Vec::new();
+            message.pack(&mut bytes);
+            SessionEvent::Message(bytes)
+        }
+
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let player_guid = Guid(0x5000_0001);
+        let target_guid = Guid(0x7000_0042);
+        let pose = WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            ..WorldPosition::default()
+        };
+        client
+            .world
+            .seed_local_player_entity(player_guid, "Player", pose);
+        let mut target = Entity::new(target_guid, "Drudge".to_owned(), pose);
+        target.wcid = Some(42);
+        target.set_did_prop(PropertyDataId::Setup, Guid(0x0200_0001));
+        client.world.add_entity(target);
+        let _ = client.world.tick(None);
+
+        let mut events = client.subscribe_client_view_events();
+
+        // Burst of 3 updates in one batch coalesces into a single Upserted with final state.
+        let burst = [1_i32, 2, 3]
+            .into_iter()
+            .enumerate()
+            .map(|(index, pk)| {
+                pack_message(GameMessage::PublicUpdatePropertyInt(Box::new(
+                    UpdatePropertyInt {
+                        sequence: index as u8 + 1,
+                        guid: target_guid,
+                        property: PropertyInt::PlayerKillerStatus as u32,
+                        value: pk,
+                    },
+                )))
+            })
+            .collect();
+        client.process_network_batch(Ok(burst)).await.unwrap();
+
+        let mut batch_one_events = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::DynamicEntity(dynamic) = event {
+                batch_one_events.push(dynamic);
+            }
+        }
+        assert_eq!(batch_one_events.len(), 1);
+        assert!(matches!(
+            batch_one_events[0],
+            DynamicEntityEvent::Upserted { ref entity } if entity.identity.guid == target_guid
+        ));
+
+        // Upsert followed by scene-unresolve removal in the same batch cancels the pending upsert.
+        let cancel_burst = vec![
+            pack_message(GameMessage::PublicUpdatePropertyInt(Box::new(
+                UpdatePropertyInt {
+                    sequence: 4,
+                    guid: target_guid,
+                    property: PropertyInt::PlayerKillerStatus as u32,
+                    value: 4,
+                },
+            ))),
+            pack_message(GameMessage::PickupEvent(Box::new(PickupEventData {
+                guid: target_guid,
+                instance_sequence: 0,
+                position_sequence: 1,
+            }))),
+        ];
+        client
+            .process_network_batch(Ok(cancel_burst))
+            .await
+            .unwrap();
+
+        let mut batch_two_events = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::DynamicEntity(dynamic) = event {
+                batch_two_events.push(dynamic);
+            }
+        }
+        assert_eq!(batch_two_events.len(), 1);
+        assert!(matches!(
+            batch_two_events[0],
+            DynamicEntityEvent::Removed { guid, .. } if guid == target_guid
+        ));
     }
 }

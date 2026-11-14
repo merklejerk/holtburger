@@ -2,12 +2,7 @@
 
 use super::entity_visual_facts::{EntityVisualFactsError, entity_visual_facts};
 use super::simulation::ClientBodyMotion;
-use anyhow::Context;
-use std::sync::Arc;
-
-use crate::dynamic_entity_view::{DynamicEntityRuntimeProjection, project_dynamic_entity_runtime};
-use holtburger_content::MotionSequenceCatalog;
-use holtburger_world::entity::EntityMutationBoundary;
+use std::collections::BTreeSet;
 
 use holtburger_common::Guid;
 use holtburger_common::properties::{
@@ -16,7 +11,7 @@ use holtburger_common::properties::{
 };
 use holtburger_world::{
     EntityPlacement, PhysicalBodyParticipation, ResolvedScenePlacement, ScenePlacementError,
-    WorldState,
+    WorldObservationChanges, WorldObservationCursor, WorldState,
 };
 use thiserror::Error;
 
@@ -147,73 +142,11 @@ fn client_entity_placement(
     }))
 }
 
-/// Facts that advance without rewriting the retained entity description.
-fn project_client_entity_runtime(
-    world: &WorldState,
-    guid: Guid,
-) -> Result<Option<DynamicEntityRuntimeProjection>, ClientDynamicEntityViewError> {
-    let scene_placement = world.resolve_scene_placement(guid)?;
-    if matches!(scene_placement, ResolvedScenePlacement::Unresolved(_)) {
-        return Ok(None);
-    }
-    Ok(Some(project_dynamic_entity_runtime(
-        client_entity_placement(world, guid, scene_placement)?,
-        world.motion_runtimes.motion_playback(guid),
-    )))
-}
-
-/// One authority-owned tick boundary, including the validity scope of its captured metadata.
+/// Lightweight authority-owned cursor sampling world observation revisions before simulation.
 #[derive(Clone)]
-pub(super) struct DynamicEntityTickBaseline {
-    /// Full views still define the comparison boundary and accepted-path origins.
-    pub(super) views: Vec<crate::DynamicEntityView>,
-    /// Proof scope for reusing fields that do not advance in the scene or playback runtime.
-    metadata: DynamicEntityMetadataBoundary,
-}
-
-/// World-owned mutation evidence and the immutable motion catalog sampled together.
-#[derive(Clone)]
-struct DynamicEntityMetadataBoundary {
-    /// Entity changes must remain observable until the after boundary.
-    entities: EntityMutationBoundary,
-    /// Held immutable handle detects replacement and copy-on-write motion-catalog changes.
-    motion_sequences: Arc<MotionSequenceCatalog>,
-}
-
-impl DynamicEntityMetadataBoundary {
-    fn capture(world: &WorldState) -> Self {
-        Self {
-            entities: world.entities.mutation_boundary(),
-            motion_sequences: Arc::clone(&world.motion_sequences),
-        }
-    }
-
-    fn motion_catalog_unchanged(&self, world: &WorldState) -> bool {
-        Arc::ptr_eq(&self.motion_sequences, &world.motion_sequences)
-    }
-
-    /// Refresh independently advancing fields, or rebuild all facts when reuse lacks proof.
-    fn project_after(
-        &self,
-        world: &WorldState,
-        previous: &crate::DynamicEntityView,
-        motion_catalog_unchanged: bool,
-        traversed: bool,
-    ) -> Result<Option<crate::DynamicEntityView>, ClientDynamicEntityViewError> {
-        let guid = previous.identity.guid;
-        if !motion_catalog_unchanged || !world.entities.unchanged_since(guid, &self.entities) {
-            return project_client_dynamic_entity(world, guid);
-        }
-        let Some(runtime) = project_client_entity_runtime(world, guid)? else {
-            return Ok(None);
-        };
-        if runtime.matches_view(previous) && !traversed {
-            return Ok(None);
-        }
-        let mut entity = previous.clone();
-        runtime.apply_to(&mut entity);
-        Ok(Some(entity))
-    }
+pub(super) struct DynamicEntityTickCursor {
+    pub(super) has_entities: bool,
+    observation: WorldObservationCursor,
 }
 
 /// Projects every currently representable client entity in stable GUID order.
@@ -262,14 +195,35 @@ impl ClientRuntime {
             .collect()
     }
 
-    pub(super) fn capture_dynamic_entity_tick_baseline(&self) -> DynamicEntityTickBaseline {
-        DynamicEntityTickBaseline {
-            views: self.current_dynamic_entity_views(),
-            metadata: DynamicEntityMetadataBoundary::capture(&self.world),
+    pub(super) fn capture_dynamic_entity_tick_cursor(&self) -> DynamicEntityTickCursor {
+        DynamicEntityTickCursor {
+            has_entities: !self.world.entities.is_empty(),
+            observation: self.world.observation_cursor(),
         }
     }
 
-    pub(super) fn emit_dynamic_entity_snapshot(&self) {
+    pub(super) fn begin_dynamic_entity_upsert_coalescing(&mut self) {
+        self.coalesced_dynamic_entity_upserts
+            .get_or_insert_with(BTreeSet::new);
+    }
+
+    pub(super) fn flush_dynamic_entity_upserts(&mut self) {
+        let Some(pending) = self.coalesced_dynamic_entity_upserts.take() else {
+            return;
+        };
+        for guid in pending {
+            self.send_dynamic_entity_upsert(guid);
+        }
+    }
+
+    pub(super) fn cancel_dynamic_entity_upsert_coalescing(&mut self) {
+        self.coalesced_dynamic_entity_upserts = None;
+    }
+
+    pub(super) fn emit_dynamic_entity_snapshot(&mut self) {
+        if let Some(pending) = self.coalesced_dynamic_entity_upserts.as_mut() {
+            pending.clear();
+        }
         let snapshot = DynamicEntitySnapshot::new(
             self.dynamic_entity_host_time(),
             self.current_dynamic_entity_views(),
@@ -281,7 +235,7 @@ impl ClientRuntime {
             ));
     }
 
-    pub(super) fn emit_dynamic_entity_upsert(&self, guid: Guid) {
+    fn send_dynamic_entity_upsert(&self, guid: Guid) {
         let entity = match project_client_dynamic_entity(&self.world, guid) {
             Ok(Some(entity)) => entity,
             Ok(None) => return,
@@ -299,7 +253,18 @@ impl ClientRuntime {
             ));
     }
 
-    pub(super) fn emit_dynamic_entity_removed(&self, guid: Guid, generation: u64) {
+    pub(super) fn emit_dynamic_entity_upsert(&mut self, guid: Guid) {
+        if let Some(pending) = self.coalesced_dynamic_entity_upserts.as_mut() {
+            pending.insert(guid);
+            return;
+        }
+        self.send_dynamic_entity_upsert(guid);
+    }
+
+    pub(super) fn emit_dynamic_entity_removed(&mut self, guid: Guid, generation: u64) {
+        if let Some(pending) = self.coalesced_dynamic_entity_upserts.as_mut() {
+            pending.remove(&guid);
+        }
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::DynamicEntity(
@@ -307,47 +272,109 @@ impl ClientRuntime {
             ));
     }
 
-    /// Builds one closed advance product from authority-owned tick boundaries.
-    ///
-    /// The runtime captures the before boundary and samples the after boundary itself. Unchanged
-    /// entity metadata may be reused only while its journal and catalog evidence remain valid.
+    /// Builds one closed advance product from authority-owned tick cursors and simulation moves.
     pub(super) fn dynamic_entity_tick_batch(
         &self,
-        before: DynamicEntityTickBaseline,
+        before: DynamicEntityTickCursor,
         host_time: impl FnOnce() -> DynamicEntityHostTime,
         duration_ms: f64,
         body_motions: &std::collections::HashMap<Guid, ClientBodyMotion>,
     ) -> anyhow::Result<Option<DynamicEntityTickBatch>> {
-        let motion_catalog_unchanged = before.metadata.motion_catalog_unchanged(&self.world);
-        let before_by_guid = before
-            .views
-            .into_iter()
-            .map(|entity| (entity.identity.guid, entity))
-            .collect::<std::collections::HashMap<_, _>>();
+        let changes = self.world.observation_changes_since(&before.observation);
+        if body_motions.is_empty() && changes == WorldObservationChanges::UpToDate {
+            return Ok(None);
+        }
+
+        // GUID -> (pose_may_have_changed, touched_in_dirty_logs)
+        let mut dirty_by_guid: std::collections::BTreeMap<Guid, (bool, bool)> =
+            std::collections::BTreeMap::new();
+        match changes {
+            WorldObservationChanges::FullResync { scene_delta } => {
+                for entity in self.world.entities.iter() {
+                    dirty_by_guid.insert(entity.guid, (false, true));
+                }
+                for &guid in body_motions.keys() {
+                    dirty_by_guid.entry(guid).or_insert((false, false));
+                }
+                if let Some(entries) = scene_delta {
+                    for entry in entries {
+                        if let Some((pose_dirty, _)) = dirty_by_guid.get_mut(&entry.guid) {
+                            *pose_dirty |= entry.pose_may_have_changed;
+                        }
+                    }
+                }
+            }
+            WorldObservationChanges::UpToDate => {
+                for &guid in body_motions.keys() {
+                    dirty_by_guid.insert(guid, (false, false));
+                }
+            }
+            WorldObservationChanges::Delta {
+                entities,
+                scene,
+                motion,
+            } => {
+                for &guid in body_motions.keys() {
+                    dirty_by_guid.entry(guid).or_insert((false, false));
+                }
+                if !entities.is_empty() {
+                    let mut mutated_guids: Vec<Guid> =
+                        entities.iter().map(|entry| entry.guid).collect();
+                    mutated_guids.sort_unstable();
+                    mutated_guids.dedup();
+                    for &guid in &mutated_guids {
+                        let slot = dirty_by_guid.entry(guid).or_insert((false, true));
+                        slot.1 = true;
+                    }
+                    // Attached descendants can change resolved placement when an ancestor mutates.
+                    // Any acyclic path through retained entities traverses at most `entities.len()` links.
+                    let max_ancestors = self.world.entities.len();
+                    for candidate in self.world.entities.iter() {
+                        let mut current = candidate.attachment().map(|link| link.parent);
+                        let mut depth = 0usize;
+                        while let Some(parent_guid) = current {
+                            if mutated_guids.binary_search(&parent_guid).is_ok() {
+                                let slot =
+                                    dirty_by_guid.entry(candidate.guid).or_insert((false, true));
+                                slot.1 = true;
+                                break;
+                            }
+                            depth += 1;
+                            if depth > max_ancestors {
+                                break;
+                            }
+                            current = self
+                                .world
+                                .entities
+                                .get(parent_guid)
+                                .and_then(|parent| parent.attachment())
+                                .map(|link| link.parent);
+                        }
+                    }
+                }
+                for entry in motion {
+                    let slot = dirty_by_guid.entry(entry.guid).or_insert((false, true));
+                    slot.1 = true;
+                }
+                for entry in scene {
+                    let slot = dirty_by_guid.entry(entry.guid).or_insert((false, true));
+                    slot.0 |= entry.pose_may_have_changed;
+                    slot.1 = true;
+                }
+            }
+        }
+
         let mut advances = Vec::new();
         let mut updates = Vec::new();
 
-        let mut guids = self
-            .world
-            .entities
-            .iter()
-            .map(|entity| entity.guid)
-            .collect::<Vec<_>>();
-        guids.sort_unstable();
-        for guid in guids {
-            let Some(previous) = before_by_guid.get(&guid) else {
-                continue;
-            };
+        for (guid, (pose_may_have_changed, in_logs)) in dirty_by_guid {
             let motion = body_motions.get(&guid);
-            let traversed = matches!(motion, Some(ClientBodyMotion::Physical(path))
-                if path.legs().iter().any(|leg| leg.end() != path.initial()));
-            let projected = before.metadata.project_after(
-                &self.world,
-                previous,
-                motion_catalog_unchanged,
-                traversed,
+            let traversed = matches!(
+                motion,
+                Some(ClientBodyMotion::Physical { path, .. })
+                    if path.legs().iter().any(|leg| leg.end() != path.initial())
             );
-            let entity = match projected {
+            let entity = match project_client_dynamic_entity(&self.world, guid) {
                 Ok(Some(entity)) => entity,
                 Ok(None) => continue,
                 Err(error) => {
@@ -355,39 +382,61 @@ impl ClientRuntime {
                     continue;
                 }
             };
-            if previous.generation != entity.generation || previous == &entity && !traversed {
-                continue;
-            }
 
-            let (
-                crate::DynamicEntityPlacementView::World {
-                    pose: previous_pose,
-                    spatial_membership: previous_membership,
-                    ..
-                },
-                crate::DynamicEntityPlacementView::World {
-                    pose: current_pose,
-                    spatial_membership: current_membership,
-                    ..
-                },
-            ) = (&previous.placement, &entity.placement)
-            else {
-                if previous.placement == entity.placement {
-                    updates.push(Box::new(entity));
+            let Some(motion) = motion else {
+                if pose_may_have_changed
+                    && matches!(
+                        entity.placement,
+                        crate::DynamicEntityPlacementView::World { .. }
+                    )
+                {
+                    anyhow::bail!(
+                        "changed entity placement has no simulation outcome: guid={:#010x}; placement={:?}",
+                        entity.identity.guid.0,
+                        entity.placement,
+                    );
                 }
+                updates.push(Box::new(entity));
                 continue;
             };
 
-            // Collision residency can refresh membership without integrating this body.
-            if previous_pose == current_pose && !traversed {
-                updates.push(Box::new(entity));
+            let crate::DynamicEntityPlacementView::World {
+                pose: current_pose,
+                spatial_membership: current_membership,
+                ..
+            } = &entity.placement
+            else {
+                continue;
+            };
+            let (previous_pose, previous_membership_world) = match motion {
+                ClientBodyMotion::Physical {
+                    previous_pose,
+                    path,
+                } => (*previous_pose, path.initial().placement()),
+                ClientBodyMotion::PoseOnly {
+                    previous_pose,
+                    previous_membership,
+                }
+                | ClientBodyMotion::CorrectionSnap {
+                    previous_pose,
+                    previous_membership,
+                } => (*previous_pose, previous_membership),
+            };
+            let previous_membership =
+                DynamicEntitySpatialMembership::from(previous_membership_world);
+
+            // Collision residency or non-pose runtime fields can change without advancing the pose.
+            if previous_pose == *current_pose && !traversed {
+                if in_logs || previous_membership != *current_membership {
+                    updates.push(Box::new(entity));
+                }
                 continue;
             }
 
             // Only pose-only movement and snaps need an endpoint approximation.
             let endpoint_path = || DynamicEntityPlacedPath {
                 initial: DynamicEntityPathPoint {
-                    pose: *previous_pose,
+                    pose: previous_pose,
                     spatial_membership: previous_membership.clone(),
                 },
                 legs: vec![DynamicEntityPathLeg {
@@ -398,28 +447,24 @@ impl ClientRuntime {
                     },
                 }],
             };
-            let (kind, path) =
-                match motion.with_context(|| format!(
-                    "changed entity placement has no simulation outcome: guid={:#010x}; previous_pose={previous_pose:?}; current_pose={current_pose:?}; previous_membership={previous_membership:?}; current_membership={current_membership:?}",
-                    entity.identity.guid.0,
-                ))? {
-                    ClientBodyMotion::Physical(path) => (
-                        DynamicEntityPlacementAdvanceKind::Integrated,
-                        DynamicEntityPlacedPath::from_motion(
-                            path,
-                            previous_pose.rotation,
-                            current_pose.rotation,
-                        )?,
-                    ),
-                    ClientBodyMotion::PoseOnly => (
-                        DynamicEntityPlacementAdvanceKind::Integrated,
-                        endpoint_path(),
-                    ),
-                    ClientBodyMotion::CorrectionSnap => (
-                        DynamicEntityPlacementAdvanceKind::CorrectionSnap,
-                        endpoint_path(),
-                    ),
-                };
+            let (kind, path) = match motion {
+                ClientBodyMotion::Physical { path, .. } => (
+                    DynamicEntityPlacementAdvanceKind::Integrated,
+                    DynamicEntityPlacedPath::from_motion(
+                        path,
+                        previous_pose.rotation,
+                        current_pose.rotation,
+                    )?,
+                ),
+                ClientBodyMotion::PoseOnly { .. } => (
+                    DynamicEntityPlacementAdvanceKind::Integrated,
+                    endpoint_path(),
+                ),
+                ClientBodyMotion::CorrectionSnap { .. } => (
+                    DynamicEntityPlacementAdvanceKind::CorrectionSnap,
+                    endpoint_path(),
+                ),
+            };
             advances.push(DynamicEntityAdvance {
                 entity: Box::new(entity),
                 kind,
@@ -1028,10 +1073,7 @@ mod tests {
             })
             .expect("unnamed entity must reach the frontend");
         assert_eq!(published.display.name, "");
-        assert_eq!(
-            client.capture_dynamic_entity_tick_baseline().views,
-            vec![*published]
-        );
+        assert_eq!(client.current_dynamic_entity_views(), vec![*published]);
     }
 
     #[test]
@@ -1238,13 +1280,7 @@ mod tests {
         client.world.add_entity(projectable_entity(guid, start));
 
         client.world.tick(None);
-        let before = client.capture_dynamic_entity_tick_baseline();
-        assert!(
-            client
-                .world
-                .entities
-                .unchanged_since(guid, &before.metadata.entities)
-        );
+        let before = client.capture_dynamic_entity_tick_cursor();
         let _ = client.world.set_local_player_runtime_pose(end);
         let missing = client
             .dynamic_entity_tick_batch(
@@ -1260,7 +1296,18 @@ mod tests {
                 before,
                 || DynamicEntityHostTime::new(12.5).expect("test host time is valid"),
                 30.0,
-                &std::collections::HashMap::from([(guid, ClientBodyMotion::PoseOnly)]),
+                &std::collections::HashMap::from([(
+                    guid,
+                    ClientBodyMotion::PoseOnly {
+                        previous_pose: start,
+                        previous_membership: client
+                            .world
+                            .scene
+                            .body_for_guid(guid)
+                            .unwrap()
+                            .spatial_membership(),
+                    },
+                )]),
             )
             .unwrap()
             .expect("changed world placement should produce one advance");
@@ -1353,9 +1400,21 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::InWorld);
         client.world.player.guid = guid;
         client.world.add_entity(projectable_entity(guid, start));
-        let before = client.capture_dynamic_entity_tick_baseline();
+        let before = client.capture_dynamic_entity_tick_cursor();
+        let previous_membership = client
+            .world
+            .scene
+            .body_for_guid(guid)
+            .unwrap()
+            .spatial_membership();
         client.world.set_local_player_runtime_pose(end);
-        let kinds = std::collections::HashMap::from([(guid, ClientBodyMotion::CorrectionSnap)]);
+        let kinds = std::collections::HashMap::from([(
+            guid,
+            ClientBodyMotion::CorrectionSnap {
+                previous_pose: start,
+                previous_membership,
+            },
+        )]);
 
         let batch = client
             .dynamic_entity_tick_batch(
@@ -1385,13 +1444,7 @@ mod tests {
         client.world.player.guid = guid;
         client.world.add_entity(projectable_entity(guid, pose));
         client.world.tick(None);
-        let before = client.capture_dynamic_entity_tick_baseline();
-        assert!(
-            client
-                .world
-                .entities
-                .unchanged_since(guid, &before.metadata.entities)
-        );
+        let before = client.capture_dynamic_entity_tick_cursor();
 
         assert!(
             client.world.scene.apply_runtime_body_contact(
@@ -1434,13 +1487,7 @@ mod tests {
                 },
             ));
             client.world.tick(None);
-            let before = client.capture_dynamic_entity_tick_baseline();
-            assert!(
-                client
-                    .world
-                    .entities
-                    .unchanged_since(guid, &before.metadata.entities)
-            );
+            let before = client.capture_dynamic_entity_tick_cursor();
             let new_level = 23;
             let entity = client.world.entities.get_mut(guid).unwrap();
             entity.set_int_prop(PropertyInt::Level, new_level);
@@ -1448,12 +1495,6 @@ mod tests {
             if consume_journal {
                 client.world.tick(None);
             }
-            assert!(
-                !client
-                    .world
-                    .entities
-                    .unchanged_since(guid, &before.metadata.entities)
-            );
             let batch = client
                 .dynamic_entity_tick_batch(
                     before,
@@ -1486,17 +1527,19 @@ mod tests {
             },
         ));
         client.world.tick(None);
-        let before = client.capture_dynamic_entity_tick_baseline();
-        let setup_did = before.views[0].presentation.content.setup_did;
+        let before = client.capture_dynamic_entity_tick_cursor();
+        let setup_did = client.current_dynamic_entity_views()[0]
+            .presentation
+            .content
+            .setup_did;
         let motion_table_did = 0x0900_0123;
-        client.world.motion_sequences = Arc::new(
+        let entity_cursor = client.world.entities.mutation_cursor();
+        client.world.set_motion_sequences(
             MotionSequenceCatalog::assemble([], [], [(setup_did, motion_table_did)]).unwrap(),
         );
-        assert!(
-            client
-                .world
-                .entities
-                .unchanged_since(guid, &before.metadata.entities)
+        assert_eq!(
+            client.world.entities.mutation_log_since(entity_cursor),
+            holtburger_world::dirty_log::GuidChanges::UpToDate
         );
         let batch = client
             .dynamic_entity_tick_batch(
@@ -1529,7 +1572,7 @@ mod tests {
             ));
         }
         client.world.tick(None);
-        let before = client.capture_dynamic_entity_tick_baseline();
+        let before = client.capture_dynamic_entity_tick_cursor();
 
         assert!(
             client

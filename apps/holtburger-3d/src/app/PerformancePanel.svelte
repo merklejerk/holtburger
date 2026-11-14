@@ -8,6 +8,10 @@
 		type RendererGpuSystem,
 	} from "../lib/game/renderer/renderer";
 	import {
+		PHYSICS_TICK_PHASES,
+		type PhysicsTickPhase,
+	} from "./native-performance";
+	import {
 		serializePerformanceReport,
 		type PerformanceReport,
 	} from "./performance-report";
@@ -48,6 +52,16 @@
 		transparencyAndEffects: "Transparency and effects",
 		presentation: "Presentation & grading",
 		other: "Other renderer work",
+	};
+	const physicsPhaseLabels: Record<PhysicsTickPhase, string> = {
+		command_drain: "Command drain",
+		pre_tick: "Pre-tick & movement input",
+		world_tick: "World state maintenance",
+		collision_coordinator: "Collision residency",
+		simulation: "Physics simulation",
+		post_simulation: "Post-simulation dispatch",
+		dynamic_entity_diff: "Dynamic view projection",
+		camera: "Camera sweep",
 	};
 	const ms = (value: number | null | undefined): string =>
 		value == null ? "—" : `${value.toFixed(2)} ms`;
@@ -268,7 +282,22 @@
 													? "Network dispatch"
 													: "Commands"}</td
 										><td>{scope.sampleCount}</td><td>{ms(scope.meanMs)}</td></tr
-									>{/each}
+									>
+									{#if scope.scope === "physics_tick"}
+										{#each PHYSICS_TICK_PHASES as phaseId (phaseId)}
+											{@const phase = native.snapshot.physicsPhases.find(
+												(entry) => entry.phase === phaseId,
+											)}
+											{#if phase}
+												<tr data-physics-phase={phase.phase}
+													><td>↳ {physicsPhaseLabels[phase.phase]}</td><td
+														>{phase.sampleCount}</td
+													><td>{ms(phase.meanMs)}</td></tr
+												>
+											{/if}
+										{/each}
+									{/if}
+								{/each}
 								<tr
 									><td>Event forwarding</td><td
 										>{native.snapshot.forwarding.sampleCount}</td

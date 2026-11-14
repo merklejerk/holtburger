@@ -311,7 +311,7 @@ fn capture_composition(
     }
     let pose = world
         .effective_motion_table_id_for_guid(guid)
-        .and_then(|table_id| world.motion_sequences.table(table_id))
+        .and_then(|table_id| world.motion_sequences().table(table_id))
         .and_then(|table| table.default_cycle())
         .filter(|cycle| !cycle.clips.is_empty())
         .map_or(ObjectPreviewPose::SetupPose, |cycle| {

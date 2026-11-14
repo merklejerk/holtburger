@@ -28,6 +28,36 @@ pub struct ServerTimeSync {
     pub local_time: std::time::Instant,
 }
 
+/// Multi-reader cursor across entity descriptions, runtime bodies, motion runtimes,
+/// local-player identity, and the active motion-sequence catalog.
+#[derive(Clone)]
+pub struct WorldObservationCursor {
+    entities: crate::dirty_log::DirtyGuidCursor,
+    scene: crate::dirty_log::DirtyGuidCursor,
+    motion: crate::dirty_log::DirtyGuidCursor,
+    player_guid: Guid,
+    motion_sequences: Arc<MotionSequenceCatalog>,
+}
+
+/// Incremental observation diff between a [`WorldObservationCursor`] and current [`WorldState`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorldObservationChanges {
+    /// None of the observed world domains changed since the cursor was captured.
+    UpToDate,
+    /// Bounded per-domain deltas since the cursor was captured.
+    Delta {
+        entities: Vec<crate::dirty_log::DirtyGuidEntry>,
+        scene: Vec<crate::dirty_log::DirtyGuidEntry>,
+        motion: Vec<crate::dirty_log::DirtyGuidEntry>,
+    },
+    /// At least one domain overflowed, reset, or switched player/catalog identity.
+    FullResync {
+        /// Scene-specific delta when available so simulation-step callers can still validate
+        /// pose-change invariants even when non-scene domains triggered a full resync.
+        scene_delta: Option<Vec<crate::dirty_log::DirtyGuidEntry>>,
+    },
+}
+
 /// The authoritative state of the game world.
 ///
 /// `WorldState` owns entity/spatial/trade/vendor state plus the invariants that tie those systems
@@ -62,7 +92,7 @@ pub struct WorldState {
     /// Immutable contract definitions used by shared tracker interpretation.
     pub contract_catalog: Arc<holtburger_content::ContractCatalog>,
     pub soul_emote_catalog: Arc<SoulEmoteCatalog>,
-    pub motion_sequences: Arc<MotionSequenceCatalog>,
+    pub(crate) motion_sequences: Arc<MotionSequenceCatalog>,
     /// Immutable setup cylinders for interaction queries without a physical-body dependency.
     pub setup_dimensions: Arc<holtburger_content::SetupDimensionCatalog>,
     /// Authored-motion playback for every entity this client simulates.
@@ -91,6 +121,8 @@ pub struct WorldState {
     /// Deferred entity messages, attachment admission and scene transition history.
     pub(crate) entity_dependencies: super::entity_dependencies::EntityDependencies,
     pub(crate) entity_lifecycle: EntityLifecycleStore,
+    pub(crate) last_visibility_fingerprint:
+        Option<super::liveness::VisibilityMaintenanceFingerprint>,
     pub(crate) self_movement_capabilities_override: Option<SelfMovementCapabilities>,
 }
 
@@ -346,6 +378,7 @@ impl WorldState {
         let scope = if previous_player == self.player.guid {
             ScenePlacementScope::ChangedEntities(mutations)
         } else {
+            self.entity_dependencies.last_reconciled_player_guid = self.player.guid;
             ScenePlacementScope::All
         };
         self.reconcile_scene_placements(&mut events, scope);
@@ -494,6 +527,7 @@ impl WorldState {
         self.world_container = super::WorldContainerState::Closed;
         self.entity_dependencies = Default::default();
         self.entity_lifecycle = Default::default();
+        self.last_visibility_fingerprint = None;
         self.self_movement_capabilities_override = None;
     }
 
@@ -531,6 +565,7 @@ impl WorldState {
             world_container: super::WorldContainerState::Closed,
             entity_dependencies: super::entity_dependencies::EntityDependencies::default(),
             entity_lifecycle: EntityLifecycleStore::default(),
+            last_visibility_fingerprint: None,
             self_movement_capabilities_override: None,
         }
     }
@@ -540,9 +575,77 @@ impl WorldState {
         Self::new(Arc::new(WorldBootstrap::synthetic()))
     }
 
-    #[cfg(any(test, feature = "test-support"))]
+    /// Returns the active motion-sequence catalog.
+    pub fn motion_sequences(&self) -> &Arc<MotionSequenceCatalog> {
+        &self.motion_sequences
+    }
+
+    /// Replaces the motion-sequence catalog and invalidates motion observation cursors.
     pub fn set_motion_sequences(&mut self, motion_sequences: MotionSequenceCatalog) {
         self.motion_sequences = Arc::new(motion_sequences);
+        self.motion_runtimes.mark_all_observations_dirty();
+    }
+
+    /// Captures a multi-domain observation cursor at the current world revisions and identities.
+    pub fn observation_cursor(&self) -> WorldObservationCursor {
+        WorldObservationCursor {
+            entities: self.entities.mutation_cursor(),
+            scene: self.scene.body_observation_cursor(),
+            motion: self.motion_runtimes.observation_cursor(),
+            player_guid: self.player.guid,
+            motion_sequences: Arc::clone(&self.motion_sequences),
+        }
+    }
+
+    /// Computes incremental observation deltas since `cursor`, or `FullResync` on lineage/overflow.
+    pub fn observation_changes_since(
+        &self,
+        cursor: &WorldObservationCursor,
+    ) -> WorldObservationChanges {
+        use crate::dirty_log::GuidChanges;
+
+        let motion_catalog_unchanged =
+            Arc::ptr_eq(&cursor.motion_sequences, &self.motion_sequences);
+        let player_unchanged = cursor.player_guid == self.player.guid;
+        let entity_changes = self.entities.mutation_log_since(cursor.entities);
+        let scene_changes = self.scene.body_observation_changes_since(cursor.scene);
+        let motion_changes = self
+            .motion_runtimes
+            .observation_changes_since(cursor.motion);
+
+        if motion_catalog_unchanged
+            && player_unchanged
+            && entity_changes == GuidChanges::UpToDate
+            && scene_changes == GuidChanges::UpToDate
+            && motion_changes == GuidChanges::UpToDate
+        {
+            return WorldObservationChanges::UpToDate;
+        }
+
+        if !motion_catalog_unchanged
+            || !player_unchanged
+            || entity_changes == GuidChanges::FullResync
+            || scene_changes == GuidChanges::FullResync
+            || motion_changes == GuidChanges::FullResync
+        {
+            let scene_delta = match scene_changes {
+                GuidChanges::Delta(entries) => Some(entries),
+                GuidChanges::UpToDate => Some(Vec::new()),
+                GuidChanges::FullResync => None,
+            };
+            return WorldObservationChanges::FullResync { scene_delta };
+        }
+
+        let unpack = |changes: GuidChanges| match changes {
+            GuidChanges::UpToDate => Vec::new(),
+            GuidChanges::Delta(entries) => entries,
+            GuidChanges::FullResync => unreachable!("handled full resync above"),
+        };
+        WorldObservationChanges::Delta {
+            entities: unpack(entity_changes),
+            scene: unpack(scene_changes),
+            motion: unpack(motion_changes),
+        }
     }
 
     pub fn current_server_time(&self) -> f64 {

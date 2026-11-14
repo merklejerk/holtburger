@@ -3,6 +3,21 @@ import type { HostTransport } from "../lib/host/host-transport";
 
 const duration = z.number().finite().nonnegative();
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
+/** Fixed `physics_tick` sub-phase vocabulary matching `holtburger-core`. */
+export const PHYSICS_TICK_PHASES = [
+	"command_drain",
+	"pre_tick",
+	"world_tick",
+	"collision_coordinator",
+	"simulation",
+	"post_simulation",
+	"dynamic_entity_diff",
+	"camera",
+] as const;
+
+export type PhysicsTickPhase = (typeof PHYSICS_TICK_PHASES)[number];
+
 /** Strict projection of the finite authority vocabulary; no arbitrary metric registry. */
 const nativeSnapshotSchema = z
 	.object({
@@ -14,6 +29,15 @@ const nativeSnapshotSchema = z
 			z
 				.object({
 					scope: z.enum(["network_batch", "command_batch", "physics_tick"]),
+					sampleCount: count.positive(),
+					meanMs: duration,
+				})
+				.strict(),
+		),
+		physicsPhases: z.array(
+			z
+				.object({
+					phase: z.enum(PHYSICS_TICK_PHASES),
 					sampleCount: count.positive(),
 					meanMs: duration,
 				})

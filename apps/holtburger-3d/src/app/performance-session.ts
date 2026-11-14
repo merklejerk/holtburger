@@ -212,7 +212,7 @@ export class PerformanceSession {
 		const presentation = runtime.getPresentationProfile();
 		const renderer = runtime.getRendererFrameDiagnostics();
 		return {
-			schemaVersion: 5,
+			schemaVersion: 6,
 			mode: this.#source.mode,
 			capture: {
 				generation: this.#generation,

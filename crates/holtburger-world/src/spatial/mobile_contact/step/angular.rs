@@ -91,14 +91,16 @@ fn advance_arc(
     remaining: &mut usize,
 ) -> Result<ControlFlow<Option<HardSphereSweepHit>>> {
     let root = body.root;
+    let radial_reach = |sphere: crate::spatial::GroundedSphere| {
+        let offset = sphere.center - root;
+        (offset - arc.axis * offset.dot(&arc.axis)).length()
+    };
+    let primary_reach = radial_reach(body.mobile.spheres.primary());
     let reach = body
         .mobile
         .spheres
         .iter()
-        .map(|sphere| {
-            let offset = sphere.center - root;
-            (offset - arc.axis * offset.dot(&arc.axis)).length()
-        })
+        .map(radial_reach)
         .fold(0.0_f32, f32::max);
     if reach <= f32::EPSILON {
         // Check axis invariance, not equal endpoints: a full turn can sweep real obstacles.
@@ -148,7 +150,9 @@ fn advance_arc(
         )?;
         body.rotation = delta.multiply(&body.rotation);
         body.contact.membership = swept.path.membership().clone();
-        if let Some(grounded) = &mut body.grounded {
+        if primary_reach > f32::EPSILON
+            && let Some(grounded) = &mut body.grounded
+        {
             grounded.ground = GroundState::Airborne;
         }
         body.motion.push(ContactMotionSegment::Rotation {

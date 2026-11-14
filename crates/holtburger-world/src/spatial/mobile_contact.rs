@@ -26,8 +26,10 @@ pub use step::{
     advance_body_contact_collection, advance_body_contacts,
 };
 pub(crate) use step::{
-    advance_body_contact_collection_without_reports, checked_recovery_destination,
-    settle_arrival_destination,
+    ContactStepScratch, SceneContactPreparation, SceneContactReportOverride,
+    advance_body_contact_collection_prepared, advance_body_contact_collection_without_reports,
+    checked_recovery_destination, settle_arrival_destination, step_sweep_target,
+    targets::HardTargets,
 };
 
 use anyhow::{Result, ensure};
@@ -354,19 +356,21 @@ impl<'a> PreparedBodyContact<'a> {
             .dynamic
             .as_ref()
             .is_none_or(|dynamic| dynamic.collision.contact_response.yields());
-        let role = if matches!(
-            physical.definition,
-            PhysicalBodyDefinition::FixedPosition { .. }
-        ) || (physical.dynamic.as_ref().is_some_and(|dynamic| {
-            dynamic.demand.integration == LocalIntegrationDemand::Excluded
-                || matches!(
-                    dynamic.collision.contact_response,
-                    super::EntityContactResponse::Character(
-                        crate::EntityIntegrationEligibility::Frozen
-                            | crate::EntityIntegrationEligibility::Static
+        let is_fixed_or_excluded_or_frozen =
+            matches!(
+                physical.definition,
+                PhysicalBodyDefinition::FixedPosition { .. }
+            ) || physical.dynamic.as_ref().is_some_and(|dynamic| {
+                dynamic.demand.integration == LocalIntegrationDemand::Excluded
+                    || matches!(
+                        dynamic.collision.contact_response,
+                        super::EntityContactResponse::Character(
+                            crate::EntityIntegrationEligibility::Frozen
+                                | crate::EntityIntegrationEligibility::Static
+                        )
                     )
-                )
-        })) {
+            });
+        let role = if is_fixed_or_excluded_or_frozen {
             PreparedContactRole::Hard
         } else {
             let pose = body.pose.reanchor_to_landblock_owner(anchor)?;
@@ -421,8 +425,10 @@ impl<'a> PreparedBodyContact<'a> {
                 }
             }
         };
-        let hard_target = matches!(role, PreparedContactRole::Hard)
-            || matches!(role, PreparedContactRole::Mover { .. }) && !yields;
+        let hard_target = physical.dynamic.as_ref().map_or_else(
+            || matches!(role, PreparedContactRole::Hard),
+            |dynamic| super::dynamic_index::is_hard_target_dynamic(physical, dynamic),
+        );
         let target = match physical.dynamic.as_ref() {
             Some(dynamic) if hard_target => PreparedContactTarget::Hard(dynamic),
             Some(dynamic)
@@ -464,16 +470,83 @@ impl ContactParticipant {
     }
 
     fn receives_response_from(&self, peer: &Self) -> bool {
-        !self
-            .filter
-            .excludes(super::PhysicalCollisionExclusions::ENTITY_RESPONSE)
-            && self.body_id != peer.body_id
-            && peer.target_demand == LocalTargetDemand::Retained
-            && self
-                .policy
-                .contact_with(peer.policy, self.player_collision, peer.player_collision)
-                == crate::EntityContactInteraction::Blocking
+        hard_response_allowed(
+            SupportParticipationFacts {
+                filter: self.filter,
+                body_id: self.body_id,
+                target_demand: self.target_demand,
+                policy: self.policy,
+                player_collision: self.player_collision,
+            },
+            SupportParticipationFacts {
+                filter: peer.filter,
+                body_id: peer.body_id,
+                target_demand: peer.target_demand,
+                policy: peer.policy,
+                player_collision: peer.player_collision,
+            },
+        )
     }
+
+    pub(super) fn accepts_hard_support_from(&self, peer: &Self) -> bool {
+        self.receives_response_from(peer) && self.membership.intersects_reached(&peer.membership)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SupportParticipationFacts {
+    filter: super::PhysicalCollisionFilter,
+    body_id: SpatialBodyId,
+    target_demand: LocalTargetDemand,
+    policy: EntityDynamicCollisionPolicy,
+    player_collision: Option<crate::PlayerCollisionStatus>,
+}
+
+fn hard_response_allowed(
+    seeker: SupportParticipationFacts,
+    peer: SupportParticipationFacts,
+) -> bool {
+    !seeker
+        .filter
+        .excludes(super::PhysicalCollisionExclusions::ENTITY_RESPONSE)
+        && seeker.body_id != peer.body_id
+        && peer.target_demand == LocalTargetDemand::Retained
+        && seeker
+            .policy
+            .contact_with(peer.policy, seeker.player_collision, peer.player_collision)
+            == crate::EntityContactInteraction::Blocking
+}
+
+/// Checks whether a settled or active `seeker` still receives blocking hard support from `peer`.
+pub(in crate::spatial) fn bodies_accept_hard_support(
+    seeker: &SpatialBody,
+    peer: &SpatialBody,
+) -> bool {
+    let (Some(seeker_phys), Some(peer_phys)) = (seeker.physical.as_ref(), peer.physical.as_ref())
+    else {
+        return false;
+    };
+    let (Some(seeker_dyn), Some(peer_dyn)) =
+        (seeker_phys.dynamic.as_ref(), peer_phys.dynamic.as_ref())
+    else {
+        return false;
+    };
+    hard_response_allowed(
+        SupportParticipationFacts {
+            filter: seeker_phys.collision_filter,
+            body_id: seeker.id,
+            target_demand: seeker_dyn.demand.target,
+            policy: seeker_dyn.collision.dynamic_collision,
+            player_collision: seeker_dyn.collision.player_collision,
+        },
+        SupportParticipationFacts {
+            filter: peer_phys.collision_filter,
+            body_id: peer.id,
+            target_demand: peer_dyn.demand.target,
+            policy: peer_dyn.collision.dynamic_collision,
+            player_collision: peer_dyn.collision.player_collision,
+        },
+    ) && seeker_dyn.placement.intersects_reached(&peer_dyn.placement)
 }
 
 fn resolve_participant_pair(

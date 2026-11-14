@@ -87,19 +87,33 @@ impl EntityLifecycleState {
 #[derive(Debug, Default)]
 pub(crate) struct EntityLifecycleStore {
     by_guid: HashMap<Guid, EntityLifecycleState>,
+    revision: u64,
 }
 
 impl EntityLifecycleStore {
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     pub fn get(&self, guid: Guid) -> Option<&EntityLifecycleState> {
         self.by_guid.get(&guid)
     }
 
+    pub fn get_mut(&mut self, guid: Guid) -> Option<&mut EntityLifecycleState> {
+        let state = self.by_guid.get_mut(&guid)?;
+        self.revision = self.revision.wrapping_add(1);
+        Some(state)
+    }
+
     pub fn get_or_default_mut(&mut self, guid: Guid) -> &mut EntityLifecycleState {
+        self.revision = self.revision.wrapping_add(1);
         self.by_guid.entry(guid).or_default()
     }
 
     pub fn clear(&mut self, guid: Guid) {
-        self.by_guid.remove(&guid);
+        if self.by_guid.remove(&guid).is_some() {
+            self.revision = self.revision.wrapping_add(1);
+        }
     }
 
     pub fn compact(&mut self, guid: Guid) {
@@ -109,12 +123,26 @@ impl EntityLifecycleStore {
             .is_some_and(EntityLifecycleState::is_empty)
         {
             self.by_guid.remove(&guid);
+            self.revision = self.revision.wrapping_add(1);
         }
     }
 
     pub fn tracked_guids(&self) -> impl Iterator<Item = Guid> + '_ {
         self.by_guid.keys().copied()
     }
+}
+
+/// Equality key capturing every external input to `VisibilitySnapshot` and prune maintenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VisibilityMaintenanceFingerprint {
+    collision_topology: Option<(u64, u64)>,
+    player_guid: Guid,
+    player_landblock: Option<Guid>,
+    entities_cursor: crate::dirty_log::DirtyGuidCursor,
+    lifecycle_revision: u64,
+    storage_revision: u64,
+    world_container_root: Option<Guid>,
+    trade_signature: Option<(u32, u64)>,
 }
 
 /// Delete disposition after applying one authoritative object description.
@@ -365,7 +393,7 @@ impl WorldState {
             return false;
         };
         let mut applies_to_instance = false;
-        if let Some(state) = self.entity_lifecycle.by_guid.get_mut(&guid) {
+        if let Some(state) = self.entity_lifecycle.get_mut(guid) {
             applies_to_instance = matches!(
                 state.delete_request,
                 Some(EntityDeleteRequest::Instance(pending)) if pending == instance_sequence
@@ -396,7 +424,7 @@ impl WorldState {
     }
 
     pub(crate) fn clear_entity_prune_request(&mut self, guid: Guid) {
-        if let Some(state) = self.entity_lifecycle.by_guid.get_mut(&guid) {
+        if let Some(state) = self.entity_lifecycle.get_mut(guid) {
             state.prune_request = None;
         }
         self.entity_lifecycle.compact(guid);
@@ -417,7 +445,7 @@ impl WorldState {
     }
 
     pub(crate) fn clear_trade_preview(&mut self, guid: Guid) {
-        if let Some(state) = self.entity_lifecycle.by_guid.get_mut(&guid) {
+        if let Some(state) = self.entity_lifecycle.get_mut(guid) {
             state.trade_preview = false;
         }
         self.entity_lifecycle.compact(guid);
@@ -430,7 +458,7 @@ impl WorldState {
     }
 
     pub(crate) fn clear_container_preview(&mut self, guid: Guid) {
-        if let Some(state) = self.entity_lifecycle.by_guid.get_mut(&guid) {
+        if let Some(state) = self.entity_lifecycle.get_mut(guid) {
             state.container_preview = false;
         }
         self.entity_lifecycle.compact(guid);
@@ -446,7 +474,7 @@ impl WorldState {
 
     /// Release one request after success, rejection, or failed send. Other requests still retain it.
     pub fn finish_inventory_transfer(&mut self, guid: Guid) {
-        let Some(state) = self.entity_lifecycle.by_guid.get_mut(&guid) else {
+        let Some(state) = self.entity_lifecycle.get_mut(guid) else {
             return;
         };
         if state.inventory_transfer_requests == 0 {
@@ -653,17 +681,74 @@ impl WorldState {
             .collect()
     }
 
+    fn visibility_maintenance_fingerprint(
+        &self,
+        collision_topology: Option<(u64, u64)>,
+    ) -> VisibilityMaintenanceFingerprint {
+        let player_landblock = self
+            .local_player_runtime_pose()
+            .filter(|pose| pose.landblock_id != Guid::NULL)
+            .map(|pose| pose.landblock_id);
+        let trade_signature = self.trade.as_ref().map(|trade| {
+            use std::hash::{Hash as _, Hasher as _};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            trade.self_side.items.hash(&mut hasher);
+            trade.partner_side.items.hash(&mut hasher);
+            (trade.revision, hasher.finish())
+        });
+        VisibilityMaintenanceFingerprint {
+            collision_topology,
+            player_guid: self.player.guid,
+            player_landblock,
+            entities_cursor: self.entities.mutation_cursor(),
+            lifecycle_revision: self.entity_lifecycle.revision(),
+            storage_revision: self.storage.revision(),
+            world_container_root: self.world_container.root(),
+            trade_signature,
+        }
+    }
+
     /// Advances lifecycle cleanup using explicit static scene coverage; absence never proves exclusion.
     pub fn tick(&mut self, collision: Option<&CollisionScene>) -> Vec<WorldEvent> {
         self.seed_scene_placements();
         let mut events = Vec::new();
         let now = self.current_server_time();
-        let visibility = VisibilitySnapshot::capture(self, collision);
-        self.invalidate_unavailable_visibility(&visibility);
+        let collision_topology = collision.map(|scene| (scene.lineage(), scene.revision()));
+        let initial_fingerprint = self.visibility_maintenance_fingerprint(collision_topology);
+        let visibility_dirty_before =
+            self.last_visibility_fingerprint.as_ref() != Some(&initial_fingerprint);
+        let mut visibility = if visibility_dirty_before {
+            let snapshot = VisibilitySnapshot::capture(self, collision);
+            self.invalidate_unavailable_visibility(&snapshot);
+            Some(snapshot)
+        } else {
+            None
+        };
+
         self.sweep_eviction_queue(now, &mut events);
         self.prepare_deferred_entity_messages(&mut events);
-        self.reconcile_scene_placements(&mut events, ScenePlacementScope::All);
-        self.maintain_entity_prune_requests(now, &visibility);
+
+        let mutations = self.entities.take_mutations();
+        let placement_scope =
+            if self.player.guid != self.entity_dependencies.last_reconciled_player_guid {
+                self.entity_dependencies.last_reconciled_player_guid = self.player.guid;
+                self.entities.clear_mutations();
+                ScenePlacementScope::All
+            } else {
+                ScenePlacementScope::ChangedEntities(mutations)
+            };
+        self.reconcile_scene_placements(&mut events, placement_scope);
+
+        let post_fingerprint = self.visibility_maintenance_fingerprint(collision_topology);
+        if visibility.is_some() || post_fingerprint != initial_fingerprint {
+            let snapshot = match visibility.take() {
+                Some(snapshot) if post_fingerprint == initial_fingerprint => snapshot,
+                _ => VisibilitySnapshot::capture(self, collision),
+            };
+            self.maintain_entity_prune_requests(now, &snapshot);
+            self.last_visibility_fingerprint =
+                Some(self.visibility_maintenance_fingerprint(collision_topology));
+        }
 
         events
     }
@@ -749,7 +834,7 @@ impl WorldState {
     }
 
     fn reconcile_pending_visual_description_for_create(&mut self, entity: &mut Entity) {
-        let Some(state) = self.entity_lifecycle.by_guid.get_mut(&entity.guid) else {
+        let Some(state) = self.entity_lifecycle.get_mut(entity.guid) else {
             return;
         };
         let Some(pending) = state.pending_visual_description.as_ref() else {

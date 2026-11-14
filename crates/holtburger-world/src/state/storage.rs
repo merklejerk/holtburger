@@ -116,9 +116,18 @@ pub(crate) struct StorageState {
     locations: BTreeMap<Guid, StorageLocation>,
     rosters: BTreeMap<Guid, RosterCoverage>,
     changed: BTreeSet<Guid>,
+    revision: u64,
 }
 
 impl StorageState {
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn bump_revision(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
     pub(crate) fn location(&self, guid: Guid) -> Option<StorageLocation> {
         self.locations.get(&guid).copied()
     }
@@ -131,6 +140,7 @@ impl StorageState {
         if let std::collections::btree_map::Entry::Vacant(entry) = self.rosters.entry(parent) {
             entry.insert(RosterCoverage::Awaiting);
             self.changed.insert(parent);
+            self.bump_revision();
         }
     }
 
@@ -228,6 +238,7 @@ impl StorageState {
             if let StorageLocation::Contained { parent, slot } = location {
                 self.shift_slots(parent, slot, false);
             }
+            self.bump_revision();
         }
     }
 
@@ -239,6 +250,7 @@ impl StorageState {
         self.locations
             .insert(guid, StorageLocation::Contained { parent, slot });
         self.establish_container(parent);
+        self.bump_revision();
     }
 
     /// Repeated property confirmation must not erase the ordered containment declaration.
@@ -266,6 +278,7 @@ impl StorageState {
         self.withdraw(guid);
         self.locations
             .insert(guid, StorageLocation::Equipped { wearer, mask });
+        self.bump_revision();
     }
 
     /// Replace direct membership. Container and focus entries share the pack index sequence.
@@ -304,6 +317,7 @@ impl StorageState {
             *index += 1;
         }
         self.rosters.insert(parent, RosterCoverage::Announced);
+        self.bump_revision();
     }
 
     /// A new player baseline cannot inherit old child rosters through matching GUIDs.
@@ -312,6 +326,7 @@ impl StorageState {
         self.changed.extend(self.rosters.keys().copied());
         self.locations.clear();
         self.rosters.clear();
+        self.bump_revision();
     }
 
     /// Actual retirement disposes direct links as well as the parent's roster.
@@ -327,6 +342,7 @@ impl StorageState {
             }
         });
         self.rosters.remove(&guid);
+        self.bump_revision();
     }
 }
 
@@ -813,5 +829,75 @@ mod message_tests {
         assert!(world.is_owned_by_player(ITEM));
         describe(&mut world, ITEM, PACK);
         assert!(world.all_player_contained_objects_exist());
+    }
+
+    #[test]
+    fn storage_revision_tracks_place_withdraw_equip_and_unhydrated_parent_withdrawal() {
+        let mut storage = StorageState::default();
+        let initial = storage.revision();
+
+        storage.place(
+            PACK,
+            PLAYER,
+            StorageSlot::from_entry(InventoryEntryKind::Container, 0),
+        );
+        let after_first_place = storage.revision();
+        assert_ne!(after_first_place, initial);
+
+        // Placing a second item into an already established container must still advance revision.
+        storage.place(
+            ITEM,
+            PLAYER,
+            StorageSlot::from_entry(InventoryEntryKind::Item, 0),
+        );
+        let after_second_place = storage.revision();
+        assert_ne!(after_second_place, after_first_place);
+
+        storage.equip(ITEM, PLAYER, Some(EquipMask::CHEST_WEAR));
+        let after_equip = storage.revision();
+        assert_ne!(after_equip, after_second_place);
+
+        storage.withdraw(ITEM);
+        let after_withdraw = storage.revision();
+        assert_ne!(after_withdraw, after_equip);
+
+        // Removing an unhydrated pack from player storage must trigger prune maintenance on its
+        // hydrated child even though `entities` itself did not mutate on the withdrawal.
+        let mut world = WorldState::synthetic();
+        world.player.guid = PLAYER;
+        let player_pose = holtburger_common::position::WorldPosition {
+            landblock_id: Guid(0x0101_ffff),
+            ..Default::default()
+        };
+        world.seed_local_player_entity(PLAYER, "Player", player_pose);
+        place(&mut world, PACK, PLAYER, InventoryEntryKind::Container);
+        place(&mut world, ITEM, PACK, InventoryEntryKind::Item);
+        let item_entity = crate::entity::Entity::new(
+            ITEM,
+            "Item".into(),
+            holtburger_common::position::WorldPosition {
+                landblock_id: Guid(0x0505_ffff),
+                ..Default::default()
+            },
+        );
+        world.upsert_entity_from_create(item_entity, &mut Vec::new());
+        world.tick(None);
+        assert!(
+            world
+                .entity_lifecycle
+                .get(ITEM)
+                .and_then(|state| state.prune_request)
+                .is_none()
+        );
+
+        world.storage.withdraw(PACK);
+        world.tick(None);
+        assert!(
+            world
+                .entity_lifecycle
+                .get(ITEM)
+                .and_then(|state| state.prune_request)
+                .is_some()
+        );
     }
 }

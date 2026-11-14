@@ -474,3 +474,34 @@ fn admitted_parent_cancels_orphan_grace_without_visibility_coverage() {
     assert!(world.entities.get(TARGET).is_some());
     assert!(world.is_entity_world_participant(TARGET));
 }
+
+#[test]
+fn quiet_ticks_preserve_due_prune_and_recompute_on_coverage_loss() {
+    let scene = scene();
+    let mut initial = world(cell_id(OWNER, LOWER), cell_id(OWNER, UPPER));
+    initial.tick(Some(&scene));
+    let armed_deadline = deadline(&initial);
+
+    // Repeated quiet ticks under identical scene coverage preserve and fire the due deadline.
+    time(&mut initial, armed_deadline - 1.0);
+    let _ = initial.tick(Some(&scene));
+    assert!(initial.entities.get(TARGET).is_some());
+    assert_eq!(deadline(&initial), armed_deadline);
+
+    time(&mut initial, armed_deadline);
+    let events = initial.tick(Some(&scene));
+    assert!(initial.entities.get(TARGET).is_none());
+    assert!(
+        events.iter().any(
+            |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == TARGET)
+        )
+    );
+
+    // Losing static scene coverage mid-countdown invalidates visibility maintenance and clears
+    // the exclusion timer.
+    let mut world_loss = world(cell_id(OWNER, LOWER), cell_id(OWNER, UPPER));
+    world_loss.tick(Some(&scene));
+    assert!(world_loss.entity_lifecycle_state(TARGET).is_some());
+    let _ = world_loss.tick(None);
+    assert!(world_loss.entity_lifecycle_state(TARGET).is_none());
+}

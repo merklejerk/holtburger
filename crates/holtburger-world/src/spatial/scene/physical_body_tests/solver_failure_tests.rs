@@ -1,5 +1,7 @@
 //! Mobile solver rejection preserves committed state and permits subsequent fresh input.
 
+use std::collections::BTreeMap;
+
 use super::*;
 use crate::spatial::bsp_query::CONTACT_EPSILON;
 use holtburger_common::position::METERS_PER_LANDBLOCK;

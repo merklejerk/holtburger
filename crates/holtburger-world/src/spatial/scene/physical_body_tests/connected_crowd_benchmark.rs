@@ -2,6 +2,8 @@
 //! Includes compliant contact and body publication; excludes authoritative samples and runtime
 //! scheduling. Re-run with the `physics-profiling` feature and the ignored benchmark test filter.
 
+use std::collections::BTreeMap;
+
 use super::*;
 
 /// Keeps the same connected workload available while the runtime collection implementation changes.
@@ -16,7 +18,7 @@ fn connected_crowd_benchmark() {
     println!(
         "scenario,run,mean_ms,p95_ms,max_ms,body_preparations,shape_queries,stationary_body_steps,player_distance,player_forward,remote_distance,max_penetration,max_speed,max_vertical_speed,max_hard_penetration"
     );
-    for scenario in ["swarm", "pinned", "tight_corner"] {
+    for scenario in ["idle_settled", "swarm", "pinned", "tight_corner"] {
         let now = Instant::now();
         let collision = flat_collision_scene();
         let source = SpatialBodyId::LocalPlayer(Guid(0x7700_0000));
@@ -85,7 +87,21 @@ fn connected_crowd_benchmark() {
                     .integration = LocalIntegrationDemand::Excluded;
             }
         }
-        let drive = if scenario == "tight_corner" {
+        if scenario == "idle_settled" {
+            // Settle all bodies once before timing idle scene ticks with zero active inputs.
+            initial
+                .advance_dynamic_entity_collection(&collision, DT, now, |_| {
+                    Ok(PhysicalBodyInput::referenced(
+                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        PhysicalReferenceInput::body(None),
+                        true,
+                    ))
+                })
+                .unwrap();
+        }
+        let drive = if scenario == "idle_settled" {
+            Vector3::zero()
+        } else if scenario == "tight_corner" {
             Vector3::new(2.0, 0.5, 0.0)
         } else {
             Vector3::new(0.0, 2.0, 0.0)
@@ -105,21 +121,29 @@ fn connected_crowd_benchmark() {
             let mut maximum_hard_penetration = 0.0_f32;
             for tick in 0..TICKS {
                 // Capture measurement inputs and force admission outside the timed solver work.
-                // All bodies are scheduled deliberately; this workload does not measure sleeping.
+                // Crowded scenarios schedule every body deliberately; `idle_settled` preserves sleep.
                 let before = scene
                     .body_store
-                    .bodies
-                    .iter()
-                    .map(|(&id, body)| (id, body.pose))
+                    .iter_bodies()
+                    .map(|body| (body.id, body.pose))
                     .collect::<BTreeMap<_, _>>();
-                for &id in before.keys() {
-                    scene.wake_dynamic_body(id);
+                if scenario != "idle_settled" {
+                    for &id in before.keys() {
+                        scene.wake_dynamic_body(id);
+                    }
                 }
                 crate::spatial::physics_work::take_physics_work();
                 let start = Instant::now();
                 let time = now + Duration::from_secs_f32((tick + 1) as f32 * DT);
                 let collection = scene
                     .advance_dynamic_entity_collection(&collision, DT, time, |body| {
+                        if scenario == "idle_settled" {
+                            return Ok(PhysicalBodyInput::referenced(
+                                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                                PhysicalReferenceInput::body(None),
+                                true,
+                            ));
+                        }
                         let requested = if body.id == source {
                             drive
                         } else if scenario == "swarm" {
@@ -136,6 +160,9 @@ fn connected_crowd_benchmark() {
                     })
                     .unwrap();
                 assert!(collection.coverage_rejections.is_empty());
+                if scenario == "idle_settled" {
+                    let _ = scene.entity_collision_snapshot().unwrap();
+                }
                 for outcome in collection.outcomes {
                     let crate::DynamicEntityBodyOutcome::Integrated(update) = outcome else {
                         panic!("crowd benchmark unexpectedly repositioned a body")
@@ -153,7 +180,7 @@ fn connected_crowd_benchmark() {
                 preparations += work.body_preparations;
                 shapes += work.shape_queries;
                 // Penetration auditing is excluded from solver/publication time.
-                let bodies = scene.body_store.bodies.values().collect::<Vec<_>>();
+                let bodies = scene.body_store.iter_bodies().collect::<Vec<_>>();
                 for (index, left) in bodies.iter().enumerate() {
                     let speed = left.retained.velocity.length();
                     assert!(speed.is_finite(), "non-finite body velocity");

@@ -471,10 +471,8 @@ fn failed_server_approach_stops_playback_and_stays_retired_until_a_new_directive
             assert_eq!(runtime.tick().offset.translation, Vector3::zero());
         }
         // Even an action rejected for missing content must not erase the terminal timeline.
-        let table = world
-            .motion_sequences
-            .table(FIXTURE_MOTION_TABLE_ID)
-            .unwrap();
+        let catalog = world.motion_sequences().clone();
+        let table = catalog.table(FIXTURE_MOTION_TABLE_ID).unwrap();
         assert_eq!(
             world.motion_runtimes.enqueue_action(
                 table,
@@ -2615,10 +2613,8 @@ fn client_directed_updates_do_not_clear_existing_locomotion() {
         .client_directed_locomotion_order(&world)
         .unwrap()
         .unwrap();
-    let table = world
-        .motion_sequences
-        .table(FIXTURE_MOTION_TABLE_ID)
-        .unwrap();
+    let catalog = world.motion_sequences().clone();
+    let table = catalog.table(FIXTURE_MOTION_TABLE_ID).unwrap();
     // This kinematic fixture has no animation assets, so use the observable manual authority as
     // the cursor sentinel. `clear_locomotion` itself is intentionally authority-agnostic.
     world.motion_runtimes.drive_manual(

@@ -217,6 +217,27 @@ impl PhysicalBodyInput {
         actuation
     }
 
+    /// Validates an incoming collision-pose override and reports whether it alters geometry.
+    pub(crate) fn preview_collision_pose_change(
+        &self,
+        dynamic: &super::physical_body::DynamicBodyRuntimeState,
+    ) -> anyhow::Result<bool> {
+        let Some(sample) = self.collision_pose else {
+            return Ok(false);
+        };
+        if dynamic.collision_poses.sample == Some(sample)
+            || dynamic
+                .collision
+                .target_geometry
+                .physics_bsp_parts
+                .is_empty()
+        {
+            return Ok(false);
+        }
+        let mut poses = dynamic.collision_poses.clone();
+        poses.apply(&dynamic.collision.target_geometry, sample)
+    }
+
     /// The complete ordinary input owns wake/settle eligibility, including authored travel.
     /// An authored sample retains its playback-driven activity even when its current offset is
     /// stationary; callers must not reconstruct a redundant driven target to keep it awake.

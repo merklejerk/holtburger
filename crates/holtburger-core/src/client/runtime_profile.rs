@@ -1,4 +1,4 @@
-//! Opt-in elapsed totals for the client authority's three independent workloads.
+//! Opt-in elapsed totals for the client authority's independent workloads and `physics_tick` phases.
 
 use std::{
     collections::BTreeMap,
@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Independent actor workloads; no per-phase or nested simulation probes are retained.
+/// Independent actor workloads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RuntimeProfileScope {
     /// Dispatch of one bounded network batch.
@@ -28,6 +28,54 @@ impl RuntimeProfileScope {
             Self::CommandBatch => "command_batch",
             Self::PhysicsTick => "physics_tick",
         }
+    }
+}
+
+/// Non-overlapping sub-phases partitioning one `RuntimeProfileScope::PhysicsTick` observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PhysicsTickPhase {
+    CommandDrain,
+    PreTick,
+    WorldTick,
+    CollisionCoordinator,
+    Simulation,
+    PostSimulation,
+    DynamicEntityDiff,
+    Camera,
+}
+
+impl PhysicsTickPhase {
+    /// Fixed variant count backing zero-allocation stack accumulation.
+    pub const COUNT: usize = 8;
+
+    /// Canonical emission order across telemetry and logs.
+    pub const ALL: [Self; Self::COUNT] = [
+        Self::CommandDrain,
+        Self::PreTick,
+        Self::WorldTick,
+        Self::CollisionCoordinator,
+        Self::Simulation,
+        Self::PostSimulation,
+        Self::DynamicEntityDiff,
+        Self::Camera,
+    ];
+
+    /// Stable vocabulary projected by diagnostic consumers.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CommandDrain => "command_drain",
+            Self::PreTick => "pre_tick",
+            Self::WorldTick => "world_tick",
+            Self::CollisionCoordinator => "collision_coordinator",
+            Self::Simulation => "simulation",
+            Self::PostSimulation => "post_simulation",
+            Self::DynamicEntityDiff => "dynamic_entity_diff",
+            Self::Camera => "camera",
+        }
+    }
+
+    const fn index(self) -> usize {
+        self as usize
     }
 }
 
@@ -51,6 +99,8 @@ pub struct RuntimeProfileSnapshot {
     pub pending_scopes: u64,
     /// One total per independent actor workload.
     pub scopes: BTreeMap<RuntimeProfileScope, RuntimeScopeTotals>,
+    /// Exhaustive sub-phase totals sharing the completed `PhysicsTick` window.
+    pub physics_phases: BTreeMap<PhysicsTickPhase, RuntimeScopeTotals>,
 }
 
 #[derive(Default)]
@@ -126,11 +176,20 @@ struct RuntimeObservation {
     handle: RuntimeProfileHandle,
     generation: u64,
     /// Completion and pending-count release publish together when this guard is consumed.
-    completed: Option<(RuntimeProfileScope, Duration)>,
+    completed: Option<(
+        RuntimeProfileScope,
+        Duration,
+        Option<[Duration; PhysicsTickPhase::COUNT]>,
+    )>,
 }
 impl RuntimeObservation {
-    fn finish(mut self, scope: RuntimeProfileScope, elapsed: Duration) {
-        self.completed = Some((scope, elapsed));
+    fn finish(
+        mut self,
+        scope: RuntimeProfileScope,
+        elapsed: Duration,
+        phase_totals: Option<[Duration; PhysicsTickPhase::COUNT]>,
+    ) {
+        self.completed = Some((scope, elapsed, phase_totals));
     }
 }
 impl Drop for RuntimeObservation {
@@ -143,10 +202,17 @@ impl Drop for RuntimeObservation {
             .expect("runtime profile lock poisoned");
         if state.recording && state.generation == self.generation {
             state.pending_scopes -= 1;
-            if let Some((scope, elapsed)) = self.completed {
+            if let Some((scope, elapsed, phase_totals)) = self.completed {
                 let aggregate = state.scopes.entry(scope).or_default();
                 aggregate.sample_count += 1;
                 aggregate.total += elapsed;
+                if let Some(phase_totals) = phase_totals {
+                    for phase in PhysicsTickPhase::ALL {
+                        let entry = state.physics_phases.entry(phase).or_default();
+                        entry.sample_count += 1;
+                        entry.total += phase_totals[phase.index()];
+                    }
+                }
             }
         }
     }
@@ -154,6 +220,8 @@ impl Drop for RuntimeObservation {
 
 struct ScopeMeasurement {
     started: Instant,
+    phase_boundary: Instant,
+    phase_totals: Option<[Duration; PhysicsTickPhase::COUNT]>,
     observation: Option<RuntimeObservation>,
 }
 
@@ -174,24 +242,60 @@ impl RuntimeScopeProfile {
         let enabled = observation.is_some() || log::log_enabled!(log::Level::Debug);
         Self {
             scope,
-            measurement: enabled.then(|| ScopeMeasurement {
-                started: Instant::now(),
-                observation,
+            measurement: enabled.then(|| {
+                let started = Instant::now();
+                ScopeMeasurement {
+                    started,
+                    phase_boundary: started,
+                    phase_totals: (scope == RuntimeProfileScope::PhysicsTick)
+                        .then_some([Duration::ZERO; PhysicsTickPhase::COUNT]),
+                    observation,
+                }
             }),
         }
     }
+
+    pub(super) fn checkpoint(&mut self, phase: PhysicsTickPhase) {
+        let Some(measured) = self.measurement.as_mut() else {
+            return;
+        };
+        let Some(totals) = measured.phase_totals.as_mut() else {
+            return;
+        };
+        let now = Instant::now();
+        totals[phase.index()] += now.duration_since(measured.phase_boundary);
+        measured.phase_boundary = now;
+    }
+
     pub(super) fn finish(self, context: fmt::Arguments<'_>) {
         if let Some(measured) = self.measurement {
             let elapsed = measured.started.elapsed();
             if let Some(observation) = measured.observation {
-                observation.finish(self.scope, elapsed);
+                observation.finish(self.scope, elapsed, measured.phase_totals);
             }
-            log::debug!(
-                "scope={} total_ms={:.3} {}",
-                self.scope.as_str(),
-                elapsed.as_secs_f64() * 1000.0,
-                context
-            );
+            if let Some(totals) = measured.phase_totals {
+                log::debug!(
+                    "scope={} total_ms={:.3} command_drain_ms={:.3} pre_tick_ms={:.3} world_tick_ms={:.3} collision_coordinator_ms={:.3} simulation_ms={:.3} post_simulation_ms={:.3} dynamic_entity_diff_ms={:.3} camera_ms={:.3} {}",
+                    self.scope.as_str(),
+                    elapsed.as_secs_f64() * 1000.0,
+                    totals[PhysicsTickPhase::CommandDrain.index()].as_secs_f64() * 1000.0,
+                    totals[PhysicsTickPhase::PreTick.index()].as_secs_f64() * 1000.0,
+                    totals[PhysicsTickPhase::WorldTick.index()].as_secs_f64() * 1000.0,
+                    totals[PhysicsTickPhase::CollisionCoordinator.index()].as_secs_f64() * 1000.0,
+                    totals[PhysicsTickPhase::Simulation.index()].as_secs_f64() * 1000.0,
+                    totals[PhysicsTickPhase::PostSimulation.index()].as_secs_f64() * 1000.0,
+                    totals[PhysicsTickPhase::DynamicEntityDiff.index()].as_secs_f64() * 1000.0,
+                    totals[PhysicsTickPhase::Camera.index()].as_secs_f64() * 1000.0,
+                    context
+                );
+            } else {
+                log::debug!(
+                    "scope={} total_ms={:.3} {}",
+                    self.scope.as_str(),
+                    elapsed.as_secs_f64() * 1000.0,
+                    context
+                );
+            }
         }
     }
 }
@@ -208,13 +312,24 @@ mod tests {
         handle.start(2).unwrap();
         old.finish(format_args!(""));
         assert!(handle.snapshot().scopes.is_empty());
-        RuntimeScopeProfile::begin(RuntimeProfileScope::PhysicsTick, Some(&handle))
-            .finish(format_args!(""));
+        assert!(handle.snapshot().physics_phases.is_empty());
+        let mut physics =
+            RuntimeScopeProfile::begin(RuntimeProfileScope::PhysicsTick, Some(&handle));
+        assert_eq!(handle.snapshot().pending_scopes, 1);
+        physics.checkpoint(PhysicsTickPhase::CommandDrain);
+        assert_eq!(handle.snapshot().pending_scopes, 1);
+        physics.checkpoint(PhysicsTickPhase::Simulation);
+        assert_eq!(handle.snapshot().pending_scopes, 1);
+        physics.finish(format_args!(""));
+        let snapshot = handle.snapshot();
         assert_eq!(
-            handle.snapshot().scopes[&RuntimeProfileScope::PhysicsTick].sample_count,
+            snapshot.scopes[&RuntimeProfileScope::PhysicsTick].sample_count,
             1
         );
-        assert_eq!(handle.snapshot().pending_scopes, 0);
+        assert_eq!(snapshot.pending_scopes, 0);
+        for phase in PhysicsTickPhase::ALL {
+            assert_eq!(snapshot.physics_phases[&phase].sample_count, 1);
+        }
         let unfinished =
             RuntimeScopeProfile::begin(RuntimeProfileScope::NetworkBatch, Some(&handle));
         assert_eq!(handle.stop().pending_scopes, 1);

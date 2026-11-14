@@ -356,10 +356,10 @@ fn hard_entity_top_support_is_stable_and_revalidated_after_removal_or_movement()
         .ground()
         .walkable_support()
         .unwrap();
-    assert_eq!(
+    assert!(matches!(
         support.source,
-        crate::spatial::SupportSource::Entity(platform)
-    );
+        crate::spatial::SupportSource::Entity(id, stamp) if id == platform && stamp != 0
+    ));
     let initial = standing.pose;
     let mut resting = scene.clone();
     for tick in 1..=30 {
@@ -512,7 +512,7 @@ fn falling_body_lands_on_hard_entity_and_reports_that_entity() {
     let landed = scene.body(rider).unwrap();
     assert_eq!(landed.contact, ContactState::Grounded);
     assert!((landed.pose.coords.z - resting.coords.z).abs() <= CONTACT_EPSILON);
-    assert_eq!(
+    assert!(matches!(
         landed
             .physical
             .as_ref()
@@ -522,8 +522,8 @@ fn falling_body_lands_on_hard_entity_and_reports_that_entity() {
             .walkable_support()
             .unwrap()
             .source,
-        crate::spatial::SupportSource::Entity(platform)
-    );
+        crate::spatial::SupportSource::Entity(id, stamp) if id == platform && stamp != 0
+    ));
     assert!(reported_platform);
 }
 
@@ -558,10 +558,10 @@ fn hard_top_requires_a_shared_reached_collision_domain() {
             .find(|update| update.body_id == rider)
             .unwrap();
         if shared {
-            assert_eq!(
+            assert!(matches!(
                 update.ground.walkable_support().unwrap().source,
-                crate::spatial::SupportSource::Entity(platform)
-            );
+                crate::spatial::SupportSource::Entity(id, _) if id == platform
+            ));
         } else {
             assert_eq!(update.ground, GroundState::Airborne);
         }
@@ -1499,6 +1499,232 @@ fn dungeon_ramp_seam_crosses_both_directions_without_unrelated_outdoor_content()
                 ground.walkable_support().unwrap().normal,
                 control_ground.walkable_support().unwrap().normal
             );
+        }
+    }
+}
+
+#[test]
+fn settled_entity_support_ignores_unrelated_entity_changes_and_wakes_on_stamp_change() {
+    let now = Instant::now();
+    let (mut scene, collision, rider, platform) = hard_top_fixture(now);
+    let bystander = SpatialBodyId::Entity(Guid(3));
+    scene.register_body(SpatialBody::new(
+        bystander,
+        pose(Vector3::new(50.0, 96.0, 0.0)),
+        now,
+    ));
+    let bystander_cfg = dynamic_definition_with_geometry(
+        grounded_definition(),
+        false,
+        fallback_target(Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+            low_point: Vector3::zero(),
+            radius: 0.5,
+            height: 1.0,
+        }))),
+        false,
+    );
+    let bystander_cfg = dynamic_configuration_with_demand(
+        bystander_cfg.definition().clone(),
+        LocalPhysicalDemand {
+            target: LocalTargetDemand::Retained,
+            integration: LocalIntegrationDemand::Excluded,
+        },
+    );
+    scene
+        .set_dynamic_physical_body(
+            bystander,
+            Some(bystander_cfg),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    let initial_rider_pose = scene.body(rider).unwrap().pose;
+
+    // First quiet collection tick confirms rider is settled on platform's initial stamp.
+    tick_collection(&mut scene, &collision, MOBILE_CONTACT_TICK_SECONDS, now);
+    let support_stamp = match scene
+        .body(rider)
+        .unwrap()
+        .physical
+        .as_ref()
+        .unwrap()
+        .response
+        .ground()
+        .walkable_support()
+        .unwrap()
+        .source
+    {
+        crate::spatial::SupportSource::Entity(id, stamp) => {
+            assert_eq!(id, platform);
+            assert_ne!(stamp, 0);
+            stamp
+        }
+        other => panic!("expected entity support, got {other:?}"),
+    };
+    assert_eq!(
+        scene
+            .body(rider)
+            .unwrap()
+            .physical
+            .as_ref()
+            .unwrap()
+            .dynamic
+            .as_ref()
+            .unwrap()
+            .activity,
+        DynamicBodyActivity::Settled
+    );
+
+    // Removing an unrelated peer triggers `peer_support_recheck_needed`, yet rider must stay
+    // asleep because `platform` kept the exact same `geometry_stamp`.
+    scene.remove_body(bystander).unwrap();
+    let quiet_tick = scene
+        .advance_dynamic_entity_collection(
+            &collision,
+            MOBILE_CONTACT_TICK_SECONDS,
+            now + Duration::from_millis(30),
+            collection_input,
+        )
+        .unwrap();
+    assert!(
+        quiet_tick
+            .outcomes
+            .iter()
+            .all(|outcome| outcome.body_id() != rider),
+        "settled rider must not wake for unrelated peer changes"
+    );
+    assert_eq!(scene.body(rider).unwrap().pose, initial_rider_pose);
+    assert!(matches!(
+        scene
+            .body(rider)
+            .unwrap()
+            .physical
+            .as_ref()
+            .unwrap()
+            .response
+            .ground()
+            .walkable_support()
+            .unwrap()
+            .source,
+        crate::spatial::SupportSource::Entity(id, stamp)
+            if id == platform && stamp == support_stamp
+    ));
+
+    // Relocating the supporting platform allocates a new `geometry_stamp`, waking the rider.
+    let mut relocated = scene.body(platform).unwrap().pose;
+    relocated.coords.x += 10.0;
+    scene
+        .relocate_dynamic_body(platform, relocated, now)
+        .unwrap();
+    let wake_tick = scene
+        .advance_dynamic_entity_collection(
+            &collision,
+            MOBILE_CONTACT_TICK_SECONDS,
+            now + Duration::from_millis(60),
+            collection_input,
+        )
+        .unwrap();
+    assert!(
+        wake_tick
+            .outcomes
+            .iter()
+            .any(|outcome| outcome.body_id() == rider)
+    );
+    assert_eq!(scene.body(rider).unwrap().contact, ContactState::Airborne);
+    assert!(scene.body(rider).unwrap().pose.coords.z < initial_rider_pose.coords.z);
+}
+
+#[test]
+fn report_prefilter_skips_inactive_pairs_and_preserves_directional_reports() {
+    let now = Instant::now();
+    let collision = flat_collision_scene();
+    let definition = grounded_definition();
+    let mover_id = SpatialBodyId::LocalPlayer(Guid(10));
+    let trigger_id = SpatialBodyId::Entity(Guid(11));
+
+    for (mover_emits, mover_accepts, trigger_emits, trigger_accepts, expected) in [
+        (false, false, false, false, None),
+        (true, false, false, true, Some((mover_id, trigger_id))),
+        (false, true, true, false, Some((trigger_id, mover_id))),
+    ] {
+        let mut mover = SpatialBody::new(mover_id, pose(Vector3::new(90.0, 96.0, 0.3)), now);
+        let (mut mover_def, mover_demand, _, _) =
+            dynamic_definition(definition, false).into_parts();
+        mover_def.entity_collision.reporting.enabled = mover_emits;
+        mover_def
+            .entity_collision
+            .dynamic_collision
+            .accepts_peer_reports = mover_accepts;
+        let mover_dyn = DynamicPhysicalBodyConfiguration::new(mover_def, mover_demand).unwrap();
+        mover.physical = Some(PhysicalBodyState::new_dynamic(
+            mover_dyn,
+            PhysicalCollisionFilter::ALL,
+            None,
+        ));
+
+        let mut trigger = SpatialBody::new(trigger_id, pose(Vector3::new(90.5, 96.0, 0.3)), now);
+        let (mut trigger_def, _, _, _) = dynamic_definition_with_geometry(
+            definition,
+            false,
+            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 0.4,
+            }))),
+            false,
+        )
+        .into_parts();
+        trigger_def.entity_collision.reporting.enabled = trigger_emits;
+        trigger_def.entity_collision.dynamic_collision.target =
+            EntityCollisionParticipation::Ethereal;
+        trigger_def
+            .entity_collision
+            .dynamic_collision
+            .accepts_peer_reports = trigger_accepts;
+        let trigger_dyn = dynamic_configuration_with_demand(
+            trigger_def,
+            LocalPhysicalDemand {
+                target: LocalTargetDemand::Retained,
+                integration: LocalIntegrationDemand::Excluded,
+            },
+        );
+        trigger.physical = Some(PhysicalBodyState::new_dynamic(
+            trigger_dyn,
+            PhysicalCollisionFilter::ALL,
+            None,
+        ));
+
+        let snapshot =
+            crate::spatial::EntityCollisionSnapshot::compile(&[mover.clone(), trigger.clone()])
+                .unwrap();
+        assert_eq!(snapshot.any_reporting_enabled(), trigger_emits);
+        assert_eq!(snapshot.any_accepts_peer_reports(), trigger_accepts);
+
+        let input = GroundedBodyActuation::drive(Vector3::new(10.0, 0.0, 0.0)).unwrap();
+        let result = crate::spatial::advance_body_contact_collection(
+            &collision,
+            &[mover, trigger],
+            Guid(0xda55_ffff),
+            MOBILE_CONTACT_TICK_SECONDS,
+            |body, ground, _| grounded_step_input(body, ground, &input),
+        )
+        .unwrap();
+
+        let matched: Vec<_> = result
+            .report_touches
+            .iter()
+            .filter_map(|touch| match touch.contact.source {
+                crate::spatial::CollisionReportSource::DynamicBody { peer, .. } => {
+                    Some((touch.contact.recipient, peer))
+                }
+                crate::spatial::CollisionReportSource::StaticEnvironment => None,
+            })
+            .collect();
+        match expected {
+            None => assert!(
+                matched.is_empty(),
+                "expected no dynamic reports, got {matched:?}"
+            ),
+            Some(pair) => assert_eq!(matched, vec![pair]),
         }
     }
 }

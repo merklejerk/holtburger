@@ -172,7 +172,8 @@ fn checked_destination(
         if let PreparedContactTarget::Hard(geometry) = contact.source.target {
             hard.push(SweepTarget {
                 contact: contact.participant,
-                shapes: placed_target_shapes(geometry, peer.pose, anchor)?,
+                geometry_stamp: 0,
+                shapes: placed_target_shapes(geometry, peer.pose, anchor)?.into(),
             });
         } else if let PreparedContactRole::Mover { body, .. } = contact.role {
             mobiles.push((contact.participant, body));

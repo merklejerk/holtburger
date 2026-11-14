@@ -41,7 +41,10 @@ impl CollisionScene {
         let cells = GlobalCellRange::from_sphere(request.anchor, request.center, request.radius);
         let mut centers = Vec::new();
         let mut containing_colliders = Vec::new();
-        for selected in self.selected_colliders(cells, request.placement) {
+        let mut collider_scratch = Vec::new();
+        for selected in
+            self.selected_colliders_with(cells, request.placement, &mut collider_scratch)
+        {
             if !selected.center_solid {
                 continue;
             }

@@ -196,8 +196,11 @@ fn support_candidates(
         sphere: request,
         probe,
     } = query;
-    for target in hard
-        .support_candidates(request.center, request.radius)?
+    let mut slot_scratch = Vec::new();
+    hard.support_candidates_into(request.center, request.radius, &mut slot_scratch)?;
+    for target in slot_scratch
+        .iter()
+        .map(|&slot| hard.resolved_slot(slot))
         .filter(|target| {
             contact.receives_response_from(&target.contact)
                 && request
@@ -205,7 +208,7 @@ fn support_candidates(
                     .intersects_reached(&target.contact.membership)
         })
     {
-        for shape in &target.shapes {
+        for shape in target.shapes.iter() {
             crate::spatial::volume_query::visit_placed_shape_supports(
                 shape,
                 request.center,
@@ -216,7 +219,10 @@ fn support_candidates(
                         normal: support.normal,
                         height_delta: support.height_delta,
                         feature: support.feature,
-                        source: SupportSource::Entity(target.contact.body_id),
+                        source: SupportSource::Entity(
+                            target.contact.body_id,
+                            target.geometry_stamp,
+                        ),
                     })
                 },
             );
@@ -480,7 +486,7 @@ pub(super) fn settle_after_movement(
             SupportSource::World(_) | SupportSource::StationaryFall(_) => {
                 crate::spatial::HardSphereSweepHit::World(contact)
             }
-            SupportSource::Entity(body_id) => crate::spatial::HardSphereSweepHit::Entity {
+            SupportSource::Entity(body_id, _) => crate::spatial::HardSphereSweepHit::Entity {
                 body_id,
                 hit: contact,
             },

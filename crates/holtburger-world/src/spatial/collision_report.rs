@@ -70,27 +70,41 @@ pub struct CollisionReportTouch {
     pub source_is_ethereal: bool,
 }
 
-/// Derives source classification once for either solver's accepted dynamic contact.
-pub(crate) fn dynamic_report_touch(
+/// Derives source classification once from flattened flags.
+pub(crate) fn dynamic_report_touch_from_flags(
     recipient: SpatialBodyId,
     peer: SpatialBodyId,
-    source: &DynamicBodyRuntimeState,
+    as_environment: bool,
+    source_is_ethereal: bool,
 ) -> CollisionReportTouch {
     CollisionReportTouch {
         contact: CollisionReportContact {
             recipient,
             source: CollisionReportSource::DynamicBody {
                 peer,
-                classification: if source.collision.reporting.as_environment {
+                classification: if as_environment {
                     CollisionReportClassification::Environment
                 } else {
                     CollisionReportClassification::Object
                 },
             },
         },
-        source_is_ethereal: source.collision.dynamic_collision.target
-            == EntityCollisionParticipation::Ethereal,
+        source_is_ethereal,
     }
+}
+
+/// Derives source classification once for either solver's accepted dynamic contact.
+pub(crate) fn dynamic_report_touch(
+    recipient: SpatialBodyId,
+    peer: SpatialBodyId,
+    source: &DynamicBodyRuntimeState,
+) -> CollisionReportTouch {
+    dynamic_report_touch_from_flags(
+        recipient,
+        peer,
+        source.collision.reporting.as_environment,
+        source.collision.dynamic_collision.target == EntityCollisionParticipation::Ethereal,
+    )
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -143,6 +157,31 @@ impl CollisionReportLifetimes {
                 },
             );
         }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.active.is_empty()
+    }
+
+    /// Refreshes active stationary contacts that still satisfy current eligibility and overlap.
+    pub(crate) fn refresh_stationary(
+        &mut self,
+        now: Instant,
+        mut still_active: impl FnMut(CollisionReportContact) -> Result<bool>,
+    ) -> Result<()> {
+        for (&contact, active) in &mut self.active {
+            ensure!(
+                now >= active.touched_at,
+                "collision-report clock moved backward for {contact:?}"
+            );
+            if active.touched_at == now {
+                continue;
+            }
+            if still_active(contact)? {
+                active.touched_at = now;
+            }
+        }
+        Ok(())
     }
 
     /// Expires untouched lifetimes after every directional body attempt in a collection epoch.

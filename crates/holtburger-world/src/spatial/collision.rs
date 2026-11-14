@@ -206,8 +206,8 @@ pub enum SupportSource {
     /// Horizontal recovery plane at a stalled body's current pose, valid only while this
     /// collision product remains installed and the body has not moved away.
     StationaryFall(CollisionOwnerProof),
-    /// Hard body to re-query in the current prepared collection, never a cached validity proof.
-    Entity(super::SpatialBodyId),
+    /// Hard body and monotonic geometry stamp validating unchanged target geometry across ticks.
+    Entity(super::SpatialBodyId, u64),
 }
 
 /// Opaque owner-scoped identity of one installed immutable collision product.
@@ -331,13 +331,17 @@ impl SpatialMembership {
     }
 
     pub(super) fn merge_reached(mut self, other: Self) -> Self {
+        self.merge_reached_ref(&other);
+        self
+    }
+
+    pub(super) fn merge_reached_ref(&mut self, other: &Self) {
         self.reaches_outdoors |= other.reaches_outdoors;
-        for cell in other.reached_env_cells {
-            if !self.reached_env_cells.contains(&cell) {
-                self.reached_env_cells.push(cell);
+        for cell in &other.reached_env_cells {
+            if !self.reached_env_cells.contains(cell) {
+                self.reached_env_cells.push(*cell);
             }
         }
-        self
     }
 
     fn reaches_interior_in(&self, owner: Guid) -> bool {
@@ -837,6 +841,18 @@ struct ColliderReference {
     collider_index: usize,
 }
 
+/// Reusable scratch buffer for resident static-collider selection during sphere sweeps.
+#[derive(Debug, Default)]
+pub(super) struct StaticSweepScratch {
+    colliders: Vec<ColliderReference>,
+}
+
+impl Clone for StaticSweepScratch {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
 /// One selected static collider and the retail BSP leaf policy for this spatial membership.
 #[derive(Debug, Clone, Copy)]
 struct SelectedCollider<'a> {
@@ -1100,27 +1116,66 @@ impl StaticSceneIndex {
         }
     }
 
+    #[cfg(test)]
     fn selected_colliders(
         &self,
         query_cells: GlobalCellRange,
         placement: &SpatialMembership,
     ) -> Vec<ColliderReference> {
-        let mut selected = Vec::new();
+        let mut scratch = Vec::new();
+        self.select_colliders(query_cells, placement, &mut scratch)
+            .to_vec()
+    }
+
+    /// Returns the deduplicated collider references touching `query_cells` / `placement`,
+    /// borrowing single-cell slices directly without heap allocation and only merging into
+    /// `scratch` when multiple distinct cell lists overlap.
+    fn select_colliders<'a>(
+        &'a self,
+        query_cells: GlobalCellRange,
+        placement: &'a SpatialMembership,
+        scratch: &'a mut Vec<ColliderReference>,
+    ) -> &'a [ColliderReference] {
+        let mut single: Option<&[ColliderReference]> = None;
+        let mut merged = false;
+        let mut accept = |list: &'a [ColliderReference]| {
+            if list.is_empty() {
+                return;
+            }
+            if merged {
+                scratch.extend_from_slice(list);
+                return;
+            }
+            match single {
+                None => single = Some(list),
+                Some(first) => {
+                    scratch.clear();
+                    scratch.reserve(first.len() + list.len());
+                    scratch.extend_from_slice(first);
+                    scratch.extend_from_slice(list);
+                    merged = true;
+                }
+            }
+        };
         if placement.reaches_outdoors {
             for cell in query_cells.cells() {
                 if let Some(colliders) = self.outdoor_cells.get(&cell) {
-                    selected.extend(colliders.iter().copied());
+                    accept(colliders.as_slice());
                 }
             }
         }
         for cell in &placement.reached_env_cells {
             if let Some(colliders) = self.interior_colliders.get(cell) {
-                selected.extend(colliders.iter().copied());
+                accept(colliders.as_slice());
             }
         }
-        selected.sort_unstable();
-        selected.dedup();
-        selected
+        if merged {
+            scratch.sort_unstable();
+            scratch.dedup();
+            scratch.as_slice()
+        } else {
+            single.unwrap_or(&[])
+        }
     }
 }
 
@@ -1155,6 +1210,8 @@ pub struct CollisionScene {
     static_index: StaticSceneIndex,
     /// Snapshot-owned portal count bounds traversal without rescanning resident cells per segment.
     motion_transition_limit: usize,
+    /// Monotonic topology revision bumped on every resident landblock insertion or eviction.
+    topology_revision: u64,
 }
 
 impl Default for CollisionScene {
@@ -1168,6 +1225,7 @@ impl Default for CollisionScene {
             next_owner_revision: 0,
             static_index: StaticSceneIndex::default(),
             motion_transition_limit: 1,
+            topology_revision: 0,
         }
     }
 }
@@ -1176,6 +1234,16 @@ impl CollisionScene {
     /// Creates an empty scene.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Unique instance lineage distinguishing independent scene stores at equal numerical revisions.
+    pub fn lineage(&self) -> u64 {
+        self.lineage
+    }
+
+    /// Monotonic topology revision bumped whenever resident collision assets change.
+    pub fn revision(&self) -> u64 {
+        self.topology_revision
     }
 
     /// Atomically inserts or replaces all collision facts owned by an artifact.
@@ -1215,6 +1283,7 @@ impl CollisionScene {
                 next_owner_revision: self.next_owner_revision,
                 static_index: self.static_index.clone(),
                 motion_transition_limit: self.motion_transition_limit,
+                topology_revision: self.topology_revision,
             });
         }
 
@@ -1268,6 +1337,10 @@ impl CollisionScene {
             next_owner_revision,
             static_index,
             motion_transition_limit,
+            topology_revision: self
+                .topology_revision
+                .checked_add(1)
+                .expect("collision topology revision exhausted"),
         })
     }
 
@@ -1456,7 +1529,10 @@ impl CollisionScene {
             request.sweep.end,
             request.sweep.radius,
         );
-        for selected in self.selected_colliders(query_cells, request.placement) {
+        let mut collider_scratch = Vec::new();
+        for selected in
+            self.selected_colliders_with(query_cells, request.placement, &mut collider_scratch)
+        {
             let reference = selected.reference;
             let collider = selected.collider;
             let local_center =
@@ -1685,7 +1761,10 @@ impl CollisionScene {
         }
         let query_cells =
             GlobalCellRange::from_sphere(request.anchor, request.center, request.radius);
-        for selected in self.selected_colliders(query_cells, request.placement) {
+        let mut collider_scratch = Vec::new();
+        for selected in
+            self.selected_colliders_with(query_cells, request.placement, &mut collider_scratch)
+        {
             let reference = selected.reference;
             let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
             // One contract mapping for every shape's supports.
@@ -1841,9 +1920,8 @@ impl CollisionScene {
         validate_sweep_radius(sweep, allow_zero_radius)?;
         let touched = touched_landblocks(sweep);
         let value = self.transit_cell_installed(request, &touched);
-        let required = required_query_owners(&touched, &value);
         Ok(UncoveredCollisionQuery {
-            unavailable_owner: self.first_unavailable_owner(&required),
+            unavailable_owner: self.first_unavailable_query_owner(&touched, &value),
             value,
         })
     }
@@ -1933,11 +2011,33 @@ impl CollisionScene {
         })
     }
 
-    fn first_unavailable_owner(&self, owners: &[Guid]) -> Option<Guid> {
-        owners
-            .iter()
-            .copied()
-            .find(|owner| !self.landblocks.contains_key(owner))
+    fn has_outdoor_entrance(&self, range: GlobalCellRange) -> bool {
+        !self.static_index.outdoor_entrances.is_empty()
+            && range
+                .cells()
+                .any(|cell| self.static_index.outdoor_entrances.contains_key(&cell))
+    }
+
+    fn first_unavailable_query_owner(
+        &self,
+        touched: &[Guid],
+        placement: &SpatialMembership,
+    ) -> Option<Guid> {
+        let outdoor = if placement.reaches_outdoors {
+            touched.iter().copied()
+        } else {
+            [].iter().copied()
+        };
+        outdoor
+            .chain(
+                placement
+                    .reached_env_cells
+                    .iter()
+                    .copied()
+                    .map(landblock_key),
+            )
+            .filter(|owner| !self.landblocks.contains_key(owner))
+            .min()
     }
 
     fn require_query_coverage(
@@ -1945,8 +2045,7 @@ impl CollisionScene {
         touched: &[Guid],
         placement: &SpatialMembership,
     ) -> Result<(), CollisionQueryError> {
-        let required = required_query_owners(touched, placement);
-        if let Some(owner) = self.first_unavailable_owner(&required) {
+        if let Some(owner) = self.first_unavailable_query_owner(touched, placement) {
             return Err(CollisionQueryError::UnavailableOwner { owner: owner.0 });
         }
         Ok(())
@@ -1959,8 +2058,7 @@ impl CollisionScene {
         placement: &SpatialMembership,
         value: T,
     ) -> Result<UncoveredCollisionQuery<T>, CollisionQueryError> {
-        let required = required_query_owners(touched, placement);
-        let unavailable_owner = self.first_unavailable_owner(&required);
+        let unavailable_owner = self.first_unavailable_query_owner(touched, placement);
         if policy == CollisionQueryPolicy::RequireCollisionCoverage
             && let Some(owner) = unavailable_owner
         {
@@ -2144,6 +2242,11 @@ impl CollisionScene {
         sweep: SphereSweep,
         previous_cell: Option<Guid>,
     ) -> Result<SpatialMembership, CollisionQueryError> {
+        if previous_cell.is_none()
+            && !self.has_outdoor_entrance(static_sphere_sweep::swept_query_cells(sweep))
+        {
+            return Ok(SpatialMembership::outdoor());
+        }
         let (placement, recovery) = self.infer_placement_from_cell(
             sweep.anchor,
             sweep.start,
@@ -2633,7 +2736,10 @@ impl CollisionScene {
         }
         let query_cells =
             GlobalCellRange::from_sphere(request.anchor, request.center, request.radius);
-        for selected in self.selected_colliders(query_cells, request.placement) {
+        let mut collider_scratch = Vec::new();
+        for selected in
+            self.selected_colliders_with(query_cells, request.placement, &mut collider_scratch)
+        {
             let reference = selected.reference;
             let collider = selected.collider;
             let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
@@ -2751,15 +2857,17 @@ impl CollisionScene {
         contacts
     }
 
-    fn selected_colliders<'a>(
+    fn selected_colliders_with<'a>(
         &'a self,
         query_cells: GlobalCellRange,
         placement: &'a SpatialMembership,
+        scratch: &'a mut Vec<ColliderReference>,
     ) -> impl Iterator<Item = SelectedCollider<'a>> + 'a {
         // Shadow selection owns ordering/deduplication; stream geometry without another buffer.
         self.static_index
-            .selected_colliders(query_cells, placement)
-            .into_iter()
+            .select_colliders(query_cells, placement, scratch)
+            .iter()
+            .copied()
             .map(move |reference| {
                 let product = &self.landblocks[&reference.owner];
                 let collider = &product.asset.static_geometry.colliders[reference.collider_index];
@@ -3414,7 +3522,83 @@ fn validate_probe(
     Ok(())
 }
 
-fn touched_landblocks(request: SphereSweep) -> Vec<Guid> {
+/// Outdoor landblock IDs touched by one extent, kept on the stack for ordinary sweeps.
+#[derive(Debug, Clone)]
+pub(super) enum TouchedLandblocks {
+    Inline { items: [Guid; 4], len: u8 },
+    Heap(Vec<Guid>),
+}
+
+impl std::ops::Deref for TouchedLandblocks {
+    type Target = [Guid];
+
+    fn deref(&self) -> &[Guid] {
+        match self {
+            Self::Inline { items, len } => &items[..usize::from(*len)],
+            Self::Heap(items) => items,
+        }
+    }
+}
+
+impl AsRef<[Guid]> for TouchedLandblocks {
+    fn as_ref(&self) -> &[Guid] {
+        self
+    }
+}
+
+pub(super) enum TouchedLandblocksIntoIter {
+    Inline {
+        items: [Guid; 4],
+        index: u8,
+        len: u8,
+    },
+    Heap(std::vec::IntoIter<Guid>),
+}
+
+impl Iterator for TouchedLandblocksIntoIter {
+    type Item = Guid;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Inline { items, index, len } => {
+                if *index >= *len {
+                    return None;
+                }
+                let item = items[usize::from(*index)];
+                *index += 1;
+                Some(item)
+            }
+            Self::Heap(iter) => iter.next(),
+        }
+    }
+}
+
+impl IntoIterator for TouchedLandblocks {
+    type Item = Guid;
+    type IntoIter = TouchedLandblocksIntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            Self::Inline { items, len } => Self::IntoIter::Inline {
+                items,
+                index: 0,
+                len,
+            },
+            Self::Heap(items) => Self::IntoIter::Heap(items.into_iter()),
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a TouchedLandblocks {
+    type Item = &'a Guid;
+    type IntoIter = std::slice::Iter<'a, Guid>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+fn touched_landblocks(request: SphereSweep) -> TouchedLandblocks {
     let minimum = Vector3::new(
         request.start.x.min(request.end.x) - request.radius,
         request.start.y.min(request.end.y) - request.radius,
@@ -3429,7 +3613,11 @@ fn touched_landblocks(request: SphereSweep) -> Vec<Guid> {
 }
 
 /// Returns valid outdoor owners touched by one axis-aligned extent in the anchor frame.
-fn touched_landblocks_for_extent(anchor: Guid, minimum: Vector3, maximum: Vector3) -> Vec<Guid> {
+fn touched_landblocks_for_extent(
+    anchor: Guid,
+    minimum: Vector3,
+    maximum: Vector3,
+) -> TouchedLandblocks {
     let anchor = landblock_key(anchor);
     let anchor_x = i64::from((anchor.0 >> 24) & 0xff);
     let anchor_y = i64::from((anchor.0 >> 16) & 0xff);
@@ -3443,33 +3631,32 @@ fn touched_landblocks_for_extent(anchor: Guid, minimum: Vector3, maximum: Vector
     let last_x = max_x.min(maximum_axis);
     let last_y = max_y.min(maximum_axis);
     if first_x > last_x || first_y > last_y {
-        return Vec::new();
+        return TouchedLandblocks::Inline {
+            items: [Guid(0); 4],
+            len: 0,
+        };
     }
-    let mut touched = Vec::new();
+    let width = (last_x - first_x + 1) as u64;
+    let height = (last_y - first_y + 1) as u64;
+    let count = width.saturating_mul(height);
+    if count <= 4 {
+        let mut items = [Guid(0); 4];
+        let mut len = 0_u8;
+        for x in first_x..=last_x {
+            for y in first_y..=last_y {
+                items[usize::from(len)] = Guid(((x as u32) << 24) | ((y as u32) << 16) | 0xffff);
+                len += 1;
+            }
+        }
+        return TouchedLandblocks::Inline { items, len };
+    }
+    let mut touched = Vec::with_capacity(usize::try_from(count).unwrap_or(0));
     for x in first_x..=last_x {
         for y in first_y..=last_y {
             touched.push(Guid(((x as u32) << 24) | ((y as u32) << 16) | 0xffff));
         }
     }
-    touched
-}
-
-fn required_query_owners(touched: &[Guid], placement: &SpatialMembership) -> Vec<Guid> {
-    let mut required = if placement.reaches_outdoors {
-        touched.to_vec()
-    } else {
-        Vec::new()
-    };
-    required.extend(
-        placement
-            .reached_env_cells
-            .iter()
-            .copied()
-            .map(landblock_key),
-    );
-    required.sort_unstable();
-    required.dedup();
-    required
+    TouchedLandblocks::Heap(touched)
 }
 
 pub(super) fn landblock_key(landblock_id: Guid) -> Guid {
@@ -6268,9 +6455,10 @@ mod tests {
                 .selected_colliders(owner_cells(owner), &straddling),
             references([0, 1, 2, 3])
         );
+        let mut scratch = Vec::new();
         assert_eq!(
             scene
-                .selected_colliders(owner_cells(owner), &straddling)
+                .selected_colliders_with(owner_cells(owner), &straddling, &mut scratch)
                 .map(|selected| (selected.reference, selected.center_solid))
                 .collect::<Vec<_>>(),
             references([0, 1, 2, 3])

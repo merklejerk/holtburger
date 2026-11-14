@@ -14,6 +14,16 @@ const response = {
 			meanMs: 3,
 		},
 	],
+	physicsPhases: [
+		{ phase: "command_drain", sampleCount: 2, meanMs: 0.1 },
+		{ phase: "pre_tick", sampleCount: 2, meanMs: 0.2 },
+		{ phase: "world_tick", sampleCount: 2, meanMs: 0.3 },
+		{ phase: "collision_coordinator", sampleCount: 2, meanMs: 0.4 },
+		{ phase: "simulation", sampleCount: 2, meanMs: 1.5 },
+		{ phase: "post_simulation", sampleCount: 2, meanMs: 0.2 },
+		{ phase: "dynamic_entity_diff", sampleCount: 2, meanMs: 0.2 },
+		{ phase: "camera", sampleCount: 2, meanMs: 0.1 },
+	],
 	forwarding: { sampleCount: 2, meanMs: 1 },
 };
 function build(payload: unknown) {

@@ -7,19 +7,16 @@ use holtburger_content::{
     CellCollisionPortalTarget, CollisionPolygon, CollisionShape, PlacedCollisionShape,
     TerrainCollisionSurfaceKind,
 };
-use parry3d::math::{Pose, Vector as ParryVector};
-use parry3d::query::{PointQuery, ShapeCastOptions, cast_shapes};
-use parry3d::shape::{Ball, Cylinder, Triangle};
 
 use crate::spatial::{SpatialBodyId, volume_query::placed_volume_sweep_contact};
 
 use super::{
     CELL_PLANE_TOLERANCE, ColliderReference, CollisionQueryError, CollisionQueryPolicy,
     CollisionScene, GlobalCellRange, MotionWaypoint, MotionWaypointPlacement,
-    PhysicalCollisionExclusions, PhysicalCollisionFilter, PlacedMotionPath,
-    PlacedMotionPathRequest, SpatialMembership, SphereSweep, UncoveredCollisionQuery,
-    anchor_to_landblock, landblock_key, overlapped_terrain_cells, point_between_landblocks,
-    touched_landblocks, validate_sweep,
+    PhysicalCollisionExclusions, PhysicalCollisionFilter, PlacedMotionLeg, PlacedMotionPath,
+    PlacedMotionPathRequest, PlacedMotionPoint, SpatialMembership, SphereSweep, StaticSweepScratch,
+    UncoveredCollisionQuery, anchor_to_landblock, landblock_key, overlapped_terrain_cells,
+    point_between_landblocks, touched_landblocks, validate_sweep, validate_sweep_radius,
 };
 
 /// One continuous sphere displacement against resident static collision geometry.
@@ -107,6 +104,8 @@ pub(crate) struct PreparedHardSphereSweep {
     request: StaticSphereSweepRequest,
     /// Earliest resident blocker in original request fractions.
     pub(crate) hit: Option<HardSphereSweepHit>,
+    /// True when the full candidate sweep is outdoor with zero outdoor entrances in its cell range.
+    pure_outdoor: bool,
 }
 
 /// Resident static candidates and the domains used to select hard-entity candidates.
@@ -115,6 +114,8 @@ pub(super) struct StaticSphereTrace {
     pub(super) hit: Option<StaticSphereSweepHit>,
     /// Candidate domains used when admitting hard-entity geometry.
     membership: SpatialMembership,
+    /// True when the full candidate sweep has no previous cell or outdoor entrances.
+    pure_outdoor: bool,
 }
 
 impl CollisionScene {
@@ -142,10 +143,24 @@ impl CollisionScene {
         request: StaticSphereSweepRequest,
         entities: impl IntoIterator<Item = HardEntityShape<'a>>,
     ) -> Result<PreparedHardSphereSweep, CollisionQueryError> {
-        let traced = self.trace_static_sphere(request)?;
+        let mut scratch = StaticSweepScratch::default();
+        self.prepare_hard_sphere_with_scratch(request, entities, &mut scratch)
+    }
+
+    pub(in crate::spatial) fn prepare_hard_sphere_with_scratch<'a>(
+        &self,
+        request: StaticSphereSweepRequest,
+        entities: impl IntoIterator<Item = HardEntityShape<'a>>,
+        scratch: &mut StaticSweepScratch,
+    ) -> Result<PreparedHardSphereSweep, CollisionQueryError> {
+        let traced = self.trace_static_sphere_with_scratch(
+            request,
+            &[],
+            TerrainCollisionSurfaceKind::Immersed,
+            scratch,
+        )?;
         let mut earliest = traced.hit.map(HardSphereSweepHit::World);
-        let ball = Ball::new(request.radius);
-        let moving = MovingSphereCast::new(&ball, request.start, request.displacement);
+        let moving = MovingSphereCast::new(request.radius, request.start, request.displacement);
         for HardEntityShape {
             body_id,
             shape,
@@ -167,6 +182,7 @@ impl CollisionScene {
         Ok(PreparedHardSphereSweep {
             request,
             hit: earliest,
+            pure_outdoor: traced.pure_outdoor,
         })
     }
 
@@ -176,6 +192,16 @@ impl CollisionScene {
         prepared: PreparedHardSphereSweep,
         fraction: f32,
     ) -> Result<PlacedMotionPath, CollisionQueryError> {
+        if prepared.pure_outdoor {
+            let end = prepared.request.start + prepared.request.displacement * fraction;
+            return Ok(self
+                .finish_outdoor_sphere_path(
+                    prepared.request,
+                    end,
+                    CollisionQueryPolicy::RequireCollisionCoverage,
+                )?
+                .value);
+        }
         Ok(self
             .finish_sphere_path(
                 prepared.request,
@@ -192,6 +218,16 @@ impl CollisionScene {
         policy: CollisionQueryPolicy,
     ) -> Result<UncoveredCollisionQuery<PlacedMotionPath>, CollisionQueryError> {
         let end = request.start + request.displacement * fraction;
+        if request.previous_cell.is_none()
+            && !self.has_outdoor_entrance(swept_query_cells(SphereSweep {
+                anchor: request.anchor,
+                start: request.start,
+                end,
+                radius: request.radius,
+            }))
+        {
+            return self.finish_outdoor_sphere_path(request, end, policy);
+        }
         let path = self.transit_motion_path(PlacedMotionPathRequest {
             anchor: request.anchor,
             previous_cell: request.previous_cell,
@@ -246,6 +282,42 @@ impl CollisionScene {
         Ok(UncoveredCollisionQuery {
             value: path,
             unavailable_owner,
+        })
+    }
+
+    fn finish_outdoor_sphere_path(
+        &self,
+        request: StaticSphereSweepRequest,
+        end: Vector3,
+        policy: CollisionQueryPolicy,
+    ) -> Result<UncoveredCollisionQuery<PlacedMotionPath>, CollisionQueryError> {
+        let sweep = SphereSweep {
+            anchor: request.anchor,
+            start: request.start,
+            end,
+            radius: request.radius,
+        };
+        validate_sweep_radius(sweep, false)?;
+        let touched = touched_landblocks(sweep);
+        let coverage = self.complete_query(policy, &touched, &SpatialMembership::outdoor(), ())?;
+        Ok(UncoveredCollisionQuery {
+            value: PlacedMotionPath {
+                anchor: landblock_key(request.anchor),
+                initial: PlacedMotionPoint {
+                    center: request.start,
+                    placement: SpatialMembership::outdoor(),
+                    recovery: None,
+                },
+                legs: vec![PlacedMotionLeg {
+                    end_fraction: 1.0,
+                    end: PlacedMotionPoint {
+                        center: end,
+                        placement: SpatialMembership::outdoor(),
+                        recovery: None,
+                    },
+                }],
+            },
+            unavailable_owner: coverage.unavailable_owner,
         })
     }
 
@@ -386,8 +458,7 @@ impl CollisionScene {
             request.start.y.max(end.y) + extent,
             request.start.z.max(end.z) + extent,
         );
-        let ball = Ball::new(request.radius);
-        let moving = MovingSphereCast::new(&ball, request.start, request.displacement);
+        let moving = MovingSphereCast::new(request.radius, request.start, request.displacement);
         for id in entities
             .index
             .candidates(None, request.anchor, minimum, maximum, membership)
@@ -431,6 +502,17 @@ impl CollisionScene {
         excluded: &[ColliderReference],
         terrain_surface: TerrainCollisionSurfaceKind,
     ) -> Result<StaticSphereTrace, CollisionQueryError> {
+        let mut scratch = StaticSweepScratch::default();
+        self.trace_static_sphere_with_scratch(request, excluded, terrain_surface, &mut scratch)
+    }
+
+    pub(super) fn trace_static_sphere_with_scratch(
+        &self,
+        request: StaticSphereSweepRequest,
+        excluded: &[ColliderReference],
+        terrain_surface: TerrainCollisionSurfaceKind,
+        scratch: &mut StaticSweepScratch,
+    ) -> Result<StaticSphereTrace, CollisionQueryError> {
         let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.start,
@@ -439,8 +521,14 @@ impl CollisionScene {
         };
         validate_sweep(sweep)?;
         let displacement = request.displacement;
-
-        let swept_placement = self.sweep_candidate_membership(sweep, request.previous_cell)?;
+        let query_cells = swept_query_cells(sweep);
+        let pure_outdoor =
+            request.previous_cell.is_none() && !self.has_outdoor_entrance(query_cells);
+        let swept_placement = if pure_outdoor {
+            SpatialMembership::outdoor()
+        } else {
+            self.sweep_candidate_membership(sweep, request.previous_cell)?
+        };
 
         let touched = touched_landblocks(sweep);
         // Every representable nonzero move needs collision admission. Treating small
@@ -449,11 +537,12 @@ impl CollisionScene {
             return Ok(StaticSphereTrace {
                 hit: None,
                 membership: swept_placement,
+                pure_outdoor,
             });
         }
 
-        let moving_ball = Ball::new(request.radius);
-        let narrow_phase = MovingSphereCast::new(&moving_ball, request.start, request.displacement);
+        let narrow_phase =
+            MovingSphereCast::new(request.radius, request.start, request.displacement);
         // Cell shadows select whole 24m cells. Refine them with a sphere containing the entire
         // nominal swept volume before entering exact shape/BSP queries. Use the authoritative
         // displacement, not end-start, and the full radius rather than the shrunken contact radius.
@@ -482,8 +571,9 @@ impl CollisionScene {
             }
         }
 
-        let query_cells = swept_query_cells(sweep);
-        for selected in self.selected_colliders(query_cells, &swept_placement) {
+        for selected in
+            self.selected_colliders_with(query_cells, &swept_placement, &mut scratch.colliders)
+        {
             if excluded.contains(&selected.reference) {
                 continue;
             }
@@ -515,6 +605,7 @@ impl CollisionScene {
         Ok(StaticSphereTrace {
             hit: earliest,
             membership: swept_placement,
+            pure_outdoor,
         })
     }
 }
@@ -523,9 +614,8 @@ impl CollisionScene {
 struct MovingSphereCast {
     /// Narrow-phase radius defining the fixed permitted-overlap boundary. Published geometry
     /// and support keep the original radius; this band is never replenished per movement.
-    ball: Ball,
-    pose: Pose,
-    velocity: ParryVector,
+    radius: f32,
+    start: Vector3,
     displacement: Vector3,
 }
 
@@ -574,42 +664,17 @@ pub(crate) fn sphere_path_touches_shape(
     if start == end {
         return Ok(false);
     }
-    let ball = Ball::new(radius);
     let mut hit = None;
-    if let CollisionShape::Cylinder(cylinder) = &*shape.shape {
-        let scale = shape
-            .scale
-            .as_uniform()
-            .expect("placed collision cylinders have validated uniform scale");
-        let low = shape.point_to_landblock_space(cylinder.low_point);
-        let top = low.z + cylinder.height * scale;
-        if start.z >= low.z && start.z <= top && end.z >= low.z && end.z <= top {
-            // Within the cylinder's height, the closest surface throughout the chord is
-            // radial. Report the horizontal circle sweep without iterative cylinder GJK.
-            // Preserve the movement query's initial tolerance and separating-path rule.
-            if let Some(contact) = placed_volume_sweep_contact(shape, start, radius) {
-                return Ok((end - start).dot(&contact.normal) < 0.0);
-            }
-            let horizontal_end = Vector3::new(end.x, end.y, start.z);
-            MovingSphereCast::new(&ball, start, horizontal_end - start).update_shape_hit(
-                &Ball::new(cylinder.radius * scale),
-                Pose::from_translation(parry_vector(Vector3::new(low.x, low.y, start.z))),
-                &mut hit,
-            )?;
-            return Ok(hit.is_some());
-        }
-    }
-    let cast = MovingSphereCast::new(&ball, start, end - start);
+    let cast = MovingSphereCast::new(radius, start, end - start);
     cast.update_collider_hit(shape, anchor, anchor, &mut hit)?;
     Ok(hit.is_some())
 }
 
 impl MovingSphereCast {
-    fn new(ball: &Ball, start: Vector3, displacement: Vector3) -> Self {
+    fn new(radius: f32, start: Vector3, displacement: Vector3) -> Self {
         Self {
-            ball: Ball::new(hard_contact_radius(ball.radius)),
-            pose: Pose::from_translation(parry_vector(start)),
-            velocity: parry_vector(displacement),
+            radius: hard_contact_radius(radius),
+            start,
             displacement,
         }
     }
@@ -622,8 +687,7 @@ impl MovingSphereCast {
         anchor: Guid,
         earliest: &mut Option<StaticSphereSweepHit>,
     ) -> Result<(), CollisionQueryError> {
-        let start =
-            point_between_landblocks(world_vector(self.pose.translation), anchor.0, owner.0);
+        let start = point_between_landblocks(self.start, anchor.0, owner.0);
         if let CollisionShape::Cylinder(cylinder) = &*collider.shape {
             let scale = collider
                 .scale
@@ -633,12 +697,11 @@ impl MovingSphereCast {
             let top = low.z + cylinder.height * scale;
             // A cap-interior entry has an exact plane time. Before that time the sphere
             // is wholly above/below the cylinder, so a rim or side cannot precede it.
-            // Generic cylinder casts can miss short approaches at this flat boundary.
             for (height, normal_z) in [(top, 1.0), (low.z, -1.0)] {
                 let approach = self.displacement.z * normal_z;
                 let distance = (start.z - height) * normal_z;
-                if approach < 0.0 && distance >= self.ball.radius {
-                    let time = (self.ball.radius - distance) / approach;
+                if approach < 0.0 && distance >= self.radius {
+                    let time = (self.radius - distance) / approach;
                     if (0.0..=1.0).contains(&time) {
                         let point = start + self.displacement * time - low;
                         if point.x * point.x + point.y * point.y
@@ -656,15 +719,15 @@ impl MovingSphereCast {
                     }
                 }
             }
-            // Prove cap-tangent paths clear before either initial-contact normals or
-            // iterative future casts can introduce a spurious tilted rim response.
-            if (self.displacement.z >= 0.0 && start.z >= top + self.ball.radius)
-                || (self.displacement.z <= 0.0 && start.z <= low.z - self.ball.radius)
+            // Prove cap-tangent paths clear before initial-contact normals can introduce
+            // a spurious tilted rim response.
+            if (self.displacement.z >= 0.0 && start.z >= top + self.radius)
+                || (self.displacement.z <= 0.0 && start.z <= low.z - self.radius)
             {
                 return Ok(());
             }
         }
-        if let Some(contact) = placed_volume_sweep_contact(collider, start, self.ball.radius) {
+        if let Some(contact) = placed_volume_sweep_contact(collider, start, self.radius) {
             let inward = -self.displacement.dot(&contact.normal);
             // A projected tangent can round inward when its endpoint is stored in the
             // landblock frame. Bound the entire chord against the original supporting
@@ -675,7 +738,7 @@ impl MovingSphereCast {
                 * ((start.x * contact.normal.x).abs()
                     + (start.y * contact.normal.y).abs()
                     + (start.z * contact.normal.z).abs()
-                    + self.ball.radius);
+                    + self.radius);
             if inward > 0.0 && contact.depth + inward > roundoff {
                 update_earliest(
                     earliest,
@@ -686,13 +749,13 @@ impl MovingSphereCast {
                 );
             }
             // A straight tangent/separating path cannot re-enter this convex volume. Known
-            // contact is resolved here instead of asking a zero-time cast to rediscover it.
+            // contact is resolved here instead of asking a future cast to rediscover it.
             return Ok(());
         }
         match &*collider.shape {
             CollisionShape::Bsp(solid) => {
                 let center = point_between_landblocks(
-                    world_vector(self.pose.translation) + self.displacement * 0.5,
+                    self.start + self.displacement * 0.5,
                     anchor.0,
                     owner.0,
                 );
@@ -700,7 +763,7 @@ impl MovingSphereCast {
                     solid,
                     collider,
                     center,
-                    self.ball.radius + self.displacement.length() * 0.5,
+                    self.radius + self.displacement.length() * 0.5,
                 );
                 for polygon in polygons {
                     sweep_polygon(self, collider, owner, anchor, polygon, earliest)?;
@@ -713,34 +776,234 @@ impl MovingSphereCast {
                     .expect("placed collision balls have validated uniform scale");
                 let center = collider.point_to_landblock_space(ball.center);
                 let center = point_between_landblocks(center, owner.0, anchor.0);
-                let target = Ball::new(ball.radius * scale);
-                self.update_shape_hit(
-                    &target,
-                    Pose::from_translation(parry_vector(center)),
-                    earliest,
-                )?;
+                self.update_ball_hit(center, ball.radius * scale, earliest);
             }
             CollisionShape::Cylinder(cylinder) => {
                 let scale = collider
                     .scale
                     .as_uniform()
                     .expect("placed collision cylinders have validated uniform scale");
-                let height = cylinder.height * scale;
                 let low = collider.point_to_landblock_space(cylinder.low_point);
-                let center = point_between_landblocks(
-                    low + Vector3::new(0.0, 0.0, height * 0.5),
-                    owner.0,
-                    anchor.0,
+                self.update_cylinder_hit(
+                    start,
+                    low,
+                    cylinder.radius * scale,
+                    cylinder.height * scale,
+                    earliest,
                 );
-                let target = Cylinder::new(height * 0.5, cylinder.radius * scale);
-                let target_pose = Pose::from_parts(
-                    parry_vector(center),
-                    parry3d::math::Rotation::from_rotation_x(std::f32::consts::FRAC_PI_2),
-                );
-                self.update_shape_hit(&target, target_pose, earliest)?;
             }
         }
         Ok(())
+    }
+
+    fn update_ball_hit(
+        &self,
+        center: Vector3,
+        target_radius: f32,
+        earliest: &mut Option<StaticSphereSweepHit>,
+    ) {
+        if earliest.is_some_and(|hit| hit.time_of_impact == 0.0) {
+            return;
+        }
+        let rel = DVec3::from_vec3(self.start).sub(DVec3::from_vec3(center));
+        let vel = DVec3::from_vec3(self.displacement);
+        let sum_r = f64::from(self.radius) + f64::from(target_radius);
+        let Some(t) = sweep_sphere_vs_sphere_time(rel, vel, sum_r) else {
+            return;
+        };
+        let hit_rel = rel.add(vel.scale(t));
+        let Some(normal) = hit_rel.normalized() else {
+            return;
+        };
+        if self.displacement.dot(&normal) < 0.0 {
+            update_earliest(
+                earliest,
+                StaticSphereSweepHit {
+                    time_of_impact: t as f32,
+                    normal,
+                },
+            );
+        }
+    }
+
+    fn update_cylinder_hit(
+        &self,
+        start_owner: Vector3,
+        low_owner: Vector3,
+        cyl_radius: f32,
+        height: f32,
+        earliest: &mut Option<StaticSphereSweepHit>,
+    ) {
+        if earliest.is_some_and(|hit| hit.time_of_impact == 0.0) {
+            return;
+        }
+        let rel_x = f64::from(start_owner.x) - f64::from(low_owner.x);
+        let rel_y = f64::from(start_owner.y) - f64::from(low_owner.y);
+        let vx = f64::from(self.displacement.x);
+        let vy = f64::from(self.displacement.y);
+        let sz = f64::from(start_owner.z);
+        let vz = f64::from(self.displacement.z);
+        let low_z = f64::from(low_owner.z);
+        let top_z = low_z + f64::from(height);
+        let cyl_r = f64::from(cyl_radius);
+        let r = f64::from(self.radius);
+
+        // Guard any f32-vs-f64 boundary discrepancy where `placed_volume_sweep_contact` saw
+        // `distance > radius` in f32 while `(dr^2 + dz^2) <= r^2` already holds in f64.
+        let r_xy = rel_x.hypot(rel_y);
+        let dr = (r_xy - cyl_r).max(0.0);
+        let dz = if sz > top_z {
+            sz - top_z
+        } else if sz < low_z {
+            low_z - sz
+        } else {
+            0.0
+        };
+        let dist_sq = dr * dr + dz * dz;
+        if dist_sq <= r * r {
+            let normal = if dr > 0.0 || dz > 0.0 {
+                let ring_scale = if dr > 0.0 && r_xy > 0.0 {
+                    dr / r_xy
+                } else {
+                    0.0
+                };
+                let signed_dz = if sz > top_z {
+                    dz
+                } else if sz < low_z {
+                    -dz
+                } else {
+                    0.0
+                };
+                (DVec3 {
+                    x: rel_x * ring_scale,
+                    y: rel_y * ring_scale,
+                    z: signed_dz,
+                })
+                .normalized()
+            } else {
+                let to_side = cyl_r - r_xy;
+                let to_top = top_z - sz;
+                let to_low = sz - low_z;
+                if to_top <= to_side && to_top <= to_low {
+                    Some(Vector3::new(0.0, 0.0, 1.0))
+                } else if to_low <= to_side {
+                    Some(Vector3::new(0.0, 0.0, -1.0))
+                } else {
+                    (DVec3 {
+                        x: rel_x,
+                        y: rel_y,
+                        z: 0.0,
+                    })
+                    .normalized()
+                    .or(Some(Vector3::new(1.0, 0.0, 0.0)))
+                }
+            };
+            if let Some(normal) = normal {
+                let inward = -self.displacement.dot(&normal);
+                let roundoff = f32::EPSILON
+                    * ((start_owner.x * normal.x).abs()
+                        + (start_owner.y * normal.y).abs()
+                        + (start_owner.z * normal.z).abs()
+                        + self.radius);
+                let depth = (r - dist_sq.sqrt()).max(0.0) as f32;
+                if inward > 0.0 && depth + inward > roundoff {
+                    update_earliest(
+                        earliest,
+                        StaticSphereSweepHit {
+                            time_of_impact: 0.0,
+                            normal,
+                        },
+                    );
+                }
+            }
+            return;
+        }
+
+        // Exact f64 flat-cap planes (closes any 1-ULP gap when `low.z + height` rounds up in f32).
+        for (cap_z, normal_z) in [(top_z, 1.0_f64), (low_z, -1.0_f64)] {
+            let approach = vz * normal_z;
+            let distance = (sz - cap_z) * normal_z;
+            if approach < 0.0 && distance >= r {
+                let t = ((r - distance) / approach).max(0.0);
+                if t <= 1.0 {
+                    let hx = rel_x + vx * t;
+                    let hy = rel_y + vy * t;
+                    if hx * hx + hy * hy <= cyl_r * cyl_r {
+                        update_earliest(
+                            earliest,
+                            StaticSphereSweepHit {
+                                time_of_impact: t as f32,
+                                normal: Vector3::new(0.0, 0.0, normal_z as f32),
+                            },
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Barrel: 2D ray-circle cast against expanded cylinder radius, clamped to finite Z span.
+        if let Some(t) = sweep_sphere_vs_sphere_time(
+            DVec3 {
+                x: rel_x,
+                y: rel_y,
+                z: 0.0,
+            },
+            DVec3 {
+                x: vx,
+                y: vy,
+                z: 0.0,
+            },
+            cyl_r + r,
+        ) {
+            let hit_z = sz + vz * t;
+            if hit_z >= low_z && hit_z <= top_z {
+                let hx = rel_x + vx * t;
+                let hy = rel_y + vy * t;
+                if let Some(normal) = (DVec3 {
+                    x: hx,
+                    y: hy,
+                    z: 0.0,
+                })
+                .normalized()
+                    && self.displacement.dot(&normal) < 0.0
+                {
+                    update_earliest(
+                        earliest,
+                        StaticSphereSweepHit {
+                            time_of_impact: t as f32,
+                            normal,
+                        },
+                    );
+                }
+            }
+        }
+
+        // Top and bottom flat-cap rim circles are only reachable if the swept Z span goes
+        // outside [low_z, top_z] while staying within reach `r` of a rim plane.
+        let min_z = sz.min(sz + vz);
+        let max_z = sz.max(sz + vz);
+        for (ring_z, in_z_range) in [
+            (top_z, max_z > top_z && min_z < top_z + r),
+            (low_z, min_z < low_z && max_z > low_z - r),
+        ] {
+            if !in_z_range {
+                continue;
+            }
+            let z0 = sz - ring_z;
+            if let Some((t, normal)) =
+                sweep_sphere_vs_rim((rel_x, rel_y), (vx, vy), z0, vz, cyl_r, r, ring_z == top_z)
+                && self.displacement.dot(&normal) < 0.0
+            {
+                update_earliest(
+                    earliest,
+                    StaticSphereSweepHit {
+                        time_of_impact: t as f32,
+                        normal,
+                    },
+                );
+            }
+        }
     }
 
     fn update_triangle_hit(
@@ -760,7 +1023,7 @@ impl MovingSphereCast {
         }
         // Solve around the sphere origin so closest-feature normals do not inherit
         // cancellation error from large landblock coordinates.
-        let start = world_vector(self.pose.translation);
+        let start = self.start;
         let distance = (start - vertices[0]).dot(&normal);
         // A triangle (including a slightly warped authored face's fan triangle) lies
         // inside its vertex projection interval. A sphere that cannot reach that interval
@@ -773,8 +1036,8 @@ impl MovingSphereCast {
                     (low.min(projected), high.max(projected))
                 });
         // Use the same query radius as the cast. Adding the contact band back here admits
-        // tangent floors to GJK, whose convergence tolerance can invent a zero-time impact.
-        let reach = self.ball.radius;
+        // tangent floors to narrow-phase rounding, inventing zero-time impacts.
+        let reach = self.radius;
         // Approach is negative: distance decreases monotonically throughout this sweep.
         if distance < minimum - reach || distance + approach > maximum + reach {
             return Ok(());
@@ -782,24 +1045,21 @@ impl MovingSphereCast {
         if self.admits_contact_tangent(vertices, normal, distance, maximum, approach) {
             return Ok(());
         }
-        let triangle = Triangle::new(
-            parry_vector(vertices[0] - start),
-            parry_vector(vertices[1] - start),
-            parry_vector(vertices[2] - start),
-        );
-        // A sphere approaching the finite face has an exact plane hit. Generic GJK casts
-        // can converge late even on flat terrain; use them only when face containment
-        // does not prove the hit (edges or vertices). Initial front-side face overlap
-        // is time zero: an iterative future cast can otherwise report a later hit and
-        // incorrectly admit a support adjustment deeper into an already contacted wall.
-        let time = ((self.ball.radius - distance) / approach).max(0.0);
+        let v0 = DVec3::from_vec3(vertices[0] - start);
+        let v1 = DVec3::from_vec3(vertices[1] - start);
+        let v2 = DVec3::from_vec3(vertices[2] - start);
+        // A sphere approaching the finite face has an exact plane hit. Use it directly when
+        // face containment proves the hit; otherwise resolve against geometric face, edges,
+        // and vertices analytically. Initial front-side face overlap is time zero: a later hit
+        // would admit a support adjustment deeper into an already contacted wall.
+        let r = f64::from(self.radius);
+        let contact_eps_sq = f64::from(crate::spatial::bsp_query::CONTACT_EPSILON).powi(2);
+        let time = ((self.radius - distance) / approach).max(0.0);
         if distance >= 0.0 && time <= 1.0 {
             let face_distance = distance + approach * time;
-            let point = parry_vector(self.displacement * time - normal * face_distance);
-            let closest = triangle.project_local_point(point, true).point;
-            if (closest - point).length_squared()
-                <= crate::spatial::bsp_query::CONTACT_EPSILON.powi(2)
-            {
+            let point = DVec3::from_vec3(self.displacement * time - normal * face_distance);
+            let closest = closest_point_on_triangle(point, v0, v1, v2);
+            if closest.sub(point).length_squared() <= contact_eps_sq {
                 update_earliest(
                     earliest,
                     StaticSphereSweepHit {
@@ -810,17 +1070,49 @@ impl MovingSphereCast {
                 return Ok(());
             }
         }
-        let Some(hit) = cast_shapes(
-            &Pose::IDENTITY,
-            self.velocity,
-            &self.ball,
-            &Pose::IDENTITY,
-            ParryVector::ZERO,
-            &triangle,
-            cast_options(),
-        )
-        .map_err(|_| CollisionQueryError::UnsupportedSphereSweep)?
-        else {
+        let vel = DVec3::from_vec3(self.displacement);
+        let r_sq = r * r;
+        let best_t: Option<f64> =
+            if closest_point_on_triangle(DVec3::ZERO, v0, v1, v2).length_squared() <= r_sq {
+                Some(0.0)
+            } else {
+                let mut earliest_feature: Option<f64> = None;
+                let geo_n = v1.sub(v0).cross(v2.sub(v0));
+                if let Some(u_n) = geo_n.normalized_dvec() {
+                    let dist0 = -v0.dot(u_n);
+                    let (u_n, dist0) = if dist0 < 0.0 {
+                        (u_n.scale(-1.0), -dist0)
+                    } else {
+                        (u_n, dist0)
+                    };
+                    let geo_approach = vel.dot(u_n);
+                    if geo_approach < 0.0 && dist0 >= r {
+                        let plane_t = (r - dist0) / geo_approach;
+                        if (0.0..=1.0).contains(&plane_t) {
+                            let face_pt = vel.scale(plane_t).sub(u_n.scale(r));
+                            if closest_point_on_triangle(face_pt, v0, v1, v2)
+                                .sub(face_pt)
+                                .length_squared()
+                                <= contact_eps_sq
+                            {
+                                earliest_feature = Some(plane_t);
+                            }
+                        }
+                    }
+                }
+                for (p, q) in [(v0, v1), (v1, v2), (v2, v0)] {
+                    if let Some(edge_t) = sweep_sphere_vs_segment_barrel(vel, p, q, r) {
+                        earliest_feature = Some(earliest_feature.map_or(edge_t, |c| c.min(edge_t)));
+                    }
+                }
+                for v in [v0, v1, v2] {
+                    if let Some(vert_t) = sweep_sphere_vs_sphere_time(v.scale(-1.0), vel, r) {
+                        earliest_feature = Some(earliest_feature.map_or(vert_t, |c| c.min(vert_t)));
+                    }
+                }
+                earliest_feature
+            };
+        let Some(hit_t) = best_t else {
             return Ok(());
         };
         // RETAIL DIVERGENCE: BSP collision response selects the polygon plane normal. Finite
@@ -831,31 +1123,33 @@ impl MovingSphereCast {
         // one captured indoor bridge landing; installed collision meshes have not received
         // a full feature census. The authored face normal above still owns one-sided
         // admission, but cannot replace the actual separating direction.
-        let center = parry_vector(self.displacement * hit.time_of_impact);
-        let closest = triangle.project_local_point(center, true).point;
-        let separation = world_vector(center - closest);
+        let hit_t_f32 = hit_t as f32;
+        let center = DVec3::from_vec3(self.displacement).scale(f64::from(hit_t_f32));
+        let closest = closest_point_on_triangle(center, v0, v1, v2);
+        let separation = center.sub(closest);
         // An initial back-face overlap must retain its actual separating direction. A
         // downward-facing bridge floor can overlap a sphere above it after endpoint
         // rounding; its authored normal would falsely block upward support recovery.
         // Front-side face contacts keep the stable plane normal. At coincident
         // center/face positions there is no radial direction, so the face owns response.
-        let face_distance = distance + approach * hit.time_of_impact;
-        let face_point = center - parry_vector(normal * face_distance);
-        let on_face = triangle.project_local_point(face_point, true).point;
+        let face_distance = f64::from(distance) + f64::from(approach) * f64::from(hit_t_f32);
+        let face_point = center.sub(DVec3::from_vec3(normal).scale(face_distance));
+        let on_face = closest_point_on_triangle(face_point, v0, v1, v2);
         let normal = if (face_distance >= 0.0
-            && (on_face - face_point).length_squared()
-                <= crate::spatial::bsp_query::CONTACT_EPSILON.powi(2))
+            && on_face.sub(face_point).length_squared() <= contact_eps_sq)
             || separation.length_squared() == 0.0
         {
             normal
+        } else if let Some(sep_normal) = separation.normalized() {
+            sep_normal
         } else {
-            separation.normalize()
+            normal
         };
         if self.displacement.dot(&normal) < 0.0 {
             update_earliest(
                 earliest,
                 StaticSphereSweepHit {
-                    time_of_impact: hit.time_of_impact,
+                    time_of_impact: hit_t_f32,
                     normal,
                 },
             );
@@ -882,7 +1176,7 @@ impl MovingSphereCast {
         if -approach as f64 > roundoff_bound(5) * magnitude as f64 {
             return false;
         }
-        let start = world_vector(self.pose.translation);
+        let start = self.start;
         let end = start + self.displacement;
         let extent = Vector3::new(
             start.x.abs().max(end.x.abs()),
@@ -892,12 +1186,12 @@ impl MovingSphereCast {
         let coordinate_magnitude = extent.x * normal.x.abs()
             + extent.y * normal.y.abs()
             + extent.z * normal.z.abs()
-            + self.ball.radius;
+            + self.radius;
         // Eight operations cover stored center/endpoint rounding and a plane evaluation.
         // This boundary is geometric: existing depth consumes the allowance, so repeated
         // calls cannot replenish it by measuring only the next inward displacement.
         let uncertainty = roundoff_bound(8) * coordinate_magnitude as f64;
-        if distance < 0.0 || (distance - maximum - self.ball.radius).abs() as f64 > uncertainty {
+        if distance < 0.0 || (distance - maximum - self.radius).abs() as f64 > uncertainty {
             return false;
         }
         let dot = |a: Vector3, b: Vector3| {
@@ -911,41 +1205,394 @@ impl MovingSphereCast {
             .map(|v| dot(*v, normal))
             .fold(f64::NEG_INFINITY, f64::max);
         let clearance = (dot(start, normal).min(dot(end, normal)) - boundary) / normal_length;
-        clearance >= self.ball.radius as f64 - uncertainty
+        clearance >= self.radius as f64 - uncertainty
+    }
+}
+
+#[derive(Clone, Copy)]
+struct DVec3 {
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+impl DVec3 {
+    const ZERO: Self = Self {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+
+    fn from_vec3(v: Vector3) -> Self {
+        Self {
+            x: f64::from(v.x),
+            y: f64::from(v.y),
+            z: f64::from(v.z),
+        }
     }
 
-    fn update_shape_hit(
-        &self,
-        target: &dyn parry3d::shape::Shape,
-        target_pose: Pose,
-        earliest: &mut Option<StaticSphereSweepHit>,
-    ) -> Result<(), CollisionQueryError> {
-        let Some(hit) = cast_shapes(
-            &self.pose,
-            self.velocity,
-            &self.ball,
-            &target_pose,
-            ParryVector::ZERO,
-            target,
-            cast_options(),
-        )
-        .map_err(|_| CollisionQueryError::UnsupportedSphereSweep)?
-        else {
-            return Ok(());
-        };
-        // Parry normals are outward from each shape in its own local frame. Response needs
-        // the target's outward normal; the moving ball's normal points into the obstacle.
-        let normal = world_vector(target_pose.rotation * hit.normal2);
-        if self.displacement.dot(&normal) < 0.0 {
-            update_earliest(
-                earliest,
-                StaticSphereSweepHit {
-                    time_of_impact: hit.time_of_impact,
-                    normal,
-                },
-            );
+    fn to_vec3(self) -> Vector3 {
+        Vector3::new(self.x as f32, self.y as f32, self.z as f32)
+    }
+
+    fn add(self, rhs: Self) -> Self {
+        Self {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+            z: self.z + rhs.z,
         }
-        Ok(())
+    }
+
+    fn sub(self, rhs: Self) -> Self {
+        Self {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+            z: self.z - rhs.z,
+        }
+    }
+
+    fn scale(self, s: f64) -> Self {
+        Self {
+            x: self.x * s,
+            y: self.y * s,
+            z: self.z * s,
+        }
+    }
+
+    fn dot(self, rhs: Self) -> f64 {
+        self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
+    }
+
+    fn cross(self, rhs: Self) -> Self {
+        Self {
+            x: self.y * rhs.z - self.z * rhs.y,
+            y: self.z * rhs.x - self.x * rhs.z,
+            z: self.x * rhs.y - self.y * rhs.x,
+        }
+    }
+
+    fn length_squared(self) -> f64 {
+        self.dot(self)
+    }
+
+    fn normalized_dvec(self) -> Option<Self> {
+        let len_sq = self.length_squared();
+        if len_sq == 0.0 {
+            return None;
+        }
+        Some(self.scale(len_sq.sqrt().recip()))
+    }
+
+    fn normalized(self) -> Option<Vector3> {
+        self.normalized_dvec()
+            .map(|unit| unit.to_vec3().normalize())
+    }
+}
+
+fn sweep_sphere_vs_sphere_time(rel: DVec3, vel: DVec3, sum_radius: f64) -> Option<f64> {
+    let c = rel.length_squared() - sum_radius * sum_radius;
+    let b = rel.dot(vel);
+    if c <= 0.0 {
+        return (b < 0.0).then_some(0.0);
+    }
+    if b >= 0.0 {
+        return None;
+    }
+    let a = vel.length_squared();
+    if a == 0.0 {
+        return None;
+    }
+    let disc = b * b - a * c;
+    if disc < 0.0 {
+        return None;
+    }
+    let t = (c / (-b + disc.sqrt())).max(0.0);
+    (t <= 1.0).then_some(t)
+}
+
+fn sweep_sphere_vs_segment_barrel(vel: DVec3, p: DVec3, q: DVec3, radius: f64) -> Option<f64> {
+    let e = q.sub(p);
+    let e_len_sq = e.length_squared();
+    if e_len_sq == 0.0 {
+        return None;
+    }
+    let m = p.scale(-1.0);
+    let m_e = m.dot(e) / e_len_sq;
+    let d_e = vel.dot(e) / e_len_sq;
+    let m_perp = m.sub(e.scale(m_e));
+    let d_perp = vel.sub(e.scale(d_e));
+    let t = sweep_sphere_vs_sphere_time(m_perp, d_perp, radius)?;
+    let s = m_e + t * d_e;
+    (0.0..=1.0).contains(&s).then_some(t)
+}
+
+/// Exact closest point on triangle `(a, b, c)` to point `p` (Christer Ericson's Voronoi test).
+fn closest_point_on_triangle(p: DVec3, a: DVec3, b: DVec3, c: DVec3) -> DVec3 {
+    let ab = b.sub(a);
+    let ac = c.sub(a);
+    let ap = p.sub(a);
+    let d1 = ab.dot(ap);
+    let d2 = ac.dot(ap);
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return a;
+    }
+
+    let bp = p.sub(b);
+    let d3 = ab.dot(bp);
+    let d4 = ac.dot(bp);
+    if d3 >= 0.0 && d4 <= d3 {
+        return b;
+    }
+
+    let vc = d1 * d4 - d3 * d2;
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 && d1 - d3 > 0.0 {
+        let v = d1 / (d1 - d3);
+        return a.add(ab.scale(v));
+    }
+
+    let cp = p.sub(c);
+    let d5 = ab.dot(cp);
+    let d6 = ac.dot(cp);
+    if d6 >= 0.0 && d5 <= d6 {
+        return c;
+    }
+
+    let vb = d5 * d2 - d1 * d6;
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 && d2 - d6 > 0.0 {
+        let w = d2 / (d2 - d6);
+        return a.add(ac.scale(w));
+    }
+
+    let va = d3 * d6 - d5 * d4;
+    if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
+        let denom = (d4 - d3) + (d5 - d6);
+        if denom > 0.0 {
+            let w = (d4 - d3) / denom;
+            return b.add(c.sub(b).scale(w));
+        }
+    }
+
+    let sum = va + vb + vc;
+    if sum <= 0.0 {
+        return a;
+    }
+    let denom = sum.recip();
+    let v = vb * denom;
+    let w = vc * denom;
+    a.add(ab.scale(v)).add(ac.scale(w))
+}
+
+fn sweep_sphere_vs_rim(
+    (x0, y0): (f64, f64),
+    (vx, vy): (f64, f64),
+    z0: f64,
+    vz: f64,
+    cyl_r: f64,
+    sphere_r: f64,
+    is_top: bool,
+) -> Option<(f64, Vector3)> {
+    let r2 = vx * vx + vy * vy;
+    if vz == 0.0 {
+        let rem = sphere_r * sphere_r - z0 * z0;
+        if rem < 0.0 {
+            return None;
+        }
+        let target_r = cyl_r + rem.sqrt();
+        let t = sweep_sphere_vs_sphere_time(
+            DVec3 {
+                x: x0,
+                y: y0,
+                z: 0.0,
+            },
+            DVec3 {
+                x: vx,
+                y: vy,
+                z: 0.0,
+            },
+            target_r,
+        )?;
+        let hx = x0 + vx * t;
+        let hy = y0 + vy * t;
+        let r_xy = hx.hypot(hy);
+        if r_xy < cyl_r {
+            return None;
+        }
+        let ring_scale = if r_xy > 0.0 { 1.0 - cyl_r / r_xy } else { 0.0 };
+        let normal = (DVec3 {
+            x: hx * ring_scale,
+            y: hy * ring_scale,
+            z: z0,
+        })
+        .normalized()?;
+        return Some((t, normal));
+    }
+    if r2 == 0.0 {
+        let dr = x0.hypot(y0) - cyl_r;
+        if dr < 0.0 {
+            return None;
+        }
+        let rem = sphere_r * sphere_r - dr * dr;
+        if rem < 0.0 {
+            return None;
+        }
+        let target_z = if is_top { rem.sqrt() } else { -rem.sqrt() };
+        let t = (target_z - z0) / vz;
+        if !(0.0..=1.0).contains(&t) {
+            return None;
+        }
+        let r_xy = x0.hypot(y0);
+        let ring_scale = if r_xy > 0.0 { 1.0 - cyl_r / r_xy } else { 0.0 };
+        let normal = (DVec3 {
+            x: x0 * ring_scale,
+            y: y0 * ring_scale,
+            z: target_z,
+        })
+        .normalized()?;
+        return Some((t, normal));
+    }
+
+    let r1 = 2.0 * (x0 * vx + y0 * vy);
+    let r0 = x0 * x0 + y0 * y0;
+    let s2 = r2 + vz * vz;
+    let s1 = r1 + 2.0 * z0 * vz;
+    let s0 = r0 + z0 * z0 + cyl_r * cyl_r - sphere_r * sphere_r;
+    let c2 = 4.0 * cyl_r * cyl_r;
+
+    let p4 = s2 * s2;
+    let p3 = 2.0 * s2 * s1;
+    let p2 = s1 * s1 + 2.0 * s2 * s0 - c2 * r2;
+    let p1 = 2.0 * s1 * s0 - c2 * r1;
+    let p0 = s0 * s0 - c2 * r0;
+    let eval = |t: f64| (((p4 * t + p3) * t + p2) * t + p1) * t + p0;
+
+    let (crit_roots, crit_len) = cubic_real_roots(4.0 * p4, 3.0 * p3, 2.0 * p2, p1);
+    let mut bounds = [0.0_f64; 5];
+    let mut len = 1_usize;
+    for &root in &crit_roots[..crit_len] {
+        if root > 0.0 && root < 1.0 {
+            bounds[len] = root;
+            len += 1;
+        }
+    }
+    bounds[len] = 1.0;
+    len += 1;
+    bounds[..len].sort_by(f64::total_cmp);
+
+    let rim_tol = 1e-6 * (1.0 + cyl_r + sphere_r);
+    if p0 <= 0.0 {
+        let r_xy = x0.hypot(y0);
+        if r_xy >= cyl_r - rim_tol && ((!is_top && z0 <= rim_tol) || (is_top && z0 >= -rim_tol)) {
+            let ring_scale = if r_xy > 0.0 { 1.0 - cyl_r / r_xy } else { 0.0 };
+            if let Some(normal) = (DVec3 {
+                x: x0 * ring_scale,
+                y: y0 * ring_scale,
+                z: z0,
+            })
+            .normalized()
+                && (x0 * ring_scale) * vx + (y0 * ring_scale) * vy + z0 * vz < 0.0
+            {
+                return Some((0.0, normal));
+            }
+        }
+    }
+    for pair in bounds[..len].windows(2) {
+        let mut lo = pair[0];
+        let mut hi = pair[1];
+        if (hi - lo) <= 1e-15 {
+            continue;
+        }
+        let mut flo = eval(lo);
+        let mut fhi = eval(hi);
+        if (flo > 0.0 && fhi > 0.0) || (flo < 0.0 && fhi < 0.0) {
+            continue;
+        }
+        for _ in 0..56 {
+            let mid = 0.5 * (lo + hi);
+            let fmid = eval(mid);
+            if (flo <= 0.0 && fmid >= 0.0) || (flo >= 0.0 && fmid <= 0.0) {
+                hi = mid;
+                fhi = fmid;
+            } else {
+                lo = mid;
+                flo = fmid;
+            }
+        }
+        let _ = (flo, fhi);
+        let t = 0.5 * (lo + hi);
+        let hx = x0 + vx * t;
+        let hy = y0 + vy * t;
+        let hz = z0 + vz * t;
+        let r_xy = hx.hypot(hy);
+        if r_xy < cyl_r - rim_tol {
+            continue;
+        }
+        if (is_top && hz < -rim_tol) || (!is_top && hz > rim_tol) {
+            continue;
+        }
+        let rim_err = ((r_xy - cyl_r).powi(2) + hz * hz - sphere_r * sphere_r).abs();
+        if rim_err > 1e-5 * (1.0 + sphere_r * sphere_r) {
+            continue;
+        }
+        let ring_scale = if r_xy > 0.0 { 1.0 - cyl_r / r_xy } else { 0.0 };
+        let Some(normal) = (DVec3 {
+            x: hx * ring_scale,
+            y: hy * ring_scale,
+            z: hz,
+        })
+        .normalized() else {
+            continue;
+        };
+        return Some((t, normal));
+    }
+    None
+}
+
+fn cubic_real_roots(a: f64, b: f64, c: f64, d: f64) -> ([f64; 3], usize) {
+    let mut roots = [0.0_f64; 3];
+    if a.abs() <= 1e-18 * (b.abs() + c.abs() + d.abs() + 1.0) {
+        if b.abs() <= 1e-18 * (c.abs() + d.abs() + 1.0) {
+            if c.abs() > 1e-18 {
+                roots[0] = -d / c;
+                return (roots, 1);
+            }
+            return (roots, 0);
+        }
+        let disc = c * c - 4.0 * b * d;
+        if disc < 0.0 {
+            return (roots, 0);
+        }
+        let sq = disc.sqrt();
+        roots[0] = (-c - sq) / (2.0 * b);
+        roots[1] = (-c + sq) / (2.0 * b);
+        return (roots, 2);
+    }
+    let inv_a = a.recip();
+    let b = b * inv_a;
+    let c = c * inv_a;
+    let d = d * inv_a;
+    let b3 = b / 3.0;
+    let p = c - b * b3;
+    let q = (2.0 * b3 * b3 * b3) - (b3 * c) + d;
+    let half_q = 0.5 * q;
+    let third_p = p / 3.0;
+    let disc = half_q * half_q + third_p * third_p * third_p;
+    if disc > 0.0 {
+        let s = disc.sqrt();
+        roots[0] = (-half_q + s).cbrt() + (-half_q - s).cbrt() - b3;
+        (roots, 1)
+    } else if third_p == 0.0 {
+        roots[0] = -b3;
+        (roots, 1)
+    } else {
+        let neg_third_p = -third_p;
+        let radius = 2.0 * neg_third_p.sqrt();
+        let cos_phi = (-half_q / (neg_third_p * neg_third_p.sqrt())).clamp(-1.0, 1.0);
+        let phi = cos_phi.acos();
+        let step = std::f64::consts::TAU / 3.0;
+        roots[0] = radius * (phi / 3.0).cos() - b3;
+        roots[1] = radius * ((phi + step) / 3.0).cos() - b3;
+        roots[2] = radius * ((phi + 2.0 * step) / 3.0).cos() - b3;
+        (roots, 3)
     }
 }
 
@@ -960,15 +1607,6 @@ fn hard_contact_radius(radius: f32) -> f32 {
 fn roundoff_bound(operations: u32) -> f64 {
     let error = operations as f64 * (f32::EPSILON as f64 * 0.5);
     error / (1.0 - error)
-}
-
-fn cast_options() -> ShapeCastOptions {
-    ShapeCastOptions {
-        max_time_of_impact: 1.0,
-        target_distance: 0.0,
-        stop_at_penetration: true,
-        compute_impact_geometry_on_penetration: true,
-    }
 }
 
 fn update_earliest(earliest: &mut Option<StaticSphereSweepHit>, candidate: StaticSphereSweepHit) {
@@ -1073,14 +1711,6 @@ pub(super) fn landblock_entry_hit(
             time_of_impact: enter,
             normal,
         })
-}
-
-pub(super) fn parry_vector(value: Vector3) -> ParryVector {
-    ParryVector::new(value.x, value.y, value.z)
-}
-
-pub(super) fn world_vector(value: ParryVector) -> Vector3 {
-    Vector3::new(value.x, value.y, value.z)
 }
 
 #[cfg(test)]
@@ -1247,7 +1877,7 @@ mod tests {
                             };
                             let mut expected = None;
                             MovingSphereCast::new(
-                                &Ball::new(request.radius),
+                                request.radius,
                                 request.start,
                                 request.displacement,
                             )
@@ -1293,7 +1923,7 @@ mod tests {
     fn initially_contacting_face_blocks_settle_at_time_zero() {
         let (vertices, normal, start) = flared_wall_contact();
         let mut hit = None;
-        MovingSphereCast::new(&Ball::new(0.48), start, Vector3::new(0.0, 0.0, -0.04))
+        MovingSphereCast::new(0.48, start, Vector3::new(0.0, 0.0, -0.04))
             .update_triangle_hit(vertices, normal, &mut hit)
             .unwrap();
         assert_eq!(hit.unwrap().time_of_impact, 0.0);
@@ -1301,7 +1931,7 @@ mod tests {
 
     #[test]
     fn double_sided_face_overlap_allows_escape_and_blocks_inward_travel() {
-        let ball = Ball::new(0.48);
+        let radius = 0.48;
         let tolerance = crate::spatial::bsp_query::CONTACT_EPSILON;
         for height in [0.0, 384.0] {
             let vertices = [
@@ -1315,11 +1945,11 @@ mod tests {
                 let start = Vector3::new(
                     0.0,
                     0.0,
-                    height + side * (hard_contact_radius(ball.radius) - tolerance * 0.125),
+                    height + side * (hard_contact_radius(radius) - tolerance * 0.125),
                 );
                 let away = Vector3::new(0.0, 0.0, side);
                 for (travel, blocked) in [(away * tolerance, false), (away * -tolerance, true)] {
-                    let moving = MovingSphereCast::new(&ball, start, travel);
+                    let moving = MovingSphereCast::new(radius, start, travel);
                     let mut hit = None;
                     for normal in [away, away * -1.0] {
                         moving
@@ -1338,7 +1968,7 @@ mod tests {
 
     #[test]
     fn front_side_ceiling_blocks_before_the_sphere_crosses_it() {
-        let ball = Ball::new(0.48);
+        let radius = 0.48;
         let height = 384.0;
         let vertices = [
             Vector3::new(-4.0, -4.0, height),
@@ -1347,7 +1977,7 @@ mod tests {
         ];
         let mut hit = None;
         MovingSphereCast::new(
-            &ball,
+            radius,
             Vector3::new(0.0, 0.0, height - 1.0),
             Vector3::new(0.0, 0.0, 2.0),
         )
@@ -1357,7 +1987,7 @@ mod tests {
         assert_eq!(hit.normal, Vector3::new(0.0, 0.0, -1.0));
         assert_eq!(
             hit.time_of_impact,
-            (1.0 - hard_contact_radius(ball.radius)) / 2.0
+            (1.0 - hard_contact_radius(radius)) / 2.0
         );
     }
 
@@ -1368,7 +1998,7 @@ mod tests {
         assert!(tangent.dot(&normal) < 0.0);
         let query = |start, travel| {
             let mut hit = None;
-            MovingSphereCast::new(&Ball::new(0.48), start, travel)
+            MovingSphereCast::new(0.48, start, travel)
                 .update_triangle_hit(vertices, normal, &mut hit)
                 .unwrap();
             hit
@@ -1385,7 +2015,7 @@ mod tests {
         let (vertices, normal, start) = flared_wall_contact();
         let outside = start + Vector3::new(10.0, -10.0, 0.0);
         let mut hit = None;
-        MovingSphereCast::new(&Ball::new(0.48), outside, Vector3::new(0.0, 0.0, -0.04))
+        MovingSphereCast::new(0.48, outside, Vector3::new(0.0, 0.0, -0.04))
             .update_triangle_hit(vertices, normal, &mut hit)
             .unwrap();
         assert!(hit.is_none());
@@ -1404,18 +2034,18 @@ mod tests {
             origin + tangent * 4.0,
             origin + Vector3::new(0.0, 0.0, 8.0),
         ];
-        let ball = Ball::new(0.48);
+        let radius = 0.48;
         assert_eq!(tangent.dot(&normal), 0.0);
         let rounded = start + tangent - start;
         assert!(rounded.dot(&normal) < 0.0);
         let mut hit = None;
-        MovingSphereCast::new(&ball, start, tangent)
+        MovingSphereCast::new(radius, start, tangent)
             .update_triangle_hit(vertices, normal, &mut hit)
             .unwrap();
         assert!(hit.is_none(), "wall rejected tangent travel: {hit:?}");
 
         // A real inward component must still collide with the same finite wall.
-        MovingSphereCast::new(&ball, start, tangent - normal * 0.01)
+        MovingSphereCast::new(radius, start, tangent - normal * 0.01)
             .update_triangle_hit(vertices, normal, &mut hit)
             .unwrap();
         assert!(hit.is_some(), "wall admitted inward travel");
@@ -1424,14 +2054,13 @@ mod tests {
     #[test]
     fn tolerated_floor_tangency_does_not_hide_a_crossed_wall() {
         let radius = 0.5;
-        let ball = Ball::new(radius);
         let start = Vector3::new(0.0, 0.0, radius);
         let end = Vector3::new(
             2.0,
             0.0,
             radius - crate::spatial::bsp_query::CONTACT_EPSILON * 0.5,
         );
-        let moving = MovingSphereCast::new(&ball, start, end - start);
+        let moving = MovingSphereCast::new(radius, start, end - start);
         let mut hit = None;
         moving
             .update_triangle_hit(
@@ -1467,7 +2096,6 @@ mod tests {
     #[test]
     fn repeated_inward_casts_cannot_replenish_the_contact_band() {
         let radius = 0.5;
-        let ball = Ball::new(radius);
         let normal = Vector3::new(0.0, 0.0, 1.0);
         let vertices = [
             Vector3::new(-10.0, -10.0, 0.0),
@@ -1480,7 +2108,7 @@ mod tests {
         let mut contacts = 0;
         for _ in 0..1024 {
             let mut hit = None;
-            MovingSphereCast::new(&ball, center, movement)
+            MovingSphereCast::new(radius, center, movement)
                 .update_triangle_hit(vertices, normal, &mut hit)
                 .unwrap();
             contacts += usize::from(hit.is_some());
@@ -1497,7 +2125,6 @@ mod tests {
     #[test]
     fn hard_volumes_share_the_fixed_contact_band() {
         let radius = 0.5;
-        let ball = Ball::new(radius);
         let anchor = Guid(0xda55_ffff);
         for (shape, top) in [
             (
@@ -1530,7 +2157,7 @@ mod tests {
                 Vector3::new(0.0, 0.0, -crate::spatial::bsp_query::CONTACT_EPSILON * 0.25);
             for _ in 0..1024 {
                 let mut hit = None;
-                MovingSphereCast::new(&ball, center, movement)
+                MovingSphereCast::new(radius, center, movement)
                     .update_collider_hit(&shape, anchor, anchor, &mut hit)
                     .unwrap();
                 center = center + movement * hit.map_or(1.0, |hit| hit.time_of_impact);
@@ -1548,7 +2175,7 @@ mod tests {
             let inward = Vector3::new(-crate::spatial::bsp_query::CONTACT_EPSILON * 0.25, 0.0, 0.0);
             for _ in 0..1024 {
                 let mut hit = None;
-                MovingSphereCast::new(&ball, side, inward)
+                MovingSphereCast::new(radius, side, inward)
                     .update_collider_hit(&shape, anchor, anchor, &mut hit)
                     .unwrap();
                 side = side + inward * hit.map_or(1.0, |hit| hit.time_of_impact);
@@ -1559,7 +2186,7 @@ mod tests {
             }
             let start = Vector3::new(0.0, 0.0, top + radius);
             let mut hit = None;
-            MovingSphereCast::new(&ball, start, Vector3::new(1.0, 0.0, 0.0))
+            MovingSphereCast::new(radius, start, Vector3::new(1.0, 0.0, 0.0))
                 .update_collider_hit(&shape, anchor, anchor, &mut hit)
                 .unwrap();
             assert!(hit.is_none(), "nominal tangent was blocked: {hit:?}");
@@ -1576,14 +2203,14 @@ mod tests {
             Vector3::new(1.0, -1.0, 0.1),
             Vector3::new(0.0, 1.0, 0.1),
         ];
-        let ball = Ball::new(0.05);
+        let radius = 0.05;
         for (start_height, end_height, expected) in
             [(0.2, 0.08, true), (0.3, 0.2, false), (-0.1, -0.2, false)]
         {
             let start = Vector3::new(0.0, 0.5, start_height);
             let end = Vector3::new(0.0, 0.5, end_height);
             let mut hit = None;
-            MovingSphereCast::new(&ball, start, end - start)
+            MovingSphereCast::new(radius, start, end - start)
                 .update_triangle_hit(vertices, normal, &mut hit)
                 .unwrap();
             assert_eq!(
@@ -1634,7 +2261,7 @@ mod tests {
                 // admission allowance. Repetition must not refill that allowance.
                 let end = Vector3::new(center.x.next_down(), center.y, center.z);
                 let mut hit = None;
-                MovingSphereCast::new(&Ball::new(radius), center, end - center)
+                MovingSphereCast::new(radius, center, end - center)
                     .update_collider_hit(&shape, anchor, anchor, &mut hit)
                     .unwrap();
                 blocked += usize::from(hit.is_some());
@@ -1671,7 +2298,7 @@ mod tests {
         let request = Vector3::new(0.06, 0.015, 0.0);
         let tangent = request - contact.normal * request.dot(&contact.normal);
         let end = start + tangent;
-        let moving = MovingSphereCast::new(&Ball::new(0.48), start, end - start);
+        let moving = MovingSphereCast::new(0.48, start, end - start);
         // This is the stalled production corner: endpoint rounding turns the
         // projected tangent slightly inward, despite a clear route around the side.
         assert!(moving.displacement.dot(&contact.normal) < 0.0);
@@ -1697,25 +2324,25 @@ mod tests {
             ColliderScale::uniform(1.0).unwrap(),
         )
         .unwrap();
-        let ball = Ball::new(0.25);
+        let radius = 0.25;
         let anchor = Guid(0xda55_ffff);
         for (start, end, expected_time, expected_normal) in [
             (
                 Vector3::new(-2.0, 0.0, 0.5),
                 Vector3::new(2.0, 0.0, 1.5),
-                (2.0 - 0.5 - hard_contact_radius(ball.radius)) / 4.0,
+                (2.0 - 0.5 - hard_contact_radius(radius)) / 4.0,
                 Vector3::new(-1.0, 0.0, 0.0),
             ),
             (
                 Vector3::new(0.0, 0.0, 3.0),
                 Vector3::new(0.0, 0.0, 1.0),
-                (3.0 - 2.0 - hard_contact_radius(ball.radius)) / 2.0,
+                (3.0 - 2.0 - hard_contact_radius(radius)) / 2.0,
                 Vector3::new(0.0, 0.0, 1.0),
             ),
         ] {
-            assert!(sphere_path_touches_shape(&shape, start, end, ball.radius, anchor).unwrap());
+            assert!(sphere_path_touches_shape(&shape, start, end, radius, anchor).unwrap());
             let mut hit = None;
-            MovingSphereCast::new(&ball, start, end - start)
+            MovingSphereCast::new(radius, start, end - start)
                 .update_collider_hit(&shape, anchor, anchor, &mut hit)
                 .unwrap();
             let hit = hit.expect("the path crosses the cylinder surface");
@@ -1723,7 +2350,7 @@ mod tests {
             assert!((hit.normal - expected_normal).length() < 0.0001);
         }
         let tolerance = crate::spatial::bsp_query::CONTACT_EPSILON;
-        let touching = Vector3::new(0.5 + ball.radius, 0.0, 1.0);
+        let touching = Vector3::new(0.5 + radius, 0.0, 1.0);
         for (start, end, expected) in [
             (
                 Vector3::new(0.5, 0.0, 1.0),
@@ -1747,9 +2374,71 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                sphere_path_touches_shape(&shape, start, end, ball.radius, anchor).unwrap(),
+                sphere_path_touches_shape(&shape, start, end, radius, anchor).unwrap(),
                 expected,
             );
+        }
+
+        // Oblique approach hitting the top cylinder rim circle outside the flat cap disk.
+        let mut rim_hit = None;
+        let rim_start = Vector3::new(1.2, 0.0, 2.6);
+        let rim_disp = Vector3::new(-0.6, 0.0, -0.8);
+        MovingSphereCast::new(0.48, rim_start, rim_disp)
+            .update_collider_hit(&shape, anchor, anchor, &mut rim_hit)
+            .unwrap();
+        let rim_hit = rim_hit.expect("oblique path hits top cylinder rim");
+        assert!(rim_hit.time_of_impact > 0.0 && rim_hit.time_of_impact < 1.0);
+        assert!(rim_hit.normal.x > 0.0 && rim_hit.normal.z > 0.0);
+
+        // 1-ULP boundary between `start.z - (low.z + h)` and `(start.z - low.z) - h` over a flat cap.
+        let ulp_cap_shape = PlacedCollisionShape::new(
+            std::sync::Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+                low_point: Vector3::zero(),
+                radius: 0.92,
+                height: 2.415,
+            })),
+            LandblockPlacement {
+                origin: Vector3::new(10.0, 20.0, 13.6031),
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(1.0).unwrap(),
+        )
+        .unwrap();
+        let mut cap_hit = None;
+        MovingSphereCast::new(
+            0.5,
+            Vector3::new(10.0, 20.0, 16.517_9),
+            Vector3::new(0.0, 0.0, -1.0),
+        )
+        .update_collider_hit(&ulp_cap_shape, anchor, anchor, &mut cap_hit)
+        .unwrap();
+        let cap_hit = cap_hit.expect("1-ULP flat-cap boundary must not tunnel");
+        assert!(cap_hit.time_of_impact <= 1e-5);
+        assert!((cap_hit.normal - Vector3::new(0.0, 0.0, 1.0)).length() < 1e-5);
+
+        // 1-ULP boundary where f32 `placed_volume_sweep_contact` sees `distance > radius` while
+        // f64 sees initial Minkowski rim contact.
+        let ulp_rim_shape = PlacedCollisionShape::new(
+            std::sync::Arc::new(CollisionShape::Cylinder(CollisionCylinder {
+                low_point: Vector3::zero(),
+                radius: 0.92,
+                height: 2.415,
+            })),
+            LandblockPlacement {
+                origin: Vector3::new(53.7, 112.3, 14.8),
+                orientation: Quaternion::identity(),
+            },
+            ColliderScale::uniform(1.0).unwrap(),
+        )
+        .unwrap();
+        for disp in [Vector3::new(0.0, 0.0, -0.3), Vector3::new(0.1, 0.0, -0.3)] {
+            let mut hit = None;
+            MovingSphereCast::new(0.5, Vector3::new(52.401_512, 112.552_02, 17.511_003), disp)
+                .update_collider_hit(&ulp_rim_shape, anchor, anchor, &mut hit)
+                .unwrap();
+            let hit = hit.expect("1-ULP rim boundary must not tunnel");
+            assert_eq!(hit.time_of_impact, 0.0);
+            assert!(disp.dot(&hit.normal) < 0.0);
         }
     }
 }

@@ -4,13 +4,11 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_content::{
     CollisionPolygon, CollisionShape, PlacedCollisionShape, StaticColliderPlacement,
 };
-use parry3d::math::Pose;
+use parry3d::math::{Pose, Vector as ParryVector};
 use parry3d::query::{Ray, RayCast};
 use parry3d::shape::{Ball, Cylinder, Triangle};
 
-use super::static_sphere_sweep::{
-    landblock_entry_hit, parry_vector, placed_anchor_point, swept_query_cells, world_vector,
-};
+use super::static_sphere_sweep::{landblock_entry_hit, placed_anchor_point, swept_query_cells};
 use super::{
     CollisionOwnerProof, CollisionQueryError, CollisionQueryPolicy, CollisionScene,
     PhysicalCollisionExclusions, PhysicalCollisionFilter, PortalTraversalPolicy, SpatialMembership,
@@ -19,6 +17,14 @@ use super::{
 };
 
 const DIRECTION_LENGTH_TOLERANCE: f32 = 0.000_1;
+
+pub(super) fn parry_vector(value: Vector3) -> ParryVector {
+    ParryVector::new(value.x, value.y, value.z)
+}
+
+pub(super) fn world_vector(value: ParryVector) -> Vector3 {
+    Vector3::new(value.x, value.y, value.z)
+}
 
 /// One finite ray against resident static collision geometry.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -192,7 +198,12 @@ impl CollisionScene {
             }
         }
 
-        for selected in self.selected_colliders(swept_query_cells(full_sweep), swept_placement) {
+        let mut collider_scratch = Vec::new();
+        for selected in self.selected_colliders_with(
+            swept_query_cells(full_sweep),
+            swept_placement,
+            &mut collider_scratch,
+        ) {
             let collider = selected.collider;
             if let Some(mut candidate) = cast_placed_collision_shape(
                 &ray,

@@ -8,7 +8,7 @@
 //! body-neutral; body completion is joined with live authoritative placement only on the
 //! simulation thread.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -494,6 +494,8 @@ pub struct ClientCollisionCoordinator {
     body_generation: u64,
     remote_body_generation: u64,
     remote_bodies: BTreeMap<SpatialBodyId, ClientRemoteBodyDemand>,
+    remote_bodies_may_have_pending: bool,
+    remote_observation_cursor: Option<holtburger_world::WorldObservationCursor>,
     scene_generation: u64,
     /// Character-scoped local override, retained across body rebuilds and teleports.
     entity_response_override: Option<Guid>,
@@ -525,6 +527,8 @@ impl ClientCollisionCoordinator {
             body_generation: 0,
             remote_body_generation: 0,
             remote_bodies: BTreeMap::new(),
+            remote_bodies_may_have_pending: false,
+            remote_observation_cursor: None,
             scene_generation: 0,
             entity_response_override: None,
         }
@@ -788,6 +792,7 @@ impl ClientCollisionCoordinator {
     /// Publishes only scene and body completions that still name their exact current revisions.
     pub fn poll(&mut self, world: &mut WorldState, _now: Instant) -> Vec<WorldEvent> {
         let mut events = Vec::new();
+        let mut stranded_remote_bodies = Vec::new();
         while let Ok(completion) = self.completion_rx.try_recv() {
             match completion {
                 ClientSpatialCompletion::Context(completion) => {
@@ -973,10 +978,23 @@ impl ClientCollisionCoordinator {
                             });
                         }
                     }
+                    stranded_remote_bodies.extend(self.remote_bodies.iter().filter_map(
+                        |(&body_id, demand)| {
+                            (demand.status == ClientRemoteBodyStatus::Preparing).then_some(body_id)
+                        },
+                    ));
                 }
             }
         }
         self.start_pending_remote_body_loading();
+        for body_id in stranded_remote_bodies {
+            if let Some(demand) = self.remote_bodies.get_mut(&body_id)
+                && demand.status == ClientRemoteBodyStatus::Preparing
+            {
+                demand.status = ClientRemoteBodyStatus::Pending;
+                self.remote_bodies_may_have_pending = true;
+            }
+        }
         events
     }
 
@@ -995,6 +1013,8 @@ impl ClientCollisionCoordinator {
         self.body_target = None;
         self.body_readiness = ClientBodyReadiness::Waiting;
         self.remote_bodies.clear();
+        self.remote_bodies_may_have_pending = false;
+        self.remote_observation_cursor = None;
     }
 
     /// Retires the character-scoped debug policy at logout, including any remaining body.
@@ -1196,96 +1216,126 @@ impl ClientCollisionCoordinator {
         }));
     }
 
-    fn observe_remote_bodies(&mut self, world: &mut WorldState) -> Vec<WorldEvent> {
-        let desired = world
-            .entities
-            .iter()
-            .filter_map(|entity| {
-                self.bodies
-                    .remote_target(world, entity.guid)
-                    .map(|target| (target.body_id, target))
-            })
-            .collect::<BTreeMap<_, _>>();
-        if remote_body_demands_match(&self.remote_bodies, &desired) {
-            self.start_pending_remote_body_loading();
-            return Vec::new();
+    fn reconcile_remote_target(
+        &mut self,
+        world: &mut WorldState,
+        guid: Guid,
+        events: &mut Vec<WorldEvent>,
+    ) {
+        let body_id = SpatialBodyId::Entity(guid);
+        let Some(target) = self.bodies.remote_target(world, guid) else {
+            if self.remote_bodies.remove(&body_id).is_some() {
+                remove_physical_body(world, body_id, events);
+            }
+            return;
+        };
+
+        if let Some(existing) = self.remote_bodies.get_mut(&body_id) {
+            if target.preparation.definition_eq(&existing.preparation)
+                && target.demand == existing.demand
+            {
+                if matches!(existing.status, ClientRemoteBodyStatus::Preparing)
+                    && self.remote_body_worker.is_none()
+                {
+                    existing.status = ClientRemoteBodyStatus::Pending;
+                    self.remote_bodies_may_have_pending = true;
+                }
+                return;
+            }
+            if existing.preparation.preparation_eq(&target.preparation)
+                && reconfigure_physical_body(
+                    world,
+                    target.body_id,
+                    target.preparation.physics(),
+                    target.demand,
+                    events,
+                )
+            {
+                existing.preparation = target.preparation;
+                existing.demand = target.demand;
+                existing.status = ClientRemoteBodyStatus::Prepared;
+                return;
+            }
+            remove_physical_body(world, body_id, events);
         }
+
+        self.remote_bodies_may_have_pending = true;
+        self.remote_bodies.insert(
+            body_id,
+            ClientRemoteBodyDemand {
+                preparation: target.preparation,
+                demand: target.demand,
+                status: ClientRemoteBodyStatus::Pending,
+            },
+        );
+    }
+
+    fn observe_remote_bodies(&mut self, world: &mut WorldState) -> Vec<WorldEvent> {
+        use holtburger_world::WorldObservationChanges;
+
+        let dirty_guids: Option<Vec<Guid>> = match self
+            .remote_observation_cursor
+            .as_ref()
+            .map(|cursor| world.observation_changes_since(cursor))
+        {
+            Some(WorldObservationChanges::UpToDate) => {
+                self.start_pending_remote_body_loading();
+                return Vec::new();
+            }
+            Some(WorldObservationChanges::Delta {
+                entities,
+                scene,
+                motion,
+            }) => {
+                let mut guids: Vec<Guid> = entities
+                    .into_iter()
+                    .chain(scene)
+                    .chain(motion)
+                    .map(|entry| entry.guid)
+                    .collect();
+                if guids.len() > 1 {
+                    guids.sort_unstable();
+                    guids.dedup();
+                }
+                Some(guids)
+            }
+            Some(WorldObservationChanges::FullResync { .. }) | None => None,
+        };
+
+        let candidate_guids = match dirty_guids {
+            Some(guids) => guids,
+            None => {
+                let mut guids: Vec<Guid> =
+                    world.entities.iter().map(|entity| entity.guid).collect();
+                guids.extend(
+                    self.remote_bodies
+                        .keys()
+                        .filter_map(|body_id| body_id.authoritative_guid()),
+                );
+                if guids.len() > 1 {
+                    guids.sort_unstable();
+                    guids.dedup();
+                }
+                guids
+            }
+        };
 
         let mut events = Vec::new();
-        let mut reconfigured = BTreeSet::new();
-        for (&body_id, demand) in &self.remote_bodies {
-            if desired.get(&body_id).is_some_and(|target| {
-                target.preparation.definition_eq(&demand.preparation)
-                    && target.demand == demand.demand
-            }) {
-                continue;
-            }
-            if desired.get(&body_id).is_some_and(|target| {
-                demand.preparation.preparation_eq(&target.preparation)
-                    && reconfigure_physical_body(
-                        world,
-                        target.body_id,
-                        target.preparation.physics(),
-                        target.demand,
-                        &mut events,
-                    )
-            }) {
-                reconfigured.insert(body_id);
-                continue;
-            }
-            remove_physical_body(world, body_id, &mut events);
+        for guid in candidate_guids {
+            self.reconcile_remote_target(world, guid, &mut events);
         }
-        self.remote_bodies = desired
-            .into_iter()
-            .map(|(body_id, target)| {
-                let status = if reconfigured.contains(&body_id) {
-                    ClientRemoteBodyStatus::Prepared
-                } else {
-                    self.remote_bodies
-                        .get(&body_id)
-                        .filter(|demand| {
-                            demand.preparation.definition_eq(&target.preparation)
-                                && demand.demand == target.demand
-                        })
-                        .map_or(ClientRemoteBodyStatus::Pending, |demand| {
-                            match demand.status {
-                                ClientRemoteBodyStatus::Prepared => {
-                                    ClientRemoteBodyStatus::Prepared
-                                }
-                                ClientRemoteBodyStatus::Unavailable => {
-                                    ClientRemoteBodyStatus::Unavailable
-                                }
-                                ClientRemoteBodyStatus::Preparing
-                                    if self.remote_body_worker.is_some() =>
-                                {
-                                    ClientRemoteBodyStatus::Preparing
-                                }
-                                ClientRemoteBodyStatus::Pending
-                                | ClientRemoteBodyStatus::Preparing => {
-                                    ClientRemoteBodyStatus::Pending
-                                }
-                            }
-                        })
-                };
-                (
-                    body_id,
-                    ClientRemoteBodyDemand {
-                        preparation: target.preparation,
-                        demand: target.demand,
-                        status,
-                    },
-                )
-            })
-            .collect();
 
+        // Capture after reconciling so scene writes performed here do not re-dirty our own cursor.
+        self.remote_observation_cursor = Some(world.observation_cursor());
         self.start_pending_remote_body_loading();
         events
     }
 
     fn start_pending_remote_body_loading(&mut self) {
-        if self.remote_body_worker.is_some() {
+        if self.remote_body_worker.is_some() || !self.remote_bodies_may_have_pending {
             return;
         }
+        self.remote_bodies_may_have_pending = false;
         let pending = self
             .remote_bodies
             .iter_mut()
@@ -1341,19 +1391,6 @@ impl ClientCollisionCoordinator {
             ));
         }));
     }
-}
-
-fn remote_body_demands_match(
-    current: &BTreeMap<SpatialBodyId, ClientRemoteBodyDemand>,
-    desired: &BTreeMap<SpatialBodyId, ClientRemoteBodyTarget>,
-) -> bool {
-    current.len() == desired.len()
-        && current.iter().all(|(body_id, demand)| {
-            desired.get(body_id).is_some_and(|target| {
-                target.preparation.definition_eq(&demand.preparation)
-                    && target.demand == demand.demand
-            })
-        })
 }
 
 fn local_player_physical_demand(physics: EffectiveEntityPhysicsState) -> LocalPhysicalDemand {
@@ -3297,5 +3334,139 @@ mod tests {
             client_player_body_facts(&world),
             Err(ClientEntityBodyFactsError::MissingSetup)
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn quiet_observe_remote_bodies_is_noop_and_entity_delta_reconciles_removal() {
+        let mut world = WorldState::synthetic();
+        let player_guid = Guid(0x5000_0001);
+        let remote_guid = Guid(0x7000_0001);
+        world.seed_local_player_entity(player_guid, "Player", position(0x1234_0001));
+        facts(&mut world, player_guid);
+        world.add_entity(holtburger_world::entity::Entity::new(
+            remote_guid,
+            "Remote".to_owned(),
+            position(0x1234_0002),
+        ));
+        facts(&mut world, remote_guid);
+
+        let source = Arc::new(FakeSource::default());
+        let mut coordinator = ClientCollisionCoordinator::new(source);
+        let _ = coordinator.observe(&mut world);
+        let player_body_id = SpatialBodyId::LocalPlayer(player_guid);
+        let body_id = SpatialBodyId::Entity(remote_guid);
+        wait_for_physical_body(&mut coordinator, &mut world, player_body_id).await;
+        wait_for_physical_body(&mut coordinator, &mut world, body_id).await;
+        let _ = coordinator.observe(&mut world);
+
+        assert_eq!(
+            world.observation_changes_since(
+                coordinator
+                    .remote_observation_cursor
+                    .as_ref()
+                    .expect("remote observation cursor should be recorded")
+            ),
+            holtburger_world::WorldObservationChanges::UpToDate
+        );
+        assert!(!coordinator.remote_bodies_may_have_pending);
+
+        let quiet_events = coordinator.observe_remote_bodies(&mut world);
+        assert!(quiet_events.is_empty());
+        assert!(coordinator.remote_bodies.contains_key(&body_id));
+
+        world
+            .entities
+            .get_mut(remote_guid)
+            .unwrap()
+            .properties
+            .dids
+            .0
+            .remove(&PropertyDataId::Setup);
+        let delta_events = coordinator.observe_remote_bodies(&mut world);
+        assert!(!delta_events.is_empty());
+        assert!(!coordinator.remote_bodies.contains_key(&body_id));
+        assert!(
+            world
+                .scene
+                .body(body_id)
+                .is_some_and(|body| body.physical.is_none())
+        );
+        assert_eq!(
+            world.observation_changes_since(
+                coordinator
+                    .remote_observation_cursor
+                    .as_ref()
+                    .expect("remote observation cursor should advance")
+            ),
+            holtburger_world::WorldObservationChanges::UpToDate
+        );
+
+        // Retiring the character replaces the underlying stores at revision 0; a non-invalidated
+        // coordinator cursor must detect the store lineage change and clear stale remote demand.
+        world.add_entity(holtburger_world::entity::Entity::new(
+            remote_guid,
+            "Remote2".to_owned(),
+            position(0x1234_0002),
+        ));
+        facts(&mut world, remote_guid);
+        let _ = coordinator.observe(&mut world);
+        wait_for_physical_body(&mut coordinator, &mut world, body_id).await;
+        let _ = coordinator.observe(&mut world);
+        assert!(coordinator.remote_bodies.contains_key(&body_id));
+
+        world.retire_character();
+        let _ = coordinator.observe_remote_bodies(&mut world);
+        assert!(coordinator.remote_bodies.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn skipped_remote_body_completion_resets_preparing_to_pending_for_quiet_retry() {
+        let mut world = WorldState::synthetic();
+        let player_guid = Guid(0x5000_0001);
+        let remote_guid = Guid(0x7000_0001);
+        let remote_pos = position(0x1234_0002);
+        world.seed_local_player_entity(player_guid, "Player", position(0x1234_0001));
+        facts(&mut world, player_guid);
+        world.add_entity(holtburger_world::entity::Entity::new(
+            remote_guid,
+            "Remote".to_owned(),
+            remote_pos,
+        ));
+        facts(&mut world, remote_guid);
+
+        let source = Arc::new(FakeSource::default());
+        let mut coordinator = ClientCollisionCoordinator::new(source);
+        let body_id = SpatialBodyId::Entity(remote_guid);
+        let _ = coordinator.observe(&mut world);
+        assert!(coordinator.remote_body_worker.is_some());
+
+        // Remove the scene body immediately before any `poll` drains the worker so installation
+        // deterministically hits the missing-body guard while `world.entities` still matches.
+        let saved_body = world
+            .scene
+            .remove_body(body_id)
+            .expect("remote scene body should exist before removal");
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+        while coordinator.remote_body_worker.is_some() {
+            let _ = coordinator.poll(&mut world, Instant::now());
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for remote worker completion"
+            );
+            tokio::task::yield_now().await;
+        }
+
+        assert_eq!(
+            coordinator.remote_bodies.get(&body_id).map(|d| d.status),
+            Some(ClientRemoteBodyStatus::Pending)
+        );
+        assert!(coordinator.remote_bodies_may_have_pending);
+
+        // Restore the scene body and advance our observation cursor past the restore so the next
+        // `observe` is completely quiet (`UpToDate`), verifying the pending retry still launches.
+        world.scene.register_body(saved_body);
+        coordinator.remote_observation_cursor = Some(world.observation_cursor());
+        let _ = coordinator.observe(&mut world);
+        wait_for_physical_body(&mut coordinator, &mut world, body_id).await;
     }
 }

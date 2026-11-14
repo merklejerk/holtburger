@@ -11,13 +11,13 @@ use std::sync::{Arc, OnceLock};
 
 use super::SweepTarget;
 use crate::spatial::bsp_query::CONTACT_EPSILON;
-use crate::spatial::dynamic_index::{EntityCollisionTarget, reanchor_placed_shapes};
+use crate::spatial::dynamic_index::{EntityCollisionTarget, reanchor_placed_shapes_arc};
 use crate::spatial::{CollisionQueryError, SpatialBodyId};
 
 /// Owns target geometry and its index together so accepted pose changes update both.
 /// Leaf IDs are stable vector slots; query results restore body identity order for hit ties.
 #[derive(Debug, Clone)]
-pub(super) struct HardTargets {
+pub(crate) struct HardTargets {
     /// Prepared geometry; existing slots never move when projectile targets are appended.
     bodies: Vec<HardTarget>,
     /// Identity lookup for accepted hard-target replacement, independent of append order.
@@ -37,6 +37,8 @@ enum HardTarget {
 #[derive(Debug, Clone)]
 struct FrozenHardTarget {
     anchor: Guid,
+    /// Monotonic geometry stamp from `SpatialBodyStore` (`0` for unversioned test/direct sweeps).
+    geometry_stamp: u64,
     /// Original frame and shared posed shapes; selection does not copy target proofs.
     source_anchor: Guid,
     shapes: Arc<[holtburger_content::PlacedCollisionShape]>,
@@ -53,15 +55,30 @@ impl HardTarget {
         }
     }
 
+    fn geometry_stamp(&self) -> u64 {
+        match self {
+            Self::Prepared(target) => target.geometry_stamp,
+            Self::Frozen(target) => target.geometry_stamp,
+        }
+    }
+
+    fn contact(&self) -> &super::ContactParticipant {
+        match self {
+            Self::Prepared(target) => &target.contact,
+            Self::Frozen(target) => &target.contact,
+        }
+    }
+
     fn resolve(&self) -> Result<&SweepTarget, CollisionQueryError> {
         match self {
             Self::Prepared(target) => Ok(target),
             Self::Frozen(target) => target
                 .prepared
                 .get_or_init(|| {
-                    reanchor_placed_shapes(target.source_anchor, &target.shapes, target.anchor)
+                    reanchor_placed_shapes_arc(target.source_anchor, &target.shapes, target.anchor)
                         .map(|shapes| SweepTarget {
                             contact: target.contact.clone(),
+                            geometry_stamp: target.geometry_stamp,
                             shapes,
                         })
                         .map_err(|error| {
@@ -76,10 +93,22 @@ impl HardTarget {
                 .map_err(|error| *error),
         }
     }
+
+    fn resolved(&self) -> &SweepTarget {
+        match self {
+            Self::Prepared(target) => target,
+            Self::Frozen(target) => target
+                .prepared
+                .get()
+                .expect("candidate slot was not resolved")
+                .as_ref()
+                .expect("failed candidate slot reached resolved lookup"),
+        }
+    }
 }
 
 impl HardTargets {
-    pub(super) fn new(bodies: Vec<SweepTarget>) -> Result<Self> {
+    pub(crate) fn new(bodies: Vec<SweepTarget>) -> Result<Self> {
         ensure!(
             bodies.len() < u32::MAX as usize,
             "too many hard targets for spatial index"
@@ -125,6 +154,7 @@ impl HardTargets {
             }
             bodies.push(HardTarget::Frozen(FrozenHardTarget {
                 anchor,
+                geometry_stamp: target.geometry_stamp,
                 source_anchor: target.anchor,
                 shapes: Arc::clone(&target.shapes),
                 contact: target.contact.clone(),
@@ -144,7 +174,7 @@ impl HardTargets {
     }
 
     /// Publishes accepted nonyielding movement without rebuilding unrelated target bounds.
-    pub(super) fn replace(&mut self, target: SweepTarget) -> Result<()> {
+    pub(crate) fn replace(&mut self, target: SweepTarget) -> Result<()> {
         let slot = *self
             .slots
             .get(&target.contact.body_id)
@@ -175,6 +205,20 @@ impl HardTargets {
         // to hit. This avoids adding a separate removal lifecycle for tick-local geometry.
     }
 
+    pub(super) fn accepts_entity_support(
+        &self,
+        body_id: SpatialBodyId,
+        stamp: u64,
+        seeker: &super::ContactParticipant,
+    ) -> bool {
+        stamp != 0
+            && self.slots.get(&body_id).is_some_and(|&slot| {
+                let target = &self.bodies[slot];
+                target.geometry_stamp() == stamp
+                    && seeker.accepts_hard_support_from(target.contact())
+            })
+    }
+
     pub(super) fn iter(&self) -> Result<impl Iterator<Item = &SweepTarget>, CollisionQueryError> {
         Ok(self
             .bodies
@@ -184,41 +228,81 @@ impl HardTargets {
             .into_iter())
     }
 
+    pub(super) fn resolved_slot(&self, slot: u32) -> &SweepTarget {
+        self.bodies[slot as usize].resolved()
+    }
+
+    #[cfg(test)]
     pub(super) fn sphere_candidates(
         &self,
         center: Vector3,
         radius: f32,
     ) -> Result<impl Iterator<Item = &SweepTarget>, CollisionQueryError> {
-        let center = vector(center);
-        let extent = Vector::splat(radius);
-        self.candidates(Aabb::new(center - extent, center + extent))
+        let mut slots = Vec::new();
+        self.sphere_candidates_into(center, radius, &mut slots)?;
+        Ok(slots.into_iter().map(|slot| self.resolved_slot(slot)))
     }
 
+    pub(super) fn sphere_candidates_into(
+        &self,
+        center: Vector3,
+        radius: f32,
+        slots: &mut Vec<u32>,
+    ) -> Result<(), CollisionQueryError> {
+        let center = vector(center);
+        let extent = Vector::splat(radius);
+        self.candidates_into(Aabb::new(center - extent, center + extent), slots)
+    }
+
+    #[cfg(test)]
     pub(super) fn support_candidates(
         &self,
         center: Vector3,
         radius: f32,
     ) -> Result<impl Iterator<Item = &SweepTarget>, CollisionQueryError> {
+        let mut slots = Vec::new();
+        self.support_candidates_into(center, radius, &mut slots)?;
+        Ok(slots.into_iter().map(|slot| self.resolved_slot(slot)))
+    }
+
+    pub(super) fn support_candidates_into(
+        &self,
+        center: Vector3,
+        radius: f32,
+        slots: &mut Vec<u32>,
+    ) -> Result<(), CollisionQueryError> {
         let reach = radius + CONTACT_EPSILON;
         // Match the existing support primitive's XY column rejection. Height admission
         // remains shape-owned, including BSP slopes and expanded volume cap corners.
-        self.candidates(Aabb::new(
-            Vector::new(center.x - reach, center.y - reach, -f32::MAX),
-            Vector::new(center.x + reach, center.y + reach, f32::MAX),
-        ))
+        self.candidates_into(
+            Aabb::new(
+                Vector::new(center.x - reach, center.y - reach, -f32::MAX),
+                Vector::new(center.x + reach, center.y + reach, f32::MAX),
+            ),
+            slots,
+        )
     }
 
-    fn candidates(
+    fn candidates_into(
         &self,
         query: Aabb,
-    ) -> Result<impl Iterator<Item = &SweepTarget>, CollisionQueryError> {
-        let mut slots = self.index.intersect_aabb(&query).collect::<Vec<_>>();
-        slots.sort_unstable_by_key(|slot| self.bodies[*slot as usize].body_id());
-        Ok(slots
-            .into_iter()
-            .map(|slot| self.bodies[slot as usize].resolve())
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter())
+        slots: &mut Vec<u32>,
+    ) -> Result<(), CollisionQueryError> {
+        slots.clear();
+        if self.bodies.is_empty() {
+            return Ok(());
+        }
+        slots.extend(self.index.intersect_aabb(&query));
+        if slots.is_empty() {
+            return Ok(());
+        }
+        if slots.len() > 1 {
+            slots.sort_unstable_by_key(|slot| self.bodies[*slot as usize].body_id());
+        }
+        for &slot in slots.iter() {
+            let _ = self.bodies[slot as usize].resolve()?;
+        }
+        Ok(())
     }
 }
 
@@ -344,6 +428,7 @@ mod tests {
                 membership: SpatialMembership::interior(Guid(0xda55_0100 + id)),
                 filter: PhysicalCollisionFilter::ALL,
             },
+            geometry_stamp: 0,
             shapes: vec![
                 PlacedCollisionShape::new(
                     Arc::new(CollisionShape::Ball(CollisionBall {
@@ -357,7 +442,8 @@ mod tests {
                     ColliderScale::uniform(1.0).unwrap(),
                 )
                 .unwrap(),
-            ],
+            ]
+            .into(),
         }
     }
 
@@ -368,7 +454,7 @@ mod tests {
                 .map(|slot| {
                     let mut body = target(4 - slot, Vector3::zero());
                     if !occupied.contains(&slot) {
-                        body.shapes.clear();
+                        body.shapes = Arc::from([]);
                     }
                     body
                 })
@@ -418,14 +504,18 @@ mod tests {
                     id,
                     Vector3::new((id % 8) as f32 * 12.0, (id / 8) as f32 * 12.0, id as f32),
                 );
-                EntityCollisionTarget::for_test(source_anchor, prepared.contact, prepared.shapes)
+                EntityCollisionTarget::for_test(
+                    source_anchor,
+                    prepared.contact,
+                    prepared.shapes.to_vec(),
+                )
             })
             .collect::<Vec<_>>();
         let high = target(65, Vector3::new(12.0, 0.0, 100.0));
         sources.push(EntityCollisionTarget::for_test(
             source_anchor,
             high.contact,
-            high.shapes,
+            high.shapes.to_vec(),
         ));
         for anchor in [source_anchor, Guid(0xdb54_ffff), Guid(0x0055_ffff)] {
             let deferred = HardTargets::frozen(anchor, &sources).unwrap();
@@ -434,7 +524,8 @@ mod tests {
                     .iter()
                     .map(|source| SweepTarget {
                         contact: source.contact.clone(),
-                        shapes: reanchor_placed_shapes(source.anchor, &source.shapes, anchor)
+                        geometry_stamp: source.geometry_stamp,
+                        shapes: reanchor_placed_shapes_arc(source.anchor, &source.shapes, anchor)
                             .unwrap(),
                     })
                     .collect(),
@@ -510,11 +601,10 @@ mod tests {
     fn selected_peer_preparation_failure_is_not_treated_as_empty_space() {
         let source_anchor = Guid(0xda55_ffff);
         let query_anchor = Guid(0xdb55_ffff);
-        let mut malformed = target(1, Vector3::zero());
-        malformed.shapes[0].scale =
-            ColliderScale::from_components(Vector3::new(1.0, 2.0, 1.0)).unwrap();
-        let source =
-            EntityCollisionTarget::for_test(source_anchor, malformed.contact, malformed.shapes);
+        let malformed = target(1, Vector3::zero());
+        let mut shapes = malformed.shapes.to_vec();
+        shapes[0].scale = ColliderScale::from_components(Vector3::new(1.0, 2.0, 1.0)).unwrap();
+        let source = EntityCollisionTarget::for_test(source_anchor, malformed.contact, shapes);
         let deferred = HardTargets::frozen(query_anchor, [&source]).unwrap();
         let center = WorldPosition {
             landblock_id: source_anchor,

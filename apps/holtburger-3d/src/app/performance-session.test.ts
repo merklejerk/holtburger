@@ -36,6 +36,7 @@ function nativeSnapshot(
 		elapsedMs: 0,
 		pendingScopes: 0,
 		authority: [],
+		physicsPhases: [],
 		forwarding: { sampleCount: 0, meanMs: null },
 	};
 }
@@ -210,7 +211,7 @@ describe("PerformanceSession", () => {
 		await expect(session.start()).rejects.toThrow("retired");
 	});
 
-	it("exports schema v5 renderer CPU phases and portal workload counts", async () => {
+	it("exports schema v6 renderer CPU phases and portal workload counts", async () => {
 		let now = 0;
 		const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
 		try {
@@ -238,7 +239,7 @@ describe("PerformanceSession", () => {
 			const { session } = build(undefined, () => diagnostics);
 			await session.start();
 			const report = session.snapshot();
-			expect(report?.schemaVersion).toBe(5);
+			expect(report?.schemaVersion).toBe(6);
 			expect(report?.renderer?.cpu).toMatchObject({
 				latestMs: 3,
 				meanMs: 3,

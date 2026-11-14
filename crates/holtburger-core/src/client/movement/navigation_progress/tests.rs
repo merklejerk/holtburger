@@ -702,7 +702,7 @@ fn simulation_admits_travel_once_and_publishes_bodyless_translation_and_facing()
     );
     assert!(matches!(
         tick.body_motions.get(&guid),
-        Some(ClientBodyMotion::PoseOnly)
+        Some(ClientBodyMotion::PoseOnly { .. })
     ));
     assert!(
         world
@@ -723,7 +723,7 @@ fn simulation_admits_travel_once_and_publishes_bodyless_translation_and_facing()
     assert!(tick.relative_facing_changed);
     assert!(matches!(
         tick.body_motions.get(&guid),
-        Some(ClientBodyMotion::PoseOnly)
+        Some(ClientBodyMotion::PoseOnly { .. })
     ));
 }
 

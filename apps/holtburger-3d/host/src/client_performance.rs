@@ -38,6 +38,18 @@ pub struct NativeScopeMean {
     mean_ms: f64,
 }
 
+/// Sub-phase mean sharing completed `physics_tick` observations.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePhysicsPhaseMean {
+    /// Core phase spelling, not arbitrary application data.
+    phase: &'static str,
+    /// Completed `physics_tick` scopes represented by this mean.
+    sample_count: u64,
+    /// Elapsed time in this sub-phase, including awaited work.
+    mean_ms: f64,
+}
+
 /// Completed forwarding work; retained only while explicitly capturing.
 #[derive(Debug, Clone, Default)]
 struct ForwardingTotals {
@@ -64,6 +76,7 @@ pub struct ClientPerformanceSnapshot {
     /// Unfinished authority workloads excluded on stop.
     pending_scopes: u64,
     authority: Vec<NativeScopeMean>,
+    physics_phases: Vec<NativePhysicsPhaseMean>,
     forwarding: ForwardingProfile,
 }
 
@@ -175,6 +188,15 @@ impl ClientPerformance {
                     mean_ms: totals.total.as_secs_f64() * 1000.0 / totals.sample_count as f64,
                 })
                 .collect(),
+            physics_phases: authority
+                .physics_phases
+                .into_iter()
+                .map(|(phase, totals)| NativePhysicsPhaseMean {
+                    phase: phase.as_str(),
+                    sample_count: totals.sample_count,
+                    mean_ms: totals.total.as_secs_f64() * 1000.0 / totals.sample_count as f64,
+                })
+                .collect(),
             forwarding: ForwardingProfile {
                 sample_count: state.totals.sample_count,
                 mean_ms: (state.totals.sample_count > 0).then(|| {
@@ -237,6 +259,7 @@ mod tests {
         assert!(!snapshot.recording);
         assert_eq!(snapshot.forwarding.sample_count, 1);
         assert_eq!(snapshot.forwarding.mean_ms, Some(3.0));
+        assert!(snapshot.physics_phases.is_empty());
         assert!(
             profile
                 .control(request(PerformanceAction::Stop, 1))
@@ -248,5 +271,41 @@ mod tests {
                 .is_err()
         );
         assert!(profile.forwarding_generation().is_none());
+    }
+
+    #[test]
+    fn snapshot_serializes_physics_phases_when_authority_samples_exist() {
+        let authority = RuntimeProfileSnapshot {
+            generation: 1,
+            recording: true,
+            pending_scopes: 0,
+            scopes: [(
+                holtburger_core::client::runtime_profile::RuntimeProfileScope::PhysicsTick,
+                holtburger_core::client::runtime_profile::RuntimeScopeTotals {
+                    sample_count: 2,
+                    total: Duration::from_millis(6),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            physics_phases: holtburger_core::client::runtime_profile::PhysicsTickPhase::ALL
+                .into_iter()
+                .map(|phase| {
+                    (
+                        phase,
+                        holtburger_core::client::runtime_profile::RuntimeScopeTotals {
+                            sample_count: 2,
+                            total: Duration::from_millis(1),
+                        },
+                    )
+                })
+                .collect(),
+        };
+        let projected = ClientPerformance::project(&ForwardingState::default(), authority);
+        let json = serde_json::to_value(&projected).unwrap();
+        assert_eq!(json["physicsPhases"].as_array().unwrap().len(), 8);
+        assert_eq!(json["physicsPhases"][0]["phase"], "command_drain");
+        assert_eq!(json["physicsPhases"][0]["sampleCount"], 2);
+        assert_eq!(json["physicsPhases"][0]["meanMs"], 0.5);
     }
 }

@@ -1164,14 +1164,90 @@ fn valid_speed_multiplier(speed: f32) -> bool {
 }
 
 /// Authored-motion playback for every body one authority simulates.
+#[derive(PartialEq)]
+struct MotionObservationSignature {
+    playback: Option<MotionPlayback>,
+    offset: Option<RigidTransform>,
+}
+
+impl MotionObservationSignature {
+    fn of(runtime: &BodyMotionRuntime) -> Self {
+        Self {
+            playback: runtime.motion_playback(),
+            offset: runtime
+                .sequence
+                .contributes_motion()
+                .then_some(runtime.tick.offset),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MotionRuntimeRegistry {
     bodies: HashMap<Guid, BodyMotionRuntime>,
     /// Terminal results outlive body removal until the caller consumes them or retires its epoch.
     retired_local_feedback: HashMap<Guid, Vec<LocalMotionFeedback>>,
+    /// Bounded multi-reader journal tracking playback/offset changes per GUID.
+    observation_log: crate::dirty_log::DirtyGuidLog,
 }
 
 impl MotionRuntimeRegistry {
+    /// Opaque cursor incremented whenever a body's playback or authored offset changes.
+    pub fn observation_cursor(&self) -> crate::dirty_log::DirtyGuidCursor {
+        self.observation_log.cursor()
+    }
+
+    /// Incremental entity GUIDs whose observed playback or authored offset changed after `cursor`.
+    pub fn observation_changes_since(
+        &self,
+        cursor: crate::dirty_log::DirtyGuidCursor,
+    ) -> crate::dirty_log::GuidChanges {
+        self.observation_log.changes_since(cursor)
+    }
+
+    /// Forces all observation readers onto a full resync (for example after catalog replacement).
+    pub fn mark_all_observations_dirty(&mut self) {
+        self.observation_log.record_all();
+    }
+
+    fn mutate_body<R>(
+        &mut self,
+        guid: Guid,
+        f: impl FnOnce(&mut BodyMotionRuntime) -> R,
+    ) -> Option<R> {
+        let runtime = self.bodies.get_mut(&guid)?;
+        let before = MotionObservationSignature::of(runtime);
+        let out = f(runtime);
+        if MotionObservationSignature::of(runtime) != before {
+            self.observation_log.record(guid, false);
+        }
+        Some(out)
+    }
+
+    fn upsert_body<R>(
+        &mut self,
+        table: &MotionSequenceTable,
+        guid: Guid,
+        f: impl FnOnce(&mut BodyMotionRuntime) -> R,
+    ) -> R {
+        if let Some(runtime) = self.bodies.get_mut(&guid) {
+            let before = MotionObservationSignature::of(runtime);
+            let out = f(runtime);
+            if MotionObservationSignature::of(runtime) != before {
+                self.observation_log.record(guid, false);
+            }
+            return out;
+        }
+        let mut runtime = BodyMotionRuntime::new(table);
+        let out = f(&mut runtime);
+        let after = MotionObservationSignature::of(&runtime);
+        self.bodies.insert(guid, runtime);
+        if after.playback.is_some() || after.offset.is_some() {
+            self.observation_log.record(guid, false);
+        }
+        out
+    }
+
     /// Drain local command results from the owning body's playback timeline.
     pub fn take_local_feedback(&mut self, guid: Guid) -> Vec<LocalMotionFeedback> {
         let mut feedback = self
@@ -1211,26 +1287,24 @@ impl MotionRuntimeRegistry {
         target: Option<Guid>,
         now: Instant,
     ) {
-        let runtime = self
-            .bodies
-            .entry(guid)
-            .or_insert_with(|| BodyMotionRuntime::new(table));
-        runtime.bind_table(table);
-        runtime.sticky.admit(target, now);
+        self.upsert_body(table, guid, |runtime| {
+            runtime.bind_table(table);
+            runtime.sticky.admit(target, now);
+        });
     }
 
     /// Preserve explicit target-facing source intent beyond the interval's sticky lifetime.
     pub(crate) fn retain_sticky_heading(&mut self, guid: Guid, heading: f32) {
-        if let Some(runtime) = self.bodies.get_mut(&guid) {
+        self.mutate_body(guid, |runtime| {
             runtime.retain_sticky_heading(heading);
-        }
+        });
     }
 
     /// Explicit command cancellation also invalidates a sample not yet consumed by physics.
     pub fn cancel_sticky_target(&mut self, guid: Guid) {
-        if let Some(runtime) = self.bodies.get_mut(&guid) {
+        self.mutate_body(guid, |runtime| {
             runtime.sticky = StickyMotion::default();
-        }
+        });
     }
 
     pub fn new() -> Self {
@@ -1239,9 +1313,9 @@ impl MotionRuntimeRegistry {
 
     /// Interrupt an existing body's pending animation work; never instantiate playback here.
     pub(crate) fn interrupt_transitions(&mut self, guid: Guid) {
-        if let Some(runtime) = self.bodies.get_mut(&guid) {
+        self.mutate_body(guid, |runtime| {
             runtime.interrupt_transitions();
-        }
+        });
     }
 
     pub fn get(&self, guid: Guid) -> Option<&BodyMotionRuntime> {
@@ -1289,30 +1363,47 @@ impl MotionRuntimeRegistry {
     /// Retire playback while preserving explicit cancellation for unfinished local requests.
     pub fn forget(&mut self, guid: Guid) {
         if let Some(mut runtime) = self.bodies.remove(&guid) {
+            let sig = MotionObservationSignature::of(&runtime);
             Self::preserve_body_cancellation(&mut self.retired_local_feedback, guid, &mut runtime);
+            if sig.playback.is_some() || sig.offset.is_some() {
+                self.observation_log.record(guid, false);
+            }
         }
     }
 
     /// Commits one caller-proposed body playback after its enclosing transaction succeeds.
     pub fn replace_body(&mut self, guid: Guid, runtime: BodyMotionRuntime) {
-        self.bodies.insert(guid, runtime);
+        let next = MotionObservationSignature::of(&runtime);
+        let prev = self
+            .bodies
+            .insert(guid, runtime)
+            .map(|old| MotionObservationSignature::of(&old));
+        if prev.as_ref() != Some(&next)
+            && (prev.is_some() || next.playback.is_some() || next.offset.is_some())
+        {
+            self.observation_log.record(guid, false);
+        }
     }
 
     /// Relinquishes independent locomotion without resetting ordinary playback or actions.
     /// Authorities retain observations only while their local physical presentation is active.
     pub fn retain_locomotion(&mut self, keep: impl Fn(Guid) -> bool) {
-        for (guid, runtime) in &mut self.bodies {
-            if runtime.locomotion.is_some() && !keep(*guid) {
+        for (&guid, runtime) in &mut self.bodies {
+            if runtime.locomotion.is_some() && !keep(guid) {
+                let before = MotionObservationSignature::of(runtime);
                 runtime.locomotion = None;
+                if MotionObservationSignature::of(runtime) != before {
+                    self.observation_log.record(guid, false);
+                }
             }
         }
     }
 
     /// Retires one locomotion owner while preserving commanded playback and actions.
     pub fn clear_locomotion(&mut self, guid: Guid) {
-        if let Some(runtime) = self.bodies.get_mut(&guid) {
+        self.mutate_body(guid, |runtime| {
             runtime.locomotion = None;
-        }
+        });
     }
 
     /// Resolve and apply observed playback as one registry-owned transition. Ending external
@@ -1325,40 +1416,41 @@ impl MotionRuntimeRegistry {
         observation: ObservedCharacterMotion,
         quantum: f32,
     ) -> anyhow::Result<()> {
-        let Some(runtime) = self.bodies.get_mut(&guid) else {
-            return Ok(());
-        };
-        runtime.bind_table(table);
-        if runtime.has_manual_locomotion() {
-            return Ok(());
-        }
-        let commanded = runtime.state.substate.is_locomotion_command()
-            || runtime
-                .state
-                .modifiers()
-                .iter()
-                .any(|active| active.command.is_locomotion_command());
-        let requires_observed =
-            commanded || observation.presentation != super::CharacterMotionPresentation::Grounded;
-        if !requires_observed && !observation.motion.external_translation {
-            runtime.locomotion = None;
-            return Ok(());
-        }
-        let order = observed_locomotion_order(
-            table,
-            runtime.state.style,
-            observation.motion.accepted,
-            observation.orientation,
-            observation.presentation,
-            observation.object_scale,
-        )?;
-        // An ineffective return must leave the standing cursor and its hooks uninterrupted.
-        // A blocked movement command still needs observed standing instead of its authored gait.
-        if !requires_observed && !order.has_channels() {
-            runtime.locomotion = None;
-            return Ok(());
-        }
-        runtime.present_locomotion(table, order, quantum);
+        self.mutate_body(guid, |runtime| -> anyhow::Result<()> {
+            runtime.bind_table(table);
+            if runtime.has_manual_locomotion() {
+                return Ok(());
+            }
+            let commanded = runtime.state.substate.is_locomotion_command()
+                || runtime
+                    .state
+                    .modifiers()
+                    .iter()
+                    .any(|active| active.command.is_locomotion_command());
+            let requires_observed = commanded
+                || observation.presentation != super::CharacterMotionPresentation::Grounded;
+            if !requires_observed && !observation.motion.external_translation {
+                runtime.locomotion = None;
+                return Ok(());
+            }
+            let order = observed_locomotion_order(
+                table,
+                runtime.state.style,
+                observation.motion.accepted,
+                observation.orientation,
+                observation.presentation,
+                observation.object_scale,
+            )?;
+            // An ineffective return must leave the standing cursor and its hooks uninterrupted.
+            // A blocked movement command still needs observed standing instead of its authored gait.
+            if !requires_observed && !order.has_channels() {
+                runtime.locomotion = None;
+                return Ok(());
+            }
+            runtime.present_locomotion(table, order, quantum);
+            Ok(())
+        })
+        .transpose()?;
         Ok(())
     }
 
@@ -1367,7 +1459,11 @@ impl MotionRuntimeRegistry {
             if keep(*guid) {
                 return true;
             }
+            let sig = MotionObservationSignature::of(runtime);
             Self::preserve_body_cancellation(&mut self.retired_local_feedback, *guid, runtime);
+            if sig.playback.is_some() || sig.offset.is_some() {
+                self.observation_log.record(*guid, false);
+            }
             false
         });
     }
@@ -1390,22 +1486,20 @@ impl MotionRuntimeRegistry {
         speed: OrderedMotionScalar,
         admission: EntityMotionAdmission,
     ) -> MotionCommandAdmissionOutcome {
-        let runtime = self
-            .bodies
-            .entry(guid)
-            .or_insert_with(|| BodyMotionRuntime::new(table));
-        // Server stance admission and manual locomotion can leave ordinary playback on an older
-        // style. Select the accepted style before a transient action chooses its animation route.
-        if runtime.state.style != style {
-            runtime.accept_order(
-                table,
-                MotionOrder {
-                    style: Some(style),
-                    ..MotionOrder::default()
-                },
-            );
-        }
-        runtime.submit_local_command(table, request, speed, admission)
+        self.upsert_body(table, guid, |runtime| {
+            // Server stance admission and manual locomotion can leave ordinary playback on an older
+            // style. Select the accepted style before a transient action chooses its animation route.
+            if runtime.state.style != style {
+                runtime.accept_order(
+                    table,
+                    MotionOrder {
+                        style: Some(style),
+                        ..MotionOrder::default()
+                    },
+                );
+            }
+            runtime.submit_local_command(table, request, speed, admission)
+        })
     }
 
     /// Advance the retained order only while it is still owned by local command admission.
@@ -1415,17 +1509,28 @@ impl MotionRuntimeRegistry {
         guid: Guid,
         quantum: f32,
     ) -> Option<&SequenceTick> {
-        let runtime = self.bodies.get_mut(&guid)?;
-        runtime
-            .local_command_owned
-            .then(|| runtime.advance_local_command(table, quantum))
+        let advanced = self.mutate_body(guid, |runtime| {
+            if runtime.local_command_owned {
+                runtime.advance_local_command(table, quantum);
+                true
+            } else {
+                false
+            }
+        })?;
+        advanced.then(|| {
+            &self
+                .bodies
+                .get(&guid)
+                .expect("mutated local command runtime disappeared")
+                .tick
+        })
     }
 
     /// A fresh source supersedes the local order while preserving its cursor for normal transition selection.
     pub fn release_local_command(&mut self, guid: Guid) {
-        if let Some(runtime) = self.bodies.get_mut(&guid) {
+        self.mutate_body(guid, |runtime| {
             runtime.local_command_owned = false;
-        }
+        });
     }
 
     /// Enqueues one transient action on the body runtime selected by its effective table.
@@ -1435,12 +1540,10 @@ impl MotionRuntimeRegistry {
         guid: Guid,
         action: EntityMotionAction,
     ) -> MotionActionEnqueueOutcome {
-        let runtime = self
-            .bodies
-            .entry(guid)
-            .or_insert_with(|| BodyMotionRuntime::new(table));
-        runtime.bind_table(table);
-        runtime.enqueue_action(action)
+        self.upsert_body(table, guid, |runtime| {
+            runtime.bind_table(table);
+            runtime.enqueue_action(action)
+        })
     }
 
     /// Updates the independent visual locomotion cursor after physical motion has been published.
@@ -1453,10 +1556,9 @@ impl MotionRuntimeRegistry {
         order: MotionOrder,
         quantum: f32,
     ) -> bool {
-        self.bodies
-            .entry(guid)
-            .or_insert_with(|| BodyMotionRuntime::new(table))
-            .present_locomotion(table, order, quantum)
+        self.upsert_body(table, guid, |runtime| {
+            runtime.present_locomotion(table, order, quantum)
+        })
     }
 
     /// Local manual arbitration uses the same resident cursor and diagnostics as other drives.
@@ -1480,20 +1582,22 @@ impl MotionRuntimeRegistry {
         presentation: super::CharacterMotionPresentation,
         quantum: f32,
     ) -> &SequenceTick {
-        let runtime = self
+        self.upsert_body(table, guid, |runtime| {
+            runtime.remote_motion = None;
+            let previous_resolution = runtime.reported_resolution();
+            runtime.drive_manual_with_fallback(table, baseline, order, presentation, quantum);
+            runtime.report_selection(
+                table,
+                guid,
+                previous_resolution,
+                runtime.reported_resolution(),
+            );
+        });
+        &self
             .bodies
-            .entry(guid)
-            .or_insert_with(|| BodyMotionRuntime::new(table));
-        runtime.remote_motion = None;
-        let previous_resolution = runtime.reported_resolution();
-        runtime.drive_manual_with_fallback(table, baseline, order, presentation, quantum);
-        runtime.report_selection(
-            table,
-            guid,
-            previous_resolution,
-            runtime.reported_resolution(),
-        );
-        &runtime.tick
+            .get(&guid)
+            .expect("upserted manual runtime disappeared")
+            .tick
     }
 
     /// Brings one body's playback in line with its order, then advances it by the tick.
@@ -1508,12 +1612,15 @@ impl MotionRuntimeRegistry {
         order: MotionOrder,
         quantum: f32,
     ) -> &SequenceTick {
-        let runtime = self
+        self.upsert_body(table, guid, |runtime| {
+            runtime.remote_motion = None;
+            runtime.drive_for_guid(table, guid, order, quantum);
+        });
+        &self
             .bodies
-            .entry(guid)
-            .or_insert_with(|| BodyMotionRuntime::new(table));
-        runtime.remote_motion = None;
-        runtime.drive_for_guid(table, guid, order, quantum)
+            .get(&guid)
+            .expect("upserted driven runtime disappeared")
+            .tick
     }
 }
 

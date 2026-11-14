@@ -27,7 +27,7 @@ use holtburger_world::{
     PhysicalBodyDefinition, PhysicalBodyState, SolveBodyInput, SpatialBodyId, WorldEvent,
     WorldState, admit_physical_duration, advance_body_kinematics,
 };
-use holtburger_world::{PlacedMotionPath, SpatialBody};
+use holtburger_world::{PlacedMotionPath, SpatialBody, SpatialMembership};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -57,11 +57,20 @@ pub(super) struct ClientSimulationTick {
 #[derive(Debug)]
 pub(super) enum ClientBodyMotion {
     /// Accepted physical geometry, including intermediate placement boundaries.
-    Physical(PlacedMotionPath),
+    Physical {
+        previous_pose: WorldPosition,
+        path: PlacedMotionPath,
+    },
     /// Endpoint projection without a fully traversed physical path.
-    PoseOnly,
+    PoseOnly {
+        previous_pose: WorldPosition,
+        previous_membership: SpatialMembership,
+    },
     /// Discontinuous placement, with no interpolated transit.
-    CorrectionSnap,
+    CorrectionSnap {
+        previous_pose: WorldPosition,
+        previous_membership: SpatialMembership,
+    },
 }
 
 /// Local-player contributions admitted once for the current physical interval.
@@ -294,7 +303,10 @@ pub(super) fn tick_with_precise_jump(
         && !local_dead
         && let Some(collision) = collision
     {
-        let previous = world.local_player_runtime_pose();
+        let previous_placement = world
+            .scene
+            .body_for_guid(local_guid)
+            .map(|body| (body.pose, body.spatial_membership()));
         events.extend(movement.advance_navigation(
             world,
             &collision.scene,
@@ -306,8 +318,16 @@ pub(super) fn tick_with_precise_jump(
                 sticky_target: navigation_sticky_target,
             },
         )?);
-        if world.local_player_runtime_pose() != previous {
-            body_motions.insert(local_guid, ClientBodyMotion::PoseOnly);
+        if let Some((previous_pose, previous_membership)) = previous_placement
+            && world.local_player_runtime_pose() != Some(previous_pose)
+        {
+            body_motions.insert(
+                local_guid,
+                ClientBodyMotion::PoseOnly {
+                    previous_pose,
+                    previous_membership,
+                },
+            );
         }
     }
     events.extend(tick_pose_only_remote_entities(
@@ -705,6 +725,7 @@ fn tick_physical_entities(
     // accepted prefixes and client locomotion policy; residency refresh retries missing owners.
     let holtburger_world::DynamicEntityCollectionTick {
         outcomes,
+        mut snap_previous_placements,
         collision_reports,
         coverage_rejections: _,
     } = collection;
@@ -718,16 +739,34 @@ fn tick_physical_entities(
         let update = match outcome {
             holtburger_world::DynamicEntityBodyOutcome::Integrated(update) => update,
             holtburger_world::DynamicEntityBodyOutcome::FixedPlacement(body_id) => {
+                let (previous_pose, previous_membership) = snap_previous_placements
+                    .remove(&body_id)
+                    .context("fixed placement outcome missing pre-step placement")?;
                 events.push(WorldEvent::RuntimeBodyAdvanced {
                     body_id,
                     kind: holtburger_world::RuntimeBodyAdvanceKind::CorrectionSnap,
                 });
-                body_motions.insert(guid, ClientBodyMotion::CorrectionSnap);
+                body_motions.insert(
+                    guid,
+                    ClientBodyMotion::CorrectionSnap {
+                        previous_pose,
+                        previous_membership,
+                    },
+                );
                 continue;
             }
             holtburger_world::DynamicEntityBodyOutcome::RecoveredPlacement(body_id) => {
+                let (previous_pose, previous_membership) = snap_previous_placements
+                    .remove(&body_id)
+                    .context("recovered placement outcome missing pre-step placement")?;
                 events.extend(world.apply_recovered_body(body_id)?);
-                body_motions.insert(guid, ClientBodyMotion::CorrectionSnap);
+                body_motions.insert(
+                    guid,
+                    ClientBodyMotion::CorrectionSnap {
+                        previous_pose,
+                        previous_membership,
+                    },
+                );
                 continue;
             }
         };
@@ -768,7 +807,14 @@ fn tick_physical_entities(
                 world.present_character_locomotion(body_id, source, presentation, dt)?;
             }
         }
-        body_motions.insert(guid, ClientBodyMotion::Physical(update.path));
+        let previous_pose = update.previous_pose;
+        body_motions.insert(
+            guid,
+            ClientBodyMotion::Physical {
+                previous_pose,
+                path: update.path,
+            },
+        );
     }
     Ok(PhysicalSimulationTick {
         events,
@@ -880,6 +926,10 @@ fn tick_pose_only_remote_entities(
         if physical || awaiting_physics {
             continue;
         }
+        let previous_placement = world
+            .scene
+            .body(input.body_id)
+            .map(|body| (body.pose, body.spatial_membership()));
         let solved = advance_body_kinematics(&input, dt);
         let Some((solved, kind)) = world
             .scene
@@ -893,14 +943,22 @@ fn tick_pose_only_remote_entities(
                 .body_id
                 .authoritative_guid()
                 .context("pose-only body has no entity")?;
+            let (previous_pose, previous_membership) =
+                previous_placement.context("pose-only body missing pre-step placement")?;
             body_motions.insert(
                 guid,
                 match kind {
                     holtburger_world::RuntimeBodyAdvanceKind::Integrated => {
-                        ClientBodyMotion::PoseOnly
+                        ClientBodyMotion::PoseOnly {
+                            previous_pose,
+                            previous_membership,
+                        }
                     }
                     holtburger_world::RuntimeBodyAdvanceKind::CorrectionSnap => {
-                        ClientBodyMotion::CorrectionSnap
+                        ClientBodyMotion::CorrectionSnap {
+                            previous_pose,
+                            previous_membership,
+                        }
                     }
                 },
             );

@@ -10,8 +10,8 @@ use super::collision_report::{
     CollisionReportSource, CollisionReportTouch,
 };
 use super::dynamic_index::{
-    EntityCollisionProof, EntityCollisionSnapshot, current_entity_peer_overlap,
-    placed_target_shapes,
+    EntityCollisionProof, EntityCollisionSnapshot, EntityCollisionTarget,
+    current_entity_peer_overlap, placed_target_shapes,
 };
 #[cfg(test)]
 use super::{
@@ -37,7 +37,8 @@ use crate::{EffectiveEntityPhysicsState, LocalIntegrationDemand};
 use anyhow::Context;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 /// Resolves retail's post-transition shadow residency: physics-BSP entities use transformed part
@@ -66,13 +67,143 @@ fn resolve_dynamic_body_placement(
     Ok(collision.part_box_membership(anchor, &parts, movement.committed_cell())?)
 }
 
+type PlacedShapesCache =
+    OnceLock<Result<(Guid, Arc<[holtburger_content::PlacedCollisionShape]>), String>>;
+
+#[derive(Debug, Clone)]
+struct StoredSpatialBody {
+    body: SpatialBody,
+    /// Monotonic identity bumped whenever pose or target-shape geometry inputs change.
+    geometry_stamp: u64,
+    /// Last `(pose, collision_scene_revision)` where `dynamic.placement` was proven valid.
+    verified_placement: Option<(WorldPosition, u64)>,
+    /// Lazy target geometry placed in `owner(body.pose)` for the current geometry stamp.
+    placed_shapes: PlacedShapesCache,
+}
+
+impl StoredSpatialBody {
+    fn new(body: SpatialBody, geometry_stamp: u64) -> Self {
+        Self {
+            body,
+            geometry_stamp,
+            verified_placement: None,
+            placed_shapes: OnceLock::new(),
+        }
+    }
+
+    fn ensure_natural_placed_shapes(
+        &self,
+    ) -> anyhow::Result<Option<(Guid, Arc<[holtburger_content::PlacedCollisionShape]>)>> {
+        let Some(dynamic) = self
+            .body
+            .physical
+            .as_ref()
+            .and_then(|physical| physical.dynamic.as_ref())
+        else {
+            return Ok(None);
+        };
+        let anchor = super::dynamic_index::landblock_owner(self.body.pose);
+        let cached = self.placed_shapes.get_or_init(|| {
+            placed_target_shapes(dynamic, self.body.pose, anchor)
+                .map(|shapes| (anchor, shapes.into()))
+                .map_err(|error| format!("{error:#}"))
+        });
+        cached
+            .as_ref()
+            .map(|(cached_anchor, shapes)| Some((*cached_anchor, Arc::clone(shapes))))
+            .map_err(|error| anyhow::anyhow!("{error}"))
+    }
+
+    fn placed_shapes_in(
+        &self,
+        anchor: Guid,
+    ) -> anyhow::Result<Option<Arc<[holtburger_content::PlacedCollisionShape]>>> {
+        let Some((cached_anchor, shapes)) = self.ensure_natural_placed_shapes()? else {
+            return Ok(None);
+        };
+        super::dynamic_index::reanchor_placed_shapes_arc(cached_anchor, &shapes, anchor).map(Some)
+    }
+}
+
+fn target_geometry_unchanged(previous: &SpatialBody, next: &SpatialBody) -> bool {
+    if previous.pose != next.pose {
+        return false;
+    }
+    match (
+        previous
+            .physical
+            .as_ref()
+            .and_then(|physical| physical.dynamic.as_ref()),
+        next.physical
+            .as_ref()
+            .and_then(|physical| physical.dynamic.as_ref()),
+    ) {
+        (None, None) => true,
+        (Some(prev), Some(curr)) => {
+            prev.object_scale.to_bits() == curr.object_scale.to_bits()
+                && prev.collision.uses_physics_bsp == curr.collision.uses_physics_bsp
+                && Arc::ptr_eq(
+                    &prev.collision.target_geometry,
+                    &curr.collision.target_geometry,
+                )
+                && Arc::ptr_eq(&prev.collision_poses.poses, &curr.collision_poses.poses)
+        }
+        _ => false,
+    }
+}
+
+fn is_hard_target_body(body: &SpatialBody) -> bool {
+    let Some(physical) = body.physical.as_ref() else {
+        return false;
+    };
+    let Some(dynamic) = physical.dynamic.as_ref() else {
+        return false;
+    };
+    dynamic.activity != DynamicBodyActivity::Suspended
+        && super::dynamic_index::is_hard_target_dynamic(physical, dynamic)
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct SpatialBodyStore {
-    bodies: HashMap<SpatialBodyId, SpatialBody>,
+    bodies: HashMap<SpatialBodyId, StoredSpatialBody>,
     /// Lazy collision-only publication shared by readers until an entity body may change.
-    entity_queries: std::sync::OnceLock<Result<std::sync::Arc<EntityCollisionSnapshot>, String>>,
+    entity_queries: OnceLock<Result<Arc<EntityCollisionSnapshot>, String>>,
+    /// Lazy hard-target spatial index reused across ticks until a hard body changes.
+    hard_targets: OnceLock<Result<(Guid, Arc<super::mobile_contact::HardTargets>), String>>,
+    /// Bounded multi-reader change log for observed body state mutations.
+    observation_log: crate::dirty_log::DirtyGuidLog,
     config: SpatialSamplingConfig,
     next_ephemeral_body_id: u64,
+    next_geometry_stamp: u64,
+}
+
+#[derive(PartialEq)]
+struct ObservedBodySignature {
+    pose: WorldPosition,
+    contact: ContactState,
+    sample_mode: SpatialSampleMode,
+    is_physical: bool,
+    membership: SpatialMembership,
+    authoritative_pose: Option<WorldPosition>,
+    has_pose_reconciliation_work: bool,
+    retained: super::RetainedBodyKinematics,
+    nominal: AuthoritativeBodyVectors,
+    motion_state: Option<EntityMotionSnapshot>,
+}
+
+fn observed_body_signature(body: &SpatialBody) -> ObservedBodySignature {
+    ObservedBodySignature {
+        pose: body.pose,
+        contact: body.contact,
+        sample_mode: body.sampling.mode,
+        is_physical: body.physical.is_some(),
+        membership: body.spatial_membership(),
+        authoritative_pose: body.authoritative_pose(),
+        has_pose_reconciliation_work: body.has_pose_reconciliation_work(),
+        retained: body.retained,
+        nominal: body.nominal,
+        motion_state: body.motion_state,
+    }
 }
 
 /// One discontinuous body relocation plus every report lifetime it invalidated.
@@ -97,6 +228,8 @@ pub struct DynamicEntityCollectionCoverageRejection {
 pub struct DynamicEntityBodyTick {
     /// Canonical body whose final state is already published.
     pub body_id: SpatialBodyId,
+    /// Body pose immediately before this step committed.
+    pub previous_pose: WorldPosition,
     /// Contact before this collection, sampled by its mutation owner.
     pub previous_contact: ContactState,
     /// Final contact committed by the collection, used for support and animation transitions.
@@ -119,7 +252,7 @@ pub struct DynamicEntityBodyTick {
 /// Mutually exclusive placement consequence for one committed body.
 pub enum DynamicEntityBodyOutcome {
     /// Ordinary accepted movement with its full physical route and presentation facts.
-    Integrated(DynamicEntityBodyTick),
+    Integrated(Box<DynamicEntityBodyTick>),
     /// Fixed-body authority placement; publish a snap without resetting remote motion sources.
     FixedPlacement(SpatialBodyId),
     /// Checked return to reference; publish a snap and reset the remote continuation source.
@@ -140,6 +273,8 @@ impl DynamicEntityBodyOutcome {
 pub struct DynamicEntityCollectionTick {
     /// One explicit disposition per committed body. Recovery replaces ordinary movement.
     pub outcomes: Vec<DynamicEntityBodyOutcome>,
+    /// Pre-step pose and spatial membership for snap outcomes (`FixedPlacement` / `RecoveredPlacement`).
+    pub snap_previous_placements: HashMap<SpatialBodyId, (WorldPosition, SpatialMembership)>,
     /// Collision lifecycle events aggregated after all body publications and final expiry.
     pub collision_reports: Vec<CollisionReportOutcome>,
     /// Bodies lacking required coverage, without invalidating independent body results.
@@ -150,14 +285,82 @@ impl Default for SpatialBodyStore {
     fn default() -> Self {
         Self {
             bodies: HashMap::new(),
-            entity_queries: std::sync::OnceLock::new(),
+            entity_queries: OnceLock::new(),
+            hard_targets: OnceLock::new(),
+            observation_log: crate::dirty_log::DirtyGuidLog::default(),
             config: SpatialSamplingConfig::default(),
             next_ephemeral_body_id: 1,
+            next_geometry_stamp: 1,
         }
     }
 }
 
 impl SpatialBodyStore {
+    fn allocate_geometry_stamp(&mut self) -> u64 {
+        let stamp = self.next_geometry_stamp;
+        self.next_geometry_stamp = self
+            .next_geometry_stamp
+            .checked_add(1)
+            .expect("geometry stamp exhausted");
+        stamp
+    }
+
+    fn invalidate_hard_targets(&mut self, prev_hard: bool, next_hard: bool) {
+        if prev_hard || next_hard {
+            self.hard_targets.take();
+        }
+    }
+
+    fn invalidate_caches(&mut self, body_id: SpatialBodyId, prev_hard: bool, next_hard: bool) {
+        if matches!(body_id, SpatialBodyId::Entity(_)) {
+            self.entity_queries.take();
+        }
+        self.invalidate_hard_targets(prev_hard, next_hard);
+    }
+
+    fn sync_entity_snapshot_entry(&mut self, body_id: SpatialBodyId) {
+        if !matches!(body_id, SpatialBodyId::Entity(_)) {
+            return;
+        }
+        let Some(cached) = self.entity_queries.get_mut() else {
+            return;
+        };
+        let Ok(snapshot) = cached else {
+            self.entity_queries.take();
+            return;
+        };
+        let next = match self.bodies.get(&body_id) {
+            Some(stored) => {
+                let shapes = match stored.ensure_natural_placed_shapes() {
+                    Ok(shapes) => shapes,
+                    Err(_) => {
+                        self.entity_queries.take();
+                        return;
+                    }
+                };
+                match EntityCollisionTarget::from_body_cached(
+                    stored.geometry_stamp,
+                    &stored.body,
+                    shapes,
+                ) {
+                    Ok(target) => target,
+                    Err(_) => {
+                        self.entity_queries.take();
+                        return;
+                    }
+                }
+            }
+            None => None,
+        };
+        Arc::make_mut(snapshot).update_target(body_id, next);
+    }
+
+    fn record_observation(&mut self, body_id: SpatialBodyId, pose_may_have_changed: bool) {
+        if let Some(guid) = body_id.authoritative_guid() {
+            self.observation_log.record(guid, pose_may_have_changed);
+        }
+    }
+
     fn config(&self) -> SpatialSamplingConfig {
         self.config
     }
@@ -171,11 +374,19 @@ impl SpatialBodyStore {
     }
 
     fn iter_runtime_body_views(&self) -> impl Iterator<Item = RuntimeSpatialBodyView> + '_ {
-        self.bodies.values().map(SpatialBody::runtime_view)
+        self.iter_bodies().map(SpatialBody::runtime_view)
+    }
+
+    pub(crate) fn iter_bodies(&self) -> impl Iterator<Item = &SpatialBody> + '_ {
+        self.bodies.values().map(|stored| &stored.body)
+    }
+
+    fn stored_body(&self, body_id: SpatialBodyId) -> Option<&StoredSpatialBody> {
+        self.bodies.get(&body_id)
     }
 
     fn body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
-        self.bodies.get(&body_id)
+        self.bodies.get(&body_id).map(|stored| &stored.body)
     }
 
     fn body_for_guid(&self, guid: Guid) -> Option<&SpatialBody> {
@@ -183,33 +394,144 @@ impl SpatialBodyStore {
             .or_else(|| self.body(SpatialBodyId::Entity(guid)))
     }
 
+    #[cfg(test)]
     fn body_mut(&mut self, body_id: SpatialBodyId) -> Option<&mut SpatialBody> {
+        let _ = self.bodies.get(&body_id)?;
+        let stamp = self.allocate_geometry_stamp();
         if matches!(body_id, SpatialBodyId::Entity(_)) {
             self.entity_queries.take();
         }
-        self.bodies.get_mut(&body_id)
+        self.hard_targets.take();
+        self.record_observation(body_id, true);
+        let stored = self.bodies.get_mut(&body_id)?;
+        stored.geometry_stamp = stamp;
+        stored.verified_placement = None;
+        stored.placed_shapes = OnceLock::new();
+        Some(&mut stored.body)
+    }
+
+    /// Mutable access for mutations that preserve authored pose, geometry, policy, and filter.
+    fn body_kinematics_mut(&mut self, body_id: SpatialBodyId) -> Option<&mut SpatialBody> {
+        if matches!(body_id, SpatialBodyId::Entity(_))
+            && let Some(Ok(snapshot)) = self.entity_queries.get_mut()
+            && snapshot
+                .target(body_id)
+                .is_some_and(EntityCollisionTarget::has_proof)
+        {
+            Arc::make_mut(snapshot).clear_target_proof(body_id);
+        }
+        self.bodies.get_mut(&body_id).map(|stored| &mut stored.body)
+    }
+
+    /// Mutates body collision policy or filter, keeping cached hard/entity indices coherent.
+    fn mutate_body_policy<R>(
+        &mut self,
+        body_id: SpatialBodyId,
+        mutate: impl FnOnce(&mut SpatialBody) -> R,
+    ) -> Option<R> {
+        let prev_hard = is_hard_target_body(&self.bodies.get(&body_id)?.body);
+        let stored = self.bodies.get_mut(&body_id)?;
+        let result = mutate(&mut stored.body);
+        let next_hard = is_hard_target_body(&stored.body);
+        self.invalidate_hard_targets(prev_hard, next_hard);
+        self.sync_entity_snapshot_entry(body_id);
+        Some(result)
+    }
+
+    /// Updates only `sampling.last_derived_at` on an otherwise unchanged settled body.
+    fn touch_sampling_timestamp(&mut self, body_id: SpatialBodyId, now: Instant) {
+        if let Some(stored) = self.bodies.get_mut(&body_id) {
+            stored.body.sampling.last_derived_at = now;
+        }
     }
 
     fn register_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
-        if matches!(body.id, SpatialBodyId::Entity(_)) {
-            self.entity_queries.take();
-        }
-        self.bodies.insert(body.id, body)
+        let body_id = body.id;
+        let new_pose = body.pose;
+        let next_hard = is_hard_target_body(&body);
+        let stamp = self.allocate_geometry_stamp();
+        let previous = self
+            .bodies
+            .insert(body_id, StoredSpatialBody::new(body, stamp))
+            .map(|stored| stored.body);
+        let prev_hard = previous.as_ref().is_some_and(is_hard_target_body);
+        let pose_may_have_changed = previous.as_ref().is_some_and(|prev| prev.pose != new_pose);
+        self.invalidate_hard_targets(prev_hard, next_hard);
+        self.sync_entity_snapshot_entry(body_id);
+        self.record_observation(body_id, pose_may_have_changed);
+        previous
     }
 
     fn update_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
-        if matches!(body.id, SpatialBodyId::Entity(_)) {
-            self.entity_queries.take();
+        self.update_body_with_revision(body, None)
+    }
+
+    fn update_body_with_revision(
+        &mut self,
+        body: SpatialBody,
+        verified_revision: Option<u64>,
+    ) -> Option<SpatialBody> {
+        let body_id = body.id;
+        let existing = self.bodies.get(&body_id)?;
+        let prev_hard = is_hard_target_body(&existing.body);
+        let next_hard = is_hard_target_body(&body);
+        let prev_sig = observed_body_signature(&existing.body);
+        let next_sig = observed_body_signature(&body);
+        let same_geometry = target_geometry_unchanged(&existing.body, &body);
+        let same_definition = existing.body.physical.as_ref().map(|p| p.definition)
+            == body.physical.as_ref().map(|p| p.definition);
+        let same_cell = existing
+            .body
+            .physical
+            .as_ref()
+            .and_then(|physical| physical.response.cell())
+            == body
+                .physical
+                .as_ref()
+                .and_then(|physical| physical.response.cell());
+        let same_suspended = existing
+            .body
+            .physical
+            .as_ref()
+            .and_then(|p| p.dynamic.as_ref())
+            .is_some_and(|d| d.activity == DynamicBodyActivity::Suspended)
+            == body
+                .physical
+                .as_ref()
+                .and_then(|p| p.dynamic.as_ref())
+                .is_some_and(|d| d.activity == DynamicBodyActivity::Suspended);
+        let next_stamp = (!same_geometry).then(|| self.allocate_geometry_stamp());
+        let slot = self.bodies.get_mut(&body_id)?;
+        let previous = std::mem::replace(&mut slot.body, body);
+        if let Some(stamp) = next_stamp {
+            slot.geometry_stamp = stamp;
+            slot.placed_shapes = OnceLock::new();
+            slot.verified_placement = verified_revision.map(|rev| (slot.body.pose, rev));
+        } else if !same_definition || !same_cell || !same_suspended {
+            slot.verified_placement = verified_revision.map(|rev| (slot.body.pose, rev));
+        } else if let Some(rev) = verified_revision {
+            slot.verified_placement = Some((slot.body.pose, rev));
         }
-        let existing = self.bodies.get_mut(&body.id)?;
-        Some(std::mem::replace(existing, body))
+        self.invalidate_hard_targets(prev_hard, next_hard);
+        self.sync_entity_snapshot_entry(body_id);
+        if prev_sig != next_sig {
+            self.record_observation(body_id, prev_sig.pose != next_sig.pose);
+        }
+        Some(previous)
     }
 
     fn remove_body(&mut self, body_id: SpatialBodyId) -> Option<SpatialBody> {
-        if matches!(body_id, SpatialBodyId::Entity(_)) {
-            self.entity_queries.take();
+        let prev_hard = self
+            .bodies
+            .get(&body_id)
+            .is_some_and(|stored| is_hard_target_body(&stored.body));
+        let removed = self.bodies.remove(&body_id).map(|stored| stored.body);
+        if removed.is_some() {
+            self.invalidate_hard_targets(prev_hard, false);
+            self.sync_entity_snapshot_entry(body_id);
+            self.record_observation(body_id, false);
         }
-        self.bodies.remove(&body_id)
+        removed
     }
 
     fn allocate_ephemeral_body_id(&mut self) -> SpatialBodyId {
@@ -217,10 +539,70 @@ impl SpatialBodyStore {
         self.next_ephemeral_body_id += 1;
         body_id
     }
+
+    fn compile_hard_targets_in(
+        &self,
+        anchor: Guid,
+    ) -> anyhow::Result<Arc<super::mobile_contact::HardTargets>> {
+        let mut hard = Vec::new();
+        for stored in self.bodies.values() {
+            if !is_hard_target_body(&stored.body) {
+                continue;
+            }
+            let physical = stored
+                .body
+                .physical
+                .as_ref()
+                .context("hard body lost physical state")?;
+            let dynamic = physical
+                .dynamic
+                .as_ref()
+                .context("hard body lost dynamic state")?;
+            let Some(shapes) = stored.placed_shapes_in(anchor)? else {
+                continue;
+            };
+            hard.push(super::mobile_contact::step_sweep_target(
+                super::mobile_contact::ContactParticipant::from_dynamic(
+                    &stored.body,
+                    dynamic,
+                    physical.collision_filter,
+                ),
+                stored.geometry_stamp,
+                shapes,
+            ));
+        }
+        Ok(Arc::new(super::mobile_contact::HardTargets::new(hard)?))
+    }
+
+    fn hard_targets_in_mut(
+        &mut self,
+        anchor: Guid,
+    ) -> anyhow::Result<Arc<super::mobile_contact::HardTargets>> {
+        if let Some(cached) = self.hard_targets.get() {
+            let (cached_anchor, targets) = cached
+                .as_ref()
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            if *cached_anchor == anchor {
+                return Ok(Arc::clone(targets));
+            }
+            self.hard_targets.take();
+        }
+        let compiled = self
+            .hard_targets
+            .get_or_init(|| {
+                self.compile_hard_targets_in(anchor)
+                    .map(|targets| (anchor, targets))
+                    .map_err(|error| format!("hard target publication failed: {error:#}"))
+            })
+            .as_ref()
+            .map(|(_, targets)| Arc::clone(targets))
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        Ok(compiled)
+    }
 }
 
 fn coarse_membership_owner(pose: WorldPosition) -> Option<Guid> {
-    (pose.landblock_id != Guid::NULL).then_some(Guid((pose.landblock_id.0 & 0xffff_0000) | 0xffff))
+    (pose.landblock_id != Guid::NULL).then(|| super::dynamic_index::landblock_owner(pose))
 }
 
 pub(crate) fn integrate_angular_velocity(
@@ -459,6 +841,12 @@ pub struct SpatialScene {
     collision_reports: CollisionReportLifetimes,
     /// Last rejected mobile solve, used to report persistent faults once until they change or clear.
     last_contact_failure: Option<String>,
+    /// Last `CollisionScene::revision()` observed during an active collection pass.
+    last_collection_collision_revision: Option<u64>,
+    /// Set when non-solver mutations may have invalidated `Settled` entity support references.
+    peer_support_recheck_needed: bool,
+    /// Reusable per-tick collection and step scratch buffers.
+    collection_scratch: contact_collection::SceneCollectionScratch,
 }
 
 impl Default for SpatialScene {
@@ -474,6 +862,9 @@ impl SpatialScene {
             body_store: SpatialBodyStore::default(),
             collision_reports: CollisionReportLifetimes::default(),
             last_contact_failure: None,
+            last_collection_collision_revision: None,
+            peer_support_recheck_needed: false,
+            collection_scratch: contact_collection::SceneCollectionScratch::default(),
         }
     }
 
@@ -499,7 +890,7 @@ impl SpatialScene {
             .body_store
             .body(body_id)
             .context("solidifying body is not registered")?;
-        current_entity_peer_overlap(object, self.body_store.bodies.values())
+        current_entity_peer_overlap(object, self.body_store.iter_bodies())
     }
 
     pub fn body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
@@ -510,15 +901,42 @@ impl SpatialScene {
         self.body_store.body_for_guid(guid)
     }
 
-    /// Seals the current entity target population once for replaceable speculative work.
-    pub fn entity_collision_snapshot(
+    /// Opaque cursor incremented whenever an observed body state changes.
+    pub fn body_observation_cursor(&self) -> crate::dirty_log::DirtyGuidCursor {
+        self.body_store.observation_log.cursor()
+    }
+
+    /// Incremental entity GUIDs whose observed body state changed after `cursor`.
+    pub fn body_observation_changes_since(
         &self,
-    ) -> anyhow::Result<std::sync::Arc<EntityCollisionSnapshot>> {
+        cursor: crate::dirty_log::DirtyGuidCursor,
+    ) -> crate::dirty_log::GuidChanges {
+        self.body_store.observation_log.changes_since(cursor)
+    }
+
+    /// Seals the current entity target population once for replaceable speculative work.
+    pub fn entity_collision_snapshot(&self) -> anyhow::Result<Arc<EntityCollisionSnapshot>> {
         self.body_store
             .entity_queries
             .get_or_init(|| {
-                EntityCollisionSnapshot::compile(self.body_store.bodies.values())
-                    .map(std::sync::Arc::new)
+                let mut entries = Vec::with_capacity(self.body_store.bodies.len());
+                for stored in self.body_store.bodies.values() {
+                    if !matches!(stored.body.id, SpatialBodyId::Entity(_)) {
+                        continue;
+                    }
+                    let Some(_) = super::dynamic_index::indexed_dynamic_body(&stored.body) else {
+                        continue;
+                    };
+                    let shapes = match stored.ensure_natural_placed_shapes() {
+                        Ok(shapes) => shapes,
+                        Err(error) => {
+                            return Err(format!("entity collision publication failed: {error:#}"));
+                        }
+                    };
+                    entries.push((stored.geometry_stamp, &stored.body, shapes));
+                }
+                EntityCollisionSnapshot::compile_with_cached(entries)
+                    .map(Arc::new)
                     .map_err(|error| format!("entity collision publication failed: {error:#}"))
             })
             .as_ref()
@@ -542,8 +960,7 @@ impl SpatialScene {
     pub fn scheduled_dynamic_entity_ids(&self) -> Vec<SpatialBodyId> {
         let mut body_ids = self
             .body_store
-            .bodies
-            .values()
+            .iter_bodies()
             .filter_map(|body| {
                 if matches!(body.id, SpatialBodyId::Ephemeral(_)) {
                     return None;
@@ -594,13 +1011,32 @@ impl SpatialScene {
         body_id: SpatialBodyId,
         status: Option<crate::PlayerCollisionStatus>,
     ) {
-        if let Some(dynamic) = self
+        let already_matches = self
             .body_store
-            .body_mut(body_id)
-            .and_then(|body| body.physical.as_mut())
-            .and_then(|physical| physical.dynamic.as_mut())
-        {
-            dynamic.collision.player_collision = status;
+            .body(body_id)
+            .and_then(|body| body.physical.as_ref())
+            .and_then(|physical| physical.dynamic.as_ref())
+            .is_none_or(|dynamic| dynamic.collision.player_collision == status);
+        if already_matches {
+            return;
+        }
+        let changed = self
+            .body_store
+            .mutate_body_policy(body_id, |body| {
+                if let Some(dynamic) = body
+                    .physical
+                    .as_mut()
+                    .and_then(|physical| physical.dynamic.as_mut())
+                {
+                    dynamic.collision.player_collision = status;
+                    true
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
+        if changed {
+            self.peer_support_recheck_needed = true;
         }
     }
 
@@ -612,31 +1048,51 @@ impl SpatialScene {
         exclusion: super::PhysicalCollisionExclusions,
         excluded: bool,
     ) -> bool {
-        let Some(body) = self.body_store.body_mut(body_id) else {
+        let Some(body) = self.body_store.body(body_id) else {
             return false;
         };
-        let Some(physical) = body.physical.as_mut() else {
+        let Some(physical) = body.physical.as_ref() else {
             return false;
         };
         let filter = physical
             .collision_filter
             .with_exclusion(exclusion, excluded);
-        if physical.collision_filter != filter {
-            physical.collision_filter = filter;
-            wake_dynamic_runtime(body);
+        if physical.collision_filter == filter {
+            return true;
         }
-        true
+        self.body_store
+            .mutate_body_policy(body_id, |body| {
+                let Some(physical) = body.physical.as_mut() else {
+                    return false;
+                };
+                physical.collision_filter = filter;
+                wake_dynamic_runtime(body);
+                true
+            })
+            .unwrap_or(false)
     }
 
     /// Reactivates one dynamic body without changing semantic or physical policy.
     pub fn wake_dynamic_body(&mut self, body_id: SpatialBodyId) -> bool {
+        let Some(body) = self.body_store.body(body_id) else {
+            return false;
+        };
+        if body
+            .physical
+            .as_ref()
+            .and_then(|p| p.dynamic.as_ref())
+            .is_some_and(|d| d.activity == DynamicBodyActivity::Active)
+        {
+            return true;
+        }
         self.body_store
-            .body_mut(body_id)
+            .body_kinematics_mut(body_id)
             .is_some_and(wake_dynamic_runtime)
     }
 
     #[cfg(test)]
     pub fn body_mut(&mut self, body_id: SpatialBodyId) -> Option<&mut SpatialBody> {
+        self.peer_support_recheck_needed = true;
         self.body_store.body_mut(body_id)
     }
 
@@ -654,6 +1110,7 @@ impl SpatialScene {
             previous.as_ref().map(|body| body.pose),
             Some(new_pose),
         );
+        self.peer_support_recheck_needed = true;
         previous
     }
 
@@ -679,6 +1136,7 @@ impl SpatialScene {
         let collision_reports = self.force_end_collision_reports_for_body(body_id);
         let removed = self.body_store.remove_body(body_id)?;
         self.replace_body_membership(body_id, Some(removed.pose), None);
+        self.peer_support_recheck_needed = true;
         Some((removed, collision_reports))
     }
 
@@ -726,14 +1184,15 @@ impl SpatialScene {
         response_policy: super::PhysicalBodyResponsePolicy,
         retained_cell: Option<Guid>,
     ) -> Option<()> {
-        let body = self.body_store.body_mut(body_id)?;
-        body.physical = Some(PhysicalBodyState::new(
+        let mut candidate = self.body_store.body(body_id)?.clone();
+        candidate.physical = Some(PhysicalBodyState::new(
             definition,
             collision_filter,
             response_policy,
             retained_cell,
         ));
-        reclassify_body_reconciliation(body);
+        reclassify_body_reconciliation(&mut candidate);
+        self.body_store.update_body(candidate)?;
         Some(())
     }
 
@@ -760,49 +1219,63 @@ impl SpatialScene {
         {
             return Ok(false);
         }
+        let mut next_poses = dynamic.collision_poses.clone();
+        let changed = next_poses.apply(&dynamic.collision.target_geometry, sample)?;
+        if !changed {
+            let stored = self
+                .body_store
+                .bodies
+                .get_mut(&body_id)
+                .context("collision pose body disappeared during publication")?;
+            stored
+                .body
+                .physical
+                .as_mut()
+                .and_then(|p| p.dynamic.as_mut())
+                .context("collision pose body lost its dynamic state")?
+                .collision_poses = next_poses;
+            return Ok(false);
+        }
         let mut candidate = body.clone();
+        let committed_cell = dynamic.placement.committed_cell();
+        candidate
+            .physical
+            .as_mut()
+            .and_then(|p| p.dynamic.as_mut())
+            .context("collision pose candidate lost its dynamic state")?
+            .collision_poses = next_poses;
+        let mut verified_revision = None;
+        let placement = resolve_dynamic_body_placement(collision, &candidate, committed_cell);
         let next = candidate
             .physical
             .as_mut()
             .and_then(|p| p.dynamic.as_mut())
             .context("collision pose candidate lost its dynamic state")?;
-        let changed = next
-            .collision_poses
-            .apply(&next.collision.target_geometry, sample)?;
-        if changed {
-            let placement = resolve_dynamic_body_placement(
-                collision,
-                &candidate,
-                dynamic.placement.committed_cell(),
-            );
-            let next = candidate
-                .physical
-                .as_mut()
-                .and_then(|p| p.dynamic.as_mut())
-                .context("collision pose candidate lost its dynamic state")?;
-            match placement {
-                Ok(placement) => next.placement = placement,
-                Err(error)
-                    if matches!(
-                        error.downcast_ref::<CollisionQueryError>(),
-                        Some(
-                            CollisionQueryError::UnknownMotionCell { .. }
-                                | CollisionQueryError::UnavailableOwner { .. }
-                        )
-                    ) =>
-                {
-                    // Playback can outlive collision residency. Retain its latest part poses,
-                    // but exclude the body from queries until ordinary residency refresh succeeds.
-                    next.activity = DynamicBodyActivity::Suspended;
-                }
-                Err(error) => return Err(error),
+        match placement {
+            Ok(placement) => {
+                next.placement = placement;
+                verified_revision = Some(collision.revision());
             }
+            Err(error)
+                if matches!(
+                    error.downcast_ref::<CollisionQueryError>(),
+                    Some(
+                        CollisionQueryError::UnknownMotionCell { .. }
+                            | CollisionQueryError::UnavailableOwner { .. }
+                    )
+                ) =>
+            {
+                // Playback can outlive collision residency. Retain its latest part poses,
+                // but exclude the body from queries until ordinary residency refresh succeeds.
+                next.activity = DynamicBodyActivity::Suspended;
+            }
+            Err(error) => return Err(error),
         }
-        *self
-            .body_store
-            .body_mut(body_id)
-            .expect("collision pose body disappeared during publication") = candidate;
-        Ok(changed)
+        self.peer_support_recheck_needed = true;
+        self.body_store
+            .update_body_with_revision(candidate, verified_revision)
+            .context("collision pose body disappeared during publication")?;
+        Ok(true)
     }
 
     /// Adds, removes, or reconfigures dynamic-entity physics without replacing its pose body.
@@ -816,8 +1289,18 @@ impl SpatialScene {
         collision_filter: super::PhysicalCollisionFilter,
         initial_cell: Option<Guid>,
     ) -> Option<PhysicalBodyReconfigurationOutcome> {
-        let body = self.body_store.body_mut(body_id)?;
-        let previous = body.physical.take();
+        let existing_body = self.body_store.body(body_id)?;
+        if existing_body.physical.is_none() && replacement.is_none() {
+            return Some(PhysicalBodyReconfigurationOutcome {
+                before: PhysicalBodyParticipation::PoseOnly,
+                after: PhysicalBodyParticipation::PoseOnly,
+                change: PhysicalBodyReconfiguration::Unchanged,
+                response_memory_preserved: false,
+                collision_reports: Vec::new(),
+            });
+        }
+        let mut candidate = existing_body.clone();
+        let previous = candidate.physical.take();
         let previous_for_reports = previous.clone();
         let before = if previous.is_some() {
             PhysicalBodyParticipation::Physical
@@ -826,7 +1309,7 @@ impl SpatialScene {
         };
 
         let (next, change, response_memory_preserved) = match (previous, replacement) {
-            (None, None) => (None, PhysicalBodyReconfiguration::Unchanged, false),
+            (None, None) => unreachable!("pose-only no-op handled above"),
             (Some(_), None) => (None, PhysicalBodyReconfiguration::Removed, false),
             (None, Some(replacement)) => (
                 Some(PhysicalBodyState::new_dynamic(
@@ -907,8 +1390,14 @@ impl SpatialScene {
             dynamic_report_recipient_compatible(previous_for_reports.as_ref(), next.as_ref());
         let dynamic_source_compatible =
             dynamic_report_source_compatible(previous_for_reports.as_ref(), next.as_ref());
-        body.physical = next;
-        reclassify_body_reconciliation(body);
+        candidate.physical = next;
+        reclassify_body_reconciliation(&mut candidate);
+        if change != PhysicalBodyReconfiguration::Unchanged {
+            self.peer_support_recheck_needed = true;
+        }
+        if candidate != *existing_body {
+            self.body_store.update_body(candidate)?;
+        }
         let collision_reports = self.collision_reports.force_end_where(|contact| {
             if contact.recipient == body_id {
                 match contact.source {
@@ -953,19 +1442,30 @@ impl SpatialScene {
         body_id: SpatialBodyId,
         object_scale: f32,
     ) -> Result<(), super::PhysicalBodyDefinitionError> {
-        let Some(body) = self.body_store.body_mut(body_id) else {
+        let Some(existing_body) = self.body_store.body(body_id) else {
             return Ok(());
         };
-        let Some(physical) = body.physical.as_mut() else {
+        let Some(existing_physical) = existing_body.physical.as_ref() else {
             return Ok(());
         };
-        let Some(dynamic) = physical.dynamic.as_mut() else {
+        let Some(existing_dynamic) = existing_physical.dynamic.as_ref() else {
             return Ok(());
         };
-        if dynamic.object_scale.to_bits() == object_scale.to_bits() {
+        if existing_dynamic.object_scale.to_bits() == object_scale.to_bits() {
             return Ok(());
         }
-        let definition = dynamic.unit_movement.uniformly_scaled(object_scale)?;
+        let definition = existing_dynamic
+            .unit_movement
+            .uniformly_scaled(object_scale)?;
+        let mut candidate = existing_body.clone();
+        let physical = candidate
+            .physical
+            .as_mut()
+            .expect("checked dynamic body lost its physical state");
+        let dynamic = physical
+            .dynamic
+            .as_mut()
+            .expect("checked dynamic body lost its dynamic state");
         let cell = physical.response.cell();
         physical.definition = definition;
         physical.response = super::physical_body::initial_response(definition, cell);
@@ -973,6 +1473,8 @@ impl SpatialScene {
         dynamic.placement =
             cell.map_or_else(SpatialMembership::outdoor, SpatialMembership::interior);
         dynamic.wake();
+        self.body_store.update_body(candidate);
+        self.peer_support_recheck_needed = true;
         self.collision_reports.force_end_where(|contact| {
             contact.recipient == body_id
                 || matches!(
@@ -993,7 +1495,7 @@ impl SpatialScene {
         kinematics: DynamicBodyKinematics,
         now: Instant,
     ) -> Option<RuntimeSpatialBodyView> {
-        let body = self.body_store.body_mut(body_id)?;
+        let body = self.body_store.body_kinematics_mut(body_id)?;
         let physical = body.physical.as_mut()?;
         physical.dynamic.as_mut()?.wake();
         physical.response_policy.align_path = kinematics.align_path();
@@ -1024,7 +1526,9 @@ impl SpatialScene {
         body.contact = ContactState::Airborne;
         body.sampling.mode = SpatialSampleMode::SimulatingVelocity;
         body.sampling.last_derived_at = now;
-        Some(body.runtime_view())
+        let view = body.runtime_view();
+        self.body_store.record_observation(body_id, false);
+        Some(view)
     }
 
     /// Resolves a discontinuous arrival without advancing time or replacing server authority.
@@ -1053,8 +1557,7 @@ impl SpatialScene {
             .placement = membership;
         let mut peers = self
             .body_store
-            .bodies
-            .values()
+            .iter_bodies()
             .filter(|peer| peer.id != body_id)
             .cloned()
             .collect::<Vec<_>>();
@@ -1073,7 +1576,9 @@ impl SpatialScene {
             .as_mut()
             .context("placed body lost dynamic physics")?
             .placement = membership;
-        self.update_body(candidate);
+        self.body_store
+            .update_body_with_revision(candidate, Some(collision.revision()));
+        self.peer_support_recheck_needed = true;
         Ok(())
     }
 
@@ -1094,6 +1599,7 @@ impl SpatialScene {
         let view = body.runtime_view();
         self.update_body(body)
             .expect("prevalidated dynamic body vanished during relocation");
+        self.peer_support_recheck_needed = true;
         let collision_reports = self.force_end_collision_reports_for_body(body_id);
         DynamicBodyRelocationOutcome {
             body: view,
@@ -1107,23 +1613,38 @@ impl SpatialScene {
         body_id: SpatialBodyId,
         collision: &CollisionScene,
     ) -> anyhow::Result<()> {
-        let Some(body) = self.body_store.body(body_id) else {
+        let collision_revision = collision.revision();
+        let Some(stored) = self.body_store.bodies.get(&body_id) else {
             return Ok(());
         };
+        let body = &stored.body;
         let Some(physical) = body.physical.as_ref() else {
             return Ok(());
         };
-        if physical.dynamic.is_none() {
+        let Some(dynamic) = physical.dynamic.as_ref() else {
+            return Ok(());
+        };
+        if dynamic.activity != DynamicBodyActivity::Suspended
+            && stored.verified_placement == Some((body.pose, collision_revision))
+        {
             return Ok(());
         }
+        let body_pose = body.pose;
         let placement =
             match resolve_dynamic_body_placement(collision, body, physical.response.cell()) {
                 Ok(placement) => placement,
                 Err(error) => {
-                    let physical = self
+                    let prev_hard = is_hard_target_body(body);
+                    let stored = self
                         .body_store
-                        .body_mut(body_id)
-                        .and_then(|body| body.physical.as_mut())
+                        .bodies
+                        .get_mut(&body_id)
+                        .context("placement refresh lost its stored body")?;
+                    stored.verified_placement = None;
+                    let physical = stored
+                        .body
+                        .physical
+                        .as_mut()
                         .context("placement refresh lost its physical body")?;
                     // An unqueryable pose interrupts consecutive collision-blocked falling,
                     // including both absent owners and evicted interior topology.
@@ -1138,6 +1659,8 @@ impl SpatialScene {
                         error.downcast_ref::<CollisionQueryError>(),
                         Some(CollisionQueryError::UnknownMotionCell { .. })
                     ) {
+                        self.body_store
+                            .invalidate_caches(body_id, prev_hard, prev_hard);
                         return Err(error);
                     }
                     // A scene-interest replacement may evict the dungeon containing this body while
@@ -1148,17 +1671,43 @@ impl SpatialScene {
                         .as_mut()
                         .context("placement refresh lost its dynamic body")?;
                     dynamic.activity = DynamicBodyActivity::Suspended;
+                    self.body_store.invalidate_hard_targets(prev_hard, false);
+                    self.body_store.sync_entity_snapshot_entry(body_id);
+                    self.body_store.record_observation(body_id, false);
                     return Ok(());
                 }
             };
-        let dynamic = self
+        let stored = self
             .body_store
-            .body_mut(body_id)
-            .and_then(|body| body.physical.as_mut())
-            .and_then(|physical| physical.dynamic.as_mut())
+            .bodies
+            .get_mut(&body_id)
             .expect("validated dynamic body vanished during placement refresh");
+        let prev_hard = is_hard_target_body(&stored.body);
+        let prev_suspended = stored
+            .body
+            .physical
+            .as_ref()
+            .and_then(|p| p.dynamic.as_ref())
+            .is_some_and(|d| d.activity == DynamicBodyActivity::Suspended);
+        let dynamic = stored
+            .body
+            .physical
+            .as_mut()
+            .and_then(|body| body.dynamic.as_mut())
+            .expect("validated dynamic body lost dynamic state");
+        let placement_changed = dynamic.placement != placement;
         dynamic.placement = placement;
         dynamic.restore_from_suspension();
+        let next_hard = is_hard_target_body(&stored.body);
+        stored.verified_placement = Some((body_pose, collision_revision));
+        if prev_suspended || placement_changed || prev_hard != next_hard {
+            self.body_store
+                .invalidate_hard_targets(prev_hard, next_hard);
+            self.body_store.sync_entity_snapshot_entry(body_id);
+            if placement_changed {
+                self.body_store.record_observation(body_id, false);
+            }
+        }
         Ok(())
     }
 
@@ -1580,7 +2129,7 @@ impl SpatialScene {
         vectors: AuthoritativeBodyVectors,
         now: Instant,
     ) -> bool {
-        let Some(body) = self.body_store.body_mut(body_id) else {
+        let Some(body) = self.body_store.body_kinematics_mut(body_id) else {
             return false;
         };
         body.retained = vectors.into();
@@ -1588,6 +2137,7 @@ impl SpatialScene {
         body.motion_state = None;
         body.sampling.last_authoritative_update = now;
         wake_dynamic_runtime(body);
+        self.body_store.record_observation(body_id, false);
         true
     }
 
@@ -1599,11 +2149,12 @@ impl SpatialScene {
         body_id: SpatialBodyId,
         vectors: AuthoritativeBodyVectors,
     ) -> bool {
-        let Some(body) = self.body_store.body_mut(body_id) else {
+        let Some(body) = self.body_store.body_kinematics_mut(body_id) else {
             return false;
         };
         body.nominal = vectors;
         wake_dynamic_runtime(body);
+        self.body_store.record_observation(body_id, false);
         true
     }
 
@@ -1655,12 +2206,13 @@ impl SpatialScene {
         body_id: SpatialBodyId,
         motion_state: Option<EntityMotionSnapshot>,
     ) {
-        let Some(body) = self.body_store.body_mut(body_id) else {
+        let Some(body) = self.body_store.body_kinematics_mut(body_id) else {
             return;
         };
 
         body.motion_state = motion_state;
         wake_dynamic_runtime(body);
+        self.body_store.record_observation(body_id, false);
     }
 
     pub fn update_runtime_body_motion_state(
@@ -1686,6 +2238,7 @@ impl SpatialScene {
         wake_dynamic_runtime(&mut body);
         self.update_body(body)
             .expect("runtime body vanished during single-threaded pose update");
+        self.peer_support_recheck_needed = true;
         true
     }
 
@@ -1701,7 +2254,7 @@ impl SpatialScene {
         body_id: SpatialBodyId,
         contact: ContactState,
     ) -> bool {
-        let Some(body) = self.body_store.body_mut(body_id) else {
+        let Some(body) = self.body_store.body_kinematics_mut(body_id) else {
             return false;
         };
         if body.physical.as_ref().is_some_and(|physical| {
@@ -1719,6 +2272,7 @@ impl SpatialScene {
 
         body.contact = contact;
         wake_dynamic_runtime(body);
+        self.body_store.record_observation(body_id, false);
         true
     }
 
@@ -1748,15 +2302,19 @@ impl SpatialScene {
         mut solved: SolvedBodyKinematics,
         delta_seconds: f32,
     ) -> Option<(SolvedBodyKinematics, RuntimeBodyAdvanceKind)> {
-        let body = self.body_store.body_mut(solved.body_id)?;
+        let body_id = solved.body_id;
+        let body = self.body_store.body_kinematics_mut(body_id)?;
         let Some(mut reconciliation) = body.reconciliation.take() else {
             return Some((solved, RuntimeBodyAdvanceKind::Integrated));
         };
         if let Some(target) = reconciliation.take_pending_snap() {
+            let prev_pose = body.pose;
             solved.pose = target;
             solved.accepted_motion = super::AcceptedBodyMotion::default();
             solved.contact = body.contact;
             body.reconciliation = (!reconciliation.is_empty()).then_some(reconciliation);
+            self.body_store
+                .record_observation(body_id, prev_pose != target);
             return Some((solved, RuntimeBodyAdvanceKind::CorrectionSnap));
         }
 
@@ -1788,6 +2346,7 @@ impl SpatialScene {
                 delta_seconds,
             );
         }
+        self.body_store.record_observation(body_id, false);
         Some((solved, RuntimeBodyAdvanceKind::Integrated))
     }
 
@@ -6362,5 +6921,268 @@ mod physical_body_tests {
         );
         assert!(!committed.pose.is_indoors());
         assert_eq!(committed.physical.as_ref().unwrap().response.cell(), None);
+    }
+
+    #[test]
+    fn idle_settled_collection_ticks_preserve_snapshot_identity_and_skip_preparation() {
+        let now = Instant::now();
+        let collision = flat_collision_scene();
+        let mut scene = SpatialScene::new();
+        for index in 0..3_u32 {
+            let id = SpatialBodyId::Entity(Guid(0x7800_0001 + index));
+            scene.register_body(SpatialBody::new(
+                id,
+                pose(Vector3::new(80.0 + index as f32 * 2.0, 80.0, 0.005)),
+                now,
+            ));
+            scene
+                .set_dynamic_physical_body(
+                    id,
+                    Some(dynamic_definition(grounded_definition(), false)),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+            acquire_support(&mut scene, &collision, id, now);
+        }
+        let settle_input = |_: &SpatialBody| {
+            Ok(crate::spatial::PhysicalBodyInput::referenced(
+                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                crate::spatial::PhysicalReferenceInput::body(None),
+                true,
+            ))
+        };
+        scene
+            .advance_dynamic_entity_collection(&collision, CONTACT_INTERVAL, now, settle_input)
+            .unwrap();
+        assert!(scene.scheduled_dynamic_entity_ids().is_empty());
+        let baseline = scene.entity_collision_snapshot().unwrap();
+
+        for tick in 1..=3 {
+            let result = scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    CONTACT_INTERVAL,
+                    now + Duration::from_secs_f32(tick as f32 * CONTACT_INTERVAL),
+                    settle_input,
+                )
+                .unwrap();
+            assert!(result.outcomes.is_empty());
+            assert!(scene.scheduled_dynamic_entity_ids().is_empty());
+            let next = scene.entity_collision_snapshot().unwrap();
+            assert!(Arc::ptr_eq(&baseline, &next));
+        }
+    }
+
+    #[test]
+    fn settled_bfs_cluster_wakes_transitive_chain_of_resting_peers() {
+        let now = Instant::now();
+        let (mut scene, collision, (source, target)) = grounded_pair_fixture(true, now);
+        let blocker = SpatialBodyId::Entity(Guid(0x7200_0003));
+        // Space A->B->C at exact sphere tangency (0.48 + 0.48 = 0.96m) while keeping
+        // C clear of A's own frontier so C can only join through B in BFS.
+        scene
+            .relocate_dynamic_body(target, pose(Vector3::new(10.0, 10.96, 0.005)), now)
+            .unwrap();
+        scene
+            .relocate_dynamic_body(blocker, pose(Vector3::new(10.0, 11.92, 0.005)), now)
+            .unwrap();
+        acquire_support(&mut scene, &collision, target, now);
+        acquire_support(&mut scene, &collision, blocker, now);
+        for settle_tick in 0..2 {
+            scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    CONTACT_INTERVAL,
+                    now + Duration::from_secs_f32(settle_tick as f32 * CONTACT_INTERVAL),
+                    |_| {
+                        Ok(crate::spatial::PhysicalBodyInput::referenced(
+                            PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                            crate::spatial::PhysicalReferenceInput::body(None),
+                            true,
+                        ))
+                    },
+                )
+                .unwrap();
+        }
+        assert!(
+            scene.scheduled_dynamic_entity_ids().is_empty(),
+            "still scheduled: {:?}",
+            scene.scheduled_dynamic_entity_ids()
+        );
+        let initial_target_y = scene.body(target).unwrap().pose.coords.y;
+        let initial_blocker_y = scene.body(blocker).unwrap().pose.coords.y;
+
+        for tick in 2..=10 {
+            scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    CONTACT_INTERVAL,
+                    now + Duration::from_secs_f32(tick as f32 * CONTACT_INTERVAL),
+                    |body| {
+                        let actuation = if body.id == source {
+                            PhysicalBodyActuation::grounded_drive(Vector3::new(0.0, 4.0, 0.0))?
+                        } else {
+                            PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast())
+                        };
+                        Ok(crate::spatial::PhysicalBodyInput::referenced(
+                            actuation,
+                            crate::spatial::PhysicalReferenceInput::body(None),
+                            true,
+                        ))
+                    },
+                )
+                .unwrap();
+        }
+        assert!(scene.body(target).unwrap().pose.coords.y > initial_target_y + 1e-4);
+        assert!(scene.body(blocker).unwrap().pose.coords.y > initial_blocker_y + 1e-4);
+    }
+
+    #[test]
+    fn stationary_ethereal_and_separated_solid_collision_reports_respect_idle_lifetimes() {
+        let start = Instant::now();
+        let collision = collision_scene(None);
+        let geometry = || {
+            fallback_target(Arc::new(CollisionShape::Ball(CollisionBall {
+                center: Vector3::zero(),
+                radius: 0.5,
+            })))
+        };
+
+        // Part A: Stationary overlapping ethereal peer report stays alive while settled.
+        let mover = SpatialBodyId::Entity(Guid(0x7900_0001));
+        let ethereal = SpatialBodyId::Entity(Guid(0x7900_0002));
+        let mut scene = SpatialScene::new();
+        for body_id in [mover, ethereal] {
+            install_free_dynamic(
+                &mut scene,
+                body_id,
+                Vector3::zero(),
+                Vector3::zero(),
+                geometry(),
+                start,
+            );
+            scene
+                .body_mut(body_id)
+                .unwrap()
+                .physical
+                .as_mut()
+                .unwrap()
+                .dynamic
+                .as_mut()
+                .unwrap()
+                .collision
+                .dynamic_collision
+                .mover_accepts_response = false;
+        }
+        {
+            let dynamic = scene
+                .body_mut(ethereal)
+                .unwrap()
+                .physical
+                .as_mut()
+                .unwrap()
+                .dynamic
+                .as_mut()
+                .unwrap();
+            dynamic.collision.dynamic_collision.target =
+                crate::EntityCollisionParticipation::Ethereal;
+            dynamic.activity = DynamicBodyActivity::Settled;
+        }
+        let tick_seconds = crate::spatial::MOBILE_CONTACT_TICK_SECONDS;
+        let tick_duration = Duration::from_secs_f32(tick_seconds);
+        let started = tick_collection(&mut scene, &collision, tick_seconds, start + tick_duration);
+        assert_eq!(started.len(), 2);
+        assert!(scene.scheduled_dynamic_entity_ids().is_empty());
+        assert_eq!(scene.active_collision_report_count(), 2);
+        let expiry_ticks = (crate::spatial::collision_report::COLLISION_REPORT_EXPIRY.as_secs_f32()
+            / tick_seconds)
+            .ceil() as u32
+            + 5;
+        for tick in 2..=expiry_ticks {
+            let reports = tick_collection(
+                &mut scene,
+                &collision,
+                tick_seconds,
+                start + tick_duration * tick,
+            );
+            assert!(
+                reports.is_empty(),
+                "stationary ethereal overlap ended prematurely at tick {tick}: {reports:?}"
+            );
+            assert_eq!(scene.active_collision_report_count(), 2);
+        }
+
+        // Part B: Non-ethereal solid report expires after >1s once bodies separate and settle.
+        let a = SpatialBodyId::Entity(Guid(0x7900_0011));
+        let b = SpatialBodyId::Entity(Guid(0x7900_0012));
+        let mut solid_scene = SpatialScene::new();
+        for body_id in [a, b] {
+            install_free_dynamic(
+                &mut solid_scene,
+                body_id,
+                Vector3::zero(),
+                Vector3::zero(),
+                geometry(),
+                start,
+            );
+            solid_scene
+                .body_mut(body_id)
+                .unwrap()
+                .physical
+                .as_mut()
+                .unwrap()
+                .dynamic
+                .as_mut()
+                .unwrap()
+                .collision
+                .dynamic_collision
+                .mover_accepts_response = false;
+        }
+        let first = tick_collection(
+            &mut solid_scene,
+            &collision,
+            tick_seconds,
+            start + tick_duration,
+        );
+        assert_eq!(first.len(), 2);
+        assert_eq!(solid_scene.active_collision_report_count(), 2);
+
+        // Separate `a` beyond touch distance, then let it settle outside overlap.
+        let t_separate = start + tick_duration * 2;
+        solid_scene
+            .advance_dynamic_entity_collection(&collision, tick_seconds, t_separate, |body| {
+                let velocity = if body.id == a {
+                    Vector3::new(100.0, 0.0, 0.0)
+                } else {
+                    Vector3::zero()
+                };
+                Ok(crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(velocity)?,
+                ))
+            })
+            .unwrap();
+        let t_settle = start + tick_duration * 3;
+        solid_scene
+            .advance_dynamic_entity_collection(&collision, tick_seconds, t_settle, |_| {
+                Ok(crate::spatial::PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(Vector3::zero())?,
+                ))
+            })
+            .unwrap();
+        assert!(solid_scene.scheduled_dynamic_entity_ids().is_empty());
+        let expired = tick_collection(
+            &mut solid_scene,
+            &collision,
+            tick_seconds,
+            t_settle + crate::spatial::collision_report::COLLISION_REPORT_EXPIRY + tick_duration,
+        );
+        assert_eq!(expired.len(), 2);
+        assert!(
+            expired
+                .iter()
+                .all(|report| report.phase == CollisionReportPhase::Ended)
+        );
+        assert_eq!(solid_scene.active_collision_report_count(), 0);
     }
 }

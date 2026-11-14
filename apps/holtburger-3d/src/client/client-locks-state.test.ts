@@ -117,6 +117,7 @@ function fixture(
 	const selection = new ClientEntitySelection({
 		lifecycle: {
 			entities,
+			tradeSnapshot: () => ({ trade: null }),
 			subscribe: (receive) => {
 				listeners.add(receive);
 				return () => listeners.delete(receive);

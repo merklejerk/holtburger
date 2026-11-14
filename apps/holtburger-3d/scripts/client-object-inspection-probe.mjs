@@ -353,6 +353,21 @@ export async function probeObjectInspection(
 		]);
 		await screenshot("inspection-item");
 
+		// Retained appraisals whose entity is absent stay disabled and never change selection.
+		await select(8);
+		assert.deepEqual(
+			await read(`(() => {
+				const cell = document.querySelector('.inspection-item-cell .item-grid-cell');
+				return {
+					disabled: cell?.disabled ?? null,
+					pressed: cell?.getAttribute('aria-pressed') ?? null,
+				};
+			})()`),
+			{ disabled: true, pressed: "false" },
+		);
+		await click(".inspection-item-cell .item-grid-cell");
+		assert.equal((await snapshot()).selectedGuid, 8);
+
 		// Exercise refresh through the production request owner, retaining the same window.
 		for (const [kind, expected] of [
 			["item-zero", 0],
@@ -790,6 +805,31 @@ export async function probeObjectInspection(
 		);
 		assert.equal(rightClicked.selectedGuid, beforeRightClick.selectedGuid);
 		assert.deepEqual(rightClicked.commands.at(-1)?.args, { guid: 7 });
+		await respond("item", 7);
+		await waitFor(
+			(value) => value.window?.title?.startsWith("Ancient Atlan") === true,
+			"Right-click item inspection did not open",
+		);
+		assert.deepEqual(
+			await read(`(() => {
+				const cell = document.querySelector('.inspection-item-cell .item-grid-cell');
+				return {
+					disabled: cell?.disabled ?? null,
+					pressed: cell?.getAttribute('aria-pressed') ?? null,
+				};
+			})()`),
+			{ disabled: false, pressed: "false" },
+		);
+		await click(".inspection-item-cell .item-grid-cell");
+		assert.equal((await snapshot()).selectedGuid, 7);
+		assert.equal(
+			await read(
+				"document.querySelector('.inspection-item-cell .item-grid-cell')?.getAttribute('aria-pressed')",
+			),
+			"true",
+		);
+		await click(".inspection-item-cell .item-grid-cell");
+		assert.equal((await snapshot()).selectedGuid, 7);
 
 		const crosstalk = await read(probe + ".crosstalk()");
 		assert.deepEqual(crosstalk, {

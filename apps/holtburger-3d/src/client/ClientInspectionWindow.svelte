@@ -12,6 +12,8 @@
 	import ClientPlayerKillerStatusIcon from "./ClientPlayerKillerStatusIcon.svelte";
 	import type { ClientSpellServices } from "./client-spells";
 	import type { ClientInspectionState } from "./client-inspection";
+	import type { ClientInspectionItemSelection } from "./client-entity-selection";
+	import type { ClientInspectionItemInteractions } from "./client-item-interactions";
 	import type { SpellReference } from "../app/spell-references";
 	import ClientSpellInspection from "./ClientSpellInspection.svelte";
 	import type { ClientObjectPreviewService } from "./client-object-preview-service";
@@ -34,6 +36,12 @@
 		readonly objectPreviewService: ClientObjectPreviewService;
 		readonly spells: ClientSpellServices | null;
 		readonly icons: UiIconRepository | null;
+		/** Live item admission and selection remain separate from the window subject. */
+		readonly itemSelection: ClientInspectionItemSelection | null;
+		/** Active targeted-item combining takes precedence over selecting the inspected cell. */
+		readonly itemInteractions: ClientInspectionItemInteractions | null;
+		/** Shared selected identity highlights the inspected item cell. */
+		readonly selectedGuid: number | null;
 		readonly placement: ClientHudPlacement;
 		readonly viewport: ClientHudViewport;
 		readonly previewHeight: number;
@@ -47,6 +55,9 @@
 		objectPreviewService,
 		spells,
 		icons,
+		itemSelection,
+		itemInteractions,
+		selectedGuid,
 		placement,
 		viewport,
 		previewHeight,
@@ -166,6 +177,9 @@
 				use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
 			>
 				<ClientItemInspection
+					{itemSelection}
+					{itemInteractions}
+					{selectedGuid}
 					{onSetWaypoint}
 					{inspection}
 					item={inspection.details.details}

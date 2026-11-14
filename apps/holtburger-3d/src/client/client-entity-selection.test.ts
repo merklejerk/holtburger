@@ -22,6 +22,172 @@ import type { ClientEntitySelectionQueryRequest } from "./client-host-contract";
 import type { ClientSelectedEntityTrackingStatus } from "./client-selection-tracking";
 
 describe("ClientEntitySelection", () => {
+	it.each([
+		{
+			name: "carried",
+			facts: entityFacts(12, {
+				ownedByPlayer: true,
+				scenePlacement: "unavailable",
+				location: {
+					kind: "contained",
+					parentGuid: 1,
+					slot: { kind: "item", index: 0 },
+				},
+			}),
+		},
+		{
+			name: "worn",
+			facts: entityFacts(12, {
+				ownedByPlayer: true,
+				scenePlacement: "unavailable",
+				location: { kind: "equipped", wearerGuid: 1, mask: null },
+			}),
+		},
+		{
+			name: "external contents",
+			facts: entityFacts(12, {
+				worldContainerContent: true,
+				scenePlacement: "unavailable",
+			}),
+		},
+		{ name: "world item", facts: entityFacts(12) },
+	])(
+		"selects an inspected $name item without toggling or mutating selection on display reads",
+		({ facts }) => {
+			const lifecycle = new FakeLifecycle();
+			lifecycle.update([facts], []);
+			const selection = new ClientEntitySelection({
+				lifecycle,
+				presentation: () => null,
+			});
+			selection.select(7);
+			const intent = selection.beginAcquisition("cycle");
+			expect(selection.readSelectableItem(facts.guid)).toEqual(facts);
+			expect(selection.selectedGuid()).toBe(7);
+			expect(selection.isCurrentAcquisition(intent)).toBe(true);
+			expect(selection.selectInspectedItem(facts.guid)).toBe(true);
+			expect(selection.isCurrentAcquisition(intent)).toBe(false);
+			expect(selection.selectInspectedItem(facts.guid)).toBe(true);
+			expect(selection.selectedGuid()).toBe(facts.guid);
+			selection.destroy();
+		},
+	);
+
+	it("exempts accessible inspection contents from the world range check", () => {
+		const lifecycle = new FakeLifecycle();
+		const presentation = new FakePresentation();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => presentation,
+		});
+		presentation.trackingStatus = {
+			kind: "tracked",
+			distance: OUTDOOR_LANDBLOCK_WORLD_SIZE + 1,
+		};
+		lifecycle.update(
+			[
+				entityFacts(12, {
+					ownedByPlayer: true,
+					location: { kind: "equipped", wearerGuid: 1, mask: null },
+				}),
+			],
+			[],
+		);
+		expect(selection.selectInspectedItem(12)).toBe(true);
+		lifecycle.update([entityFacts(12)], []);
+		expect(selection.readSelectableItem(12)).toBeNull();
+		expect(selection.selectInspectedItem(12)).toBe(false);
+		presentation.trackingStatus = {
+			kind: "tracked",
+			distance: OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		};
+		expect(selection.selectInspectedItem(12)).toBe(true);
+		selection.destroy();
+	});
+
+	it("admits unplaced partner trade offers only while the trade includes them", () => {
+		const lifecycle = new FakeLifecycle();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => null,
+		});
+		const offer = entityFacts(12, {
+			ownedByPlayer: false,
+			worldContainerContent: false,
+			scenePlacement: "unavailable",
+		});
+		lifecycle.update([offer], []);
+		expect(selection.readSelectableItem(12)).toBeNull();
+		expect(selection.selectInspectedItem(12)).toBe(false);
+
+		lifecycle.partnerTradeItems = [12];
+		expect(selection.readSelectableItem(12)).toEqual(offer);
+		selection.selectContentsItem(12, "select");
+		expect(selection.selectedGuid()).toBe(12);
+		selection.select(7);
+		expect(selection.selectInspectedItem(12)).toBe(true);
+		expect(selection.selectedGuid()).toBe(12);
+
+		lifecycle.partnerTradeItems = null;
+		expect(selection.readSelectableItem(12)).toBeNull();
+		selection.select(7);
+		expect(selection.selectInspectedItem(12)).toBe(false);
+		expect(selection.selectedGuid()).toBe(7);
+		selection.destroy();
+	});
+
+	it.each([
+		"removed",
+		"unplaced",
+		"pending-description",
+		"recovery",
+		"destroyed",
+	] as const)(
+		"rechecks inspection selection after %s without replacing another selection",
+		(reason) => {
+			const lifecycle = new FakeLifecycle();
+			const selection = new ClientEntitySelection({
+				lifecycle,
+				presentation: () => null,
+			});
+			selection.select(7);
+			expect(selection.readSelectableItem(12)?.guid).toBe(12);
+			switch (reason) {
+				case "removed":
+					lifecycle.update([], [12]);
+					break;
+				case "unplaced":
+					lifecycle.update(
+						[entityFacts(12, { scenePlacement: "unavailable" })],
+						[],
+					);
+					break;
+				case "pending-description":
+					lifecycle.update(
+						[
+							entityFacts(12, {
+								ownedByPlayer: true,
+								location: { kind: "equipped", wearerGuid: 1, mask: null },
+								description: { kind: "pending" },
+							}),
+						],
+						[],
+					);
+					break;
+				case "recovery":
+					lifecycle.entities.awaitSnapshot();
+					break;
+				case "destroyed":
+					selection.destroy();
+					break;
+			}
+			expect(selection.readSelectableItem(12)).toBeNull();
+			expect(selection.selectInspectedItem(12)).toBe(false);
+			expect(selection.selectedGuid()).toBe(7);
+			selection.destroy();
+		},
+	);
+
 	it("acquires known roster identities and leaves unknown or unplaced targets unchanged", () => {
 		const lifecycle = new FakeLifecycle();
 		const selection = new ClientEntitySelection({
@@ -863,6 +1029,15 @@ describe("ClientEntitySelection", () => {
 
 class FakeLifecycle implements ClientEntitySelectionLifecyclePort {
 	readonly entities = new ClientEntityMirror();
+	partnerTradeItems: readonly number[] | null = null;
+	tradeSnapshot() {
+		return {
+			trade:
+				this.partnerTradeItems === null
+					? null
+					: { partner_side: { items: this.partnerTradeItems } },
+		};
+	}
 	constructor() {
 		this.entities.commit(
 			this.entities.prepareSnapshot(

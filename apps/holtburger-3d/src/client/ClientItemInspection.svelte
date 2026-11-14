@@ -1,15 +1,20 @@
 <script lang="ts">
+	import { tick, untrack } from "svelte";
+	import ItemGridCell from "../app/ItemGridCell.svelte";
+	import { pulseItemCell } from "../app/item-cell-pulse";
+	import type { ClientInspectionItemSelection } from "./client-entity-selection";
+	import type { ClientInspectionItemInteractions } from "./client-item-interactions";
 	import { useItemCooldown } from "../app/item-cooldowns.svelte";
 	import ClientWaypointText from "./ClientWaypointText.svelte";
 	import UiQuantity from "../app/UiQuantity.svelte";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import { formatDuration } from "../app/duration-format";
 	import type { SpellReference } from "../app/spell-references";
-	import type { UiIconRepository } from "../app/ui-icon-repository";
+	import type {
+		UiIconDisplay,
+		UiIconRepository,
+	} from "../app/ui-icon-repository";
 	import type { HexRgbaColor } from "../lib/frontend-color";
-	import ClientInspectionArtwork, {
-		type InspectionArtwork,
-	} from "./ClientInspectionArtwork.svelte";
 	import { summarizeItemCantrips } from "./client-item-cantrips";
 	import type { ClientSpellServices } from "./client-spells";
 	import { CLIENT_TUNING } from "./client-tuning";
@@ -44,19 +49,118 @@
 		readonly item: ItemInspection;
 		readonly spells: ClientSpellServices | null;
 		readonly icons: UiIconRepository | null;
+		/** Live selection stays independent of this retained appraisal. */
+		readonly itemSelection: ClientInspectionItemSelection | null;
+		/** Active targeted-item combining consumes cell clicks before selection. */
+		readonly itemInteractions: ClientInspectionItemInteractions | null;
+		/** Current gameplay selection controls the shared cell highlight. */
+		readonly selectedGuid: number | null;
 	}
 
-	const { inspection, nameColor, item, spells, icons, onSetWaypoint }: Props =
-		$props();
-	/** Item disclosure policy stays with the item view; the artwork display accepts icon recipes. */
-	const artwork = $derived<InspectionArtwork>(
+	const {
+		inspection,
+		nameColor,
+		item,
+		spells,
+		icons,
+		onSetWaypoint,
+		itemSelection,
+		itemInteractions,
+		selectedGuid,
+	}: Props = $props();
+	/** Primitive cell facts avoid reactive churn when bounded display polls find no change. */
+	let selectable = $state(false);
+	let equipped = $state(false);
+	let artworkDisplay = $state.raw<UiIconDisplay | undefined>();
+	let consumedCombineClick = false;
+	const hasArtwork = $derived(
 		item.artwork.base !== null ||
 			item.artwork.overlay !== null ||
 			item.artwork.underlay !== null ||
-			item.artwork.uiEffects !== 0
-			? { kind: "ready", spec: { kind: "item", ...item.artwork } }
-			: { kind: "failed", detail: "No item artwork was disclosed." },
+			item.artwork.uiEffects !== 0,
 	);
+	const unavailableArtworkReason = $derived(
+		!hasArtwork
+			? "No item artwork was disclosed."
+			: icons === null
+				? "Artwork service is unavailable."
+				: null,
+	);
+	/** Missing recipes or icon services are terminal failures, not an indefinitely loading cell. */
+	const cellDisplay = $derived<UiIconDisplay | undefined>(
+		unavailableArtworkReason === null
+			? artworkDisplay
+			: {
+					kind: "failed",
+					issues: [{ code: "preparation", detail: unavailableArtworkReason }],
+				},
+	);
+	const artworkIssue = $derived(
+		artworkDisplay?.kind === "failed" || artworkDisplay?.kind === "degraded"
+			? artworkDisplay.issues.map(({ detail }) => detail).join(" ")
+			: null,
+	);
+
+	$effect(() => {
+		const repository = icons;
+		const selection = itemSelection;
+		const guid = inspection.guid;
+		const spec = hasArtwork
+			? ({
+					kind: "item",
+					base: item.artwork.base,
+					itemType: item.artwork.itemType,
+					overlay: item.artwork.overlay,
+					underlay: item.artwork.underlay,
+					uiEffects: item.artwork.uiEffects,
+				} as const)
+			: null;
+		artworkDisplay = undefined;
+		const owner =
+			spec !== null && repository !== null
+				? repository.createOwner("display")
+				: null;
+		const key =
+			owner !== null && spec !== null && repository !== null
+				? repository.retain(owner, spec)
+				: null;
+		const refresh = () => {
+			const entity =
+				selection === null ? null : selection.readSelectableItem(guid);
+			selectable = entity !== null;
+			equipped = entity?.location.kind === "equipped";
+			if (key !== null && repository !== null)
+				artworkDisplay = repository.read(key);
+		};
+		// Seed immediately without letting imperative entity/distance reads own this lease.
+		untrack(refresh);
+		if (key === null && selection === null) return;
+		const timer = window.setInterval(
+			refresh,
+			CLIENT_TUNING.inventory.displayIntervalMs,
+		);
+		return () => {
+			window.clearInterval(timer);
+			if (owner !== null && repository !== null)
+				void tick().then(() => repository.releaseOwner(owner));
+		};
+	});
+
+	function selectCell(event: MouseEvent): void {
+		if (event.detail <= 1) consumedCombineClick = false;
+		const targeting = itemInteractions?.snapshot();
+		if (targeting?.kind === "acquiring") {
+			if (event.detail <= 1) {
+				consumedCombineClick = true;
+				if (event.currentTarget instanceof HTMLElement)
+					pulseItemCell(event.currentTarget, "interaction");
+				itemInteractions?.target(inspection.guid, targeting.generation);
+			}
+			return;
+		}
+		if (consumedCombineClick) return;
+		itemSelection?.selectInspectedItem(inspection.guid);
+	}
 	const statuses = $derived(formatItemStatuses(item.status));
 	/** Cold appraisal facts consumed by the Portal section's labeled rows. */
 	const portalFacts = $derived(formatPortalInspection(item.portalRestrictions));
@@ -206,7 +310,34 @@
 <article class="inspection-body inspection-item">
 	<header class="inspection-hero">
 		<div class="inspection-hero-aside">
-			<ClientInspectionArtwork {artwork} {icons} name={inspection.name} />
+			<div class="inspection-artwork" aria-label={`${inspection.name} artwork`}>
+				<div class="inspection-item-cell">
+					<ItemGridCell
+						itemGuid={inspection.guid}
+						label={inspection.name}
+						display={cellDisplay}
+						{equipped}
+						count={item.stack?.current}
+						structure={item.uses}
+						cooldown={item.cooldown}
+						selected={selectable && selectedGuid === inspection.guid}
+						disabled={!selectable}
+						onselect={selectCell}
+					/>
+				</div>
+				{#if unavailableArtworkReason !== null}
+					<p class="inspection-diagnostic">{unavailableArtworkReason}</p>
+				{:else if artworkIssue !== null}
+					<p
+						class:inspection-warning={artworkDisplay?.kind === "degraded"}
+						class="inspection-diagnostic"
+					>
+						{artworkDisplay?.kind === "failed"
+							? "Artwork unavailable"
+							: "Artwork incomplete"}: {artworkIssue}
+					</p>
+				{/if}
+			</div>
 			{#if cantripSummary.kind === "loading"}
 				<div
 					class="inspection-cantrip-pills"
@@ -762,3 +893,12 @@
 		</details>
 	{/if}
 </article>
+
+<style>
+	@layer components {
+		.inspection-item-cell {
+			width: 64px;
+			height: 64px;
+		}
+	}
+</style>

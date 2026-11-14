@@ -5306,6 +5306,7 @@
 				{emotesEnabled}
 				nearby={nearbyOwner}
 				onSelectKnownEntity={(guid) => selection.selectKnownEntity(guid)}
+				inspectionItemSelection={selection}
 				onClearWaypoint={clearWaypoint}
 				onSetWaypoint={setWaypoint}
 				{partyHudPresent}

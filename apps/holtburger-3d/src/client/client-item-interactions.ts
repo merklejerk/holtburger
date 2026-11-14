@@ -86,6 +86,12 @@ type Session = Pick<
 	| "submitInventory"
 >;
 
+/** Narrow target-submission seam for item cells outside full inventory/container panels. */
+export type ClientInspectionItemInteractions = Pick<
+	ClientItemInteractions,
+	"snapshot" | "target"
+>;
+
 /** Frontend item interactions. Rust evaluates consequences; this owner decides whether to ask. */
 export class ClientItemInteractions implements LocalDialogSource {
 	readonly #session: Session;

@@ -38,7 +38,7 @@
 		readonly dimmed?: boolean;
 		readonly disabled: boolean;
 		/** Consumer-owned action for an occupied cell. */
-		readonly onselect: () => void;
+		readonly onselect: (event: MouseEvent) => void;
 		/** Optional consumer-owned secondary action, such as inspecting a payment item. */
 		readonly oncontextmenu?: (event: MouseEvent) => void;
 		/** Optional cold pointer-hover notification for panel-local affordances. */

@@ -67,6 +67,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	const requests: ClientEntitySelectionQueryRequest[] = [];
 	const lifecycle = {
 		entities,
+		tradeSnapshot: () => ({ trade: null }),
 		subscribe: (listener: (event: ClientLifecycleSessionEvent) => void) => {
 			listeners.add(listener);
 			return () => {

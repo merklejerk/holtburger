@@ -26,7 +26,7 @@ export class ClientCombineCells {
 			subtree: true,
 			childList: true,
 			attributes: true,
-			attributeFilter: ["data-item-guid", "data-action-item"],
+			attributeFilter: ["data-item-guid", "data-action-item", "disabled"],
 		});
 		this.#unsubscribe = interactions.subscribe(() => this.#refresh());
 		this.#refresh();
@@ -62,7 +62,7 @@ export class ClientCombineCells {
 		for (const candidate of this.#candidates.values()) candidate.cells.clear();
 		for (const cell of cells) {
 			const encoded = cell.dataset.itemGuid ?? cell.dataset.actionItem;
-			if (encoded === undefined) {
+			if (encoded === undefined || cell.matches(":disabled")) {
 				cell.dataset.combineDimmed = "true";
 				continue;
 			}

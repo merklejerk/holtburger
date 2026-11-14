@@ -1096,7 +1096,8 @@
 	let nearby = $state.raw<ClientNearby | null>(null);
 	/** Presentation-owned demand, retained across ordinary Nearby window changes. */
 	let nearbySceneMembership: SceneInterestMembership | null = null;
-	let entitySelection: ClientEntitySelection | null = null;
+	/** Cold owner identity is passed to the inspection cell; selection updates keep their own subscription. */
+	let entitySelection = $state.raw<ClientEntitySelection | null>(null);
 	let pointerSelection: ClientPointerSelectionController | null = null;
 	let selectionInput: ClientSelectionInput | null = null;
 	let itemInteractions = $state<ClientItemInteractions | null>(null);
@@ -2809,6 +2810,7 @@
 			{nearby}
 			onSelectKnownEntity={(guid) =>
 				entitySelection?.selectKnownEntity(guid) === true}
+			inspectionItemSelection={entitySelection}
 			{readMinimapFrame}
 			onClearWaypoint={() => navigationWaypoint.clear()}
 			onSetWaypoint={(target) => navigationWaypoint.set(target, notifyWaypoint)}

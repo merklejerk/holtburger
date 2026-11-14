@@ -77,7 +77,11 @@ function fixture() {
 	const entities = new ClientEntityMirror();
 	entities.commit(entities.prepareSnapshot(playerEntitySnapshot(1), 1));
 	const selection = new ClientEntitySelection({
-		lifecycle: { entities, subscribe: () => () => {} },
+		lifecycle: {
+			entities,
+			tradeSnapshot: () => ({ trade: null }),
+			subscribe: () => () => {},
+		},
 		presentation: () => null,
 	});
 	let candidates: readonly CycleCandidate[] | null = [];

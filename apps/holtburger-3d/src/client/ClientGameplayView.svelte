@@ -48,6 +48,7 @@
 	import type { ItemDragSession } from "./client-item-drag";
 	import ClientWorldContainerWindow from "./ClientWorldContainerWindow.svelte";
 	import ClientInspectionWindow from "./ClientInspectionWindow.svelte";
+	import type { ClientInspectionItemSelection } from "./client-entity-selection";
 	import ClientBookWindow from "./ClientBookWindow.svelte";
 	import type { ClientBookReaderState } from "./client-book-reader";
 	import type { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
@@ -335,6 +336,8 @@
 		readonly nearby: ClientNearby | null;
 		/** Shared admission for explicit entity references from chat and the nearby catalog. */
 		readonly onSelectKnownEntity: (guid: number) => boolean;
+		/** Current item reference admission for the retained inspection window. */
+		readonly inspectionItemSelection: ClientInspectionItemSelection | null;
 		/** Clear session-owned navigation intent without changing selection. */
 		readonly onClearWaypoint: () => void;
 		/** Static host capability, owned by the mounted transport lifetime. */
@@ -556,6 +559,7 @@
 		readMinimapFrame,
 		nearby,
 		onSelectKnownEntity,
+		inspectionItemSelection,
 		onClearWaypoint,
 		worldMapSource,
 		characterGuid,
@@ -698,7 +702,7 @@
 	function considerPointer(event: PointerEvent): void {
 		const element = event.target instanceof Element ? event.target : null;
 		const cell = element?.closest<HTMLElement>(
-			".item-grid-cell[data-item-guid], .action-cell[data-action-item]",
+			".item-grid-cell[data-item-guid]:not(:disabled), .action-cell[data-action-item]:not(:disabled)",
 		);
 		combineSurface = cell
 			? Number(cell.dataset.itemGuid ?? cell.dataset.actionItem)
@@ -1703,7 +1707,7 @@
 					{viewport}
 					onPlacementChange={(placement) =>
 						changeHudPlacement("trade", placement)}
-					onSelectItem={onSelectEntity}
+					onSelectItem={(guid) => onSelectContentsItem(guid, "select")}
 					{onExamineItem}
 				/>
 			{/key}
@@ -1737,6 +1741,9 @@
 		{#if inspection.kind === "ready" || inspection.kind === "spell"}
 			{#key inspection.kind === "spell" ? `spell:${inspection.spellId}` : `object:${inspection.guid}`}
 				<ClientInspectionWindow
+					{itemInteractions}
+					itemSelection={inspectionItemSelection}
+					selectedGuid={selectedEntityGuid}
 					{onSetWaypoint}
 					subject={inspection}
 					{objectPreviewService}
@@ -2052,8 +2059,8 @@
 		.combining[data-combine-eligibility="ineligible"] {
 			--combine-cursor: url("./combine-cursor-ineligible.svg") 12 12, crosshair;
 		}
-		.client-world.combining :global(.item-grid-cell),
-		.client-world.combining :global(.action-cell) {
+		.client-world.combining :global(.item-grid-cell:not(:disabled)),
+		.client-world.combining :global(.action-cell:not(:disabled)) {
 			cursor: var(--combine-cursor);
 		}
 	}

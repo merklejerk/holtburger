@@ -1,4 +1,8 @@
-import type { ClientEntityMirror } from "./client-entity-mirror";
+import type {
+	ClientEntityFacts,
+	ClientEntityLevel,
+	ClientEntityMirror,
+} from "./client-entity-mirror";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 import type { ClientSelectedEntityTrackingStatus } from "./client-selection-tracking";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../lib/game/landblocks";
@@ -7,6 +11,12 @@ import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../lib/game/landblocks";
 export interface ClientEntitySelectionLifecyclePort {
 	/** Accepted identity and ownership facts, independent of rendered geometry. */
 	readonly entities: Pick<ClientEntityMirror, "read">;
+	/** Active trade offers admit partner items that have no world placement or player ownership. */
+	tradeSnapshot(): {
+		readonly trade: {
+			readonly partner_side: { readonly items: readonly number[] };
+		} | null;
+	};
 	subscribe(listener: (event: ClientLifecycleSessionEvent) => void): () => void;
 }
 
@@ -16,6 +26,12 @@ export interface ClientEntitySelectionPresentationPort {
 		guid: number,
 	): ClientSelectedEntityTrackingStatus;
 }
+
+/** Inspector cells read current admission and recheck it when selecting a retained subject. */
+export type ClientInspectionItemSelection = Pick<
+	ClientEntitySelection,
+	"readSelectableItem" | "selectInspectedItem"
+>;
 
 /** Sole selected-identity owner and arbiter of competing acquisition intents. */
 export class ClientEntitySelection {
@@ -103,13 +119,30 @@ export class ClientEntitySelection {
 		const read = this.#lifecycle.entities.read();
 		if (read.kind === "pending") return false;
 		const entity = read.level.entities.get(guid);
-		if (
-			entity?.description.kind !== "known" ||
-			(guid !== read.level.playerGuid &&
-				entity.scenePlacement === "unavailable") ||
-			this.#beyondRetentionDistance(guid)
-		)
+		if (entity === undefined || !this.#canSelectWorldEntity(read.level, entity))
 			return false;
+		this.commitAcquisition(intent, guid);
+		return true;
+	}
+
+	/** Current selectable facts; retained appraisal alone never authorizes selection. */
+	readSelectableItem(guid: number): ClientEntityFacts | null {
+		if (this.#destroyed) return null;
+		const read = this.#lifecycle.entities.read();
+		if (read.kind === "pending") return null;
+		const entity = read.level.entities.get(guid);
+		return entity !== undefined &&
+			(this.#canSelectContentsEntity(read.level, entity) ||
+				this.#canSelectWorldEntity(read.level, entity))
+			? entity
+			: null;
+	}
+
+	/** Explicit inspection references select without toggling or changing the examined subject. */
+	selectInspectedItem(guid: number): boolean {
+		if (this.#destroyed) return false;
+		const intent = this.beginAcquisition("external");
+		if (this.readSelectableItem(guid) === null) return false;
 		this.commitAcquisition(intent, guid);
 		return true;
 	}
@@ -131,14 +164,40 @@ export class ClientEntitySelection {
 		if (read.kind === "pending") return;
 		const entity = read.level.entities.get(guid);
 		if (
-			entity?.description.kind === "known" &&
-			(entity.ownedByPlayer ||
-				entity.worldContainerContent ||
-				guid === read.level.playerGuid ||
-				(read.level.worldContainer.kind === "open" &&
-					guid === read.level.worldContainer.root))
+			entity !== undefined &&
+			this.#canSelectContentsEntity(read.level, entity)
 		)
 			this.#publish(mode === "toggle" && this.#selected === guid ? null : guid);
+	}
+
+	#canSelectContentsEntity(
+		level: ClientEntityLevel,
+		entity: ClientEntityFacts,
+	): boolean {
+		return (
+			entity.description.kind === "known" &&
+			(entity.ownedByPlayer ||
+				entity.worldContainerContent ||
+				entity.guid === level.playerGuid ||
+				(level.worldContainer.kind === "open" &&
+					entity.guid === level.worldContainer.root) ||
+				(this.#lifecycle
+					.tradeSnapshot()
+					.trade?.partner_side.items.includes(entity.guid) ??
+					false))
+		);
+	}
+
+	#canSelectWorldEntity(
+		level: ClientEntityLevel,
+		entity: ClientEntityFacts,
+	): boolean {
+		return (
+			entity.description.kind === "known" &&
+			(entity.guid === level.playerGuid ||
+				entity.scenePlacement !== "unavailable") &&
+			!this.#beyondRetentionDistance(entity.guid)
+		);
 	}
 
 	/** Maintain identity from semantic facts; presentation contributes measured distance only. */

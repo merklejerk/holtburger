@@ -396,12 +396,6 @@ try {
 		report = { suite: "client-spells", ...result.clientSpells, browserErrors };
 	} else if (options.clientNearby) {
 		report = { suite: "client-nearby", ...result.clientNearby, browserErrors };
-	} else if (options.itemCooldowns) {
-		report = {
-			suite: "item-cooldowns",
-			...result.itemCooldowns,
-			browserErrors,
-		};
 	} else if (options.clientTargeting) {
 		report = {
 			suite: "client-targeting",
@@ -712,7 +706,6 @@ function parseArgs(args) {
 		clientTargeting: false,
 		clientHudSnapping: false,
 		uiShowcase: false,
-		itemCooldowns: false,
 		cellTooltips: false,
 		clientNearby: false,
 		clientSpells: false,
@@ -856,10 +849,6 @@ function parseArgs(args) {
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		switch (arg) {
-			case "--item-cooldowns":
-				parsed.clientHudFixture = true;
-				parsed.itemCooldowns = true;
-				break;
 			case "--client-party-screenshots":
 				parsed.clientHudFixture = true;
 				parsed.clientPartyScreenshotDirectory = resolve(
@@ -2318,7 +2307,6 @@ Options:
   --client-hud-snapping Verify action-bar adjacency, alignment, and pointer release.
   --client-combat-bar   Verify attack controls, projectile supply, and HUD cancellation.
   --client-locks        Verify locked-target HUD, manual and batched keys, Escape, and teardown.
-  --item-cooldowns      Verify shared countdowns, themed CSS fills, expiry, and untouched icon artwork.
   --relocate-sequence <hex,hex,...>
                          Re-issue scene interest at each landblock in turn, so sustained streaming
                          churn can be measured without the interactive client. Reports per-hop
@@ -4767,9 +4755,7 @@ async function runClientHudHarness({ viteUrl }) {
 			? "cell-tooltips"
 			: options.uiShowcase
 				? "ui-showcase"
-				: options.itemCooldowns
-					? "item-cooldowns"
-					: "client-hud";
+				: "client-hud";
 	const pageUrl = `${viteUrl}/harness/browser/?${page}=1`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
@@ -4829,27 +4815,6 @@ async function runClientHudHarness({ viteUrl }) {
 							).data,
 						}
 					: {}),
-			};
-		}
-		if (options.itemCooldowns) {
-			const started = Date.now();
-			while (
-				!(await evaluateExpression(
-					client,
-					"Boolean(window.__HOLTBURGER_ITEM_COOLDOWNS__)",
-				))
-			) {
-				if (Date.now() - started > 30_000)
-					throw new Error("Timed out loading item cooldown harness");
-				await delay(100);
-			}
-			return {
-				itemCooldowns: await evaluateExpression(
-					client,
-					"window.__HOLTBURGER_ITEM_COOLDOWNS__()",
-				),
-				consoleMessages,
-				state: { error: null, ready: true },
 			};
 		}
 		if (options.performanceSurfaces) {

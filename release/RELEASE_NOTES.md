@@ -2,11 +2,12 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, inventory:** Items now remember the last pack they were in, including across restarts.
-- **3D client, equipment:** Unequipping gear or switching loadouts returns each item to its remembered pack first, then your main pack and other bags.
-- **3D client, performance:** Per-frame rendering work is reduced, including nameplates, animation, particles and portal views, which should improve frame rates in busy scenes.
-- **3D client, performance panel:** The physics tick now breaks down into per-phase timings, which makes slowdowns easier to trace.
-- **3D client and CLI, crowds:** Collision and physics work in crowded areas is reduced, which should lower steady-state CPU load.
+- **3D client, spell bar:** Spell tabs can hold more than ten spells with scrolling, and you can swap spells or whole tabs by dragging.
+- **3D client, spell bar layout:** The bar can be resized in whole columns, shows the wielded-caster spell as a separate button, and follows your theme's frame.
+- **3D client, HUD:** The spell and combat bars now fade when idle, using shared themeable settings.
+- **3D client, world map:** Activated waypoints are revealed on the map with a themeable destination pin and a brief ping.
+- **3D client, world map, contracts:** You can choose which contracts are visible on the map.
+- **3D client, vendor:** Items can be dragged out of the vendor queue to remove them, and queue layering is fixed.
 
 ## Known issues
 
@@ -20,6 +21,7 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 - The performance panel and GPU timing have not been verified on native Windows or macOS.
 - The startup fix has not been verified by launching rebuilt platform release bundles.
 - The crowd and rendering performance improvements have not been verified on native hardware or in live crowded play.
+- The new spell bar, waypoint ping and map changes have not been verified visually on native hardware.
 - CLI movement is simplified: jumping, falling, gravity, and stairs are not simulated locally. The server may correct your position or reject actions.
 
 ## Updating

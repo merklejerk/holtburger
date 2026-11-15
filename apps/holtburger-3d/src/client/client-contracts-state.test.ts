@@ -43,6 +43,47 @@ function fixture() {
 }
 
 describe("contracts journal", () => {
+	it("selects map identities independently of queries and publishes only map-relevant changes", () => {
+		const { owner, submit } = fixture();
+		const changed = vi.fn();
+		const unsubscribe = owner.subscribeMap(changed);
+		expect(owner.read().mapSelection).toBe("all");
+		owner.toggleMapVisibility(1);
+		expect(owner.read().mapSelection).toBe("mixed");
+		expect(owner.readMapFacts()?.rows.map((row) => row.id)).toEqual([2, 99]);
+		expect(owner.readFacts()?.rows).toHaveLength(3);
+		owner.setSearch("absent");
+		owner.setFilters(["completed"]);
+		owner.toggleExpanded(1);
+		expect(changed).toHaveBeenCalledTimes(1);
+		owner.setAllMapVisible(false);
+		expect(owner.read().mapSelection).toBe("none");
+		expect(owner.readMapFacts()?.rows).toEqual([]);
+		owner.setAllMapVisible(true);
+		expect(owner.read().mapSelection).toBe("all");
+		expect(owner.readMapFacts()?.rows).toHaveLength(3);
+		expect(submit).not.toHaveBeenCalled();
+		unsubscribe();
+	});
+	it("retains map choices through recovery, defaults new identities on, and prunes retired choices", () => {
+		const { owner } = fixture();
+		owner.toggleMapVisibility(1);
+		owner.recover({ rows: [row(1), row(2), row(3)] }, 42, true);
+		expect(owner.readMapFacts()?.rows.map((row) => row.id)).toEqual([2, 3]);
+		owner.setContext(42, false);
+		expect(owner.read().mapHidden.has(1)).toBe(true);
+		owner.update({ rows: [row(2)] });
+		owner.update({ rows: [row(1), row(2)] });
+		expect(owner.read().mapSelection).toBe("all");
+		owner.setAllMapVisible(false);
+		owner.recover({ rows: [row(1)] }, 43, true);
+		expect(owner.read().mapSelection).toBe("all");
+		owner.setAllMapVisible(false);
+		owner.reset();
+		expect(owner.read().mapHidden.size).toBe(0);
+		expect(owner.readMapFacts()).toBeNull();
+	});
+
 	it("unions selected statuses, intersects search, and clears on character replacement", () => {
 		const { owner } = fixture();
 		owner.setFilters(["waitingToRepeat", "unresolved"]);

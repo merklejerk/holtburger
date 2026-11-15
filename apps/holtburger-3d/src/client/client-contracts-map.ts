@@ -41,7 +41,7 @@ export interface ContractMapMarker {
 	readonly entries: readonly ContractMapEntry[];
 }
 
-/** Project accepted unfiltered facts; Journal controls never participate. */
+/** Project map-selected facts; Journal search and status filters never participate. */
 export function contractMapMarkers(
 	facts: ContractsSnapshot | null,
 ): readonly ContractMapMarker[] {

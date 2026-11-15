@@ -8,6 +8,7 @@
 	import CompletedIcon from "../assets/icons/contract-completed.svg?component";
 	import UnresolvedIcon from "../assets/icons/contract-unresolved.svg?component";
 	import ProgressIcon from "../assets/icons/contract-in-progress.svg?component";
+	import EyeIcon from "../assets/icons/hud-eye.svg?component";
 	import ClockIcon from "../assets/icons/duration.svg?component";
 	import { formatDuration } from "../app/duration-format";
 	import {
@@ -153,143 +154,176 @@
 						<p>No contracts match your filters.</p>
 					{/if}
 
+					{#if view.journal.total > 0}
+						<div class="contract-list-header contract-grid">
+							<button
+								class="ui-button ui-icon-button contract-map-toggle"
+								aria-label="Show all contracts on world map"
+								title={view.mapSelection === "all"
+									? "Hide all contracts on world map"
+									: "Show all contracts on world map"}
+								aria-pressed={view.mapSelection === "mixed"
+									? "mixed"
+									: view.mapSelection === "all"}
+								onclick={() => {
+									owner.setAllMapVisible(owner.read().mapSelection !== "all");
+									refresh();
+								}}><EyeIcon /></button
+							>
+							<span>Contracts</span>
+						</div>
+					{/if}
 					{#each view.journal.rows as row (row.id)}
 						{@const label = contractStatusLabel(row)}
-						<details
-							class="ui-disclosure contract-row"
-							open={view.expanded.has(row.id)}
-						>
-							<summary
-								onclick={(event) => {
-									event.preventDefault();
-									owner.toggleExpanded(row.id);
+						<div class="contract-grid">
+							<button
+								class="ui-button ui-icon-button contract-map-toggle"
+								aria-label={`Show ${contractName(row)} on world map`}
+								title="Show contract destinations when the world map’s Contracts layer is enabled"
+								aria-pressed={!view.mapHidden.has(row.id)}
+								onclick={() => {
+									owner.toggleMapVisibility(row.id);
 									refresh();
-								}}
+								}}><EyeIcon /></button
 							>
-								<span class="contract-summary">
-									<span
-										class="contract-status"
-										data-status={row.kind === "resolved"
-											? row.status.kind
-											: row.kind}
-										title={label}
-										role="img"
-										aria-label={label}
-									>
-										{#if row.kind === "unresolved"}
-											<UnresolvedIcon />
-										{:else if row.status.kind === "available"}
-											<AvailableIcon />
-										{:else if row.status.kind === "completed"}
-											<CompletedIcon />
-										{:else if row.status.kind === "waitingToRepeat"}
-											<ClockIcon />
-										{:else}
-											<ProgressIcon />
+							<details
+								class="ui-disclosure contract-row"
+								open={view.expanded.has(row.id)}
+							>
+								<summary
+									onclick={(event) => {
+										event.preventDefault();
+										owner.toggleExpanded(row.id);
+										refresh();
+									}}
+								>
+									<span class="contract-summary">
+										<span
+											class="contract-status"
+											data-status={row.kind === "resolved"
+												? row.status.kind
+												: row.kind}
+											title={label}
+											role="img"
+											aria-label={label}
+										>
+											{#if row.kind === "unresolved"}
+												<UnresolvedIcon />
+											{:else if row.status.kind === "available"}
+												<AvailableIcon />
+											{:else if row.status.kind === "completed"}
+												<CompletedIcon />
+											{:else if row.status.kind === "waitingToRepeat"}
+												<ClockIcon />
+											{:else}
+												<ProgressIcon />
+											{/if}
+										</span>
+										<span class="contract-name">{contractName(row)}</span>
+
+										{#if row.kind === "resolved"}
+											{#if row.status.kind === "inProgress" && row.status.progress !== null}
+												<span class="contract-progress"
+													>{row.status.progress}</span
+												>
+											{:else if row.status.kind === "waitingToRepeat"}
+												<span
+													class="contract-progress"
+													title="Repeat available in"
+													>{formatDuration(
+														Math.ceil(row.status.remainingSeconds),
+													)}</span
+												>
+											{/if}
+
+											{#if row.deadline?.kind === "running"}
+												<span class="deadline-badge" title="Time remaining"
+													><ClockIcon />{formatDuration(
+														Math.ceil(row.deadline.remainingSeconds),
+													)}</span
+												>
+											{/if}
 										{/if}
 									</span>
-									<span class="contract-name">{contractName(row)}</span>
+								</summary>
+								<div class="ui-disclosure-body contract-details">
+									{#if row.kind === "unresolved"}
+										<p>
+											Contract definition #{row.id} is missing from client content.
+										</p>
+									{:else}
+										<p>
+											<ClientWaypointText
+												interactive
+												text={row.description}
+												{onSetWaypoint}
+											/>
+										</p>
+										<dl>
+											<dt>Status</dt>
+											<dd>{label}</dd>
 
-									{#if row.kind === "resolved"}
-										{#if row.status.kind === "inProgress" && row.status.progress !== null}
-											<span class="contract-progress"
-												>{row.status.progress}</span
-											>
-										{:else if row.status.kind === "waitingToRepeat"}
-											<span
-												class="contract-progress"
-												title="Repeat available in"
-												>{formatDuration(
-													Math.ceil(row.status.remainingSeconds),
-												)}</span
-											>
-										{/if}
+											{#if row.status.kind === "inProgress" && row.status.progress !== null}
+												<dt>Progress</dt>
+												<dd>
+													<ClientWaypointText
+														interactive
+														text={row.status.progress}
+														{onSetWaypoint}
+													/>
+												</dd>
+											{/if}
 
-										{#if row.deadline?.kind === "running"}
-											<span class="deadline-badge" title="Time remaining"
-												><ClockIcon />{formatDuration(
-													Math.ceil(row.deadline.remainingSeconds),
-												)}</span
-											>
-										{/if}
+											{#if row.status.kind === "waitingToRepeat"}
+												<dt>Repeat available in</dt>
+												<dd>
+													{formatDuration(
+														Math.ceil(row.status.remainingSeconds),
+													)}
+												</dd>
+											{/if}
+
+											{#if row.contact === null}
+												<dt>Contact</dt>
+												<dd>Not provided</dd>
+											{:else}
+												<dt>
+													{row.contact.role === "start"
+														? "Start contact"
+														: "End contact"}
+												</dt>
+												<dd>{row.contact.name}</dd>
+												<dt>Contact location</dt>
+												<dd>{@render locationLink(row.contact.location)}</dd>
+											{/if}
+
+											<dt>Quest area</dt>
+											<dd>{@render locationLink(row.area)}</dd>
+
+											{#if row.deadline !== null}
+												<dt>Time remaining</dt>
+												<dd>
+													{row.deadline.kind === "finished"
+														? "Finished"
+														: formatDuration(
+																Math.ceil(row.deadline.remainingSeconds),
+															)}
+												</dd>
+											{/if}
+										</dl>
 									{/if}
-								</span>
-							</summary>
-							<div class="ui-disclosure-body contract-details">
-								{#if row.kind === "unresolved"}
-									<p>
-										Contract definition #{row.id} is missing from client content.
-									</p>
-								{:else}
-									<p>
-										<ClientWaypointText
-											interactive
-											text={row.description}
-											{onSetWaypoint}
-										/>
-									</p>
-									<dl>
-										<dt>Status</dt>
-										<dd>{label}</dd>
 
-										{#if row.status.kind === "inProgress" && row.status.progress !== null}
-											<dt>Progress</dt>
-											<dd>
-												<ClientWaypointText
-													interactive
-													text={row.status.progress}
-													{onSetWaypoint}
-												/>
-											</dd>
-										{/if}
-
-										{#if row.status.kind === "waitingToRepeat"}
-											<dt>Repeat available in</dt>
-											<dd>
-												{formatDuration(Math.ceil(row.status.remainingSeconds))}
-											</dd>
-										{/if}
-
-										{#if row.contact === null}
-											<dt>Contact</dt>
-											<dd>Not provided</dd>
-										{:else}
-											<dt>
-												{row.contact.role === "start"
-													? "Start contact"
-													: "End contact"}
-											</dt>
-											<dd>{row.contact.name}</dd>
-											<dt>Contact location</dt>
-											<dd>{@render locationLink(row.contact.location)}</dd>
-										{/if}
-
-										<dt>Quest area</dt>
-										<dd>{@render locationLink(row.area)}</dd>
-
-										{#if row.deadline !== null}
-											<dt>Time remaining</dt>
-											<dd>
-												{row.deadline.kind === "finished"
-													? "Finished"
-													: formatDuration(
-															Math.ceil(row.deadline.remainingSeconds),
-														)}
-											</dd>
-										{/if}
-									</dl>
-								{/if}
-
-								<div class="ui-action-row">
-									<button
-										class="ui-button"
-										disabled={!view.enabled}
-										onclick={() => owner.requestRemove(row.id, onNotice)}
-										>Remove from journal</button
-									>
+									<div class="ui-action-row">
+										<button
+											class="ui-button"
+											disabled={!view.enabled}
+											onclick={() => owner.requestRemove(row.id, onNotice)}
+											>Remove from journal</button
+										>
+									</div>
 								</div>
-							</div>
-						</details>
+							</details>
+						</div>
 					{/each}
 				{/if}
 			</div>
@@ -346,6 +380,34 @@
 			overflow: auto;
 			min-height: 0;
 			flex: 1;
+		}
+		.contract-grid {
+			display: grid;
+			grid-template-columns: var(--ui-icon-action-size) minmax(0, 1fr);
+			column-gap: 8px;
+			align-items: start;
+		}
+		.contract-list-header {
+			align-items: center;
+			padding-bottom: 6px;
+		}
+		.contract-map-toggle {
+			width: var(--ui-icon-action-size);
+			height: var(--ui-icon-action-size);
+			margin-top: 5px;
+		}
+		.contract-list-header .contract-map-toggle {
+			margin-top: 0;
+		}
+		.contract-map-toggle :global(svg) {
+			width: 18px;
+			height: 18px;
+		}
+		.contract-map-toggle[aria-pressed="false"] :global(svg) {
+			opacity: 0.35;
+		}
+		.contract-map-toggle[aria-pressed="mixed"] {
+			border-style: dashed;
 		}
 		.contract-row > summary {
 			padding: 8px 0;

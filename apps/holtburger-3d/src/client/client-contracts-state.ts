@@ -56,13 +56,13 @@ interface RemoveQuestion {
 	readonly onFailure: (message: string) => void;
 }
 
-/** Session-lifetime read model and cold journal controls; world owns membership. */
+/** Session-lifetime read model and cold contract controls; world owns membership. */
 export class ClientContractsState implements LocalDialogSource {
 	readonly #submit: (action: ContractsAction) => Promise<void>;
 	readonly #now: () => number;
 	readonly #listeners = new Set<() => void>();
-	/** Map consumers observe accepted facts, independently of local Journal/dialog controls. */
-	readonly #factsListeners = new Set<() => void>();
+	/** Map consumers observe facts and visibility choices independently of Journal queries. */
+	readonly #mapListeners = new Set<() => void>();
 	#snapshot: {
 		readonly facts: ContractsSnapshot;
 		readonly receivedAtMs: number;
@@ -73,6 +73,8 @@ export class ClientContractsState implements LocalDialogSource {
 	/** Selected statuses form a union; an empty selection includes every status. */
 	#filters: readonly ContractFilter[] = [];
 	#expanded = new Set<number>();
+	/** Hidden identities are session-local; new contracts default to visible. */
+	#mapHidden = new Set<number>();
 	#question: RemoveQuestion | null = null;
 	#questionSequence = 0;
 
@@ -88,13 +90,13 @@ export class ClientContractsState implements LocalDialogSource {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
 	}
-	/** Fact-only notifications keep query changes off the map's preparation path. */
-	subscribeFacts(listener: () => void): () => void {
-		this.#factsListeners.add(listener);
-		return () => this.#factsListeners.delete(listener);
+	/** Map notifications keep query and disclosure changes off the preparation path. */
+	subscribeMap(listener: () => void): () => void {
+		this.#mapListeners.add(listener);
+		return () => this.#mapListeners.delete(listener);
 	}
-	#publishFacts(): void {
-		for (const listener of this.#factsListeners) listener();
+	#publishMap(): void {
+		for (const listener of this.#mapListeners) listener();
 	}
 	#publish(): void {
 		for (const listener of this.#listeners) listener();
@@ -114,10 +116,11 @@ export class ClientContractsState implements LocalDialogSource {
 		this.#snapshot =
 			snapshot === null ? null : { facts: snapshot, receivedAtMs: this.#now() };
 		const ids = new Set(snapshot?.rows.map((row) => row.id));
+		this.#mapHidden = new Set([...this.#mapHidden].filter((id) => ids.has(id)));
 		this.#expanded = new Set([...this.#expanded].filter((id) => ids.has(id)));
 		if (this.#question !== null && !ids.has(this.#question.id))
 			this.#question = null;
-		this.#publishFacts();
+		this.#publishMap();
 		this.#publish();
 	}
 
@@ -145,6 +148,34 @@ export class ClientContractsState implements LocalDialogSource {
 		this.#publish();
 	}
 
+	/** Select every destination for one identity, including currently undrawable roles. */
+	toggleMapVisibility(id: number): void {
+		if (!this.#snapshot?.facts.rows.some((row) => row.id === id)) return;
+		if (this.#mapHidden.has(id)) this.#mapHidden.delete(id);
+		else this.#mapHidden.add(id);
+		this.#publishMap();
+		this.#publish();
+	}
+
+	/** Bulk selection covers the whole journal, independently of search and status filters. */
+	setAllMapVisible(visible: boolean): void {
+		this.#mapHidden = new Set(
+			visible ? [] : this.#snapshot?.facts.rows.map((row) => row.id),
+		);
+		this.#publishMap();
+		this.#publish();
+	}
+
+	/** Apply local visibility before marker grouping so shared points and tooltips stay coherent. */
+	readMapFacts(): ContractsSnapshot | null {
+		const facts = this.readFacts();
+		return facts === null
+			? null
+			: {
+					rows: facts.rows.filter((row) => !this.#mapHidden.has(row.id)),
+				};
+	}
+
 	/** Age all accepted facts independently of Journal controls or panel visibility. */
 	readFacts(): ContractsSnapshot | null {
 		const snapshot = this.#snapshot;
@@ -164,6 +195,15 @@ export class ClientContractsState implements LocalDialogSource {
 			search: this.#search,
 			filters: [...this.#filters],
 			expanded: new Set(this.#expanded),
+			/** Row toggle selection; independent of the map's master layer switch. */
+			mapHidden: new Set(this.#mapHidden),
+			/** Header state computed over every membership row, including filtered rows. */
+			mapSelection:
+				this.#mapHidden.size === 0
+					? ("all" as const)
+					: this.#mapHidden.size === facts?.rows.length
+						? ("none" as const)
+						: ("mixed" as const),
 			enabled: this.#enabled && this.#player !== null,
 		};
 		if (facts === null) return { ...controls, journal: null };
@@ -245,8 +285,9 @@ export class ClientContractsState implements LocalDialogSource {
 		this.#search = "";
 		this.#filters = [];
 		this.#expanded.clear();
+		this.#mapHidden.clear();
 		this.#question = null;
-		this.#publishFacts();
+		this.#publishMap();
 		this.#publish();
 	}
 }

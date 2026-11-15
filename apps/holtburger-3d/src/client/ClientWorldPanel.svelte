@@ -53,7 +53,7 @@
 	interface Props {
 		/** Explicit activation only; ordinary waypoint sampling never requests a reveal. */
 		readonly waypointReveal?: ClientWaypointReveal | null;
-		/** Session-owned unfiltered facts, independent of Journal window state. */
+		/** Session-owned map selection and facts, independent of Journal queries and visibility. */
 		readonly contracts: ClientContractsState | null;
 		/** Cold character identity resets the search filter independently of transport lifetime. */
 		readonly characterGuid: number | null;
@@ -217,12 +217,12 @@
 			return;
 		}
 		const refresh = () => {
-			overlay.setFacts(source.readFacts());
+			overlay.setFacts(source.readMapFacts());
 			drawOverlays();
 		};
 		// Overlay drawing reads independent display choices; they must not own this subscription.
 		untrack(refresh);
-		const unsubscribe = source.subscribeFacts(refresh);
+		const unsubscribe = source.subscribeMap(refresh);
 		// Repeat expiry can reveal a quest area without a new server snapshot.
 		const timer = setInterval(refresh, CLIENT_TUNING.journal.displayIntervalMs);
 		return () => {

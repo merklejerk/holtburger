@@ -198,6 +198,95 @@ export async function probeContractMap(options: {
 			tooltip().textContent?.includes(
 				"In progress",
 			), "End-contact tooltip missing");
+		// Exercise production row/header controls alongside the retained map overlay.
+		get<HTMLButtonElement>(
+			'nav[aria-label="Game shortcuts"] button[aria-label="Journal"]',
+		).click();
+		await waitTimer();
+		const journal = 'section.hud-window[aria-label="Journal"]';
+		const header = () =>
+			get<HTMLButtonElement>(`${journal} .contract-list-header button`);
+		const rowToggle = () =>
+			get<HTMLButtonElement>(
+				`${journal} .contract-grid:not(.contract-list-header) button.contract-map-toggle`,
+			);
+		const rowDetails = get<HTMLDetailsElement>(
+			`${journal} details.contract-row`,
+		);
+		const headerBounds = header().getBoundingClientRect();
+		const rowBounds = rowToggle().getBoundingClientRect();
+		require(Math.abs(headerBounds.left - rowBounds.left) < 1 &&
+			headerBounds.width > 0 &&
+			headerBounds.width ===
+				rowBounds.width, "Contract map column is not aligned");
+		require(header().getAttribute("aria-pressed") ===
+			"true", "Header must start fully selected");
+		rowToggle().click();
+		await settle();
+		require(!rowDetails.open &&
+			rowToggle().getAttribute("aria-pressed") === "false" &&
+			header().getAttribute("aria-pressed") ===
+				"mixed", "Row toggle expanded disclosure or failed to select");
+		header().click();
+		await settle();
+		require(owner.read().mapSelection === "all" &&
+			rowToggle().getAttribute("aria-pressed") ===
+				"true", "Mixed header selection did not select all contracts");
+		owner.setSearch("absent");
+		await waitTimer();
+		header().click();
+		await settle();
+		require(owner.readMapFacts()?.rows.length === 0 &&
+			header().getAttribute("aria-pressed") ===
+				"false", "Hide all ignored filtered-out contracts");
+		// The panels share one active slot; verify hidden selection after map activation.
+		launch();
+		await settle();
+		require(markers().length === 0 &&
+			(await toggle()).getAttribute("aria-checked") ===
+				"true", "Hidden contracts reappeared when the enabled map layer reopened");
+		get<HTMLButtonElement>(
+			'nav[aria-label="Game shortcuts"] button[aria-label="Journal"]',
+		).click();
+		await settle();
+		require(header().getAttribute("aria-label") ===
+			"Show all contracts on world map", "Header visibility label changed meaning with its pressed state");
+		header().click();
+		await settle();
+		require(owner.readMapFacts()?.rows.length === rows.length &&
+			header().getAttribute("aria-pressed") ===
+				"true", "Show all failed to restore map selection");
+		// Journal and World share the active-panel slot; opening Journal intentionally stops map work.
+		get<HTMLButtonElement>(
+			`${journal} button[aria-label="Close Journal"]`,
+		).click();
+		launch();
+		await settle();
+		require(markers().length ===
+			3, "Map reopen failed to apply restored selection");
+		owner.toggleMapVisibility(3);
+		await settle();
+		const sharedArea = markers().find(
+			(node) => node.dataset.contractMarker === area.dataset.contractMarker,
+		);
+		if (sharedArea === undefined) throw new Error("Shared marker disappeared");
+		hover(sharedArea);
+		await settle();
+		require(markers().length === 3 &&
+			!tooltip().textContent?.includes(
+				"Completed",
+			), "Hidden coincident contract remained in tooltip or removed another contract's marker");
+		(await toggle()).click();
+		await settle();
+		(await toggle()).click();
+		await settle();
+		require(owner
+			.read()
+			.mapHidden.has(3), "Master layer toggle erased individual selections");
+		owner.setAllMapVisible(true);
+		owner.setSearch("");
+		await settle();
+
 		const beforeQuery = reads;
 		owner.setSearch("absent");
 		owner.setFilters(["completed"]);
@@ -205,8 +294,12 @@ export async function probeContractMap(options: {
 		require(reads === beforeQuery &&
 			markers().length ===
 				3, "Journal query changes rebuilt or filtered map facts");
-		const width = end.querySelector("svg")?.getAttribute("width");
-		const beforeZoom = end.getAttribute("transform");
+		const currentEnd = markers().find(
+			(node) => node.dataset.contractRole === "contact",
+		);
+		if (currentEnd === undefined) throw new Error("Missing restored contact");
+		const width = currentEnd.querySelector("svg")?.getAttribute("width");
+		const beforeZoom = currentEnd.getAttribute("transform");
 		const zoomCanvas = get<HTMLCanvasElement>(`${rootSelector} canvas`);
 		const zoomBounds = zoomCanvas.getBoundingClientRect();
 		zoomCanvas.dispatchEvent(
@@ -219,16 +312,16 @@ export async function probeContractMap(options: {
 			}),
 		);
 		await settle();
-		require(end.getAttribute("transform") !==
+		require(currentEnd.getAttribute("transform") !==
 			beforeZoom, "Zoom did not reproject markers");
-		require(end.querySelector("svg")?.getAttribute("width") ===
+		require(currentEnd.querySelector("svg")?.getAttribute("width") ===
 			width, "Marker pixel size changed on zoom");
 		const surface = get<HTMLElement>(`${rootSelector} .world-map-surface`);
-		const beforeResize = end.getAttribute("transform");
+		const beforeResize = currentEnd.getAttribute("transform");
 		surface.style.width = "80%";
 		await settle();
 		await settle();
-		require(end.getAttribute("transform") !==
+		require(currentEnd.getAttribute("transform") !==
 			beforeResize, "Resize did not reproject markers");
 		surface.style.width = "";
 		await settle();
@@ -412,6 +505,9 @@ export async function probeContractMap(options: {
 			markers: 3,
 			defaultOn: true,
 			independentJournal: true,
+			individualVisibility: true,
+			bulkVisibility: true,
+			alignedVisibilityColumn: true,
 			independentWaypointLayer: true,
 			roleTooltips: true,
 			overlappingHits: true,

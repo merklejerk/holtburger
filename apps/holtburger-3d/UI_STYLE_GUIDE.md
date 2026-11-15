@@ -281,7 +281,8 @@ physical press, selection, an open panel, or disabled controls.
 | `--ui-button-background-color`, `--ui-button-border-color`                                                                                                  | Background color and border color for text buttons and tabs. Disabled buttons desaturate the background color.                        |
 | `--ui-hud-button-background`, `--ui-hud-button-indicator-color`                                                                                             | Optional full background for an icon's feathered backing (shared HUD tint by default), and underline color.                           |
 | `--ui-hud-control-background`, `--ui-hud-control-indicator-color`                                                                                           | Independent full backing and underline for labelled/compound HUD controls and cells.                                                  |
-| `--ui-combat-idle-opacity`, `--ui-combat-emphasis-duration`, `--ui-combat-opacity-transition-duration`                                                      | Whole-component idle opacity, full-emphasis hold time, and fade/hover transition time.                                                |
+| `--ui-hud-idle-opacity`, `--ui-hud-opacity-transition-duration`                                                                                             | Shared whole-component idle opacity and fade time for the spell bar and combat HUD.                                                   |
+| `--ui-combat-emphasis-duration`                                                                                                                             | Full-opacity hold after a combat profile activation.                                                                                  |
 | `--ui-combat-foreground-color`, `--ui-combat-outline-color`, `--ui-combat-track-color`, `--ui-combat-charge-color`                                          | Combat gauge ink, handle outline, unfilled track, and animated charge colors at full emphasis.                                        |
 | `--ui-combat-height-color`, `--ui-combat-height-selected-color`, `--ui-combat-height-hover-color`                                                           | Complete colors for the combat gauge's three attack-height button states.                                                             |
 | `--ui-combat-handle-filter`, `--ui-combat-handle-focus-filter`, `--ui-combat-breakpoint-shadow`                                                             | Complete CSS filter and text-shadow recipes for the combat handle and breakpoint labels.                                              |
@@ -305,6 +306,20 @@ the pulse duration and `--ui-combat-handle-settle-scale` its peak scale (positiv
 number). Dragging interrupts the pulse; release or a keyboard position change
 restarts it. Unchanged settings and attack-height selections do not pulse.
 Reduced-motion preferences disable this animation, including one already running.
+
+The spell bar and combat HUD use `ui-hud-fade`: both inherit
+`--ui-hud-idle-opacity` (default `0.7`) and
+`--ui-hud-opacity-transition-duration` (default `180ms`). Hover, focus within,
+and feature-owned emphasis restore full opacity; the spell bar stays emphasized
+while layout editing is unlocked. Reduced motion disables the fade transition.
+Set the shared variables on the theme for consistent defaults, or scope an override
+to either HUD:
+
+```css
+.ui-theme .spell-bar {
+	--ui-hud-idle-opacity: 0.8;
+}
+```
 
 Combat HUD hover help uses `--ui-combat-help-color` and
 `--ui-combat-help-text-shadow` independently of the control paint. When omitted,

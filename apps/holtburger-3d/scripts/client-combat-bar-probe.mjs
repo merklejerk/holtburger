@@ -24,10 +24,10 @@ export async function probeCombatBar(
 				: Number.parseFloat(value) * 1000;
 		};
 		return {
-			idle: styles.getPropertyValue('--ui-combat-idle-opacity').trim(),
+			idle: styles.getPropertyValue('--ui-hud-idle-opacity').trim(),
 			emphasisMs: milliseconds('--ui-combat-emphasis-duration'),
 			appearanceHoldMs: milliseconds('--ui-combat-appearance-hold-duration'),
-			transitionMs: milliseconds('--ui-combat-opacity-transition-duration'),
+			transitionMs: milliseconds('--ui-hud-opacity-transition-duration'),
 		};
 	})()`);
 	const arcPoint = (value) =>
@@ -347,10 +347,10 @@ export async function probeCombatBar(
 		return {
 			opacity: getComputedStyle(bar).opacity,
 			animated: getComputedStyle(bar).animationName.endsWith('combat-pop-in'),
-			appearing: bar.classList.contains('appearing'),
+			emphasized: bar.classList.contains('ui-hud-emphasized'),
 		};
 	})()`),
-		{ opacity: "1", animated: true, appearing: true },
+		{ opacity: "1", animated: true, emphasized: true },
 	);
 	assert.equal(await helpOpacity(), "0");
 	assert.equal(
@@ -610,7 +610,7 @@ export async function probeCombatBar(
 		await read(`(async () => {
 			document.querySelector('.height.high').click();
 			await new Promise(resolve => requestAnimationFrame(resolve));
-			return document.querySelector('.combat-bar').classList.contains('profile-emphasized');
+			return document.querySelector('.combat-bar').classList.contains('ui-hud-emphasized');
 		})()`),
 		true,
 	);
@@ -647,7 +647,7 @@ export async function probeCombatBar(
 			}));
 			await new Promise(resolve => requestAnimationFrame(resolve));
 			return {
-				emphasized: document.querySelector('.combat-bar').classList.contains('profile-emphasized'),
+				emphasized: document.querySelector('.combat-bar').classList.contains('ui-hud-emphasized'),
 				value: document.querySelector('.power-control').getAttribute('aria-valuenow'),
 			};
 		})()`),
@@ -659,12 +659,6 @@ export async function probeCombatBar(
 	assert.equal(
 		await read("document.querySelector('.power-label').textContent.trim()"),
 		"Accuracy",
-	);
-	assert.equal(
-		await read(
-			"document.querySelector('.combat-bar').classList.contains('appearing')",
-		),
-		false,
 	);
 	assert.equal(
 		await read("document.querySelector('.combat-bar').dataset.combatMode"),

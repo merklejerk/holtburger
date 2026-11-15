@@ -367,7 +367,8 @@
 	{onPlacementChange}
 >
 	<div
-		class="spell-bar"
+		class="spell-bar ui-hud-fade"
+		class:ui-hud-emphasized={editable}
 		data-spell-bar-surface
 		style:--spell-cell-size={`${metrics.cell}px`}
 		style:--spell-caster-gap={`${metrics.casterGap}px`}

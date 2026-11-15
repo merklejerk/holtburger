@@ -92,6 +92,9 @@
 		/* Corner width/height relative to the viewport; gradient's transparent stop. */
 		--ui-vital-warning-vein-corner-size: 32%;
 		--ui-vital-warning-glow-clear-extent: 55%;
+		/* Shared resting visibility for interactive HUDs. */
+		--ui-hud-idle-opacity: 0.7;
+		--ui-hud-opacity-transition-duration: 180ms;
 		/* Spell shortcuts have their own palette and backing opacity, independent of vitals. */
 		--ui-spell-bar-color: #66aaff;
 		--ui-spell-cell-background-opacity: 27%;
@@ -213,13 +216,11 @@
 		--ui-party-name-gap: 4px;
 		--ui-party-leader-icon-size: 12px;
 		/* Combat gauge paint; geometry and hit targets remain component-owned. */
-		--ui-combat-idle-opacity: 0.7;
 		--ui-combat-appearance-duration: 360ms;
 		--ui-combat-appearance-start-scale: 0.55;
 		--ui-combat-appearance-easing: cubic-bezier(0.34, 1.65, 0.64, 1);
 		--ui-combat-appearance-hold-duration: 1s;
 		--ui-combat-emphasis-duration: 0.25s;
-		--ui-combat-opacity-transition-duration: 180ms;
 		--ui-combat-foreground-color: var(--ui-color-text);
 		/* Optional help color/shadow and leader color resolve at their consumers. */
 		--ui-combat-help-arc-letter-spacing: 0.14em;
@@ -1339,6 +1340,14 @@
 			animation: none;
 		}
 	}
+	/* Feature owners can emphasize active or editable HUDs independently of hover. */
+	.ui-theme .ui-hud-fade {
+		opacity: var(--ui-hud-idle-opacity);
+		transition: opacity var(--ui-hud-opacity-transition-duration) ease-out;
+	}
+	.ui-theme .ui-hud-fade:is(:hover, :focus-within, .ui-hud-emphasized) {
+		opacity: 1;
+	}
 	.ui-theme .ui-world-map-label {
 		font: var(--ui-world-map-label-font, 11px var(--ui-font-body));
 		fill: var(--ui-world-map-label-color, var(--ui-color-text));
@@ -1366,6 +1375,7 @@
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.ui-theme .ui-button,
+		.ui-theme .ui-hud-fade,
 		.ui-theme :is(.ui-hud-button, .ui-hud-control) svg {
 			transition: none;
 		}

@@ -526,10 +526,9 @@
 >
 	<div
 		bind:this={combatBar}
-		class="combat-bar"
+		class="combat-bar ui-hud-fade"
+		class:ui-hud-emphasized={profileEmphasized || appearing}
 		style:--combat-metal={`url(#${gaugeId}-metal)`}
-		class:profile-emphasized={profileEmphasized}
-		class:appearing
 		class:help-enabled={showHelpLabels}
 		data-combat-mode={profile.kind}
 	>
@@ -882,25 +881,15 @@
 			font-weight: 600;
 		}
 		.combat-bar {
-			--combat-rest-opacity: var(--ui-combat-idle-opacity);
-
 			position: relative;
 			box-sizing: border-box;
 			width: 100%;
 			height: 100%;
 			pointer-events: none;
 			color: var(--ui-combat-foreground-color);
-			opacity: var(--combat-rest-opacity);
-			transition: opacity var(--ui-combat-opacity-transition-duration) ease-out;
 			transform-origin: center;
 			animation: combat-pop-in var(--ui-combat-appearance-duration)
 				var(--ui-combat-appearance-easing);
-		}
-		.combat-bar:hover,
-		.combat-bar:focus-within,
-		.combat-bar.profile-emphasized,
-		.combat-bar.appearing {
-			--combat-rest-opacity: 1;
 		}
 		@keyframes combat-pop-in {
 			from {
@@ -925,7 +914,7 @@
 				--ui-combat-help-text-shadow,
 				var(--ui-combat-breakpoint-shadow)
 			);
-			transition: opacity var(--ui-combat-opacity-transition-duration) ease-out;
+			transition: opacity var(--ui-hud-opacity-transition-duration) ease-out;
 		}
 		.combat-bar.help-enabled:hover .combat-help {
 			opacity: 1;

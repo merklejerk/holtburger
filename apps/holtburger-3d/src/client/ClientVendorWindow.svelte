@@ -324,6 +324,7 @@
 												removalDisabled={locked}
 												onremove={() => act(() => model.remove(cell))}
 												data-vendor-queued-item={cell.sources[0]}
+												data-vendor-queue-key={cell.key}
 												aria-label={label}
 												title=""
 												data-ui-tooltip={label}

@@ -219,6 +219,7 @@ export class ClientItemDrag {
 			| "acceptsSaleDrop"
 			| "queueBuy"
 			| "queueSell"
+			| "captureRemoval"
 		> | null,
 		/** Salvage queue edits remain local; drag-out captures its exact draft lifetime. */
 		private readonly salvage: Pick<
@@ -332,6 +333,26 @@ export class ClientItemDrag {
 		};
 	}
 
+	/** All draft sources share one pointer lifetime; feature owners capture removal authority. */
+	#startDraftDrag(
+		event: PointerEvent,
+		element: HTMLElement,
+		boundary: HTMLElement,
+		remove: () => void,
+	): void {
+		this.#cancel();
+		this.#draftGesture = {
+			boundary,
+			remove,
+			element,
+			pointer: event.pointerId,
+			x: event.clientX,
+			y: event.clientY,
+			dragging: false,
+		};
+		event.stopPropagation();
+	}
+
 	#down = (event: PointerEvent): void => {
 		// Suppression belongs to the completed gesture, never a later independent click.
 		this.#suppressClick = false;
@@ -368,6 +389,19 @@ export class ClientItemDrag {
 				return;
 			}
 		}
+		const queuedVendor =
+			event.target instanceof Element
+				? event.target.closest<HTMLElement>("[data-vendor-queue-key]")
+				: null;
+		if (queuedVendor !== null && this.#root.contains(queuedVendor)) {
+			const boundary = queuedVendor.closest<HTMLElement>("[data-vendor-queue]");
+			const key = queuedVendor.getAttribute("data-vendor-queue-key");
+			if (boundary === null || key === null) return;
+			const remove = this.vendor?.captureRemoval(key);
+			if (remove == null) return;
+			this.#startDraftDrag(event, queuedVendor, boundary, remove);
+			return;
+		}
 		const queuedSalvage =
 			event.target instanceof Element
 				? event.target.closest<HTMLElement>("[data-salvage-item]")
@@ -380,17 +414,7 @@ export class ClientItemDrag {
 				Number(queuedSalvage.dataset.salvageItem),
 			);
 			if (boundary === null || remove == null) return;
-			this.#cancel();
-			this.#draftGesture = {
-				boundary,
-				remove,
-				element: queuedSalvage,
-				pointer: event.pointerId,
-				x: event.clientX,
-				y: event.clientY,
-				dragging: false,
-			};
-			event.stopPropagation();
+			this.#startDraftDrag(event, queuedSalvage, boundary, remove);
 			return;
 		}
 		const requirement =
@@ -406,17 +430,9 @@ export class ClientItemDrag {
 				Number(row.dataset.housingWcid),
 			);
 			if (identity == null) return;
-			this.#cancel();
-			this.#draftGesture = {
-				boundary: requirement,
-				remove: () => this.houseCrystal?.clearRow(identity),
-				element: requirement,
-				pointer: event.pointerId,
-				x: event.clientX,
-				y: event.clientY,
-				dragging: false,
-			};
-			event.stopPropagation();
+			this.#startDraftDrag(event, requirement, requirement, () =>
+				this.houseCrystal?.clearRow(identity),
+			);
 			return;
 		}
 		const offer =

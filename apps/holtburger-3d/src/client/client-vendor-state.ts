@@ -384,6 +384,18 @@ export class ClientVendorState {
 		);
 	}
 
+	/** Capture an exact draft and display group so drag-out cannot edit a replacement queue. */
+	captureRemoval(key: string): (() => void) | null {
+		if (!this.#editable() || this.#draft === null) return null;
+		const cell = this.#queue().find((cell) => cell.key === key);
+		if (cell === undefined) return null;
+		const draft = this.#draft;
+		const quote = this.#quote;
+		return () => {
+			if (this.#draft === draft && this.#quote === quote) this.remove(cell);
+		};
+	}
+
 	remove(cell: VendorQueueCell): void {
 		if (!this.#editable() || this.#draft === null) return;
 		const sources = new Set(cell.sources);

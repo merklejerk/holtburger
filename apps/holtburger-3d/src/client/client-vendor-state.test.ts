@@ -174,6 +174,77 @@ function buy(model: ClientVendorState, item: number, amount?: number): void {
 }
 
 describe("vendor draft presentation", () => {
+	it.each(["buy", "sell"] as const)(
+		"captures %s queue removal without retargeting a later draft",
+		(side) => {
+			const f = fixture();
+			const item = side === "buy" ? singleOffer.guid : 10;
+			const quote: VendorQuote = {
+				...blank,
+				[side === "buy" ? "buys" : "sells"]: [
+					{ item, amount: 1, total: 100, merge_key: null },
+				],
+			};
+			const queue = () => {
+				if (side === "buy") buy(f.model, item);
+				else f.model.queueSell(item);
+				f.answer(quote);
+				const cell = f.model.read()?.queue[0];
+				if (cell === undefined) throw new Error("Expected queued item");
+				const remove = f.model.captureRemoval(cell.key);
+				if (remove === null) throw new Error("Expected removable item");
+				return remove;
+			};
+			const remove = queue();
+			remove();
+			expect(f.pending().draft).toEqual({
+				vendor: vendorId,
+				buys: [],
+				sells: [],
+			});
+			f.answer(blank);
+			queue();
+			const requests = f.previewVendor.mock.calls.length;
+			remove();
+			expect(f.previewVendor).toHaveBeenCalledTimes(requests);
+			expect(f.model.read()?.queue).toHaveLength(1);
+		},
+	);
+
+	it("refuses drag removal while quoting or paying and after a quote changes", () => {
+		const f = fixture();
+		buy(f.model, singleOffer.guid);
+		const quote = {
+			...blank,
+			buys: [
+				{ item: singleOffer.guid, amount: 1, total: 100, merge_key: null },
+			],
+		};
+		f.answer(quote);
+		const cell = f.model.read()?.queue[0];
+		if (cell === undefined) throw new Error("Expected purchase cell");
+		const remove = f.model.captureRemoval(cell.key);
+		if (remove === null) throw new Error("Expected removable item");
+		expect(f.model.captureRemoval("missing")).toBeNull();
+		f.emit({ type: "vendor-snapshot", vendor: catalog });
+		expect(f.model.captureRemoval(cell.key)).toBeNull();
+		remove();
+		f.answer({ ...quote });
+		const requests = f.previewVendor.mock.calls.length;
+		remove();
+		expect(f.previewVendor).toHaveBeenCalledTimes(requests);
+		expect(f.model.read()?.queue).toHaveLength(1);
+		const removeBeforePayment = f.model.captureRemoval(cell.key);
+		if (removeBeforePayment === null)
+			throw new Error("Expected removable item before payment");
+		f.model.trade();
+		expect(f.submitVendor).toHaveBeenCalledTimes(1);
+		removeBeforePayment();
+		expect(f.previewVendor).toHaveBeenCalledTimes(requests);
+		expect(f.model.read()?.queue).toHaveLength(1);
+		expect(f.model.captureRemoval(cell.key)).toBeNull();
+	});
+
 	it("stages Main Pack's direct items without offering the character", () => {
 		const f = fixture();
 		expect(f.model.acceptsSaleDrop(vendorId, 1)).toBe(true);

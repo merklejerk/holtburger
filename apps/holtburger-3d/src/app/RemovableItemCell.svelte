@@ -36,6 +36,7 @@
 	@layer components {
 		.removable-item-cell {
 			position: relative;
+			isolation: isolate;
 			width: var(--ui-item-cell-min-size);
 			flex: none;
 		}
@@ -43,7 +44,8 @@
 			position: absolute;
 			top: -4px;
 			right: -4px;
-			z-index: 1;
+			/* Selected item cells use layer 2; removal stays above their artwork and reticle. */
+			z-index: 3;
 			display: grid;
 			place-items: center;
 			width: 20px;

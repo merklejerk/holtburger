@@ -1,4 +1,10 @@
 <script lang="ts">
+	import type { ClientWaypointReveal } from "./client-navigation-waypoint";
+	import MapWaypointPingIcon from "../assets/icons/map-waypoint-ping.svg?component";
+	import {
+		showVisualPopover,
+		positionVisualPopover,
+	} from "../app/visual-popover";
 	import { UI_SCALE_CHANGE_EVENT } from "../app/ui-scale";
 	import type { ClientContractsState } from "./client-contracts-state";
 	import { ContractMapOverlay } from "./client-contracts-map-overlay";
@@ -45,6 +51,8 @@
 	import { HousingSearchOverlay } from "./client-housing-search-overlay";
 
 	interface Props {
+		/** Explicit activation only; ordinary waypoint sampling never requests a reveal. */
+		readonly waypointReveal?: ClientWaypointReveal | null;
 		/** Session-owned unfiltered facts, independent of Journal window state. */
 		readonly contracts: ClientContractsState | null;
 		/** Cold character identity resets the search filter independently of transport lifetime. */
@@ -73,6 +81,7 @@
 		readonly readFrame: () => MinimapFrame;
 	}
 	const {
+		waypointReveal = null,
 		contracts,
 		characterGuid,
 		housing,
@@ -227,6 +236,94 @@
 	let canvas: HTMLCanvasElement;
 	let playerMarker: SVGGElement;
 	let waypointMarker: SVGGElement;
+	/** Top-layer anchor escapes map, tab, and window-content clipping without taking input. */
+	let waypointPingSurface: HTMLDivElement;
+	let waypointPing: HTMLDivElement;
+	/** One activation advances from fitting to the fitted draw, then owns its animation lifetime. */
+	let reveal: {
+		/** The accepted activation also guards asynchronous completion against replacement. */
+		readonly request: ClientWaypointReveal;
+		/** Fitting requests a draw; painting starts the theme-owned animation. */
+		phase: "fit" | "paint" | "ping";
+	} | null = null;
+	/** Character updates cancel work without replaying the same activation. */
+	let lastReveal: ClientWaypointReveal | null = null;
+	function cancelReveal(): void {
+		reveal = null;
+		waypointPing?.classList.remove("ui-waypoint-ping-active");
+		if (waypointPingSurface?.matches(":popover-open"))
+			waypointPingSurface.hidePopover();
+	}
+	$effect(() => {
+		const request = waypointReveal;
+		const guid = characterGuid;
+		untrack(() => {
+			cancelReveal();
+			if (request === lastReveal) return;
+			lastReveal = request;
+			if (request === null || request.characterGuid !== guid) return;
+			activeTab = "world";
+			showWaypoints = true;
+			menu = null;
+			cancelPan?.();
+			cancelPan = null;
+			const state = owner?.read();
+			if (state?.kind === "load-failed" || state?.kind === "unavailable")
+				return;
+			reveal = { request, phase: "fit" };
+			owner?.setVisible(visible);
+		});
+	});
+	function drawReveal(): void {
+		const pending = reveal;
+		if (
+			!pending ||
+			pending.phase === "ping" ||
+			!owner ||
+			!visible ||
+			activeTab !== "world"
+		)
+			return;
+		if (canvas.clientWidth <= 0 || canvas.clientHeight <= 0) return;
+		const state = owner.read();
+		if (
+			state.kind !== "ready" &&
+			!(state.kind === "streaming" && state.appliedTiles > 0)
+		)
+			return;
+		if (pending.phase === "fit") {
+			pending.phase = "paint";
+			owner.fit();
+			return;
+		}
+		if (waypointPlacement?.target !== pending.request.target) return;
+		pending.phase = "ping";
+		showVisualPopover(waypointPingSurface, pingBounds(waypointPlacement));
+		waypointPing.classList.remove("ui-waypoint-ping-active");
+		// Flush the removed animation once per activation so the same target can ping again.
+		waypointPing.getBoundingClientRect();
+		waypointPing.classList.add("ui-waypoint-ping-active");
+		// CSS owns timing. An empty animation list (theme opt-out), cancellation, and
+		// normal completion all retire this activation without affecting a newer one.
+		void Promise.allSettled(
+			waypointPing.getAnimations().map((animation) => animation.finished),
+		).then(() => {
+			if (reveal === pending) cancelReveal();
+		});
+	}
+	/** Convert the projected map point to a viewport anchor; popover placement owns CSS zoom. */
+	function pingBounds(point: {
+		readonly x: number;
+		readonly y: number;
+	}): DOMRect {
+		const rect = canvas.getBoundingClientRect();
+		return new DOMRect(
+			rect.left + (point.x * rect.width) / canvas.clientWidth,
+			rect.top + (point.y * rect.height) / canvas.clientHeight,
+			0,
+			0,
+		);
+	}
 	/** Last completed overlay placement, used by stationary hover as well as pointer events. */
 	let waypointPlacement: {
 		readonly target: MapWaypointTarget;
@@ -376,11 +473,16 @@
 		const mounted = new WorldMapOwner(source, canvas);
 		owner = mounted;
 		mounted.setVisible(visible && activeTab === "world");
-		const unsubscribeDraw = mounted.subscribeDraw(drawOverlays);
+		const unsubscribeDraw = mounted.subscribeDraw(() => {
+			drawOverlays();
+			drawReveal();
+		});
 		const unsubscribe = mounted.subscribe((next) => {
 			mapState = next;
-			if (next.kind === "load-failed" || next.kind === "unavailable")
+			if (next.kind === "load-failed" || next.kind === "unavailable") {
+				cancelReveal();
 				drawOverlays();
+			}
 		});
 		const resize = new ResizeObserver(() => {
 			mounted.resize();
@@ -388,6 +490,7 @@
 		resize.observe(canvas);
 		void mounted.load();
 		return () => {
+			cancelReveal();
 			cancelPan?.();
 			resize.disconnect();
 			unsubscribe();
@@ -405,6 +508,7 @@
 	$effect(() => {
 		owner?.setVisible(visible && activeTab === "world");
 		if (!visible || activeTab !== "world") {
+			cancelReveal();
 			cancelPan?.();
 			cancelPan = null;
 			clearHover();
@@ -530,6 +634,7 @@
 		}
 		const frame = readFrame();
 		const target = showWaypoints ? (frame.waypoint?.target ?? null) : null;
+		if (reveal !== null && reveal.request.target !== target) cancelReveal();
 		waypointPlacement = null;
 		if (target !== null) {
 			const [x, y] = projectWorldMapPoint(
@@ -549,6 +654,14 @@
 			}
 		}
 		waypointMarker.style.display = waypointPlacement === null ? "none" : "";
+		if (reveal?.phase === "ping") {
+			if (waypointPlacement === null) cancelReveal();
+			else
+				positionVisualPopover(
+					waypointPingSurface,
+					pingBounds(waypointPlacement),
+				);
+		}
 		const player = worldMapPlayer(
 			frame,
 			view,
@@ -712,8 +825,10 @@
 					<g
 						bind:this={waypointMarker}
 						class="world-waypoint-target ui-waypoint-marker"
-						style:display="none"><MapWaypointPinIcon /></g
+						style:display="none"
 					>
+						<MapWaypointPinIcon />
+					</g>
 					<g
 						bind:this={playerMarker}
 						class="world-player-target"
@@ -817,6 +932,16 @@
 	</UiTabPanel>
 </div>
 
+<div
+	bind:this={waypointPingSurface}
+	class="world-waypoint-ping-surface"
+	popover="manual"
+>
+	<div bind:this={waypointPing} class="ui-waypoint-ping">
+		<MapWaypointPingIcon />
+	</div>
+</div>
+
 {#if recallAnchor !== null}
 	<PopupMenu
 		anchor={recallAnchor}
@@ -857,6 +982,13 @@
 
 <style>
 	@layer components {
+		.world-waypoint-ping-surface {
+			padding: 0;
+			border: 0;
+			overflow: visible;
+			background: none;
+			pointer-events: none;
+		}
 		.world-map-page {
 			height: 100%;
 			display: grid;

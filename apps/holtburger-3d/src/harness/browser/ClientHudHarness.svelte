@@ -3523,7 +3523,9 @@
 	const waypointMessages: ClientChatMessage[] = [];
 	const waypointServerMessages: string[] = [];
 	const waypointNotices: string[] = [];
-	function notifyWaypoint(message: string): void {
+	function notifyWaypoint(target: MapWaypointTarget): void {
+		const message = `Waypoint set: ${target.label}.`;
+		gameplayView?.revealWaypoint(target);
 		waypointNotices.push(message);
 		toast = { id: waypointNotices.length, message, tone: "status" };
 	}

@@ -19,6 +19,7 @@
 	} from "./client-gameplay-options-contract";
 	import type { UiThemeSettings } from "../app/ui-theme-selection";
 	import ClientEmoteWheel from "./ClientEmoteWheel.svelte";
+	import type { ClientWaypointReveal } from "./client-navigation-waypoint";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import ClientLoadoutBuilder from "./ClientLoadoutBuilder.svelte";
 	import {
@@ -832,6 +833,23 @@
 	);
 	let chatEditor = $state<ClientChat>();
 	let activePanel = $state<ClientSystemPanel | null>(null);
+	/** Latest cold activation survives the World window's lazy first mount. */
+	let waypointReveal = $state.raw<ClientWaypointReveal | null>(null);
+	$effect(() => {
+		// A new character or map source starts a new presentation lifetime.
+		void characterGuid;
+		void worldMapSource;
+		waypointReveal = null;
+	});
+	/** Explicit activations also promote an already visible World window. */
+	let waypointFocusRevision = $state(0);
+	/** Open, promote, and reveal through the existing single-panel presentation policy. */
+	export function revealWaypoint(target: MapWaypointTarget): void {
+		if (characterGuid === null || worldMapSource === null) return;
+		waypointReveal = { characterGuid, target };
+		waypointFocusRevision++;
+		activePanel = "world";
+	}
 	/** Salvage entry opens inventory through the same single-open-panel owner as the dock. */
 	export function showInventory(): void {
 		activePanel = "inventory";
@@ -1829,6 +1847,7 @@
 				<ClientHudWindow
 					icon="world"
 					title="World"
+					focusRevision={waypointFocusRevision}
 					visible={activePanel === "world"}
 					placement={hudLayout.world}
 					minWidth={CLIENT_UI_DEFAULTS.world.minSize.width}
@@ -1839,6 +1858,7 @@
 						changeHudPlacement("world", placement)}
 				>
 					<ClientWorldPanel
+						{waypointReveal}
 						{contracts}
 						source={worldMapSource}
 						{characterGuid}

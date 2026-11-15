@@ -520,6 +520,20 @@ Both modes use the complete base appearance in `src/app/ui-base.css`.
 Its colors, shared controls, and decoration can evolve together in that stylesheet.
 CSS themes can replace variables and styling rules; component CSS owns layout.
 
+The World map destination pin defaults to cyan with a dark outline. Themes can override
+`--ui-world-waypoint-color`, `--ui-world-waypoint-outline-color`, and
+`--ui-world-waypoint-outline-width` independently of other map markers.
+
+Explicit waypoint activation opens the World map at whole-world scale and plays a finite ring.
+Themes can set `--ui-waypoint-ping-color`, `--ui-waypoint-ping-stroke-width`,
+`--ui-waypoint-ping-duration` (per pulse), `--ui-waypoint-ping-repeat-count`,
+`--ui-waypoint-ping-filter` (glow), and `--ui-waypoint-ping-scale` (final ring scale).
+The ring floats above clipping containers and follows the pin without intercepting input.
+`--ui-waypoint-ping-animation` accepts a global keyframe name or `none`; the default
+recipe is `ui-waypoint-ping`. Reduced motion defaults to the stationary
+`ui-waypoint-ping-fade` recipe; an explicit theme recipe owns its reduced-motion treatment.
+Use a finite repeat count so the reveal retires automatically.
+
 Toast entrances use `--ui-toast-pop-animation`, `--ui-toast-pop-duration`,
 `--ui-toast-pop-scale` (starting scale), `--ui-toast-pop-peak-scale` (overshoot),
 and `--ui-toast-pop-easing`.

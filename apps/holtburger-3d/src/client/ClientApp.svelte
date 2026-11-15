@@ -48,6 +48,7 @@
 	import { ClientEmoteController } from "./client-emote-controller";
 	import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
+	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
 	import { runClientAssetsCommand } from "./client-assets-command";
 	import { runClientVersionCommand } from "./client-version-command";
@@ -1518,9 +1519,13 @@
 		}
 	}
 
-	/** Present waypoint activation feedback through the app status surface. */
-	function notifyWaypoint(message: string): void {
-		toastCenter.publish({ message, tone: "status" });
+	/** Present accepted waypoint activation through the status surface and World window. */
+	function notifyWaypoint(target: MapWaypointTarget): void {
+		toastCenter.publish({
+			message: `Waypoint set: ${target.label}.`,
+			tone: "status",
+		});
+		gameplayView?.revealWaypoint(target);
 	}
 
 	/** Explicit launches remain cold UI events; the board owns its run lifetime. */

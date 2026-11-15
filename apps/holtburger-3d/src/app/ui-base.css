@@ -1312,6 +1312,17 @@
 	.ui-theme .ui-waypoint-marker {
 		color: var(--ui-color-accent);
 	}
+	/* Cyan separates the navigation destination from gold map controls and settlement markers. */
+	.ui-theme .world-waypoint-target {
+		color: var(--ui-world-waypoint-color, #59e5ff);
+	}
+	.ui-theme .world-waypoint-target .ui-waypoint-pin {
+		overflow: visible;
+		stroke: var(--ui-world-waypoint-outline-color, #0a1820);
+		stroke-width: var(--ui-world-waypoint-outline-width, 2px);
+		stroke-linejoin: round;
+		paint-order: stroke fill;
+	}
 	.ui-theme .minimap-waypoint-pointer {
 		/* A bright core and broader halo lift the rim guide above map and frame detail. */
 		filter: drop-shadow(0 0 2px var(--ui-color-highlight))
@@ -1924,5 +1935,57 @@
 	.ui-scale-surface {
 		--ui-viewport-width: calc(100vw / var(--ui-scale));
 		--ui-viewport-height: calc(100dvh / var(--ui-scale));
+	}
+}
+
+/* A finite geographic reveal; themes may replace the animation recipe as well as its tokens. */
+@layer components {
+	.ui-theme .ui-waypoint-ping {
+		color: var(--ui-waypoint-ping-color, var(--ui-color-highlight));
+		opacity: 0;
+		transform-origin: 0 0;
+		stroke-width: var(--ui-waypoint-ping-stroke-width, 3px);
+		filter: var(
+			--ui-waypoint-ping-filter,
+			drop-shadow(0 0 3px currentColor) drop-shadow(0 0 8px currentColor)
+		);
+		pointer-events: none;
+	}
+	.ui-theme .ui-waypoint-ping-ring {
+		position: absolute;
+		left: -48px;
+		top: -48px;
+		overflow: visible;
+	}
+	.ui-theme .ui-waypoint-ping-active {
+		animation: var(--ui-waypoint-ping-animation, ui-waypoint-ping)
+			var(--ui-waypoint-ping-duration, 1000ms) ease-out
+			var(--ui-waypoint-ping-repeat-count, 2) both;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.ui-theme .ui-waypoint-ping-active {
+			animation-name: var(--ui-waypoint-ping-animation, ui-waypoint-ping-fade);
+		}
+	}
+}
+@keyframes ui-waypoint-ping {
+	from {
+		opacity: 1;
+		transform: scale(0.25);
+	}
+	40% {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+		transform: scale(var(--ui-waypoint-ping-scale, 2));
+	}
+}
+@keyframes ui-waypoint-ping-fade {
+	from {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
 	}
 }

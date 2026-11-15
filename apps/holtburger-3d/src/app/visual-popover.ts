@@ -10,6 +10,14 @@ export function showVisualPopover(element: HTMLElement, bounds: DOMRect): void {
 		anchorName: "none",
 	});
 	element.showPopover();
+	positionVisualPopover(element, bounds);
+}
+
+/** Reposition a visible decoration as its source moves, preserving inherited CSS zoom. */
+export function positionVisualPopover(
+	element: HTMLElement,
+	bounds: DOMRect,
+): void {
 	// Top-layer surfaces retain inherited zoom. Read it after showing the popover,
 	// then convert viewport bounds back to its local CSS units exactly once.
 	const scale = element.currentCSSZoom;

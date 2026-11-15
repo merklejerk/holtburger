@@ -13,6 +13,14 @@ import type {
 	ClientLifecycle,
 } from "./client-host-contract";
 
+/** One explicit map reveal, bound to the character that accepted the destination. */
+export interface ClientWaypointReveal {
+	/** Accepted character prevents a retained window replaying another character's reveal. */
+	readonly characterGuid: number;
+	/** Destination identity is also used to cancel a reveal after clearing or replacing intent. */
+	readonly target: MapWaypointTarget;
+}
+
 /** Session-local intent owner. Renderer replacement and portal travel do not own its lifetime. */
 export class ClientNavigationWaypointOwner {
 	/** Single committed destination, independent of presentation resources. */
@@ -96,11 +104,14 @@ export class ClientNavigationWaypointOwner {
 	}
 
 	/** Commit a prepared destination through the same character check and confirmation for all inputs. */
-	set(target: MapWaypointTarget, notify: (message: string) => void): void {
+	set(
+		target: MapWaypointTarget,
+		activate: (target: MapWaypointTarget) => void,
+	): void {
 		if (this.#characterGuid === null)
 			throw new Error("Select a character before setting a waypoint.");
 		this.#target = target;
-		notify(`Waypoint set: ${target.label}.`);
+		activate(target);
 	}
 
 	/** Exact-token interception, including invalid arguments, keeps recognized commands local. */
@@ -108,7 +119,7 @@ export class ClientNavigationWaypointOwner {
 		message: string,
 		readDisplay: () => MapWaypointDisplay | null,
 		append: (message: ClientChatMessage) => void,
-		notify: (message: string) => void,
+		activate: (target: MapWaypointTarget) => void,
 	): boolean {
 		const match = /^[/@](?:waypoint|wp)(?=\s|$)/i.exec(message.trim());
 		if (match === null) return false;
@@ -138,7 +149,7 @@ export class ClientNavigationWaypointOwner {
 			const target = waypointFromPrintedCoordinates(parsed);
 			if (target === null)
 				throw new Error("Waypoint coordinates are outside the outdoor world.");
-			this.set(target, notify);
+			this.set(target, activate);
 		}
 		return true;
 	}

@@ -148,7 +148,13 @@ export const CLIENT_TUNING = {
 		bottomToleranceCssPixels: 2,
 	},
 	/** Maximum publication cadence for asynchronously prepared spell artwork. */
-	spells: { iconDisplayIntervalMs: 100 },
+	spells: {
+		iconDisplayIntervalMs: 100,
+		/** Horizontal band inside each visible end of the spell cells. */
+		dragScrollEdgeCssPixels: 32,
+		/** Maximum edge speed, reduced proportionally toward the band interior. */
+		dragScrollCssPixelsPerSecond: 320,
+	},
 	statIcons: { displayIntervalMs: 100 },
 	xpFeedback: {
 		/** Time to traverse the full bar; shorter gains take proportionally less time. */

@@ -47,12 +47,12 @@
 			--ui-party-grid-gap: 8px;
 			--ui-spell-bar-color: #c49766;
 			--ui-spell-tab-color: #d7c4ad;
-			--ui-spell-tab-active-color: #f2d6ae;
+			--ui-spell-tab-active-color: #21160e;
 			--ui-spell-tab-border: 1px solid #98775b99;
 			--ui-spell-tab-radius: 2px 2px 0 0;
-			--ui-spell-tab-active-background: #735035cc;
+			--ui-spell-tab-active-background: #c69a62f2;
 			--ui-spell-tab-active-shadow:
-				inset 0 2px 3px #140b0899, inset 0 -2px #d6b18a;
+				inset 0 1px 0 #f4d6a399, inset 0 -2px #8b5e32;
 			--ui-spell-scrollbar-color: #c49766;
 			--ui-spell-scrollbar-track-opacity: 28%;
 			--ui-spell-scrollbar-thumb-opacity: 75%;
@@ -153,7 +153,8 @@
 
 		/* Compact overlays use the window's metal at a smaller scale. Their existing
 	   backings, modality, focus ownership and placement are unchanged. */
-		.ui-theme .ui-overlay-surface:not(.ui-dialog) {
+		.ui-theme .ui-overlay-surface:not(.ui-dialog),
+		.ui-theme .spell-rail::before {
 			border-image-source: var(--ui-travelers-frame);
 			border-image-slice: 16;
 			border-image-width: 6px;
@@ -237,7 +238,7 @@
 			scrollbar-color: var(--ui-color-border) #140b0840;
 		}
 
-		.ui-theme :is(.action-bar, .spell-bar) {
+		.ui-theme .action-bar {
 			/* Rail paint stays outside the measured cell grid, leaving artwork and
 		   hit geometry intact. Individual slots retain their translucent wells. */
 			box-shadow:

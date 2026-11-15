@@ -15,6 +15,8 @@ Choose **Unlock UI layout** to edit the layout. Move the HUD elements and use th
 
 Give frequently used controls comfortable positions before a fight. You can arrange windows and bars separately; leave room for chat, targeting and the world view.
 
+The [spell bar](/holtburger/3d/spells/#fit-the-bar-to-your-hud) resizes in whole columns, with a minimum of ten spells. Widen it to show more shortcuts at the current icon size.
+
 If you want to start over, use **Settings → HUD layout → Reset HUD placements**.
 
 <Media id="hud" />

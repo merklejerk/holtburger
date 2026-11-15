@@ -45,6 +45,10 @@ export function pulseItemCell(
 			"data-action-bar",
 			"data-action-item",
 			"data-template-wcid",
+			"data-spell-tab",
+			"data-spell-cell",
+			"data-bound-spell",
+			"data-spell-drop",
 			"autofocus",
 		])
 			element.removeAttribute(name);
@@ -54,6 +58,7 @@ export function pulseItemCell(
 	// Preserve resolved color (including hover) and layout without giving a copy those identities.
 	const appearance = getComputedStyle(cell);
 	for (const property of [
+		"--ui-hud-control-background",
 		"color",
 		"user-select",
 		"aspect-ratio",
@@ -64,7 +69,7 @@ export function pulseItemCell(
 	]) {
 		copy.style.setProperty(property, appearance.getPropertyValue(property));
 	}
-	copy.classList.remove("item-grid-cell", "action-cell");
+	copy.classList.remove("item-grid-cell", "action-cell", "spell-cell");
 	copy.classList.add("ui-item-cell-pulse");
 	cell.after(copy);
 	showVisualPopover(copy, bounds);

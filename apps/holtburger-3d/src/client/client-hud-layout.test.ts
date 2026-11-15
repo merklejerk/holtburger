@@ -7,6 +7,7 @@ import {
 	moveClientHudRectangle,
 	resizeClientPanelRectangle,
 	resolveClientHudPlacement,
+	topAnchoredClientHudPlacement,
 	resolveClientHudSquarePlacement,
 	resolveClientMinimapPlacement,
 } from "./client-hud-layout";
@@ -344,3 +345,111 @@ describe("client HUD layout", () => {
 		}
 	});
 });
+
+it.each(["start", "center", "end"] as const)(
+	"keeps a dynamic HUD's top fixed with a retained %s attachment",
+	(alignment) => {
+		const viewport = { width: 800, height: 600 };
+		const minimum = { width: 40, height: 40 };
+		const placement = {
+			horizontal: { alignment: "center", offset: 0 },
+			vertical: { alignment, offset: 100 },
+			preferredWidth: 400,
+			preferredHeight: 80,
+		} as const;
+		const reference = resolveClientHudPlacement(placement, viewport, minimum);
+		const anchored = topAnchoredClientHudPlacement(
+			placement,
+			viewport,
+			minimum,
+		);
+		for (const preferredHeight of [60, 80, 120]) {
+			const resolved = resolveClientHudPlacement(
+				{ ...anchored, preferredHeight },
+				viewport,
+				minimum,
+			);
+			expect(resolved.top).toBe(reference.top);
+			expect(resolved.left).toBe(reference.left);
+			expect(resolved.height).toBe(preferredHeight);
+		}
+	},
+);
+
+it("snaps resized widths from the minimum while preserving the opposite border", () => {
+	const start = { left: 100, top: 50, width: 450, height: 70 };
+	const viewport = { width: 900, height: 600 };
+	const minimum = { width: 450, height: 70 };
+	const step = 40;
+	for (const x of [15, 25, 65, 1000]) {
+		const right = resizeClientPanelRectangle(
+			start,
+			viewport,
+			minimum,
+			{ x, y: 0 },
+			{ horizontal: "right" },
+			step,
+		);
+		expect(right.left).toBe(start.left);
+		expect((right.width - minimum.width) % step).toBe(0);
+		expect(right.left + right.width).toBeLessThanOrEqual(viewport.width);
+		const left = resizeClientPanelRectangle(
+			start,
+			viewport,
+			minimum,
+			{ x: -x, y: 0 },
+			{ horizontal: "left" },
+			step,
+		);
+		expect(left.left + left.width).toBe(start.left + start.width);
+		expect((left.width - minimum.width) % step).toBe(0);
+	}
+	expect(
+		resizeClientPanelRectangle(
+			start,
+			viewport,
+			minimum,
+			{ x: 15, y: 0 },
+			{ horizontal: "right" },
+			step,
+		).width,
+	).toBe(450);
+	expect(
+		resizeClientPanelRectangle(
+			start,
+			viewport,
+			minimum,
+			{ x: 25, y: 0 },
+			{ horizontal: "right" },
+			step,
+		).width,
+	).toBe(490);
+});
+
+it("keeps stepped resizing reachable when the viewport is narrower than the minimum", () => {
+	const resized = resizeClientPanelRectangle(
+		{ left: 0, top: 0, width: 300, height: 60 },
+		{ width: 300, height: 600 },
+		{ width: 400, height: 60 },
+		{ x: 80, y: 0 },
+		{ horizontal: "right" },
+		40,
+	);
+	expect(resized.width).toBe(300);
+});
+
+it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
+	"rejects unusable resize increments: %s",
+	(step) => {
+		expect(() =>
+			resizeClientPanelRectangle(
+				{ left: 0, top: 0, width: 400, height: 60 },
+				{ width: 800, height: 600 },
+				{ width: 400, height: 60 },
+				{ x: 10, y: 0 },
+				{ horizontal: "right" },
+				step,
+			),
+		).toThrow("Resize width step must be finite and positive");
+	},
+);

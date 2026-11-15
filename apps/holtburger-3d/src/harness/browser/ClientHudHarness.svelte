@@ -81,6 +81,7 @@
 	import { createHousingFixture } from "./client-housing-fixture";
 	import { ClientWorldContainerPanelState } from "../../client/client-world-container-panel-state";
 	import { handleCombatBarKeydown } from "../../client/client-combat-bar-input";
+	import { pulseSpellBarCell } from "../../client/client-spell-bar-feedback";
 	import { handleSpellBarKeydown } from "../../client/client-spell-bar-input";
 	import type {
 		CombatBreakpointIndex,
@@ -96,6 +97,7 @@
 	import {
 		bindSpellCell,
 		initialSpellBar,
+		swapSpellTabs,
 	} from "../../client/client-spell-bar-state";
 	import { findWieldedCasterSpell } from "../../client/client-inventory-equipment";
 	import { z } from "zod";
@@ -432,13 +434,19 @@
 			spellBarEnabled &&
 			id !== null &&
 			interactionLifecycle.state().knownSpells?.includes(id)
-		)
+		) {
+			if (interactionRoot !== null)
+				pulseSpellBarCell(interactionRoot, { tab: spellBar.selected, slot });
 			void castSpell(id);
+		}
 	}
 	function activateCasterSpell(): void {
 		if (!spellBarEnabled || inventory === null) return;
 		const caster = findWieldedCasterSpell(inventory.readItems().items.values());
-		if (caster !== null) itemInteractions.castWieldedSpell(caster.item);
+		if (caster !== null) {
+			if (interactionRoot !== null) pulseSpellBarCell(interactionRoot, null);
+			itemInteractions.castWieldedSpell(caster.item);
+		}
 	}
 	async function castSpell(id: number): Promise<void> {
 		const spellState = spells;
@@ -5417,6 +5425,16 @@
 				onHudModeChange={(mode) => (hudMode = mode)}
 				{spellBar}
 				onSpellBarChange={(state) => (spellBar = state)}
+				onSwapSpellTabs={(source, target) => {
+					const swapped = swapSpellTabs(spellBar, source, target);
+					if (swapped === spellBar) return;
+					spellBar = swapped;
+					toast = {
+						id: (toast?.id ?? 0) + 1,
+						message: `Swapped spell tabs ${(source + 1) % 10} and ${(target + 1) % 10}.`,
+						tone: "status",
+					};
+				}}
 				{spellBarEnabled}
 				onSelectSpellTab={selectSpellTab}
 				onActivateSpellCell={activateSpellCell}

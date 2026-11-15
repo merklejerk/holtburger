@@ -293,6 +293,11 @@
 		/** Session-local bindings shared with game dispatch. */
 		readonly spellBar: ClientSpellBarState;
 		readonly onSpellBarChange: (value: ClientSpellBarState) => void;
+		/** Commit a complete tab swap and publish its app-owned confirmation. */
+		readonly onSwapSpellTabs: (
+			source: InputDigitIndex,
+			target: InputDigitIndex,
+		) => void;
 		/** App-owned casting availability, independent of membership. */
 		readonly spellBarEnabled: boolean;
 		readonly onSelectSpellTab: (tab: InputDigitIndex) => void;
@@ -542,6 +547,7 @@
 		onHudModeChange,
 		spellBar,
 		onSpellBarChange,
+		onSwapSpellTabs,
 		spellBarEnabled,
 		onSelectSpellTab,
 		onActivateSpellCell,
@@ -775,6 +781,7 @@
 						? bindSpellCell(spellBar, source, null)
 						: swapSpellCells(spellBar, source, target),
 				),
+			swapTabs: onSwapSpellTabs,
 			begin: () => {
 				itemDrag?.cancel();
 				itemInteractions?.cancel();

@@ -1,3 +1,4 @@
+import { dragEdgeScrollFactor } from "../app/drag-edge-scroll";
 import { pulseItemCell } from "../app/item-cell-pulse";
 import type { ClientSalvageState } from "./client-salvage-state";
 import { showUiDragGhost, positionUiDragGhost } from "../app/ui-drag-ghost";
@@ -625,16 +626,17 @@ export class ClientItemDrag {
 			if (scroll != null && this.#root.contains(scroll)) {
 				const box = scroll.getBoundingClientRect();
 				const tuning = CLIENT_TUNING.inventory;
-				// Non-overlapping zones also support short, resized inventory windows.
-				const edge = Math.min(tuning.dragScrollEdgeCssPixels, box.height / 2);
-				if (edge > 0) {
-					const top = Math.max(0, 1 - (this.#cursor.y - box.top) / edge);
-					const bottom = Math.max(0, 1 - (box.bottom - this.#cursor.y) / edge);
-					const before = scroll.scrollTop;
-					scroll.scrollTop +=
-						(bottom - top) * tuning.dragScrollCssPixelsPerSecond * elapsed;
-					if (scroll.scrollTop !== before) this.#target(false);
-				}
+				const before = scroll.scrollTop;
+				scroll.scrollTop +=
+					dragEdgeScrollFactor(
+						this.#cursor.y,
+						box.top,
+						box.bottom,
+						tuning.dragScrollEdgeCssPixels,
+					) *
+					tuning.dragScrollCssPixelsPerSecond *
+					elapsed;
+				if (scroll.scrollTop !== before) this.#target(false);
 			}
 			if (this.#gesture?.kind === "dragging")
 				this.#scrollFrame = requestAnimationFrame(frame);

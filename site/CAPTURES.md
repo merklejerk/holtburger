@@ -183,7 +183,7 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 - Setup: Known spells in several schools/levels and an empty spell-bar cell.
 - Frame: Keep the spell search, filters and destination bar readable, then close the spellbook before casting. The final framing must include the character and cast effect.
 - Expected result: A spell is found, inspected and bound, then cast with the book closed so the animation and result are visible.
-- Used in: [3d/spells/#set-up-your-bar](https://merklejerk.github.io/holtburger/3d/spells/#set-up-your-bar)
+- Used in: [3d/spells/#organize-your-spell-tabs](https://merklejerk.github.io/holtburger/3d/spells/#organize-your-spell-tabs)
 
 ### Review a mixed salvage batch
 
@@ -234,9 +234,9 @@ Use a character with two gear choices, stackable supplies, an Ust, two expendabl
 
 **First · user · available · still** — ID: `spell-bar`
 
-- Setup: Populate a spell tab with several spells.
-- Frame: Crop the spell bar, including tab selectors and shortcut hints.
-- Expected result: Introduce the spell bar before explaining how to populate it.
+- Setup: Populate a spell tab beyond ten spells, widen the bar and wield a weapon with a spell. Select a tab so its highlight is visible.
+- Frame: Crop the spell bar, including tabs, shortcut hints, overflow scrollbar and the separate weapon-spell button.
+- Expected result: Show the selected tab, extended spell row and weapon spell before explaining setup and resizing.
 - Used in: [3d/spells/#cast-from-your-spell-bar](https://merklejerk.github.io/holtburger/3d/spells/#cast-from-your-spell-bar)
 
 ### Item shortcuts with alternate actions

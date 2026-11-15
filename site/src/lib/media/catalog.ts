@@ -374,11 +374,11 @@ export const media = {
 		title: 'Your spell shortcuts',
 		source: {
 			kind: 'remote',
-			url: 'https://merklejerk.github.io/holtburger-media/3d/spell-bar-v1.webp'
+			url: 'https://merklejerk.github.io/holtburger-media/3d/spell-bar-v2.webp'
 		},
-		alt: 'Spell bar with tab selectors above numbered shortcut cells and their key hints.',
-		width: 436,
-		height: 95
+		alt: 'Selected second spell tab above a widened row of spell shortcuts, with an overflow scrollbar and a separate weapon-spell button.',
+		width: 477,
+		height: 128
 	},
 
 	'spell-list': {

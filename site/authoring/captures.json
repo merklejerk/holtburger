@@ -457,9 +457,9 @@
 		"spell-bar": {
 			"owner": "user",
 			"session": "gear",
-			"setup": "Populate a spell tab with several spells.",
-			"framing": "Crop the spell bar, including tab selectors and shortcut hints.",
-			"expected": "Introduce the spell bar before explaining how to populate it.",
+			"setup": "Populate a spell tab beyond ten spells, widen the bar and wield a weapon with a spell. Select a tab so its highlight is visible.",
+			"framing": "Crop the spell bar, including tabs, shortcut hints, overflow scrollbar and the separate weapon-spell button.",
+			"expected": "Show the selected tab, extended spell row and weapon spell before explaining setup and resizing.",
 			"priority": "first"
 		},
 		"action-bar-intro": {

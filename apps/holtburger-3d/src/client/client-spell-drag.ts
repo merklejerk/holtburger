@@ -1,8 +1,10 @@
+import { dragEdgeScrollFactor } from "../app/drag-edge-scroll";
 import { showUiDragGhost, positionUiDragGhost } from "../app/ui-drag-ghost";
 import {
 	SPELL_BAR_INDICES,
 	type SpellCellAddress,
 } from "./client-spell-bar-state";
+import type { InputDigitIndex } from "../lib/input/input-contract";
 import { CLIENT_TUNING } from "./client-tuning";
 
 /** Mutations and availability belong to the HUD composition, not DOM elements. */
@@ -16,6 +18,8 @@ interface SpellDragBindings {
 		source: SpellCellAddress,
 		target: SpellCellAddress | null,
 	) => void;
+	/** Exchange complete tab contents through the existing configuration owner. */
+	readonly swapTabs: (source: InputDigitIndex, target: InputDigitIndex) => void;
 	/** Retire incompatible item interactions when the pointer crosses the threshold. */
 	readonly begin: () => void;
 	/** Read current HUD visibility policy at the pointer event. */
@@ -25,10 +29,22 @@ interface SpellDragBindings {
 interface SpellGesture {
 	/** Original element whose removal or hiding cancels the gesture. */
 	readonly element: HTMLElement;
-	/** Null denotes a spellbook source that must never be removed. */
-	readonly origin: SpellCellAddress | null;
-	/** Captured identity, revalidated against bound sources before release. */
-	readonly spell: number;
+	/** Spell payload and whole-tab gestures have disjoint source and drop rules. */
+	readonly source:
+		| {
+				/** A single spell copied or moved into a cell. */
+				readonly kind: "spell";
+				/** Null identifies a spellbook copy source. */
+				readonly origin: SpellCellAddress | null;
+				/** Captured spell identity, revalidated before a bound source moves. */
+				readonly spell: number;
+		  }
+		| {
+				/** Whole tabs only accept tab destinations. */
+				readonly kind: "tab";
+				/** Fixed numeric source identity, independent of selection. */
+				readonly tab: InputDigitIndex;
+		  };
 	/** Only this pointer can advance or release the gesture. */
 	readonly pointer: number;
 	/** Initial client-space horizontal position for the drag threshold. */
@@ -37,6 +53,12 @@ interface SpellGesture {
 	readonly y: number;
 	/** Crossing the threshold enables transfer and suppresses the trailing click. */
 	dragging: boolean;
+}
+/** Read the fixed numeric identity of a tab drag handle. */
+function tabIdentity(element: HTMLElement): InputDigitIndex | undefined {
+	return SPELL_BAR_INDICES.find(
+		(index) => String(index) === element.dataset.spellTabSource,
+	);
 }
 /** Parse tab identities and any nonnegative cell address emitted by SpellCell. */
 function address(element: HTMLElement): SpellCellAddress | null {
@@ -48,7 +70,7 @@ function address(element: HTMLElement): SpellCellAddress | null {
 		? null
 		: { tab, slot };
 }
-/** Narrow spell shortcut gesture owner; spellbook entries are copied, bindings are moved. */
+/** Spell shortcut gestures copy spellbook entries, move cells, or exchange complete tabs. */
 export class ClientSpellDrag {
 	readonly #abort = new AbortController();
 	readonly #observer: MutationObserver;
@@ -56,6 +78,10 @@ export class ClientSpellDrag {
 	#gesture: SpellGesture | null = null;
 	#suppressClick = false;
 	#target: HTMLElement | null = null;
+	/** Latest client-space pointer position; scrolling continues without pointer events. */
+	#cursor = { x: 0, y: 0 };
+	/** Owned by the active drag and retired through the common cancellation path. */
+	#scrollFrame: number | null = null;
 	constructor(
 		private readonly root: HTMLElement,
 		private readonly bindings: SpellDragBindings,
@@ -84,7 +110,12 @@ export class ClientSpellDrag {
 			childList: true,
 			subtree: true,
 			attributes: true,
-			attributeFilter: ["hidden", "data-spell-tab", "data-bound-spell"],
+			attributeFilter: [
+				"hidden",
+				"data-spell-tab",
+				"data-bound-spell",
+				"data-spell-tab-source",
+			],
 		});
 	}
 	/** Return whether Escape or another interaction actually retired a gesture. */
@@ -93,6 +124,8 @@ export class ClientSpellDrag {
 		if (gesture === null) return false;
 		if (gesture.dragging) this.#suppressClick = true;
 		this.#gesture = null;
+		if (this.#scrollFrame !== null) cancelAnimationFrame(this.#scrollFrame);
+		this.#scrollFrame = null;
 		this.#ghost.hidePopover();
 		this.#ghost.hidden = true;
 		this.#highlight(null);
@@ -111,12 +144,15 @@ export class ClientSpellDrag {
 			gesture.element.closest("[hidden]")
 		)
 			return false;
-		if (gesture.origin === null) return true;
+		const source = gesture.source;
+		if (source.kind === "tab")
+			return tabIdentity(gesture.element) === source.tab;
+		if (source.origin === null) return true;
 		const current = address(gesture.element);
 		return (
-			current?.tab === gesture.origin.tab &&
-			current.slot === gesture.origin.slot &&
-			this.bindings.read(gesture.origin) === gesture.spell
+			current?.tab === source.origin.tab &&
+			current.slot === source.origin.slot &&
+			this.bindings.read(source.origin) === source.spell
 		);
 	}
 	#down = (event: PointerEvent): void => {
@@ -128,26 +164,31 @@ export class ClientSpellDrag {
 		)
 			return;
 		const element = event.target.closest<HTMLElement>(
-			"[data-spell-cell], [data-spell-drag-source]",
+			"[data-spell-cell], [data-spell-drag-source], [data-spell-tab-source]",
 		);
 		if (element === null || !this.root.contains(element)) return;
-		const origin = address(element);
-		const spell =
-			origin === null
-				? Number(element.dataset.spellDragSource)
-				: this.bindings.read(origin);
-		if (
-			spell === null ||
-			spell === undefined ||
-			!Number.isSafeInteger(spell) ||
-			spell <= 0
-		)
-			return;
+		const tab = tabIdentity(element);
+		let source: SpellGesture["source"];
+		if (tab !== undefined) source = { kind: "tab", tab };
+		else {
+			const origin = address(element);
+			const spell =
+				origin === null
+					? Number(element.dataset.spellDragSource)
+					: this.bindings.read(origin);
+			if (
+				spell === null ||
+				spell === undefined ||
+				!Number.isSafeInteger(spell) ||
+				spell <= 0
+			)
+				return;
+			source = { kind: "spell", origin, spell };
+		}
 		this.cancel();
 		this.#gesture = {
 			element,
-			origin,
-			spell,
+			source,
 			pointer: event.pointerId,
 			x: event.clientX,
 			y: event.clientY,
@@ -162,6 +203,7 @@ export class ClientSpellDrag {
 			this.cancel();
 			return;
 		}
+		this.#cursor = { x: event.clientX, y: event.clientY };
 		if (!gesture.dragging) {
 			if (
 				Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) <
@@ -170,18 +212,82 @@ export class ClientSpellDrag {
 				return;
 			this.bindings.begin();
 			gesture.dragging = true;
-			showUiDragGhost(this.#ghost, gesture.element, `Spell ${gesture.spell}`);
+			if (gesture.source.kind === "spell") this.#startEdgeScroll();
+			showUiDragGhost(
+				this.#ghost,
+				gesture.element,
+				gesture.source.kind === "spell"
+					? `Spell ${gesture.source.spell}`
+					: `Tab ${(gesture.source.tab + 1) % 10}`,
+			);
 		}
 		positionUiDragGhost(this.#ghost, event);
+		this.#updateTarget();
+		event.preventDefault();
+	};
+	/** Re-hit-test after scrolling moves a new cell underneath a stationary pointer. */
+	#updateTarget(): void {
 		const target =
 			document
-				.elementFromPoint(event.clientX, event.clientY)
-				?.closest<HTMLElement>("[data-spell-cell]") ?? null;
+				.elementFromPoint(this.#cursor.x, this.#cursor.y)
+				?.closest<HTMLElement>(
+					this.#gesture?.source.kind === "tab"
+						? "[data-spell-tab-source]"
+						: "[data-spell-cell]",
+				) ?? null;
 		this.#highlight(
 			target !== null && this.root.contains(target) ? target : null,
 		);
-		event.preventDefault();
-	};
+	}
+	#startEdgeScroll(): void {
+		let previous = performance.now();
+		const frame = (now: number): void => {
+			this.#scrollFrame = null;
+			const gesture = this.#gesture;
+			if (gesture === null) return;
+			if (!this.#valid(gesture)) {
+				this.cancel();
+				return;
+			}
+			// Cap suspended frames so returning to the window cannot jump across the strip.
+			const elapsed = Math.min(now - previous, 50) / 1_000;
+			previous = now;
+			const scroll = document
+				.elementFromPoint(this.#cursor.x, this.#cursor.y)
+				?.closest<HTMLElement>("[data-spell-scroll-viewport]");
+			if (scroll != null && this.root.contains(scroll)) {
+				const surface = scroll.closest<HTMLElement>(
+					"[data-spell-scroll-container]",
+				);
+				if (surface === null)
+					throw new Error("Spell viewport has no scroll container");
+				const box = scroll.getBoundingClientRect();
+				const clip = surface.getBoundingClientRect();
+				const tuning = CLIENT_TUNING.spells;
+				// Exclude a native scrollbar and preserve the HUD's CSS zoom in client space.
+				const clipRight =
+					clip.left + surface.clientWidth * (clip.width / surface.offsetWidth);
+				// The outer HUD can clip the strip on a constrained viewport.
+				const delta =
+					dragEdgeScrollFactor(
+						this.#cursor.x,
+						Math.max(box.left, clip.left),
+						Math.min(box.right, clipRight),
+						tuning.dragScrollEdgeCssPixels,
+					) *
+					tuning.dragScrollCssPixelsPerSecond *
+					elapsed;
+				const before = scroll.scrollLeft;
+				scroll.scrollLeft += delta;
+				// Once the strip reaches its end, reveal the portion clipped by the HUD.
+				surface.scrollLeft += delta - (scroll.scrollLeft - before);
+			}
+			this.#updateTarget();
+			this.#scrollFrame = requestAnimationFrame(frame);
+		};
+		this.#scrollFrame = requestAnimationFrame(frame);
+	}
+
 	#up = (event: PointerEvent): void => {
 		const gesture = this.#gesture;
 		if (gesture === null || gesture.pointer !== event.pointerId) return;
@@ -190,6 +296,30 @@ export class ClientSpellDrag {
 			return;
 		}
 		const hit = document.elementFromPoint(event.clientX, event.clientY);
+		const source = gesture.source;
+		if (source.kind === "tab") {
+			const tab = hit?.closest<HTMLElement>("[data-spell-tab-source]");
+			const target =
+				tab != null && this.root.contains(tab) ? tabIdentity(tab) : undefined;
+			this.cancel();
+			if (target !== undefined && target !== source.tab) {
+				// Reset presentation only when the visible tab receives different contents.
+				if (
+					gesture.element.getAttribute("aria-pressed") === "true" ||
+					tab?.getAttribute("aria-pressed") === "true"
+				) {
+					const surface = gesture.element.closest("[data-spell-bar-surface]");
+					if (surface === null) throw new Error("Spell tab has no bar surface");
+					for (const viewport of surface.querySelectorAll<HTMLElement>(
+						"[data-spell-scroll-viewport], [data-spell-scroll-container]",
+					))
+						viewport.scrollLeft = 0;
+				}
+				this.bindings.swapTabs(source.tab, target);
+			}
+			event.preventDefault();
+			return;
+		}
 		const cell = hit?.closest<HTMLElement>("[data-spell-cell]");
 		const target =
 			cell === undefined || cell === null || !this.root.contains(cell)
@@ -198,13 +328,13 @@ export class ClientSpellDrag {
 		// Retire DOM state before mutation can unmount a source or change its identity.
 		this.cancel();
 		if (target !== null) {
-			if (gesture.origin === null) this.bindings.bind(target, gesture.spell);
-			else this.bindings.transfer(gesture.origin, target);
+			if (source.origin === null) this.bindings.bind(target, source.spell);
+			else this.bindings.transfer(source.origin, target);
 		} else if (
-			gesture.origin !== null &&
+			source.origin !== null &&
 			!hit?.closest("[data-spell-bar-surface]")
 		)
-			this.bindings.transfer(gesture.origin, null);
+			this.bindings.transfer(source.origin, null);
 		event.preventDefault();
 	};
 	#pointerCancel = (event: PointerEvent): void => {

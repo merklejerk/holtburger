@@ -21,13 +21,25 @@ Select a target by clicking it or using [Smart Tab](/holtburger/3d/combat/); **X
 | **Shift+1–0**    | Switch spell tabs.                               |
 | **Ctrl+Shift+1** | Cast your wielded caster’s spell.                |
 
-### Set up your bar
+If your wielded weapon has a spell, its button appears separately to the left of the bar. Click it or use the wielded-caster shortcut above.
 
-Drag spells from **Spells** into cells. Use the ten tabs to group your regular casts, with shortcuts for the first ten cells on each tab. Choose a single or double display layout to fit your HUD.
+### Organize your spell tabs
+
+Drag spells from **Spells** into cells. Each tab can hold more than ten spells; the first ten keep their numbered shortcuts. Drag a bound spell onto another cell to swap them, or off the bar to remove its binding.
+
+Use the ten tabs to group your regular casts. Drag one tab onto another to swap their entire contents, including overflow spells. The selected tab number stays the same.
+
+For longer tabs, use the scrollbar. While dragging a spell, hold it near either end of the spell row to scroll toward hidden cells.
 
 <Media id="spells" detail />
 
 Spell bindings are saved per character. Customize shortcuts in **Settings → Input**.
+
+### Fit the bar to your HUD
+
+Choose **Unlock UI layout** to move the bar, switch between one row of ten spells and two rows of five, or drag its left or right edge to resize it. Width snaps one column at a time, revealing more overflow spells without changing icon size. The minimum fits ten spells in the chosen layout, plus the weapon-spell button when present.
+
+The bar keeps its top edge in place when the scrollbar appears or disappears. Its frame follows your theme and surrounds the spell cells and scrollbar, with the tabs above it. Choose **Lock UI layout** when finished.
 
 <IllustratedProse name="olthoi">
 

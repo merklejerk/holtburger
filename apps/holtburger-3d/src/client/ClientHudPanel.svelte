@@ -33,6 +33,8 @@
 		readonly placement: ClientHudPlacement;
 		/** Whether unlocked layout editing allows dragging the borders to resize. */
 		readonly resizable: boolean;
+		/** Optional width increment in logical UI units, applied after pointer-scale conversion. */
+		readonly resizeWidthStep?: number;
 		/** Whether the entire HUD rectangle or only explicit descendants participate in hit testing. */
 		readonly contentHitTesting: "surface" | "descendants";
 		readonly viewport: ClientHudViewport;
@@ -50,6 +52,7 @@
 		minWidth,
 		placement,
 		resizable,
+		resizeWidthStep,
 		contentHitTesting,
 		viewport,
 		onPlacementChange,
@@ -144,6 +147,7 @@
 						y: (moved.clientY - startY) / scale,
 					},
 					edges,
+					resizeWidthStep,
 				);
 				onPlacementChange(
 					anchorClientHudPlacement(rectangle, startViewport, {

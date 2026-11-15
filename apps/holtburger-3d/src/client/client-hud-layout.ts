@@ -135,6 +135,21 @@ export function resolveClientHudPlacement(
 	};
 }
 
+/** Keep a content-sized HUD's top fixed as its measured height changes.
+ * The retained rectangle supplies the viewport attachment; callers then replace its extent.
+ */
+export function topAnchoredClientHudPlacement(
+	placement: ClientHudPlacement,
+	viewport: ClientHudViewport,
+	minimum: PreferredClientHudExtent,
+): ClientHudPlacement {
+	const reference = resolveClientHudPlacement(placement, viewport, minimum);
+	return {
+		...placement,
+		vertical: { alignment: "start", offset: reference.top },
+	};
+}
+
 /** Resolve a square surface against the tighter available viewport axis. */
 export function resolveClientHudSquarePlacement(
 	placement: ClientHudPlacement,
@@ -251,6 +266,25 @@ export function moveClientHudRectangle(
 	};
 }
 
+/** Clamp a resize to reachable whole steps measured from its minimum extent. */
+function clampResizeWidth(
+	requested: number,
+	minimum: number,
+	maximum: number,
+	step: number | undefined,
+): number {
+	if (step === undefined) return clamp(requested, minimum, maximum);
+	return (
+		minimum +
+		clamp(
+			Math.round((requested - minimum) / step),
+			0,
+			Math.floor((maximum - minimum) / step),
+		) *
+			step
+	);
+}
+
 /** Resize a floating rectangle from any border while keeping its opposite borders stationary. */
 export function resizeClientPanelRectangle(
 	start: ResolvedClientHudPlacement,
@@ -258,7 +292,14 @@ export function resizeClientPanelRectangle(
 	minimum: PreferredClientHudExtent,
 	delta: ClientPointerDelta,
 	edges: ResizeEdges,
+	/** Optional logical-width increment; omit for continuous resizing. */
+	widthStep?: number,
 ): ResolvedClientHudPlacement {
+	if (
+		widthStep !== undefined &&
+		(!Number.isFinite(widthStep) || widthStep <= 0)
+	)
+		throw new Error("Resize width step must be finite and positive");
 	let left = start.left;
 	let top = start.top;
 	let width = start.width;
@@ -267,14 +308,20 @@ export function resizeClientPanelRectangle(
 	if (edges.horizontal === "left") {
 		const right = start.left + start.width;
 		const reachableMinimum = Math.min(minimum.width, right);
-		left = clamp(start.left + delta.x, 0, right - reachableMinimum);
-		width = right - left;
+		width = clampResizeWidth(
+			start.width - delta.x,
+			reachableMinimum,
+			right,
+			widthStep,
+		);
+		left = right - width;
 	} else if (edges.horizontal === "right") {
 		const available = Math.max(0, viewport.width - start.left);
-		width = clamp(
+		width = clampResizeWidth(
 			start.width + delta.x,
 			Math.min(minimum.width, available),
 			available,
+			widthStep,
 		);
 	}
 

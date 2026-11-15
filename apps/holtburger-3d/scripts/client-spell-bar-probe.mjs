@@ -514,10 +514,10 @@ async function runSpellBarProbe(client, evaluateExpression, screenshotPath) {
    const tint=getComputedStyle(expected).backgroundColor; expected.remove();
    const action=document.querySelector('[data-action-cell]');
    const tabs=document.querySelector('.spell-tabs').getBoundingClientRect();
-   const bar=document.querySelector('[data-spell-bar-surface]').getBoundingClientRect();
+   const strip=document.querySelector('[data-spell-scroll-viewport]').getBoundingClientRect();
    return {empty:getComputedStyle(empty,'::before').backgroundColor, full:getComputedStyle(full,'::before').backgroundColor,
     flat:getComputedStyle(full).backgroundColor, mask:getComputedStyle(full,'::before').maskImage,actionMask:getComputedStyle(action,'::before').maskImage,
-    tint,tabHeight:tabs.height,cellHeight:full.getBoundingClientRect().height,tabWidth:tabs.width,barWidth:bar.width};
+    tint,tabWidth:tabs.width,stripWidth:strip.width};
   })()`);
 		assert.equal(
 			colors.empty,
@@ -540,8 +540,8 @@ async function runSpellBarProbe(client, evaluateExpression, screenshotPath) {
 			"Spell cells reuse action cell feathering",
 		);
 		assert.ok(
-			colors.tabHeight < colors.cellHeight && colors.tabWidth < colors.barWidth,
-			"Compact tabs occupy less than the full strip",
+			colors.tabWidth <= colors.stripWidth + 1,
+			"Tabs fit within the configured spell strip",
 		);
 		backgrounds.push(colors.tint);
 	}

@@ -111,8 +111,15 @@ export interface ClientTuning {
 		/** CSS pixel slack for fractional scroll geometry at the bottom. */
 		readonly bottomToleranceCssPixels: number;
 	};
-	/** Mounted spell-list artwork sampling; membership itself is event-driven. */
-	readonly spells: { readonly iconDisplayIntervalMs: number };
+	/** Spell artwork sampling and shortcut drag presentation policy. */
+	readonly spells: {
+		/** Mounted spell-list artwork sampling; membership itself is event-driven. */
+		readonly iconDisplayIntervalMs: number;
+		/** Horizontal activation band inside the visible spell-cell strip. */
+		readonly dragScrollEdgeCssPixels: number;
+		/** Maximum horizontal speed, scaled by edge proximity. */
+		readonly dragScrollCssPixelsPerSecond: number;
+	};
 	/** Bounded display sampling for creation and progression artwork. */
 	readonly statIcons: { readonly displayIntervalMs: number };
 	/** HUD experience gain and level-up presentation. */

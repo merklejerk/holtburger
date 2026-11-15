@@ -4,6 +4,7 @@ import {
 	initialSpellBar,
 	SPELL_BAR_INDICES,
 	swapSpellCells,
+	swapSpellTabs,
 } from "./client-spell-bar-state";
 
 it("retains exact addresses, duplicate spell bindings and unrelated tabs through transfers", () => {
@@ -85,4 +86,26 @@ it("moves the last occupied cell into its trailing destination before trimming",
 	expect(moved.tabs[0][destination]).toBe(42);
 	expect(moved.tabs[0][destination + 1]).toBeNull();
 	expect(moved.tabs[0]).toHaveLength(destination + 2);
+});
+
+it("exchanges whole tabs without losing overflow, holes, or selected identity", () => {
+	const overflow = SPELL_BAR_INDICES.length;
+	let state = bindSpellCell(
+		initialSpellBar(),
+		{ tab: 0, slot: overflow - 1 },
+		42,
+	);
+	state = bindSpellCell(state, { tab: 0, slot: overflow }, 73);
+	state = bindSpellCell(state, { tab: 1, slot: 2 }, 99);
+	const swapped = swapSpellTabs(state, 0, 1);
+	expect(swapped.selected).toBe(state.selected);
+	expect(swapped.tabs[0]).toBe(state.tabs[1]);
+	expect(swapped.tabs[1]).toBe(state.tabs[0]);
+	for (const tab of SPELL_BAR_INDICES.slice(2))
+		expect(swapped.tabs[tab]).toBe(state.tabs[tab]);
+	expect(swapSpellTabs(swapped, 0, 1)).toEqual(state);
+	expect(swapSpellTabs(state, 0, 0)).toBe(state);
+	const moved = swapSpellTabs(state, 0, 9);
+	expect(moved.tabs[0]).toBe(state.tabs[9]);
+	expect(moved.tabs[9]).toBe(state.tabs[0]);
 });

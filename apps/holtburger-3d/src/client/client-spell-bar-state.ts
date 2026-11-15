@@ -113,3 +113,20 @@ export function swapSpellCells(
 		tabs = replace(tabs, target.tab, normalizeSpellTab(changedTarget));
 	return { ...state, tabs };
 }
+
+/** Exchange entire binding tabs, preserving slot layout and the selected numeric identity. */
+export function swapSpellTabs(
+	state: ClientSpellBarState,
+	source: InputDigitIndex,
+	target: InputDigitIndex,
+): ClientSpellBarState {
+	if (source === target) return state;
+	return {
+		...state,
+		tabs: replace(
+			replace(state.tabs, source, state.tabs[target]),
+			target,
+			state.tabs[source],
+		),
+	};
+}

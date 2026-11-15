@@ -79,6 +79,7 @@
 	import { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import {
 		initialSpellBarBindings,
+		swapSpellTabs,
 		type ClientSpellBarState,
 	} from "./client-spell-bar-state";
 	import type {
@@ -195,6 +196,7 @@
 		type ClientSelectedEntityDisplay,
 		EMPTY_CLIENT_SELECTED_DISPLAY,
 	} from "./client-selected-entity-tracking";
+	import { pulseSpellBarCell } from "./client-spell-bar-feedback";
 	import ClientGameplayView from "./ClientGameplayView.svelte";
 	import { hostWorldMapSource } from "../lib/assets/world-map-source";
 	import type { MinimapFrame } from "../app/minimap-frame";
@@ -403,17 +405,36 @@
 		)
 			changeCharacterSettings("spellBarBindings", { tabs: value.tabs });
 	}
+	function swapSpellBarTabs(
+		source: InputDigitIndex,
+		target: InputDigitIndex,
+	): void {
+		const current = spellBar;
+		const swapped = swapSpellTabs(current, source, target);
+		if (swapped === current) return;
+		changeSpellBar(swapped);
+		toastCenter.publish({
+			message: `Swapped spell tabs ${(source + 1) % 10} and ${(target + 1) % 10}.`,
+			tone: "status",
+		});
+	}
 	function activateSpellCell(slot: number): void {
 		if (!spellBarEnabled) return;
 		const id = spellBar.tabs[spellBar.selected][slot];
-		if (id !== null && session?.state().knownSpells?.includes(id))
+		if (id !== null && session?.state().knownSpells?.includes(id)) {
+			if (interactionRoot !== null)
+				pulseSpellBarCell(interactionRoot, { tab: spellBar.selected, slot });
 			void castSpell(id);
+		}
 	}
 	function activateCasterSpell(): void {
 		if (!spellBarEnabled || inventory === null || itemInteractions === null)
 			return;
 		const caster = findWieldedCasterSpell(inventory.readItems().items.values());
-		if (caster !== null) itemInteractions.castWieldedSpell(caster.item);
+		if (caster !== null) {
+			if (interactionRoot !== null) pulseSpellBarCell(interactionRoot, null);
+			itemInteractions.castWieldedSpell(caster.item);
+		}
 	}
 	let spells = $state<ClientSpellServices | null>(null);
 	let enchantments = $state.raw<ClientTimedEnchantments | null>(null);
@@ -2815,6 +2836,7 @@
 			onHudModeChange={(mode) => (hudMode = mode)}
 			{spellBar}
 			onSpellBarChange={changeSpellBar}
+			onSwapSpellTabs={swapSpellBarTabs}
 			actionBars={characterSettings.kind === "ready"
 				? characterSettings.settings.actionBars
 				: null}

@@ -779,8 +779,11 @@ mod message_tests {
         world.player.guid = PLAYER;
         describe(&mut world, PACK, PLAYER);
         place(&mut world, PACK, PLAYER, InventoryEntryKind::Container);
-        world.handle_message(&GameMessage::InventoryRemoveObject(Box::new(
-            holtburger_protocol::messages::InventoryRemoveObjectData { object_guid: PACK },
+        world.handle_message(&GameMessage::ObjectDelete(Box::new(
+            holtburger_protocol::messages::ObjectDeleteData {
+                guid: PACK,
+                instance_sequence: 0,
+            },
         )));
         assert_eq!(world.client_entity_facts(PACK).unwrap(), None);
         // These later declarations establish a new pending identity, not its deleted description.
@@ -807,6 +810,125 @@ mod message_tests {
             EntityDescription::Known { .. }
         ));
         assert!(world.is_owned_by_player(ITEM));
+    }
+
+    #[test]
+    fn given_item_returns_after_followup_delete_with_cleanup_between_messages() {
+        use holtburger_protocol::messages::{InventoryRemoveObjectData, ObjectDeleteData};
+
+        // Captured handoffs use instance zero for both descriptions. Cleanup timing must not
+        // turn the outgoing handoff's delete into authority over the returned item.
+        for tick_after_removal in [false, true] {
+            let mut world = WorldState::synthetic();
+            world.player.guid = PLAYER;
+            describe(&mut world, ITEM, PLAYER);
+            place(&mut world, ITEM, PLAYER, InventoryEntryKind::Item);
+            world.handle_message(&GameMessage::InventoryRemoveObject(Box::new(
+                InventoryRemoveObjectData { object_guid: ITEM },
+            )));
+            if tick_after_removal {
+                // A pickup can follow inventory withdrawal on equipped-item paths. It must
+                // preserve the same grace period after old ownership properties are cleared.
+                world.handle_message(&GameMessage::PickupEvent(Box::new(
+                    holtburger_protocol::messages::PickupEventData {
+                        guid: ITEM,
+                        instance_sequence: 0,
+                        position_sequence: 1,
+                    },
+                )));
+                world.tick(None);
+                assert!(world.entities.get(ITEM).is_some());
+            }
+            place(&mut world, ITEM, Guid(9), InventoryEntryKind::Item);
+            world.handle_message(&GameMessage::ObjectDelete(Box::new(ObjectDeleteData {
+                guid: ITEM,
+                instance_sequence: 0,
+            })));
+            world.tick(None);
+            assert!(world.entities.get(ITEM).is_none());
+            place(&mut world, ITEM, PLAYER, InventoryEntryKind::Item);
+            describe(&mut world, ITEM, PLAYER);
+            world.tick(None);
+            let facts = world.client_entity_facts(ITEM).unwrap().unwrap();
+            assert!(facts.owned_by_player);
+            assert!(matches!(
+                facts.description,
+                crate::entity_facts::EntityDescription::Known { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn removed_item_can_be_readmitted_by_description_or_world_placement() {
+        for describe_first in [false, true] {
+            let mut world = WorldState::synthetic();
+            world.player.guid = PLAYER;
+            describe(&mut world, ITEM, PLAYER);
+            place(&mut world, ITEM, PLAYER, InventoryEntryKind::Item);
+            world.handle_message(&GameMessage::InventoryRemoveObject(Box::new(
+                holtburger_protocol::messages::InventoryRemoveObjectData { object_guid: ITEM },
+            )));
+            let deadline = world
+                .entity_lifecycle_state(ITEM)
+                .unwrap()
+                .prune_request
+                .unwrap()
+                .deadline;
+            if describe_first {
+                describe(&mut world, ITEM, PLAYER);
+                assert!(world.is_entity_client_visible(ITEM));
+                place(&mut world, ITEM, PLAYER, InventoryEntryKind::Item);
+            } else {
+                world.move_entity_into_world(ITEM, &mut Vec::new());
+                assert!(world.is_entity_client_visible(ITEM));
+            }
+            assert!(!world.sweep_entity(ITEM, deadline, &mut Vec::new()));
+        }
+    }
+
+    #[test]
+    fn removed_pack_contents_expire_and_explicit_readmission_restores_descriptions() {
+        for readmit in [false, true] {
+            let mut world = WorldState::synthetic();
+            world.player.guid = PLAYER;
+            describe(&mut world, PACK, PLAYER);
+            place(&mut world, PACK, PLAYER, InventoryEntryKind::Container);
+            describe(&mut world, ITEM, PACK);
+            place(&mut world, ITEM, PACK, InventoryEntryKind::Item);
+            world.handle_message(&GameMessage::InventoryRemoveObject(Box::new(
+                holtburger_protocol::messages::InventoryRemoveObjectData { object_guid: PACK },
+            )));
+            world.tick(None);
+            let deadline = world
+                .entity_lifecycle_state(PACK)
+                .unwrap()
+                .prune_request
+                .unwrap()
+                .deadline;
+            for guid in [PACK, ITEM] {
+                assert!(world.entities.get(guid).is_some());
+                assert_eq!(world.client_entity_facts(guid).unwrap(), None);
+            }
+            if readmit {
+                place(&mut world, PACK, PLAYER, InventoryEntryKind::Container);
+                place(&mut world, ITEM, PACK, InventoryEntryKind::Item);
+            }
+            for guid in [PACK, ITEM] {
+                assert_eq!(
+                    world.sweep_entity(guid, deadline, &mut Vec::new()),
+                    !readmit
+                );
+                if readmit {
+                    assert!(
+                        world
+                            .client_entity_facts(guid)
+                            .unwrap()
+                            .unwrap()
+                            .owned_by_player
+                    );
+                }
+            }
+        }
     }
 
     #[test]

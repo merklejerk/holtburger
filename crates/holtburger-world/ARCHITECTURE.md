@@ -596,7 +596,18 @@ Entity lifetime is not just spawn/despawn.
 - visibility-based prune deadlines
 - explicit delete requests
 
-All of these feed the retention snapshot in [src/state/liveness.rs](src/state/liveness.rs).
+Inventory removal revokes storage access immediately while retaining the item and known contents'
+descriptions for the retail 25-second cleanup grace period. Retained descriptions are excluded from
+client-visible queries and scene placement. Follow-up instance deletes can still match those
+descriptions instead of being queued against a later return with the same instance number.
+Explicit storage re-admission, world placement, or a replacement description ends inventory-removal
+cleanup; stale container/wielder properties do not. Expiry cleans up descriptions even when those
+old properties still identify an owner. Removal also clears and publishes inventory location
+properties for consumers of entity property events.
+
+The retention snapshot describes ownership, preview evidence, and inventory-removal retention;
+lifecycle cleanup separately applies inventory-removal deadlines and explicit instance deletion
+priority.
 If you change entity ownership or visibility rules, update retention reconciliation in the owning
 world helpers rather than layering on handler-specific cleanup.
 

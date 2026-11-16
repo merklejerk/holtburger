@@ -362,7 +362,9 @@ impl super::ClientRuntime {
 mod tests {
     use super::*;
     use holtburger_common::{
-        properties::{EquipMask, InventoryEntryKind, PropertyInt},
+        properties::{
+            EquipMask, InventoryEntryKind, PropertyInstanceId, PropertyInt, PropertyUpdate,
+        },
         stats::AttributeType,
     };
     use holtburger_protocol::messages::{
@@ -1797,6 +1799,74 @@ mod tests {
     }
 
     #[test]
+    fn handoff_return_publishes_owned_item_after_outgoing_removal_and_delete() {
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Cider".into());
+        description.public_weenie_desc.container_id = Some(PLAYER);
+
+        // Observe every host publication boundary, including the cleanup tick between the
+        // outgoing inventory removal and delete, using the same instance on the return.
+        for message in [
+            GameMessage::ObjectCreate(Box::new(description.clone())),
+            place(ITEM, PLAYER, InventoryEntryKind::Item),
+        ] {
+            for change in world.handle_message(&message) {
+                publisher.observe(&change);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        }
+        assert!(mirror[&ITEM].owned_by_player);
+        for message in [
+            GameMessage::InventoryRemoveObject(Box::new(InventoryRemoveObjectData {
+                object_guid: ITEM,
+            })),
+            GameMessage::ObjectDelete(Box::new(holtburger_protocol::messages::ObjectDeleteData {
+                guid: ITEM,
+                instance_sequence: 0,
+            })),
+        ] {
+            let changes = world.handle_message(&message);
+            if matches!(message, GameMessage::InventoryRemoveObject(_)) {
+                assert!(changes.iter().any(|change| matches!(change,
+                    WorldEvent::PropertiesUpdated { guid, updates }
+                    if *guid == ITEM && updates.contains(&PropertyUpdate::InstanceId(
+                        PropertyInstanceId::Container, Guid::NULL
+                    ))
+                )));
+                assert!(world.entities.get(ITEM).is_some());
+            }
+            for change in changes {
+                publisher.observe(&change);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert!(!mirror.contains_key(&ITEM));
+            for change in world.tick(None) {
+                publisher.observe(&change);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert!(!mirror.contains_key(&ITEM));
+        }
+        for message in [
+            place(ITEM, PLAYER, InventoryEntryKind::Item),
+            GameMessage::ObjectCreate(Box::new(description)),
+        ] {
+            for change in world.handle_message(&message) {
+                publisher.observe(&change);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert!(mirror[&ITEM].owned_by_player);
+        }
+        assert!(matches!(
+            mirror[&ITEM].description,
+            EntityDescription::Known { .. }
+        ));
+    }
+
+    #[test]
     fn readmitted_pending_parent_survives_deferred_description_eviction() {
         let mut world = WorldState::synthetic();
         world.seed_local_player_entity(PLAYER, "Player", Default::default());
@@ -1807,8 +1877,9 @@ mod tests {
         for message in [
             GameMessage::ObjectCreate(Box::new(description.clone())),
             place(PACK, PLAYER, InventoryEntryKind::Container),
-            GameMessage::InventoryRemoveObject(Box::new(InventoryRemoveObjectData {
-                object_guid: PACK,
+            GameMessage::ObjectDelete(Box::new(holtburger_protocol::messages::ObjectDeleteData {
+                guid: PACK,
+                instance_sequence: 0,
             })),
             place(PACK, PLAYER, InventoryEntryKind::Container),
             place(ITEM, PACK, InventoryEntryKind::Item),

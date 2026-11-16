@@ -28,6 +28,8 @@ pub(crate) struct EntityPruneRequest {
 /// Local cleanup decisions have distinct cancellation contracts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntityPruneReason {
+    /// Inventory access was withdrawn; retain the description for follow-up protocol messages.
+    InventoryRemoval,
     /// Continuous, proven exclusion from the observer's authored visibility.
     Visibility,
     /// Unretained preview, transfer, or dependent description ready for cleanup.
@@ -37,7 +39,7 @@ pub(crate) enum EntityPruneReason {
 /// Server request that can retire every current incarnation or one exact instance sequence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EntityDeleteRequest {
-    /// Non-generation-scoped removal produced by inventory and ownership transitions.
+    /// Non-generation-scoped removal of an unretained dependent description.
     Unconditional,
     /// Network deletion that applies only to the named server object incarnation.
     Instance(u16),
@@ -178,6 +180,8 @@ pub(crate) struct EntityRetentionSnapshot {
     pub container_preview: bool,
     /// Description retention only; never grants ownership, access, or semantic admission.
     pub inventory_transfer_pending: bool,
+    /// Inventory access is withdrawn, but follow-up protocol messages still need the description.
+    pub inventory_removal_pending: bool,
     /// Whether current deletion authority applies to this entity's exact incarnation.
     pub current_instance_delete_requested: bool,
     /// Whether the current local cleanup authority has reached its deadline.
@@ -214,6 +218,7 @@ impl EntityRetentionSnapshot {
         self.has_authoritative_retention()
             || self.has_preview_retention()
             || self.inventory_transfer_pending
+            || self.inventory_removal_pending
     }
 }
 
@@ -278,6 +283,9 @@ impl WorldState {
             let Some(retention) = self.retention_snapshot(guid, now) else {
                 continue;
             };
+            if retention.inventory_removal_pending {
+                continue;
+            }
             if retention.current_instance_delete_requested || retention.has_nonworld_retention() {
                 self.clear_entity_prune_request(guid);
                 continue;
@@ -333,6 +341,40 @@ impl WorldState {
 
     pub(crate) fn entity_lifecycle_state(&self, guid: Guid) -> Option<&EntityLifecycleState> {
         self.entity_lifecycle.get(guid)
+    }
+
+    /// Retail behavior is to withdraw inventory access immediately and retain descriptions for
+    /// 25 seconds. The following instance delete must find the old description rather than queue
+    /// against a future create which can reuse the same instance sequence.
+    pub(crate) fn remove_inventory_object(&mut self, guid: Guid, events: &mut Vec<WorldEvent>) {
+        let removed: Vec<_> = std::iter::once(guid)
+            .chain(self.storage.owned_items(guid))
+            .collect();
+        let deadline = self.current_server_time() + ACE_DESTRUCTION_TIMEOUT_SECS;
+        for guid in removed {
+            self.retire_entity_storage(guid);
+            if self.entities.get(guid).is_some() {
+                self.entity_lifecycle.get_or_default_mut(guid).prune_request =
+                    Some(EntityPruneRequest {
+                        reason: EntityPruneReason::InventoryRemoval,
+                        deadline,
+                    });
+                self.withdraw_entity_inventory_location(guid, events);
+            }
+        }
+    }
+
+    fn inventory_removal_pending(&self, guid: Guid) -> bool {
+        self.entity_lifecycle.get(guid).is_some_and(|state| {
+            state
+                .prune_request
+                .is_some_and(|request| request.reason == EntityPruneReason::InventoryRemoval)
+        })
+    }
+
+    /// Retained protocol descriptions do not grant scene or client semantic access.
+    pub(super) fn entity_description_withdrawn(&self, entity: &Entity) -> bool {
+        self.instance_delete_applies(entity) || self.inventory_removal_pending(entity.guid)
     }
 
     pub(crate) fn mark_entity_explicit_delete(&mut self, guid: Guid) {
@@ -417,6 +459,9 @@ impl WorldState {
     }
 
     pub(crate) fn request_unretained_entity_prune(&mut self, guid: Guid, deadline: f64) {
+        if self.inventory_removal_pending(guid) {
+            return;
+        }
         self.entity_lifecycle.get_or_default_mut(guid).prune_request = Some(EntityPruneRequest {
             reason: EntityPruneReason::Unretained,
             deadline,
@@ -430,7 +475,7 @@ impl WorldState {
         self.entity_lifecycle.compact(guid);
     }
 
-    fn clear_entity_prune_reason(&mut self, guid: Guid, reason: EntityPruneReason) {
+    pub(super) fn clear_entity_prune_reason(&mut self, guid: Guid, reason: EntityPruneReason) {
         if self
             .entity_lifecycle_state(guid)
             .and_then(|state| state.prune_request)
@@ -556,6 +601,7 @@ impl WorldState {
             trade_preview: lifecycle.is_some_and(|state| state.trade_preview),
             container_preview,
             inventory_transfer_pending: self.has_pending_inventory_transfer(guid),
+            inventory_removal_pending: self.inventory_removal_pending(guid),
             current_instance_delete_requested: self.current_instance_delete_requested(guid),
             prune_request_expired: lifecycle
                 .and_then(|state| state.prune_request)
@@ -567,7 +613,15 @@ impl WorldState {
         &mut self,
         guid: Guid,
     ) -> Option<EntityRetentionSnapshot> {
+        // Accepted storage declarations re-admit a retained description. Old description IIDs
+        // alone cannot cancel inventory removal.
+        if self.storage.location(guid).is_some() {
+            self.clear_entity_prune_reason(guid, EntityPruneReason::InventoryRemoval);
+        }
         let snapshot = self.retention_snapshot(guid, self.current_server_time())?;
+        if snapshot.inventory_removal_pending {
+            return Some(snapshot);
+        }
         if snapshot.has_nonworld_retention() {
             self.clear_entity_prune_request(guid);
         } else if snapshot.is_retained() {
@@ -583,6 +637,10 @@ impl WorldState {
 
         if snapshot.current_instance_delete_requested {
             return true;
+        }
+
+        if snapshot.inventory_removal_pending {
+            return snapshot.prune_request_expired;
         }
 
         if snapshot.has_nonworld_retention() {
@@ -627,7 +685,7 @@ impl WorldState {
     pub fn is_entity_client_visible(&self, guid: Guid) -> bool {
         self.entities
             .get(guid)
-            .is_some_and(|entity| !self.instance_delete_applies(entity))
+            .is_some_and(|entity| !self.entity_description_withdrawn(entity))
     }
 
     pub(super) fn current_instance_delete_requested(&self, guid: Guid) -> bool {
@@ -656,12 +714,12 @@ impl WorldState {
 
     pub fn get_visible_entity(&self, guid: Guid) -> Option<&Entity> {
         self.entities
-            .get_filtered(guid, |entity| !self.instance_delete_applies(entity))
+            .get_filtered(guid, |entity| !self.entity_description_withdrawn(entity))
     }
 
     pub fn iter_visible_entities(&self) -> impl Iterator<Item = &Entity> + '_ {
         self.entities
-            .iter_filtered(move |entity| !self.instance_delete_applies(entity))
+            .iter_filtered(move |entity| !self.entity_description_withdrawn(entity))
     }
 
     pub fn get_nearby_world_entities(&self) -> Vec<Entity> {
@@ -759,6 +817,7 @@ impl WorldState {
         events: &mut Vec<WorldEvent>,
     ) -> EntityCreateDisposition {
         let guid = entity.guid;
+        self.clear_entity_prune_reason(guid, EntityPruneReason::InventoryRemoval);
         if entity.position.landblock_id != Guid::NULL {
             entity.position = recover_pose_orientation(
                 guid,

@@ -86,7 +86,7 @@ pub(crate) fn handle_message(
             true
         }
         GameMessage::InventoryRemoveObject(data) => {
-            state.mark_entity_explicit_delete(data.object_guid);
+            state.remove_inventory_object(data.object_guid, events);
             true
         }
         GameMessage::ParentEvent(data) => {

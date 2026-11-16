@@ -27,8 +27,8 @@ pub enum ResolvedScenePlacement {
 pub enum UnresolvedScenePlacement {
     /// The requested entity or one of its ancestors has not arrived.
     MissingEntity { guid: Guid },
-    /// An endpoint is subject to deletion of its current incarnation.
-    DeletedEntity { guid: Guid },
+    /// An endpoint has been withdrawn from client access while awaiting protocol cleanup.
+    WithdrawnEntity { guid: Guid },
     /// The independent endpoint has no authoritative world location.
     UnplacedEntity { guid: Guid },
 }
@@ -60,9 +60,9 @@ impl WorldState {
                     UnresolvedScenePlacement::MissingEntity { guid: current },
                 ));
             };
-            if self.instance_delete_applies(entity) {
+            if self.entity_description_withdrawn(entity) {
                 return Ok(ResolvedScenePlacement::Unresolved(
-                    UnresolvedScenePlacement::DeletedEntity { guid: current },
+                    UnresolvedScenePlacement::WithdrawnEntity { guid: current },
                 ));
             }
             if let Some(attachment) = entity.attachment() {
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(
             world.resolve_scene_placement(child),
             Ok(ResolvedScenePlacement::Unresolved(
-                UnresolvedScenePlacement::DeletedEntity { guid: root }
+                UnresolvedScenePlacement::WithdrawnEntity { guid: root }
             ))
         );
     }

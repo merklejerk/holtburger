@@ -1,3 +1,4 @@
+use super::liveness::EntityPruneReason;
 use super::pose_orientation::recover_pose_orientation;
 use super::*;
 use crate::entity::{EntityMotionSnapshot, EntityNetworkMotion};
@@ -1251,6 +1252,30 @@ impl WorldState {
         events.push(WorldEvent::PropertiesUpdated { guid, updates });
     }
 
+    /// Publish immediate inventory withdrawal while lifecycle cleanup retains the description.
+    pub(super) fn withdraw_entity_inventory_location(
+        &mut self,
+        guid: Guid,
+        events: &mut Vec<WorldEvent>,
+    ) {
+        if !self.set_entity_inventory_location(guid, Guid::NULL, Guid::NULL, EquipMask::NONE) {
+            return;
+        }
+        self.finalize_entity_inventory_location_update(
+            guid,
+            true,
+            vec![
+                PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL),
+                PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, Guid::NULL),
+                PropertyUpdate::Int(
+                    PropertyInt::CurrentWieldedLocation,
+                    EquipMask::NONE.bits() as i32,
+                ),
+            ],
+            events,
+        );
+    }
+
     pub(crate) fn move_entity_into_container(
         &mut self,
         item_guid: Guid,
@@ -1289,6 +1314,7 @@ impl WorldState {
         guid: Guid,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
+        self.clear_entity_prune_reason(guid, EntityPruneReason::InventoryRemoval);
         self.storage.withdraw(guid);
         if !self.set_entity_inventory_location(guid, Guid::NULL, Guid::NULL, EquipMask::NONE) {
             return false;

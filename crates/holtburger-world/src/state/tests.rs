@@ -2392,33 +2392,39 @@ fn test_wield_object() {
 
 #[test]
 fn test_inventory_remove_object() {
+    use crate::state::liveness::ACE_DESTRUCTION_TIMEOUT_SECS;
+
     let mut state = WorldState::synthetic();
-    let obj_guid = Guid(0x1);
+    let guid = Guid(1);
+    let owner = Guid(2);
+    state.player.guid = owner;
+    let mut entity = Entity::new(guid, "Item".into(), Default::default());
+    entity.set_container_id(Some(owner));
+    state.add_entity(entity);
+    state.storage.announce_container(guid, owner);
+    let before_removal = state.current_server_time();
+    state.handle_message(&GameMessage::InventoryRemoveObject(Box::new(
+        InventoryRemoveObjectData { object_guid: guid },
+    )));
 
-    state.entities.insert(Entity::new(
-        obj_guid,
-        "Item".to_string(),
-        WorldPosition::default(),
-    ));
-
-    let data = InventoryRemoveObjectData {
-        object_guid: obj_guid,
-    };
-    let msg = GameMessage::InventoryRemoveObject(Box::new(data));
-
-    let events = state.handle_message(&msg);
-
-    assert!(state.entities.get(obj_guid).is_some());
-    assert!(
-        state
-            .entity_lifecycle_state(obj_guid)
-            .is_some_and(|state| state.delete_request.is_some())
+    let after_removal = state.current_server_time();
+    assert!(!state.storage.owned_by(guid, owner));
+    assert_eq!(state.client_entity_facts(guid).unwrap(), None);
+    state.tick(None);
+    assert!(state.entities.get(guid).is_some());
+    let request = state
+        .entity_lifecycle_state(guid)
+        .unwrap()
+        .prune_request
+        .unwrap();
+    assert_eq!(
+        request.reason,
+        liveness::EntityPruneReason::InventoryRemoval
     );
-    assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, WorldEvent::EntityDespawned { guid, .. } if *guid == obj_guid))
-    );
+    assert!(request.deadline >= before_removal + ACE_DESTRUCTION_TIMEOUT_SECS);
+    assert!(request.deadline <= after_removal + ACE_DESTRUCTION_TIMEOUT_SECS);
+    assert!(!state.sweep_entity(guid, request.deadline - 1.0, &mut Vec::new()));
+    assert!(state.sweep_entity(guid, request.deadline, &mut Vec::new()));
 }
 
 #[test]

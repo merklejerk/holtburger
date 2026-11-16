@@ -744,7 +744,7 @@ mod tests {
             assert_eq!(
                 world.resolve_scene_placement(guid),
                 Ok(ResolvedScenePlacement::Unresolved(
-                    crate::UnresolvedScenePlacement::DeletedEntity {
+                    crate::UnresolvedScenePlacement::WithdrawnEntity {
                         guid: replacement_root
                     }
                 ))

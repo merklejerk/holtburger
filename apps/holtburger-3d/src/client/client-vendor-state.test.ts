@@ -189,7 +189,7 @@ describe("vendor draft presentation", () => {
 				{
 					...actor,
 					description: { ...actor.description, name: "Renamed vendor" },
-					playerThreat: true,
+					isHostile: true,
 				},
 			],
 			removed: [],

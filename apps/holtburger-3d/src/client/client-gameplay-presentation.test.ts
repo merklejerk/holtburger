@@ -2025,6 +2025,13 @@ describe("ClientGameplayPresentation", () => {
 		const requestFacts = vi.spyOn(lifecycle.appraisals, "requestFacts");
 		await presentation.start();
 		try {
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [entityFacts(mobGuid, { isHostile: true })],
+				removed: [],
+			});
 			const mob = {
 				...view(mobGuid, 0x0101_0100),
 				presentation: {
@@ -2090,6 +2097,13 @@ describe("ClientGameplayPresentation", () => {
 		const requestFacts = vi.spyOn(lifecycle.appraisals, "requestFacts");
 		await presentation.start();
 		try {
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [entityFacts(mobGuid, { isHostile: true })],
+				removed: [],
+			});
 			const mob = {
 				...view(mobGuid, 0x0101_0100),
 				presentation: {

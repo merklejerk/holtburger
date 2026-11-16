@@ -2084,17 +2084,18 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
                     },
                 ));
             }
-            // ACE uses this packet for ordinary inventory refusals. A reasonless
-            // packet also follows separate feedback (Player_Inventory.cs:1371-1399);
-            // it is a rollback signal, not an additional player-facing error.
+            // Reasonless inventory rollbacks follow separate feedback. Scripted
+            // NPC refusals also cancel the transfer while still running the NPC's
+            // response and leaving the item with the player. Neither needs a toast.
             if let ActionResultReason::InventoryServerSaveFailed { error, .. } = &reason {
-                return (*error != WeenieError::None).then(|| {
-                    ClientHostEvent::ActionFeedback(ClientActionFeedback {
-                        message: format_weenie_error(*error, None),
-                        tone: ClientActionFeedbackTone::Status,
-                        equipment: None,
-                    })
-                });
+                return (!matches!(error, WeenieError::None | WeenieError::TradeAiRefuseEmote))
+                    .then(|| {
+                        ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                            message: format_weenie_error(*error, None),
+                            tone: ClientActionFeedbackTone::Status,
+                            equipment: None,
+                        })
+                    });
             }
             if matches!(reason, ActionResultReason::Weenie(WeenieError::None, _)) {
                 return None;
@@ -3407,16 +3408,18 @@ mod tests {
             assert_eq!(feedback.message, format_weenie_error(error, None));
             assert!(matches!(feedback.tone, ClientActionFeedbackTone::Status));
         }
-        assert!(
-            project_client_event(ClientViewEvent::ActionResult {
-                source: holtburger_core::ActionResultSource::Wire,
-                reason: ActionResultReason::InventoryServerSaveFailed {
-                    item_guid: Guid(0x4000_0001),
-                    error: WeenieError::None,
-                },
-            })
-            .is_none()
-        );
+        for error in [WeenieError::None, WeenieError::TradeAiRefuseEmote] {
+            assert!(
+                project_client_event(ClientViewEvent::ActionResult {
+                    source: holtburger_core::ActionResultSource::Wire,
+                    reason: ActionResultReason::InventoryServerSaveFailed {
+                        item_guid: Guid(0x4000_0001),
+                        error,
+                    },
+                })
+                .is_none()
+            );
+        }
     }
 
     #[test]

@@ -3342,17 +3342,16 @@ fn contacted_near_remote_position_preserves_runtime_pose_then_interpolates_on_ti
     assert_eq!(body.authoritative_pose(), Some(pose(10.0)));
     assert_eq!(body.contact, ContactState::Unknown);
 
-    let ordinary = SolvedBodyKinematics {
+    let input = crate::SolveBodyInput::velocity(
         body_id,
-        pose: pose(8.0),
-        accepted_motion: crate::AcceptedBodyMotion::default(),
-        retained: crate::RetainedBodyKinematics::default(),
-        contact: ContactState::Unknown,
-        projection_state: None,
-    };
+        pose(8.0),
+        ContactState::Unknown,
+        Vector3::zero(),
+        Vector3::zero(),
+    );
     let (solved, kind) = state
         .scene
-        .reconcile_pose_only_body_kinematics(ordinary, 0.03)
+        .advance_pose_only_body_kinematics(&input, Duration::from_millis(30))
         .expect("remote body remains registered");
     assert_eq!(kind, crate::RuntimeBodyAdvanceKind::Integrated);
     assert!(solved.pose.coords.x > 8.0);
@@ -3415,17 +3414,16 @@ fn remote_position_at_retail_distance_boundary_schedules_tick_snap() {
 
     let body_id = SpatialBodyId::Entity(remote_guid);
     assert_eq!(state.scene.body(body_id).unwrap().pose, pose(96.0));
-    let ordinary = SolvedBodyKinematics {
+    let input = crate::SolveBodyInput::velocity(
         body_id,
-        pose: pose(96.0),
-        accepted_motion: crate::AcceptedBodyMotion::default(),
-        retained: crate::RetainedBodyKinematics::default(),
-        contact: ContactState::Sliding,
-        projection_state: None,
-    };
+        pose(96.0),
+        ContactState::Sliding,
+        Vector3::zero(),
+        Vector3::zero(),
+    );
     let (solved, kind) = state
         .scene
-        .reconcile_pose_only_body_kinematics(ordinary, 0.03)
+        .advance_pose_only_body_kinematics(&input, Duration::from_millis(30))
         .expect("remote body remains registered");
     assert_eq!(kind, crate::RuntimeBodyAdvanceKind::CorrectionSnap);
     assert_eq!(solved.pose, pose(100.0));
@@ -6556,4 +6554,132 @@ fn character_titles_reset_with_description_and_ignore_other_characters() {
     })));
     assert!(state.player.character_titles.is_none());
     assert!(events.is_empty());
+}
+
+#[test]
+fn hidden_motion_pauses_cached_running_output_and_resumes_without_catch_up() {
+    let table = 0x0900_0040;
+    let guid = Guid(0x7000_0100);
+    let mut state = WorldState::synthetic();
+    state.set_motion_sequences(test_motion_catalog(table));
+    let mut entity = Entity::new(guid, "Remote".to_owned(), WorldPosition::default());
+    entity.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(table),
+    );
+    entity.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+        ..EntityMotionSnapshot::default()
+    });
+    state.add_entity(entity);
+    let dt = Duration::from_millis(30);
+    let running = state.advance_authored_motion_for_body(guid, dt).unwrap();
+    assert!(running.offset.translation.length_squared() > 0.0);
+    let snapshot = state.entities.get(guid).unwrap().network_motion;
+    state.entities.get_mut(guid).unwrap().physics.reconcile(
+        crate::resolve_effective_entity_physics_state(PhysicsState::HIDDEN),
+    );
+    for _ in 0..10 {
+        assert!(state.advance_authored_motion_for_body(guid, dt).is_none());
+        assert_eq!(
+            state.motion_runtimes.get(guid).unwrap().tick(),
+            &crate::motion::SequenceTick::identity()
+        );
+        assert_eq!(state.entities.get(guid).unwrap().network_motion, snapshot);
+    }
+    state.entities.get_mut(guid).unwrap().physics.reconcile(
+        crate::resolve_effective_entity_physics_state(PhysicsState::empty()),
+    );
+    let resumed = state.advance_authored_motion_for_body(guid, dt).unwrap();
+    assert_eq!(resumed.offset, running.offset);
+
+    // A stop received during the pause must replace the retained running source on reveal.
+    state.entities.get_mut(guid).unwrap().physics.reconcile(
+        crate::resolve_effective_entity_physics_state(PhysicsState::HIDDEN),
+    );
+    let idle = EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        ..EntityMotionSnapshot::default()
+    };
+    state.entities.get_mut(guid).unwrap().network_motion = EntityNetworkMotion::Initialized(idle);
+    state.accept_entity_motion(guid, idle, [], None);
+    assert!(state.advance_authored_motion_for_body(guid, dt).is_none());
+    state.entities.get_mut(guid).unwrap().physics.reconcile(
+        crate::resolve_effective_entity_physics_state(PhysicsState::empty()),
+    );
+    assert_eq!(
+        state
+            .advance_authored_motion_for_body(guid, dt)
+            .unwrap()
+            .offset,
+        holtburger_common::RigidTransform::identity()
+    );
+}
+
+#[test]
+fn hidden_state_removes_remote_physics_without_losing_retained_motion() {
+    let guid = Guid(0x7000_0100);
+    let id = SpatialBodyId::Entity(guid);
+    let mut state = WorldState::synthetic();
+    let mut entity = Entity::new(
+        guid,
+        "Remote".to_owned(),
+        WorldPosition {
+            landblock_id: Guid(0x1234_0001),
+            ..WorldPosition::default()
+        },
+    );
+    entity.velocity = Vector3::new(2.0, 0.0, 0.0);
+    entity.omega = Vector3::new(0.0, 0.0, 1.0);
+    state.add_entity(entity);
+    state
+        .scene
+        .set_dynamic_physical_body(
+            id,
+            Some(set_state_dynamic_definition()),
+            crate::PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    let before = state.scene.body(id).unwrap().clone();
+    state.handle_message(&GameMessage::SetState(Box::new(
+        holtburger_protocol::messages::SetStateData {
+            guid,
+            physics_state: PhysicsState::HIDDEN,
+            instance_sequence: 0,
+            state_sequence: 1,
+        },
+    )));
+    let after = state.scene.body(id).unwrap();
+    assert!(after.physical.is_none());
+    assert_eq!(after.pose, before.pose);
+    assert_eq!(after.retained, before.retained);
+
+    let destination = WorldPosition {
+        landblock_id: Guid(0x4321_0100),
+        coords: Vector3::new(10.0, 10.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    assert!(state.apply_entity_position_pack(
+        guid,
+        &PositionPack {
+            pos: destination,
+            position_sequence: 1,
+            teleport_sequence: 1,
+            ..PositionPack::default()
+        },
+        &mut Vec::new()
+    ));
+    let dt = Duration::from_millis(30);
+    for _ in 0..10 {
+        let input = state.resolve_body_projection_input(id).unwrap();
+        assert!(!input.has_motion());
+        let (solved, _) = state
+            .scene
+            .advance_pose_only_body_kinematics(&input, dt)
+            .unwrap();
+        assert!(state.scene.apply_solved_runtime_body_kinematics(&solved));
+        assert_eq!(state.scene.body(id).unwrap().pose, destination);
+    }
 }

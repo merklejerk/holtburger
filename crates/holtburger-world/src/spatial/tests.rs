@@ -396,6 +396,7 @@ fn authored_projection_integrates_an_offset_in_the_bodys_own_frame() {
     let quarter_turn = std::f32::consts::FRAC_PI_2;
 
     let input = SolveBodyInput {
+        motion_policy: crate::EntityMotionPolicy::Simulate,
         body_id: SpatialBodyId::Entity(guid),
         pose,
         contact: ContactState::Grounded,
@@ -424,6 +425,7 @@ fn authored_turn_in_place_has_no_linear_or_retained_motion() {
     let body_id = SpatialBodyId::Entity(Guid(0x5000_0007));
     let quarter_turn = std::f32::consts::FRAC_PI_2;
     let input = SolveBodyInput {
+        motion_policy: crate::EntityMotionPolicy::Simulate,
         body_id,
         pose: make_position(10.0, 20.0, 90.0_f32.to_radians()),
         contact: ContactState::Grounded,
@@ -452,6 +454,7 @@ fn an_unsupported_body_keeps_authored_rotation_and_loses_authored_translation() 
     let quarter_turn = std::f32::consts::FRAC_PI_2;
 
     let input = SolveBodyInput {
+        motion_policy: crate::EntityMotionPolicy::Simulate,
         body_id: SpatialBodyId::Entity(guid),
         pose,
         contact: ContactState::Airborne,
@@ -475,6 +478,7 @@ fn an_authored_stop_clears_accepted_motion_without_manufacturing_coasting_moment
     let body_id = SpatialBodyId::Entity(Guid(0x5000_0006));
     let start = make_position(10.0, 20.0, 90.0_f32.to_radians());
     let moving = SolveBodyInput {
+        motion_policy: crate::EntityMotionPolicy::Simulate,
         body_id,
         pose: start,
         contact: ContactState::Grounded,
@@ -490,6 +494,7 @@ fn an_authored_stop_clears_accepted_motion_without_manufacturing_coasting_moment
 
     let stopped = advance_body_kinematics(
         &SolveBodyInput {
+            motion_policy: crate::EntityMotionPolicy::Simulate,
             body_id,
             pose: moved.pose,
             contact: ContactState::Grounded,
@@ -577,6 +582,7 @@ fn body_solver_types_preserve_body_identity_and_support_ephemeral_events() {
     };
 
     let entity_body_input = SolveBodyInput {
+        motion_policy: crate::EntityMotionPolicy::Simulate,
         body_id: SpatialBodyId::Entity(Guid(0x7000_0001)),
         pose,
         contact: ContactState::Unknown,
@@ -594,6 +600,7 @@ fn body_solver_types_preserve_body_identity_and_support_ephemeral_events() {
     );
 
     let body_input = SolveBodyInput {
+        motion_policy: crate::EntityMotionPolicy::Simulate,
         body_id: SpatialBodyId::LocalPlayer(Guid(0x7000_0002)),
         pose,
         contact: ContactState::Unknown,

@@ -150,7 +150,9 @@ pub fn project_pose_forward_distance(
 
 pub fn advance_body_kinematics(input: &SolveBodyInput, dt: Duration) -> SolvedBodyKinematics {
     let dt_secs = dt.as_secs_f32().max(0.0);
-    if dt_secs <= f32::EPSILON {
+    if dt_secs <= f32::EPSILON
+        || input.motion_policy == crate::EntityMotionPolicy::ServerPositionOnly
+    {
         return SolvedBodyKinematics {
             body_id: input.body_id,
             pose: input.pose,

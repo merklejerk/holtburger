@@ -38,7 +38,12 @@ impl<'a> BodyProjectionResolver<'a> {
 
     /// Remote source sample, including command orientation even on a motionless interval.
     pub fn remote_motion_sample(&self, guid: Guid) -> Option<RemoteMotionSample> {
-        let snapshot = self.entities.get(guid)?.network_motion.snapshot()?;
+        let entity = self.entities.get(guid)?;
+        if entity.physics.effective().motion_policy == crate::EntityMotionPolicy::ServerPositionOnly
+        {
+            return None;
+        }
+        let snapshot = entity.network_motion.snapshot()?;
         if snapshot
             .motion_command()
             .is_some_and(InterpretedMotionCommand::is_dead)
@@ -51,33 +56,24 @@ impl<'a> BodyProjectionResolver<'a> {
     /// Resolves one captured body's current authority and authored-playback contribution.
     pub fn resolve(&self, body: &SpatialBody) -> Option<SolveBodyInput> {
         let guid = body.id.authoritative_guid()?;
-        let entity_state = self.entities.get(guid).map(|entity| {
-            (
-                RetainedBodyKinematics {
-                    velocity: entity.velocity,
-                    acceleration: entity.acceleration,
-                    omega: entity.omega,
-                },
-                entity.network_motion.snapshot(),
-            )
-        });
-        let (retained, motion_snapshot) = match entity_state {
-            Some((entity_retained, entity_motion_state)) => {
-                let retained = if body.sampling.mode == SpatialSampleMode::AuthoritativeOnly {
-                    entity_retained
-                } else {
-                    body.retained
-                };
-                (retained, entity_motion_state.or(body.motion_state))
+        let entity = self.entities.get(guid)?;
+        let retained = if body.sampling.mode == SpatialSampleMode::AuthoritativeOnly {
+            RetainedBodyKinematics {
+                velocity: entity.velocity,
+                acceleration: entity.acceleration,
+                omega: entity.omega,
             }
-            None => (body.retained, body.motion_state),
+        } else {
+            body.retained
         };
+        let motion_snapshot = entity.network_motion.snapshot().or(body.motion_state);
         let authored_offset = match body.id {
             SpatialBodyId::LocalPlayer(_) => None,
             SpatialBodyId::Entity(guid) => self.resolve_authored_offset(guid, motion_snapshot),
             SpatialBodyId::Ephemeral(_) => None,
         };
         Some(SolveBodyInput {
+            motion_policy: entity.physics.effective().motion_policy,
             body_id: body.id,
             pose: body.pose,
             contact: body.contact,
@@ -91,6 +87,11 @@ impl<'a> BodyProjectionResolver<'a> {
         guid: Guid,
         snapshot: Option<EntityMotionSnapshot>,
     ) -> Option<RigidTransform> {
+        if self.entities.get(guid)?.physics.effective().motion_policy
+            == crate::EntityMotionPolicy::ServerPositionOnly
+        {
+            return None;
+        }
         let snapshot = snapshot?;
         if snapshot
             .motion_command()
@@ -321,7 +322,8 @@ impl WorldState {
             return None;
         }
         let physics = self.entities.get(guid)?.physics.effective();
-        if !physics.supports_local_simulation()
+        if physics.motion_policy == crate::EntityMotionPolicy::ServerPositionOnly
+            || !physics.supports_local_simulation()
             || physics.integration_eligibility != crate::EntityIntegrationEligibility::Eligible
         {
             return None;
@@ -558,6 +560,9 @@ impl WorldState {
         order: MotionOrder,
         dt: Duration,
     ) -> Result<SequenceTick, AuthoredMotionDriveError> {
+        if self.pause_hidden_motion(guid) {
+            return Ok(SequenceTick::identity());
+        }
         let quantum = dt.as_secs_f32();
         let source = self.motion_table_source_for_guid(guid).ok_or(
             AuthoredMotionDriveError::MotionTableSourceUnavailable {
@@ -586,6 +591,9 @@ impl WorldState {
         presentation: CharacterMotionPresentation,
         dt: Duration,
     ) -> Result<SequenceTick, AuthoredMotionDriveError> {
+        if self.pause_hidden_motion(guid) {
+            return Ok(SequenceTick::identity());
+        }
         let source = self.motion_table_source_for_guid(guid).ok_or(
             AuthoredMotionDriveError::MotionTableSourceUnavailable {
                 guid: u32::from(guid),
@@ -615,6 +623,18 @@ impl WorldState {
                 dt.as_secs_f32(),
             )
             .clone())
+    }
+
+    /// Clear interval output while retaining admitted commands, sequence phase, and action queues.
+    fn pause_hidden_motion(&mut self, guid: Guid) -> bool {
+        let paused = self.entities.get(guid).is_some_and(|entity| {
+            entity.physics.effective().motion_policy
+                == crate::EntityMotionPolicy::ServerPositionOnly
+        });
+        if paused {
+            self.motion_runtimes.pause_interval(guid);
+        }
+        paused
     }
 
     /// Whether accepted gesture/idle playback permits independent locomotion.
@@ -755,6 +775,9 @@ impl WorldState {
         dt: Duration,
     ) -> Result<Option<SequenceTick>, AuthoredMotionDriveError> {
         let guid = self.player.guid;
+        if self.pause_hidden_motion(guid) {
+            return Ok(None);
+        }
         if !self.has_local_authored_motion(guid) {
             return Ok(None);
         }
@@ -923,6 +946,9 @@ impl WorldState {
         guid: Guid,
         dt: Duration,
     ) -> Option<SequenceTick> {
+        if self.pause_hidden_motion(guid) {
+            return None;
+        }
         let snapshot = self.entities.get(guid)?.network_motion.snapshot()?;
         let source = self.motion_table_source_for_guid(guid)?;
         let input = self.remote_motion_input(guid, snapshot)?;

@@ -692,6 +692,8 @@ impl SpatialBody {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolveBodyInput {
+    /// State-owned permission; corrections remain eligible when ordinary motion is paused.
+    pub motion_policy: crate::EntityMotionPolicy,
     pub body_id: SpatialBodyId,
     pub pose: WorldPosition,
     pub contact: ContactState,
@@ -713,6 +715,7 @@ impl SolveBodyInput {
             body_id,
             pose,
             contact,
+            motion_policy: crate::EntityMotionPolicy::Simulate,
             authored_offset: None,
             retained: RetainedBodyKinematics {
                 velocity,
@@ -724,7 +727,9 @@ impl SolveBodyInput {
 
     /// Whether this tick has an authored or physical contribution worth scheduling.
     pub fn has_motion(self) -> bool {
-        self.authored_offset.is_some() || self.retained != RetainedBodyKinematics::default()
+        self.motion_policy == crate::EntityMotionPolicy::Simulate
+            && (self.authored_offset.is_some()
+                || self.retained != RetainedBodyKinematics::default())
     }
 }
 

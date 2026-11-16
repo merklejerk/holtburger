@@ -33,19 +33,17 @@ fn receive(scene: &mut SpatialScene, id: SpatialBodyId, target: WorldPosition) {
 
 fn tick(scene: &mut SpatialScene, id: SpatialBodyId, seconds: f32) -> RuntimeBodyAdvanceKind {
     let body = scene.body(id).unwrap();
-    let ordinary = crate::spatial::advance_body_kinematics(
-        &SolveBodyInput {
-            body_id: id,
-            pose: body.pose,
-            contact: body.contact,
-            authored_offset: None,
-            retained: body.retained,
-        },
-        Duration::from_secs_f32(seconds),
-    );
+    let input = SolveBodyInput {
+        motion_policy: crate::EntityMotionPolicy::Simulate,
+        body_id: id,
+        pose: body.pose,
+        contact: body.contact,
+        authored_offset: None,
+        retained: body.retained,
+    };
     let (solved, kind) = scene
-        .reconcile_pose_only_body_kinematics(ordinary, seconds)
-        .unwrap();
+        .advance_pose_only_body_kinematics(&input, Duration::from_secs_f32(seconds))
+        .expect("pose-only body remains registered");
     assert!(scene.apply_solved_runtime_body_kinematics(&solved));
     kind
 }

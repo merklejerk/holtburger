@@ -1234,9 +1234,17 @@ impl ClientCollisionCoordinator {
             if target.preparation.definition_eq(&existing.preparation)
                 && target.demand == existing.demand
             {
-                if matches!(existing.status, ClientRemoteBodyStatus::Preparing)
-                    && self.remote_body_worker.is_none()
-                {
+                // Hide and reveal may be admitted before this observer runs. Matching final
+                // facts do not prove that the body survived the intermediate state change.
+                let needs_preparation = match existing.status {
+                    ClientRemoteBodyStatus::Prepared => world
+                        .scene
+                        .body(body_id)
+                        .is_none_or(|body| body.physical.is_none()),
+                    ClientRemoteBodyStatus::Preparing => self.remote_body_worker.is_none(),
+                    ClientRemoteBodyStatus::Pending | ClientRemoteBodyStatus::Unavailable => false,
+                };
+                if needs_preparation {
                     existing.status = ClientRemoteBodyStatus::Pending;
                     self.remote_bodies_may_have_pending = true;
                 }
@@ -1418,10 +1426,11 @@ pub(super) fn remote_body_requires_physics(
         // supported physics are unavailable. Attachments retain their existing parent ownership.
         ClientMovementPolicy::Navigation => {
             guid != world.player.guid
-                && world
-                    .entities
-                    .get(guid)
-                    .is_some_and(|entity| entity.attachment().is_none())
+                && world.entities.get(guid).is_some_and(|entity| {
+                    entity.attachment().is_none()
+                        && entity.physics.effective().motion_policy
+                            == holtburger_world::EntityMotionPolicy::Simulate
+                })
         }
     }
 }
@@ -1435,6 +1444,8 @@ fn client_remote_body_target(
     let body_id = SpatialBodyId::Entity(guid);
     if guid == world.player.guid
         || entity.attachment().is_some()
+        || entity.physics.effective().motion_policy
+            == holtburger_world::EntityMotionPolicy::ServerPositionOnly
         || !entity.physics.effective().supports_local_simulation()
     {
         return None;
@@ -2872,6 +2883,55 @@ mod tests {
                 .scene
                 .scheduled_dynamic_entity_ids()
                 .contains(&body_id)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn remote_body_is_reprepared_after_hide_and_reveal_in_one_batch() {
+        let mut world = WorldState::synthetic();
+        let player = Guid(0x5000_0001);
+        let remote = Guid(0x7000_0001);
+        world.seed_local_player_entity(player, "Player", position(0x1234_0001));
+        facts(&mut world, player);
+        world.add_entity(holtburger_world::entity::Entity::new(
+            remote,
+            "Remote".to_owned(),
+            position(0x1234_0001),
+        ));
+        facts(&mut world, remote);
+        let source = Arc::new(FakeSource::default());
+        let mut coordinator = ClientCollisionCoordinator::new(source);
+        let id = SpatialBodyId::Entity(remote);
+        coordinator.observe(&mut world);
+        wait_for_physical_body(&mut coordinator, &mut world, id).await;
+        let original = world
+            .entities
+            .get(remote)
+            .unwrap()
+            .physics
+            .effective()
+            .semantic;
+        let instance = world.entities.get(remote).unwrap().instance_sequence();
+        for (offset, state) in [(1, original | PhysicsState::HIDDEN), (2, original)] {
+            world.handle_message(&holtburger_protocol::messages::GameMessage::SetState(
+                Box::new(holtburger_protocol::messages::SetStateData {
+                    guid: remote,
+                    physics_state: state,
+                    instance_sequence: instance,
+                    state_sequence: offset,
+                }),
+            ));
+        }
+        assert!(world.scene.body(id).unwrap().physical.is_none());
+        coordinator.observe(&mut world);
+        assert!(matches!(
+            coordinator.remote_bodies[&id].status,
+            ClientRemoteBodyStatus::Pending | ClientRemoteBodyStatus::Preparing
+        ));
+        wait_for_physical_body(&mut coordinator, &mut world, id).await;
+        assert_eq!(
+            coordinator.remote_bodies[&id].status,
+            ClientRemoteBodyStatus::Prepared
         );
     }
 

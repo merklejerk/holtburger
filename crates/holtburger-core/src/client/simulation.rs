@@ -25,7 +25,7 @@ use holtburger_world::{
     AuthoredBodyMotionTick, BodyProjectionResolver, ContactState, DynamicBodyKinematics,
     GroundedBodyActuation, GroundedLaunch, LocalDriveControl, PhysicalBodyActuation,
     PhysicalBodyDefinition, PhysicalBodyState, SolveBodyInput, SpatialBodyId, WorldEvent,
-    WorldState, admit_physical_duration, advance_body_kinematics,
+    WorldState, admit_physical_duration,
 };
 use holtburger_world::{PlacedMotionPath, SpatialBody, SpatialMembership};
 use std::collections::HashMap;
@@ -930,11 +930,7 @@ fn tick_pose_only_remote_entities(
             .scene
             .body(input.body_id)
             .map(|body| (body.pose, body.spatial_membership()));
-        let solved = advance_body_kinematics(&input, dt);
-        let Some((solved, kind)) = world
-            .scene
-            .reconcile_pose_only_body_kinematics(solved, dt.as_secs_f32())
-        else {
+        let Some((solved, kind)) = world.scene.advance_pose_only_body_kinematics(&input, dt) else {
             continue;
         };
         let applied = world.apply_pose_only_body_tick(&solved, kind);
@@ -1058,6 +1054,78 @@ mod tests {
         MotionStance, MovementEventData, MovementType, MovementTypeData,
     };
     use holtburger_world::{SpatialBodyEvent, entity::Entity};
+
+    #[test]
+    fn hidden_remote_retains_vectors_but_only_accepts_server_position_changes() {
+        for policy in [
+            ClientMovementPolicy::Physical,
+            ClientMovementPolicy::Navigation,
+        ] {
+            for collision_enabled in [false, true] {
+                let mut world = WorldState::synthetic();
+                let guid = Guid(0x7000_0043);
+                let id = SpatialBodyId::Entity(guid);
+                let pose = WorldPosition {
+                    landblock_id: Guid(0x1234_0001),
+                    coords: Vector3::new(12.0, 12.0, 24.0),
+                    rotation: Quaternion::identity(),
+                };
+                let mut entity = Entity::new(guid, "Hidden remote".to_owned(), pose);
+                entity
+                    .physics
+                    .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                        PhysicsState::HIDDEN | PhysicsState::GRAVITY,
+                    ));
+                entity.velocity = Vector3::new(2.0, 0.0, 0.0);
+                entity.acceleration = Vector3::new(0.0, 0.0, -9.8);
+                entity.omega = Vector3::new(0.0, 0.0, 1.0);
+                world.add_entity(entity);
+                let retained = world.scene.body(id).unwrap().retained;
+                let dt = Duration::from_millis(30);
+                let mut motions = HashMap::new();
+                for _ in 0..10 {
+                    tick_pose_only_remote_entities(
+                        dt,
+                        &mut world,
+                        collision_enabled,
+                        policy,
+                        &mut motions,
+                    )
+                    .unwrap();
+                }
+                assert_eq!(world.scene.body(id).unwrap().pose, pose);
+                assert_eq!(world.scene.body(id).unwrap().retained, retained);
+                let mut destination = pose;
+                destination.coords.y += 1.0;
+                world.scene.apply_authoritative_body_effect(
+                    id,
+                    holtburger_world::AuthoritativePoseEffect::Interpolate {
+                        pose: destination,
+                        keep_heading: false,
+                        adjusted_max_speed_mps: None,
+                    },
+                    holtburger_world::AuthoritativeBodyVectors {
+                        velocity: retained.velocity,
+                        acceleration: retained.acceleration,
+                        omega: retained.omega,
+                    },
+                    Instant::now(),
+                );
+                for _ in 0..100 {
+                    tick_pose_only_remote_entities(
+                        dt,
+                        &mut world,
+                        collision_enabled,
+                        policy,
+                        &mut motions,
+                    )
+                    .unwrap();
+                }
+                assert_eq!(world.scene.body(id).unwrap().pose, destination);
+                assert_eq!(world.scene.body(id).unwrap().retained, retained);
+            }
+        }
+    }
 
     #[test]
     fn stalled_tick_discards_catch_up_before_projection_and_does_not_replay_it() {

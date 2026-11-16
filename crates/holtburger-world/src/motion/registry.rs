@@ -1322,6 +1322,11 @@ impl MotionRuntimeRegistry {
         self.bodies.get(&guid)
     }
 
+    /// Pauses one interval without retiring playback or replaying its previous hooks/offset.
+    pub(crate) fn pause_interval(&mut self, guid: Guid) {
+        self.mutate_body(guid, |runtime| runtime.tick = SequenceTick::identity());
+    }
+
     /// Current independent playback descriptions for the host projection.
     pub fn motion_playback(&self, guid: Guid) -> Option<MotionPlayback> {
         self.bodies

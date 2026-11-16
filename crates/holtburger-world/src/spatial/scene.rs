@@ -16,7 +16,7 @@ use super::dynamic_index::{
 #[cfg(test)]
 use super::{
     AcceptedBodyMotion, PhysicalReferenceInput, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
-    RETAIL_LANDING_NORMAL_Z, RetainedBodyKinematics, SolveBodyInput,
+    RETAIL_LANDING_NORMAL_Z, RetainedBodyKinematics,
 };
 use super::{
     AuthoritativeBodyVectors, AuthoritativePoseEffect, AuthoritativePoseResetCause, CollisionScene,
@@ -25,8 +25,8 @@ use super::{
     PhysicalBodyInput, PhysicalBodyParticipation, PhysicalBodyReconfiguration,
     PhysicalBodyReconfigurationOutcome, PhysicalBodyState, PhysicalBodyTickResult,
     PoseReconciliationState, PoseTranslationSource, RuntimeBodyAdvanceKind, RuntimeSpatialBodyView,
-    SolvedBodyKinematics, SpatialBody, SpatialBodyId, SpatialMembership, SpatialSampleMode,
-    SpatialSamplingConfig,
+    SolveBodyInput, SolvedBodyKinematics, SpatialBody, SpatialBodyId, SpatialMembership,
+    SpatialSampleMode, SpatialSamplingConfig,
     dead_reckoning::{project_pose_by_offset, sample_mode_for_projection_state},
     physical_body::{
         physical_body_scene_residency, resolve_physical_body_placement, solve_physical_body_tick,
@@ -1435,10 +1435,19 @@ impl SpatialScene {
         let body = self.body_store.body(body_id)?;
         let physical = body.physical.as_ref()?;
         let dynamic = physical.dynamic.as_ref()?;
-        let replacement = physical.dynamic_configuration_for_state(state, dynamic.demand)?;
+        // Hidden remotes retain their pose for server corrections. Local activation still
+        // needs prepared geometry to settle the destination before revealing the player;
+        // its lifecycle owner withholds ordinary simulation during that settlement.
+        let replacement = if matches!(body_id, SpatialBodyId::Entity(_))
+            && state.motion_policy == crate::EntityMotionPolicy::ServerPositionOnly
+        {
+            None
+        } else {
+            Some(physical.dynamic_configuration_for_state(state, dynamic.demand)?)
+        };
         let collision_filter = physical.collision_filter;
         let initial_cell = body.pose.is_indoors().then_some(body.pose.landblock_id);
-        self.set_dynamic_physical_body(body_id, Some(replacement), collision_filter, initial_cell)
+        self.set_dynamic_physical_body(body_id, replacement, collision_filter, initial_cell)
     }
 
     /// Applies one absolute object scale to retained unit geometry and invalidates stale contacts.
@@ -2301,12 +2310,16 @@ impl SpatialScene {
         true
     }
 
-    /// Composes one pose-only body's ordinary projection through its body-owned reconciliation.
-    pub fn reconcile_pose_only_body_kinematics(
+    /// Advances ordinary motion and server corrections under one captured motion permission.
+    /// Retained vectors survive a pause but contribute to neither extrapolation nor correction.
+    pub fn advance_pose_only_body_kinematics(
         &mut self,
-        mut solved: SolvedBodyKinematics,
-        delta_seconds: f32,
+        input: &SolveBodyInput,
+        dt: std::time::Duration,
     ) -> Option<(SolvedBodyKinematics, RuntimeBodyAdvanceKind)> {
+        let mut solved = super::advance_body_kinematics(input, dt);
+        let delta_seconds = dt.as_secs_f32();
+        let motion_policy = input.motion_policy;
         let body_id = solved.body_id;
         let body = self.body_store.body_kinematics_mut(body_id)?;
         let Some(mut reconciliation) = body.reconciliation.take() else {
@@ -2324,8 +2337,12 @@ impl SpatialScene {
         }
 
         let accepted_translation = solved.pose.global_coords() - body.pose.global_coords();
-        let physical_translation = body.retained.velocity * delta_seconds
-            + body.retained.acceleration * (0.5 * delta_seconds * delta_seconds);
+        let physical_translation = if motion_policy == crate::EntityMotionPolicy::Simulate {
+            body.retained.velocity * delta_seconds
+                + body.retained.acceleration * (0.5 * delta_seconds * delta_seconds)
+        } else {
+            Vector3::zero()
+        };
         let ordinary_translation = accepted_translation - physical_translation;
         let composition = reconciliation.compose_pose_only_translation(
             body.pose,
@@ -2346,7 +2363,11 @@ impl SpatialScene {
         {
             solved.pose.rotation = integrate_angular_velocity(
                 authoritative.rotation,
-                body.retained.omega,
+                if motion_policy == crate::EntityMotionPolicy::Simulate {
+                    body.retained.omega
+                } else {
+                    Vector3::zero()
+                },
                 delta_seconds,
             );
         }
@@ -2516,18 +2537,16 @@ mod physical_body_tests {
 
     fn tick_pose_only_body(scene: &mut SpatialScene, body_id: SpatialBodyId, delta_seconds: f32) {
         let body = scene.body(body_id).expect("pose-only body").clone();
-        let ordinary = crate::spatial::advance_body_kinematics(
-            &SolveBodyInput {
-                body_id,
-                pose: body.pose,
-                contact: body.contact,
-                authored_offset: None,
-                retained: body.retained,
-            },
-            Duration::from_secs_f32(delta_seconds),
-        );
+        let input = SolveBodyInput {
+            motion_policy: crate::EntityMotionPolicy::Simulate,
+            body_id,
+            pose: body.pose,
+            contact: body.contact,
+            authored_offset: None,
+            retained: body.retained,
+        };
         let (solved, _) = scene
-            .reconcile_pose_only_body_kinematics(ordinary, delta_seconds)
+            .advance_pose_only_body_kinematics(&input, Duration::from_secs_f32(delta_seconds))
             .expect("pose-only body remains registered");
         assert!(scene.apply_solved_runtime_body_kinematics(&solved));
     }

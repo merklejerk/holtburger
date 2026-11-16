@@ -39,6 +39,7 @@ impl NavigationBodyFacts {
         let physics = entity.physics.effective();
         if guid == world.player.guid
             || entity.attachment().is_some()
+            || physics.motion_policy == holtburger_world::EntityMotionPolicy::ServerPositionOnly
             || !physics.supports_local_simulation()
             || physics.integration_eligibility
                 != holtburger_world::EntityIntegrationEligibility::Eligible

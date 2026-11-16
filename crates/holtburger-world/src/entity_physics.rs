@@ -73,6 +73,16 @@ pub enum EntityIntegrationEligibility {
     Static,
 }
 
+/// Ordinary motion permission, independent of authoritative position reconciliation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityMotionPolicy {
+    /// Advance authored playback and integrate retained physical vectors.
+    Simulate,
+    /// Retail behavior is to pause model animation and physics while hidden, but continue
+    /// position-manager corrections and independently running scripts and particles.
+    ServerPositionOnly,
+}
+
 /// Collision character of an entity in one collision domain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntityCollisionParticipation {
@@ -237,6 +247,8 @@ pub struct EffectiveEntityPhysicsState {
     pub unsupported_local_simulation: PhysicsState,
     /// Collision callbacks invoke the default script; contact reporting gates callback delivery.
     pub collision_script_enabled: bool,
+    /// Ordinary motion permission shared by animation, physical, and pose-only consumers.
+    pub motion_policy: EntityMotionPolicy,
     /// Integration eligibility derived from the semantic mask.
     pub integration_eligibility: EntityIntegrationEligibility,
     /// Directional peer collision decisions derived from the semantic mask.
@@ -512,6 +524,11 @@ pub fn resolve_effective_entity_physics_state(
         unknown_bits,
         unsupported_local_simulation,
         collision_script_enabled: semantic.contains(PhysicsState::SCRIPTED_COLLISION),
+        motion_policy: if hidden {
+            EntityMotionPolicy::ServerPositionOnly
+        } else {
+            EntityMotionPolicy::Simulate
+        },
         integration_eligibility,
         dynamic_collision: EntityDynamicCollisionPolicy {
             is_static: semantic.contains(PhysicsState::STATIC),
@@ -729,6 +746,7 @@ mod tests {
         assert!(resolved.reporting.as_environment);
         assert!(resolved.response.inelastic);
         assert!(resolved.presentation.no_draw);
+        assert_eq!(resolved.motion_policy, EntityMotionPolicy::Simulate);
         assert!(resolved.supports_local_simulation());
     }
 
@@ -736,6 +754,10 @@ mod tests {
     fn hidden_derives_runtime_consequences_without_rewriting_semantic_truth() {
         let semantic = PhysicsState::HIDDEN | PhysicsState::REPORT_COLLISIONS;
         let resolved = resolve_effective_entity_physics_state(semantic);
+        assert_eq!(
+            resolved.motion_policy,
+            EntityMotionPolicy::ServerPositionOnly
+        );
 
         assert_eq!(resolved.semantic, semantic);
         assert_eq!(

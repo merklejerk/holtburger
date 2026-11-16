@@ -17,6 +17,7 @@ use holtburger_protocol::messages::movement::{
     HoldKey, MotionStance, MovementEventData, MovementInvalid, MovementType, MovementTypeData,
 };
 use holtburger_session::Session;
+use holtburger_world::WorldState;
 use holtburger_world::entity::{
     Entity, EntityMotionAction, EntityMotionAdmission, EntityMotionCommandSource,
     EntityMotionDirective, EntityMotionSnapshot, EntityMoveToParameters, EntityNetworkMotion,
@@ -27,7 +28,6 @@ use holtburger_world::state::motion_resolution::test_support::{
     FIXTURE_STAND_COMMAND, FixtureCycle, explicit_motion_catalog,
 };
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, TrainingLevel};
-use holtburger_world::{AuthoritativePoseEffect, WorldState};
 
 const FIXTURE_MOTION_TABLE_ID: u32 = 0x0900_0020;
 
@@ -1890,8 +1890,7 @@ fn sequential_position_confirmations_preserve_manual_displacement() {
             coords: Vector3::new(sample as f32 * 0.1, 0.0, 0.0),
             ..pose
         };
-        let _ =
-            world.apply_player_pose_effect(AuthoritativePoseEffect::Confirm { pose: confirmed });
+        let _ = world.set_player_position(confirmed);
 
         assert!(movement.has_active_manual_drive());
         assert!(world.motion_runtimes.get(guid).is_some());

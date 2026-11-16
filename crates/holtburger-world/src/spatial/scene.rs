@@ -2011,6 +2011,28 @@ impl SpatialScene {
         self.collision_reports.active_len()
     }
 
+    /// Confirms only the local-player timeline, preserving its integrated pose and vectors.
+    /// A missing timeline is reported to the world owner for explicit initialization.
+    pub fn confirm_local_player_pose(
+        &mut self,
+        player: Guid,
+        pose: WorldPosition,
+        now: Instant,
+    ) -> bool {
+        let Some(mut body) = self.remove_body(SpatialBodyId::LocalPlayer(player)) else {
+            return false;
+        };
+        body.pose_authority = Some(BodyPoseAuthority::Correctable(pose));
+        body.sampling.last_authoritative_update = now;
+        body.sampling.last_derived_at = now;
+        body.reconciliation
+            .get_or_insert_with(|| Box::new(PoseReconciliationState::default()))
+            .confirm(pose, body.pose);
+        wake_dynamic_runtime(&mut body);
+        self.register_body(body);
+        true
+    }
+
     /// Applies one already-classified authoritative pose effect and vector replacement.
     ///
     /// Initialization is the only variant that may create a body. Every other effect requires an
@@ -2038,7 +2060,6 @@ impl SpatialScene {
         body.pose_authority = Some(match effect {
             AuthoritativePoseEffect::Observe { .. } => BodyPoseAuthority::Observed(pose),
             AuthoritativePoseEffect::Initialize { .. }
-            | AuthoritativePoseEffect::Confirm { .. }
             | AuthoritativePoseEffect::Interpolate { .. }
             | AuthoritativePoseEffect::Snap { .. }
             | AuthoritativePoseEffect::Reset { .. } => BodyPoseAuthority::Correctable(pose),
@@ -2056,14 +2077,13 @@ impl SpatialScene {
         });
         // Routine mobile pose samples retarget the reference without erasing contact/motor
         // continuation. Explicit vector messages and discontinuous initialization remain replacements.
-        let preserves_continuation = matches!(
-            effect,
-            AuthoritativePoseEffect::Confirm { .. } | AuthoritativePoseEffect::Observe { .. }
-        ) || mobile_physical
-            && matches!(
-                effect,
-                AuthoritativePoseEffect::Interpolate { .. } | AuthoritativePoseEffect::Snap { .. }
-            );
+        let preserves_continuation = matches!(effect, AuthoritativePoseEffect::Observe { .. })
+            || mobile_physical
+                && matches!(
+                    effect,
+                    AuthoritativePoseEffect::Interpolate { .. }
+                        | AuthoritativePoseEffect::Snap { .. }
+                );
         if !preserves_continuation {
             body.retained = vectors.into();
             body.nominal = vectors;
@@ -2090,11 +2110,6 @@ impl SpatialScene {
                 body.motion_state = None;
                 body.reconciliation = None;
                 body.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
-            }
-            AuthoritativePoseEffect::Confirm { .. } => {
-                body.reconciliation
-                    .get_or_insert_with(|| Box::new(PoseReconciliationState::default()))
-                    .confirm(pose, body.pose);
             }
             AuthoritativePoseEffect::Interpolate {
                 keep_heading,

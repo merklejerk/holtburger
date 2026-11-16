@@ -749,7 +749,11 @@ fn authoritative_pose_effects_do_not_infer_initialization_or_replace_ordinary_ru
 
     assert!(!scene.apply_authoritative_body_effect(
         body_id,
-        AuthoritativePoseEffect::Confirm { pose: target_pose },
+        AuthoritativePoseEffect::Interpolate {
+            pose: target_pose,
+            keep_heading: false,
+            adjusted_max_speed_mps: None,
+        },
         vectors,
         now,
     ));
@@ -768,7 +772,6 @@ fn authoritative_pose_effects_do_not_infer_initialization_or_replace_ordinary_ru
     ));
 
     for effect in [
-        AuthoritativePoseEffect::Confirm { pose: target_pose },
         AuthoritativePoseEffect::Interpolate {
             pose: target_pose,
             keep_heading: false,
@@ -812,11 +815,6 @@ fn authoritative_confirmation_preserves_locally_integrated_vectors() {
         acceleration: Vector3::new(0.0, 0.0, -9.8),
         omega: Vector3::new(0.0, 0.0, 0.5),
     };
-    let echoed_vectors = AuthoritativeBodyVectors {
-        velocity: Vector3::new(30.0, 40.0, 50.0),
-        acceleration: Vector3::zero(),
-        omega: Vector3::new(0.0, 0.0, 5.0),
-    };
 
     assert!(scene.apply_authoritative_body_effect(
         body_id,
@@ -824,12 +822,9 @@ fn authoritative_confirmation_preserves_locally_integrated_vectors() {
         local_vectors,
         now,
     ));
-    assert!(scene.apply_authoritative_body_effect(
-        body_id,
-        AuthoritativePoseEffect::Confirm {
-            pose: confirmed_pose,
-        },
-        echoed_vectors,
+    assert!(scene.confirm_local_player_pose(
+        Guid(0x7000_0012),
+        confirmed_pose,
         now + Duration::from_millis(30),
     ));
 
@@ -882,7 +877,11 @@ fn reset_and_world_suspension_clear_pose_reconciliation_state() {
 
     scene.apply_authoritative_body_effect(
         body_id,
-        AuthoritativePoseEffect::Confirm { pose: target_pose },
+        AuthoritativePoseEffect::Interpolate {
+            pose: target_pose,
+            keep_heading: false,
+            adjusted_max_speed_mps: None,
+        },
         vectors,
         now,
     );

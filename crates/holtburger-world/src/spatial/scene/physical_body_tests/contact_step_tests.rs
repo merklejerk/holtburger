@@ -1979,6 +1979,73 @@ fn grounded_step_input(
 }
 
 #[test]
+fn completed_pose_only_interpolation_can_gain_physics_and_capture_contact_return() {
+    let now = Instant::now();
+    let collision = flat_collision_scene();
+    let mut scene = SpatialScene::new();
+    let remote = SpatialBodyId::Entity(Guid(1));
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let position = pose(Vector3::new(90.0, 96.0, primary.radius - primary.center.z));
+    scene.register_body(SpatialBody::new(remote, position, now));
+    assert!(scene.apply_authoritative_body_effect(
+        remote,
+        AuthoritativePoseEffect::Interpolate {
+            pose: position,
+            keep_heading: false,
+            adjusted_max_speed_mps: None,
+        },
+        AuthoritativeBodyVectors::default(),
+        now,
+    ));
+    let input = SolveBodyInput::velocity(
+        remote,
+        position,
+        ContactState::Unknown,
+        Vector3::zero(),
+        Vector3::zero(),
+    );
+    let (solved, _) = scene
+        .advance_pose_only_body_kinematics(
+            &input,
+            Duration::from_secs_f32(MOBILE_CONTACT_TICK_SECONDS),
+        )
+        .unwrap();
+    assert!(scene.apply_solved_runtime_body_kinematics(&solved));
+    let body = scene.body(remote).unwrap();
+    assert!(!body.has_pose_reconciliation_work());
+    assert!(body.has_pose_reconciliation_state());
+    scene
+        .set_dynamic_physical_body(
+            remote,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    let collection = scene
+        .advance_dynamic_entity_collection(&collision, MOBILE_CONTACT_TICK_SECONDS, now, |_| {
+            Ok(PhysicalBodyInput::referenced(
+                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                crate::spatial::PhysicalReferenceInput::body(None),
+                true,
+            ))
+        })
+        .unwrap();
+    assert!(collection.coverage_rejections.is_empty());
+    let body = scene.body(remote).unwrap();
+    assert_eq!(body.contact, ContactState::Grounded);
+    assert_eq!(
+        body.reconciliation
+            .as_ref()
+            .unwrap()
+            .physical_reference()
+            .unwrap(),
+        position
+    );
+}
+
+#[test]
 fn confirmation_uses_newly_proved_support_before_movement() {
     let now = Instant::now();
     let collision = flat_collision_scene();

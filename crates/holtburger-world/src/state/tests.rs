@@ -2161,6 +2161,64 @@ fn test_public_update_position_non_location_for_player_is_stored_without_moving_
 }
 
 #[test]
+fn remote_location_quality_preserves_runtime_correction_and_placement_ownership() {
+    for pending_correction in [false, true] {
+        for placement in [
+            crate::EntityPlacementIntent::Independent,
+            crate::EntityPlacementIntent::Withdrawn,
+        ] {
+            let mut state = WorldState::synthetic();
+            let guid = Guid(0x50000999);
+            let initial = WorldPosition {
+                landblock_id: Guid(0x1234_0001),
+                rotation: Quaternion::identity(),
+                ..WorldPosition::default()
+            };
+            let target = WorldPosition {
+                coords: Vector3::new(1.0, 0.0, 0.0),
+                ..initial
+            };
+            state.add_entity(Entity::new(guid, "Remote".to_owned(), initial));
+            let body_id = SpatialBodyId::Entity(guid);
+            if pending_correction {
+                state.apply_authoritative_pose_effect(
+                    guid,
+                    Vector3::zero(),
+                    Vector3::zero(),
+                    crate::AuthoritativePoseEffect::Interpolate {
+                        pose: target,
+                        keep_heading: false,
+                        adjusted_max_speed_mps: None,
+                    },
+                );
+            }
+            state.entities.get_mut(guid).unwrap().placement_intent = placement;
+            if placement == crate::EntityPlacementIntent::Withdrawn {
+                state.scene.retire_authoritative_body(body_id);
+            }
+            let before = state.scene.body(body_id).cloned();
+            let property_position = WorldPosition {
+                coords: Vector3::new(2.0, 0.0, 0.0),
+                ..initial
+            };
+            let events = state.handle_message(&GameMessage::PublicUpdatePosition(Box::new(
+                PublicUpdatePositionData {
+                    sequence: 1,
+                    guid,
+                    position_type: PositionType::Location,
+                    pos: property_position,
+                },
+            )));
+            let entity = state.entities.get(guid).unwrap();
+            assert_eq!(entity.position, property_position);
+            assert_eq!(entity.placement_intent, placement);
+            assert_eq!(state.scene.body(body_id), before.as_ref());
+            assert!(events.iter().any(|event| matches!(event, WorldEvent::EntityMoved { guid: moved, pos } if *moved == guid && *pos == property_position)));
+        }
+    }
+}
+
+#[test]
 fn test_public_update_position_non_location_for_other_entity_does_not_move_it() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);

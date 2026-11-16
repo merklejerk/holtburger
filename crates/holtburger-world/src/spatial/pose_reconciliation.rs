@@ -79,6 +79,7 @@ pub enum AuthoritativePoseResetCause {
 /// The selected variant carries the pose so scene consumers cannot pair a classified effect with
 /// a different authoritative sample. Local and remote adapters choose the variant once; spatial
 /// code executes it without re-deriving policy from body identity or update timing.
+/// Local-player confirmation uses a dedicated scene entry point, not an entity effect.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AuthoritativePoseEffect {
     /// Retain a server observation without authorizing interpolation or recovery placement.
@@ -89,11 +90,6 @@ pub enum AuthoritativePoseEffect {
     /// Seed a body with no runtime timeline and discard any stale reconciliation allocation.
     Initialize {
         /// Authoritative pose installed as both authority and runtime placement.
-        pose: WorldPosition,
-    },
-    /// Record authority and re-arm confirmed-travel damping without replacing runtime placement.
-    Confirm {
-        /// Latest producer-authoritative pose used to measure confirmed travel.
         pose: WorldPosition,
     },
     /// Record authority and replace the active interpolation target.
@@ -125,7 +121,6 @@ impl AuthoritativePoseEffect {
         match self {
             Self::Initialize { pose }
             | Self::Observe { pose }
-            | Self::Confirm { pose }
             | Self::Interpolate { pose, .. }
             | Self::Snap { pose }
             | Self::Reset { pose, .. } => pose,
@@ -137,7 +132,6 @@ impl AuthoritativePoseEffect {
         match self {
             Self::Initialize { .. } => Self::Initialize { pose },
             Self::Observe { .. } => Self::Observe { pose },
-            Self::Confirm { .. } => Self::Confirm { pose },
             Self::Interpolate {
                 keep_heading,
                 adjusted_max_speed_mps,
@@ -269,8 +263,10 @@ enum ReconciliationMode {
     /// No pending reconciliation work or confirmation budget.
     #[default]
     Empty,
-    /// Existing confirmation and pose-only retail projection mechanics.
-    Retail(RetailPoseReconciliationState),
+    /// Local prediction retains its confirmation budget across physics changes.
+    LocalConfirmation(ConfirmedTravelConstraint),
+    /// Remote pose-only projection, including its residual travel constraint.
+    RemotePose(RemotePoseReconciliationState),
     /// Collision-respecting correction for a mobile physical body.
     Physical(PhysicalCorrection),
 }
@@ -283,9 +279,8 @@ impl PoseReconciliationState {
 
     /// Preserves the local player's confirmed-travel behavior.
     pub fn confirm(&mut self, confirmed: WorldPosition, current: WorldPosition) {
-        let mut state = RetailPoseReconciliationState::default();
-        state.confirm(confirmed, current);
-        self.mode = ReconciliationMode::Retail(state);
+        self.mode =
+            ReconciliationMode::LocalConfirmation(confirmed_travel_constraint(confirmed, current));
         self.recovery = None;
     }
 
@@ -297,13 +292,13 @@ impl PoseReconciliationState {
         keep_heading: bool,
         adjusted_max_speed_mps: Option<f32>,
     ) {
-        if !matches!(self.mode, ReconciliationMode::Retail(state) if state.interpolation.is_some())
+        if !matches!(self.mode, ReconciliationMode::RemotePose(state) if state.interpolation.is_some())
         {
             self.recovery = None;
         }
-        let mut state = RetailPoseReconciliationState::default();
+        let mut state = RemotePoseReconciliationState::default();
         state.interpolate(target, current, keep_heading, adjusted_max_speed_mps);
-        self.mode = ReconciliationMode::Retail(state);
+        self.mode = ReconciliationMode::RemotePose(state);
     }
 
     /// Retargets the reference and renews height evidence while preserving return/watchdog state.
@@ -337,7 +332,7 @@ impl PoseReconciliationState {
         match self.mode {
             ReconciliationMode::Empty => self.correct(current, current, true),
             ReconciliationMode::Physical(_) => {}
-            ReconciliationMode::Retail(_) => {
+            ReconciliationMode::LocalConfirmation(_) | ReconciliationMode::RemotePose(_) => {
                 anyhow::bail!(
                     "contact return cannot replace local confirmation or pose-only reconciliation"
                 );
@@ -346,15 +341,17 @@ impl PoseReconciliationState {
         Ok(())
     }
 
-    /// Reclassifies pending remote work when physics is installed or removed. A confirmation
-    /// without a remote target keeps its local-player travel budget across that change.
+    /// Reclassifies remote work when physics changes; local confirmation has a separate lifetime.
     pub(crate) fn set_mobile_physical(&mut self, mobile: bool, current: WorldPosition) {
         match self.mode {
-            ReconciliationMode::Retail(state) if mobile => {
+            ReconciliationMode::RemotePose(state) if mobile => {
                 if let Some(target) = state.interpolation {
                     self.correct(target.pose, current, target.keep_heading);
                 } else if let Some(target) = state.pending_snap {
                     self.correct(target, current, false);
+                } else {
+                    // Completed remote interpolation must not become local confirmation.
+                    self.reset();
                 }
             }
             ReconciliationMode::Physical(target) if !mobile => {
@@ -498,16 +495,16 @@ impl PoseReconciliationState {
 
     /// Schedules placement only for pose-only consumers.
     pub fn schedule_snap(&mut self, target: WorldPosition) {
-        let mut state = RetailPoseReconciliationState::default();
+        let mut state = RemotePoseReconciliationState::default();
         state.schedule_snap(target);
-        self.mode = ReconciliationMode::Retail(state);
+        self.mode = ReconciliationMode::RemotePose(state);
         self.recovery = None;
     }
 
     /// Takes a pose-only placement once at the tick boundary.
     pub fn take_pending_snap(&mut self) -> Option<WorldPosition> {
         match &mut self.mode {
-            ReconciliationMode::Retail(state) => state.take_pending_snap(),
+            ReconciliationMode::RemotePose(state) => state.take_pending_snap(),
             _ => None,
         }
     }
@@ -515,8 +512,8 @@ impl PoseReconciliationState {
     /// Pending movement work keeps a blocked correction eligible for a later tick.
     pub fn has_projection_work(&self) -> bool {
         match self.mode {
-            ReconciliationMode::Empty => false,
-            ReconciliationMode::Retail(state) => state.has_projection_work(),
+            ReconciliationMode::Empty | ReconciliationMode::LocalConfirmation(_) => false,
+            ReconciliationMode::RemotePose(state) => state.has_projection_work(),
             ReconciliationMode::Physical(target) => {
                 target.activity != PhysicalReturnActivity::Watching
                     || target.pending_heading.is_some()
@@ -529,8 +526,8 @@ impl PoseReconciliationState {
     pub fn is_empty(&self) -> bool {
         match self.mode {
             ReconciliationMode::Empty => true,
-            ReconciliationMode::Retail(state) => state.is_empty(),
-            ReconciliationMode::Physical(_) => false,
+            ReconciliationMode::RemotePose(state) => state.is_empty(),
+            ReconciliationMode::Physical(_) | ReconciliationMode::LocalConfirmation(_) => false,
         }
     }
 
@@ -543,7 +540,13 @@ impl PoseReconciliationState {
         quantum: f32,
     ) -> PoseReconciliationComposition {
         match &mut self.mode {
-            ReconciliationMode::Retail(state) => {
+            ReconciliationMode::LocalConfirmation(constraint) => PoseReconciliationComposition {
+                translation: constraint
+                    .constrain_translation(ordinary_translation, has_physical_contact(contact)),
+                source: PoseTranslationSource::Ordinary,
+                keep_heading: false,
+            },
+            ReconciliationMode::RemotePose(state) => {
                 state.compose_translation(current, contact, ordinary_translation, quantum)
             }
             _ => PoseReconciliationComposition {
@@ -562,7 +565,12 @@ impl PoseReconciliationState {
         quantum: f32,
     ) -> PoseReconciliationComposition {
         match &mut self.mode {
-            ReconciliationMode::Retail(state) => {
+            ReconciliationMode::LocalConfirmation(constraint) => PoseReconciliationComposition {
+                translation: constraint.constrain_translation(ordinary_translation, false),
+                source: PoseTranslationSource::Ordinary,
+                keep_heading: false,
+            },
+            ReconciliationMode::RemotePose(state) => {
                 state.compose_pose_only_translation(current, ordinary_translation, quantum)
             }
             ReconciliationMode::Empty => PoseReconciliationComposition {
@@ -577,13 +585,13 @@ impl PoseReconciliationState {
     }
 }
 
-/// Body-owned temporal state for authoritative pose reconciliation.
+/// Remote pose-only temporal state for authoritative pose reconciliation.
 ///
 /// The interpolation target and confirmed-travel constraint transition together on every received
 /// pose effect. A reset clears the complete composite, preventing temporal state from crossing an
 /// authority discontinuity.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-struct RetailPoseReconciliationState {
+struct RemotePoseReconciliationState {
     /// Target that may replace ordinary translation while contacted.
     interpolation: Option<InterpolationTarget>,
     /// Confirmation budget that modifies whichever translation basis survives.
@@ -596,15 +604,7 @@ struct RetailPoseReconciliationState {
     received_contact: bool,
 }
 
-impl RetailPoseReconciliationState {
-    /// Applies a confirmation without granting interpolation ownership of translation.
-    pub fn confirm(&mut self, confirmed: WorldPosition, current: WorldPosition) {
-        self.interpolation = None;
-        self.pending_snap = None;
-        self.received_contact = false;
-        self.constraint = Some(confirmed_travel_constraint(confirmed, current));
-    }
-
+impl RemotePoseReconciliationState {
     /// Applies an admitted near target and re-arms its confirmed-travel constraint atomically.
     pub fn interpolate(
         &mut self,
@@ -737,20 +737,27 @@ impl RetailPoseReconciliationState {
         let Some(constraint) = self.constraint.as_mut() else {
             return translation;
         };
+        constraint.constrain_translation(translation, has_contact)
+    }
+}
+
+impl ConfirmedTravelConstraint {
+    /// Accumulates accepted travel and damps contacted motion against the shared retail budget.
+    fn constrain_translation(&mut self, translation: Vector3, has_contact: bool) -> Vector3 {
         let (translation, accumulated_distance) = if has_contact {
             damp_constraint_translation(
                 translation,
-                constraint.accumulated_distance,
-                constraint.start_distance,
-                constraint.maximum_distance,
+                self.accumulated_distance,
+                self.start_distance,
+                self.maximum_distance,
             )
         } else {
             (
                 translation,
-                constraint.accumulated_distance + translation.length(),
+                self.accumulated_distance + translation.length(),
             )
         };
-        constraint.accumulated_distance = accumulated_distance;
+        self.accumulated_distance = accumulated_distance;
         translation
     }
 }
@@ -820,6 +827,18 @@ mod tests {
             coords: Vector3::new(x, 0.0, 0.0),
             rotation: Quaternion::identity(),
         }
+    }
+
+    #[test]
+    fn local_confirmation_budget_survives_physical_role_changes() {
+        let current = position(0.0);
+        let mut state = PoseReconciliationState::default();
+        state.confirm(current, current);
+        let confirmed = state;
+        state.set_mobile_physical(true, current);
+        state.set_mobile_physical(false, current);
+        assert_eq!(state, confirmed);
+        assert!(state.begin_contact_return(current).is_err());
     }
 
     #[test]

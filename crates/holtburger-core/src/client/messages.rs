@@ -77,14 +77,15 @@ impl ClientRuntime {
         } else {
             None
         };
-        let effect = reset_cause.map_or(
-            AuthoritativePoseEffect::Confirm { pose: position },
-            |cause| AuthoritativePoseEffect::Reset {
-                pose: position,
-                cause,
-            },
-        );
-        let events = self.world.apply_player_pose_effect(effect);
+        let events = match reset_cause {
+            Some(cause) => self
+                .world
+                .apply_player_pose_effect(AuthoritativePoseEffect::Reset {
+                    pose: position,
+                    cause,
+                }),
+            None => self.world.set_player_position(position),
+        };
         if reset_cause.is_some() {
             self.movement.reset_navigation_progress();
         }

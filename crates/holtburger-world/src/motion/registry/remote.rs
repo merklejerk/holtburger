@@ -294,7 +294,6 @@ impl MotionRuntimeRegistry {
                     .rotation = pose.rotation;
             }
             AuthoritativePoseEffect::Observe { .. }
-            | AuthoritativePoseEffect::Confirm { .. }
             | AuthoritativePoseEffect::Interpolate {
                 keep_heading: true, ..
             } => {}

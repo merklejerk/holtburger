@@ -37,8 +37,8 @@ impl PoseReconciliationState {
             ReconciliationMode::Physical(correction) => {
                 correction.height_disagreement_origin = None
             }
-            ReconciliationMode::Retail(state) => state.received_contact = false,
-            ReconciliationMode::Empty => {}
+            ReconciliationMode::RemotePose(state) => state.received_contact = false,
+            ReconciliationMode::Empty | ReconciliationMode::LocalConfirmation(_) => {}
         }
     }
 
@@ -50,7 +50,7 @@ impl PoseReconciliationState {
         seconds: f32,
     ) -> Option<WorldPosition> {
         let target = match self.mode {
-            ReconciliationMode::Retail(state) if state.received_contact => state.interpolation,
+            ReconciliationMode::RemotePose(state) if state.received_contact => state.interpolation,
             _ => None,
         };
         let Some(target) = target else {

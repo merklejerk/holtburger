@@ -17,6 +17,24 @@ use holtburger_protocol::messages::movement::{
 };
 use std::time::Instant;
 
+/// Player-only mutation input keeps confirmation out of the shared entity-effect contract.
+enum PlayerPoseUpdate {
+    /// Same-epoch authority confirms local prediction without replacing its timeline.
+    Confirm(WorldPosition),
+    /// Explicit initialization, observation or correction selected by the authority adapter.
+    Effect(AuthoritativePoseEffect),
+}
+
+impl PlayerPoseUpdate {
+    /// The sample to validate before either local confirmation or an explicit effect is applied.
+    fn pose(&self) -> WorldPosition {
+        match self {
+            Self::Confirm(pose) => *pose,
+            Self::Effect(effect) => effect.pose(),
+        }
+    }
+}
+
 impl WorldState {
     /// Apply one authored presentation flag; ordinary entity publication carries the effective result.
     pub fn apply_entity_script_presentation(
@@ -80,16 +98,13 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn apply_authoritative_pose_effect(
+    /// Applies placement eligibility to every authoritative pose, including local confirmation.
+    fn admit_authoritative_body_pose(
         &mut self,
         guid: Guid,
-        velocity: Vector3,
-        omega: Vector3,
-        effect: AuthoritativePoseEffect,
-    ) -> bool {
-        let Some(body_id) = self.authoritative_body_id_for_guid(guid) else {
-            return false;
-        };
+        pose: WorldPosition,
+    ) -> Option<SpatialBodyId> {
+        let body_id = self.authoritative_body_id_for_guid(guid)?;
 
         // Retaining a child's last wire position does not authorize an independent body. This
         // gate also covers vector-update recovery and replacement, which can initialize bodies.
@@ -100,20 +115,34 @@ impl WorldState {
                 Ok(crate::ResolvedScenePlacement::Attached { .. }) => {}
                 Ok(_) => {
                     self.scene.retire_authoritative_body(body_id);
-                    return false;
+                    return None;
                 }
                 Err(error) => {
                     log::error!("Cannot establish entity body: {error}");
                     self.scene.retire_authoritative_body(body_id);
-                    return false;
+                    return None;
                 }
             }
         }
 
-        if effect.pose().landblock_id == Guid::NULL {
+        if pose.landblock_id == Guid::NULL {
             self.scene.retire_authoritative_body(body_id);
-            return false;
+            return None;
         }
+
+        Some(body_id)
+    }
+
+    pub(crate) fn apply_authoritative_pose_effect(
+        &mut self,
+        guid: Guid,
+        velocity: Vector3,
+        omega: Vector3,
+        effect: AuthoritativePoseEffect,
+    ) -> bool {
+        let Some(body_id) = self.admit_authoritative_body_pose(guid, effect.pose()) else {
+            return false;
+        };
 
         let vectors = self.authoritative_body_vectors(guid, velocity, omega);
         let applied =
@@ -933,7 +962,7 @@ impl WorldState {
     /// reconciliation state aligned with that world-owned pose.
     fn update_player_position(
         &mut self,
-        effect: AuthoritativePoseEffect,
+        update: PlayerPoseUpdate,
     ) -> Option<(Guid, WorldPosition)> {
         let guid = self.player.guid;
         if guid == Guid::NULL {
@@ -942,18 +971,25 @@ impl WorldState {
 
         let pos = recover_pose_orientation(
             guid,
-            effect.pose(),
+            update.pose(),
             self.player_position().map(|current| current.rotation),
         );
 
-        self.player_entity_mut()?.position = pos;
-        let (velocity, omega) = self
-            .entities
-            .get(guid)
-            .map(|entity| (entity.velocity, entity.omega))
-            .unwrap_or((Vector3::zero(), Vector3::zero()));
-        let effect = effect.with_pose(pos);
-        if !self.apply_authoritative_pose_effect(guid, velocity, omega, effect) {
+        let entity = self.player_entity_mut()?;
+        entity.position = pos;
+        let (velocity, omega) = (entity.velocity, entity.omega);
+        let applied = match update {
+            PlayerPoseUpdate::Confirm(_) => {
+                self.admit_authoritative_body_pose(guid, pos).is_some()
+                    && self
+                        .scene
+                        .confirm_local_player_pose(guid, pos, Instant::now())
+            }
+            PlayerPoseUpdate::Effect(effect) => {
+                self.apply_authoritative_pose_effect(guid, velocity, omega, effect.with_pose(pos))
+            }
+        };
+        if !applied {
             self.initialize_authoritative_body(guid, pos, velocity, omega);
         }
 
@@ -962,8 +998,13 @@ impl WorldState {
 
     /// Applies one classified player pose effect and emits its authoritative entity change.
     pub fn apply_player_pose_effect(&mut self, effect: AuthoritativePoseEffect) -> Vec<WorldEvent> {
+        self.publish_player_pose_update(PlayerPoseUpdate::Effect(effect))
+    }
+
+    /// Publishes the same player/entity notifications for confirmation and discontinuities.
+    fn publish_player_pose_update(&mut self, update: PlayerPoseUpdate) -> Vec<WorldEvent> {
         let mut events = Vec::new();
-        let Some((guid, pos)) = self.update_player_position(effect) else {
+        let Some((guid, pos)) = self.update_player_position(update) else {
             return events;
         };
 
@@ -976,7 +1017,7 @@ impl WorldState {
 
     /// Confirms an ordinary player pose without replacing its runtime placement.
     pub fn set_player_position(&mut self, pos: WorldPosition) -> Vec<WorldEvent> {
-        self.apply_player_pose_effect(AuthoritativePoseEffect::Confirm { pose: pos })
+        self.publish_player_pose_update(PlayerPoseUpdate::Confirm(pos))
     }
 
     /// Synchronizes the authoritative player position without emitting movement events.
@@ -984,7 +1025,9 @@ impl WorldState {
     /// This is intended for hydration/bootstrap flows where the client is seeding authoritative
     /// state rather than reacting to a live movement update packet.
     pub fn sync_player_position(&mut self, pos: WorldPosition) {
-        let _ = self.update_player_position(AuthoritativePoseEffect::Initialize { pose: pos });
+        let _ = self.update_player_position(PlayerPoseUpdate::Effect(
+            AuthoritativePoseEffect::Initialize { pose: pos },
+        ));
     }
 
     /// Records a fresh server vector sample for the retail-default autonomous player.
@@ -1092,13 +1135,12 @@ impl WorldState {
 
             let position = recover_pose_orientation(guid, position, Some(entity.position.rotation));
             entity.position = position;
-            entity.placement_intent = crate::EntityPlacementIntent::Independent;
-            self.emit_entity_pose_effect(
+            // Retail behavior is to store this position quality and notify its consumers.
+            // A quality update does not authorize movement reconciliation or unparenting.
+            events.push(WorldEvent::EntityMoved {
                 guid,
-                AuthoritativePoseEffect::Confirm { pose: position },
-                0,
-                events,
-            );
+                pos: position,
+            });
             return true;
         }
 

@@ -2,12 +2,8 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, chat:** You can delete the previous word with a configurable shortcut and copy selected chat text.
-- **3D client, vendor:** Quantity edits in the vendor queue are now kept when the vendor list refreshes.
-- **3D client, characters:** The character menu is ordered by most recent session.
-- **3D client, performance:** Frame timing is smoother, and the Windows background process no longer runs in the low-power efficiency mode.
-- **3D client, rendering and world:** Fixes cover particle effects, the colour-grading-off path, appearance changes while hidden, and entity movement during portal transitions.
-- **CLI, scripting:** Scripts can read `isHostile` on entities, and the bundled combat scripts attack only hostile monsters, not summons. The unused `lastAttackTime` combat field is removed.
+- **3D client, movement:** You can keep moving while eating or drinking, and held movement is no longer interrupted when those animations return to ready.
+- **3D client, other players and creatures:** Remote movement and position corrections are more consistent across physics transitions.
 
 ## Known issues
 
@@ -16,7 +12,7 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 - Some Windows NVIDIA laptops have shown intermittent transparent holes in the UI with GPU compositing on. Turning it off in App settings is a workaround, but it can significantly reduce frame rates. The cause has not been established, and the Direct3D 11 default has not been verified on native hardware. If panels or text show transparent holes, first try **Use defaults** in App settings.
 - The terrain and portal rendering changes, including the earlier Intel Iris Xe terrain change, have not been verified visually or on native hardware, including Intel Iris Xe.
 - The visual quality and performance of the reduced-cost selection outline have not been verified on Intel Iris Xe or other native hardware.
-- Healing animation blending while moving, and autorun during healing, have not been visually verified in live play.
+- Healing animation blending while moving, and autorun during healing, have not been visually verified in live play. Eating and drinking while moving have likewise not been verified visually.
 - The combat health bars, cantrip borders and indoor map floor ordering have not been visually verified on native hardware.
 - The performance panel and GPU timing have not been verified on native Windows or macOS.
 - The startup fix has not been verified by launching rebuilt platform release bundles.

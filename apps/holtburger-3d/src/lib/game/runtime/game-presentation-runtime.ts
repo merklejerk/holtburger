@@ -550,7 +550,11 @@ interface DesiredDynamicEntityRecord {
 	/** Exclusive preparation outcome; a rejected source is retried only by a new level or explicit retry. */
 	realization:
 		| { readonly kind: "idle" }
-		| { readonly kind: "preparing"; readonly completion: Promise<void> }
+		| {
+				readonly kind: "preparing";
+				/** Exact retained or installed playback owner; null means no presentation was committed. */
+				readonly completion: Promise<DynamicEntityPresentationRecord | null>;
+		  }
 		| { readonly kind: "unavailable"; readonly error: Error };
 }
 
@@ -1364,7 +1368,7 @@ export class GamePresentationRuntime {
 	/** Completed asynchronous commits awaiting the next synchronous runtime tick. */
 	readonly #commitArtifacts: PendingCommitArtifact[] = [];
 	/** Resource continuations awaited before runtime-owned sources and renderer state are destroyed. */
-	readonly #realizationContinuations = new Set<Promise<void>>();
+	readonly #realizationContinuations = new Set<Promise<unknown>>();
 	/** Asynchronous preparation and eviction failures surfaced by the next runtime tick. */
 	readonly #presentationFailures: unknown[] = [];
 	/** Cold source observations replay to a new frontend error surface and reset on explicit retry. */
@@ -2430,7 +2434,7 @@ export class GamePresentationRuntime {
 			desired.realization.kind === "preparing"
 				? desired.realization.completion
 				: installed?.generation === desired.entity.generation
-					? Promise.resolve()
+					? Promise.resolve(installed)
 					: null;
 		if (ready === null) return;
 		const queued = this.#pendingDynamicEntityCues.get(guid);
@@ -2456,16 +2460,23 @@ export class GamePresentationRuntime {
 				const assets = await preparation;
 				let transferred = false;
 				try {
-					const settled = await predecessors;
+					const [predecessor, realization] = await predecessors;
+					if (
+						predecessor.status === "rejected" ||
+						realization.status === "rejected"
+					)
+						return;
+					// Appearance requests may change while the same playback owner survives.
+					// Cold work binds to its own installation result, never a later GUID occupant.
+					const expected =
+						installed === undefined ? realization.value : installed;
 					const target = this.#spawnedPresentations.get(guid);
 					if (
-						settled.some((result) => result.status === "rejected") ||
+						expected === null ||
 						epoch !== this.#entityCueEpoch ||
-						(installed === undefined &&
-							this.#spawnedDesiredEntities.get(guid) !== desired) ||
 						target === undefined ||
 						target.generation !== cue.generation ||
-						(installed !== undefined && target !== installed) ||
+						target !== expected ||
 						!this.#isEntityCueTimely(cue)
 					)
 						return;
@@ -2724,13 +2735,13 @@ export class GamePresentationRuntime {
 		const visual = this.#retainSpawnedVisual(guid, entity);
 		const continuation = this.#realizeDynamicEntity(record, visual)
 			.catch((cause: unknown) => {
-				if (!this.#isDynamicRealizationEligible(record)) return;
+				if (!this.#isDynamicRealizationEligible(record)) return null;
 				if (isContentFailure(cause)) {
 					const error = dynamicEntityPresentationFailure(entity, cause);
 					this.#retireDynamicPresentationTree(guid);
 					record.realization = { kind: "unavailable", error };
 					this.reportContentFailure(error);
-					return;
+					return null;
 				}
 				throw dynamicEntityPresentationFailure(entity, cause);
 			})
@@ -3243,14 +3254,14 @@ export class GamePresentationRuntime {
 	async #realizeDynamicEntity(
 		record: DesiredDynamicEntityRecord,
 		visual: Promise<DecodedStaticPresentation>,
-	): Promise<void> {
+	): Promise<DynamicEntityPresentationRecord | null> {
 		let entity = record.entity;
 		const guid = entity.identity.guid;
 		const resolved = await visual;
-		if (!this.#isDynamicRealizationEligible(record)) return;
+		if (!this.#isDynamicRealizationEligible(record)) return null;
 		entity = record.entity;
 		const stagingPlacement = this.#spawnedStagingPlacement(entity);
-		if (stagingPlacement === null) return;
+		if (stagingPlacement === null) return null;
 		const ownerId = dynamicEntityOwnerId(guid);
 		let source = adaptDynamicEntityPresentation(
 			this.#attachmentVisibility(entity).entity,
@@ -3285,7 +3296,7 @@ export class GamePresentationRuntime {
 					: null;
 			let transferred = false;
 			try {
-				if (!this.#isDynamicRealizationEligible(record)) return;
+				if (!this.#isDynamicRealizationEligible(record)) return null;
 				const replacement = await this.#dynamics.stageVisualReplacement(
 					ownerId,
 					live.nodeId,
@@ -3297,7 +3308,7 @@ export class GamePresentationRuntime {
 							!this.#isDynamicRealizationEligible(record) ||
 							this.#spawnedPresentations.get(guid) !== live
 						)
-							return;
+							return null;
 						replacement.commit();
 						if (particleChanged) {
 							// Drain already-due time-zero defaults before clearing, so an unadvanced default
@@ -3338,7 +3349,7 @@ export class GamePresentationRuntime {
 					} finally {
 						replacement.release();
 					}
-					return;
+					return live;
 				}
 			} finally {
 				if (effect !== null && !transferred) releaseCueAssets(effect);
@@ -3352,7 +3363,7 @@ export class GamePresentationRuntime {
 		);
 		if (!this.#isDynamicRealizationEligible(record)) {
 			activation.release();
-			return;
+			return null;
 		}
 		const [nodeId] = activation.nodeIds;
 		if (nodeId === undefined || activation.nodeIds.length !== 1) {
@@ -3425,6 +3436,7 @@ export class GamePresentationRuntime {
 			);
 		}
 		this.#applyDynamicEntityState(installed, latestDesired);
+		return installed;
 	}
 
 	/** Apply everything one view says about an installed presentation, placement included. */
@@ -5940,7 +5952,7 @@ export class GamePresentationRuntime {
 		);
 	}
 
-	#trackRealizationContinuation(continuation: Promise<void>): void {
+	#trackRealizationContinuation(continuation: Promise<unknown>): void {
 		this.#realizationContinuations.add(continuation);
 		void continuation.then(
 			() => this.#realizationContinuations.delete(continuation),

@@ -2536,6 +2536,214 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		},
 	);
 
+	it.each(["appearance", "setup", "incarnation", "remove", "evict"] as const)(
+		"binds cold UnHide cleanup to its playback owner across %s changes",
+		async (change) => {
+			const tableId: DatAssetId = "0x34000001";
+			const hiddenId: DatAssetId = "0x33000001";
+			const unhideId: DatAssetId = "0x33000002";
+			const emitterId: DatAssetId = "0x32000001";
+			const meshId: DatAssetId = "0x01000001";
+			const animationReady = controlledPromise<void>();
+			const unhideReady = controlledPromise<void>();
+			let unhideRequested = false;
+			let selectedNodes: readonly SceneNodeId[] = [];
+			let submittedParticles = 0;
+			const materialSamples = vi.spyOn(
+				EffectSystem.prototype,
+				"samplePresentation",
+			);
+			onTestFinished(() => materialSamples.mockRestore());
+			const runtime = await buildSpawnRuntime(
+				{
+					load: async (setup) => ({
+						...spawnedVisual(),
+						setupId: setup === 0x02000002 ? "0x02000002" : "0x02000001",
+					}),
+				},
+				{
+					...ANIMATION_SOURCE,
+					async loadAnimation(id) {
+						await animationReady.promise;
+						return ANIMATION_SOURCE.loadAnimation(id);
+					},
+				},
+				testRenderer({
+					drawFrame: () => ({
+						...EMPTY_RENDERER_FRAME_FEEDBACK,
+						selectedDynamicNodeIds: selectedNodes,
+					}),
+					particles: {
+						install: async () => {},
+						submit: (ranges) => {
+							submittedParticles = ranges.reduce(
+								(sum, range) => sum + range.count,
+								0,
+							);
+						},
+						clear() {},
+					},
+				}),
+				{
+					destroy() {},
+					async loadPhysicsScript(id) {
+						if (id === hiddenId)
+							return {
+								id,
+								lengthSeconds: 0,
+								records: [
+									{
+										kind: "create-particle",
+										emitterInfoId: emitterId,
+										emitterId: 1,
+										partIndex: 0,
+										offsetOrigin: acVector3([0, 0, 0]),
+										startTime: 0,
+										authoredOrder: 0,
+									},
+									{
+										kind: "transparent",
+										start: 1,
+										end: 1,
+										durationSeconds: 0,
+										startTime: 0,
+										authoredOrder: 1,
+									},
+								],
+							};
+						if (id !== unhideId)
+							throw new Error(`Unexpected cleanup script ${id}.`);
+						unhideRequested = true;
+						await unhideReady.promise;
+						return {
+							id,
+							lengthSeconds: 0,
+							records: [
+								{
+									kind: "stop-particle",
+									emitterId: 1,
+									startTime: 0,
+									authoredOrder: 0,
+								},
+								{
+									kind: "transparent",
+									start: 1,
+									end: 0,
+									durationSeconds: 0,
+									startTime: 0,
+									authoredOrder: 1,
+								},
+							],
+						};
+					},
+				},
+				{
+					destroy() {},
+					loadPhysicsScriptTable: async () => ({
+						id: tableId,
+						cues: new Map([
+							[
+								RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE,
+								[{ maximumIntensity: 1, scriptId: hiddenId }],
+							],
+							[
+								RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE,
+								[{ maximumIntensity: 1, scriptId: unhideId }],
+							],
+						]),
+					}),
+				},
+				{
+					destroy() {},
+					loadParticleEmitter: async () =>
+						particleEmitterInfo(emitterId, meshId),
+				},
+				{
+					destroy() {},
+					loadParticleMeshes: async () => ({
+						presentations: new Map([
+							[
+								meshId,
+								{ orientation: "authored", presentation: spawnedVisual() },
+							],
+						]),
+						textureDependencies: [],
+					}),
+				},
+			);
+			onTestFinished(async () => {
+				animationReady.resolve();
+				unhideReady.resolve();
+				await runtime.destroy();
+			});
+			const entity = (hidden: boolean, generation: number) =>
+				withPhysicsEffectTable(
+					spawnedEntity(7, generation, { hidden }),
+					tableId,
+				);
+			const initial = runtime.upsertDynamicEntity(entity(true, 3));
+			// Metadata must resolve before installation so the cue captures a cold owner.
+			await settleSoundCues();
+			const showing = runtime.upsertDynamicEntity(entity(false, 3));
+			await vi.waitFor(() => expect(unhideRequested).toBe(true));
+			animationReady.resolve();
+			await Promise.all([initial, showing]);
+			await settleSoundCues();
+			setTestCamera(runtime, SPAWN_TEST_CAMERA);
+			runtime.render(0);
+			const created = runtime
+				.getAuthoredDynamicRuntimeDiagnostics()
+				.worldOwnedBehavior.observations.find(
+					(entry) => entry.command === "create-particle",
+				);
+			if (created === undefined)
+				throw new Error("Hidden did not create a bubble emitter.");
+			const root = sceneNodeIdOf(created.targetId);
+			if (root === null) throw new Error("Bubble emitter has no scene owner.");
+			selectedNodes = [root];
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+			).toBe(1);
+			const changed = entity(false, change === "incarnation" ? 4 : 3);
+			if (change === "appearance")
+				changed.presentation.appearance.paletteDid = 1;
+			if (change === "setup")
+				changed.presentation.content.setupDid = 0x02000002;
+			if (change === "remove") runtime.removeDynamicEntity(7, 3);
+			else if (change === "evict") {
+				runtime.clearSceneInterest();
+				await activateSpawnScene(runtime, "0x0001ffff", 2);
+				await runtime.reevaluateDynamicEntityEligibility();
+			} else await runtime.upsertDynamicEntity(changed);
+			unhideReady.resolve();
+			await settleSoundCues();
+			runtime.render(0.1);
+			// Particle advancement consumes the previous frame's owner selection.
+			runtime.render(0.2);
+			// Restating authority must neither replay cleanup nor resurrect canceled work.
+			if (change === "appearance") await runtime.upsertDynamicEntity(changed);
+			await settleSoundCues();
+			runtime.render(particleEmitterInfo(emitterId, meshId).lifespan + 1);
+			const diagnostics = runtime.getAuthoredDynamicRuntimeDiagnostics();
+			expect(diagnostics.particles.emitterCount).toBe(0);
+			expect(submittedParticles).toBe(0);
+			expect(diagnostics.particles.explicitlyStoppedEmitterTotal).toBe(
+				change === "appearance" ? 1 : 0,
+			);
+			expect(
+				diagnostics.worldOwnedBehavior.observations.filter(
+					(entry) => entry.provenance.assetId === unhideId,
+				),
+			).toHaveLength(change === "appearance" ? 2 : 0);
+			if (change === "appearance") {
+				const sample = materialSamples.mock.results.at(-1);
+				if (sample?.type !== "return")
+					throw new Error("Materialization produced no material sample.");
+				expect(sample.value.partRenderStates[0]?.translucency).toBe(0);
+			}
+		},
+	);
+
 	it("seeds Hidden on a new cold appearance without waiting for the superseded visual", async () => {
 		const tableId: DatAssetId = "0x34000001";
 		const scriptId: DatAssetId = "0x33000001";

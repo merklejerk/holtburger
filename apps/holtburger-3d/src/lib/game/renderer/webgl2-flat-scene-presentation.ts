@@ -608,19 +608,20 @@ export class WebGL2FlatScenePresentation {
 	/**
 	 * Publish this frame's grade, rebaking the strip only when the authored look changed.
 	 *
-	 * A disabled grade binds nothing and rebakes nothing: the shader takes its untouched copy
-	 * path, so presentation output stays exactly what it was before grading existed.
+	 * Disabled grading skips baking and takes the shader's untouched copy path. Its active sampler
+	 * still needs a compatible binding: portal composition can leave an integer texture on this unit.
 	 */
 	#applyColorGrade(colorGrade: ColorGradeSettings): void {
 		const gl = this.#gl;
+		gl.activeTexture(gl.TEXTURE0 + COLOR_GRADE_STRIP_TEXTURE_UNIT);
+		gl.bindSampler(COLOR_GRADE_STRIP_TEXTURE_UNIT, null);
+		gl.bindTexture(gl.TEXTURE_2D, this.#stripTexture);
 		gl.uniform1i(this.#uniforms.enabled, colorGrade.enabled ? 1 : 0);
 		if (!colorGrade.enabled) return;
 		const parameters = colorGrade.parameters;
 		if (parameters !== this.#bakedParameters) {
 			createColorGradeParameters(parameters);
 			bakeColorGradeStrip(parameters, this.#stripBuffer);
-			gl.activeTexture(gl.TEXTURE0 + COLOR_GRADE_STRIP_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, this.#stripTexture);
 			gl.texSubImage2D(
 				gl.TEXTURE_2D,
 				0,
@@ -645,9 +646,6 @@ export class WebGL2FlatScenePresentation {
 			this.#whiteBalance.blue,
 		);
 		gl.uniform1f(this.#uniforms.saturation, parameters.saturation);
-		gl.activeTexture(gl.TEXTURE0 + COLOR_GRADE_STRIP_TEXTURE_UNIT);
-		gl.bindSampler(COLOR_GRADE_STRIP_TEXTURE_UNIT, null);
-		gl.bindTexture(gl.TEXTURE_2D, this.#stripTexture);
 	}
 
 	/** Release the renderer-local program, vertex array, sampler, and strip texture exactly once. */

@@ -7,6 +7,8 @@ import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
 import { WebGL2FlatScenePresentation } from "./webgl2-flat-scene-presentation";
 import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import { WebGL2FlatSceneTarget } from "./webgl2-flat-scene-target";
+import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-model";
+import { requireWebGL2NoError } from "../webgl/diagnostics";
 
 const FIXTURE_EXTENT = 17;
 const FIXTURE_PIXEL_COUNT = FIXTURE_EXTENT * FIXTURE_EXTENT;
@@ -63,6 +65,14 @@ export function runPortalTransitionPresentationFixture(
 	const target = targetOwner.resizeDimensions(FIXTURE_EXTENT, FIXTURE_EXTENT);
 	const origin = createSolidTexture(gl, [255, 0, 0, 255]);
 	const tunnel = createSolidTexture(gl, [0, 255, 0, 255]);
+	// The portal compositor leaves an integer frontier texture on the presenter's curve slot.
+	const frontier = gl.createTexture();
+	if (frontier === null)
+		throw new Error("Failed to allocate fixture frontier.");
+	gl.bindTexture(gl.TEXTURE_2D, frontier);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+	gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R8UI, 1, 1);
 	uploadSolidTexture(gl, target.color, [0, 0, 255, 255]);
 	const controller = new PortalTransitionController({
 		enterDurationMs: 1_000,
@@ -70,6 +80,10 @@ export function runPortalTransitionPresentationFixture(
 	});
 	controller.begin(41, { kind: "capture-last-world" });
 	const render = (plan: PortalTransitionPresentationPlan) => {
+		gl.activeTexture(gl.TEXTURE0 + PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.frontier1);
+		gl.bindTexture(gl.TEXTURE_2D, frontier);
+		gl.bindSampler(PORTAL_SCOPE_ATLAS_TEXTURE_UNITS.frontier1, null);
+		requireWebGL2NoError(gl, "Before presentation with inherited frontier");
 		const tunnelSample =
 			plan.kind === "destination-only-awaiting-handoff"
 				? null
@@ -86,6 +100,7 @@ export function runPortalTransitionPresentationFixture(
 			null,
 			0,
 		);
+		requireWebGL2NoError(gl, "After presentation with disabled color grading");
 		gl.finish();
 		return readPixelCensus(gl, plan);
 	};
@@ -141,6 +156,7 @@ export function runPortalTransitionPresentationFixture(
 		targetOwner.destroy();
 		gl.deleteTexture(origin);
 		gl.deleteTexture(tunnel);
+		gl.deleteTexture(frontier);
 	}
 }
 

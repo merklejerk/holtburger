@@ -154,6 +154,7 @@ function fixture(
 	});
 	return {
 		model,
+		entities,
 		emit,
 		pending,
 		answer,
@@ -174,6 +175,165 @@ function buy(model: ClientVendorState, item: number, amount?: number): void {
 }
 
 describe("vendor draft presentation", () => {
+	it("updates actor presentation without requoting or replacing a quantity request", () => {
+		const f = fixture();
+		f.model.queueBuy(stackOffer.guid);
+		const request = f.model.read()?.quantityRequest;
+		expect(request).toMatchObject({ item: stackOffer.guid });
+		const count = f.previewVendor.mock.calls.length;
+		const actor = entityFacts(vendorId);
+		if (actor.description.kind !== "known")
+			throw new Error("Expected described vendor");
+		const prepared = f.entities.prepareDelta({
+			upserts: [
+				{
+					...actor,
+					description: { ...actor.description, name: "Renamed vendor" },
+					playerThreat: true,
+				},
+			],
+			removed: [],
+			salvage: null,
+			projectileSupply: null,
+			worldContainer: null,
+		});
+		if (prepared === null) throw new Error("Expected prepared delta");
+		f.entities.commit(prepared);
+		expect(f.model.read()).toMatchObject({
+			name: "Renamed vendor",
+			pending: false,
+		});
+		expect(f.model.read()?.quantityRequest).toBe(request);
+		expect(f.previewVendor).toHaveBeenCalledTimes(count);
+	});
+
+	it.each([
+		{
+			name: "health",
+			guid: 1,
+			patch: {
+				health: { instanceSequence: 1, fraction: 0.5, observedAtSeconds: 1 },
+			},
+			removed: [],
+			previews: 0,
+		},
+		{
+			name: "owned item",
+			guid: 10,
+			patch: { vendorSale: { vendor: vendorId, accepted: false } },
+			removed: [],
+			previews: 1,
+		},
+		{
+			name: "inventory addition",
+			guid: 20,
+			patch: {
+				ownedByPlayer: true,
+				location: {
+					kind: "contained",
+					parentGuid: 1,
+					slot: { kind: "item", index: 4 },
+				},
+			},
+			removed: [],
+			previews: 1,
+		},
+		{
+			name: "inventory removal",
+			guid: null,
+			patch: {},
+			removed: [10],
+			previews: 1,
+		},
+		{
+			name: "container hydration",
+			guid: 1,
+			patch: {
+				storage: {
+					kind: "container",
+					roster: "awaiting",
+					itemCapacity: 24,
+					packCapacity: 7,
+				},
+			},
+			removed: [],
+			previews: 1,
+		},
+	] satisfies {
+		name: string;
+		guid: number | null;
+		patch: Partial<ClientEntityFacts>;
+		removed: number[];
+		previews: number;
+	}[])(
+		"requests $previews previews after a $name change",
+		({ guid, patch, removed, previews }) => {
+			const f = fixture();
+			const before = f.previewVendor.mock.calls.length;
+			const read = f.entities.read();
+			if (read.kind !== "current") throw new Error("Expected current entities");
+			const upserts =
+				guid === null
+					? []
+					: [
+							{
+								...(read.level.entities.get(guid) ?? entityFacts(guid)),
+								...patch,
+							},
+						];
+			const prepared = f.entities.prepareDelta({
+				upserts,
+				removed,
+				salvage: null,
+				projectileSupply: null,
+				worldContainer: null,
+			});
+			if (prepared === null) throw new Error("Expected prepared delta");
+			f.entities.commit(prepared);
+			expect(f.model.read()?.pending).toBe(previews > 0);
+			expect(f.previewVendor).toHaveBeenCalledTimes(before + previews);
+		},
+	);
+
+	it("revalidates balance changes during a candidate without losing it or extending its deadline", () => {
+		vi.useFakeTimers();
+		const f = fixture();
+		buy(f.model, stackOffer.guid, 37);
+		const old = f.pending();
+		vi.advanceTimersByTime(CLIENT_TUNING.vendor.previewTimeoutMs / 2);
+		const root = entityFacts(1);
+		if (root.description.kind !== "known")
+			throw new Error("Expected described root");
+		const prepared = f.entities.prepareDelta({
+			upserts: [
+				{ ...root, description: { ...root.description, pyrealBalance: 2500 } },
+			],
+			removed: [],
+			salvage: null,
+			projectileSupply: null,
+			worldContainer: null,
+		});
+		if (prepared === null) throw new Error("Expected prepared delta");
+		f.entities.commit(prepared);
+		f.model.read();
+		expect(f.pending().sequence).not.toBe(old.sequence);
+		expect(f.pending().draft).toEqual(old.draft);
+		f.emit({
+			type: "vendor-preview",
+			result: {
+				sequence: old.sequence,
+				vendor: vendorId,
+				outcome: { kind: "ready", quote: blank },
+			},
+		});
+		expect(f.model.read()?.pending).toBe(true);
+		vi.advanceTimersByTime(CLIENT_TUNING.vendor.previewTimeoutMs / 2);
+		expect(f.model.read()?.pending).toBe(false);
+		expect(f.failure).toHaveBeenCalledWith(
+			expect.stringContaining("timed out"),
+		);
+	});
+
 	it.each(["buy", "sell"] as const)(
 		"captures %s queue removal without retargeting a later draft",
 		(side) => {

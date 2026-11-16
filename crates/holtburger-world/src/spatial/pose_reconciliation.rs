@@ -59,10 +59,6 @@ pub const PHYSICAL_RETURN_START_THRESHOLD_M: f32 = 0.20;
 pub const RETAIL_INTERPOLATION_SNAP_DISTANCE_M: f32 = 96.0;
 /// Fallback cap when no motion interpreter supplies an adjusted speed.
 pub const RETAIL_MAX_INTERPOLATED_VELOCITY_MPS: f32 = 7.5;
-/// A stalled target closer than this completes rather than failing.
-pub const RETAIL_INTERPOLATION_NEAR_COMPLETE_DISTANCE_M: f32 = 0.2;
-const RETAIL_INTERPOLATION_WATCHDOG_FRAMES: u8 = 5;
-const RETAIL_WATCHDOG_PROGRESS_RATIO: f32 = 0.3;
 const EPSILON: f32 = 0.000_2;
 
 /// Why an authoritative pose establishes a new runtime-placement epoch.
@@ -185,36 +181,12 @@ pub struct PoseReconciliationComposition {
 /// 82.4 ms at retail's 7.5 m/s fallback.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct InterpolationTarget {
-    /// Latest producer-authoritative destination consumed by interpolation and watchdog snap.
+    /// Latest producer-authoritative destination consumed by interpolation and recovery.
     pose: WorldPosition,
     /// Heading policy returned while this target owns translation.
     keep_heading: bool,
     /// Retail motion-interpreter speed captured when this target was admitted.
     adjusted_max_speed_mps: Option<f32>,
-    /// Distance at the start of the current watchdog window.
-    original_distance: f32,
-    /// Simulated time accumulated in the current watchdog window.
-    progress_quantum: f32,
-    /// Contacted interpolation ticks accumulated before the watchdog evaluates progress.
-    frame_counter: u8,
-}
-
-impl InterpolationTarget {
-    fn new(
-        pose: WorldPosition,
-        current: WorldPosition,
-        keep_heading: bool,
-        adjusted_max_speed_mps: Option<f32>,
-    ) -> Self {
-        Self {
-            pose,
-            keep_heading,
-            adjusted_max_speed_mps,
-            original_distance: current.distance_to(&pose),
-            progress_quantum: 0.0,
-            frame_counter: 0,
-        }
-    }
 }
 
 /// Confirmed-travel budget applied after interpolation chooses the tick translation.
@@ -241,15 +213,14 @@ struct ConfirmedTravelConstraint {
 /// intentionally; server gameplay remains authoritative.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PhysicalCorrection {
-    /// Accepted-progress watchdog; survives equivalent authority updates.
-    recovery: Option<recovery::RecoveryObservation>,
     /// Whether this reference is continuously corrected or uses supported-character hysteresis.
     activity: PhysicalReturnActivity,
     /// Reference position in its original landblock frame; it need not be a placed body.
     reference: WorldPosition,
-    /// Nominal travel since retargeting makes the anchor insufficient proof of current height.
-    /// Retain the history: a stair journey can return to the anchor's XY on another floor.
-    reference_has_traveled: bool,
+    /// Local elevation at admission of a height disagreement; absent if heights already agreed.
+    /// Horizontal travel preserves this evidence. Elevation change or loss of support retires it
+    /// until a new authority sample arrives; contact-only reference capture cannot manufacture it.
+    height_disagreement_origin: Option<f32>,
     /// Fresh authority facing, consumed by one accepted physical tick independently
     /// of position return. Later ordinary turning must not replay this old facing.
     pending_heading: Option<holtburger_common::Quaternion>,
@@ -276,7 +247,9 @@ impl PhysicalCorrection {
         let anchor = Guid(current.landblock_id.0 | 0xffff);
         let error = self.reference.reanchor_to_landblock_owner(anchor)?.coords - current.coords;
         self.reference.coords = self.reference.coords + ordinary;
-        self.reference_has_traveled |= ordinary != Vector3::zero();
+        if ordinary.z != 0.0 {
+            self.height_disagreement_origin = None;
+        }
         Ok(error)
     }
 }
@@ -287,6 +260,8 @@ impl PhysicalCorrection {
 pub struct PoseReconciliationState {
     /// Mutually exclusive correction implementations; reset replaces the whole mode.
     mode: ReconciliationMode,
+    /// Accepted-progress history belongs to the correction lifetime, not its replaceable target.
+    recovery: Option<recovery::RecoveryObservation>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -311,9 +286,10 @@ impl PoseReconciliationState {
         let mut state = RetailPoseReconciliationState::default();
         state.confirm(confirmed, current);
         self.mode = ReconciliationMode::Retail(state);
+        self.recovery = None;
     }
 
-    /// Installs the existing pose-only interpolation policy.
+    /// Replaces pose-only steering without renewing an active correction's progress history.
     pub fn interpolate(
         &mut self,
         target: WorldPosition,
@@ -321,26 +297,35 @@ impl PoseReconciliationState {
         keep_heading: bool,
         adjusted_max_speed_mps: Option<f32>,
     ) {
+        if !matches!(self.mode, ReconciliationMode::Retail(state) if state.interpolation.is_some())
+        {
+            self.recovery = None;
+        }
         let mut state = RetailPoseReconciliationState::default();
         state.interpolate(target, current, keep_heading, adjusted_max_speed_mps);
         self.mode = ReconciliationMode::Retail(state);
     }
 
     /// Retargets the reference and renews height evidence while preserving return/watchdog state.
-    pub(crate) fn correct(&mut self, reference: WorldPosition, keep_heading: bool) {
+    pub(crate) fn correct(
+        &mut self,
+        reference: WorldPosition,
+        current: WorldPosition,
+        keep_heading: bool,
+    ) {
         let activity = match self.mode {
             ReconciliationMode::Physical(target) => target.activity,
             _ => PhysicalReturnActivity::Continuous,
         };
-        let recovery = match self.mode {
-            ReconciliationMode::Physical(target) => target.recovery,
-            _ => None,
-        };
+        if !matches!(self.mode, ReconciliationMode::Physical(_)) {
+            self.recovery = None;
+        }
         self.mode = ReconciliationMode::Physical(PhysicalCorrection {
-            recovery,
             activity,
             reference,
-            reference_has_traveled: false,
+            height_disagreement_origin: ((current.coords.z - reference.coords.z).abs()
+                > PHYSICAL_RETURN_START_THRESHOLD_M)
+                .then_some(current.coords.z),
             pending_heading: (!keep_heading).then_some(reference.rotation),
         });
     }
@@ -350,7 +335,7 @@ impl PoseReconciliationState {
     /// interpolation must be classified by the caller instead of being silently overwritten.
     pub(crate) fn begin_contact_return(&mut self, current: WorldPosition) -> anyhow::Result<()> {
         match self.mode {
-            ReconciliationMode::Empty => self.correct(current, true),
+            ReconciliationMode::Empty => self.correct(current, current, true),
             ReconciliationMode::Physical(_) => {}
             ReconciliationMode::Retail(_) => {
                 anyhow::bail!(
@@ -367,9 +352,9 @@ impl PoseReconciliationState {
         match self.mode {
             ReconciliationMode::Retail(state) if mobile => {
                 if let Some(target) = state.interpolation {
-                    self.correct(target.pose, target.keep_heading);
+                    self.correct(target.pose, current, target.keep_heading);
                 } else if let Some(target) = state.pending_snap {
-                    self.correct(target, false);
+                    self.correct(target, current, false);
                 }
             }
             ReconciliationMode::Physical(target) if !mobile => {
@@ -491,9 +476,10 @@ impl PoseReconciliationState {
                     <= super::PHYSICAL_RETURN_GAIN * RETAIL_INTERPOLATION_TARGET_THRESHOLD_M;
             match target.activity {
                 PhysicalReturnActivity::Continuous
-                    if settled && (!retain_recovery || target.recovery.is_none()) =>
+                    if settled && (!retain_recovery || self.recovery.is_none()) =>
                 {
-                    self.mode = ReconciliationMode::Empty
+                    self.mode = ReconciliationMode::Empty;
+                    self.recovery = None;
                 }
                 PhysicalReturnActivity::Returning if settled => {
                     target.activity = PhysicalReturnActivity::Watching;
@@ -515,6 +501,7 @@ impl PoseReconciliationState {
         let mut state = RetailPoseReconciliationState::default();
         state.schedule_snap(target);
         self.mode = ReconciliationMode::Retail(state);
+        self.recovery = None;
     }
 
     /// Takes a pose-only placement once at the tick boundary.
@@ -533,7 +520,7 @@ impl PoseReconciliationState {
             ReconciliationMode::Physical(target) => {
                 target.activity != PhysicalReturnActivity::Watching
                     || target.pending_heading.is_some()
-                    || target.recovery.is_some()
+                    || self.recovery.is_some()
             }
         }
     }
@@ -627,12 +614,11 @@ impl RetailPoseReconciliationState {
         adjusted_max_speed_mps: Option<f32>,
     ) {
         self.constraint = Some(confirmed_travel_constraint(target, current));
-        self.interpolation = Some(InterpolationTarget::new(
-            target,
-            current,
+        self.interpolation = Some(InterpolationTarget {
+            pose: target,
             keep_heading,
             adjusted_max_speed_mps,
-        ));
+        });
         self.pending_snap = None;
         self.received_contact = true;
     }
@@ -724,7 +710,7 @@ impl RetailPoseReconciliationState {
         has_contact: bool,
         quantum: f32,
     ) -> Option<(Vector3, bool)> {
-        let mut target = self.interpolation?;
+        let target = self.interpolation?;
         if !has_contact {
             return None;
         }
@@ -738,37 +724,12 @@ impl RetailPoseReconciliationState {
 
         let rate = retail_interpolated_speed(target.adjusted_max_speed_mps);
         let quantum = quantum.max(0.0);
-        target.frame_counter = target.frame_counter.saturating_add(1);
-        target.progress_quantum += quantum;
-
-        if target.frame_counter >= RETAIL_INTERPOLATION_WATCHDOG_FRAMES {
-            let progress = target.original_distance - distance;
-            let progressing = progress >= EPSILON
-                && target.progress_quantum > EPSILON
-                && progress / target.progress_quantum / rate >= RETAIL_WATCHDOG_PROGRESS_RATIO;
-            if !progressing {
-                if distance < RETAIL_INTERPOLATION_NEAR_COMPLETE_DISTANCE_M {
-                    self.interpolation = None;
-                    return None;
-                }
-                // `NodeCompleted(false)` removes the failed head. With this component's
-                // measured one-target history there is no successor, so retail `UseTime`
-                // installs the retained blip immediately.
-                self.schedule_snap(target.pose);
-                return None;
-            }
-            target.frame_counter = 0;
-            target.progress_quantum = 0.0;
-            target.original_distance = distance;
-        }
-
         let cap = rate * quantum;
         let translation = if distance > cap && distance > EPSILON {
             to_target * (cap / distance)
         } else {
             to_target
         };
-        self.interpolation = Some(target);
         Some((translation, target.keep_heading))
     }
 
@@ -865,7 +826,7 @@ mod tests {
     fn supported_hysteresis_preserves_reference_and_heading_across_small_updates() {
         let mut state = PoseReconciliationState::default();
         let origin = position(0.0);
-        state.correct(origin, true);
+        state.correct(origin, origin, true);
         let small = PHYSICAL_RETURN_START_THRESHOLD_M * 0.5;
         assert_eq!(
             state.select_return_error(Vector3::new(small, 0.0, 0.0), true),
@@ -888,7 +849,7 @@ mod tests {
         assert!(state.has_projection_work());
         // Once returning, a fresh packet inside the start band cannot stop the return early.
         let target = position(small);
-        state.correct(target, false);
+        state.correct(target, target, false);
         let error = state
             .advance_return_reference(origin, Vector3::zero())
             .unwrap();
@@ -899,7 +860,7 @@ mod tests {
         assert!(!state.has_projection_work());
         assert_eq!(state.physical_reference().unwrap(), target);
         // Heading alone wakes its one-shot consumption, not positional return.
-        state.correct(target, false);
+        state.correct(target, target, false);
         assert!(state.has_projection_work());
         assert_eq!(
             state.select_return_error(Vector3::zero(), true),
@@ -921,7 +882,7 @@ mod tests {
             let mut state = PoseReconciliationState::default();
             let mut target = position(10.0);
             target.rotation = Quaternion::from_heading(1.0);
-            state.correct(target, false);
+            state.correct(target, target, false);
             if consumed {
                 assert_eq!(state.take_correction_heading(), Some(target.rotation));
             }
@@ -935,7 +896,7 @@ mod tests {
             assert_eq!(state.take_correction_heading(), None);
             // A fresh packet renews the heading request even while position return persists.
             target.rotation = Quaternion::from_heading(2.0);
-            state.correct(target, false);
+            state.correct(target, target, false);
             assert_eq!(state.take_correction_heading(), Some(target.rotation));
         }
     }
@@ -943,7 +904,7 @@ mod tests {
     #[test]
     fn contact_capture_preserves_authority_and_rejects_confirmation() {
         let mut state = PoseReconciliationState::default();
-        state.correct(position(10.0), false);
+        state.correct(position(10.0), position(10.0), false);
         state.begin_contact_return(position(1.0)).unwrap();
         assert_eq!(state.physical_reference().unwrap(), position(10.0));
         assert_eq!(
@@ -962,7 +923,7 @@ mod tests {
         let separation = RETAIL_INTERPOLATION_TARGET_THRESHOLD_M * 8.0;
         let mut state = PoseReconciliationState::default();
         let mut current = position(0.0);
-        state.correct(position(separation), true);
+        state.correct(position(separation), position(separation), true);
         // Reference ownership is arithmetic only; the contact motor owns all actual correction.
         for ordinary in [
             Vector3::new(0.0, 0.2, 0.0),
@@ -985,7 +946,7 @@ mod tests {
     fn reference_completion_waits_for_relative_velocity_to_settle() {
         let mut state = PoseReconciliationState::default();
         let target = position(0.0);
-        state.correct(target, false);
+        state.correct(target, target, false);
         let speed_tolerance =
             super::super::PHYSICAL_RETURN_GAIN * RETAIL_INTERPOLATION_TARGET_THRESHOLD_M;
         state.finish_physical_tick(
@@ -1005,7 +966,7 @@ mod tests {
         let mut state = PoseReconciliationState::default();
         let current = position(0.0);
         let distance = super::super::PHYSICAL_RETURN_START_THRESHOLD_M * 10.0;
-        state.correct(position(distance), false);
+        state.correct(position(distance), position(distance), false);
         for _ in 0..200 {
             let correction = state
                 .advance_return_reference(current, Vector3::zero())
@@ -1027,7 +988,7 @@ mod tests {
     fn physical_packet_replaces_reference_without_preserving_confirmation_damping() {
         let mut state = PoseReconciliationState::default();
         state.confirm(position(-100.0), position(0.0));
-        state.correct(position(2.0), false);
+        state.correct(position(2.0), position(2.0), false);
         let ordinary = Vector3::new(0.0, 1.0, 0.0);
         assert_eq!(
             state
@@ -1038,7 +999,7 @@ mod tests {
         state
             .advance_return_reference(position(0.0), ordinary)
             .unwrap();
-        state.correct(position(-2.0), false);
+        state.correct(position(-2.0), position(-2.0), false);
         let correction = state
             .advance_return_reference(position(0.0), Vector3::zero())
             .unwrap();
@@ -1054,7 +1015,7 @@ mod tests {
         let mut target = current;
         target.coords.x += RETAIL_INTERPOLATION_TARGET_THRESHOLD_M * 2.0;
         let mut state = PoseReconciliationState::default();
-        state.correct(target, true);
+        state.correct(target, target, true);
         let ordinary = Vector3::new(0.0003, 0.0, 0.0);
         for _ in 0..100 {
             state.advance_return_reference(current, ordinary).unwrap();
@@ -1166,22 +1127,6 @@ mod tests {
     }
 
     #[test]
-    fn stalled_interpolation_schedules_snap_after_one_failed_target() {
-        let mut state = PoseReconciliationState::default();
-        state.interpolate(position(10.0), position(0.0), false, Some(1.0));
-        for _ in 0..5 {
-            let _ = state.compose_translation(
-                position(0.0),
-                ContactState::Grounded,
-                Vector3::zero(),
-                0.03,
-            );
-        }
-        assert_eq!(state.take_pending_snap(), Some(position(10.0)));
-        assert_eq!(state.take_pending_snap(), None);
-    }
-
-    #[test]
     fn speed_uses_twice_adjusted_motion_rate_and_retail_fallback() {
         assert_eq!(retail_interpolated_speed(Some(4.0)), 8.0);
         assert_eq!(retail_interpolated_speed(Some(f32::NAN)), 7.5);
@@ -1196,7 +1141,7 @@ mod tests {
             let mut target = position(0.0);
             target.coords.z = RETAIL_INTERPOLATION_TARGET_THRESHOLD_M * 2.0;
             let mut state = PoseReconciliationState::default();
-            state.correct(target, true);
+            state.correct(target, target, true);
             state.finish_physical_tick(position(0.0), Vector3::zero(), domain);
             assert_eq!(
                 state.has_physical_correction(),

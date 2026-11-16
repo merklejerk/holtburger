@@ -4,6 +4,7 @@
 //! behavior in a small oracle so the client implementation can be compared against a second
 //! model rather than agreeing with itself. The ordering is fixed by retail position-offset
 //! adjustment: interpolation assigns the translation, then the constraint manager damps it.
+//! Stall timing deliberately differs; shared recovery tests own that contract.
 
 use holtburger_common::Vector3;
 
@@ -11,9 +12,6 @@ const NODE_COMPLETE_DISTANCE: f32 = 0.05;
 const SNAP_DISTANCE: f32 = 96.0;
 const DEFAULT_STEP_RATE: f32 = 7.5;
 const EPSILON: f32 = 0.000_2;
-const WATCHDOG_FRAMES: u32 = 5;
-const WATCHDOG_RATIO: f32 = 0.3;
-const WATCHDOG_NEAR_COMPLETE_DISTANCE: f32 = 0.2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OracleDisposition {
@@ -171,44 +169,21 @@ impl OracleRuntimeContact {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct OracleNode {
-    original_distance: f32,
-    frame_counter: u32,
-    progress_quantum: f32,
-    failed_nodes: u8,
-}
-
-impl OracleNode {
-    fn new(distance: f32) -> Self {
-        Self {
-            original_distance: distance,
-            frame_counter: 0,
-            progress_quantum: 0.0,
-            failed_nodes: 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 enum OracleInterpolationOutcome {
     NotApplied,
     Completed,
-    Abandoned,
     Assigned {
         translation: Vector3,
         heading_zeroed: bool,
     },
-    Snap,
 }
 
 fn oracle_interpolation_adjust(
-    node: &mut OracleNode,
     contact: OracleRuntimeContact,
     to_target: Vector3,
     max_speed: Option<f32>,
     keep_heading: bool,
     quantum: f32,
-    queued_successor: bool,
 ) -> OracleInterpolationOutcome {
     if !contact.has_contact() {
         return OracleInterpolationOutcome::NotApplied;
@@ -221,27 +196,6 @@ fn oracle_interpolation_adjust(
         .map(|speed| speed * 2.0)
         .filter(|speed| speed.is_finite() && *speed >= EPSILON)
         .unwrap_or(DEFAULT_STEP_RATE);
-    node.frame_counter += 1;
-    node.progress_quantum += quantum.max(0.0);
-    if node.frame_counter >= WATCHDOG_FRAMES {
-        let progress = node.original_distance - distance;
-        let progressing = progress >= EPSILON
-            && node.progress_quantum > EPSILON
-            && progress / node.progress_quantum / rate >= WATCHDOG_RATIO;
-        if !progressing {
-            if distance < WATCHDOG_NEAR_COMPLETE_DISTANCE {
-                return OracleInterpolationOutcome::Completed;
-            }
-            node.failed_nodes = node.failed_nodes.saturating_add(1);
-            if !queued_successor || node.failed_nodes > 3 {
-                return OracleInterpolationOutcome::Snap;
-            }
-            return OracleInterpolationOutcome::Abandoned;
-        }
-        node.frame_counter = 0;
-        node.progress_quantum = 0.0;
-        node.original_distance = distance;
-    }
     let cap = rate * quantum.max(0.0);
     let translation = if distance > cap && distance > EPSILON {
         to_target * (cap / distance)
@@ -307,7 +261,7 @@ struct OracleTickInput {
 }
 
 fn oracle_tick(
-    node: Option<&mut OracleNode>,
+    interpolating: bool,
     constraint: &mut OracleConstraint,
     input: OracleTickInput,
 ) -> (Vector3, bool) {
@@ -319,26 +273,20 @@ fn oracle_tick(
         keep_heading,
         quantum,
     } = input;
-    let (translation, heading_zeroed) = match node {
-        Some(node) => match oracle_interpolation_adjust(
-            node,
-            contact,
-            to_target,
-            max_speed,
-            keep_heading,
-            quantum,
-            false,
-        ) {
-            OracleInterpolationOutcome::Assigned {
-                translation,
-                heading_zeroed,
-            } => (translation, heading_zeroed),
-            OracleInterpolationOutcome::NotApplied
-            | OracleInterpolationOutcome::Completed
-            | OracleInterpolationOutcome::Abandoned
-            | OracleInterpolationOutcome::Snap => (authored_translation, false),
-        },
-        None => (authored_translation, false),
+    let (translation, heading_zeroed) = match interpolating {
+        true => {
+            match oracle_interpolation_adjust(contact, to_target, max_speed, keep_heading, quantum)
+            {
+                OracleInterpolationOutcome::Assigned {
+                    translation,
+                    heading_zeroed,
+                } => (translation, heading_zeroed),
+                OracleInterpolationOutcome::NotApplied | OracleInterpolationOutcome::Completed => {
+                    (authored_translation, false)
+                }
+            }
+        }
+        false => (authored_translation, false),
     };
     (
         oracle_constraint_adjust(constraint, contact, translation),
@@ -491,10 +439,9 @@ mod tests {
 
     #[test]
     fn interpolation_assigns_instead_of_adds_and_uses_twice_speed() {
-        let mut node = OracleNode::new(10.0);
         let mut leash = oracle_constraint(false, 0.0);
         let (translation, heading_zeroed) = oracle_tick(
-            Some(&mut node),
+            true,
             &mut leash,
             OracleTickInput {
                 contact: OracleRuntimeContact::Grounded,
@@ -508,75 +455,6 @@ mod tests {
         assert_close(translation.x, 0.24);
         assert_close(translation.y, 0.0);
         assert!(!heading_zeroed);
-    }
-
-    #[test]
-    fn watchdog_completes_near_and_distinguishes_last_from_queued_failure() {
-        let mut node = OracleNode::new(10.0);
-        for _ in 0..4 {
-            assert!(matches!(
-                oracle_interpolation_adjust(
-                    &mut node,
-                    OracleRuntimeContact::Grounded,
-                    Vector3::new(10.0, 0.0, 0.0),
-                    Some(1.0),
-                    false,
-                    0.03,
-                    false,
-                ),
-                OracleInterpolationOutcome::Assigned { .. }
-            ));
-        }
-        assert_eq!(
-            oracle_interpolation_adjust(
-                &mut node,
-                OracleRuntimeContact::Grounded,
-                Vector3::new(10.0, 0.0, 0.0),
-                Some(1.0),
-                false,
-                0.03,
-                false,
-            ),
-            OracleInterpolationOutcome::Snap
-        );
-        let mut queued = OracleNode::new(10.0);
-        queued.frame_counter = 4;
-        assert_eq!(
-            oracle_interpolation_adjust(
-                &mut queued,
-                OracleRuntimeContact::Grounded,
-                Vector3::new(10.0, 0.0, 0.0),
-                Some(1.0),
-                false,
-                0.03,
-                true,
-            ),
-            OracleInterpolationOutcome::Abandoned
-        );
-        let mut near = OracleNode::new(0.1);
-        for _ in 0..4 {
-            let _ = oracle_interpolation_adjust(
-                &mut near,
-                OracleRuntimeContact::Grounded,
-                Vector3::new(0.1, 0.0, 0.0),
-                Some(1.0),
-                false,
-                0.03,
-                false,
-            );
-        }
-        assert_eq!(
-            oracle_interpolation_adjust(
-                &mut near,
-                OracleRuntimeContact::Grounded,
-                Vector3::new(0.1, 0.0, 0.0),
-                Some(1.0),
-                false,
-                0.03,
-                false,
-            ),
-            OracleInterpolationOutcome::Completed
-        );
     }
 
     #[test]

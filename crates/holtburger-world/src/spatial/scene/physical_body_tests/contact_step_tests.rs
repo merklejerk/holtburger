@@ -2939,7 +2939,7 @@ fn character_return_tracks_reference_without_accumulating_nominal_speed() {
             if epoch == 1 {
                 reference = scene.body(id).unwrap().pose.coords - Vector3::new(1.0, 0.0, 0.0);
             }
-            reconciliation.correct(pose(reference), false);
+            reconciliation.correct(pose(reference), scene.body(id).unwrap().pose, false);
             let initial_error = (reference - scene.body(id).unwrap().pose.coords).length();
             let maximum_drive =
                 ordinary.length() + PHYSICAL_RETURN_GAIN * (initial_error + ordinary.length() * h);
@@ -3039,7 +3039,7 @@ fn contact_collection_discards_excess_time_and_consumes_launch_once() {
             let mut state = PoseReconciliationState::default();
             let mut target = body.pose;
             target.coords.x -= 1.0;
-            state.correct(target, true);
+            state.correct(target, body.pose, true);
             Ok(input
                 .step(body, ground, interval, &mut Some(state))?
                 .actuation)
@@ -3596,7 +3596,7 @@ fn moving_flight_returns_without_retaining_correction_or_authored_velocity() {
     let mut reference = start;
     reference.coords.x += 1.0;
     let mut reconciliation = PoseReconciliationState::default();
-    reconciliation.correct(reference, true);
+    reconciliation.correct(reference, start, true);
     let duration = MOBILE_CONTACT_TICK_SECONDS;
     for _ in 0..(4.0 / duration).ceil() as usize {
         let mut nominal_velocity = Vector3::zero();
@@ -3816,7 +3816,7 @@ fn collection_impact_retires_entity_flight_and_does_not_capture_a_new_return() {
     let mut pending = PoseReconciliationState::default();
     let mut target = start;
     target.coords.x += 1.0;
-    pending.correct(target, true);
+    pending.correct(target, start, true);
     body.reconciliation = Some(Box::new(pending));
     let duration = MOBILE_CONTACT_TICK_SECONDS;
     let entities = &world.entities;
@@ -5761,7 +5761,7 @@ fn sticky_drive_approaches_actual_clearance_when_reference_is_across_target() {
             // A retained reference can straddle the target after contact or fresh target travel.
             // Keep the historical server anchor at the start, not at the predicted reference.
             let mut reconciliation = PoseReconciliationState::default();
-            reconciliation.correct(reference, true);
+            reconciliation.correct(reference, start, true);
             scene.body_mut(id).unwrap().reconciliation = Some(Box::new(reconciliation));
             let mut desired = target;
             desired.coords.x += side * clearance;
@@ -6554,7 +6554,7 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
                     .reconciliation
                     .as_mut()
                     .unwrap()
-                    .correct(predicted, true);
+                    .correct(predicted, start, true);
             }
             let scene = &mut world.scene;
             let tick = scene
@@ -7942,4 +7942,180 @@ fn coaxial_angular_rotation_with_offset_upper_sphere_preserves_grounded_support(
     assert_eq!(update.displacement, Vector3::zero());
     assert_ne!(update.rotation, Quaternion::identity());
     assert!(!update.motion.is_empty());
+}
+
+/// Separates loss of packet contact authority from loss of height evidence during ordinary travel.
+/// Both scenarios end with sustained grounded, stationary authority as a recovery control.
+fn recovery_interruption_scenario(moving_height: bool) -> bool {
+    use crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS;
+    use holtburger_protocol::messages::{
+        GameMessage, PositionPack, UpdatePositionData, UpdatePositionFlag,
+    };
+
+    let height = GROUNDED_CONFIG.step_down_height * 4.0;
+    let mut collision = if moving_height {
+        collision_with_polygons(HashMap::from([(
+            0,
+            CollisionPolygon {
+                vertices: vec![
+                    Vector3::new(88.0, 90.0, height),
+                    Vector3::new(96.0, 90.0, height),
+                    Vector3::new(96.0, 175.0, height),
+                    Vector3::new(88.0, 175.0, height),
+                ],
+                normal: Vector3::new(0.0, 0.0, 1.0),
+                d: -height,
+            },
+        )]))
+    } else {
+        flat_collision_scene()
+    };
+    if !moving_height {
+        let mut asset = flat_collision_asset(0);
+        asset.static_geometry = LandblockColliders::new(
+            vec![
+                PlacedCollider::new(
+                    polygon_wall_shape(),
+                    LandblockPlacement {
+                        origin: Vector3::new(92.0, 96.0, 1.0),
+                        orientation: Quaternion::identity(),
+                    },
+                    ColliderScale::uniform(1.0).unwrap(),
+                    StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+                )
+                .unwrap(),
+            ],
+            Vec::new(),
+        );
+        collision.insert(asset).unwrap();
+    }
+    let now = Instant::now();
+    let guid = Guid(1);
+    let id = SpatialBodyId::Entity(guid);
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let start = pose(Vector3::new(90.0, 96.0, primary.radius - primary.center.z));
+    let mut authority = start;
+    if moving_height {
+        authority.coords.z += height;
+    } else {
+        authority.coords.x += 4.0;
+    }
+    let mut world = crate::WorldState::synthetic();
+    world.add_entity(crate::entity::Entity::new(
+        guid,
+        "Remote recovery subject".to_owned(),
+        start,
+    ));
+    world
+        .scene
+        .set_dynamic_physical_body(
+            id,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    acquire_support(&mut world.scene, &collision, id, now);
+    let packet_ticks =
+        (RECOVERY_WINDOW_SECONDS * 0.25 / MOBILE_CONTACT_TICK_SECONDS).round() as usize;
+    let phase_ticks = packet_ticks * 40;
+    let total_ticks =
+        phase_ticks + (RECOVERY_WINDOW_SECONDS * 2.0 / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize;
+    let mut recovered_during_interruption = false;
+    let mut recovery_times = Vec::new();
+    for tick in 0..total_ticks {
+        let interrupted = tick < phase_ticks;
+        if tick % packet_ticks == 0 {
+            let contact = moving_height || !interrupted || (tick / packet_ticks).is_multiple_of(2);
+            world.handle_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                guid,
+                pos: PositionPack {
+                    pos: authority,
+                    position_sequence: (tick / packet_ticks + 1) as u16,
+                    flags: if contact {
+                        UpdatePositionFlag::HAS_CONTACT
+                    } else {
+                        UpdatePositionFlag::NONE
+                    },
+                    ..Default::default()
+                },
+            })));
+            assert_eq!(
+                world.scene.body(id).unwrap().authoritative_pose(),
+                Some(authority)
+            );
+        }
+        let displacement = if moving_height && interrupted {
+            Vector3::new(0.0, MOBILE_CONTACT_TICK_SECONDS, 0.0)
+        } else {
+            Vector3::zero()
+        };
+        let result = world
+            .scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                now + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS),
+                |_| {
+                    Ok(PhysicalBodyInput::referenced(
+                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        PhysicalReferenceInput::remote(
+                            Some(RigidTransform {
+                                translation: displacement,
+                                rotation: Quaternion::identity(),
+                            }),
+                            start.rotation,
+                        ),
+                        true,
+                    ))
+                },
+            )
+            .unwrap();
+        assert!(result.coverage_rejections.is_empty());
+        let placed = result.outcomes.iter().any(|outcome| matches!(outcome, DynamicEntityBodyOutcome::RecoveredPlacement(body) if *body == id));
+        if placed {
+            recovered_during_interruption |= interrupted;
+            recovery_times.push(tick as f32 * MOBILE_CONTACT_TICK_SECONDS);
+        } else {
+            assert_eq!(
+                world.scene.body(id).unwrap().contact,
+                ContactState::Grounded
+            );
+        }
+        authority.coords = authority.coords + displacement;
+    }
+    let first_recovery = *recovery_times
+        .first()
+        .expect("eligible authority must recover");
+    let expected_start = if moving_height {
+        0.0
+    } else {
+        phase_ticks as f32 * MOBILE_CONTACT_TICK_SECONDS
+    };
+    assert!(
+        (first_recovery - expected_start - RECOVERY_WINDOW_SECONDS).abs()
+            <= MOBILE_CONTACT_TICK_SECONDS * 2.0,
+        "recovery must use a full eligible simulation-time window: {first_recovery}s"
+    );
+    let final_pose = world.scene.body(id).unwrap().pose;
+    assert!(
+        final_pose.distance_to(&authority)
+            <= crate::spatial::RETAIL_INTERPOLATION_TARGET_THRESHOLD_M
+    );
+    assert!((final_pose.coords.z - authority.coords.z).abs() < CONTACT_EPSILON);
+    recovered_during_interruption
+}
+
+#[test]
+fn intermittent_packet_contact_requires_a_new_sustained_recovery_window() {
+    assert!(!recovery_interruption_scenario(false));
+}
+
+#[test]
+fn moving_grounded_remote_recovers_wrong_height() {
+    assert!(
+        recovery_interruption_scenario(true),
+        "height disagreement must recover while ordinary movement continues"
+    );
 }

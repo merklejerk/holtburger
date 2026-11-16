@@ -821,6 +821,7 @@ struct PhysicalBodyCommitInput {
 
 /// Physics hydration changes which reconciliation implementation owns a retained remote sample.
 fn reclassify_body_reconciliation(body: &mut SpatialBody) {
+    let correction_authorized = body.correction_pose().is_some();
     let mobile = body.physical.as_ref().is_some_and(|physical| {
         !matches!(
             physical.definition,
@@ -829,6 +830,10 @@ fn reclassify_body_reconciliation(body: &mut SpatialBody) {
     });
     if let Some(state) = body.reconciliation.as_mut() {
         state.set_mobile_physical(mobile, body.pose);
+        // Changing execution mode cannot turn observation-only authority into contact evidence.
+        if !correction_authorized {
+            state.invalidate_recovery();
+        }
     }
 }
 
@@ -2063,12 +2068,12 @@ impl SpatialScene {
             AuthoritativePoseEffect::Interpolate { keep_heading, .. } if mobile_physical => {
                 body.reconciliation
                     .get_or_insert_with(|| Box::new(PoseReconciliationState::default()))
-                    .correct(pose, keep_heading);
+                    .correct(pose, body.pose, keep_heading);
             }
             AuthoritativePoseEffect::Snap { .. } if mobile_physical => {
                 body.reconciliation
                     .get_or_insert_with(|| Box::new(PoseReconciliationState::default()))
-                    .correct(pose, false);
+                    .correct(pose, body.pose, false);
             }
             AuthoritativePoseEffect::Initialize { .. } => {
                 replace_unsolved_runtime_pose(&mut body, pose);
@@ -2327,7 +2332,6 @@ impl SpatialScene {
             ordinary_translation,
             delta_seconds,
         );
-        body.reconciliation = (!reconciliation.is_empty()).then_some(reconciliation);
         let composed_translation = composition.translation + physical_translation;
         if composed_translation != accepted_translation {
             solved.pose =
@@ -2346,8 +2350,18 @@ impl SpatialScene {
                 delta_seconds,
             );
         }
+        let kind = if let Some(target) =
+            reconciliation.finish_pose_only_tick(solved.pose, delta_seconds)
+        {
+            solved.pose = target;
+            solved.accepted_motion = super::AcceptedBodyMotion::default();
+            RuntimeBodyAdvanceKind::CorrectionSnap
+        } else {
+            RuntimeBodyAdvanceKind::Integrated
+        };
+        body.reconciliation = (!reconciliation.is_empty()).then_some(reconciliation);
         self.body_store.record_observation(body_id, false);
-        Some((solved, RuntimeBodyAdvanceKind::Integrated))
+        Some((solved, kind))
     }
 
     pub fn suspend_runtime_bodies(&mut self, now: Instant) {
@@ -3523,6 +3537,8 @@ mod physical_body_tests {
 
     mod collision_pose_tests;
     mod contact_step_tests;
+    mod pose_only_recovery_tests;
+    mod remote_position_tests;
     mod solver_failure_tests;
 
     #[test]
@@ -5491,7 +5507,11 @@ mod physical_body_tests {
         };
 
         let mut correction = PoseReconciliationState::default();
-        correction.correct(pose(Vector3::new(50.0, 20.0, 30.0)), false);
+        correction.correct(
+            pose(Vector3::new(50.0, 20.0, 30.0)),
+            scene.body(id).unwrap().pose,
+            false,
+        );
         scene.body_mut(id).unwrap().reconciliation = Some(Box::new(correction));
 
         let relocated = scene
@@ -5911,7 +5931,7 @@ mod physical_body_tests {
         let mut reference = start;
         reference.coords.x += 1.0;
         let mut reconciliation = PoseReconciliationState::default();
-        reconciliation.correct(reference, false);
+        reconciliation.correct(reference, start, false);
         scene.body_mut(id).unwrap().reconciliation = Some(Box::new(reconciliation));
         let before = scene.body(id).unwrap().clone();
         let mut input = collection_input(&before).unwrap();

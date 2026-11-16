@@ -52,10 +52,9 @@ pub use dead_reckoning::{
 pub use pose_reconciliation::{
     AuthoritativePoseEffect, AuthoritativePoseResetCause, PHYSICAL_RETURN_START_THRESHOLD_M,
     PhysicalReferenceDomain, PoseReconciliationComposition, PoseReconciliationState,
-    PoseTranslationSource, RETAIL_INTERPOLATION_NEAR_COMPLETE_DISTANCE_M,
-    RETAIL_INTERPOLATION_SNAP_DISTANCE_M, RETAIL_INTERPOLATION_TARGET_THRESHOLD_M,
-    RETAIL_MAX_INTERPOLATED_VELOCITY_MPS, damp_constraint_translation, retail_constraint_distances,
-    retail_interpolated_speed,
+    PoseTranslationSource, RETAIL_INTERPOLATION_SNAP_DISTANCE_M,
+    RETAIL_INTERPOLATION_TARGET_THRESHOLD_M, RETAIL_MAX_INTERPOLATED_VELOCITY_MPS,
+    damp_constraint_translation, retail_constraint_distances, retail_interpolated_speed,
 };
 pub(crate) use scene::integrate_angular_velocity;
 pub use scene::{

@@ -81,6 +81,8 @@ function fakeGl() {
 	const texImage2D = vi.fn();
 	const texSubImage2D = vi.fn();
 	const gl = {
+		NO_ERROR: 0,
+		getError: () => 0,
 		ARRAY_BUFFER: 1,
 		BLEND: 2,
 		COMPILE_STATUS: 3,

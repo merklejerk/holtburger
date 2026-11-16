@@ -37,6 +37,17 @@ function birthTimeAt(slots: ParticleRecordSlots, slot: number): number {
 }
 
 describe("ParticleRecordSlots", () => {
+	it("reuses padding after a reservation larger than one row", () => {
+		const slots = new ParticleRecordSlots();
+		const requested = PARTICLE_RECORDS_PER_ROW + 1;
+		slots.allocate(requested);
+		const mirror = slots.data;
+		const spare = slots.allocate(PARTICLE_RECORDS_PER_ROW - 1);
+		expect(spare.base).toBe(requested);
+		expect(slots.data).toBe(mirror);
+		expect(slots.reservedSlotCount).toBe(PARTICLE_RECORDS_PER_ROW * 2);
+	});
+
 	it("hands out non-overlapping regions", () => {
 		const slots = new ParticleRecordSlots();
 
@@ -81,7 +92,7 @@ describe("ParticleRecordSlots", () => {
 		slots.writeRecord(region.base, record(42));
 
 		// Force growth past the initial block.
-		slots.allocate(1024);
+		slots.allocate(PARTICLE_RECORDS_PER_ROW + 1);
 
 		expect(birthTimeAt(slots, region.base)).toBe(42);
 	});

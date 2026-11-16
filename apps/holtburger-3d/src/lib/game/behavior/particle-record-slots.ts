@@ -13,9 +13,6 @@ const FLOATS_PER_TEXEL = 4;
 export const PARTICLE_RECORD_STRIDE_FLOATS =
 	PARTICLE_RECORD_TEXELS * FLOATS_PER_TEXEL;
 
-/** Records the store grows by when it runs out of room. */
-const GROWTH_RECORDS = PARTICLE_RECORDS_PER_ROW;
-
 /** A contiguous run of free slots, held so adjacent frees can merge back together. */
 interface FreeSpan {
 	base: number;
@@ -53,7 +50,7 @@ export class ParticleRecordSlots {
 	/** One bit per texture row; scattered writes do not bridge untouched rows. */
 	#dirtyRows = new Uint32Array(0);
 
-	/** Backing mirror, in the exact layout the record texture holds. */
+	/** Backing mirror padded to complete texture rows; spare slots remain available for reuse. */
 	get data(): Float32Array {
 		return this.#data;
 	}
@@ -178,14 +175,16 @@ export class ParticleRecordSlots {
 	/** Extend the store by at least `required` slots and return the base of the new run. */
 	#grow(required: number): number {
 		const base = this.#capacity;
-		const added = Math.max(required, GROWTH_RECORDS);
+		// GPU uploads consume complete rows, including unused slots in the final row.
+		const added =
+			Math.ceil(required / PARTICLE_RECORDS_PER_ROW) * PARTICLE_RECORDS_PER_ROW;
 		this.#capacity += added;
 		const grown = new Float32Array(
 			this.#capacity * PARTICLE_RECORD_STRIDE_FLOATS,
 		);
 		grown.set(this.#data);
 		this.#data = grown;
-		const rowCount = Math.ceil(this.#capacity / PARTICLE_RECORDS_PER_ROW);
+		const rowCount = this.#capacity / PARTICLE_RECORDS_PER_ROW;
 		const wordCount = Math.ceil(rowCount / 32);
 		if (wordCount > this.#dirtyRows.length) {
 			const bits = new Uint32Array(wordCount);

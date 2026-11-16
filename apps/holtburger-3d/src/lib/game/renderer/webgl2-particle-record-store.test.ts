@@ -1,3 +1,4 @@
+import { ParticleRecordSlots } from "../behavior/particle-record-slots";
 import { describe, expect, it, vi } from "vitest";
 import {
 	PARTICLE_RECORD_TEXELS,
@@ -9,10 +10,13 @@ const FLOATS_PER_ROW = PARTICLE_RECORDS_PER_ROW * PARTICLE_RECORD_TEXELS * 4;
 
 function fakeGl() {
 	const calls = {
+		getError: vi.fn(() => 0),
 		texImage2D: vi.fn(),
 		texSubImage2D: vi.fn(),
 	};
 	const gl = {
+		NO_ERROR: 0,
+		getError: calls.getError,
 		CLAMP_TO_EDGE: 1,
 		FLOAT: 2,
 		NEAREST: 3,
@@ -42,6 +46,45 @@ function store() {
 }
 
 describe("WebGL2ParticleRecordStore", () => {
+	it.each([-1, 0, 1])(
+		"uploads allocator output around a row boundary (%i)",
+		(offset) => {
+			const slots = new ParticleRecordSlots();
+			const { calls, store: records } = store();
+			// Exercise both initial allocation and growth with existing records.
+			for (let growth = 0; growth < 2; growth += 1) {
+				slots.allocate(PARTICLE_RECORDS_PER_ROW + offset);
+				records.sync(slots.data, slots.takeDirtyRows());
+				const call = calls.texImage2D.mock.calls.at(-1);
+				if (!call) throw new Error("Expected a particle texture allocation.");
+				expect(call[8]).toBe(slots.data);
+				expect(slots.data.length).toBe(call[3] * call[4] * 4);
+			}
+		},
+	);
+
+	it("rejects incomplete rows before uploading", () => {
+		const { calls, store: records } = store();
+		expect(() =>
+			records.sync(new Float32Array(FLOATS_PER_ROW + 1), null),
+		).toThrow("complete texture rows");
+		expect(calls.texImage2D).not.toHaveBeenCalled();
+	});
+
+	it("retries allocation after a driver rejection without publishing its height", () => {
+		const { calls, store: records } = store();
+		const mirror = new Float32Array(FLOATS_PER_ROW);
+		calls.getError.mockReturnValueOnce(0).mockReturnValueOnce(0x502);
+		expect(() => records.sync(mirror, null)).toThrow(
+			"After particle record allocation",
+		);
+		expect(records.uploadedRowCount).toBe(0);
+		records.sync(mirror, null);
+		expect(calls.texImage2D).toHaveBeenCalledTimes(2);
+		expect(calls.texSubImage2D).not.toHaveBeenCalled();
+		expect(records.uploadedRowCount).toBe(1);
+	});
+
 	it("allocates and uploads the whole mirror when it first appears", () => {
 		const { calls, store: records } = store();
 

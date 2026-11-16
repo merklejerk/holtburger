@@ -1,3 +1,4 @@
+import { requireWebGL2NoError } from "../webgl/diagnostics";
 import { PARTICLE_RECORD_TEXELS } from "./particle-record-layout";
 
 /** RGBA32F carries four floats per texel. */
@@ -57,19 +58,24 @@ export class WebGL2ParticleRecordStore {
 		this.#requireAlive();
 		this.#uploadedRowCount = 0;
 		const width = this.#recordsPerRow * PARTICLE_RECORD_TEXELS;
-		const requiredRows = Math.ceil(mirror.length / (width * FLOATS_PER_TEXEL));
+		const floatsPerRow = width * FLOATS_PER_TEXEL;
+		if (mirror.length % floatsPerRow !== 0)
+			throw new Error(
+				"Particle record storage must contain complete texture rows.",
+			);
+		const requiredRows = mirror.length / floatsPerRow;
 		const gl = this.#gl;
 		if (requiredRows > this.#rows) {
-			// A grown mirror is a different texture, so every row is uploaded regardless of what
-			// the dirty bits claimed.
-			this.#rows = requiredRows;
+			// Redefining texture storage replaces its contents, so upload every row.
+			// Commit the new height only after the driver accepts the allocation.
+			requireWebGL2NoError(gl, "Before particle record allocation");
 			gl.bindTexture(gl.TEXTURE_2D, this.#texture);
 			gl.texImage2D(
 				gl.TEXTURE_2D,
 				0,
 				gl.RGBA32F,
 				width,
-				this.#rows,
+				requiredRows,
 				0,
 				gl.RGBA,
 				gl.FLOAT,
@@ -77,7 +83,9 @@ export class WebGL2ParticleRecordStore {
 				0,
 			);
 			gl.bindTexture(gl.TEXTURE_2D, null);
-			this.#uploadedRowCount = this.#rows;
+			requireWebGL2NoError(gl, "After particle record allocation");
+			this.#rows = requiredRows;
+			this.#uploadedRowCount = requiredRows;
 			return;
 		}
 		if (dirtyRows === null || this.#rows === 0) return;

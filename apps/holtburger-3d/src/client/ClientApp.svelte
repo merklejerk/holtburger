@@ -1354,7 +1354,10 @@
 					inputController?.setFullChargeDurationMs(
 						characterMotion.fullChargeDurationMs,
 					);
-				appLifecycle.acceptAuthority(event.state.lifecycle);
+				appLifecycle.acceptAuthority(
+					event.state.lifecycle,
+					event.state.localPlayerGuid,
+				);
 				return;
 			case "resyncing":
 				canTeleportFromMap = false;
@@ -1388,7 +1391,10 @@
 				) {
 					retireCharacterSettings();
 				}
-				appLifecycle.acceptAuthority(event.lifecycle);
+				appLifecycle.acceptAuthority(
+					event.lifecycle,
+					session?.state().playerGuid ?? null,
+				);
 				return;
 			case "character-motion-capabilities":
 				characterMotion = event.capabilities;

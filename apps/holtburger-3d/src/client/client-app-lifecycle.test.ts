@@ -66,9 +66,118 @@ function deferred() {
 }
 
 describe("app lifecycle coordination", () => {
+	it("orders successful character use across logout and roster refresh without changing slots", () => {
+		const app = setup();
+		const characters = [
+			...roster.characters,
+			{ guid: 9, name: "Ash", slot: 2, deleteTime: 0 },
+		];
+		const selection = { ...roster, characters };
+		app.owner.acceptAuthority(selection, null);
+		expect(app.state().phase).toMatchObject({ characters, selectedGuid: 7 });
+
+		// An atomic in-world snapshot can be the first observed entry event.
+		app.owner.acceptAuthority({ kind: "in-world" }, 9);
+		app.owner.acceptAuthority({ kind: "logging-out" }, 9);
+		app.owner.acceptAuthority(selection, null);
+		expect(app.state().phase).toMatchObject({
+			characters: [characters[2], characters[0], characters[1]],
+			selectedGuid: 9,
+		});
+
+		app.owner.acceptAuthority({ kind: "in-world" }, 8);
+		app.owner.acceptAuthority(
+			{
+				kind: "portal-space",
+				worldGeneration: 4,
+				cause: "teleport",
+			},
+			8,
+		);
+		app.owner.acceptAuthority({ kind: "in-world" }, 8);
+		app.owner.acceptAuthority({ kind: "in-world" }, 8);
+		app.owner.acceptAuthority(selection, null);
+		app.owner.acceptScene({ kind: "ready" }, true);
+		app.owner.select(7);
+		app.owner.acceptAuthority(selection, null);
+		expect(app.state().phase).toMatchObject({
+			characters: [characters[1], characters[2], characters[0]],
+			selectedGuid: 7,
+		});
+		expect(selection.characters.map((character) => character.guid)).toEqual([
+			7, 8, 9,
+		]);
+		app.owner.acceptAuthority(
+			{ ...selection, characters: [characters[0], characters[2]] },
+			null,
+		);
+		expect(app.state().phase).toMatchObject({
+			characters: [characters[2], characters[0]],
+			selectedGuid: 7,
+		});
+		app.owner.acceptAuthority({ kind: "in-world" }, 9);
+		app.owner.acceptAuthority(selection, null);
+		expect(app.state().phase).toMatchObject({
+			characters: [characters[2], characters[1], characters[0]],
+			selectedGuid: 9,
+		});
+	});
+	it("uses refreshed roster records and server order for unused characters", () => {
+		const app = setup();
+		app.owner.acceptAuthority({ kind: "in-world" }, 8);
+		const refreshed = [
+			{ guid: 9, name: "Ash", slot: 0, deleteTime: 0 },
+			{ guid: 7, name: "Mira", slot: 1, deleteTime: 0 },
+			{ guid: 8, name: "Renamed Nox", slot: 2, deleteTime: 123 },
+		];
+		app.owner.acceptAuthority({ ...roster, characters: refreshed }, null);
+		expect(app.state().phase).toMatchObject({
+			characters: [refreshed[2], refreshed[0], refreshed[1]],
+			selectedGuid: 8,
+		});
+		app.owner.acceptAuthority({ ...roster, characters: [] }, null);
+		expect(app.state().phase).toMatchObject({
+			characters: [],
+			selectedGuid: null,
+		});
+	});
+	it("does not count selection, command acceptance, or rejected portal staging as usage", async () => {
+		const app = setup();
+		app.owner.acceptAuthority(roster, null);
+		app.owner.acceptScene({ kind: "ready" }, true);
+		app.owner.select(8);
+		await app.owner.enter();
+		app.owner.acceptAuthority(
+			{ kind: "entering-world", characterGuid: 8 },
+			null,
+		);
+		app.owner.acceptAuthority(
+			{ kind: "portal-space", worldGeneration: 2, cause: "initial-entry" },
+			8,
+		);
+		app.owner.acceptAuthority({ ...roster, rejection: "Entry refused" }, null);
+		expect(app.state().phase).toMatchObject({
+			characters: roster.characters,
+			selectedGuid: 7,
+		});
+	});
+	it("records identity from a later coherent snapshot and starts a new owner in server order", () => {
+		const app = setup();
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
+		app.owner.acceptAuthority({ kind: "in-world" }, 8);
+		app.owner.acceptAuthority(roster, null);
+		expect(app.state().phase).toMatchObject({
+			characters: [roster.characters[1], roster.characters[0]],
+		});
+		const nextConnection = setup();
+		nextConnection.owner.acceptAuthority(roster, null);
+		expect(nextConnection.state().phase).toMatchObject({
+			characters: roster.characters,
+		});
+	});
 	it("admits the roster and its canvas together only after scene readiness", () => {
 		const app = setup();
-		app.owner.acceptAuthority(roster);
+		app.owner.acceptAuthority(roster, null);
 		expect(app.page().kind).toBe("loading");
 		expect(app.state().admission.canvasVisible).toBe(false);
 		app.owner.acceptScene({ kind: "ready" }, true);
@@ -82,22 +191,25 @@ describe("app lifecycle coordination", () => {
 	});
 	it("preserves a valid selection on roster refresh and replaces a removed selection", () => {
 		const app = setup();
-		app.owner.acceptAuthority(roster);
+		app.owner.acceptAuthority(roster, null);
 		app.owner.acceptScene({ kind: "ready" }, true);
 		app.owner.select(8);
-		app.owner.acceptAuthority(roster);
+		app.owner.acceptAuthority(roster, null);
 		expect(app.state().phase).toMatchObject({ selectedGuid: 8 });
-		app.owner.acceptAuthority({
-			...roster,
-			characters: [roster.characters[0]],
-		});
+		app.owner.acceptAuthority(
+			{
+				...roster,
+				characters: [roster.characters[0]],
+			},
+			null,
+		);
 		expect(app.state().phase).toMatchObject({ selectedGuid: 7 });
 	});
 	it("serializes repeated entry and keeps selection stable while entry is pending", async () => {
 		const app = setup();
 		const entry = deferred();
 		app.session.enterWorld.mockReturnValue(entry.promise);
-		app.owner.acceptAuthority(roster);
+		app.owner.acceptAuthority(roster, null);
 		app.owner.acceptScene({ kind: "ready" }, true);
 		const first = app.owner.enter();
 		app.owner.select(8);
@@ -109,28 +221,34 @@ describe("app lifecycle coordination", () => {
 	});
 	it("keeps gameplay presentation through portal staging but enables input only in world", () => {
 		const app = setup();
-		app.owner.acceptAuthority({ kind: "entering-world", characterGuid: 7 });
+		app.owner.acceptAuthority(
+			{ kind: "entering-world", characterGuid: 7 },
+			null,
+		);
 		expect(app.page().kind).toBe("gameplay");
 		expect(app.state().admission).toMatchObject({
 			mode: "gameplay",
 			gameplayInput: false,
 		});
-		app.owner.acceptAuthority({
-			kind: "portal-space",
-			worldGeneration: 4,
-			cause: "initial-entry",
-		});
+		app.owner.acceptAuthority(
+			{
+				kind: "portal-space",
+				worldGeneration: 4,
+				cause: "initial-entry",
+			},
+			null,
+		);
 		expect(app.state().admission.mode).toBe("gameplay");
 		expect(app.state().admission.gameplayInput).toBe(false);
-		app.owner.acceptAuthority({ kind: "in-world" });
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
 		expect(app.state().admission.gameplayInput).toBe(true);
 	});
 	it("retains return progress through roster arrival until the replacement scene is ready", async () => {
 		const app = setup();
-		app.owner.acceptAuthority({ kind: "in-world" });
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
 		app.owner.acceptScene({ kind: "ready" }, true);
 		app.session.logout.mockImplementation(async () => {
-			app.owner.acceptAuthority({ kind: "logging-out" });
+			app.owner.acceptAuthority({ kind: "logging-out" }, null);
 		});
 		await app.owner.returnToSelection();
 		expect(app.stopInput).toHaveBeenCalledOnce();
@@ -143,7 +261,7 @@ describe("app lifecycle coordination", () => {
 			canvasVisible: false,
 			gameplayInput: false,
 		});
-		app.owner.acceptAuthority(roster);
+		app.owner.acceptAuthority(roster, null);
 		expect(app.page()).toMatchObject({
 			kind: "loading",
 			content: { activity: "return" },
@@ -156,7 +274,7 @@ describe("app lifecycle coordination", () => {
 		const flush = deferred();
 		app.stopInput.mockReturnValue(flush.promise);
 		app.session.logout.mockRejectedValue(new Error("Logout refused"));
-		app.owner.acceptAuthority({ kind: "in-world" });
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
 		const returning = app.owner.returnToSelection();
 		expect(app.state().admission.gameplayInput).toBe(false);
 		expect(app.session.logout).not.toHaveBeenCalled();
@@ -171,7 +289,7 @@ describe("app lifecycle coordination", () => {
 		const app = setup();
 		const retirement = deferred();
 		app.retireGameplay.mockReturnValue(retirement.promise);
-		app.owner.acceptAuthority({ kind: "in-world" });
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
 		const closing = app.owner.disconnect();
 		await vi.waitFor(() => expect(app.retireGameplay).toHaveBeenCalledOnce());
 		expect(app.state().admission).toMatchObject({
@@ -200,7 +318,7 @@ describe("app lifecycle coordination", () => {
 		const shutdown = deferred();
 		app.session.enterWorld.mockReturnValue(entry.promise);
 		app.session.disconnect.mockReturnValue(shutdown.promise);
-		app.owner.acceptAuthority(roster);
+		app.owner.acceptAuthority(roster, null);
 		app.owner.acceptScene({ kind: "ready" }, true);
 		const entering = app.owner.enter();
 		const disconnecting = app.owner.disconnect();
@@ -217,11 +335,14 @@ describe("app lifecycle coordination", () => {
 	});
 	it("distinguishes shutdown in progress from completed exit even with an empty diagnostic", async () => {
 		const app = setup();
-		app.owner.acceptAuthority({ kind: "in-world" });
-		app.owner.acceptAuthority({
-			kind: "exiting",
-			cause: "server-disconnect",
-		});
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
+		app.owner.acceptAuthority(
+			{
+				kind: "exiting",
+				cause: "server-disconnect",
+			},
+			null,
+		);
 		expect(app.state().phase.kind).toBe("closing");
 		expect(app.page()).toMatchObject({
 			content: { kind: "pending", activity: "disconnect" },
@@ -235,7 +356,7 @@ describe("app lifecycle coordination", () => {
 				message: "The connection to the server was lost.",
 			},
 		});
-		app.owner.acceptAuthority(roster);
+		app.owner.acceptAuthority(roster, null);
 		expect(app.state().phase.kind).toBe("closed");
 		expect(app.state().admission).toMatchObject({
 			mode: "idle",
@@ -246,7 +367,7 @@ describe("app lifecycle coordination", () => {
 	});
 	it("keeps meaningful server reasons and technical context in the completed failure", async () => {
 		const app = setup();
-		app.owner.acceptAuthority({ kind: "in-world" });
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
 		app.owner.acceptExit({
 			cause: "server-disconnect",
 			diagnostic: "Server maintenance",
@@ -261,7 +382,7 @@ describe("app lifecycle coordination", () => {
 	});
 	it("withdraws gameplay UI, canvas, and input together on app failure", () => {
 		const app = setup();
-		app.owner.acceptAuthority({ kind: "in-world" });
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
 		app.owner.acceptScene({ kind: "ready" }, true);
 		app.owner.fail("command", "Broken command");
 		expect(app.page()).toMatchObject({
@@ -295,7 +416,7 @@ describe("app lifecycle coordination", () => {
 	});
 	it("keeps failed Disconnect withdrawn rather than restarting gameplay", async () => {
 		const app = setup();
-		app.owner.acceptAuthority({ kind: "in-world" });
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
 		app.session.disconnect.mockRejectedValue(new Error("Host unavailable"));
 		await app.owner.disconnect();
 		expect(app.state().admission).toMatchObject({
@@ -309,7 +430,7 @@ describe("app lifecycle coordination", () => {
 	});
 	it("attempts host Disconnect despite failed local cleanup and preserves the diagnostic", async () => {
 		const app = setup();
-		app.owner.acceptAuthority({ kind: "in-world" });
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
 		app.retireGameplay.mockRejectedValue(new Error("Camera cleanup failed"));
 		await app.owner.disconnect();
 		expect(app.session.disconnect).toHaveBeenCalledOnce();
@@ -338,7 +459,7 @@ describe("app lifecycle coordination", () => {
 		const app = setup();
 		const retirement = deferred();
 		app.retireGameplay.mockReturnValue(retirement.promise);
-		app.owner.acceptAuthority({ kind: "in-world" });
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
 		app.owner.acceptExit({
 			cause: "server-disconnect",
 			diagnostic: "Server maintenance",
@@ -353,7 +474,7 @@ describe("app lifecycle coordination", () => {
 		const app = setup();
 		const entry = deferred();
 		app.session.enterWorld.mockReturnValue(entry.promise);
-		app.owner.acceptAuthority(roster);
+		app.owner.acceptAuthority(roster, null);
 		app.owner.acceptScene({ kind: "ready" }, true);
 		const entering = app.owner.enter();
 		await vi.waitFor(() =>
@@ -369,7 +490,7 @@ describe("app lifecycle coordination", () => {
 		const app = setup();
 		const logout = deferred();
 		app.session.logout.mockReturnValue(logout.promise);
-		app.owner.acceptAuthority({ kind: "in-world" });
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
 		const returning = app.owner.returnToSelection();
 		await vi.waitFor(() => expect(app.session.logout).toHaveBeenCalledOnce());
 		await app.owner.disconnect();
@@ -385,7 +506,7 @@ describe("app lifecycle coordination", () => {
 			const command = deferred();
 			let pending: Promise<void>;
 			if (intent === "enter") {
-				app.owner.acceptAuthority(roster);
+				app.owner.acceptAuthority(roster, null);
 				app.owner.acceptScene({ kind: "ready" }, true);
 				app.session.enterWorld.mockReturnValue(command.promise);
 				pending = app.owner.enter();
@@ -393,7 +514,7 @@ describe("app lifecycle coordination", () => {
 					expect(app.session.enterWorld).toHaveBeenCalledOnce(),
 				);
 			} else {
-				app.owner.acceptAuthority({ kind: "in-world" });
+				app.owner.acceptAuthority({ kind: "in-world" }, null);
 				app.session.logout.mockReturnValue(command.promise);
 				pending = app.owner.returnToSelection();
 				await vi.waitFor(() =>
@@ -415,7 +536,7 @@ describe("app lifecycle coordination", () => {
 	it("joins an already issued native Disconnect before acknowledging Quit", async () => {
 		const app = setup();
 		const command = deferred();
-		app.owner.acceptAuthority({ kind: "in-world" });
+		app.owner.acceptAuthority({ kind: "in-world" }, null);
 		app.session.disconnect.mockReturnValue(command.promise);
 		const disconnecting = app.owner.disconnect();
 		await vi.waitFor(() =>
@@ -474,7 +595,7 @@ describe("app lifecycle coordination", () => {
 
 it("shows a login failure using the retained phase and shared diagnostic", async () => {
 	const app = setup();
-	app.owner.acceptAuthority({ kind: "authenticating" });
+	app.owner.acceptAuthority({ kind: "authenticating" }, null);
 	app.owner.acceptExit({
 		cause: "server-disconnect",
 		diagnostic: "Login failed: The account does not exist on this server.",
@@ -491,18 +612,24 @@ it("shows a login failure using the retained phase and shared diagnostic", async
 
 it("restores selection with the retained rejection and allows another explicit entry", async () => {
 	const app = setup();
-	app.owner.acceptAuthority(roster);
+	app.owner.acceptAuthority(roster, null);
 	app.owner.acceptScene({ kind: "ready" }, true);
 	await app.owner.enter();
-	app.owner.acceptAuthority({
-		kind: "portal-space",
-		worldGeneration: 2,
-		cause: "initial-entry",
-	});
-	app.owner.acceptAuthority({
-		...roster,
-		rejection: "World entry failed: This character is still in the world.",
-	});
+	app.owner.acceptAuthority(
+		{
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "initial-entry",
+		},
+		null,
+	);
+	app.owner.acceptAuthority(
+		{
+			...roster,
+			rejection: "World entry failed: This character is still in the world.",
+		},
+		null,
+	);
 	app.owner.acceptScene({ kind: "ready" }, true);
 	expect(app.page()).toMatchObject({
 		kind: "selection",

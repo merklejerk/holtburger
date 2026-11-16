@@ -20,7 +20,7 @@ type ClientSessionLoadingPageState =
 			readonly retry: (() => void) | null;
 	  });
 
-/** Authority phases plus app-owned roster selection and explicit shutdown completion. */
+/** Authority phases plus app-owned roster ordering, selection, and shutdown completion. */
 export type ClientAppPhase =
 	| Exclude<
 			ClientLifecycle,
@@ -154,7 +154,7 @@ interface ClientAppAdmission {
 
 /** Immutable cold app snapshot shared by page, input, and presentation consumers. */
 export interface ClientAppLifecycleState {
-	/** Current authority projection, enriched only with frontend selection and terminal completion. */
+	/** Authority projection with frontend roster ordering, selection, and terminal completion. */
 	readonly phase: ClientAppPhase;
 	/** Latest cold readiness or failure from the presentation owner. */
 	readonly scene: ClientAppScene;
@@ -207,6 +207,8 @@ interface AppOperation {
 
 export class ClientAppLifecycle {
 	#state = initialClientAppLifecycleState();
+	/** Successful character use during this connection, most recent first. */
+	#recentCharacterGuids: number[] = [];
 	#operation: AppOperation | null = null;
 	#withdrawal: Promise<void> | null = null;
 	#disconnecting: Promise<void> | null = null;
@@ -217,8 +219,38 @@ export class ClientAppLifecycle {
 		this.#dependencies = dependencies;
 	}
 
-	acceptAuthority(next: ClientLifecycle): void {
+	/** Identity may arrive in a later current-state snapshot; staging alone is not usage. */
+	acceptAuthority(next: ClientLifecycle, localPlayerGuid: number | null): void {
 		const previous = this.#state;
+		if (previous.phase.kind === "closing" || previous.phase.kind === "closed")
+			return;
+		if (
+			next.kind === "in-world" &&
+			localPlayerGuid !== null &&
+			this.#recentCharacterGuids[0] !== localPlayerGuid
+		) {
+			this.#recentCharacterGuids = [
+				localPlayerGuid,
+				...this.#recentCharacterGuids.filter(
+					(guid) => guid !== localPlayerGuid,
+				),
+			];
+		}
+		if (next.kind === "character-selection") {
+			// Rank only display order; roster records retain their server-provided slots.
+			const remaining = new Map(
+				next.characters.map((entry) => [entry.guid, entry]),
+			);
+			const characters: (typeof next.characters)[number][] = [];
+			for (const guid of this.#recentCharacterGuids) {
+				const character = remaining.get(guid);
+				if (character !== undefined) {
+					characters.push(character);
+					remaining.delete(guid);
+				}
+			}
+			next = { ...next, characters: [...characters, ...remaining.values()] };
+		}
 		const phase = reduceClientAppPhase(previous.phase, {
 			type: "authority",
 			lifecycle: next,
@@ -242,12 +274,14 @@ export class ClientAppLifecycle {
 					: phase.kind,
 		});
 		if (phase.kind === "closing") {
+			this.#recentCharacterGuids = [];
 			if (this.#operation?.kind !== "quit")
 				this.#operation?.lifetime.abort(abortError("Authority is ending."));
 			this.#observeWithdrawal();
 		}
 	}
 	acceptExit(exit: ClientExitRequested): void {
+		this.#recentCharacterGuids = [];
 		const phase = this.#state.phase;
 		if (
 			(phase.kind === "closing" || phase.kind === "closed") &&

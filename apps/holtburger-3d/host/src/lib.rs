@@ -64,6 +64,7 @@ pub mod placed_motion_presentation;
 pub mod polygon_geometry;
 pub mod portal_geometry;
 pub mod portal_visibility;
+pub mod process_qos;
 pub mod protocol;
 mod reporting_content_source;
 pub mod runtime;

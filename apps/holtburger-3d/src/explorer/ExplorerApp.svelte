@@ -1990,7 +1990,7 @@
 							physicalPlacement.residency.landblockId,
 						);
 					}
-					gameRuntime.tick();
+					gameRuntime.tick(tickStartedAt);
 					cameraCoordinator?.pollSceneActivation();
 					const staticActivationReady =
 						cameraCoordinator?.activationReady() ?? false;

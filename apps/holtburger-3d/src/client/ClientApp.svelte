@@ -2144,24 +2144,26 @@
 		(window as ClientPerformanceWindow).__holtburgerPerformance =
 			performanceProbe;
 		const stopFrameLoop = startPresentationFrameLoop(
-			(timeMs) => {
+			(animationFrameTimeMs) => {
 				if (cancelled) return;
+				// Sample the monotonic clock once so camera, dynamic placements, and IPC receipt
+				// timestamps share one time domain independently of compositor BeginFrame lag.
+				const startedAtMs = performance.now();
 				const elapsedSeconds =
 					previousFrameTime === null
 						? 0
-						: Math.max(0, timeMs - previousFrameTime) / 1000;
-				previousFrameTime = timeMs;
+						: Math.max(0, startedAtMs - previousFrameTime) / 1000;
+				previousFrameTime = startedAtMs;
 				if (usesGameplayPresentation)
 					preciseJumpSession?.adjustHeldPower(
 						inputArbiter?.precisePowerDirection ?? 0,
 						elapsedSeconds,
 					);
-				const startedAtMs = performance.now();
-				const result = root.frame(timeMs);
+				const result = root.frame(startedAtMs);
 				const workMs = performance.now() - startedAtMs;
 				performanceSession?.recordFrame(workMs);
 				sampler.recordFrame({
-					animationFrameTimeMs: timeMs,
+					animationFrameTimeMs,
 					startedAtMs,
 					workMs,
 				});

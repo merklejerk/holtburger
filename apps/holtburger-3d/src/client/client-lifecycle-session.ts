@@ -703,7 +703,11 @@ export type ClientLifecycleSessionEvent =
 			readonly receipt: ClientCameraStartReceipt;
 	  }
 	| { readonly type: "camera-error"; readonly message: string }
-	| { readonly type: "camera"; readonly tick: ClientCameraTick }
+	| {
+			readonly type: "camera";
+			readonly tick: ClientCameraTick;
+			readonly receivedAtMs: number;
+	  }
 	| {
 			readonly type: "presentation-tick";
 			readonly tick: ClientPresentationTick;
@@ -2422,7 +2426,12 @@ export class ClientLifecycleSession {
 	}
 
 	#receiveCamera(payload: unknown): void {
-		this.#emit({ type: "camera", tick: decodeClientCameraTick(payload) });
+		const receivedAtMs = performance.now();
+		this.#emit({
+			type: "camera",
+			tick: decodeClientCameraTick(payload),
+			receivedAtMs,
+		});
 	}
 
 	#receiveExit(payload: unknown): void {

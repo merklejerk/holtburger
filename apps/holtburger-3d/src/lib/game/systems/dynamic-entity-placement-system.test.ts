@@ -238,6 +238,26 @@ describe("DynamicEntityPlacementSystem", () => {
 		placements.advance(1_050);
 		expect(scene.getResolvedPlacement(root)?.localToLandblock.m41).toBe(0);
 	});
+
+	it("rejects non-finite receipt and sample timestamps", () => {
+		const scene = new SceneGraph();
+		const placements = new DynamicEntityPlacementSystem(scene);
+		const root = placements.createRoot(
+			{
+				envCellId: null,
+				landblockId: "0x0102ffff",
+				localTransform: Mat4.identity(),
+				spatialMembership: { scopes: [{ kind: "outdoor" }] },
+			},
+			null,
+		);
+		expect(() =>
+			placements.applyPath(root, advance(0, 10), 100, Number.NaN),
+		).toThrow("Dynamic placement receipt time must be finite.");
+		expect(() => placements.advance(Number.POSITIVE_INFINITY)).toThrow(
+			"Dynamic placement sample time must be finite.",
+		);
+	});
 });
 
 function advance(startX: number, endX: number): DynamicEntityAdvance {

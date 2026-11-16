@@ -48,8 +48,8 @@ export function mountPregameWorldHarness(
 		onError,
 	});
 	const stop = startPresentationFrameLoop(
-		(time) => {
-			root.frame(time);
+		() => {
+			root.frame(performance.now());
 		},
 		() => 0,
 	);

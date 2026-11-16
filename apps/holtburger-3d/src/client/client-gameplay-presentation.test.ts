@@ -802,6 +802,80 @@ describe("ClientGameplayPresentation", () => {
 		}
 	});
 
+	it("samples dynamic placements and camera interpolation at the same monotonic frame instant", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientGameplayPresentation({
+			canvas: fakeCanvas(),
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+		});
+		let currentNowMs = 1_000;
+		const now = vi
+			.spyOn(performance, "now")
+			.mockImplementation(() => currentNowMs);
+		try {
+			await presentation.start();
+			presentation.frame(currentNowMs);
+			await vi.waitFor(() => expect(transport.cameraStarts).toBe(1));
+			const status = presentation.readDiagnostics().cameraStatus;
+			if (status.kind !== "active") {
+				throw new Error("Expected active client camera registration.");
+			}
+			const point = (x: number) => ({
+				position: { landblockId: 0x0100_ffff, coords: { x, y: 3, z: 2 } },
+				visualPivot: {
+					landblockId: 0x0100_ffff,
+					coords: { x: x + 10, y: 3, z: 2 },
+				},
+			});
+			currentNowMs = 2_000;
+			const durationMs = 30;
+			transport.emit("client-presentation-tick", {
+				dynamic: null,
+				camera: {
+					kind: "advanced",
+					...status.identity,
+					sequence: 2,
+					durationMs,
+					targetSphereRole: "primary",
+					clearance: { projectionRevision: 1, radius: 0.2 },
+					desiredReach: 4.5,
+					renderedReach: 4.5,
+					convergence: "converging",
+					path: {
+						initial: point(10),
+						legs: [{ endFraction: 1, end: point(16) }],
+					},
+					diagnostics: {
+						collisionProof: { status: "covered" },
+						controlLegs: 1,
+						clearanceSweeps: 1,
+						continuitySweeps: 0,
+						contactPasses: 0,
+					},
+				} satisfies ClientCameraTick,
+			});
+			const midpointMs = currentNowMs + durationMs / 2;
+			// Advance wall-clock performance.now() past the path end to prove runtime.tick and
+			// camera.presentation both consume the frame's single captured monotonic sample.
+			currentNowMs = midpointMs + durationMs * 3;
+			expect(presentation.frame(midpointMs).rendered).toBe(true);
+			expect(runtime.tickTimes.at(-1)).toBe(midpointMs);
+			const origin = createLandblockWorldOrigin("0x0100ffff");
+			expect(
+				runtime.primaryViews.at(-1)?.camera.placement.position.x,
+			).toBeCloseTo(origin.x + 13);
+		} finally {
+			now.mockRestore();
+			await presentation.destroy();
+			lifecycle.stop();
+		}
+	});
+
 	it("installs before identity and binds possession from the authority edge", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport({
@@ -2637,7 +2711,10 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 	clearCombatEffects(): void {
 		this.combatClearCount++;
 	}
-	tick(): void {}
+	readonly tickTimes: number[] = [];
+	tick(nowMs: number): void {
+		this.tickTimes.push(nowMs);
+	}
 
 	render(): PortalTransitionPresentationReceipt | null {
 		this.worldRenderCount += 1;

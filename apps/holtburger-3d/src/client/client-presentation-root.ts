@@ -251,8 +251,11 @@ export class ClientPresentationRoot<
 		this.#owner?.setOutputVolume(audible ? settings.masterVolume : 0);
 	}
 
-	/** The caller schedules one world loop. Each driver retains its own proven tick/render order. */
-	frame(timeMs: number): ClientPresentationRootFrame {
+	/**
+	 * The caller schedules one world loop on the `performance.now()` monotonic clock shared with
+	 * host event receipt timestamps. Each driver retains its own proven tick/render order.
+	 */
+	frame(nowMs: number): ClientPresentationRootFrame {
 		if (this.#failure !== null) return { kind: "failed", ...this.#failure };
 		if (this.#closed) return { kind: "loading" };
 		try {
@@ -261,7 +264,7 @@ export class ClientPresentationRoot<
 				return { kind: "loading" };
 			}
 			if (this.#active.kind === "gameplay") {
-				const frame = this.#active.driver.frame(timeMs);
+				const frame = this.#active.driver.frame(nowMs);
 				if (frame.status.kind === "error") {
 					return {
 						kind: "failed",
@@ -279,7 +282,7 @@ export class ClientPresentationRoot<
 				return { kind: "gameplay", frame };
 			}
 			const rendered = this.#active.driver.frame(
-				timeMs,
+				nowMs,
 				this.#dependencies.canvas.clientWidth,
 				this.#dependencies.canvas.clientHeight,
 			);

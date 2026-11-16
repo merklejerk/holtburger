@@ -121,9 +121,9 @@ export class ClientCameraSession {
 				);
 				this.#resetSession();
 			}
-			if (event.type === "camera") this.#receiveCurrentOutput(event.tick);
+			if (event.type === "camera") this.receive(event.tick, event.receivedAtMs);
 			if (event.type === "presentation-tick" && event.tick.camera !== null)
-				this.#receiveCurrentOutput(event.tick.camera, event.receivedAtMs);
+				this.receive(event.tick.camera, event.receivedAtMs);
 		});
 	}
 
@@ -338,10 +338,7 @@ export class ClientCameraSession {
 		this.#resetSession();
 	}
 
-	#receiveCurrentOutput(
-		tick: ClientCameraTick,
-		receivedAtMs = performance.now(),
-	): void {
+	#receiveCurrentOutput(tick: ClientCameraTick, receivedAtMs: number): void {
 		const received = { tick, receivedAtMs };
 		const identity = this.#identity;
 		if (identity === null) {

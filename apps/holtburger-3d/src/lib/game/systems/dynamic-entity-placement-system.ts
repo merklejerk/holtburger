@@ -115,6 +115,9 @@ export class DynamicEntityPlacementSystem {
 		startedAtMs: number,
 	): void {
 		this.#requireRoot(nodeId);
+		if (!Number.isFinite(startedAtMs)) {
+			throw new Error("Dynamic placement receipt time must be finite.");
+		}
 		if (advance.kind === "integrated") {
 			validateHostPlacedPath(advance.path, durationMs);
 			const points = [
@@ -149,6 +152,9 @@ export class DynamicEntityPlacementSystem {
 
 	/** Evaluate every active path at frontend render cadence without consulting host topology. */
 	advance(nowMs: number): void {
+		if (!Number.isFinite(nowMs)) {
+			throw new Error("Dynamic placement sample time must be finite.");
+		}
 		let changed = false;
 		for (const [nodeId, active] of this.#activePaths) {
 			const elapsedMs = nowMs - active.startedAtMs;

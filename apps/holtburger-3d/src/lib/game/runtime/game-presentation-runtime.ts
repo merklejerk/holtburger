@@ -4802,13 +4802,13 @@ export class GamePresentationRuntime {
 			: this.#scene.queryEnvCellBounds(residency.envCellId);
 	}
 
-	tick(): void {
+	tick(nowMs: number): void {
 		if (this.#destroyed) return;
 		this.pollPortalTransitionLoading();
 		const finishPlacement =
 			this.#presentationProfiler?.beginWork("placementAdvance");
 		try {
-			this.#dynamicPlacements.advance(performance.now());
+			this.#dynamicPlacements.advance(nowMs);
 		} finally {
 			finishPlacement?.();
 		}
@@ -4836,7 +4836,7 @@ export class GamePresentationRuntime {
 	/** Advance ordered runtime state and draw one frontend-scheduled frame. */
 	frame(timeSeconds: number): void {
 		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
-		this.tick();
+		this.tick(timeSeconds * 1_000);
 		this.render(timeSeconds);
 	}
 

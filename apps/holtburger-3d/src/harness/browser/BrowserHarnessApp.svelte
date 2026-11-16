@@ -4851,7 +4851,7 @@
 							await activeRuntime.replaceDynamicEntitySnapshot(entities);
 							const deadline = performance.now() + 20_000;
 							while (true) {
-								activeRuntime.tick();
+								activeRuntime.tick(performance.now());
 								await activeRuntime.reevaluateDynamicEntityEligibility();
 								let restored = 0;
 								activeRuntime.visitRealizedEntitySelectionBounds(
@@ -5108,7 +5108,7 @@
 						portalTransitionCompositorDiagnosticFrames += 1;
 					}
 					const tickStartedAt = performance.now();
-					runtime.tick();
+					runtime.tick(tickStartedAt);
 					const renderStartedAt = performance.now();
 					runtime.render(
 						FRAME_INTERVAL_MS === null

@@ -506,7 +506,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		expect(runtime.dynamicEntityOrigin(8)).toBeNull();
 		await runtime.reevaluateDynamicEntityEligibility();
 		expect(failedLoads).toBe(1);
-		expect(() => runtime.tick()).not.toThrow();
+		expect(() => runtime.tick(0)).not.toThrow();
 		broken = false;
 		runtime.retryContentFailures();
 		expect((await runtime.reevaluateDynamicEntityEligibility()).get(8)).toBe(
@@ -1023,7 +1023,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		runtime.updateSceneInterest(sceneInterest("0x2020ffff"));
 		pipeline.resolveNext([staleTerrainArtifact("0x1010ffff")]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		expect(() => runtime.tick()).not.toThrow();
+		expect(() => runtime.tick(0)).not.toThrow();
 
 		await runtime.destroy();
 	});
@@ -1135,7 +1135,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		runtime.clearSceneInterest();
 		runtime.updateSceneInterest(sceneInterest("0x1010ffff"));
 
-		expect(() => runtime.tick()).not.toThrow();
+		expect(() => runtime.tick(0)).not.toThrow();
 
 		await runtime.destroy();
 	});
@@ -1163,7 +1163,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
 		pipeline.resolveNext([promotedBuildingArtifact("0xda55ffff")]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		runtime.tick();
+		runtime.tick(0);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		expect(runtime.getAuthoredDynamicResidentDiagnostics()).toEqual([
@@ -1212,7 +1212,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
 		pipeline.resolveNext([promotedBuildingArtifact("0xda55ffff", scriptId)]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		runtime.tick();
+		runtime.tick(0);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		setTestCamera(runtime, SPAWN_TEST_CAMERA);
 
@@ -1258,7 +1258,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
 		pipeline.resolveNext([promotedBuildingArtifact("0xda55ffff", scriptId)]);
 		await vi.waitFor(() => {
-			runtime.tick();
+			runtime.tick(0);
 			expect(runtime.getAuthoredDynamicResidentDiagnostics()).toHaveLength(1);
 		});
 		expect(
@@ -1298,7 +1298,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		runtime.updateSceneInterest(objectSceneInterest("0xda55ffff"));
 		pipeline.resolveNext([promotedObjectArtifact("0xda55ffff")]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		runtime.tick();
+		runtime.tick(0);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		expect(runtime.getAuthoredDynamicResidentDiagnostics()).toEqual([
@@ -1346,7 +1346,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		runtime.updateSceneInterest(generatedSceneInterest("0xda55ffff"));
 		pipeline.resolveNext([promotedGeneratedArtifact("0xda55ffff")]);
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		runtime.tick();
+		runtime.tick(0);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 
 		expect(runtime.getAuthoredDynamicResidentDiagnostics()).toEqual([
@@ -3394,7 +3394,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			target: sceneInterest(landblockId),
 		});
 		await vi.waitFor(() => {
-			runtime.tick();
+			runtime.tick(0);
 			const status = runtime.sceneActivationStatus(receipt);
 			if (status.kind === "failed") throw new Error(status.diagnostic);
 			expect(status.kind).toBe("ready");
@@ -4358,7 +4358,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(runtime.dynamicEntityOrigin(7)).toBeNull();
 		await activateSpawnScene(runtime, "0x0001ffff", 3);
 		await vi.waitFor(() => {
-			runtime.tick();
+			runtime.tick(0);
 			const selected = runtime.dynamicEntityPresentationState(7);
 			if (selected.kind !== "realized")
 				throw new Error(
@@ -4620,7 +4620,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 
 		runtime.updateSceneInterest(sceneInterest("0x0001ffff"));
 		await vi.waitFor(() => {
-			runtime.tick();
+			runtime.tick(0);
 			expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
 		});
 		expect(visualLoads).toBe(1);
@@ -4646,7 +4646,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 
 		await activateSpawnScene(runtime, "0x0001ffff", 3);
 		await vi.waitFor(() => {
-			runtime.tick();
+			runtime.tick(0);
 			expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
 		});
 		expect(runtime.dynamicEntityPresentationState(7).kind).toBe("realized");
@@ -5427,7 +5427,7 @@ async function activateSpawnScene(
 		target: sceneInterest(landblockId),
 	});
 	await vi.waitFor(() => {
-		runtime.tick();
+		runtime.tick(0);
 		const status = runtime.sceneActivationStatus(receipt);
 		if (status.kind === "failed") throw new Error(status.diagnostic);
 		expect(status.kind).toBe("ready");

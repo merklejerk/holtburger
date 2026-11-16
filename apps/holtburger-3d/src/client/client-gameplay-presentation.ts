@@ -400,7 +400,7 @@ export interface ClientGameplayRuntime
 	refreshCombatEffectsFontAtlas(): void;
 	/** Age transient visuals even when scene readiness holds the ordinary tick. */
 	advanceCombatEffects(nowMs: number): void;
-	tick(): void;
+	tick(nowMs: number): void;
 	clearPresentation(): void;
 	/** Present portal space without requiring or advancing a committed world view. */
 	renderPortalTransition(
@@ -1153,25 +1153,26 @@ export class ClientGameplayPresentation {
 	}
 
 	/**
-	 * Tick and render one browser frame.
+	 * Tick and render one browser frame on the `performance.now()` monotonic clock shared with
+	 * host event receipt timestamps.
 	 *
 	 * The authoritative entity selects residency and the interpolated scene origin selects the
 	 * camera eye. If visual realization or EnvCell topology is not ready, the frame is held rather
 	 * than inventing a free-fly camera.
 	 */
-	frame(timeMs: number): ClientGameplayPresentationFrame {
+	frame(nowMs: number): ClientGameplayPresentationFrame {
 		const resources = this.#activeResources;
 		const playerGuid = this.#playerGuid;
 		if (this.#destroyed || resources === null) {
 			return { rendered: false, status: this.#status };
 		}
-		resources.runtime.advanceCombatEffects(timeMs);
+		resources.runtime.advanceCombatEffects(nowMs);
 		if (this.#terminalPresentationError !== null) {
 			this.#setStatus("error", this.#terminalPresentationError);
 			return { rendered: false, status: this.#status };
 		}
-		if (timeMs - this.#lastEnvironmentAtMs >= CLIENT_ENVIRONMENT_INTERVAL_MS)
-			this.#refreshEnvironment(timeMs);
+		if (nowMs - this.#lastEnvironmentAtMs >= CLIENT_ENVIRONMENT_INTERVAL_MS)
+			this.#refreshEnvironment(nowMs);
 		if (this.#session.mirror.isAwaitingSnapshot()) {
 			this.#setStatus("awaiting-snapshot");
 			return { rendered: false, status: this.#status };
@@ -1199,7 +1200,7 @@ export class ClientGameplayPresentation {
 				"Waiting for the server to establish local-player identity.",
 			);
 			return portal
-				? this.#renderPortalLoadingFrame(resources, timeMs)
+				? this.#renderPortalLoadingFrame(resources, nowMs)
 				: { rendered: false, status: this.#status };
 		}
 		if (lifecycle.kind === "entering-world") {
@@ -1208,7 +1209,7 @@ export class ClientGameplayPresentation {
 				"Local-player identity is established, but authority has not entered portal space.",
 			);
 			return portal
-				? this.#renderPortalLoadingFrame(resources, timeMs)
+				? this.#renderPortalLoadingFrame(resources, nowMs)
 				: { rendered: false, status: this.#status };
 		}
 		const player = this.#authoritativePlayer(playerGuid);
@@ -1220,7 +1221,7 @@ export class ClientGameplayPresentation {
 				`Local player 0x${playerGuid.toString(16).padStart(8, "0")} is absent from the authoritative dynamic mirror.`,
 			);
 			return portal
-				? this.#renderPortalLoadingFrame(resources, timeMs)
+				? this.#renderPortalLoadingFrame(resources, nowMs)
 				: { rendered: false, status: this.#status };
 		}
 		if (player.placement.kind !== "world") {
@@ -1231,7 +1232,7 @@ export class ClientGameplayPresentation {
 				`Local player has ${player.placement.kind} placement instead of world placement.`,
 			);
 			return portal
-				? this.#renderPortalLoadingFrame(resources, timeMs)
+				? this.#renderPortalLoadingFrame(resources, nowMs)
 				: { rendered: false, status: this.#status };
 		}
 		if (portal) {
@@ -1258,8 +1259,8 @@ export class ClientGameplayPresentation {
 		}
 		resources.runtime.setViewerEntity(playerGuid);
 		if (!portal) {
-			this.#reconcileNameplateHealth(timeMs);
-			resources.runtime.tick();
+			this.#reconcileNameplateHealth(nowMs);
+			resources.runtime.tick(nowMs);
 		}
 		let primaryView: PrimaryCameraView;
 		if (portal) {
@@ -1279,14 +1280,14 @@ export class ClientGameplayPresentation {
 					resources,
 					player,
 					playerGuid,
-					timeMs,
+					nowMs,
 				);
 				if (readiness.kind === "failed") {
 					return this.#failPortalPresentation(resources, readiness.diagnostic);
 				}
 				if (readiness.kind === "waiting") {
 					this.#setStatus(readiness.status, readiness.diagnostic);
-					return this.#renderPortalLoadingFrame(resources, timeMs);
+					return this.#renderPortalLoadingFrame(resources, nowMs);
 				}
 				primaryView = readiness.primaryView;
 				this.#portalDestinationFrame = {
@@ -1294,10 +1295,10 @@ export class ClientGameplayPresentation {
 					primaryView,
 				};
 			}
-			const plan = this.#publishPortalTransition(resources, timeMs, true);
+			const plan = this.#publishPortalTransition(resources, nowMs, true);
 			if (plan.kind === "origin-to-tunnel" || plan.kind === "tunnel-only") {
 				this.#setStatus("loading-activation");
-				return this.#renderPortalLoadingFrame(resources, timeMs, false);
+				return this.#renderPortalLoadingFrame(resources, nowMs, false);
 			}
 		} else {
 			this.#portalDestinationFrame = null;
@@ -1331,7 +1332,7 @@ export class ClientGameplayPresentation {
 			const facingYaw = createEntityFacingCameraYaw(
 				player.placement.pose.rotation,
 			);
-			this.camera.advance(timeMs, facingYaw);
+			this.camera.advance(nowMs, facingYaw);
 			const submitCamera = this.camera.queueSynchronization(projection);
 			if (submitCamera !== null) {
 				this.#cameraSynchronization = this.#cameraSynchronization
@@ -1340,7 +1341,7 @@ export class ClientGameplayPresentation {
 					})
 					.catch((error: unknown) => this.#reportError(error));
 			}
-			const presentation = this.camera.presentation(timeMs);
+			const presentation = this.camera.presentation(nowMs);
 			if (presentation === null) {
 				const cameraStatus = this.camera.status();
 				this.#setStatus(
@@ -1355,7 +1356,7 @@ export class ClientGameplayPresentation {
 				player,
 				resolvedOrigin,
 				presentation,
-				this.camera.acknowledgedProjection(timeMs),
+				this.camera.acknowledgedProjection(nowMs),
 				this.#fieldOfView,
 			);
 			// A third-person boom can cross a cell boundary before the player's room changes.
@@ -1384,7 +1385,7 @@ export class ClientGameplayPresentation {
 		resources.runtime.setPrimaryView(primaryView);
 		this.#lastPrimaryView = primaryView;
 		if (!portal) resources.runtime.setAudioListener(audioListenerFor(camera));
-		const transitionReceipt = resources.runtime.render(timeMs / 1_000);
+		const transitionReceipt = resources.runtime.render(nowMs / 1_000);
 		this.#hasRenderedFrame = true;
 		this.#renderedFrameCount += 1;
 		this.#setStatus("ready");
@@ -2029,7 +2030,7 @@ export class ClientGameplayPresentation {
 		resources: ClientGameplayPresentationResources,
 		player: DynamicEntityView,
 		playerGuid: number,
-		timeMs: number,
+		nowMs: number,
 	): PortalDestinationReadiness {
 		const sceneActivation = this.#portalSceneActivation;
 		if (sceneActivation?.kind !== "accepted") {
@@ -2077,7 +2078,7 @@ export class ClientGameplayPresentation {
 		);
 		const projection = this.#resolveCameraProjection(extent);
 		this.#ensureCamera(player, projection);
-		const cameraPresentation = this.camera.presentation(timeMs);
+		const cameraPresentation = this.camera.presentation(nowMs);
 		const cameraStatus = this.camera.status();
 		if (
 			cameraPresentation === null ||
@@ -2094,7 +2095,7 @@ export class ClientGameplayPresentation {
 			player,
 			origin,
 			cameraPresentation,
-			this.camera.acknowledgedProjection(timeMs),
+			this.camera.acknowledgedProjection(nowMs),
 			this.#fieldOfView,
 		);
 		if (
@@ -2113,18 +2114,18 @@ export class ClientGameplayPresentation {
 	/** Present one portal-only frame while destination prerequisites remain unavailable. */
 	#renderPortalLoadingFrame(
 		resources: ClientGameplayPresentationResources,
-		timeMs: number,
+		nowMs: number,
 		advanceTransition = true,
 	): ClientGameplayPresentationFrame {
 		if (advanceTransition) {
-			this.#publishPortalTransition(resources, timeMs, false);
+			this.#publishPortalTransition(resources, nowMs, false);
 		}
 		const extent = resources.runtime.resolveViewportExtent(
 			this.#canvas.clientWidth,
 			this.#canvas.clientHeight,
 		);
 		const receipt = resources.runtime.renderPortalTransition(
-			timeMs / 1_000,
+			nowMs / 1_000,
 			extent,
 		);
 		this.#acknowledgePortalPresentation(receipt);
@@ -2456,12 +2457,12 @@ export class ClientGameplayPresentation {
 		this.#onEnvironmentIssue?.(binding.issue);
 	}
 
-	#refreshEnvironment(timeMs: number): void {
+	#refreshEnvironment(nowMs: number): void {
 		const resources = this.#activeResources;
 		const sources = this.#environmentSources;
 		if (resources === null || sources === null) return;
-		sources.server.refresh(timeMs);
-		this.#lastEnvironmentAtMs = timeMs;
+		sources.server.refresh(nowMs);
+		this.#lastEnvironmentAtMs = nowMs;
 		this.#applyEnvironment();
 	}
 

@@ -32,3 +32,6 @@ env_logger.workspace = true
 
 [dev-dependencies]
 holtburger-world = { workspace = true, features = ["test-support"] }
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_System_Threading", "Win32_Foundation"] }

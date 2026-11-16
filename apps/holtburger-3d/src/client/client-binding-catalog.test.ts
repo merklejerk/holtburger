@@ -36,6 +36,34 @@ const ctrlDigitTwo = {
 };
 
 describe("client binding catalog", () => {
+	it("limits word deletion conflicts to the chat editor", () => {
+		const deletion = row("client.chatDeletePreviousWord");
+		expect(deletion.group).toBe("Chat");
+		expect(
+			conflictingClientBindings(
+				defaults,
+				deletion,
+				{ key: "w", ctrl: true },
+				null,
+			),
+		).toEqual([]);
+		expect(
+			conflictingClientBindings(
+				defaults,
+				deletion,
+				{ key: "PageUp" },
+				null,
+			).map((entry) => entry.id),
+		).toContain("client.chatPreviousPage");
+		expect(
+			conflictingClientBindings(
+				defaults,
+				deletion,
+				{ key: "c", ctrl: true },
+				null,
+			),
+		).toEqual([]);
+	});
 	it("presents rest posture among movement bindings", () => {
 		expect(row("client.cycleRestPosture")).toMatchObject({
 			label: "Cycle rest posture",

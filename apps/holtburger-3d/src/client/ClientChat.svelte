@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { chatCompletion } from "./client-chat-completion";
+	import { chatWordDeletionStart } from "./client-chat-edit";
+	import { copyChatSelection } from "./client-chat-selection";
 	import { ChatSubmissionError } from "./client-chat-composer.svelte";
 	import ClientWaypointText from "./ClientWaypointText.svelte";
 	import ClientChatFormattedText from "./ClientChatFormattedText.svelte";
@@ -289,6 +291,22 @@
 
 	function handleKeydown(event: KeyboardEvent): void {
 		if (event.isComposing || composing) return;
+		if (clientInput.shortcut("chatDeletePreviousWord", event)) {
+			event.preventDefault();
+			if (sending || inputElement === null) return;
+			const start = inputElement.selectionStart;
+			const end = inputElement.selectionEnd;
+			if (start === null || end === null)
+				throw new Error("Chat editor does not support text selection.");
+			const boundary = chatWordDeletionStart(inputElement.value, start, end);
+			if (boundary === end) return;
+			inputElement.setSelectionRange(boundary, end);
+			// Chromium's native edit retains undo and emits the ordinary input event,
+			// keeping draft, recall, and completion updates on their existing path.
+			if (!document.execCommand("delete"))
+				onNotice("Chat word deletion failed.");
+			return;
+		}
 		if (
 			completion !== null &&
 			completionChoice !== undefined &&
@@ -578,6 +596,7 @@
 					if (heldHistory === null) explicitHistory = true;
 				}}
 				use:followBuffer
+				use:copyChatSelection={onNotice}
 				use:keyboard.scope={{
 					nativeControls: true,
 					pointerActivation: true,
@@ -647,7 +666,7 @@
 				aria-pressed={historyInteractive}
 				title={historyInteractive
 					? "Disable chat history interaction"
-					: "Enable chat history interaction (select and copy)"}
+					: "Enable chat history interaction (selection copies automatically)"}
 				onclick={toggleHistory}
 			>
 				<ClientHudIcon name="select-text" />

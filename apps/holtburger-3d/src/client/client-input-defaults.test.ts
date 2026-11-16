@@ -13,6 +13,49 @@ import {
 
 describe("platform input defaults", () => {
 	it.each(INPUT_PLATFORMS)(
+		"supports word deletion defaults, rebinding, and clearing on %s",
+		(platform) => {
+			const defaults = createInputDefaults(platform);
+			const input = new AppInput(defaults);
+			const chord = {
+				key: "w",
+				shiftKey: false,
+				ctrlKey: true,
+				altKey: false,
+				metaKey: false,
+			};
+			expect(input.shortcut("chatDeletePreviousWord", chord)).toBe(true);
+			for (const modifier of ["shiftKey", "altKey", "metaKey"] as const)
+				expect(
+					input.shortcut("chatDeletePreviousWord", {
+						...chord,
+						[modifier]: true,
+					}),
+				).toBe(false);
+			input.replaceConfiguration({
+				...defaults,
+				client: { ...defaults.client, chatDeletePreviousWord: [{ key: "F8" }] },
+			});
+			expect(input.shortcut("chatDeletePreviousWord", chord)).toBe(false);
+			expect(
+				input.shortcut("chatDeletePreviousWord", {
+					key: "F8",
+					shiftKey: false,
+				}),
+			).toBe(true);
+			input.replaceConfiguration({
+				...defaults,
+				client: { ...defaults.client, chatDeletePreviousWord: [] },
+			});
+			expect(
+				input.shortcut("chatDeletePreviousWord", {
+					key: "F8",
+					shiftKey: false,
+				}),
+			).toBe(false);
+		},
+	);
+	it.each(INPUT_PLATFORMS)(
 		"resolves usable history controls on %s",
 		(platform) => {
 			const defaults = createInputDefaults(platform);

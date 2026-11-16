@@ -34,7 +34,8 @@ type BindingContext =
 	| "game-physical"
 	| "precise-jump"
 	| "focused-bar"
-	| "chat";
+	| "chat-editor"
+	| "chat-history";
 type ClientBindingGroup =
 	| "System panels"
 	| "Movement"
@@ -100,6 +101,7 @@ const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
 	holdChatHistory: "Interact with chat history (hold)",
 	chatPreviousPage: "Earlier chat page",
 	chatNextPage: "Later chat page",
+	chatDeletePreviousWord: "Delete previous word",
 };
 const ACTION_COMMAND_LABELS: Readonly<
 	Record<(typeof ACTION_BAR_COMMANDS)[number], string>
@@ -125,7 +127,10 @@ function characterRow(action: CharacterAction): BindingDefinition {
 }
 
 function clientRow(action: ClientShortcut): BindingDefinition {
-	const chatOnly = action === "chatPreviousPage" || action === "chatNextPage";
+	const chatOnly =
+		action === "chatPreviousPage" ||
+		action === "chatNextPage" ||
+		action === "chatDeletePreviousWord";
 	const group: ClientBindingGroup =
 		action === "toggleNearby" ||
 		CLIENT_PANEL_SHORTCUT_ACTIONS.some((panelAction) => panelAction === action)
@@ -147,11 +152,19 @@ function clientRow(action: ClientShortcut): BindingDefinition {
 		group === "System panels"
 			? [...GAME_CONTEXTS, "precise-jump", "focused-bar"]
 			: chatOnly
-				? ["chat"]
+				? action === "chatDeletePreviousWord"
+					? ["chat-editor"]
+					: ["chat-editor", "chat-history"]
 				: action === "toggleChatHistory"
-					? [...GAME_CONTEXTS, "chat"]
+					? [...GAME_CONTEXTS, "chat-history"]
 					: action === "cancel"
-						? [...GAME_CONTEXTS, "precise-jump", "focused-bar", "chat"]
+						? [
+								...GAME_CONTEXTS,
+								"precise-jump",
+								"focused-bar",
+								"chat-editor",
+								"chat-history",
+							]
 						: GAME_CONTEXTS;
 	return {
 		reference: { kind: "client", action },

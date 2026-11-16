@@ -151,6 +151,10 @@ export function createInputDefaults(platform: InputPlatform) {
 			chatPreviousPage: [{ key: "PageUp" }],
 			/** Scroll toward later messages while chat owns focus. */
 			chatNextPage: [{ key: "PageDown" }],
+			/** Delete a whitespace-delimited word only in the focused chat editor. */
+			chatDeletePreviousWord: [
+				{ key: "w", ctrl: true, shift: false, alt: false, meta: false },
+			],
 		},
 		/** Exact modifier chords for gameplay spell tabs and casting. */
 		spellBar: {

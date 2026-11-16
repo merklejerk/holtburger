@@ -113,6 +113,7 @@ export const CLIENT_SHORTCUT_ACTIONS = [
 	"holdChatHistory",
 	"chatPreviousPage",
 	"chatNextPage",
+	"chatDeletePreviousWord",
 ] as const;
 export type ClientShortcut = (typeof CLIENT_SHORTCUT_ACTIONS)[number];
 

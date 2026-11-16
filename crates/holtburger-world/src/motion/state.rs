@@ -127,18 +127,10 @@ impl RestPosture {
 /// Unknown and custom commands deliberately retain ordinary motion policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MotionGesture {
-    /// Scarab-selected spell preparation action.
-    Windup,
-    /// Healing-skill action on self or another player.
-    Healing,
-    /// Talisman-selected spell release substate.
-    Release,
-    /// Pickup/drop reach substate; does not imply an inventory transaction.
+    /// Movement-compatible playback using the ordinary humanoid upper-body blend.
+    Gesture,
+    /// Pickup/drop playback retaining its authored full-body pose while moving.
     Reach,
-    /// Missile aiming substate, including level and vertical variants.
-    MissileAim,
-    /// Missile reload substate.
-    MissileReload,
 }
 
 impl MotionCommand {
@@ -149,18 +141,24 @@ impl MotionCommand {
 
     /// Classifies recognized gestures for independent manual movement.
     /// Includes spell components, inventory reaches, missile aim/reload and healing-skill
-    /// actions. Healing completion and movement-disruption checks remain server-owned.
+    /// actions, eating, and drinking. Healing completion and movement-disruption checks remain
+    /// server-owned.
     /// Arbitrary UseUserAnimation overrides are not inferred.
     pub const fn movement_override_gesture(self) -> Option<MotionGesture> {
         match self.0 {
-            0x1000_0070 | 0x1000_0072 | 0x1000_0074 | 0x1000_0076 | 0x1000_0078 | 0x1000_0132 => {
-                Some(MotionGesture::Windup)
-            }
-            0x4000_002b..=0x4000_0031 | 0x4000_0033..=0x4000_0039 => Some(MotionGesture::Release),
             0x4000_0018 | 0x4000_0136..=0x4000_0139 => Some(MotionGesture::Reach),
-            0x4000_0016 => Some(MotionGesture::MissileReload),
-            0x4000_001e..=0x4000_002a => Some(MotionGesture::MissileAim),
-            0x1000_010e | 0x1000_010f => Some(MotionGesture::Healing),
+            0x1000_0070
+            | 0x1000_0072
+            | 0x1000_0074
+            | 0x1000_0076
+            | 0x1000_0078
+            | 0x1000_0132
+            | 0x1000_010e
+            | 0x1000_010f
+            | 0x4000_0016
+            | 0x4000_001a..=0x4000_001b
+            | 0x4000_001e..=0x4000_0031
+            | 0x4000_0033..=0x4000_0039 => Some(MotionGesture::Gesture),
             _ => None,
         }
     }
@@ -169,6 +167,11 @@ impl MotionCommand {
     /// Both queued-action admission and active playback use the same command classification.
     pub(crate) const fn is_movement_override_action(self) -> bool {
         self.is_action() && self.movement_override_gesture().is_some()
+    }
+
+    /// Substate gestures retain their identity through entry, hold, and return transitions.
+    pub(crate) const fn is_movement_override_substate(self) -> bool {
+        self.is_substate() && self.movement_override_gesture().is_some()
     }
 
     pub const fn raw(self) -> u32 {

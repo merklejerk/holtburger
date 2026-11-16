@@ -1526,14 +1526,19 @@ mod tests {
     #[tokio::test]
     async fn server_motion_notifies_displacement_only_when_local_movement_is_displaced() {
         const TABLE: u32 = 0x0900_0020;
-        const HEAL_SELF: u16 = 0x010e;
-        const HEAL_OTHER: u16 = 0x010f;
-        const THRUST_MEDIUM: u16 = 0x0058;
+        const EAT: u32 = 0x4000_001a;
+        const DRINK: u32 = 0x4000_001b;
+        const HEAL_SELF: u32 = 0x1000_010e;
+        const HEAL_OTHER: u32 = 0x1000_010f;
+        const THRUST_MEDIUM: u32 = 0x1000_0058;
         for (command, preserves_movement) in [
+            (EAT, true),
+            (DRINK, true),
             (HEAL_SELF, true),
             (HEAL_OTHER, true),
             (THRUST_MEDIUM, false),
         ] {
+            let is_action = MotionCommand(command).is_action();
             let mut client = build_test_client();
             let guid = Guid(0x5000_0001);
             client
@@ -1560,6 +1565,8 @@ mod tests {
                         default_style: style,
                         style_defaults: HashMap::from([(style, FIXTURE_STAND_COMMAND)]),
                         cycles: HashMap::from([
+                            (MotionTable::cycle_key(style, EAT), motion.clone()),
+                            (MotionTable::cycle_key(style, DRINK), motion.clone()),
                             (
                                 MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
                                 motion.clone(),
@@ -1576,7 +1583,7 @@ mod tests {
                         modifiers: HashMap::new(),
                         links: HashMap::from([(
                             MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND),
-                            HashMap::from([(0x1000_0000 | u32::from(command), motion)]),
+                            HashMap::from([(command, motion)]),
                         )]),
                     }],
                     [Animation {
@@ -1625,11 +1632,17 @@ mod tests {
                         flags: MovementStateFlags::CURRENT_STYLE
                             | MovementStateFlags::FORWARD_COMMAND,
                         current_style: Some(MotionStance::NonCombat.interpreted()),
-                        forward_command: Some(InterpretedMotionCommand(
+                        forward_command: Some(InterpretedMotionCommand(if is_action {
                             MotionCommand::READY.raw() as u16
-                        )),
-                        num_commands: 1,
-                        commands: vec![MotionItem::new(command, 1, false, 1.0)],
+                        } else {
+                            command as u16
+                        })),
+                        num_commands: u32::from(is_action),
+                        commands: if is_action {
+                            vec![MotionItem::new(command as u16, 1, false, 1.0)]
+                        } else {
+                            Vec::new()
+                        },
                         ..Default::default()
                     },
                     sticky_object: None,
@@ -1638,7 +1651,7 @@ mod tests {
             let encoded_gesture =
                 encode_message(&GameMessage::UpdateMotion(Box::new(gesture.clone())));
             client.handle_message(&encoded_gesture).await.unwrap();
-            assert!(client.world.has_authored_motion_actions(guid));
+            assert_eq!(client.world.has_authored_motion_actions(guid), is_action);
             assert_eq!(
                 client.movement.has_active_manual_drive(),
                 preserves_movement
@@ -1657,10 +1670,31 @@ mod tests {
                     .any(|event| matches!(event, ClientViewEvent::LocalMovementDisplaced))
             );
 
+            // Substate consumption returns to Ready without revoking held movement.
+            if !is_action {
+                let mut ready = gesture.clone();
+                ready.movement_sequence = 2;
+                ready.server_control_sequence = 2;
+                let MovementTypeData::Invalid(ref mut data) = ready.data else {
+                    unreachable!("fixture uses interpreted state");
+                };
+                data.state.forward_command =
+                    Some(InterpretedMotionCommand(MotionCommand::READY.raw() as u16));
+                client
+                    .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(ready))))
+                    .await
+                    .unwrap();
+                assert!(client.movement.has_active_manual_drive());
+                assert!(
+                    !std::iter::from_fn(|| events.try_recv().ok())
+                        .any(|event| matches!(event, ClientViewEvent::LocalMovementDisplaced))
+                );
+            }
+
             // A server-directed turn still displaces independent movement.
             let takeover = MovementEventData {
-                movement_sequence: 2,
-                server_control_sequence: 2,
+                movement_sequence: 3,
+                server_control_sequence: 3,
                 movement_type: MovementType::TurnToHeading,
                 data: MovementTypeData::TurnToHeading(TurnToHeading {
                     params: TurnToParameters {

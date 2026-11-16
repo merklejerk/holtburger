@@ -485,17 +485,8 @@ impl BodyMotionRuntime {
         runtime.pending_gesture = runtime
             .state
             .substate
-            .movement_override_gesture()
-            .filter(|gesture| {
-                matches!(
-                    gesture,
-                    super::MotionGesture::Release
-                        | super::MotionGesture::Reach
-                        | super::MotionGesture::MissileAim
-                        | super::MotionGesture::MissileReload
-                )
-            })
-            .map(|_| runtime.state.substate);
+            .is_movement_override_substate()
+            .then_some(runtime.state.substate);
         runtime
     }
 
@@ -527,15 +518,7 @@ impl BodyMotionRuntime {
     pub fn accept_order(&mut self, table: &MotionSequenceTable, order: MotionOrder) {
         self.bind_table(table);
         self.select_order(table, order, true);
-        if matches!(
-            self.state.substate.movement_override_gesture(),
-            Some(
-                super::MotionGesture::Release
-                    | super::MotionGesture::Reach
-                    | super::MotionGesture::MissileAim
-                    | super::MotionGesture::MissileReload
-            )
-        ) {
+        if self.state.substate.is_movement_override_substate() {
             self.pending_gesture = Some(self.state.substate);
         } else if self.sequence.is_cyclic()
             || (!table.is_default_cycle(self.state.style.raw(), self.state.substate.raw())

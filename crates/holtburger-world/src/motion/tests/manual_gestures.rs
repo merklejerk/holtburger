@@ -1,6 +1,8 @@
 use super::*;
 use holtburger_common::Guid;
 
+const EAT: u32 = 0x4000_001a;
+const DRINK: u32 = 0x4000_001b;
 const RELEASE: u32 = 0x4000_002b;
 const REACH: u32 = 0x4000_0018;
 const MISSILE_RELOAD: u32 = 0x4000_0016;
@@ -20,6 +22,8 @@ fn build_gesture_catalog(with_stop: bool, reach: u32) -> MotionSequenceCatalog {
     let cycles = [
         (STAND, STAND_ANIM, 4.0),
         (WALK, WALK_ANIM, 4.0),
+        (EAT, HOLD_ANIM, 4.0),
+        (DRINK, HOLD_ANIM, 4.0),
         (RELEASE, HOLD_ANIM, 4.0),
         (reach, HOLD_ANIM, 4.0),
         (MISSILE_RELOAD, HOLD_ANIM, 4.0),
@@ -38,6 +42,8 @@ fn build_gesture_catalog(with_stop: bool, reach: u32) -> MotionSequenceCatalog {
         (
             MotionTable::cycle_key(STYLE, STAND),
             HashMap::from([
+                (EAT, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
+                (DRINK, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
                 (RELEASE, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
                 (reach, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
                 (
@@ -67,6 +73,12 @@ fn build_gesture_catalog(with_stop: bool, reach: u32) -> MotionSequenceCatalog {
             HashMap::from([(STAND, motion(vec![clip(RETURN_ANIM, 4.0)], None, None))]),
         ),
     ]);
+    for command in [EAT, DRINK] {
+        links.insert(
+            MotionTable::cycle_key(STYLE, command),
+            HashMap::from([(STAND, motion(vec![clip(RETURN_ANIM, 4.0)], None, None))]),
+        );
+    }
     if with_stop {
         links.insert(
             MotionTable::cycle_key(STYLE, WALK),
@@ -107,7 +119,7 @@ fn order(command: u32) -> MotionOrder {
 fn movement_preserves_gesture_entry_hold_and_return_timing() {
     let catalog = gesture_catalog();
     let table = catalog.table(0x0900_0001).unwrap();
-    for command in [RELEASE, REACH, MISSILE_AIM, MISSILE_RELOAD] {
+    for command in [RELEASE, REACH, MISSILE_AIM, MISSILE_RELOAD, EAT, DRINK] {
         let mut idle = BodyMotionRuntime::new(table);
         idle.accept_order(table, order(command));
         let mut moving = idle.clone();
@@ -179,34 +191,36 @@ fn movement_preserves_gesture_entry_hold_and_return_timing() {
 }
 
 #[test]
-fn stopped_input_preserves_reach_and_new_input_does_not_restart_it() {
+fn stopped_input_preserves_substate_gestures_and_new_input_does_not_restart_them() {
     let catalog = gesture_catalog();
     let table = catalog.table(0x0900_0001).unwrap();
-    let mut runtime = BodyMotionRuntime::new(table);
-    runtime.accept_order(table, order(REACH));
-    runtime.drive_manual(
-        table,
-        order(WALK),
-        CharacterMotionPresentation::Grounded,
-        0.25,
-    );
-    runtime.drive_manual(
-        table,
-        MotionOrder::default(),
-        CharacterMotionPresentation::Grounded,
-        0.25,
-    );
-    // With no locomotion stop link, the still-playing gesture regains authored displacement.
-    assert_eq!(runtime.tick().offset.translation.y, 0.25);
-    assert_eq!(runtime.sequence().frame_number(), 2.0);
-    runtime.drive_manual(
-        table,
-        order(WALK),
-        CharacterMotionPresentation::Grounded,
-        0.25,
-    );
-    assert_eq!(runtime.sequence().frame_number(), 3.0);
-    assert_eq!(runtime.tick().offset.translation.y, 1.0);
+    for command in [REACH, EAT, DRINK] {
+        let mut runtime = BodyMotionRuntime::new(table);
+        runtime.accept_order(table, order(command));
+        runtime.drive_manual(
+            table,
+            order(WALK),
+            CharacterMotionPresentation::Grounded,
+            0.25,
+        );
+        runtime.drive_manual(
+            table,
+            MotionOrder::default(),
+            CharacterMotionPresentation::Grounded,
+            0.25,
+        );
+        // With no locomotion stop link, the still-playing gesture regains authored displacement.
+        assert_eq!(runtime.tick().offset.translation.y, 0.25);
+        assert_eq!(runtime.sequence().frame_number(), 2.0);
+        runtime.drive_manual(
+            table,
+            order(WALK),
+            CharacterMotionPresentation::Grounded,
+            0.25,
+        );
+        assert_eq!(runtime.sequence().frame_number(), 3.0);
+        assert_eq!(runtime.tick().offset.translation.y, 1.0);
+    }
 }
 
 #[test]
@@ -305,7 +319,7 @@ fn queued_windups_continue_while_moving_and_release_remains_the_return_destinati
 fn gestures_continue_through_takeoff_airborne_input_release_and_landing() {
     let catalog = gesture_catalog();
     let table = catalog.table(0x0900_0001).unwrap();
-    for command in [RELEASE, REACH, MISSILE_AIM, MISSILE_RELOAD] {
+    for command in [RELEASE, REACH, MISSILE_AIM, MISSILE_RELOAD, EAT, DRINK] {
         let mut idle = BodyMotionRuntime::new(table);
         idle.accept_order(table, order(command));
         let mut airborne = idle.clone();
@@ -1055,11 +1069,11 @@ fn remote_gestures_keep_their_clock_through_airborne_admission_and_return() {
 }
 
 #[test]
-fn remote_missile_aim_and_reload_compose_with_observed_locomotion() {
+fn remote_substate_gestures_compose_with_observed_locomotion() {
     let catalog = gesture_catalog();
     let table = catalog.table(0x0900_0001).unwrap();
     let guid = Guid(1);
-    for command in [MISSILE_AIM, MISSILE_RELOAD] {
+    for command in [MISSILE_AIM, MISSILE_RELOAD, EAT, DRINK] {
         let mut registry = MotionRuntimeRegistry::new();
         registry.accept_remote(
             table,

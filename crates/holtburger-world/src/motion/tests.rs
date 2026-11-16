@@ -3110,19 +3110,19 @@ fn recovered_body_publication_preserves_action_and_playback_phase() {
 fn movement_override_gesture_classification_excludes_unknown_variants() {
     assert_eq!(
         MotionCommand(WINDUP).movement_override_gesture(),
-        Some(MotionGesture::Windup)
+        Some(MotionGesture::Gesture)
     );
     assert_eq!(
         MotionCommand(0x1000_0132).movement_override_gesture(),
-        Some(MotionGesture::Windup)
+        Some(MotionGesture::Gesture)
     );
     assert_eq!(
         MotionCommand(0x4000_002b).movement_override_gesture(),
-        Some(MotionGesture::Release)
+        Some(MotionGesture::Gesture)
     );
     assert_eq!(
         MotionCommand(0x4000_0039).movement_override_gesture(),
-        Some(MotionGesture::Release)
+        Some(MotionGesture::Gesture)
     );
     assert_eq!(
         MotionCommand(0x4000_0018).movement_override_gesture(),
@@ -3134,12 +3134,15 @@ fn movement_override_gesture_classification_excludes_unknown_variants() {
     );
     assert_eq!(
         MotionCommand(0x4000_0016).movement_override_gesture(),
-        Some(MotionGesture::MissileReload)
+        Some(MotionGesture::Gesture)
     );
-    for raw in 0x4000_001e..=0x4000_002a {
+    for raw in [0x4000_001a, 0x4000_001b, 0x1000_010e, 0x1000_010f]
+        .into_iter()
+        .chain(0x4000_001e..=0x4000_002a)
+    {
         assert_eq!(
             MotionCommand(raw).movement_override_gesture(),
-            Some(MotionGesture::MissileAim)
+            Some(MotionGesture::Gesture)
         );
     }
     for raw in [

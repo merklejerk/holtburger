@@ -18,7 +18,7 @@ import {
 	useHealingKitOnTarget,
 	vulnerabilityPolicyForTarget,
 } from "./runtime-actions";
-import { isDefeated, ratio } from "./runtime-helpers";
+import { isAttackCandidate, ratio } from "./runtime-helpers";
 import { isSkillUsable } from "./skills";
 import type {
 	AttackTarget,
@@ -37,7 +37,7 @@ export function collectMonsterCandidates(
 ): MonsterCandidate[] {
 	const searchRange = Math.min(maxAggroDistance, maxAttackRange);
 	const monsters = HB.nearbyEntities(searchRange, ["monster"]).filter(
-		(monster) => !isDefeated(monster),
+		isAttackCandidate,
 	);
 
 	return monsters

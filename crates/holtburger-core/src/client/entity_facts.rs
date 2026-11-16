@@ -249,7 +249,7 @@ impl EntityFactsPublication {
         }
         let storage_changed = !storage_changes.is_empty();
         self.dirty.extend(storage_changes);
-        // Every player threat relationship depends on our own current PvP flags. Refresh peers
+        // Every PvP hostility relationship depends on our own current PvP flags. Refresh peers
         // when the local record changes, including replacement descriptions and private updates.
         if self.dirty.contains(&world.player.guid) {
             self.dirty.extend(
@@ -536,6 +536,54 @@ mod tests {
     }
 
     #[test]
+    fn summon_ownership_changes_republish_hostility_and_match_recovery() {
+        use holtburger_common::properties::{
+            ItemType, PropertyInstanceId, PropertyUpdate, WorldObjectPropertyAccessorsMut,
+        };
+        use holtburger_world::entity::Entity;
+        let mut world = WorldState::synthetic();
+        let guid = Guid(7);
+        let mut entity = Entity::new(guid, "Creature".into(), Default::default());
+        entity.flags = ObjectDescriptionFlag::ATTACKABLE;
+        entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        world.entities.insert(entity);
+        let mut publication = EntityFactsPublication::default();
+        publication.collect(&mut world).unwrap();
+        for (owner, expected) in [(Guid(99), false), (Guid::NULL, true)] {
+            let update = PropertyUpdate::InstanceId(PropertyInstanceId::PetOwner, owner);
+            world
+                .entities
+                .get_mut(guid)
+                .unwrap()
+                .set_property(update.clone());
+            publication.observe(&WorldEvent::PropertiesUpdated {
+                guid,
+                updates: vec![update],
+            });
+            let delta = publication.collect(&mut world).unwrap();
+            let record = delta
+                .upserts
+                .iter()
+                .find(|record| record.guid == guid)
+                .unwrap();
+            assert_eq!(record.is_hostile, expected);
+            let snapshot = ClientEntitySnapshot::from_world(&world).unwrap();
+            assert_eq!(
+                snapshot
+                    .entities
+                    .iter()
+                    .find(|record| record.guid == guid)
+                    .unwrap(),
+                record
+            );
+            assert_eq!(
+                publication.collect(&mut world).unwrap(),
+                ClientEntityDelta::default()
+            );
+        }
+    }
+
+    #[test]
     fn login_descriptions_republish_threats_from_the_latest_private_pvp_status() {
         use holtburger_common::properties::{ItemType, WorldObjectPropertyAccessorsMut};
         use holtburger_world::entity::Entity;
@@ -568,7 +616,7 @@ mod tests {
                     .upserts
                     .iter()
                     .find(|record| record.guid == peer)
-                    .map(|record| record.player_threat),
+                    .map(|record| record.is_hostile),
                 Some(threat)
             );
             let snapshot = ClientEntitySnapshot::from_world(&world).unwrap();
@@ -578,7 +626,7 @@ mod tests {
                     .iter()
                     .find(|record| record.guid == peer)
                     .unwrap()
-                    .player_threat,
+                    .is_hostile,
                 threat
             );
         }
@@ -607,7 +655,7 @@ mod tests {
                 .iter()
                 .find(|record| record.guid == peer)
                 .unwrap()
-                .player_threat
+                .is_hostile
         );
         // First change our private status, then change the remote public status, then restore it.
         for (guid, status, expected) in [
@@ -633,7 +681,7 @@ mod tests {
                     .iter()
                     .find(|record| record.guid == peer)
                     .unwrap()
-                    .player_threat,
+                    .is_hostile,
                 expected
             );
             assert_eq!(

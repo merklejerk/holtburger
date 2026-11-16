@@ -18,7 +18,7 @@ function inventoryFixtureItem(
 ): ClientEntityFacts {
 	return {
 		guid,
-		playerThreat: false,
+		isHostile: false,
 		summon: null,
 		nearby: null,
 		canPickUp: false,

@@ -323,11 +323,7 @@ function cycleMemberships(
 ): CycleCandidate["filters"] {
 	if (facts.summon !== null) return { "smart-combat": "immediate-only" };
 	if (facts.targeting === "creature") {
-		const hostile =
-			facts.playerThreat ||
-			(facts.description.kind === "known" &&
-				facts.description.mapCategory === "mob");
-		return !preferences.smartTabHostileOnly || hostile
+		return !preferences.smartTabHostileOnly || facts.isHostile
 			? { "smart-combat": smartCombatMembership(facts, context) }
 			: {};
 	}
@@ -361,7 +357,7 @@ function smartCombatMembership(
 	if (
 		facts.description.kind !== "known" ||
 		facts.description.mapCategory !== "player" ||
-		facts.playerThreat ||
+		facts.isHostile ||
 		context.combatMode === "peace" ||
 		context.combatMode === "unknown" ||
 		(context.combatMode === "magic" && context.partyMembers.has(facts.guid))

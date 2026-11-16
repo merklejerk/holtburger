@@ -1852,8 +1852,9 @@ export class ClientGameplayPresentation {
 			const facts = levelEntities.get(guid);
 			const isHostileMob =
 				dynamic.presentation.entityClass === "mob" &&
-				(facts === undefined ||
-					(facts.corpse === null && facts.summon === null));
+				facts !== undefined &&
+				facts.isHostile &&
+				facts.corpse === null;
 			const distanceMeters =
 				isHostileMob &&
 				playerPose !== null &&

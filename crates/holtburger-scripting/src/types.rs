@@ -312,7 +312,6 @@ pub struct ScriptCombatInfo {
     pub target: Option<Guid>,
     pub power: f32,
     pub height: AttackHeight,
-    pub last_attack_time: Option<f64>,
 }
 
 impl Default for ScriptCombatInfo {
@@ -323,7 +322,6 @@ impl Default for ScriptCombatInfo {
             target: None,
             power: 0.0,
             height: AttackHeight::Medium,
-            last_attack_time: None,
         }
     }
 }
@@ -388,6 +386,8 @@ impl From<BusyOperationKind> for ScriptBusyOperation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScriptEntityView {
+    /// Known hostile combat classification; false until shared facts establish hostility.
+    pub is_hostile: bool,
     pub guid: Guid,
     pub name: Option<String>,
     pub kind: ScriptEntityKind,

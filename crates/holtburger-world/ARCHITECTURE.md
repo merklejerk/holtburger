@@ -106,7 +106,10 @@ its observed end and optional appraised lifetime. Death and applicable server de
 `SummonEnded` edge; local eviction and snapshot recovery do not. Remaining lifespan is anchored to
 monotonic receipt time and projected to a stable estimated server deadline, rebased only when the
 server clock changes. Timer expiry never establishes death or removal. Frontends consume
-`ClientEntityFacts.summon` and choose their own targeting, coloring, feedback and effects.
+`ClientEntityFacts.summon` for coloring, feedback and effects. World also publishes
+`ClientEntityFacts.is_hostile`: known mobs and PvP-compatible opponents, excluding self and
+player-owned summons. Unestablished hostility is false; life, range and temporary protections
+remain independent. Frontends consume that decision and own acquisition and automation policy.
 
 ### Spatial / Physics helpers
 

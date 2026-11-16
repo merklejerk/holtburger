@@ -15,3 +15,13 @@ export function isDefeated(entity: ScriptEntityView | null): boolean {
 		entity.profile?.kind === "creature" && entity.profile.data.health === 0
 	);
 }
+
+/** Shared eligibility for acquiring and retaining the mage's PvE combat targets. */
+export function isAttackCandidate(entity: ScriptEntityView | null): boolean {
+	return (
+		entity != null &&
+		entity.kind === "monster" &&
+		entity.isHostile &&
+		!isDefeated(entity)
+	);
+}

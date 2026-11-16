@@ -8,12 +8,14 @@ import {
 	SELF_STAMINA_THRESHOLD,
 } from "./constants";
 import {
+	collectMonsterCandidates,
 	maybeRestoreMana,
 	maybeRestoreStamina,
 	maybeRevitalizePartyMember,
 } from "./combat";
 import type { MageSpellRecord } from "./types";
 import { createInitialState } from "./state";
+import { resolveCombatTarget } from "./runtime-actions";
 
 const testGlobal = globalThis as typeof globalThis & {
 	HB: {
@@ -179,6 +181,10 @@ function samplePartyMember(
 
 function sampleEntity(): ScriptEntityView {
 	return {
+		isHostile: false,
+		container: 0,
+		wielder: 0,
+		distanceToSelf: 0,
 		guid: 999 as Guid,
 		name: "Entity",
 		weenieId: null,
@@ -188,7 +194,54 @@ function sampleEntity(): ScriptEntityView {
 			coords: { x: 0, y: 0, z: 0 },
 			rotation: { w: 1, x: 0, y: 0, z: 0 },
 		},
-		motionCommand: { kind: "walking" },
+		motionCommand: { kind: "walk_forward" },
 		profile: null,
-	} as unknown as ScriptEntityView;
+	};
 }
+
+// Exercise acquisition and retention with the same script-facing contract.
+test("mage acquires only hostile monsters and drops a retained summon", () => {
+	const self = sampleSelf({ stamina: 1, mana: 1 });
+	const mob: ScriptEntityView = {
+		...sampleEntity(),
+		guid: 2 as Guid,
+		kind: "monster",
+		isHostile: true,
+	};
+	const summon: ScriptEntityView = {
+		...mob,
+		guid: 3 as Guid,
+		isHostile: false,
+	};
+	const pvp: ScriptEntityView = { ...mob, guid: 4 as Guid, kind: "player" };
+	const context = {
+		...testGlobal.HB,
+		nearbyEntities: () => [
+			summon,
+			mob,
+			pvp,
+			{ ...mob, motionCommand: { kind: "dead" } },
+		],
+		entityExists: () => true,
+		entity: () => mob,
+		distance: () => 0,
+	};
+	testGlobal.HB = context;
+	assert.deepEqual(
+		collectMonsterCandidates(self, null, 10, 10).map(
+			(candidate) => candidate.guid,
+		),
+		[mob.guid],
+	);
+	const state = createInitialState();
+	state.combatTargetGuid = mob.guid;
+	assert.equal(resolveCombatTarget(state, self, null, 10)?.guid, mob.guid);
+	mob.isHostile = false;
+	assert.equal(resolveCombatTarget(state, self, null, 10), null);
+	assert.equal(state.combatTargetGuid, null);
+	mob.isHostile = true;
+	mob.motionCommand = { kind: "dead" };
+	state.combatTargetGuid = mob.guid;
+	assert.equal(resolveCombatTarget(state, self, null, 10), null);
+	assert.equal(state.combatTargetGuid, null);
+});

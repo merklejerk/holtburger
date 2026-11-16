@@ -7,6 +7,7 @@ import {
 	SPELL_REPEAT_SECONDS,
 	VULN_REPEAT_SECONDS,
 } from "./constants";
+import { isAttackCandidate } from "./runtime-helpers";
 import { isMonsterCandidateInCombatRange } from "./domain/targeting";
 import type {
 	AttackRaySnapshot,
@@ -355,12 +356,6 @@ export function setCombatTarget(
 	state.combatTargetGuid = targetGuid;
 }
 
-export function isCombatTargetAlive(
-	entity: ScriptEntityView | null | undefined,
-): boolean {
-	return entity != null && entity.motionCommand.kind !== "dead";
-}
-
 export function resolveCombatTarget(
 	state: MageRuntimeState,
 	self: ScriptSelfView,
@@ -382,7 +377,7 @@ export function resolveCombatTarget(
 		clearCombatTarget(state);
 		return null;
 	}
-	if (!isCombatTargetAlive(entity)) {
+	if (!isAttackCandidate(entity)) {
 		clearCombatTarget(state);
 		return null;
 	}

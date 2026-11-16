@@ -323,6 +323,9 @@
     }
     return entity.profile?.kind === "creature" && entity.profile.data.health === 0;
   }
+  function isAttackCandidate(entity) {
+    return entity != null && entity.kind === "monster" && entity.isHostile && !isDefeated(entity);
+  }
 
   // src/party.ts
   function partyLeaderMember(party) {
@@ -589,9 +592,6 @@
   function setCombatTarget(state2, targetGuid) {
     state2.combatTargetGuid = targetGuid;
   }
-  function isCombatTargetAlive(entity) {
-    return entity != null && entity.motionCommand.kind !== "dead";
-  }
   function resolveCombatTarget(state2, self, partyLeader, maxAttackRange) {
     const combatTargetGuid = state2.combatTargetGuid;
     if (combatTargetGuid == null) {
@@ -606,7 +606,7 @@
       clearCombatTarget(state2);
       return null;
     }
-    if (!isCombatTargetAlive(entity)) {
+    if (!isAttackCandidate(entity)) {
       clearCombatTarget(state2);
       return null;
     }
@@ -1068,7 +1068,7 @@
   function collectMonsterCandidates(self, partyLeader, maxAttackRange, maxAggroDistance) {
     const searchRange = Math.min(maxAggroDistance, maxAttackRange);
     const monsters = HB.nearbyEntities(searchRange, ["monster"]).filter(
-      (monster) => !isDefeated(monster)
+      isAttackCandidate
     );
     return monsters.map((monster) => ({
       guid: monster.guid,

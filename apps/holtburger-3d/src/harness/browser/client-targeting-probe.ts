@@ -225,8 +225,8 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			projectile?: boolean;
 			/** Player identity, independent of whether PvP permits harm. */
 			player?: boolean;
-			/** World-produced PvP relationship; fixtures never reconstruct it from radar style. */
-			playerThreat?: boolean;
+			/** World-produced hostility relationship; fixtures never reconstruct it from radar style. */
+			isHostile?: boolean;
 			monster?: boolean;
 			usable?: boolean;
 			corpse?: "unopened" | "opened";
@@ -254,7 +254,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 						...records.map((record): ClientEntityFacts => {
 							const facts = entityFacts(record.guid, {
 								corpse: record.corpse ?? null,
-								playerThreat: record.playerThreat ?? false,
+								isHostile: record.isHostile === true || record.monster === true,
 								targeting: record.projectile
 									? "projectile"
 									: record.creature
@@ -785,7 +785,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 				distance: 7,
 				creature: true,
 				player: true,
-				playerThreat: true,
+				isHostile: true,
 			},
 			{ guid: 8, distance: 8, creature: false, usable: true },
 			{ guid: 9, distance: 9, creature: false, corpse: "unopened" },

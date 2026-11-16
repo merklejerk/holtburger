@@ -507,7 +507,7 @@ describe("smart combat stance policy", () => {
 						entityFacts(1),
 						...records.map((record) => {
 							const facts = entityFacts(record.guid, {
-								playerThreat: record.guid === 7,
+								isHostile: record.category === "mob" || record.guid === 7,
 								targeting:
 									record.category === "other" ? "non-creature" : "creature",
 								corpse: record.guid === 9 ? "unopened" : null,
@@ -715,6 +715,22 @@ function doorFacts(
 }
 
 describe("realized volume candidate sampling", () => {
+	it("hostile-only acquisition follows the shared verdict even for a mob category", () => {
+		const facts = entityFacts(2, { targeting: "creature", isHostile: false });
+		if (facts.description.kind !== "known")
+			throw new Error("Fixture requires known facts.");
+		const scene = volumeScene(
+			[{ ...facts, description: { ...facts.description, mapCategory: "mob" } }],
+			[boxEntity(2, 0, 0, -POLICY.initialDistanceBandMeters / 2, BODY_BOX)],
+		);
+		expect(
+			scene.sample({ targetOnlyInView: false, smartTabHostileOnly: true }),
+		).toEqual([]);
+		expect(
+			scene.sample({ targetOnlyInView: false, smartTabHostileOnly: false }),
+		).toHaveLength(1);
+	});
+
 	it.each([false, true])(
 		"summons remain immediate-only with hostile-only=%s",
 		(smartTabHostileOnly) => {

@@ -301,7 +301,6 @@ interface ScriptCombatInfo {
   target: Guid | null;
   power: number;
   height: AttackHeight;
-  lastAttackTime: number | null;
 }
 
 interface ScriptClientInteractionTargetEntity {
@@ -473,6 +472,9 @@ type ScriptMotionCommand =
   | ScriptMotionCommandOther;
 
 interface ScriptEntityView {
+  /** Known hostile mob or PvP opponent; false until established. Summons and self are excluded.
+   * Independent of life, range and current aggression. */
+  isHostile: boolean;
   guid: Guid;
   name: string | null;
   kind: ScriptEntityKind;

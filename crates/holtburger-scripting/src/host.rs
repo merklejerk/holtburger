@@ -2110,7 +2110,6 @@ mod tests {
                 target: Some(Guid(7)),
                 power: 0.75,
                 height: AttackHeight::High,
-                last_attack_time: Some(123.5),
             }
         }
 
@@ -2244,6 +2243,7 @@ mod tests {
 
         fn entity(&self, guid: Guid) -> Option<ScriptEntityView> {
             (guid == Guid(11)).then_some(ScriptEntityView {
+                is_hostile: false,
                 guid,
                 name: Some("Lesser Healing Kit".to_string()),
                 kind: ScriptEntityKind::HealingKit,
@@ -2599,7 +2599,7 @@ mod tests {
             "entity-test",
             r#"
                 const entity = Holtburger.entity(11);
-                Holtburger.print("info", JSON.stringify([entity.guid, entity.name, entity.kind]));
+                Holtburger.print("info", JSON.stringify([entity.guid, entity.name, entity.kind, entity.isHostile]));
             "#,
         );
 
@@ -2609,7 +2609,7 @@ mod tests {
         assert!(matches!(
             outputs.as_slice(),
             [ScriptIntent::Print { message, .. }]
-                if message == "[11,\"Lesser Healing Kit\",\"healing_kit\"]"
+                if message == "[11,\"Lesser Healing Kit\",\"healing_kit\",false]"
         ));
     }
 
@@ -2723,7 +2723,6 @@ mod tests {
                         combatInfo.target,
                         combatInfo.power,
                         combatInfo.height,
-                        combatInfo.lastAttackTime,
                     ]),
                 );
             "#,
@@ -2735,7 +2734,7 @@ mod tests {
         assert!(matches!(
             outputs.as_slice(),
             [ScriptIntent::Print { message, .. }]
-                if message == "[\"Melee\",true,7,0.75,\"High\",123.5]"
+                if message == "[\"Melee\",true,7,0.75,\"High\"]"
         ));
     }
 

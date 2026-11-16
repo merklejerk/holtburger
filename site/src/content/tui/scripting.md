@@ -68,6 +68,11 @@ Register handlers with `HB.onEvent(handler)`. They run synchronously in registra
 | Manage items                | `moveItem(item, container)`, `splitItem(item, container, amount)`, `equip(item, slot)`, `salvage(tool, items)`            |
 | Trade and interact          | `openTrade(guid)`, `addToTrade(item)`, `acceptTrade()`, `useWith(source, destination)`, `respondToConfirmation(accepted)` |
 
+`entity(guid)` and `nearbyEntities()` expose `isHostile`, the shared world classification
+for known hostile mobs and PvP-compatible opponents. Summons and self are excluded; false
+also covers facts that have not arrived. Life, range and current aggression are independent.
+The bundled combat scripts additionally restrict automated attacks to monsters.
+
 ## Files and persistence
 
 For a script named `hello`:

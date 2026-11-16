@@ -405,9 +405,9 @@ pub struct ClientEntityFacts {
     pub scene_placement: SceneAvailability,
     /// Consumed by keyboard acquisition; not a renderer visibility decision.
     pub targeting: EntityTargetingCategory,
-    /// Another player whose public PvP status permits harming us; ignores range and temporary protections.
-    /// Consumed by stance-aware frontend targeting.
-    pub player_threat: bool,
+    /// Known hostile mob or PvP opponent, excluding self and player-owned summons.
+    /// False includes unestablished hostility; life, range and temporary protections are independent.
+    pub is_hostile: bool,
     /// Corpse identity and this session's confirmed-open state; absent for other entities.
     pub corpse: Option<CorpseState>,
     /// Section existence and loading state.
@@ -620,6 +620,24 @@ impl WorldState {
             }
             _ => EntityTargetingCategory::Ineligible,
         };
+        let summon = entity.and_then(|entity| entity.summon_facts());
+        // Reuse the world-owned category; presentation consumers never infer hostility from it.
+        let is_hostile = guid != self.player.guid
+            && summon.is_none()
+            && match &description {
+                EntityDescription::Known {
+                    map_category: DynamicEntityMapBlipCategory::Mob,
+                    ..
+                } => true,
+                EntityDescription::Known {
+                    map_category: DynamicEntityMapBlipCategory::Player,
+                    ..
+                } => entity.is_some_and(|target| {
+                    self.get_visible_entity(self.player.guid)
+                        .is_some_and(|player| player_pvp_threat(player.flags, target.flags))
+                }),
+                _ => false,
+            };
         Ok(Some(ClientEntityFacts {
             guid,
             nearby: entity
@@ -649,7 +667,7 @@ impl WorldState {
                     })
                 }),
             description,
-            summon: entity.and_then(|entity| entity.summon_facts()),
+            summon,
             health: host_origin.and_then(|origin| {
                 entity.and_then(|entity| {
                     entity.health.map(|health| EntityHealthFacts {
@@ -683,11 +701,7 @@ impl WorldState {
             is_locked: entity.and_then(|entity| entity.get_bool_prop_opt(PropertyBool::Locked)),
             scene_placement,
             targeting,
-            player_threat: guid != self.player.guid
-                && entity.is_some_and(|target| {
-                    self.get_visible_entity(self.player.guid)
-                        .is_some_and(|player| player_pvp_threat(player.flags, target.flags))
-                }),
+            is_hostile,
             corpse: entity.and_then(|entity| {
                 entity
                     .flags
@@ -1155,7 +1169,45 @@ mod tests {
     }
 
     #[test]
-    fn player_threat_uses_both_pvp_statuses_and_excludes_self_and_nonplayers() {
+    fn hostility_uses_creature_facts_and_excludes_summons_and_vendors() {
+        use holtburger_common::properties::PropertyInstanceId;
+        let mut world = WorldState::synthetic();
+        let guid = Guid(7);
+        let mut mob = Entity::new(guid, "Mob".into(), Default::default());
+        mob.flags = ObjectDescriptionFlag::ATTACKABLE;
+        mob.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        world.entities.insert(mob);
+        let hostile =
+            |world: &WorldState| world.client_entity_facts(guid).unwrap().unwrap().is_hostile;
+        assert!(hostile(&world));
+        // An owner need not be visible, and a null owner does not establish a summon.
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_iid_prop(PropertyInstanceId::PetOwner, Guid(99));
+        assert!(!hostile(&world));
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_iid_prop(PropertyInstanceId::PetOwner, Guid::NULL);
+        assert!(hostile(&world));
+        world.entities.get_mut(guid).unwrap().flags |= ObjectDescriptionFlag::VENDOR;
+        assert!(!hostile(&world));
+        world.entities.get_mut(guid).unwrap().flags = ObjectDescriptionFlag::empty();
+        assert!(!hostile(&world));
+        world.entities.get_mut(guid).unwrap().flags = ObjectDescriptionFlag::ATTACKABLE;
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_int_prop(PropertyInt::ItemType, ItemType::MISC.bits() as i32);
+        assert!(!hostile(&world));
+    }
+
+    #[test]
+    fn is_hostile_uses_both_pvp_statuses_and_excludes_self_and_nonplayers() {
         use holtburger_common::properties::PropertyUpdate;
         let mut world = WorldState::synthetic();
         let player = Guid(1);
@@ -1182,11 +1234,7 @@ mod tests {
                 let expected =
                     local == 0x20 || remote == 0x20 || (local == remote && local != 0x02);
                 assert_eq!(
-                    world
-                        .client_entity_facts(peer)
-                        .unwrap()
-                        .unwrap()
-                        .player_threat,
+                    world.client_entity_facts(peer).unwrap().unwrap().is_hostile,
                     expected,
                     "local {local:#x}, remote {remote:#x}"
                 );
@@ -1195,7 +1243,7 @@ mod tests {
                         .client_entity_facts(player)
                         .unwrap()
                         .unwrap()
-                        .player_threat
+                        .is_hostile
                 );
             }
         }
@@ -1205,13 +1253,7 @@ mod tests {
             .unwrap()
             .flags
             .remove(ObjectDescriptionFlag::PLAYER);
-        assert!(
-            !world
-                .client_entity_facts(peer)
-                .unwrap()
-                .unwrap()
-                .player_threat
-        );
+        assert!(!world.client_entity_facts(peer).unwrap().unwrap().is_hostile);
     }
 
     #[test]

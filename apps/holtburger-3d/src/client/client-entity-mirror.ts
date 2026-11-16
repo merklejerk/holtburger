@@ -263,7 +263,8 @@ const clientEntityFactsSchema = z
 		/** World-owned acquisition category, independent of rendering and disposition. */
 		targeting: z.enum(["ineligible", "creature", "non-creature", "projectile"]),
 		/** World-resolved ability of another player to harm us under current PvP statuses. */
-		playerThreat: z.boolean(),
+		/** World-established hostile combat classification; independent of life and range. */
+		isHostile: z.boolean(),
 		/** Session-local confirmed-open state; null identifies every non-corpse entity. */
 		corpse: z.enum(["unopened", "opened"]).nullable(),
 		/** Monotonic health sample bound to one incarnation; null when unobserved or reset. */

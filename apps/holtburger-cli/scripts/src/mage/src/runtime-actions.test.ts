@@ -16,7 +16,6 @@ import {
 	hasRecentVulnerabilityCast,
 	cancelCombatPlanning,
 	interruptSpellcast,
-	isCombatTargetAlive,
 	healingKitUseBlocksPlanning,
 	observeSpellCastBusy,
 	resolveSpellcastFromCombatFeedback,
@@ -98,22 +97,6 @@ test("vulnerability success history survives disappearance while failed attempts
 
 	assert.equal(hasRecentVulnerabilityCast(state, targetGuid), true);
 	assert.equal(failedVulnAttemptCount(state, targetGuid), 0);
-});
-
-test("combat engagement only tracks living targets", () => {
-	assert.equal(isCombatTargetAlive(null), false);
-	assert.equal(
-		isCombatTargetAlive({
-			motionCommand: { kind: "dead" },
-		} as unknown as ScriptEntityView),
-		false,
-	);
-	assert.equal(
-		isCombatTargetAlive({
-			motionCommand: { kind: "walking" },
-		} as unknown as ScriptEntityView),
-		true,
-	);
 });
 
 test("attack timeout records a missed target and clears combat target", () => {

@@ -7,7 +7,6 @@ const DEFAULT_AGGRO_DISTANCE = 15;
 const DEFAULT_MAX_PARTY_DISTANCE = 20;
 const PARTY_RESUME_FACTOR = 0.9;
 const HEALING_DISTANCE = 15;
-const MELEE_STALL_TIMEOUT_SECONDS = 3;
 const LOW_STAMINA_RATIO = 0.1;
 const LOW_HEALTH_RATIO = 0.6;
 const HEALING_BUSY_OPERATIONS = new Set(["use", "use_with_target"]);
@@ -22,7 +21,6 @@ const state = {
   lastPrimaryActionKey: null,
   preferredAttackTargetGuid: null,
   partySeparationLatched: false,
-  meleeStallRecovery: null,
 };
 
 function ratio(current, max) {
@@ -44,7 +42,6 @@ function clearTransientState() {
   state.lastPrimaryActionKey = null;
   state.preferredAttackTargetGuid = null;
   state.partySeparationLatched = false;
-  state.meleeStallRecovery = null;
 }
 
 function parsePositiveNumberArg(args, flagName) {
@@ -69,12 +66,6 @@ function issuePrimaryAction(key, emit) {
   state.lastPrimaryActionKey = key;
   emit();
   return true;
-}
-
-function toggleCombatMode(on) {
-  return issuePrimaryAction(`combat-mode:${on}`, () => {
-    HB.setCombatMode(on);
-  });
 }
 
 function isLowHealth(percent) {
@@ -102,6 +93,16 @@ function isDefeated(entity) {
     entity.profile != null &&
     entity.profile.kind === "creature" &&
     entity.profile.data.health === 0
+  );
+}
+
+// Automated combat stays PvE-only, using world-owned hostility and observed life.
+function isAttackCandidate(entity) {
+  return (
+    entity != null &&
+    entity.kind === "monster" &&
+    entity.isHostile &&
+    !isDefeated(entity)
   );
 }
 
@@ -201,10 +202,11 @@ function firstHealingKit() {
 // Prefer monsters that keep us close to the party leader.
 function selectAttackTarget(self, partyLeader) {
   const monsters = HB.nearbyEntities(aggroDistance, ["monster"]).filter(
-    (monster) => !isDefeated(monster),
+    isAttackCandidate,
   );
   const withinPartyAttackRange = (monster) =>
-    !partyLeader || HB.distance(partyLeader.guid, monster.guid) <= maxPartyDistance;
+    !partyLeader ||
+    HB.distance(partyLeader.guid, monster.guid) <= maxPartyDistance;
   const stickyMonster = state.preferredAttackTargetGuid
     ? monsters.find(
         (monster) =>
@@ -255,13 +257,8 @@ function selectAttackTarget(self, partyLeader) {
     }
   }
 
-  const aggroMonsters = HB.nearbyEntities(aggroDistance, ["monster"]).filter(
-    (monster) => !isDefeated(monster),
-  );
-  if (aggroMonsters.length > 0) {
-    const aggroMonster = aggroMonsters.find((monster) =>
-      withinPartyAttackRange(monster),
-    );
+  if (monsters.length > 0) {
+    const aggroMonster = monsters.find(withinPartyAttackRange);
     if (!aggroMonster) {
       return null;
     }
@@ -321,117 +318,37 @@ function followPartyLeader(self, partyLeader) {
   });
 }
 
-function attackTarget(target, options = {}) {
+function attackTarget(target) {
   if (!target) {
     return false;
   }
-
-  const force = options.force === true;
 
   const combatInfo = HB.combatInfo();
   const currentInteraction = HB.currentInteraction();
   const alreadyAttackingSameTarget =
     (combatInfo.target != null && combatInfo.target === target.guid) ||
     (currentInteraction != null &&
-      currentInteraction.kind === "attack" &&
+      currentInteraction.kind === "Attack" &&
       currentInteraction.data.guid === target.guid);
   const alreadyApproachingSameTarget =
     currentInteraction != null &&
-    currentInteraction.kind === "approach" &&
+    currentInteraction.kind === "Approach" &&
     currentInteraction.data.guid === target.guid;
 
-  if (!force && alreadyAttackingSameTarget) {
+  if (alreadyAttackingSameTarget) {
     state.preferredAttackTargetGuid = target.guid;
     return true;
   }
 
-  if (!force && alreadyApproachingSameTarget) {
+  if (alreadyApproachingSameTarget) {
     state.preferredAttackTargetGuid = target.guid;
     return true;
   }
 
   state.preferredAttackTargetGuid = target.guid;
-  const key = force ? `attack-recover:${target.guid}` : target.key;
-  return issuePrimaryAction(key, () => {
+  return issuePrimaryAction(target.key, () => {
     HB.attack(target.guid);
   });
-}
-
-function shouldRecoverMeleeStall(combatInfo) {
-  if (combatInfo.combatMode !== "Melee" || !combatInfo.isEngaged) {
-    return false;
-  }
-
-  if (combatInfo.target == null || combatInfo.lastAttackTime == null) {
-    return false;
-  }
-
-  const serverTime = HB.serverTime();
-  if (serverTime <= 0) {
-    return false;
-  }
-
-  return serverTime - combatInfo.lastAttackTime >= MELEE_STALL_TIMEOUT_SECONDS;
-}
-
-function clearMeleeStallRecovery() {
-  state.meleeStallRecovery = null;
-}
-
-function handleMeleeStallRecovery(combatInfo) {
-  if (state.meleeStallRecovery == null) {
-    if (!shouldRecoverMeleeStall(combatInfo)) {
-      return false;
-    }
-
-    state.meleeStallRecovery = {
-      phase: "drop",
-      targetGuid: combatInfo.target,
-    };
-  }
-
-  const recovery = state.meleeStallRecovery;
-  if (
-    recovery == null ||
-    combatInfo.target == null ||
-    combatInfo.target !== recovery.targetGuid
-  ) {
-    clearMeleeStallRecovery();
-    return false;
-  }
-
-  if (recovery.phase === "drop") {
-    if (combatInfo.combatMode !== "NonCombat") {
-      return toggleCombatMode(false);
-    }
-
-    recovery.phase = "raise";
-    return true;
-  }
-
-  if (recovery.phase === "raise") {
-    if (combatInfo.combatMode !== "Melee") {
-      return toggleCombatMode(true);
-    }
-
-    const attacked = attackTarget(
-      {
-        guid: recovery.targetGuid,
-        key: `attack-recover:${recovery.targetGuid}`,
-        reason: "melee-stall-recovery",
-      },
-      { force: true },
-    );
-
-    if (attacked) {
-      clearMeleeStallRecovery();
-    }
-
-    return attacked;
-  }
-
-  clearMeleeStallRecovery();
-  return false;
 }
 
 // Once separated, stay latched until we are safely back in range of the leader.
@@ -468,6 +385,17 @@ function runFighter() {
   }
 
   const combatInfo = HB.combatInfo();
+  // Retire invalid engagements before any other automation can retain their target.
+  if (
+    combatInfo.isEngaged &&
+    !isAttackCandidate(HB.entity(combatInfo.target))
+  ) {
+    state.preferredAttackTargetGuid = null;
+    issuePrimaryAction(`invalid-target:${combatInfo.target}`, () =>
+      HB.cancelInteraction(),
+    );
+    return;
+  }
   const lowStamina = isLowStamina(self);
 
   if (lowStamina) {
@@ -507,10 +435,6 @@ function runFighter() {
     return;
   }
 
-  if (handleMeleeStallRecovery(combatInfo)) {
-    return;
-  }
-
   const party = HB.party();
   const partyLeader = partyLeaderMember(party);
   const separation = updatePartySeparationLatch(self, partyLeader);
@@ -524,17 +448,8 @@ function runFighter() {
     state.partySeparationLatched = false;
   }
 
-  const combatTarget =
-    combatInfo.target != null ? HB.entity(combatInfo.target) : null;
-  const combatTargetDefeated = isDefeated(combatTarget);
-
-  if (combatInfo.isEngaged && !combatTargetDefeated) {
+  if (combatInfo.isEngaged) {
     return;
-  }
-
-  if (combatInfo.isEngaged && combatTargetDefeated) {
-    state.preferredAttackTargetGuid = null;
-    HB.cancelInteraction();
   }
 
   if (attackTarget(selectAttackTarget(self, partyLeader))) {

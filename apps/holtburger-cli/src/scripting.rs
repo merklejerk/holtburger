@@ -200,6 +200,13 @@ impl TuiScriptClientView<'_> {
             });
 
         Some(ScriptEntityView {
+            // Raw descriptions may precede semantic publication. Only positive shared evidence
+            // admits an automated hostile target; other entity operations remain available.
+            is_hostile: self
+                .data
+                .entity_facts
+                .get(&guid)
+                .is_some_and(|facts| facts.is_hostile),
             guid,
             name: (!name.is_empty()).then(|| name.to_string()),
             kind: classification::classify_entity(entity).kind(),
@@ -367,8 +374,6 @@ impl ScriptClientView for TuiScriptClientView<'_> {
                 .map(|engagement| engagement.target),
             power: self.data.combat_controls.profile_level.wire_value(),
             height: self.data.combat_controls.attack_height,
-            // Shared repetition does not expose a cadence-derived fake request time.
-            last_attack_time: None,
         }
     }
 
@@ -1675,7 +1680,7 @@ mod tests {
     }
 
     #[test]
-    fn combat_info_projection_exposes_current_mode_target_controls_and_timestamp() {
+    fn combat_info_projection_exposes_current_mode_target_controls() {
         let player_guid = Guid(0x5000_0002);
         let target_guid = Guid(0x8000_0002);
 
@@ -1707,7 +1712,6 @@ mod tests {
         assert_eq!(combat_info.target, Some(target_guid));
         assert_eq!(combat_info.power, 0.5);
         assert_eq!(combat_info.height, AttackHeight::High);
-        assert_eq!(combat_info.last_attack_time, None);
     }
 
     #[test]
@@ -2179,6 +2183,43 @@ mod tests {
                 removed,
             }) if added == vec![Guid(0x5000_0004)] && removed == vec![Guid(0x5000_0001), Guid(0x5000_0003)]
         ));
+    }
+
+    #[test]
+    fn script_hostility_waits_for_shared_facts_and_tracks_replacements() {
+        let guid = Guid(7);
+        let mut world = holtburger_world::WorldState::synthetic();
+        let mut entity = Entity::new(guid, "Creature".into(), Default::default());
+        entity.flags = ObjectDescriptionFlag::ATTACKABLE;
+        entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        world.entities.insert(entity.clone());
+        let mut data = GameData::default();
+        data.entities.insert(guid, entity);
+        let read = |data: &GameData| {
+            TuiScriptClientView {
+                data,
+                view: &ViewState::default(),
+                directories: &ScriptDirectories::default(),
+                server_time: None,
+                script_name: None,
+            }
+            .entity(guid)
+            .unwrap()
+            .is_hostile
+        };
+        assert!(!read(&data));
+        data.entity_facts
+            .insert(guid, world.client_entity_facts(guid).unwrap().unwrap());
+        assert!(read(&data));
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .set_iid_prop(PropertyInstanceId::PetOwner, Guid(99));
+        data.entity_facts
+            .insert(guid, world.client_entity_facts(guid).unwrap().unwrap());
+        assert!(!read(&data));
+        assert_eq!(data.entities.get(&guid).unwrap().summon_owner(), None);
     }
 
     #[test]

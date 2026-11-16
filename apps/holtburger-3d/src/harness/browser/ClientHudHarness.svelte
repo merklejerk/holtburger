@@ -1450,7 +1450,7 @@
 						reason: "Fixture item cannot be salvaged.",
 					},
 					targeting: "non-creature",
-					playerThreat: false,
+					isHostile: false,
 					summon: null,
 					corpse: null,
 					health: null,

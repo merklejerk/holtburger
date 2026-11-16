@@ -6266,7 +6266,7 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
         ..Default::default()
     };
 
-    let events = world.handle_message(&identify_response_message(response));
+    let events = world.handle_message(&identify_response_message(response.clone()));
 
     assert!(
         events.iter().any(
@@ -6280,6 +6280,32 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
             outcome: crate::inspection::ObjectInspectionOutcome::Ready { .. },
         }) if *result_guid == guid
     )));
+
+    let repeated = world.handle_message(&identify_response_message(response.clone()));
+    assert!(
+        !repeated
+            .iter()
+            .any(|event| matches!(event, WorldEvent::VendorItemIdentified(_)))
+    );
+    assert!(repeated.iter().any(|event| matches!(
+        event,
+        WorldEvent::ObjectInspectionResult(crate::inspection::ObjectInspectionResult {
+            outcome: crate::inspection::ObjectInspectionOutcome::Ready { .. },
+            ..
+        })
+    )));
+
+    // Maximum stack size affects larger purchases but is absent from catalog rows.
+    let mut changed = response;
+    changed
+        .properties
+        .set_int_prop(PropertyInt::MaxStackSize, 200);
+    let changed_events = world.handle_message(&identify_response_message(changed));
+    assert!(
+        changed_events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::VendorItemIdentified(_)))
+    );
 
     let mut unsupported = IdentifyObjectResponseEventData {
         object_guid: guid,

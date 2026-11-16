@@ -3,7 +3,11 @@ import {
 	type ClientOfferSelection,
 } from "./client-offer-selection";
 import type { UiIconOwner, UiIconRepository } from "../app/ui-icon-repository";
-import type { ClientEntityFacts } from "./client-entity-mirror";
+import equal from "fast-deep-equal";
+import type {
+	ClientEntityFacts,
+	ClientEntityLevel,
+} from "./client-entity-mirror";
 import { PYREAL_ICON_SPEC } from "./client-inventory-art";
 import { INVENTORY_CURRENCIES } from "./client-inventory-currencies";
 import { CLIENT_TUNING } from "./client-tuning";
@@ -115,6 +119,39 @@ function sequence(): number {
 	return ++nextSequence;
 }
 
+/** Player balance and coverage are commerce inputs; health and nearby actor facts are not. */
+function playerQuoteFacts(level: ClientEntityLevel) {
+	const player =
+		level.playerGuid === null
+			? undefined
+			: level.entities.get(level.playerGuid);
+	return {
+		guid: level.playerGuid,
+		storage: player?.storage,
+		balance:
+			player?.description.kind === "known"
+				? player.description.pyrealBalance
+				: undefined,
+	};
+}
+
+/** The mirror preserves unchanged record identities; both passes detect ownership gains and losses. */
+function quoteInventoryChanged(
+	previous: ClientEntityLevel | null,
+	next: ClientEntityLevel,
+): boolean {
+	if (
+		previous === null ||
+		!equal(playerQuoteFacts(previous), playerQuoteFacts(next))
+	)
+		return true;
+	for (const [guid, item] of previous.entities)
+		if (item.ownedByPlayer && next.entities.get(guid) !== item) return true;
+	for (const [guid, item] of next.entities)
+		if (item.ownedByPlayer && previous.entities.get(guid) !== item) return true;
+	return false;
+}
+
 /** Session-owned draft; only semantic quotes commit candidate additions. */
 export class ClientVendorState {
 	readonly #owner: UiIconOwner;
@@ -133,7 +170,8 @@ export class ClientVendorState {
 	#visible = false;
 	#problem: string | null = null;
 	#view: VendorView | null = null;
-	#inventoryRevision = -1;
+	/** Last sampled semantic level; unrelated actor updates only invalidate presentation. */
+	#entityLevel: ClientEntityLevel | null = null;
 	/** Distinguishes initial pose hydration from a vendor that disappeared later. */
 	#hadVendorPose = false;
 	/** Cached reach availability invalidates the quote view when poses arrive. */
@@ -170,14 +208,11 @@ export class ClientVendorState {
 		const canReachVendor = this.#checkRange();
 		if (!this.#visible) return null;
 		const read = this.session.entities.read();
-		if (
-			read.kind === "current" &&
-			read.level.revision !== this.#inventoryRevision
-		) {
-			this.#inventoryRevision = read.level.revision;
+		if (read.kind === "current" && read.level !== this.#entityLevel) {
+			const changed = quoteInventoryChanged(this.#entityLevel, read.level);
+			this.#entityLevel = read.level;
 			this.#view = null;
-			if (this.#execution === null && this.#preview === null)
-				this.#request(this.#draft, false);
+			if (changed) this.#refreshQuote();
 		}
 		if (this.#view !== null) return this.#view;
 		const grouped = new Map<string, VendorCatalogCell[]>();
@@ -447,6 +482,7 @@ export class ClientVendorState {
 
 	close(): void {
 		this.#visible = false;
+		this.#entityLevel = null;
 		this.#quantityRequest = null;
 		this.#view = null;
 		if (this.#execution === null && this.#draft !== null) {
@@ -459,6 +495,7 @@ export class ClientVendorState {
 
 	destroy(): void {
 		this.#disposed = true;
+		this.#entityLevel = null;
 		this.#retirePreview();
 		this.#unsubscribe();
 		this.icons.releaseOwner(this.#owner);
@@ -501,8 +538,23 @@ export class ClientVendorState {
 		this.#preview = null;
 	}
 
+	/** Revalidation keeps the pending candidate and its original deadline. */
+	#refreshQuote(): void {
+		if (this.#visible && this.#draft !== null && this.#execution === null) {
+			const pending = this.#preview;
+			this.#request(
+				pending?.draft ?? this.#draft,
+				pending?.reportRejection ?? false,
+			);
+		}
+	}
+
 	#request(draft: VendorDraft, reportRejection: boolean): void {
 		if (this.#recovering) return;
+		const read = this.session.entities.read();
+		// A hidden in-flight trade may request its final quote without retaining the world map.
+		this.#entityLevel =
+			this.#visible && read.kind === "current" ? read.level : null;
 		const deadline =
 			this.#preview?.deadline ??
 			performance.now() + CLIENT_TUNING.vendor.previewTimeoutMs;
@@ -542,7 +594,10 @@ export class ClientVendorState {
 	#replaceSnapshot(snapshot: VendorSnapshot): void {
 		const changed = snapshot?.vendor !== this.#snapshot?.vendor;
 		this.#snapshot = snapshot;
-		if (snapshot === null) this.#visible = false;
+		if (snapshot === null) {
+			this.#visible = false;
+			this.#entityLevel = null;
+		}
 		this.#view = null;
 		if (changed) {
 			this.#hadVendorPose = false;
@@ -570,20 +625,14 @@ export class ClientVendorState {
 				return [offer.guid, { name: offer.name, iconKey, offer }];
 			}),
 		);
-		// Hidden catalogs stay current without quoting a dismissed draft on each appraisal.
-		if (this.#visible && this.#draft !== null && this.#execution === null) {
-			const pending = this.#preview;
-			this.#request(
-				pending?.draft ?? this.#draft,
-				pending?.reportRejection ?? false,
-			);
-		}
+		this.#refreshQuote();
 		this.#collectArtwork();
 	}
 
 	#receive(event: ClientLifecycleSessionEvent): void {
 		if (event.type === "resyncing") {
 			this.#recovering = true;
+			this.#entityLevel = null;
 			this.#retirePreview();
 			this.#view = null;
 			this.#collectArtwork();

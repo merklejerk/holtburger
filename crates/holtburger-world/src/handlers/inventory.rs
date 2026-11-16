@@ -237,12 +237,17 @@ pub(crate) fn handle_event(
                         }));
                         return true;
                     }
+                    let previous = item.clone();
                     let applied = item.apply_identify_response(data);
                     debug_assert!(applied, "successful identify response must merge");
                     item.refresh_equipment_cantrip(&spell_catalog);
                     let outcome =
                         ObjectInspection::from_vendor_item(item, inspection_context).into();
-                    events.push(WorldEvent::VendorItemIdentified(Box::new(item.clone())));
+                    // Completion is independent of changed facts: repeated appraisals must
+                    // still settle the inspector without republishing an unchanged catalog.
+                    if *item != previous {
+                        events.push(WorldEvent::VendorItemIdentified(Box::new(item.clone())));
+                    }
                     events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
                         guid,
                         outcome,

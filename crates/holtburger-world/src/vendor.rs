@@ -21,7 +21,7 @@ pub use draft::{
     VendorCurrencyQuote, VendorDraft, VendorDraftQuote, VendorLineQuote, VendorPurchase,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct CoreVendorItem {
     pub guid: Guid,
     pub wcid: u32,

@@ -55,8 +55,8 @@
 	const { keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
 	const pyreals = { wcid: 273, name: "Pyreals" } as const;
-	/** Bounded display sampling owns artwork and markup; core owns execution. */
-	let view = $state<VendorView | null>(null);
+	/** Immutable sampled views preserve quantity-request identity across display refreshes. */
+	let view = $state.raw<VendorView | null>(null);
 	let displays = $state<ReadonlyMap<string, UiIconDisplay>>(new Map());
 	let selected = $state<number | null>(null);
 	let panel = $state<HTMLDivElement>();

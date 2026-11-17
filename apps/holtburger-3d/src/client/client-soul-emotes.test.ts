@@ -38,11 +38,16 @@ function requests(text: string, ctx: ChatComposeContext) {
 }
 
 describe("soul-emote composition", () => {
-	it.each([" *wave*", " /say *wave*", " hello *wave*"])(
-		"sends escaped %j literally even with emote content loaded",
-		(text) =>
+	it.each([
+		[" *wave*", "*wave*"],
+		[" /say *wave*", "@say *wave*"],
+		[" hello *wave*", "hello *wave*"],
+		["  /say *wave*", " /say *wave*"],
+	])(
+		"bypasses local emote interpretation for %j with content loaded",
+		(text, expected) =>
 			expect(requests(text, context)).toEqual([
-				{ kind: "speech", message: text.trimStart() },
+				{ kind: "speech", message: expected },
 			]),
 	);
 

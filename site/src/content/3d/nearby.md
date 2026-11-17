@@ -53,4 +53,4 @@ Click the linked name in a chat alert to select the creature or object. Hold **C
 
 Enable or disable individual rules as needed, and delete rules you no longer use. Rules are saved for the character.
 
-Alerts notify you about matching nearby encounters without repeating the same notice continuously. Choose patterns specific enough that the notifications stay useful.
+Alerts notify you about matching nearby encounters and keep their nameplates visible in Smart and Always modes. Choose patterns specific enough that the notifications stay useful.

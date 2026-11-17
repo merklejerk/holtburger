@@ -66,9 +66,7 @@ A separate combat reticle marks the target you are actively attacking or casting
 
 ## Read health and damage in the world
 
-In combat stance, health bars appear beneath the names of nearby hostile creatures involved in combat when recent health information is available. You can follow several enemies’ remaining health without selecting each one in turn.
-
-Holtburger refreshes that information automatically, prioritizing enemies you have attacked most recently. Bars disappear when you return to peace stance.
+Health bars appear above damaged nearby creatures when recent health information is available, whether or not a nameplate is shown, so you can follow several enemies’ remaining health without selecting each one in turn.
 
 Floating damage numbers show hit amounts, with an emphasized **CRITICAL** label for critical hits. **MISS** and **RESIST** indicators show when an attack is evaded or a spell is resisted, so you can read the outcome without watching chat.
 

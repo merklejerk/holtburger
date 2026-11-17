@@ -70,7 +70,7 @@ export function clientCommandHelp(
 					spans: [
 						{
 							kind: "plain",
-							text: "Use /help <command> for details. Alias: /?. Commands accept / or @. Start with a space to send literal chat; leading whitespace is removed.",
+							text: "Use /help <command> for details. Alias: /?. Commands accept / or @. Start with a space to bypass local commands and emotes. Unhandled commands go to the server; only the first space is removed, and / becomes @ if it is then the first character.",
 						},
 					],
 				},

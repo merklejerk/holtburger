@@ -270,7 +270,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>. Start with a space to send literal chat; leading whitespace is removed.".to_string(),
+            "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>. Start with a space to bypass local commands and emotes. Unhandled commands go to the server; only the first space is removed, and / becomes @ if it is then the first character.".to_string(),
         );
         self.chat.log(
             ChatMessageTags::system(),
@@ -568,7 +568,7 @@ impl GameState {
     }
 
     pub(super) fn handle_prefixed_command(&mut self, submitted_command: &str) -> UpdateResult {
-        // Normalize only local matching; history and unknown server commands retain the input.
+        // Local matching uses /; history retains the input and server submissions use @.
         let normalized_command = match submitted_command.strip_prefix('@') {
             Some(body) => Cow::Owned(format!("/{body}")),
             None => Cow::Borrowed(submitted_command),
@@ -959,7 +959,7 @@ impl GameState {
                 result.merge(self.finish_input_command_submission(submitted_command));
                 result
                     .commands
-                    .push(ClientCommand::Talk(submitted_command.to_string()));
+                    .push(ClientCommand::Talk(server_command_text(submitted_command)));
                 result.with_redraw(true)
             }
         }
@@ -1033,7 +1033,7 @@ mod tests {
             let unknown = format!("{prefix}wave hello @Bestie");
             let result = state.handle_prefixed_command(&unknown);
             assert!(
-                matches!(result.commands.first(), Some(ClientCommand::Talk(text)) if text == &unknown)
+                matches!(result.commands.first(), Some(ClientCommand::Talk(text)) if text == "@wave hello @Bestie")
             );
         }
     }
@@ -2035,7 +2035,7 @@ mod tests {
         ));
         assert!(matches!(
             result.commands.first(),
-            Some(ClientCommand::Talk(text)) if text == "/wave hello"
+            Some(ClientCommand::Talk(text)) if text == "@wave hello"
         ));
         assert!(result.redraw_requested());
         assert_eq!(state.view.focused_pane, FocusedPane::Input);

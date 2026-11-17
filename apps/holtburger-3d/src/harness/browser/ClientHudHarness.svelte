@@ -214,7 +214,10 @@
 		CLIENT_TUNING,
 	} from "../../client/client-tuning";
 	import { recordSentChat } from "../../client/client-chat-input-history";
-	import { selectedChatRecipient } from "../../client/client-chat-compose";
+	import {
+		selectedChatRecipient,
+		serverCommandRequest,
+	} from "../../client/client-chat-compose";
 	import { ClientChatComposer } from "../../client/client-chat-composer.svelte";
 	import { uiThemes } from "../../app/mount";
 	import { steelUrl } from "./ui-showcase-themes";
@@ -3546,7 +3549,7 @@
 				notifyWaypoint,
 			)
 		)
-			waypointServerMessages.push(message);
+			waypointServerMessages.push(serverCommandRequest(message).message);
 		showcaseWaypointEnabled = readMinimapFrame().waypoint !== null;
 	}
 	function readMinimapFrame(): MinimapFrame {
@@ -5623,11 +5626,11 @@
 					) {
 						return;
 					} else if (waypointProbeEnabled) submitWaypointChat(message);
-					else if (message.startsWith("/"))
-						throw new Error(
-							"Unknown command. Use /help for supported commands.",
-						);
-					else await interactionLifecycle.sendChat({ kind: "speech", message });
+					else {
+						const request = serverCommandRequest(message);
+						await interactionLifecycle.sendChat(request);
+						chatRequests.push(request);
+					}
 				}}
 				onChatNotice={(message) => {
 					toast = { id: 1, message, tone: "warning" };

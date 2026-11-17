@@ -203,7 +203,7 @@ function send(
 	message: string,
 ): ChatComposeResolution {
 	const labels = chatDestinationLabels(destination);
-	return message.length === 0
+	return message.trim().length === 0
 		? error(labels, "Chat message must contain visible text.")
 		: { kind: "send", ...labels, request: { ...destination, message } };
 }
@@ -220,14 +220,34 @@ function chatEmote(message: string): ChatComposeResolution {
 		: { kind: "send", ...labels, request: { kind: "emote", message } };
 }
 
+/** Unhandled commands use local Talk with the server's @ prefix; message bodies stay untouched. */
+export function serverCommandRequest(
+	text: string,
+): Extract<ClientChatRequest, { kind: "speech" }> {
+	return {
+		kind: "speech",
+		message: text.startsWith("/") ? `@${text.slice(1)}` : text,
+	};
+}
+
 /** Chat commands override one message; unrecognized commands remain with the existing app dispatcher. */
 export function resolveChatCompose(
 	text: string,
 	context: ChatComposeContext,
 ): ChatComposeResolution {
-	// Leading whitespace escapes all command and emote interpretation.
-	const literal = text.trimStart();
-	if (literal !== text) return send(context.destination, literal);
+	// Leading whitespace bypasses local interpretation; only one literal space is removed.
+	if (/^\s/u.test(text)) {
+		const literal = text.startsWith(" ") ? text.slice(1) : text;
+		if (literal.startsWith("/") || literal.startsWith("@"))
+			return {
+				kind: "send",
+				label: "Command",
+				buttonLabel: "Cmd",
+				buttonIcon: "speech",
+				request: serverCommandRequest(literal),
+			};
+		return send(context.destination, literal);
+	}
 	if (text.startsWith(":")) return chatEmote(text.slice(1));
 	const trimmed = text.trim();
 	const command = /^[/@](\S+)(?:\s+([\s\S]*))?$/.exec(trimmed);

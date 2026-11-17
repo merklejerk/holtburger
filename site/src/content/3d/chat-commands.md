@@ -9,6 +9,8 @@ presentation: reference
 
 Use `/help` (alias `/?`) for the command list, and `/help COMMAND` for a topic. Commands accept **`/` or `@`**. Capitalized words below are placeholders; brackets mark optional arguments.
 
+Unhandled commands are sent as local speech with a leading `/` converted to `@`. A leading space bypasses local commands and emotes; only that first space is removed. If `/` or `@` is then the first character, the command goes to the server regardless of the selected chat destination.
+
 ## Tell and reply
 
 | Command                 | Alias | Action                                                         |

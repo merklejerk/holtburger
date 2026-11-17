@@ -2,7 +2,8 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client and CLI, release notes:** Release notes shown with updates now reflect edits made to the published notes.
+- **3D client, nameplates:** A new nameplate mode setting (Minimal, Smart or Always) controls how much name information appears above creatures and other entities.
+- **3D client, combat health:** Health bars now appear above damaged nearby creatures whether or not a nameplate is shown, so you can follow several enemies at once.
 
 ## Known issues
 

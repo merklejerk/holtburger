@@ -1280,7 +1280,7 @@ const OBJECT_MOVEMENT_SEQUENCE_INDEX: usize = 1;
 /// Physics-state timestamp slot in a complete object description.
 pub(crate) const OBJECT_STATE_SEQUENCE_INDEX: usize = 2;
 const OBJECT_VECTOR_SEQUENCE_INDEX: usize = 3;
-const OBJECT_TELEPORT_SEQUENCE_INDEX: usize = 4;
+pub(crate) const OBJECT_TELEPORT_SEQUENCE_INDEX: usize = 4;
 const OBJECT_SERVER_CONTROL_SEQUENCE_INDEX: usize = 5;
 const OBJECT_FORCE_POSITION_SEQUENCE_INDEX: usize = 6;
 const OBJECT_VISUAL_DESCRIPTION_SEQUENCE_INDEX: usize = 7;
@@ -1432,6 +1432,20 @@ impl Entity {
         self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = data.object_instance_sequence;
         self.sequences[OBJECT_MOVEMENT_SEQUENCE_INDEX] = data.movement_sequence;
         self.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX] = data.server_control_sequence;
+    }
+
+    /// Retains a witnessed death and consumed action stamps across a description refresh.
+    pub(crate) fn preserve_death_motion_from(&mut self, previous: &Self) {
+        self.network_motion = previous.network_motion;
+        self.server_action_sequence = previous.server_action_sequence;
+    }
+
+    /// Consumes fresh server actions even when lifecycle policy suppresses their playback.
+    pub(crate) fn acknowledge_suppressed_movement(&mut self, data: &MovementEventData) {
+        let (_, _, next_action_sequence) =
+            self.reduce_motion_commands(data, true, &mut EntityMotionSnapshot::default());
+        self.server_action_sequence = next_action_sequence;
+        self.acknowledge_local_movement(data);
     }
 
     fn commit_movement_admission(

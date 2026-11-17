@@ -19,6 +19,7 @@ Select a target by clicking it or using [Smart Tab](/holtburger/3d/combat/); **X
 | ---------------- | ------------------------------------------------ |
 | **1–0**          | Cast the corresponding cell; **0** is the tenth. |
 | **Shift+1–0**    | Switch spell tabs.                               |
+| **PgUp / PgDn**  | Previous / next non-empty tab, wrapping around.  |
 | **Ctrl+Shift+1** | Cast your wielded caster’s spell.                |
 
 If your wielded weapon has a spell, its button appears separately to the left of the bar. Click it or use the wielded-caster shortcut above.
@@ -27,13 +28,13 @@ If your wielded weapon has a spell, its button appears separately to the left of
 
 Drag spells from **Spells** into cells. Each tab can hold more than ten spells; the first ten keep their numbered shortcuts. Drag a bound spell onto another cell to swap them, or off the bar to remove its binding.
 
-Use the ten tabs to group your regular casts. Drag one tab onto another to swap their entire contents, including overflow spells. The selected tab number stays the same.
+Use up to ten tabs to group your regular casts. The bar shows tabs through the last one containing spells, plus an empty tab for your next group. Selecting a later tab with its shortcut keeps it visible. Empty tabs appear dimmed until selected. Drag one tab onto another to swap their entire contents, including overflow spells. The selected tab number stays the same.
 
 For longer tabs, use the scrollbar. While dragging a spell, hold it near either end of the spell row to scroll toward hidden cells.
 
 <Media id="spells" detail />
 
-Spell bindings are saved per character. Customize shortcuts in **Settings → Input**.
+Spell bindings are saved per character. Customize shortcuts in **Settings → Input**. Hover over the spell bar to see your configured tab-cycling shortcuts.
 
 ### Fit the bar to your HUD
 

@@ -268,7 +268,22 @@ const bindingGroups: readonly {
 	},
 	{
 		title: "Spells",
-		rows: [...spellTabRows, spellCasterRow, ...spellSlotRows],
+		rows: [
+			...(["previous", "next"] as const).map(
+				(direction): BindingDefinition => ({
+					reference: { kind: "spellTabCycle", direction },
+					label:
+						direction === "previous"
+							? "Previous non-empty spell tab"
+							: "Next non-empty spell tab",
+					group: "Spells",
+					contexts: ["game-magic"],
+				}),
+			),
+			...spellTabRows,
+			spellCasterRow,
+			...spellSlotRows,
+		],
 	},
 	{ title: "Action bars", rows: actionBarRows },
 	{

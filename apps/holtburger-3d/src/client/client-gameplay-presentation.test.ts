@@ -1485,6 +1485,46 @@ describe("ClientGameplayPresentation", () => {
 		await presentation.destroy();
 	});
 
+	it("requests outgoing capture without rendering teleport replacement entities", async () => {
+		const playerGuid = 0x0101_0001;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientGameplayPresentation({
+			canvas: fakeCanvas(),
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+		});
+		try {
+			await presentation.start();
+			await vi.waitFor(() =>
+				expect(presentation.frame(1_000).rendered).toBe(true),
+			);
+			const outgoingRenderCount = runtime.worldRenderCount;
+			expect(outgoingRenderCount).toBeGreaterThan(0);
+			const generation = lifecycle.state().worldGeneration + 1;
+			transport.emit("client-lifecycle-changed", portalLifecycle(generation));
+			// Core publishes the retired motion only after the portal lifecycle edge. Allow a
+			// frame between those deliveries as well as after the replacement reaches the mirror.
+			presentation.frame(1_016);
+			expect(runtime.worldRenderCount).toBe(outgoingRenderCount);
+			transport.emit("client-dynamic-entity", {
+				kind: "upserted",
+				entity: view(playerGuid),
+			});
+			presentation.frame(1_016);
+			expect(runtime.worldRenderCount).toBe(outgoingRenderCount);
+			expect(runtime.portalTransitions.at(-1)).toMatchObject({
+				kind: "origin-to-tunnel",
+				generation,
+			});
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
+	});
+
 	it("retains activation for duplicate portal state and replaces it on generation change", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport({

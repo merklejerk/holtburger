@@ -1,6 +1,7 @@
 use crate::entity::{
     EntityManager, EntityMotionAdmission, EntityMotionSnapshot, OrderedMotionScalar,
 };
+use crate::events::SelfMotionAcknowledgement;
 use crate::motion::RestPosture;
 use crate::motion::{
     CharacterMotionPresentation, LocomotionPresentationSource, MotionCommand, MotionOrder,
@@ -194,10 +195,7 @@ impl WorldState {
     /// Property and motion updates can arrive independently during a combat transition.
     pub fn player_social_motion_ready(&self) -> bool {
         !self.player.guid.is_null()
-            && !self
-                .player_entity()
-                .and_then(|entity| entity.network_motion.snapshot())
-                .is_some_and(|snapshot| snapshot.indicates_death_motion())
+            && !self.player_is_dead()
             && self.player_combat_mode()
                 == holtburger_protocol::messages::combat::CombatMode::NonCombat
             && self
@@ -221,26 +219,56 @@ impl WorldState {
             .map(|style| style as u32)
     }
 
-    /// Acknowledges a controller-declined local object turn without installing its playback.
-    /// The controller owns the reason for declining; normal self authority rejects stale packets.
-    pub fn acknowledge_local_object_turn(
+    /// Whether accepted local-player motion currently owns the death interval.
+    pub fn player_is_dead(&self) -> bool {
+        self.player_entity()
+            .and_then(|entity| entity.network_motion.snapshot())
+            .is_some_and(EntityMotionSnapshot::indicates_death_motion)
+    }
+
+    /// Admits self sequencing once, before deciding whether playback or cached style may change.
+    /// A controller may decline a target turn; death takes priority over that gesture policy.
+    pub fn admit_self_motion(
         &mut self,
         data: &holtburger_protocol::messages::MovementEventData,
+        decline_target_turn: bool,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if data.guid.is_null()
             || data.guid != self.player.guid
-            || data.is_autonomous
-            || !matches!(
-                data.data,
-                holtburger_protocol::messages::MovementTypeData::TurnToObject(_)
-            )
-            || !self.player.apply_self_update_motion(data)
+            || !self.player.acknowledge_self_motion(data)
         {
             return false;
         }
-        if let Some(entity) = self.entities.get_mut(data.guid) {
-            entity.acknowledge_local_movement(data);
+        let reason = if self.player_is_dead() {
+            Some(SelfMotionAcknowledgement::Death)
+        } else if decline_target_turn
+            && matches!(
+                data.data,
+                holtburger_protocol::messages::MovementTypeData::TurnToObject(_)
+            )
+        {
+            Some(SelfMotionAcknowledgement::TargetFacing)
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            // RETAIL DIVERGENCE: Retail behavior is to install fresh server motion after Dead.
+            // Delayed gameplay callbacks can consequently replace the fallen pose before teleport.
+            // We retain local death until placement retirement. Census: this gates all self
+            // UpdateMotion forms, including action lists and controller-declined target turns;
+            // remote entities retain retail admission and no content rows are changed.
+            if let Some(entity) = self.entities.get_mut(data.guid) {
+                entity.acknowledge_suppressed_movement(data);
+            }
+            events.push(WorldEvent::SelfMotionAcknowledged {
+                sequence: data.server_control_sequence,
+                reason,
+            });
+            return false;
         }
+        self.player
+            .update_last_server_motion_style(data.current_style);
         true
     }
 

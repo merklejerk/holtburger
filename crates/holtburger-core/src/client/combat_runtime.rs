@@ -69,7 +69,8 @@ impl ClientRuntime {
             ClientAttackProfile::Melee { .. } => !self.movement.has_active_manual_drive(),
             ClientAttackProfile::Missile { .. } => self.missile_request_ready(),
         };
-        self.world.player_combat_mode() == desired.profile.combat_mode()
+        !self.world.player_is_dead()
+            && self.world.player_combat_mode() == desired.profile.combat_mode()
             && self
                 .world
                 .combat_target_status(desired.target)
@@ -332,6 +333,11 @@ impl ClientRuntime {
             } => {
                 let previous = self.combat_engagement.status();
                 if !self.combat_engagement.admit_intent(intent_sequence) {
+                    return Ok(());
+                }
+                if self.world.player_is_dead() {
+                    self.reject_combat_request("You cannot attack while dead.");
+                    self.emit_combat_status_if_changed(previous);
                     return Ok(());
                 }
                 if !self.world.combat_target_status(target).is_available() {

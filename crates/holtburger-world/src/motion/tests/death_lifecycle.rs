@@ -1,6 +1,7 @@
 //! Synthetic lifecycle cases deliberately use a different entry and destination animation.
 
 use super::*;
+use crate::WorldEvent;
 use crate::entity::{Entity, EntityNetworkMotion};
 use crate::state::WorldState;
 use holtburger_common::Guid;
@@ -365,4 +366,269 @@ fn remote_death_retires_airborne_windups() {
             .animation_id(),
         REST
     );
+}
+
+/// Packet fixture exercises world admission rather than bypassing it with runtime orders.
+fn self_motion(
+    guid: Guid,
+    sequence: u16,
+    command: InterpretedMotionCommand,
+) -> holtburger_protocol::messages::MovementEventData {
+    use holtburger_protocol::messages::*;
+    MovementEventData {
+        guid,
+        object_instance_sequence: 0,
+        movement_sequence: sequence,
+        server_control_sequence: sequence,
+        is_autonomous: false,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: MotionStance::NonCombat.interpreted(),
+        data: MovementTypeData::Invalid(MovementInvalid {
+            state: InterpretedMotionState {
+                forward_command: Some(command),
+                ..Default::default()
+            },
+            sticky_object: None,
+        }),
+    }
+}
+
+#[test]
+fn local_death_suppresses_fresh_actions_and_refreshes_until_teleport() {
+    use holtburger_protocol::messages::*;
+    let mut world = WorldState::synthetic();
+    world.set_motion_sequences(death_catalog(0.0));
+    let guid = Guid(0x5000_0001);
+    world.seed_local_player_entity(
+        guid,
+        "Local",
+        WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            ..WorldPosition::default()
+        },
+    );
+    world
+        .player_entity_mut()
+        .unwrap()
+        .set_did_prop(PropertyDataId::MotionTable, Guid(TABLE));
+    world.reset_authored_motion(guid, Some(snapshot(InterpretedMotionCommand(STAND as u16))));
+    world.player.teleport_sequence = 10;
+    let mut dead = self_motion(guid, 1, InterpretedMotionCommand::DEAD);
+    if let MovementTypeData::Invalid(motion) = &mut dead.data {
+        motion.state.commands = vec![MotionItem::new(ACTION as u16, 1, false, 1.0)];
+        motion.sticky_object = Some(Guid(2));
+    }
+    world.handle_message(&GameMessage::UpdateMotion(Box::new(dead.clone())));
+    assert!(!world.motion_runtimes.has_actions(guid));
+    world.advance_authored_motion(Duration::from_millis(250));
+    let frame = world
+        .motion_runtimes
+        .get(guid)
+        .unwrap()
+        .sequence()
+        .current_frame();
+    assert_eq!(frame, 1);
+    let mut ready = self_motion(guid, 2, InterpretedMotionCommand(STAND as u16));
+    ready.current_style = MotionStance::BowCombat.interpreted();
+    if let MovementTypeData::Invalid(motion) = &mut ready.data {
+        motion.state.commands = vec![MotionItem::new(ACTION as u16, 2, false, 1.0)];
+    }
+    let events = world.handle_message(&GameMessage::UpdateMotion(Box::new(ready.clone())));
+    assert!(world.player_is_dead());
+    assert_eq!(world.player.server_control_sequence, 2);
+    assert_eq!(
+        world.player.last_server_motion_style,
+        Some(MotionStance::NonCombat)
+    );
+    assert!(!world.motion_runtimes.has_actions(guid));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::SelfMotionAcknowledged { sequence: 2, .. }
+    )));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::SelfServerControlledMotion(_)))
+    );
+    let mut repeated = dead;
+    repeated.server_control_sequence = 3;
+    repeated.movement_sequence = 3;
+    world.handle_message(&GameMessage::UpdateMotion(Box::new(repeated)));
+    assert_eq!(
+        world
+            .motion_runtimes
+            .get(guid)
+            .unwrap()
+            .sequence()
+            .current_frame(),
+        frame
+    );
+
+    let mut replacement = world.player_entity().unwrap().clone();
+    replacement.network_motion =
+        EntityNetworkMotion::Initialized(snapshot(InterpretedMotionCommand(STAND as u16)));
+    world.upsert_entity_from_create(replacement, &mut Vec::new());
+    assert!(world.player_is_dead());
+    assert_eq!(
+        world
+            .motion_runtimes
+            .get(guid)
+            .unwrap()
+            .sequence()
+            .current_frame(),
+        frame
+    );
+    for sequence in [9, 10] {
+        world.handle_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
+            teleport_sequence: sequence,
+        })));
+        assert!(world.player_is_dead());
+    }
+    world.handle_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
+        teleport_sequence: 11,
+    })));
+    assert!(!world.player_is_dead());
+    ready.current_style = MotionStance::NonCombat.interpreted();
+    ready.server_control_sequence = 4;
+    ready.movement_sequence = 4;
+    world.handle_message(&GameMessage::UpdateMotion(Box::new(ready)));
+    assert!(!world.player_is_dead());
+    assert!(
+        !world.motion_runtimes.has_actions(guid),
+        "suppressed action stamp must not replay after teleport"
+    );
+}
+
+#[test]
+fn death_takes_priority_over_target_facing_and_remote_motion_stays_authoritative() {
+    use holtburger_protocol::messages::*;
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x5000_0001);
+    world.seed_local_player_entity(
+        guid,
+        "Local",
+        WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            ..WorldPosition::default()
+        },
+    );
+    world.handle_message(&GameMessage::UpdateMotion(Box::new(self_motion(
+        guid,
+        1,
+        InterpretedMotionCommand::DEAD,
+    ))));
+    let mut turn = self_motion(guid, 2, InterpretedMotionCommand(STAND as u16));
+    turn.movement_type = MovementType::TurnToObject;
+    turn.data = MovementTypeData::TurnToObject(TurnToObject {
+        target: Guid(2),
+        ..Default::default()
+    });
+    let mut events = Vec::new();
+    assert!(!world.admit_self_motion(&turn, true, &mut events));
+    assert!(matches!(
+        events.as_slice(),
+        [WorldEvent::SelfMotionAcknowledged {
+            reason: crate::events::SelfMotionAcknowledgement::Death,
+            ..
+        }]
+    ));
+    let remote = Guid(0x6000_0001);
+    world.add_entity(Entity::new(
+        remote,
+        "Remote".into(),
+        WorldPosition::default(),
+    ));
+    for (sequence, command) in [
+        (1, InterpretedMotionCommand::DEAD),
+        (2, InterpretedMotionCommand(STAND as u16)),
+    ] {
+        world.handle_message(&GameMessage::UpdateMotion(Box::new(self_motion(
+            remote, sequence, command,
+        ))));
+    }
+    assert!(
+        !world
+            .entities
+            .get(remote)
+            .unwrap()
+            .network_motion
+            .snapshot()
+            .unwrap()
+            .indicates_death_motion()
+    );
+}
+
+#[test]
+fn local_death_releases_only_on_a_new_teleport_position_epoch() {
+    use holtburger_protocol::messages::*;
+    for autonomous in [false, true] {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x5000_0001);
+        world.seed_local_player_entity(guid, "Local", WorldPosition::default());
+        world.player.teleport_sequence = u16::MAX;
+        world.handle_message(&GameMessage::UpdateMotion(Box::new(self_motion(
+            guid,
+            1,
+            InterpretedMotionCommand::DEAD,
+        ))));
+        for teleport_sequence in [u16::MAX, 0] {
+            let message = if autonomous {
+                GameMessage::AutonomousPosition(Box::new(ServerAutonomousPositionData {
+                    guid,
+                    position: WorldPosition::default(),
+                    instance_sequence: 0,
+                    server_control_sequence: 1,
+                    teleport_sequence,
+                    force_position_sequence: 1,
+                    contact_flags: 0,
+                }))
+            } else {
+                GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+                    guid,
+                    pos: PositionPack {
+                        teleport_sequence,
+                        force_position_sequence: 1,
+                        ..Default::default()
+                    },
+                }))
+            };
+            world.handle_message(&message);
+            assert_eq!(world.player_is_dead(), teleport_sequence == u16::MAX);
+        }
+    }
+}
+
+#[test]
+fn local_death_description_replacement_respects_incarnation_and_teleport_epoch() {
+    use crate::entity::{OBJECT_INSTANCE_SEQUENCE_INDEX, OBJECT_TELEPORT_SEQUENCE_INDEX};
+    use holtburger_protocol::messages::GameMessage;
+
+    for (instance, teleport, remains_dead) in [(0, 0, true), (1, 0, false), (0, 1, false)] {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x5000_0001);
+        world.seed_local_player_entity(guid, "Local", WorldPosition::default());
+        world.handle_message(&GameMessage::UpdateMotion(Box::new(self_motion(
+            guid,
+            1,
+            InterpretedMotionCommand::DEAD,
+        ))));
+        let mut replacement = world.player_entity().unwrap().clone();
+        replacement.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = instance;
+        replacement.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX] = teleport;
+        replacement.network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+            current_style: Some(MotionStance::BowCombat),
+            ..Default::default()
+        });
+        world.upsert_entity_from_create(replacement, &mut Vec::new());
+        assert_eq!(world.player_is_dead(), remains_dead);
+        assert_eq!(
+            world.player.last_server_motion_style,
+            Some(if remains_dead {
+                MotionStance::NonCombat
+            } else {
+                MotionStance::BowCombat
+            })
+        );
+    }
 }

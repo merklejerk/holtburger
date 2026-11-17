@@ -180,13 +180,38 @@ impl ClientRuntime {
                 .iter()
                 .any(|event| matches!(event, WorldEvent::DerivedStatsUpdated(_)));
             let mut follow_up_events = Vec::new();
+            // Enter portal space before publishing any replacement pose from this packet. The
+            // world has already retired outgoing motion; projecting it under the old lifecycle
+            // lets a frontend render a standing player before capturing its outgoing frame.
+            // Consume the lifecycle edge here exactly once, including its generation change.
+            for event in &pending_events {
+                if matches!(event, WorldEvent::TeleportStarted { .. }) {
+                    self.handle_runtime_world_event_with_context(
+                        event,
+                        teleport_batch,
+                        derived_vitals_in_batch,
+                    );
+                }
+            }
             // Packet-scoped authority/control effects must finish mutating the canonical runtime
             // before any event in this batch projects a dynamic entity view. Otherwise an
             // `EntityMoved` upsert can publish the newly authoritative pose before the local
             // correction/reset effect has established its runtime consequence.
             for event in &pending_events {
                 match event {
+                    WorldEvent::SelfMotionAcknowledged { sequence, reason } => {
+                        self.movement.record_server_control_sequence(*sequence);
+                        if *reason
+                            == holtburger_world::events::SelfMotionAcknowledgement::TargetFacing
+                        {
+                            self.movement
+                                .admit_server_gesture(Instant::now(), &mut self.world);
+                        }
+                    }
                     WorldEvent::SelfServerControlledMotion(data) => {
+                        if self.world.player_is_dead() {
+                            self.reset_combat_engagement();
+                        }
                         if holtburger_world::entity::EntityMotionDirective::from_movement_event(
                             data,
                         )
@@ -258,6 +283,9 @@ impl ClientRuntime {
             }
 
             for event in &pending_events {
+                if matches!(event, WorldEvent::TeleportStarted { .. }) {
+                    continue;
+                }
                 sheet_changed |= self.world_event_changes_character_sheet(event);
                 self.handle_runtime_world_event_with_context(
                     event,
@@ -486,17 +514,13 @@ impl ClientRuntime {
         let world_events = if let GameMessage::UpdateMotion(data) = &message
             && self.suppresses_local_target_turn(data)
         {
-            // RETAIL DIVERGENCE: installs non-autonomous motion. Installing these turns
-            // interrupts held movement/jump during casting or mobile missile fire. Scope is
-            // local TurnToObject packets matching an outstanding cast or sent missile target;
-            // no asset layout is involved.
-            if self.world.acknowledge_local_object_turn(data) {
-                self.movement
-                    .record_server_control_sequence(data.server_control_sequence);
-                self.movement
-                    .admit_server_gesture(std::time::Instant::now(), &mut self.world);
-            }
-            Vec::new()
+            // RETAIL DIVERGENCE: Retail behavior is to install non-autonomous target turns.
+            // Installing them interrupts held movement/jump during casting or mobile missile
+            // fire. Scope: local TurnToObject matching an outstanding cast or sent missile
+            // target; no asset layout is involved. World death policy takes precedence.
+            let mut events = Vec::new();
+            self.world.admit_self_motion(data, true, &mut events);
+            events
         } else {
             self.world.handle_message_at(&message, Instant::now())
         };
@@ -1289,6 +1313,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn death_retires_combat_and_suppressed_motion_only_advances_control_sequence() {
+        let mut client = build_test_client();
+        let guid = Guid(0x5000_0001);
+        client
+            .world
+            .seed_local_player_entity(guid, "Local", WorldPosition::default());
+        client.combat_engagement.begin(
+            Guid(2),
+            ClientAttackProfile::Missile {
+                height: AttackHeight::Medium,
+                accuracy: 0.5,
+            },
+            Instant::now(),
+            std::time::Duration::ZERO,
+        );
+        let packet = MovementEventData {
+            guid,
+            object_instance_sequence: 0,
+            movement_sequence: 1,
+            server_control_sequence: 1,
+            is_autonomous: false,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: MovementStateFlags::FORWARD_COMMAND,
+                    forward_command: Some(InterpretedMotionCommand::DEAD),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        };
+        client
+            .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(
+                packet.clone(),
+            ))))
+            .await
+            .unwrap();
+        assert!(client.combat_engagement.status().desired.is_none());
+        let mut fresh = packet;
+        fresh.server_control_sequence = 2;
+        fresh.movement_sequence = 2;
+        fresh.current_style = MotionStance::BowCombat.interpreted();
+        fresh.data = MovementTypeData::Invalid(MovementInvalid::default());
+        client
+            .handle_message(&encode_message(&GameMessage::UpdateMotion(Box::new(fresh))))
+            .await
+            .unwrap();
+        assert!(client.world.player_is_dead());
+        assert_eq!(client.world.player.server_control_sequence, 2);
+        assert!(!client.movement.has_server_controlled_motion());
+        client.state = ClientState::InWorld;
+        client
+            .handle_combat_command(ClientCommand::BeginCombatEngagement {
+                target: Guid(2),
+                intent_sequence: 1,
+                profile: ClientAttackProfile::Missile {
+                    height: AttackHeight::Medium,
+                    accuracy: 0.5,
+                },
+            })
+            .await
+            .unwrap();
+        assert!(client.combat_engagement.status().desired.is_none());
+    }
+
+    #[tokio::test]
     async fn relog_restores_wire_cooldowns_before_inventory_descriptions_arrive() {
         use holtburger_common::properties::{
             InventoryEntryKind, ItemType, ObjectDescriptionFlag, WeenieHeaderFlag,
@@ -1799,6 +1891,61 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn teleport_enters_portal_before_publishing_retired_death_motion() {
+        use holtburger_world::entity::{EntityMotionSnapshot, EntityNetworkMotion};
+
+        let mut client = build_test_client();
+        let guid = Guid(0x5000_0001);
+        client
+            .world
+            .seed_local_player_entity(guid, "Local", WorldPosition::default());
+        client.world.player_entity_mut().unwrap().network_motion =
+            EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+                current_style: Some(MotionStance::BowCombat),
+                forward_command: Some(InterpretedMotionCommand::DEAD),
+                ..Default::default()
+            });
+        let mut events = client.subscribe_client_view_events();
+        let generation_before = client.world_generation;
+        let encoded = encode_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
+            teleport_sequence: 42,
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut entered_portal = false;
+        let mut saw_retired_motion = false;
+        let mut teleport_edges = 0;
+        while let Ok(event) = events.try_recv() {
+            match event {
+                ClientViewEvent::LifecycleChanged(ClientLifecycleState::PortalSpace { .. }) => {
+                    entered_portal = true;
+                }
+                ClientViewEvent::EntityMotionUpdated {
+                    guid: entity_guid,
+                    motion,
+                } if entity_guid == guid => {
+                    assert!(
+                        entered_portal,
+                        "retired motion must not reach the outgoing world"
+                    );
+                    assert!(!motion.snapshot().unwrap().indicates_death_motion());
+                    saw_retired_motion = true;
+                }
+                ClientViewEvent::DynamicEntity(_) => {
+                    assert!(entered_portal, "entity projection must follow portal entry");
+                }
+                ClientViewEvent::TeleportStarted { sequence: 42 } => teleport_edges += 1,
+                _ => {}
+            }
+        }
+        assert!(entered_portal);
+        assert!(saw_retired_motion);
+        assert_eq!(teleport_edges, 1);
+        assert_eq!(client.world_generation, generation_before + 1);
     }
 
     #[tokio::test]

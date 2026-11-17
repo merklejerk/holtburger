@@ -78,6 +78,7 @@
 	import { ClientHouseCrystalState } from "./client-house-crystal-state";
 	import { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
 	import {
+		cycleSpellTab,
 		initialSpellBarBindings,
 		swapSpellTabs,
 		type ClientSpellBarState,
@@ -1745,6 +1746,7 @@
 				selectSpellTab,
 				activateSpellCell,
 				activateCasterSpell,
+				(direction) => selectSpellTab(cycleSpellTab(spellBar, direction)),
 			)
 		)
 			return;

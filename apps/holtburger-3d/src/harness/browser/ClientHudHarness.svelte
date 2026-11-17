@@ -96,6 +96,7 @@
 	} from "../../client/client-combat-bar-state";
 	import {
 		bindSpellCell,
+		cycleSpellTab,
 		initialSpellBar,
 		swapSpellTabs,
 	} from "../../client/client-spell-bar-state";
@@ -552,6 +553,7 @@
 						selectSpellTab,
 						activateSpellCell,
 						activateCasterSpell,
+						(direction) => selectSpellTab(cycleSpellTab(spellBar, direction)),
 					);
 				},
 				keyup: () => {},
@@ -5126,6 +5128,8 @@
 									selectSpellTab,
 									activateSpellCell,
 									activateCasterSpell,
+									(direction) =>
+										selectSpellTab(cycleSpellTab(spellBar, direction)),
 								)
 							)
 								return;

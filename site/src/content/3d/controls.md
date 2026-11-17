@@ -51,6 +51,7 @@ Start with [Smart Tab](/holtburger/3d/combat/) for everyday targeting.
 | Combat power/accuracy presets             | 1–5 while physical combat controls are active  |
 | High / medium / low attack height         | Shift+1 / Shift+2 / Shift+3 in physical combat |
 | Choose spell tab                          | Shift+1 through Shift+0 in magic               |
+| Previous / next non-empty spell tab       | PgUp / PgDn in magic                           |
 | Cast a spell-bar cell                     | 1–0 in magic                                   |
 | Wielded-caster spell                      | Ctrl+Shift+1                                   |
 | Focus action bar                          | Ctrl+1 through Ctrl+0                          |

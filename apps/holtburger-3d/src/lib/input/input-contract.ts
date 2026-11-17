@@ -1,3 +1,6 @@
+/** Direction through populated spell tabs in their fixed numeric order. */
+export type SpellTabDirection = "previous" | "next";
+
 /** A binding selects either a layout-resolved key or a physical code, plus modifier constraints. */
 export type KeyBinding = KeyModifiers &
 	(
@@ -134,6 +137,10 @@ export interface InputConfiguration {
 	readonly actionBars: ActionBarInputConfiguration;
 	/** Gameplay-only spell shortcuts; focused UI scopes retain priority. */
 	readonly spellBar: {
+		/** Cycle backward through tabs containing bound spells. */
+		readonly previousTab: readonly KeyBinding[];
+		/** Cycle forward through tabs containing bound spells. */
+		readonly nextTab: readonly KeyBinding[];
 		readonly tabs: NumberedInputBindings;
 		readonly cells: NumberedInputBindings;
 		/** Cast the spell built into the currently wielded caster. */

@@ -41,6 +41,7 @@ it("maps every numbered tab/cell and consumes repeats without executing", () => 
 				tab,
 				cast,
 				caster,
+				() => {},
 			),
 		).toBe(true);
 		expect(cast).toHaveBeenLastCalledWith(index);
@@ -52,6 +53,7 @@ it("maps every numbered tab/cell and consumes repeats without executing", () => 
 				tab,
 				cast,
 				caster,
+				() => {},
 			),
 		).toBe(true);
 		expect(tab).toHaveBeenLastCalledWith(index);
@@ -63,6 +65,7 @@ it("maps every numbered tab/cell and consumes repeats without executing", () => 
 		tab,
 		cast,
 		caster,
+		() => {},
 	);
 	expect(cast).toHaveBeenCalledTimes(SPELL_BAR_INDICES.length);
 	expect(tab).toHaveBeenCalledTimes(SPELL_BAR_INDICES.length);
@@ -80,16 +83,33 @@ it("maps every numbered tab/cell and consumes repeats without executing", () => 
 				tab,
 				cast,
 				caster,
+				() => {},
 			),
 		).toBe(false);
 	}
 	expect(
-		handleSpellBarKeydown(TEST_INPUT, event(0, {}), false, tab, cast, caster),
+		handleSpellBarKeydown(
+			TEST_INPUT,
+			event(0, {}),
+			false,
+			tab,
+			cast,
+			caster,
+			() => {},
+		),
 	).toBe(false);
 	const consumed = event(0, {});
 	consumed.preventDefault();
 	expect(
-		handleSpellBarKeydown(TEST_INPUT, consumed, true, tab, cast, caster),
+		handleSpellBarKeydown(
+			TEST_INPUT,
+			consumed,
+			true,
+			tab,
+			cast,
+			caster,
+			() => {},
+		),
 	).toBe(false);
 	expect(caster).not.toHaveBeenCalled();
 });
@@ -105,6 +125,7 @@ it("casts the wielded-caster spell only in the active gameplay scope", () => {
 			() => {},
 			() => {},
 			caster,
+			() => {},
 		),
 	).toBe(true);
 	expect(caster).toHaveBeenCalledOnce();
@@ -116,6 +137,7 @@ it("casts the wielded-caster spell only in the active gameplay scope", () => {
 			() => {},
 			() => {},
 			caster,
+			() => {},
 		),
 	).toBe(true);
 	expect(caster).toHaveBeenCalledOnce();
@@ -127,6 +149,7 @@ it("casts the wielded-caster spell only in the active gameplay scope", () => {
 			() => {},
 			() => {},
 			caster,
+			() => {},
 		),
 	).toBe(false);
 });
@@ -143,6 +166,7 @@ it("uses the existing keyboard gate and quarantines repeat presses across blocki
 				() => {},
 				cast,
 				() => {},
+				() => {},
 			);
 		},
 		keyup: () => {},
@@ -158,4 +182,72 @@ it("uses the existing keyboard gate and quarantines repeat presses across blocki
 	keyboard.keyup(event(1, {}));
 	keyboard.keydown(event(1, {}));
 	expect(cast).toHaveBeenCalledTimes(2);
+});
+
+it("cycles configured tabs once per press without casting and honors unbinding", () => {
+	const defaults = createInputDefaults("windows");
+	const input = new AppInput({
+		...defaults,
+		spellBar: {
+			...defaults.spellBar,
+			previousTab: [{ key: "F11" }],
+			nextTab: [],
+		},
+	});
+	const cycle = vi.fn();
+	const cast = vi.fn();
+	const dispatch = (overrides: Partial<KeyboardEvent>, enabled = true) =>
+		handleSpellBarKeydown(
+			input,
+			event(0, { code: "F11", ...overrides }),
+			enabled,
+			cast,
+			cast,
+			cast,
+			cycle,
+		);
+	expect(dispatch({ key: "F11", code: "F11" })).toBe(true);
+	expect(cycle).toHaveBeenLastCalledWith("previous");
+	expect(dispatch({ key: "F11", repeat: true })).toBe(true);
+	expect(dispatch({ key: "F11", isComposing: true })).toBe(false);
+	expect(dispatch({ key: "F11" }, false)).toBe(false);
+	expect(dispatch({ key: "PageUp" })).toBe(false);
+	expect(dispatch({ key: "PageDown" })).toBe(false);
+	expect(cycle).toHaveBeenCalledOnce();
+	expect(cast).not.toHaveBeenCalled();
+});
+
+it("routes both default paging keys through spell dispatch without repeating or casting", () => {
+	const cycle = vi.fn();
+	const cast = vi.fn();
+	for (const [key, direction] of [
+		["PageUp", "previous"],
+		["PageDown", "next"],
+	] as const) {
+		const press = event(0, { key, code: key });
+		expect(
+			handleSpellBarKeydown(
+				TEST_INPUT,
+				press,
+				true,
+				vi.fn(),
+				cast,
+				cast,
+				cycle,
+			),
+		).toBe(true);
+		expect(press.defaultPrevented).toBe(true);
+		expect(cycle).toHaveBeenLastCalledWith(direction);
+		handleSpellBarKeydown(
+			TEST_INPUT,
+			event(0, { key, code: key, repeat: true }),
+			true,
+			vi.fn(),
+			cast,
+			cast,
+			cycle,
+		);
+	}
+	expect(cycle).toHaveBeenCalledTimes(2);
+	expect(cast).not.toHaveBeenCalled();
 });

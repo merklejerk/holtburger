@@ -769,7 +769,7 @@
 			{@const setting =
 				profile.kind === "melee" ? "Melee power" : "Missile accuracy"}
 			<span
-				class="breakpoint breakpoint-{index + 1}"
+				class="breakpoint ui-hud-shortcut-label breakpoint-{index + 1}"
 				role="img"
 				aria-label={`${setting} ${percent}%. Key: ${binding.description}`}
 				title={`${setting}: ${percent}%\nKey: ${binding.description}`}
@@ -1095,11 +1095,7 @@
 			z-index: 1;
 			display: grid;
 			place-items: center;
-			font-size: 0.9rem;
-			font-weight: 800;
 			opacity: 0;
-			pointer-events: none;
-			text-shadow: var(--ui-combat-breakpoint-shadow);
 			transform: scale(0.85);
 			transition:
 				opacity 100ms ease-out,
@@ -1108,7 +1104,6 @@
 		.combat-bar:hover .breakpoint,
 		.combat-bar:focus-within .breakpoint {
 			opacity: 1;
-			pointer-events: auto;
 			transform: translate(
 					var(--breakpoint-outward-x),
 					var(--breakpoint-outward-y)

@@ -183,9 +183,9 @@ impl ClientRuntime {
                 if let Some(coordinator) = self.collision_coordinator.as_mut() {
                     coordinator.invalidate();
                 }
-                // PlayerTeleport emits this reset as an effect before its identifying edge. The
-                // batch handler lets the TeleportStarted event own the one generation increment;
-                // a standalone reset remains an in-place presentation discontinuity.
+                // The batch handler processes TeleportStarted before projecting reset effects,
+                // so it owns the one generation increment. A standalone reset remains an
+                // in-place presentation discontinuity.
                 if !teleport_batch && self.activation.is_none() {
                     self.bump_world_generation();
                     let _ = self.client_view_event_tx.send(

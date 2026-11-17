@@ -244,9 +244,9 @@ impl PlayerState {
         !is_newer_u16(self.server_control_sequence, server_control_sequence)
     }
 
-    /// Applies self `UpdateMotion` sequencing and cached server style only when the packet is
-    /// current.
-    pub fn apply_self_update_motion(&mut self, data: &MovementEventData) -> bool {
+    /// Acknowledges self `UpdateMotion` sequencing without changing accepted playback or style.
+    /// Non-autonomous packets must carry a fresh server-control sequence.
+    pub fn acknowledge_self_motion(&mut self, data: &MovementEventData) -> bool {
         if !data.is_autonomous
             && !self.should_accept_server_controlled_motion(data.server_control_sequence)
         {
@@ -258,7 +258,6 @@ impl PlayerState {
             data.server_control_sequence,
             data.movement_sequence,
         );
-        self.update_last_server_motion_style(data.current_style);
         true
     }
 

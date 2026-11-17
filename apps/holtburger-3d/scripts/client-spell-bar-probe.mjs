@@ -388,12 +388,15 @@ async function runSpellBarProbe(client, evaluateExpression, screenshotPath) {
 		),
 		"double",
 	);
-	for (let tab = 0; tab < 10; tab++) {
-		await click(`.spell-tabs button:nth-child(${tab + 1})`);
+	const visibleTabs = await read(
+		`Array.from(document.querySelectorAll('[data-spell-tab-source]'), tab => Number(tab.dataset.spellTabSource))`,
+	);
+	for (const tab of visibleTabs) {
+		await click(`[data-spell-tab-source="${tab}"]`);
 		assert.equal(
 			await read(`${probe}.bindings().selected`),
 			tab,
-			"Layout handles leave every tab clickable",
+			"Layout handles leave every visible tab clickable",
 		);
 	}
 	await click(".spell-tabs button:nth-child(1)");

@@ -158,6 +158,12 @@ export function createInputDefaults(platform: InputPlatform) {
 		},
 		/** Exact modifier chords for gameplay spell tabs and casting. */
 		spellBar: {
+			previousTab: [
+				{ key: "PageUp", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			nextTab: [
+				{ key: "PageDown", shift: false, ctrl: false, alt: false, meta: false },
+			],
 			caster: [
 				{ code: "Digit1", ctrl: true, shift: true, alt: false, meta: false },
 			],

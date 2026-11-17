@@ -267,6 +267,8 @@ describe("client binding catalog", () => {
 		);
 		expect(groups).toHaveLength(1);
 		expect(groups[0].rows.map((row) => row.id)).toEqual([
+			"spellBar.previousTab",
+			"spellBar.nextTab",
 			...ACTION_SLOT_INDICES.map((index) => `spellBar.tabs.${index}`),
 			"spellBar.caster",
 			...ACTION_SLOT_INDICES.map((index) => `spellBar.cells.${index}`),
@@ -419,4 +421,20 @@ describe("client binding catalog", () => {
 			[],
 		);
 	});
+});
+
+it("keeps spell tab cycling separate from chat paging while detecting game conflicts", () => {
+	const cycle = row("spellBar.previousTab");
+	expect(cycle.contexts).toEqual(["game-magic"]);
+	expect(
+		conflictingClientBindings(defaults, cycle, { key: "PageUp" }, null),
+	).toEqual([]);
+	expect(
+		conflictingClientBindings(
+			defaults,
+			cycle,
+			{ code: "Digit1", shift: true },
+			null,
+		).map((entry) => entry.id),
+	).toContain("spellBar.tabs.0");
 });

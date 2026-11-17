@@ -1,4 +1,7 @@
-import type { InputDigitIndex } from "../lib/input/input-contract";
+import type {
+	InputDigitIndex,
+	SpellTabDirection,
+} from "../lib/input/input-contract";
 
 /** The ten numbered positions remain the only keyboard-addressable cells. */
 export const SPELL_BAR_INDICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
@@ -129,4 +132,44 @@ export function swapSpellTabs(
 			state.tabs[source],
 		),
 	};
+}
+
+/** Visible tab identity and occupancy, shared by header styling and strip geometry. */
+export interface SpellTabHeader {
+	/** Fixed numeric identity, independent of visibility. */
+	readonly index: InputDigitIndex;
+	/** No bound spell anywhere in the tab, including overflow cells. */
+	readonly empty: boolean;
+}
+
+function spellTabIsEmpty(tab: readonly (number | null)[]): boolean {
+	return tab.every((spell) => spell === null);
+}
+
+/** Keep numeric identities through the last populated tab and one empty destination; direct selection stays visible. */
+export function visibleSpellTabs(
+	state: ClientSpellBarState,
+): readonly SpellTabHeader[] {
+	const tabs = SPELL_BAR_INDICES.map((index) => ({
+		index,
+		empty: spellTabIsEmpty(state.tabs[index]),
+	}));
+	const lastOccupied = tabs.findLastIndex((tab) => !tab.empty);
+	const count = Math.max(state.selected + 1, lastOccupied + 2);
+	return tabs.slice(0, count);
+}
+
+/** Find the next populated tab, including overflow cells; all-empty bars retain selection. */
+export function cycleSpellTab(
+	state: ClientSpellBarState,
+	direction: SpellTabDirection,
+): InputDigitIndex {
+	const step = direction === "next" ? 1 : -1;
+	const count = SPELL_BAR_INDICES.length;
+	for (let distance = 1; distance <= count; distance++) {
+		const index =
+			SPELL_BAR_INDICES[(state.selected + step * distance + count) % count];
+		if (!spellTabIsEmpty(state.tabs[index])) return index;
+	}
+	return state.selected;
 }

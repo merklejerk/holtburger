@@ -21,6 +21,8 @@ const addresses: readonly ClientBindingReference[] = [
 	{ kind: "preciseJump", action: "increasePower" },
 	{ kind: "client", action: "selectSelf" },
 	{ kind: "client", action: "splitStack" },
+	{ kind: "spellTabCycle", direction: "previous" },
+	{ kind: "spellTabCycle", direction: "next" },
 	{ kind: "spellTab", index: 9 },
 	{ kind: "spellCell", index: 9 },
 	{ kind: "spellCaster" },
@@ -113,6 +115,12 @@ it("uses accepted replacement addresses in every runtime lookup family", () => {
 				expect(actions).toEqual([reference.action]);
 				break;
 			}
+			case "spellTabCycle":
+				expect(input.spellBarCommand(event)).toEqual({
+					kind: "cycle",
+					direction: reference.direction,
+				});
+				break;
 			case "spellTab":
 				expect(input.spellBarCommand(event)).toEqual({
 					kind: "tabs",

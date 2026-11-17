@@ -5,6 +5,7 @@ import {
 } from "./input-contract";
 import { InputContext, matchesKey } from "./input-context";
 import type {
+	SpellTabDirection,
 	ActionBarDirection,
 	CombatBreakpointIndex,
 	CombatHeightIndex,
@@ -53,8 +54,10 @@ export class AppInput {
 	spellBarCommand(
 		event: InputKeyEvent,
 	):
-		| { readonly kind: "tabs" | "cells"; readonly index: InputDigitIndex }
+		| { readonly kind: "tabs"; readonly index: InputDigitIndex }
+		| { readonly kind: "cells"; readonly index: InputDigitIndex }
 		| { readonly kind: "caster" }
+		| { readonly kind: "cycle"; readonly direction: SpellTabDirection }
 		| null {
 		if (
 			matchesKey(
@@ -75,6 +78,18 @@ export class AppInput {
 				),
 			);
 			if (index !== undefined) return { kind, index };
+		}
+		for (const direction of ["previous", "next"] as const) {
+			if (
+				matchesKey(
+					event,
+					readClientBinding(this.configuration, {
+						kind: "spellTabCycle",
+						direction,
+					}),
+				)
+			)
+				return { kind: "cycle", direction };
 		}
 		return null;
 	}

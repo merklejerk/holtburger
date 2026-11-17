@@ -130,6 +130,7 @@ describe("ClientSettingsStore", () => {
 						defaults.input,
 					);
 				const { holdChatHistory: omitted, ...client } = defaults.input.client;
+				const { previousTab, nextTab, ...spellBar } = defaults.input.spellBar;
 				await writeFile(
 					path,
 					JSON.stringify({
@@ -140,6 +141,7 @@ describe("ClientSettingsStore", () => {
 								value: {
 									...defaults.input,
 									client: { ...client, examine: [{ key: "F12" }] },
+									spellBar: { ...spellBar, caster: [] },
 								},
 							},
 						},
@@ -150,6 +152,12 @@ describe("ClientSettingsStore", () => {
 				await reloaded.load();
 				const result = await reloaded.loadUser(context, "persisted");
 				expect(result.settings.input.client.holdChatHistory).toEqual(omitted);
+				expect(result.settings.input.spellBar).toEqual({
+					...spellBar,
+					caster: [],
+					previousTab,
+					nextTab,
+				});
 				expect(result.settings.input.client.examine).toEqual([{ key: "F12" }]);
 			} finally {
 				await rm(dirname(path), { recursive: true, force: true });

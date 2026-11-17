@@ -11,6 +11,7 @@
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import {
 		SPELL_BAR_INDICES,
+		visibleSpellTabs,
 		type ClientSpellBarState,
 	} from "./client-spell-bar-state";
 	import {
@@ -130,6 +131,8 @@
 		return { rows, columns: SPELL_BAR_INDICES.length / rows };
 	});
 	const cells = $derived(configuration.tabs[configuration.selected]);
+	/** One published tab list owns both rendering and the bookend geometry. */
+	const tabs = $derived(visibleSpellTabs(configuration));
 	// Each group of ten keeps slots 1–5 above 6–10 in two-row mode.
 	const totalColumns = $derived(
 		Math.floor((cells.length - 1) / SPELL_BAR_INDICES.length) * grid.columns +
@@ -371,6 +374,7 @@
 		class:ui-hud-emphasized={editable}
 		data-spell-bar-surface
 		style:--spell-cell-size={`${metrics.cell}px`}
+		style:--spell-tab-count={tabs.length}
 		style:--spell-caster-gap={`${metrics.casterGap}px`}
 		data-spell-bar-shape={shape}
 	>
@@ -378,6 +382,27 @@
 			<span class="spell-scrollbar-metrics"></span>
 			<span class="spell-caster-gap-metrics"></span>
 		</span>
+		<!-- Match the tab strip width while keeping its bookend hints outside the cell scrollport. -->
+		<div class="spell-cycle-hints" style:left={`${casterExtent}px`}>
+			{#each ["previous", "next"] as const as direction}
+				{@const binding = presentClientBinding(
+					input,
+					{ kind: "spellTabCycle", direction },
+					displayPlatform,
+				)}
+				{#if binding.hint !== null}
+					<span
+						class="spell-cycle-hint ui-hud-shortcut-label {direction}"
+						role="img"
+						aria-label={`${direction === "previous" ? "Previous" : "Next"} non-empty spell tab. Key: ${binding.description}`}
+						title={`${direction === "previous" ? "Previous" : "Next"} non-empty spell tab — ${binding.description}`}
+						>{direction === "previous"
+							? `← ${binding.hint}`
+							: `${binding.hint} →`}</span
+					>
+				{/if}
+			{/each}
+		</div>
 		<div class="spell-bar-scroll" class:constrained data-spell-scroll-container>
 			{#if caster !== null}
 				{@const row = rows.get(caster.spell)}
@@ -405,7 +430,7 @@
 			{/if}
 			<div class="spell-shortcuts" style:width={`${stripWidth}px`}>
 				<div class="spell-tabs" role="group" aria-label="Spell bar tabs">
-					{#each SPELL_BAR_INDICES as tab}
+					{#each tabs as { index: tab, empty } (tab)}
 						{@const binding = presentClientBinding(
 							input,
 							{ kind: "spellTab", index: tab },
@@ -415,6 +440,7 @@
 							type="button"
 							class="spell-tab ui-hud-control"
 							data-spell-tab-source={tab}
+							data-empty={empty}
 							aria-label={`Spell tab ${(tab + 1) % 10} (${binding.description})`}
 							title={`Spell tab ${(tab + 1) % 10} — ${binding.description}`}
 							aria-pressed={configuration.selected === tab}
@@ -519,6 +545,43 @@
 			width: 100%;
 			height: 100%;
 		}
+		.spell-cycle-hints {
+			position: absolute;
+			top: 0;
+			right: 0;
+			max-width: calc(var(--spell-tab-count) * var(--ui-spell-tab-width));
+			height: var(--ui-spell-tab-height);
+			pointer-events: none;
+		}
+		.spell-cycle-hint {
+			position: absolute;
+			z-index: 1;
+			top: 50%;
+			width: max-content;
+			max-width: min(40vw, 16rem);
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			transform: translateY(-50%) scale(0.85);
+			opacity: 0;
+			transition:
+				opacity 100ms ease-out,
+				transform 100ms ease-out;
+		}
+		.spell-cycle-hint.previous {
+			transform-origin: right center;
+			left: auto;
+			right: calc(100% + 4px);
+		}
+		.spell-cycle-hint.next {
+			transform-origin: left center;
+			left: calc(100% + 4px);
+		}
+		.spell-bar:hover .spell-cycle-hint,
+		.spell-bar:focus-within .spell-cycle-hint {
+			transform: translateY(-50%) scale(1);
+			opacity: 1;
+		}
 		.spell-bar-metrics {
 			position: absolute;
 			visibility: hidden;
@@ -568,6 +631,7 @@
 			width: var(--spell-cell-size);
 			height: var(--spell-cell-size);
 			margin-right: var(--spell-caster-gap);
+			margin-top: var(--ui-spell-tab-height);
 		}
 		.spell-tabs,
 		.spell-cells {
@@ -575,8 +639,11 @@
 			width: max-content;
 		}
 		.spell-tabs {
-			grid-template-columns: repeat(10, minmax(0, 1fr));
-			width: min(100%, calc(10 * var(--ui-spell-tab-width)));
+			grid-template-columns: repeat(var(--spell-tab-count), minmax(0, 1fr));
+			width: min(
+				100%,
+				calc(var(--spell-tab-count) * var(--ui-spell-tab-width))
+			);
 			height: var(--ui-spell-tab-height);
 		}
 		.spell-tabs button {
@@ -602,6 +669,9 @@
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
+		}
+		.spell-tabs button[data-empty="true"]:not([aria-pressed="true"]) {
+			opacity: var(--ui-spell-empty-tab-opacity);
 		}
 		.spell-tabs button[aria-pressed="true"] {
 			--ui-hud-control-background: var(

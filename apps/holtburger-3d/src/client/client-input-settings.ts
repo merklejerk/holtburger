@@ -40,8 +40,8 @@ const digitBindingsSchema = z
 	.record(z.enum(INPUT_DIGIT_KEYS), bindingListSchema)
 	.readonly();
 
-/** Shared keyboard fields before the spell-bar caster shortcut is added. */
-const keyboardSettingsBaseSchema = z
+/** Complete keyboard contract shared by persistence and the binding editor. */
+export const clientKeyboardSettingsSchema = z
 	.object({
 		character: z
 			.record(z.enum(CHARACTER_ACTIONS), bindingListSchema)
@@ -78,7 +78,13 @@ const keyboardSettingsBaseSchema = z
 			z.record(z.enum(CLIENT_SHORTCUT_ACTIONS), bindingListSchema).readonly(),
 		),
 		spellBar: z
-			.object({ tabs: digitBindingsSchema, cells: digitBindingsSchema })
+			.object({
+				tabs: digitBindingsSchema,
+				cells: digitBindingsSchema,
+				caster: bindingListSchema,
+				previousTab: bindingListSchema,
+				nextTab: bindingListSchema,
+			})
 			.strict()
 			.readonly(),
 		combatBar: z
@@ -101,20 +107,6 @@ const keyboardSettingsBaseSchema = z
 					.readonly(),
 				alternate: z.enum(["shift", "ctrl", "alt", "meta"]),
 			})
-			.strict()
-			.readonly(),
-	})
-	.strict()
-	.readonly();
-
-/** Keyboard-only schema used as the base of persisted client input. */
-export const clientKeyboardSettingsSchema = keyboardSettingsBaseSchema
-	.unwrap()
-	.extend({
-		spellBar: keyboardSettingsBaseSchema
-			.unwrap()
-			.shape.spellBar.unwrap()
-			.extend({ caster: bindingListSchema })
 			.strict()
 			.readonly(),
 	})

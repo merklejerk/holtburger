@@ -1,4 +1,5 @@
 import type {
+	SpellTabDirection,
 	ClientKeyboardConfiguration,
 	ClientShortcut,
 	CharacterAction,
@@ -19,6 +20,7 @@ export type ClientBindingReference =
 	| { readonly kind: "preciseJump"; readonly action: PreciseJumpAction }
 	| { readonly kind: "spellTab"; readonly index: InputDigitIndex }
 	| { readonly kind: "spellCell"; readonly index: InputDigitIndex }
+	| { readonly kind: "spellTabCycle"; readonly direction: SpellTabDirection }
 	| { readonly kind: "spellCaster" }
 	| { readonly kind: "combatHeight"; readonly index: CombatHeightIndex }
 	| { readonly kind: "combatBreakpoint"; readonly index: CombatBreakpointIndex }
@@ -33,6 +35,7 @@ export type ClientBindingId =
 	| `preciseJump.${PreciseJumpAction}`
 	| `spellBar.tabs.${InputDigitIndex}`
 	| `spellBar.cells.${InputDigitIndex}`
+	| `spellBar.${SpellTabDirection}Tab`
 	| "spellBar.caster"
 	| `combatBar.heights.${CombatHeightIndex}`
 	| `combatBar.breakpoints.${CombatBreakpointIndex}`
@@ -55,6 +58,8 @@ export function clientBindingId(
 			return `spellBar.tabs.${reference.index}`;
 		case "spellCell":
 			return `spellBar.cells.${reference.index}`;
+		case "spellTabCycle":
+			return `spellBar.${reference.direction}Tab`;
 		case "spellCaster":
 			return "spellBar.caster";
 		case "combatHeight":
@@ -86,6 +91,8 @@ export function readClientBinding(
 			return settings.spellBar.tabs[reference.index];
 		case "spellCell":
 			return settings.spellBar.cells[reference.index];
+		case "spellTabCycle":
+			return settings.spellBar[`${reference.direction}Tab`];
 		case "spellCaster":
 			return settings.spellBar.caster;
 		case "combatHeight":
@@ -137,6 +144,14 @@ export function replaceClientBinding(
 				spellBar: {
 					...settings.spellBar,
 					cells: { ...settings.spellBar.cells, [reference.index]: bindings },
+				},
+			};
+		case "spellTabCycle":
+			return {
+				...settings,
+				spellBar: {
+					...settings.spellBar,
+					[`${reference.direction}Tab`]: bindings,
 				},
 			};
 		case "spellCaster":

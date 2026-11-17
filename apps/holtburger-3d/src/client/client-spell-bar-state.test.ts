@@ -1,6 +1,9 @@
 import { expect, it } from "vitest";
 import {
 	bindSpellCell,
+	cycleSpellTab,
+	visibleSpellTabs,
+	type ClientSpellBarState,
 	initialSpellBar,
 	SPELL_BAR_INDICES,
 	swapSpellCells,
@@ -108,4 +111,78 @@ it("exchanges whole tabs without losing overflow, holes, or selected identity", 
 	const moved = swapSpellTabs(state, 0, 9);
 	expect(moved.tabs[0]).toBe(state.tabs[9]);
 	expect(moved.tabs[9]).toBe(state.tabs[0]);
+});
+
+it("cycles populated tabs in either direction, wrapping and including overflow", () => {
+	const empty = initialSpellBar();
+	expect(cycleSpellTab(empty, "next")).toBe(empty.selected);
+	expect(cycleSpellTab(empty, "previous")).toBe(empty.selected);
+	const single = bindSpellCell(empty, { tab: 7, slot: 0 }, 42);
+	expect(cycleSpellTab(single, "next")).toBe(7);
+	expect(cycleSpellTab({ ...single, selected: 7 }, "next")).toBe(7);
+	const filled = bindSpellCell(
+		single,
+		{ tab: 7, slot: SPELL_BAR_INDICES.length - 1 },
+		42,
+	);
+	const extended = bindSpellCell(
+		filled,
+		{ tab: 7, slot: SPELL_BAR_INDICES.length },
+		73,
+	);
+	const overflowOnly = bindSpellCell(
+		bindSpellCell(extended, { tab: 7, slot: 0 }, null),
+		{ tab: 7, slot: SPELL_BAR_INDICES.length - 1 },
+		null,
+	);
+	const populated = bindSpellCell(overflowOnly, { tab: 2, slot: 0 }, 42);
+	expect(cycleSpellTab({ ...populated, selected: 2 }, "next")).toBe(7);
+	expect(cycleSpellTab({ ...populated, selected: 7 }, "next")).toBe(2);
+	expect(cycleSpellTab({ ...populated, selected: 2 }, "previous")).toBe(7);
+	expect(cycleSpellTab({ ...populated, selected: 7 }, "previous")).toBe(2);
+	expect(cycleSpellTab({ ...populated, selected: 5 }, "next")).toBe(7);
+	expect(cycleSpellTab({ ...populated, selected: 5 }, "previous")).toBe(2);
+});
+
+it("reveals tabs through the last binding and one empty destination without hiding direct selection", () => {
+	const indices = (state: ClientSpellBarState) =>
+		visibleSpellTabs(state).map((tab) => tab.index);
+	const empty = initialSpellBar();
+	expect(visibleSpellTabs(empty)).toEqual([{ index: 0, empty: true }]);
+	expect(indices(empty)).toEqual([0]);
+	const first = bindSpellCell(empty, { tab: 0, slot: 0 }, 42);
+	expect(indices(first)).toEqual([0, 1]);
+	const distant = bindSpellCell(first, { tab: 4, slot: 0 }, 73);
+	expect(indices(distant)).toEqual([0, 1, 2, 3, 4, 5]);
+	expect(indices(bindSpellCell(distant, { tab: 4, slot: 0 }, null))).toEqual([
+		0, 1,
+	]);
+	expect(indices({ ...empty, selected: 7 })).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+	const last = SPELL_BAR_INDICES[SPELL_BAR_INDICES.length - 1];
+	expect(indices(bindSpellCell(empty, { tab: last, slot: 0 }, 42))).toEqual(
+		SPELL_BAR_INDICES,
+	);
+	const extended = bindSpellCell(
+		distant,
+		{ tab: 4, slot: SPELL_BAR_INDICES.length - 1 },
+		42,
+	);
+	const overflow = bindSpellCell(
+		extended,
+		{ tab: 4, slot: SPELL_BAR_INDICES.length },
+		42,
+	);
+	const overflowOnly = bindSpellCell(
+		bindSpellCell(overflow, { tab: 4, slot: 0 }, null),
+		{ tab: 4, slot: SPELL_BAR_INDICES.length - 1 },
+		null,
+	);
+	expect(visibleSpellTabs(overflowOnly)).toEqual([
+		{ index: 0, empty: false },
+		{ index: 1, empty: true },
+		{ index: 2, empty: true },
+		{ index: 3, empty: true },
+		{ index: 4, empty: false },
+		{ index: 5, empty: true },
+	]);
 });

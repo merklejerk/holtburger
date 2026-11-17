@@ -2,8 +2,9 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, movement:** You can keep moving while eating or drinking, and held movement is no longer interrupted when those animations return to ready.
-- **3D client, other players and creatures:** Remote movement and position corrections are more consistent across physics transitions.
+- **3D client and terminal client, chat commands:** Unrecognized `/` commands are now sent to the server as `@` commands, so server-side commands work from either client.
+- **3D client and terminal client, command escape:** A leading space now skips local commands and emotes and sends the text to the server. Only that one space is removed, and a `/` or `@` that follows is still sent as a server command.
+- **3D client, chat:** Whitespace-only messages are now rejected instead of being sent.
 
 ## Known issues
 

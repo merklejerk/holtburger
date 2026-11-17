@@ -2,8 +2,9 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, movement:** You can keep moving while eating or drinking, and held movement is no longer interrupted when those animations return to ready.
-- **3D client, other players and creatures:** Remote movement and position corrections are more consistent across physics transitions.
+- **3D client, spells:** PgUp and PgDn now cycle through non-empty spell tabs, with configurable shortcuts and a clearer spell bar showing the next empty tab.
+- **3D client and CLI, chat commands:** Server commands now go through consistently, and a leading space sends text as speech instead of running a local command.
+- **3D client and CLI, death and portals:** Your character's death animation now carries through the portal handoff.
 
 ## Known issues
 
@@ -17,7 +18,8 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 - The performance panel and GPU timing have not been verified on native Windows or macOS.
 - The startup fix has not been verified by launching rebuilt platform release bundles.
 - The crowd and rendering performance improvements, including the frame timing and Windows power-mode changes, have not been verified on native hardware or in live crowded play.
-- The spell bar, waypoint ping and map changes have not been verified visually on native hardware.
+- The spell bar, waypoint ping and map changes, including the new tab cycling and spell bar presentation, have not been verified visually on native hardware.
+- The death playback fix through portal transitions has not been verified visually in live play.
 - CLI movement is simplified: jumping, falling, gravity, and stairs are not simulated locally. The server may correct your position or reject actions.
 
 ## Updating

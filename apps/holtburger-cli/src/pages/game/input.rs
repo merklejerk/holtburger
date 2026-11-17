@@ -14,6 +14,14 @@ use crate::types::{
     AppAction, AppUiAction, ContextView, FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult,
 };
 
+/// Normalize only command submissions, preserving arguments and ordinary speech bodies.
+fn server_command_text(text: &str) -> String {
+    match text.strip_prefix('/') {
+        Some(body) => format!("@{body}"),
+        None => text.to_string(),
+    }
+}
+
 fn normalize_soul_emote_token(command: &str) -> Option<&str> {
     let token = command
         .strip_prefix('*')
@@ -239,12 +247,11 @@ impl GameState {
                         return result;
                     }
                     self.chat_input.record_history_submission(&command);
-                    let literal = command.trim_start();
-                    // Leading whitespace escapes all command and emote interpretation.
-                    if literal != command {
+                    // Remove one escape space; preserve any remaining whitespace as message text.
+                    if let Some(literal) = command.strip_prefix(' ') {
                         result
                             .commands
-                            .push(ClientCommand::Talk(literal.to_string()));
+                            .push(ClientCommand::Talk(server_command_text(literal)));
                         result.merge(self.finish_input_command_submission(&command));
                         return result;
                     }
@@ -789,9 +796,21 @@ mod tests {
     }
 
     #[test]
-    fn enter_sends_whitespace_prefixed_input_literally_and_preserves_history() {
-        for input in [
-            " /help", "  @help", "\t/help", " *wave*", " :waves", " /help  ",
+    fn enter_bypasses_local_handlers_and_preserves_history() {
+        for (input, expected) in [
+            (" /help", "@help"),
+            (" @help", "@help"),
+            ("  @help", " @help"),
+            ("   /dn", "  /dn"),
+            ("  hello  ", " hello  "),
+            (" \t/dn", "\t/dn"),
+            ("\t/help", "\t/help"),
+            ("\t/dn", "\t/dn"),
+            ("\u{00a0}@help", "\u{00a0}@help"),
+            (" *wave*", "*wave*"),
+            (" :waves", ":waves"),
+            (" /help  ", "@help  "),
+            (" /dn Mixed /arg @Name  ", "@dn Mixed /arg @Name  "),
         ] {
             let mut state = GameState::new(Guid(0x50000001), "Player".into(), "World".into());
             state.view.focused_pane = FocusedPane::Input;
@@ -802,7 +821,7 @@ mod tests {
 
             assert!(
                 matches!(result.commands.as_slice(), [ClientCommand::Talk(message)]
-                if message == input.trim_start())
+                if message == expected)
             );
             assert_eq!(state.chat_input.input_history, [input]);
             assert!(result.actions.iter().any(|action| matches!(action,

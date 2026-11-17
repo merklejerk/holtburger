@@ -3,6 +3,7 @@ import { ClientChatComposer } from "./client-chat-composer.svelte";
 import {
 	CHAT_CHANNEL_DESTINATIONS,
 	resolveChatCompose,
+	serverCommandRequest,
 	selectedChatRecipient,
 	type ChatComposeContext,
 } from "./client-chat-compose";
@@ -56,27 +57,75 @@ describe("chat composition", () => {
 	});
 
 	it.each([
-		" /help",
-		"  @help",
-		"\t/help",
-		" /VERSION",
-		"  @version",
-		" *wave*",
-		" :waves",
-	])("sends %j literally to the selected destination", (text) => {
-		for (const destination of [
-			{ kind: "speech" },
-			{ kind: "tell", target: player },
-			context.destination,
-		] as const) {
-			expect(
-				resolveChatCompose(`${text}  `, { ...context, destination }),
-			).toMatchObject({
-				kind: "send",
-				request: { ...destination, message: `${text.trimStart()}  ` },
-			});
-		}
+		[" /help", "@help"],
+		[" @help", "@help"],
+		[" /dn", "@dn"],
+		[" /VERSION", "@VERSION"],
+		[" @version", "@version"],
+	])(
+		"routes escaped command %j to the server regardless of the picker",
+		(text, expected) => {
+			for (const destination of [
+				{ kind: "speech" },
+				{ kind: "tell", target: player },
+				context.destination,
+			] as const) {
+				const result = resolveChatCompose(`${text}  `, {
+					...context,
+					destination,
+				});
+				expect(result).toMatchObject({
+					kind: "send",
+					label: "Command",
+					buttonLabel: "Cmd",
+					request: {
+						kind: "speech",
+						message: `${expected}  `,
+					},
+				});
+			}
+		},
+	);
+
+	it.each([
+		[" *wave*", "*wave*"],
+		[" :waves", ":waves"],
+		[" hello", "hello"],
+		["  hello", " hello"],
+		["   /dn", "  /dn"],
+		["  @help", " @help"],
+		[" \t/dn", "\t/dn"],
+	])("keeps escaped text %j at the selected destination", (text, expected) => {
+		expect(resolveChatCompose(`${text}  `, context)).toMatchObject({
+			kind: "send",
+			request: { ...context.destination, message: `${expected}  ` },
+		});
 	});
+
+	it.each(["\t/help", "\t/dn", "\u00a0@help", "\t*wave*"])(
+		"preserves non-space leading whitespace in %j without interpreting commands",
+		(text) => {
+			expect(resolveChatCompose(text, context)).toMatchObject({
+				kind: "send",
+				request: { ...context.destination, message: text },
+			});
+		},
+	);
+
+	it.each([
+		["/dn Mixed /arg @Name  ", "@dn Mixed /arg @Name  "],
+		["@dn Mixed /arg @Name  ", "@dn Mixed /arg @Name  "],
+		["/", "@"],
+		["//dn", "@/dn"],
+	])(
+		"normalizes the server submission %j without changing its body",
+		(text, expected) => {
+			expect(serverCommandRequest(text)).toEqual({
+				kind: "speech",
+				message: expected,
+			});
+		},
+	);
 
 	it.each(["", " ", "  \t"])("rejects blank input %j", (text) => {
 		expect(resolveChatCompose(text, context).kind).toBe("error");
@@ -172,7 +221,7 @@ describe("chat composition", () => {
 	it("uses the picker for plain text while explicit commands override it", () => {
 		expect(resolveChatCompose("  hello  ", context)).toMatchObject({
 			kind: "send",
-			request: { kind: "channel", channel: "fellowship", message: "hello  " },
+			request: { kind: "channel", channel: "fellowship", message: " hello  " },
 		});
 		expect(resolveChatCompose("/rt hello", context)).toMatchObject({
 			kind: "send",

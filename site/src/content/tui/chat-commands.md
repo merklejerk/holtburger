@@ -11,6 +11,8 @@ Use `/help` or `/?` for discovery, and `/help COMMAND` for a topic. Commands als
 
 `PLAYER`, `MESSAGE` and other capitalized words are placeholders. Square brackets mark optional arguments; do not type the brackets.
 
+Unhandled commands are sent as local speech with a leading `/` converted to `@`. A leading space bypasses local commands and emotes; only that first space is removed. If `/` or `@` is then the first character, the command goes to the server.
+
 ## Messages and allegiance
 
 | Command                | Aliases          | Action                               |
@@ -24,7 +26,7 @@ Use `/help` or `/?` for discovery, and `/help COMMAND` for a topic. Commands als
 
 The TUI's `/tell` takes a single word as the recipient name, followed by the message. The 3D client's comma-separated tell syntax is different.
 
-Unprefixed input sends ordinary speech; a leading colon sends a text emote. Commands not handled locally are sent to the server as entered.
+Unprefixed input sends ordinary speech; a leading colon sends a text emote.
 
 ## Party
 

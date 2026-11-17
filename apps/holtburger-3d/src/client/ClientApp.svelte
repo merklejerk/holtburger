@@ -223,6 +223,7 @@
 	import { ClientChatComposer } from "./client-chat-composer.svelte";
 	import {
 		selectedChatRecipient,
+		serverCommandRequest,
 		type ChatComposeResolution,
 	} from "./client-chat-compose";
 	import type { FrameSettings } from "../lib/game/renderer/renderer";
@@ -1668,11 +1669,7 @@
 		if (!handled) {
 			if (session !== currentSession || chatComposer.generation !== generation)
 				throw new Error("Chat session changed before command dispatch.");
-			if (message.startsWith("/"))
-				throw new Error(
-					`Unknown command: ${message.split(/\s/, 1)[0]}. Use /help for supported commands.`,
-				);
-			await currentSession.sendChat({ kind: "speech", message });
+			await currentSession.sendChat(serverCommandRequest(message));
 		}
 	}
 

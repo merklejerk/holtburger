@@ -316,9 +316,8 @@ export async function probeClientChat(client, evaluateExpression) {
 		});
 		await send(" /help");
 		assert.deepEqual(await lastRequest(), {
-			kind: "channel",
-			channel: "fellowship",
-			message: "/help",
+			kind: "speech",
+			message: "@help",
 		});
 		await draft("");
 		await press("ArrowUp", "ArrowUp", 38);
@@ -327,15 +326,29 @@ export async function probeClientChat(client, evaluateExpression) {
 				`document.querySelector('input[aria-label="Chat message"]').value`,
 			),
 			" /help",
-			"History must retain the escape so resending cannot execute the command",
+			"History must retain the bypass of local command handling",
 		);
 		const beforeResend = (await read()).requests.length;
 		await press("Enter", "Enter", 13);
 		assert.equal((await read()).requests.length, beforeResend + 1);
 		assert.deepEqual(await lastRequest(), {
+			kind: "speech",
+			message: "@help",
+		});
+		for (const command of ["/dn", "@dn", " /dn", " @dn"]) {
+			await draft(command);
+			assert.equal(
+				await evaluate('document.querySelector(".chat-destination").title'),
+				"Command",
+			);
+			await press("Enter", "Enter", 13);
+			assert.deepEqual(await lastRequest(), { kind: "speech", message: "@dn" });
+		}
+		await send("  /dn  ");
+		assert.deepEqual(await lastRequest(), {
 			kind: "channel",
 			channel: "fellowship",
-			message: "/help",
+			message: " /dn  ",
 		});
 		await draft(":*wave*");
 		assert.equal(
@@ -578,7 +591,14 @@ export async function probeClientChat(client, evaluateExpression) {
 			"/t Rejected Player, retry me",
 		);
 		await send("/unknown-chat-command");
-		assert.equal((await read()).requests.length, beforeFailure.requests.length);
+		assert.equal(
+			(await read()).requests.length,
+			beforeFailure.requests.length + 1,
+		);
+		assert.deepEqual(await lastRequest(), {
+			kind: "speech",
+			message: "@unknown-chat-command",
+		});
 
 		await invoke("professorPrompt");
 		assert.match(

@@ -168,10 +168,7 @@ pub(super) fn tick_with_precise_jump(
     let local_guid = world.player.guid;
     // Authoritative death retires manual playback priority. The world advances its animation
     // while the existing death projection rules suppress physical root actuation.
-    let local_dead = world
-        .player_entity()
-        .and_then(|entity| entity.network_motion.snapshot())
-        .is_some_and(|snapshot| snapshot.indicates_death_motion());
+    let local_dead = world.player_is_dead();
     let excluded = (!local_dead
         && (movement.drives_local_authored_playback_this_tick()
             || world.has_authored_motion_actions(local_guid)

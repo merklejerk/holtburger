@@ -818,6 +818,29 @@ impl WorldState {
     ) -> EntityCreateDisposition {
         let guid = entity.guid;
         self.clear_entity_prune_reason(guid, EntityPruneReason::InventoryRemoval);
+        // A same-incarnation refresh cannot undo a witnessed local death or restart its cursor.
+        let preserve_death = guid == self.player.guid
+            && self.player_is_dead()
+            && self.entities.get(guid).is_some_and(|previous| {
+                previous.instance_sequence() == entity.instance_sequence()
+                    && !holtburger_common::sequence::is_newer_u16(
+                        entity.teleport_sequence(),
+                        self.player.teleport_sequence,
+                    )
+            });
+        if preserve_death && let Some(previous) = self.entities.get(guid) {
+            entity.preserve_death_motion_from(previous);
+        }
+        if guid == self.player.guid
+            && !preserve_death
+            && let Some(style) = entity
+                .network_motion
+                .snapshot()
+                .and_then(|motion| motion.current_style)
+        {
+            self.player
+                .update_last_server_motion_style(style.interpreted());
+        }
         if entity.position.landblock_id != Guid::NULL {
             entity.position = recover_pose_orientation(
                 guid,
@@ -887,7 +910,9 @@ impl WorldState {
                 .entities
                 .get(guid)
                 .and_then(|entity| entity.network_motion.snapshot());
-            self.reset_authored_motion(guid, snapshot);
+            if !preserve_death {
+                self.reset_authored_motion(guid, snapshot);
+            }
             EntityCreateDisposition::Active
         }
     }

@@ -1,5 +1,4 @@
 use crate::WorldEvent;
-use crate::entity::EntityMotionSnapshot;
 use crate::player::mutations::{SkillUpdateParams, VitalUpdateParams};
 use crate::spatial::RuntimeBodyResetCause;
 use crate::state::WorldState;
@@ -14,18 +13,9 @@ pub(crate) fn handle_message(
         GameMessage::ObjectCreate(data) | GameMessage::UpdateObject(data) => {
             if data.public_weenie_desc.guid == state.player.guid
                 && state.player.guid != holtburger_common::Guid::NULL
+                && let Some(pos) = data.pos
             {
-                if let Some(pos) = data.pos {
-                    state.sync_player_position(pos);
-                }
-
-                if let Some(current_style) = EntityMotionSnapshot::from_object_description(data)
-                    .and_then(|(snapshot, _)| snapshot.current_style)
-                {
-                    state
-                        .player
-                        .update_last_server_motion_style(current_style.interpreted());
-                }
+                state.sync_player_position(pos);
             }
             false
         }
@@ -36,6 +26,12 @@ pub(crate) fn handle_message(
                 let known_force_position_sequence = state.player.force_position_sequence;
                 let accepted = state.player.apply_position_from_server(&data.pos, events);
                 if accepted {
+                    if holtburger_common::sequence::is_newer_u16(
+                        data.pos.teleport_sequence,
+                        known_teleport_sequence,
+                    ) {
+                        state.retire_local_player_motion_epoch(events);
+                    }
                     events.push(WorldEvent::SelfUpdatePosition {
                         position: data.pos.pos,
                         known_teleport_sequence,
@@ -64,6 +60,14 @@ pub(crate) fn handle_message(
             false
         }
         GameMessage::PlayerTeleport(data) => {
+            if holtburger_common::sequence::is_newer_u16(
+                state.player.teleport_sequence,
+                data.teleport_sequence,
+            ) || state.player_is_dead()
+                && state.player.teleport_sequence == data.teleport_sequence
+            {
+                return true;
+            }
             state.close_world_container();
             state.player.set_teleport_sequence(data.teleport_sequence);
             events

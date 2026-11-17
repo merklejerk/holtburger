@@ -101,7 +101,7 @@ pub(crate) fn handle_message(
         GameMessage::UpdateMotion(data) => {
             let guid = data.guid;
             let is_local = guid == state.player.guid && !guid.is_null();
-            if is_local && !state.player.apply_self_update_motion(data) {
+            if is_local && !state.admit_self_motion(data, false, events) {
                 return true;
             }
             if is_local && data.is_autonomous {
@@ -123,7 +123,7 @@ pub(crate) fn handle_message(
                 Some(entity) => entity.admit_movement_with_action_policy(data, true),
                 None => return false,
             };
-            let (snapshot, motion_changed, actions, rejected_commands) = match admission {
+            let (snapshot, motion_changed, mut actions, rejected_commands) = match admission {
                 EntityMovementAdmission::Rejected
                 | EntityMovementAdmission::MovementSequenceAdvanced => return true,
                 EntityMovementAdmission::Applied {
@@ -135,9 +135,13 @@ pub(crate) fn handle_message(
                 } => (snapshot, motion_changed, actions, rejected_commands),
             };
 
+            let is_death = snapshot.indicates_death_motion();
+            if is_local && is_death {
+                actions.clear();
+            }
             let sticky_target = match &data.data {
                 holtburger_protocol::messages::MovementTypeData::Invalid(motion) => {
-                    motion.sticky_object
+                    motion.sticky_object.filter(|_| !is_local || !is_death)
                 }
                 _ => None,
             };
@@ -160,7 +164,7 @@ pub(crate) fn handle_message(
                 events.push(WorldEvent::EntityMotionPlaybackChanged { guid });
             }
 
-            if snapshot.indicates_death_motion() {
+            if is_death {
                 state.update_health_fraction_at(guid, 0.0, observed_at, events);
             } else if is_hostile_attack && let Some(entity) = state.entities.get(guid) {
                 events.push(WorldEvent::EntityCombatObserved {

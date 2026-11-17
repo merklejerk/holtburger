@@ -11,6 +11,15 @@ use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::MovementEventData;
 use holtburger_protocol::messages::magic::Enchantment;
 
+/// Why a fresh self motion advances sequencing without installing server playback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfMotionAcknowledgement {
+    /// Retained death owns playback until the world placement is replaced.
+    Death,
+    /// The current combat/casting controller already owns target facing.
+    TargetFacing,
+}
+
 #[derive(Debug, Clone)]
 pub struct PlayerInfoData {
     /// Authoritative world/entity snapshot for the local player.
@@ -241,6 +250,13 @@ pub enum WorldEvent {
     // Keep the full protocol payload for now: a future 3D client will likely need
     // richer server-authored movement detail than the current core/TUI consumer.
     SelfServerControlledMotion(Box<MovementEventData>),
+    /// Advances core's sequence tracker without replaying a suppressed command.
+    SelfMotionAcknowledged {
+        /// Fresh server-control sequence consumed by world admission.
+        sequence: u16,
+        /// World-owned decision controlling whether local locomotion may resume.
+        reason: SelfMotionAcknowledgement,
+    },
     ForcedReposition {
         guid: Guid,
         pos: WorldPosition,

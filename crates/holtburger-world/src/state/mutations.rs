@@ -291,7 +291,7 @@ impl WorldState {
     }
 
     /// Clears local-player motion authored against the world placement being replaced.
-    fn retire_local_player_motion_epoch(&mut self, events: &mut Vec<WorldEvent>) {
+    pub(crate) fn retire_local_player_motion_epoch(&mut self, events: &mut Vec<WorldEvent>) {
         let guid = self.player.guid;
         if guid == Guid::NULL {
             return;
@@ -1099,14 +1099,21 @@ impl WorldState {
             return Vec::new();
         }
 
-        let events = vec![WorldEvent::SelfAutonomousPosition {
+        let mut events = Vec::new();
+        if holtburger_common::sequence::is_newer_u16(
+            data.teleport_sequence,
+            known_teleport_sequence,
+        ) {
+            self.retire_local_player_motion_epoch(&mut events);
+        }
+        events.push(WorldEvent::SelfAutonomousPosition {
             position: data.position,
             known_teleport_sequence,
             known_force_position_sequence,
             teleport_sequence: data.teleport_sequence,
             force_position_sequence: data.force_position_sequence,
             server_control_sequence: data.server_control_sequence,
-        }];
+        });
 
         self.player.instance_sequence = data.instance_sequence;
         self.player.server_control_sequence = data.server_control_sequence;

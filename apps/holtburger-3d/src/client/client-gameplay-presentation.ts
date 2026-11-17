@@ -36,6 +36,7 @@ import {
 	awaitWithAbort,
 } from "../lib/async-lifetime";
 import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
+import { VisualTemplateStagingError } from "../lib/game/systems/object-visual-template-repository";
 import { formatError } from "../lib/format-error";
 import type {
 	CombatEffectOutcome,
@@ -1833,8 +1834,14 @@ export class ClientGameplayPresentation {
 				if (event.entity.identity.guid === this.#playerGuid)
 					this.#invalidatePlayerPresentationConvergence();
 				if (this.#activeResources !== null) {
+					const completion = this.#activeResources.runtime.upsertDynamicEntity(
+						event.entity,
+					);
 					this.#observePresentationCompletion(
-						this.#activeResources.runtime.upsertDynamicEntity(event.entity),
+						completion,
+						this.#session.state().lifecycle?.kind === "in-world"
+							? event.entity.identity.guid
+							: null,
 					);
 				}
 				this.#reconcileEntityNameplate(event.entity.identity.guid);
@@ -2414,11 +2421,25 @@ export class ClientGameplayPresentation {
 	}
 
 	/** Observe asynchronous realization failures without ordering later accepted state behind them. */
-	#observePresentationCompletion(completion: Promise<unknown>): void {
+	#observePresentationCompletion(
+		completion: Promise<unknown>,
+		liveVisualGuid: number | null = null,
+	): void {
 		const observed = awaitWithAbort(completion, this.#lifetime.signal)
 			.then(() => undefined)
 			.catch((error: unknown) => {
-				if (!this.#destroyed || !isAbortError(error)) this.#reportError(error);
+				if (this.#destroyed && isAbortError(error)) return;
+				if (
+					liveVisualGuid !== null &&
+					this.#playerGuid !== null &&
+					liveVisualGuid !== this.#playerGuid &&
+					this.#session.state().lifecycle?.kind === "in-world" &&
+					error instanceof VisualTemplateStagingError
+				) {
+					console.warn(formatError(error));
+					return;
+				}
+				this.#reportError(error);
 			});
 		this.#pendingWork.add(observed);
 		void observed.then(() => this.#pendingWork.delete(observed));

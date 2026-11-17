@@ -94,6 +94,7 @@ export type ClientPanelShortcut =
 export const CLIENT_SHORTCUT_ACTIONS = [
 	...CLIENT_PANEL_SHORTCUT_ACTIONS,
 	"toggleNearby",
+	"toggleConsole",
 	"selectSelf",
 	"nextSmartCombat",
 	"previousSmartCombat",

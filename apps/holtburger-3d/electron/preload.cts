@@ -42,6 +42,8 @@ if (process.argv.includes("--holtburger-wayland-pointer-restore")) {
 
 contextBridge.exposeInMainWorld("holtburgerAppDiagnostics", {
 	save: (failure: unknown) => invoke("diagnostics:save-failure", failure),
+	readRuntimeLog: (since: number) =>
+		invoke("diagnostics:read-runtime-log", since),
 });
 
 contextBridge.exposeInMainWorld("holtburgerLauncher", {

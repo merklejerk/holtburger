@@ -78,6 +78,7 @@ const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
 	toggleJournal: "Toggle journal",
 	toggleSettings: "Toggle settings",
 	toggleNearby: "Toggle entity list",
+	toggleConsole: "Toggle console",
 
 	selectSelf: "Select self",
 	nextSmartCombat: "Next smart combat target",
@@ -133,6 +134,7 @@ function clientRow(action: ClientShortcut): BindingDefinition {
 		action === "chatDeletePreviousWord";
 	const group: ClientBindingGroup =
 		action === "toggleNearby" ||
+		action === "toggleConsole" ||
 		CLIENT_PANEL_SHORTCUT_ACTIONS.some((panelAction) => panelAction === action)
 			? "System panels"
 			: action === "toggleAutoRun" ||

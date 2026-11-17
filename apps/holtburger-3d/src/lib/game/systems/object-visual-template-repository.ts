@@ -1,3 +1,4 @@
+import { GeometryCreationError } from "../geometry/geometry-manager";
 import type { DynamicPresentationSource } from "./dynamic-presentation-source";
 import {
 	compileDynamicAppearance,
@@ -323,6 +324,9 @@ export interface ObjectVisualTemplateGeometry {
 /** One immutable template key uses one atlas revision because changed content produces a new key. */
 const OBJECT_VISUAL_TEMPLATE_ATLAS_REVISION = 1;
 
+/** Geometry or atlas staging failed and releasing the staged resources succeeded. */
+export class VisualTemplateStagingError extends Error {}
+
 /** Shares immutable preparation and owns complete geometry-plus-atlas template residency. */
 export class ObjectVisualTemplateRepository<
 	TOwnerId extends string,
@@ -521,9 +525,17 @@ export class ObjectVisualTemplateRepository<
 			}
 
 			geometryRetained = true;
-			this.#geometry.replaceOwner(resourceOwner, [
-				{ key: template.layout.key, geometry: template.layout.geometry },
-			]);
+			try {
+				this.#geometry.replaceOwner(resourceOwner, [
+					{ key: template.layout.key, geometry: template.layout.geometry },
+				]);
+			} catch (cause) {
+				if (!(cause instanceof GeometryCreationError)) throw cause;
+				throw new VisualTemplateStagingError(
+					`Visual template ${entry.key} geometry preparation failed.`,
+					{ cause },
+				);
+			}
 			atlasClaim = this.#atlas.prepareOwnerRequirements(
 				resourceOwner,
 				OBJECT_VISUAL_TEMPLATE_ATLAS_REVISION,
@@ -535,7 +547,11 @@ export class ObjectVisualTemplateRepository<
 					throw new Error(
 						`Visual template ${entry.key} atlas claim was withdrawn.`,
 					);
-				throw new Error(
+				const Failure =
+					atlasCompletion.cause instanceof AggregateError
+						? Error
+						: VisualTemplateStagingError;
+				throw new Failure(
 					`Visual template ${entry.key} atlas preparation failed.`,
 					{ cause: atlasCompletion.cause },
 				);
@@ -644,10 +660,23 @@ export class ObjectVisualTemplateRepository<
 			TemplateEntry<TOwnerId, TClaim>
 		>,
 	): Promise<ReadonlyMap<ObjectVisualTemplateKey, ObjectVisualTemplate>> {
-		const templates = await Promise.all(
+		const results = await Promise.allSettled(
 			[...entries.values()].map((entry) => this.#entryCompletion(entry)),
 		);
-		return new Map(templates.map((template) => [template.key, template]));
+		const templates = new Map<ObjectVisualTemplateKey, ObjectVisualTemplate>();
+		const failures: unknown[] = [];
+		for (const result of results) {
+			if (result.status === "fulfilled")
+				templates.set(result.value.key, result.value);
+			else failures.push(result.reason);
+		}
+		if (failures.length === 1) throw failures[0];
+		if (failures.length > 1)
+			throw new AggregateError(
+				failures,
+				"Multiple visual templates failed to prepare.",
+			);
+		return templates;
 	}
 
 	#entryCompletion(

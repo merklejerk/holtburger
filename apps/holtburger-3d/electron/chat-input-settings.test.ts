@@ -30,3 +30,26 @@ it("adds word deletion to older profiles while preserving custom and unbound act
 		}).client.chatDeletePreviousWord,
 	).toEqual([]);
 });
+
+it("adds the console key only when an older profile leaves it free", () => {
+	const defaults = createClientInputDefaults("windows");
+	const { toggleConsole, ...olderActions } = defaults.client;
+	const oldProfile = { ...defaults, client: olderActions };
+	expect(
+		clientInputSettingsSchema.parse(oldProfile).client.toggleConsole,
+	).toEqual(toggleConsole);
+
+	const occupied = {
+		...oldProfile,
+		character: { ...oldProfile.character, forward: [{ code: "F9" }] },
+	};
+	const restored = clientInputSettingsSchema.parse(occupied);
+	expect(restored.client.toggleConsole).toEqual([]);
+	expect(restored.character.forward).toEqual(occupied.character.forward);
+	expect(
+		clientInputSettingsSchema.parse({
+			...oldProfile,
+			client: { ...olderActions, toggleConsole: [] },
+		}).client.toggleConsole,
+	).toEqual([]);
+});

@@ -1,11 +1,12 @@
 /** Copy completed user selections without giving document mutations clipboard ownership. */
-export function copyChatSelection(
+export function copyTextSelection(
 	element: HTMLElement,
 	onError: (message: string) => void,
-): { destroy: () => void } {
+	options?: { readonly selectAllWithin?: boolean },
+): { destroy: () => void; isSelecting: () => boolean } {
 	const document = element.ownerDocument;
 	const window = document.defaultView;
-	if (window === null) throw new Error("Chat selection requires a window.");
+	if (window === null) throw new Error("Text selection requires a window.");
 	const snapshot = () => {
 		const selection = document.getSelection();
 		if (selection === null) return null;
@@ -15,6 +16,17 @@ export function copyChatSelection(
 			focus: selection.focusNode,
 			focusOffset: selection.focusOffset,
 		};
+	};
+	/** Keep live text stable while the user is carving out or reading a selection. */
+	const isSelecting = () => {
+		if (pointer !== null || selectingByKeyboard) return true;
+		const selection = document.getSelection();
+		return (
+			selection !== null &&
+			!selection.isCollapsed &&
+			element.contains(selection.anchorNode) &&
+			element.contains(selection.focusNode)
+		);
 	};
 	let before: ReturnType<typeof snapshot> = null;
 	let pointer: number | null = null;
@@ -41,7 +53,7 @@ export function copyChatSelection(
 			await window.navigator.clipboard.writeText(text);
 		} catch (error: unknown) {
 			onError(
-				`Chat selection copy failed: ${error instanceof Error ? error.message : String(error)}`,
+				`Selection copy failed: ${error instanceof Error ? error.message : String(error)}`,
 			);
 		}
 	};
@@ -61,7 +73,12 @@ export function copyChatSelection(
 	};
 	const keydown = (event: KeyboardEvent) => {
 		if (!element.contains(document.activeElement)) return;
+		const selectAll =
+			(event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a";
+		const scopedSelectAll = selectAll && options?.selectAllWithin;
+		if (scopedSelectAll) event.preventDefault();
 		const selects =
+			selectAll ||
 			(event.shiftKey &&
 				[
 					"ArrowLeft",
@@ -72,11 +89,11 @@ export function copyChatSelection(
 					"End",
 					"PageUp",
 					"PageDown",
-				].includes(event.key)) ||
-			((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a");
+				].includes(event.key));
 		if (!selects || selectingByKeyboard) return;
 		selectingByKeyboard = true;
 		before = snapshot();
+		if (scopedSelectAll) document.getSelection()?.selectAllChildren(element);
 	};
 	const keyup = () => {
 		if (!selectingByKeyboard) return;
@@ -90,6 +107,7 @@ export function copyChatSelection(
 	window.addEventListener("pointercancel", cancel);
 	window.addEventListener("blur", cancel);
 	return {
+		isSelecting,
 		destroy: () => {
 			element.removeEventListener("pointerdown", pointerdown);
 			document.removeEventListener("keydown", keydown, true);

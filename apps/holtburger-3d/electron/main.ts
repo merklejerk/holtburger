@@ -3,6 +3,7 @@ import {
 	MAX_RENDERER_EVIDENCE_BYTES,
 	type AppFailureKind,
 } from "./app-failure-report.js";
+import { RuntimeLog } from "./runtime-log.js";
 import { ApplicationWindow } from "./application-window.js";
 import { ClientRetirement } from "./client-retirement.js";
 import {
@@ -157,6 +158,7 @@ function saveAppFailure(kind: AppFailureKind, message: string): Promise<void> {
 		console.error("Could not save application failure report.", error),
 	);
 }
+const clientRuntimeLog = new RuntimeLog();
 let quitting = false;
 /** Client window close joins renderer preparation before native store/process shutdown. */
 let documentRetirement: ClientRetirement | undefined;
@@ -776,8 +778,14 @@ function createWindow(entry: {
 	});
 	window.webContents.on(
 		"console-message",
-		({ level, message, lineNumber, sourceId }) => {
+		({ level, message, lineNumber, sourceId, frame }) => {
 			if (level === "warning" || level === "error") {
+				if (frame === window.webContents.mainFrame) {
+					if (documents.role === "client")
+						clientRuntimeLog.record(level, message);
+					if (documents.role === "client" || documents.role === "explorer")
+						failureReports.recordWebGLWarning(message);
+				}
 				const severity = level === "error" ? "error" : "warn";
 				console[severity](
 					`[holtburger-renderer:${severity}] ${message} (${sourceId}:${lineNumber})`,
@@ -789,6 +797,10 @@ function createWindow(entry: {
 			}
 		},
 	);
+	window.webContents.on("did-navigate", () => {
+		failureReports.beginDocument();
+		clientRuntimeLog.clear();
+	});
 	window.webContents.on("before-input-event", (event, input) => {
 		if (
 			input.key === "F11" &&
@@ -972,6 +984,9 @@ void (async () => {
 	});
 	installIpcBridge(window, entry.mode);
 	installContentIpc();
+	handle("diagnostics:read-runtime-log", "client", (_event, since: unknown) =>
+		clientRuntimeLog.read(z.number().int().min(-1).parse(since)),
+	);
 	handle("diagnostics:save-failure", undefined, (_event, input: unknown) => {
 		if (documents.role !== "client" && documents.role !== "explorer")
 			throw new Error("Game failure reports require a game document");
@@ -997,7 +1012,6 @@ void (async () => {
 	});
 	const navigate = async (role: DocumentRole, path: string) => {
 		appUpdates?.clearPregame();
-		failureReports.beginDocument();
 		documents.navigate(role, path);
 		await loadEntry(window, path, entry.mode);
 	};

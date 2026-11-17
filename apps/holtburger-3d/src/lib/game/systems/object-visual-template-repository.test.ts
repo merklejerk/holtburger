@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { DynamicPresentationSource } from "./dynamic-presentation-source";
+import { GeometryCreationError } from "../geometry/geometry-manager";
 import type { GeometrySource } from "../geometry/types";
 import { AABB3, Mat4, Vec3 } from "../math/types";
 import type { AtlasRequirementCompletion } from "../textures/atlas/resident-texture-atlas";
@@ -12,6 +13,7 @@ import {
 	InlineObjectVisualTemplatePreparer,
 	ObjectVisualTemplateAssetRepository,
 	ObjectVisualTemplateRepository,
+	VisualTemplateStagingError,
 	objectVisualTemplateKey,
 	type ObjectVisualTemplateAtlas,
 	type ObjectVisualTemplateAtlasClaim,
@@ -392,6 +394,9 @@ describe("ObjectVisualTemplateRepository", () => {
 			source("atlas-failure", "appearance:atlas-failure"),
 		]);
 
+		await expect(staged.completion).rejects.toBeInstanceOf(
+			VisualTemplateStagingError,
+		);
 		await expect(staged.completion).rejects.toMatchObject({
 			message: expect.stringContaining("atlas preparation failed"),
 			cause,
@@ -399,6 +404,37 @@ describe("ObjectVisualTemplateRepository", () => {
 		expect(geometry.resources.size).toBe(0);
 		expect(atlas.activeOwnerCount).toBe(0);
 		expect(atlas.withdrawalCount).toBe(1);
+		staged.release();
+	});
+
+	it("preserves a sibling ownership failure when a geometry upload also fails", async () => {
+		const geometry = new FixtureGeometry();
+		const upload = new GeometryCreationError("upload refused");
+		const ownership = new Error("resource ownership lost");
+		vi.spyOn(geometry, "replaceOwner")
+			.mockImplementationOnce(() => {
+				throw upload;
+			})
+			.mockImplementationOnce(() => {
+				throw ownership;
+			});
+		const repository = createRepository(
+			geometry,
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const staged = repository.stageOwner([
+			source("first", "appearance:first"),
+			source("second", "appearance:second"),
+		]);
+		await expect(staged.completion).rejects.toMatchObject({
+			errors: [
+				expect.objectContaining({
+					constructor: VisualTemplateStagingError,
+					cause: upload,
+				}),
+				ownership,
+			],
+		});
 		staged.release();
 	});
 

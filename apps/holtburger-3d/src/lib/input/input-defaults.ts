@@ -1,5 +1,14 @@
-import type { InputConfiguration } from "./input-contract.js";
+import type { KeyBinding, InputConfiguration } from "./input-contract.js";
 import type { InputPlatform } from "./input-platform.js";
+
+/** Default console chord shared by first-run settings and saved-profile migration. */
+export const DEFAULT_CONSOLE_BINDING = {
+	key: "F9",
+	shift: false,
+	ctrl: false,
+	alt: false,
+	meta: false,
+} as const satisfies KeyBinding;
 
 /** Default input policy. Edit bindings here; controllers consume semantic actions. */
 export function createInputDefaults(platform: InputPlatform) {
@@ -77,6 +86,8 @@ export function createInputDefaults(platform: InputPlatform) {
 			toggleSettings: [
 				{ key: "F10", shift: false, ctrl: false, alt: false, meta: false },
 			],
+			/** Toggle the runtime diagnostics overlay. */
+			toggleConsole: [DEFAULT_CONSOLE_BINDING],
 			/** Toggle the independent nearby entity list and alerts window. */
 			toggleNearby: [
 				{ key: "f", shift: false, ctrl: true, alt: false, meta: false },

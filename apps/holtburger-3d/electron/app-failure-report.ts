@@ -5,7 +5,17 @@ import { replaceLocalFile } from "./replace-local-file.js";
 /** Bound incoming renderer evidence and native error text independently. */
 export const MAX_RENDERER_EVIDENCE_BYTES = 64 * 1024;
 const MAX_MESSAGE_LENGTH = 4096;
+const MAX_WEBGL_WARNINGS = 16;
+const MAX_WEBGL_WARNING_LENGTH = 1024;
 const rendererEvidenceSchema = z.looseObject({ reason: z.string() });
+
+/** One run of consecutive identical Chromium WebGL warnings. */
+interface WebGLWarning {
+	readonly message: string;
+	readonly firstSeenAt: string;
+	readonly lastSeenAt: string;
+	readonly count: number;
+}
 
 /** App-wide report categories used by the launcher clipboard action. */
 export type AppFailureKind =
@@ -15,7 +25,11 @@ export type AppFailureKind =
 export class AppFailureReportStore {
 	readonly #path: string;
 	#pending = Promise.resolve();
-	#rendererEvidence: z.infer<typeof rendererEvidenceSchema> | null = null;
+	#rendererEvidence: {
+		readonly report: z.infer<typeof rendererEvidenceSchema>;
+		readonly webglWarnings: readonly WebGLWarning[];
+	} | null = null;
+	readonly #webglWarnings: WebGLWarning[] = [];
 
 	constructor(path: string) {
 		this.#path = path;
@@ -23,12 +37,41 @@ export class AppFailureReportStore {
 
 	beginDocument(): void {
 		this.#rendererEvidence = null;
+		this.#webglWarnings.length = 0;
+	}
+
+	/** Keep recent browser diagnostics from the main frame of the current game document. */
+	recordWebGLWarning(message: string): void {
+		if (!message.startsWith("WebGL: ")) return;
+		const boundedMessage = message.slice(0, MAX_WEBGL_WARNING_LENGTH);
+		const timestamp = new Date().toISOString();
+		const previous = this.#webglWarnings.at(-1);
+		if (previous?.message === boundedMessage) {
+			this.#webglWarnings[this.#webglWarnings.length - 1] = {
+				...previous,
+				lastSeenAt: timestamp,
+				count: previous.count + 1,
+			};
+			return;
+		}
+		this.#webglWarnings.push({
+			message: boundedMessage,
+			firstSeenAt: timestamp,
+			lastSeenAt: timestamp,
+			count: 1,
+		});
+		if (this.#webglWarnings.length > MAX_WEBGL_WARNINGS)
+			this.#webglWarnings.shift();
 	}
 
 	/** Retain validated evidence and expose its reason to the application report. */
 	retainRendererEvidence(report: string): string {
 		const evidence = rendererEvidenceSchema.parse(JSON.parse(report));
-		this.#rendererEvidence = evidence;
+		// A later process failure can reuse this evidence after teardown emits more warnings.
+		this.#rendererEvidence = {
+			report: evidence,
+			webglWarnings: this.#webglWarnings.slice(),
+		};
 		return evidence.reason;
 	}
 
@@ -49,7 +92,9 @@ export class AppFailureReportStore {
 				...context,
 				platform: process.platform,
 				architecture: process.arch,
-				renderer: this.#rendererEvidence,
+				renderer: this.#rendererEvidence?.report ?? null,
+				webglWarnings:
+					this.#rendererEvidence?.webglWarnings ?? this.#webglWarnings,
 			},
 			null,
 			2,

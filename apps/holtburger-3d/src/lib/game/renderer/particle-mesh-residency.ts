@@ -58,8 +58,18 @@ const SOLID_COLOR_MATERIAL_KIND = 0;
 /** Opaque white, so the placeholder binding cannot tint anything if it is ever sampled. */
 const PLACEHOLDER_TEXEL = new Uint8Array([255, 255, 255, 255]);
 
+/** GPU resource operations needed to install and draw particle meshes. */
+type ParticleMeshResources = Pick<
+	WebGL2ResourceManager,
+	| "createGeometry"
+	| "createTexture2D"
+	| "getGeometry"
+	| "getTexture2D"
+	| "releaseResource"
+>;
+
 export class ParticleMeshResidency {
-	readonly #resources: WebGL2ResourceManager;
+	readonly #resources: ParticleMeshResources;
 	/** Resource keys, resolved to live bindings only in {@link resolve}. */
 	readonly #meshes = new Map<DatAssetId, ResidentParticleMesh>();
 	readonly #geometries: GeometryResourceKey[] = [];
@@ -76,7 +86,7 @@ export class ParticleMeshResidency {
 	 */
 	#placeholderTexture: Texture2DResourceKey | null = null;
 
-	constructor(resources: WebGL2ResourceManager) {
+	constructor(resources: ParticleMeshResources) {
 		this.#resources = resources;
 	}
 
@@ -115,7 +125,7 @@ export class ParticleMeshResidency {
 		}
 	}
 
-	/** Resolve a resident mesh for the draw pass; `null` never triggers an upload. */
+	/** Resolve installed bindings without changing the draw pass's WebGL state. */
 	resolve(hwGfxObjId: DatAssetId): ParticleDrawGeometry | null {
 		const mesh = this.#meshes.get(hwGfxObjId.toLowerCase() as DatAssetId);
 		if (mesh === undefined) return null;
@@ -123,8 +133,12 @@ export class ParticleMeshResidency {
 		// samplers complete and reads its colour from the uniform instead.
 		const base =
 			mesh.base === null
-				? this.#requirePlaceholderTexture()
+				? this.#placeholderTexture
 				: this.#textures.get(mesh.base);
+		if (base === null)
+			throw new Error(
+				"Resident solid-color particle mesh has no placeholder texture.",
+			);
 		// A mesh whose texture upload failed is not drawable; reporting null keeps it counted as an
 		// unresolved range rather than drawn untextured.
 		if (base === undefined) return null;
@@ -173,17 +187,6 @@ export class ParticleMeshResidency {
 		this.#placeholderTexture = null;
 	}
 
-	#requirePlaceholderTexture(): Texture2DResourceKey {
-		this.#placeholderTexture ??= this.#resources.createTexture2D({
-			data: PLACEHOLDER_TEXEL,
-			format: TexturePixelFormat.RGBA8,
-			height: 1,
-			mipLevels: 1,
-			width: 1,
-		});
-		return this.#placeholderTexture;
-	}
-
 	#resolveMesh(
 		hwGfxObjId: DatAssetId,
 		decoded: DecodedParticleMesh,
@@ -192,6 +195,25 @@ export class ParticleMeshResidency {
 		const part = decoded.presentation.presentation.parts[0];
 		if (part === undefined) return null;
 		const label = `Particle mesh ${hwGfxObjId}`;
+		const ranges = resolveObjectMaterialRanges(part, label, facts);
+		const range = ranges[0];
+		if (range === undefined) return null;
+		// Every particle in a draw range shares one mesh, so a mesh spanning several material
+		// ranges would have to split the range mid-draw. Counted rather than silently truncated.
+		if (ranges.length > 1) this.#multiRangeMeshCount += 1;
+		const base = range.material.textures.base;
+		const source = range.material.source;
+		if (source.kind === "solid-color") {
+			// The uploader unbinds the active texture unit. Install the placeholder here so
+			// resolving the first solid-color mesh cannot unbind the draw's particle records.
+			this.#placeholderTexture ??= this.#resources.createTexture2D({
+				data: PLACEHOLDER_TEXEL,
+				format: TexturePixelFormat.RGBA8,
+				height: 1,
+				mipLevels: 1,
+				width: 1,
+			});
+		}
 		const geometry = this.#resources.createGeometry({
 			bakedLight: null,
 			indices: part.geometry.indices,
@@ -201,14 +223,6 @@ export class ParticleMeshResidency {
 			textureCoordinates: part.geometry.textureCoordinates,
 		});
 		this.#geometries.push(geometry);
-		const ranges = resolveObjectMaterialRanges(part, label, facts);
-		const range = ranges[0];
-		if (range === undefined) return null;
-		// Every particle in a draw range shares one mesh, so a mesh spanning several material
-		// ranges would have to split the range mid-draw. Counted rather than silently truncated.
-		if (ranges.length > 1) this.#multiRangeMeshCount += 1;
-		const base = range.material.textures.base;
-		const source = range.material.source;
 		// An untextured surface is authored content, not a defect: the rain emitter's mesh
 		// `0x01001646` is a solid pale blue-white. Retail renders these by writing the colour
 		// into a 1x1 texture and taking the ordinary textured path (`D3DPolyRender`); we carry

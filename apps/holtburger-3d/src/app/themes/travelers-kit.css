@@ -80,6 +80,22 @@
 				0 5px 12px #0d080666;
 		}
 
+		/* A dark leather writing surface, finished with the kit's stitched lower edge. */
+		.ui-theme .ui-runtime-console {
+			background:
+				var(--ui-travelers-stitches),
+				linear-gradient(180deg, #160e0ced, #25160ef2),
+				var(--ui-travelers-leather) left top / 96px 32px repeat,
+				#39211e;
+			border-bottom: 2px solid #98775b;
+			box-shadow:
+				inset 0 -6px #352018,
+				0 6px 16px #140b08a6;
+			padding-bottom: 7px;
+			--ui-console-selection-background: #f2d6ae;
+			--ui-console-selection-text: #21160e;
+		}
+
 		.ui-theme .ui-frame {
 			/* The thread has a lit upper strand, a darker body and recessed holes.
 		   Stitches and grain repeat independently of the fixed frame corners. */

@@ -1721,13 +1721,21 @@ export class DynamicEntitySystem<
 			this.#destroyEntityTrees(entities);
 			return "superseded";
 		}
-		const failure = settled.find((result) => result.status === "rejected");
-		if (failure?.status === "rejected") {
+		const failures = settled.flatMap((result) =>
+			result.status === "rejected" ? [result.reason as unknown] : [],
+		);
+		if (failures.length > 0) {
 			for (const handle of acquiredHandles) handle.release();
 			releaseBehaviorAssets();
 			preparation.release();
 			this.#destroyEntityTrees(entities);
-			throw failure.reason;
+			// A failed staging lane must not hide a sibling failure from the caller.
+			throw failures.length === 1
+				? failures[0]
+				: new AggregateError(
+						failures,
+						"Multiple dynamic preparation stages failed.",
+					);
 		}
 		if (templateResult.status !== "fulfilled") {
 			throw new Error(

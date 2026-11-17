@@ -653,6 +653,21 @@
 	.ui-theme .ui-panel .ui-panel:not(:modal) {
 		background: var(--ui-panel-background, var(--ui-color-surface));
 	}
+	/* Recessed log surface with a single lower rail for its top-edge mount. */
+	.ui-theme .ui-runtime-console {
+		background: color-mix(
+			in srgb,
+			var(--ui-color-shadow) 78%,
+			var(--ui-color-surface)
+		);
+		color: var(--ui-color-text);
+		border-bottom: 1px solid var(--ui-color-border);
+		box-shadow:
+			inset 0 -3px 0 var(--ui-color-well),
+			0 6px 16px #0d080680;
+		padding-bottom: 3px;
+	}
+
 	.ui-theme .ui-frame {
 		/* Restrict the decorative background to the header’s top edge. */
 		background:

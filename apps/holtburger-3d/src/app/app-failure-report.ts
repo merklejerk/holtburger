@@ -1,4 +1,5 @@
 import { formatError } from "../lib/format-error";
+import type { RuntimeLogSnapshot } from "./runtime-log-contract";
 import { APP_BUILD_LABEL } from "./app-build";
 import type { WebGL2FailureReport } from "../lib/game/renderer/webgl2-failure-diagnostics";
 
@@ -9,6 +10,7 @@ let latestFailure: string | null = null;
 declare global {
 	interface Window {
 		holtburgerAppDiagnostics?: {
+			readRuntimeLog(since: number): Promise<RuntimeLogSnapshot | null>;
 			save(
 				failure:
 					| { readonly kind: "renderer"; readonly report: string }

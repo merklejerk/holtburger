@@ -16,6 +16,7 @@ import {
 	entityFacts,
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
+import { VisualTemplateStagingError } from "../lib/game/systems/object-visual-template-repository";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
@@ -2028,6 +2029,54 @@ describe("ClientGameplayPresentation", () => {
 			await presentation.destroy();
 		}
 	});
+
+	it.each(["remote", "local"] as const)(
+		"routes a rolled-back live %s visual failure according to its scope",
+		async (scope) => {
+			const playerGuid = 0x0101_0001;
+			const entityGuid = scope === "local" ? playerGuid : 0x0101_0002;
+			const transport = new FakeClientTransport(currentState(playerGuid));
+			const lifecycle = new ClientLifecycleSession(transport);
+			await lifecycle.start();
+			const runtime = new FakePresentationRuntime();
+			const onError = vi.fn();
+			const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const presentation = new ClientGameplayPresentation({
+				canvas: fakeCanvas(),
+				session: lifecycle,
+				onError,
+				resources: fakeOwner(runtime, activeRegion()),
+			});
+			try {
+				await presentation.start();
+				const previous = presentation.status();
+				const failure = new VisualTemplateStagingError("visual refused", {
+					cause: new Error("geometry upload refused"),
+				});
+				runtime.failNextUpsertRealization(failure);
+				transport.emit("client-dynamic-entity", {
+					kind: "upserted",
+					entity: view(entityGuid),
+				});
+				if (scope === "remote") {
+					await vi.waitFor(() =>
+						expect(warning).toHaveBeenCalledWith(
+							"visual refused\nCaused by: geometry upload refused",
+						),
+					);
+					expect(onError).not.toHaveBeenCalled();
+					expect(presentation.status()).toEqual(previous);
+				} else {
+					await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(failure));
+					expect(warning).not.toHaveBeenCalled();
+					expect(presentation.status().kind).toBe("error");
+				}
+			} finally {
+				warning.mockRestore();
+				await presentation.destroy();
+			}
+		},
+	);
 
 	it("holds rendering and rejects lagged advances during mirror recovery", async () => {
 		const transport = new FakeClientTransport(currentState(0x0100_0001));

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { chatCompletion } from "./client-chat-completion";
 	import { chatWordDeletionStart } from "./client-chat-edit";
-	import { copyChatSelection } from "./client-chat-selection";
+	import { copyTextSelection } from "./client-text-selection";
 	import { ChatSubmissionError } from "./client-chat-composer.svelte";
 	import ClientWaypointText from "./ClientWaypointText.svelte";
 	import ClientChatFormattedText from "./ClientChatFormattedText.svelte";
@@ -596,7 +596,7 @@
 					if (heldHistory === null) explicitHistory = true;
 				}}
 				use:followBuffer
-				use:copyChatSelection={onNotice}
+				use:copyTextSelection={onNotice}
 				use:keyboard.scope={{
 					nativeControls: true,
 					pointerActivation: true,

@@ -91,7 +91,11 @@ describe("GeometryManager", () => {
 					key: createTerrainGeometryKey("0x3333ffff"),
 				},
 			]),
-		).toThrow("geometry creation failed");
+		).toThrow(
+			expect.objectContaining({
+				cause: expect.objectContaining({ message: "geometry creation failed" }),
+			}),
+		);
 		expect(geometry.getResource(previousKey)).toBe("geometry-resource:0");
 		expect(resources.released).toEqual(["geometry-resource:1"]);
 	});

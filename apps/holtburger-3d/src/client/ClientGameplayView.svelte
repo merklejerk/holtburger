@@ -105,6 +105,7 @@
 	import ClientEnchantmentsPanel from "./ClientEnchantmentsPanel.svelte";
 	import { presentEnchantmentTray } from "./client-enchantments-view";
 	import ClientJumpPowerBar from "./ClientJumpPowerBar.svelte";
+	import ClientRuntimeConsole from "./ClientRuntimeConsole.svelte";
 	import ClientChat from "./ClientChat.svelte";
 	import type { ClientChatComposer } from "./client-chat-composer.svelte";
 	import type { ChatComposeResolution } from "./client-chat-compose";
@@ -870,6 +871,7 @@
 	function toggleSystemPanel(panel: ClientSystemPanel): void {
 		activePanel = activePanel === panel ? null : panel;
 	}
+	let consoleOpen = $state(false);
 	/** UI panel commands remain available while world controls are suspended. */
 	function handleSystemPanelKeydown(event: KeyboardEvent): boolean {
 		if (event.defaultPrevented || event.isComposing || hudMode !== "runtime")
@@ -889,6 +891,15 @@
 	}
 	onMount(() =>
 		keyboard.bindShortcuts((event) => {
+			if (
+				hudMode === "runtime" &&
+				!event.isComposing &&
+				clientInput.shortcut("toggleConsole", event)
+			) {
+				event.preventDefault();
+				if (!event.repeat) consoleOpen = !consoleOpen;
+				return;
+			}
 			if (handleSystemPanelKeydown(event)) return;
 			if (event.key === "Escape" && hudMode === "runtime") {
 				// The router has already offered Escape to editors and cancellation contexts.
@@ -1256,6 +1267,12 @@
 	}}
 	aria-label="Holtburger client world"
 >
+	{#if consoleOpen && hudMode === "runtime"}
+		<ClientRuntimeConsole
+			onClose={() => (consoleOpen = false)}
+			onToggle={() => (consoleOpen = !consoleOpen)}
+		/>
+	{/if}
 	{#key characterGuid}
 		<ClientVitalWarningOverlay
 			{vitals}

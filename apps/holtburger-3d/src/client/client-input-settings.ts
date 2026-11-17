@@ -1,7 +1,11 @@
 import type { InputPlatform } from "../lib/input/input-platform.js";
 import equal from "fast-deep-equal";
 import { z } from "zod";
-import { createInputDefaults } from "../lib/input/input-defaults.js";
+import { matchesKey } from "../lib/input/input-context.js";
+import {
+	DEFAULT_CONSOLE_BINDING,
+	createInputDefaults,
+} from "../lib/input/input-defaults.js";
 import {
 	ACTION_BAR_COMMANDS,
 	CHARACTER_ACTIONS,
@@ -148,6 +152,30 @@ export function createClientInputDefaults(
 	};
 }
 
+/** A saved F9 binding can use either the key name or the physical code. */
+function usesDefaultConsoleKey(value: unknown, visited: Set<object>): boolean {
+	if (typeof value !== "object" || value === null) return false;
+	if (Array.isArray(value)) {
+		const bindings = bindingListSchema.safeParse(value);
+		return (
+			bindings.success &&
+			matchesKey(
+				{
+					key: DEFAULT_CONSOLE_BINDING.key,
+					code: DEFAULT_CONSOLE_BINDING.key,
+					shiftKey: false,
+				},
+				bindings.data,
+			)
+		);
+	}
+	if (visited.has(value)) return false;
+	visited.add(value);
+	return Object.values(value).some((child) =>
+		usesDefaultConsoleKey(child, visited),
+	);
+}
+
 /** User-scoped input; retiring the old mouse block must not discard saved keyboard bindings. */
 export const clientInputSettingsSchema = z.preprocess(
 	(value) => {
@@ -155,6 +183,20 @@ export const clientInputSettingsSchema = z.preprocess(
 			return value;
 		const current = { ...value };
 		Reflect.deleteProperty(current, "mouse");
+		const client: unknown = Reflect.get(current, "client");
+		if (
+			typeof client === "object" &&
+			client !== null &&
+			!Array.isArray(client) &&
+			!Object.hasOwn(client, "toggleConsole")
+		) {
+			Reflect.set(current, "client", {
+				...client,
+				toggleConsole: usesDefaultConsoleKey(current, new Set())
+					? []
+					: [DEFAULT_CONSOLE_BINDING],
+			});
+		}
 		return current;
 	},
 	clientKeyboardSettingsSchema

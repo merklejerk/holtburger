@@ -140,6 +140,7 @@ import type { EntitySelectionGeometry } from "../selection/entity-selection-inte
 import { DynamicEntityPlacementSystem } from "../systems/dynamic-entity-placement-system";
 import {
 	ObjectVisualTemplateRepository,
+	VisualTemplateStagingError,
 	type ObjectVisualTemplateRepositoryDiagnostics,
 } from "../systems/object-visual-template-repository";
 import { EnvCellSystem } from "../systems/env-cell-system";
@@ -866,11 +867,13 @@ function dynamicEntityPresentationFailure(
 	entity: DynamicEntityView,
 	cause: unknown,
 ): Error {
+	const subject = `Dynamic entity ${formatDynamicGuid(entity.identity.guid)} generation ${entity.generation}`;
+	if (cause instanceof VisualTemplateStagingError)
+		return new VisualTemplateStagingError(`${subject} presentation refused.`, {
+			cause,
+		});
 	const reason = cause instanceof Error ? cause.message : String(cause);
-	return new Error(
-		`Dynamic entity ${formatDynamicGuid(entity.identity.guid)} generation ${entity.generation} presentation refused: ${reason}`,
-		{ cause },
-	);
+	return new Error(`${subject} presentation refused: ${reason}`, { cause });
 }
 
 /** Bridges source commits, scene topology, runtime residency, and frontend frame state. */

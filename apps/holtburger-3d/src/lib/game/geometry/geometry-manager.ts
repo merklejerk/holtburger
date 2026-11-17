@@ -6,6 +6,9 @@ import type {
 } from "../renderer/resource-manager";
 import type { GeometryKey, GeometrySource } from "./types";
 
+/** The renderer refused to create a geometry resource. */
+export class GeometryCreationError extends Error {}
+
 /** Owns logical geometry identity, device bindings, and shared owner retention. */
 export class GeometryManager<TOwnerId extends string = string> {
 	readonly #renderResources: RendererResourceManager;
@@ -58,10 +61,13 @@ export class GeometryManager<TOwnerId extends string = string> {
 				this.#renderResources.createGeometry(source.geometry, source.key),
 			);
 		} catch (cause) {
-			const detail = cause instanceof Error ? cause.message : String(cause);
-			throw new Error(`Geometry ${source.key} preparation failed: ${detail}`, {
-				cause,
-			});
+			if (cause instanceof AggregateError) throw cause;
+			throw new GeometryCreationError(
+				`Geometry ${source.key} preparation failed.`,
+				{
+					cause,
+				},
+			);
 		}
 		this.#geometryBytes.set(source.key, geometryByteLength(source.geometry));
 	}

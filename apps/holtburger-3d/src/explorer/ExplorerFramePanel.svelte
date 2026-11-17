@@ -176,20 +176,28 @@
 		</fieldset>
 
 		<details class="explorer-frame-details ui-disclosure">
-			<summary>Nameplates</summary>
+			<summary>Overlays &amp; Nameplates</summary>
 			<div class="explorer-param-panel">
 				<div class="explorer-param-row">
-					<span class="explorer-param-key">Eligible / budget rejected</span>
+					<span class="explorer-param-key">Labels eligible / rejected</span>
 					<code
 						>{diagnostics?.nameplates.eligibleCandidateCount ?? 0} / {diagnostics
 							?.nameplates.budgetRejectedCandidateCount ?? 0}</code
 					>
 				</div>
 				<div class="explorer-param-row">
+					<span class="explorer-param-key">Health bars eligible / rejected</span
+					>
+					<code
+						>{diagnostics?.healthBars.eligibleCandidateCount ?? 0} / {diagnostics
+							?.healthBars.budgetRejectedCandidateCount ?? 0}</code
+					>
+				</div>
+				<div class="explorer-param-row">
 					<span class="explorer-param-key">Submitted instances / draws</span>
 					<code
-						>{diagnostics?.nameplates.submittedInstanceCount ?? 0} / {diagnostics
-							?.nameplates.submittedDrawCount ?? 0}</code
+						>{diagnostics?.entityOverlays.submittedInstanceCount ?? 0} / {diagnostics
+							?.entityOverlays.submittedDrawCount ?? 0}</code
 					>
 				</div>
 				<div class="explorer-param-row">

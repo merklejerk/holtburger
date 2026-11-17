@@ -99,6 +99,8 @@ export function createExplorerFrameDiagnosticReport(
 			dynamicResources: input.frame.dynamicResources,
 			entityShadows: input.frame.entityShadows,
 			nameplates: input.frame.nameplates,
+			healthBars: input.frame.healthBars,
+			entityOverlays: input.frame.entityOverlays,
 			selectionMetrics: input.frame.selectionMetrics,
 			compiledObjectDraws: input.frame.compiledObjectDraws,
 		},

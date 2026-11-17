@@ -324,8 +324,8 @@ export const CLIENT_TUNING = {
 		/** Names change rarely and do not need to follow pointer sampling cadence. */
 		displayIntervalMs: 250,
 	},
-	nameplateHealth: {
-		/** Combat interest and nameplate health stay bounded within practical engagement range. */
+	combatHealth: {
+		/** Combat interest stays bounded within practical engagement range. */
 		maxDistanceMeters: 35,
 		/** Hold combat interest briefly after attacks or target switches before expiring. */
 		combatInterestMs: 12_000,
@@ -335,6 +335,18 @@ export const CLIENT_TUNING = {
 		refreshIntervalMs: CLIENT_APPRAISAL_TUNING.refreshIntervalMs,
 		/** Request initial health once when entering combat interest without fresh health. */
 		bootstrapOnCombatEnter: true,
+	},
+	entityOverlays: {
+		/** Total horizontal arc around player body facing for Smart proximity labels. */
+		proximityArcDegrees: 90,
+		/** Inclusive 3D root-to-root radius in meters for Smart proximity labels. */
+		proximityRadiusMeters: 3,
+		/** Bounded 10 Hz passive preview cadence during ready in-world Smart gameplay. */
+		immediatePreviewIntervalMs: 100,
+		/** Independent overhead creature health-bar distance bound in meters. */
+		healthMaxDistanceMeters: 35,
+		/** Shared recency window against `mirror.hostTimeSeconds()` for overhead bars. */
+		healthRecentWindowMs: CLIENT_APPRAISAL_TUNING.recentWindowMs,
 	},
 	/** Client-owned starting display policy. */
 	frameSettings: CLIENT_FRAME_SETTINGS,

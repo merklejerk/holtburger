@@ -4,10 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientEntityMirror } from "./client-entity-mirror";
 import { playerEntitySnapshot } from "./client-entity-mirror.test-support";
 import { ClientEntitySelection } from "./client-entity-selection";
-import {
-	ClientCycleSelectionController,
-	type CycleCandidate,
-} from "./client-cycle-selection-controller";
+import { ClientCycleSelectionController } from "./client-cycle-selection-controller";
+import type { CycleCandidate } from "./client-target-acquisition";
 import { ClientSelectionInput } from "./client-selection-input";
 import { AppInput } from "../lib/input/app-input";
 import { createInputDefaults } from "../lib/input/input-defaults";

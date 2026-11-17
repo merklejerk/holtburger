@@ -4,6 +4,7 @@ import { DEFAULT_AMBIENT_OCCLUSION_PARAMETERS } from "./game/renderer/ambient-oc
 import { DEFAULT_COLOR_GRADE_PARAMETERS } from "./game/renderer/color-grade-policy.js";
 import { DEFAULT_ENTITY_SHADOW_SETTINGS } from "./game/renderer/entity-shadow-policy.js";
 import type { NameplateSettings } from "./game/renderer/nameplate-policy";
+import type { HealthBarSettings } from "./game/renderer/entity-overlay-policy";
 import type { FrameSettings } from "./game/renderer/renderer";
 import { LandblockLayerKind } from "./game/runtime/scene-interest.js";
 
@@ -30,15 +31,17 @@ const SHARED_NAMEPLATE_SETTINGS = {
 		},
 		outlineColor: normalizedRgbaColor(NAMEPLATE_TUNING.appearance.outlineColor),
 	},
-	healthBar: {
-		...NAMEPLATE_TUNING.healthBar,
-		fillColor: normalizedRgbaColor(NAMEPLATE_TUNING.healthBar.fillColor),
-		backgroundColor: normalizedRgbaColor(
-			NAMEPLATE_TUNING.healthBar.backgroundColor,
-		),
-		borderColor: normalizedRgbaColor(NAMEPLATE_TUNING.healthBar.borderColor),
-	},
 } satisfies NameplateSettings;
+
+const HEALTH_BAR_TUNING = SHARED_FRONTEND_TUNING.rendering.healthBars;
+
+/** Resolve tuning-only hex colors once into the normalized health bar contract. */
+const SHARED_HEALTH_BAR_SETTINGS = {
+	...HEALTH_BAR_TUNING,
+	fillColor: normalizedRgbaColor(HEALTH_BAR_TUNING.fillColor),
+	backgroundColor: normalizedRgbaColor(HEALTH_BAR_TUNING.backgroundColor),
+	borderColor: normalizedRgbaColor(HEALTH_BAR_TUNING.borderColor),
+} satisfies HealthBarSettings;
 
 /**
  * Shared starting display policy for a mode composition.
@@ -57,7 +60,9 @@ export const SHARED_FRAME_SETTINGS = {
 	showRetailHiddenGeometry: false,
 	sealedInteriorAmbientLevel:
 		SHARED_FRONTEND_TUNING.rendering.frameDefaults.sealedInteriorAmbientLevel,
+	entityOverlays: SHARED_FRONTEND_TUNING.rendering.entityOverlays,
 	nameplates: SHARED_NAMEPLATE_SETTINGS,
+	healthBars: SHARED_HEALTH_BAR_SETTINGS,
 	ambientOcclusion: {
 		enabled: SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.enabledByDefault,
 		parameters: DEFAULT_AMBIENT_OCCLUSION_PARAMETERS,

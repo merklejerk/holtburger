@@ -4,6 +4,7 @@ import {
 	barberPreviewSchema,
 } from "./client-barber-contract";
 import type { DynamicPresentationOverride } from "../lib/game/runtime/dynamic-presentation-override";
+import type { EntityOverlayFrame } from "../lib/game/renderer/entity-overlay-policy";
 import { rotateRenderVector } from "../lib/game/math/camera-orientation";
 import { RenderSceneInterestController } from "../lib/game/runtime/render-scene-interest-controller";
 import {
@@ -1213,6 +1214,7 @@ describe("ClientGameplayPresentation", () => {
 		// A snapshot accepted before presentation creation must supply the engagement without app seeding.
 		const transport = new FakeClientTransport({
 			...currentState(0x0101_0001),
+			combatMode: "melee",
 			combat: engagement,
 		});
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -1244,6 +1246,7 @@ describe("ClientGameplayPresentation", () => {
 					{ kind: "missile", height, accuracy: 0.5 },
 				];
 				for (const profile of profiles) {
+					transport.emit("client-combat-mode-updated", { mode: profile.kind });
 					transport.emit("client-combat-status-updated", {
 						...engagement,
 						desired: { target: 7, profile },
@@ -1266,6 +1269,7 @@ describe("ClientGameplayPresentation", () => {
 					});
 				}
 			}
+			transport.emit("client-combat-mode-updated", { mode: "melee" });
 			transport.emit("client-combat-status-updated", engagement);
 			const initial = presentation.readCombatTargetFrame();
 			expect(initial?.combatType).toBe("melee");
@@ -1353,6 +1357,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-spell-cast-target-updated", { target: 7 });
 			expect(presentation.readCombatTargetFrame()).not.toBeNull();
 			// A non-self spell recipient takes priority over any retained auto-attack intent.
+			transport.emit("client-combat-mode-updated", { mode: "missile" });
 			transport.emit("client-combat-status-updated", {
 				desired: {
 					target: 9,
@@ -2065,11 +2070,16 @@ describe("ClientGameplayPresentation", () => {
 		const requestFacts = vi.spyOn(lifecycle.appraisals, "requestFacts");
 		await presentation.start();
 		try {
+			let nowMs = performance.now();
+			const baseHostSeconds =
+				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? 75;
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
 				worldContainer: null,
-				upserts: [entityFacts(mobGuid, { isHostile: true })],
+				upserts: [
+					entityFacts(mobGuid, { isHostile: true, targeting: "creature" }),
+				],
 				removed: [],
 			});
 			const mob = {
@@ -2088,35 +2098,66 @@ describe("ClientGameplayPresentation", () => {
 				worldGeneration: state.worldGeneration,
 				guid: mobGuid,
 				instanceSequence: 1,
-				observedAt: { seconds: 76 },
+				observedAt: { seconds: baseHostSeconds },
 			});
-			presentation.frame(1_000);
+			await vi.waitFor(() => {
+				expect(presentation.frame(nowMs).rendered).toBe(true);
+			});
 			expect(requestFacts).toHaveBeenCalledWith(
 				mobGuid,
 				expect.objectContaining({ kind: "combat-health" }),
 			);
-			expect(runtime.nameplateHealth.has(mobGuid)).toBe(false);
+			expect(runtime.healthBarFraction(mobGuid)).toBeUndefined();
 
+			// Core updates both ClientEntityFacts.health and emits client-entity-health-updated.
+			nowMs += 50;
+			const sampleSeconds =
+				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? baseHostSeconds;
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [
+					{
+						...entityFacts(mobGuid, { isHostile: true, targeting: "creature" }),
+						health: {
+							instanceSequence: 1,
+							fraction: 0.65,
+							observedAtSeconds: sampleSeconds,
+						},
+					},
+				],
+				removed: [],
+			});
 			transport.emit("client-entity-health-updated", {
 				worldGeneration: state.worldGeneration,
 				guid: mobGuid,
 				instanceSequence: 1,
 				healthFraction: 0.65,
-				observedAt: { seconds: 76.5 },
+				observedAt: { seconds: sampleSeconds },
 			});
-			presentation.frame(1_050);
-			expect(runtime.nameplateHealth.get(mobGuid)).toBe(0.65);
+			expect(presentation.frame(nowMs).rendered).toBe(true);
+			expect(runtime.healthBarFraction(mobGuid)).toBe(0.65);
 
+			// Leaving combat stops background health polling without erasing fresh display facts.
+			requestFacts.mockClear();
 			transport.emit("client-combat-mode-updated", { mode: "peace" });
-			presentation.frame(1_100);
-			expect(runtime.nameplateHealth.has(mobGuid)).toBe(false);
+			nowMs += 50;
+			expect(presentation.frame(nowMs).rendered).toBe(true);
+			expect(runtime.healthBarFraction(mobGuid)).toBe(0.65);
+			expect(requestFacts).not.toHaveBeenCalled();
+
+			// Fresh health expires cleanly once host recency elapses.
+			nowMs = nowMs + CLIENT_TUNING.entityOverlays.healthRecentWindowMs + 100;
+			expect(presentation.frame(nowMs).rendered).toBe(true);
+			expect(runtime.healthBarFraction(mobGuid)).toBeUndefined();
 		} finally {
 			requestFacts.mockRestore();
 			await presentation.destroy();
 		}
 	});
 
-	it("syncs nameplate health world generation across portal entry, teleports, and discontinuities while suppressing portal polling", async () => {
+	it("clears overlays and syncs combat health requests across portal entry, teleports, and discontinuities while suppressing portal polling", async () => {
 		const playerGuid = 0x0101_0001;
 		const mobGuid = 0x0200_0002;
 		const state = {
@@ -2137,13 +2178,6 @@ describe("ClientGameplayPresentation", () => {
 		const requestFacts = vi.spyOn(lifecycle.appraisals, "requestFacts");
 		await presentation.start();
 		try {
-			transport.emit("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				upserts: [entityFacts(mobGuid, { isHostile: true })],
-				removed: [],
-			});
 			const mob = {
 				...view(mobGuid, 0x0101_0100),
 				presentation: {
@@ -2151,8 +2185,20 @@ describe("ClientGameplayPresentation", () => {
 					entityClass: "mob" as const,
 				},
 			};
+			let nowMs = performance.now();
+			const baseHostSeconds =
+				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? 75;
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [
+					entityFacts(mobGuid, { isHostile: true, targeting: "creature" }),
+				],
+				removed: [],
+			});
 
-			// Initial entry baseline arrives in portal-space(worldGeneration: 1): no nameplate polling while in portal.
+			// Initial entry baseline arrives in portal-space(worldGeneration: 1): no polling while in portal.
 			transport.emit("client-dynamic-entity", {
 				kind: "upserted",
 				entity: mob,
@@ -2161,28 +2207,50 @@ describe("ClientGameplayPresentation", () => {
 				worldGeneration: 1,
 				guid: mobGuid,
 				instanceSequence: 1,
-				observedAt: { seconds: 80 },
+				observedAt: { seconds: baseHostSeconds },
 			});
-			presentation.frame(1_000);
+			presentation.frame(nowMs);
 			expect(requestFacts).not.toHaveBeenCalled();
-			expect(runtime.nameplateHealth.has(mobGuid)).toBe(false);
+			expect(runtime.healthBarFraction(mobGuid)).toBeUndefined();
 
 			// Entering in-world keeps worldGeneration 1 synced and allows polling + health display.
 			transport.emit("client-lifecycle-changed", { kind: "in-world" });
-			presentation.frame(1_050);
+			nowMs += 50;
+			await vi.waitFor(() => {
+				expect(presentation.frame(nowMs).status.kind).toBe("ready");
+			});
 			expect(requestFacts).toHaveBeenCalledWith(
 				mobGuid,
 				expect.objectContaining({ kind: "combat-health" }),
 			);
+			nowMs += 50;
+			const gen1Seconds =
+				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? baseHostSeconds;
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [
+					{
+						...entityFacts(mobGuid, { isHostile: true, targeting: "creature" }),
+						health: {
+							instanceSequence: 1,
+							fraction: 0.55,
+							observedAtSeconds: gen1Seconds,
+						},
+					},
+				],
+				removed: [],
+			});
 			transport.emit("client-entity-health-updated", {
 				worldGeneration: 1,
 				guid: mobGuid,
 				instanceSequence: 1,
 				healthFraction: 0.55,
-				observedAt: { seconds: 80.5 },
+				observedAt: { seconds: gen1Seconds },
 			});
-			presentation.frame(1_100);
-			expect(runtime.nameplateHealth.get(mobGuid)).toBe(0.55);
+			expect(presentation.frame(nowMs).status.kind).toBe("ready");
+			expect(runtime.healthBarFraction(mobGuid)).toBe(0.55);
 
 			// Teleport portal-space advances worldGeneration to 2, clears generation-1 bars, and suppresses portal polling.
 			requestFacts.mockClear();
@@ -2190,38 +2258,70 @@ describe("ClientGameplayPresentation", () => {
 				"client-lifecycle-changed",
 				portalLifecycle(2, "teleport"),
 			);
-			expect(runtime.nameplateHealth.has(mobGuid)).toBe(false);
+			expect(runtime.healthBarFraction(mobGuid)).toBeUndefined();
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [
+					entityFacts(mobGuid, { isHostile: true, targeting: "creature" }),
+				],
+				removed: [],
+			});
 			transport.emit("client-entity-combat-observed", {
 				worldGeneration: 2,
 				guid: mobGuid,
 				instanceSequence: 1,
-				observedAt: { seconds: 81 },
+				observedAt: { seconds: gen1Seconds + 1 },
 			});
-			presentation.frame(1_150);
+			nowMs += 50;
+			presentation.frame(nowMs);
 			expect(requestFacts).not.toHaveBeenCalled();
 
 			transport.emit("client-lifecycle-changed", { kind: "in-world" });
-			presentation.frame(1_200);
+			nowMs += 50;
+			await vi.waitFor(() => {
+				expect(presentation.frame(nowMs).status.kind).toBe("ready");
+			});
 			expect(requestFacts).toHaveBeenCalledWith(
 				mobGuid,
 				expect.objectContaining({ kind: "combat-health" }),
 			);
+			nowMs += 50;
+			const gen2Seconds =
+				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? baseHostSeconds;
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [
+					{
+						...entityFacts(mobGuid, { isHostile: true, targeting: "creature" }),
+						health: {
+							instanceSequence: 1,
+							fraction: 0.45,
+							observedAtSeconds: gen2Seconds,
+						},
+					},
+				],
+				removed: [],
+			});
 			transport.emit("client-entity-health-updated", {
 				worldGeneration: 2,
 				guid: mobGuid,
 				instanceSequence: 1,
 				healthFraction: 0.45,
-				observedAt: { seconds: 81.5 },
+				observedAt: { seconds: gen2Seconds },
 			});
-			presentation.frame(1_250);
-			expect(runtime.nameplateHealth.get(mobGuid)).toBe(0.45);
+			expect(presentation.frame(nowMs).status.kind).toBe("ready");
+			expect(runtime.healthBarFraction(mobGuid)).toBe(0.45);
 
 			// Forced-reposition discontinuity advances worldGeneration to 3, clearing generation-2 bars and accepting generation-3 health.
 			transport.emit("client-presentation-discontinuity", {
 				kind: "forced-reposition",
 				worldGeneration: 3,
 			});
-			expect(runtime.nameplateHealth.has(mobGuid)).toBe(false);
+			expect(runtime.healthBarFraction(mobGuid)).toBeUndefined();
 
 			transport.emit("client-dynamic-entity", {
 				kind: "upserted",
@@ -2231,19 +2331,194 @@ describe("ClientGameplayPresentation", () => {
 				worldGeneration: 3,
 				guid: mobGuid,
 				instanceSequence: 1,
-				observedAt: { seconds: 82 },
+				observedAt: { seconds: gen2Seconds + 1 },
+			});
+			nowMs += 50;
+			const gen3Seconds =
+				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? baseHostSeconds;
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [
+					{
+						...entityFacts(mobGuid, { isHostile: true, targeting: "creature" }),
+						health: {
+							instanceSequence: 1,
+							fraction: 0.3,
+							observedAtSeconds: gen3Seconds,
+						},
+					},
+				],
+				removed: [],
 			});
 			transport.emit("client-entity-health-updated", {
 				worldGeneration: 3,
 				guid: mobGuid,
 				instanceSequence: 1,
 				healthFraction: 0.3,
-				observedAt: { seconds: 82.5 },
+				observedAt: { seconds: gen3Seconds },
 			});
-			presentation.frame(1_300);
-			expect(runtime.nameplateHealth.get(mobGuid)).toBe(0.3);
+			await vi.waitFor(() => {
+				expect(presentation.frame(nowMs).status.kind).toBe("ready");
+			});
+			expect(runtime.healthBarFraction(mobGuid)).toBe(0.3);
 		} finally {
 			requestFacts.mockRestore();
+			await presentation.destroy();
+		}
+	});
+
+	it("wires Smart vs Always overlay mode, tracked alerts, and unselected spellCastTarget through gameplay frames", async () => {
+		const playerGuid = 0x0101_0001;
+		const distantMobGuid = 0x0200_0010;
+		const distantItemGuid = 0x0200_0011;
+		const transport = new FakeClientTransport(currentState(playerGuid));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const tracked = new Set<number>();
+		const presentation = new ClientGameplayPresentation({
+			canvas: fakeCanvas(),
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+			trackedAlertGuids: () => tracked,
+		});
+		await presentation.start();
+		try {
+			const mobBase = view(distantMobGuid, 0x0101_0100);
+			if (mobBase.placement.kind !== "world")
+				throw new Error("Expected world placement");
+			// Place behind the player (outside any forward <= 180 deg proximity arc) and within health bar range.
+			const rearDistance =
+				CLIENT_TUNING.entityOverlays.healthMaxDistanceMeters * 0.5;
+			const mob = {
+				...mobBase,
+				placement: {
+					...mobBase.placement,
+					pose: {
+						...mobBase.placement.pose,
+						coords: { x: 0, y: -rearDistance, z: 0 },
+					},
+				},
+				presentation: { ...mobBase.presentation, entityClass: "mob" as const },
+			};
+			const itemBase = view(distantItemGuid, 0x0101_0100);
+			const item = {
+				...itemBase,
+				placement: mob.placement,
+				presentation: {
+					...itemBase.presentation,
+					entityClass: "other" as const,
+				},
+			};
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [
+					entityFacts(distantMobGuid, {
+						isHostile: true,
+						targeting: "creature",
+					}),
+					entityFacts(distantItemGuid, { targeting: "non-creature" }),
+				],
+				removed: [],
+			});
+			transport.emit("client-dynamic-entity", {
+				kind: "upserted",
+				entity: mob,
+			});
+			transport.emit("client-dynamic-entity", {
+				kind: "upserted",
+				entity: item,
+			});
+
+			let nowMs = performance.now();
+			await vi.waitFor(() => {
+				expect(presentation.frame(nowMs).status.kind).toBe("ready");
+			});
+			expect(runtime.entityOverlayFrame.kind).toBe("resolved");
+			if (runtime.entityOverlayFrame.kind !== "resolved")
+				throw new Error("Expected resolved frame");
+			expect(runtime.entityOverlayFrame.entities.has(distantMobGuid)).toBe(
+				false,
+			);
+			expect(runtime.entityOverlayFrame.entities.has(distantItemGuid)).toBe(
+				false,
+			);
+
+			// Unselected spellCastTarget in flight focuses the target and its health bar.
+			const castHostSec = lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? 75;
+			transport.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [
+					{
+						...entityFacts(distantMobGuid, {
+							isHostile: true,
+							targeting: "creature",
+						}),
+						health: {
+							instanceSequence: 1,
+							fraction: 0.4,
+							observedAtSeconds: castHostSec,
+						},
+					},
+				],
+				removed: [],
+			});
+			transport.emit("client-spell-cast-target-updated", {
+				target: distantMobGuid,
+			});
+			tracked.add(distantItemGuid);
+			nowMs += 16;
+			expect(presentation.frame(nowMs).status.kind).toBe("ready");
+			const presentedView = runtime.primaryViews.at(-1);
+			if (presentedView === undefined)
+				throw new Error("Expected presented camera view");
+			runtime.entityFrame = entityFrameInCamera(
+				presentedView,
+				distantMobGuid,
+				new Vec3(0, 0, -10),
+			);
+			expect(presentation.readCombatTargetFrame()).not.toBeNull();
+			if (runtime.entityOverlayFrame.kind !== "resolved")
+				throw new Error("Expected resolved frame");
+			expect(
+				runtime.entityOverlayFrame.entities.get(distantMobGuid)?.presentation,
+			).toEqual({
+				occlusion: "scene",
+				nameplate: "focus",
+				healthBar: { fraction: 0.4, priority: "focus" },
+			});
+			expect(
+				runtime.entityOverlayFrame.entities.get(distantItemGuid)?.presentation,
+			).toEqual({
+				occlusion: "scene",
+				nameplate: "alert",
+				healthBar: null,
+			});
+
+			// Switching cold mode to Always delegates ambient visibility to the configured category map.
+			transport.emit("client-spell-cast-target-updated", { target: null });
+			tracked.delete(distantItemGuid);
+			presentation.setNameplateMode("always");
+			nowMs += 16;
+			expect(presentation.frame(nowMs).status.kind).toBe("ready");
+			if (runtime.entityOverlayFrame.kind !== "resolved")
+				throw new Error("Expected resolved frame");
+			const categoryVisibility =
+				CLIENT_TUNING.frameSettings.nameplates.categoryVisibility;
+			expect(
+				runtime.entityOverlayFrame.entities.get(distantMobGuid)?.presentation
+					.nameplate,
+			).toBe(categoryVisibility.mob ? "ambient" : null);
+			expect(runtime.entityOverlayFrame.entities.has(distantItemGuid)).toBe(
+				categoryVisibility.other,
+			);
+		} finally {
 			await presentation.destroy();
 		}
 	});
@@ -2459,7 +2734,7 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 		number,
 		Pick<NameplateContent, "indicators" | "strikeThrough" | "nameColor">
 	>();
-	nameplateHealth = new Map<number, number>();
+	entityOverlayFrame: EntityOverlayFrame = { kind: "ambient" };
 	/** Independent streaming availability for player and third-person camera cells. */
 	readonly unavailableEnvCellIds = new Set<string>();
 	#activationRevision = 0;
@@ -2468,6 +2743,12 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 		| { readonly kind: "completion"; readonly completion: Promise<void> }
 		| { readonly kind: "failure"; readonly error: Error }
 		| null = null;
+
+	healthBarFraction(guid: number): number | undefined {
+		if (this.entityOverlayFrame.kind !== "resolved") return undefined;
+		return this.entityOverlayFrame.entities.get(guid)?.presentation.healthBar
+			?.fraction;
+	}
 	#nextSceneActivationCompletion: Promise<void> | null = null;
 
 	holdNextSceneActivation(): () => void {
@@ -2505,12 +2786,11 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 		else this.nameplateDecoration.set(guid, decoration);
 	}
 
-	setDynamicEntityNameplateHealth(
-		guid: number,
-		healthFraction: number | null,
-	): void {
-		if (healthFraction === null) this.nameplateHealth.delete(guid);
-		else this.nameplateHealth.set(guid, healthFraction);
+	setEntityOverlayFrame(frame: EntityOverlayFrame): void {
+		this.entityOverlayFrame =
+			frame.kind === "resolved"
+				? { kind: "resolved", entities: new Map(frame.entities) }
+				: frame;
 	}
 
 	async replaceDynamicEntitySnapshot(

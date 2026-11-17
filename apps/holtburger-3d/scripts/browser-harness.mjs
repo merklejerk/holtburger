@@ -516,6 +516,7 @@ try {
 			: result.state;
 		assertNameplateWorkload(
 			assertionState.nameplates,
+			assertionState.entityOverlays,
 			options.nameplateWorkload,
 			options.envCellCameraId !== null,
 			assertionState.frameSettings.nameplates.maximumVisible,
@@ -2785,12 +2786,18 @@ function nameplateHarnessReport(result) {
 
 function assertNameplateWorkload(
 	diagnostics,
+	entityOverlays,
 	workload,
 	hasEnvCellCamera,
 	maximumVisible,
 	frameMode,
 ) {
-	if (diagnostics === null || diagnostics === undefined) {
+	if (
+		diagnostics === null ||
+		diagnostics === undefined ||
+		entityOverlays === null ||
+		entityOverlays === undefined
+	) {
 		throw new Error(
 			"Synthetic nameplate workload published no renderer diagnostics.",
 		);
@@ -2834,8 +2841,8 @@ function assertNameplateWorkload(
 		budgetRejectedCandidateCount: diagnostics.budgetRejectedCandidateCount,
 		eligibleCandidateCount: diagnostics.eligibleCandidateCount,
 		liveEntryCount: diagnostics.cache.liveEntryCount,
-		submittedDrawCount: diagnostics.submittedDrawCount,
-		submittedInstanceCount: diagnostics.submittedInstanceCount,
+		submittedDrawCount: entityOverlays.submittedDrawCount,
+		submittedInstanceCount: entityOverlays.submittedInstanceCount,
 	};
 	if (JSON.stringify(actual) !== JSON.stringify(expected)) {
 		throw new Error(
@@ -6920,12 +6927,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				client,
 				`(async () => {
 				const state = globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state();
-				if (!state.frameProfile || !state.metrics || !state.dynamicResources || !state.entityShadowResources || !state.nameplates) throw new Error('Renderer diagnostic fixture is incomplete');
+				if (!state.frameProfile || !state.metrics || !state.dynamicResources || !state.entityShadowResources || !state.nameplates || !state.healthBars || !state.entityOverlays) throw new Error('Renderer diagnostic fixture is incomplete');
 				const { probeGpuSurfaces } = await import('/src/harness/browser/performance-surface-probe.ts');
 				return probeGpuSurfaces({
 					profile: state.frameProfile, profilingEnabled: true, selectionMetrics: state.metrics,
 					dynamicResources: state.dynamicResources, entityShadows: state.entityShadowResources,
-					nameplates: state.nameplates, compiledObjectDraws: state.compiledObjectDraws,
+					nameplates: state.nameplates, healthBars: state.healthBars, entityOverlays: state.entityOverlays,
+					compiledObjectDraws: state.compiledObjectDraws,
 				});
 			})()`,
 			);

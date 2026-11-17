@@ -6,15 +6,26 @@ import type {
 import { CLIENT_SUMMON_TUNING } from "./client-tuning";
 import type { ClientSummonLeashColors } from "./client-summon-leash-appearance";
 import type { RealizedEntitySelectionSource } from "../lib/game/selection/entity-selection-bounds";
-import type { CycleSelectionPresentationFrame } from "./client-cycle-selection-controller";
+import type {
+	CycleCandidate,
+	CycleSelectionPresentationFrame,
+} from "./client-target-acquisition";
 import {
 	ClientLockFeedbackEffects,
 	type ClientLockFeedbackFrame,
 } from "./client-lock-feedback";
 import {
-	ClientNameplateHealth,
-	type NameplateHealthUpdate,
-} from "./client-nameplate-health";
+	EMPTY_ENTITY_OVERLAY_FRAME,
+	type EntityOverlayFrame,
+} from "../lib/game/renderer/entity-overlay-policy";
+import { ClientCombatHealthRequests } from "./client-combat-health-requests";
+import {
+	ClientEntityOverlays,
+	resolveActiveCombatEngagement,
+	resolveFreshCreatureHealth,
+	type NameplateMode,
+} from "./client-entity-overlays";
+import { resolveImmediateCandidate } from "./client-target-acquisition";
 import { distanceBetweenDynamicWorldPoses } from "./client-entity-distance";
 import { projectClientEntityCenter } from "./client-entity-projection";
 import type { BarberPreview, BarberSnapshot } from "./client-barber-contract";
@@ -357,11 +368,8 @@ export interface ClientGameplayRuntime
 			"indicators" | "strikeThrough" | "nameColor"
 		>,
 	): void;
-	/** Apply or clear nameplate health bar fraction without rebuilding texture resources. */
-	setDynamicEntityNameplateHealth(
-		guid: number,
-		healthFraction: number | null,
-	): void;
+	/** Install the active scene driver's entity overlay frame for the next render. */
+	setEntityOverlayFrame(frame: EntityOverlayFrame): void;
 	dynamicEntityPresentationState(guid: number): DynamicEntityPresentationState;
 	/** Latest authority-backed display value for one desired dynamic entity. */
 	setPortalTransition(
@@ -414,6 +422,16 @@ export interface ClientGameplayRuntime
 	getPortalTransitionDiagnostics?(): PortalTransitionRuntimeDiagnostics;
 }
 
+const EMPTY_ALERT_GUIDS: ReadonlySet<number> = new Set();
+
+interface MutableCombatHealthCandidate {
+	guid: number;
+	generation: number;
+	isHostileMob: boolean;
+	distanceMeters: number | null;
+	freshObservedAtMs: number | null;
+}
+
 /** Borrowed presentation capabilities consumed by gameplay; browser-resource lifetime stays in the root. */
 export interface ClientGameplayPresentationResources {
 	readonly activeRegion: ActiveRegionSource;
@@ -435,6 +453,14 @@ export interface ClientGameplayPresentationDependencies {
 	readonly onEnvironmentIssue?: (issue: string | null) => void;
 	/** App-owned resources borrowed only for this gameplay adapter's lifetime. */
 	readonly resources: ClientGameplayPresentationResources;
+	/** Cold initial nameplate presentation mode; live edits arrive via `setNameplateMode`. */
+	readonly nameplateMode?: NameplateMode;
+	/** Imperative reader for currently enabled Nearby alert matches; absent alerts mean empty set. */
+	readonly trackedAlertGuids?: () => ReadonlySet<number>;
+	/** Shared acquisition candidate sampler reused by passive Smart immediate preview. */
+	readonly sampleImmediateTargetCandidates?: (
+		frame: CycleSelectionPresentationFrame,
+	) => readonly CycleCandidate[] | null;
 }
 
 /** One authority-scoped sound or script cue delivered to the borrowed runtime. */
@@ -497,14 +523,16 @@ export class ClientGameplayPresentation {
 	#sceneInterestCoordinator: SceneInterestRequestCoordinator | null = null;
 	#unsubscribe: (() => void) | null = null;
 	readonly #lockFeedback = new ClientLockFeedbackEffects();
-	readonly #nameplateHealth: ClientNameplateHealth;
-	/** Reused candidate records for the active combat pass; reconciliation does not retain them. */
-	readonly #nameplateCandidates: Array<{
-		guid: number;
-		generation: number;
-		isHostileMob: boolean;
-		distanceMeters: number | null;
-	}> = [];
+	readonly #combatHealth: ClientCombatHealthRequests;
+	readonly #overlays: ClientEntityOverlays;
+	readonly #trackedAlertGuids: () => ReadonlySet<number>;
+	readonly #sampleImmediateTargetCandidates:
+		| ((
+				frame: CycleSelectionPresentationFrame,
+		  ) => readonly CycleCandidate[] | null)
+		| null;
+	/** Reused candidate records for active combat health requests. */
+	readonly #combatHealthCandidates: MutableCombatHealthCandidate[] = [];
 	#playerGuid: number | null = null;
 	#startPromise: Promise<void> | null = null;
 	#sceneTargetKey: string | null = null;
@@ -545,10 +573,18 @@ export class ClientGameplayPresentation {
 		this.#canvas = dependencies.canvas;
 		this.#onError = dependencies.onError ?? (() => undefined);
 		this.#resources = dependencies.resources;
-		this.#nameplateHealth = new ClientNameplateHealth({
-			tuning: CLIENT_TUNING.nameplateHealth,
+		this.#trackedAlertGuids =
+			dependencies.trackedAlertGuids ?? (() => EMPTY_ALERT_GUIDS);
+		this.#sampleImmediateTargetCandidates =
+			dependencies.sampleImmediateTargetCandidates ?? null;
+		this.#combatHealth = new ClientCombatHealthRequests({
+			tuning: CLIENT_TUNING.combatHealth,
 			requestFacts: (guid, priority) =>
 				this.#session.appraisals.requestFacts(guid, priority),
+		});
+		this.#overlays = new ClientEntityOverlays({
+			tuning: CLIENT_TUNING.entityOverlays,
+			initialMode: dependencies.nameplateMode,
 		});
 		const cameraSession = new ClientCameraSession(this.#session);
 		this.camera = new PossessionCameraController({
@@ -645,10 +681,20 @@ export class ClientGameplayPresentation {
 		);
 	}
 
+	/** Cold UI mode update; stops passive preview immediately when leaving Smart. */
+	setNameplateMode(mode: NameplateMode): void {
+		this.#overlays.setMode(mode);
+	}
+
+	/** Invalidate passive preview immediately after input targeting preferences change. */
+	invalidateImmediateOverlayPreview(): void {
+		this.#overlays.invalidateImmediatePreview();
+	}
+
 	/** Forward the cold identity level once; presentation resolves realization and pose per frame. */
 	setSelectedEntityGuid(guid: number | null): void {
 		this.#selectedEntityGuid = guid;
-		this.#nameplateHealth.setSelectedTarget(guid);
+		this.#combatHealth.setSelectedTarget(guid);
 		this.#activeResources?.runtime.setSelectedEntityGuid(guid);
 	}
 
@@ -689,25 +735,8 @@ export class ClientGameplayPresentation {
 	/** Pull the combat bound and presented camera without publishing frame-hot UI state. */
 	readCombatTargetFrame(): ClientCombatTargetFrame | null {
 		const view = this.#lastPrimaryView;
-		const { spellCastTarget, combat } = this.#session.state();
-		// A pending non-self cast takes presentation priority without changing auto-attack intent.
-		const engagement =
-			spellCastTarget !== null
-				? {
-						target: spellCastTarget,
-						combatType: "magic" as const,
-						heightFraction: 0.5,
-					}
-				: combat.desired === null
-					? null
-					: {
-							target: combat.desired.target,
-							combatType: combat.desired.profile.kind,
-							heightFraction:
-								CLIENT_TUNING.combatTargetIndicator.heightFractions[
-									combat.desired.profile.height
-								],
-						};
+		// Pending non-self spell cast takes presentation priority without changing auto-attack intent.
+		const engagement = resolveActiveCombatEngagement(this.#session.state());
 		const state =
 			engagement === null
 				? null
@@ -1259,7 +1288,7 @@ export class ClientGameplayPresentation {
 		}
 		resources.runtime.setViewerEntity(playerGuid);
 		if (!portal) {
-			this.#reconcileNameplateHealth(nowMs);
+			this.#reconcileCombatHealth(nowMs);
 			resources.runtime.tick(nowMs);
 		}
 		let primaryView: PrimaryCameraView;
@@ -1384,7 +1413,12 @@ export class ClientGameplayPresentation {
 		}
 		resources.runtime.setPrimaryView(primaryView);
 		this.#lastPrimaryView = primaryView;
-		if (!portal) resources.runtime.setAudioListener(audioListenerFor(camera));
+		if (portal) {
+			this.#clearOverlayPresentation(resources.runtime);
+		} else {
+			resources.runtime.setAudioListener(audioListenerFor(camera));
+			this.#publishEntityOverlays(resources, player, nowMs);
+		}
 		const transitionReceipt = resources.runtime.render(nowMs / 1_000);
 		this.#hasRenderedFrame = true;
 		this.#renderedFrameCount += 1;
@@ -1437,7 +1471,8 @@ export class ClientGameplayPresentation {
 		await attempt("camera-stop", () => this.camera.stop());
 		// Withdraw desired entities before awaiting startup/realization so late visuals cannot publish.
 		this.#lockFeedback.clear();
-		this.#applyNameplateHealthUpdates(this.#nameplateHealth.destroy());
+		this.#combatHealth.destroy();
+		this.#clearOverlayPresentation();
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
 		this.#sceneInterestCoordinator?.invalidate();
@@ -1474,7 +1509,9 @@ export class ClientGameplayPresentation {
 		this.#environmentSources = null;
 		this.#onWeatherPresets?.([]);
 		this.#onEnvironmentIssue?.(null);
+		this.#overlays.clear();
 		if (resources !== null) {
+			resources.runtime.setEntityOverlayFrame(EMPTY_ENTITY_OVERLAY_FRAME);
 			resources.runtime.clearDynamicEntityCues();
 			resources.runtime.clearCombatEffects();
 			resources.runtime.setSummonVisuals([], CLIENT_SUMMON_TUNING);
@@ -1514,10 +1551,12 @@ export class ClientGameplayPresentation {
 			this.#environmentSources = { server, presentation: server };
 			this.#onWeatherPresets?.(clientWeatherPresets(resources.activeRegion));
 			this.#bindEnvironment();
+			resources.runtime.setEntityOverlayFrame(EMPTY_ENTITY_OVERLAY_FRAME);
+			this.#overlays.clear();
 			resources.runtime.setSelectedEntityGuid(this.#selectedEntityGuid);
 			resources.runtime.setHoveredEntityGuid(this.#hoveredEntityGuid);
-			this.#syncNameplateHealthWorld(true);
-			this.#nameplateHealth.setSelectedTarget(this.#selectedEntityGuid);
+			this.#syncCombatHealthWorld(true);
+			this.#combatHealth.setSelectedTarget(this.#selectedEntityGuid);
 			this.#reconcileEntityPresentationPolicy();
 			this.#sceneInterestCoordinator = new SceneInterestRequestCoordinator(
 				resources.profileSource,
@@ -1576,9 +1615,9 @@ export class ClientGameplayPresentation {
 					return;
 				}
 				if (event.outcome.attribution.kind === "attributed") {
-					this.#nameplateHealth.acceptPlayerAttack(
+					this.#combatHealth.acceptPlayerAttack(
 						event.outcome.attribution.target,
-						event.receivedAtMs,
+						this.#hostNowMs(event.receivedAtMs),
 					);
 				}
 				this.#activeResources?.runtime.acceptCombatOutcome(
@@ -1596,7 +1635,8 @@ export class ClientGameplayPresentation {
 					CLIENT_SUMMON_TUNING,
 				);
 				this.#lockFeedback.clear();
-				this.#syncNameplateHealthWorld(true);
+				this.#clearOverlayPresentation();
+				this.#syncCombatHealthWorld(true);
 				this.#activeResources?.runtime.clearCombatEffects();
 				return;
 			case "barber-updated":
@@ -1605,33 +1645,33 @@ export class ClientGameplayPresentation {
 				);
 				return;
 			case "combat-mode":
-				this.#nameplateHealth.setCombatMode(event.mode);
+				this.#combatHealth.setCombatMode(event.mode);
+				this.#overlays.invalidateImmediatePreview();
+				return;
+			case "party-presence":
+				// Fellowship creation/dissolution/HUD presence invalidates immediately; mid-party roster
+				// changes settle on the next 10 Hz preview sample without subscribing to vital ticks.
+				this.#overlays.invalidateImmediatePreview();
 				return;
 			case "combat":
-				this.#nameplateHealth.setCombatTarget(
+				this.#combatHealth.setCombatTarget(
 					event.status.desired?.target ?? null,
-					performance.now(),
+					this.#hostNowMs(performance.now()),
 				);
 				return;
 			case "entity-health":
-				this.#nameplateHealth.acceptEntityHealth(
-					event.health,
-					performance.now(),
-				);
+				this.#combatHealth.acceptEntityHealth(event.health);
 				return;
 			case "entity-combat-observed":
-				this.#nameplateHealth.acceptCombatObserved(
-					event.combat,
-					performance.now(),
-				);
+				this.#combatHealth.acceptCombatObserved(event.combat);
 				return;
 			case "appraisal-facts-settled":
-				this.#nameplateHealth.acceptAppraisalFactsSettled(event.guid);
+				this.#combatHealth.acceptAppraisalFactsSettled(event.guid);
 				return;
 			case "current-state":
 				this.#lockFeedback.clear();
 				this.#receiveCurrentState(event.state);
-				this.#syncNameplateHealthWorld(true);
+				this.#syncCombatHealthWorld(true);
 				this.#reconcileEntityPresentationPolicy();
 				return;
 			case "entities":
@@ -1640,9 +1680,10 @@ export class ClientGameplayPresentation {
 			case "lifecycle":
 				if (event.lifecycle.kind !== "in-world") {
 					this.#lockFeedback.clear();
-					this.#syncNameplateHealthWorld(true);
+					this.#clearOverlayPresentation();
+					this.#syncCombatHealthWorld(true);
 				} else {
-					this.#syncNameplateHealthWorld(false);
+					this.#syncCombatHealthWorld(false);
 				}
 				return;
 			case "local-player-established":
@@ -1680,7 +1721,8 @@ export class ClientGameplayPresentation {
 				return;
 			case "presentation-discontinuity":
 				this.#lockFeedback.clear();
-				this.#syncNameplateHealthWorld(true);
+				this.#clearOverlayPresentation();
+				this.#syncCombatHealthWorld(true);
 				this.#receivePresentationDiscontinuity(event.discontinuity);
 				return;
 			case "exit-requested":
@@ -1799,9 +1841,7 @@ export class ClientGameplayPresentation {
 				return;
 			case "removed":
 				this.#lockFeedback.remove(event.guid, event.generation);
-				this.#applyNameplateHealthUpdates(
-					this.#nameplateHealth.removeEntity(event.guid),
-				);
+				this.#combatHealth.removeEntity(event.guid);
 				if (event.guid === this.#playerGuid)
 					this.#invalidatePlayerPresentationConvergence();
 				this.#activeResources?.runtime.removeDynamicEntity(
@@ -1812,40 +1852,59 @@ export class ClientGameplayPresentation {
 		}
 	}
 
-	#syncNameplateHealthWorld(forceReset: boolean): void {
+	#hostNowSeconds(localNowMs: number): number | null {
+		return this.#session.mirror.isAwaitingSnapshot()
+			? null
+			: this.#session.mirror.hostTimeSeconds(localNowMs / 1_000);
+	}
+
+	#hostNowMs(localNowMs: number): number | null {
+		const seconds = this.#hostNowSeconds(localNowMs);
+		return seconds === null ? null : seconds * 1_000;
+	}
+
+	#clearOverlayPresentation(
+		runtime: ClientGameplayRuntime | undefined = this.#activeResources?.runtime,
+	): void {
+		this.#overlays.clear();
+		runtime?.setEntityOverlayFrame(EMPTY_ENTITY_OVERLAY_FRAME);
+	}
+
+	#syncCombatHealthWorld(forceReset: boolean): void {
 		const sessionState = this.#session.state();
 		if (
 			forceReset ||
-			this.#nameplateHealth.worldGeneration() !== sessionState.worldGeneration
+			this.#combatHealth.worldGeneration() !== sessionState.worldGeneration
 		) {
-			this.#applyNameplateHealthUpdates(
-				this.#nameplateHealth.resetWorld(sessionState.worldGeneration),
-			);
+			this.#combatHealth.resetWorld(sessionState.worldGeneration);
 		}
-		this.#nameplateHealth.setCombatMode(sessionState.combatMode);
-		this.#nameplateHealth.setCombatTarget(
+		this.#combatHealth.setCombatMode(sessionState.combatMode);
+		this.#combatHealth.setCombatTarget(
 			sessionState.combat.desired?.target ?? null,
+			this.#hostNowMs(performance.now()),
 		);
 	}
 
-	#reconcileNameplateHealth(nowMs: number): void {
-		if (this.#nameplateHealth.isIdle()) return;
+	#reconcileCombatHealth(nowMs: number): void {
+		if (this.#combatHealth.isIdle()) return;
+		const hostNowSeconds = this.#hostNowSeconds(nowMs);
+		if (hostNowSeconds === null) return;
+		const hostNowMs = hostNowSeconds * 1_000;
 		const read = this.#session.entities.read();
 		if (read.kind !== "current") {
-			this.#applyNameplateHealthUpdates(
-				this.#nameplateHealth.reconcile([], nowMs),
-			);
+			this.#combatHealth.reconcile([], hostNowMs);
 			return;
 		}
 		const levelEntities = read.level.entities;
 		const player =
-			read.level.playerGuid === null ||
-			this.#session.mirror.isAwaitingSnapshot()
+			read.level.playerGuid === null
 				? null
 				: this.#session.mirror.entityByGuid(read.level.playerGuid);
 		const playerPose =
 			player?.placement.kind === "world" ? player.placement.pose : null;
-		const candidates = this.#nameplateCandidates;
+		const recentWindowSeconds =
+			CLIENT_TUNING.combatHealth.recentWindowMs / 1_000;
+		const candidates = this.#combatHealthCandidates;
 		let candidateCount = 0;
 		for (const dynamic of this.#session.mirror.currentEntities()) {
 			const guid = dynamic.identity.guid;
@@ -1861,6 +1920,14 @@ export class ClientGameplayPresentation {
 				dynamic.placement.kind === "world"
 					? distanceBetweenDynamicWorldPoses(playerPose, dynamic.placement.pose)
 					: null;
+			const freshHealth = resolveFreshCreatureHealth(
+				facts,
+				dynamic.generation,
+				hostNowSeconds,
+				recentWindowSeconds,
+			);
+			const freshObservedAtMs =
+				freshHealth === null ? null : freshHealth.observedAtSeconds * 1_000;
 			const candidate = candidates[candidateCount];
 			if (candidate === undefined)
 				candidates.push({
@@ -1868,32 +1935,72 @@ export class ClientGameplayPresentation {
 					generation: dynamic.generation,
 					isHostileMob,
 					distanceMeters,
+					freshObservedAtMs,
 				});
 			else {
 				candidate.guid = guid;
 				candidate.generation = dynamic.generation;
 				candidate.isHostileMob = isHostileMob;
 				candidate.distanceMeters = distanceMeters;
+				candidate.freshObservedAtMs = freshObservedAtMs;
 			}
 			candidateCount += 1;
 		}
 		candidates.length = candidateCount;
-		this.#applyNameplateHealthUpdates(
-			this.#nameplateHealth.reconcile(candidates, nowMs),
-		);
+		this.#combatHealth.reconcile(candidates, hostNowMs);
 	}
 
-	#applyNameplateHealthUpdates(
-		updates: readonly NameplateHealthUpdate[],
+	#publishEntityOverlays(
+		resources: ClientGameplayPresentationResources,
+		player: DynamicEntityView,
+		nowMs: number,
 	): void {
-		const runtime = this.#activeResources?.runtime;
-		if (runtime === undefined || updates.length === 0) return;
-		for (const update of updates) {
-			runtime.setDynamicEntityNameplateHealth(
-				update.guid,
-				update.healthFraction,
-			);
+		const read = this.#session.entities.read();
+		const hostNowSeconds = this.#hostNowSeconds(nowMs);
+		if (
+			read.kind !== "current" ||
+			player.placement.kind !== "world" ||
+			hostNowSeconds === null
+		) {
+			this.#clearOverlayPresentation(resources.runtime);
+			return;
 		}
+		const engagement = resolveActiveCombatEngagement(this.#session.state());
+		const sampleCandidates =
+			this.#status.kind === "ready" &&
+			this.camera.status().kind === "active" &&
+			this.#sampleImmediateTargetCandidates !== null
+				? this.#sampleImmediateTargetCandidates
+				: null;
+		const frame = this.#overlays.composeFrame({
+			nowMs,
+			hostNowSeconds,
+			playerGuid: player.identity.guid,
+			playerPose: player.placement.pose,
+			dynamicEntities: this.#session.mirror.currentEntities(),
+			resolveDynamicGeneration: (guid) =>
+				this.#session.mirror.entityByGuid(guid)?.generation ?? null,
+			factsEntities: read.level.entities,
+			selectedGuid: this.#selectedEntityGuid,
+			hoveredGuid: this.#hoveredEntityGuid,
+			activeCombatTargetGuid: engagement?.target ?? null,
+			alertGuids: this.#trackedAlertGuids(),
+			categoryVisibility:
+				CLIENT_TUNING.frameSettings.nameplates.categoryVisibility,
+			sampleImmediateTarget:
+				sampleCandidates === null
+					? undefined
+					: () =>
+							this.withCycleSelectionFrame((selectionFrame) => {
+								const sampled = sampleCandidates(selectionFrame);
+								if (sampled === null) return null;
+								return (
+									resolveImmediateCandidate(sampled, "smart-combat")?.guid ??
+									null
+								);
+							}),
+		});
+		resources.runtime.setEntityOverlayFrame(frame);
 	}
 
 	/** Reconcile app-owned summon effects and name decorations from the complete semantic level. */
@@ -2118,6 +2225,7 @@ export class ClientGameplayPresentation {
 		nowMs: number,
 		advanceTransition = true,
 	): ClientGameplayPresentationFrame {
+		this.#clearOverlayPresentation(resources.runtime);
 		if (advanceTransition) {
 			this.#publishPortalTransition(resources, nowMs, false);
 		}

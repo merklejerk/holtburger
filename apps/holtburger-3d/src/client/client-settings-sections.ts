@@ -25,6 +25,7 @@ export const clientUserSectionSchemas = {
 	lockInteractions: userShape.lockInteractions,
 	recentEmotes: userShape.recentEmotes,
 	graphics: userShape.graphics,
+	nameplates: userShape.nameplates,
 	audio: userShape.audio,
 	ui: userShape.ui,
 	clockFormat: userShape.clockFormat,

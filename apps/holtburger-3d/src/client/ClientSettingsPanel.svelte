@@ -48,6 +48,7 @@
 	import type {
 		ClientAudioSettings,
 		ClientGraphicsSettings,
+		ClientNameplateSettings,
 		ClientUiSettings,
 	} from "./client-settings-contract";
 	import {
@@ -105,9 +106,11 @@
 		readonly input: ClientInputConfiguration;
 		readonly displayPlatform: InputPlatform;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
+		readonly nameplates: ClientNameplateSettings;
 		readonly selectedTab: SettingsTab;
 		readonly onSelectTab: (tab: SettingsTab) => void;
 		readonly onGraphicsChange: (graphics: ClientGraphicsSettings) => void;
+		readonly onNameplatesChange: (nameplates: ClientNameplateSettings) => void;
 		readonly onUiChange: (ui: ClientUiSettings) => void;
 		readonly onInputChange: (input: ClientInputConfiguration) => void;
 		readonly canResetHudPlacements: boolean;
@@ -135,9 +138,11 @@
 		input,
 		displayPlatform,
 		textureFilteringCapabilities,
+		nameplates,
 		selectedTab,
 		onSelectTab,
 		onGraphicsChange,
+		onNameplatesChange,
 		onUiChange,
 		onInputChange,
 		canResetHudPlacements,
@@ -449,6 +454,21 @@
 				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>Display</summary>
 					<div class="settings-section ui-disclosure-body">
+						<label
+							>Nameplate mode
+							<select
+								value={nameplates.mode}
+								onchange={(event) =>
+									onNameplatesChange({
+										mode: event.currentTarget
+											.value as ClientNameplateSettings["mode"],
+									})}
+							>
+								<option value="minimal">Minimal</option>
+								<option value="smart">Smart</option>
+								<option value="always">Always</option>
+							</select>
+						</label>
 						<label class="ui-checkbox"
 							><input
 								type="checkbox"
@@ -459,17 +479,6 @@
 										showHelpLabels: event.currentTarget.checked,
 									})}
 							/> Show help labels</label
-						>
-						<label class="ui-checkbox"
-							><input
-								type="checkbox"
-								checked={graphics.alwaysShowEntityNameplates}
-								onchange={(event) =>
-									onGraphicsChange({
-										...graphics,
-										alwaysShowEntityNameplates: event.currentTarget.checked,
-									})}
-							/> Always show entity nameplates</label
 						>
 						<label class="ui-checkbox"
 							><input

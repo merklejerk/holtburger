@@ -5296,6 +5296,9 @@
 				lockInteractions={userSettings.lockInteractions}
 				onLockInteractionsChange={(lockInteractions) =>
 					(userSettings = { ...userSettings, lockInteractions })}
+				nameplates={userSettings.nameplates}
+				onNameplatesChange={(nameplates) =>
+					(userSettings = { ...userSettings, nameplates })}
 				chatSuppression={userSettings.chatSuppression}
 				onChatSuppressionChange={(chatSuppression) =>
 					(userSettings = { ...userSettings, chatSuppression })}

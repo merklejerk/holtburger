@@ -76,7 +76,7 @@ export async function probeDynamicDomains(
 			pixels: context.getImageData(0, 0, canvas.width, canvas.height).data,
 			image: canvas.toDataURL("image/png"),
 			metrics: diagnostics.selectionMetrics,
-			nameplates: diagnostics.nameplates,
+			entityOverlays: diagnostics.entityOverlays,
 			poseBytes: diagnostics.dynamicResources.poses.uploadedBytes,
 		};
 	};
@@ -173,7 +173,7 @@ export async function probeDynamicDomains(
 			) as WebGLProgram | null;
 			if (
 				program !== null &&
-				gl.getUniformLocation(program, "uNameplateClipFromAnchor") !== null
+				gl.getUniformLocation(program, "uOverlayClipFromAnchor") !== null
 			) {
 				const scoped =
 					gl.getUniformLocation(program, "uPortalRenderDomain") !== null;
@@ -196,7 +196,7 @@ export async function probeDynamicDomains(
 				overlayDraws.length = 0;
 				const sample = await capture("plural", 0, false);
 				if (
-					sample.nameplates.submittedInstanceCount !== 1 ||
+					sample.entityOverlays.submittedInstanceCount !== 1 ||
 					overlayDraws.length === 0 ||
 					overlayDraws.some(
 						(sample) =>

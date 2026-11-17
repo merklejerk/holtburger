@@ -1,7 +1,7 @@
 import type { ClientAttackProfile } from "./client-host-contract";
 import type { ClientTargetIndicatorGeometryTuning } from "./client-target-indicator";
 import type { ClientVitalWarningTuning } from "./client-vital-warning";
-import type { CycleSelectionPolicy } from "./client-cycle-selection-controller";
+import type { CycleSelectionPolicy } from "./client-target-acquisition";
 import type { PortalTransitionPolicy } from "../lib/client/portal-transition-controller";
 import type { HexRgbaColor } from "../lib/frontend-color";
 import type {
@@ -64,18 +64,32 @@ export type ClientHostAppraisalTuningConfig = Pick<
 	"assessmentRetryIntervalMs" | "burstLimit" | "responseTimeoutMs"
 >;
 
-/** Client-owned hostile combat nameplate health policy and bounded recency rules. */
-export interface ClientNameplateHealthTuning {
-	/** Maximum player-to-mob distance in meters to maintain combat interest or show a health bar. */
+/** Client-owned combat health-request scheduling and interest bounds. */
+export interface ClientCombatHealthTuning {
+	/** Maximum player-to-mob distance in meters to maintain combat-health interest. */
 	readonly maxDistanceMeters: number;
 	/** How long a mob retains combat interest after combat observation or target change. */
 	readonly combatInterestMs: number;
-	/** Host-time window during which an entity health update remains visible on the nameplate. */
+	/** Host-time window after which an in-flight facts request is considered stale. */
 	readonly recentWindowMs: number;
 	/** Periodic background facts-appraisal refresh cadence while combat interest remains active. */
 	readonly refreshIntervalMs: number;
 	/** Whether entering combat interest issues an immediate bootstrap facts appraisal when health is absent or stale. */
 	readonly bootstrapOnCombatEnter: boolean;
+}
+
+/** Smart nameplate proximity, preview cadence, and overhead health-bar display policy. */
+export interface ClientEntityOverlayTuning {
+	/** Total horizontal arc angle in degrees around player body facing for Smart proximity labels. */
+	readonly proximityArcDegrees: number;
+	/** Inclusive 3D root-to-root Euclidean distance in meters for Smart proximity labels. */
+	readonly proximityRadiusMeters: number;
+	/** Cadence in milliseconds for passive Smart Tab immediate preview sampling. */
+	readonly immediatePreviewIntervalMs: number;
+	/** Maximum player-to-creature distance in meters for overhead health bar display. */
+	readonly healthMaxDistanceMeters: number;
+	/** Host-time recency window in milliseconds during which observed creature health stays visible. */
+	readonly healthRecentWindowMs: number;
 }
 
 /** Complete starting renderer display policy. */
@@ -308,8 +322,10 @@ export interface ClientTuning {
 		/** Bounded cadence for refreshing selected-entity display text. */
 		readonly displayIntervalMs: number;
 	};
-	/** Hostile combat nameplate health bars and bounded recent health recency policy. */
-	readonly nameplateHealth: ClientNameplateHealthTuning;
+	/** Combat-interest background health-appraisal scheduling policy. */
+	readonly combatHealth: ClientCombatHealthTuning;
+	/** Smart nameplate proximity/preview and overhead health-bar display policy. */
+	readonly entityOverlays: ClientEntityOverlayTuning;
 	/** Complete starting renderer display policy. */
 	readonly frameSettings: FrameSettings;
 }

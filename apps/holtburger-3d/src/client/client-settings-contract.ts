@@ -190,13 +190,26 @@ export const clientGraphicsSettingsSchema = z
 			.min(CLIENT_GRAPHICS_RANGES.renderScale.minimum)
 			.max(CLIENT_GRAPHICS_RANGES.renderScale.maximum),
 		weatherEnabled: z.boolean(),
-		/** Keep ambient labels visible; older profiles retain the existing enabled behavior. */
-		alwaysShowEntityNameplates: z.boolean().default(true),
 	})
 	.strict()
 	.readonly();
 export type ClientGraphicsSettings = z.infer<
 	typeof clientGraphicsSettingsSchema
+>;
+
+const CLIENT_NAMEPLATE_MODES = ["minimal", "smart", "always"] as const;
+const clientNameplateModeSchema = z.enum(CLIENT_NAMEPLATE_MODES);
+export type ClientNameplateMode = z.infer<typeof clientNameplateModeSchema>;
+
+/** User-scoped overhead nameplate presentation mode; bar visibility remains independent authority. */
+export const clientNameplateSettingsSchema = z
+	.object({
+		mode: clientNameplateModeSchema,
+	})
+	.strict()
+	.readonly();
+export type ClientNameplateSettings = z.infer<
+	typeof clientNameplateSettingsSchema
 >;
 
 /** Each vital's remaining-percentage threshold activates its glow and veins together. */
@@ -308,6 +321,7 @@ export const clientUserSettingsSchema = z
 		chatSuppression: clientChatSuppressionSettingsSchema,
 		lockInteractions: clientLockInteractionSettingsSchema,
 		graphics: clientGraphicsSettingsSchema,
+		nameplates: clientNameplateSettingsSchema,
 		audio: clientAudioSettingsSchema,
 		ui: clientUiSettingsSchema,
 		clockFormat: clientClockFormatSchema,

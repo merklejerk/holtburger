@@ -482,7 +482,7 @@ describe("RenderWorld", () => {
 					nodeId === "scene-node:9" ? presentation : null,
 				getNameplatePopulationRevision: () => 0,
 				forEachNameplateVisual: () => {},
-				getNameplateFacts: () => null,
+				getOverlayFacts: () => null,
 				getPresentationClass: (nodeId) =>
 					nodeId === "scene-node:9" ? "mob" : null,
 				getPresentationIdentity: (nodeId) =>
@@ -651,7 +651,7 @@ function createShadowWorld(
 				classes.has(id) ? bounds : null,
 			getNameplatePopulationRevision: unused,
 			forEachNameplateVisual: unused,
-			getNameplateFacts: unused,
+			getOverlayFacts: unused,
 			getVisiblePresentation: unused,
 		},
 	});

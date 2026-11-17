@@ -6,6 +6,7 @@ import { HostCommandError } from "../../host/host-command-result";
 import { onTestFinished, describe, expect, it, vi } from "vitest";
 import { PresentationAssetService } from "./presentation-asset-service";
 import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
+import type { EntityOverlayPresentation } from "../renderer/entity-overlay-policy";
 import { EffectSystem } from "../systems/effect-system";
 import { nameplateIconId } from "../systems/dynamic-presentation-source";
 import { WorkerTexturePreparer } from "../textures/texture-preparer";
@@ -800,6 +801,12 @@ describe("GamePresentationRuntime view and interest control", () => {
 							releaseCount: 0,
 							revision: 0,
 						},
+					},
+					healthBars: {
+						budgetRejectedCandidateCount: 0,
+						eligibleCandidateCount: 0,
+					},
+					entityOverlays: {
 						submittedDrawCount: 0,
 						submittedInstanceCount: 0,
 					},
@@ -873,7 +880,9 @@ describe("GamePresentationRuntime view and interest control", () => {
 			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
 			showRetailHiddenGeometry: false,
 			sealedInteriorAmbientLevel: 0.65,
+			entityOverlays: SHARED_FRAME_SETTINGS.entityOverlays,
 			nameplates: SHARED_FRAME_SETTINGS.nameplates,
+			healthBars: SHARED_FRAME_SETTINGS.healthBars,
 			ambientOcclusion: {
 				...SHARED_FRAME_SETTINGS.ambientOcclusion,
 				enabled: true,
@@ -902,7 +911,9 @@ describe("GamePresentationRuntime view and interest control", () => {
 			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
 			showRetailHiddenGeometry: false,
 			sealedInteriorAmbientLevel: 0.65,
+			entityOverlays: SHARED_FRAME_SETTINGS.entityOverlays,
 			nameplates: SHARED_FRAME_SETTINGS.nameplates,
+			healthBars: SHARED_FRAME_SETTINGS.healthBars,
 			ambientOcclusion: {
 				...SHARED_FRAME_SETTINGS.ambientOcclusion,
 				enabled: true,
@@ -963,6 +974,12 @@ describe("GamePresentationRuntime view and interest control", () => {
 					releaseCount: 0,
 					revision: 0,
 				},
+			},
+			healthBars: {
+				budgetRejectedCandidateCount: 0,
+				eligibleCandidateCount: 0,
+			},
+			entityOverlays: {
 				submittedDrawCount: 0,
 				submittedInstanceCount: 0,
 			},
@@ -3486,25 +3503,44 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(runtime.dynamicEntityPresentationState(7).kind).toBe("realized");
 
 		runtime.render(1);
+		const node7 = frames.at(-1)?.selectionTarget?.nodeId;
 		expect(frames.at(-1)?.selectionTarget?.shape).toEqual({ kind: "rigid" });
-		expect(frames.at(-1)?.hoveredEntityNodeId).toBe(
-			frames.at(-1)?.selectionTarget?.nodeId,
-		);
+		expect(node7).toBeDefined();
+		expect(frames.at(-1)?.entityOverlays.presentation(node7!)).toEqual({
+			occlusion: "overlay",
+			nameplate: "focus",
+			healthBar: null,
+		});
 		await runtime.replaceDynamicEntitySnapshot([portal]);
 		runtime.setSelectedEntityGuid(8);
 		expect(runtime.dynamicEntityPresentationState(8).kind).toBe("realized");
 		runtime.render(2);
+		const node8 = frames.at(-1)?.selectionTarget?.nodeId;
 		expect(frames.at(-1)?.selectionTarget?.shape).toEqual({ kind: "rigid" });
-		expect(frames.at(-1)?.hoveredEntityNodeId).toBeNull();
+		expect(node8).toBeDefined();
+		expect(frames.at(-1)?.entityOverlays.presentation(node7!)).toBeNull();
+		expect(frames.at(-1)?.entityOverlays.presentation(node8!)).toEqual({
+			occlusion: "overlay",
+			nameplate: "focus",
+			healthBar: null,
+		});
 		runtime.setHoveredEntityGuid(8);
 
 		runtime.setSelectedEntityGuid(null);
 		runtime.render(3);
 		expect(frames.at(-1)?.selectionTarget).toBeNull();
-		expect(frames.at(-1)?.hoveredEntityNodeId).not.toBeNull();
+		expect(frames.at(-1)?.entityOverlays.presentation(node8!)).toEqual({
+			occlusion: "overlay",
+			nameplate: "focus",
+			healthBar: null,
+		});
 		runtime.setHoveredEntityGuid(null);
 		runtime.render(4);
-		expect(frames.at(-1)?.hoveredEntityNodeId).toBeNull();
+		expect(frames.at(-1)?.entityOverlays.presentation(node8!)).toEqual({
+			occlusion: "scene",
+			nameplate: "ambient",
+			healthBar: null,
+		});
 		await runtime.destroy();
 	});
 
@@ -4710,31 +4746,83 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		}
 	});
 
-	it("applies and retains nameplate health without triggering nameplate texture re-rasterization", async () => {
+	it("resolves overlay frames by generation without triggering nameplate texture re-rasterization", async () => {
 		const delayed = controlledPromise<DecodedStaticPresentation>();
-		const runtime = await buildSpawnRuntime({ load: () => delayed.promise });
-		const updateHealth = vi.spyOn(
-			DynamicEntitySystem.prototype,
-			"updateNameplateHealth",
+		const observedPresentations: Array<EntityOverlayPresentation | null> = [];
+		const runtime = await buildSpawnRuntime(
+			{ load: () => delayed.promise },
+			ANIMATION_SOURCE,
+			testRenderer({
+				drawFrame(input) {
+					const nodeId = input.selectionTarget?.nodeId;
+					observedPresentations.push(
+						nodeId === undefined
+							? null
+							: input.entityOverlays.presentation(nodeId),
+					);
+					return EMPTY_RENDERER_FRAME_FEEDBACK;
+				},
+			}),
 		);
 		const updateContent = vi.spyOn(
 			DynamicEntitySystem.prototype,
 			"updateNameplateContent",
 		);
 		try {
-			const pending = runtime.upsertDynamicEntity(spawnedEntity(7, 1));
-			runtime.setDynamicEntityNameplateHealth(7, 0.75);
+			const pending = runtime.upsertDynamicEntity(spawnedEntity(7, 2));
+			runtime.setSelectedEntityGuid(7);
+			setTestCamera(runtime, SPAWN_TEST_CAMERA);
+			runtime.setEntityOverlayFrame({
+				kind: "resolved",
+				entities: new Map([
+					[
+						7,
+						{
+							generation: 1,
+							presentation: {
+								occlusion: "scene",
+								nameplate: null,
+								healthBar: { fraction: 0.9, priority: "focus" },
+							},
+						},
+					],
+				]),
+			});
 			delayed.resolve(spawnedVisual());
 			await pending;
-			expect(updateHealth).toHaveBeenLastCalledWith(expect.anything(), 0.75);
+			runtime.render(1);
+			// Mismatched generation must be ignored without falling back to ambient.
+			expect(observedPresentations.at(-1)).toBeNull();
+
 			const contentCallsAtInstall = updateContent.mock.calls.length;
-			runtime.setDynamicEntityNameplateHealth(7, 0.25);
-			expect(updateHealth).toHaveBeenLastCalledWith(expect.anything(), 0.25);
+			runtime.setEntityOverlayFrame({
+				kind: "resolved",
+				entities: new Map([
+					[
+						7,
+						{
+							generation: 2,
+							presentation: {
+								occlusion: "overlay",
+								nameplate: "focus",
+								healthBar: { fraction: 0.25, priority: "focus" },
+							},
+						},
+					],
+				]),
+			});
+			runtime.render(2);
+			expect(observedPresentations.at(-1)).toEqual({
+				occlusion: "overlay",
+				nameplate: "focus",
+				healthBar: { fraction: 0.25, priority: "focus" },
+			});
 			expect(updateContent.mock.calls.length).toBe(contentCallsAtInstall);
-			runtime.setDynamicEntityNameplateHealth(7, null);
-			expect(updateHealth).toHaveBeenLastCalledWith(expect.anything(), null);
+
+			runtime.setEntityOverlayFrame({ kind: "resolved", entities: new Map() });
+			runtime.render(3);
+			expect(observedPresentations.at(-1)).toBeNull();
 		} finally {
-			updateHealth.mockRestore();
 			updateContent.mockRestore();
 			await runtime.destroy();
 		}

@@ -17,6 +17,10 @@ import type {
 } from "./game/renderer/nameplate-policy";
 import type { PortalWarpDriveTuning } from "./game/renderer/portal-warp-drive-tuning";
 import type { FrameSettings } from "./game/renderer/renderer";
+import type {
+	EntityOverlaySettings,
+	HealthBarSettings,
+} from "./game/renderer/entity-overlay-policy";
 
 /** Runtime audio policy selected by each frontend composition root. */
 export interface FrontendAudioTuning {
@@ -59,7 +63,7 @@ export interface FrontendColorGradeTuning {
 /** Nameplate policy as authored in tuning, before hex colors become runtime channels. */
 interface FrontendNameplateTuning extends Omit<
 	NameplateSettings,
-	"appearance" | "healthBar"
+	"appearance"
 > {
 	/** Canvas appearance with tuning-friendly hexadecimal colors. */
 	readonly appearance: Omit<
@@ -73,16 +77,17 @@ interface FrontendNameplateTuning extends Omit<
 		/** Straight-alpha outline surrounding every text line. */
 		readonly outlineColor: HexRgbaColor;
 	};
-	/** Combat nameplate health bar styling with hexadecimal colors. */
-	readonly healthBar: Omit<
-		NameplateSettings["healthBar"],
-		"fillColor" | "backgroundColor" | "borderColor"
-	> & {
-		readonly fillColor: HexRgbaColor;
-		readonly backgroundColor: HexRgbaColor;
-		readonly borderColor: HexRgbaColor;
-	};
 }
+
+/** Health bar policy as authored in tuning, before hex colors become runtime channels. */
+type FrontendHealthBarTuning = Omit<
+	HealthBarSettings,
+	"fillColor" | "backgroundColor" | "borderColor"
+> & {
+	readonly fillColor: HexRgbaColor;
+	readonly backgroundColor: HexRgbaColor;
+	readonly borderColor: HexRgbaColor;
+};
 
 /** Authored semantic colors used by map surfaces and their strokes. */
 type MapSurfaceColor =
@@ -268,8 +273,12 @@ interface FrontendRenderingTuning {
 	readonly entitySelectionMaskDownsample: number;
 	/** Fallback framebuffer color when no scene covers a pixel. */
 	readonly clearColor: HexRgbaColor;
+	/** Placement and perspective scale shared by labels and health bars. */
+	readonly entityOverlays: EntityOverlaySettings;
 	/** Initial nameplate workload and Canvas appearance. */
 	readonly nameplates: FrontendNameplateTuning;
+	/** Initial health bar workload and appearance. */
+	readonly healthBars: FrontendHealthBarTuning;
 	/** Selected-entity widths and animation; colors belong to the UI theme. */
 	readonly entitySelectionOutline: Omit<
 		EntitySelectionOutlineSettings,

@@ -1,6 +1,9 @@
 import type { FrameSettings } from "../lib/game/renderer/renderer";
 import type { SceneInterestRadii } from "../lib/game/runtime/types";
-import type { ClientGraphicsSettings } from "./client-settings-contract";
+import type {
+	ClientGraphicsSettings,
+	ClientNameplateSettings,
+} from "./client-settings-contract";
 import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings.js";
 
 /** Absence defaults composed from shared rendering policy and client-only view choices. */
@@ -13,8 +16,12 @@ export const CLIENT_GRAPHICS_DEFAULTS = {
 	textureFiltering: SHARED_FRAME_SETTINGS.quality.textureFiltering,
 	renderScale: SHARED_FRAME_SETTINGS.quality.renderScale,
 	weatherEnabled: SHARED_FRAME_SETTINGS.weatherEnabled,
-	alwaysShowEntityNameplates: true,
 } as const satisfies ClientGraphicsSettings;
+
+/** Smart Nameplates are the default cutover mode for new and upgraded installs. */
+export const CLIENT_NAMEPLATE_DEFAULTS = {
+	mode: "smart",
+} as const satisfies ClientNameplateSettings;
 
 const EXPLICIT_OBJECT_RADIUS_CAP = 1;
 const GENERATED_OBJECT_RADIUS_CAP = 2;
@@ -55,12 +62,5 @@ export function frameSettingsWithGraphics(
 			renderScale: graphics.renderScale,
 		},
 		weatherEnabled: graphics.weatherEnabled,
-		nameplates: {
-			...settings.nameplates,
-			// A zero ambient budget still admits hovered and selected entities.
-			maximumVisible: graphics.alwaysShowEntityNameplates
-				? SHARED_FRAME_SETTINGS.nameplates.maximumVisible
-				: 0,
-		},
 	};
 }

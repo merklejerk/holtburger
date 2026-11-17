@@ -11,11 +11,11 @@ import {
 } from "../../client/client-entity-mirror.test-support";
 import { ClientEntitySelection } from "../../client/client-entity-selection";
 import { ClientPointerSelectionController } from "../../client/client-pointer-selection-controller";
+import { ClientCycleSelectionController } from "../../client/client-cycle-selection-controller";
 import {
-	ClientCycleSelectionController,
 	sampleCycleCandidates,
 	type CycleSelectionPolicy,
-} from "../../client/client-cycle-selection-controller";
+} from "../../client/client-target-acquisition";
 import { ClientSelectionInput } from "../../client/client-selection-input";
 import { AppInput } from "../../lib/input/app-input";
 import {

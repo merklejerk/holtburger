@@ -236,12 +236,14 @@
 		ClientCharacterSettings,
 		ClientAudioSettings,
 		ClientGraphicsSettings,
+		ClientNameplateSettings,
 		ClientUiSettings,
 		ClientUserSettings,
 	} from "./client-settings-contract";
 	import {
 		clientAudioSettingsSchema,
 		clientGraphicsSettingsSchema,
+		clientNameplateSettingsSchema,
 		clientUiSettingsSchema,
 	} from "./client-settings-contract";
 	import type { ClientUserSettingsPatch } from "./client-settings-sections";
@@ -280,10 +282,12 @@
 	import { ClientEntitySelection } from "./client-entity-selection";
 	import { ClientPointerSelectionController } from "./client-pointer-selection-controller";
 	import { resolveClientSpellCastAim } from "./client-spell-casting";
+	import { ClientCycleSelectionController } from "./client-cycle-selection-controller";
 	import {
-		ClientCycleSelectionController,
 		sampleCycleCandidates,
-	} from "./client-cycle-selection-controller";
+		type CycleCandidate,
+		type CycleSelectionPresentationFrame,
+	} from "./client-target-acquisition";
 	import { ClientSelectionInput } from "./client-selection-input";
 	import {
 		CLIENT_TOAST_DURATION_MS,
@@ -396,6 +400,25 @@
 	let hudMode = $state<"runtime" | "layout">("runtime");
 	/** Temporary HUD visibility; never persisted to layout settings. */
 	let uiShowcase = $state(false);
+	/** One acquisition composition shared by Tab input and the passive Smart Nameplates preview. */
+	function sampleTargetCandidates(
+		owner: ClientLifecycleSession,
+		frame: CycleSelectionPresentationFrame,
+	): readonly CycleCandidate[] | null {
+		return sampleCycleCandidates(
+			owner.entities,
+			owner.mirror,
+			frame,
+			CLIENT_TUNING.entitySelection.cycle,
+			userSettings.input,
+			{
+				combatMode: owner.state().combatMode,
+				partyMembers: new Set(
+					owner.partySnapshot()?.members.map((member) => member.guid) ?? [],
+				),
+			},
+		);
+	}
 	function selectSpellTab(selected: InputDigitIndex): void {
 		selectedSpellTab = selected;
 	}
@@ -910,6 +933,7 @@
 			);
 		}
 		changeUserSection("input", accepted);
+		gameplayPresentation?.invalidateImmediateOverlayPreview();
 	}
 	function fontCss(family: ClientFontFamily): string | undefined {
 		return family === "theme" ? undefined : CLIENT_FONT_FAMILY_CSS[family];
@@ -1044,6 +1068,12 @@
 		const accepted = clientAudioSettingsSchema.parse(audio);
 		changeUserSection("audio", accepted);
 		presentationRoot?.setAudioSettings(accepted);
+	}
+	function changeNameplates(nameplates: ClientNameplateSettings): void {
+		const accepted = clientNameplateSettingsSchema.parse(nameplates);
+		if (accepted.mode === userSettings.nameplates.mode) return;
+		changeUserSection("nameplates", accepted);
+		gameplayPresentation?.setNameplateMode(accepted.mode);
 	}
 	function changeGraphics(graphics: ClientGraphicsSettings): void {
 		const accepted = clientGraphicsSettingsSchema.parse(graphics);
@@ -2038,6 +2068,11 @@
 					canvas,
 					resources,
 					session: currentSession,
+					nameplateMode: untrack(() => userSettings.nameplates.mode),
+					trackedAlertGuids: () =>
+						nearby?.trackedGuids() ?? EMPTY_TRACKED_GUIDS,
+					sampleImmediateTargetCandidates: (frame) =>
+						sampleTargetCandidates(currentSession, frame),
 					onError: reportPresentationError,
 					onLockFeedback: () => {
 						if (!cancelled) lockFeedbackWakeRevision += 1;
@@ -2496,20 +2531,7 @@
 			selection,
 			sample: () =>
 				gameplayPresentation?.withCycleSelectionFrame((frame) =>
-					sampleCycleCandidates(
-						owner.entities,
-						owner.mirror,
-						frame,
-						CLIENT_TUNING.entitySelection.cycle,
-						userSettings.input,
-						{
-							combatMode: owner.state().combatMode,
-							partyMembers: new Set(
-								owner.partySnapshot()?.members.map((member) => member.guid) ??
-									[],
-							),
-						},
-					),
+					sampleTargetCandidates(owner, frame),
 				) ?? null,
 		});
 		const input = new ClientSelectionInput({
@@ -2834,6 +2856,8 @@
 			input={userSettings.input}
 			{textureFilteringCapabilities}
 			onGraphicsChange={changeGraphics}
+			nameplates={userSettings.nameplates}
+			onNameplatesChange={changeNameplates}
 			onUiChange={changeUi}
 			onInputChange={changeInput}
 			onInspectionPreviewHeightChange={(previewHeight) =>

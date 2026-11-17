@@ -621,6 +621,9 @@
 			readonly before: RendererFrameDiagnosticsSnapshot["nameplates"];
 			readonly moved: RendererFrameDiagnosticsSnapshot["nameplates"];
 			readonly cleared: RendererFrameDiagnosticsSnapshot["nameplates"];
+			readonly beforeOverlays: RendererFrameDiagnosticsSnapshot["entityOverlays"];
+			readonly movedOverlays: RendererFrameDiagnosticsSnapshot["entityOverlays"];
+			readonly clearedOverlays: RendererFrameDiagnosticsSnapshot["entityOverlays"];
 			readonly movedGuid: number;
 			readonly previousY: number;
 			readonly movedY: number;
@@ -2618,6 +2621,9 @@
 		readonly before: RendererFrameDiagnosticsSnapshot["nameplates"];
 		readonly moved: RendererFrameDiagnosticsSnapshot["nameplates"];
 		readonly cleared: RendererFrameDiagnosticsSnapshot["nameplates"];
+		readonly beforeOverlays: RendererFrameDiagnosticsSnapshot["entityOverlays"];
+		readonly movedOverlays: RendererFrameDiagnosticsSnapshot["entityOverlays"];
+		readonly clearedOverlays: RendererFrameDiagnosticsSnapshot["entityOverlays"];
 		readonly movedGuid: number;
 		readonly previousY: number;
 		readonly movedY: number;
@@ -2629,28 +2635,27 @@
 		const current = spawnedEntities[0];
 		if (current?.placement.kind !== "world")
 			throw new Error("Synthetic nameplate lifecycle has no world target.");
-		const readNameplates =
-			(): RendererFrameDiagnosticsSnapshot["nameplates"] => {
-				const diagnostics = runtime?.getRendererFrameDiagnostics()?.nameplates;
-				if (!diagnostics)
-					throw new Error(
-						"Synthetic nameplate lifecycle has no renderer diagnostics.",
-					);
-				return diagnostics;
-			};
+		const readDiagnostics = (): RendererFrameDiagnosticsSnapshot => {
+			const diagnostics = runtime?.getRendererFrameDiagnostics();
+			if (!diagnostics)
+				throw new Error(
+					"Synthetic nameplate lifecycle has no renderer diagnostics.",
+				);
+			return diagnostics;
+		};
 		// Exercise hover admission with ordinary plates disabled, then restore the workload.
 		const maximumVisible = frameSettings.nameplates.maximumVisible;
 		try {
 			setNameplateMaximumVisible(0);
 			runtime.setHoveredEntityGuid(current.identity.guid);
 			await waitForTwoAnimationFrames();
-			if (readNameplates().submittedInstanceCount < 1)
+			if (readDiagnostics().entityOverlays.submittedInstanceCount < 1)
 				throw new Error(
 					"Hovered nameplate did not bypass the disabled budget.",
 				);
 			runtime.setHoveredEntityGuid(null);
 			await waitForTwoAnimationFrames();
-			if (readNameplates().submittedInstanceCount !== 0)
+			if (readDiagnostics().entityOverlays.submittedInstanceCount !== 0)
 				throw new Error("Cleared hover retained a forced nameplate.");
 		} finally {
 			runtime.setHoveredEntityGuid(null);
@@ -2658,7 +2663,9 @@
 		}
 		await waitForTwoAnimationFrames();
 		// Hover may populate the cache even when the original budget was zero.
-		const before = readNameplates();
+		const beforeDiagnostics = readDiagnostics();
+		const before = beforeDiagnostics.nameplates;
+		const beforeOverlays = beforeDiagnostics.entityOverlays;
 		const previousY = current.placement.pose.coords.y;
 		const movedY = previousY + 2;
 		const movedEntity: DynamicEntityView = {
@@ -2676,31 +2683,86 @@
 		);
 		await runtime.upsertDynamicEntity(movedEntity);
 		await waitForTwoAnimationFrames();
-		const moved = readNameplates();
-		// Exercise live WebGL2 health-bar drawing without re-rasterizing the nameplate texture.
-		runtime.setDynamicEntityNameplateHealth(movedEntity.identity.guid, 0.55);
-		await waitForTwoAnimationFrames();
-		const withHealth = readNameplates();
-		if (
-			withHealth.cache.rasterizationCount !== moved.cache.rasterizationCount ||
-			withHealth.cache.releaseCount !== moved.cache.releaseCount
-		)
-			throw new Error(
-				"Updating nameplate health caused a nameplate texture re-rasterization.",
-			);
-		if (withHealth.submittedInstanceCount !== moved.submittedInstanceCount)
-			throw new Error(
-				"Updating nameplate health altered submitted nameplate instance count.",
-			);
-		runtime.setDynamicEntityNameplateHealth(movedEntity.identity.guid, null);
+		const movedDiagnostics = readDiagnostics();
+		const moved = movedDiagnostics.nameplates;
+		const movedOverlays = movedDiagnostics.entityOverlays;
+		try {
+			// Exercise live WebGL2 health-bar drawing without re-rasterizing the nameplate texture.
+			runtime.setEntityOverlayFrame({
+				kind: "resolved",
+				entities: new Map([
+					[
+						movedEntity.identity.guid,
+						{
+							generation: movedEntity.generation,
+							presentation: {
+								occlusion: "scene",
+								nameplate: "focus",
+								healthBar: { fraction: 0.55, priority: "focus" },
+							},
+						},
+					],
+				]),
+			});
+			await waitForTwoAnimationFrames();
+			const withHealth = readDiagnostics();
+			if (
+				withHealth.nameplates.cache.rasterizationCount !==
+					moved.cache.rasterizationCount ||
+				withHealth.nameplates.cache.releaseCount !== moved.cache.releaseCount
+			)
+				throw new Error(
+					"Updating nameplate health caused a nameplate texture re-rasterization.",
+				);
+			if (
+				withHealth.entityOverlays.submittedInstanceCount !== 1 ||
+				withHealth.healthBars.eligibleCandidateCount !== 1
+			)
+				throw new Error(
+					"Resolved label+health overlay did not submit the expected bar and quad.",
+				);
+			// Exercise bar-only overlay emission (zero plate dimensions, fallback texture).
+			runtime.setEntityOverlayFrame({
+				kind: "resolved",
+				entities: new Map([
+					[
+						movedEntity.identity.guid,
+						{
+							generation: movedEntity.generation,
+							presentation: {
+								occlusion: "scene",
+								nameplate: null,
+								healthBar: { fraction: 0.4, priority: "focus" },
+							},
+						},
+					],
+				]),
+			});
+			await waitForTwoAnimationFrames();
+			const barOnly = readDiagnostics();
+			if (
+				barOnly.entityOverlays.submittedInstanceCount !== 1 ||
+				barOnly.healthBars.eligibleCandidateCount !== 1 ||
+				barOnly.nameplates.eligibleCandidateCount !== 0
+			)
+				throw new Error(
+					"Resolved bar-only overlay failed independent bar submission.",
+				);
+		} finally {
+			runtime.setEntityOverlayFrame({ kind: "ambient" });
+		}
 		await waitForTwoAnimationFrames();
 		await runtime.replaceDynamicEntitySnapshot([]);
 		spawnedEntities = [];
 		await waitForTwoAnimationFrames();
+		const clearedDiagnostics = readDiagnostics();
 		return {
 			before,
-			cleared: readNameplates(),
+			beforeOverlays,
+			cleared: clearedDiagnostics.nameplates,
+			clearedOverlays: clearedDiagnostics.entityOverlays,
 			moved,
+			movedOverlays,
 			movedGuid: movedEntity.identity.guid,
 			movedY,
 			previousY,
@@ -5016,6 +5078,8 @@
 								frameDiagnostics?.compiledObjectDraws ?? null,
 							frameProfile: frameDiagnostics?.profile ?? null,
 							nameplates: frameDiagnostics?.nameplates ?? null,
+							healthBars: frameDiagnostics?.healthBars ?? null,
+							entityOverlays: frameDiagnostics?.entityOverlays ?? null,
 							worldIndicatorProof,
 							frames,
 							metrics: frameDiagnostics?.selectionMetrics ?? null,

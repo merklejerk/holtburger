@@ -30,27 +30,34 @@ const INSTANCE_ATTRIBUTES = [
 	[PORTAL_DOMAIN_ATTRIBUTE, 1, 10],
 ] as const;
 
-export interface NameplateDrawInstance {
+/**
+ * One composed entity overlay: a label, a health bar, or both sharing one bottom anchor.
+ *
+ * Composition happens after independent admission, so a rejected label never leaves a blank
+ * footprint above a surviving bar.
+ */
+export interface EntityOverlayDrawInstance {
 	/** Anchor-relative bottom-center position. */
 	readonly anchor: Vec3;
-	readonly binding: NameplateTextureBinding;
-	/** Selected and hovered entity plates overlay scene geometry; ordinary plates test depth. */
+	/** Admitted label raster; null draws a bar-only overlay without atlas acquisition. */
+	readonly binding: NameplateTextureBinding | null;
+	/** Overlay-occlusion entities ignore scene depth; scene-occlusion entities test depth. */
 	readonly depthTest: boolean;
-	/** Recent health fraction in [0, 1], or null/undefined when hidden. */
-	readonly healthFraction?: number | null;
+	/** Admitted health fraction in [0, 1], or null when no bar survived admission. */
+	readonly healthFraction: number | null;
 }
 
-export interface NameplateScopedDrawInstance extends NameplateDrawInstance {
+export interface EntityOverlayScopedDrawInstance extends EntityOverlayDrawInstance {
 	/** Selected portal visibility domain for this ordered instance. */
 	readonly renderScopeKey: string;
 }
 
-/** Per-instance scope selection lets ordered plates share one portal draw. */
-export interface NameplateInstanceScopeRouting {
+/** Per-instance scope selection lets ordered overlays share one portal draw. */
+export interface EntityOverlayInstanceScopeRouting {
 	deferredRenderDomainOrdinal(renderScopeKey: string): number;
 }
 
-interface NameplateHealthBarDrawStyle {
+interface HealthBarDrawStyle {
 	/** Raster-pixel [width, height] scaled by current rendering density. */
 	readonly sizePixels: readonly [number, number];
 	readonly gapPixels: number;
@@ -60,20 +67,20 @@ interface NameplateHealthBarDrawStyle {
 	readonly borderColor: NameplateColor;
 }
 
-export interface NameplateDrawContext {
+export interface EntityOverlayDrawContext {
 	readonly clipFromAnchor: Float32Array;
 	readonly referenceDistance: number;
 	readonly viewportHeight: number;
 	readonly viewportWidth: number;
-	readonly healthBar: NameplateHealthBarDrawStyle;
+	readonly healthBar: HealthBarDrawStyle;
 }
 
-export interface NameplateDrawDiagnostics {
+export interface EntityOverlayDrawDiagnostics {
 	readonly drawCount: number;
 	readonly instanceCount: number;
 }
 
-interface NameplateProgram {
+interface EntityOverlayProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly clipFromAnchor: WebGLUniformLocation;
@@ -88,24 +95,34 @@ interface NameplateProgram {
 	};
 }
 
-/** One reusable instanced camera-facing quad pass for atlas-resident nameplates. */
-export class WebGL2NameplatePass {
+/** One reusable instanced camera-facing quad pass for labels and health bars. */
+export class WebGL2EntityOverlayPass {
 	readonly #anchorBuffer: WebGLBuffer;
 	readonly #cornerBuffer: WebGLBuffer;
 	readonly #gl: WebGL2RenderingContext;
-	readonly #flatProgram: NameplateProgram;
-	readonly #portalProgram: NameplateProgram;
+	readonly #flatProgram: EntityOverlayProgram;
+	readonly #portalProgram: EntityOverlayProgram;
 	/** Shared single-level sampler that makes this pass independent of earlier material state. */
 	readonly #sampler: WebGLSampler;
+	/** Borrowed complete 1x1 texture bound by runs that contain only bar-only overlays. */
+	readonly #fallbackTexture: WebGLTexture;
 	readonly #vertexArray: WebGLVertexArrayObject;
 	#instanceScratch = new Float32Array(0);
 	#instanceCapacityFloats = 0;
-	#diagnostics: NameplateDrawDiagnostics = { drawCount: 0, instanceCount: 0 };
+	#diagnostics: EntityOverlayDrawDiagnostics = {
+		drawCount: 0,
+		instanceCount: 0,
+	};
 	#destroyed = false;
 
-	constructor(gl: WebGL2RenderingContext, sampler: WebGLSampler) {
+	constructor(
+		gl: WebGL2RenderingContext,
+		sampler: WebGLSampler,
+		fallbackTexture: WebGLTexture,
+	) {
 		this.#gl = gl;
 		this.#sampler = sampler;
+		this.#fallbackTexture = fallbackTexture;
 		const vertexArray = gl.createVertexArray();
 		const cornerBuffer = gl.createBuffer();
 		const anchorBuffer = gl.createBuffer();
@@ -113,7 +130,7 @@ export class WebGL2NameplatePass {
 			if (vertexArray) gl.deleteVertexArray(vertexArray);
 			if (cornerBuffer) gl.deleteBuffer(cornerBuffer);
 			if (anchorBuffer) gl.deleteBuffer(anchorBuffer);
-			throw new Error("Failed to allocate nameplate pass geometry.");
+			throw new Error("Failed to allocate entity overlay pass geometry.");
 		}
 		this.#vertexArray = vertexArray;
 		this.#cornerBuffer = cornerBuffer;
@@ -142,11 +159,11 @@ export class WebGL2NameplatePass {
 		}
 		gl.bindVertexArray(null);
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
-		let flatProgram: NameplateProgram | null = null;
-		let portalProgram: NameplateProgram | null = null;
+		let flatProgram: EntityOverlayProgram | null = null;
+		let portalProgram: EntityOverlayProgram | null = null;
 		try {
-			flatProgram = createNameplateProgram(gl, false);
-			portalProgram = createNameplateProgram(gl, true);
+			flatProgram = createEntityOverlayProgram(gl, false);
+			portalProgram = createEntityOverlayProgram(gl, true);
 		} catch (cause) {
 			if (flatProgram) gl.deleteProgram(flatProgram.program);
 			if (portalProgram) gl.deleteProgram(portalProgram.program);
@@ -160,25 +177,27 @@ export class WebGL2NameplatePass {
 	}
 
 	draw(
-		context: NameplateDrawContext,
-		instances: readonly NameplateDrawInstance[],
+		context: EntityOverlayDrawContext,
+		instances: readonly EntityOverlayDrawInstance[],
 	): void {
 		this.#draw(context, instances, null);
 	}
 
-	/** Draw scope-grouped plates through the portal compositor's deferred visibility envelope. */
+	/** Draw scope-grouped overlays through the portal compositor's deferred visibility envelope. */
 	drawScoped(
-		context: NameplateDrawContext,
-		instances: readonly NameplateScopedDrawInstance[],
-		routing: NameplateInstanceScopeRouting,
+		context: EntityOverlayDrawContext,
+		instances: readonly EntityOverlayScopedDrawInstance[],
+		routing: EntityOverlayInstanceScopeRouting,
 	): void {
 		this.#draw(context, instances, routing);
 	}
 
 	#draw(
-		context: NameplateDrawContext,
-		instances: readonly (NameplateDrawInstance | NameplateScopedDrawInstance)[],
-		routing: NameplateInstanceScopeRouting | null,
+		context: EntityOverlayDrawContext,
+		instances: readonly (
+			EntityOverlayDrawInstance | EntityOverlayScopedDrawInstance
+		)[],
+		routing: EntityOverlayInstanceScopeRouting | null,
 	): void {
 		this.#requireAlive();
 		const floatCount = instances.length * INSTANCE_FLOATS;
@@ -191,18 +210,23 @@ export class WebGL2NameplatePass {
 		let floatOffset = 0;
 		for (const instance of instances) {
 			const { anchor, healthFraction, binding } = instance;
+			if (binding === null && healthFraction === null)
+				throw new Error("Entity overlay instance has neither label nor bar.");
 			this.#instanceScratch[floatOffset] = anchor.x;
 			this.#instanceScratch[floatOffset + 1] = anchor.y;
 			this.#instanceScratch[floatOffset + 2] = anchor.z;
 			this.#instanceScratch[floatOffset + 3] =
-				healthFraction !== undefined &&
-				healthFraction !== null &&
-				Number.isFinite(healthFraction)
-					? Math.max(0, Math.min(1, healthFraction))
-					: HIDDEN_HEALTH_SENTINEL;
-			this.#instanceScratch[floatOffset + 4] = binding.width;
-			this.#instanceScratch[floatOffset + 5] = binding.height;
-			this.#instanceScratch.set(binding.atlasUvRect, floatOffset + 6);
+				healthFraction === null
+					? HIDDEN_HEALTH_SENTINEL
+					: Math.max(0, Math.min(1, healthFraction));
+			// Zero plate dimensions mark a bar-only overlay; the shader never samples the atlas.
+			if (binding === null) {
+				this.#instanceScratch.fill(0, floatOffset + 4, floatOffset + 10);
+			} else {
+				this.#instanceScratch[floatOffset + 4] = binding.width;
+				this.#instanceScratch[floatOffset + 5] = binding.height;
+				this.#instanceScratch.set(binding.atlasUvRect, floatOffset + 6);
+			}
 			this.#instanceScratch[floatOffset + 10] =
 				routing && "renderScopeKey" in instance
 					? routing.deferredRenderDomainOrdinal(instance.renderScopeKey)
@@ -279,30 +303,31 @@ export class WebGL2NameplatePass {
 		// WebGL sampler objects override texture parameters. Claim the sampler explicitly so a
 		// mipmapped material sampler left on unit zero cannot make this one-level texture incomplete.
 		gl.bindSampler(0, this.#sampler);
-		const texture = instances[0]?.binding.texture;
-		if (!texture) throw new Error("Nameplate draw has no atlas texture.");
 		let firstInstance = 0;
 		let drawCount = 0;
 		let instanceCount = 0;
 		while (firstInstance < instances.length) {
 			const first = instances[firstInstance];
 			if (first === undefined)
-				throw new Error("Nameplate draw run lost its first instance.");
+				throw new Error("Entity overlay draw run lost its first instance.");
+			// Runs stay consecutive to preserve blend order. Bar-only instances join any run;
+			// labeled instances split it only when they need a different atlas texture.
+			let runTexture = first.binding?.texture ?? null;
 			let endInstance = firstInstance + 1;
 			while (endInstance < instances.length) {
 				const next = instances[endInstance];
-				if (
-					next === undefined ||
-					next.binding.texture !== first.binding.texture ||
-					next.depthTest !== first.depthTest
-				)
-					break;
+				if (next === undefined || next.depthTest !== first.depthTest) break;
+				const nextTexture = next.binding?.texture ?? null;
+				if (nextTexture !== null) {
+					if (runTexture !== null && nextTexture !== runTexture) break;
+					runTexture = nextTexture;
+				}
 				endInstance += 1;
 			}
 			const count = endInstance - firstInstance;
 			if (first.depthTest) gl.enable(gl.DEPTH_TEST);
 			else gl.disable(gl.DEPTH_TEST);
-			gl.bindTexture(gl.TEXTURE_2D, first.binding.texture);
+			gl.bindTexture(gl.TEXTURE_2D, runTexture ?? this.#fallbackTexture);
 			const baseByteOffset = firstInstance * INSTANCE_STRIDE_BYTES;
 			for (const [attribute, size, floatOffset] of INSTANCE_ATTRIBUTES)
 				gl.vertexAttribPointer(
@@ -327,7 +352,7 @@ export class WebGL2NameplatePass {
 		this.#diagnostics = { drawCount, instanceCount };
 	}
 
-	diagnostics(): NameplateDrawDiagnostics {
+	diagnostics(): EntityOverlayDrawDiagnostics {
 		return this.#diagnostics;
 	}
 
@@ -342,14 +367,14 @@ export class WebGL2NameplatePass {
 	}
 
 	#requireAlive(): void {
-		if (this.#destroyed) throw new Error("Nameplate pass is destroyed.");
+		if (this.#destroyed) throw new Error("Entity overlay pass is destroyed.");
 	}
 }
 
-function createNameplateProgram(
+function createEntityOverlayProgram(
 	gl: WebGL2RenderingContext,
 	portal: boolean,
-): NameplateProgram {
+): EntityOverlayProgram {
 	const vertex = `#version 300 es
 precision highp float;
 layout(location = ${CORNER_ATTRIBUTE}) in vec2 aCorner;
@@ -358,7 +383,7 @@ layout(location = ${HEALTH_ATTRIBUTE}) in float aHealthFraction;
 layout(location = ${PLATE_SIZE_ATTRIBUTE}) in vec2 aPlateSize;
 layout(location = ${ATLAS_UV_ATTRIBUTE}) in vec4 aAtlasUvRect;
 layout(location = ${PORTAL_DOMAIN_ATTRIBUTE}) in float aPortalRenderDomain;
-uniform mat4 uNameplateClipFromAnchor;
+uniform mat4 uOverlayClipFromAnchor;
 uniform float uReferenceDistance;
 uniform vec2 uViewportSize;
 uniform vec2 uHealthBarSize;
@@ -370,9 +395,10 @@ out vec4 vAtlasUvRect;
 flat out uint vPortalRenderDomain;
 ${BILLBOARD_CLIP_GLSL}
 void main() {
-	vec4 clip = uNameplateClipFromAnchor * vec4(aAnchor, 1.0);
+	vec4 clip = uOverlayClipFromAnchor * vec4(aAnchor, 1.0);
 	float hasBar = step(0.0, aHealthFraction);
-	float barFootprintH = hasBar * (uHealthBarSize.y + uHealthBarGapBorder.x);
+	float hasPlate = step(0.5, aPlateSize.y);
+	float barFootprintH = hasBar * (uHealthBarSize.y + hasPlate * uHealthBarGapBorder.x);
 	float totalWidth = max(aPlateSize.x, hasBar * uHealthBarSize.x);
 	float totalHeight = aPlateSize.y + barFootprintH;
 	vec2 localPixel = vec2(aCorner.x * totalWidth, aCorner.y * totalHeight);
@@ -402,8 +428,10 @@ flat in uint vPortalRenderDomain;
 out vec4 outColor;
 void main() {
 	float hasBar = step(0.0, vHealthFraction);
-	float barFootprintH = hasBar * (uHealthBarSize.y + uHealthBarGapBorder.x);
-	bool inPlate = abs(vLocalPixel.x) <= vPlateSize.x * 0.5 && vLocalPixel.y >= barFootprintH && vLocalPixel.y <= barFootprintH + vPlateSize.y;
+	float hasPlate = step(0.5, vPlateSize.y);
+	float barFootprintH = hasBar * (uHealthBarSize.y + hasPlate * uHealthBarGapBorder.x);
+	// Bar-only overlays carry zero plate dimensions and never sample the atlas.
+	bool inPlate = hasPlate > 0.0 && abs(vLocalPixel.x) <= vPlateSize.x * 0.5 && vLocalPixel.y >= barFootprintH && vLocalPixel.y <= barFootprintH + vPlateSize.y;
 	vec4 color = vec4(0.0);
 	if (inPlate) {
 		vec2 plateUv = vec2(
@@ -434,7 +462,7 @@ void main() {
 }`;
 	const program = linkWebGL2Program(
 		gl,
-		portal ? "portal nameplate" : "nameplate",
+		portal ? "portal entity overlay" : "entity overlay",
 		vertex,
 		fragment,
 	);
@@ -445,7 +473,7 @@ void main() {
 			clipFromAnchor: requireWebGL2Uniform(
 				gl,
 				program,
-				"uNameplateClipFromAnchor",
+				"uOverlayClipFromAnchor",
 			),
 			healthBarBackgroundColor: requireWebGL2Uniform(
 				gl,

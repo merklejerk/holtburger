@@ -1,25 +1,28 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	WebGL2NameplatePass,
-	type NameplateDrawInstance,
-	type NameplateScopedDrawInstance,
-} from "./webgl2-nameplate-pass";
+	WebGL2EntityOverlayPass,
+	type EntityOverlayDrawInstance,
+	type EntityOverlayScopedDrawInstance,
+} from "./webgl2-entity-overlay-pass";
 import type { NameplateTextureBinding } from "./webgl2-nameplate-texture-cache";
 import { PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES } from "./portal-propagation-metadata";
 import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
 import { Vec3 } from "../math/types";
 
 const ATLAS_TEXTURE = { key: "shared-atlas" } as unknown as WebGLTexture;
+const OTHER_ATLAS_TEXTURE = { key: "other-atlas" } as unknown as WebGLTexture;
+const FALLBACK_TEXTURE = { key: "fallback" } as unknown as WebGLTexture;
 
 function binding(
 	_key: string,
 	width: number,
 	height: number,
+	texture: WebGLTexture = ATLAS_TEXTURE,
 ): NameplateTextureBinding {
 	return {
 		height,
-		texture: ATLAS_TEXTURE,
+		texture,
 		width,
 		atlasUvRect: new Float32Array([0, 0, 1, 1]),
 	};
@@ -38,6 +41,7 @@ function createFixture() {
 	const referenceDistances: number[] = [];
 	const sampler = { key: "nameplate" } as unknown as WebGLSampler;
 	const samplerBindings: Array<WebGLSampler | null> = [];
+	const textureBindings: Array<WebGLTexture | null> = [];
 	const shaderSources: string[] = [];
 	const deleted = { buffers: 0, programs: 0, vertexArrays: 0 };
 	const gl = {
@@ -65,7 +69,8 @@ function createFixture() {
 		bindBuffer: () => undefined,
 		bindSampler: (_unit: number, binding: WebGLSampler | null) =>
 			samplerBindings.push(binding),
-		bindTexture: () => undefined,
+		bindTexture: (_target: number, texture: WebGLTexture | null) =>
+			textureBindings.push(texture),
 		bindVertexArray: () => undefined,
 		blendFunc: () => undefined,
 		bufferData: () => undefined,
@@ -169,12 +174,13 @@ function createFixture() {
 		sampler,
 		samplerBindings,
 		shaderSources,
+		textureBindings,
 		uploadedFloatCounts,
 		uploadedFloats,
 	};
 }
 
-const barSettings = SHARED_FRAME_SETTINGS.nameplates.healthBar;
+const barSettings = SHARED_FRAME_SETTINGS.healthBars;
 const context = {
 	clipFromAnchor: new Float32Array(16),
 	referenceDistance: 6.25,
@@ -193,16 +199,21 @@ const context = {
 	},
 };
 
-describe("WebGL2NameplatePass", () => {
+describe("WebGL2EntityOverlayPass", () => {
 	it.each(["flat", "portal"] as const)(
 		"keeps selected plates visible without merging their depth policy into adjacent ordinary plates (%s)",
 		(path) => {
 			const fixture = createFixture();
-			const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+			const pass = new WebGL2EntityOverlayPass(
+				fixture.gl,
+				fixture.sampler,
+				FALLBACK_TEXTURE,
+			);
 			const plate = binding("shared", 64, 16);
 			const instances = [true, false, true].map((depthTest) => ({
 				anchor: Vec3.zero(),
 				binding: plate,
+				healthFraction: null,
 				depthTest,
 				renderScopeKey: "env:one",
 			}));
@@ -218,13 +229,18 @@ describe("WebGL2NameplatePass", () => {
 	it("forwards the supplied reference distance to the billboard draw program", () => {
 		const fixture = createFixture();
 
-		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
 
 		pass.draw(context, [
 			{
 				depthTest: true,
 				anchor: Vec3.zero(),
 				binding: binding("plate", 64, 16),
+				healthFraction: null,
 			},
 		]);
 		expect(fixture.referenceDistances).toEqual([context.referenceDistance]);
@@ -232,23 +248,30 @@ describe("WebGL2NameplatePass", () => {
 
 	it("uploads one ordered instance stream and draws different plates from one atlas", () => {
 		const fixture = createFixture();
-		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
 		const drudge = binding("drudge", 128, 32);
-		const instances: NameplateDrawInstance[] = [
+		const instances: EntityOverlayDrawInstance[] = [
 			{
 				depthTest: true,
 				anchor: new Vec3(1, 2, 3),
 				binding: drudge,
+				healthFraction: null,
 			},
 			{
 				depthTest: true,
 				anchor: new Vec3(4, 5, 6),
 				binding: drudge,
+				healthFraction: null,
 			},
 			{
 				depthTest: true,
 				anchor: new Vec3(7, 8, 9),
 				binding: binding("town-crier", 96, 48),
+				healthFraction: null,
 			},
 		];
 
@@ -265,7 +288,11 @@ describe("WebGL2NameplatePass", () => {
 
 	it("does no upload or draw work for an empty submission", () => {
 		const fixture = createFixture();
-		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
 
 		pass.draw(context, []);
 
@@ -277,25 +304,32 @@ describe("WebGL2NameplatePass", () => {
 
 	it("coalesces ordered instances across portal domains when they share one atlas", () => {
 		const fixture = createFixture();
-		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
 		const drudge = binding("drudge", 128, 32);
-		const instances: NameplateScopedDrawInstance[] = [
+		const instances: EntityOverlayScopedDrawInstance[] = [
 			{
 				depthTest: true,
 				anchor: new Vec3(1, 2, 3),
 				binding: drudge,
+				healthFraction: null,
 				renderScopeKey: "env:one",
 			},
 			{
 				depthTest: true,
 				anchor: new Vec3(4, 5, 6),
 				binding: drudge,
+				healthFraction: null,
 				renderScopeKey: "env:one",
 			},
 			{
 				depthTest: true,
 				anchor: new Vec3(7, 8, 9),
 				binding: drudge,
+				healthFraction: null,
 				renderScopeKey: "outdoor",
 			},
 		];
@@ -315,10 +349,15 @@ describe("WebGL2NameplatePass", () => {
 
 	it("submits fifty ordered scoped plates with one depth-tested draw", () => {
 		const fixture = createFixture();
-		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
 		const plates = Array.from({ length: 50 }, (_, index) => ({
 			anchor: new Vec3(index, 0, 0),
 			binding: binding(`plate:${index}`, 64 + index, 24),
+			healthFraction: null,
 			depthTest: true,
 			renderScopeKey: index % 2 === 0 ? "outdoor" : "indoor",
 		}));
@@ -332,14 +371,33 @@ describe("WebGL2NameplatePass", () => {
 
 	it("preserves plate order while batching distinct atlas rectangles", () => {
 		const fixture = createFixture();
-		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
 		const drudge = binding("drudge", 128, 32);
 		const townCrier = binding("town-crier", 96, 48);
 
 		pass.draw(context, [
-			{ depthTest: true, anchor: new Vec3(1, 2, 3), binding: drudge },
-			{ depthTest: true, anchor: new Vec3(4, 5, 6), binding: townCrier },
-			{ depthTest: true, anchor: new Vec3(7, 8, 9), binding: drudge },
+			{
+				depthTest: true,
+				anchor: new Vec3(1, 2, 3),
+				binding: drudge,
+				healthFraction: null,
+			},
+			{
+				depthTest: true,
+				anchor: new Vec3(4, 5, 6),
+				binding: townCrier,
+				healthFraction: null,
+			},
+			{
+				depthTest: true,
+				anchor: new Vec3(7, 8, 9),
+				binding: drudge,
+				healthFraction: null,
+			},
 		]);
 
 		expect(fixture.draws).toEqual([3]);
@@ -350,7 +408,11 @@ describe("WebGL2NameplatePass", () => {
 
 	it("packs instanced health fractions with divisor 1 and negative sentinels without splitting matching batches", () => {
 		const fixture = createFixture();
-		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
 		const drudge = binding("drudge", 128, 32);
 
 		pass.draw(context, [
@@ -390,18 +452,165 @@ describe("WebGL2NameplatePass", () => {
 		]);
 	});
 
+	it("coalesces bar-only overlays into adjacent labeled runs without atlas acquisition", () => {
+		const fixture = createFixture();
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
+		const label = binding("label", 128, 32);
+		pass.draw(context, [
+			{
+				depthTest: true,
+				anchor: new Vec3(1, 2, 3),
+				binding: null,
+				healthFraction: 0.5,
+			},
+			{
+				depthTest: true,
+				anchor: new Vec3(4, 5, 6),
+				binding: label,
+				healthFraction: null,
+			},
+			{
+				depthTest: true,
+				anchor: new Vec3(7, 8, 9),
+				binding: null,
+				healthFraction: 0.25,
+			},
+			{
+				depthTest: true,
+				anchor: new Vec3(1, 1, 1),
+				binding: label,
+				healthFraction: 0.75,
+			},
+		]);
+		expect(fixture.draws).toEqual([4]);
+		expect(fixture.textureBindings).toEqual([ATLAS_TEXTURE, null]);
+		const floats = fixture.uploadedFloats[0] ?? [];
+		// Bar-only plate dimensions and atlas rectangles are zero.
+		expect(floats.slice(4, 10)).toEqual([0, 0, 0, 0, 0, 0]);
+		expect(floats.slice(26, 32)).toEqual([0, 0, 0, 0, 0, 0]);
+		expect(floats.filter((_, index) => index % 11 === 3)).toEqual([
+			0.5, -1, 0.25, 0.75,
+		]);
+	});
+
+	it("binds the borrowed fallback texture for runs containing only bars", () => {
+		const fixture = createFixture();
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
+		pass.draw(context, [
+			{
+				depthTest: false,
+				anchor: Vec3.zero(),
+				binding: null,
+				healthFraction: 1,
+			},
+			{
+				depthTest: false,
+				anchor: Vec3.zero(),
+				binding: null,
+				healthFraction: 0,
+			},
+		]);
+		expect(fixture.draws).toEqual([2]);
+		expect(fixture.textureBindings).toEqual([FALLBACK_TEXTURE, null]);
+	});
+
+	it("splits ordered runs only for distinct label atlases or depth routes", () => {
+		const fixture = createFixture();
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
+		pass.draw(context, [
+			{
+				depthTest: true,
+				anchor: Vec3.zero(),
+				binding: binding("a", 8, 8),
+				healthFraction: null,
+			},
+			{
+				depthTest: true,
+				anchor: Vec3.zero(),
+				binding: null,
+				healthFraction: 0.5,
+			},
+			{
+				depthTest: true,
+				anchor: Vec3.zero(),
+				binding: binding("b", 8, 8, OTHER_ATLAS_TEXTURE),
+				healthFraction: null,
+			},
+			{
+				depthTest: false,
+				anchor: Vec3.zero(),
+				binding: null,
+				healthFraction: 0.5,
+			},
+		]);
+		expect(fixture.draws).toEqual([2, 1, 1]);
+		expect(fixture.textureBindings).toEqual([
+			ATLAS_TEXTURE,
+			OTHER_ATLAS_TEXTURE,
+			FALLBACK_TEXTURE,
+			null,
+		]);
+	});
+
+	it("rejects an overlay instance with neither component", () => {
+		const fixture = createFixture();
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
+		expect(() =>
+			pass.draw(context, [
+				{
+					depthTest: true,
+					anchor: Vec3.zero(),
+					binding: null,
+					healthFraction: null,
+				},
+			]),
+		).toThrow("neither label nor bar");
+	});
+
+	it("reserves the label gap only when both components are composed", () => {
+		const fixture = createFixture();
+		new WebGL2EntityOverlayPass(fixture.gl, fixture.sampler, FALLBACK_TEXTURE);
+		const vertex = fixture.shaderSources.find((source) =>
+			source.includes("aPlateSize"),
+		);
+		expect(vertex).toContain("hasPlate * uHealthBarGapBorder.x");
+	});
+
 	it("owns and releases its complete GPU resource set", () => {
 		const fixture = createFixture();
-		const pass = new WebGL2NameplatePass(fixture.gl, fixture.sampler);
+		const pass = new WebGL2EntityOverlayPass(
+			fixture.gl,
+			fixture.sampler,
+			FALLBACK_TEXTURE,
+		);
 
 		pass.destroy();
 		pass.destroy();
 
+		// The fallback texture is borrowed from the renderer and is not released here.
 		expect(fixture.deleted).toEqual({
 			buffers: 2,
 			programs: 2,
 			vertexArrays: 1,
 		});
-		expect(() => pass.draw(context, [])).toThrow("Nameplate pass is destroyed");
+		expect(() => pass.draw(context, [])).toThrow(
+			"Entity overlay pass is destroyed",
+		);
 	});
 });

@@ -57,6 +57,7 @@
 		theme={fixtureTheme}
 		audio={defaults.audio}
 		graphics={defaults.graphics}
+		nameplates={defaults.nameplates}
 		ui={defaults.ui}
 		clockFormat={defaults.clockFormat}
 		environmentOverrides={defaults.environmentOverrides}
@@ -71,6 +72,7 @@
 		onSelectTab={() => {}}
 		onAudioChange={() => {}}
 		onGraphicsChange={() => {}}
+		onNameplatesChange={() => {}}
 		onUiChange={() => {}}
 		onInputChange={(proposal) => {
 			input = accept(proposal);

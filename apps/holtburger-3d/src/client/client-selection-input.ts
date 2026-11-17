@@ -3,10 +3,8 @@ import type {
 	KeyboardInputPolicy,
 } from "../lib/input/keyboard-input-policy";
 import type { AppInput } from "../lib/input/app-input";
-import type {
-	ClientCycleSelectionController,
-	CycleFilter,
-} from "./client-cycle-selection-controller";
+import type { ClientCycleSelectionController } from "./client-cycle-selection-controller";
+import type { CycleFilter } from "./client-target-acquisition";
 import type { ClientEntitySelection } from "./client-entity-selection";
 
 /** One acquisition press; release and hold completion are mutually exclusive. */

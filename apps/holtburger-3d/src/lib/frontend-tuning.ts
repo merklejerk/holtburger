@@ -404,10 +404,15 @@ export const SHARED_FRONTEND_TUNING = {
 		},
 		/** Fallback framebuffer color exposed when no scene presentation covers a pixel. */
 		clearColor: hexRgba("#260d0dff"),
-		/** Shared initial nameplate workload and Canvas appearance for Client and Explorer. */
-		nameplates: {
+		/** Placement and perspective scale shared by labels and health bars. */
+		entityOverlays: {
 			/** Renderer-space clearance above the current rigid-pose top. */
 			anchorPaddingWorldUnits: 0.15,
+			/** Camera-forward distance where raster pixels map one-for-one to viewport pixels. */
+			referenceDistance: 4,
+		},
+		/** Shared initial nameplate workload and Canvas appearance for Client and Explorer. */
+		nameplates: {
 			appearance: {
 				fillColors: {
 					/** Hostile and attackable creatures. */
@@ -452,22 +457,25 @@ export const SHARED_FRONTEND_TUNING = {
 				portal: true,
 				selfPlayer: false,
 			},
-			/** Nearest already-visible candidates retained independently for each rendered view. */
+			/** Nearest ordinary (alert, then ambient) labels retained for each rendered view. */
 			maximumVisible: 50,
 			/** Cull once even the larger name line falls below this CSS-pixel height. */
 			minimumLegibleNamePixels: 4,
-			/** Camera-forward distance where raster pixels map one-for-one to viewport pixels. */
-			referenceDistance: 4,
-			/** Combat health bar drawn cleanly beneath active hostile monster plates. */
-			healthBar: {
-				widthCssPixels: 136,
-				heightCssPixels: 14,
-				gapCssPixels: 6,
-				borderWidthCssPixels: 2,
-				fillColor: hexRgba("#d93b34ff"),
-				backgroundColor: hexRgba("#140d0be6"),
-				borderColor: hexRgba("#705a46ff"),
-			},
+		},
+		/** Creature health bars, drawn beneath a label when both are admitted. */
+		healthBars: {
+			widthCssPixels: 136,
+			heightCssPixels: 14,
+			/** Separation from a label above the bar; omitted for bar-only overlays. */
+			gapCssPixels: 6,
+			borderWidthCssPixels: 2,
+			fillColor: hexRgba("#d93b34ff"),
+			backgroundColor: hexRgba("#140d0be6"),
+			borderColor: hexRgba("#705a46ff"),
+			/** Nearest ordinary bars retained for each rendered view. */
+			maximumVisible: 50,
+			/** Cull once the projected bar falls below this CSS-pixel height. */
+			minimumLegibleBarPixels: 2,
 		},
 		/**
 		 * Presentation color grade, applied once to the finished scene.

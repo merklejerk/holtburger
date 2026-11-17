@@ -45,16 +45,25 @@ export function repairSettingsEntry(
 				notices.add(`${label}.${key}: removed unknown entry field`);
 		}
 	}
-	const repaired = repairSettingsValue(
-		envelope.data.value,
-		schema,
-		defaults,
-		label,
-	);
+	const value =
+		label === "user.graphics" && isRecord(envelope.data.value)
+			? stripRetiredField(envelope.data.value, "alwaysShowEntityNameplates")
+			: envelope.data.value;
+	const repaired = repairSettingsValue(value, schema, defaults, label);
 	return {
 		entry: { version: 1, value: repaired.value },
 		notices: [...notices, ...repaired.notices],
 	};
+}
+
+function stripRetiredField(
+	record: Readonly<Record<string, unknown>>,
+	retiredKey: string,
+): Readonly<Record<string, unknown>> {
+	if (!Object.hasOwn(record, retiredKey)) return record;
+	const copy: Record<string, unknown> = { ...record };
+	delete copy[retiredKey];
+	return copy;
 }
 
 /** Prune section identities and versions without requiring viewport- or character-specific defaults. */

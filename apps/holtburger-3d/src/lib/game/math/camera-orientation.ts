@@ -26,6 +26,32 @@ export interface AcEntityRotation {
 }
 
 /**
+ * Normalized 2D horizontal facing unit vector `(x, y)` in AC landblock space from an entity
+ * quaternion (rotating local `+Y` forward), or null when the orientation has no horizontal
+ * component.
+ */
+export function tryEntityHorizontalForward(
+	rotation: AcEntityRotation,
+): { readonly x: number; readonly y: number } | null {
+	const magnitude = Math.hypot(rotation.w, rotation.x, rotation.y, rotation.z);
+	if (!Number.isFinite(magnitude) || magnitude <= Number.EPSILON) {
+		return null;
+	}
+	const w = rotation.w / magnitude;
+	const x = rotation.x / magnitude;
+	const y = rotation.y / magnitude;
+	const z = rotation.z / magnitude;
+	// Rotate AC's local +Y forward vector by the same quaternion convention as the host.
+	const forwardX = 2 * (x * y - w * z);
+	const forwardY = 1 - 2 * (x * x + z * z);
+	const planarMagnitude = Math.hypot(forwardX, forwardY);
+	if (!Number.isFinite(planarMagnitude) || planarMagnitude <= Number.EPSILON) {
+		return null;
+	}
+	return { x: forwardX / planarMagnitude, y: forwardY / planarMagnitude };
+}
+
+/**
  * Derive the renderer yaw for a camera looking from behind an AC entity.
  *
  * AC's local forward axis is +Y and its quaternion is Z-up. The returned renderer yaw points in
@@ -40,18 +66,11 @@ export function createEntityFacingCameraYaw(
 	if (!Number.isFinite(magnitude) || magnitude <= Number.EPSILON) {
 		throw new Error("Entity orientation must be finite and non-zero.");
 	}
-	const w = rotation.w / magnitude;
-	const x = rotation.x / magnitude;
-	const y = rotation.y / magnitude;
-	const z = rotation.z / magnitude;
-	// Rotate AC's local +Y forward vector by the same quaternion convention as the host.
-	const forwardX = 2 * (x * y - w * z);
-	const forwardY = 1 - 2 * (x * x + z * z);
-	const planarMagnitude = Math.hypot(forwardX, forwardY);
-	if (!Number.isFinite(planarMagnitude) || planarMagnitude <= Number.EPSILON) {
+	const forward = tryEntityHorizontalForward(rotation);
+	if (forward === null) {
 		throw new Error("Entity orientation has no horizontal facing direction.");
 	}
-	return Math.atan2(forwardX / planarMagnitude, forwardY / planarMagnitude);
+	return Math.atan2(forward.x, forward.y);
 }
 
 /**

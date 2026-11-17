@@ -56,35 +56,19 @@ export interface NameplateVisual {
 	readonly content: NameplateContent;
 }
 
-/** World-independent nameplate health bar styling authored at baseline density. */
-export interface NameplateHealthBarSettings {
-	readonly widthCssPixels: number;
-	readonly heightCssPixels: number;
-	readonly gapCssPixels: number;
-	readonly borderWidthCssPixels: number;
-	readonly fillColor: NameplateColor;
-	readonly backgroundColor: NameplateColor;
-	readonly borderColor: NameplateColor;
-}
-
-/** Cold frame policy bounding which entity nameplates may be submitted. */
+/** Cold frame policy for the text component of entity overlays. */
 export interface NameplateSettings {
-	/** World-space clearance above the current rigid-pose top. */
-	readonly anchorPaddingWorldUnits: number;
 	readonly appearance: NameplateAppearance;
+	/** Ambient-producer category participation; explicit interest admits every category. */
 	readonly categoryVisibility: Readonly<Record<NameplateCategory, boolean>>;
+	/** Ordinary (alert and ambient) labels retained per view; focus labels bypass this budget. */
 	readonly maximumVisible: number;
 	/** Smallest projected name-font height worth submitting, in CSS pixels. */
 	readonly minimumLegibleNamePixels: number;
-	/** Forward camera distance where a plate retains its Canvas pixel dimensions. */
-	readonly referenceDistance: number;
-	/** Optional combat health bar styling drawn under active hostile mob plates. */
-	readonly healthBar: NameplateHealthBarSettings;
 }
 
 /** Reject malformed runtime policy at the frame boundary rather than coercing it. */
 export function validateNameplateSettings(settings: NameplateSettings): void {
-	validateNonnegativeFinite(settings.anchorPaddingWorldUnits, "anchor padding");
 	if (
 		!Number.isSafeInteger(settings.maximumVisible) ||
 		settings.maximumVisible < 0
@@ -99,19 +83,20 @@ export function validateNameplateSettings(settings: NameplateSettings): void {
 		throw new Error(
 			"Nameplate minimumLegibleNamePixels must be finite and positive.",
 		);
-	if (
-		!Number.isFinite(settings.referenceDistance) ||
-		settings.referenceDistance <= 0
-	)
-		throw new Error("Nameplate referenceDistance must be finite and positive.");
 	for (const category of NAMEPLATE_CATEGORIES) {
 		if (typeof settings.categoryVisibility[category] !== "boolean")
 			throw new Error(`Nameplate category ${category} must be boolean.`);
-		validateColor(settings.appearance.fillColors[category], `${category} fill`);
+		validateNormalizedColor(
+			settings.appearance.fillColors[category],
+			`Nameplate ${category} fill`,
+		);
 	}
 	if (settings.appearance.fontFamily.trim().length === 0)
 		throw new Error("Nameplate font family must not be empty.");
-	validateColor(settings.appearance.outlineColor, "outline");
+	validateNormalizedColor(
+		settings.appearance.outlineColor,
+		"Nameplate outline",
+	);
 	validateNonnegativeFinite(
 		settings.appearance.horizontalPaddingPixels,
 		"horizontal padding",
@@ -132,34 +117,14 @@ export function validateNameplateSettings(settings: NameplateSettings): void {
 	);
 	validateTextAppearance(settings.appearance.name, "name");
 	validateTextAppearance(settings.appearance.level, "level");
-	validateHealthBarSettings(settings.healthBar);
-}
-
-function validateHealthBarSettings(settings: NameplateHealthBarSettings): void {
-	if (!Number.isFinite(settings.widthCssPixels) || settings.widthCssPixels <= 0)
-		throw new Error("Nameplate healthBar width must be finite and positive.");
-	if (
-		!Number.isFinite(settings.heightCssPixels) ||
-		settings.heightCssPixels <= 0
-	)
-		throw new Error("Nameplate healthBar height must be finite and positive.");
-	validateNonnegativeFinite(settings.gapCssPixels, "healthBar gap");
-	validateNonnegativeFinite(
-		settings.borderWidthCssPixels,
-		"healthBar border width",
-	);
-	validateColor(settings.fillColor, "healthBar fill");
-	validateColor(settings.backgroundColor, "healthBar background");
-	validateColor(settings.borderColor, "healthBar border");
 }
 
 /** Refine only the locally driven player; every other producer class remains authoritative. */
 export function resolveNameplateCategory(
 	entityClass: DynamicEntityPresentationClass,
-	identity: string,
-	viewerEntityIdentity: string | null,
+	isViewerEntity: boolean,
 ): NameplateCategory {
-	return entityClass === "player" && identity === viewerEntityIdentity
+	return entityClass === "player" && isViewerEntity
 		? "selfPlayer"
 		: entityClass;
 }
@@ -196,12 +161,16 @@ function validateNonnegativeFinite(value: number, label: string): void {
 		throw new Error(`Nameplate ${label} must be finite and nonnegative.`);
 }
 
-function validateColor(color: NameplateColor, label: string): void {
+/** Shared normalized straight-alpha color validation for every overlay component. */
+export function validateNormalizedColor(
+	color: NameplateColor,
+	label: string,
+): void {
 	for (const channel of ["red", "green", "blue", "alpha"] as const) {
 		const value = color[channel];
 		if (!Number.isFinite(value) || value < 0 || value > 1)
 			throw new Error(
-				`Nameplate ${label} color ${channel} must be finite and within [0, 1].`,
+				`${label} color ${channel} must be finite and within [0, 1].`,
 			);
 	}
 }

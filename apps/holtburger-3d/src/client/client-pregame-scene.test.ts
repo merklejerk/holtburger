@@ -45,6 +45,7 @@ function fixture(
 		})),
 		pollPortalTransitionLoading: vi.fn(),
 		setAudioListener: vi.fn(),
+		setEntityOverlayFrame: vi.fn<PregameRuntime["setEntityOverlayFrame"]>(),
 		setSceneEnvironment: vi.fn<PregameRuntime["setSceneEnvironment"]>(),
 		setPrimaryView: vi.fn<PregameRuntime["setPrimaryView"]>(),
 		queryWorldPointResidencyCandidates: vi.fn<
@@ -170,9 +171,12 @@ describe("ClientPregameScene", () => {
 		},
 	);
 
-	it("withdraws the world audio listener immediately and keeps it withdrawn across pregame frames", async () => {
+	it("withdraws the world audio listener and installs ambient overlays immediately", async () => {
 		const { scene, runtime, receipt } = fixture();
 		expect(runtime.setAudioListener.mock.calls).toEqual([[null]]);
+		expect(runtime.setEntityOverlayFrame.mock.calls).toEqual([
+			[{ kind: "ambient" }],
+		]);
 		await scene.start();
 		runtime.sceneActivationStatus.mockReturnValue({ kind: "ready", receipt });
 		scene.frame(0, 1440, 900);

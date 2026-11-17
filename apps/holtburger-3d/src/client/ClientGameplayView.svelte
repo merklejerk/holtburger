@@ -12,6 +12,7 @@
 	import type {
 		ClientChatSuppressionSettings,
 		ClientLockInteractionSettings,
+		ClientNameplateSettings,
 	} from "./client-settings-contract";
 	import type {
 		ClientGameplayOption,
@@ -280,6 +281,8 @@
 		readonly input: ClientInputConfiguration;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		readonly onGraphicsChange: (graphics: ClientGraphicsSettings) => void;
+		readonly nameplates: ClientNameplateSettings;
+		readonly onNameplatesChange: (nameplates: ClientNameplateSettings) => void;
 		readonly onUiChange: (ui: ClientUiSettings) => void;
 		/** App-owned semantic mouse movement dispatch. */
 		readonly mouseMovement: ClientMouseMovementInput;
@@ -539,6 +542,8 @@
 		input,
 		textureFilteringCapabilities,
 		onGraphicsChange,
+		nameplates,
+		onNameplatesChange,
 		onUiChange,
 		onInputChange,
 		mouseMovement,
@@ -2022,6 +2027,8 @@
 								selectedTab={settingsTab}
 								onSelectTab={(tab) => (settingsTab = tab)}
 								{onGraphicsChange}
+								{nameplates}
+								{onNameplatesChange}
 								{onUiChange}
 								{clockFormat}
 								{environmentOverrides}

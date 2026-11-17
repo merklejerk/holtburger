@@ -49,6 +49,7 @@ export type ClientPregameSceneResources = Pick<
 		| "sceneActivationStatus"
 		| "pollPortalTransitionLoading"
 		| "setAudioListener"
+		| "setEntityOverlayFrame"
 		| "setSceneEnvironment"
 		| "setPrimaryView"
 		| "resolveViewportExtent"
@@ -116,8 +117,9 @@ export class ClientPregameScene {
 		this.#reducedMotion = reducedMotion;
 		this.#resources = resources;
 		this.#location = location;
-		// Pregame owns a silent world; gameplay installs its own listener on handoff.
+		// Pregame owns a silent world and ambient overlays; gameplay installs its own policy on handoff.
 		resources.runtime.setAudioListener(null);
+		resources.runtime.setEntityOverlayFrame({ kind: "ambient" });
 		const { w, x, y, z } = location.camera.rotation;
 		const length = Math.hypot(w, x, y, z);
 		this.#camera = {

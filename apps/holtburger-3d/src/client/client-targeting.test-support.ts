@@ -1,4 +1,4 @@
-import type { CycleSelectionPresentationFrame } from "./client-cycle-selection-controller";
+import type { CycleSelectionPresentationFrame } from "./client-target-acquisition";
 import { createScaleMat4, multiplyMat4 } from "../lib/game/math/matrices";
 import {
 	cellId,

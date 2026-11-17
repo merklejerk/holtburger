@@ -104,6 +104,7 @@
 			{theme}
 			audio={settings.audio}
 			graphics={settings.graphics}
+			nameplates={settings.nameplates}
 			ui={settings.ui}
 			input={settings.input}
 			clockFormat={settings.clockFormat}
@@ -118,6 +119,9 @@
 			onEnvironmentOverridesChange={() => {}}
 			onAudioChange={() => {}}
 			onGraphicsChange={() => {}}
+			onNameplatesChange={(nameplates) => {
+				settings = { ...settings, nameplates };
+			}}
 			onInputChange={() => {}}
 			onUiChange={(ui) => {
 				settings = { ...settings, ui };

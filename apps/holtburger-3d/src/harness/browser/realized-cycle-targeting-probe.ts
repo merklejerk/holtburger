@@ -1,10 +1,10 @@
 import { formatError } from "../../lib/format-error";
 import { ClientGameplayPresentation } from "../../client/client-gameplay-presentation";
+import { ClientCycleSelectionController } from "../../client/client-cycle-selection-controller";
 import {
-	ClientCycleSelectionController,
 	sampleCycleCandidates,
 	type CycleSelectionPolicy,
-} from "../../client/client-cycle-selection-controller";
+} from "../../client/client-target-acquisition";
 import { ClientEntitySelection } from "../../client/client-entity-selection";
 import { ClientSelectionInput } from "../../client/client-selection-input";
 import { CLIENT_TUNING } from "../../client/client-tuning";

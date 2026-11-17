@@ -40,6 +40,7 @@ function fixture() {
 		sceneActivationStatus: vi.fn(() => ({ kind: "ready" as const, receipt })),
 		pollPortalTransitionLoading: vi.fn(),
 		setAudioListener: vi.fn(),
+		setEntityOverlayFrame: vi.fn(),
 		setSceneEnvironment: vi.fn(),
 		setPrimaryView: vi.fn(),
 		queryWorldPointResidencyCandidates: vi.fn(() => null),

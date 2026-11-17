@@ -34,6 +34,11 @@ import type { EntityShadowSettings } from "./entity-shadow-policy";
 import type { EntitySelectionOutlineSettings } from "./entity-selection-outline-policy";
 import type { LocalSelectionSphere } from "../selection/entity-interaction-shape";
 import type { NameplateSettings } from "./nameplate-policy";
+import type {
+	EntityOverlayLookup,
+	EntityOverlaySettings,
+	HealthBarSettings,
+} from "./entity-overlay-policy";
 
 /** Environment-cell visibility scheduler selected without rebuilding resident content. */
 export type EnvCellRenderMode = "flat" | "portal";
@@ -61,8 +66,12 @@ export interface FrameSettings {
 	readonly layerVisibility: RenderLayerVisibility;
 	/** Whether debug presentation includes GfxObjs retail's degradation chain suppresses. */
 	readonly showRetailHiddenGeometry: boolean;
-	/** Category participation and per-view submission ceiling for entity nameplates. */
+	/** Placement and perspective scale shared by labels and health bars. */
+	readonly entityOverlays: EntityOverlaySettings;
+	/** Label appearance, ambient category participation, and per-view label admission. */
 	readonly nameplates: NameplateSettings;
+	/** Health bar appearance and per-view bar admission, independent of labels. */
+	readonly healthBars: HealthBarSettings;
 	/** Optional nearby opaque-geometry occlusion and its runtime-adjustable presentation values. */
 	readonly ambientOcclusion: AmbientOcclusionSettings;
 	/** White ambient level in [0, 1] used when the camera occupies a sealed interior. */
@@ -194,8 +203,8 @@ export interface FrameInput {
 	readonly views: readonly FrameViewInput[];
 	/** Current realized selected presentation; null leaves the frame's x-ray pass idle. */
 	readonly selectionTarget: EntitySelectionTarget | null;
-	/** Current hovered root; forces its nameplate without changing selection or outlines. */
-	readonly hoveredEntityNodeId: SceneNodeId | null;
+	/** Final per-node label and health bar decisions; the renderer never reinterprets them. */
+	readonly entityOverlays: EntityOverlayLookup;
 	/** Optional frontend-resolved precise-jump indicator; absent frames draw no marker or curve. */
 	readonly worldIndicator?: WorldIndicatorInput | null;
 	/** App-owned relationships prepared from current posed scene endpoints. */
@@ -604,8 +613,17 @@ export interface RendererFrameDiagnosticsSnapshot {
 	};
 	/** Cold entity-shadow resource ownership, independent from optional timing profiling. */
 	readonly entityShadows: EntityShadowResourceDiagnostics;
-	/** Plate selection, submission, and cache facts from the latest frame and renderer lifetime. */
+	/** Label admission and atlas facts from the latest frame and renderer lifetime. */
 	readonly nameplates: RendererNameplateDiagnostics;
+	/** Health bar admission facts from the latest frame. */
+	readonly healthBars: OverlayComponentAdmissionDiagnostics;
+	/** Composed label/bar submission facts from the latest frame. */
+	readonly entityOverlays: {
+		/** Composed overlay quads submitted across all views. */
+		readonly submittedInstanceCount: number;
+		/** Ordered instanced draws submitted across all views. */
+		readonly submittedDrawCount: number;
+	};
 	/** Latest completed profile, or null before the first sample and while profiling is disabled. */
 	readonly profile: RendererFrameProfile | null;
 	readonly profilingEnabled: boolean;
@@ -620,16 +638,16 @@ export interface RendererFrameDiagnosticsSnapshot {
 	readonly compiledObjectDraws: CompiledObjectDrawDiagnostics | null;
 }
 
-/** Exact nameplate work needed to distinguish selection, budget, draw, and residency costs. */
-interface RendererNameplateDiagnostics {
-	/** Category-enabled, entity-visible, legible candidates before the per-view budget. */
+/** One overlay component's admission work across all views in the latest frame. */
+interface OverlayComponentAdmissionDiagnostics {
+	/** Admitted, entity-visible, legible components before the per-view budget. */
 	readonly eligibleCandidateCount: number;
-	/** Eligible candidates rejected solely by the configured per-view maximum. */
+	/** Eligible components rejected solely by the configured per-view maximum. */
 	readonly budgetRejectedCandidateCount: number;
-	/** Instanced quads submitted across all views in the latest frame. */
-	readonly submittedInstanceCount: number;
-	/** Physical atlas instanced draws submitted across all views in the latest frame. */
-	readonly submittedDrawCount: number;
+}
+
+/** Exact label work needed to distinguish admission, budget, and residency costs. */
+interface RendererNameplateDiagnostics extends OverlayComponentAdmissionDiagnostics {
 	/** Browser SVG preparation state for installed indicator sources. */
 	readonly icons: {
 		readonly failedCount: number;

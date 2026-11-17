@@ -104,10 +104,10 @@ import {
 	type PreparedEntitySelection,
 } from "./webgl2-entity-selection-pass";
 import {
-	type NameplateDrawInstance,
-	type NameplateScopedDrawInstance,
-	WebGL2NameplatePass,
-} from "./webgl2-nameplate-pass";
+	type EntityOverlayDrawInstance,
+	type EntityOverlayScopedDrawInstance,
+	WebGL2EntityOverlayPass,
+} from "./webgl2-entity-overlay-pass";
 import {
 	Canvas2DNameplateRasterizer,
 	type NameplateTextureBinding,
@@ -119,15 +119,23 @@ import {
 } from "./nameplate-icon-repository";
 import { NAMEPLATE_ICON_CATALOG } from "./nameplate-icon-source";
 import type { NameplateIconId } from "../systems/dynamic-presentation-source";
-import { resolveNameplateAnchor } from "./nameplate-anchor";
+import { resolveEntityOverlayAnchor } from "./entity-overlay-anchor";
 import {
-	retainLegibleNameplates,
-	retainNearestNameplates,
-} from "./nameplate-selection";
+	composeEntityOverlays,
+	maximumLegibleOverlayDepth,
+	retainLegibleOverlays,
+	retainOverlayBudget,
+	type ComposedEntityOverlay,
+} from "./entity-overlay-selection";
+import type {
+	EntityOverlayLookup,
+	EntityOverlayPriority,
+	EntityOverlaySettings,
+	HealthBarSettings,
+} from "./entity-overlay-policy";
 import {
 	resolveNameplateCategory,
 	type NameplateAppearance,
-	type NameplateHealthBarSettings,
 	type NameplateVisual,
 } from "./nameplate-policy";
 import {
@@ -705,34 +713,62 @@ interface PreparedEntityAnalyticShadows {
 	readonly outdoorSettings: EntityShadowSettings["outdoorDirectional"];
 }
 
-/** Label admission also determines its complete depth and portal visibility policy. */
-type PreparedNameplateCandidate = {
+/** Depth and portal route shared by both components of one entity's overlay. */
+type PreparedOverlayRoute =
+	| {
+			/** Selected and hovered entities draw once as overlays. */ readonly kind: "overlay";
+	  }
+	| {
+			/** Other entities test depth within their admitted domains. */ readonly kind: "scene";
+			readonly renderScopeKeys: readonly string[];
+	  };
+
+const OVERLAY_ROUTE: PreparedOverlayRoute = { kind: "overlay" };
+
+/** Renderer state before its first frame; every drawn frame replaces it from `FrameInput`. */
+const NO_ENTITY_OVERLAYS: EntityOverlayLookup = { presentation: () => null };
+
+/** One entity's shared overlay anchor; its components reference it by identity for composition. */
+interface PreparedOverlayEntity {
 	readonly anchor: Vec3;
 	readonly distanceSquared: number;
-	readonly healthFraction: number | null;
 	readonly identity: string;
-	readonly visual: NameplateVisual;
-} & (
-	| {
-			/** Selected and hovered labels draw once as overlays. */ readonly required: true;
-	  }
-	| {
-			/** Ordinary labels test depth within their admitted domains. */ readonly required: false;
-			readonly renderScopeKeys: readonly string[];
-	  }
-);
+	readonly route: PreparedOverlayRoute;
+}
 
-interface MutableNameplateDrawInstance extends NameplateDrawInstance {
+/** One independently admitted overlay component before its own legibility and budget cut. */
+interface PreparedOverlayComponent {
+	readonly entity: PreparedOverlayEntity;
+	readonly anchor: Vec3;
+	readonly distanceSquared: number;
+	readonly identity: string;
+	readonly priority: EntityOverlayPriority;
+}
+
+interface PreparedLabelComponent extends PreparedOverlayComponent {
+	readonly label: NameplateVisual;
+}
+
+interface PreparedBarComponent extends PreparedOverlayComponent {
+	readonly fraction: number;
+}
+
+type PreparedEntityOverlay = ComposedEntityOverlay<
+	PreparedOverlayEntity,
+	NameplateVisual
+>;
+
+interface MutableEntityOverlayDrawInstance extends EntityOverlayDrawInstance {
 	depthTest: boolean;
 	anchor: Vec3;
-	binding: NameplateTextureBinding;
+	binding: NameplateTextureBinding | null;
 	healthFraction: number | null;
 }
 
-interface MutableNameplateScopedDrawInstance extends NameplateScopedDrawInstance {
+interface MutableEntityOverlayScopedDrawInstance extends EntityOverlayScopedDrawInstance {
 	depthTest: boolean;
 	anchor: Vec3;
-	binding: NameplateTextureBinding;
+	binding: NameplateTextureBinding | null;
 	healthFraction: number | null;
 	renderScopeKey: string;
 }
@@ -757,12 +793,12 @@ interface PreparedSceneContributions {
 	readonly skyParticles: readonly ParticleDrawRange[];
 	/** Fixed per-receiver analytic-shadow records produced from the same visible-entry walk. */
 	readonly entityAnalyticShadows: PreparedEntityAnalyticShadows | null;
-	/** Budgeted candidates collected only from already-selected visible dynamic entities. */
-	readonly nameplates: readonly PreparedNameplateCandidate[];
-	/** Perspective scale applied by the nameplate pass for this prepared view. */
-	readonly nameplateReferenceDistance: number;
-	/** Health bar geometry and colors drawn beneath combat-tracked monster nameplates. */
-	readonly nameplateHealthBar: NameplateHealthBarSettings;
+	/** Composed admitted labels and bars, in back-to-front blend order. */
+	readonly entityOverlays: readonly PreparedEntityOverlay[];
+	/** Shared perspective scale applied by the overlay pass for this prepared view. */
+	readonly entityOverlaySettings: EntityOverlaySettings;
+	/** Health bar geometry and colors for this prepared view. */
+	readonly healthBars: HealthBarSettings;
 }
 
 /** Anchor-relative matrices and content reused by all passes for one view. */
@@ -933,11 +969,11 @@ export class WebGL2Renderer implements Renderer {
 	readonly #worldMarkerPass: WebGL2WorldMarkerPass;
 	readonly #worldTrajectoryPass: WebGL2WorldTrajectoryPass;
 	readonly #desiredTrajectoryPass: WebGL2WorldTrajectoryPass;
-	readonly #nameplatePass: WebGL2NameplatePass;
+	readonly #entityOverlayPass: WebGL2EntityOverlayPass;
 	readonly #nameplateIconRepository: NameplateIconRepository;
 	readonly #nameplateTextureCache: WebGL2NameplateTextureCache;
-	readonly #nameplateDrawScratch: MutableNameplateDrawInstance[] = [];
-	readonly #scopedNameplateDrawScratch: MutableNameplateScopedDrawInstance[] =
+	readonly #entityOverlayDrawScratch: MutableEntityOverlayDrawInstance[] = [];
+	readonly #scopedEntityOverlayDrawScratch: MutableEntityOverlayScopedDrawInstance[] =
 		[];
 	readonly #nameplatePopulationScratch: NameplateVisual[] = [];
 	readonly #nameplateIconScratch: NameplateIconId[] = [];
@@ -947,13 +983,16 @@ export class WebGL2Renderer implements Renderer {
 	#reconciledNameplateViewerIdentity: string | null | undefined = undefined;
 	#eligibleNameplateCandidateCount = 0;
 	#budgetRejectedNameplateCandidateCount = 0;
-	#submittedNameplateInstanceCount = 0;
-	#submittedNameplateDrawCount = 0;
+	#eligibleHealthBarCandidateCount = 0;
+	#budgetRejectedHealthBarCandidateCount = 0;
+	#submittedEntityOverlayInstanceCount = 0;
+	#submittedEntityOverlayDrawCount = 0;
 	#frameWorldIndicator: WorldIndicatorInput | null = null;
 	/** Current realized selected root, resolved by the runtime rather than retained by the renderer. */
 	#frameSelectionTarget: EntitySelectionTarget | null = null;
 	/** Hover admission is independent from the selected-geometry outline. */
-	#frameHoveredEntityNodeId: SceneNodeId | null = null;
+	/** Final per-node overlay decisions borrowed for the current frame. */
+	#frameEntityOverlays: EntityOverlayLookup = NO_ENTITY_OVERLAYS;
 	/** Frame-global mask geometry prepared before any camera draws. */
 	#preparedSelection: {
 		readonly pass: WebGL2EntitySelectionPass;
@@ -1307,15 +1346,6 @@ export class WebGL2Renderer implements Renderer {
 			(material, ordering) =>
 				this.#objectDrawCompiler.prepareSurface(material, ordering),
 		);
-		this.#nameplatePass = new WebGL2NameplatePass(
-			gl,
-			this.#textureSamplers.getSampler({
-				mipLevels: 1,
-				policy: "linear",
-				samplingClass: "filterable",
-				wrap: TextureWrapMode.Clamp,
-			}),
-		);
 		this.#nameplateIconRepository = new NameplateIconRepository(
 			NAMEPLATE_ICON_CATALOG,
 			browserNameplateIconServices(),
@@ -1382,6 +1412,16 @@ export class WebGL2Renderer implements Renderer {
 			}),
 			texture: createObjectFallbackTexture(gl),
 		};
+		this.#entityOverlayPass = new WebGL2EntityOverlayPass(
+			gl,
+			this.#textureSamplers.getSampler({
+				mipLevels: 1,
+				policy: "linear",
+				samplingClass: "filterable",
+				wrap: TextureWrapMode.Clamp,
+			}),
+			this.#objectFallbackBinding.texture,
+		);
 		this.frameDiagnostics = {
 			snapshot: () => ({
 				dynamicResources: {
@@ -1398,8 +1438,15 @@ export class WebGL2Renderer implements Renderer {
 					cache: this.#nameplateTextureCache.diagnostics(),
 					eligibleCandidateCount: this.#eligibleNameplateCandidateCount,
 					icons: this.#nameplateIconRepository.diagnostics(),
-					submittedDrawCount: this.#submittedNameplateDrawCount,
-					submittedInstanceCount: this.#submittedNameplateInstanceCount,
+				},
+				healthBars: {
+					budgetRejectedCandidateCount:
+						this.#budgetRejectedHealthBarCandidateCount,
+					eligibleCandidateCount: this.#eligibleHealthBarCandidateCount,
+				},
+				entityOverlays: {
+					submittedDrawCount: this.#submittedEntityOverlayDrawCount,
+					submittedInstanceCount: this.#submittedEntityOverlayInstanceCount,
 				},
 				profile: this.#frameProfiler?.getProfile() ?? null,
 				profilingEnabled: this.#frameProfiler !== null,
@@ -1602,7 +1649,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameWorldIndicator = input.worldIndicator ?? null;
 		this.#frameSummonLeashes = input.summonLeashes ?? [];
 		this.#frameSelectionTarget = input.selectionTarget;
-		this.#frameHoveredEntityNodeId = input.hoveredEntityNodeId;
+		this.#frameEntityOverlays = input.entityOverlays;
 		this.#frameViewerEntityIdentity = input.viewerEntityIdentity;
 		// Snapshotted here because the flat schedule never receives frame settings, and both
 		// schedules reach presentation through the same shared helper.
@@ -2138,7 +2185,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameProfiler?.setCpuPhase("transparencyAndOverlays");
 		this.#drawBlendedObjects(view, objectRuns.blended, shading, pipeline);
 		this.#drawWorldParticles(view, particlesByScope);
-		this.#drawNameplates(view, pipeline);
+		this.#drawEntityOverlays(view, pipeline);
 		this.#drawSummonLeashes(view);
 		this.#drawCombatEffects(view, pipeline, frame.atlas.visibility);
 		const indicator = this.#frameWorldIndicator;
@@ -2225,7 +2272,7 @@ export class WebGL2Renderer implements Renderer {
 		this.#worldMarkerPass.destroy();
 		this.#worldTrajectoryPass.destroy();
 		this.#desiredTrajectoryPass.destroy();
-		this.#nameplatePass.destroy();
+		this.#entityOverlayPass.destroy();
 		this.#nameplateTextureCache.destroy();
 		this.#nameplateIconRepository.destroy();
 		if (this.#skyProgram) this.#gl.deleteProgram(this.#skyProgram.program);
@@ -2485,7 +2532,8 @@ export class WebGL2Renderer implements Renderer {
 			transparent: ObjectColorSubmission[];
 		} = { opaque: [], additive: [], transparent: [] };
 		const dynamicOpaque: PreparedDynamicOpaque[] = [];
-		const nameplates: PreparedNameplateCandidate[] = [];
+		const labels: PreparedLabelComponent[] = [];
+		const bars: PreparedBarComponent[] = [];
 		const entityShadowsEnabled = frameSettings.entityShadows.mode !== "none";
 		const simpleOutdoorShadows = frameSettings.entityShadows.mode === "simple";
 		const storage = prepared.submissionStorage;
@@ -2732,58 +2780,22 @@ export class WebGL2Renderer implements Renderer {
 						);
 					}
 				}
-				const required =
-					this.#frameSelectionTarget?.nodeId === nodeId ||
-					this.#frameHoveredEntityNodeId === nodeId;
-				if (
-					renderTarget !== null &&
-					admission.sourceRangeGroupCount > 0 &&
-					(frameSettings.nameplates.maximumVisible > 0 || required)
-				) {
-					const facts = this.#world.getEntityNameplateFacts(nodeId);
-					if (facts !== null) {
-						const category = resolveNameplateCategory(
-							contribution.entityClass,
-							facts.identity,
-							this.#frameViewerEntityIdentity,
-						);
-						if (
-							required ||
-							frameSettings.nameplates.categoryVisibility[category]
-						) {
-							const landblockOffset = createLandblockOffset(
-								getLandblockCoordinates(renderTarget.landblockId),
-								prepared.anchorCoordinates,
-							);
-							const { anchor, distanceSquared } = resolveNameplateAnchor(
-								facts.rigidBounds,
-								contribution.footprint.placement.localToLandblock,
-								landblockOffset,
-								prepared.cameraPosition,
-								frameSettings.nameplates.anchorPaddingWorldUnits,
-							);
-							nameplates.push({
-								anchor,
-								distanceSquared,
-								healthFraction: facts.healthFraction,
-								identity: facts.identity,
-								...(required
-									? { required: true as const }
-									: {
-											required: false as const,
-											renderScopeKeys: selectedDynamicRenderScopeKeys(
-												renderTarget.renderScopes,
-												portalVisibility,
-											),
-										}),
-								visual: {
-									category,
-									content: facts.content,
-								},
-							});
-						}
-					}
-				}
+				const overlay =
+					renderTarget !== null && admission.sourceRangeGroupCount > 0
+						? this.#frameEntityOverlays.presentation(nodeId)
+						: null;
+				if (overlay !== null && renderTarget !== null)
+					this.#prepareEntityOverlay(
+						nodeId,
+						overlay,
+						renderTarget,
+						contribution,
+						prepared,
+						frameSettings.entityOverlays,
+						portalVisibility,
+						labels,
+						bars,
+					);
 				this.#selectedDynamicNodeIds.add(nodeId);
 				this.#frameSelectionMetrics.visibleDynamicEntityCount += 1;
 				this.#frameSelectionMetrics.visibleDynamicSourceRangeCount +=
@@ -2910,19 +2922,37 @@ export class WebGL2Renderer implements Renderer {
 			}
 		}
 
-		retainLegibleNameplates(
-			nameplates,
+		const { referenceDistance } = frameSettings.entityOverlays;
+		retainLegibleOverlays(
+			labels,
 			prepared.clipFromAnchor,
-			frameSettings.nameplates,
+			maximumLegibleOverlayDepth(
+				referenceDistance,
+				frameSettings.nameplates.appearance.name.fontSizePixels,
+				frameSettings.nameplates.minimumLegibleNamePixels,
+			),
+			true,
 		);
-		const eligibleNameplateCandidateCount = nameplates.length;
-		retainNearestNameplates(
-			nameplates,
-			frameSettings.nameplates.maximumVisible,
-		);
-		this.#eligibleNameplateCandidateCount += eligibleNameplateCandidateCount;
+		const eligibleLabelCount = labels.length;
+		retainOverlayBudget(labels, frameSettings.nameplates.maximumVisible);
+		this.#eligibleNameplateCandidateCount += eligibleLabelCount;
 		this.#budgetRejectedNameplateCandidateCount +=
-			eligibleNameplateCandidateCount - nameplates.length;
+			eligibleLabelCount - labels.length;
+		retainLegibleOverlays(
+			bars,
+			prepared.clipFromAnchor,
+			maximumLegibleOverlayDepth(
+				referenceDistance,
+				frameSettings.healthBars.heightCssPixels,
+				frameSettings.healthBars.minimumLegibleBarPixels,
+			),
+			false,
+		);
+		const eligibleBarCount = bars.length;
+		retainOverlayBudget(bars, frameSettings.healthBars.maximumVisible);
+		this.#eligibleHealthBarCandidateCount += eligibleBarCount;
+		this.#budgetRejectedHealthBarCandidateCount +=
+			eligibleBarCount - bars.length;
 		// Keep adjacent roots in the same landblock and physical appearance so their
 		// landblock uniform, material table, and VAO-local index binding stay resident.
 		const appearanceOrder = new Map<WebGLBuffer, number>();
@@ -2961,9 +2991,9 @@ export class WebGL2Renderer implements Renderer {
 				: null,
 			dynamicOpaque,
 			landblockOffsets,
-			nameplates,
-			nameplateReferenceDistance: frameSettings.nameplates.referenceDistance,
-			nameplateHealthBar: frameSettings.nameplates.healthBar,
+			entityOverlays: composeEntityOverlays(labels, bars),
+			entityOverlaySettings: frameSettings.entityOverlays,
+			healthBars: frameSettings.healthBars,
 			objectBuckets,
 			particles: [],
 			skyParticles: [],
@@ -3254,8 +3284,10 @@ export class WebGL2Renderer implements Renderer {
 		const metrics = this.#frameSelectionMetrics;
 		this.#eligibleNameplateCandidateCount = 0;
 		this.#budgetRejectedNameplateCandidateCount = 0;
-		this.#submittedNameplateInstanceCount = 0;
-		this.#submittedNameplateDrawCount = 0;
+		this.#eligibleHealthBarCandidateCount = 0;
+		this.#budgetRejectedHealthBarCandidateCount = 0;
+		this.#submittedEntityOverlayInstanceCount = 0;
+		this.#submittedEntityOverlayDrawCount = 0;
 		metrics.ambientOcclusion.activeBytes = 0;
 		metrics.ambientOcclusion.allocatedGenerationCount = 0;
 		metrics.ambientOcclusion.pixelCount = 0;
@@ -3672,7 +3704,7 @@ export class WebGL2Renderer implements Renderer {
 			this.#frameClockSeconds,
 			1.0,
 		);
-		this.#drawNameplates(view, null);
+		this.#drawEntityOverlays(view, null);
 		this.#drawSummonLeashes(view);
 		this.#drawCombatEffects(view, null, null);
 		const indicator = this.#frameWorldIndicator;
@@ -3725,8 +3757,7 @@ export class WebGL2Renderer implements Renderer {
 				...visual,
 				category: resolveNameplateCategory(
 					visual.entityClass,
-					identity,
-					viewerEntityIdentity,
+					identity === viewerEntityIdentity,
 				),
 			};
 			this.#nameplatePopulationScratch.push(classified);
@@ -3783,11 +3814,84 @@ export class WebGL2Renderer implements Renderer {
 		this.#frameProfiler?.setGpuSystem("other");
 	}
 
-	#drawNameplates(
+	/**
+	 * Resolve one visible entity's shared anchor and enqueue its independently admitted components.
+	 *
+	 * Entity visibility, depth, and portal domains still apply; the decision of which components
+	 * exist was made upstream and is never reinterpreted here.
+	 */
+	#prepareEntityOverlay(
+		nodeId: SceneNodeId,
+		overlay: NonNullable<ReturnType<EntityOverlayLookup["presentation"]>>,
+		renderTarget: VisibleDynamicPresentation,
+		contribution: Extract<RenderContribution, { kind: "dynamic" }>,
+		prepared: PreparedViewGeometry,
+		settings: EntityOverlaySettings,
+		portalVisibility: DynamicRenderDomainSelection | null,
+		labels: PreparedLabelComponent[],
+		bars: PreparedBarComponent[],
+	): void {
+		const facts = this.#world.getEntityOverlayFacts(nodeId);
+		if (facts === null) return;
+		const content = overlay.nameplate === null ? null : facts.content;
+		if (content === null && overlay.healthBar === null) return;
+		const landblockOffset = createLandblockOffset(
+			getLandblockCoordinates(renderTarget.landblockId),
+			prepared.anchorCoordinates,
+		);
+		const { anchor, distanceSquared } = resolveEntityOverlayAnchor(
+			facts.rigidBounds,
+			contribution.footprint.placement.localToLandblock,
+			landblockOffset,
+			prepared.cameraPosition,
+			settings.anchorPaddingWorldUnits,
+		);
+		const entity: PreparedOverlayEntity = {
+			anchor,
+			distanceSquared,
+			identity: facts.identity,
+			route:
+				overlay.occlusion === "overlay"
+					? OVERLAY_ROUTE
+					: {
+							kind: "scene",
+							renderScopeKeys: selectedDynamicRenderScopeKeys(
+								renderTarget.renderScopes,
+								portalVisibility,
+							),
+						},
+		};
+		if (content !== null && overlay.nameplate !== null)
+			labels.push({
+				entity,
+				anchor,
+				distanceSquared,
+				identity: facts.identity,
+				priority: overlay.nameplate,
+				label: {
+					category: resolveNameplateCategory(
+						contribution.entityClass,
+						facts.identity === this.#frameViewerEntityIdentity,
+					),
+					content,
+				},
+			});
+		if (overlay.healthBar !== null)
+			bars.push({
+				entity,
+				anchor,
+				distanceSquared,
+				identity: facts.identity,
+				priority: overlay.healthBar.priority,
+				fraction: overlay.healthBar.fraction,
+			});
+	}
+
+	#drawEntityOverlays(
 		view: PreparedView,
 		portalRouting: WebGL2PortalScopeAtlasPipeline | null,
 	): void {
-		const bar = view.nameplateHealthBar;
+		const bar = view.healthBars;
 		const density = this.#renderScale;
 		const context = {
 			clipFromAnchor: mat4ToFloat32Array(
@@ -3805,78 +3909,86 @@ export class WebGL2Renderer implements Renderer {
 				backgroundColor: bar.backgroundColor,
 				borderColor: bar.borderColor,
 			},
-			referenceDistance: view.nameplateReferenceDistance,
+			referenceDistance: view.entityOverlaySettings.referenceDistance,
 			viewportHeight: this.#frameHeight,
 			viewportWidth: this.#frameWidth,
 		};
-		if (view.nameplates.length === 0) {
+		if (view.entityOverlays.length === 0) {
 			if (portalRouting)
-				this.#nameplatePass.drawScoped(context, [], portalRouting);
-			else this.#nameplatePass.draw(context, []);
+				this.#entityOverlayPass.drawScoped(context, [], portalRouting);
+			else this.#entityOverlayPass.draw(context, []);
 			return;
 		}
 		this.#nameplateTextureCache.beginDraw();
+		const acquire = (overlay: PreparedEntityOverlay) =>
+			overlay.label === null
+				? null
+				: this.#nameplateTextureCache.acquire(overlay.label);
 		if (portalRouting) {
 			let instanceCount = 0;
-			for (const candidate of view.nameplates) {
-				if (candidate.required) continue;
-				const binding = this.#nameplateTextureCache.acquire(candidate.visual);
-				for (const renderScopeKey of candidate.renderScopeKeys) {
-					const instance = this.#scopedNameplateDrawScratch[instanceCount];
+			for (const overlay of view.entityOverlays) {
+				const { route } = overlay.entity;
+				if (route.kind === "overlay") continue;
+				const binding = acquire(overlay);
+				for (const renderScopeKey of route.renderScopeKeys) {
+					const instance = this.#scopedEntityOverlayDrawScratch[instanceCount];
 					if (instance === undefined) {
-						this.#scopedNameplateDrawScratch.push({
-							anchor: candidate.anchor,
-							depthTest: !candidate.required,
+						this.#scopedEntityOverlayDrawScratch.push({
+							anchor: overlay.entity.anchor,
+							depthTest: true,
 							binding,
-							healthFraction: candidate.healthFraction,
+							healthFraction: overlay.healthFraction,
 							renderScopeKey,
 						});
 					} else {
-						instance.anchor = candidate.anchor;
-						instance.depthTest = !candidate.required;
+						instance.anchor = overlay.entity.anchor;
+						instance.depthTest = true;
 						instance.binding = binding;
-						instance.healthFraction = candidate.healthFraction;
+						instance.healthFraction = overlay.healthFraction;
 						instance.renderScopeKey = renderScopeKey;
 					}
 					instanceCount += 1;
 				}
 			}
-			this.#scopedNameplateDrawScratch.length = instanceCount;
-			this.#nameplatePass.drawScoped(
+			this.#scopedEntityOverlayDrawScratch.length = instanceCount;
+			this.#entityOverlayPass.drawScoped(
 				context,
-				this.#scopedNameplateDrawScratch,
+				this.#scopedEntityOverlayDrawScratch,
 				portalRouting,
 			);
-			const scopedDiagnostics = this.#nameplatePass.diagnostics();
-			this.#submittedNameplateDrawCount += scopedDiagnostics.drawCount;
-			this.#submittedNameplateInstanceCount += scopedDiagnostics.instanceCount;
+			const scopedDiagnostics = this.#entityOverlayPass.diagnostics();
+			this.#submittedEntityOverlayDrawCount += scopedDiagnostics.drawCount;
+			this.#submittedEntityOverlayInstanceCount +=
+				scopedDiagnostics.instanceCount;
 		}
 		let instanceCount = 0;
-		for (const candidate of view.nameplates) {
-			// Selected/hovered labels draw once as overlays after ordinary scoped labels.
-			if (portalRouting !== null && !candidate.required) continue;
-			const binding = this.#nameplateTextureCache.acquire(candidate.visual);
-			const instance = this.#nameplateDrawScratch[instanceCount];
+		for (const overlay of view.entityOverlays) {
+			const { route } = overlay.entity;
+			// Overlay-route entities draw once, unscoped, after ordinary scoped overlays.
+			if (portalRouting !== null && route.kind === "scene") continue;
+			const binding = acquire(overlay);
+			const depthTest = route.kind === "scene";
+			const instance = this.#entityOverlayDrawScratch[instanceCount];
 			if (instance === undefined) {
-				this.#nameplateDrawScratch.push({
-					anchor: candidate.anchor,
-					depthTest: !candidate.required,
+				this.#entityOverlayDrawScratch.push({
+					anchor: overlay.entity.anchor,
+					depthTest,
 					binding,
-					healthFraction: candidate.healthFraction,
+					healthFraction: overlay.healthFraction,
 				});
 			} else {
-				instance.anchor = candidate.anchor;
-				instance.depthTest = !candidate.required;
+				instance.anchor = overlay.entity.anchor;
+				instance.depthTest = depthTest;
 				instance.binding = binding;
-				instance.healthFraction = candidate.healthFraction;
+				instance.healthFraction = overlay.healthFraction;
 			}
 			instanceCount += 1;
 		}
-		this.#nameplateDrawScratch.length = instanceCount;
-		this.#nameplatePass.draw(context, this.#nameplateDrawScratch);
-		const diagnostics = this.#nameplatePass.diagnostics();
-		this.#submittedNameplateDrawCount += diagnostics.drawCount;
-		this.#submittedNameplateInstanceCount += diagnostics.instanceCount;
+		this.#entityOverlayDrawScratch.length = instanceCount;
+		this.#entityOverlayPass.draw(context, this.#entityOverlayDrawScratch);
+		const diagnostics = this.#entityOverlayPass.diagnostics();
+		this.#submittedEntityOverlayDrawCount += diagnostics.drawCount;
+		this.#submittedEntityOverlayInstanceCount += diagnostics.instanceCount;
 	}
 
 	#drawWorldMarker(
@@ -4064,10 +4176,9 @@ export class WebGL2Renderer implements Renderer {
 				dynamicOpaque: [],
 				landblockOffsets: new Map([[view.anchorLandblockId, [0, 0, 0]]]),
 				// Portal space is a presentation-only authored setup, never a dynamic-entity view.
-				nameplates: [],
-				nameplateReferenceDistance:
-					SHARED_FRAME_SETTINGS.nameplates.referenceDistance,
-				nameplateHealthBar: SHARED_FRAME_SETTINGS.nameplates.healthBar,
+				entityOverlays: [],
+				entityOverlaySettings: SHARED_FRAME_SETTINGS.entityOverlays,
+				healthBars: SHARED_FRAME_SETTINGS.healthBars,
 				objectBuckets: bucketObjectSubmissions(objects),
 				particles: [],
 				skyParticles: [],

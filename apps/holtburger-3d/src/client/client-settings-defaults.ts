@@ -27,7 +27,10 @@ import type {
 } from "./client-settings-contract.js";
 import { CLIENT_TUNING } from "./client-tuning.js";
 import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults.js";
-import { CLIENT_GRAPHICS_DEFAULTS } from "./client-settings-policy.js";
+import {
+	CLIENT_GRAPHICS_DEFAULTS,
+	CLIENT_NAMEPLATE_DEFAULTS,
+} from "./client-settings-policy.js";
 import { createClientInputDefaults } from "./client-input-settings.js";
 import {
 	CLIENT_CLOCK_FORMAT_DEFAULT,
@@ -82,6 +85,7 @@ export function createDefaultClientUserSections(
 		chatSuppression: clientChatSuppressionSettingsSchema.parse({}),
 		lockInteractions: clientLockInteractionSettingsSchema.parse({}),
 		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },
+		nameplates: { ...CLIENT_NAMEPLATE_DEFAULTS },
 		audio: { ...CLIENT_AUDIO_DEFAULTS },
 		ui: {
 			showFps: false,

@@ -1052,7 +1052,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			name: "Drudge",
 		});
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 1);
-		expect(system.getNameplateFacts(nodeId)?.content).toEqual({
+		expect(system.getOverlayFacts(nodeId)?.content).toEqual({
 			strikeThrough: false,
 			indicators: [],
 			level: 13,
@@ -1084,18 +1084,11 @@ describe("DynamicEntitySystem authored ownership", () => {
 		};
 		system.updateNameplateContent(nodeId, decorated);
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 3);
-		expect(system.getNameplateFacts(nodeId)?.content.strikeThrough).toBe(true);
+		expect(system.getOverlayFacts(nodeId)?.content?.strikeThrough).toBe(true);
 		system.updateNameplateContent(nodeId, {
 			...decorated,
 			strikeThrough: false,
 		});
-		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 4);
-		expect(system.getNameplateFacts(nodeId)?.healthFraction).toBeNull();
-		system.updateNameplateHealth(nodeId, 0.42);
-		expect(system.getNameplateFacts(nodeId)?.healthFraction).toBe(0.42);
-		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 4);
-		system.updateNameplateHealth(nodeId, null);
-		expect(system.getNameplateFacts(nodeId)?.healthFraction).toBeNull();
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 4);
 		system.removeOwner("layer");
 		expect(system.getNameplatePopulationRevision()).toBe(installedRevision + 5);

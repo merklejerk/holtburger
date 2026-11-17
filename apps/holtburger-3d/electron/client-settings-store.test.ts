@@ -348,41 +348,106 @@ describe("ClientSettingsStore", () => {
 		}
 	});
 
-	it("evolves older graphics preferences and persists disabled ambient nameplates", async () => {
-		const path = await temporarySettingsPath();
-		const { alwaysShowEntityNameplates, ...olderGraphics } =
-			createDefaultClientUserSettings(
-				{ width: 1440, height: 900 },
-				8,
-				"windows",
-			).graphics;
-		const savedGraphics = { ...olderGraphics, weatherEnabled: false };
+	it("cuts over legacy alwaysShowEntityNameplates true/false identically to Smart, persists Always choices, and repairs malformed modes", async () => {
+		const defaults = createDefaultClientUserSettings(
+			{ width: 1440, height: 900 },
+			8,
+			"windows",
+		);
+		const savedGraphics = { ...defaults.graphics, weatherEnabled: false };
+
+		// Legacy true and false without nameplates section both adopt Smart and preserve graphics silently.
+		for (const legacyValue of [true, false]) {
+			const path = await temporarySettingsPath();
+			try {
+				await writeFile(
+					path,
+					JSON.stringify({
+						formatVersion: 1,
+						user: {
+							graphics: {
+								version: 1,
+								value: {
+									...savedGraphics,
+									alwaysShowEntityNameplates: legacyValue,
+								},
+							},
+						},
+						characters: {},
+					}),
+				);
+				const store = new ClientSettingsStore(path, initialWindow);
+				await store.load();
+				const loaded = await store.loadUser(userContext, "persisted");
+				expect(loaded.repaired).toEqual([]);
+				expect(loaded.settings.graphics).toEqual(savedGraphics);
+				expect(loaded.settings.nameplates).toEqual({ mode: "smart" });
+			} finally {
+				await rm(dirname(path), { recursive: true, force: true });
+			}
+		}
+
+		// Valid saved Always survives alongside a stale legacy field and persists across reloads.
+		const persistPath = await temporarySettingsPath();
 		try {
 			await writeFile(
-				path,
+				persistPath,
 				JSON.stringify({
 					formatVersion: 1,
-					user: { graphics: { version: 1, value: savedGraphics } },
+					user: {
+						graphics: {
+							version: 1,
+							value: {
+								...savedGraphics,
+								alwaysShowEntityNameplates: false,
+							},
+						},
+						nameplates: { version: 1, value: { mode: "always" } },
+					},
 					characters: {},
 				}),
 			);
-			const store = new ClientSettingsStore(path, initialWindow);
+			const store = new ClientSettingsStore(persistPath, initialWindow);
 			await store.load();
-			expect(await store.loadUser(userContext, "persisted")).toMatchObject({
-				settings: {
-					graphics: { ...savedGraphics, alwaysShowEntityNameplates },
-				},
-				repaired: [],
+			const loaded = await store.loadUser(userContext, "persisted");
+			expect(loaded.repaired).toEqual([]);
+			expect(loaded.settings.nameplates).toEqual({ mode: "always" });
+			expect(loaded.settings.graphics).toEqual(savedGraphics);
+
+			await store.saveUserPatch({
+				sections: { nameplates: { mode: "minimal" } },
 			});
-			const graphics = { ...savedGraphics, alwaysShowEntityNameplates: false };
-			await store.saveUserPatch({ sections: { graphics } });
-			const reloaded = new ClientSettingsStore(path, initialWindow);
+			const reloaded = new ClientSettingsStore(persistPath, initialWindow);
 			await reloaded.load();
 			expect(
-				(await reloaded.loadUser(userContext, "persisted")).settings.graphics,
-			).toEqual(graphics);
+				(await reloaded.loadUser(userContext, "persisted")).settings.nameplates,
+			).toEqual({ mode: "minimal" });
 		} finally {
-			await rm(dirname(path), { recursive: true, force: true });
+			await rm(dirname(persistPath), { recursive: true, force: true });
+		}
+
+		// Malformed new mode repairs to Smart and reports the invalid value.
+		const malformedPath = await temporarySettingsPath();
+		try {
+			await writeFile(
+				malformedPath,
+				JSON.stringify({
+					formatVersion: 1,
+					user: {
+						nameplates: { version: 1, value: { mode: "invalid" } },
+					},
+					characters: {},
+				}),
+			);
+			const store = new ClientSettingsStore(malformedPath, initialWindow);
+			await store.load();
+			const loaded = await store.loadUser(userContext, "persisted");
+			expect(loaded.settings.nameplates).toEqual({ mode: "smart" });
+			expect(loaded.repaired).toEqual([
+				"user.nameplates.mode: reset invalid value",
+			]);
+		} finally {
+			await rm(dirname(malformedPath), { recursive: true, force: true });
 		}
 	});
 

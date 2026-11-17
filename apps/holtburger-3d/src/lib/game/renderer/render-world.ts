@@ -114,12 +114,7 @@ interface RenderWorldSystems {
 		forEachNameplateVisual(
 			visit: (identity: string, visual: NameplateSourceVisual) => void,
 		): void;
-		getNameplateFacts(nodeId: SceneNodeId): {
-			readonly content: NameplateContent;
-			readonly healthFraction: number | null;
-			readonly identity: string;
-			readonly rigidBounds: AABB3;
-		} | null;
+		getOverlayFacts(nodeId: SceneNodeId): EntityOverlayFacts | null;
 		getVisiblePresentation(
 			nodeId: SceneNodeId,
 		): VisibleDynamicPresentation | null;
@@ -239,11 +234,12 @@ export interface EntityShadowDynamicFacts {
 	readonly spatialMembership: SceneSpatialMembership;
 }
 
-/** Display value and exact current rigid bounds for one selected dynamic entity. */
-export interface EntityNameplateFacts {
-	readonly content: NameplateContent;
-	readonly healthFraction: number | null;
+/** Anchor bounds, stable identity, and optional label content for one selected dynamic entity. */
+export interface EntityOverlayFacts {
+	/** Label display value; null still anchors an independently admitted health bar. */
+	readonly content: NameplateContent | null;
 	readonly identity: string;
+	/** Exact current rigid-pose bounds before particle-envelope expansion. */
 	readonly rigidBounds: AABB3;
 }
 
@@ -455,8 +451,8 @@ export class RenderWorld {
 		this.#systems.dynamics.forEachNameplateVisual(visit);
 	}
 
-	getEntityNameplateFacts(nodeId: SceneNodeId): EntityNameplateFacts | null {
-		return this.#systems.dynamics.getNameplateFacts(nodeId);
+	getEntityOverlayFacts(nodeId: SceneNodeId): EntityOverlayFacts | null {
+		return this.#systems.dynamics.getOverlayFacts(nodeId);
 	}
 
 	/** Check scope admission before reading exact pose bounds for indoor grounding. */

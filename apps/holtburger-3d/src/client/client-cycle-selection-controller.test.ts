@@ -12,14 +12,14 @@ import {
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
 import { ClientEntitySelection } from "./client-entity-selection";
+import { ClientCycleSelectionController } from "./client-cycle-selection-controller";
 import {
-	ClientCycleSelectionController,
 	sampleCycleCandidates,
 	type CycleCandidate,
 	type CycleFilter,
 	type CycleSelectionContext,
 	type CycleSelectionPresentationFrame,
-} from "./client-cycle-selection-controller";
+} from "./client-target-acquisition";
 import {
 	DynamicEntityMirror,
 	cellId,

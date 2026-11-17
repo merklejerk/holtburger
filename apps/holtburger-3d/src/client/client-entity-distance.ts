@@ -7,24 +7,43 @@ import type { ClientEntityMirror } from "./client-entity-mirror";
 
 type WorldPose = DynamicEntityWorldPlacement["pose"];
 
+/** AC-space vector from `origin` to `target` in meters without allocating landblock origins. */
+export function deltaBetweenDynamicWorldPoses(
+	origin: WorldPose,
+	target: WorldPose,
+): { readonly dx: number; readonly dy: number; readonly dz: number } {
+	const dx =
+		(((target.landblockId >>> 24) & 0xff) -
+			((origin.landblockId >>> 24) & 0xff)) *
+			OUTDOOR_LANDBLOCK_WORLD_SIZE +
+		target.coords.x -
+		origin.coords.x;
+	const dy =
+		(((target.landblockId >>> 16) & 0xff) -
+			((origin.landblockId >>> 16) & 0xff)) *
+			OUTDOOR_LANDBLOCK_WORLD_SIZE +
+		target.coords.y -
+		origin.coords.y;
+	const dz = target.coords.z - origin.coords.z;
+	return { dx, dy, dz };
+}
+
+/** Squared 3D Euclidean distance between accepted AC poses in meters. */
+export function distanceSquaredBetweenDynamicWorldPoses(
+	player: WorldPose,
+	target: WorldPose,
+): number {
+	const { dx, dy, dz } = deltaBetweenDynamicWorldPoses(player, target);
+	return dx * dx + dy * dy + dz * dz;
+}
+
 /** Distance between accepted AC poses in canonical scene space without allocating origins. */
 export function distanceBetweenDynamicWorldPoses(
 	player: WorldPose,
 	target: WorldPose,
 ): number {
-	const x =
-		(((player.landblockId >>> 24) & 0xff) -
-			((target.landblockId >>> 24) & 0xff)) *
-			OUTDOOR_LANDBLOCK_WORLD_SIZE +
-		player.coords.x -
-		target.coords.x;
-	const z =
-		(((player.landblockId >>> 16) & 0xff) -
-			((target.landblockId >>> 16) & 0xff)) *
-			OUTDOOR_LANDBLOCK_WORLD_SIZE +
-		player.coords.y -
-		target.coords.y;
-	return Math.hypot(x, z, player.coords.z - target.coords.z);
+	const { dx, dy, dz } = deltaBetweenDynamicWorldPoses(player, target);
+	return Math.hypot(dx, dy, dz);
 }
 
 /** Event-driven distance query for vendor and house interaction policy. */

@@ -25,13 +25,9 @@ describe("nameplate frame policy", () => {
 	});
 
 	it("classifies only the driven player as self", () => {
-		expect(resolveNameplateCategory("player", "local", "local")).toBe(
-			"selfPlayer",
-		);
-		expect(resolveNameplateCategory("player", "remote", "local")).toBe(
-			"player",
-		);
-		expect(resolveNameplateCategory("mob", "local", "local")).toBe("mob");
+		expect(resolveNameplateCategory("player", true)).toBe("selfPlayer");
+		expect(resolveNameplateCategory("player", false)).toBe("player");
+		expect(resolveNameplateCategory("mob", true)).toBe("mob");
 	});
 
 	it("rejects each malformed budget domain", () => {
@@ -56,21 +52,6 @@ describe("nameplate frame policy", () => {
 		}
 	});
 
-	it("rejects malformed world-space layout values", () => {
-		expect(() =>
-			validateNameplateSettings({
-				...SETTINGS,
-				anchorPaddingWorldUnits: -1,
-			}),
-		).toThrow("anchor padding");
-		expect(() =>
-			validateNameplateSettings({
-				...SETTINGS,
-				referenceDistance: 0,
-			}),
-		).toThrow("referenceDistance");
-	});
-
 	it("rejects malformed typography before Canvas receives it", () => {
 		expect(() =>
 			validateNameplateSettings({
@@ -93,29 +74,5 @@ describe("nameplate frame policy", () => {
 				},
 			}),
 		).toThrow("outline color alpha");
-	});
-
-	it("rejects malformed health bar dimensions or color channels", () => {
-		expect(() =>
-			validateNameplateSettings({
-				...SETTINGS,
-				healthBar: { ...SETTINGS.healthBar, widthCssPixels: 0 },
-			}),
-		).toThrow("healthBar width");
-		expect(() =>
-			validateNameplateSettings({
-				...SETTINGS,
-				healthBar: { ...SETTINGS.healthBar, borderWidthCssPixels: -1 },
-			}),
-		).toThrow("healthBar border width");
-		expect(() =>
-			validateNameplateSettings({
-				...SETTINGS,
-				healthBar: {
-					...SETTINGS.healthBar,
-					fillColor: { ...SETTINGS.healthBar.fillColor, red: 2 },
-				},
-			}),
-		).toThrow("healthBar fill color red");
 	});
 });

@@ -71,7 +71,18 @@ import {
 	type RendererFrameDiagnosticsSnapshot,
 	type WorldIndicatorInput,
 } from "../renderer/renderer";
-import { validateNameplateSettings } from "../renderer/nameplate-policy";
+import {
+	resolveAmbientEntityOverlay,
+	validateEntityOverlaySettings,
+	validateHealthBarSettings,
+	type EntityOverlayFrame,
+	type EntityOverlayLookup,
+	type EntityOverlayPresentation,
+} from "../renderer/entity-overlay-policy";
+import {
+	resolveNameplateCategory,
+	validateNameplateSettings,
+} from "../renderer/nameplate-policy";
 import { validateEntitySelectionOutlineSettings } from "../renderer/entity-selection-outline-policy";
 import { RenderWorld } from "../renderer/render-world";
 import {
@@ -934,8 +945,19 @@ export class GamePresentationRuntime {
 		number,
 		Pick<NameplateContent, "indicators" | "strikeThrough" | "nameColor">
 	>();
-	/** App-owned nameplate health bar fraction keyed by entity GUID; survives re-realization without rebuilding textures. */
-	readonly #spawnedNameplateHealth = new Map<number, number>();
+	/**
+	 * Explicit scene-driver overlay policy. Explorer defaults to ambient; pregame and gameplay
+	 * install their own frames on handoff and never fall back between them.
+	 */
+	#entityOverlayFrame: EntityOverlayFrame = { kind: "ambient" };
+	/** Synchronous per-node overlay lookup refreshed immediately before `renderer.drawFrame()`. */
+	readonly #resolvedNodeOverlays = new Map<
+		SceneNodeId,
+		EntityOverlayPresentation
+	>();
+	readonly #resolvedOverlayLookup: EntityOverlayLookup = {
+		presentation: (nodeId) => this.#resolvedNodeOverlays.get(nodeId) ?? null,
+	};
 	readonly #spawnedVisualKeys = new Map<number, string>();
 	readonly #retainedSetupVisuals = new Map<string, RetainedSetupVisual>();
 	/** Env-cell scopes, crossings, shell nodes, and portal contributions. */
@@ -2170,7 +2192,6 @@ export class GamePresentationRuntime {
 		const desired = this.#spawnedDesiredEntities.get(guid);
 		if (desired?.entity.generation !== generation) return;
 		this.#spawnedNameplateDecoration.delete(guid);
-		this.#spawnedNameplateHealth.delete(guid);
 		this.#retireDynamicPresentationTree(guid);
 		this.#forgetDesiredDynamicEntity(guid, "release-visual");
 		for (const childGuid of this.#spawnedDesiredChildren.get(guid) ?? []) {
@@ -2325,16 +2346,14 @@ export class GamePresentationRuntime {
 			});
 	}
 
-	/** Replace app-owned nameplate health fraction without re-rasterizing the nameplate texture. */
-	setDynamicEntityNameplateHealth(
-		guid: number,
-		healthFraction: number | null,
-	): void {
-		if (healthFraction === null) this.#spawnedNameplateHealth.delete(guid);
-		else this.#spawnedNameplateHealth.set(guid, healthFraction);
-		const installed = this.#spawnedPresentations.get(guid);
-		if (installed !== undefined)
-			this.#dynamics.updateNameplateHealth(installed.nodeId, healthFraction);
+	/**
+	 * Install the active scene driver's entity overlay frame.
+	 *
+	 * When `frame.kind === "resolved"`, the caller's entity map is borrowed synchronously through
+	 * the next `render()` call and must not be mutated during rendering.
+	 */
+	setEntityOverlayFrame(frame: EntityOverlayFrame): void {
+		this.#entityOverlayFrame = frame;
 	}
 
 	/** Queue one server or locally triggered PlayScript cue for the exact entity generation. */
@@ -3526,10 +3545,6 @@ export class GamePresentationRuntime {
 				strikeThrough: false,
 			}),
 		});
-		this.#dynamics.updateNameplateHealth(
-			installed.nodeId,
-			this.#spawnedNameplateHealth.get(entity.identity.guid) ?? null,
-		);
 		this.#applyDynamicEntityMotion(
 			installed,
 			entity.motion,
@@ -3995,7 +4010,9 @@ export class GamePresentationRuntime {
 
 	/** Replace frontend-selected dynamic display choices without altering world data. */
 	setFrameSettings(settings: FrameSettings): void {
+		validateEntityOverlaySettings(settings.entityOverlays);
 		validateNameplateSettings(settings.nameplates);
+		validateHealthBarSettings(settings.healthBars);
 		validateEntitySelectionOutlineSettings(settings.entitySelectionOutline);
 		this.#frameSettings = settings;
 	}
@@ -4311,13 +4328,18 @@ export class GamePresentationRuntime {
 	/** Resolve the driven entity's installed generation to the renderer's stable identity. */
 	#viewerEntityIdentity(): string | null {
 		if (this.#viewerEntityGuid === null) return null;
+		const desired = this.#spawnedDesiredEntities.get(this.#viewerEntityGuid);
 		const installed = this.#spawnedPresentations.get(this.#viewerEntityGuid);
-		return installed === undefined
-			? null
-			: dynamicEntityPresentationIdentity(
-					this.#viewerEntityGuid,
-					installed.generation,
-				);
+		if (
+			desired === undefined ||
+			installed === undefined ||
+			desired.entity.generation !== installed.generation
+		)
+			return null;
+		return dynamicEntityPresentationIdentity(
+			this.#viewerEntityGuid,
+			installed.generation,
+		);
 	}
 
 	/** Set offscreen visual sampling cadence; zero preserves full render cadence. */
@@ -4902,6 +4924,62 @@ export class GamePresentationRuntime {
 		return { kind: "opaque-loading", generation: transition.generation };
 	}
 
+	#resolveInstalledNodeId(guid: number | null): SceneNodeId | null {
+		if (guid === null) return null;
+		const desired = this.#spawnedDesiredEntities.get(guid);
+		const installed = this.#spawnedPresentations.get(guid);
+		if (
+			desired === undefined ||
+			installed === undefined ||
+			desired.entity.generation !== installed.generation
+		)
+			return null;
+		return installed.nodeId;
+	}
+
+	#resolveNodeEntityOverlays(): void {
+		this.#resolvedNodeOverlays.clear();
+		if (this.#entityOverlayFrame.kind === "resolved") {
+			for (const [guid, entry] of this.#entityOverlayFrame.entities) {
+				const desired = this.#spawnedDesiredEntities.get(guid);
+				const installed = this.#spawnedPresentations.get(guid);
+				if (
+					desired === undefined ||
+					installed === undefined ||
+					desired.entity.generation !== installed.generation ||
+					entry.generation !== installed.generation
+				)
+					continue;
+				if (
+					entry.presentation.nameplate === null &&
+					entry.presentation.healthBar === null
+				)
+					continue;
+				this.#resolvedNodeOverlays.set(installed.nodeId, entry.presentation);
+			}
+			return;
+		}
+		const selectedNodeId = this.#resolveInstalledNodeId(
+			this.#selectedEntityGuid,
+		);
+		const hoveredNodeId = this.#resolveInstalledNodeId(this.#hoveredEntityGuid);
+		const viewerNodeId = this.#resolveInstalledNodeId(this.#viewerEntityGuid);
+		this.#dynamics.forEachNameplateNode((nodeId, entityClass) => {
+			const presentation = resolveAmbientEntityOverlay({
+				hasNameplate: true,
+				category: resolveNameplateCategory(
+					entityClass,
+					nodeId === viewerNodeId,
+				),
+				isSelected: nodeId === selectedNodeId,
+				isHovered: nodeId === hoveredNodeId,
+				nameplates: this.#frameSettings.nameplates,
+			});
+			if (presentation !== null)
+				this.#resolvedNodeOverlays.set(nodeId, presentation);
+		});
+	}
+
 	/** Draw the current runtime state after a frontend-owned tick measurement. */
 	render(timeSeconds: number): PortalTransitionPresentationReceipt | null {
 		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
@@ -4976,6 +5054,7 @@ export class GamePresentationRuntime {
 		);
 		const anchorLandblockId = this.#camera.placement.landblockId;
 		const summonLeashes = this.#prepareSummons(timeSeconds);
+		this.#resolveNodeEntityOverlays();
 		const feedback = renderer.drawFrame({
 			anchorLandblockId,
 			dynamicLights:
@@ -4994,11 +5073,7 @@ export class GamePresentationRuntime {
 			portalTransition,
 			outdoorLights: this.#outdoorLights,
 			selectionTarget: this.#selectedEntityRenderTarget(),
-			hoveredEntityNodeId:
-				this.#hoveredEntityGuid === null
-					? null
-					: (this.#spawnedPresentations.get(this.#hoveredEntityGuid)?.nodeId ??
-						null),
+			entityOverlays: this.#resolvedOverlayLookup,
 			timeSeconds,
 			viewerLightOrigin: resolveViewerLightOrigin(
 				this.#viewerEntityGuid === null
@@ -5066,7 +5141,8 @@ export class GamePresentationRuntime {
 		this.#contentFailures.clear();
 		this.#spawnedVisualKeys.clear();
 		this.#spawnedNameplateDecoration.clear();
-		this.#spawnedNameplateHealth.clear();
+		this.#resolvedNodeOverlays.clear();
+		this.#entityOverlayFrame = { kind: "ambient" };
 		this.#pendingDynamicEntityCues.clear();
 		this.#presentationLights = [];
 		// Register repositories before their users; reverse-order teardown retires users first,

@@ -40,7 +40,7 @@ const releaseSchema = z
 const summarySchema = z.object({ draft: z.boolean(), tag_name: z.string() });
 
 /** The publisher appends download instructions for GitHub; native UI owns its download actions. */
-const INSTALL_SECTION = "\n\n## Install\n\n";
+const INSTALL_HEADING = "## Install";
 
 /** Keep edited release prose while excluding the publisher-owned installation appendix. */
 function publishedReleaseNotes(api: GitHub, tag: string): string {
@@ -51,7 +51,9 @@ function publishedReleaseNotes(api: GitHub, tag: string): string {
         api([`repos/${REPOSITORY}/releases/tags/${tag}`]).toString("utf8"),
       ),
     );
-  const installation = body.indexOf(INSTALL_SECTION);
+  const installation = body.search(
+    new RegExp(`^${INSTALL_HEADING}[\\t ]*\\r?$`, "m"),
+  );
   return installation === -1 ? body : body.slice(0, installation);
 }
 
@@ -367,7 +369,7 @@ export function releaseDescription(
     identity.kind === "nightly"
       ? `Development build from [${identity.commit.slice(0, 8)}](${repository}/commit/${identity.commit}). It may contain unfinished changes.\n\nNightlies replace an installed beta and share its saved settings. They do not check for updates.`
       : readFileSync(join(root, "release/RELEASE_NOTES.md"), "utf8").trim();
-  return `${notes}${INSTALL_SECTION}Choose a download from Assets below. Installation instructions:\n\n| Platform | 3D client | Terminal client (CLI) |\n| --- | --- | --- |\n| Windows x86-64 | [Setup or ZIP](${source}/3d/win32.md) | [ZIP](${source}/cli/win32.md) |\n| macOS Apple Silicon | [DMG or ZIP](${source}/3d/darwin.md) | [ZIP](${source}/cli/darwin.md) |\n| Linux x86-64 | [Flatpak or tar.gz](${source}/3d/linux.md) | [Flatpak or tar.gz](${source}/cli/linux.md) |\n\nEach bundle includes its instructions as \`QUICKSTART.md\`. The 3D client requires your own Asheron's Call game files; CLI game data is included.\n`;
+  return `${notes}\n\n${INSTALL_HEADING}\n\nChoose a download from Assets below. Installation instructions:\n\n| Platform | 3D client | Terminal client (CLI) |\n| --- | --- | --- |\n| Windows x86-64 | [Setup or ZIP](${source}/3d/win32.md) | [ZIP](${source}/cli/win32.md) |\n| macOS Apple Silicon | [DMG or ZIP](${source}/3d/darwin.md) | [ZIP](${source}/cli/darwin.md) |\n| Linux x86-64 | [Flatpak or tar.gz](${source}/3d/linux.md) | [Flatpak or tar.gz](${source}/cli/linux.md) |\n\nEach bundle includes its instructions as \`QUICKSTART.md\`. The 3D client requires your own Asheron's Call game files; CLI game data is included.\n`;
 }
 
 if (import.meta.main) {

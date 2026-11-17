@@ -279,7 +279,10 @@ test("history preserves edited release prose without GitHub installation instruc
       ? Buffer.from(JSON.stringify({ body }))
       : fixture.data;
   generateFeeds([fixture.release], api, root);
-  body = body.replace("Short highlights.", "Corrected highlights.");
+  body = body
+    .replace("Short highlights.", "Corrected highlights.")
+    .replace("\n\n## Install", "\n## Install")
+    .replaceAll("\n", "\r\n");
   generateFeeds([fixture.release], api, root);
   assert.deepEqual(readJson(join(root, "updates/v2/beta.json")), {
     schemaVersion: 2,
@@ -287,7 +290,9 @@ test("history preserves edited release prose without GitHub installation instruc
       {
         version: identity.version,
         tag: identity.tag,
-        notes: notes.replace("Short highlights.", "Corrected highlights."),
+        notes: notes
+          .replace("Short highlights.", "Corrected highlights.")
+          .replaceAll("\n", "\r\n"),
       },
     ],
     omittedVersion: null,

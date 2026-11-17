@@ -14,7 +14,7 @@ const versionSchema = z
 		"Expected a canonical beta release version",
 	);
 
-/** Notes come from the immutable source commit recorded in the verified release manifest. */
+/** Editable GitHub release notes accompany identities from verified release manifests. */
 export const releaseChangelogSchema = z
 	.object({
 		/** Canonical release version, used for native selection and display. */

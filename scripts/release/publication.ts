@@ -39,6 +39,22 @@ const releaseSchema = z
 /** Minimal records permit old/nightly tags to be ignored without downloading assets. */
 const summarySchema = z.object({ draft: z.boolean(), tag_name: z.string() });
 
+/** The publisher appends download instructions for GitHub; native UI owns its download actions. */
+const INSTALL_SECTION = "\n\n## Install\n\n";
+
+/** Keep edited release prose while excluding the publisher-owned installation appendix. */
+function publishedReleaseNotes(api: GitHub, tag: string): string {
+  const { body } = z
+    .object({ body: z.string() })
+    .parse(
+      JSON.parse(
+        api([`repos/${REPOSITORY}/releases/tags/${tag}`]).toString("utf8"),
+      ),
+    );
+  const installation = body.indexOf(INSTALL_SECTION);
+  return installation === -1 ? body : body.slice(0, installation);
+}
+
 /** The immutable tag must describe exactly the admitted manifest identity. */
 export function validateTag(tag: string, identity: Distribution): void {
   if (tag !== identity.tag)
@@ -192,6 +208,7 @@ export function generateFeeds(
   // Validate every advertised release before touching any existing output.
   const inventories = publishedInventories(releases, api);
   const [newest] = inventories;
+  // Release prose is editable; manifests still own version and asset identity.
   // Resolve every retained changelog before modifying any existing published output.
   const history =
     newest === undefined
@@ -203,11 +220,7 @@ export function generateFeeds(
             .map(({ identity }) => ({
               version: identity.version,
               tag: identity.tag,
-              notes: api([
-                `repos/${REPOSITORY}/contents/release/RELEASE_NOTES.md?ref=${identity.commit}`,
-                "--header",
-                "Accept: application/vnd.github.raw+json",
-              ]).toString("utf8"),
+              notes: publishedReleaseNotes(api, identity.tag),
             })),
           omittedVersion:
             inventories[RELEASE_HISTORY_LIMIT]?.identity.version ?? null,
@@ -354,7 +367,7 @@ export function releaseDescription(
     identity.kind === "nightly"
       ? `Development build from [${identity.commit.slice(0, 8)}](${repository}/commit/${identity.commit}). It may contain unfinished changes.\n\nNightlies replace an installed beta and share its saved settings. They do not check for updates.`
       : readFileSync(join(root, "release/RELEASE_NOTES.md"), "utf8").trim();
-  return `${notes}\n\n## Install\n\nChoose a download from Assets below. Installation instructions:\n\n| Platform | 3D client | Terminal client (CLI) |\n| --- | --- | --- |\n| Windows x86-64 | [Setup or ZIP](${source}/3d/win32.md) | [ZIP](${source}/cli/win32.md) |\n| macOS Apple Silicon | [DMG or ZIP](${source}/3d/darwin.md) | [ZIP](${source}/cli/darwin.md) |\n| Linux x86-64 | [Flatpak or tar.gz](${source}/3d/linux.md) | [Flatpak or tar.gz](${source}/cli/linux.md) |\n\nEach bundle includes its instructions as \`QUICKSTART.md\`. The 3D client requires your own Asheron's Call game files; CLI game data is included.\n`;
+  return `${notes}${INSTALL_SECTION}Choose a download from Assets below. Installation instructions:\n\n| Platform | 3D client | Terminal client (CLI) |\n| --- | --- | --- |\n| Windows x86-64 | [Setup or ZIP](${source}/3d/win32.md) | [ZIP](${source}/cli/win32.md) |\n| macOS Apple Silicon | [DMG or ZIP](${source}/3d/darwin.md) | [ZIP](${source}/cli/darwin.md) |\n| Linux x86-64 | [Flatpak or tar.gz](${source}/3d/linux.md) | [Flatpak or tar.gz](${source}/cli/linux.md) |\n\nEach bundle includes its instructions as \`QUICKSTART.md\`. The 3D client requires your own Asheron's Call game files; CLI game data is included.\n`;
 }
 
 if (import.meta.main) {

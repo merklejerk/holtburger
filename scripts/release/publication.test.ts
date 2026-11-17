@@ -82,9 +82,10 @@ test("beta reconciliation selects SemVer, supports withdrawal and preserves webs
       1,
     ),
     newer = publicRelease(distribution("release", "0.2.1", "b".repeat(40)), 2);
+  let notes = "## Changes\n\nReviewed notes";
   const api: GitHub = (args) => {
-    if (args[0].includes("/contents/"))
-      return Buffer.from("## Changes\n\nReviewed notes");
+    if (args[0].includes("/releases/tags/"))
+      return Buffer.from(JSON.stringify({ body: notes }));
     const id = basename(args[0]);
     assert.equal(args[1], "--header");
     return id === "1" ? older.data : newer.data;
@@ -110,6 +111,18 @@ test("beta reconciliation selects SemVer, supports withdrawal and preserves webs
       ),
     });
   }
+  notes = "## Changes\n\nCorrected published notes";
+  generateFeeds([newer.release, older.release], api, output);
+  const history = readJson(join(output, "updates/v2/beta.json"));
+  assert.deepEqual(history, {
+    schemaVersion: 2,
+    releases: [newer, older].map(({ manifest }) => ({
+      version: manifest.version,
+      tag: `v${manifest.version}`,
+      notes,
+    })),
+    omittedVersion: null,
+  });
   generateFeeds([older.release], api, output);
   assert.equal(
     JSON.parse(readFileSync(join(output, "updates/beta.json"), "utf8")).version,
@@ -150,8 +163,8 @@ test("bad public asset inventories and duplicate versions leave prior feed intac
     identity = distribution("release", "0.2.0", "a".repeat(40)),
     fixture = publicRelease(identity, 1);
   const api: GitHub = (args) =>
-    args[0].includes("/contents/")
-      ? Buffer.from("Reviewed notes")
+    args[0].includes("/releases/tags/")
+      ? Buffer.from(JSON.stringify({ body: "Reviewed notes" }))
       : fixture.data;
   generateFeeds([fixture.release], api, output);
   const prior = readFileSync(join(output, "updates/beta.json"));
@@ -180,7 +193,7 @@ test("bad public asset inventories and duplicate versions leave prior feed intac
   );
 });
 
-test("history backfills retained source notes and records the newest omitted version", (t) => {
+test("history reads editable release notes and records the newest omitted version", (t) => {
   const output = scratch(t);
   const fixtures = Array.from(
     { length: RELEASE_HISTORY_LIMIT + 2 },
@@ -196,9 +209,11 @@ test("history backfills retained source notes and records the newest omitted ver
   );
   const requestedNotes: string[] = [];
   const api: GitHub = (args) => {
-    if (args[0].includes("/contents/")) {
+    if (args[0].includes("/releases/tags/")) {
       requestedNotes.push(args[0]);
-      return Buffer.from(`## Changes\n\nNotes at ${args[0]}`);
+      return Buffer.from(
+        JSON.stringify({ body: `## Changes\n\nNotes at ${args[0]}` }),
+      );
     }
     const fixture = fixtures.find(
       ({ release }) => String(release.id) === basename(args[0]),
@@ -220,7 +235,7 @@ test("history backfills retained source notes and records the newest omitted ver
       .map(({ manifest }) => ({
         version: manifest.version,
         tag: `v${manifest.version}`,
-        notes: `## Changes\n\nNotes at repos/merklejerk/holtburger/contents/release/RELEASE_NOTES.md?ref=${manifest.commit}`,
+        notes: `## Changes\n\nNotes at repos/merklejerk/holtburger/releases/tags/v${manifest.version}`,
       })),
     omittedVersion: fixtures[1].manifest.version,
   });
@@ -232,9 +247,9 @@ test("history backfills retained source notes and records the newest omitted ver
       generateFeeds(
         fixtures.map(({ release }) => release),
         (args) => {
-          if (args[0].includes("/contents/")) {
-            if (missing) throw new Error("Source notes unavailable");
-            return Buffer.from(" ");
+          if (args[0].includes("/releases/tags/")) {
+            if (missing) throw new Error("Release notes unavailable");
+            return Buffer.from(JSON.stringify({ body: " " }));
           }
           return api(args);
         },
@@ -247,6 +262,36 @@ test("history backfills retained source notes and records the newest omitted ver
       priorLegacy,
     );
   }
+});
+
+test("history preserves edited release prose without GitHub installation instructions", (t) => {
+  const root = scratch(t);
+  mkdirSync(join(root, "release"));
+  const identity = distribution("release", "0.2.0", "a".repeat(40));
+  const fixture = publicRelease(identity, 1);
+  const notes =
+    "## Changes\n\nShort highlights.\n\n## Updating\n\nQuit before updating.";
+  writeFileSync(join(root, "release/RELEASE_NOTES.md"), notes);
+  let body = releaseDescription(root, identity);
+  assert.match(body, /## Install/);
+  const api: GitHub = (args) =>
+    args[0].includes("/releases/tags/")
+      ? Buffer.from(JSON.stringify({ body }))
+      : fixture.data;
+  generateFeeds([fixture.release], api, root);
+  body = body.replace("Short highlights.", "Corrected highlights.");
+  generateFeeds([fixture.release], api, root);
+  assert.deepEqual(readJson(join(root, "updates/v2/beta.json")), {
+    schemaVersion: 2,
+    releases: [
+      {
+        version: identity.version,
+        tag: identity.tag,
+        notes: notes.replace("Short highlights.", "Corrected highlights."),
+      },
+    ],
+    omittedVersion: null,
+  });
 });
 
 test("published build skipping requires source, audience, manifest and ready digest inventory", () => {

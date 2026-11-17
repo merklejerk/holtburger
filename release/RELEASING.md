@@ -61,8 +61,13 @@ Failed runs do not overwrite historical branches. Close an abandoned PR before r
 reviewing/editing an existing PR is usually simpler.
 
 Review the notes, known issues, upgrade instructions, and version rationale in the PR.
-Copilot should retain unresolved limitations unless source evidence demonstrates a fix;
-human review owns the accuracy of those judgments. If main advances while the PR is open,
+Keep Updating to one short paragraph of installation essentials and required user actions
+for this release. Omit automatic migration details, internal API changes, and historical advice.
+Copilot reassesses known issues for every release, retaining observed unresolved defects and
+current product limitations, consolidating related entries, and removing issues with source
+evidence of a fix. Historical testing caveats and lists of unperformed checks do not belong
+in known issues; removing them does not claim those checks passed. Human review owns the
+accuracy of those judgments. If main advances while the PR is open,
 review the intervening changes and update the notes as necessary. PR checks reject unrelated
 files, dependency changes hidden in version files, empty/unchanged notes, and invalid increments.
 Merge the PR to start **Release**. Its reviewed merge commit becomes that attempt's
@@ -370,10 +375,13 @@ matches the event ref, even though promotion checks out trusted main tooling; ch
 main does not change the release event’s tag ref. Promotion needs `contents: read`;
 deployment needs `pages: write` and `id-token: write`.
 
-`Publish Website and Update Feeds` reconciles the complete published release inventory after publication
-or manual dispatch. It accepts only unsuffixed `v0.x.y` tags with complete schema 2 beta
+`Publish Website and Update Feeds` reconciles the complete published release inventory after publication,
+release edits, or manual dispatch. It accepts only unsuffixed `v0.x.y` tags with complete schema 2 beta
 release manifests, exact tag/version agreement, and verified public asset inventories.
 Historical alpha/candidate tags, nightlies, and drafts are excluded before manifest loading.
+History uses the current GitHub release descriptions without the generated Install appendix,
+so editorial corrections appear after the next feed deployment. Version and asset identity
+remain bound to verified manifests.
 Malformed managed stable releases fail visibly. The highest eligible SemVer selects:
 
 `https://merklejerk.github.io/holtburger/updates/beta.json`

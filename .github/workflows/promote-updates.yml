@@ -15,7 +15,7 @@ on:
       - 'package-lock.json'
       - '.github/workflows/promote-updates.yml'
   release:
-    types: [published]
+    types: [published, edited]
   workflow_dispatch:
 
 permissions:

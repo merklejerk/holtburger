@@ -875,6 +875,19 @@ export class DynamicEntitySystem<
 		};
 	}
 
+	/** Identify the installed setup that prevents a live child from attaching. */
+	setupMissingHoldingLocation(
+		parentNodeId: SceneNodeId,
+		location: ParentLocation,
+	): DatAssetId | null {
+		const parent = this.#entities.get(parentNodeId);
+		if (!parent)
+			throw new Error(`Dynamic parent ${parentNodeId} does not exist.`);
+		return parent.source.presentation.holdingLocations.has(location)
+			? null
+			: parent.source.setupId;
+	}
+
 	/**
 	 * Pose one child by its own setup and attach its root to a named point on the parent
 	 * setup.
@@ -916,10 +929,6 @@ export class DynamicEntitySystem<
 		const attachPoint =
 			parent.source.presentation.holdingLocations.get(location);
 		if (!attachPoint) {
-			// RETAIL DIVERGENCE: retail child attachment silently refuses a missing holding
-			// location. Presentation throws because silence would hide broken mounted data; an
-			// archive/ACE census found 8 missing pairs among 2,288, all on three arrow
-			// templates carrying degenerate wield lists and none on genuine creatures.
 			throw new Error(
 				`Dynamic parent ${parentRootNodeId} has no holding location ${location}.`,
 			);

@@ -36,7 +36,6 @@ import {
 	awaitWithAbort,
 } from "../lib/async-lifetime";
 import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
-import { VisualTemplateStagingError } from "../lib/game/systems/object-visual-template-repository";
 import { formatError } from "../lib/format-error";
 import type {
 	CombatEffectOutcome,
@@ -90,6 +89,7 @@ import {
 import { Quat, Vec3 } from "../lib/game/math/types";
 import {
 	datAssetId,
+	hasUsableDynamicBody,
 	type DynamicEntityRealizationDisposition,
 	type DynamicEntityRealizationResults,
 } from "../lib/game/runtime/dynamic-entity-presentation";
@@ -379,8 +379,8 @@ export interface ClientGameplayRuntime
 	/** Play a validated head-locked portal transition cue when the runtime owns audio. */
 	playPortalTransitionSound?(kind: "enter" | "exit"): void;
 	dynamicEntityOrigin(guid: number): ResolvedSceneOrigin | null;
-	/** A source-rejected local body is a specific readiness failure, not indefinite loading. */
-	dynamicEntityContentFailure(guid: number): Error | null;
+	/** A rejected body without a usable previous appearance blocks player readiness. */
+	dynamicEntityBodyFailure(guid: number): Error | null;
 	/** Current scene placement of one realized dynamic entity. */
 	spawnedEntityPlacement(guid: number): ScenePlacement | null;
 	withSpawnedEntitySelectionGeometry<T>(
@@ -1334,8 +1334,7 @@ export class ClientGameplayPresentation {
 			this.#portalDestinationFrame = null;
 			const resolvedOrigin = resources.runtime.dynamicEntityOrigin(playerGuid);
 			if (resolvedOrigin === null) {
-				const failure =
-					resources.runtime.dynamicEntityContentFailure(playerGuid);
+				const failure = resources.runtime.dynamicEntityBodyFailure(playerGuid);
 				if (failure !== null) {
 					this.#setStatus("error", formatError(failure));
 					return { rendered: false, status: this.#status };
@@ -1834,14 +1833,8 @@ export class ClientGameplayPresentation {
 				if (event.entity.identity.guid === this.#playerGuid)
 					this.#invalidatePlayerPresentationConvergence();
 				if (this.#activeResources !== null) {
-					const completion = this.#activeResources.runtime.upsertDynamicEntity(
-						event.entity,
-					);
 					this.#observePresentationCompletion(
-						completion,
-						this.#session.state().lifecycle?.kind === "in-world"
-							? event.entity.identity.guid
-							: null,
+						this.#activeResources.runtime.upsertDynamicEntity(event.entity),
 					);
 				}
 				this.#reconcileEntityNameplate(event.entity.identity.guid);
@@ -2166,7 +2159,7 @@ export class ClientGameplayPresentation {
 			return { kind: "waiting", status: "loading-activation" };
 		}
 		const playerFailure =
-			resources.runtime.dynamicEntityContentFailure(playerGuid);
+			resources.runtime.dynamicEntityBodyFailure(playerGuid);
 		if (playerFailure !== null)
 			return { kind: "failed", diagnostic: formatError(playerFailure) };
 		if (convergedActivation.realization !== "ready") {
@@ -2360,7 +2353,7 @@ export class ClientGameplayPresentation {
 			current.receipt !== portalActivation.receipt
 		)
 			return;
-		const realization = this.#localPlayerInstalled(results)
+		const realization = this.#localPlayerHasUsableBody(results)
 			? "ready"
 			: "deferred";
 		this.#portalSceneActivation = {
@@ -2406,10 +2399,10 @@ export class ClientGameplayPresentation {
 		);
 	}
 
-	#localPlayerInstalled(results: DynamicEntityRealizationResults): boolean {
-		return (
-			this.#playerGuid !== null && results.get(this.#playerGuid) === "installed"
-		);
+	#localPlayerHasUsableBody(results: DynamicEntityRealizationResults): boolean {
+		if (this.#playerGuid === null) return false;
+		const disposition = results.get(this.#playerGuid);
+		return hasUsableDynamicBody(disposition);
 	}
 
 	#authoritativePlayerConvergenceKey(): string | null {
@@ -2421,24 +2414,11 @@ export class ClientGameplayPresentation {
 	}
 
 	/** Observe asynchronous realization failures without ordering later accepted state behind them. */
-	#observePresentationCompletion(
-		completion: Promise<unknown>,
-		liveVisualGuid: number | null = null,
-	): void {
+	#observePresentationCompletion(completion: Promise<unknown>): void {
 		const observed = awaitWithAbort(completion, this.#lifetime.signal)
 			.then(() => undefined)
 			.catch((error: unknown) => {
 				if (this.#destroyed && isAbortError(error)) return;
-				if (
-					liveVisualGuid !== null &&
-					this.#playerGuid !== null &&
-					liveVisualGuid !== this.#playerGuid &&
-					this.#session.state().lifecycle?.kind === "in-world" &&
-					error instanceof VisualTemplateStagingError
-				) {
-					console.warn(formatError(error));
-					return;
-				}
 				this.#reportError(error);
 			});
 		this.#pendingWork.add(observed);

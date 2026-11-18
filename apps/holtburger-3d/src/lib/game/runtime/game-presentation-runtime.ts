@@ -9,7 +9,10 @@ import {
 } from "./summon-presentation";
 import type { EntitySelectionBounds } from "../selection/entity-selection-bounds";
 import type { DynamicPresentationOverride } from "./dynamic-presentation-override";
-import { isContentFailure } from "../../host/host-command-result";
+import {
+	isContentFailure,
+	isHostCapacityFailure,
+} from "../../host/host-command-result";
 import { formatError } from "../../format-error";
 import { resolveObjectBehavior } from "../resolution/object-resident-classifier";
 import type { DistantAnimationSamplingPolicy } from "../../frontend-tuning-contract";
@@ -288,6 +291,7 @@ import {
 	datAssetId,
 	dynamicEntityPresentationIdentity,
 	dynamicEntityPlacement,
+	hasUsableDynamicBody,
 	type DynamicEntityRealizationDisposition,
 	type DynamicEntityRealizationResults,
 } from "./dynamic-entity-presentation";
@@ -538,7 +542,11 @@ export type DynamicEntityPresentationState =
 
 /** One unavailable prerequisite that can make a desired entity realizable later. */
 type DynamicEntityDeferral =
-	| { readonly kind: "parent"; readonly parentGuid: number }
+	| {
+			readonly kind: "parent";
+			/** Null while the parent itself is absent. */
+			readonly missingSlotSetup: DatAssetId | null;
+	  }
 	| { readonly kind: "residency"; readonly residencyKey: string };
 
 /** Runtime-owned desired level and every derived fact consumed by realization decisions. */
@@ -870,12 +878,20 @@ function dynamicEntityPresentationFailure(
 	cause: unknown,
 ): Error {
 	const subject = `Dynamic entity ${formatDynamicGuid(entity.identity.guid)} generation ${entity.generation}`;
-	if (cause instanceof VisualTemplateStagingError)
-		return new VisualTemplateStagingError(`${subject} presentation refused.`, {
-			cause,
-		});
 	const reason = cause instanceof Error ? cause.message : String(cause);
 	return new Error(`${subject} presentation refused: ${reason}`, { cause });
+}
+
+/** Resolve the requested appearance against the body that actually owns this incarnation. */
+function dynamicBodyDisposition(
+	record: DesiredDynamicEntityRecord,
+	installed: DynamicEntityPresentationRecord | undefined,
+): DynamicEntityRealizationDisposition {
+	const sameGeneration = installed?.generation === record.entity.generation;
+	if (sameGeneration && installed.visualKey === record.visualKey)
+		return "installed";
+	if (record.realization.kind !== "unavailable") return "deferred";
+	return sameGeneration ? "retained" : "unavailable";
 }
 
 /** Bridges source commits, scene topology, runtime residency, and frontend frame state. */
@@ -936,8 +952,6 @@ export class GamePresentationRuntime {
 	readonly #spawnedDesiredChildren = new Map<number, Set<number>>();
 	/** Deferred world roots keyed by the static residency fact that can wake them. */
 	readonly #spawnedDeferredResidencies = new Map<string, Set<number>>();
-	/** Deferred attachments keyed by the exact desired parent that can wake them. */
-	readonly #spawnedDeferredParents = new Map<number, Set<number>>();
 	/** Installed frontend resources keyed by producer identity. */
 	readonly #spawnedPresentations = new Map<
 		number,
@@ -2067,7 +2081,10 @@ export class GamePresentationRuntime {
 				level === null
 					? undefined
 					: this.#spawnedDesiredEntities.get(level.guid);
-			if (desired === undefined || this.#isDesiredVisualInstalled(desired))
+			if (
+				desired === undefined ||
+				this.#dynamicEntityDisposition(desired) === "installed"
+			)
 				return;
 		}
 		const previous = this.#presentationOverride;
@@ -2161,30 +2178,20 @@ export class GamePresentationRuntime {
 		}
 	}
 
-	/** Installation receipts describe the requested appearance, not merely a live incarnation. */
-	#isDesiredVisualInstalled(record: DesiredDynamicEntityRecord): boolean {
-		const guid = record.entity.identity.guid;
-		const installed = this.#spawnedPresentations.get(guid);
-		return (
-			this.#spawnedDesiredEntities.get(guid) === record &&
-			installed?.generation === record.entity.generation &&
-			installed.visualKey === record.visualKey
-		);
-	}
-
+	/** An asynchronous receipt can only describe the desired level that requested it. */
 	#dynamicEntityDisposition(
 		record: DesiredDynamicEntityRecord,
 	): DynamicEntityRealizationDisposition {
-		if (this.#isDesiredVisualInstalled(record)) return "installed";
-		return record.realization.kind === "unavailable"
-			? "unavailable"
-			: "deferred";
+		const guid = record.entity.identity.guid;
+		if (this.#spawnedDesiredEntities.get(guid) !== record) return "deferred";
+		return dynamicBodyDisposition(record, this.#spawnedPresentations.get(guid));
 	}
 
-	/** Specific source failure used to block only a local player lacking a usable presentation. */
-	dynamicEntityContentFailure(guid: number): Error | null {
+	/** Failure for an entity whose generation has no usable body. */
+	dynamicEntityBodyFailure(guid: number): Error | null {
 		const record = this.#spawnedDesiredEntities.get(guid);
-		return record?.realization.kind === "unavailable"
+		return record?.realization.kind === "unavailable" &&
+			this.#dynamicEntityDisposition(record) === "unavailable"
 			? record.realization.error
 			: null;
 	}
@@ -2209,7 +2216,7 @@ export class GamePresentationRuntime {
 			if (child !== undefined)
 				this.#deferDynamicEntity(child, {
 					kind: "parent",
-					parentGuid: guid,
+					missingSlotSetup: null,
 				});
 		}
 	}
@@ -2481,7 +2488,12 @@ export class GamePresentationRuntime {
 					? this.#prepareDynamicScriptCue(desired.scriptTableId, cue)
 					: Promise.resolve(null)
 			).catch((error: unknown) => {
-				this.#presentationFailures.push(error);
+				if (isHostCapacityFailure(error))
+					console.warn(
+						`Skipped script cue for ${formatDynamicGuid(guid)} because the host request queue is full.`,
+						error,
+					);
+				else this.#presentationFailures.push(error);
 				return null;
 			});
 			const predecessors = Promise.allSettled([tail, ready]);
@@ -2682,7 +2694,7 @@ export class GamePresentationRuntime {
 		for (const record of records) {
 			if (
 				record.entity.placement.kind === "attached" &&
-				!this.#isDesiredVisualInstalled(record)
+				this.#dynamicEntityDisposition(record) === "deferred"
 			) {
 				await this.#realizeAcceptedDynamicEntity(record);
 			}
@@ -2716,7 +2728,6 @@ export class GamePresentationRuntime {
 			this.#spawnedDesiredEntities.get(record.entity.identity.guid) !== record
 		)
 			return;
-		if (record.realization.kind === "unavailable") return;
 		const entity = record.entity;
 		if (
 			entity.placement.kind === "world" &&
@@ -2729,33 +2740,16 @@ export class GamePresentationRuntime {
 			this.#retireDynamicPresentationTree(entity.identity.guid);
 			return;
 		}
-		if (entity.placement.kind === "attached") {
-			const parent = this.#spawnedPresentations.get(entity.placement.parent);
-			const desiredParent = this.#spawnedDesiredEntities.get(
-				entity.placement.parent,
-			);
-			if (
-				parent === undefined ||
-				parent.generation !== desiredParent?.entity.generation
-			) {
-				this.#deferDynamicEntity(record, {
-					kind: "parent",
-					parentGuid: entity.placement.parent,
-				});
-				this.#retireDynamicPresentationTree(entity.identity.guid);
-				return;
-			}
-		}
+		if (this.#deferIfDynamicParentUnavailable(record)) return;
 		this.#clearDynamicEntityDeferral(record);
 		const installed = this.#spawnedPresentations.get(entity.identity.guid);
-		if (
-			installed?.generation === entity.generation &&
-			installed.visualKey === record.visualKey
-		) {
+		const disposition = dynamicBodyDisposition(record, installed);
+		if (installed !== undefined && hasUsableDynamicBody(disposition)) {
 			this.#applyDynamicEntityState(installed, record);
 			await this.#realizeDesiredDynamicChildren(entity.identity.guid);
 			return;
 		}
+		if (record.realization.kind === "unavailable") return;
 		if (record.realization.kind === "preparing") {
 			await record.realization.completion;
 			return;
@@ -2765,14 +2759,21 @@ export class GamePresentationRuntime {
 		const continuation = this.#realizeDynamicEntity(record, visual)
 			.catch((cause: unknown) => {
 				if (!this.#isDynamicRealizationEligible(record)) return null;
+				const error = dynamicEntityPresentationFailure(entity, cause);
 				if (isContentFailure(cause)) {
-					const error = dynamicEntityPresentationFailure(entity, cause);
 					this.#retireDynamicPresentationTree(guid);
-					record.realization = { kind: "unavailable", error };
 					this.reportContentFailure(error);
-					return null;
+				} else if (cause instanceof VisualTemplateStagingError) {
+					// Staging rolled back. A previous appearance still owns its scene node.
+					console.warn(formatError(error), error);
+					const retained = this.#spawnedPresentations.get(guid);
+					if (retained !== undefined)
+						this.#applyDynamicEntityState(retained, record);
+				} else {
+					throw error;
 				}
-				throw dynamicEntityPresentationFailure(entity, cause);
+				record.realization = { kind: "unavailable", error };
+				return null;
 			})
 			.finally(() => {
 				if (
@@ -2951,19 +2952,12 @@ export class GamePresentationRuntime {
 	): void {
 		this.#clearDynamicEntityDeferral(record);
 		record.deferral = deferral;
-		let guids: Set<number> | undefined;
-		if (deferral.kind === "parent") {
-			guids = this.#spawnedDeferredParents.get(deferral.parentGuid);
-			if (guids === undefined) {
-				guids = new Set();
-				this.#spawnedDeferredParents.set(deferral.parentGuid, guids);
-			}
-		} else {
-			guids = this.#spawnedDeferredResidencies.get(deferral.residencyKey);
-			if (guids === undefined) {
-				guids = new Set();
-				this.#spawnedDeferredResidencies.set(deferral.residencyKey, guids);
-			}
+		// Parent readiness already traverses the desired attachment index.
+		if (deferral.kind === "parent") return;
+		let guids = this.#spawnedDeferredResidencies.get(deferral.residencyKey);
+		if (guids === undefined) {
+			guids = new Set();
+			this.#spawnedDeferredResidencies.set(deferral.residencyKey, guids);
 		}
 		guids.add(record.entity.identity.guid);
 	}
@@ -2971,13 +2965,7 @@ export class GamePresentationRuntime {
 	/** Clear one desired record's reverse dependency entry. */
 	#clearDynamicEntityDeferral(record: DesiredDynamicEntityRecord): void {
 		const deferral = record.deferral;
-		if (deferral === null) return;
-		if (deferral.kind === "parent") {
-			const guids = this.#spawnedDeferredParents.get(deferral.parentGuid);
-			guids?.delete(record.entity.identity.guid);
-			if (guids?.size === 0)
-				this.#spawnedDeferredParents.delete(deferral.parentGuid);
-		} else {
+		if (deferral?.kind === "residency") {
 			const guids = this.#spawnedDeferredResidencies.get(deferral.residencyKey);
 			guids?.delete(record.entity.identity.guid);
 			if (guids?.size === 0)
@@ -3270,14 +3258,44 @@ export class GamePresentationRuntime {
 			this.#isDynamicEntityFrontendEvicted(entity.identity.guid)
 		)
 			return false;
-		if (entity.placement.kind === "world") return true;
-		const parent = this.#spawnedPresentations.get(entity.placement.parent);
-		return (
+		return !this.#deferIfDynamicParentUnavailable(record);
+	}
+
+	/** Check the installed setup both before loading the child and after asynchronous preparation. */
+	#deferIfDynamicParentUnavailable(
+		record: DesiredDynamicEntityRecord,
+	): boolean {
+		const { identity, placement } = record.entity;
+		if (placement.kind === "world") return false;
+		const parent = this.#spawnedPresentations.get(placement.parent);
+		let missingSlotSetup: DatAssetId | null = null;
+		if (
 			parent !== undefined &&
 			parent.generation ===
-				this.#spawnedDesiredEntities.get(entity.placement.parent)?.entity
-					.generation
-		);
+				this.#spawnedDesiredEntities.get(placement.parent)?.entity.generation
+		) {
+			// Retail behavior is to decline attachment when the setup lacks the requested slot.
+			missingSlotSetup = this.#dynamics.setupMissingHoldingLocation(
+				parent.nodeId,
+				placement.parentLocation,
+			);
+			if (missingSlotSetup === null) return false;
+		}
+		if (
+			record.deferral?.kind !== "parent" ||
+			record.deferral.missingSlotSetup !== missingSlotSetup
+		) {
+			this.#deferDynamicEntity(record, {
+				kind: "parent",
+				missingSlotSetup,
+			});
+			this.#retireDynamicPresentationTree(identity.guid);
+			if (missingSlotSetup !== null)
+				console.warn(
+					`Deferred attachment of ${formatDynamicGuid(identity.guid)} to ${formatDynamicGuid(placement.parent)}: setup ${missingSlotSetup} has no holding location ${placement.parentLocation}.`,
+				);
+		}
+		return true;
 	}
 
 	async #realizeDynamicEntity(
@@ -4766,11 +4784,11 @@ export class GamePresentationRuntime {
 			if (
 				desired === undefined ||
 				desired.authoritative.placement.kind !== "world" ||
-				installed.generation !== desired.entity.generation ||
-				installed.visualKey !== desired.visualKey ||
 				!this.#isDynamicScopeReady(desired.entity)
 			)
 				continue;
+			const disposition = dynamicBodyDisposition(desired, installed);
+			if (!hasUsableDynamicBody(disposition)) continue;
 			this.#dynamics.withSelectionGeometry(installed.nodeId, (geometry) => {
 				if (geometry.parts.length > 0) visit(desired.authoritative, geometry);
 			});

@@ -500,7 +500,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		const result = await runtime.replaceDynamicEntitySnapshot(entities);
 		expect(result.get(7)).toBe("installed");
 		expect(result.get(8)).toBe("unavailable");
-		expect(runtime.dynamicEntityContentFailure(8)?.message).toContain(
+		expect(runtime.dynamicEntityBodyFailure(8)?.message).toContain(
 			"Missing body setup",
 		);
 		expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
@@ -513,8 +513,58 @@ describe("GamePresentationRuntime view and interest control", () => {
 		expect((await runtime.reevaluateDynamicEntityEligibility()).get(8)).toBe(
 			"installed",
 		);
-		expect(runtime.dynamicEntityContentFailure(8)).toBeNull();
+		expect(runtime.dynamicEntityBodyFailure(8)).toBeNull();
 		await runtime.destroy();
+	});
+
+	it("contains a held item's staging failure during snapshot convergence and retains a usable body on replacement", async () => {
+		const runtime = await buildSpawnRuntime({
+			load: async (_setup, appearance) =>
+				appearance.paletteDid === null
+					? heldVisual()
+					: appearanceVisual(appearance.paletteDid),
+		});
+		onTestFinished(() => runtime.destroy());
+		const parent = spawnedEntity(20, 1);
+		await runtime.upsertDynamicEntity(parent);
+		const createGeometry = TEST_RESOURCES.createGeometry;
+		const allocation = vi
+			.spyOn(TEST_RESOURCES, "createGeometry")
+			.mockImplementation(() => {
+				throw new Error("geometry allocation refused");
+			});
+		try {
+			const child = attachedEntity(21, 1, 20);
+			child.presentation.appearance.paletteDid = 2;
+			const snapshot = await runtime.replaceDynamicEntitySnapshot([
+				child,
+				parent,
+			]);
+			expect(snapshot.get(20)).toBe("installed");
+			expect(snapshot.get(21)).toBe("unavailable");
+			expect(runtime.dynamicEntityBodyFailure(21)?.message).toContain(
+				"0x00000015",
+			);
+			expect(runtime.dynamicEntityBodyFailure(20)).toBeNull();
+			expect(runtime.dynamicEntityOrigin(21)).toBeNull();
+			const changed = spawnedEntity(20, 1);
+			changed.presentation.appearance.paletteDid = 3;
+			expect(await runtime.upsertDynamicEntity(changed)).toBe("retained");
+			expect(runtime.dynamicEntityBodyFailure(20)).toBeNull();
+			expect(realizedBoundsEvidence(runtime).map(({ guid }) => guid)).toEqual([
+				20,
+			]);
+			expect((await runtime.reevaluateDynamicEntityEligibility()).get(20)).toBe(
+				"retained",
+			);
+			expect(allocation).toHaveBeenCalledTimes(2);
+			allocation.mockImplementation(createGeometry);
+			runtime.retryContentFailures();
+			const retried = await runtime.reevaluateDynamicEntityEligibility();
+			expect(retried.get(20)).toBe("installed");
+		} finally {
+			allocation.mockRestore();
+		}
 	});
 
 	it("presents a real opaque loading receipt when authored portal assets are unavailable", async () => {
@@ -2166,23 +2216,35 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await runtime.destroy();
 	});
 
-	it.each(["emitter", "mesh"] as const)(
-		"contains a refused cue %s and allows a valid cue after explicit retry",
-		async (failedSource) => {
+	it.each([
+		["emitter", "missing"],
+		["mesh", "missing"],
+		["emitter", "capacity"],
+		["mesh", "capacity"],
+	] as const)(
+		"contains a refused cue %s (%s) and allows a later cue to play",
+		async (failedSource, failureKind) => {
 			const tableId: DatAssetId = "0x34000001";
 			const scriptId: DatAssetId = "0x33000001";
 			const emitterId: DatAssetId = "0x32000001";
 			const meshId: DatAssetId = "0x01000001";
 			let broken = true;
-			const refusal = new HostCommandError({
-				code: "application_error",
-				message: `Missing cue ${failedSource}`,
-				resource: {
-					kind: "missing",
-					namespace: "eor/portal",
-					file_id: Number(failedSource === "mesh" ? meshId : emitterId),
-				},
-			});
+			const refusal = new HostCommandError(
+				failureKind === "capacity"
+					? {
+							code: "pending_limit",
+							message: "Host request queue full",
+						}
+					: {
+							code: "application_error",
+							message: `Missing cue ${failedSource}`,
+							resource: {
+								kind: "missing",
+								namespace: "eor/portal",
+								file_id: Number(failedSource === "mesh" ? meshId : emitterId),
+							},
+						},
+			);
 			const runtime = await buildSpawnRuntime(
 				{ load: async () => spawnedVisual() },
 				ANIMATION_SOURCE,
@@ -2256,7 +2318,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 			).toBe(1);
 			broken = false;
-			runtime.retryContentFailures();
+			if (failureKind === "missing") runtime.retryContentFailures();
 			runtime.playDynamicEntityScriptCue({
 				guid: 7,
 				generation: 3,
@@ -5131,6 +5193,34 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			expect(runtime.dynamicEntityOrigin(9)).toBeNull();
 		} finally {
 			visualLoad.resolve(spawnedVisual());
+			await runtime.destroy();
+		}
+	});
+
+	it("keeps a child deferred until its parent setup supplies the requested slot", async () => {
+		const runtime = await buildSpawnRuntime({
+			load: async (setup) =>
+				setup === 0x02000002
+					? { ...heldVisual(), setupId: "0x02000002" }
+					: spawnedVisual(),
+		});
+		const parent = spawnedEntity(20, 1);
+		const child = attachedEntity(21, 1, 20);
+		try {
+			expect(await runtime.upsertDynamicEntity(child)).toBe("deferred");
+			expect(await runtime.upsertDynamicEntity(parent)).toBe("installed");
+			expect(await runtime.upsertDynamicEntity(child)).toBe("deferred");
+			expect(runtime.dynamicEntityOrigin(21)).toBeNull();
+			const compatible = spawnedEntity(20, 1);
+			compatible.presentation.content.setupDid = 0x02000002;
+			expect(await runtime.upsertDynamicEntity(compatible)).toBe("installed");
+			expect(runtime.dynamicEntityPresentationState(21).kind).toBe("realized");
+			expect(await runtime.upsertDynamicEntity(parent)).toBe("installed");
+			expect(runtime.dynamicEntityOrigin(21)).toBeNull();
+			expect(await runtime.upsertDynamicEntity(spawnedEntity(21, 1))).toBe(
+				"installed",
+			);
+		} finally {
 			await runtime.destroy();
 		}
 	});

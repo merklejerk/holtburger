@@ -24,9 +24,16 @@ import type {
 	SceneSpatialPlacement,
 } from "../scene";
 
-/** Runtime realization state of one accepted entity level. */
+/** A retained body is the previous usable appearance after a replacement rolled back. */
 export type DynamicEntityRealizationDisposition =
-	"installed" | "deferred" | "unavailable";
+	"installed" | "retained" | "deferred" | "unavailable";
+
+/** Whether this receipt supplies geometry that can be used for rendering and interaction. */
+export function hasUsableDynamicBody(
+	disposition: DynamicEntityRealizationDisposition | undefined,
+): boolean {
+	return disposition === "installed" || disposition === "retained";
+}
 
 /** Per-entity realization result produced at an explicit population/readiness boundary. */
 export type DynamicEntityRealizationResults = ReadonlyMap<

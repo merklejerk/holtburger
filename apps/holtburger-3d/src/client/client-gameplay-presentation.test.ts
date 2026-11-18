@@ -16,7 +16,6 @@ import {
 	entityFacts,
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
-import { VisualTemplateStagingError } from "../lib/game/systems/object-visual-template-repository";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
@@ -228,7 +227,7 @@ describe("ClientGameplayPresentation", () => {
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
 		runtime.realizationDisposition = "unavailable";
-		vi.spyOn(runtime, "dynamicEntityContentFailure").mockReturnValue(
+		vi.spyOn(runtime, "dynamicEntityBodyFailure").mockReturnValue(
 			new Error("Player body refused", {
 				cause: new Error("Missing setup dependency"),
 			}),
@@ -1630,80 +1629,84 @@ describe("ClientGameplayPresentation", () => {
 		await presentation.destroy();
 	});
 
-	it("replaces same-generation destination convergence and reveals only an installed player", async () => {
-		const playerGuid = 0x0101_0001;
-		const transport = new FakeClientTransport({
-			...currentState(playerGuid),
-			lifecycle: portalLifecycle(4),
-			worldGeneration: 4,
-		});
-		const lifecycle = new ClientLifecycleSession(transport);
-		await lifecycle.start();
-		const runtime = new FakePresentationRuntime();
-		runtime.realizationDisposition = "deferred";
-		const presentation = new ClientGameplayPresentation({
-			canvas: fakeCanvas(),
-			session: lifecycle,
-			resources: fakeOwner(runtime, activeRegion()),
-		});
+	it.each(["installed", "retained"] as const)(
+		"replaces same-generation destination convergence and reveals a player with a %s body",
+		async (usableBody) => {
+			const playerGuid = 0x0101_0001;
+			const transport = new FakeClientTransport({
+				...currentState(playerGuid),
+				lifecycle: portalLifecycle(4),
+				worldGeneration: 4,
+			});
+			const lifecycle = new ClientLifecycleSession(transport);
+			await lifecycle.start();
+			const runtime = new FakePresentationRuntime();
+			runtime.realizationDisposition = "deferred";
+			const presentation = new ClientGameplayPresentation({
+				canvas: fakeCanvas(),
+				session: lifecycle,
+				resources: fakeOwner(runtime, activeRegion()),
+			});
 
-		await presentation.start();
-		presentation.frame(1_000);
-		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
-		presentation.frame(1_016);
-		await vi.waitFor(() =>
-			expect(runtime.snapshotReplacements).toHaveLength(1),
-		);
-		expect(presentation.frame(1_032).status.kind).toBe("loading-player");
-		expect(transport.acknowledgedWorldReveals).toEqual([]);
-		transport.emit("client-dynamic-entity", {
-			kind: "ticked",
-			batch: advanceBatch(playerGuid),
-		});
-		await vi.waitFor(() => expect(runtime.advances).toHaveLength(1));
-		expect(runtime.snapshotReplacements).toHaveLength(1);
-		const eligibilityReevaluationsBefore = runtime.eligibilityReevaluationCount;
+			await presentation.start();
+			presentation.frame(1_000);
+			await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
+			presentation.frame(1_016);
+			await vi.waitFor(() =>
+				expect(runtime.snapshotReplacements).toHaveLength(1),
+			);
+			expect(presentation.frame(1_032).status.kind).toBe("loading-player");
+			expect(transport.acknowledgedWorldReveals).toEqual([]);
+			transport.emit("client-dynamic-entity", {
+				kind: "ticked",
+				batch: advanceBatch(playerGuid),
+			});
+			await vi.waitFor(() => expect(runtime.advances).toHaveLength(1));
+			expect(runtime.snapshotReplacements).toHaveLength(1);
+			const eligibilityReevaluationsBefore =
+				runtime.eligibilityReevaluationCount;
 
-		runtime.realizationDisposition = "installed";
-		transport.emit("client-dynamic-entity", {
-			kind: "upserted",
-			entity: view(playerGuid, 0x0100_0001),
-		});
-		presentation.frame(1_048);
-		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(2));
-		expect(runtime.completedActivations).toEqual([4]);
-		presentation.frame(1_064);
-		await vi.waitFor(() =>
-			expect(runtime.eligibilityReevaluationCount).toBeGreaterThan(
-				eligibilityReevaluationsBefore,
-			),
-		);
-		expect(runtime.upserted).toHaveLength(1);
+			runtime.realizationDisposition = usableBody;
+			transport.emit("client-dynamic-entity", {
+				kind: "upserted",
+				entity: view(playerGuid, 0x0100_0001),
+			});
+			presentation.frame(1_048);
+			await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(2));
+			expect(runtime.completedActivations).toEqual([4]);
+			presentation.frame(1_064);
+			await vi.waitFor(() =>
+				expect(runtime.eligibilityReevaluationCount).toBeGreaterThan(
+					eligibilityReevaluationsBefore,
+				),
+			);
+			expect(runtime.upserted).toHaveLength(1);
 
-		await vi.waitFor(() => {
-			expect(presentation.frame(2_000).rendered).toBe(true);
+			await vi.waitFor(() => {
+				expect(presentation.frame(2_000).rendered).toBe(true);
+				expect(runtime.portalTransitions.at(-1)).toMatchObject({
+					kind: "tunnel-to-destination",
+					progress: 0,
+				});
+			});
+			expect(runtime.portalTransitionSounds).toEqual(["enter", "exit"]);
+			expect(presentation.frame(2_500).rendered).toBe(true);
+			expect(runtime.portalTransitionSounds).toEqual(["enter", "exit"]);
 			expect(runtime.portalTransitions.at(-1)).toMatchObject({
 				kind: "tunnel-to-destination",
-				progress: 0,
+				progress: 0.5,
 			});
-		});
-		expect(runtime.portalTransitionSounds).toEqual(["enter", "exit"]);
-		expect(presentation.frame(2_500).rendered).toBe(true);
-		expect(runtime.portalTransitionSounds).toEqual(["enter", "exit"]);
-		expect(runtime.portalTransitions.at(-1)).toMatchObject({
-			kind: "tunnel-to-destination",
-			progress: 0.5,
-		});
-		expect(transport.acknowledgedWorldReveals).toEqual([]);
-		expect(presentation.frame(3_000).rendered).toBe(true);
-		expect(runtime.portalTransitions.at(-1)).toMatchObject({
-			kind: "destination-only-awaiting-handoff",
-		});
-		await vi.waitFor(() =>
-			expect(transport.acknowledgedWorldReveals).toEqual([4]),
-		);
-		await presentation.destroy();
-	});
+			expect(transport.acknowledgedWorldReveals).toEqual([]);
+			expect(presentation.frame(3_000).rendered).toBe(true);
+			expect(runtime.portalTransitions.at(-1)).toMatchObject({
+				kind: "destination-only-awaiting-handoff",
+			});
+			await vi.waitFor(() =>
+				expect(transport.acknowledgedWorldReveals).toEqual([4]),
+			);
+			await presentation.destroy();
+		},
+	);
 
 	it("keeps portal space visible for an unsettled fallback camera", async () => {
 		const playerGuid = 0x0101_0001;
@@ -2029,54 +2032,6 @@ describe("ClientGameplayPresentation", () => {
 			await presentation.destroy();
 		}
 	});
-
-	it.each(["remote", "local"] as const)(
-		"routes a rolled-back live %s visual failure according to its scope",
-		async (scope) => {
-			const playerGuid = 0x0101_0001;
-			const entityGuid = scope === "local" ? playerGuid : 0x0101_0002;
-			const transport = new FakeClientTransport(currentState(playerGuid));
-			const lifecycle = new ClientLifecycleSession(transport);
-			await lifecycle.start();
-			const runtime = new FakePresentationRuntime();
-			const onError = vi.fn();
-			const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
-			const presentation = new ClientGameplayPresentation({
-				canvas: fakeCanvas(),
-				session: lifecycle,
-				onError,
-				resources: fakeOwner(runtime, activeRegion()),
-			});
-			try {
-				await presentation.start();
-				const previous = presentation.status();
-				const failure = new VisualTemplateStagingError("visual refused", {
-					cause: new Error("geometry upload refused"),
-				});
-				runtime.failNextUpsertRealization(failure);
-				transport.emit("client-dynamic-entity", {
-					kind: "upserted",
-					entity: view(entityGuid),
-				});
-				if (scope === "remote") {
-					await vi.waitFor(() =>
-						expect(warning).toHaveBeenCalledWith(
-							"visual refused\nCaused by: geometry upload refused",
-						),
-					);
-					expect(onError).not.toHaveBeenCalled();
-					expect(presentation.status()).toEqual(previous);
-				} else {
-					await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(failure));
-					expect(warning).not.toHaveBeenCalled();
-					expect(presentation.status().kind).toBe("error");
-				}
-			} finally {
-				warning.mockRestore();
-				await presentation.destroy();
-			}
-		},
-	);
 
 	it("holds rendering and rejects lagged advances during mirror recovery", async () => {
 		const transport = new FakeClientTransport(currentState(0x0100_0001));
@@ -3022,7 +2977,7 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 		this.clearPresentationCount += 1;
 	}
 
-	dynamicEntityContentFailure(): Error | null {
+	dynamicEntityBodyFailure(): Error | null {
 		return null;
 	}
 

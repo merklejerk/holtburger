@@ -1,35 +1,18 @@
-import { offerPackFixture } from "./client-offer-pack-fixture";
 import { entityFacts } from "../../client/client-entity-mirror.test-support";
-import {
-	tradeRequestSchema,
-	type TradeState,
-} from "../../client/client-trade-contract";
+import type { TradeState } from "../../client/client-trade-contract";
 
-/** Typed server publications for the production selected-player and trade HUD paths. */
+/** Synthetic trade session publications for the interactive UI showcase. */
 export function createTradeFixture(options: {
 	readonly emit: (event: string, payload: unknown) => void;
 	readonly baseline: () => void;
 	readonly select: (guid: number) => void;
-	readonly commands: readonly {
-		readonly command: string;
-		readonly args: Record<string, unknown> | undefined;
-	}[];
 }) {
 	const partner = 5001;
 	const item = 6001;
 	let trade: TradeState | null = null;
-	const publish = (pending_items: readonly number[] = []) =>
-		options.emit("client-trade-snapshot", { trade, pending_items });
+	const publish = () =>
+		options.emit("client-trade-snapshot", { trade, pending_items: [] });
 	return {
-		packs() {
-			options.emit("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				removed: [],
-				upserts: offerPackFixture(0),
-			});
-		},
 		begin() {
 			options.baseline();
 			trade = null;
@@ -83,9 +66,6 @@ export function createTradeFixture(options: {
 			};
 			publish();
 		},
-		pending() {
-			publish([item]);
-		},
 		acknowledge() {
 			if (trade === null) throw new Error("Trade fixture is not registered");
 			trade = {
@@ -95,59 +75,6 @@ export function createTradeFixture(options: {
 				partner_side: { ...trade.partner_side, items: [item + 1] },
 			};
 			publish();
-		},
-		accepted(side: "self" | "partner", accepted: boolean) {
-			if (trade === null) throw new Error("Trade fixture is not registered");
-			trade =
-				side === "self"
-					? { ...trade, self_side: { ...trade.self_side, accepted } }
-					: { ...trade, partner_side: { ...trade.partner_side, accepted } };
-			publish();
-		},
-		/** A bot-sized offer exercises scrolling and implicit grid row sizing. */
-		largeOffer(count: number) {
-			if (trade === null) throw new Error("Trade fixture is not registered");
-			const items = Array.from(
-				{ length: count },
-				(_, index) => item + 1 + index,
-			);
-			options.emit("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				upserts: items.map((guid) =>
-					entityFacts(guid, { scenePlacement: "unavailable" }),
-				),
-				removed: [],
-			});
-			trade = {
-				...trade,
-				revision: trade.revision + 1,
-				partner_side: { ...trade.partner_side, items },
-			};
-			publish();
-		},
-		complete() {
-			if (trade === null) throw new Error("Trade fixture is not registered");
-			trade = {
-				...trade,
-				revision: trade.revision + 1,
-				self_side: { ...trade.self_side, accepted: false, items: [] },
-				partner_side: { ...trade.partner_side, accepted: false, items: [] },
-			};
-			publish();
-		},
-		close() {
-			trade = null;
-			publish();
-		},
-		request() {
-			const args = options.commands.findLast(
-				(entry) => entry.command === "submit_client_trade",
-			)?.args;
-			if (args === undefined)
-				throw new Error("Trade fixture has no submitted request");
-			return tradeRequestSchema.parse(args.request);
 		},
 	};
 }

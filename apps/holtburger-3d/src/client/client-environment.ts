@@ -26,7 +26,7 @@ export interface ClientEnvironmentReadout {
 }
 
 /** Coherent selection/output pair: the adapter consumes selection; rendering consumes output. */
-export interface ClientEnvironmentSample {
+interface ClientEnvironmentSample {
 	readonly selection: SceneEnvironmentSelection;
 	readonly environment: ResolvedSceneEnvironment;
 }

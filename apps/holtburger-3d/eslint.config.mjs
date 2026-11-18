@@ -84,11 +84,7 @@ export default tseslint.config(
 	{
 		// These functions are serialized and executed in the browser by CDP.
 		files: [
-			"scripts/ui-theme-probe.mjs",
-			"scripts/ui-showcase-probe.mjs",
-			"scripts/item-cell-pulse-probe.mjs",
 			"scripts/indexed-texture-readback.mjs",
-			"scripts/ui-showcase-panels-probe.mjs",
 			"scripts/explorer-theme-probe.mjs",
 		],
 		languageOptions: { globals: globals.browser },

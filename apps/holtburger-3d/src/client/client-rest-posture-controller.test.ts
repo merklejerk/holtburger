@@ -2,11 +2,74 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientRestPostureController } from "./client-rest-posture-controller";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 import {
+	cellId,
 	DynamicEntityMirror,
+	type DynamicEntityMotion,
+	type DynamicEntityView,
 	type RestPosture,
 } from "../lib/game/runtime/dynamic-entity-feed";
-import { emotePlaybackFixture } from "../harness/browser/client-emote-fixture";
 import { CLIENT_TUNING } from "./client-tuning";
+
+function playerPlaybackFixture(
+	guid: number,
+	activity: DynamicEntityMotion["activity"],
+): DynamicEntityView {
+	return {
+		generation: 1,
+		identity: { guid, wcid: 1 },
+		display: { name: "Emote fixture", level: null },
+		presentation: {
+			entityClass: "player",
+			placementFrame: 0,
+			objectScale: 1,
+			content: {
+				setupDid: 0x02000001,
+				motionTableDid: null,
+				soundTableDid: null,
+				physicsEffectTableDid: null,
+			},
+			appearance: {
+				paletteDid: null,
+				subPalettes: [],
+				textureChanges: [],
+				partChanges: [],
+			},
+			radar: { category: "player", behavior: null, obviousRange: null },
+		},
+		physics: {
+			semanticMask: 0,
+			participation: "pose-only",
+			noDraw: false,
+			hidden: false,
+			cloaked: false,
+			translucency: 0,
+			lighting: false,
+			defaultAnimation: false,
+			defaultScript: false,
+		},
+		placement: {
+			kind: "world",
+			spatialMembership: { reachesOutdoors: true, reachedEnvCellIds: [] },
+			pose: {
+				landblockId: cellId(0xda550001),
+				coords: { x: 1, y: 2, z: 3 },
+				rotation: { w: 1, x: 0, y: 0, z: 0 },
+			},
+			contact: "unknown",
+			sampleMode: "authoritative-only",
+		},
+		motion: {
+			activity,
+			restPosture: null,
+			locomotionCommandActive: false,
+			locomotion: null,
+			ordinary: {
+				playbackId: "1",
+				clip: { kind: "settled", animationId: 0x03000001, frame: 0 },
+			},
+		},
+	};
+}
 
 function fixture() {
 	type Session = ConstructorParameters<typeof ClientRestPostureController>[0];
@@ -16,7 +79,7 @@ function fixture() {
 		worldGeneration: 1,
 	};
 	const mirror = new DynamicEntityMirror(() => 0);
-	const entity = emotePlaybackFixture(1, "locomotion");
+	const entity = playerPlaybackFixture(1, "locomotion");
 	mirror.apply({
 		kind: "snapshot",
 		snapshot: { hostTime: { seconds: 0 }, entities: [entity] },
@@ -57,7 +120,7 @@ function fixture() {
 		for (const listener of listeners) listener(event);
 	};
 	const observe = (posture: RestPosture, guid = 1) => {
-		const updated = emotePlaybackFixture(guid, "explicit");
+		const updated = playerPlaybackFixture(guid, "explicit");
 		if (updated.motion === null) throw new Error("fixture requires motion");
 		updated.motion.restPosture = posture;
 		emit({ type: "dynamic", event: { kind: "upserted", entity: updated } });

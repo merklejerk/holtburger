@@ -920,6 +920,13 @@ export class SceneGraph {
 		return this.#envCellScopes.get(envCellId)?.seenOutside ?? null;
 	}
 
+	/** Authored interior visibility for the installed cell, shared by presentation consumers. */
+	getPotentiallyVisibleEnvCellIds(
+		cell: EnvCellId,
+	): ReadonlySet<EnvCellId> | undefined {
+		return this.#envCellScopes.get(cell)?.potentiallyVisibleEnvCellIds;
+	}
+
 	/** Test live ancestry, including self; also guards attachment cycles. */
 	isSelfOrDescendant(
 		candidateId: SceneNodeId,

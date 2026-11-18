@@ -13,9 +13,15 @@ export type DynamicEntityOwnerId = `dynamic-entity:${number}`;
 /** Runtime-local visual composition identity, unrelated to server GUIDs or scene-node identity. */
 export type LocalSceneModelOwnerId = `local-model:${number}`;
 
+/** Setup-authored object group owned by a single interior cell. */
+export type EnvCellBehaviorOwnerId = `env-cell-behavior:${string}`;
+
 /** Every owner admitted by the shared dynamic presentation systems. */
 export type DynamicOwnerId =
-	OwnerId | DynamicEntityOwnerId | LocalSceneModelOwnerId;
+	| OwnerId
+	| DynamicEntityOwnerId
+	| LocalSceneModelOwnerId
+	| EnvCellBehaviorOwnerId;
 
 /** Runtime lifetime identity for resource leases owned exclusively by one terrain source. */
 export type TerrainResourceOwnerId = `terrain-resource:${LandblockOwnerId}`;
@@ -46,11 +52,9 @@ export type DynamicPresentationResourceOwnerId =
 export type ResourceOwnerId =
 	/** Presentation-only ocean geometry and regional material leases. */
 	| "ocean-backdrop"
-	| OwnerId
+	| DynamicOwnerId
 	| TerrainResourceOwnerId
 	| ActiveRegionResourceOwnerId
-	| DynamicEntityOwnerId
-	| LocalSceneModelOwnerId
 	| StaticRevisionResourceOwnerId
 	| EnvCellRevisionResourceOwnerId
 	| DynamicGenerationResourceOwnerId

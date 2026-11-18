@@ -1,3 +1,4 @@
+import { EnvCellBehaviors } from "./env-cell-behaviors";
 import {
 	summonOpacityAt,
 	validateSummonPresentation,
@@ -267,6 +268,7 @@ import {
 	type TerrainResourceOwnerId,
 	type OwnerId,
 	type DynamicOwnerId,
+	type EnvCellBehaviorOwnerId,
 	type DynamicEntityOwnerId,
 	dynamicEntityOwnerId,
 } from "./owner-ids";
@@ -1344,8 +1346,13 @@ export class GamePresentationRuntime {
 	#presentationProfiler: PresentationProfiler | undefined;
 	/** Active authored-dynamic residents grouped by their source owner. */
 	readonly #authoredDynamicResidents = new Map<
-		OwnerId,
+		OwnerId | EnvCellBehaviorOwnerId,
 		AuthoredDynamicResidentDiagnostic[]
+	>();
+	/** Published EnvCell layers, reconciled even on cell crossings within one landblock. */
+	readonly #cellBehaviors = new Map<
+		LandblockOwnerId,
+		EnvCellBehaviors<AuthoredDynamicSource[]>
 	>();
 	/** Source-to-runtime outdoor-static snapshots removed with their layer owner. */
 	readonly #staticObjectLayerDiagnostics = new Map<
@@ -5125,6 +5132,8 @@ export class GamePresentationRuntime {
 
 	async #destroy(): Promise<void> {
 		this.#destroyed = true;
+		for (const landblock of this.#cellBehaviors.keys())
+			this.#removeCellBehaviors(landblock);
 		const spawned = [...this.#spawnedDesiredEntities.keys()];
 		// Revoke demand synchronously before any release awaits in-flight publication.
 		try {
@@ -5247,7 +5256,10 @@ export class GamePresentationRuntime {
 	}
 
 	#applySceneInterest(interest: SceneInterestMap): SceneInterestReceipt {
-		return this.#sceneInterestCoordinator.reconcile(interest);
+		const receipt = this.#sceneInterestCoordinator.reconcile(interest);
+		for (const landblock of this.#cellBehaviors.keys())
+			this.#syncCellBehaviors(landblock);
+		return receipt;
 	}
 
 	#drainCommitArtifacts(): void {
@@ -5395,6 +5407,68 @@ export class GamePresentationRuntime {
 		);
 	}
 
+	#syncCellBehaviors(landblock: LandblockOwnerId): void {
+		const layer = this.#cellBehaviors.get(landblock);
+		if (!layer) return;
+		const target = this.#renderSceneInterest.resolvedTarget();
+		const focus =
+			target?.kind === "dungeon" && target.requested.kind === "env-cell"
+				? target.requested.envCellId
+				: null;
+		const visible =
+			focus === null
+				? undefined
+				: this.#scene.getPotentiallyVisibleEnvCellIds(focus);
+		// The interest coordinator evicts departed layers synchronously before this reconciliation.
+		this.#trackPresentationWork(
+			layer.reconcile(
+				(cell) =>
+					focus === null || cell === focus || visible?.has(cell) === true,
+			),
+		);
+	}
+
+	#removeCellBehaviors(landblock: LandblockOwnerId): void {
+		const layer = this.#cellBehaviors.get(landblock);
+		if (!layer) return;
+		this.#cellBehaviors.delete(landblock);
+		this.#trackPresentationWork(layer.reconcile(() => false));
+	}
+
+	#installCellBehaviors({
+		landblockId,
+		dynamicSources,
+	}: EnvCellMaterializationPlan): void {
+		const sources = new Map<EnvCellId, AuthoredDynamicSource[]>();
+		for (const source of dynamicSources) {
+			const cell = source.placement.envCellId;
+			if (cell === null)
+				throw new Error("Interior authored object lacks an EnvCell placement.");
+			const group = sources.get(cell);
+			if (group) group.push(source);
+			else sources.set(cell, [source]);
+		}
+		this.#removeCellBehaviors(landblockId);
+		const groups = new EnvCellBehaviors(
+			sources,
+			(cell, group) => {
+				return this.#prepareStaticAuthoredDynamics(
+					`env-cell-behavior:${cell}`,
+					LandblockLayerKind.EnvCells,
+					landblockId,
+					group,
+				);
+			},
+			(cell) => {
+				const owner = `env-cell-behavior:${cell}` as const;
+				this.#authoredDynamicResidents.delete(owner);
+				this.#retireDynamicOwner(owner);
+			},
+		);
+		this.#cellBehaviors.set(landblockId, groups);
+		this.#syncCellBehaviors(landblockId);
+	}
+
 	#realizeEnvCellLayer(
 		ownerId: OwnerId,
 		artifact: Extract<
@@ -5423,19 +5497,21 @@ export class GamePresentationRuntime {
 				.realize({
 					layer: LandblockLayerKind.EnvCells,
 					owner: ownerId,
-					prepareCompanion: () =>
-						this.#prepareStaticAuthoredDynamics(
-							ownerId,
-							artifact.layer,
-							artifact.landblockId,
-							plan.dynamicSources,
-						),
 					revision,
 					source: plan,
 					textureRequirements,
 				})
 				.then(async (result) => {
 					if (result.kind !== "published") return;
+					if (
+						this.#destroyed ||
+						!this.#sceneInterestCoordinator.ownsDispatch(
+							{ id: artifact.landblockId, layer: artifact.layer },
+							revision,
+						)
+					)
+						return;
+					this.#installCellBehaviors(plan);
 					this.#mapGeometry.installInterior({
 						apertures: plan.apertures,
 						crossings: plan.crossings,
@@ -5834,7 +5910,7 @@ export class GamePresentationRuntime {
 	}
 
 	async #prepareStaticAuthoredDynamics(
-		ownerId: OwnerId,
+		ownerId: OwnerId | EnvCellBehaviorOwnerId,
 		layer: LandblockLayerKind,
 		landblockId: LandblockOwnerId,
 		sources: readonly AuthoredDynamicSource[],
@@ -5896,17 +5972,20 @@ export class GamePresentationRuntime {
 	): void {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
 		if (isOutdoorStaticLayer(layer)) {
-			this.#trackStaticEviction(
+			this.#trackPresentationWork(
 				this.#staticLayerRealizer.evict(ownerId, revision),
 			);
 		} else if (layer === LandblockLayerKind.EnvCells) {
-			this.#trackStaticEviction(this.#envCellRealizer.evict(ownerId, revision));
+			this.#trackPresentationWork(
+				this.#envCellRealizer.evict(ownerId, revision),
+			);
 		} else {
 			this.#staticObjects.evict(ownerId, revision);
 		}
 		if (layer === LandblockLayerKind.Buildings) {
 			this.#mapGeometry.evictBuildings(landblockId);
 		} else if (layer === LandblockLayerKind.EnvCells) {
+			this.#removeCellBehaviors(landblockId);
 			this.#mapGeometry.evictInterior(landblockId);
 		}
 		this.#authoredDynamicResidents.delete(ownerId);
@@ -6022,10 +6101,10 @@ export class GamePresentationRuntime {
 		this.#trackRealizationContinuation(guarded);
 	}
 
-	/** Eviction rebuilds atlas bindings asynchronously and must drain before atlas worker teardown. */
-	#trackStaticEviction(eviction: Promise<void>): void {
+	/** Drain background presentation work before its resources are destroyed and surface failures on tick. */
+	#trackPresentationWork(work: Promise<void>): void {
 		this.#trackRealizationContinuation(
-			eviction.catch((error: unknown) => {
+			work.catch((error: unknown) => {
 				this.#presentationFailures.push(error);
 			}),
 		);

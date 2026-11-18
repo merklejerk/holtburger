@@ -1157,6 +1157,102 @@ describe("GamePresentationRuntime view and interest control", () => {
 		await runtime.destroy();
 	});
 
+	it("activates dungeon scripts across cell crossings using the authored visible-cell list", async () => {
+		const landblockId = "0x8a02ffff";
+		const entry = "0x8a020157";
+		const emitter = "0x8a02026d";
+		const nearby = "0x8a020283";
+		const scriptId = "0x33000c01";
+		const pipeline = new DeferredCommitPipeline();
+		const runtime = await buildGamePresentationRuntimeForTest(
+			{ buildRenderer: async () => testRenderer(), resources: TEST_RESOURCES },
+			pipeline,
+			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
+			scalePhysicsScriptSource(scriptId, 1),
+			{ playOneShot: () => null, prepare: async () => {} },
+			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
+			null,
+		);
+		const enter = (envCellId: string) =>
+			runtime.updateSceneInterest({
+				...sceneInterest(landblockId),
+				target: {
+					kind: "dungeon",
+					requested: { kind: "env-cell", landblockId, envCellId },
+				},
+			});
+		const scopes = [entry, emitter, nearby].map((envCellId) => ({
+			scope: { kind: "env-cell" as const, envCellId, landblockId },
+			containmentPlanes: null,
+			landblockBounds: null,
+			structureToLandblock: Mat4.identity(),
+			potentiallyVisibleEnvCellIds: new Set(
+				envCellId === nearby ? [emitter] : [],
+			),
+			seenOutside: false,
+			visibilityIslandOrdinal: 0,
+		}));
+		try {
+			enter(entry);
+			pipeline.resolveNext([
+				{
+					landblockId,
+					layer: LandblockLayerKind.EnvCells,
+					commit: {
+						plan: {
+							landblockId,
+							scopes,
+							shellGeometries: [],
+							shells: [],
+							shellTextureRequirements: [],
+							apertureGeometries: [],
+							apertures: [],
+							crossings: [],
+							residentJobs: [],
+							dynamicSources: [
+								promotedResidentSource(landblockId, scriptId, emitter),
+							],
+							diagnostics: {
+								expectedCellCount: scopes.length,
+								shellCount: 0,
+								apertureCount: 0,
+								crossingCount: 0,
+								expectedResidentCount: 1,
+								plannedStaticResidentCount: 0,
+								defaultAnimatedResidentCount: 1,
+								unsupportedResidentCount: 0,
+								shellMaterialRangeCount: 0,
+								uniqueShellGeometryCount: 0,
+								uniqueShellMaterialCount: 0,
+							},
+						},
+					},
+				},
+			]);
+			await vi.waitFor(() => {
+				runtime.tick(0);
+				expect(
+					runtime.getStaticObjectRuntimeDiagnostics().envCellLayers,
+				).toHaveLength(1);
+			});
+			const active = () =>
+				runtime.getAuthoredDynamicRuntimeDiagnostics().physicsScripts
+					.activeOwnerCount;
+			expect(active()).toBe(0);
+			enter(nearby);
+			await vi.waitFor(() => expect(active()).toBe(1));
+			enter(emitter);
+			expect(active()).toBe(1);
+			enter(entry);
+			expect(active()).toBe(0);
+		} finally {
+			await runtime.destroy();
+		}
+	});
+
 	it("activates a promoted building owner set with shared playback", async () => {
 		const pipeline = new DeferredCommitPipeline();
 		const device: GamePresentationRuntimeRenderDevice = {
@@ -6320,14 +6416,11 @@ function promotedGeneratedArtifact(landblockId: string): LandblockLayerCommit {
 	return promotedStaticArtifact(landblockId, LandblockLayerKind.Generated);
 }
 
-function promotedStaticArtifact(
+function promotedResidentSource(
 	landblockId: string,
-	layer:
-		| LandblockLayerKind.Buildings
-		| LandblockLayerKind.Objects
-		| LandblockLayerKind.Generated,
-	physicsScriptId: DatAssetId | null = null,
-): LandblockLayerCommit {
+	physicsScriptId: DatAssetId | null,
+	envCellId: string | null,
+): AuthoredDynamicSource {
 	const residentBehavior: AuthoredDynamicSource["behavior"] =
 		physicsScriptId === null
 			? {
@@ -6346,12 +6439,12 @@ function promotedStaticArtifact(
 					motionTableId: null,
 					soundTableId: null,
 				};
-	const promotedResident: AuthoredDynamicSource = {
+	return {
 		behavior: residentBehavior,
 		identity: { kind: "authored", sourceId: "resident:promoted" },
 		localBounds: null,
 		placement: {
-			envCellId: null,
+			envCellId,
 			landblockId,
 			localTransform: Mat4.identity(),
 		},
@@ -6402,6 +6495,21 @@ function promotedStaticArtifact(
 		scale: new Vec3(1, 1, 1),
 		setupId: "0x02000001",
 	};
+}
+
+function promotedStaticArtifact(
+	landblockId: string,
+	layer:
+		| LandblockLayerKind.Buildings
+		| LandblockLayerKind.Objects
+		| LandblockLayerKind.Generated,
+	physicsScriptId: DatAssetId | null = null,
+): LandblockLayerCommit {
+	const promotedResident = promotedResidentSource(
+		landblockId,
+		physicsScriptId,
+		null,
+	);
 	const staticResident: ResolvedObjectResident = {
 		...promotedResident,
 		behavior: {

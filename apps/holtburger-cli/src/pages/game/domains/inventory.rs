@@ -1,11 +1,13 @@
 use super::super::{SalvageAssessment, SalvagingPhase};
 use super::object_interaction;
 use super::*;
+use holtburger_core::client::inventory_plan::{InventoryIntent, InventoryTarget};
 use holtburger_core::client::inventory_storage::EquipmentStoragePolicy;
 use holtburger_core::client::salvage::{
     SalvagePreviewEvaluation, SalvagePreviewRequest, SalvageSubmitOutcome, SalvageSubmitRequest,
     SalvageToolSelection,
 };
+use holtburger_core::client::types::TargetSlot;
 use holtburger_world::entity_facts::EntityStorageLocation;
 use holtburger_world::inspection::ObjectInspectionOutcome;
 use holtburger_world::state::storage::{PackEntryKind, StorageSlot};
@@ -45,6 +47,19 @@ fn equipment_storage(state: &GameState, incoming: Option<Guid>) -> EquipmentStor
             .chain(packs.into_iter().map(|(_, guid)| guid))
             .collect(),
     }
+}
+
+fn push_inventory_command(
+    result: &mut UpdateResult,
+    state: &GameState,
+    item: Guid,
+    target: InventoryTarget,
+    incoming_for_storage: Option<Guid>,
+) {
+    result.commands.push(ClientCommand::SubmitInventory {
+        intent: InventoryIntent { item, target },
+        storage: equipment_storage(state, incoming_for_storage),
+    });
 }
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
@@ -115,42 +130,37 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             });
         }
         AppAction::Drop { guid } => {
-            result.commands.push(ClientCommand::Drop(guid));
+            push_inventory_command(&mut result, state, guid, InventoryTarget::Ground, None);
         }
         AppAction::Equip { guid } => {
-            result.commands.push(ClientCommand::GetAndWield {
-                item: guid,
-                slot: None,
-                storage: equipment_storage(state, Some(guid)),
-            });
+            push_inventory_command(
+                &mut result,
+                state,
+                guid,
+                InventoryTarget::EquipPreferred { alternate: false },
+                Some(guid),
+            );
         }
         AppAction::EquipInSlot { guid, slot } => {
-            result.commands.push(ClientCommand::GetAndWield {
-                item: guid,
-                slot: Some(slot),
-                storage: equipment_storage(state, Some(guid)),
-            });
+            let target = match slot {
+                TargetSlot::PreferredSide { alternate } => {
+                    InventoryTarget::EquipPreferred { alternate }
+                }
+                TargetSlot::EquipMask(mask) => InventoryTarget::Equipment { mask: mask.bits() },
+            };
+            push_inventory_command(&mut result, state, guid, target, Some(guid));
         }
         AppAction::Unequip { guid } => {
-            if let Some(container) = state.data.find_non_full_pack(guid, None) {
-                result.commands.push(ClientCommand::MoveItem {
-                    item: guid,
-                    container,
-                    placement: 0,
-                });
-            } else {
-                result.actions.push(AppAction::Log {
-                    chat_tags: ChatMessageTags::system(),
-                    message: "No available inventory space to unequip item.".to_string(),
-                });
-            }
+            push_inventory_command(&mut result, state, guid, InventoryTarget::Unequip, None);
         }
         AppAction::MoveItem { item, container } => {
-            result.commands.push(ClientCommand::MoveItem {
+            push_inventory_command(
+                &mut result,
+                state,
                 item,
-                container,
-                placement: 0,
-            });
+                InventoryTarget::Container { guid: container },
+                None,
+            );
             result.actions.push(AppAction::Notification {
                 notification: AppNotification::ActiveInteractionChanged { interaction: None },
             });
@@ -160,44 +170,50 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             destination,
             amount,
         } => {
-            result.commands.push(ClientCommand::Stack {
+            push_inventory_command(
+                &mut result,
+                state,
                 source,
-                destination,
-                amount,
-            });
+                InventoryTarget::Stack {
+                    guid: destination,
+                    amount: Some(amount),
+                },
+                None,
+            );
         }
         AppAction::SplitItem {
             item,
             container,
             amount,
         } => {
-            result.commands.push(ClientCommand::Split {
+            push_inventory_command(
+                &mut result,
+                state,
                 item,
-                container,
-                amount,
-            });
+                InventoryTarget::Split {
+                    amount,
+                    container: Some(container),
+                },
+                None,
+            );
         }
         AppAction::PickUp { item, container } => {
-            result.commands.push(ClientCommand::SubmitInventory {
-                intent: holtburger_core::client::inventory_plan::InventoryIntent {
-                    item,
-                    target: holtburger_core::client::inventory_plan::InventoryTarget::Pickup {
-                        container,
-                    },
-                },
-                storage: equipment_storage(state, None),
-            });
-        }
-        AppAction::Give {
-            item,
-            recipient,
-            amount,
-        } => {
-            result.commands.push(ClientCommand::GiveObjectRequest {
-                target: recipient,
+            push_inventory_command(
+                &mut result,
+                state,
                 item,
-                amount,
-            });
+                InventoryTarget::Pickup { container },
+                None,
+            );
+        }
+        AppAction::Give { item, recipient } => {
+            push_inventory_command(
+                &mut result,
+                state,
+                item,
+                InventoryTarget::Give { guid: recipient },
+                None,
+            );
         }
         AppAction::UseWith { item, target } => {
             result

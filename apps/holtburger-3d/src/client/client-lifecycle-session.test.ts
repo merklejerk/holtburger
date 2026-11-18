@@ -1219,10 +1219,12 @@ describe("ClientLifecycleSession", () => {
 			await session.equipItem(91, alternate);
 			expect(transport.invocations).toEqual([
 				{
-					command: "equip_client_item",
+					command: "submit_client_inventory",
 					args: {
-						guid: 91,
-						alternate: alternate,
+						intent: {
+							item: 91,
+							target: { kind: "equip-preferred", alternate },
+						},
 						storage: { preferred: {}, fallback: [] },
 					},
 				},

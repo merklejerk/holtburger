@@ -435,15 +435,6 @@ pub enum ClientHostCommand {
     SubmitClientItemUse {
         request: holtburger_core::client::item_use::ItemUseRequest,
     },
-    /// Equip an owned item using shared side preference and replacement planning.
-    EquipClientItem {
-        guid: holtburger_common::Guid,
-        /// Prefer the off hand when supported, or the right side for paired jewelry.
-        alternate: bool,
-        /// Browser-selected destinations for displaced equipment.
-        #[serde(deserialize_with = "deserialize_equipment_storage")]
-        storage: EquipmentStoragePolicy,
-    },
     /// Consolidate direct carried contents using the application's explicit timeout policy.
     AutoMergeClientContainer {
         /// Player root or real carried pack identity.
@@ -694,7 +685,6 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "request_client_barber",
     "submit_client_inventory",
     "auto_merge_client_container",
-    "equip_client_item",
     "apply_client_equipment_set",
     "preview_client_salvage",
     "submit_client_salvage",
@@ -1391,19 +1381,6 @@ pub async fn dispatch_client(
             .map_err(application_error),
         SubmitClientItemUse { request } => runtime
             .send_command(ClientCommand::SubmitItemUse(request))
-            .await
-            .map(|()| HostResponse::Unit)
-            .map_err(application_error),
-        EquipClientItem {
-            guid,
-            alternate,
-            storage,
-        } => runtime
-            .send_command(ClientCommand::GetAndWield {
-                item: guid,
-                slot: Some(holtburger_core::client::types::TargetSlot::PreferredSide { alternate }),
-                storage,
-            })
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

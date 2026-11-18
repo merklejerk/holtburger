@@ -503,8 +503,6 @@ impl ClientRuntime {
             || matches!(
                 cmd,
                 ClientCommand::SubmitInventory { .. }
-                    | ClientCommand::GetAndWield { .. }
-                    | ClientCommand::SplitToWield { .. }
                     | ClientCommand::SubmitItemUse(_)
                     | ClientCommand::ApplyEquipmentSet { .. }
                     | ClientCommand::SubmitSalvage(_)

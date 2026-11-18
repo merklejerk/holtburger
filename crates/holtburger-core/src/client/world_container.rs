@@ -722,7 +722,10 @@ mod tests {
                 .submit_inventory_intent(
                     InventoryIntent {
                         item: PACK,
-                        target: InventoryTarget::Stack { guid: OWNED_STACK },
+                        target: InventoryTarget::Stack {
+                            guid: OWNED_STACK,
+                            amount: None,
+                        },
                     },
                     &storage_policy(&client.world),
                 )

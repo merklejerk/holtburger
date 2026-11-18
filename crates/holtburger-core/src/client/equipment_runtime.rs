@@ -3,19 +3,15 @@
 use super::{
     ClientRuntime, ClientState,
     equipment_plan::{EquipmentPlan, plan_equipment_change},
-    inventory_storage::EquipmentStoragePolicy,
     types::{ActionResultReason, ActionResultSource, TargetSlot},
 };
 use anyhow::Result;
-use holtburger_common::{
-    Guid,
-    properties::{EquipMask, WorldObjectExt},
-};
+use holtburger_common::{Guid, properties::EquipMask};
 use holtburger_protocol::messages::{
     combat::CombatMode,
     game_action::{
         ChangeCombatModeActionData, GameAction, GetAndWieldItemActionData,
-        PutItemInContainerActionData, StackableSplitToWieldActionData,
+        PutItemInContainerActionData,
     },
 };
 use holtburger_world::{
@@ -24,10 +20,7 @@ use holtburger_world::{
     equipment::MAIN_HAND_LOCATIONS,
     state::storage::{StorageLocation, StorageSlot},
 };
-use std::{
-    collections::BTreeSet,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 /// Deadline applies to each server-confirmed step, not total outfit size.
 pub(super) const EQUIPMENT_STEP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -39,22 +32,6 @@ enum EquipmentStage {
     Peace,
     Unequip,
     Wield,
-}
-
-/// Whole-item wield and split-to-wield have different completion identities.
-#[derive(Debug)]
-enum WieldRequest {
-    Whole,
-    Split {
-        /// Quantity requested on the existing source stack.
-        amount: u32,
-        /// Source template to recognize the newly created equipped entity.
-        wcid: u32,
-        /// Expected remainder; a newly equipped matching item alone cannot confirm a split.
-        source_remaining: u32,
-        /// Original equipped identities cannot acknowledge a newly split item.
-        previous_equipment: BTreeSet<Guid>,
-    },
 }
 
 /// A single local replacement; unrelated server mutations may invalidate its plan.
@@ -70,8 +47,6 @@ pub(super) struct EquipmentOperation {
     deadline: Instant,
     /// Restore combat only when this operation first requested peace.
     resume_combat: bool,
-    /// Final wire request and its corresponding completion rule.
-    wield: WieldRequest,
 }
 
 /// Advance either waits, sends a dependent step, or sends the final request.
@@ -92,30 +67,9 @@ impl EquipmentOperation {
     }
 
     fn wielded(&self, world: &WorldState) -> bool {
-        match &self.wield {
-            WieldRequest::Whole => world
-                .player_equipment()
-                .any(|(guid, mask)| guid == self.plan.item && mask == self.plan.target),
-            WieldRequest::Split {
-                amount,
-                wcid,
-                previous_equipment,
-                source_remaining,
-            } => {
-                world
-                    .entities
-                    .get(self.plan.item)
-                    .is_some_and(|entity| entity.stack_size() == *source_remaining)
-                    && world.player_equipment().any(|(guid, mask)| {
-                        !previous_equipment.contains(&guid)
-                            && guid != self.plan.item
-                            && mask == self.plan.target
-                            && world.entities.get(guid).is_some_and(|entity| {
-                                entity.wcid == Some(*wcid) && entity.stack_size() == *amount
-                            })
-                    })
-            }
-        }
+        world
+            .player_equipment()
+            .any(|(guid, mask)| guid == self.plan.item && mask == self.plan.target)
     }
 
     fn advance(
@@ -148,18 +102,6 @@ impl EquipmentOperation {
                 return Err("Timed out waiting for the server; the last equipment request may still complete".into());
             }
             return Ok(EquipmentAdvance::Waiting);
-        }
-        if let WieldRequest::Split {
-            amount,
-            source_remaining,
-            ..
-        } = self.wield
-            && world
-                .entities
-                .get(self.plan.item)
-                .is_none_or(|entity| entity.stack_size() != amount + source_remaining)
-        {
-            return Err("Source stack changed while preparing split-to-wield".into());
         }
         let current = plan_equipment_change(
             world,
@@ -200,21 +142,10 @@ impl EquipmentOperation {
             )));
         }
         self.stage = EquipmentStage::Wield;
-        let action = match self.wield {
-            WieldRequest::Whole => {
-                GameAction::GetAndWieldItem(Box::new(GetAndWieldItemActionData {
-                    item_guid: self.plan.item,
-                    equip_mask: self.plan.target,
-                }))
-            }
-            WieldRequest::Split { amount, .. } => {
-                GameAction::StackableSplitToWield(Box::new(StackableSplitToWieldActionData {
-                    stack_guid: self.plan.item,
-                    equip_mask: self.plan.target,
-                    amount: amount as i32,
-                }))
-            }
-        };
+        let action = GameAction::GetAndWieldItem(Box::new(GetAndWieldItemActionData {
+            item_guid: self.plan.item,
+            equip_mask: self.plan.target,
+        }));
         Ok(if self.resume_combat {
             EquipmentAdvance::Send(action)
         } else {
@@ -246,82 +177,15 @@ impl ClientRuntime {
         }
     }
 
-    pub(super) async fn start_equipment_change(
-        &mut self,
-        item: Guid,
-        slot: Option<TargetSlot>,
-        split: Option<u32>,
-        storage: &EquipmentStoragePolicy,
-    ) -> Result<()> {
-        if self.inventory_change_pending() || self.active_busy_operation.is_some() {
-            self.emit_action_result(
-                ActionResultSource::Client,
-                ActionResultReason::General("Another inventory operation is still pending".into()),
-            );
-            return Ok(());
-        }
-        if !matches!(self.state, ClientState::InWorld) || self.activation.is_some() {
-            self.emit_action_result(
-                ActionResultSource::Client,
-                ActionResultReason::General("Equipment changes require an active world".into()),
-            );
-            return Ok(());
-        }
-        let plan = match plan_equipment_change(
-            &self.world,
-            item,
-            slot,
-            self.inventory_placement.automatic,
-            storage,
-        ) {
-            Ok(plan) => plan,
-            Err(error) => {
-                self.emit_action_result(
-                    ActionResultSource::Client,
-                    ActionResultReason::General(error.to_string()),
-                );
-                return Ok(());
-            }
-        };
-        self.start_planned_equipment_change(plan, split).await
-    }
-
     /// Consumes the admitted plan without discarding its resolved destinations.
     /// Callers must perform lifecycle/busy admission before entering this path.
     pub(super) async fn start_planned_equipment_change(
         &mut self,
         plan: EquipmentPlan,
-        split: Option<u32>,
     ) -> Result<()> {
-        let item = plan.item;
-        let wield = if let Some(amount) = split {
-            let template = self.world.entities.get(item).and_then(|entity| {
-                (entity.is_stackable()
-                    && amount > 0
-                    && amount < entity.stack_size()
-                    && i32::try_from(amount).is_ok())
-                .then(|| entity.wcid.map(|wcid| (wcid, entity.stack_size() - amount)))
-                .flatten()
-            });
-            let Some((wcid, source_remaining)) = template else {
-                self.emit_action_result(
-                    ActionResultSource::Client,
-                    ActionResultReason::General("Invalid quantity for split-to-wield".into()),
-                );
-                return Ok(());
-            };
-            WieldRequest::Split {
-                amount,
-                wcid,
-                source_remaining,
-                previous_equipment: self.world.iter_equipment().collect(),
-            }
-        } else {
-            if self.world.equipment_mask(item) == Some(plan.target) {
-                return Ok(());
-            }
-            WieldRequest::Whole
-        };
+        if self.world.equipment_mask(plan.item) == Some(plan.target) {
+            return Ok(());
+        }
         let now = Instant::now();
         // Only explicit active modes need restoration; an absent login property means peace.
         let resume_combat = matches!(
@@ -340,7 +204,6 @@ impl ClientRuntime {
             },
             deadline: now + EQUIPMENT_STEP_TIMEOUT,
             resume_combat,
-            wield,
         });
         if resume_combat {
             self.send_game_action(GameAction::ChangeCombatMode(Box::new(
@@ -404,7 +267,6 @@ mod tests {
             stage: EquipmentStage::Ready,
             deadline: now + EQUIPMENT_STEP_TIMEOUT,
             resume_combat: false,
-            wield: WieldRequest::Whole,
         }
     }
 
@@ -490,53 +352,6 @@ mod tests {
             pending.advance(&world, now),
             Ok(EquipmentAdvance::SendFinal(GameAction::GetAndWieldItem(_)))
         ));
-    }
-
-    #[test]
-    fn split_completion_waits_for_source_remainder_and_new_equipped_identity() {
-        use holtburger_common::properties::PropertyInt;
-        use holtburger_world::entity::Entity;
-        let mut world = outfit(2, 1);
-        let now = Instant::now();
-        let mut pending = operation(&world, now);
-        const TEMPLATE: u32 = 123;
-        const SPLIT_AMOUNT: u32 = 4;
-        const REMAINDER: u32 = 6;
-        const NEW_ITEM: Guid = Guid(20);
-        pending.wield = WieldRequest::Split {
-            amount: SPLIT_AMOUNT,
-            wcid: TEMPLATE,
-            source_remaining: REMAINDER,
-            previous_equipment: world.iter_equipment().collect(),
-        };
-        let source = world.entities.get_mut(INCOMING).expect("source stack");
-        source
-            .properties
-            .ints
-            .insert(PropertyInt::StackSize, (SPLIT_AMOUNT + REMAINDER) as i32);
-        let mut split = Entity::new(NEW_ITEM, "Split item".into(), Default::default());
-        split.wcid = Some(TEMPLATE);
-        split
-            .properties
-            .ints
-            .insert(PropertyInt::StackSize, SPLIT_AMOUNT as i32);
-        world.entities.insert(split);
-        event(
-            &mut world,
-            GameEvent::WieldObject(Box::new(WieldObjectEventData {
-                object_guid: NEW_ITEM,
-                equip_mask: pending.plan.target,
-            })),
-        );
-        assert!(!pending.wielded(&world));
-        world
-            .entities
-            .get_mut(INCOMING)
-            .expect("source stack")
-            .properties
-            .ints
-            .insert(PropertyInt::StackSize, REMAINDER as i32);
-        assert!(pending.wielded(&world));
     }
 
     #[test]
@@ -665,11 +480,18 @@ mod tests {
 
     #[tokio::test]
     async fn another_equipment_request_cannot_replace_the_pending_owner() {
+        use super::super::inventory_plan::{InventoryIntent, InventoryTarget};
         let mut client = super::super::builder::build_test_client(ClientState::InWorld);
         client.world = outfit(2, 1);
         client.equipment_operation = Some(operation(&client.world, Instant::now()));
         client
-            .start_equipment_change(Guid(99), None, None, &storage_policy(&client.world))
+            .submit_inventory_intent(
+                InventoryIntent {
+                    item: Guid(99),
+                    target: InventoryTarget::EquipPreferred { alternate: false },
+                },
+                &storage_policy(&client.world),
+            )
             .await
             .expect("busy rejection");
         assert_eq!(
@@ -685,6 +507,7 @@ mod tests {
 
     #[tokio::test]
     async fn weapon_change_restores_only_explicit_active_combat_modes() {
+        use super::super::inventory_plan::{InventoryIntent, InventoryTarget};
         for mode in [
             None,
             Some(CombatMode::Undef),
@@ -719,7 +542,13 @@ mod tests {
                 holtburger_common::properties::ItemType::MELEE_WEAPON.bits() as i32,
             );
             client
-                .start_equipment_change(INCOMING, None, None, &storage_policy(&client.world))
+                .submit_inventory_intent(
+                    InventoryIntent {
+                        item: INCOMING,
+                        target: InventoryTarget::EquipPreferred { alternate: false },
+                    },
+                    &storage_policy(&client.world),
+                )
                 .await
                 .expect("weapon change");
             let active = matches!(

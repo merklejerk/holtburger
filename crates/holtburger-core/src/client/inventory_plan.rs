@@ -38,15 +38,28 @@ pub enum InventoryTarget {
     /// Give the whole source stack to a plausible world recipient.
     Give { guid: Guid },
     /// Split this positive quantity into newly allocated carried storage.
-    Split { amount: u32 },
+    Split {
+        amount: u32,
+        #[serde(default)]
+        container: Option<Guid>,
+    },
     /// Merge when compatible with remaining capacity, otherwise insert before this item.
     Item { guid: Guid },
     /// Merge only; a changed stack must never turn this intent into a positional move.
-    Stack { guid: Guid },
+    Stack {
+        guid: Guid,
+        #[serde(default)]
+        amount: Option<u32>,
+    },
     /// Insert into this container using the frontend's automatic placement preference.
     Container { guid: Guid },
     /// Resolve a visible equipment slot to its actual wield location.
     Equipment { mask: u32 },
+    /// Equip an owned item using shared side preference (and ammo top-up when not alternate).
+    EquipPreferred {
+        #[serde(default)]
+        alternate: bool,
+    },
     /// Exchange the source and target pack's native positions.
     Pack { guid: Guid },
 }
@@ -215,13 +228,7 @@ pub fn plan_inventory_intent(
         InventoryTarget::Pickup { container } => {
             let entity = holtburger_world::interaction::pickup_candidate(world, intent.item)
                 .ok_or(InventoryPlanError::NotPickable)?;
-            let preferred = match container {
-                Some(guid) if guid != world.player.guid && !world.is_owned_by_player(guid) => {
-                    return Err(InventoryPlanError::InvalidContainer);
-                }
-                Some(guid) => guid,
-                None => world.player.guid,
-            };
+            let preferred = preferred_owned_container(world, container, world.player.guid)?;
             if entity.is_stackable() {
                 let amount = entity
                     .get_int_prop(PropertyInt::StackSize)
@@ -278,7 +285,7 @@ pub fn plan_inventory_intent(
             })
         }
         InventoryTarget::Ground => Ok(InventoryPlan::Drop { item: intent.item }),
-        InventoryTarget::Split { amount } => {
+        InventoryTarget::Split { amount, container } => {
             let entity = world
                 .get_visible_entity(intent.item)
                 .ok_or(InventoryPlanError::Pending(intent.item))?;
@@ -293,7 +300,7 @@ pub fn plan_inventory_intent(
             let source_location = world
                 .storage_location(intent.item)
                 .ok_or(InventoryPlanError::NotOwned)?;
-            let preferred = source_location.parent();
+            let preferred = preferred_owned_container(world, container, source_location.parent())?;
             let destinations =
                 allocate_storage(world, preferred, &[entity.uses_player_container_slot()])?;
             let destination = destinations[0];
@@ -325,32 +332,27 @@ pub fn plan_inventory_intent(
             })
         }
 
-        InventoryTarget::Equipment { mask } => {
-            if mask == EquipMask::MISSILE_AMMO.bits() {
-                // Retail tops up equipped ammo before considering replacement. Resolve before
-                // equipment planning: a merge needs no storage for displacement.
-                for guid in world.iter_equipment() {
-                    let location = world
-                        .equipment_mask(guid)
-                        .ok_or(InventoryPlanError::Pending(guid))?;
-                    if location == EquipMask::MISSILE_AMMO {
-                        if intent.item == guid {
-                            return Ok(InventoryPlan::Noop);
-                        }
-                        if let Some(plan) = plan_stack_merge(world, intent.item, guid)? {
-                            return Ok(InventoryPlan::Merge(plan));
-                        }
-                        break;
-                    }
-                }
-            }
-            Ok(InventoryPlan::Equip(plan_equipment_change(
+        InventoryTarget::Equipment { mask } => plan_equipment_target(
+            world,
+            intent.item,
+            TargetSlot::EquipMask(EquipMask::from_bits_retain(mask)),
+            mask == EquipMask::MISSILE_AMMO.bits(),
+            policy,
+            storage,
+        ),
+        InventoryTarget::EquipPreferred { alternate } => {
+            let is_ammo = world
+                .entities
+                .get(intent.item)
+                .is_some_and(|entity| entity.valid_locations() == EquipMask::MISSILE_AMMO);
+            plan_equipment_target(
                 world,
                 intent.item,
-                Some(TargetSlot::EquipMask(EquipMask::from_bits_retain(mask))),
-                policy.automatic,
+                TargetSlot::PreferredSide { alternate },
+                !alternate && is_ammo,
+                policy,
                 storage,
-            )?))
+            )
         }
         InventoryTarget::Container { guid } => {
             let mut step = plan_move(world, intent.item, guid, None)?;
@@ -358,13 +360,25 @@ pub fn plan_inventory_intent(
             Ok(InventoryPlan::Move(step))
         }
         InventoryTarget::Pack { guid } => plan_pack_swap(world, intent.item, guid),
-        InventoryTarget::Item { guid } | InventoryTarget::Stack { guid } => {
+        InventoryTarget::Item { guid } | InventoryTarget::Stack { guid, .. } => {
             if intent.item == guid {
                 return Ok(InventoryPlan::Noop);
             }
             require_accessible_item(world, guid)?;
             match plan_stack_merge(world, intent.item, guid) {
-                Ok(Some(plan)) => return Ok(InventoryPlan::Merge(plan)),
+                Ok(Some(mut plan)) => {
+                    if let InventoryTarget::Stack {
+                        amount: Some(requested),
+                        ..
+                    } = intent.target
+                    {
+                        if requested == 0 || requested > plan.amount {
+                            return Err(InventoryPlanError::InvalidSplit);
+                        }
+                        plan = plan.with_amount(requested);
+                    }
+                    return Ok(InventoryPlan::Merge(plan));
+                }
                 // Positional item drops retain their move fallback when the stack is full.
                 Err(InventoryPlanError::StackFull)
                     if matches!(intent.target, InventoryTarget::Item { .. }) => {}
@@ -378,6 +392,55 @@ pub fn plan_inventory_intent(
             plan_move(world, intent.item, container, Some(slot)).map(InventoryPlan::Move)
         }
     }
+}
+
+fn preferred_owned_container(
+    world: &WorldState,
+    container: Option<Guid>,
+    default: Guid,
+) -> Result<Guid, InventoryPlanError> {
+    match container {
+        Some(guid) if guid != world.player.guid && !world.is_owned_by_player(guid) => {
+            Err(InventoryPlanError::InvalidContainer)
+        }
+        Some(guid) => Ok(guid),
+        None => Ok(default),
+    }
+}
+
+fn plan_equipment_target(
+    world: &WorldState,
+    item: Guid,
+    slot: TargetSlot,
+    try_ammo_top_up: bool,
+    policy: InventoryPlacementPolicy,
+    storage: &EquipmentStoragePolicy,
+) -> Result<InventoryPlan, InventoryPlanError> {
+    if try_ammo_top_up {
+        // Retail tops up equipped ammo before considering replacement. Resolve before
+        // equipment planning: a merge needs no storage for displacement.
+        for guid in world.iter_equipment() {
+            let location = world
+                .equipment_mask(guid)
+                .ok_or(InventoryPlanError::Pending(guid))?;
+            if location == EquipMask::MISSILE_AMMO {
+                if item == guid {
+                    return Ok(InventoryPlan::Noop);
+                }
+                if let Some(plan) = plan_stack_merge(world, item, guid)? {
+                    return Ok(InventoryPlan::Merge(plan));
+                }
+                break;
+            }
+        }
+    }
+    Ok(InventoryPlan::Equip(plan_equipment_change(
+        world,
+        item,
+        Some(slot),
+        policy.automatic,
+        storage,
+    )?))
 }
 
 /// Retail searches main-pack items, then each carried pack's items in native order. Container
@@ -465,7 +528,7 @@ fn plan_move(
     let destination = world
         .get_visible_entity(container)
         .ok_or(InventoryPlanError::Pending(container))?;
-    // ACE owns corpse/hook/nesting rules. Storage coverage and capacity establish local
+    // Server owns corpse/hook/nesting rules. Storage coverage and capacity establish local
     // placement feasibility; they do not promise that the server will permit the transfer.
     let source_location = world
         .storage_location(item)
@@ -769,7 +832,10 @@ pub(super) mod tests {
                 client.evaluate_inventory_intent(
                     InventoryIntent {
                         item: SOURCE,
-                        target: InventoryTarget::Split { amount: AMOUNT },
+                        target: InventoryTarget::Split {
+                            amount: AMOUNT,
+                            container: None,
+                        },
                     },
                     &storage_policy(&client.world)
                 ),
@@ -852,7 +918,10 @@ pub(super) mod tests {
             .insert(PropertyInt::ItemsCapacity, 4);
         let intent = InventoryIntent {
             item: SOURCE,
-            target: InventoryTarget::Split { amount: AMOUNT },
+            target: InventoryTarget::Split {
+                amount: AMOUNT,
+                container: None,
+            },
         };
         let expected = |container, placement| {
             Ok(InventoryPlan::Split {
@@ -1343,7 +1412,10 @@ pub(super) mod tests {
         for target in [
             InventoryTarget::Unequip,
             InventoryTarget::Ground,
-            InventoryTarget::Split { amount: 1 },
+            InventoryTarget::Split {
+                amount: 1,
+                container: None,
+            },
             InventoryTarget::Give { guid: PLAYER },
             InventoryTarget::Equipment {
                 mask: EquipMask::MELEE_WEAPON.bits(),
@@ -1392,7 +1464,10 @@ pub(super) mod tests {
                     &world,
                     InventoryIntent {
                         item: source,
-                        target: InventoryTarget::Stack { guid: destination }
+                        target: InventoryTarget::Stack {
+                            guid: destination,
+                            amount: None,
+                        }
                     },
                     Default::default(),
                     &storage_policy(&world)
@@ -1412,7 +1487,10 @@ pub(super) mod tests {
                 &world,
                 InventoryIntent {
                     item: SOURCE,
-                    target: InventoryTarget::Stack { guid: LOOT }
+                    target: InventoryTarget::Stack {
+                        guid: LOOT,
+                        amount: None,
+                    }
                 },
                 Default::default(),
                 &storage_policy(&world)
@@ -1957,7 +2035,10 @@ pub(super) mod tests {
                 &world,
                 InventoryIntent {
                     item: SOURCE,
-                    target: InventoryTarget::Stack { guid: TARGET },
+                    target: InventoryTarget::Stack {
+                        guid: TARGET,
+                        amount: None,
+                    },
                 },
                 Default::default(),
                 &storage_policy(&world)
@@ -1994,7 +2075,10 @@ pub(super) mod tests {
             .insert(PropertyInt::MaxStackSize, 100);
         let intent = InventoryIntent {
             item: SOURCE,
-            target: InventoryTarget::Split { amount: 7 },
+            target: InventoryTarget::Split {
+                amount: 7,
+                container: None,
+            },
         };
         assert_eq!(
             plan_inventory_intent(&world, intent, Default::default(), &storage_policy(&world)),
@@ -2005,7 +2089,10 @@ pub(super) mod tests {
                 &world,
                 InventoryIntent {
                     item: SOURCE,
-                    target: InventoryTarget::Split { amount: 20 }
+                    target: InventoryTarget::Split {
+                        amount: 20,
+                        container: None,
+                    }
                 },
                 Default::default(),
                 &storage_policy(&world)
@@ -2056,7 +2143,10 @@ pub(super) mod tests {
                     &world,
                     InventoryIntent {
                         item: SOURCE,
-                        target: InventoryTarget::Split { amount }
+                        target: InventoryTarget::Split {
+                            amount,
+                            container: None,
+                        }
                     },
                     Default::default(),
                     &storage_policy(&world)
@@ -2107,7 +2197,10 @@ pub(super) mod tests {
                 &world,
                 InventoryIntent {
                     item: SOURCE,
-                    target: InventoryTarget::Stack { guid: TARGET }
+                    target: InventoryTarget::Stack {
+                        guid: TARGET,
+                        amount: None,
+                    }
                 },
                 Default::default(),
                 &storage_policy(&world)
@@ -2156,6 +2249,101 @@ pub(super) mod tests {
                 &storage_policy(&world)
             ),
             Err(InventoryPlanError::InvalidPack)
+        );
+    }
+
+    #[test]
+    fn equip_preferred_merges_ammo_when_not_alternate_and_validates_split_container_and_stack_amount()
+     {
+        let mut world = ammo_inventory();
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item: SOURCE,
+                    target: InventoryTarget::EquipPreferred { alternate: false },
+                },
+                Default::default(),
+                &storage_policy(&world)
+            ),
+            Ok(expected_merge(&world, SOURCE, TARGET, 10))
+        );
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item: SOURCE,
+                    target: InventoryTarget::Stack {
+                        guid: TARGET,
+                        amount: Some(4),
+                    },
+                },
+                Default::default(),
+                &storage_policy(&world)
+            ),
+            Ok(expected_merge(&world, SOURCE, TARGET, 4))
+        );
+        for invalid in [0, 11] {
+            assert_eq!(
+                plan_inventory_intent(
+                    &world,
+                    InventoryIntent {
+                        item: SOURCE,
+                        target: InventoryTarget::Stack {
+                            guid: TARGET,
+                            amount: Some(invalid),
+                        },
+                    },
+                    Default::default(),
+                    &storage_policy(&world)
+                ),
+                Err(InventoryPlanError::InvalidSplit)
+            );
+        }
+        world
+            .entities
+            .get_mut(PLAYER)
+            .expect("root")
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 1);
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item: SOURCE,
+                    target: InventoryTarget::Split {
+                        amount: 5,
+                        container: Some(PLAYER),
+                    },
+                },
+                Default::default(),
+                &storage_policy(&world)
+            ),
+            Ok(InventoryPlan::Split {
+                step: InventoryMove {
+                    item: SOURCE,
+                    container: PLAYER,
+                    placement: 0,
+                },
+                amount: 5,
+                max_amount: 20,
+            })
+        );
+        assert_eq!(
+            plan_inventory_intent(
+                &world,
+                InventoryIntent {
+                    item: SOURCE,
+                    target: InventoryTarget::Split {
+                        amount: 5,
+                        container: Some(Guid(0x8000_0099)),
+                    },
+                },
+                Default::default(),
+                &storage_policy(&world)
+            ),
+            Err(InventoryPlanError::InvalidContainer)
         );
     }
 }

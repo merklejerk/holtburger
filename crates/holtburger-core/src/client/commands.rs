@@ -29,15 +29,9 @@ pub(super) fn inventory_command_requires_guard(command: &ClientCommand) -> bool 
     // with equipment stance transitions, so they share ordinary inventory admission.
     matches!(
         command,
-        ClientCommand::Drop(_)
-            | ClientCommand::Get(_)
-            | ClientCommand::Stack { .. }
-            | ClientCommand::Split { .. }
-            | ClientCommand::MoveItem { .. }
-            | ClientCommand::Use { .. }
+        ClientCommand::Use { .. }
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::SalvageItemsWith { .. }
-            | ClientCommand::GiveObjectRequest { .. }
             | ClientCommand::VendorTrade(_)
             | ClientCommand::Trade(
                 crate::client::trade::TradeRequest::Open { .. }
@@ -130,25 +124,13 @@ impl ClientRuntime {
             return self.reject_auto_merge_conflict(cmd).await;
         }
         self.cancel_rest_for_command(&cmd);
-        match &cmd {
-            ClientCommand::GetAndWield { item, .. }
-            | ClientCommand::SplitToWield { item, .. }
-            | ClientCommand::MoveItem { item, .. }
-            | ClientCommand::Split { item, .. }
-            | ClientCommand::Drop(item)
-            | ClientCommand::Get(item) => self.equipment_set.supersede_item(*item),
-            ClientCommand::SubmitInventory { intent, .. } => {
-                self.equipment_set.supersede_item(intent.item)
+        if let ClientCommand::SubmitInventory { intent, .. } = &cmd {
+            self.equipment_set.supersede_item(intent.item);
+            if let crate::client::inventory_plan::InventoryTarget::Stack { guid, .. }
+            | crate::client::inventory_plan::InventoryTarget::Pack { guid } = intent.target
+            {
+                self.equipment_set.supersede_item(guid);
             }
-            ClientCommand::Stack {
-                source,
-                destination,
-                ..
-            } => {
-                self.equipment_set.supersede_item(*source);
-                self.equipment_set.supersede_item(*destination);
-            }
-            _ => {}
         }
         if self.inventory_change_pending() && inventory_command_requires_guard(&cmd) {
             if let ClientCommand::Trade(_) = &cmd {
@@ -264,7 +246,6 @@ impl ClientRuntime {
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::SalvageItemsWith { .. }
             | ClientCommand::VendorTrade(_)
-            | ClientCommand::GiveObjectRequest { .. }
             | ClientCommand::SetCharacterTitle { .. }
             | ClientCommand::SetCharacterOption { .. }
             | ClientCommand::Recall(_)
@@ -290,14 +271,6 @@ impl ClientRuntime {
             | ClientCommand::DisbandParty
             | ClientCommand::SetPartyOpenness { .. }
             | ClientCommand::UninviteFromParty { .. } => self.handle_party_command(cmd).await,
-
-            ClientCommand::Drop(_)
-            | ClientCommand::Get(_)
-            | ClientCommand::Stack { .. }
-            | ClientCommand::Split { .. }
-            | ClientCommand::MoveItem { .. }
-            | ClientCommand::GetAndWield { .. }
-            | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
             ClientCommand::DriveSelf(_) | ClientCommand::ControlCharacter(_) => {
                 self.handle_movement_command(cmd).await
@@ -898,26 +871,6 @@ impl ClientRuntime {
             ClientCommand::SalvageItemsWith { tool, items } => {
                 self.salvage_items_with(tool, items).await
             }
-            ClientCommand::GiveObjectRequest {
-                target,
-                item,
-                amount,
-            } => {
-                log::info!(
-                    ">>> Giving item 0x{:08X} to target 0x{:08X} (amount {})",
-                    item,
-                    target,
-                    amount
-                );
-                self.send_game_action(GameAction::GiveObjectRequest(Box::new(
-                    GiveObjectRequestActionData {
-                        target_guid: target,
-                        item_guid: item,
-                        amount: amount as i32,
-                    },
-                )))
-                .await
-            }
             ClientCommand::VendorTrade(request) => self.submit_vendor_trade(request).await,
             ClientCommand::CloseContainer(guid) => self.close_container(guid).await,
             ClientCommand::SetCharacterTitle {
@@ -1015,108 +968,6 @@ impl ClientRuntime {
                 self.active_confirmation = None;
                 self.emit_active_character_confirmation_updated();
                 Ok(())
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    async fn handle_inventory_command(&mut self, cmd: ClientCommand) -> Result<()> {
-        match cmd {
-            ClientCommand::Drop(guid) => {
-                log::info!(">>> Dropping: 0x{:08X}", guid);
-                self.send_game_action(GameAction::DropItem(Box::new(DropItemActionData {
-                    item_guid: guid,
-                })))
-                .await
-            }
-            ClientCommand::Get(guid) => {
-                log::info!(">>> Getting: 0x{:08X}", guid);
-                self.send_game_action(GameAction::PutItemInContainer(Box::new(
-                    PutItemInContainerActionData {
-                        item_guid: guid,
-                        container_guid: self.world.player.guid,
-                        placement: 0,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::Stack {
-                source,
-                destination,
-                amount,
-            } => {
-                log::info!(
-                    ">>> Stacking 0x{:08X} ({}x) onto 0x{:08X}",
-                    source,
-                    amount,
-                    destination
-                );
-                self.send_game_action(GameAction::StackableMerge(Box::new(
-                    StackableMergeActionData {
-                        merge_from_guid: source,
-                        merge_to_guid: destination,
-                        amount: amount as i32,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::Split {
-                item,
-                container,
-                amount,
-            } => {
-                log::info!(
-                    ">>> Splitting 0x{:08X} ({}x) to container 0x{:08X}",
-                    item,
-                    amount,
-                    container
-                );
-                self.send_game_action(GameAction::StackableSplitToContainer(Box::new(
-                    StackableSplitToContainerActionData {
-                        stack_guid: item,
-                        container_guid: container,
-                        place: 0, // Auto-placement
-                        amount: amount as i32,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::MoveItem {
-                item,
-                container,
-                placement,
-            } => {
-                log::info!(
-                    ">>> Moving item 0x{:08X} to container 0x{:08X} (slot {})",
-                    item,
-                    container,
-                    placement
-                );
-                self.send_game_action(GameAction::PutItemInContainer(Box::new(
-                    PutItemInContainerActionData {
-                        item_guid: item,
-                        container_guid: container,
-                        placement,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::GetAndWield {
-                item,
-                slot,
-                storage,
-            } => {
-                self.start_equipment_change(item, slot, None, &storage)
-                    .await
-            }
-            ClientCommand::SplitToWield {
-                item,
-                slot,
-                amount,
-                storage,
-            } => {
-                self.start_equipment_change(item, slot, Some(amount), &storage)
-                    .await
             }
             _ => unreachable!(),
         }

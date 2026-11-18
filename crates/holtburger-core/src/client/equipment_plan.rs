@@ -2,12 +2,12 @@
 
 use holtburger_common::{
     Guid,
-    properties::{EquipMask, PseudoEquipMask, WorldObjectExt},
+    properties::{EquipMask, WorldObjectExt},
 };
 use holtburger_world::{
     WorldState,
     context::{WorldContext, WorldContextExt},
-    equipment::{EquipmentFacts, EquipmentFactsError, MAIN_HAND_LOCATIONS},
+    equipment::{EquipmentFacts, EquipmentFactsError},
     state::storage::StorageLocation,
 };
 
@@ -163,10 +163,6 @@ pub(super) fn resolve_equipment_change(
     let requested = match slot {
         Some(TargetSlot::PreferredSide { alternate }) => incoming.preferred_side_request(alternate),
         Some(TargetSlot::EquipMask(mask)) => mask,
-        Some(TargetSlot::MainHand) => MAIN_HAND_LOCATIONS,
-        Some(TargetSlot::OffHand) => EquipMask::SHIELD,
-        Some(TargetSlot::TopClothes) => PseudoEquipMask::TOP_CLOTHES.into(),
-        Some(TargetSlot::BottomClothes) => PseudoEquipMask::BOTTOM_CLOTHES.into(),
         None => incoming.valid_locations,
     };
     let target = incoming
@@ -220,6 +216,7 @@ pub(super) mod tests {
         ViewContentsEventData, ViewContentsEventItem, WieldObjectEventData,
     };
     use holtburger_world::entity::Entity;
+    use holtburger_world::equipment::MAIN_HAND_LOCATIONS;
 
     /// Explicit Main-Pack-first caller policy for shared planner fixtures.
     pub(in crate::client) fn storage_policy(world: &WorldState) -> EquipmentStoragePolicy {

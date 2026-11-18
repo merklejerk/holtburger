@@ -346,7 +346,6 @@ type ClientCommandName = Extract<
 	| "submit_client_inventory"
 	| "auto_merge_client_container"
 	| "close_client_container"
-	| "equip_client_item"
 	| "apply_client_equipment_set"
 	| "query_client_item_use_target"
 	| "query_client_spell_inspection"
@@ -1310,12 +1309,10 @@ export class ClientLifecycleSession {
 	}
 
 	/** Equip one owned item through core’s equipment replacement policy with a side preference. */
-	async equipItem(guid: number, alternate: boolean): Promise<void> {
-		this.#equipmentNames.delete(guid);
-		await this.#transport.invoke("equip_client_item", {
-			guid,
-			alternate,
-			storage: this.packAffinities.storage(this.entities.read()),
+	async equipItem(guid: number, alternate = false): Promise<void> {
+		await this.submitInventory({
+			item: guid,
+			target: { kind: "equip-preferred", alternate },
 		});
 	}
 

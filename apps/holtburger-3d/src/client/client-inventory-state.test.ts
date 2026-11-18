@@ -1,5 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ClientInventoryState } from "./client-inventory-state";
+import { describe, expect, it, vi } from "vitest";
+import {
+	ClientInventoryState,
+	type InventoryLifecycleEvent,
+} from "./client-inventory-state";
 import {
 	ClientEntityMirror,
 	type ClientEntityFacts,
@@ -9,10 +12,8 @@ import {
 	emptyPlayerSummary,
 	entityFacts,
 } from "./client-entity-mirror.test-support";
-import { CLIENT_TUNING } from "./client-tuning";
 import { INVENTORY_CURRENCIES } from "./client-inventory-currencies";
 import type { ClientLifecycle } from "./client-host-contract";
-import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 import {
 	UiIconRepository,
 	type UiIconServices,
@@ -40,7 +41,11 @@ function fixture(
 	initialLifecycle: ClientLifecycle | null = { kind: "in-world" },
 ) {
 	const mirror = new ClientEntityMirror();
-	const baseline = (items: ClientEntityFacts[], player = 1) =>
+	const listeners = new Set<(event: InventoryLifecycleEvent) => void>();
+	const emit = (event: InventoryLifecycleEvent) => {
+		for (const listener of listeners) listener(event);
+	};
+	const baseline = (items: ClientEntityFacts[], player = 1) => {
 		mirror.commit(
 			mirror.prepareSnapshot(
 				{
@@ -62,9 +67,14 @@ function fixture(
 				player,
 			),
 		);
+		emit({ type: "entities" });
+	};
+	const resync = () => {
+		mirror.awaitSnapshot();
+		emit({ type: "resyncing" });
+	};
 	baseline([item(2, 10)]);
 	let lifecycle: ClientLifecycle | null = initialLifecycle;
-	const listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
 	let image = 0;
 	const services: UiIconServices = {
 		prepare: vi.fn<UiIconServices["prepare"]>(async (requests) =>
@@ -98,15 +108,16 @@ function fixture(
 	);
 	const changeLifecycle = (value: ClientLifecycle) => {
 		lifecycle = value;
-		for (const listener of listeners)
-			listener({ type: "lifecycle", lifecycle });
+		emit({ type: "lifecycle", lifecycle });
 	};
 	return {
 		mirror,
 		model,
 		icons,
 		services,
+		emit,
 		baseline,
+		resync,
 		changeLifecycle,
 		destroy: () => {
 			model.destroy();
@@ -114,10 +125,7 @@ function fixture(
 		},
 	};
 }
-const sample = () =>
-	vi.advanceTimersByTimeAsync(CLIENT_TUNING.inventory.displayIntervalMs);
-beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+const flushIcons = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 describe("persistent inventory state", () => {
 	it("offers auto-merge only for Main Pack and actual carried containers, rechecking stale menus", async () => {
@@ -151,7 +159,7 @@ describe("persistent inventory state", () => {
 		expect(f.model.canAutoMergeContainer(99)).toBe(false);
 		await f.model.autoMergeContainer(8);
 		expect(f.model.interactions.autoMergeContainer).toHaveBeenCalledWith(8);
-		f.mirror.awaitSnapshot();
+		f.resync();
 		expect(f.model.canAutoMergeContainer(8)).toBe(false);
 		await expect(f.model.autoMergeContainer(8)).rejects.toThrow(
 			"no longer available",
@@ -171,7 +179,7 @@ describe("persistent inventory state", () => {
 				"Injected enqueue failure",
 			),
 		);
-		f.mirror.awaitSnapshot();
+		f.resync();
 		f.model.requestAutoMergeContainer(1);
 		await vi.waitFor(() =>
 			expect(f.model.reportFailure).toHaveBeenCalledWith(
@@ -190,16 +198,13 @@ describe("persistent inventory state", () => {
 		);
 		expect(arrivals).toEqual([]);
 		f.baseline([item(2, 10), item(3, 11)]);
-		await sample();
 		expect(arrivals).toEqual([[[3, 1]]]);
 		f.changeLifecycle({ kind: "entering-world", characterGuid: 1 });
 		f.baseline([item(2, 10), item(3, 11), item(4, 12)]);
 		f.changeLifecycle({ kind: "in-world" });
-		await sample();
 		expect(arrivals).toHaveLength(1);
 		unsubscribe();
 		f.baseline([item(5, 13)]);
-		await sample();
 		expect(arrivals).toHaveLength(1);
 		f.destroy();
 	});
@@ -218,10 +223,11 @@ describe("persistent inventory state", () => {
 					guid,
 				),
 			);
+			f.emit({ type: "entities" });
 		};
 		acceptPlayer(1, 2.15);
 		expect(f.model.readBurden()).toBe(2.15);
-		f.mirror.awaitSnapshot();
+		f.resync();
 		expect(f.model.readBurden()).toBeNull();
 		acceptPlayer(4, 1.25);
 		expect(f.model.readBurden()).toBe(1.25);
@@ -240,7 +246,7 @@ describe("persistent inventory state", () => {
 		const slots = EQUIPMENT_SLOTS.filter((slot) =>
 			["Chest armor", "Upper arm armor"].includes(slot.label),
 		);
-		await sample();
+		await flushIcons();
 		const key = f.model.read().iconKeys.get(armor.guid);
 		f.baseline([
 			{
@@ -252,7 +258,7 @@ describe("persistent inventory state", () => {
 				},
 			},
 		]);
-		await sample();
+		await flushIcons();
 		expect(
 			f.model
 				.read()
@@ -262,7 +268,7 @@ describe("persistent inventory state", () => {
 		expect(f.model.read().iconKeys.get(armor.guid)).toBe(key);
 		expect(f.services.revokeImage).not.toHaveBeenCalled();
 		f.baseline([armor]);
-		await sample();
+		await flushIcons();
 		expect(
 			f.model.read().equipment.rows.every((row) => row.item === null),
 		).toBe(true);
@@ -282,7 +288,7 @@ describe("persistent inventory state", () => {
 			description: { ...record.description, wcid, stackCount: count },
 		});
 		f.baseline([coin(2, 5), coin(3, null)]);
-		await sample();
+		await flushIcons();
 		const row = f.model.read().currencies[0];
 		if (row === undefined) throw new Error("Expected currency row");
 		expect(row.count).toBe(6);
@@ -290,24 +296,23 @@ describe("persistent inventory state", () => {
 		const display = f.icons.read(row.iconKey);
 		if (display.kind !== "ready")
 			throw new Error("Expected prepared currency image");
-		f.mirror.awaitSnapshot();
-		await sample();
+		f.resync();
 		expect(f.model.read().currenciesPending).toBe(true);
 		f.baseline([coin(3, 2)]);
-		await sample();
+		await flushIcons();
 		expect(f.model.read().currencies[0]).toMatchObject({
 			count: 2,
 			iconKey: row.iconKey,
 		});
 		f.baseline([]);
-		await sample();
+		await flushIcons();
 		expect(f.model.read().currencies).toEqual([]);
 		expect(f.services.revokeImage).toHaveBeenCalledWith(display.url);
 		f.destroy();
 	});
 	it("updates stack quantities through recovery without touching shared artwork", async () => {
 		const f = fixture();
-		await sample();
+		await flushIcons();
 		const originalKeys = f.model.read().iconKeys;
 		const stacked = (count: number) => {
 			const entity = item(2, 10);
@@ -317,11 +322,10 @@ describe("persistent inventory state", () => {
 			};
 		};
 		for (const count of [2, 20, 1]) {
-			f.mirror.awaitSnapshot();
-			await sample();
+			f.resync();
 			expect(f.model.read().pending).toBe(true);
 			f.baseline([stacked(count)]);
-			await sample();
+			await flushIcons();
 			expect(f.model.read().sections[0]?.items[0]?.description).toMatchObject({
 				stackCount: count,
 			});
@@ -335,12 +339,12 @@ describe("persistent inventory state", () => {
 
 	it("waits for usable lifecycle state when constructed before connection", async () => {
 		const f = fixture(null);
-		await sample();
+		await flushIcons();
 		expect(f.model.read().pending).toBe(true);
 		expect(f.icons.read(f.model.pyrealIconKey).kind).toBe("ready");
 		expect(f.model.read().iconKeys.size).toBe(0);
 		f.changeLifecycle({ kind: "in-world" });
-		await sample();
+		await flushIcons();
 		expect(f.model.read().pending).toBe(false);
 		expect(f.services.createImage).toHaveBeenCalledTimes(3);
 		f.destroy();
@@ -348,25 +352,24 @@ describe("persistent inventory state", () => {
 
 	it("prepares before first display, reconciles hidden changes and keeps sort across entry", async () => {
 		const f = fixture();
-		await sample();
+		await flushIcons();
 		expect(f.services.createImage).toHaveBeenCalledTimes(3);
 		f.model.cycleSort();
 		f.baseline([item(3, 11)]);
-		await sample();
+		await flushIcons();
 		expect(f.services.createImage).toHaveBeenCalledTimes(4);
 		expect(f.services.revokeImage).toHaveBeenCalledTimes(1);
 		expect(f.model.read().sections[0]?.items.map((item) => item.guid)).toEqual([
 			3,
 		]);
 		expect(f.model.read().sortMode).toBe("alphabetical");
-		f.mirror.awaitSnapshot();
+		f.resync();
 		f.changeLifecycle({ kind: "entering-world", characterGuid: 1 });
 		f.changeLifecycle({
 			kind: "portal-space",
 			cause: "initial-entry",
 			worldGeneration: 2,
 		});
-		await sample();
 		expect(f.model.read().sections).toEqual([]);
 		expect(f.model.read().sortMode).toBe("alphabetical");
 		expect(f.services.revokeImage).toHaveBeenCalledTimes(3);
@@ -374,9 +377,8 @@ describe("persistent inventory state", () => {
 	});
 	it("preserves references through recovery and ordinary teleport", async () => {
 		const f = fixture();
-		await sample();
-		f.mirror.awaitSnapshot();
-		await sample();
+		await flushIcons();
+		f.resync();
 		expect(f.model.read().pending).toBe(true);
 		expect(f.services.revokeImage).not.toHaveBeenCalled();
 		f.baseline([item(2, 10)]);
@@ -385,20 +387,20 @@ describe("persistent inventory state", () => {
 			cause: "teleport",
 			worldGeneration: 2,
 		});
-		await sample();
+		await flushIcons();
 		expect(f.services.prepare).toHaveBeenCalledTimes(1);
 		expect(f.model.read().pending).toBe(false);
 		f.destroy();
 	});
 	it("does not evict on same-icon item handoff or second-consumer release", async () => {
 		const f = fixture();
-		await sample();
+		await flushIcons();
 		const oldKey = f.model.read().iconKeys.get(2);
 		if (!oldKey) throw new Error("Expected icon key.");
 		const other = f.icons.createOwner("persistent");
 		f.icons.retainKey(other, oldKey);
 		f.baseline([item(3, 10)]);
-		await sample();
+		await flushIcons();
 		expect(f.model.read().iconKeys.get(3)).toBe(oldKey);
 		expect(f.services.prepare).toHaveBeenCalledTimes(1);
 		f.icons.releaseOwner(other);
@@ -407,9 +409,9 @@ describe("persistent inventory state", () => {
 	});
 	it("resets references on a changed player snapshot and stops maintenance on destruction", async () => {
 		const f = fixture();
-		await sample();
+		await flushIcons();
 		f.baseline([item(5, 12, 4)], 4);
-		await sample();
+		await flushIcons();
 		expect(f.services.revokeImage).toHaveBeenCalledTimes(2);
 		expect(f.model.read().sections[0]?.container.guid).toBe(4);
 		const items = f.model.readItems();
@@ -420,8 +422,44 @@ describe("persistent inventory state", () => {
 		f.model.destroy();
 		const count = vi.mocked(f.services.prepare).mock.calls.length;
 		f.baseline([item(6, 13, 4)], 4);
-		await sample();
+		await flushIcons();
 		expect(f.services.prepare).toHaveBeenCalledTimes(count);
 		f.icons.dispose();
+	});
+
+	it("keeps all inventory getters side-effect-free without retaining or releasing icons", () => {
+		const f = fixture();
+		const retainSpy = vi.spyOn(f.icons, "retain");
+		const releaseSpy = vi.spyOn(f.icons, "release");
+		f.mirror.commit(
+			f.mirror.prepareSnapshot(
+				{
+					projectileSupply: { kind: "not-applicable" },
+					player: { ...emptyPlayerSummary, burden: 0.75 },
+					worldContainer: { kind: "closed" },
+					entities: [
+						entityFacts(1, {
+							storage: {
+								kind: "container",
+								roster: "announced",
+								itemCapacity: 24,
+								packCapacity: 7,
+							},
+						}),
+						item(77, 15),
+					],
+				},
+				1,
+			),
+		);
+		f.model.read();
+		f.model.readItems();
+		f.model.readItem(2);
+		f.model.readProjectileSupply();
+		f.model.readBurden();
+		f.model.canAutoMergeContainer(1);
+		expect(retainSpy).not.toHaveBeenCalled();
+		expect(releaseSpy).not.toHaveBeenCalled();
+		f.destroy();
 	});
 });

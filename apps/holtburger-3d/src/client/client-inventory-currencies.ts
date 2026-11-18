@@ -1,11 +1,6 @@
 import type { ClientEntityLevel } from "./client-entity-mirror";
 
-/** Ambient recognition from the local ACE world census, 2026-09-12.
- * Refresh query: SELECT DISTINCT d.value FROM
- * weenie_properties_d_i_d d JOIN weenie v ON v.class_Id=d.object_Id
- * WHERE d.type=57 AND v.type=12;
- * Resolve name and icon from the referenced weenie's string 1 and DID 8.
- */
+/** Ambient recognition for standard alternate currencies observed in world data. */
 export const INVENTORY_CURRENCIES = [
 	[6621, "Scintillating Gem", 0x06002027],
 	[20630, "Trade Note (250,000)", 0x06002761],
@@ -76,7 +71,7 @@ export function inventoryCurrencyTotals(level: ClientEntityLevel): {
 			pending = true;
 			continue;
 		}
-		// World stackCount is absent for single items; ACE counts those as one.
+		// World stackCount is absent for single items; server counts those as one.
 		counts.set(
 			description.wcid,
 			(counts.get(description.wcid) ?? 0) + (description.stackCount ?? 1),

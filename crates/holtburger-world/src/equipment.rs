@@ -174,8 +174,8 @@ impl EquipmentFacts {
     /// Callers deduplicate by item identity and exclude the incoming item itself.
     pub fn conflicts_with(self, target: EquipMask, existing: Self, current: EquipMask) -> bool {
         if let (Some(incoming), Some(worn)) = (self.clothing_priority, existing.clothing_priority) {
-            // ACE Creature_Equipment.GetEquippedItems and retail AutoWearIsLegal
-            // use priority overlap even when valid-location masks overlap differently.
+            // Retail behavior checks clothing priority bitmask overlap even when
+            // valid-location masks overlap differently.
             return incoming & worn != 0;
         }
         if target.intersects(current) {

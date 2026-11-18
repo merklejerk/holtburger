@@ -13,6 +13,12 @@ const inventoryTargetSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("stack"), guid: unsigned }),
 	z.object({ kind: z.literal("container"), guid: unsigned }),
 	z.object({ kind: z.literal("equipment"), mask: unsigned }),
+	z
+		.object({
+			kind: z.literal("equip-preferred"),
+			alternate: z.boolean().optional(),
+		})
+		.strict(),
 	z.object({ kind: z.literal("pack"), guid: unsigned }),
 ]);
 

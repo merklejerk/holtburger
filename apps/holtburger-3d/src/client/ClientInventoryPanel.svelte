@@ -201,8 +201,8 @@
 			repository: inventory.icons,
 			intervalMs: CLIENT_TUNING.inventory.displayIntervalMs,
 			read: () => {
-				const items = inventory.readItems().items;
 				const next = inventory.read();
+				const items = inventory.readItems().items;
 				workflowDimmed = new Set(
 					[...items.values()]
 						.filter(

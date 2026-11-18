@@ -40,6 +40,17 @@ pub struct MergeStep {
 }
 
 impl MergeStep {
+    /// Adjust transfer quantity while keeping expected post-merge counts consistent.
+    pub(super) fn with_amount(mut self, amount: u32) -> Self {
+        self.amount = amount;
+        self.source_after = match self.source_before - amount {
+            0 => MergeSourceAfter::Removed,
+            count => MergeSourceAfter::Remaining { count },
+        };
+        self.destination_after = self.destination_before + amount;
+        self
+    }
+
     /// Serialize only the already resolved decision.
     pub(super) fn action(self) -> GameAction {
         GameAction::StackableMerge(Box::new(StackableMergeActionData {

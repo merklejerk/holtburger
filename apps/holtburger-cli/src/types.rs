@@ -727,7 +727,6 @@ pub enum AppAction {
     Give {
         item: Guid,
         recipient: Guid,
-        amount: u32,
     },
     OpenShop {
         vendor: Guid,

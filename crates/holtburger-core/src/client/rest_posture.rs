@@ -55,8 +55,6 @@ impl ClientRuntime {
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::AutoMergeContainer { .. }
             | ClientCommand::SubmitInventory { .. }
-            | ClientCommand::GetAndWield { .. }
-            | ClientCommand::SplitToWield { .. }
             | ClientCommand::Quit
             | ClientCommand::Logout => true,
             _ => false,

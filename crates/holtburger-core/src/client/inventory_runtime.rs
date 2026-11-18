@@ -127,7 +127,7 @@ impl ClientRuntime {
             ),
             InventoryPlan::Noop => return Ok(()),
             InventoryPlan::Equip(plan) => {
-                return self.start_planned_equipment_change(plan, None).await;
+                return self.start_planned_equipment_change(plan).await;
             }
             InventoryPlan::Move(step) => move_action(step),
             InventoryPlan::Give {

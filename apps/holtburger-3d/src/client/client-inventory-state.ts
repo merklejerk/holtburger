@@ -14,7 +14,10 @@ import type {
 	ProjectileSupply,
 } from "./client-entity-mirror";
 import type { ClientLifecycle } from "./client-host-contract";
-import type { ClientLifecycleSession } from "./client-lifecycle-session";
+import type {
+	ClientLifecycleSession,
+	ClientLifecycleSessionEvent,
+} from "./client-lifecycle-session";
 import {
 	contentsSections,
 	contentsPackSlots,
@@ -23,7 +26,6 @@ import {
 	type ClientContentsSection,
 	type ContentsSortMode,
 } from "./client-container-contents";
-import { CLIENT_TUNING } from "./client-tuning";
 import { PYREAL_ICON_SPEC } from "./client-inventory-art";
 import {
 	inventoryEquipment,
@@ -42,11 +44,18 @@ export interface InventoryCurrencyRow extends Omit<
 	readonly iconKey: string;
 }
 
+/** Lifecycle and entity notifications consumed by inventory state, without full delta payloads. */
+export type InventoryLifecycleEvent =
+	| { readonly type: "entities" }
+	| Exclude<ClientLifecycleSessionEvent, { readonly type: "entities" }>;
+
 /** Session commands and results shared by inventory gestures and container actions. */
 export type InventoryInteractionSession = Pick<
 	ClientLifecycleSession,
-	"previewInventory" | "submitInventory" | "autoMergeContainer" | "subscribe"
->;
+	"previewInventory" | "submitInventory" | "autoMergeContainer"
+> & {
+	subscribe(listener: (event: InventoryLifecycleEvent) => void): () => void;
+};
 
 /** Existing lifecycle facts and semantic mirror; the model does not subscribe to raw properties. */
 export interface InventoryLifecycle extends InventoryInteractionSession {
@@ -118,7 +127,6 @@ export class ClientInventoryState {
 	readonly #lifecycle: InventoryLifecycle;
 	readonly #owner: UiIconOwner;
 	readonly #unsubscribe: () => void;
-	readonly #timer: ReturnType<typeof setInterval>;
 	#baseline: InventoryBaseline | null = null;
 	#pending = true;
 	#sortMode: ContentsSortMode = "native";
@@ -140,20 +148,22 @@ export class ClientInventoryState {
 		this.#owner = icons.createOwner("persistent");
 		this.pyrealIconKey = icons.retain(this.#owner, PYREAL_ICON_SPEC);
 		this.#unsubscribe = lifecycle.subscribe((event) => {
-			if (event.type === "resyncing") this.#arrivals.update([], true);
-			const state =
-				event.type === "lifecycle"
-					? event.lifecycle
-					: event.type === "current-state"
-						? event.state.lifecycle
-						: null;
-			if (state !== null && isInitialEntry(state)) this.#reset();
+			if (event.type === "resyncing") {
+				this.#arrivals.update([], true);
+				this.#refresh();
+			} else if (event.type === "entities") {
+				this.#refresh();
+			} else if (event.type === "current-state") {
+				if (isInitialEntry(event.state.lifecycle)) this.#reset();
+				this.#refresh();
+			} else if (event.type === "lifecycle") {
+				if (isInitialEntry(event.lifecycle)) this.#reset();
+				else this.#refresh();
+			} else if (event.type === "exit-requested") {
+				this.#reset();
+			}
 		});
 		this.#refresh();
-		this.#timer = setInterval(
-			() => this.#refresh(),
-			CLIENT_TUNING.inventory.displayIntervalMs,
-		);
 	}
 
 	/** Notifications are live-only: opening a panel never replays unseen arrivals. */
@@ -187,7 +197,6 @@ export class ClientInventoryState {
 
 	/** Action bars consume item facts without building hidden inventory sections. */
 	readItems(): ClientInventoryItems {
-		this.#refresh();
 		if (this.#pending || this.#baseline === null)
 			return {
 				playerGuid: null,
@@ -200,13 +209,11 @@ export class ClientInventoryState {
 
 	/** Current owned item facts, independent of panel visibility and sorting. */
 	readItem(guid: number): ClientEntityFacts | undefined {
-		this.#refresh();
 		return this.#pending ? undefined : this.#baseline?.items.get(guid);
 	}
 
 	/** Bounded HUD readers consume world semantics without building inventory layouts. */
 	readProjectileSupply(): ProjectileSupply {
-		this.#refresh();
 		const read = this.#lifecycle.entities.read();
 		return this.#pending || read.kind === "pending"
 			? { kind: "pending", appraisal: null }
@@ -215,13 +222,11 @@ export class ClientInventoryState {
 
 	/** Local-player world ratio for bounded HUD sampling, without sorting inventory contents. */
 	readBurden(): number | null {
-		this.#refresh();
 		return this.#pending ? null : (this.#baseline?.player.burden ?? null);
 	}
 
 	/** Only actual carried storage and Main Pack expose the app-local context command. */
 	canAutoMergeContainer(guid: number): boolean {
-		this.#refresh();
 		if (this.#pending || this.#baseline === null) return false;
 		const { playerGuid, membership } = this.#baseline;
 		const item =
@@ -268,7 +273,6 @@ export class ClientInventoryState {
 		if (this.#disposed) return;
 		this.#disposed = true;
 		this.#arrivalListeners.clear();
-		clearInterval(this.#timer);
 		this.#unsubscribe();
 		this.icons.releaseOwner(this.#owner);
 		this.#baseline = null;

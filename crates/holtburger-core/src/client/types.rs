@@ -431,10 +431,6 @@ pub enum TargetSlot {
         alternate: bool,
     },
     EquipMask(EquipMask),
-    MainHand,
-    OffHand,
-    TopClothes,
-    BottomClothes,
 }
 
 impl Default for TargetSlot {
@@ -1612,36 +1608,6 @@ pub enum ClientCommand {
         /// Explicit diagnostic override of authored useability; server and busy checks still apply.
         unrestricted: bool,
     },
-    Drop(Guid),
-    Get(Guid),
-    Stack {
-        source: Guid,
-        destination: Guid,
-        amount: u32,
-    },
-    Split {
-        item: Guid,
-        container: Guid,
-        amount: u32,
-    },
-    MoveItem {
-        item: Guid,
-        container: Guid,
-        placement: u32,
-    },
-    GetAndWield {
-        item: Guid,
-        slot: Option<TargetSlot>,
-        /// Caller-selected destinations for displaced items.
-        storage: super::inventory_storage::EquipmentStoragePolicy,
-    },
-    SplitToWield {
-        item: Guid,
-        slot: Option<TargetSlot>,
-        amount: u32,
-        /// Caller-selected destinations for displaced items.
-        storage: super::inventory_storage::EquipmentStoragePolicy,
-    },
     DriveSelf(PlayerDriveIntent),
     /// Applies one ordered, non-coalescible character-motion lifecycle edge.
     ControlCharacter(SequencedCharacterMotionEvent),
@@ -1664,11 +1630,6 @@ pub enum ClientCommand {
     },
     /// Submit the exact consequence shown by a shared progression evaluation.
     SubmitProgression(super::progression::ClientProgressionQuote),
-    GiveObjectRequest {
-        target: Guid,
-        item: Guid,
-        amount: u32,
-    },
     /// Execute an optional sale followed by an optional purchase under one busy owner.
     VendorTrade(super::vendor_transaction::VendorTradeRequest),
     /// Evaluate a draft without changing inventory or sending a server action.

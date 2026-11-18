@@ -364,8 +364,15 @@ async fn fixed_deadline_releases_on_missing_or_partial_reply_and_late_updates_do
         assert!(!client.inventory_operation_pending());
         assert!(results(&mut events).is_empty());
         let before = client.session.game_action_sequence;
+        let storage = crate::client::equipment_plan::tests::storage_policy(&client.world);
         client
-            .handle_command(ClientCommand::Drop(SECOND))
+            .handle_command(ClientCommand::SubmitInventory {
+                intent: InventoryIntent {
+                    item: SECOND,
+                    target: InventoryTarget::Ground,
+                },
+                storage,
+            })
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, before + 1);
@@ -444,8 +451,15 @@ async fn expired_owner_is_cleared_before_admitting_a_conflicting_command() {
     };
     pending.deadline = Instant::now();
     let before = client.session.game_action_sequence;
+    let storage = crate::client::equipment_plan::tests::storage_policy(&client.world);
     client
-        .handle_command(ClientCommand::Drop(SECOND))
+        .handle_command(ClientCommand::SubmitInventory {
+            intent: InventoryIntent {
+                item: SECOND,
+                target: InventoryTarget::Ground,
+            },
+            storage,
+        })
         .await
         .unwrap();
     assert!(!client.inventory_operation_pending());
@@ -624,8 +638,15 @@ async fn interruption_between_steps_admits_the_action_without_replaying_it() {
     receive(&mut client, count(FIRST, 90)).await;
     client.poll_auto_merge(Instant::now());
     let before = client.session.game_action_sequence;
+    let storage = crate::client::equipment_plan::tests::storage_policy(&client.world);
     client
-        .handle_command(ClientCommand::Drop(THIRD))
+        .handle_command(ClientCommand::SubmitInventory {
+            intent: InventoryIntent {
+                item: THIRD,
+                target: InventoryTarget::Ground,
+            },
+            storage,
+        })
         .await
         .unwrap();
     assert!(!client.inventory_operation_pending());

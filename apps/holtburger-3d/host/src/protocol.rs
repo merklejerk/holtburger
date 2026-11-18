@@ -1642,23 +1642,31 @@ mod tests {
         let request = rmp_serde::to_vec_named(&serde_json::json!({
             "kind": "request",
             "id": 1,
-            "command": { "command": "equip_client_item", "guid": 91, "alternate": true, "storage": { "preferred": { "92": 7 }, "fallback": [1, 7] } },
+            "command": {
+                "command": "submit_client_inventory",
+                "intent": { "item": 91, "target": { "kind": "equip-preferred", "alternate": true } },
+                "storage": { "preferred": { "92": 7 }, "fallback": [1, 7] }
+            },
         }))
         .unwrap();
         let mut reader = Cursor::new(framed_payload(request));
         let Some(InboundFrame::Request {
             command:
-                HostCommand::Client(ClientHostCommand::EquipClientItem {
-                    guid,
-                    alternate: true,
-                    storage,
-                }),
+                HostCommand::Client(ClientHostCommand::SubmitClientInventory { intent, storage }),
             ..
         }) = read_frame(&mut reader).unwrap()
         else {
             panic!("equipment request did not decode into the client command");
         };
-        assert_eq!(guid, holtburger_common::Guid(91));
+        assert_eq!(
+            intent,
+            holtburger_core::client::inventory_plan::InventoryIntent {
+                item: holtburger_common::Guid(91),
+                target: holtburger_core::client::inventory_plan::InventoryTarget::EquipPreferred {
+                    alternate: true,
+                },
+            }
+        );
         assert_eq!(
             storage.preferred[&holtburger_common::Guid(92)],
             holtburger_common::Guid(7)
@@ -1708,8 +1716,11 @@ mod tests {
         for key in ["01", "0", "invalid", "4294967296"] {
             let request = rmp_serde::to_vec_named(&serde_json::json!({
                 "kind": "request", "id": 1,
-                "command": { "command": "equip_client_item", "guid": 91, "alternate": false,
-                    "storage": { "preferred": { key: 7 }, "fallback": [1] } },
+                "command": {
+                    "command": "submit_client_inventory",
+                    "intent": { "item": 91, "target": { "kind": "equip-preferred", "alternate": false } },
+                    "storage": { "preferred": { key: 7 }, "fallback": [1] }
+                },
             }))
             .unwrap();
             let mut reader = Cursor::new(framed_payload(request));

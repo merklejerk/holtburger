@@ -193,6 +193,7 @@ import {
 import {
 	ClientEntityMirror,
 	clientEntityDeltaSchema,
+	type ClientEntityDelta,
 } from "./client-entity-mirror";
 import {
 	recallDestinationSchema,
@@ -627,7 +628,7 @@ export type ClientLifecycleSessionEvent =
 			readonly hudPresent: boolean;
 	  }
 	| { readonly type: "party-updates-failed"; readonly message: string }
-	| { readonly type: "entities" }
+	| { readonly type: "entities"; readonly delta: ClientEntityDelta }
 	| { readonly type: "resyncing" }
 	| { readonly type: "current-state"; readonly state: ClientCurrentState }
 	| {
@@ -1660,13 +1661,12 @@ export class ClientLifecycleSession {
 			);
 			unlisteners.push(
 				await listen("client-entity-facts-changed", (payload) => {
-					const prepared = this.entities.prepareDelta(
-						clientEntityDeltaSchema.parse(payload),
-					);
+					const delta = clientEntityDeltaSchema.parse(payload);
+					const prepared = this.entities.prepareDelta(delta);
 					if (prepared === null) return;
 					this.entities.commit(prepared);
 					this.packAffinities.observe(this.entities.read());
-					this.#emit({ type: "entities" });
+					this.#emit({ type: "entities", delta });
 				}),
 			);
 			unlisteners.push(

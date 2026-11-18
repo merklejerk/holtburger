@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ClientAppraisalRequests } from "./client-appraisal-requests";
 import { ClientEntityMirror } from "./client-entity-mirror";
 import type { ClientEntityFacts } from "./client-entity-mirror";
-import { entityFacts } from "./client-entity-mirror.test-support";
+import { entityDelta, entityFacts } from "./client-entity-mirror.test-support";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 import {
 	ClientSummonPresentation,
@@ -71,18 +71,11 @@ function fixture() {
 							burden: null,
 							aetheriaActivation: null,
 						},
-						salvage: {
-							skills: {
-								salvagingSkill: 0,
-								tinkeringSkill: 0,
-								augmentationBonusSalvage: 0,
-							},
-						},
 					},
 					1,
 				),
 			);
-			emit({ type: "entities" });
+			emit({ type: "entities", delta: entityDelta({ upserts: [...records] }) });
 		},
 	};
 }

@@ -1043,13 +1043,6 @@ class FakeLifecycle implements ClientEntitySelectionLifecyclePort {
 			this.entities.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
-					salvage: {
-						skills: {
-							salvagingSkill: 0,
-							tinkeringSkill: 0,
-							augmentationBonusSalvage: 0,
-						},
-					},
 					player: {
 						pyrealBalance: null,
 						burden: null,
@@ -1063,17 +1056,17 @@ class FakeLifecycle implements ClientEntitySelectionLifecyclePort {
 		);
 	}
 	update(upserts: ClientEntityFacts[], removed: number[]): void {
-		const prepared = this.entities.prepareDelta({
+		const delta = {
 			projectileSupply: null,
-			salvage: null,
 			player: null,
 			worldContainer: null,
 			upserts,
 			removed,
-		});
+		};
+		const prepared = this.entities.prepareDelta(delta);
 		if (prepared === null) throw new Error("Fixture requires current state.");
 		this.entities.commit(prepared);
-		this.emit({ type: "entities" });
+		this.emit({ type: "entities", delta });
 	}
 	readonly requests: ClientEntitySelectionQueryRequest[] = [];
 	readonly #listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();

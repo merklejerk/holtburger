@@ -1578,7 +1578,6 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             let operation = match operation {
                 BusyOperationKind::Use => "Use",
                 BusyOperationKind::UseWithTarget => "Use with target",
-                BusyOperationKind::Salvage => "Salvage",
                 BusyOperationKind::SpellCast => "Spell cast",
                 // Transaction receipts already own the terminal notice, including partial progress.
                 BusyOperationKind::Buy
@@ -3070,67 +3069,33 @@ mod tests {
 mod salvage_wire_tests {
     use crate::host_event_sink::ClientEventSink;
     use crate::protocol::{HostCommand, InboundFrame, StdioEventSink, encode_frame, read_frame};
-    use holtburger_common::{
-        Guid,
-        properties::{ItemType, MaterialType},
-    };
+    use holtburger_common::{Guid, properties::MaterialType};
     use holtburger_core::ClientViewEvent;
     use holtburger_core::client::salvage::{
-        SalvagePreviewResult, SalvageSubmitOutcome, SalvageSubmitRequest, SalvageSubmitResult,
+        SalvagePreviewEvaluation, SalvagePreviewResult, SalvageSubmitOutcome, SalvageSubmitRequest,
+        SalvageSubmitResult,
     };
-    use holtburger_world::crafting::salvage::{
-        SalvageCandidate, SalvageContext, SalvageEvaluation, SalvageItemInput, SalvagePreviewBag,
-        SalvageReview, SalvageSkillProfile, SalvageSource, SalvageTool,
-    };
+    use holtburger_world::crafting::salvage::{SalvageCandidate, SalvagePreviewBag};
     use serde_json::Value;
     use std::{io::Cursor, sync::mpsc};
 
     #[test]
-    fn salvage_contract_matches_browser_fixture_and_round_trips_the_review() {
+    fn salvage_contract_matches_browser_fixture_and_round_trips_the_revision() {
         let fixture: serde_json::Value =
             serde_json::from_str(include_str!("../../src/client/fixtures/salvage-wire.json"))
                 .unwrap();
-        let source = SalvageSource {
-            guid: Guid(3),
-            instance: 1,
-            input: SalvageItemInput {
-                item_type: ItemType::MELEE_WEAPON,
-                material_type: MaterialType::Steel,
-                stack_size: 2,
-                structure: 0,
-                item_workmanship: 7,
-                num_items_in_material: 1,
-            },
-        };
-        let skills = SalvageSkillProfile {
-            salvaging_skill: 300,
-            tinkering_skill: 200,
-            augmentation_bonus_salvage: 0,
-        };
-        let review = SalvageReview {
-            player: Guid(1),
-            tool: SalvageTool {
-                guid: Guid(2),
-                instance: 1,
-            },
-            sources: vec![source.clone()],
-            skills,
+        let candidate = SalvageCandidate::Ready {
+            material: MaterialType::Steel,
         };
         assert_eq!(
-            serde_json::to_value(SalvageCandidate::Ready {
-                source: source.clone()
-            })
-            .unwrap(),
+            serde_json::to_value(&candidate).unwrap(),
             fixture["candidate"]
-        );
-        assert_eq!(
-            serde_json::to_value(SalvageContext { skills }).unwrap(),
-            fixture["context"]
         );
         let preview = SalvagePreviewResult {
             sequence: 9,
-            evaluation: SalvageEvaluation::Ready {
-                review: review.clone(),
+            evaluation: SalvagePreviewEvaluation::Ready {
+                revision: 1,
+                tool: Guid(2),
                 bags: vec![SalvagePreviewBag {
                     material_type: MaterialType::Steel,
                     units: 42,
@@ -3148,16 +3113,14 @@ mod salvage_wire_tests {
         let bytes = encode_frame(&receiver.recv().unwrap()).unwrap();
         let frame: Value = rmp_serde::from_slice(&bytes[4..]).unwrap();
         assert_eq!(frame["event"]["payload"], fixture["preview"]);
-        let candidate = SalvageCandidate::Ready { source };
         let bytes = rmp_serde::to_vec_named(&candidate).unwrap();
         let candidate: Value = rmp_serde::from_slice(&bytes).unwrap();
         assert_eq!(candidate, fixture["candidate"]);
 
         let submit: SalvageSubmitRequest =
             serde_json::from_value(fixture["submit"].clone()).unwrap();
-        assert_eq!(submit.review, review);
+        assert_eq!(submit.revision, 1);
         // HostCommand decodes MessagePack into JSON before deserializing its request.
-        // Returning the same numeric review must survive that production path too.
         let payload = rmp_serde::to_vec_named(&serde_json::json!({
             "kind": "request", "id": 1,
             "command": { "command": "submit_client_salvage", "request": fixture["submit"] }
@@ -3175,7 +3138,7 @@ mod salvage_wire_tests {
         else {
             panic!("salvage submission did not decode");
         };
-        assert_eq!(request.review, review);
+        assert_eq!(request.revision, 1);
 
         assert_eq!(
             serde_json::to_value(SalvageSubmitResult {

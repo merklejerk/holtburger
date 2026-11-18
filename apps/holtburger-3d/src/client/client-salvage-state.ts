@@ -13,7 +13,6 @@ import type {
 import type {
 	SalvageEvaluation,
 	SalvagePreviewRequest,
-	SalvageReview,
 	SalvageSubmitRequest,
 } from "./client-salvage-contract";
 
@@ -30,7 +29,7 @@ type State =
 	| {
 			readonly kind: "confirming";
 			readonly draft: Draft;
-			readonly review: SalvageReview;
+			readonly revision: number;
 			readonly question: LocalConfirmationRequest;
 	  }
 	| {
@@ -46,7 +45,6 @@ interface PendingPreview {
 	readonly sequence: number;
 	readonly action: Action;
 	readonly items: readonly number[];
-	readonly dependencies: string;
 }
 /** Narrow semantic session surface; synthetic tests need no renderer or transport socket. */
 export interface SalvageSession extends Pick<
@@ -88,7 +86,6 @@ export class ClientSalvageState implements LocalDialogSource {
 	#pending: PendingPreview | null = null;
 	#actions: Action[] = [];
 	readonly #appraisals = new Map<number, AppraisalProgress>();
-	#dependencies = "";
 	#problem: string | null = null;
 	#destroyed = false;
 
@@ -135,13 +132,11 @@ export class ClientSalvageState implements LocalDialogSource {
 	}
 	/** Capture the accepted draft so a late drag cannot remove an entry from a replacement queue. */
 	captureRemoval(item: number): (() => void) | null {
-		this.#sync();
 		const state = this.#state;
 		if (state.kind !== "editing" || !state.draft.items.includes(item))
 			return null;
 		const draft = state.draft;
 		return () => {
-			this.#sync();
 			if (this.#state.kind === "editing" && this.#state.draft === draft)
 				this.remove(item);
 		};
@@ -157,7 +152,6 @@ export class ClientSalvageState implements LocalDialogSource {
 		this.#pending = null;
 		this.#actions = [];
 		this.#state = { kind: "closed" };
-		this.#dependencies = "";
 		this.#problem = null;
 		this.#notify();
 	}
@@ -167,10 +161,8 @@ export class ClientSalvageState implements LocalDialogSource {
 		this.#unsubscribe();
 		this.#listeners.clear();
 	}
-	/** Sampling compares only world-produced salvage dependencies, not the global entity revision. */
+	/** Pure view snapshot; reactive world listeners drive refresh and appraisal pumping. */
 	read(): SalvageView | null {
-		this.#sync();
-		this.#pumpAppraisals();
 		const state = this.#state;
 		if (state.kind === "closed") return null;
 		return {
@@ -192,7 +184,6 @@ export class ClientSalvageState implements LocalDialogSource {
 	}
 	/** Failed items remain queued; retry only their missing appraisal work on explicit intent. */
 	retryDetails(): void {
-		this.#sync();
 		if (this.#state.kind !== "editing") return;
 		for (const [guid, progress] of this.#appraisals)
 			if (progress.kind === "failed") this.#appraisals.delete(guid);
@@ -209,14 +200,15 @@ export class ClientSalvageState implements LocalDialogSource {
 			state.draft.evaluation.kind !== "ready"
 		)
 			return;
+		const revision = state.draft.evaluation.revision;
 		if (this.#confirmation.active) {
-			this.#submit(state.draft, state.draft.evaluation.review);
+			this.#submit(state.draft, revision);
 			return;
 		}
 		this.#state = {
 			kind: "confirming",
 			draft: state.draft,
-			review: state.draft.evaluation.review,
+			revision,
 			question: {
 				requestId: `salvage-${nextInventoryPreviewSequence()}`,
 				text: `Destroy these ${state.draft.items.length} queued items to produce salvage? Entire stacks are included.`,
@@ -228,7 +220,6 @@ export class ClientSalvageState implements LocalDialogSource {
 		this.#notify();
 	}
 	respond(id: string, accepted: boolean, suppress?: boolean): void {
-		this.#sync();
 		const state = this.#state;
 		if (state.kind !== "confirming" || state.question.requestId !== id) return;
 		if (!accepted) {
@@ -237,10 +228,13 @@ export class ClientSalvageState implements LocalDialogSource {
 			return;
 		}
 		if (suppress === true) this.#confirmation.suppressForHour();
-		this.#submit(state.draft, state.review);
+		this.#submit(state.draft, state.revision);
 	}
-	#submit(draft: Draft, review: SalvageReview): void {
-		const request = { sequence: nextInventoryPreviewSequence(), review };
+	#submit(draft: Draft, revision: number): void {
+		const request: SalvageSubmitRequest = {
+			sequence: nextInventoryPreviewSequence(),
+			revision,
+		};
 		this.#state = { kind: "submitting", draft, request };
 		this.#notify();
 		void this.#session.submitSalvage(request).catch((error: unknown) => {
@@ -313,9 +307,22 @@ export class ClientSalvageState implements LocalDialogSource {
 		} else if (action.kind === "remove")
 			items = items.filter((item) => item !== action.item);
 		else if (action.kind === "clear") items = [];
-		else if (action.kind === "refresh" && draft === null) {
-			this.#drain();
-			return;
+		else if (action.kind === "refresh") {
+			if (draft === null) {
+				this.#drain();
+				return;
+			}
+			const filtered = items.filter((item) => this.canQueue(item));
+			if (filtered.length !== items.length) {
+				this.#retireAppraisals(filtered);
+				this.#notice("Unavailable items were removed from the salvage queue.");
+				this.#state = {
+					kind: "editing",
+					draft: { ...draft, items: filtered },
+				};
+				items = filtered;
+				this.#notify();
+			}
 		}
 		let tool: SalvagePreviewRequest["tool"];
 		if (action.kind === "tool") tool = { kind: "exact", guid: action.tool };
@@ -338,7 +345,6 @@ export class ClientSalvageState implements LocalDialogSource {
 			sequence: request.sequence,
 			action,
 			items,
-			dependencies: this.#dependencyKey(items),
 		};
 		this.#pending = pending;
 		void this.#session.previewSalvage(request).catch((error: unknown) => {
@@ -403,7 +409,11 @@ export class ClientSalvageState implements LocalDialogSource {
 				this.#appraisals.set(guid, { kind: "received" });
 				// Core has applied the appraisal; evaluate again rather than deriving yield or
 				// depending on whether its entity delta arrived before the response callback.
-				this.#enqueue({ kind: "refresh" });
+				if (
+					this.#pending?.action.kind !== "refresh" &&
+					!this.#actions.some((action) => action.kind === "refresh")
+				)
+					this.#enqueue({ kind: "refresh" });
 			} else {
 				const reason =
 					result.outcome.kind === "rejected"
@@ -429,45 +439,6 @@ export class ClientSalvageState implements LocalDialogSource {
 		});
 	}
 
-	#dependencyKey(items: readonly number[]): string {
-		const read = this.#session.entities.read();
-		if (read.kind !== "current") return "pending";
-		return JSON.stringify([
-			read.level.playerGuid,
-			read.level.salvage,
-			items.map((item) => read.level.entities.get(item)?.salvage ?? null),
-		]);
-	}
-	#sync(): void {
-		const state = this.#state;
-		if (state.kind === "closed") return;
-		const read = this.#session.entities.read();
-		if (
-			read.kind !== "current" ||
-			this.#session.state().lifecycle?.kind !== "in-world"
-		) {
-			this.close();
-			return;
-		}
-		if (read.level.entities.get(state.draft.tool)?.ownedByPlayer !== true) {
-			this.#notice("The salvage tool is no longer available.");
-			this.close();
-			return;
-		}
-		if (state.kind === "submitting") return;
-		const key = this.#dependencyKey(state.draft.items);
-		if (key === this.#dependencies) return;
-		this.#dependencies = key;
-		const items = state.draft.items.filter((item) => this.canQueue(item));
-		this.#retireAppraisals(items);
-		if (items.length !== state.draft.items.length)
-			this.#notice("Unavailable items were removed from the salvage queue.");
-		this.#state = { kind: "editing", draft: { ...state.draft, items } };
-		if (!this.#actions.some((action) => action.kind === "refresh"))
-			this.#actions.push({ kind: "refresh" });
-		this.#notify();
-		this.#drain();
-	}
 	#receive(event: ClientLifecycleSessionEvent): void {
 		this.#confirmation.receive(event);
 		if (
@@ -476,19 +447,66 @@ export class ClientSalvageState implements LocalDialogSource {
 			(event.type === "lifecycle" && event.lifecycle.kind !== "in-world")
 		) {
 			this.close();
+		} else if (event.type === "entities") {
+			const state = this.#state;
+			if (state.kind === "closed") return;
+			const read = this.#session.entities.read();
+			if (
+				read.kind !== "current" ||
+				this.#session.state().lifecycle?.kind !== "in-world"
+			) {
+				this.close();
+				return;
+			}
+			if (read.level.entities.get(state.draft.tool)?.ownedByPlayer !== true) {
+				this.#notice("The salvage tool is no longer available.");
+				this.close();
+				return;
+			}
+			if (state.kind === "submitting") return;
+			const items = state.draft.items.filter((item) => this.canQueue(item));
+			const removedAny = items.length !== state.draft.items.length;
+			const pendingItems = this.#pending?.items ?? [];
+			const touches = (guid: number) =>
+				guid === state.draft.tool ||
+				state.draft.items.includes(guid) ||
+				pendingItems.includes(guid);
+			const touchedByDelta =
+				event.delta.upserts.some((record) => touches(record.guid)) ||
+				event.delta.removed.some((guid) => touches(guid));
+			if (!removedAny && !touchedByDelta) return;
+			this.#retireAppraisals(items);
+			if (removedAny)
+				this.#notice("Unavailable items were removed from the salvage queue.");
+			this.#state = {
+				kind: "editing",
+				draft: { ...state.draft, items },
+			};
+			if (!this.#actions.some((action) => action.kind === "refresh"))
+				this.#actions.push({ kind: "refresh" });
+			this.#notify();
+			this.#drain();
+			this.#pumpAppraisals();
+		} else if (event.type === "character-sheet") {
+			const state = this.#state;
+			if (state.kind !== "editing" && state.kind !== "confirming") return;
+			if (state.kind === "confirming")
+				this.#state = { kind: "editing", draft: state.draft };
+			if (!this.#actions.some((action) => action.kind === "refresh"))
+				this.#actions.push({ kind: "refresh" });
+			this.#notify();
+			this.#drain();
 		} else if (event.type === "salvage-preview") {
 			const pending = this.#pending;
 			if (pending === null || pending.sequence !== event.result.sequence)
 				return;
 			this.#pending = null;
-			if (pending.dependencies !== this.#dependencyKey(pending.items)) {
-				this.#actions.unshift(pending.action);
-				this.#drain();
-				return;
-			}
+			const refreshQueued = this.#actions.some(
+				(action) => action.kind === "refresh",
+			);
 			const evaluation = event.result.evaluation;
 			if (evaluation.kind === "rejected") {
-				this.#notice(evaluation.reason);
+				if (!refreshQueued) this.#notice(evaluation.reason);
 				if (
 					pending.action.kind === "refresh" &&
 					this.#state.kind === "editing"
@@ -500,16 +518,15 @@ export class ClientSalvageState implements LocalDialogSource {
 					this.#problem = null;
 				}
 			} else {
-				const tool =
-					evaluation.kind === "ready"
-						? evaluation.review.tool
-						: evaluation.tool;
 				this.#state = {
 					kind: "editing",
-					draft: { tool: tool.guid, items: pending.items, evaluation },
+					draft: {
+						tool: evaluation.tool,
+						items: pending.items,
+						evaluation,
+					},
 				};
-				this.#reconcileAppraisals(evaluation);
-				this.#dependencies = this.#dependencyKey(pending.items);
+				if (!refreshQueued) this.#reconcileAppraisals(evaluation);
 				this.#problem = null;
 				if (pending.action.kind === "add" || pending.action.kind === "tool")
 					this.#raise();
@@ -528,7 +545,6 @@ export class ClientSalvageState implements LocalDialogSource {
 			const outcome = event.result.outcome;
 			if (outcome.kind === "dispatched") {
 				this.#state = { kind: "editing", draft: { ...state.draft, items: [] } };
-				this.#dependencies = this.#dependencyKey([]);
 				this.#actions.push({ kind: "refresh" });
 			} else {
 				this.#problem =

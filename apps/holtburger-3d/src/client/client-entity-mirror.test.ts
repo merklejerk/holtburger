@@ -37,7 +37,6 @@ function commit(
 ): void {
 	const prepared = mirror.prepareDelta({
 		projectileSupply: null,
-		salvage: null,
 		player: null,
 		worldContainer: null,
 		upserts,
@@ -53,13 +52,6 @@ describe("ClientEntityMirror", () => {
 		const store = mirror();
 		const prepared = store.prepareDelta({
 			projectileSupply: { kind: "finite", count: 17 },
-			salvage: {
-				skills: {
-					salvagingSkill: 0,
-					tinkeringSkill: 0,
-					augmentationBonusSalvage: 0,
-				},
-			},
 			player: null,
 			worldContainer: null,
 			upserts: [],
@@ -78,13 +70,6 @@ describe("ClientEntityMirror", () => {
 		});
 		const pending = store.prepareDelta({
 			projectileSupply: { kind: "pending", appraisal: null },
-			salvage: {
-				skills: {
-					salvagingSkill: 0,
-					tinkeringSkill: 0,
-					augmentationBonusSalvage: 0,
-				},
-			},
 			player: null,
 			worldContainer: null,
 			upserts: [],
@@ -103,13 +88,6 @@ describe("ClientEntityMirror", () => {
 				{
 					...playerEntitySnapshot(player),
 					projectileSupply: { kind: "unlimited" },
-					salvage: {
-						skills: {
-							salvagingSkill: 0,
-							tinkeringSkill: 0,
-							augmentationBonusSalvage: 0,
-						},
-					},
 				},
 				player,
 			),
@@ -145,13 +123,6 @@ describe("ClientEntityMirror", () => {
 			store.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
-					salvage: {
-						skills: {
-							salvagingSkill: 0,
-							tinkeringSkill: 0,
-							augmentationBonusSalvage: 0,
-						},
-					},
 					player: emptyPlayerSummary,
 					worldContainer: { kind: "closed" },
 					entities: [entityFacts(player), updated],
@@ -187,7 +158,6 @@ describe("ClientEntityMirror", () => {
 		const before = store.read();
 		const next = store.prepareDelta({
 			projectileSupply: null,
-			salvage: null,
 			player: null,
 			worldContainer: null,
 			upserts: [owned(item, pack), owned(pack, player)],
@@ -222,13 +192,6 @@ describe("ClientEntityMirror", () => {
 			store.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
-					salvage: {
-						skills: {
-							salvagingSkill: 0,
-							tinkeringSkill: 0,
-							augmentationBonusSalvage: 0,
-						},
-					},
 					player: emptyPlayerSummary,
 					worldContainer: { kind: "closed" },
 					entities: [entityFacts(player), entityFacts(player)],
@@ -239,7 +202,6 @@ describe("ClientEntityMirror", () => {
 		expect(() =>
 			store.prepareDelta({
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [owned(item, player)],
@@ -249,7 +211,6 @@ describe("ClientEntityMirror", () => {
 		expect(() =>
 			store.prepareDelta({
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [owned(item, pack)],
@@ -259,7 +220,6 @@ describe("ClientEntityMirror", () => {
 		expect(() =>
 			store.prepareDelta({
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [],
@@ -277,7 +237,6 @@ describe("ClientEntityMirror", () => {
 		expect(
 			store.prepareDelta({
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [owned(pack, player)],

@@ -45,13 +45,6 @@ function fixture(
 			mirror.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
-					salvage: {
-						skills: {
-							salvagingSkill: 0,
-							tinkeringSkill: 0,
-							augmentationBonusSalvage: 0,
-						},
-					},
 					player: emptyPlayerSummary,
 					worldContainer: { kind: "closed" },
 					entities: [
@@ -218,13 +211,6 @@ describe("persistent inventory state", () => {
 				f.mirror.prepareSnapshot(
 					{
 						projectileSupply: { kind: "not-applicable" },
-						salvage: {
-							skills: {
-								salvagingSkill: 0,
-								tinkeringSkill: 0,
-								augmentationBonusSalvage: 0,
-							},
-						},
 						player: { ...emptyPlayerSummary, burden },
 						worldContainer: { kind: "closed" },
 						entities: [entityFacts(guid)],

@@ -108,7 +108,6 @@ export function createVendorFixture(options: {
 			baseline();
 			emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [named(vendor, "Festival Merchant", {}), ...sources],

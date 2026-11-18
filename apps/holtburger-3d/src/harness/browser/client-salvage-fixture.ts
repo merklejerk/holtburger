@@ -18,13 +18,7 @@ export function createSalvageFixture(options: {
 	}[];
 }) {
 	const tool = 9200;
-	const context = {
-		skills: {
-			salvagingSkill: 300,
-			tinkeringSkill: 200,
-			augmentationBonusSalvage: 0,
-		},
-	};
+	let revision = 0;
 	const sources = new Map<number, ClientEntityFacts>();
 	function item(
 		guid: number,
@@ -40,18 +34,7 @@ export function createSalvageFixture(options: {
 			},
 			salvage: {
 				kind: "ready",
-				source: {
-					guid,
-					instance: 1,
-					input: {
-						itemType: 1,
-						materialType: material,
-						stackSize: 2,
-						structure: 0,
-						itemWorkmanship: 7,
-						numItemsInMaterial: 1,
-					},
-				},
+				material,
 			},
 		});
 		if (facts.description.kind !== "known")
@@ -88,7 +71,6 @@ export function createSalvageFixture(options: {
 			options.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				worldContainer: null,
-				salvage: context,
 				player: null,
 				upserts: [...sources.values()],
 				removed: [],
@@ -103,26 +85,18 @@ export function createSalvageFixture(options: {
 			)?.args;
 			if (args === undefined) throw new Error("No salvage preview request.");
 			const request = salvagePreviewRequestSchema.parse(args.request);
+			revision += 1;
 			const evaluation: SalvageEvaluation = {
 				kind: "ready",
-				review: {
-					player: 1,
-					tool: { guid: tool, instance: 1 },
-					skills: context.skills,
-					sources: request.items.map((guid) => {
-						const candidate = sources.get(guid)?.salvage;
-						if (candidate?.kind !== "ready")
-							throw new Error("Expected ready source.");
-						return candidate.source;
-					}),
-				},
+				revision,
+				tool,
 				bags: [
 					...new Set(
 						request.items.map((guid) => {
 							const candidate = sources.get(guid)?.salvage;
 							if (candidate?.kind !== "ready")
 								throw new Error("Expected ready source.");
-							return candidate.source.input.materialType;
+							return candidate.material;
 						}),
 					),
 				].map((materialType) => ({ materialType, units: 42, workmanship: 7 })),

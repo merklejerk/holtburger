@@ -22,7 +22,6 @@ export function entityDelta(
 ): ClientEntityDelta {
 	return {
 		projectileSupply: null,
-		salvage: null,
 		player: null,
 		worldContainer: null,
 		upserts: [],
@@ -54,13 +53,6 @@ export function creatureFacts(
 export function playerEntitySnapshot(playerGuid: number): ClientEntitySnapshot {
 	return {
 		projectileSupply: { kind: "not-applicable" },
-		salvage: {
-			skills: {
-				salvagingSkill: 0,
-				tinkeringSkill: 0,
-				augmentationBonusSalvage: 0,
-			},
-		},
 		player: emptyPlayerSummary,
 		worldContainer: { kind: "closed" },
 		entities: [entityFacts(playerGuid)],

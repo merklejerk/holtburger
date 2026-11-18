@@ -246,6 +246,8 @@ pub struct ClientRuntime {
     player_visual: player_visual::PlayerVisualPublication,
     /// Single owner of IdentifyObject queueing, cooldown pacing, and delivery filtering.
     appraisal: appraisal::AppraisalSystem,
+    /// Authority-retained salvage review bound to a monotonic preview revision.
+    salvage_approval: salvage::SalvageApproval,
     active_busy_operation: Option<PendingBusyOperation>,
     /// Direct-use evidence outlives admission because sound and UseDone arrive independently.
     lock_use: Option<lock_feedback::LockUse>,
@@ -1139,7 +1141,11 @@ impl ClientRuntime {
                     matches!(
                         update,
                         PropertyUpdate::String(PropertyString::Name | PropertyString::Template, _)
-                            | PropertyUpdate::Int(PropertyInt::CharacterTitleId, _)
+                            | PropertyUpdate::Int(
+                                PropertyInt::CharacterTitleId
+                                    | PropertyInt::AugmentationBonusSalvage,
+                                _,
+                            )
                             | PropertyUpdate::Int64(PropertyInt64::MaximumLuminance, _)
                     )
                 });

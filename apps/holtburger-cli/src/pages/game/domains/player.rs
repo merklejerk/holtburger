@@ -86,7 +86,6 @@ fn log_busy_operation_result(
     let label = match operation {
         holtburger_core::BusyOperationKind::Use => "Use",
         holtburger_core::BusyOperationKind::UseWithTarget => "Use-with-target",
-        holtburger_core::BusyOperationKind::Salvage => "Salvage",
         holtburger_core::BusyOperationKind::SpellCast => "Spell cast",
         holtburger_core::BusyOperationKind::Buy => "Buy",
         holtburger_core::BusyOperationKind::Sell => "Sell",

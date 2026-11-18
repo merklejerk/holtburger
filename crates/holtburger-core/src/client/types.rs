@@ -1041,7 +1041,6 @@ impl ActiveCharacterConfirmation {
 pub enum BusyOperationKind {
     Use,
     UseWithTarget,
-    Salvage,
     SpellCast,
     Buy,
     Sell,

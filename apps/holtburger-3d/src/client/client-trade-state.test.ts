@@ -88,13 +88,6 @@ async function fixture() {
 		dynamic: { hostTime: { seconds: 1 }, entities: [] },
 		entities: {
 			projectileSupply: { kind: "not-applicable" },
-			salvage: {
-				skills: {
-					salvagingSkill: 0,
-					tinkeringSkill: 0,
-					augmentationBonusSalvage: 0,
-				},
-			},
 			player: { pyrealBalance: null, burden: null, aetheriaActivation: null },
 			worldContainer: { kind: "closed" },
 			entities: [
@@ -179,7 +172,6 @@ describe("P2P trade HUD authority", () => {
 		});
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
-			salvage: null,
 			player: null,
 			worldContainer: null,
 			removed: [],
@@ -232,7 +224,6 @@ describe("P2P trade HUD authority", () => {
 		const f = await fixture();
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
-			salvage: null,
 			player: null,
 			worldContainer: null,
 			removed: [],

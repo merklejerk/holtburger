@@ -11,6 +11,7 @@ import {
 	type ClientEntityFacts,
 } from "./client-entity-mirror";
 import {
+	entityDelta,
 	entityFacts,
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
@@ -202,7 +203,7 @@ function fixture(
 	) => {
 		records = change(records);
 		snapshot();
-		emit({ type: "entities" });
+		emit({ type: "entities", delta: entityDelta({ upserts: records }) });
 	};
 	const escape = () =>
 		keyboard.keydown(

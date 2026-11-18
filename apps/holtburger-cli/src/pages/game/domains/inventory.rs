@@ -3,9 +3,9 @@ use super::object_interaction;
 use super::*;
 use holtburger_core::client::inventory_storage::EquipmentStoragePolicy;
 use holtburger_core::client::salvage::{
-    SalvagePreviewRequest, SalvageSubmitOutcome, SalvageSubmitRequest, SalvageToolSelection,
+    SalvagePreviewEvaluation, SalvagePreviewRequest, SalvageSubmitOutcome, SalvageSubmitRequest,
+    SalvageToolSelection,
 };
-use holtburger_world::crafting::salvage::SalvageEvaluation;
 use holtburger_world::entity_facts::EntityStorageLocation;
 use holtburger_world::inspection::ObjectInspectionOutcome;
 use holtburger_world::state::storage::{PackEntryKind, StorageSlot};
@@ -90,15 +90,16 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
         AppAction::ConfirmSalvage => {
             if let Some(session) = state.view.salvaging.as_mut()
                 && state.view.active_interaction == Some(Interaction::Salvaging)
-                && let SalvagingPhase::Reviewed(SalvageEvaluation::Ready { review, .. }) =
-                    &session.phase
-                && !review.sources.is_empty()
+                && let SalvagingPhase::Reviewed(SalvagePreviewEvaluation::Ready {
+                    revision, ..
+                }) = &session.phase
+                && !session.queued_items.is_empty()
             {
                 result
                     .commands
                     .push(ClientCommand::SubmitSalvage(SalvageSubmitRequest {
                         sequence: session.sequence,
-                        review: review.clone(),
+                        revision: *revision,
                     }));
                 session.phase = SalvagingPhase::Submitting;
                 result.request_redraw(RedrawPriority::Immediate);
@@ -414,11 +415,11 @@ fn request_salvage_preview(state: &mut GameState, result: &mut UpdateResult) {
 
 fn accept_salvage_evaluation(
     session: &mut SalvagingState,
-    evaluation: &SalvageEvaluation,
+    evaluation: &SalvagePreviewEvaluation,
     result: &mut UpdateResult,
 ) {
     let mut problem = None;
-    if let SalvageEvaluation::PendingDetails { items, .. } = evaluation {
+    if let SalvagePreviewEvaluation::PendingDetails { items, .. } = evaluation {
         for guid in items {
             match session.assessments.entry(*guid) {
                 Entry::Vacant(entry) => {
@@ -510,17 +511,16 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
         } if *client_state != holtburger_core::ClientState::InWorld => {
             close_salvaging(state, &mut result);
         }
-        ClientViewEvent::ApplicationSnapshot(_) => {
+        ClientViewEvent::ApplicationSnapshot(_) | ClientViewEvent::CharacterSheetUpdated(_) => {
             request_salvage_preview(state, &mut result);
         }
         ClientViewEvent::EntityFactsChanged(delta)
-            if delta.salvage.is_some()
-                || delta.upserts.iter().any(|facts| {
-                    session.queued_items.contains(&facts.guid) || session.ust_guid == facts.guid
-                })
-                || delta.removed.iter().any(|guid| {
-                    session.queued_items.contains(guid) || session.ust_guid == *guid
-                }) =>
+            if delta.upserts.iter().any(|facts| {
+                session.queued_items.contains(&facts.guid) || session.ust_guid == facts.guid
+            }) || delta
+                .removed
+                .iter()
+                .any(|guid| session.queued_items.contains(guid) || session.ust_guid == *guid) =>
         {
             request_salvage_preview(state, &mut result);
         }

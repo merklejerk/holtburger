@@ -429,7 +429,6 @@ describe("ClientGameplayPresentation", () => {
 			await presentation.start();
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [entityFacts(corpseGuid, { corpse: "opened" })],
@@ -449,7 +448,6 @@ describe("ClientGameplayPresentation", () => {
 			});
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [entityFacts(corpseGuid, { corpse: "unopened" })],
@@ -494,7 +492,6 @@ describe("ClientGameplayPresentation", () => {
 				const publish = (activity: "active" | "ended") =>
 					transport.emit("client-entity-facts-changed", {
 						projectileSupply: null,
-						salvage: null,
 						player: null,
 						worldContainer: null,
 						removed: [],
@@ -2082,7 +2079,6 @@ describe("ClientGameplayPresentation", () => {
 				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? 75;
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [
@@ -2123,7 +2119,6 @@ describe("ClientGameplayPresentation", () => {
 				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? baseHostSeconds;
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [
@@ -2192,7 +2187,6 @@ describe("ClientGameplayPresentation", () => {
 				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? 75;
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [
@@ -2231,7 +2225,6 @@ describe("ClientGameplayPresentation", () => {
 				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? baseHostSeconds;
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [
@@ -2258,7 +2251,6 @@ describe("ClientGameplayPresentation", () => {
 			expect(runtime.healthBarFraction(mobGuid)).toBeUndefined();
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [
@@ -2290,7 +2282,6 @@ describe("ClientGameplayPresentation", () => {
 				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? baseHostSeconds;
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [
@@ -2330,7 +2321,6 @@ describe("ClientGameplayPresentation", () => {
 				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? baseHostSeconds;
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [
@@ -2400,7 +2390,6 @@ describe("ClientGameplayPresentation", () => {
 			};
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [
@@ -2439,7 +2428,6 @@ describe("ClientGameplayPresentation", () => {
 			const castHostSec = lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? 75;
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [

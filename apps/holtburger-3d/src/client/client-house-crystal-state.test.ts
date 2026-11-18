@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UiIconRepository } from "../app/ui-icon-repository";
 import { ClientEntityMirror } from "./client-entity-mirror";
-import { entityFacts } from "./client-entity-mirror.test-support";
+import { entityDelta, entityFacts } from "./client-entity-mirror.test-support";
 import {
 	emptyHousing,
 	type HousingCrystal,
@@ -81,13 +81,6 @@ function fixture(distance: number | null = 0) {
 			entities.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
-					salvage: {
-						skills: {
-							salvagingSkill: 0,
-							tinkeringSkill: 0,
-							augmentationBonusSalvage: 0,
-						},
-					},
 					player: {
 						pyrealBalance: null,
 						burden: null,
@@ -259,13 +252,6 @@ describe("crystal draft ownership", () => {
 			f.entities.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
-					salvage: {
-						skills: {
-							salvagingSkill: 0,
-							tinkeringSkill: 0,
-							augmentationBonusSalvage: 0,
-						},
-					},
 					player: {
 						pyrealBalance: null,
 						burden: null,
@@ -349,7 +335,7 @@ describe("crystal draft ownership", () => {
 		f.emit({ type: "housing-crystal-received", crystal: profile() });
 		f.answer([10], true);
 		f.replace([11]);
-		f.emit({ type: "entities" });
+		f.emit({ type: "entities", delta: entityDelta() });
 		f.model.pay();
 		expect(f.submit).not.toHaveBeenCalled();
 		f.answer([11], true);
@@ -505,7 +491,7 @@ describe("crystal draft ownership", () => {
 		f.model.add(100, 273, 10);
 		f.answer();
 		f.replace([11]);
-		f.emit({ type: "entities" });
+		f.emit({ type: "entities", delta: entityDelta() });
 		expect(f.model.read()?.items).toEqual([]);
 		expect(f.pending().draft.items).toEqual([]);
 		f.answer();
@@ -518,7 +504,7 @@ describe("crystal draft ownership", () => {
 		f.answer();
 		f.model.add(100, 273, 10);
 		f.replace([10, 11]);
-		f.emit({ type: "entities" });
+		f.emit({ type: "entities", delta: entityDelta() });
 		f.answer([10]);
 		expect(f.model.read()?.items).toEqual([]);
 		expect(f.pending().draft.items).toEqual([]);

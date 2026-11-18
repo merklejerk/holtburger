@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { entityDelta } from "./client-entity-mirror.test-support";
 import { persistPlayerVisualCapture } from "./client-visual-capture";
 import { playerVisualCaptureSchema } from "./client-object-preview-contract";
 import fixture from "./fixtures/object-preview-wire.json";
@@ -32,7 +33,11 @@ describe("cold gameplay capture forwarding", () => {
 			transport,
 			report,
 		);
-		persistPlayerVisualCapture({ type: "entities" }, transport, report);
+		persistPlayerVisualCapture(
+			{ type: "entities", delta: entityDelta() },
+			transport,
+			report,
+		);
 		expect(stage.mock.calls).toEqual([[first], [second]]);
 		await Promise.resolve();
 		expect(report).toHaveBeenCalledExactlyOnceWith(

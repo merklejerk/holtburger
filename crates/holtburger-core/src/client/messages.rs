@@ -129,6 +129,7 @@ impl ClientRuntime {
             self.emit_progression_guards();
         }
         self.reset_container_access();
+        self.salvage_approval.reset();
         self.recent_deaths.clear();
         self.clear_busy_operation();
         // ACE Session.InitSessionForWorldLogin restarts this character's event stamps at one.

@@ -349,7 +349,6 @@ pub enum ScriptBusyOperation {
     None,
     Use,
     UseWithTarget,
-    Salvage,
     SpellCast,
     Buy,
     Sell,
@@ -366,7 +365,6 @@ impl ScriptBusyOperation {
         match kind {
             BusyOperationKind::Use => Self::Use,
             BusyOperationKind::UseWithTarget => Self::UseWithTarget,
-            BusyOperationKind::Salvage => Self::Salvage,
             BusyOperationKind::SpellCast => Self::SpellCast,
             BusyOperationKind::Buy => Self::Buy,
             BusyOperationKind::Sell => Self::Sell,

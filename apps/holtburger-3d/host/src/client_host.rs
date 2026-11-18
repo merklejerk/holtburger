@@ -598,7 +598,6 @@ mod tests {
         );
         let event = project_client_event(ClientViewEvent::EntityFactsChanged(
             holtburger_core::ClientEntityDelta {
-                salvage: None,
                 world_container: Some(holtburger_world::state::WorldContainerState::Closed),
                 ..Default::default()
             },

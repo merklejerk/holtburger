@@ -830,13 +830,6 @@ describe("ClientLifecycleSession", () => {
 			...currentState(player),
 			entities: {
 				projectileSupply: { kind: "not-applicable" },
-				salvage: {
-					skills: {
-						salvagingSkill: 0,
-						tinkeringSkill: 0,
-						augmentationBonusSalvage: 0,
-					},
-				},
 				player: emptyPlayerSummary,
 				worldContainer: { kind: "open", root },
 				entities: contents,
@@ -862,13 +855,6 @@ describe("ClientLifecycleSession", () => {
 		});
 		transport.emit("client-entity-facts-changed", {
 			projectileSupply: { kind: "not-applicable" },
-			salvage: {
-				skills: {
-					salvagingSkill: 0,
-					tinkeringSkill: 0,
-					augmentationBonusSalvage: 0,
-				},
-			},
 			player: null,
 			worldContainer: { kind: "closed" },
 			upserts: [],
@@ -879,13 +865,6 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-state-resyncing", null);
 		transport.emit("client-entity-facts-changed", {
 			projectileSupply: { kind: "not-applicable" },
-			salvage: {
-				skills: {
-					salvagingSkill: 0,
-					tinkeringSkill: 0,
-					augmentationBonusSalvage: 0,
-				},
-			},
 			player: null,
 			worldContainer: { kind: "open", root },
 			upserts: contents,
@@ -1361,7 +1340,6 @@ describe("ClientLifecycleSession", () => {
 		await session.start();
 		transport.emit("client-entity-facts-changed", {
 			projectileSupply: null,
-			salvage: null,
 			player: null,
 			worldContainer: null,
 			removed: [],
@@ -1595,13 +1573,6 @@ describe("ClientLifecycleSession", () => {
 		startup.localPlayerGuid = null;
 		startup.entities = {
 			projectileSupply: { kind: "not-applicable" },
-			salvage: {
-				skills: {
-					salvagingSkill: 0,
-					tinkeringSkill: 0,
-					augmentationBonusSalvage: 0,
-				},
-			},
 			player: emptyPlayerSummary,
 			worldContainer: { kind: "closed" },
 			entities: [],
@@ -1630,7 +1601,6 @@ describe("ClientLifecycleSession", () => {
 			baseline.entities.entities.push(item);
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: baseline.entities.entities,
@@ -1641,7 +1611,6 @@ describe("ClientLifecycleSession", () => {
 			transport.emit("client-current-state", baseline);
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				upserts: [
@@ -1785,13 +1754,6 @@ describe("ClientLifecycleSession", () => {
 		const replacement = currentState(9);
 		replacement.entities = {
 			projectileSupply: { kind: "not-applicable" },
-			salvage: {
-				skills: {
-					salvagingSkill: 0,
-					tinkeringSkill: 0,
-					augmentationBonusSalvage: 0,
-				},
-			},
 			player: emptyPlayerSummary,
 			worldContainer: { kind: "closed" },
 			entities: [
@@ -1872,7 +1834,6 @@ describe("ClientLifecycleSession", () => {
 		expect(session.entities.read().kind).toBe("pending");
 		transport.emit("client-entity-facts-changed", {
 			projectileSupply: null,
-			salvage: null,
 			player: null,
 			worldContainer: null,
 			upserts: playerEntitySnapshot(9).entities,

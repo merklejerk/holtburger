@@ -1,10 +1,6 @@
 import { equipmentCantripStateSchema } from "../app/item-cantrip-contract.js";
 import { itemCooldownDefinitionSchema } from "./client-item-cooldowns-contract";
-import {
-	salvageCandidateSchema,
-	salvageContextSchema,
-	type SalvageContext,
-} from "./client-salvage-contract";
+import { salvageCandidateSchema } from "./client-salvage-contract";
 import { z } from "zod";
 import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../lib/game/map/map-blip-category";
 
@@ -310,7 +306,6 @@ export type PlayerEntitySummary = z.infer<typeof playerEntitySummarySchema>;
 export const clientEntitySnapshotSchema = z
 	.object({
 		projectileSupply: projectileSupplySchema,
-		salvage: salvageContextSchema,
 		player: playerEntitySummarySchema,
 		entities: z.array(clientEntityFactsSchema),
 		worldContainer: worldContainerSchema,
@@ -321,7 +316,6 @@ export const clientEntityDeltaSchema = z
 	.object({
 		/** Null retains the previous supply; unknown supply is an explicit pending value. */
 		projectileSupply: projectileSupplySchema.nullable(),
-		salvage: salvageContextSchema.nullable(),
 		player: playerEntitySummarySchema.nullable(),
 		upserts: z.array(clientEntityFactsSchema),
 		removed: z.array(guid),
@@ -337,7 +331,6 @@ export type ClientEntityDelta = z.infer<typeof clientEntityDeltaSchema>;
 export interface ClientEntityLevel {
 	/** Supply accepted together with equipment and item quantities. */
 	readonly projectileSupply: ProjectileSupply;
-	readonly salvage: SalvageContext;
 	/** Local-player aggregate inventory/equipment facts. */
 	readonly player: PlayerEntitySummary;
 	/** Access accepted in the same commit as contents and their pickup eligibility. */
@@ -426,7 +419,6 @@ export class ClientEntityMirror {
 				player: snapshot.player,
 				worldContainer: snapshot.worldContainer,
 				projectileSupply: snapshot.projectileSupply,
-				salvage: snapshot.salvage,
 				revision: this.#revision + 1,
 			},
 		};
@@ -435,7 +427,6 @@ export class ClientEntityMirror {
 	prepareDelta(delta: ClientEntityDelta): PreparedClientEntities | null {
 		if (this.#read.kind === "pending") return null;
 		if (
-			delta.salvage === null &&
 			delta.projectileSupply === null &&
 			delta.player === null &&
 			delta.worldContainer === null &&
@@ -461,7 +452,6 @@ export class ClientEntityMirror {
 			level: {
 				entities,
 				player: delta.player === null ? level.player : delta.player,
-				salvage: delta.salvage === null ? level.salvage : delta.salvage,
 				projectileSupply:
 					delta.projectileSupply === null
 						? level.projectileSupply

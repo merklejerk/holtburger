@@ -493,13 +493,6 @@
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },
 			entities: {
 				projectileSupply: { kind: "not-applicable" },
-				salvage: {
-					skills: {
-						salvagingSkill: 0,
-						tinkeringSkill: 0,
-						augmentationBonusSalvage: 0,
-					},
-				},
 				player: {
 					pyrealBalance: null,
 					aetheriaActivation: null,
@@ -1499,7 +1492,6 @@
 			);
 			emitInteractionEvent("client-entity-facts-changed", {
 				projectileSupply: null,
-				salvage: null,
 				player: null,
 				worldContainer: null,
 				removed: [],
@@ -1556,7 +1548,6 @@
 			if (target7 !== undefined) {
 				emitInteractionEvent("client-entity-facts-changed", {
 					projectileSupply: null,
-					salvage: null,
 					player: null,
 					worldContainer: null,
 					removed: [],

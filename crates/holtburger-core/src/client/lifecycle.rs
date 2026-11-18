@@ -100,6 +100,7 @@ impl ClientRuntime {
 
     pub(super) fn retire_logged_out_character(&mut self) {
         self.stop_character_actions();
+        self.salvage_approval.reset();
         self.reset_container_access();
         self.activation = None;
         self.movement.retire_movement_epoch();

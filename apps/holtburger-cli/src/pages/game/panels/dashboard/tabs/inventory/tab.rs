@@ -20,7 +20,7 @@ use crate::types::{
 use crate::utils::{
     format_item_name, fuzzy_subsequence_match, normalize_filter_tokens, retain_matching_hierarchy,
 };
-use holtburger_world::crafting::salvage::SalvageEvaluation;
+use holtburger_core::client::salvage::SalvagePreviewEvaluation;
 
 #[derive(Debug, Clone)]
 struct SplitSession {
@@ -324,7 +324,7 @@ impl TabController for InventoryTab {
                         if is_queued && !session.queued_items.is_empty() {
                             if matches!(
                                 session.phase,
-                                SalvagingPhase::Reviewed(SalvageEvaluation::Ready { .. })
+                                SalvagingPhase::Reviewed(SalvagePreviewEvaluation::Ready { .. })
                             ) {
                                 verbs.push(Verb::new(
                                     AppAction::ConfirmSalvage,

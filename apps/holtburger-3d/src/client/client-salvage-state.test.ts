@@ -12,14 +12,12 @@ import {
 	type ClientEntityFacts,
 } from "./client-entity-mirror";
 import {
+	entityDelta,
 	entityFacts,
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
-import type {
-	SalvageEvaluation,
-	SalvageReview,
-} from "./client-salvage-contract";
+import type { SalvageEvaluation } from "./client-salvage-contract";
 
 function source(guid: number, material = "Steel"): ClientEntityFacts {
 	return entityFacts(guid, {
@@ -31,18 +29,7 @@ function source(guid: number, material = "Steel"): ClientEntityFacts {
 		},
 		salvage: {
 			kind: "ready",
-			source: {
-				guid,
-				instance: 1,
-				input: {
-					itemType: 1,
-					materialType: material,
-					stackSize: 2,
-					structure: 0,
-					itemWorkmanship: 7,
-					numItemsInMaterial: 1,
-				},
-			},
+			material,
 		},
 	});
 }
@@ -64,6 +51,7 @@ function fixture() {
 	});
 	const notice = vi.fn();
 	const showInventory = vi.fn();
+	let revision = 0;
 	const replace = () => {
 		const baseline = playerEntitySnapshot(1);
 		mirror.commit(
@@ -71,7 +59,6 @@ function fixture() {
 				{
 					...baseline,
 					entities: records,
-					salvage: baseline.salvage,
 				},
 				1,
 			),
@@ -94,6 +81,18 @@ function fixture() {
 		appraisals.receive(event);
 		for (const listener of listeners) listener(event);
 	};
+	const upsert = (...upserts: ClientEntityFacts[]) => {
+		for (const record of upserts) {
+			const index = records.findIndex((entry) => entry.guid === record.guid);
+			if (index >= 0) records[index] = record;
+			else records.push(record);
+		}
+		const delta = entityDelta({ upserts });
+		const prepared = mirror.prepareDelta(delta);
+		if (prepared === null) throw new Error("Expected current mirror.");
+		mirror.commit(prepared);
+		emit({ type: "entities", delta });
+	};
 	const request = () => {
 		const last = preview.mock.calls.at(-1);
 		if (last === undefined) throw new Error("Expected a preview request.");
@@ -102,20 +101,16 @@ function fixture() {
 	const ready = (): Extract<SalvageEvaluation, { kind: "ready" }> => {
 		const read = mirror.read();
 		if (read.kind !== "current") throw new Error("Expected current entities.");
-		const review: SalvageReview = {
-			player: 1,
-			tool: { guid: 2, instance: 1 },
-			skills: read.level.salvage.skills,
-			sources: request().items.map((item) => {
-				const candidate = read.level.entities.get(item)?.salvage;
-				if (candidate?.kind !== "ready")
-					throw new Error("Expected a ready fixture source.");
-				return candidate.source;
-			}),
-		};
+		for (const item of request().items) {
+			const candidate = read.level.entities.get(item)?.salvage;
+			if (candidate?.kind !== "ready")
+				throw new Error("Expected a ready fixture source.");
+		}
+		revision += 1;
 		return {
 			kind: "ready",
-			review,
+			revision,
+			tool: 2,
 			bags:
 				request().items.length === 0
 					? []
@@ -144,6 +139,7 @@ function fixture() {
 		showInventory,
 		records,
 		replace,
+		upsert,
 		request,
 		ready,
 		reply,
@@ -237,7 +233,7 @@ describe("salvage draft", () => {
 		f.model.add(3);
 		f.reply({
 			kind: "pending-details",
-			tool: { guid: 2, instance: 1 },
+			tool: 2,
 			items: [3],
 		});
 		expect(f.model.read()).toMatchObject({ items: [3], canSalvage: false });
@@ -276,30 +272,32 @@ describe("salvage draft", () => {
 		});
 		f.confirm();
 		expect(f.submit).toHaveBeenCalledWith(
-			expect.objectContaining({ review: evaluation.review }),
+			expect.objectContaining({ revision: evaluation.revision }),
 		);
 		expect(f.notice).not.toHaveBeenCalled();
 	});
 
-	it("invalidates approval on changed quantities but not unrelated descriptions", () => {
+	it("invalidates approval when queued sources or character skills change, not unrelated entities", () => {
 		const f = fixture();
 		f.model.add(3);
 		f.reply();
 		f.model.confirm();
 		expect(f.model.question()).not.toBeNull();
-		f.records[2] = { ...source(3), canOfferTrade: true };
-		f.replace();
-		f.model.read();
+		const previewsBeforeUnrelated = f.preview.mock.calls.length;
+		f.upsert({ ...source(4), canOfferTrade: true });
 		expect(f.model.question()).not.toBeNull();
-		const changed = source(3);
-		if (changed.salvage.kind !== "ready")
-			throw new Error("Expected ready source.");
-		changed.salvage.source.input.stackSize++;
-		f.records[2] = changed;
-		f.replace();
-		f.model.read();
+		expect(f.preview).toHaveBeenCalledTimes(previewsBeforeUnrelated);
+		f.upsert({ ...source(3), canOfferTrade: true });
 		expect(f.model.question()).toBeNull();
 		expect(f.model.read()?.pending).toBe(true);
+		expect(f.preview).toHaveBeenCalledTimes(previewsBeforeUnrelated + 1);
+		f.reply();
+		f.model.confirm();
+		expect(f.model.question()).not.toBeNull();
+		f.emit({ type: "character-sheet" });
+		expect(f.model.question()).toBeNull();
+		expect(f.model.read()?.pending).toBe(true);
+		expect(f.preview).toHaveBeenCalledTimes(previewsBeforeUnrelated + 2);
 		expect(f.submit).not.toHaveBeenCalled();
 	});
 	it("enqueue acceptance does not clear a submitted draft; dispatched does", () => {
@@ -396,13 +394,7 @@ describe("salvage draft", () => {
 		const f = fixture();
 		f.model.add(3);
 		f.reply();
-		const changed = source(3);
-		if (changed.salvage.kind !== "ready")
-			throw new Error("Expected ready source.");
-		changed.salvage.source.input.stackSize++;
-		f.records[2] = changed;
-		f.replace();
-		f.model.read();
+		f.upsert({ ...source(3), canOfferTrade: true });
 		f.reply({ kind: "rejected", reason: "Item details changed." });
 		expect(f.model.read()).toMatchObject({
 			items: [3],
@@ -433,7 +425,7 @@ describe("salvage draft", () => {
 			f.model.add(3);
 			f.reply({
 				kind: "pending-details",
-				tool: { guid: 2, instance: 1 },
+				tool: 2,
 				items: [3],
 			});
 			await Promise.resolve();
@@ -441,16 +433,19 @@ describe("salvage draft", () => {
 			for (let index = 0; index < 3; index++) f.model.read();
 			expect(f.appraise).toHaveBeenCalledOnce();
 			if (order === "facts-first") {
-				f.records[2] = source(3);
-				f.replace();
+				f.upsert(source(3));
 			}
 			f.emit({ type: "object-inspection-result", result: appraised(3) });
 			if (order === "response-first") {
-				f.records[2] = source(3);
-				f.replace();
+				f.upsert(source(3));
 			}
 			f.reply();
-			if (order === "response-first") f.reply(); // First preview's dependency key predates the new entity facts.
+			if (order === "response-first") {
+				// First preview predates the new entity facts, so the queued refresh runs next.
+				expect(f.model.read()?.pending).toBe(true);
+				expect(f.model.read()?.canSalvage).toBe(false);
+				f.reply();
+			}
 			expect(f.model.read()).toMatchObject({
 				items: [3],
 				canSalvage: true,
@@ -475,12 +470,12 @@ describe("salvage draft", () => {
 		f.model.add(4);
 		f.reply({
 			kind: "pending-details",
-			tool: { guid: 2, instance: 1 },
+			tool: 2,
 			items: [3],
 		});
 		f.reply({
 			kind: "pending-details",
-			tool: { guid: 2, instance: 1 },
+			tool: 2,
 			items: [3, 4],
 		});
 		await Promise.resolve();
@@ -525,7 +520,7 @@ describe("salvage draft", () => {
 		f.model.add(3);
 		f.reply({
 			kind: "pending-details",
-			tool: { guid: 2, instance: 1 },
+			tool: 2,
 			items: [3],
 		});
 		await vi.waitFor(() =>
@@ -549,7 +544,7 @@ describe("salvage draft", () => {
 		f.model.add(3);
 		const pending = {
 			kind: "pending-details",
-			tool: { guid: 2, instance: 1 },
+			tool: 2,
 			items: [3],
 		} as const;
 		f.reply({ ...pending, items: [...pending.items] });
@@ -581,7 +576,7 @@ describe("salvage draft", () => {
 			f.model.add(3);
 			f.reply({
 				kind: "pending-details",
-				tool: { guid: 2, instance: 1 },
+				tool: 2,
 				items: [3],
 			});
 			await Promise.resolve();
@@ -609,7 +604,7 @@ describe("salvage draft", () => {
 		f.model.add(3);
 		f.reply({
 			kind: "pending-details",
-			tool: { guid: 2, instance: 1 },
+			tool: 2,
 			items: [3],
 		});
 		await Promise.resolve();
@@ -639,7 +634,7 @@ describe("salvage draft", () => {
 			f.model.add(3);
 			f.reply({
 				kind: "pending-details",
-				tool: { guid: 2, instance: 1 },
+				tool: 2,
 				items: [3],
 			});
 			await Promise.resolve();
@@ -748,14 +743,32 @@ describe("salvage draft", () => {
 		f.reply();
 		f.confirm(true);
 		rejectSubmission(f);
-		f.records[2] = {
+		f.upsert({
 			...source(3),
 			salvage: { kind: "pending-details", material: "Steel" },
-		};
-		f.replace();
+		});
 		f.model.confirm();
 		expect(f.model.read()?.canSalvage).toBe(false);
 		expect(f.submit).toHaveBeenCalledOnce();
+	});
+
+	it("read() is pure and triggers zero IPC calls or listener notifications", () => {
+		const f = fixture();
+		const listener = vi.fn();
+		f.model.subscribe(listener);
+		f.model.add(3);
+		f.reply();
+		const previews = f.preview.mock.calls.length;
+		const submits = f.submit.mock.calls.length;
+		const appraisals = f.appraise.mock.calls.length;
+		const notifications = listener.mock.calls.length;
+		for (let index = 0; index < 5; index++) {
+			expect(f.model.read()).toMatchObject({ items: [3], canSalvage: true });
+		}
+		expect(f.preview).toHaveBeenCalledTimes(previews);
+		expect(f.submit).toHaveBeenCalledTimes(submits);
+		expect(f.appraise).toHaveBeenCalledTimes(appraisals);
+		expect(listener).toHaveBeenCalledTimes(notifications);
 	});
 	it("drag-out removes only the captured accepted draft entry", () => {
 		const f = fixture();

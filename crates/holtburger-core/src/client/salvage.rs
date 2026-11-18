@@ -4,7 +4,7 @@ use anyhow::Result;
 use holtburger_common::Guid;
 use holtburger_protocol::messages::{GameAction, SalvageItemsWithActionData};
 use holtburger_world::crafting::salvage::{
-    SalvageEvaluation, SalvageReview, SalvageTool, find_salvage_tool,
+    SalvageEvaluation, SalvagePreviewBag, SalvageReview, SalvageTool, find_salvage_tool,
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +37,67 @@ pub struct SalvagePreviewRequest {
     pub items: Vec<Guid>,
 }
 
+/// Authority-retained salvage evaluation projected across the client boundary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum SalvagePreviewEvaluation {
+    /// Coherent estimate and monotonic approval token retained in core.
+    Ready {
+        revision: u32,
+        tool: Guid,
+        bags: Vec<SalvagePreviewBag>,
+    },
+    /// Candidate identities needing Examine; no sources were silently omitted.
+    PendingDetails { tool: Guid, items: Vec<Guid> },
+    /// The proposed batch cannot be accepted.
+    Rejected { reason: String },
+}
+
+/// Authority-held approval binding a monotonic preview revision to its exact review.
+#[derive(Default)]
+pub(super) struct SalvageApproval {
+    next_revision: u32,
+    approved: Option<(u32, SalvageReview)>,
+}
+
+impl SalvageApproval {
+    pub(super) fn reset(&mut self) {
+        self.approved = None;
+    }
+
+    fn record(&mut self, evaluation: SalvageEvaluation) -> SalvagePreviewEvaluation {
+        match evaluation {
+            SalvageEvaluation::Ready { review, bags } => {
+                let Some(revision) = self.next_revision.checked_add(1) else {
+                    self.approved = None;
+                    return SalvagePreviewEvaluation::Rejected {
+                        reason: "Salvage revision space exhausted.".into(),
+                    };
+                };
+                self.next_revision = revision;
+                let tool = review.tool.guid;
+                self.approved = Some((revision, review));
+                SalvagePreviewEvaluation::Ready {
+                    revision,
+                    tool,
+                    bags,
+                }
+            }
+            SalvageEvaluation::PendingDetails { tool, items } => {
+                self.approved = None;
+                SalvagePreviewEvaluation::PendingDetails {
+                    tool: tool.guid,
+                    items,
+                }
+            }
+            SalvageEvaluation::Rejected { reason } => {
+                self.approved = None;
+                SalvagePreviewEvaluation::Rejected { reason }
+            }
+        }
+    }
+}
+
 /// One coherent evaluation, independently delivered after command enqueue.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,27 +105,29 @@ pub struct SalvagePreviewResult {
     /// Unmodified caller identity.
     pub sequence: u32,
     /// Latest evaluation; no source is reserved.
-    pub evaluation: SalvageEvaluation,
+    pub evaluation: SalvagePreviewEvaluation,
 }
 
-/// Submission carries semantic preconditions rather than a frontend approval receipt.
+/// Submission carries the monotonic preview revision rather than an echoed review payload.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SalvageSubmitRequest {
     /// Caller identity, used to ignore results from retired drafts.
     pub sequence: u32,
-    /// World-normalized inputs reviewed by the caller.
-    pub review: SalvageReview,
+    /// Monotonic preview revision retained by core.
+    pub revision: u32,
 }
 
 /// Dispatch outcome is not a server processing acknowledgement.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum SalvageSubmitOutcome {
     /// Current admission or transport rejected the action.
     Rejected { reason: String },
     /// Current semantics differ; a fresh review is required and nothing was sent.
-    Changed { evaluation: SalvageEvaluation },
+    Changed {
+        evaluation: SalvagePreviewEvaluation,
+    },
     /// Game action entered transport; inventory and optional result chat remain authoritative.
     Dispatched,
 }
@@ -93,39 +156,41 @@ impl ClientRuntime {
         Ok(())
     }
 
-    pub(super) fn preview_salvage(&self, request: SalvagePreviewRequest) {
-        let evaluate = || {
+    pub(super) fn preview_salvage(&mut self, request: SalvagePreviewRequest) {
+        let evaluation = {
             // Busy actions do not invalidate read-only previews.
             if self.state != ClientState::InWorld || self.world.player.guid != request.player {
-                return SalvageEvaluation::Rejected {
+                SalvageEvaluation::Rejected {
                     reason: "The originating character is no longer in the world.".into(),
+                }
+            } else {
+                let tool = match request.tool {
+                    SalvageToolSelection::Exact { guid } => {
+                        find_salvage_tool(&self.world, Some(guid)).filter(|tool| tool.guid == guid)
+                    }
+                    SalvageToolSelection::Discover { preferred } => {
+                        find_salvage_tool(&self.world, preferred)
+                    }
                 };
-            }
-            let tool = match request.tool {
-                SalvageToolSelection::Exact { guid } => {
-                    find_salvage_tool(&self.world, Some(guid)).filter(|tool| tool.guid == guid)
+                match tool {
+                    Some(tool) => self.world.evaluate_salvage(tool, &request.items),
+                    None => SalvageEvaluation::Rejected {
+                        reason: "You do not have an Ust in your inventory.".into(),
+                    },
                 }
-                SalvageToolSelection::Discover { preferred } => {
-                    find_salvage_tool(&self.world, preferred)
-                }
-            };
-            match tool {
-                Some(tool) => self.world.evaluate_salvage(tool, &request.items),
-                None => SalvageEvaluation::Rejected {
-                    reason: "You do not have an Ust in your inventory.".into(),
-                },
             }
         };
+        let evaluation = self.salvage_approval.record(evaluation);
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::SalvagePreview(SalvagePreviewResult {
                 sequence: request.sequence,
-                evaluation: evaluate(),
+                evaluation,
             }));
     }
 
     pub(super) async fn submit_salvage(&mut self, request: SalvageSubmitRequest) -> Result<()> {
-        let outcome = self.execute_salvage(&request.review).await;
+        let outcome = self.execute_salvage(request.revision).await;
         let (outcome, error) = match outcome {
             Ok(outcome) => (outcome, None),
             Err(error) => (
@@ -147,24 +212,43 @@ impl ClientRuntime {
         }
     }
 
-    async fn execute_salvage(&mut self, expected: &SalvageReview) -> Result<SalvageSubmitOutcome> {
+    async fn execute_salvage(&mut self, revision: u32) -> Result<SalvageSubmitOutcome> {
+        if let Err(reason) = self.salvage_admission(self.world.player.guid) {
+            return Ok(SalvageSubmitOutcome::Rejected {
+                reason: reason.into(),
+            });
+        }
+        let Some((stored_revision, expected)) = self.salvage_approval.approved.as_ref() else {
+            return Ok(SalvageSubmitOutcome::Rejected {
+                reason: "The salvage batch is no longer current. Review the batch again.".into(),
+            });
+        };
+        if *stored_revision != revision {
+            return Ok(SalvageSubmitOutcome::Rejected {
+                reason: "The salvage batch is no longer current. Review the batch again.".into(),
+            });
+        }
+        let expected = expected.clone();
         if let Err(reason) = self.salvage_admission(expected.player) {
             return Ok(SalvageSubmitOutcome::Rejected {
                 reason: reason.into(),
             });
         }
         if expected.sources.is_empty() {
+            self.salvage_approval.approved = None;
             return Ok(SalvageSubmitOutcome::Rejected {
                 reason: "The salvage batch is empty.".into(),
             });
         }
         let items: Vec<_> = expected.sources.iter().map(|source| source.guid).collect();
         let evaluation = self.world.evaluate_salvage(expected.tool, &items);
-        if !matches!(&evaluation, SalvageEvaluation::Ready { review, .. } if review == expected) {
-            return Ok(SalvageSubmitOutcome::Changed { evaluation });
+        if matches!(&evaluation, SalvageEvaluation::Ready { review, .. } if review == &expected) {
+            self.salvage_approval.approved = None;
+            self.dispatch_salvage(expected.tool, items).await?;
+            return Ok(SalvageSubmitOutcome::Dispatched);
         }
-        self.dispatch_salvage(expected.tool, items).await?;
-        Ok(SalvageSubmitOutcome::Dispatched)
+        let evaluation = self.salvage_approval.record(evaluation);
+        Ok(SalvageSubmitOutcome::Changed { evaluation })
     }
 
     async fn dispatch_salvage(&mut self, tool: SalvageTool, items: Vec<Guid>) -> Result<()> {
@@ -217,7 +301,7 @@ mod tests {
     };
     use holtburger_world::{crafting::salvage::UST_WCID, entity::Entity};
 
-    fn fixture() -> (ClientRuntime, SalvageReview) {
+    fn fixture() -> (ClientRuntime, u32) {
         let mut client = super::super::builder::build_test_client(ClientState::InWorld);
         client
             .world
@@ -245,23 +329,31 @@ mod tests {
                     )),
                 })));
         }
-        let tool = find_salvage_tool(&client.world, None).unwrap();
-        let SalvageEvaluation::Ready { review, .. } =
-            client.world.evaluate_salvage(tool, &[Guid(3)])
+        let mut replies = client.client_view_event_tx.subscribe();
+        client.preview_salvage(SalvagePreviewRequest {
+            sequence: 1,
+            player: Guid(1),
+            tool: SalvageToolSelection::Discover { preferred: None },
+            items: vec![Guid(3)],
+        });
+        let ClientViewEvent::SalvagePreview(SalvagePreviewResult {
+            evaluation: SalvagePreviewEvaluation::Ready { revision, .. },
+            ..
+        }) = replies.try_recv().unwrap()
         else {
             panic!("fixture must be ready");
         };
-        (client, review)
+        (client, revision)
     }
 
     #[tokio::test]
     async fn reviewed_batch_dispatches_once_without_arming_busy_operation() {
-        let (mut client, review) = fixture();
+        let (mut client, revision) = fixture();
         let mut replies = client.client_view_event_tx.subscribe();
         client
             .submit_salvage(SalvageSubmitRequest {
                 sequence: 9,
-                review,
+                revision,
             })
             .await
             .unwrap();
@@ -274,11 +366,28 @@ mod tests {
         ));
         assert!(client.active_busy_operation.is_none());
         assert_eq!(client.session.game_action_sequence, 1);
+
+        // Consumed revision cannot be replayed.
+        client
+            .submit_salvage(SalvageSubmitRequest {
+                sequence: 10,
+                revision,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            replies.try_recv().unwrap(),
+            ClientViewEvent::SalvageSubmitted(SalvageSubmitResult {
+                sequence: 10,
+                outcome: SalvageSubmitOutcome::Rejected { .. },
+            })
+        ));
+        assert_eq!(client.session.game_action_sequence, 1);
     }
 
     #[tokio::test]
-    async fn changed_stack_does_not_dispatch_or_silently_approve_a_new_batch() {
-        let (mut client, review) = fixture();
+    async fn changed_stack_does_not_dispatch_and_mints_replacement_revision() {
+        let (mut client, revision) = fixture();
         client
             .world
             .entities
@@ -289,15 +398,78 @@ mod tests {
         client
             .submit_salvage(SalvageSubmitRequest {
                 sequence: 10,
-                review,
+                revision,
+            })
+            .await
+            .unwrap();
+        let ClientViewEvent::SalvageSubmitted(SalvageSubmitResult {
+            sequence: 10,
+            outcome:
+                SalvageSubmitOutcome::Changed {
+                    evaluation:
+                        SalvagePreviewEvaluation::Ready {
+                            revision: next_revision,
+                            ..
+                        },
+                },
+        }) = replies.try_recv().unwrap()
+        else {
+            panic!("expected changed ready evaluation");
+        };
+        assert_ne!(next_revision, revision);
+        assert_eq!(client.session.game_action_sequence, 0);
+
+        // Confirming with the newly minted replacement revision dispatches.
+        client
+            .submit_salvage(SalvageSubmitRequest {
+                sequence: 11,
+                revision: next_revision,
             })
             .await
             .unwrap();
         assert!(matches!(
             replies.try_recv().unwrap(),
             ClientViewEvent::SalvageSubmitted(SalvageSubmitResult {
-                sequence: 10,
-                outcome: SalvageSubmitOutcome::Changed { .. },
+                sequence: 11,
+                outcome: SalvageSubmitOutcome::Dispatched,
+            })
+        ));
+        assert_eq!(client.session.game_action_sequence, 1);
+    }
+
+    #[tokio::test]
+    async fn superseded_revision_is_rejected_without_dispatching() {
+        let (mut client, stale_revision) = fixture();
+        let mut replies = client.client_view_event_tx.subscribe();
+        client.preview_salvage(SalvagePreviewRequest {
+            sequence: 2,
+            player: Guid(1),
+            tool: SalvageToolSelection::Discover { preferred: None },
+            items: vec![Guid(3)],
+        });
+        let ClientViewEvent::SalvagePreview(SalvagePreviewResult {
+            evaluation:
+                SalvagePreviewEvaluation::Ready {
+                    revision: current, ..
+                },
+            ..
+        }) = replies.try_recv().unwrap()
+        else {
+            panic!("expected second preview");
+        };
+        assert_ne!(stale_revision, current);
+        client
+            .submit_salvage(SalvageSubmitRequest {
+                sequence: 3,
+                revision: stale_revision,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            replies.try_recv().unwrap(),
+            ClientViewEvent::SalvageSubmitted(SalvageSubmitResult {
+                sequence: 3,
+                outcome: SalvageSubmitOutcome::Rejected { .. },
             })
         ));
         assert_eq!(client.session.game_action_sequence, 0);
@@ -305,13 +477,13 @@ mod tests {
 
     #[tokio::test]
     async fn busy_admission_still_delivers_the_correlated_rejection() {
-        let (mut client, review) = fixture();
+        let (mut client, revision) = fixture();
         assert!(client.arm_busy_operation(super::super::PendingOperation::Use { source: Guid(2) }));
         let mut replies = client.client_view_event_tx.subscribe();
         client
             .submit_salvage(SalvageSubmitRequest {
                 sequence: 12,
-                review,
+                revision,
             })
             .await
             .unwrap();
@@ -343,13 +515,13 @@ mod tests {
 
     #[tokio::test]
     async fn character_exit_produces_a_correlated_rejection() {
-        let (mut client, review) = fixture();
+        let (mut client, revision) = fixture();
         client.state = ClientState::CharacterSelection;
         let mut replies = client.client_view_event_tx.subscribe();
         client
             .submit_salvage(SalvageSubmitRequest {
                 sequence: 11,
-                review,
+                revision,
             })
             .await
             .unwrap();
@@ -361,5 +533,24 @@ mod tests {
             })
         ));
         assert_eq!(client.session.game_action_sequence, 0);
+    }
+
+    #[test]
+    fn augmentation_bonus_salvage_triggers_character_sheet_update() {
+        let (mut client, _) = fixture();
+        let mut replies = client.client_view_event_tx.subscribe();
+        client.handle_world_event(&holtburger_world::WorldEvent::PropertiesUpdated {
+            guid: Guid(1),
+            updates: vec![holtburger_common::properties::PropertyUpdate::Int(
+                PropertyInt::AugmentationBonusSalvage,
+                1,
+            )],
+        });
+        let events: Vec<_> = std::iter::from_fn(|| replies.try_recv().ok()).collect();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, ClientViewEvent::CharacterSheetUpdated(_)))
+        );
     }
 }

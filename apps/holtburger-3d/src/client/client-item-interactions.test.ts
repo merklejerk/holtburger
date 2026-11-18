@@ -109,13 +109,6 @@ async function fixture() {
 		dynamic: { hostTime: { seconds: 10 }, entities: [] },
 		entities: {
 			projectileSupply: { kind: "not-applicable" },
-			salvage: {
-				skills: {
-					salvagingSkill: 0,
-					tinkeringSkill: 0,
-					augmentationBonusSalvage: 0,
-				},
-			},
 			player: emptyPlayerSummary,
 			worldContainer: { kind: "closed" },
 			entities: [

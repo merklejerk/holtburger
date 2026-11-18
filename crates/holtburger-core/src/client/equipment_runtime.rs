@@ -612,14 +612,14 @@ mod tests {
     #[tokio::test]
     async fn salvage_during_equipment_change_gets_its_correlated_rejection() {
         use super::super::{
-            salvage::{SalvageSubmitOutcome, SalvageSubmitRequest},
+            salvage::{
+                SalvagePreviewEvaluation, SalvagePreviewRequest, SalvageSubmitOutcome,
+                SalvageSubmitRequest, SalvageToolSelection,
+            },
             types::{ClientCommand, ClientViewEvent},
         };
         use holtburger_common::properties::{MaterialType, WorldObjectPropertyAccessorsMut};
-        use holtburger_world::{
-            crafting::salvage::{SalvageEvaluation, UST_WCID, find_salvage_tool},
-            entity::Entity,
-        };
+        use holtburger_world::{crafting::salvage::UST_WCID, entity::Entity};
         let mut client = super::super::builder::build_test_client(ClientState::InWorld);
         client.world = outfit(4, 1);
         let item = client.world.entities.get_mut(INCOMING).unwrap();
@@ -630,18 +630,27 @@ mod tests {
         ust.wcid = Some(UST_WCID);
         client.world.add_entity(ust);
         confirm_unequip(&mut client.world, Guid(900), 3);
-        let tool = find_salvage_tool(&client.world, None).unwrap();
-        let SalvageEvaluation::Ready { review, .. } =
-            client.world.evaluate_salvage(tool, &[INCOMING])
-        else {
+        let mut replies = client.client_view_event_tx.subscribe();
+        client
+            .handle_command(ClientCommand::PreviewSalvage(SalvagePreviewRequest {
+                sequence: 1,
+                player: PLAYER,
+                tool: SalvageToolSelection::Discover { preferred: None },
+                items: vec![INCOMING],
+            }))
+            .await
+            .unwrap();
+        let ClientViewEvent::SalvagePreview(preview) = replies.try_recv().unwrap() else {
+            panic!("expected salvage preview");
+        };
+        let SalvagePreviewEvaluation::Ready { revision, .. } = preview.evaluation else {
             panic!("expected ready source");
         };
         client.equipment_operation = Some(operation(&client.world, Instant::now()));
-        let mut replies = client.client_view_event_tx.subscribe();
         client
             .handle_command(ClientCommand::SubmitSalvage(SalvageSubmitRequest {
                 sequence: 1,
-                review,
+                revision,
             }))
             .await
             .unwrap();

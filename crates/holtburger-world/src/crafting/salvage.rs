@@ -5,8 +5,7 @@ use holtburger_common::properties::{ItemType, MaterialType, PropertyInt, WorldOb
 /// Retail and ACE cap each resulting salvage bag at one hundred units.
 pub const MAX_SALVAGE_BAG_UNITS: u32 = 100;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 /// Character yield inputs, normalized once by the shared profile builder.
 pub struct SalvageSkillProfile {
     /// Current salvaging skill, including accepted modifiers.
@@ -17,12 +16,10 @@ pub struct SalvageSkillProfile {
     pub augmentation_bonus_salvage: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-/// Lossless predictor evidence shared by candidate publication and reviewed submission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+/// Lossless predictor evidence shared by candidate admission and reviewed submission.
 pub struct SalvageItemInput {
-    /// Exact type selects original items versus existing salvage bags; always serialized as u32 bits.
-    #[serde(with = "item_type_bits")]
+    /// Exact type selects original items versus existing salvage bags.
     pub item_type: ItemType,
     /// Concrete output material; category-header materials are rejected by admission.
     pub material_type: MaterialType,
@@ -34,21 +31,6 @@ pub struct SalvageItemInput {
     pub item_workmanship: u32,
     /// Positive contributor count paired with the raw workmanship total.
     pub num_items_in_material: u32,
-}
-
-// Bitflags' default serde representation depends on the format. Reviews cross both
-// MessagePack events and JSON command parsing, so their evidence must use one shape.
-mod item_type_bits {
-    use super::ItemType;
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    pub fn serialize<S: Serializer>(value: &ItemType, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u32(value.bits())
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ItemType, D::Error> {
-        Ok(ItemType::from_bits_retain(u32::deserialize(deserializer)?))
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -185,7 +167,7 @@ pub fn get_material_name(material_type: MaterialType) -> String {
 }
 
 fn calc_num_units(skill: u32, workmanship: f64, num_augs: u32) -> u32 {
-    // ACE Player_Crafting.CalcNumUnits evaluates its products in single precision before floor.
+    // Server salvage yield calculation evaluates its products in single precision before floor.
     1 + ((skill as f32 / 194.0) * workmanship as f32 * (1.0 + 0.25 * num_augs as f32)).floor()
         as u32
 }
@@ -264,8 +246,7 @@ fn try_add_salvage(bag: &mut WorkingBag, item: &mut SalvageItemInput, try_amount
 pub const UST_WCID: u32 = 20_646;
 
 /// Stable tool identity bound into a reviewed operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SalvageTool {
     /// Owned tool instance.
     pub guid: holtburger_common::Guid,
@@ -274,8 +255,7 @@ pub struct SalvageTool {
 }
 
 /// One normalized whole-item source, shared by approval and prediction.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SalvageSource {
     /// Carried item identity.
     pub guid: holtburger_common::Guid,
@@ -293,8 +273,8 @@ pub enum SalvageCandidate {
     Ineligible { reason: String },
     /// Public evidence permits queuing, but appraisal is needed before destruction.
     PendingDetails { material: MaterialType },
-    /// Complete source facts, consumed by review and dependency comparison.
-    Ready { source: SalvageSource },
+    /// Complete source facts are available in world state.
+    Ready { material: MaterialType },
 }
 
 impl SalvageCandidate {
@@ -302,23 +282,13 @@ impl SalvageCandidate {
     pub fn material(&self) -> Option<MaterialType> {
         match self {
             Self::Ineligible { .. } => None,
-            Self::PendingDetails { material } => Some(*material),
-            Self::Ready { source } => Some(source.input.material_type),
+            Self::PendingDetails { material } | Self::Ready { material } => Some(*material),
         }
     }
 }
 
-/// Cold player inputs published independently of per-item eligibility.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SalvageContext {
-    /// World-owned normalized yield inputs.
-    pub skills: SalvageSkillProfile,
-}
-
 /// Exact facts reviewed by a caller; core always constructs and compares a fresh value.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SalvageReview {
     /// Originating character.
     pub player: holtburger_common::Guid,
@@ -331,8 +301,7 @@ pub struct SalvageReview {
 }
 
 /// Current batch evaluation; preview readiness is distinct from candidate admission.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SalvageEvaluation {
     /// A coherent estimate and its execution precondition.
     Ready {
@@ -403,25 +372,27 @@ impl SalvageSkillProfile {
     }
 }
 
+enum SalvageSourceAdmission {
+    Ineligible { reason: String },
+    PendingDetails { material: MaterialType },
+    Ready(SalvageSource),
+}
+
 impl crate::WorldState {
-    /// Normalized yield profile, also used by fresh submission evaluation.
-    pub fn salvage_context(&self) -> SalvageContext {
+    fn salvage_skills(&self) -> SalvageSkillProfile {
         use holtburger_common::properties::WorldObjectPropertyAccessors;
         let augmentation = self
             .get_visible_entity(self.player.guid)
             .and_then(|entity| entity.get_int_prop(PropertyInt::AugmentationBonusSalvage))
             .unwrap_or(0)
             .max(0) as u32;
-        SalvageContext {
-            skills: SalvageSkillProfile::from_skills(self.player.skills.values(), augmentation),
-        }
+        SalvageSkillProfile::from_skills(self.player.skills.values(), augmentation)
     }
 
-    /// Shared admission over accepted storage, trade state, and disclosed item facts.
-    pub fn salvage_candidate(&self, guid: holtburger_common::Guid) -> SalvageCandidate {
+    fn classify_salvage_source(&self, guid: holtburger_common::Guid) -> SalvageSourceAdmission {
         use crate::context::{WorldContext, WorldContextExt};
         use crate::state::storage::RosterCoverage;
-        let reject = |reason: &str| SalvageCandidate::Ineligible {
+        let reject = |reason: &str| SalvageSourceAdmission::Ineligible {
             reason: reason.into(),
         };
         let Some(entity) = self.get_visible_entity(guid) else {
@@ -466,7 +437,7 @@ impl crate::WorldState {
                     return reject("Full salvage bags cannot be combined.");
                 }
                 Some(0) => return reject("This salvage bag is empty."),
-                None => return SalvageCandidate::PendingDetails { material },
+                None => return SalvageSourceAdmission::PendingDetails { material },
                 _ => {}
             }
         }
@@ -474,13 +445,26 @@ impl crate::WorldState {
             return reject("Item workmanship is unavailable.");
         }
         let Some(input) = SalvageItemInput::from_entity(entity) else {
-            return SalvageCandidate::PendingDetails { material };
+            return SalvageSourceAdmission::PendingDetails { material };
         };
-        SalvageCandidate::Ready {
-            source: SalvageSource {
-                guid,
-                instance: entity.instance_sequence(),
-                input,
+        SalvageSourceAdmission::Ready(SalvageSource {
+            guid,
+            instance: entity.instance_sequence(),
+            input,
+        })
+    }
+
+    /// Shared admission over accepted storage, trade state, and disclosed item facts.
+    pub fn salvage_candidate(&self, guid: holtburger_common::Guid) -> SalvageCandidate {
+        match self.classify_salvage_source(guid) {
+            SalvageSourceAdmission::Ineligible { reason } => {
+                SalvageCandidate::Ineligible { reason }
+            }
+            SalvageSourceAdmission::PendingDetails { material } => {
+                SalvageCandidate::PendingDetails { material }
+            }
+            SalvageSourceAdmission::Ready(source) => SalvageCandidate::Ready {
+                material: source.input.material_type,
             },
         }
     }
@@ -507,12 +491,12 @@ impl crate::WorldState {
             if *guid == tool.guid {
                 return rejected("The Ust cannot salvage itself.");
             }
-            match self.salvage_candidate(*guid) {
-                SalvageCandidate::Ineligible { reason } => {
+            match self.classify_salvage_source(*guid) {
+                SalvageSourceAdmission::Ineligible { reason } => {
                     return SalvageEvaluation::Rejected { reason };
                 }
-                SalvageCandidate::PendingDetails { .. } => pending.push(*guid),
-                SalvageCandidate::Ready { source } => sources.push(source),
+                SalvageSourceAdmission::PendingDetails { .. } => pending.push(*guid),
+                SalvageSourceAdmission::Ready(source) => sources.push(source),
             }
         }
         if !pending.is_empty() {
@@ -521,7 +505,7 @@ impl crate::WorldState {
                 items: pending,
             };
         }
-        let skills = self.salvage_context().skills;
+        let skills = self.salvage_skills();
         let inputs: Vec<_> = sources.iter().map(|source| source.input.clone()).collect();
         SalvageEvaluation::Ready {
             review: SalvageReview {

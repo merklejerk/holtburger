@@ -3,14 +3,12 @@ use crate::pages::game::state::SalvagingPhase;
 use holtburger_common::properties::MaterialType;
 use holtburger_core::client::entity_facts::ClientEntityDelta;
 use holtburger_core::client::salvage::{
-    SalvagePreviewResult, SalvageSubmitOutcome, SalvageSubmitResult,
+    SalvagePreviewEvaluation, SalvagePreviewResult, SalvageSubmitOutcome, SalvageSubmitResult,
 };
 use holtburger_protocol::messages::IdentifyObjectResponseEventData;
 use holtburger_protocol::messages::object::IdentifyResponseFlags;
 use holtburger_world::WorldEvent;
-use holtburger_world::crafting::salvage::{
-    SalvageContext, SalvageEvaluation, SalvageTool, UST_WCID, find_salvage_tool,
-};
+use holtburger_world::crafting::salvage::{SalvageEvaluation, UST_WCID, find_salvage_tool};
 
 use holtburger_protocol::messages::{
     GameEvent, GameEventMessage, GameMessage, InventoryPutObjInContainerEventData,
@@ -37,10 +35,7 @@ fn draft() -> GameState {
 }
 
 fn refresh(state: &mut GameState) -> u32 {
-    let result = state.handle_view_event(ClientViewEvent::EntityFactsChanged(ClientEntityDelta {
-        salvage: Some(SalvageContext::default()),
-        ..Default::default()
-    }));
+    let result = state.handle_view_event(ClientViewEvent::CharacterSheetUpdated(None));
     let [ClientCommand::PreviewSalvage(request)] = result.commands.as_slice() else {
         panic!("expected a correlated preview request");
     };
@@ -49,19 +44,20 @@ fn refresh(state: &mut GameState) -> u32 {
     request.sequence
 }
 
-fn preview(state: &mut GameState, sequence: u32, evaluation: SalvageEvaluation) -> UpdateResult {
+fn preview(
+    state: &mut GameState,
+    sequence: u32,
+    evaluation: SalvagePreviewEvaluation,
+) -> UpdateResult {
     state.handle_view_event(ClientViewEvent::SalvagePreview(SalvagePreviewResult {
         sequence,
         evaluation,
     }))
 }
 
-fn pending() -> SalvageEvaluation {
-    SalvageEvaluation::PendingDetails {
-        tool: SalvageTool {
-            guid: TOOL,
-            instance: 0,
-        },
+fn pending() -> SalvagePreviewEvaluation {
+    SalvagePreviewEvaluation::PendingDetails {
+        tool: TOOL,
         items: vec![ITEM],
     }
 }
@@ -97,9 +93,29 @@ fn world() -> WorldState {
     world
 }
 
-fn ready() -> SalvageEvaluation {
+fn project_evaluation(evaluation: SalvageEvaluation, revision: u32) -> SalvagePreviewEvaluation {
+    match evaluation {
+        SalvageEvaluation::Ready { review, bags } => SalvagePreviewEvaluation::Ready {
+            revision,
+            tool: review.tool.guid,
+            bags,
+        },
+        SalvageEvaluation::PendingDetails { tool, items } => {
+            SalvagePreviewEvaluation::PendingDetails {
+                tool: tool.guid,
+                items,
+            }
+        }
+        SalvageEvaluation::Rejected { reason } => SalvagePreviewEvaluation::Rejected { reason },
+    }
+}
+
+fn ready() -> SalvagePreviewEvaluation {
     let world = world();
-    world.evaluate_salvage(find_salvage_tool(&world, None).unwrap(), &[ITEM])
+    project_evaluation(
+        world.evaluate_salvage(find_salvage_tool(&world, None).unwrap(), &[ITEM]),
+        1,
+    )
 }
 
 fn submit(state: &mut GameState) -> u32 {
@@ -110,10 +126,10 @@ fn submit(state: &mut GameState) -> u32 {
         panic!("expected guarded submission");
     };
     assert_eq!(request.sequence, sequence);
-    let SalvageEvaluation::Ready { review, .. } = ready() else {
+    let SalvagePreviewEvaluation::Ready { revision, .. } = ready() else {
         unreachable!();
     };
-    assert_eq!(request.review, review);
+    assert_eq!(request.revision, revision);
     assert!(matches!(
         state.view.salvaging.as_ref().unwrap().phase,
         SalvagingPhase::Submitting
@@ -151,7 +167,7 @@ fn salvage_assesses_pending_items_once_and_waits_for_current_review() {
     preview(&mut state, sequence, ready());
     assert!(matches!(
         state.view.salvaging.as_ref().unwrap().phase,
-        SalvagingPhase::Reviewed(SalvageEvaluation::Ready { .. })
+        SalvagingPhase::Reviewed(SalvagePreviewEvaluation::Ready { .. })
     ));
 }
 
@@ -265,7 +281,7 @@ fn salvage_queue_loads_missing_details_and_submits_world_review() {
     let result = preview(
         &mut state,
         request.sequence,
-        world.evaluate_salvage(tool, &request.items),
+        project_evaluation(world.evaluate_salvage(tool, &request.items), 1),
     );
     assert!(matches!(
         result.commands.as_slice(),
@@ -284,19 +300,19 @@ fn salvage_queue_loads_missing_details_and_submits_world_review() {
     let [ClientCommand::PreviewSalvage(request)] = result.commands.as_slice() else {
         panic!("updated evidence must refresh the preview");
     };
-    let evaluation = world.evaluate_salvage(tool, &request.items);
-    let SalvageEvaluation::Ready { review, bags } = &evaluation else {
+    let evaluation = project_evaluation(world.evaluate_salvage(tool, &request.items), 7);
+    let SalvagePreviewEvaluation::Ready { revision, bags, .. } = &evaluation else {
         panic!("appraised source must be ready");
     };
     assert_eq!(bags.len(), 1);
     assert_eq!(bags[0].units, ITEM_UNITS as u32);
-    let review = review.clone();
+    let expected_revision = *revision;
     preview(&mut state, request.sequence, evaluation);
     let result = state.handle_action(AppAction::ConfirmSalvage).unwrap();
     let [ClientCommand::SubmitSalvage(request)] = result.commands.as_slice() else {
         panic!("confirmation must submit the displayed review");
     };
-    assert_eq!(request.review, review);
+    assert_eq!(request.revision, expected_revision);
 }
 
 #[test]
@@ -396,7 +412,11 @@ fn salvage_successful_assessment_without_required_details_stops_waiting() {
     let tool = find_salvage_tool(&world, None).unwrap();
     let mut state = draft();
     let sequence = refresh(&mut state);
-    preview(&mut state, sequence, world.evaluate_salvage(tool, &[ITEM]));
+    preview(
+        &mut state,
+        sequence,
+        project_evaluation(world.evaluate_salvage(tool, &[ITEM]), 1),
+    );
     let events = world.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
         target: PLAYER,
         sequence: 0,
@@ -426,7 +446,7 @@ fn salvage_successful_assessment_without_required_details_stops_waiting() {
     let result = preview(
         &mut state,
         request.sequence,
-        world.evaluate_salvage(tool, &[ITEM]),
+        project_evaluation(world.evaluate_salvage(tool, &[ITEM]), 2),
     );
     assert!(result.commands.is_empty());
     assert!(matches!(

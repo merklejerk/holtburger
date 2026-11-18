@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientRestPostureController } from "./client-rest-posture-controller";
+import { entityDelta } from "./client-entity-mirror.test-support";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 import {
 	cellId,
@@ -137,7 +138,7 @@ function fixture() {
 		escape: () => escape(),
 		replace: (changes: Partial<typeof state>) => {
 			state = { ...state, ...changes };
-			emit({ type: "entities" });
+			emit({ type: "entities", delta: entityDelta() });
 		},
 	};
 }

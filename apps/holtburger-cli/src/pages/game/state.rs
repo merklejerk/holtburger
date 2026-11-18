@@ -109,7 +109,7 @@ pub enum SalvagingPhase {
     /// Waiting for the current draft's core preview.
     Loading,
     /// Latest accepted evaluation, including missing details or rejection.
-    Reviewed(holtburger_world::crafting::salvage::SalvageEvaluation),
+    Reviewed(holtburger_core::client::salvage::SalvagePreviewEvaluation),
     /// Assessment finished without sufficient salvage evidence; manual assessment or requeuing can retry.
     AssessmentFailed { reason: String },
     /// Guarded submission is awaiting its dispatch receipt.

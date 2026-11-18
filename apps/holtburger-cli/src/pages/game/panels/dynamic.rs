@@ -5,10 +5,9 @@ use crate::theme::{pane_block, pane_title_style};
 use crate::types::{FocusedPane, Interaction};
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_core::client::salvage::SalvagePreviewEvaluation;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
-use holtburger_world::crafting::salvage::{
-    SalvageEvaluation, SalvagePreviewBag, get_material_name,
-};
+use holtburger_world::crafting::salvage::{SalvagePreviewBag, get_material_name};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -96,11 +95,11 @@ pub fn render_dynamic_pane(f: &mut Frame, data: &GameData, view: &ViewState, are
                 return;
             };
             let line = match &session.phase {
-                SalvagingPhase::Reviewed(SalvageEvaluation::Ready { bags, review }) => {
+                SalvagingPhase::Reviewed(SalvagePreviewEvaluation::Ready { bags, .. }) => {
                     let mut spans = vec![
                         Span::raw("  "),
                         Span::styled(
-                            format!("{} items", review.sources.len()),
+                            format!("{} items", session.queued_items.len()),
                             Style::default().add_modifier(Modifier::BOLD),
                         ),
                         Span::raw(" for "),
@@ -110,11 +109,11 @@ pub fn render_dynamic_pane(f: &mut Frame, data: &GameData, view: &ViewState, are
                 }
                 SalvagingPhase::Loading => Line::from("  Updating salvage preview…"),
                 SalvagingPhase::Submitting => Line::from("  Submitting salvage…"),
-                SalvagingPhase::Reviewed(SalvageEvaluation::PendingDetails { .. }) => {
+                SalvagingPhase::Reviewed(SalvagePreviewEvaluation::PendingDetails { .. }) => {
                     Line::from("  Assessing queued items…")
                 }
                 SalvagingPhase::AssessmentFailed { reason }
-                | SalvagingPhase::Reviewed(SalvageEvaluation::Rejected { reason }) => {
+                | SalvagingPhase::Reviewed(SalvagePreviewEvaluation::Rejected { reason }) => {
                     Line::from(format!("  {reason}"))
                 }
             };

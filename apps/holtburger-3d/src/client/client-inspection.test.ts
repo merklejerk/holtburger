@@ -242,13 +242,6 @@ describe("ClientInspection", () => {
 			kind: "current",
 			level: {
 				projectileSupply: { kind: "not-applicable" },
-				salvage: {
-					skills: {
-						salvagingSkill: 0,
-						tinkeringSkill: 0,
-						augmentationBonusSalvage: 0,
-					},
-				},
 				player: { pyrealBalance: null, burden: null, aetheriaActivation: null },
 				worldContainer: { kind: "closed" },
 				revision: 1,

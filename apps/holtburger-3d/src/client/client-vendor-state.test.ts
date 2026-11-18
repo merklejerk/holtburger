@@ -67,13 +67,6 @@ function fixture(
 		entities.prepareSnapshot(
 			{
 				projectileSupply: { kind: "not-applicable" },
-				salvage: {
-					skills: {
-						salvagingSkill: 0,
-						tinkeringSkill: 0,
-						augmentationBonusSalvage: 0,
-					},
-				},
 				player: emptyPlayerSummary,
 				worldContainer: { kind: "closed" },
 				entities: [
@@ -197,7 +190,6 @@ describe("vendor draft presentation", () => {
 				},
 			],
 			removed: [],
-			salvage: null,
 			player: null,
 			projectileSupply: null,
 			worldContainer: null,
@@ -289,7 +281,6 @@ describe("vendor draft presentation", () => {
 			const prepared = f.entities.prepareDelta({
 				upserts,
 				removed,
-				salvage: null,
 				player: null,
 				projectileSupply: null,
 				worldContainer: null,
@@ -310,7 +301,6 @@ describe("vendor draft presentation", () => {
 		const prepared = f.entities.prepareDelta({
 			upserts: [],
 			removed: [],
-			salvage: null,
 			player: { ...emptyPlayerSummary, pyrealBalance: 2500 },
 			projectileSupply: null,
 			worldContainer: null,

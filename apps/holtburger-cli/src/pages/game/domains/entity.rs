@@ -255,7 +255,6 @@ mod tests {
         reduce_view_event(
             &mut state,
             &ClientViewEvent::EntityFactsChanged(ClientEntityDelta {
-                salvage: None,
                 player: None,
                 projectile_supply: Some(snapshot.projectile_supply),
                 world_container: Some(snapshot.world_container),
@@ -303,7 +302,6 @@ mod tests {
         reduce_view_event(
             &mut state,
             &ClientViewEvent::EntityFactsChanged(ClientEntityDelta {
-                salvage: None,
                 player: None,
                 projectile_supply: None,
                 world_container: Some(world.world_container()),

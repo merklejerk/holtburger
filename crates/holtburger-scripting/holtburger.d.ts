@@ -118,7 +118,6 @@ type ScriptBusyOperation =
   | "none"
   | "use"
   | "use_with_target"
-  | "salvage"
   | "spell_cast"
   | "buy"
   | "sell";

@@ -667,10 +667,7 @@ async fn conflicting_workflows_receive_their_correlated_rejection_and_combat_ack
         types::ClientAttackProfile,
     };
     use holtburger_protocol::messages::combat::AttackHeight;
-    use holtburger_world::{
-        crafting::salvage::{SalvageReview, SalvageTool},
-        item_use::{ItemUseConsequence, ItemUseIntent},
-    };
+    use holtburger_world::item_use::{ItemUseConsequence, ItemUseIntent};
     let mut client = build_test_client(ClientState::InWorld);
     client.world = world(&[20, 90], PLAYER);
     client.start_auto_merge(PLAYER, POLICY).await.unwrap();
@@ -696,15 +693,7 @@ async fn conflicting_workflows_receive_their_correlated_rejection_and_combat_ack
     client
         .handle_command(ClientCommand::SubmitSalvage(SalvageSubmitRequest {
             sequence: 72,
-            review: SalvageReview {
-                player: PLAYER,
-                tool: SalvageTool {
-                    guid: FIRST,
-                    instance: 0,
-                },
-                sources: vec![],
-                skills: Default::default(),
-            },
+            revision: 1,
         }))
         .await
         .unwrap();

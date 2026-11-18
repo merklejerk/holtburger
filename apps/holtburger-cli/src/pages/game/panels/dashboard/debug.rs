@@ -59,7 +59,7 @@ pub fn get_debug_info(
             let class = classification::classify_entity(e);
             lines.push(Line::from(format!(
                 "Class:  {} ({:?})",
-                class.label(),
+                classification::label(class),
                 class
             )));
 

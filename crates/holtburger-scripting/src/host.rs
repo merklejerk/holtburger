@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::io::Read;
+use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::{Once, OnceLock, mpsc};
 use std::thread;
@@ -17,13 +18,12 @@ use holtburger_common::properties::{
 };
 
 use crate::{
-    ScriptBusyOperation, ScriptCharacterSheetView, ScriptClientIntent, ScriptClientInteraction,
-    ScriptClientView, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
-    ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
-    ScriptEquipmentSlotView, ScriptEvent, ScriptFetchPolicy, ScriptHostConfig, ScriptIntent,
-    ScriptJsonValue, ScriptMessageStyle, ScriptPartyView, ScriptPositionRef, ScriptPostError,
-    ScriptPostErrorCode, ScriptPostRequest, ScriptPostResponse, ScriptSelfView, ScriptSource,
-    ScriptTradeInfo,
+    ScriptBusyOperation, ScriptCharacterSheetView, ScriptClientInteraction, ScriptClientView,
+    ScriptCombatInfo, ScriptConfirmation, ScriptContainerView, ScriptEnchantmentView,
+    ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
+    ScriptEvent, ScriptFetchPolicy, ScriptHostConfig, ScriptIntent, ScriptJsonValue,
+    ScriptMessageStyle, ScriptPartyView, ScriptPositionRef, ScriptPostError, ScriptPostErrorCode,
+    ScriptPostRequest, ScriptPostResponse, ScriptSelfView, ScriptSource, ScriptTradeInfo,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
@@ -157,398 +157,6 @@ impl ScriptFetchOpOutcome {
                 message: message.into(),
             }),
         }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct ScriptClientViewPtr {
-    data: *const (),
-    self_entity: unsafe fn(*const ()) -> Option<ScriptSelfView>,
-    character_sheet: unsafe fn(*const ()) -> Option<ScriptCharacterSheetView>,
-    entity_bool_prop: unsafe fn(*const (), Guid, PropertyBool) -> Option<bool>,
-    entity_int_prop: unsafe fn(*const (), Guid, PropertyInt) -> Option<i32>,
-    entity_int64_prop: unsafe fn(*const (), Guid, PropertyInt64) -> Option<i64>,
-    entity_float_prop: unsafe fn(*const (), Guid, PropertyFloat) -> Option<f64>,
-    entity_string_prop: unsafe fn(*const (), Guid, PropertyString) -> Option<String>,
-    entity_data_prop: unsafe fn(*const (), Guid, PropertyDataId) -> Option<Guid>,
-    entity_instance_prop: unsafe fn(*const (), Guid, PropertyInstanceId) -> Option<Guid>,
-    load_config: unsafe fn(*const ()) -> Option<ScriptJsonValue>,
-    load_data: unsafe fn(*const ()) -> Option<ScriptJsonValue>,
-    load_data_bin: unsafe fn(*const ()) -> Option<Vec<u8>>,
-    write_config: unsafe fn(*const (), String) -> bool,
-    debug_log: unsafe fn(*const (), String),
-    #[allow(clippy::type_complexity)]
-    nearby_entities:
-        unsafe fn(*const (), Option<f32>, Option<Vec<ScriptEntityKind>>) -> Vec<ScriptEntityView>,
-    inventory: unsafe fn(*const ()) -> Vec<ScriptContainerView>,
-    current_open_container: unsafe fn(*const ()) -> Option<Guid>,
-    equipment: unsafe fn(*const ()) -> Vec<ScriptEquipmentSlotView>,
-    combat_info: unsafe fn(*const ()) -> ScriptCombatInfo,
-    current_interaction: unsafe fn(*const ()) -> Option<ScriptClientInteraction>,
-    enchantments: unsafe fn(*const ()) -> Vec<ScriptEnchantmentView>,
-    spellbook: unsafe fn(*const ()) -> Vec<u32>,
-    in_spellbook: unsafe fn(*const (), u32) -> bool,
-    distance: unsafe fn(*const (), ScriptPositionRef, ScriptPositionRef) -> f32,
-    heading_to: unsafe fn(*const (), ScriptPositionRef, ScriptPositionRef) -> f32,
-    entity_exists: unsafe fn(*const (), Guid) -> bool,
-    entity: unsafe fn(*const (), Guid) -> Option<ScriptEntityView>,
-    #[allow(clippy::type_complexity)]
-    current_trade_info: unsafe fn(*const ()) -> Option<ScriptTradeInfo>,
-    #[allow(clippy::type_complexity)]
-    party: unsafe fn(*const ()) -> Option<ScriptPartyView>,
-    server_time: unsafe fn(*const ()) -> Option<f64>,
-    pending_confirmation: unsafe fn(*const ()) -> Option<ScriptConfirmation>,
-    busy_operation: unsafe fn(*const ()) -> ScriptBusyOperation,
-}
-
-impl ScriptClientViewPtr {
-    fn from_ref<T: ScriptClientView>(view: &T) -> Self {
-        unsafe fn self_entity<T: ScriptClientView>(data: *const ()) -> Option<ScriptSelfView> {
-            unsafe { (&*data.cast::<T>()).self_entity() }
-        }
-
-        unsafe fn character_sheet<T: ScriptClientView>(
-            data: *const (),
-        ) -> Option<ScriptCharacterSheetView> {
-            unsafe { (&*data.cast::<T>()).character_sheet() }
-        }
-
-        unsafe fn entity_bool_prop<T: ScriptClientView>(
-            data: *const (),
-            guid: Guid,
-            prop: PropertyBool,
-        ) -> Option<bool> {
-            unsafe { (&*data.cast::<T>()).entity_bool_prop(guid, prop) }
-        }
-
-        unsafe fn entity_int_prop<T: ScriptClientView>(
-            data: *const (),
-            guid: Guid,
-            prop: PropertyInt,
-        ) -> Option<i32> {
-            unsafe { (&*data.cast::<T>()).entity_int_prop(guid, prop) }
-        }
-
-        unsafe fn entity_int64_prop<T: ScriptClientView>(
-            data: *const (),
-            guid: Guid,
-            prop: PropertyInt64,
-        ) -> Option<i64> {
-            unsafe { (&*data.cast::<T>()).entity_int64_prop(guid, prop) }
-        }
-
-        unsafe fn entity_float_prop<T: ScriptClientView>(
-            data: *const (),
-            guid: Guid,
-            prop: PropertyFloat,
-        ) -> Option<f64> {
-            unsafe { (&*data.cast::<T>()).entity_float_prop(guid, prop) }
-        }
-
-        unsafe fn entity_string_prop<T: ScriptClientView>(
-            data: *const (),
-            guid: Guid,
-            prop: PropertyString,
-        ) -> Option<String> {
-            unsafe { (&*data.cast::<T>()).entity_string_prop(guid, prop) }
-        }
-
-        unsafe fn entity_data_prop<T: ScriptClientView>(
-            data: *const (),
-            guid: Guid,
-            prop: PropertyDataId,
-        ) -> Option<Guid> {
-            unsafe { (&*data.cast::<T>()).entity_data_prop(guid, prop) }
-        }
-
-        unsafe fn entity_instance_prop<T: ScriptClientView>(
-            data: *const (),
-            guid: Guid,
-            prop: PropertyInstanceId,
-        ) -> Option<Guid> {
-            unsafe { (&*data.cast::<T>()).entity_instance_prop(guid, prop) }
-        }
-
-        unsafe fn load_config<T: ScriptClientView>(data: *const ()) -> Option<ScriptJsonValue> {
-            unsafe { (&*data.cast::<T>()).load_config() }
-        }
-
-        unsafe fn load_data<T: ScriptClientView>(data: *const ()) -> Option<ScriptJsonValue> {
-            unsafe { (&*data.cast::<T>()).load_data() }
-        }
-
-        unsafe fn load_data_bin<T: ScriptClientView>(data: *const ()) -> Option<Vec<u8>> {
-            unsafe { (&*data.cast::<T>()).load_data_bin() }
-        }
-
-        unsafe fn write_config<T: ScriptClientView>(data: *const (), contents: String) -> bool {
-            unsafe { (&*data.cast::<T>()).write_config(contents) }
-        }
-
-        unsafe fn debug_log<T: ScriptClientView>(data: *const (), message: String) {
-            unsafe { (&*data.cast::<T>()).debug_log(message) }
-        }
-
-        unsafe fn nearby_entities<T: ScriptClientView>(
-            data: *const (),
-            max_distance: Option<f32>,
-            classifications: Option<Vec<ScriptEntityKind>>,
-        ) -> Vec<ScriptEntityView> {
-            unsafe { (&*data.cast::<T>()).nearby_entities(max_distance, classifications) }
-        }
-
-        unsafe fn inventory<T: ScriptClientView>(data: *const ()) -> Vec<ScriptContainerView> {
-            unsafe { (&*data.cast::<T>()).inventory() }
-        }
-
-        unsafe fn current_open_container<T: ScriptClientView>(data: *const ()) -> Option<Guid> {
-            unsafe { (&*data.cast::<T>()).current_open_container() }
-        }
-
-        unsafe fn equipment<T: ScriptClientView>(data: *const ()) -> Vec<ScriptEquipmentSlotView> {
-            unsafe { (&*data.cast::<T>()).equipment() }
-        }
-
-        unsafe fn combat_info<T: ScriptClientView>(data: *const ()) -> ScriptCombatInfo {
-            unsafe { (&*data.cast::<T>()).combat_info() }
-        }
-
-        unsafe fn current_interaction<T: ScriptClientView>(
-            data: *const (),
-        ) -> Option<ScriptClientInteraction> {
-            unsafe { (&*data.cast::<T>()).current_interaction() }
-        }
-
-        unsafe fn enchantments<T: ScriptClientView>(data: *const ()) -> Vec<ScriptEnchantmentView> {
-            unsafe { (&*data.cast::<T>()).enchantments() }
-        }
-
-        unsafe fn distance<T: ScriptClientView>(
-            data: *const (),
-            from: ScriptPositionRef,
-            to: ScriptPositionRef,
-        ) -> f32 {
-            unsafe { (&*data.cast::<T>()).distance(from, to) }
-        }
-
-        unsafe fn spellbook<T: ScriptClientView>(data: *const ()) -> Vec<u32> {
-            unsafe { (&*data.cast::<T>()).spellbook() }
-        }
-
-        unsafe fn in_spellbook<T: ScriptClientView>(data: *const (), spell_id: u32) -> bool {
-            unsafe { (&*data.cast::<T>()).in_spellbook(spell_id) }
-        }
-
-        unsafe fn heading_to<T: ScriptClientView>(
-            data: *const (),
-            from: ScriptPositionRef,
-            to: ScriptPositionRef,
-        ) -> f32 {
-            unsafe { (&*data.cast::<T>()).heading_to(from, to) }
-        }
-
-        unsafe fn entity_exists<T: ScriptClientView>(data: *const (), guid: Guid) -> bool {
-            unsafe { (&*data.cast::<T>()).entity_exists(guid) }
-        }
-
-        unsafe fn entity<T: ScriptClientView>(
-            data: *const (),
-            guid: Guid,
-        ) -> Option<ScriptEntityView> {
-            unsafe { (&*data.cast::<T>()).entity(guid) }
-        }
-
-        unsafe fn current_trade_info<T: ScriptClientView>(
-            data: *const (),
-        ) -> Option<ScriptTradeInfo> {
-            unsafe { (&*data.cast::<T>()).current_trade_info() }
-        }
-
-        unsafe fn party<T: ScriptClientView>(data: *const ()) -> Option<ScriptPartyView> {
-            unsafe { (&*data.cast::<T>()).party() }
-        }
-
-        unsafe fn server_time<T: ScriptClientView>(data: *const ()) -> Option<f64> {
-            unsafe { (&*data.cast::<T>()).server_time() }
-        }
-
-        unsafe fn pending_confirmation<T: ScriptClientView>(
-            data: *const (),
-        ) -> Option<ScriptConfirmation> {
-            unsafe { (&*data.cast::<T>()).pending_confirmation() }
-        }
-
-        unsafe fn busy_operation<T: ScriptClientView>(data: *const ()) -> ScriptBusyOperation {
-            unsafe { (&*data.cast::<T>()).busy_operation() }
-        }
-
-        Self {
-            data: (view as *const T).cast(),
-            self_entity: self_entity::<T>,
-            character_sheet: character_sheet::<T>,
-            entity_bool_prop: entity_bool_prop::<T>,
-            entity_int_prop: entity_int_prop::<T>,
-            entity_int64_prop: entity_int64_prop::<T>,
-            entity_float_prop: entity_float_prop::<T>,
-            entity_string_prop: entity_string_prop::<T>,
-            entity_data_prop: entity_data_prop::<T>,
-            entity_instance_prop: entity_instance_prop::<T>,
-            load_config: load_config::<T>,
-            load_data: load_data::<T>,
-            load_data_bin: load_data_bin::<T>,
-            write_config: write_config::<T>,
-            debug_log: debug_log::<T>,
-            nearby_entities: nearby_entities::<T>,
-            inventory: inventory::<T>,
-            current_open_container: current_open_container::<T>,
-            equipment: equipment::<T>,
-            combat_info: combat_info::<T>,
-            current_interaction: current_interaction::<T>,
-            enchantments: enchantments::<T>,
-            spellbook: spellbook::<T>,
-            in_spellbook: in_spellbook::<T>,
-            distance: distance::<T>,
-            heading_to: heading_to::<T>,
-            entity_exists: entity_exists::<T>,
-            entity: entity::<T>,
-            current_trade_info: current_trade_info::<T>,
-            party: party::<T>,
-            server_time: server_time::<T>,
-            pending_confirmation: pending_confirmation::<T>,
-            busy_operation: busy_operation::<T>,
-        }
-    }
-
-    unsafe fn self_entity(self) -> Option<ScriptSelfView> {
-        unsafe { (self.self_entity)(self.data) }
-    }
-
-    unsafe fn character_sheet(self) -> Option<ScriptCharacterSheetView> {
-        unsafe { (self.character_sheet)(self.data) }
-    }
-
-    unsafe fn entity_bool_prop(self, guid: Guid, prop: PropertyBool) -> Option<bool> {
-        unsafe { (self.entity_bool_prop)(self.data, guid, prop) }
-    }
-
-    unsafe fn entity_int_prop(self, guid: Guid, prop: PropertyInt) -> Option<i32> {
-        unsafe { (self.entity_int_prop)(self.data, guid, prop) }
-    }
-
-    unsafe fn entity_int64_prop(self, guid: Guid, prop: PropertyInt64) -> Option<i64> {
-        unsafe { (self.entity_int64_prop)(self.data, guid, prop) }
-    }
-
-    unsafe fn entity_float_prop(self, guid: Guid, prop: PropertyFloat) -> Option<f64> {
-        unsafe { (self.entity_float_prop)(self.data, guid, prop) }
-    }
-
-    unsafe fn entity_string_prop(self, guid: Guid, prop: PropertyString) -> Option<String> {
-        unsafe { (self.entity_string_prop)(self.data, guid, prop) }
-    }
-
-    unsafe fn entity_data_prop(self, guid: Guid, prop: PropertyDataId) -> Option<Guid> {
-        unsafe { (self.entity_data_prop)(self.data, guid, prop) }
-    }
-
-    unsafe fn entity_instance_prop(self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid> {
-        unsafe { (self.entity_instance_prop)(self.data, guid, prop) }
-    }
-
-    unsafe fn load_config(self) -> Option<ScriptJsonValue> {
-        unsafe { (self.load_config)(self.data) }
-    }
-
-    unsafe fn load_data(self) -> Option<ScriptJsonValue> {
-        unsafe { (self.load_data)(self.data) }
-    }
-
-    unsafe fn load_data_bin(self) -> Option<Vec<u8>> {
-        unsafe { (self.load_data_bin)(self.data) }
-    }
-
-    unsafe fn write_config(self, contents: String) -> bool {
-        unsafe { (self.write_config)(self.data, contents) }
-    }
-
-    unsafe fn debug_log(self, message: String) {
-        unsafe { (self.debug_log)(self.data, message) }
-    }
-
-    unsafe fn nearby_entities(
-        self,
-        max_distance: Option<f32>,
-        classifications: Option<Vec<ScriptEntityKind>>,
-    ) -> Vec<ScriptEntityView> {
-        unsafe { (self.nearby_entities)(self.data, max_distance, classifications) }
-    }
-
-    unsafe fn inventory(self) -> Vec<ScriptContainerView> {
-        unsafe { (self.inventory)(self.data) }
-    }
-
-    unsafe fn current_open_container(self) -> Option<Guid> {
-        unsafe { (self.current_open_container)(self.data) }
-    }
-
-    unsafe fn equipment(self) -> Vec<ScriptEquipmentSlotView> {
-        unsafe { (self.equipment)(self.data) }
-    }
-
-    unsafe fn combat_info(self) -> ScriptCombatInfo {
-        unsafe { (self.combat_info)(self.data) }
-    }
-
-    unsafe fn current_interaction(self) -> Option<ScriptClientInteraction> {
-        unsafe { (self.current_interaction)(self.data) }
-    }
-
-    unsafe fn enchantments(self) -> Vec<ScriptEnchantmentView> {
-        unsafe { (self.enchantments)(self.data) }
-    }
-
-    unsafe fn distance(self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32 {
-        unsafe { (self.distance)(self.data, from, to) }
-    }
-
-    unsafe fn heading_to(self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32 {
-        unsafe { (self.heading_to)(self.data, from, to) }
-    }
-
-    unsafe fn spellbook(self) -> Vec<u32> {
-        unsafe { (self.spellbook)(self.data) }
-    }
-
-    unsafe fn in_spellbook(self, spell_id: u32) -> bool {
-        unsafe { (self.in_spellbook)(self.data, spell_id) }
-    }
-
-    unsafe fn entity_exists(self, guid: Guid) -> bool {
-        unsafe { (self.entity_exists)(self.data, guid) }
-    }
-
-    unsafe fn entity(self, guid: Guid) -> Option<ScriptEntityView> {
-        unsafe { (self.entity)(self.data, guid) }
-    }
-
-    unsafe fn current_trade_info(self) -> Option<ScriptTradeInfo> {
-        unsafe { (self.current_trade_info)(self.data) }
-    }
-
-    unsafe fn party(self) -> Option<ScriptPartyView> {
-        unsafe { (self.party)(self.data) }
-    }
-
-    unsafe fn server_time(self) -> Option<f64> {
-        unsafe { (self.server_time)(self.data) }
-    }
-
-    unsafe fn pending_confirmation(self) -> Option<ScriptConfirmation> {
-        unsafe { (self.pending_confirmation)(self.data) }
-    }
-
-    unsafe fn busy_operation(self) -> ScriptBusyOperation {
-        unsafe { (self.busy_operation)(self.data) }
     }
 }
 
@@ -903,7 +511,7 @@ deno_core::extension!(
 
 struct HostRuntimeState {
     outputs: Rc<RefCell<Vec<ScriptIntent>>>,
-    current_context: Cell<Option<ScriptClientViewPtr>>,
+    current_context: Cell<Option<NonNull<dyn ScriptClientView + 'static>>>,
     config: ScriptHostConfig,
     fetch_completion_tx: mpsc::Sender<CompletedFetchRequest>,
     fetch_completion_rx: mpsc::Receiver<CompletedFetchRequest>,
@@ -960,7 +568,7 @@ impl HostRuntimeState {
 
 struct ActiveScriptContextGuard {
     op_state: Rc<RefCell<OpState>>,
-    previous: Option<ScriptClientViewPtr>,
+    previous: Option<NonNull<dyn ScriptClientView + 'static>>,
 }
 
 impl Drop for ActiveScriptContextGuard {
@@ -977,12 +585,22 @@ fn install_script_context<T: ScriptClientView>(
     op_state: Rc<RefCell<OpState>>,
     context: &T,
 ) -> ActiveScriptContextGuard {
+    let trait_ref: &(dyn ScriptClientView + '_) = context;
+    // SAFETY: `ActiveScriptContextGuard::drop` restores `previous` before `context` goes out of
+    // scope, so the lifetime-erased pointer is only dereferenced while `context` is alive and borrowed.
+    let context_ptr = unsafe {
+        std::mem::transmute::<
+            NonNull<dyn ScriptClientView + '_>,
+            NonNull<dyn ScriptClientView + 'static>,
+        >(NonNull::from(trait_ref))
+    };
+
     let previous = {
         let mut op_state_ref = op_state.borrow_mut();
         op_state_ref
             .borrow_mut::<HostRuntimeState>()
             .current_context
-            .replace(Some(ScriptClientViewPtr::from_ref(context)))
+            .replace(Some(context_ptr))
     };
 
     ActiveScriptContextGuard { op_state, previous }
@@ -990,23 +608,166 @@ fn install_script_context<T: ScriptClientView>(
 
 fn with_current_script_client_view<T>(
     state: &mut OpState,
-    f: impl FnOnce(ScriptClientViewPtr) -> T,
+    f: impl FnOnce(&dyn ScriptClientView) -> T,
 ) -> Option<T> {
     let context_ptr = state.borrow::<HostRuntimeState>().current_context.get()?;
-    Some(f(context_ptr))
+    // SAFETY: `current_context` is installed exclusively by `install_script_context` for the
+    // lifetime of `ActiveScriptContextGuard`, with no mutable aliases created while ops run.
+    let view = unsafe { context_ptr.as_ref() };
+    Some(f(view))
 }
 
-#[op2]
-#[serde]
-fn op_hb_self_entity(state: &mut OpState) -> Option<ScriptSelfView> {
-    with_current_script_client_view(state, |view| unsafe { view.self_entity() }).flatten()
+fn push_script_intent(state: &mut OpState, intent: ScriptIntent) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(intent);
 }
 
-#[op2]
-#[serde]
-fn op_hb_character_sheet(state: &mut OpState) -> Option<ScriptCharacterSheetView> {
-    with_current_script_client_view(state, |view| unsafe { view.character_sheet() }).flatten()
+macro_rules! define_view_read_ops {
+    (
+        option { $($opt_op:ident => $opt_method:ident -> [$($opt_ret:tt)+]),+ $(,)? }
+        default { $($def_op:ident => $def_method:ident -> [$($def_ret:tt)+]),+ $(,)? }
+    ) => {
+        $(
+            #[op2]
+            #[serde]
+            fn $opt_op(state: &mut OpState) -> Option<$($opt_ret)+> {
+                with_current_script_client_view(state, |view| view.$opt_method()).flatten()
+            }
+        )+
+        $(
+            #[op2]
+            #[serde]
+            fn $def_op(state: &mut OpState) -> $($def_ret)+ {
+                with_current_script_client_view(state, |view| view.$def_method()).unwrap_or_default()
+            }
+        )+
+    };
 }
+
+macro_rules! define_entity_prop_ops {
+    ($( $op_name:ident => $prop_ty:ty, $method:ident, $to_value:expr );+ $(;)?) => {
+        $(
+            #[op2]
+            #[serde]
+            fn $op_name(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
+                let prop = <$prop_ty>::from_repr(prop)?;
+                with_current_script_client_view(state, |view| view.$method(Guid(guid), prop))
+                    .flatten()
+                    .and_then($to_value)
+            }
+        )+
+    };
+}
+
+macro_rules! define_intent_op {
+    ($op_name:ident () => $intent:expr) => {
+        #[op2(fast)]
+        fn $op_name(state: &mut OpState) {
+            push_script_intent(state, $intent);
+        }
+    };
+    ($op_name:ident ( $( $(#[$attr:meta])* $arg:ident : $ty:ident ),+ $(,)? ) => $intent:expr) => {
+        #[op2(fast)]
+        fn $op_name(state: &mut OpState, $( $(#[$attr])* $arg: $ty ),+) {
+            push_script_intent(state, $intent);
+        }
+    };
+}
+
+define_view_read_ops! {
+    option {
+        op_hb_self_entity => self_entity -> [ScriptSelfView],
+        op_hb_character_sheet => character_sheet -> [ScriptCharacterSheetView],
+        op_hb_load_config => load_config -> [ScriptJsonValue],
+        op_hb_load_data => load_data -> [ScriptJsonValue],
+        op_hb_load_data_bin => load_data_bin -> [Vec<u8>],
+        op_hb_current_open_container => current_open_container -> [Guid],
+        op_hb_pending_confirmation => pending_confirmation -> [ScriptConfirmation],
+        op_hb_current_trade_info => current_trade_info -> [ScriptTradeInfo],
+        op_hb_party => party -> [ScriptPartyView],
+        op_hb_current_interaction => current_interaction -> [ScriptClientInteraction],
+    }
+    default {
+        op_hb_equipment => equipment -> [Vec<ScriptEquipmentSlotView>],
+        op_hb_inventory => inventory -> [Vec<ScriptContainerView>],
+        op_hb_busy_operation => busy_operation -> [ScriptBusyOperation],
+        op_hb_spellbook => spellbook -> [Vec<u32>],
+        op_hb_combat_info => combat_info -> [ScriptCombatInfo],
+        op_hb_enchantments => enchantments -> [Vec<ScriptEnchantmentView>],
+    }
+}
+
+define_entity_prop_ops! {
+    op_hb_entity_bool_prop => PropertyBool, entity_bool_prop, |value| Some(Value::Bool(value));
+    op_hb_entity_int_prop => PropertyInt, entity_int_prop, |value| Some(json!(value));
+    op_hb_entity_int64_prop => PropertyInt64, entity_int64_prop, |value| Some(json!(value));
+    op_hb_entity_float_prop => PropertyFloat, entity_float_prop, |value| {
+        deno_core::serde_json::Number::from_f64(value).map(Value::Number)
+    };
+    op_hb_entity_string_prop => PropertyString, entity_string_prop, |value| Some(Value::String(value));
+    op_hb_entity_data_prop => PropertyDataId, entity_data_prop, |value| Some(json!(value.0));
+    op_hb_entity_instance_prop => PropertyInstanceId, entity_instance_prop, |value| Some(json!(value.0));
+}
+
+define_intent_op!(op_hb_accept_trade() => ScriptIntent::AcceptTrade);
+define_intent_op!(op_hb_decline_trade() => ScriptIntent::DeclineTrade);
+define_intent_op!(op_hb_reset_trade() => ScriptIntent::ResetTrade);
+define_intent_op!(op_hb_exit_trade() => ScriptIntent::ExitTrade);
+define_intent_op!(op_hb_cancel_interaction() => ScriptIntent::CancelInteraction);
+
+define_intent_op!(op_hb_open_container(guid: u32) => ScriptIntent::OpenContainer { guid: Guid(guid) });
+define_intent_op!(op_hb_close_container(guid: u32) => ScriptIntent::CloseContainer { guid: Guid(guid) });
+define_intent_op!(op_hb_respond_to_confirmation(accepted: bool) => ScriptIntent::RespondToConfirmation { accepted });
+define_intent_op!(op_hb_unequip(guid: u32) => ScriptIntent::Unequip { guid: Guid(guid) });
+define_intent_op!(op_hb_say(#[string] message: String) => ScriptIntent::Say { message });
+define_intent_op!(op_hb_emote(#[string] message: String) => ScriptIntent::Emote { message });
+define_intent_op!(op_hb_soul_emote(#[string] token: String) => ScriptIntent::SoulEmote { token });
+define_intent_op!(op_hb_open_trade(guid: u32) => ScriptIntent::OpenTrade { guid: Guid(guid) });
+define_intent_op!(op_hb_add_to_trade(item: u32) => ScriptIntent::AddToTrade { item: Guid(item) });
+define_intent_op!(op_hb_snap_heading(heading: f64) => ScriptIntent::SnapHeading { heading: heading as f32 });
+define_intent_op!(op_hb_scoot(distance_m: f64) => ScriptIntent::Scoot { distance_m: distance_m as f32 });
+define_intent_op!(op_hb_assess(target: u32) => ScriptIntent::Assess { target: Guid(target) });
+define_intent_op!(op_hb_drop(item: u32) => ScriptIntent::Drop { item: Guid(item) });
+define_intent_op!(op_hb_attack(guid: u32) => ScriptIntent::Attack { guid: Guid(guid) });
+define_intent_op!(op_hb_set_combat_mode(on: bool) => ScriptIntent::SetCombatMode { on });
+define_intent_op!(op_hb_follow(guid: u32) => ScriptIntent::Follow { guid: Guid(guid) });
+define_intent_op!(op_hb_target_entity(guid: u32) => ScriptIntent::TargetEntity { guid: Guid(guid) });
+define_intent_op!(op_hb_approach(guid: u32) => ScriptIntent::Approach { guid: Guid(guid) });
+
+define_intent_op!(op_hb_cast_spell(spell_id: u32, target: u32) => ScriptIntent::CastSpell {
+    spell_id,
+    target: (target != 0).then_some(Guid(target)),
+});
+define_intent_op!(op_hb_combine(source: u32, dest: u32) => ScriptIntent::Combine {
+    source: Guid(source),
+    dest: Guid(dest),
+});
+define_intent_op!(op_hb_move_item(item: u32, container: u32) => ScriptIntent::MoveItem {
+    item: Guid(item),
+    container: Guid(container),
+});
+define_intent_op!(op_hb_pickup(item: u32, container: u32) => ScriptIntent::Pickup {
+    item: Guid(item),
+    container: (container != 0).then_some(Guid(container)),
+});
+define_intent_op!(op_hb_print(#[string] style: String, #[string] message: String) => ScriptIntent::Print {
+    style: parse_script_message_style(&style),
+    message,
+});
+
+define_intent_op!(op_hb_stack_items(source: u32, destination: u32, amount: u32) => ScriptIntent::StackItems {
+    source: Guid(source),
+    destination: Guid(destination),
+    amount,
+});
+define_intent_op!(op_hb_split_item(item: u32, container: u32, amount: u32) => ScriptIntent::SplitItem {
+    item: Guid(item),
+    container: Guid(container),
+    amount,
+});
 
 #[op2]
 #[serde]
@@ -1039,7 +800,7 @@ fn op_hb_nearby_entities(
             .collect()
     });
 
-    with_current_script_client_view(state, |view| unsafe {
+    with_current_script_client_view(state, |view| {
         view.nearby_entities(
             max_distance.map(|distance| distance as f32),
             classifications,
@@ -1050,56 +811,17 @@ fn op_hb_nearby_entities(
 
 #[op2]
 #[serde]
-fn op_hb_equipment(state: &mut OpState) -> Vec<ScriptEquipmentSlotView> {
-    with_current_script_client_view(state, |view| unsafe { view.equipment() }).unwrap_or_default()
-}
-
-#[op2]
-#[serde]
-fn op_hb_inventory(state: &mut OpState) -> Vec<ScriptContainerView> {
-    with_current_script_client_view(state, |view| unsafe { view.inventory() }).unwrap_or_default()
-}
-
-#[op2]
-#[serde]
-fn op_hb_current_open_container(state: &mut OpState) -> Option<Guid> {
-    with_current_script_client_view(state, |view| unsafe { view.current_open_container() })
-        .flatten()
-}
-
-#[op2]
-#[serde]
 fn op_hb_server_time(state: &mut OpState) -> Option<Value> {
-    let server_time = with_current_script_client_view(state, |view| unsafe { view.server_time() })
+    let server_time = with_current_script_client_view(state, |view| view.server_time())
         .flatten()
         .unwrap_or_default();
 
     Some(json!(server_time))
 }
 
-#[op2]
-#[serde]
-fn op_hb_pending_confirmation(state: &mut OpState) -> Option<ScriptConfirmation> {
-    with_current_script_client_view(state, |view| unsafe { view.pending_confirmation() }).flatten()
-}
-
-#[op2]
-#[serde]
-fn op_hb_busy_operation(state: &mut OpState) -> ScriptBusyOperation {
-    with_current_script_client_view(state, |view| unsafe { view.busy_operation() })
-        .unwrap_or_default()
-}
-
-#[op2]
-#[serde]
-fn op_hb_spellbook(state: &mut OpState) -> Vec<u32> {
-    with_current_script_client_view(state, |view| unsafe { view.spellbook() }).unwrap_or_default()
-}
-
 #[op2(fast)]
 fn op_hb_in_spellbook(state: &mut OpState, spell_id: u32) -> bool {
-    with_current_script_client_view(state, |view| unsafe { view.in_spellbook(spell_id) })
-        .unwrap_or_default()
+    with_current_script_client_view(state, |view| view.in_spellbook(spell_id)).unwrap_or_default()
 }
 
 #[op2]
@@ -1108,8 +830,7 @@ fn op_hb_distance(
     #[serde] from: ScriptPositionRef,
     #[serde] to: ScriptPositionRef,
 ) -> f32 {
-    with_current_script_client_view(state, |view| unsafe { view.distance(from, to) })
-        .unwrap_or_default()
+    with_current_script_client_view(state, |view| view.distance(from, to)).unwrap_or_default()
 }
 
 #[op2]
@@ -1118,396 +839,51 @@ fn op_hb_heading_to(
     #[serde] from: ScriptPositionRef,
     #[serde] to: ScriptPositionRef,
 ) -> f32 {
-    with_current_script_client_view(state, |view| unsafe { view.heading_to(from, to) })
-        .unwrap_or_default()
+    with_current_script_client_view(state, |view| view.heading_to(from, to)).unwrap_or_default()
 }
 
 #[op2(fast)]
 fn op_hb_entity_exists(state: &mut OpState, guid: u32) -> bool {
-    with_current_script_client_view(state, |view| unsafe { view.entity_exists(Guid(guid)) })
+    with_current_script_client_view(state, |view| view.entity_exists(Guid(guid)))
         .unwrap_or_default()
 }
 
 #[op2]
 #[serde]
 fn op_hb_entity(state: &mut OpState, guid: u32) -> Option<ScriptEntityView> {
-    with_current_script_client_view(state, |view| unsafe { view.entity(Guid(guid)) }).flatten()
-}
-
-#[op2]
-#[serde]
-fn op_hb_current_trade_info(state: &mut OpState) -> Option<ScriptTradeInfo> {
-    with_current_script_client_view(state, |view| unsafe { view.current_trade_info() }).flatten()
-}
-
-#[op2]
-#[serde]
-fn op_hb_party(state: &mut OpState) -> Option<crate::ScriptPartyView> {
-    with_current_script_client_view(state, |view| unsafe { view.party() }).flatten()
-}
-
-#[op2]
-#[serde]
-fn op_hb_combat_info(state: &mut OpState) -> ScriptCombatInfo {
-    with_current_script_client_view(state, |view| unsafe { view.combat_info() }).unwrap_or_default()
-}
-
-#[op2]
-#[serde]
-fn op_hb_current_interaction(state: &mut OpState) -> Option<ScriptClientInteraction> {
-    with_current_script_client_view(state, |view| unsafe { view.current_interaction() }).flatten()
-}
-
-#[op2]
-#[serde]
-fn op_hb_enchantments(state: &mut OpState) -> Vec<ScriptEnchantmentView> {
-    with_current_script_client_view(state, |view| unsafe { view.enchantments() })
-        .unwrap_or_default()
-}
-
-#[op2(fast)]
-fn op_hb_open_container(state: &mut OpState, guid: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::OpenContainer { guid: Guid(guid) });
-}
-
-#[op2(fast)]
-fn op_hb_close_container(state: &mut OpState, guid: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::CloseContainer { guid: Guid(guid) });
-}
-
-#[op2(fast)]
-fn op_hb_respond_to_confirmation(state: &mut OpState, accepted: bool) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::RespondToConfirmation { accepted });
-}
-
-#[op2(fast)]
-fn op_hb_cast_spell(state: &mut OpState, spell_id: u32, target: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::CastSpell {
-            spell_id,
-            target: (target != 0).then_some(Guid(target)),
-        });
+    with_current_script_client_view(state, |view| view.entity(Guid(guid))).flatten()
 }
 
 #[op2(fast)]
 fn op_hb_equip(state: &mut OpState, guid: u32, #[string] slot: String) {
-    let slot = match parse_script_equipment_slot_kind(&slot) {
-        Some(slot) => slot,
-        None => {
-            state
-                .borrow::<HostRuntimeState>()
-                .outputs
-                .borrow_mut()
-                .push(ScriptIntent::Print {
-                    style: ScriptMessageStyle::Error,
-                    message: format!("invalid equipment slot for equip intent: {slot}"),
-                });
-            return;
-        }
+    let Some(slot) = parse_script_equipment_slot_kind(&slot) else {
+        push_script_intent(
+            state,
+            ScriptIntent::Print {
+                style: ScriptMessageStyle::Error,
+                message: format!("invalid equipment slot for equip intent: {slot}"),
+            },
+        );
+        return;
     };
 
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Equip {
+    push_script_intent(
+        state,
+        ScriptIntent::Equip {
             guid: Guid(guid),
             slot,
-        });
-}
-
-#[op2(fast)]
-fn op_hb_unequip(state: &mut OpState, guid: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Unequip { guid: Guid(guid) });
-}
-
-#[op2]
-#[serde]
-fn op_hb_entity_bool_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
-    let prop = PropertyBool::from_repr(prop)?;
-    with_current_script_client_view(state, |view| unsafe {
-        view.entity_bool_prop(Guid(guid), prop)
-    })
-    .flatten()
-    .map(Value::Bool)
-}
-
-#[op2]
-#[serde]
-fn op_hb_entity_int_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
-    let prop = PropertyInt::from_repr(prop)?;
-    with_current_script_client_view(state, |view| unsafe {
-        view.entity_int_prop(Guid(guid), prop)
-    })
-    .flatten()
-    .map(|value| json!(value))
-}
-
-#[op2]
-#[serde]
-fn op_hb_entity_int64_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
-    let prop = PropertyInt64::from_repr(prop)?;
-    with_current_script_client_view(state, |view| unsafe {
-        view.entity_int64_prop(Guid(guid), prop)
-    })
-    .flatten()
-    .map(|value| json!(value))
-}
-
-#[op2]
-#[serde]
-fn op_hb_entity_float_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
-    let prop = PropertyFloat::from_repr(prop)?;
-    with_current_script_client_view(state, |view| unsafe {
-        view.entity_float_prop(Guid(guid), prop)
-    })
-    .flatten()
-    .and_then(deno_core::serde_json::Number::from_f64)
-    .map(Value::Number)
-}
-
-#[op2]
-#[serde]
-fn op_hb_entity_string_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
-    let prop = PropertyString::from_repr(prop)?;
-    with_current_script_client_view(state, |view| unsafe {
-        view.entity_string_prop(Guid(guid), prop)
-    })
-    .flatten()
-    .map(Value::String)
-}
-
-#[op2]
-#[serde]
-fn op_hb_entity_data_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
-    let prop = PropertyDataId::from_repr(prop)?;
-    with_current_script_client_view(state, |view| unsafe {
-        view.entity_data_prop(Guid(guid), prop)
-    })
-    .flatten()
-    .map(|value| json!(value.0))
-}
-
-#[op2]
-#[serde]
-fn op_hb_entity_instance_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
-    let prop = PropertyInstanceId::from_repr(prop)?;
-    with_current_script_client_view(state, |view| unsafe {
-        view.entity_instance_prop(Guid(guid), prop)
-    })
-    .flatten()
-    .map(|value| json!(value.0))
-}
-
-#[op2]
-#[serde]
-fn op_hb_load_config(state: &mut OpState) -> Option<ScriptJsonValue> {
-    with_current_script_client_view(state, |view| unsafe { view.load_config() }).flatten()
-}
-
-#[op2]
-#[serde]
-fn op_hb_load_data(state: &mut OpState) -> Option<ScriptJsonValue> {
-    with_current_script_client_view(state, |view| unsafe { view.load_data() }).flatten()
-}
-
-#[op2]
-#[serde]
-fn op_hb_load_data_bin(state: &mut OpState) -> Option<Vec<u8>> {
-    with_current_script_client_view(state, |view| unsafe { view.load_data_bin() }).flatten()
+        },
+    );
 }
 
 #[op2(fast)]
 fn op_hb_write_config(state: &mut OpState, #[string] contents: String) -> bool {
-    with_current_script_client_view(state, |view| unsafe { view.write_config(contents) })
-        .unwrap_or(false)
-}
-
-#[op2(fast)]
-fn op_hb_print(state: &mut OpState, #[string] style: String, #[string] message: String) {
-    let style = parse_script_message_style(&style);
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Print { style, message });
+    with_current_script_client_view(state, |view| view.write_config(contents)).unwrap_or(false)
 }
 
 #[op2(fast)]
 fn op_hb_debug_log(state: &mut OpState, #[string] message: String) {
-    with_current_script_client_view(state, |view| unsafe { view.debug_log(message) });
-}
-
-#[op2(fast)]
-fn op_hb_say(state: &mut OpState, #[string] message: String) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Say { message });
-}
-
-#[op2(fast)]
-fn op_hb_emote(state: &mut OpState, #[string] message: String) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Emote { message });
-}
-
-#[op2(fast)]
-fn op_hb_soul_emote(state: &mut OpState, #[string] token: String) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::SoulEmote { token });
-}
-
-#[op2(fast)]
-fn op_hb_open_trade(state: &mut OpState, guid: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::OpenTrade { guid: Guid(guid) });
-}
-
-#[op2(fast)]
-fn op_hb_add_to_trade(state: &mut OpState, item: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::AddToTrade { item: Guid(item) });
-}
-
-#[op2(fast)]
-fn op_hb_accept_trade(state: &mut OpState) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::AcceptTrade);
-}
-
-#[op2(fast)]
-fn op_hb_decline_trade(state: &mut OpState) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::DeclineTrade);
-}
-
-#[op2(fast)]
-fn op_hb_reset_trade(state: &mut OpState) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::ResetTrade);
-}
-
-#[op2(fast)]
-fn op_hb_exit_trade(state: &mut OpState) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::ExitTrade);
-}
-
-#[op2(fast)]
-fn op_hb_snap_heading(state: &mut OpState, heading: f64) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::SnapHeading {
-            heading: heading as f32,
-        });
-}
-
-#[op2(fast)]
-fn op_hb_scoot(state: &mut OpState, distance_m: f64) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Scoot {
-            distance_m: distance_m as f32,
-        });
-}
-
-#[op2(fast)]
-fn op_hb_combine(state: &mut OpState, source: u32, dest: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Combine {
-            source: Guid(source),
-            dest: Guid(dest),
-        });
-}
-
-#[op2(fast)]
-fn op_hb_move_item(state: &mut OpState, item: u32, container: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::MoveItem {
-            item: Guid(item),
-            container: Guid(container),
-        });
-}
-
-#[op2(fast)]
-fn op_hb_stack_items(state: &mut OpState, source: u32, destination: u32, amount: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::StackItems {
-            source: Guid(source),
-            destination: Guid(destination),
-            amount,
-        });
-}
-
-#[op2(fast)]
-fn op_hb_split_item(state: &mut OpState, item: u32, container: u32, amount: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::SplitItem {
-            item: Guid(item),
-            container: Guid(container),
-            amount,
-        });
+    with_current_script_client_view(state, |view| view.debug_log(message));
 }
 
 #[op2(fast)]
@@ -1515,120 +891,24 @@ fn op_hb_salvage(state: &mut OpState, tool: u32, #[string] item_guids_json: Stri
     let item_guids = match deno_core::serde_json::from_str::<Vec<u32>>(&item_guids_json) {
         Ok(item_guids) => item_guids.into_iter().map(Guid).collect(),
         Err(error) => {
-            state
-                .borrow::<HostRuntimeState>()
-                .outputs
-                .borrow_mut()
-                .push(ScriptIntent::Print {
+            push_script_intent(
+                state,
+                ScriptIntent::Print {
                     style: ScriptMessageStyle::Error,
                     message: format!("failed to parse salvage item list: {error}"),
-                });
+                },
+            );
             return;
         }
     };
 
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Salvage {
+    push_script_intent(
+        state,
+        ScriptIntent::Salvage {
             tool: Guid(tool),
             items: item_guids,
-        });
-}
-
-#[op2(fast)]
-fn op_hb_assess(state: &mut OpState, target: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Assess {
-            target: Guid(target),
-        });
-}
-
-#[op2(fast)]
-fn op_hb_drop(state: &mut OpState, item: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Drop { item: Guid(item) });
-}
-
-#[op2(fast)]
-fn op_hb_pickup(state: &mut OpState, item: u32, container: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Pickup {
-            item: Guid(item),
-            container: (container != 0).then_some(Guid(container)),
-        });
-}
-
-#[op2(fast)]
-fn op_hb_attack(state: &mut OpState, guid: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Client(ScriptClientIntent::Attack {
-            guid: Guid(guid),
-        }));
-}
-
-#[op2(fast)]
-fn op_hb_set_combat_mode(state: &mut OpState, on: bool) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::SetCombatMode { on });
-}
-
-#[op2(fast)]
-fn op_hb_follow(state: &mut OpState, guid: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Client(ScriptClientIntent::Follow {
-            guid: Guid(guid),
-        }));
-}
-
-#[op2(fast)]
-fn op_hb_cancel_interaction(state: &mut OpState) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Client(ScriptClientIntent::CancelInteraction));
-}
-
-#[op2(fast)]
-fn op_hb_target_entity(state: &mut OpState, guid: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Client(ScriptClientIntent::TargetEntity {
-            guid: Guid(guid),
-        }));
-}
-
-#[op2(fast)]
-fn op_hb_approach(state: &mut OpState, guid: u32) {
-    state
-        .borrow::<HostRuntimeState>()
-        .outputs
-        .borrow_mut()
-        .push(ScriptIntent::Client(ScriptClientIntent::Approach {
-            guid: Guid(guid),
-        }));
+        },
+    );
 }
 
 fn parse_script_message_style(style: &str) -> ScriptMessageStyle {
@@ -1655,40 +935,7 @@ fn parse_script_message_style(style: &str) -> ScriptMessageStyle {
 }
 
 fn parse_script_equipment_slot_kind(slot: &str) -> Option<ScriptEquipmentSlotKind> {
-    match slot.trim().to_ascii_lowercase().as_str() {
-        "head_wear" => Some(ScriptEquipmentSlotKind::HeadWear),
-        "chest_wear" => Some(ScriptEquipmentSlotKind::ChestWear),
-        "abdomen_wear" => Some(ScriptEquipmentSlotKind::AbdomenWear),
-        "upper_arm_wear" => Some(ScriptEquipmentSlotKind::UpperArmWear),
-        "lower_arm_wear" => Some(ScriptEquipmentSlotKind::LowerArmWear),
-        "hand_wear" => Some(ScriptEquipmentSlotKind::HandWear),
-        "upper_leg_wear" => Some(ScriptEquipmentSlotKind::UpperLegWear),
-        "lower_leg_wear" => Some(ScriptEquipmentSlotKind::LowerLegWear),
-        "foot_wear" => Some(ScriptEquipmentSlotKind::FootWear),
-        "chest_armor" => Some(ScriptEquipmentSlotKind::ChestArmor),
-        "abdomen_armor" => Some(ScriptEquipmentSlotKind::AbdomenArmor),
-        "upper_arm_armor" => Some(ScriptEquipmentSlotKind::UpperArmArmor),
-        "lower_arm_armor" => Some(ScriptEquipmentSlotKind::LowerArmArmor),
-        "upper_leg_armor" => Some(ScriptEquipmentSlotKind::UpperLegArmor),
-        "lower_leg_armor" => Some(ScriptEquipmentSlotKind::LowerLegArmor),
-        "neck_wear" => Some(ScriptEquipmentSlotKind::NeckWear),
-        "left_wrist" => Some(ScriptEquipmentSlotKind::LeftWrist),
-        "right_wrist" => Some(ScriptEquipmentSlotKind::RightWrist),
-        "left_finger" => Some(ScriptEquipmentSlotKind::LeftFinger),
-        "right_finger" => Some(ScriptEquipmentSlotKind::RightFinger),
-        "melee_weapon" => Some(ScriptEquipmentSlotKind::MeleeWeapon),
-        "shield" => Some(ScriptEquipmentSlotKind::Shield),
-        "missile_weapon" => Some(ScriptEquipmentSlotKind::MissileWeapon),
-        "missile_ammo" => Some(ScriptEquipmentSlotKind::MissileAmmo),
-        "caster" => Some(ScriptEquipmentSlotKind::Caster),
-        "two_handed" => Some(ScriptEquipmentSlotKind::TwoHanded),
-        "trinket_one" => Some(ScriptEquipmentSlotKind::TrinketOne),
-        "cloak" => Some(ScriptEquipmentSlotKind::Cloak),
-        "sigil_one" => Some(ScriptEquipmentSlotKind::SigilOne),
-        "sigil_two" => Some(ScriptEquipmentSlotKind::SigilTwo),
-        "sigil_three" => Some(ScriptEquipmentSlotKind::SigilThree),
-        _ => None,
-    }
+    from_value(Value::String(slot.trim().to_ascii_lowercase())).ok()
 }
 
 fn parse_script_entity_kind(kind: String) -> Option<ScriptEntityKind> {
@@ -2055,13 +1302,12 @@ where
 mod tests {
     use super::build_dispatch_source;
     use crate::{
-        ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientIntent,
-        ScriptClientInteraction, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
-        ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
-        ScriptEquipmentSlotView, ScriptEvent, ScriptFetchAllowedHost, ScriptHostConfig,
-        ScriptIntent, ScriptLifecycleEvent, ScriptLocalConfirmation, ScriptLocalConfirmationKind,
-        ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource,
-        ScriptTradeInfo,
+        ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientInteraction,
+        ScriptCombatInfo, ScriptConfirmation, ScriptContainerView, ScriptEnchantmentView,
+        ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
+        ScriptEvent, ScriptFetchAllowedHost, ScriptHostConfig, ScriptIntent, ScriptLifecycleEvent,
+        ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptPartyMemberView,
+        ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
     };
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
@@ -2081,7 +1327,7 @@ mod tests {
 
     fn resolve_position(reference: ScriptPositionRef) -> Option<WorldPosition> {
         match reference {
-            ScriptPositionRef::Position(position) => Some(position.into()),
+            ScriptPositionRef::Position(position) => Some(position),
             ScriptPositionRef::Guid(guid) => match guid {
                 Guid(7) => Some(WorldPosition {
                     landblock_id: Guid(0x0100_0000),
@@ -2128,10 +1374,6 @@ mod tests {
                     end_time: 222.25,
                 },
             ]
-        }
-
-        fn target_entity(&self) -> Option<ScriptEntityView> {
-            None
         }
 
         fn entity_bool_prop(&self, _guid: Guid, _prop: PropertyBool) -> Option<bool> {
@@ -2248,7 +1490,7 @@ mod tests {
                 name: Some("Lesser Healing Kit".to_string()),
                 kind: ScriptEntityKind::HealingKit,
                 weenie_id: None,
-                position: WorldPosition::default().into(),
+                position: WorldPosition::default(),
                 profile: None,
                 container: Guid::NULL,
                 wielder: Guid::NULL,
@@ -2465,8 +1707,22 @@ mod tests {
         assert!(source.contains("JSON.parse("));
     }
 
+    fn run_test_script(name: &str, js: &str) -> Vec<ScriptIntent> {
+        let mut host =
+            super::ScriptHost::spawn(ScriptSource::new(name, js), &TestView).expect("script host");
+        host.drain_outputs()
+    }
+
+    fn run_test_script_print(name: &str, js: &str) -> String {
+        let outputs = run_test_script(name, js);
+        match outputs.as_slice() {
+            [ScriptIntent::Print { message, .. }] => message.clone(),
+            other => panic!("expected single Print intent for {name}, got {other:?}"),
+        }
+    }
+
     fn equipment_helper_returns_js_map() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "equipment-map-test",
             r#"
                 const equipment = Holtburger.equipment();
@@ -2480,38 +1736,22 @@ mod tests {
                 );
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "[true,true,42]"
-        ));
+        assert_eq!(message, "[true,true,42]");
     }
 
     fn spellbook_helper_returns_js_array() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "spellbook-array-test",
             r#"
                 const spellbook = Holtburger.spellbook();
                 Holtburger.print("info", JSON.stringify(spellbook));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "[7,11,13]"
-        ));
+        assert_eq!(message, "[7,11,13]");
     }
 
     fn inventory_helper_returns_js_array_of_container_views() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "inventory-array-test",
             r#"
                 const inventory = Holtburger.inventory();
@@ -2527,139 +1767,88 @@ mod tests {
                 );
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "[true,1,17,4,[11,12]]"
-        ));
+        assert_eq!(message, "[true,1,17,4,[11,12]]");
     }
 
     fn current_open_container_helper_returns_js_option() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "current-open-container-test",
             r#"
                 Holtburger.print("info", String(Holtburger.currentOpenContainer()));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "17"
-        ));
+        assert_eq!(message, "17");
     }
 
     fn current_interaction_helper_returns_js_object() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "current-interaction-test",
             r#"
                 const interaction = Holtburger.currentInteraction();
                 Holtburger.print("info", JSON.stringify(interaction));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "{\"kind\":\"Attack\",\"data\":{\"guid\":7}}"
-        ));
+        assert_eq!(message, "{\"kind\":\"Attack\",\"data\":{\"guid\":7}}");
     }
 
     fn enchantments_helper_returns_js_array() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "enchantments-test",
             r#"
                 const enchantments = Holtburger.enchantments();
                 Holtburger.print("info", JSON.stringify(enchantments));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "[{\"spellId\":7,\"endTime\":123.5},{\"spellId\":11,\"endTime\":222.25}]"
-        ));
+        assert_eq!(
+            message,
+            "[{\"spellId\":7,\"endTime\":123.5},{\"spellId\":11,\"endTime\":222.25}]"
+        );
     }
 
     fn entity_helper_returns_js_object() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "entity-test",
             r#"
                 const entity = Holtburger.entity(11);
                 Holtburger.print("info", JSON.stringify([entity.guid, entity.name, entity.kind, entity.isHostile]));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "[11,\"Lesser Healing Kit\",\"healing_kit\",false]"
-        ));
+        assert_eq!(message, "[11,\"Lesser Healing Kit\",\"healing_kit\",false]");
     }
 
     fn debug_log_helper_emits_no_script_outputs() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "debug-log-test",
             r#"
                 Holtburger.debugLog("script diagnostics");
                 Holtburger.print("info", "after debug log");
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "after debug log"
-        ));
+        assert_eq!(message, "after debug log");
     }
 
     fn party_helper_returns_js_object() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "party-test",
             r#"
                 const party = Holtburger.party();
                 Holtburger.print("info", JSON.stringify(party));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message.contains("\"leaderGuid\":7")
-                    && message.contains("\"members\"")
-                    && message.contains("\"guid\":7")
-                    && message.contains("\"name\":\"Buddy\"")
-                    && message.contains("\"healthPercent\":0.5")
-                    && message.contains("\"guid\":42")
-                    && message.contains("\"name\":\"Tank\"")
-                    && message.contains("\"manaPercent\":0.1")
-        ));
+        assert!(
+            message.contains("\"leaderGuid\":7")
+                && message.contains("\"members\"")
+                && message.contains("\"guid\":7")
+                && message.contains("\"name\":\"Buddy\"")
+                && message.contains("\"healthPercent\":0.5")
+                && message.contains("\"guid\":42")
+                && message.contains("\"name\":\"Tank\"")
+                && message.contains("\"manaPercent\":0.1")
+        );
     }
 
     fn server_time_pending_confirmation_and_busy_operation_helpers_return_js_values() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "script-state-test",
             r#"
                 const values = [
@@ -2670,24 +1859,14 @@ mod tests {
                 Holtburger.print("info", JSON.stringify(values));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        match outputs.as_slice() {
-            [ScriptIntent::Print { message, .. }]
-                if message
-                    == "[123.5,{\"kind\":\"local\",\"data\":{\"kind\":{\"kind\":\"unswear\"},\"text\":\"Please unswear first\"}},\"sell\"]" =>
-                {}
-            [ScriptIntent::Print { message, .. }] => {
-                panic!("unexpected script-state output: {message}")
-            }
-            other => panic!("unexpected outputs: {other:?}"),
-        }
+        assert_eq!(
+            message,
+            "[123.5,{\"kind\":\"local\",\"data\":{\"kind\":{\"kind\":\"unswear\"},\"text\":\"Please unswear first\"}},\"sell\"]"
+        );
     }
 
     fn distance_and_heading_helpers_accept_guids_and_positions() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "distance-heading-test",
             r#"
                 const distance = Holtburger.distance(7, 42);
@@ -2695,23 +1874,14 @@ mod tests {
                 Holtburger.print("info", JSON.stringify([distance, heading]));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if deno_core::serde_json::from_str::<Vec<f64>>(message).is_ok_and(|values| {
-                    values.len() == 2
-                        && (values[0] - 10.0).abs() < 1e-6
-                        && (values[1] - 90.0_f64.to_radians()).abs() < 1e-6
-                })
-        ));
+        let values = deno_core::serde_json::from_str::<Vec<f64>>(&message).expect("json numbers");
+        assert_eq!(values.len(), 2);
+        assert!((values[0] - 10.0).abs() < 1e-6);
+        assert!((values[1] - 90.0_f64.to_radians()).abs() < 1e-6);
     }
 
     fn combat_info_helper_returns_js_object() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "combat-info-test",
             r#"
                 const combatInfo = Holtburger.combatInfo();
@@ -2727,28 +1897,17 @@ mod tests {
                 );
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "[\"Melee\",true,7,0.75,\"High\"]"
-        ));
+        assert_eq!(message, "[\"Melee\",true,7,0.75,\"High\"]");
     }
 
     fn set_combat_mode_helper_emits_script_intent() {
-        let source = ScriptSource::new(
+        let outputs = run_test_script(
             "set-combat-mode-test",
             r#"
                 Holtburger.setCombatMode(false);
                 Holtburger.setCombatMode(true);
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
 
         assert!(matches!(
             outputs.as_slice(),
@@ -2830,7 +1989,7 @@ mod tests {
     }
 
     fn post_json_helper_rejects_denied_host() {
-        let source = ScriptSource::new(
+        let outputs = run_test_script(
             "post-json-denied-test",
             r#"
                 (async () => {
@@ -2838,9 +1997,6 @@ mod tests {
                 })().catch((error) => Holtburger.print("error", `${error.code}:${error.message}`));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
 
         assert!(matches!(
             outputs.as_slice(),
@@ -2851,7 +2007,7 @@ mod tests {
     }
 
     fn post_json_helper_rejects_invalid_request_shape() {
-        let source = ScriptSource::new(
+        let outputs = run_test_script(
             "post-json-invalid-request-test",
             r#"
                 (async () => {
@@ -2859,9 +2015,6 @@ mod tests {
                 })().catch((error) => Holtburger.print("error", `${error.code}:${error.message}`));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
 
         assert!(matches!(
             outputs.as_slice(),
@@ -2931,16 +2084,13 @@ mod tests {
     }
 
     fn respond_to_confirmation_helper_emits_script_intent() {
-        let source = ScriptSource::new(
+        let outputs = run_test_script(
             "respond-to-confirmation-test",
             r#"
                 Holtburger.respondToConfirmation(true);
                 Holtburger.respondToConfirmation(false);
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
 
         assert!(matches!(
             outputs.as_slice(),
@@ -2952,16 +2102,13 @@ mod tests {
     }
 
     fn open_and_close_container_intents_are_emitted() {
-        let source = ScriptSource::new(
+        let outputs = run_test_script(
             "container-intents-test",
             r#"
                 Holtburger.openContainer(17);
                 Holtburger.closeContainer(19);
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
 
         assert!(matches!(
             outputs.as_slice(),
@@ -2973,7 +2120,7 @@ mod tests {
     }
 
     fn attack_follow_and_cancel_helpers_emit_client_intents() {
-        let source = ScriptSource::new(
+        let outputs = run_test_script(
             "client-intents-test",
             r#"
                 Holtburger.attack(7);
@@ -2982,21 +2129,18 @@ mod tests {
             "#,
         );
 
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
         assert!(matches!(
             outputs.as_slice(),
             [
-                ScriptIntent::Client(ScriptClientIntent::Attack { guid }),
-                ScriptIntent::Client(ScriptClientIntent::Follow { guid: follow_guid }),
-                ScriptIntent::Client(ScriptClientIntent::CancelInteraction),
+                ScriptIntent::Attack { guid },
+                ScriptIntent::Follow { guid: follow_guid },
+                ScriptIntent::CancelInteraction,
             ] if *guid == Guid(7) && *follow_guid == Guid(11)
         ));
     }
 
     fn spellbook_membership_helper_returns_boolean() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "spellbook-membership-test",
             r#"
                 Holtburger.print("info", JSON.stringify([
@@ -3005,19 +2149,11 @@ mod tests {
                 ]));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "[true,false]"
-        ));
+        assert_eq!(message, "[true,false]");
     }
 
     fn heading_to_helper_returns_expected_heading() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "heading-to-test",
             r#"
                 const heading = Holtburger.headingTo(
@@ -3027,21 +2163,12 @@ mod tests {
                 Holtburger.print("info", String(heading));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message
-                    .parse::<f64>()
-                    .is_ok_and(|heading| (heading - 90.0_f64.to_radians()).abs() < 1e-6)
-        ));
+        let heading = message.parse::<f64>().expect("heading float");
+        assert!((heading - 90.0_f64.to_radians()).abs() < 1e-6);
     }
 
     fn entity_exists_helper_returns_boolean() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "entity-exists-test",
             r#"
                 Holtburger.print("info", JSON.stringify([
@@ -3050,19 +2177,11 @@ mod tests {
                 ]));
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "[true,false]"
-        ));
+        assert_eq!(message, "[true,false]");
     }
 
     fn current_trade_info_helper_returns_js_object() {
-        let source = ScriptSource::new(
+        let message = run_test_script_print(
             "current-trade-info-test",
             r#"
                 const trade = Holtburger.currentTradeInfo();
@@ -3077,14 +2196,6 @@ mod tests {
                 );
             "#,
         );
-
-        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
-        let outputs = host.drain_outputs();
-
-        assert!(matches!(
-            outputs.as_slice(),
-            [ScriptIntent::Print { message, .. }]
-                if message == "[7,\"Buddy\",[11],[21,22]]"
-        ));
+        assert_eq!(message, "[7,\"Buddy\",[11],[21,22]]");
     }
 }

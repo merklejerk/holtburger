@@ -11,8 +11,7 @@ use crate::types::{InspectTarget, Interaction};
 use anyhow::Result;
 use holtburger_core::client::types::TargetSlot;
 use holtburger_scripting::{
-    ScriptClientIntent, ScriptEquipmentSlotKind, ScriptEvent, ScriptHost, ScriptIntent,
-    ScriptLifecycleEvent,
+    ScriptEquipmentSlotKind, ScriptEvent, ScriptHost, ScriptIntent, ScriptLifecycleEvent,
 };
 use std::time::Duration;
 
@@ -248,13 +247,6 @@ impl GameState {
             ScriptIntent::Say { message } => Ok(AppAction::SendCommands {
                 commands: vec![ClientCommand::Talk(message)],
             }),
-            ScriptIntent::Tell { target, message } => Ok(AppAction::SendCommands {
-                commands: vec![ClientCommand::Tell {
-                    target: holtburger_core::client::types::ChatTellTarget::Player { name: target },
-                    message,
-                }],
-            }),
-            ScriptIntent::Use { guid } => Ok(AppAction::Use { guid }),
             ScriptIntent::Emote { message } => Ok(AppAction::Emote { message }),
             ScriptIntent::SoulEmote { token } => Ok(AppAction::SoulEmote { token }),
             ScriptIntent::OpenTrade { guid } => Ok(AppAction::OpenTrade { guid }),
@@ -332,15 +324,13 @@ impl GameState {
                 anyhow::bail!("no active confirmation to respond to")
             }
             ScriptIntent::SetCombatMode { on } => Ok(AppAction::SetCombatMode { on }),
-            ScriptIntent::Client(intent) => match intent {
-                ScriptClientIntent::TargetEntity { guid } => Ok(AppAction::BeginInteraction {
-                    interaction: Interaction::Targeting { target_guid: guid },
-                }),
-                ScriptClientIntent::Approach { guid } => Ok(AppAction::Approach { guid }),
-                ScriptClientIntent::Follow { guid } => Ok(AppAction::Follow { guid }),
-                ScriptClientIntent::CancelInteraction => Ok(AppAction::CancelInteraction),
-                ScriptClientIntent::Attack { guid } => Ok(AppAction::Attack { guid }),
-            },
+            ScriptIntent::TargetEntity { guid } => Ok(AppAction::BeginInteraction {
+                interaction: Interaction::Targeting { target_guid: guid },
+            }),
+            ScriptIntent::Approach { guid } => Ok(AppAction::Approach { guid }),
+            ScriptIntent::Follow { guid } => Ok(AppAction::Follow { guid }),
+            ScriptIntent::Attack { guid } => Ok(AppAction::Attack { guid }),
+            ScriptIntent::CancelInteraction => Ok(AppAction::CancelInteraction),
         }
     }
 

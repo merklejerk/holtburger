@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::{List, ListItem};
 
-use super::super::classification::{classify_entity, entity_name_color};
+use super::super::classification::{classify_entity, emoji, entity_name_color};
 use super::tab::NearbyTab;
 use crate::pages::game::panels::dashboard::tabs::classification::EntityClass;
 use crate::pages::game::{GameData, ViewState};
@@ -93,7 +93,7 @@ fn render_nearby_item(
 
     let text_style = Style::default().fg(color);
 
-    let type_marker = class.emoji();
+    let type_marker = emoji(class);
 
     let mut display_name = format_item_name(e, e.guid);
 

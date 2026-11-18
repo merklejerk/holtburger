@@ -1,7 +1,192 @@
-//! Color-independent entity categories shared by nameplates, maps, and selected identity UI.
+//! Color-independent entity categories shared by nameplates, maps, scripting, and selected identity UI.
 
-use holtburger_common::properties::{ItemType, ObjectDescriptionFlag, Usable, WeenieType};
+use crate::entity::Entity;
+use crate::vendor::CoreVendorItem;
+use holtburger_common::properties::{
+    ItemType, ObjectDescriptionFlag, PhysicsState, PropertyBool, PropertyInt, Usable, WeenieType,
+    WorldObjectExt, WorldObjectProperties, WorldObjectPropertyAccessors,
+};
+use holtburger_protocol::messages::object::messages::PublicWeenieDescription;
 use serde::{Deserialize, Serialize};
+
+/// Semantic classification for live entities, vendor items, and weenie descriptions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityClass {
+    Player,
+    Npc,
+    Vendor,
+    Monster,
+    Weapon,     // Includes shields
+    Apparel,    // Clothing, Jewelry, Chest, etc.
+    Container,  // Bags, Packs
+    Item,       // General attackable but not stuck item
+    Consumable, // Food, Gems, Spell Components, Mana Stones
+    Money,      // Pyreals, Notes
+    Key,        // Keys, Lockpicks
+    Writable,   // Books, Scrolls
+    HealingKit,
+    ManaStone,
+    Door,
+    Portal,
+    LifeStone,
+    Chest, // Stuck, Attackable, Container
+    Wand,
+    Tool,
+    StaticObject,
+    Unknown,
+}
+
+impl EntityClass {
+    pub fn is_creature(&self) -> bool {
+        matches!(
+            self,
+            EntityClass::Player | EntityClass::Npc | EntityClass::Vendor | EntityClass::Monster
+        )
+    }
+}
+
+pub fn classify_entity(entity: &Entity) -> EntityClass {
+    classify_world_object(entity.flags, entity)
+}
+
+pub fn classify_vendor_item(item: &CoreVendorItem) -> EntityClass {
+    classify_properties(&item.properties)
+}
+
+pub fn classify_properties(props: &WorldObjectProperties) -> EntityClass {
+    let physics_state = props
+        .get_int_prop(PropertyInt::PhysicsState)
+        .map(|v| PhysicsState::from_bits_truncate(v as u32))
+        .unwrap_or(PhysicsState::empty());
+
+    // Build synthetic flags from static properties when no live ObjectDescriptionFlag is available.
+    let mut flags = ObjectDescriptionFlag::empty();
+    if physics_state.contains(PhysicsState::STATIC) || props.is_stuck() {
+        flags |= ObjectDescriptionFlag::STUCK;
+    }
+    if props.get_bool_prop(PropertyBool::Attackable) {
+        flags |= ObjectDescriptionFlag::ATTACKABLE;
+    }
+
+    classify_world_object(flags, props)
+}
+
+pub fn classify_description(desc: &PublicWeenieDescription) -> EntityClass {
+    classify_raw(
+        desc.obj_desc_flags,
+        Some(ItemType::from_bits_truncate(desc.item_type)),
+    )
+}
+
+pub fn classify_world_object<T: WorldObjectExt>(
+    flags: ObjectDescriptionFlag,
+    object: &T,
+) -> EntityClass {
+    classify_raw(flags, object.item_type())
+}
+
+fn classify_raw(flags: ObjectDescriptionFlag, item_type: Option<ItemType>) -> EntityClass {
+    if flags.intersects(ObjectDescriptionFlag::PLAYER) {
+        return EntityClass::Player;
+    }
+    let is_stuck = flags.intersects(ObjectDescriptionFlag::STUCK);
+    let is_attackable = flags.intersects(ObjectDescriptionFlag::ATTACKABLE);
+    let is_food = flags.intersects(ObjectDescriptionFlag::FOOD);
+    let is_container = item_type.is_some_and(|it| it.intersects(ItemType::CONTAINER));
+
+    // If something is Stuck and Attackable and a Container then it's a chest.
+    if is_stuck && is_attackable && is_container {
+        return EntityClass::Chest;
+    }
+
+    // Creatures
+    let is_creature = item_type.is_some_and(|it| it.intersects(ItemType::CREATURE));
+
+    if is_creature {
+        if is_attackable {
+            return EntityClass::Monster;
+        }
+        if flags.intersects(ObjectDescriptionFlag::VENDOR) {
+            return EntityClass::Vendor;
+        }
+        return EntityClass::Npc;
+    }
+
+    // General purpose refinement for items
+    let mut refined_class = None;
+    if let Some(it) = item_type {
+        if it.intersects(ItemType::MELEE_WEAPON | ItemType::MISSILE_WEAPON) {
+            refined_class = Some(EntityClass::Weapon);
+        } else if it.intersects(ItemType::CASTER) {
+            refined_class = Some(EntityClass::Wand);
+        } else if it.intersects(ItemType::ARMOR | ItemType::CLOTHING | ItemType::JEWELRY) {
+            refined_class = Some(EntityClass::Apparel);
+        } else if it.intersects(ItemType::CONTAINER) {
+            refined_class = Some(EntityClass::Container);
+        } else if it.intersects(ItemType::PORTAL) {
+            refined_class = Some(EntityClass::Portal);
+        } else if it.intersects(ItemType::LIFE_STONE) {
+            refined_class = Some(EntityClass::LifeStone);
+        } else if it.intersects(ItemType::MANA_STONE) {
+            refined_class = Some(EntityClass::ManaStone);
+        } else if is_food
+            || it.intersects(
+                ItemType::FOOD
+                    | ItemType::GEM
+                    | ItemType::SPELL_COMPONENTS
+                    | ItemType::CRAFT_COOKING_BASE
+                    | ItemType::CRAFT_ALCHEMY_BASE
+                    | ItemType::CRAFT_FLETCHING_BASE
+                    | ItemType::CRAFT_ALCHEMY_INTERMEDIATE
+                    | ItemType::CRAFT_FLETCHING_INTERMEDIATE,
+            )
+        {
+            refined_class = Some(EntityClass::Consumable);
+        } else if it.intersects(ItemType::MONEY | ItemType::PROMISSORY_NOTE) {
+            refined_class = Some(EntityClass::Money);
+        } else if it.intersects(ItemType::KEY | ItemType::LOCKABLE) {
+            refined_class = Some(EntityClass::Key);
+        } else if it.intersects(ItemType::WRITABLE) {
+            refined_class = Some(EntityClass::Writable);
+        } else if it.intersects(ItemType::TINKERING_TOOL) {
+            refined_class = Some(EntityClass::Tool);
+        }
+    }
+
+    // Flag based overrides
+    if flags.intersects(ObjectDescriptionFlag::PORTAL) {
+        return EntityClass::Portal;
+    }
+    if flags.intersects(ObjectDescriptionFlag::DOOR) {
+        return EntityClass::Door;
+    }
+    if flags.intersects(ObjectDescriptionFlag::VENDOR) {
+        return EntityClass::Vendor;
+    }
+    if flags.intersects(ObjectDescriptionFlag::PLAYER) {
+        return EntityClass::Player;
+    }
+    if flags.intersects(ObjectDescriptionFlag::HEALER) {
+        return EntityClass::HealingKit;
+    }
+
+    // Rule: item class for things that are Attackable but not stuck.
+    if is_attackable && !is_stuck {
+        return refined_class.unwrap_or(EntityClass::Item);
+    }
+
+    // If we have a refined class from ItemType, use it even if not attackable
+    if let Some(rc) = refined_class {
+        return rc;
+    }
+
+    if flags.intersects(ObjectDescriptionFlag::STUCK) {
+        return EntityClass::StaticObject;
+    }
+
+    EntityClass::Unknown
+}
 
 /// Narrow producer-resolved class consumed only by client presentation policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

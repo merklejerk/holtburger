@@ -53,7 +53,8 @@ pub enum SpellCastAim {
     Untargeted,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ChatChannelKind {
     Fellowship,
     /// Receive-only fellowship notification, distinct from ordinary party conversation.
@@ -98,7 +99,8 @@ pub enum ChatChannelDestination {
 }
 
 /// Authoritative speaker category derived from the protocol sender GUID when available.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ChatSpeakerKind {
     Player,
     NonPlayer,
@@ -527,14 +529,16 @@ pub enum ClientLifecycleState {
 }
 
 /// Replacement activation causes proven by the protocol/retail trace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ClientWorldActivationCause {
     InitialEntry,
     Teleport,
 }
 
 /// Existing-character identity needed by the first-cut selection screen.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientCharacterSummary {
     /// Server-assigned character identity used for world entry.
     pub guid: Guid,
@@ -547,7 +551,8 @@ pub struct ClientCharacterSummary {
 }
 
 /// Terminal cause retained for diagnostics and client lifecycle presentation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ClientExitCause {
     ExplicitDisconnect,
     ServerDisconnect,
@@ -561,7 +566,8 @@ pub enum ClientExitCause {
 /// Portal replacement is represented by [`ClientLifecycleState::PortalSpace`] and never crosses
 /// this event surface. Keeping only the two in-place producers here makes the host contract honest:
 /// a consumer may discard presentation history without mistaking it for a destination activation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ClientPresentationDiscontinuityKind {
     ForcedReposition,
     Reset,
@@ -655,17 +661,55 @@ pub struct ClientApplicationSnapshot {
     pub runtime_bodies: Arc<[RuntimeSpatialBodyView]>,
 }
 
+mod attack_height_kebab {
+    use holtburger_protocol::messages::combat::AttackHeight;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    enum KebabAttackHeight {
+        Low,
+        Medium,
+        High,
+    }
+
+    pub fn serialize<S: Serializer>(
+        height: &AttackHeight,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match height {
+            AttackHeight::Low => KebabAttackHeight::Low,
+            AttackHeight::Medium => KebabAttackHeight::Medium,
+            AttackHeight::High => KebabAttackHeight::High,
+        }
+        .serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<AttackHeight, D::Error> {
+        match KebabAttackHeight::deserialize(deserializer)? {
+            KebabAttackHeight::Low => Ok(AttackHeight::Low),
+            KebabAttackHeight::Medium => Ok(AttackHeight::Medium),
+            KebabAttackHeight::High => Ok(AttackHeight::High),
+        }
+    }
+}
+
 /// Parameters ACE applies to one targeted attack sequence.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ClientAttackProfile {
     Melee {
         /// Requested vertical strike band.
+        #[serde(with = "attack_height_kebab")]
         height: AttackHeight,
         /// Requested melee charge in the inclusive zero-to-one range.
         power: f32,
     },
     Missile {
         /// Requested vertical strike band.
+        #[serde(with = "attack_height_kebab")]
         height: AttackHeight,
         /// Requested missile accuracy in the inclusive zero-to-one range.
         accuracy: f32,
@@ -678,6 +722,17 @@ impl ClientAttackProfile {
         match self {
             Self::Melee { .. } => CombatMode::Melee,
             Self::Missile { .. } => CombatMode::Missile,
+        }
+    }
+
+    /// Validates that control values are finite before normalizing into the legal zero-to-one range.
+    pub fn validated(self) -> Result<Self, &'static str> {
+        match self {
+            Self::Melee { power, .. } if !power.is_finite() => Err("melee power must be finite"),
+            Self::Missile { accuracy, .. } if !accuracy.is_finite() => {
+                Err("missile accuracy must be finite")
+            }
+            _ => Ok(self.normalized()),
         }
     }
 
@@ -705,14 +760,16 @@ impl ClientAttackProfile {
 }
 
 /// One explicit, frontend-owned target preference retained across recoverable interruptions.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientCombatEngagement {
     pub target: Guid,
     pub profile: ClientAttackProfile,
 }
 
 /// Coarse lifecycle exposed to presentation without leaking reducer bookkeeping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ClientCombatControlState {
     Idle,
     Charging,
@@ -757,7 +814,8 @@ pub struct ClientCharacterMotionCapabilities {
 }
 
 /// One ordered character-motion lifecycle outcome projected to the current input owner.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientCharacterMotionFeedback {
     /// Originating renderer sequence, used to ignore feedback for an older optimistic gesture.
     pub sequence: crate::client::character_motion::CharacterMotionSequence,
@@ -766,17 +824,21 @@ pub struct ClientCharacterMotionFeedback {
 }
 
 /// Renderer-reconstructible character-motion lifecycle outcomes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum ClientCharacterMotionOutcome {
     ChargeAccepted,
     ChargeContinues,
     JumpCommitted,
     Reset,
-    Rejected(ClientCharacterMotionRejection),
+    Rejected {
+        reason: ClientCharacterMotionRejection,
+    },
 }
 
 /// Stable renderer-facing reasons why a jump edge could not proceed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ClientCharacterMotionRejection {
     ChargeNotActive,
     Airborne,

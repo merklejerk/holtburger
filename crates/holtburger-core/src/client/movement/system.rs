@@ -50,8 +50,8 @@ fn client_character_motion_feedback(
             ClientCharacterMotionOutcome::ChargeContinues
         }
         CharacterMotionEventResult::Reset => ClientCharacterMotionOutcome::Reset,
-        CharacterMotionEventResult::Rejected(rejection) => {
-            ClientCharacterMotionOutcome::Rejected(match rejection {
+        CharacterMotionEventResult::Rejected(rejection) => ClientCharacterMotionOutcome::Rejected {
+            reason: match rejection {
                 CharacterMotionRejection::ChargeNotActive => {
                     ClientCharacterMotionRejection::ChargeNotActive
                 }
@@ -65,8 +65,8 @@ fn client_character_motion_feedback(
                 CharacterMotionRejection::CapabilityUnavailable => {
                     ClientCharacterMotionRejection::CapabilityUnavailable
                 }
-            })
-        }
+            },
+        },
         CharacterMotionEventResult::JumpReleased(_) => {
             unreachable!("release feedback is owned by the physical commit transaction")
         }

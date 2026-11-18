@@ -501,21 +501,21 @@ fn prepare_player_jump(
 
 fn rejected_release(
     sequence: crate::client::character_motion::CharacterMotionSequence,
-    rejection: ClientCharacterMotionRejection,
+    reason: ClientCharacterMotionRejection,
 ) -> ClientCharacterMotionFeedback {
     ClientCharacterMotionFeedback {
         sequence,
-        outcome: ClientCharacterMotionOutcome::Rejected(rejection),
+        outcome: ClientCharacterMotionOutcome::Rejected { reason },
     }
 }
 
 fn rejected_precise_release(
     sequence: crate::client::PreciseJumpActionSequence,
-    rejection: PreciseJumpTransactionRejection,
+    reason: PreciseJumpTransactionRejection,
 ) -> PreciseJumpTransactionFeedback {
     PreciseJumpTransactionFeedback {
         sequence,
-        outcome: PreciseJumpTransactionOutcome::Rejected(rejection),
+        outcome: PreciseJumpTransactionOutcome::Rejected { reason },
     }
 }
 

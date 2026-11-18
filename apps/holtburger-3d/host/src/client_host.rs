@@ -665,10 +665,7 @@ mod tests {
         let Some(ClientHostEvent::ExitRequested(exit)) = forwarded.recv().await else {
             panic!("missing terminal exit");
         };
-        assert!(matches!(
-            exit.cause,
-            crate::client_projection::ClientExitCauseWire::HostShutdown
-        ));
+        assert!(matches!(exit.cause, ClientExitCause::HostShutdown));
         assert!(forwarded.recv().await.is_none());
         let stop = serde_json::from_value(serde_json::json!({ "action": "stop", "generation": 1 }))
             .unwrap();
@@ -802,7 +799,7 @@ mod tests {
             .character_sheet
             .expect("lag replacement lost character sheet");
         assert_eq!(sheet.level.level, 999);
-        assert_eq!(sheet.level.unspent_xp, u64::MAX.to_string());
+        assert_eq!(sheet.level.unspent_xp, u64::MAX);
         assert_eq!(sheet.armor, 123);
         assert_eq!(sheet.vitae, 0.75);
         assert_eq!(current.enchantments.unwrap().instances[0].key.spell_id, 123);
@@ -906,10 +903,7 @@ mod tests {
             panic!("missing terminal failure");
         };
         assert!(exit.diagnostic.contains("authority test failure"));
-        assert!(matches!(
-            exit.cause,
-            crate::client_projection::ClientExitCauseWire::RuntimeFailure
-        ));
+        assert!(matches!(exit.cause, ClientExitCause::RuntimeFailure));
         assert!(forwarded.recv().await.is_none());
     }
 
@@ -1321,10 +1315,7 @@ mod tests {
                     panic!("expected terminal projection")
                 };
                 assert_eq!(exit.diagnostic, outcome.diagnostic());
-                assert!(matches!(
-                    exit.cause,
-                    crate::client_projection::ClientExitCauseWire::ServerDisconnect
-                ));
+                assert!(matches!(exit.cause, ClientExitCause::ServerDisconnect));
             }
         }
     }

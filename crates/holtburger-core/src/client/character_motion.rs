@@ -1,6 +1,7 @@
 //! Reusable interpretation of semantic character drive and jump commands.
 
 use super::movement_types::CharacterDrive;
+use serde::Serialize;
 use std::time::Duration;
 
 const MINIMUM_RETAIL_JUMP_EXTENT: f32 = 0.001;
@@ -83,7 +84,8 @@ pub enum JumpChargeProfileError {
 }
 
 /// Monotonic ordering token for jump lifecycle edges within one input-ownership epoch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
 pub struct CharacterMotionSequence(
     /// Monotonic value assigned by the current input owner.
     pub u64,

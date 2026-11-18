@@ -89,7 +89,7 @@ impl<'de> Deserialize<'de> for HostCommand {
 pub enum HostEvent {
     ClientBarberUpdated(holtburger_core::client::barber::BarberSnapshot),
     ClientBarberPreview(holtburger_core::client::barber::BarberPreviewResult),
-    ClientCharacterSheetUpdated(Option<Box<crate::client_projection::ClientCharacterSheetWire>>),
+    ClientCharacterSheetUpdated(Option<Box<holtburger_core::ClientCharacterSheet>>),
     ClientProgressionEvaluated {
         #[serde(rename = "requestId")]
         request_id: u32,
@@ -121,12 +121,10 @@ pub enum HostEvent {
     ClientCharacterMotionCapabilitiesUpdated(
         Option<crate::client_projection::ClientCharacterMotionCapabilitiesWire>,
     ),
-    ClientCharacterMotionFeedback(crate::client_projection::ClientCharacterMotionFeedbackWire),
+    ClientCharacterMotionFeedback(holtburger_core::ClientCharacterMotionFeedback),
     ClientLocalMovementDisplaced(()),
     ClientPreciseJumpEvaluation(crate::client_projection::ClientPreciseJumpEvaluationWire),
-    ClientPreciseJumpTransactionFeedback(
-        crate::client_projection::ClientPreciseJumpTransactionFeedbackWire,
-    ),
+    ClientPreciseJumpTransactionFeedback(holtburger_core::PreciseJumpTransactionFeedback),
     ClientSpellInspectionContext(holtburger_core::client::spell_inspection::SpellInspectionContext),
     ClientSpellInspectionResult(holtburger_core::client::spell_inspection::SpellInspectionResult),
     ClientObjectInspectionResult(holtburger_world::inspection::ObjectInspectionResult),

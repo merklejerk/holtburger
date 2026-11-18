@@ -275,67 +275,6 @@ impl ClientPreciseJumpCommitRequest {
     }
 }
 
-/// Strict ordered cancellation edge.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ClientPreciseJumpCancelRequest {
-    pub sequence: u64,
-}
-
-/// Strict renderer attack controls; protocol enums stop at the host boundary.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum ClientAttackProfileRequest {
-    Melee {
-        height: ClientAttackHeightRequest,
-        power: f32,
-    },
-    Missile {
-        height: ClientAttackHeightRequest,
-        accuracy: f32,
-    },
-}
-
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ClientAttackHeightRequest {
-    Low,
-    Medium,
-    High,
-}
-
-impl From<ClientAttackHeightRequest> for holtburger_protocol::messages::combat::AttackHeight {
-    fn from(value: ClientAttackHeightRequest) -> Self {
-        match value {
-            ClientAttackHeightRequest::Low => Self::Low,
-            ClientAttackHeightRequest::Medium => Self::Medium,
-            ClientAttackHeightRequest::High => Self::High,
-        }
-    }
-}
-
-impl ClientAttackProfileRequest {
-    fn into_core(self) -> Result<holtburger_core::ClientAttackProfile> {
-        let value = match self {
-            Self::Melee { height, power } => {
-                ensure!(power.is_finite(), "melee power must be finite");
-                holtburger_core::ClientAttackProfile::Melee {
-                    height: height.into(),
-                    power,
-                }
-            }
-            Self::Missile { height, accuracy } => {
-                ensure!(accuracy.is_finite(), "missile accuracy must be finite");
-                holtburger_core::ClientAttackProfile::Missile {
-                    height: height.into(),
-                    accuracy,
-                }
-            }
-        };
-        Ok(value.normalized())
-    }
-}
-
 /// Browser object keys remain strings in MessagePack; convert them only at the app boundary.
 fn deserialize_equipment_storage<'de, D>(
     deserializer: D,
@@ -579,10 +518,10 @@ pub enum ClientHostCommand {
         #[serde(rename = "intentSequence")]
         intent_sequence: u64,
         target: holtburger_common::Guid,
-        profile: ClientAttackProfileRequest,
+        profile: holtburger_core::ClientAttackProfile,
     },
     UpdateClientCombatProfile {
-        profile: ClientAttackProfileRequest,
+        profile: holtburger_core::ClientAttackProfile,
     },
     StopClientCombatEngagement {
         #[serde(rename = "intentSequence")]
@@ -724,7 +663,7 @@ pub enum ClientHostCommand {
         request: ClientPreciseJumpCommitRequest,
     },
     CancelClientPreciseJump {
-        request: ClientPreciseJumpCancelRequest,
+        request: holtburger_core::PreciseJumpCancelRequest,
     },
     /// Renderer acknowledgement after the matching destination has been installed and revealed.
     AcknowledgeClientWorldReveal {
@@ -1128,13 +1067,12 @@ impl ClientHostRuntime {
             .await
     }
 
-    pub async fn cancel_precise_jump(&self, request: ClientPreciseJumpCancelRequest) -> Result<()> {
-        self.send_command(ClientCommand::CancelPreciseJump(
-            holtburger_core::PreciseJumpCancelRequest {
-                sequence: holtburger_core::PreciseJumpActionSequence(request.sequence),
-            },
-        ))
-        .await
+    pub async fn cancel_precise_jump(
+        &self,
+        request: holtburger_core::PreciseJumpCancelRequest,
+    ) -> Result<()> {
+        self.send_command(ClientCommand::CancelPreciseJump(request))
+            .await
     }
 
     pub async fn stop_camera(&self, identity: holtburger_core::ClientCameraIdentity) -> Result<()> {
@@ -1281,7 +1219,9 @@ pub async fn dispatch_client(
             profile,
             intent_sequence,
         } => {
-            let profile = profile.into_core().map_err(application_error)?;
+            let profile = profile
+                .validated()
+                .map_err(|err| application_error(anyhow::anyhow!(err)))?;
             runtime
                 .send_command(ClientCommand::BeginCombatEngagement {
                     target,
@@ -1293,7 +1233,9 @@ pub async fn dispatch_client(
                 .map_err(application_error)
         }
         UpdateClientCombatProfile { profile } => {
-            let profile = profile.into_core().map_err(application_error)?;
+            let profile = profile
+                .validated()
+                .map_err(|err| application_error(anyhow::anyhow!(err)))?;
             runtime
                 .send_command(ClientCommand::UpdateCombatProfile(profile))
                 .await
@@ -2140,9 +2082,11 @@ mod tests {
         unknown["velocity"] = serde_json::json!([1, 2, 3]);
         assert!(serde_json::from_value::<ClientPreciseJumpCommitRequest>(unknown).is_err());
         assert!(
-            serde_json::from_value::<ClientPreciseJumpCancelRequest>(serde_json::json!({
-                "sequence": 4, "velocity": [1, 2, 3]
-            }))
+            serde_json::from_value::<holtburger_core::PreciseJumpCancelRequest>(
+                serde_json::json!({
+                    "sequence": 4, "velocity": [1, 2, 3]
+                })
+            )
             .is_err()
         );
     }

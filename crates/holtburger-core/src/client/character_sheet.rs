@@ -8,7 +8,8 @@ use holtburger_world::stats::{Attribute, CharacterLevelInfo, Resistances, Skill,
 use serde::Serialize;
 
 /// One skill and its authored descriptive content.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientCharacterSkill {
     pub stat: Skill,
     pub description: Option<String>,
@@ -36,7 +37,8 @@ pub struct ClientCharacterTitleSelection {
 }
 
 /// Atomic character facts; absent until this character's description is complete.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientCharacterSheet {
     pub character: Guid,
     /// Server-owned name, absent until the player's identity has been hydrated.
@@ -46,6 +48,7 @@ pub struct ClientCharacterSheet {
     /// Complete server-reported registry with the current, possibly optimistic selection.
     pub title_selection: Option<ClientCharacterTitleSelection>,
     /// Server-owned luminance storage capacity; absence means capacity is not known.
+    #[serde(with = "holtburger_world::progression::optional_decimal_u64")]
     pub maximum_luminance: Option<u64>,
     pub level: CharacterLevelInfo,
     pub attributes: Vec<Attribute>,

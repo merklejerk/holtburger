@@ -59,13 +59,20 @@ pub struct Resistances {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct CharacterLevelInfo {
     pub level: u32,
+    #[serde(with = "crate::progression::decimal_u64")]
     pub current_xp: u64,
+    #[serde(with = "crate::progression::decimal_u64")]
     pub unspent_xp: u64,
     pub unspent_skill_points: u32,
+    #[serde(with = "crate::progression::decimal_u64")]
     pub available_luminance: u64,
+    #[serde(with = "crate::progression::decimal_u64")]
     pub next_level_xp: u64,
+    #[serde(with = "crate::progression::decimal_u64")]
     pub xp_into_level: u64,
+    #[serde(with = "crate::progression::decimal_u64")]
     pub xp_for_next_level: u64,
 }

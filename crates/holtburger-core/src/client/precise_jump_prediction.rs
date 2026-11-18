@@ -11,6 +11,7 @@ use holtburger_world::{
     MotionWaypointPlacement, PhysicalBodyActuation, PhysicalBodyDefinition,
     PhysicalBodyResponseState, PlacedMotionPathRequest, SpatialBody,
 };
+use serde::Serialize;
 use thiserror::Error;
 
 use super::precise_jump::PreciseJumpLaunchCandidate;
@@ -80,7 +81,8 @@ pub enum PreciseJumpTargetError {
 }
 
 /// One placement interval over the trajectory's normalized `[0, 1]` time domain.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PreciseJumpTrajectoryPlacement {
     start_fraction: f32,
     end_fraction: f32,
@@ -152,7 +154,8 @@ impl PreciseJumpTrajectory {
     }
 }
 /// Missing facts or exhausted work that cannot claim a landing endpoint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum PreciseJumpPredictionIncompleteReason {
     Cancelled,
     SessionChanged,

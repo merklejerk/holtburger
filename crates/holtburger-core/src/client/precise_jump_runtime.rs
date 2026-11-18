@@ -10,6 +10,7 @@ use holtburger_world::{
     CollisionQueryError, EntityCollisionSnapshot, PhysicalBodyDefinition, PhysicalCollisionFilter,
     SpatialBody, SpatialBodyId, StaticSurfaceRayRequest, WorldState,
 };
+use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
@@ -34,7 +35,8 @@ const PRECISE_JUMP_MAXIMUM_TICKS: usize = 160;
 pub struct PreciseJumpAimSequence(pub u64);
 
 /// Monotonic non-coalescible commit/cancel edge within one precise-jump mode session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct PreciseJumpActionSequence(pub u64);
 
 /// Camera ray supplied by the presentation; collision filtering remains core-owned.
@@ -69,7 +71,8 @@ pub struct PreciseJumpCommitRequest {
 }
 
 /// Explicit request to discard precise-jump state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PreciseJumpCancelRequest {
     pub sequence: PreciseJumpActionSequence,
 }
@@ -132,7 +135,8 @@ pub enum PreciseJumpProgress {
 }
 
 /// Why an ordered commit/cancel edge did not launch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum PreciseJumpTransactionRejection {
     StaleAction,
     CommitPending,
@@ -147,15 +151,19 @@ pub enum PreciseJumpTransactionRejection {
 }
 
 /// Core-owned result of one ordered precise-jump action.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum PreciseJumpTransactionOutcome {
     Cancelled,
     Committed,
-    Rejected(PreciseJumpTransactionRejection),
+    Rejected {
+        reason: PreciseJumpTransactionRejection,
+    },
 }
 
 /// Feedback used by presentation to leave or retain precise-jump mode deterministically.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PreciseJumpTransactionFeedback {
     pub sequence: PreciseJumpActionSequence,
     pub outcome: PreciseJumpTransactionOutcome,
@@ -844,7 +852,7 @@ fn rejected(
     log::warn!("precise-jump action {} rejected: {reason:?}", sequence.0);
     PreciseJumpTransactionFeedback {
         sequence,
-        outcome: PreciseJumpTransactionOutcome::Rejected(reason),
+        outcome: PreciseJumpTransactionOutcome::Rejected { reason },
     }
 }
 
@@ -1091,7 +1099,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 tick.precise_jump_feedback.unwrap().outcome,
-                PreciseJumpTransactionOutcome::Rejected(expected)
+                PreciseJumpTransactionOutcome::Rejected { reason: expected }
             );
             assert!(tick.committed_jump.is_none());
         }
@@ -1165,9 +1173,9 @@ mod tests {
                         .err()
                         .unwrap()
                         .outcome,
-                    PreciseJumpTransactionOutcome::Rejected(
-                        PreciseJumpTransactionRejection::SessionChanged
-                    )
+                    PreciseJumpTransactionOutcome::Rejected {
+                        reason: PreciseJumpTransactionRejection::SessionChanged,
+                    }
                 );
             }
         }

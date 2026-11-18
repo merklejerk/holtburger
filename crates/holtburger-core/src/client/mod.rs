@@ -3417,9 +3417,9 @@ mod tests {
             unavailable.character_motion_feedback,
             Some(ClientCharacterMotionFeedback {
                 sequence: CharacterMotionSequence(2),
-                outcome: ClientCharacterMotionOutcome::Rejected(
-                    ClientCharacterMotionRejection::CollisionUnavailable,
-                ),
+                outcome: ClientCharacterMotionOutcome::Rejected {
+                    reason: ClientCharacterMotionRejection::CollisionUnavailable,
+                },
             })
         );
         let no_replay = simulation::tick(

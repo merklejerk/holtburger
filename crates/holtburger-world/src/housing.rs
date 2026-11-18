@@ -187,8 +187,6 @@ pub struct HousingCrystal {
     pub owner: Guid,
     /// Display name of the owner, without inferring account identity.
     pub owner_name: String,
-    /// Raw HouseBitfield retained for unknown flags.
-    pub flags: u32,
     /// Whether the server allows transactions at this dwelling.
     pub active: bool,
     /// Whether purchase requires a monarch.
@@ -223,7 +221,6 @@ impl HousingCrystal {
             dwelling_id: profile.dwelling_id,
             owner: profile.owner,
             owner_name: profile.owner_name.clone(),
-            flags: profile.flags,
             active: profile.flags & 1 != 0,
             requires_monarch: profile.flags & 2 != 0,
             house_type: profile.house_type,

@@ -105,10 +105,7 @@ export function deathLocationLines(
 		const { landblockId: cell, coords } = position;
 		if ((cell & 0xffff) >= 0x100)
 			return `Indoors cell 0x${cell.toString(16).padStart(8, "0")}, position (${coords.x}, ${coords.y}, ${coords.z})`;
-		const origin = createLandblockWorldOrigin({
-			x: cell >>> 24,
-			y: (cell >>> 16) & 0xff,
-		});
+		const origin = createLandblockWorldOrigin(cell);
 		return `(${formatWorldMapCoordinates({ x: origin.x + coords.x, z: origin.z - coords.y })})`;
 	}
 	const facts = result.locations;

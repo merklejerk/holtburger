@@ -1,6 +1,5 @@
 import type { ClientLocalMotionFeedback } from "../../client/client-host-contract";
 import type { ClientLockFeedback } from "../../client/client-lock-feedback-contract";
-import type { ClientGameplayPreferences } from "../../client/client-gameplay-options-contract";
 import type {
 	SalvagePreviewResult,
 	SalvageSubmitResult,
@@ -13,19 +12,10 @@ import type {
 	ContractsSnapshot,
 	ContractMembershipChange,
 } from "../../client/client-contracts-contract";
-import type {
-	AllegianceSnapshot,
-	AllegiancePreferences,
-} from "../../client/client-allegiance-contract";
+import type { AllegianceSnapshot } from "../../client/client-allegiance-contract";
 import type { SquelchSnapshot } from "../../client/client-squelch-contract";
-import type {
-	FriendsSnapshot,
-	FriendsPreferences,
-} from "../../client/client-friends-contract";
-import type {
-	PartyPreferences,
-	PartySnapshot,
-} from "../../client/client-party-contract";
+import type { FriendsSnapshot } from "../../client/client-friends-contract";
+import type { PartySnapshot } from "../../client/client-party-contract";
 import type {
 	HousingSnapshot,
 	HousingCrystal,
@@ -98,7 +88,7 @@ import type {
 	ClientSummonEnded,
 	ClientCharacterMotionCapabilities,
 	ClientCharacterMotionFeedback,
-	ClientAppearanceOptions,
+	ClientCharacterPreferences,
 	ClientPreciseJumpEvaluation,
 	ClientPreciseJumpTransactionFeedback,
 	ClientEntitySelectionQueryResult,
@@ -191,7 +181,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"queue_client_character_motion_event",
 	"submit_client_party",
 	"submit_client_friends",
-	"submit_client_contracts",
+	"abandon_client_contract",
 	"submit_client_squelch",
 	"submit_client_allegiance",
 	"set_client_party_updates",
@@ -460,13 +450,7 @@ export interface HostEventPayloadMap {
 	"client-player-entered": ClientPlayerEntered;
 	"client-player-spells-updated": { spellIds: number[] };
 	"client-player-enchantments-updated": unknown;
-	"client-character-preferences-updated": {
-		appearance: ClientAppearanceOptions;
-		gameplay: ClientGameplayPreferences;
-		party: PartyPreferences;
-		friends: FriendsPreferences;
-		allegiance: AllegiancePreferences;
-	};
+	"client-character-preferences-updated": ClientCharacterPreferences;
 	"client-friends-updated": { friends: FriendsSnapshot | null };
 	"client-contracts-updated": { contracts: ContractsSnapshot | null };
 	"client-contract-membership-changed": ContractMembershipChange;

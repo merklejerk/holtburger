@@ -11,10 +11,7 @@
 	import UiTabPanel from "../app/UiTabPanel.svelte";
 	import ClientPartyCreateDialog from "./ClientPartyCreateDialog.svelte";
 	import ClientPartyLeaveDialog from "./ClientPartyLeaveDialog.svelte";
-	import {
-		PARTY_DISPLAY_INTERVAL_MS,
-		type ClientPartyState,
-	} from "./client-party-state";
+	import { type ClientPartyState, type PartyView } from "./client-party-state";
 	interface Props {
 		/** Session-lifetime owner survives window dismissal. */
 		readonly owner: ClientPartyState;
@@ -88,35 +85,33 @@
 	const candidates = $derived(
 		members.filter((member) => member.guid !== view.player),
 	);
+	function applyPartyView(next: PartyView): void {
+		view = next;
+		if (
+			creationPlayer !== null &&
+			(next.player !== creationPlayer || !next.enabled || next.party !== null)
+		)
+			creationPlayer = null;
+		if (
+			handoff !== null &&
+			(!next.enabled ||
+				next.player !== handoff.player ||
+				rosterKey(next.party) !== handoff.roster)
+		)
+			handoff = null;
+	}
+	$effect(() => {
+		const currentOwner = owner;
+		applyPartyView(currentOwner.read());
+		return currentOwner.subscribe(() => {
+			applyPartyView(currentOwner.read());
+		});
+	});
 	$effect(() => {
 		if (!visible || selected !== "party") {
 			creationPlayer = null;
 			handoff = null;
-			return;
 		}
-		const pull = () => {
-			const next = owner.read();
-			if (
-				creationPlayer !== null &&
-				(next.player !== creationPlayer || !next.enabled || next.party !== null)
-			)
-				creationPlayer = null;
-			// Do not republish unchanged cold facts, and never copy vital payloads into this graph.
-			if (JSON.stringify(view) !== JSON.stringify(next)) view = next;
-			if (
-				handoff !== null &&
-				(!next.enabled ||
-					next.player !== handoff.player ||
-					rosterKey(next.party) !== handoff.roster)
-			)
-				handoff = null;
-		};
-		// Cold visibility owns the timer; reads inside pull must not own its lifetime.
-		untrack(pull);
-		const timer = setInterval(pull, PARTY_DISPLAY_INTERVAL_MS);
-		return () => {
-			clearInterval(timer);
-		};
 	});
 	$effect(() => owner.setVisible(visible && selected === "party"));
 	onDestroy(() => owner.setVisible(false));

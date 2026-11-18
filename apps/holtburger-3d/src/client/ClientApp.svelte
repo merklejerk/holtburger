@@ -1317,9 +1317,6 @@
 			case "housing-updated":
 				housing = event.housing;
 				return;
-			case "housing-crystal-received":
-				housing = { ...housing, crystal: event.crystal };
-				return;
 			case "entity-collision-disabled":
 				entityCollisionDisabled = event.disabled;
 				return;
@@ -1338,11 +1335,9 @@
 			case "spell-cast-target":
 				spellCastTarget = event.target;
 				return;
-			case "gameplay-preferences":
-				gameplayPreferences = event.preferences;
-				return;
-			case "appearance-options":
-				appearanceOptions = event.options;
+			case "character-preferences":
+				appearanceOptions = event.preferences.appearance;
+				gameplayPreferences = event.preferences.gameplay;
 				return;
 			case "current-state":
 				characterManagement = event.state.characterManagement;
@@ -1362,8 +1357,10 @@
 				combatMode = event.state.combatMode;
 				acceptCombatStatus(event.state.combat);
 				spellCastTarget = event.state.spellCastTarget;
-				appearanceOptions = event.state.appearanceOptions;
-				gameplayPreferences = event.state.gameplayPreferences;
+				appearanceOptions =
+					event.state.characterPreferences?.appearance ?? null;
+				gameplayPreferences =
+					event.state.characterPreferences?.gameplay ?? null;
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
 				if (event.state.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
@@ -1411,8 +1408,10 @@
 					recallDestinations = [];
 				}
 				enchantments = session?.state().enchantments ?? null;
-				appearanceOptions = session?.state().appearanceOptions ?? null;
-				gameplayPreferences = session?.state().gameplayPreferences ?? null;
+				appearanceOptions =
+					session?.state().characterPreferences?.appearance ?? null;
+				gameplayPreferences =
+					session?.state().characterPreferences?.gameplay ?? null;
 				if (event.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
 					inputGate.cancel("reset");
@@ -1437,8 +1436,6 @@
 				return;
 			case "transient-string":
 				toastCenter.publish({ message: event.message, tone: "status" });
-				return;
-			case "contract-membership-change":
 				return;
 			case "action-feedback":
 				toastCenter.publish(event.feedback);

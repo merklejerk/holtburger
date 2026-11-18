@@ -11,26 +11,19 @@ export function housingMapPosition(
 	if (housing.home.kind !== "owned") return null;
 	const home = housing.home.home;
 	if (home.houseType < 1 || home.houseType > 3) return null;
-	const cell = home.position.landblockId;
-	const origin = createLandblockWorldOrigin({
-		x: (cell >>> 24) & 0xff,
-		y: (cell >>> 16) & 0xff,
-	});
+	const origin = createLandblockWorldOrigin(home.position.landblockId);
 	return {
 		x: origin.x + home.position.coords.x,
 		z: origin.z - home.position.coords.y,
 	};
 }
 
-/** ACE search discloses landblock areas, so describe their center as an approximate location. */
+/** Search results disclose landblock areas, so describe their center as an approximate location. */
 export function housingSearchAreaPosition(area: number): {
 	readonly x: number;
 	readonly z: number;
 } {
-	const origin = createLandblockWorldOrigin({
-		x: (area >>> 24) & 0xff,
-		y: (area >>> 16) & 0xff,
-	});
+	const origin = createLandblockWorldOrigin(area);
 	return {
 		x: origin.x + OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,
 		z: origin.z - OUTDOOR_LANDBLOCK_WORLD_SIZE / 2,

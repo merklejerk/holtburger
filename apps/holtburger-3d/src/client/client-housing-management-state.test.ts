@@ -423,4 +423,18 @@ describe("housing management review and receipt ownership", () => {
 		);
 		f.model.destroy();
 	});
+
+	it("returns a cached reference from read() and notifies subscribers on mutations", async () => {
+		const f = fixture();
+		const listener = vi.fn();
+		const unsubscribe = f.model.subscribe(listener);
+		expect(f.model.read()).toBe(f.model.read());
+		f.model.request({ kind: "publicEntry", enabled: true });
+		expect(listener).toHaveBeenCalled();
+		expect(f.model.read().publicEntry).toBe(true);
+		expect(f.model.read()).toBe(f.model.read());
+		await Promise.resolve();
+		unsubscribe();
+		f.model.destroy();
+	});
 });

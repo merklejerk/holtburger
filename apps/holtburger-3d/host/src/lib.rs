@@ -22,7 +22,6 @@ pub mod binary_source_record;
 pub mod cell_struct_projection;
 pub mod character_creation;
 pub mod client_allegiance;
-pub mod client_contracts;
 pub mod client_friends;
 pub mod client_gameplay;
 pub mod client_host;

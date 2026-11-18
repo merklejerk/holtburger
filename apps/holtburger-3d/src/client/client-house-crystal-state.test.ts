@@ -29,7 +29,6 @@ function profile(crystal = 100): HousingCrystal {
 			dwellingId: 10,
 			owner: 0,
 			ownerName: "",
-			flags: 1,
 			active: true,
 			requiresMonarch: false,
 			houseType: 1,
@@ -279,6 +278,7 @@ describe("crystal draft ownership", () => {
 		});
 		const carriedKey = f.model.read()?.rows[0].iconKey;
 		f.replace([]);
+		f.emit({ type: "entities", delta: entityDelta() });
 		const referenceKey = f.model.read()?.rows[0].iconKey;
 		expect(referenceKey).not.toBe(carriedKey);
 		expect(retain).toHaveBeenLastCalledWith(
@@ -503,9 +503,36 @@ describe("crystal draft ownership", () => {
 		f.emit({ type: "housing-crystal-received", crystal: profile() });
 		f.answer();
 		f.model.add(100, 273, 10);
+		const stale = f.pending();
 		f.replace([10, 11]);
 		f.emit({ type: "entities", delta: entityDelta() });
-		f.answer([10]);
+		f.emit({
+			type: "housing-payment-preview",
+			result: {
+				sequence: stale.sequence,
+				crystal: stale.draft.crystal,
+				outcome: {
+					kind: "ready",
+					items: [10],
+					quote: {
+						lines: [
+							{
+								wcid: 273,
+								sources: [10],
+								consumption: [{ item: 10, quantity: 1, value: 3 }],
+								credited: 3,
+								effectivePaid: 3,
+								shortfall: 10,
+								excess: 0,
+							},
+						],
+						complete: false,
+						contributes: true,
+					},
+					unavailable: [],
+				},
+			},
+		});
 		expect(f.model.read()?.items).toEqual([]);
 		expect(f.pending().draft.items).toEqual([]);
 	});
@@ -522,9 +549,33 @@ describe("crystal draft ownership", () => {
 		f.setDistance(0);
 		f.emit({ type: "housing-crystal-received", crystal: profile() });
 		f.answer();
-		f.model.read();
+		// Reading before reconcileRange() must not latch pose availability.
+		f.setDistance(null);
+		expect(f.model.read()).not.toBeNull();
+		f.setDistance(0);
+		f.model.reconcileRange();
 		f.setDistance(null);
 		expect(f.model.read()).toBeNull();
+		f.model.reconcileRange();
+		f.setDistance(0);
+		expect(f.model.read()).toBeNull();
+	});
+
+	it("keeps read() pure and returns the cached view reference on idle ticks", () => {
+		const f = fixture(null);
+		f.emit({ type: "housing-crystal-received", crystal: profile() });
+		f.answer();
+		f.preview.mockClear();
+		const retainSpy = vi.spyOn(f.icons, "retain");
+		const releaseSpy = vi.spyOn(f.icons, "release");
+		expect(f.model.read()).toBe(f.model.read());
+		f.setDistance(0);
+		f.model.reconcileRange();
+		expect(f.model.read()).toBe(f.model.read());
+		expect(f.model.read()?.editable).toBe(true);
+		expect(f.preview).not.toHaveBeenCalled();
+		expect(retainSpy).not.toHaveBeenCalled();
+		expect(releaseSpy).not.toHaveBeenCalled();
 	});
 
 	it("keeps the housing interaction open through passive vendor snapshots", () => {

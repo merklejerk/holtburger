@@ -9,10 +9,7 @@ import {
 	type ClientLockFeedback,
 } from "./client-lock-feedback-contract";
 import type { RestPosture } from "../lib/game/runtime/dynamic-entity-feed";
-import type {
-	ClientGameplayOption,
-	ClientGameplayPreferences,
-} from "./client-gameplay-options-contract";
+import type { ClientGameplayOption } from "./client-gameplay-options-contract";
 import { characterManagementPending } from "./client-character-selection";
 import {
 	abortError,
@@ -77,7 +74,6 @@ import {
 	partySnapshotSchema,
 	partyActionSchema,
 	type PartySnapshot,
-	type PartyPreferences,
 	type PartyAction,
 } from "./client-party-contract";
 import {
@@ -215,7 +211,7 @@ import {
 	decodeClientSpells,
 	decodeClientCharacterPreferences,
 	type ClientAppearanceOption,
-	type ClientAppearanceOptions,
+	type ClientCharacterPreferences,
 	decodeClientEntityCollisionDisabled,
 	decodeClientDynamicScriptCue,
 	decodeClientDynamicSoundCue,
@@ -314,7 +310,7 @@ type ClientCommandName = Extract<
 	| "replace_client_drive"
 	| "queue_client_character_motion_event"
 	| "submit_client_friends"
-	| "submit_client_contracts"
+	| "abandon_client_contract"
 	| "submit_client_squelch"
 	| "submit_client_allegiance"
 	| "submit_client_party"
@@ -497,10 +493,8 @@ export interface ClientLifecycleSessionState {
 	readonly knownSpells: readonly number[] | null;
 	/** Shared enchantment facts sampled into this browser's clock on receipt. */
 	readonly enchantments: ClientTimedEnchantments | null;
-	/** Server-backed appearance preferences, null until PlayerDescription is available. */
-	readonly appearanceOptions: ClientAppearanceOptions | null;
-	/** Mirrored server-saved Gameplay choices for the active character. */
-	readonly gameplayPreferences: ClientGameplayPreferences | null;
+	/** Unified server-saved character preferences, null until PlayerDescription is available. */
+	readonly characterPreferences: ClientCharacterPreferences | null;
 	/** Latest server stance, consumed by the combat shortcut. */
 	readonly combatMode: ClientCombatMode;
 	/** Host-owned readiness for local social command admission. */
@@ -573,12 +567,8 @@ export type ClientLifecycleSessionEvent =
 	| { readonly type: "combat"; readonly status: ClientCombatStatus }
 	| { readonly type: "spell-cast-target"; readonly target: number | null }
 	| {
-			readonly type: "appearance-options";
-			readonly options: ClientAppearanceOptions;
-	  }
-	| {
-			readonly type: "gameplay-preferences";
-			readonly preferences: ClientGameplayPreferences;
+			readonly type: "character-preferences";
+			readonly preferences: ClientCharacterPreferences;
 	  }
 	| { readonly type: "spells"; readonly spellIds: readonly number[] }
 	| {
@@ -627,6 +617,7 @@ export type ClientLifecycleSessionEvent =
 			readonly hudPresent: boolean;
 	  }
 	| { readonly type: "party-updates-failed"; readonly message: string }
+	| { readonly type: "party-updated"; readonly party: PartySnapshot | null }
 	| { readonly type: "entities"; readonly delta: ClientEntityDelta }
 	| { readonly type: "resyncing" }
 	| { readonly type: "current-state"; readonly state: ClientCurrentState }
@@ -760,7 +751,6 @@ export class ClientLifecycleSession {
 	/** Cold membership/HUD publication excludes roster and vital updates. */
 	#partyPresence = { inParty: false, hudPresent: false };
 	#party: PartySnapshot | null = null;
-	#partyPreferences: PartyPreferences | null = null;
 	#state: ClientLifecycleSessionState = emptyState();
 	/** Transport samples stay imperative; only the mounted badge polls them. */
 	#connection: ClientConnectionObservation | null = null;
@@ -836,8 +826,8 @@ export class ClientLifecycleSession {
 			await this.#transport.invoke("submit_client_friends", { action });
 		});
 		this.contracts = new ClientContractsState(
-			async (action) => {
-				await this.#transport.invoke("submit_client_contracts", { action });
+			async (id) => {
+				await this.#transport.invoke("abandon_client_contract", { id });
 			},
 			() => performance.now(),
 		);
@@ -962,8 +952,7 @@ export class ClientLifecycleSession {
 			...this.#state,
 			knownSpells: null,
 			enchantments: null,
-			appearanceOptions: null,
-			gameplayPreferences: null,
+			characterPreferences: null,
 		};
 		this.characterSheet.reset(null, null);
 		this.#connection = null;
@@ -1070,7 +1059,7 @@ export class ClientLifecycleSession {
 	): Promise<void> {
 		if (
 			this.#state.lifecycle?.kind !== "in-world" ||
-			this.#state.gameplayPreferences === null
+			this.#state.characterPreferences === null
 		) {
 			throw new Error("Gameplay settings require an active character.");
 		}
@@ -1427,9 +1416,6 @@ export class ClientLifecycleSession {
 	partySnapshot(): PartySnapshot | null {
 		return this.#party;
 	}
-	partyPreferences(): PartyPreferences | null {
-		return this.#partyPreferences;
-	}
 	async submitParty(action: PartyAction): Promise<void> {
 		await this.#transport.invoke("submit_client_party", {
 			action: partyActionSchema.parse(action),
@@ -1646,8 +1632,7 @@ export class ClientLifecycleSession {
 						...this.#state,
 						knownSpells: null,
 						enchantments: null,
-						appearanceOptions: null,
-						gameplayPreferences: null,
+						characterPreferences: null,
 					};
 					this.entities.awaitSnapshot();
 					this.mirror.awaitSnapshot();
@@ -1722,25 +1707,19 @@ export class ClientLifecycleSession {
 						.strict()
 						.parse(payload).party;
 					this.#updatePartyPresence();
+					this.#emit({ type: "party-updated", party: this.#party });
 				}),
 			);
 			unlisteners.push(
 				await listen("client-character-preferences-updated", (payload) => {
 					const preferences = decodeClientCharacterPreferences(payload);
-					const options = preferences.appearance;
-					this.#partyPreferences = preferences.party;
 					this.friends.updatePreferences(preferences.friends);
 					this.allegiance.updatePreferences(preferences.allegiance);
 					this.#state = {
 						...this.#state,
-						appearanceOptions: options,
-						gameplayPreferences: preferences.gameplay,
+						characterPreferences: preferences,
 					};
-					this.#emit({
-						type: "gameplay-preferences",
-						preferences: preferences.gameplay,
-					});
-					this.#emit({ type: "appearance-options", options });
+					this.#emit({ type: "character-preferences", preferences });
 				}),
 			);
 			unlisteners.push(
@@ -1974,7 +1953,6 @@ export class ClientLifecycleSession {
 				}),
 				await listen("client-housing-crystal-received", (payload) => {
 					const crystal = housingCrystalSchema.parse(payload);
-					this.#housing = { ...this.#housing, crystal };
 					this.#emit({ type: "housing-crystal-received", crystal });
 				}),
 				await listen("client-vendor-approached", (payload) => {
@@ -2184,7 +2162,7 @@ export class ClientLifecycleSession {
 				: { serverTime: state.serverTime, receivedAtMs: performance.now() };
 		this.allegiance.recover(
 			state.allegiance,
-			state.allegiancePreferences,
+			state.characterPreferences?.allegiance ?? null,
 			state.localPlayerGuid,
 			state.lifecycle.kind === "in-world",
 		);
@@ -2200,12 +2178,11 @@ export class ClientLifecycleSession {
 		);
 		this.friends.recover(
 			state.friends,
-			state.friendsPreferences,
+			state.characterPreferences?.friends ?? null,
 			state.localPlayerGuid,
 			state.lifecycle.kind === "in-world",
 		);
 		this.#party = state.party;
-		this.#partyPreferences = state.partyPreferences;
 		this.characterSheet.reset(state.characterSheet, state.lifecycle.kind);
 		this.#housing = state.housing;
 		this.#vendor = state.vendor;
@@ -2236,8 +2213,7 @@ export class ClientLifecycleSession {
 							resolved: state.enchantments,
 							receivedAtMs: performance.now(),
 						},
-			appearanceOptions: state.appearanceOptions,
-			gameplayPreferences: state.gameplayPreferences,
+			characterPreferences: state.characterPreferences,
 			combatMode: state.combatMode,
 			socialMotionReady: state.socialMotionReady,
 			combat: state.combat,
@@ -2290,12 +2266,9 @@ export class ClientLifecycleSession {
 			enchantments: retiresCharacterDescription
 				? null
 				: this.#state.enchantments,
-			gameplayPreferences: retiresCharacterDescription
+			characterPreferences: retiresCharacterDescription
 				? null
-				: this.#state.gameplayPreferences,
-			appearanceOptions: retiresCharacterDescription
-				? null
-				: this.#state.appearanceOptions,
+				: this.#state.characterPreferences,
 			activeConfirmation:
 				lifecycle.kind === "exiting" ? null : this.#state.activeConfirmation,
 			worldGeneration:
@@ -2439,7 +2412,6 @@ export class ClientLifecycleSession {
 		this.squelch.reset();
 		this.allegiance.reset();
 		this.#party = null;
-		this.#partyPreferences = null;
 		this.#updatePartyPresence();
 	}
 
@@ -2522,8 +2494,7 @@ function emptyState(): ClientLifecycleSessionState {
 		playerName: null,
 		knownSpells: null,
 		enchantments: null,
-		appearanceOptions: null,
-		gameplayPreferences: null,
+		characterPreferences: null,
 		combatMode: "unknown",
 		socialMotionReady: false,
 		combat: {

@@ -5,7 +5,6 @@ import type {
 } from "./client-dialogs";
 import type {
 	ContractRow,
-	ContractsAction,
 	ContractsSnapshot,
 } from "./client-contracts-contract";
 
@@ -58,7 +57,7 @@ interface RemoveQuestion {
 
 /** Session-lifetime read model and cold contract controls; world owns membership. */
 export class ClientContractsState implements LocalDialogSource {
-	readonly #submit: (action: ContractsAction) => Promise<void>;
+	readonly #submit: (id: number) => Promise<void>;
 	readonly #now: () => number;
 	readonly #listeners = new Set<() => void>();
 	/** Map consumers observe facts and visibility choices independently of Journal queries. */
@@ -78,10 +77,7 @@ export class ClientContractsState implements LocalDialogSource {
 	#question: RemoveQuestion | null = null;
 	#questionSequence = 0;
 
-	constructor(
-		submit: (action: ContractsAction) => Promise<void>,
-		now: () => number,
-	) {
+	constructor(submit: (id: number) => Promise<void>, now: () => number) {
 		this.#submit = submit;
 		this.#now = now;
 	}
@@ -264,13 +260,11 @@ export class ClientContractsState implements LocalDialogSource {
 		)
 			return;
 		const player = this.#player;
-		void this.#submit({ kind: "remove", id: question.id }).catch(
-			(error: unknown) => {
-				console.error("Contract removal failed", error);
-				if (this.#player === player)
-					question.onFailure("Couldn’t remove contract from journal.");
-			},
-		);
+		void this.#submit(question.id).catch((error: unknown) => {
+			console.error("Contract removal failed", error);
+			if (this.#player === player)
+				question.onFailure("Couldn’t remove contract from journal.");
+		});
 	}
 	/** Hiding the retained window dismisses transient confirmation only. */
 	dismissQuestion(): void {

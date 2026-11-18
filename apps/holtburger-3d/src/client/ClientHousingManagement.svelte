@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { onMount } from "svelte";
-	import { CLIENT_TUNING } from "./client-tuning";
 	import type {
 		ClientHousingManagementState,
 		HousingManagementView,
@@ -9,39 +7,33 @@
 		/** App/session lifetime owns submitted administration. */ readonly model: ClientHousingManagementState;
 	}
 	const { model }: Props = $props();
-	/** Markup pulls a bounded display snapshot rather than subscribing to raw session events. */
+	/** Markup subscribes to cached snapshots pushed by session and local mutations. */
 	let view = $state<HousingManagementView | null>(null);
 	/** Cold form input, never retained as an authoritative guest entry. */
 	let guestName = $state("");
 	/** Occupant booting is independent of editing the guest list. */
 	let occupantName = $state("");
-	function act(action: () => void): void {
-		action();
-		view = model.read();
-	}
 	function addGuest(event: SubmitEvent): void {
 		event.preventDefault();
 		const name = guestName.trim();
-		if (name.length > 0) act(() => model.request({ kind: "addGuest", name }));
+		if (name.length > 0) model.request({ kind: "addGuest", name });
 	}
 	function boot(event: SubmitEvent): void {
 		event.preventDefault();
 		const name = occupantName.trim();
-		act(() =>
-			model.request(
-				name.length === 0
-					? { kind: "bootEveryone" }
-					: { kind: "bootGuest", name },
-			),
+		model.request(
+			name.length === 0
+				? { kind: "bootEveryone" }
+				: { kind: "bootGuest", name },
 		);
 	}
 
-	onMount(() => {
-		view = model.read();
-		const timer = setInterval(() => {
-			view = model.read();
-		}, CLIENT_TUNING.inventory.displayIntervalMs);
-		return () => clearInterval(timer);
+	$effect(() => {
+		const current = model;
+		view = current.read();
+		return current.subscribe(() => {
+			view = current.read();
+		});
 	});
 </script>
 
@@ -74,12 +66,10 @@
 							type="checkbox"
 							checked={view.publicEntry}
 							onchange={(event) =>
-								act(() =>
-									model.request({
-										kind: "publicEntry",
-										enabled: event.currentTarget.checked,
-									}),
-								)}
+								model.request({
+									kind: "publicEntry",
+									enabled: event.currentTarget.checked,
+								})}
 						/>Public entry</label
 					>
 					<label class="housing-toggle ui-checkbox"
@@ -88,12 +78,10 @@
 							aria-label="Allegiance entry"
 							checked={view.allegianceEntry}
 							onchange={(event) =>
-								act(() =>
-									model.request({
-										kind: "allegianceEntry",
-										enabled: event.currentTarget.checked,
-									}),
-								)}
+								model.request({
+									kind: "allegianceEntry",
+									enabled: event.currentTarget.checked,
+								})}
 						/>Allegiance entry</label
 					>
 					<label class="housing-toggle ui-checkbox"
@@ -102,12 +90,10 @@
 							aria-label="Allegiance storage"
 							checked={view.allegianceStorage}
 							onchange={(event) =>
-								act(() =>
-									model.request({
-										kind: "allegianceStorage",
-										enabled: event.currentTarget.checked,
-									}),
-								)}
+								model.request({
+									kind: "allegianceStorage",
+									enabled: event.currentTarget.checked,
+								})}
 						/>Allegiance storage</label
 					>
 					<section
@@ -138,25 +124,21 @@
 												aria-label={`Storage access for ${guest.name}`}
 												checked={guest.storageChecked}
 												onchange={(event) =>
-													act(() =>
-														model.request({
-															kind: "storage",
-															name: guest.name,
-															allowed: event.currentTarget.checked,
-														}),
-													)}
+													model.request({
+														kind: "storage",
+														name: guest.name,
+														allowed: event.currentTarget.checked,
+													})}
 											/>Storage access</label
 										>
 										<button
 											class="ui-button"
 											aria-label={`Remove ${guest.name}`}
 											onclick={() =>
-												act(() =>
-													model.request({
-														kind: "removeGuest",
-														name: guest.name,
-													}),
-												)}>Remove</button
+												model.request({
+													kind: "removeGuest",
+													name: guest.name,
+												})}>Remove</button
 										>
 									</li>
 								{:else}<li class="ui-muted">No guests.</li>{/each}
@@ -165,15 +147,13 @@
 								<button
 									class="ui-button"
 									disabled={view.guests.length === 0}
-									onclick={() =>
-										act(() => model.request({ kind: "removeAllStorage" }))}
+									onclick={() => model.request({ kind: "removeAllStorage" })}
 									>Revoke all storage access</button
 								>
 								<button
 									class="ui-button"
 									disabled={view.guests.length === 0}
-									onclick={() =>
-										act(() => model.request({ kind: "removeAllGuests" }))}
+									onclick={() => model.request({ kind: "removeAllGuests" })}
 									>Remove all guests</button
 								>
 							</div>
@@ -215,14 +195,12 @@
 					<div class="housing-form-row">
 						<button
 							class="ui-button"
-							onclick={() =>
-								act(() => model.request({ kind: "hooks", enabled: true }))}
+							onclick={() => model.request({ kind: "hooks", enabled: true })}
 							>Show empty hooks</button
 						>
 						<button
 							class="ui-button"
-							onclick={() =>
-								act(() => model.request({ kind: "hooks", enabled: false }))}
+							onclick={() => model.request({ kind: "hooks", enabled: false })}
 							>Hide empty hooks</button
 						>
 					</div>
@@ -242,7 +220,7 @@
 				>
 					<button
 						class="ui-button housing-danger"
-						onclick={() => act(() => model.request({ kind: "abandon" }))}
+						onclick={() => model.request({ kind: "abandon" })}
 						>Abandon home…</button
 					>
 				</fieldset>

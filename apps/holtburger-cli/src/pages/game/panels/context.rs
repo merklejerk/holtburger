@@ -334,22 +334,12 @@ mod tests {
             pages: vec![
                 BookPage {
                     index: 0,
-                    author_id: 1,
                     author_name: "A. Writer".to_string(),
-                    author_account: "acct".to_string(),
-                    flags: 0,
-                    text_included: true,
-                    ignore_author: false,
                     page_text: Some("First page".to_string()),
                 },
                 BookPage {
                     index: 1,
-                    author_id: 1,
                     author_name: "A. Writer".to_string(),
-                    author_account: "acct".to_string(),
-                    flags: 0,
-                    text_included: true,
-                    ignore_author: false,
                     page_text: Some("Second page".to_string()),
                 },
             ],

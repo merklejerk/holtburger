@@ -77,8 +77,7 @@ class FakeInspectionSession {
 			playerName: null,
 			knownSpells: null,
 			enchantments: null,
-			appearanceOptions: null,
-			gameplayPreferences: null,
+			characterPreferences: null,
 			combatMode: "peace",
 			socialMotionReady: true,
 			combat: {

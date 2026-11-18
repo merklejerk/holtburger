@@ -4995,9 +4995,9 @@ fn test_book_data_response_updates_entity_book_state() {
 
     let entity = state.entities.get(guid).expect("entity should still exist");
     let book = entity.book.as_ref().expect("book data should be populated");
-    assert_eq!(book.max_num_pages, Some(3));
     assert_eq!(book.pages.len(), 1);
     assert_eq!(book.pages[0].author_name, "Scribe One");
+    assert_eq!(book.author_name, None);
     assert_eq!(book.inscription.as_deref(), Some("Signed and sealed"));
 }
 
@@ -5009,12 +5009,7 @@ fn test_book_page_data_response_merges_into_existing_book_state() {
     entity.book = Some(crate::book::BookData {
         pages: vec![crate::book::BookPage {
             index: 0,
-            author_id: 1,
             author_name: "Page Zero".to_string(),
-            author_account: "old".to_string(),
-            flags: 0xFFFF0002,
-            text_included: false,
-            ignore_author: false,
             page_text: None,
         }],
         ..crate::book::BookData::default()

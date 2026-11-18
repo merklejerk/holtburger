@@ -23,11 +23,9 @@ pub struct HousingGuestAccess {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HousingAllegianceAccess {
-    /// Raw HARBitfield, retaining any rules beyond the currently understood bits.
-    pub flags: u32,
     /// Server-disclosed monarch; this is not the effective-home owner.
     pub monarch: Guid,
-    /// Storage permission also implies entry, per ACE HouseAccess flag construction.
+    /// Storage permission also implies entry, per server access flag construction.
     pub entry_allowed: bool,
     /// Allegiance storage permission is explicitly disclosed.
     pub storage_allowed: bool,
@@ -78,7 +76,6 @@ impl TryFrom<&HouseAccess> for HousingAccessRecords {
                 (
                     *flags & 1 != 0,
                     Some(HousingAllegianceAccess {
-                        flags: *flags,
                         monarch: *monarch,
                         entry_allowed: *flags & 6 != 0,
                         storage_allowed: *flags & 4 != 0,

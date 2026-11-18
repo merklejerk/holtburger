@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import gameplayPreferencesFixture from "../harness/browser/fixtures/gameplay-preferences.json";
 import { ClientPartyState, PARTY_UPDATE_WAIT_MS } from "./client-party-state";
 import type {
 	PartyAction,
@@ -27,18 +28,25 @@ function fixture() {
 			vitals: [10, 10, 10, 20, 20, 20],
 		})),
 	};
-	let preferences: PartyPreferences = {
-		shareXp: true,
-		shareLoot: false,
-		ignoreRequests: false,
-	};
+	const buildCharacterPreferences = (partyPrefs: PartyPreferences) => ({
+		appearance: { showHelmet: true, showCloak: true },
+		gameplay: gameplayPreferencesFixture,
+		party: partyPrefs,
+		friends: { appearOffline: false },
+		allegiance: { showLogons: false },
+	});
 	let state: Pick<
 		ClientLifecycleSessionState,
-		"playerGuid" | "playerName" | "lifecycle"
+		"playerGuid" | "playerName" | "lifecycle" | "characterPreferences"
 	> = {
 		playerGuid: 1,
 		playerName: "Test Character",
 		lifecycle: { kind: "in-world" },
+		characterPreferences: buildCharacterPreferences({
+			shareXp: true,
+			shareLoot: false,
+			ignoreRequests: false,
+		}),
 	};
 	const listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
 	const submit = vi
@@ -52,7 +60,6 @@ function fixture() {
 		{
 			state: () => state,
 			partySnapshot: () => party,
-			partyPreferences: () => preferences,
 			submitParty: submit,
 			setPartyUpdateDemand: updates,
 			subscribe: (listener) => {
@@ -74,9 +81,17 @@ function fixture() {
 		snapshot: () => party,
 		setParty: (next: PartySnapshot | null) => {
 			party = next;
+			for (const listener of listeners)
+				listener({ type: "party-updated", party: next });
 		},
 		setPreferences: (next: PartyPreferences) => {
-			preferences = next;
+			const preferences = buildCharacterPreferences(next);
+			state = { ...state, characterPreferences: preferences };
+			for (const listener of listeners)
+				listener({
+					type: "character-preferences",
+					preferences,
+				});
 		},
 		lifecycle: (next: NonNullable<typeof state.lifecycle>) => {
 			state = { ...state, lifecycle: next };
@@ -86,7 +101,10 @@ function fixture() {
 	};
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+	vi.useRealTimers();
+	vi.restoreAllMocks();
+});
 describe("party presentation ownership", () => {
 	it("queues changed creation settings before the create action", async () => {
 		const f = fixture();
@@ -183,20 +201,27 @@ describe("party presentation ownership", () => {
 		expect(f.owner.read().pending).toBe(false);
 		f.owner.destroy();
 	});
-	it("keeps pending ownership across close/reopen and releases it on a bounded deadline", () => {
-		const now = vi.spyOn(performance, "now").mockReturnValue(0);
+	it("keeps pending ownership across close/reopen, releases it on a bounded timer, and clears timers on destroy", () => {
+		vi.useFakeTimers();
 		const f = fixture();
 		f.owner.setVisible(true);
 		f.owner.request({ kind: "openness", open: true });
 		f.owner.setVisible(false);
 		f.owner.setVisible(true);
 		expect(f.owner.read().pending).toBe(true);
-		now.mockReturnValue(PARTY_UPDATE_WAIT_MS);
+		// read() must remain side-effect-free and return the cached reference.
+		expect(f.owner.read()).toBe(f.owner.read());
+		vi.advanceTimersByTime(PARTY_UPDATE_WAIT_MS);
 		expect(f.owner.read().pending).toBe(false);
 		expect(f.owner.read().party?.open).toBe(false);
 		expect(f.failure).toHaveBeenCalledOnce();
 		expect(f.submit).toHaveBeenCalledOnce();
+
+		f.failure.mockClear();
+		f.owner.request({ kind: "openness", open: true });
 		f.owner.destroy();
+		vi.advanceTimersByTime(PARTY_UPDATE_WAIT_MS);
+		expect(f.failure).not.toHaveBeenCalled();
 	});
 	it("rejects a destructive answer after the reviewed roster retires", () => {
 		const f = fixture();

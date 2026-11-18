@@ -55,7 +55,7 @@ impl From<ClientGameplayOption> for CharacterOption {
 }
 
 /// Complete locally mirrored option set, shared by snapshots and incremental events.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct ClientGameplayPreferences(BTreeMap<ClientGameplayOption, bool>);
 

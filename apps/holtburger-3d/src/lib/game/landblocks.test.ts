@@ -4,15 +4,27 @@ import {
 	createLandblockWorldOrigin,
 	getLandblockCoordinates,
 	landblockAtWorldPoint,
+	landblockCoordinatesFromId,
 	normalizeLandblockOwner,
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "./landblocks";
 import { Vec3 } from "./math/types";
 
 describe("landblock coordinates", () => {
-	it("decodes outdoor coordinates from prefixed and unprefixed ids", () => {
+	it("decodes outdoor coordinates from prefixed, unprefixed, and numeric ids", () => {
 		expect(getLandblockCoordinates("0x1234ffff")).toEqual({ x: 0x12, y: 0x34 });
 		expect(getLandblockCoordinates("1234abcd")).toEqual({ x: 0x12, y: 0x34 });
+		expect(landblockCoordinatesFromId(0x12340001)).toEqual({
+			x: 0x12,
+			y: 0x34,
+		});
+		expect(createLandblockWorldOrigin(0x01020001)).toEqual(
+			new Vec3(
+				OUTDOOR_LANDBLOCK_WORLD_SIZE,
+				0,
+				-2 * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+			),
+		);
 	});
 
 	it("creates AC-to-render offsets relative to the anchor landblock", () => {

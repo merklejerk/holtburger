@@ -181,7 +181,7 @@ describe("contracts journal", () => {
 		if (question === null) throw new Error("Missing question");
 		owner.respond(question.requestId, true);
 		await Promise.resolve();
-		expect(submit).toHaveBeenCalledWith({ kind: "remove", id: 1 });
+		expect(submit).toHaveBeenCalledWith(1);
 		expect(owner.read().journal?.rows).toHaveLength(3);
 		expect(owner.question()).toBeNull();
 		owner.requestRemove(2, failure);

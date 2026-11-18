@@ -76,6 +76,15 @@ export function landblockChebyshevDistance(
 	);
 }
 
+export function landblockCoordinatesFromId(
+	cellId: number,
+): LandblockCoordinates {
+	return {
+		x: (cellId >>> 24) & 0xff,
+		y: (cellId >>> 16) & 0xff,
+	};
+}
+
 export function getLandblockCoordinates(
 	landblockId: LandblockOwnerId,
 ): LandblockCoordinates {
@@ -84,10 +93,7 @@ export function getLandblockCoordinates(
 	const value = Number.parseInt(hex, 16) >>> 0;
 	if (Number.isNaN(value))
 		throw new Error(`Invalid landblock id ${landblockId}.`);
-	return {
-		x: (value >>> 24) & 0xff,
-		y: (value >>> 16) & 0xff,
-	};
+	return landblockCoordinatesFromId(value);
 }
 
 /** Translation from a landblock frame into an anchor-relative render frame. */
@@ -109,13 +115,15 @@ export function createLandblockOffset(
 
 /** Scene-space origin of one outdoor landblock's local coordinate frame. */
 export function createLandblockWorldOrigin(
-	landblock: LandblockOwnerId | LandblockCoordinates,
+	landblock: LandblockOwnerId | LandblockCoordinates | number,
 	targetVec?: Vec3,
 ): Vec3 {
 	const coords =
 		typeof landblock === "string"
 			? getLandblockCoordinates(landblock)
-			: landblock;
+			: typeof landblock === "number"
+				? landblockCoordinatesFromId(landblock)
+				: landblock;
 	const x = coords.x * OUTDOOR_LANDBLOCK_WORLD_SIZE;
 	const z = -coords.y * OUTDOOR_LANDBLOCK_WORLD_SIZE;
 	if (targetVec) {

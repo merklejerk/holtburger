@@ -1,4 +1,7 @@
-import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../lib/game/landblocks";
+import {
+	landblockCoordinatesFromId,
+	OUTDOOR_LANDBLOCK_WORLD_SIZE,
+} from "../lib/game/landblocks";
 import type {
 	DynamicEntityMirror,
 	DynamicEntityWorldPlacement,
@@ -12,16 +15,14 @@ export function deltaBetweenDynamicWorldPoses(
 	origin: WorldPose,
 	target: WorldPose,
 ): { readonly dx: number; readonly dy: number; readonly dz: number } {
+	const originBlock = landblockCoordinatesFromId(origin.landblockId);
+	const targetBlock = landblockCoordinatesFromId(target.landblockId);
 	const dx =
-		(((target.landblockId >>> 24) & 0xff) -
-			((origin.landblockId >>> 24) & 0xff)) *
-			OUTDOOR_LANDBLOCK_WORLD_SIZE +
+		(targetBlock.x - originBlock.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE +
 		target.coords.x -
 		origin.coords.x;
 	const dy =
-		(((target.landblockId >>> 16) & 0xff) -
-			((origin.landblockId >>> 16) & 0xff)) *
-			OUTDOOR_LANDBLOCK_WORLD_SIZE +
+		(targetBlock.y - originBlock.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE +
 		target.coords.y -
 		origin.coords.y;
 	const dz = target.coords.z - origin.coords.z;

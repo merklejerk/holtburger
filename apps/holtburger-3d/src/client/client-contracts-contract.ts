@@ -90,13 +90,6 @@ export const contractMembershipChangeSchema = z
 export type ContractMembershipChange = z.infer<
 	typeof contractMembershipChangeSchema
 >;
-/** The only journal mutation; acceptance of dispatch does not imply deletion. */
-export interface ContractsAction {
-	/** Removal leaves quest progress intact. */
-	readonly kind: "remove";
-	/** Server registry identity; the host validates the u32 boundary. */
-	readonly id: number;
-}
 /** Incremental and recovery transport use the same snapshot shape. */
 export const contractsUpdatedSchema = z
 	.object({ contracts: contractsSnapshotSchema.nullable() })

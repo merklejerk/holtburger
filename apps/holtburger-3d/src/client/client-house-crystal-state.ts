@@ -111,6 +111,8 @@ export class ClientHouseCrystalState {
 	#problem: string | null = null;
 	#visible = false;
 	#hadPose = false;
+	#canReachCrystal = false;
+	#view: HouseCrystalView | null = null;
 	#revision = -1;
 	#focusRevision = 0;
 	#disposed = false;
@@ -136,67 +138,30 @@ export class ClientHouseCrystalState {
 		// A retained profile is knowledge, not permission to replay an opening receipt.
 	}
 
-	read(): HouseCrystalView | null {
-		const profile = this.#profile;
-		if (!this.#visible || profile === null) return null;
-		const distance = this.distanceToCrystal(profile.crystal.crystal);
+	/** Latch observed crystal pose and close if the crystal vanished or moved out of reach. */
+	reconcileRange(): void {
+		if (!this.#visible || this.#profile === null) return;
+		const distance = this.distanceToCrystal(this.#profile.crystal.crystal);
 		if (distance !== null) this.#hadPose = true;
-		if (
-			(distance === null && this.#hadPose) ||
-			(distance !== null &&
-				distance > CLIENT_TUNING.housing.maximumDistanceMeters)
-		) {
+		if (this.#isClosedByRange(distance)) {
 			this.close();
-			return null;
+			return;
 		}
-		const read = this.session.entities.read();
-		if (read.kind === "current" && read.level.revision !== this.#revision) {
-			this.#revision = read.level.revision;
-			this.#items = this.#items.filter((id) => {
-				const item = read.level.entities.get(id);
-				return (
-					item?.ownedByPlayer === true &&
-					item.location.kind === "contained" &&
-					item.description.kind === "known"
-				);
-			});
-			this.#collectArtwork();
-			if (this.#canPrepare())
-				this.#request(this.#items, { kind: "quote" }, false);
-			else this.#invalidate();
+		const canReachCrystal = distance !== null;
+		if (canReachCrystal !== this.#canReachCrystal) {
+			this.#canReachCrystal = canReachCrystal;
+			this.#syncView();
 		}
-		const editable =
-			read.kind === "current" &&
-			distance !== null &&
-			this.#canPrepare() &&
-			this.#preview === null;
-		return {
-			profile,
-			purpose: this.#purpose,
-			tab: this.#tab,
-			items: this.#items.map((id) => {
-				const cell = this.#art.get(id);
-				if (cell === undefined)
-					throw new Error(`Housing draft item ${id} has no artwork`);
-				return cell;
-			}),
-			rows: this.#rows(),
-			quote: this.#quote,
-			pending: this.#preview !== null,
-			paymentPending:
-				this.#payment !== null ||
-				this.session.housingSnapshot().pendingPayment !== null,
-			canPay:
-				editable &&
-				this.#quote !== null &&
-				(this.#purpose === "purchase"
-					? this.#quote.complete
-					: this.#quote.contributes),
-			editable,
-			problem: this.#problem,
-			iconKeys: [...this.#iconKeys()],
-			focusRevision: this.#focusRevision,
-		};
+	}
+
+	read(): HouseCrystalView | null {
+		if (!this.#visible || this.#profile === null) return null;
+		const distance = this.distanceToCrystal(this.#profile.crystal.crystal);
+		if (this.#isClosedByRange(distance)) return null;
+		const canReachCrystal = distance !== null;
+		return canReachCrystal === this.#canReachCrystal && this.#view !== null
+			? this.#view
+			: this.#buildView(canReachCrystal);
 	}
 
 	/** Coarse drop admission; core resolves exact eligibility on release. */
@@ -226,6 +191,7 @@ export class ClientHouseCrystalState {
 
 	selectTab(tab: "action" | "details"): void {
 		this.#tab = tab;
+		this.#syncView();
 	}
 
 	/** Capture exact draft identity; later profile edits or quotes retire this gesture. */
@@ -267,6 +233,7 @@ export class ClientHouseCrystalState {
 
 	/** Submit the current validated draft once; core revalidates profile and consumption. */
 	pay(): void {
+		this.reconcileRange();
 		const view = this.read();
 		const player = this.session.state().playerGuid;
 		if (view?.canPay !== true || view.quote === null || player === null) return;
@@ -288,10 +255,12 @@ export class ClientHouseCrystalState {
 		};
 		this.#payment = submitted;
 		this.#invalidate();
+		this.#syncView();
 		void this.session.submitHousingPayment(request).catch((error: unknown) => {
 			if (this.#disposed || this.#payment !== submitted) return;
 			this.#payment = null;
 			this.#revision = -1;
+			this.#syncView();
 			this.reportFailure(`Housing payment dispatch failed: ${String(error)}`);
 		});
 	}
@@ -300,6 +269,8 @@ export class ClientHouseCrystalState {
 		this.#visible = false;
 		this.#items = [];
 		this.#hadPose = false;
+		this.#canReachCrystal = false;
+		this.#view = null;
 		this.#invalidate();
 		this.#collectArtwork();
 	}
@@ -309,6 +280,68 @@ export class ClientHouseCrystalState {
 		this.#unsubscribe();
 		this.close();
 		this.icons.releaseOwner(this.#owner);
+	}
+
+	#isClosedByRange(distance: number | null): boolean {
+		return (
+			(distance === null && this.#hadPose) ||
+			(distance !== null &&
+				distance > CLIENT_TUNING.housing.maximumDistanceMeters)
+		);
+	}
+
+	#buildView(canReachCrystal: boolean): HouseCrystalView | null {
+		const profile = this.#profile;
+		if (!this.#visible || profile === null) return null;
+		const read = this.session.entities.read();
+		const editable =
+			read.kind === "current" &&
+			canReachCrystal &&
+			this.#canPrepare() &&
+			this.#preview === null;
+		return {
+			profile,
+			purpose: this.#purpose,
+			tab: this.#tab,
+			items: this.#items.map((id) => {
+				const cell = this.#art.get(id);
+				if (cell === undefined)
+					throw new Error(`Housing draft item ${id} has no artwork`);
+				return cell;
+			}),
+			rows: this.#rows(),
+			quote: this.#quote,
+			pending: this.#preview !== null,
+			paymentPending:
+				this.#payment !== null ||
+				this.session.housingSnapshot().pendingPayment !== null,
+			canPay:
+				editable &&
+				this.#quote !== null &&
+				(this.#purpose === "purchase"
+					? this.#quote.complete
+					: this.#quote.contributes),
+			editable,
+			problem: this.#problem,
+			iconKeys: [...this.#iconKeys()],
+			focusRevision: this.#focusRevision,
+		};
+	}
+
+	#syncView(): void {
+		if (!this.#visible || this.#profile === null) {
+			this.#canReachCrystal = false;
+			this.#view = null;
+			return;
+		}
+		const distance = this.distanceToCrystal(this.#profile.crystal.crystal);
+		if (this.#isClosedByRange(distance)) {
+			this.#canReachCrystal = false;
+			this.#view = null;
+			return;
+		}
+		this.#canReachCrystal = distance !== null;
+		this.#view = this.#buildView(this.#canReachCrystal);
 	}
 
 	#canPrepare(): boolean {
@@ -357,6 +390,7 @@ export class ClientHouseCrystalState {
 		// Requotes follow actual draft/inventory changes and must discard old accounting.
 		if (operation.kind === "quote") this.#quote = null;
 		this.#problem = null;
+		this.#syncView();
 		void this.session
 			.previewHousingPayment(pending.request)
 			.catch((error: unknown) => {
@@ -364,6 +398,7 @@ export class ClientHouseCrystalState {
 				this.#preview = null;
 				const message = `Housing preview failed: ${String(error)}`;
 				this.#problem = pending.reportRejection ? null : message;
+				this.#syncView();
 				this.reportFailure(message);
 			});
 	}
@@ -379,6 +414,7 @@ export class ClientHouseCrystalState {
 			this.#items = [];
 			this.#tab = "action";
 			this.#hadPose = false;
+			this.#canReachCrystal = false;
 			this.#revision = -1;
 		}
 		this.#profile = profile;
@@ -389,6 +425,7 @@ export class ClientHouseCrystalState {
 		this.#collectArtwork();
 		if (this.#canPrepare())
 			this.#request(this.#items, { kind: "quote" }, false);
+		else this.#syncView();
 	}
 
 	#receive(event: ClientLifecycleSessionEvent): void {
@@ -409,6 +446,7 @@ export class ClientHouseCrystalState {
 				this.#invalidate();
 				this.#collectArtwork();
 			}
+			this.#syncView();
 		} else if (event.type === "housing-crystal-received") {
 			if (this.session.tradeSnapshot().trade !== null) {
 				this.reportFailure(
@@ -440,6 +478,7 @@ export class ClientHouseCrystalState {
 				JSON.stringify(profile) !== JSON.stringify(this.#profile)
 			)
 				this.#replaceProfile(profile);
+			else this.#syncView();
 		} else if (event.type === "housing-payment-preview") {
 			const pending = this.#preview;
 			if (
@@ -484,14 +523,40 @@ export class ClientHouseCrystalState {
 				this.#problem = pending.reportRejection ? null : outcome.reason;
 				if (pending.reportRejection) this.reportFailure(outcome.reason);
 			}
+			this.#syncView();
 		} else if (event.type === "entities") {
-			if (this.#storageOpened()) this.close();
-			else {
-				const read = this.session.entities.read();
-				// Invalidate on receipt so a reply cannot commit against an older inventory
-				// between display samples. Requoting remains consumer-paced in read().
-				if (read.kind !== "current" || read.level.revision !== this.#revision)
+			if (this.#storageOpened()) {
+				this.close();
+				return;
+			}
+			if (!this.#visible) return;
+			const read = this.session.entities.read();
+			if (read.kind !== "current") {
+				if (this.#revision !== -1) {
+					this.#revision = -1;
 					this.#invalidate();
+					this.#collectArtwork();
+					this.#syncView();
+				}
+				return;
+			}
+			if (read.level.revision !== this.#revision) {
+				this.#revision = read.level.revision;
+				this.#items = this.#items.filter((id) => {
+					const item = read.level.entities.get(id);
+					return (
+						item?.ownedByPlayer === true &&
+						item.location.kind === "contained" &&
+						item.description.kind === "known"
+					);
+				});
+				this.#collectArtwork();
+				if (this.#canPrepare())
+					this.#request(this.#items, { kind: "quote" }, false);
+				else {
+					this.#invalidate();
+					this.#syncView();
+				}
 			}
 		} else if (
 			event.type === "resyncing" ||

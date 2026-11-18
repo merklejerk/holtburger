@@ -3,42 +3,8 @@
 use holtburger_common::{CharacterOption, Guid};
 use holtburger_core::client::allegiance::AllegianceSnapshot;
 use holtburger_core::{ClientCommand, PlayerCharacterOptions};
-use holtburger_protocol::messages::AllegianceData;
-use holtburger_world::state::allegiance::titles::rank_title;
+use holtburger_world::state::allegiance::AllegianceMember;
 use serde::{Deserialize, Serialize};
-
-/// Disclosed member facts consumed by relationship/XP presentation.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClientAllegianceMember {
-    /// Character identity, independent of scene visibility.
-    pub guid: Guid,
-    /// Server-provided name.
-    pub name: String,
-    /// Shared rank title; absent for unsupported heritage, gender or rank.
-    pub title: Option<&'static str>,
-    /// Numeric allegiance rank.
-    pub rank: u16,
-    /// Level when supplied by the profile.
-    pub level: Option<u32>,
-    /// Last known presence.
-    pub online: bool,
-    /// Server-reported contribution; capped by ACE.
-    pub contributed_xp: u32,
-}
-impl From<&AllegianceData> for ClientAllegianceMember {
-    fn from(member: &AllegianceData) -> Self {
-        Self {
-            guid: member.guid,
-            name: member.name.clone(),
-            title: rank_title(member.heritage, member.gender, member.rank),
-            rank: member.rank,
-            level: member.level,
-            online: member.flags & AllegianceData::LOGGED_IN != 0,
-            contributed_xp: member.contributed_xp,
-        }
-    }
-}
 
 /// Partial relationship view, projected from world semantics once at the host boundary.
 #[derive(Debug, Clone, Serialize)]
@@ -53,13 +19,13 @@ pub struct ClientAllegianceProfile {
     /// Total descendants, distinct from the disclosed direct vassals.
     pub total_descendants: u32,
     /// Monarch context, absent for no allegiance.
-    pub monarch: Option<ClientAllegianceMember>,
+    pub monarch: Option<AllegianceMember>,
     /// Direct patron, possibly also monarch.
-    pub patron: Option<ClientAllegianceMember>,
+    pub patron: Option<AllegianceMember>,
     /// Receiving player's node, possibly also monarch.
-    pub self_member: Option<ClientAllegianceMember>,
+    pub self_member: Option<AllegianceMember>,
     /// Only direct vassals; frontend owns display ordering.
-    pub direct_vassals: Vec<ClientAllegianceMember>,
+    pub direct_vassals: Vec<AllegianceMember>,
 }
 
 /// Same publication shape for incremental events and replacement recovery.
@@ -102,7 +68,7 @@ impl From<&AllegianceSnapshot> for ClientAllegianceSnapshot {
 }
 
 /// Existing character option controls whether ACE publishes allegiance presence.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientAllegiancePreferences {
     /// Locally mirrored preference, not a server acknowledgement.

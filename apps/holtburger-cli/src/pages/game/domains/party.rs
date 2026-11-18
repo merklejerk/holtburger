@@ -31,24 +31,18 @@ pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> Update
 pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
 
-    match event {
-        ClientViewEvent::FellowshipActivity { activity } => {
-            let _ = activity;
-        }
-        ClientViewEvent::FellowshipStateUpdated { fellowship, .. } => {
-            let should_open_party_tab =
-                fellowship.is_some() && state.runtime.open_party_tab_on_next_fellowship_update;
+    if let ClientViewEvent::FellowshipStateUpdated { fellowship, .. } = event {
+        let should_open_party_tab =
+            fellowship.is_some() && state.runtime.open_party_tab_on_next_fellowship_update;
 
-            state.runtime.open_party_tab_on_next_fellowship_update = false;
-            state.data.party = fellowship.clone();
-            if should_open_party_tab {
-                result
-                    .actions
-                    .push(AppUiAction::SetDashboardActiveTab(DashboardTab::Party).into());
-            }
-            result.request_redraw(RedrawPriority::Immediate);
+        state.runtime.open_party_tab_on_next_fellowship_update = false;
+        state.data.party = fellowship.clone();
+        if should_open_party_tab {
+            result
+                .actions
+                .push(AppUiAction::SetDashboardActiveTab(DashboardTab::Party).into());
         }
-        _ => {}
+        result.request_redraw(RedrawPriority::Immediate);
     }
 
     result

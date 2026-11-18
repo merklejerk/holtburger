@@ -476,19 +476,15 @@ pub struct ClientCurrentState {
     /// Fellowship replacement baseline, independent of sibling events.
     pub party: Option<crate::client_party::ClientPartySnapshot>,
     /// Last accepted friend list; None until delivery or after retirement.
-    pub friends: Option<crate::client_friends::ClientFriendsSnapshot>,
+    pub friends: Option<holtburger_world::state::friends::FriendsState>,
     /// Shared resolved contract facts; None outside a character lifetime.
     pub contracts: Option<holtburger_world::state::contracts::ContractsSnapshot>,
     /// Character-owned ignore facts and basic scope eligibility.
     pub squelch: Option<crate::client_squelch::ClientSquelchSnapshot>,
     /// Partial allegiance facts and bounded refresh progress.
     pub allegiance: crate::client_allegiance::ClientAllegianceSnapshot,
-    /// Locally mirrored presence notification preference.
-    pub allegiance_preferences: Option<crate::client_allegiance::ClientAllegiancePreferences>,
-    /// Locally mirrored visibility preference.
-    pub friends_preferences: Option<crate::client_friends::ClientFriendsPreferences>,
-    /// Locally mirrored party preferences after character description.
-    pub party_preferences: Option<crate::client_party::ClientPartyPreferences>,
+    /// Server-saved character preferences, absent before character description or after retirement.
+    pub character_preferences: Option<ClientCharacterPreferences>,
     /// Effective-home and crystal facts recovered atomically with the character.
     pub housing: holtburger_core::client::housing::HousingSnapshot,
     /// Core-derived current permission and lifecycle admission for map teleport.
@@ -505,10 +501,6 @@ pub struct ClientCurrentState {
     pub known_spells: Option<Vec<u32>>,
     /// Shared player enchantment resolution, absent until character description.
     pub enchantments: Option<holtburger_world::enchantments::ResolvedEnchantments>,
-    /// Narrow server-backed appearance preferences consumed by client HUD controls.
-    pub appearance_options: Option<ClientAppearanceOptions>,
-    /// Server-saved gameplay choices, absent before character description or after retirement.
-    pub gameplay_preferences: Option<crate::client_gameplay::ClientGameplayPreferences>,
     /// Server-confirmed stance for the combat shortcut.
     pub combat_mode: ClientCombatMode,
     /// Shared social-command admission, including accepted server motion stance.
@@ -562,6 +554,34 @@ impl From<holtburger_core::PlayerCharacterOptions> for ClientAppearanceOptions {
         Self {
             show_helmet: options.is_enabled(CharacterOption::ShowYourHelmOrHeadGear),
             show_cloak: options.is_enabled(CharacterOption::ShowYourCloak),
+        }
+    }
+}
+
+/// Unified server-backed character preferences projected once per snapshot or update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCharacterPreferences {
+    /// Appearance visibility preferences.
+    pub appearance: ClientAppearanceOptions,
+    /// Gameplay behavior preferences.
+    pub gameplay: crate::client_gameplay::ClientGameplayPreferences,
+    /// Fellowship creation and invitation preferences.
+    pub party: crate::client_party::ClientPartyPreferences,
+    /// Friend visibility preferences.
+    pub friends: crate::client_friends::ClientFriendsPreferences,
+    /// Allegiance presence notification preferences.
+    pub allegiance: crate::client_allegiance::ClientAllegiancePreferences,
+}
+
+impl From<holtburger_core::PlayerCharacterOptions> for ClientCharacterPreferences {
+    fn from(options: holtburger_core::PlayerCharacterOptions) -> Self {
+        Self {
+            appearance: options.into(),
+            gameplay: options.into(),
+            party: options.into(),
+            friends: options.into(),
+            allegiance: options.into(),
         }
     }
 }
@@ -980,13 +1000,7 @@ pub enum ClientHostEvent {
         spell_ids: Vec<u32>,
     },
     PlayerEnchantmentsUpdated(holtburger_world::enchantments::ResolvedEnchantments),
-    CharacterPreferencesUpdated {
-        appearance: ClientAppearanceOptions,
-        gameplay: crate::client_gameplay::ClientGameplayPreferences,
-        party: crate::client_party::ClientPartyPreferences,
-        friends: crate::client_friends::ClientFriendsPreferences,
-        allegiance: crate::client_allegiance::ClientAllegiancePreferences,
-    },
+    CharacterPreferencesUpdated(ClientCharacterPreferences),
     /// Partial allegiance publication.
     AllegianceUpdated {
         allegiance: crate::client_allegiance::ClientAllegianceSnapshot,
@@ -1004,7 +1018,7 @@ pub enum ClientHostEvent {
     ContractMembershipChanged(holtburger_world::state::contracts::ContractMembershipChange),
     /// Retained friend list publication.
     FriendsUpdated {
-        friends: Option<crate::client_friends::ClientFriendsSnapshot>,
+        friends: Option<holtburger_world::state::friends::FriendsState>,
     },
     PartyUpdated {
         party: Option<crate::client_party::ClientPartySnapshot>,
@@ -1176,13 +1190,11 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             party: snapshot.fellowship.as_ref().map(|party| {
                 crate::client_party::ClientPartySnapshot::project(party, snapshot.local_player_guid)
             }),
-            party_preferences: snapshot.character_options.map(Into::into),
-            friends: snapshot.friends.as_ref().map(Into::into),
+            friends: snapshot.friends.clone(),
             contracts: snapshot.contracts.clone(),
             squelch: snapshot.squelch.as_ref().map(Into::into),
             allegiance: (&snapshot.allegiance).into(),
-            allegiance_preferences: snapshot.character_options.map(Into::into),
-            friends_preferences: snapshot.character_options.map(Into::into),
+            character_preferences: snapshot.character_options.map(Into::into),
             housing: snapshot.housing.clone(),
             can_teleport_from_map: snapshot.can_teleport_from_map,
             recall_destinations: snapshot.recall_destinations.clone(),
@@ -1190,8 +1202,6 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             trade: snapshot.trade.clone(),
             vendor: snapshot.vendor.clone().map(Into::into),
             enchantments: snapshot.enchantments.clone(),
-            appearance_options: snapshot.character_options.map(Into::into),
-            gameplay_preferences: snapshot.character_options.map(Into::into),
             combat_mode: snapshot.combat_mode.into(),
             social_motion_ready: snapshot.social_motion_ready,
             combat: snapshot.combat.into(),
@@ -1446,9 +1456,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::ContractMembershipChanged(change) => {
             Some(ClientHostEvent::ContractMembershipChanged(change))
         }
-        ClientViewEvent::FriendsStateUpdated { friends } => Some(ClientHostEvent::FriendsUpdated {
-            friends: friends.as_ref().map(Into::into),
-        }),
+        ClientViewEvent::FriendsStateUpdated { friends } => {
+            Some(ClientHostEvent::FriendsUpdated { friends })
+        }
         ClientViewEvent::FellowshipStateUpdated {
             fellowship,
             player_guid,
@@ -1458,13 +1468,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
                 .map(|party| crate::client_party::ClientPartySnapshot::project(party, player_guid)),
         }),
         ClientViewEvent::PlayerOptionsUpdated { options } => {
-            Some(ClientHostEvent::CharacterPreferencesUpdated {
-                appearance: options.into(),
-                gameplay: options.into(),
-                party: options.into(),
-                friends: options.into(),
-                allegiance: options.into(),
-            })
+            Some(ClientHostEvent::CharacterPreferencesUpdated(options.into()))
         }
         ClientViewEvent::PlayerVitalsUpdated { vitals } => {
             Some(ClientHostEvent::PlayerVitalsUpdated {
@@ -2172,17 +2176,11 @@ mod tests {
         let book = holtburger_world::book::BookData {
             pages: vec![holtburger_world::book::BookPage {
                 index: 0,
-                author_id: 7,
                 author_name: "Writer".into(),
-                author_account: "private-account".into(),
-                flags: 0xffff_0002,
-                text_included: false,
-                ignore_author: false,
                 page_text: None,
             }],
             inscription: Some("Signed".into()),
             author_name: Some("Writer".into()),
-            ..Default::default()
         };
         let opened = project_client_event(ClientViewEvent::EntityBookOpened {
             guid,
@@ -2196,7 +2194,6 @@ mod tests {
         assert_eq!(value["name"], "Journal");
         assert_eq!(value["book"]["guid"], guid.0);
         assert!(value["book"]["pages"][0]["text"].is_null());
-        assert!(value.to_string().find("private-account").is_none());
         assert!(value.to_string().find("flags").is_none());
 
         assert!(matches!(
@@ -2206,6 +2203,161 @@ mod tests {
             }),
             Some(ClientHostEvent::BookUpdated(_))
         ));
+    }
+
+    #[test]
+    fn sidecar_contract_payload_matches_browser_fixture() {
+        use crate::protocol::encode_frame;
+        use holtburger_world::state::contracts::{
+            ContractContact, ContractContactRole, ContractDeadline, ContractLocation, ContractRow,
+            ContractStatus, ContractsSnapshot,
+        };
+        use serde_json::Value;
+        use std::sync::mpsc;
+
+        let statuses = [
+            ContractStatus::Available,
+            ContractStatus::InProgress {
+                progress: Some("7 Wins".into()),
+            },
+            ContractStatus::Completed,
+            ContractStatus::WaitingToRepeat {
+                remaining_seconds: 120.0,
+            },
+            ContractStatus::InProgress { progress: None },
+        ];
+        let mut rows: Vec<_> = statuses
+            .into_iter()
+            .enumerate()
+            .map(|(index, status)| {
+                let id = index as u32 + 1;
+                ContractRow::Resolved {
+                    id,
+                    name: if id <= 2 {
+                        "Same quest".into()
+                    } else {
+                        format!("Quest {id}")
+                    },
+                    description: "Authored quest notes.".into(),
+                    status,
+                    contact: match id {
+                        1 => Some(ContractContact {
+                            role: ContractContactRole::Start,
+                            name: "Fred".into(),
+                            location: ContractLocation::Outdoor {
+                                latitude: -1.2,
+                                longitude: 3.4,
+                                position: Box::new(holtburger_common::position::WorldPosition {
+                                    landblock_id: Guid(0x80800001),
+                                    coords: holtburger_common::Vector3::new(6.0, 12.0, 25.0),
+                                    rotation: holtburger_common::Quaternion::identity(),
+                                }),
+                            },
+                        }),
+                        2 => Some(ContractContact {
+                            role: ContractContactRole::End,
+                            name: "Bob".into(),
+                            location: ContractLocation::Indoor {
+                                cell_id: 0xda550100,
+                            },
+                        }),
+                        _ => None,
+                    },
+                    area: if id == 2 {
+                        ContractLocation::Outdoor {
+                            latitude: 0.1,
+                            longitude: 0.2,
+                            position: Box::new(holtburger_common::position::WorldPosition {
+                                landblock_id: Guid(0x8080000a),
+                                coords: holtburger_common::Vector3::new(36.0, 42.0, 50.0),
+                                rotation: holtburger_common::Quaternion {
+                                    w: 0.5,
+                                    x: 0.5,
+                                    y: 0.5,
+                                    z: 0.5,
+                                },
+                            }),
+                        }
+                    } else {
+                        ContractLocation::Missing
+                    },
+                    deadline: match id {
+                        2 => Some(ContractDeadline::Running {
+                            remaining_seconds: 60.0,
+                        }),
+                        3 => Some(ContractDeadline::Finished),
+                        _ => None,
+                    },
+                }
+            })
+            .collect();
+        rows.push(ContractRow::Unresolved { id: 99 });
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../src/harness/browser/fixtures/contracts.json"
+        ))
+        .unwrap();
+        for (contracts, expected) in [
+            (Some(ContractsSnapshot { rows }), fixture),
+            (None, serde_json::json!({ "contracts": null })),
+        ] {
+            let event =
+                project_client_event(ClientViewEvent::ContractsStateUpdated { contracts }).unwrap();
+            let (sender, receiver) = mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(event)
+                .unwrap();
+            let bytes = encode_frame(&receiver.recv().unwrap()).unwrap();
+            let frame: Value = rmp_serde::from_slice(&bytes[4..]).unwrap();
+            assert_eq!(frame["event"]["event"], "client-contracts-updated");
+            assert_eq!(frame["event"]["payload"], expected);
+        }
+    }
+
+    #[test]
+    fn sidecar_membership_payload_matches_browser_fixture() {
+        use crate::protocol::encode_frame;
+        use holtburger_world::state::contracts::{
+            ContractMembershipChange, ContractMembershipChangeKind,
+        };
+        use serde_json::Value;
+        use std::sync::mpsc;
+
+        let fixture: Vec<Value> = serde_json::from_str(include_str!(
+            "../../src/harness/browser/fixtures/contract-membership.json"
+        ))
+        .unwrap();
+        for (change, expected) in [
+            (
+                ContractMembershipChange {
+                    kind: ContractMembershipChangeKind::Added,
+                    id: 1,
+                    name: Some("Same quest".into()),
+                },
+                fixture[0].clone(),
+            ),
+            (
+                ContractMembershipChange {
+                    kind: ContractMembershipChangeKind::Removed,
+                    id: 99,
+                    name: None,
+                },
+                fixture[1].clone(),
+            ),
+        ] {
+            let event =
+                project_client_event(ClientViewEvent::ContractMembershipChanged(change)).unwrap();
+            let (sender, receiver) = mpsc::sync_channel(1);
+            StdioEventSink::new(sender)
+                .publish_client_event(event)
+                .unwrap();
+            let bytes = encode_frame(&receiver.recv().unwrap()).unwrap();
+            let frame: Value = rmp_serde::from_slice(&bytes[4..]).unwrap();
+            assert_eq!(
+                frame["event"]["event"],
+                "client-contract-membership-changed"
+            );
+            assert_eq!(frame["event"]["payload"], expected);
+        }
     }
 
     #[test]

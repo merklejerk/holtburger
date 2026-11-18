@@ -70,7 +70,6 @@ export const housingCrystalSchema = z
 				dwellingId: uint,
 				owner: uint,
 				ownerName: z.string(),
-				flags: uint,
 				active: z.boolean(),
 				requiresMonarch: z.boolean(),
 				houseType: uint,
@@ -102,7 +101,6 @@ const accessRecords = z
 		),
 		allegiance: z
 			.object({
-				flags: uint,
 				monarch: uint,
 				entryAllowed: z.boolean(),
 				storageAllowed: z.boolean(),

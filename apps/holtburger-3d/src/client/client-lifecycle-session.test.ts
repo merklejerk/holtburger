@@ -415,7 +415,9 @@ describe("ClientLifecycleSession", () => {
 		transport.setCurrentState({
 			...currentState(42),
 			allegiance,
-			allegiancePreferences: { showLogons: false },
+			characterPreferences: characterPreferences({
+				allegiance: { showLogons: false },
+			}),
 		});
 		await session.start();
 		expect(session.allegiance.read().snapshot).toEqual(allegiance);
@@ -448,7 +450,9 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-current-state", {
 			...currentState(42),
 			allegiance,
-			allegiancePreferences: { showLogons: true },
+			characterPreferences: characterPreferences({
+				allegiance: { showLogons: true },
+			}),
 		});
 		expect(session.allegiance.read().snapshot?.refreshing).toBe(true);
 		transport.emit("client-lifecycle-changed", {
@@ -2339,7 +2343,6 @@ describe("ClientLifecycleSession", () => {
 		transport.setCurrentState({
 			...currentState(1),
 			party,
-			partyPreferences: preferences,
 			friends: null,
 			contracts: null,
 			squelch: null,
@@ -2349,12 +2352,11 @@ describe("ClientLifecycleSession", () => {
 				refreshing: false,
 				canSwear: false,
 			},
-			allegiancePreferences: null,
-			friendsPreferences: null,
+			characterPreferences: characterPreferences({ party: preferences }),
 		});
 		await session.start();
 		expect(session.partySnapshot()).toEqual(party);
-		expect(session.partyPreferences()).toEqual(preferences);
+		expect(session.state().characterPreferences?.party).toEqual(preferences);
 		transport.emit("client-lifecycle-changed", {
 			kind: "entering-world",
 			characterGuid: 1,
@@ -2375,7 +2377,7 @@ describe("ClientLifecycleSession", () => {
 		expect(session.partySnapshot()).toEqual(party);
 		session.stop();
 		expect(session.partySnapshot()).toBeNull();
-		expect(session.partyPreferences()).toBeNull();
+		expect(session.state().characterPreferences).toBeNull();
 	});
 
 	it("routes Ignores early delivery, recovery, portal retention, and retirement", async () => {
@@ -2460,7 +2462,9 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-current-state", {
 			...currentState(42),
 			friends,
-			friendsPreferences: { appearOffline: true },
+			characterPreferences: characterPreferences({
+				friends: { appearOffline: true },
+			}),
 		});
 		expect(session.friends.read().pending).toBeNull();
 		expect(session.friends.read().preferences).toEqual({ appearOffline: true });
@@ -2479,18 +2483,23 @@ describe("ClientLifecycleSession", () => {
 	it("recovers Gameplay options, mirrors updates, and rejects edits outside active gameplay", async () => {
 		const transport = new FakeClientTransport();
 		const initial = { ...gameplayPreferencesFixture, craftSuccessDialog: true };
-		const snapshot = { ...currentState(42), gameplayPreferences: initial };
+		const snapshot = {
+			...currentState(42),
+			characterPreferences: characterPreferences({ gameplay: initial }),
+		};
 		transport.setCurrentState(snapshot);
 		const session = new ClientLifecycleSession(transport);
 		await session.start();
-		expect(session.state().gameplayPreferences).toEqual(initial);
+		expect(session.state().characterPreferences?.gameplay).toEqual(initial);
 		await session.setGameplayOption("confirmRareUse", true);
 		expect(transport.invocations.at(-1)).toEqual({
 			command: "set_client_gameplay_option",
 			args: { option: "confirmRareUse", enabled: true },
 		});
 		// Queue acceptance alone must not invent a mirrored update.
-		expect(session.state().gameplayPreferences?.confirmRareUse).toBe(false);
+		expect(session.state().characterPreferences?.gameplay.confirmRareUse).toBe(
+			false,
+		);
 		const updated = { ...initial, confirmRareUse: true };
 		transport.emit("client-character-preferences-updated", {
 			appearance: { showHelmet: true, showCloak: true },
@@ -2499,29 +2508,29 @@ describe("ClientLifecycleSession", () => {
 			friends: { appearOffline: false },
 			allegiance: { showLogons: false },
 		});
-		expect(session.state().gameplayPreferences).toEqual(updated);
+		expect(session.state().characterPreferences?.gameplay).toEqual(updated);
 		transport.emit("client-lifecycle-changed", {
 			kind: "portal-space",
 			worldGeneration: 2,
 			cause: "teleport",
 		});
-		expect(session.state().gameplayPreferences).toEqual(updated);
+		expect(session.state().characterPreferences?.gameplay).toEqual(updated);
 		const before = transport.invocations.length;
 		await expect(
 			session.setGameplayOption("confirmRareUse", false),
 		).rejects.toThrow("active character");
 		expect(transport.invocations).toHaveLength(before);
 		transport.emit("client-state-resyncing", null);
-		expect(session.state().gameplayPreferences).toBeNull();
+		expect(session.state().characterPreferences).toBeNull();
 		transport.emit("client-current-state", snapshot);
-		expect(session.state().gameplayPreferences).toEqual(initial);
+		expect(session.state().characterPreferences?.gameplay).toEqual(initial);
 		transport.emit("client-lifecycle-changed", {
 			kind: "entering-world",
 			characterGuid: 99,
 		});
-		expect(session.state().gameplayPreferences).toBeNull();
+		expect(session.state().characterPreferences).toBeNull();
 		session.stop();
-		expect(session.state().gameplayPreferences).toBeNull();
+		expect(session.state().characterPreferences).toBeNull();
 	});
 
 	it("retains appearance updates and submits an appearance change", async () => {
@@ -2536,7 +2545,7 @@ describe("ClientLifecycleSession", () => {
 			friends: { appearOffline: false },
 			allegiance: { showLogons: false },
 		});
-		expect(session.state().appearanceOptions).toEqual({
+		expect(session.state().characterPreferences?.appearance).toEqual({
 			showHelmet: false,
 			showCloak: true,
 		});
@@ -2555,23 +2564,23 @@ describe("ClientLifecycleSession", () => {
 		const options = { showHelmet: false, showCloak: true };
 		const snapshot = {
 			...currentState(0x50000001),
-			appearanceOptions: options,
+			characterPreferences: characterPreferences({ appearance: options }),
 		};
 		transport.setCurrentState(snapshot);
 		await session.start();
-		expect(session.state().appearanceOptions).toEqual(options);
+		expect(session.state().characterPreferences?.appearance).toEqual(options);
 		transport.emit("client-lifecycle-changed", {
 			kind: "portal-space",
 			worldGeneration: 2,
 			cause: "teleport",
 		});
-		expect(session.state().appearanceOptions).toEqual(options);
+		expect(session.state().characterPreferences?.appearance).toEqual(options);
 		transport.emit("client-lifecycle-changed", {
 			kind: "portal-space",
 			worldGeneration: 3,
 			cause: "initial-entry",
 		});
-		expect(session.state().appearanceOptions).toBeNull();
+		expect(session.state().characterPreferences).toBeNull();
 		transport.emit("client-character-preferences-updated", {
 			appearance: options,
 			gameplay: gameplayPreferencesFixture,
@@ -2580,11 +2589,11 @@ describe("ClientLifecycleSession", () => {
 			allegiance: { showLogons: false },
 		});
 		transport.emit("client-state-resyncing", null);
-		expect(session.state().appearanceOptions).toBeNull();
+		expect(session.state().characterPreferences).toBeNull();
 		transport.emit("client-current-state", snapshot);
-		expect(session.state().appearanceOptions).toEqual(options);
+		expect(session.state().characterPreferences?.appearance).toEqual(options);
 		session.stop();
-		expect(session.state().appearanceOptions).toBeNull();
+		expect(session.state().characterPreferences).toBeNull();
 	});
 
 	it("sends visible local speech and rejects empty input before transport", async () => {
@@ -2751,6 +2760,21 @@ function characterSheet(
 		},
 		vitae: 1,
 		guardedTargets: [],
+	};
+}
+
+function characterPreferences(
+	overrides: Partial<
+		NonNullable<ClientCurrentState["characterPreferences"]>
+	> = {},
+): NonNullable<ClientCurrentState["characterPreferences"]> {
+	return {
+		appearance: { showHelmet: true, showCloak: true },
+		gameplay: gameplayPreferencesFixture,
+		party: { shareXp: false, shareLoot: false, ignoreRequests: false },
+		friends: { appearOffline: false },
+		allegiance: { showLogons: false },
+		...overrides,
 	};
 }
 

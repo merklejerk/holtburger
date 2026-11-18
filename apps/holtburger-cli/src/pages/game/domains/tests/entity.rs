@@ -89,12 +89,7 @@ fn book_response_refreshes_visible_context_and_requests_redraw() {
         author_name: Some("Scribe".to_string()),
         pages: vec![BookPage {
             index: 0,
-            author_id: 1,
             author_name: "Scribe".to_string(),
-            author_account: "acct".to_string(),
-            flags: 0,
-            text_included: true,
-            ignore_author: false,
             page_text: Some("Hello from the book".to_string()),
         }],
         ..BookData::default()

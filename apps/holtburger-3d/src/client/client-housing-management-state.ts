@@ -1,3 +1,4 @@
+import equal from "fast-deep-equal";
 import type {
 	LocalConfirmationRequest,
 	LocalDialogSource,
@@ -89,22 +90,28 @@ export class ClientHousingManagementState implements LocalDialogSource {
 	readonly #intentions = new Map<CheckboxKey, CheckboxIntent>();
 	#generation: number;
 	#player: number | null;
+	#view: HousingManagementView;
 
 	constructor(
 		session: HousingManagementSession,
 		failure: (message: string) => void,
 	) {
 		this.#session = session;
-		this.#generation = session.housingSnapshot().access.generation;
+		const housing = session.housingSnapshot();
+		this.#generation = housing.access.generation;
 		this.#player = session.state().playerGuid;
 		this.#failure = failure;
-		this.#submitted = session.housingSnapshot().pendingManagement;
+		this.#submitted = housing.pendingManagement;
+		this.#syncIdentity(housing);
+		this.#view = this.#buildView(housing);
 		this.#unsubscribe = session.subscribe((event) => this.#receive(event));
 	}
 
 	read(): HousingManagementView {
-		const housing = this.#session.housingSnapshot();
-		this.#syncIdentity(housing);
+		return this.#view;
+	}
+
+	#buildView(housing: HousingSnapshot): HousingManagementView {
 		const records = housing.access.records;
 		const guests =
 			records === null
@@ -150,9 +157,19 @@ export class ClientHousingManagementState implements LocalDialogSource {
 		};
 	}
 
+	#syncView(
+		housing: HousingSnapshot = this.#session.housingSnapshot(),
+		forcePublish = false,
+	): void {
+		const next = this.#buildView(housing);
+		if (!forcePublish && equal(this.#view, next)) return;
+		this.#view = next;
+		this.#publish();
+	}
+
 	/** Abandonment alone requires a typed local confirmation. */
 	question(): LocalConfirmationRequest | null {
-		const local = this.read().confirmation;
+		const local = this.#confirmation;
 		return local === null
 			? null
 			: {
@@ -162,7 +179,7 @@ export class ClientHousingManagementState implements LocalDialogSource {
 				};
 	}
 
-	/** Publish only local question changes to the shared dialog owner. */
+	/** Publish presentation and local question changes to mounted consumers and the dialog owner. */
 	subscribe(listener: () => void): () => void {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
@@ -180,7 +197,7 @@ export class ClientHousingManagementState implements LocalDialogSource {
 	}
 
 	async refresh(): Promise<void> {
-		if (this.#disposed || this.read().pending || this.read().loading) return;
+		if (this.#disposed || this.#view.pending || this.#view.loading) return;
 		try {
 			await this.#session.queryHousingAccess();
 		} catch (error) {
@@ -191,7 +208,7 @@ export class ClientHousingManagementState implements LocalDialogSource {
 	request(action: Action): void {
 		const housing = this.#session.housingSnapshot();
 		const player = this.#session.state().playerGuid;
-		if (!this.read().editable || player === null || this.#confirmation !== null)
+		if (!this.#view.editable || player === null || this.#confirmation !== null)
 			return;
 		const request = {
 			sequence: sequence(),
@@ -205,18 +222,18 @@ export class ClientHousingManagementState implements LocalDialogSource {
 				requestId: `housing-abandon-${request.sequence}`,
 				message: "Abandon this home and remove its deed?",
 			};
-			this.#publish();
+			this.#syncView(housing, true);
 		} else void this.#submit(request);
 	}
 
 	confirm(): void {
 		const confirmation = this.#confirmation;
-		if (confirmation === null || !this.read().editable) return;
+		if (confirmation === null || !this.#view.editable) return;
 		this.#confirmation = null;
-		this.#publish();
+		const housing = this.#session.housingSnapshot();
+		this.#syncView(housing, true);
 		if (
-			confirmation.request.generation !==
-				this.#session.housingSnapshot().access.generation ||
+			confirmation.request.generation !== housing.access.generation ||
 			confirmation.request.player !== this.#session.state().playerGuid
 		)
 			return;
@@ -224,14 +241,16 @@ export class ClientHousingManagementState implements LocalDialogSource {
 	}
 
 	cancel(): void {
+		if (this.#confirmation === null) return;
 		this.#confirmation = null;
-		this.#publish();
+		this.#syncView(this.#session.housingSnapshot(), true);
 	}
 
 	async #submit(request: HousingManagementRequest): Promise<void> {
 		this.#submitted = request;
 		this.#retainIntention(request);
 		this.#dispatching = true;
+		this.#syncView();
 		try {
 			await this.#session.submitHousingManagement(request);
 		} catch (error) {
@@ -242,44 +261,55 @@ export class ClientHousingManagementState implements LocalDialogSource {
 			}
 		} finally {
 			this.#dispatching = false;
-			this.#settleIntentions(this.#session.housingSnapshot());
+			const housing = this.#session.housingSnapshot();
+			this.#settleIntentions(housing);
+			this.#syncView(housing);
 		}
 	}
 
 	#receive(event: ClientLifecycleSessionEvent): void {
 		const previous = this.#confirmation;
+		let housing = this.#session.housingSnapshot();
 		if (event.type === "housing-updated") {
-			this.#syncIdentity(event.housing);
-			this.#settleIntentions(event.housing);
+			housing = event.housing;
+			this.#syncIdentity(housing);
+			this.#settleIntentions(housing);
 			if (
 				this.#confirmation !== null &&
-				(event.housing.access.generation !==
-					this.#confirmation.request.generation ||
-					event.housing.home.kind !== "owned")
+				(housing.access.generation !== this.#confirmation.request.generation ||
+					housing.home.kind !== "owned")
 			)
 				this.#confirmation = null;
-			if (event.housing.pendingManagement !== null)
-				this.#submitted = event.housing.pendingManagement;
+			if (housing.pendingManagement !== null)
+				this.#submitted = housing.pendingManagement;
+			this.#syncView(housing, previous !== this.#confirmation);
 		} else if (event.type === "current-state") {
+			housing = event.state.housing;
 			this.#confirmation = null;
-			this.#submitted = event.state.housing.pendingManagement;
-			this.#syncIdentity(event.state.housing);
-			this.#settleIntentions(event.state.housing);
+			this.#submitted = housing.pendingManagement;
+			this.#syncIdentity(housing);
+			this.#settleIntentions(housing);
+			this.#syncView(housing, previous !== this.#confirmation);
 		} else if (event.type === "housing-management-finished") {
 			this.#finish(event.result);
+			this.#syncView(housing, previous !== this.#confirmation);
 		} else if (event.type === "resyncing") {
 			this.#confirmation = null;
-		} else if (
-			event.type === "lifecycle" &&
-			event.lifecycle.kind !== "in-world"
-		) {
-			this.#confirmation = null;
-			if (event.lifecycle.kind !== "portal-space") {
-				this.#submitted = null;
-				this.#intentions.clear();
+			this.#syncView(housing, previous !== this.#confirmation);
+		} else if (event.type === "local-player-established") {
+			this.#syncIdentity(housing);
+			this.#syncView(housing, previous !== this.#confirmation);
+		} else if (event.type === "lifecycle") {
+			if (event.lifecycle.kind !== "in-world") {
+				this.#confirmation = null;
+				if (event.lifecycle.kind !== "portal-space") {
+					this.#submitted = null;
+					this.#intentions.clear();
+				}
 			}
+			this.#syncIdentity(housing);
+			this.#syncView(housing, previous !== this.#confirmation);
 		}
-		if (previous !== this.#confirmation) this.#publish();
 	}
 
 	#finish(result: HousingManagementResult): void {
@@ -376,7 +406,7 @@ export class ClientHousingManagementState implements LocalDialogSource {
 		this.#disposed = true;
 		this.#confirmation = null;
 		this.#unsubscribe();
-		this.#publish();
+		this.#syncView(this.#session.housingSnapshot(), true);
 		this.#listeners.clear();
 	}
 }

@@ -177,7 +177,6 @@ mod tests {
         assert!(records.guests[0].storage_allowed);
         assert_eq!(records.roommates, Some(vec![Guid(20)]));
         let allegiance = records.allegiance.as_ref().unwrap();
-        assert_eq!(allegiance.flags, 0x80000005);
         assert_eq!(allegiance.monarch, Guid(10));
         assert!(allegiance.entry_allowed);
         assert!(allegiance.storage_allowed);

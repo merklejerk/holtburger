@@ -550,7 +550,12 @@ const characterPreferencesSchema = z
 		allegiance: allegiancePreferencesSchema,
 	})
 	.strict();
-export function decodeClientCharacterPreferences(value: unknown) {
+export type ClientCharacterPreferences = z.infer<
+	typeof characterPreferencesSchema
+>;
+export function decodeClientCharacterPreferences(
+	value: unknown,
+): ClientCharacterPreferences {
 	return characterPreferencesSchema.parse(value);
 }
 
@@ -613,16 +618,12 @@ const currentStateSchema = z
 		playerName: z.string().nullable(),
 		knownSpells: knownSpellIdsSchema.nullable(),
 		enchantments: resolvedEnchantmentsSchema.nullable(),
-		appearanceOptions: clientAppearanceOptionsSchema.nullable(),
-		gameplayPreferences: gameplayPreferencesSchema.nullable(),
 		party: partySnapshotSchema.nullable(),
-		partyPreferences: partyPreferencesSchema.nullable(),
 		friends: friendsSnapshotSchema.nullable(),
 		contracts: contractsSnapshotSchema.nullable(),
 		squelch: squelchSnapshotSchema.nullable(),
 		allegiance: allegianceSnapshotSchema,
-		allegiancePreferences: allegiancePreferencesSchema.nullable(),
-		friendsPreferences: friendsPreferencesSchema.nullable(),
+		characterPreferences: characterPreferencesSchema.nullable(),
 		combatMode: combatModeSchema,
 		socialMotionReady: z.boolean(),
 		combat: combatStatusSchema,

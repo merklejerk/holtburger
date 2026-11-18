@@ -141,10 +141,7 @@ function contractLocationPosition(
 	location: Extract<ContractLocation, { kind: "outdoor" }>,
 ): SceneVector3 {
 	const source = location.position;
-	const origin = createLandblockWorldOrigin({
-		x: source.landblockId >>> 24,
-		y: (source.landblockId >>> 16) & 0xff,
-	});
+	const origin = createLandblockWorldOrigin(source.landblockId);
 	return sceneVector3([
 		origin.x + source.coords.x,
 		source.coords.z,

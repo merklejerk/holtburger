@@ -10,6 +10,7 @@ import type { UiIconOwner, UiIconRepository } from "../app/ui-icon-repository";
 import type {
 	ClientEntityRead,
 	ClientEntityFacts,
+	PlayerEntitySummary,
 	ProjectileSupply,
 } from "./client-entity-mirror";
 import type { ClientLifecycle } from "./client-host-contract";
@@ -74,6 +75,7 @@ interface InventoryBaseline {
 	readonly equipment: InventoryEquipment;
 	readonly currencies: readonly InventoryCurrencyRow[];
 	readonly currenciesPending: boolean;
+	readonly player: PlayerEntitySummary;
 	readonly worldRevision: number;
 	readonly playerGuid: number | null;
 	readonly membership: ClientContentsMembership | null;
@@ -88,6 +90,7 @@ export interface ClientInventoryView {
 	/** Ambient balances across all carried packs; pending prevents partial totals appearing final. */
 	readonly currencies: readonly InventoryCurrencyRow[];
 	readonly currenciesPending: boolean;
+	readonly player: PlayerEntitySummary;
 	readonly pending: boolean;
 	readonly sortMode: ContentsSortMode;
 	/** Known ordinary-slot occupancy for every displayed container, including nested ones. */
@@ -96,6 +99,12 @@ export interface ClientInventoryView {
 	readonly packSlots: readonly (ClientEntityFacts | null)[];
 	readonly iconKeys: ReadonlyMap<number, string>;
 }
+
+const EMPTY_PLAYER_SUMMARY: PlayerEntitySummary = {
+	pyrealBalance: null,
+	burden: null,
+	aetheriaActivation: null,
+};
 
 /** Session-owned preferences and icon references, independent of the active floating panel. */
 export class ClientInventoryState {
@@ -165,6 +174,7 @@ export class ClientInventoryState {
 			currencies: this.#baseline?.currencies ?? [],
 			currenciesPending:
 				this.#pending || (this.#baseline?.currenciesPending ?? true),
+			player: this.#baseline?.player ?? EMPTY_PLAYER_SUMMARY,
 			pending: this.#pending,
 			sortMode: this.#sortMode,
 			sections,
@@ -206,9 +216,7 @@ export class ClientInventoryState {
 	/** Local-player world ratio for bounded HUD sampling, without sorting inventory contents. */
 	readBurden(): number | null {
 		this.#refresh();
-		if (this.#pending) return null;
-		const description = this.#baseline?.membership?.root.description;
-		return description?.kind === "known" ? description.burden : null;
+		return this.#pending ? null : (this.#baseline?.player.burden ?? null);
 	}
 
 	/** Only actual carried storage and Main Pack expose the app-local context command. */
@@ -338,6 +346,7 @@ export class ClientInventoryState {
 			equipment,
 			currencies,
 			currenciesPending: currencyTotals.pending,
+			player: level.player,
 			worldRevision: level.revision,
 			playerGuid: level.playerGuid,
 			membership,

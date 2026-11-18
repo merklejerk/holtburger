@@ -34,6 +34,7 @@ import { ClientVendorState } from "./client-vendor-state";
 import { UiIconRepository } from "../app/ui-icon-repository";
 import { vendorRequestSchema } from "./client-vendor-contract";
 import {
+	emptyPlayerSummary,
 	entityFacts,
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
@@ -836,6 +837,7 @@ describe("ClientLifecycleSession", () => {
 						augmentationBonusSalvage: 0,
 					},
 				},
+				player: emptyPlayerSummary,
 				worldContainer: { kind: "open", root },
 				entities: contents,
 			},
@@ -867,6 +869,7 @@ describe("ClientLifecycleSession", () => {
 					augmentationBonusSalvage: 0,
 				},
 			},
+			player: null,
 			worldContainer: { kind: "closed" },
 			upserts: [],
 			removed: [pack, child],
@@ -883,6 +886,7 @@ describe("ClientLifecycleSession", () => {
 					augmentationBonusSalvage: 0,
 				},
 			},
+			player: null,
 			worldContainer: { kind: "open", root },
 			upserts: contents,
 			removed: [],
@@ -1358,6 +1362,7 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-entity-facts-changed", {
 			projectileSupply: null,
 			salvage: null,
+			player: null,
 			worldContainer: null,
 			removed: [],
 			upserts: [
@@ -1597,6 +1602,7 @@ describe("ClientLifecycleSession", () => {
 					augmentationBonusSalvage: 0,
 				},
 			},
+			player: emptyPlayerSummary,
 			worldContainer: { kind: "closed" },
 			entities: [],
 		};
@@ -1625,6 +1631,7 @@ describe("ClientLifecycleSession", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: baseline.entities.entities,
 				removed: [],
@@ -1635,6 +1642,7 @@ describe("ClientLifecycleSession", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [
 					entityFacts(item.guid, {
@@ -1649,9 +1657,6 @@ describe("ClientLifecycleSession", () => {
 							mapCategory: "other",
 							objectFlags: 0,
 							wcid: null,
-							pyrealBalance: null,
-							aetheriaActivation: null,
-							burden: null,
 							equipLocations: null,
 							consumable: null,
 							useCapability: "direct" as const,
@@ -1680,9 +1685,6 @@ describe("ClientLifecycleSession", () => {
 				mapCategory: "other",
 				objectFlags: 0,
 				wcid: null,
-				pyrealBalance: null,
-				aetheriaActivation: null,
-				burden: null,
 				equipLocations: null,
 				consumable: null,
 				useCapability: "direct" as const,
@@ -1790,6 +1792,7 @@ describe("ClientLifecycleSession", () => {
 					augmentationBonusSalvage: 0,
 				},
 			},
+			player: emptyPlayerSummary,
 			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(9, {
@@ -1803,9 +1806,6 @@ describe("ClientLifecycleSession", () => {
 						mapCategory: "other",
 						objectFlags: 0,
 						wcid: null,
-						pyrealBalance: null,
-						aetheriaActivation: null,
-						burden: null,
 						equipLocations: null,
 						consumable: null,
 						useCapability: "direct" as const,
@@ -1834,9 +1834,6 @@ describe("ClientLifecycleSession", () => {
 			mapCategory: "other",
 			objectFlags: 0,
 			wcid: null,
-			pyrealBalance: null,
-			aetheriaActivation: null,
-			burden: null,
 			equipLocations: null,
 			consumable: null,
 			useCapability: "direct" as const,
@@ -1876,6 +1873,7 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-entity-facts-changed", {
 			projectileSupply: null,
 			salvage: null,
+			player: null,
 			worldContainer: null,
 			upserts: playerEntitySnapshot(9).entities,
 			removed: [],

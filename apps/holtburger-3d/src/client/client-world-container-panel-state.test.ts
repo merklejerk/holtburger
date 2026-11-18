@@ -81,6 +81,11 @@ function fixture() {
 							augmentationBonusSalvage: 0,
 						},
 					},
+					player: {
+						pyrealBalance: null,
+						burden: null,
+						aetheriaActivation: null,
+					},
 					worldContainer: access,
 					entities: [entityFacts(1), ...records],
 				},

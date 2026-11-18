@@ -12,7 +12,7 @@ use holtburger_common::properties::{EnchantmentTypeFlags as Flags, PropertyFloat
 use holtburger_protocol::messages::magic::Enchantment;
 use serde::{Deserialize, Serialize};
 
-use crate::inspection::VitalType as VitalPropertyType;
+use crate::inspection::SecondaryAttribute as VitalPropertyType;
 use crate::spell::SpellCatalog;
 use crate::stats::{AttributeType, SkillType, VitalType};
 

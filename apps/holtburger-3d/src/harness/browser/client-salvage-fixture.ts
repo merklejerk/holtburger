@@ -89,6 +89,7 @@ export function createSalvageFixture(options: {
 				projectileSupply: null,
 				worldContainer: null,
 				salvage: context,
+				player: null,
 				upserts: [...sources.values()],
 				removed: [],
 			});

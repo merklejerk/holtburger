@@ -36,6 +36,7 @@ export function createTradeFixture(options: {
 			options.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [
 					player,

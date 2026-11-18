@@ -82,7 +82,7 @@ describe("ClientAppraisalRequests", () => {
 		expect(sendFull).toHaveBeenCalledExactlyOnceWith(result.guid, false);
 	});
 
-	it("deduplicates facts-only requests, settles on entity health, and cancels when last consumer leaves early", async () => {
+	it("deduplicates facts-only requests, settles on appraisal-facts-settled, and cancels when last consumer leaves early", async () => {
 		const { sendFacts, cancel, requests } = makeRequests();
 		const first = requests.requestFacts(result.guid);
 		const second = requests.requestFacts(result.guid);
@@ -98,16 +98,10 @@ describe("ClientAppraisalRequests", () => {
 		await third.sent;
 		expect(sendFacts).toHaveBeenCalledTimes(2);
 		requests.receive({
-			type: "entity-health",
-			health: {
-				worldGeneration: 1,
-				instanceSequence: 1,
-				guid: result.guid,
-				healthFraction: 0.75,
-				observedAt: { seconds: 4.5 },
-			},
+			type: "appraisal-facts-settled",
+			guid: result.guid,
 		});
-		// Already settled by entity-health, so late cancel does not notify core.
+		// Already settled by appraisal-facts-settled, so late cancel does not notify core.
 		third.cancel();
 		expect(cancel).toHaveBeenCalledTimes(1);
 	});
@@ -231,16 +225,10 @@ describe("ClientAppraisalRequests", () => {
 			kind: "world-container",
 		});
 
-		const settleByHealth = (guid: number) =>
+		const settleFacts = (guid: number) =>
 			requests.receive({
-				type: "entity-health",
-				health: {
-					worldGeneration: 1,
-					instanceSequence: 1,
-					guid,
-					healthFraction: 0.9,
-					observedAt: { seconds: 1 },
-				},
+				type: "appraisal-facts-settled",
+				guid,
 			});
 
 		// Completing chest dispatches upgraded world-container item (100), then remaining combat-health, owned, partner.
@@ -251,13 +239,13 @@ describe("ClientAppraisalRequests", () => {
 		chestUpgrade.cancel();
 		vendor.cancel();
 		await closeUnattacked.sent;
-		settleByHealth(103);
+		settleFacts(103);
 		await attackedRecentFar.sent;
-		settleByHealth(106);
+		settleFacts(106);
 		await attackedOlder.sent;
-		settleByHealth(104);
+		settleFacts(104);
 		await farUnattacked.sent;
-		settleByHealth(101);
+		settleFacts(101);
 		await owned.sent;
 		owned.cancel();
 		await partner.sent;

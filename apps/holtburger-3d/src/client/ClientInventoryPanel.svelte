@@ -130,18 +130,11 @@
 			hoveredInventoryGuid = null;
 	});
 	const sortMode = $derived(view?.sortMode ?? "native");
-	const rootDescription = $derived(sections[0]?.container.description);
-	const pyreals = $derived(
-		rootDescription?.kind === "known" ? rootDescription.pyrealBalance : null,
-	);
+	const pyreals = $derived(view?.player.pyrealBalance ?? null);
 	const pyrealText = $derived(
 		pending || pyreals === null ? "…" : pyreals.toLocaleString(),
 	);
-	const burden = $derived(
-		!pending && rootDescription?.kind === "known"
-			? rootDescription.burden
-			: null,
-	);
+	const burden = $derived(!pending ? (view?.player.burden ?? null) : null);
 	const burdenPresentation = $derived(presentClientBurden(burden));
 	const burdenText = $derived(burdenPresentation.percent);
 	/** Cold transient intent; core execution survives panel closure. */

@@ -249,6 +249,7 @@ describe("ClientInspection", () => {
 						augmentationBonusSalvage: 0,
 					},
 				},
+				player: { pyrealBalance: null, burden: null, aetheriaActivation: null },
 				worldContainer: { kind: "closed" },
 				revision: 1,
 				entities: new Map([

@@ -4,7 +4,10 @@ import {
 	ClientEntityMirror,
 	type ClientEntityFacts,
 } from "./client-entity-mirror";
-import { entityFacts } from "./client-entity-mirror.test-support";
+import {
+	emptyPlayerSummary,
+	entityFacts,
+} from "./client-entity-mirror.test-support";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 import type {
 	VendorOffer,
@@ -71,6 +74,7 @@ function fixture(
 						augmentationBonusSalvage: 0,
 					},
 				},
+				player: emptyPlayerSummary,
 				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1, {
@@ -194,6 +198,7 @@ describe("vendor draft presentation", () => {
 			],
 			removed: [],
 			salvage: null,
+			player: null,
 			projectileSupply: null,
 			worldContainer: null,
 		});
@@ -285,6 +290,7 @@ describe("vendor draft presentation", () => {
 				upserts,
 				removed,
 				salvage: null,
+				player: null,
 				projectileSupply: null,
 				worldContainer: null,
 			});
@@ -301,15 +307,11 @@ describe("vendor draft presentation", () => {
 		buy(f.model, stackOffer.guid, 37);
 		const old = f.pending();
 		vi.advanceTimersByTime(CLIENT_TUNING.vendor.previewTimeoutMs / 2);
-		const root = entityFacts(1);
-		if (root.description.kind !== "known")
-			throw new Error("Expected described root");
 		const prepared = f.entities.prepareDelta({
-			upserts: [
-				{ ...root, description: { ...root.description, pyrealBalance: 2500 } },
-			],
+			upserts: [],
 			removed: [],
 			salvage: null,
+			player: { ...emptyPlayerSummary, pyrealBalance: 2500 },
 			projectileSupply: null,
 			worldContainer: null,
 		});

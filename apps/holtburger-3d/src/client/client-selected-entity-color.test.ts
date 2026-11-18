@@ -10,7 +10,7 @@ describe("selected entity name colors", () => {
 	it("uses the ordinary player palette for summons without changing their category", () => {
 		expect(
 			selectedEntityNameColor(
-				{ mapCategory: "mob", objectFlags: 0, itemType: 0 },
+				{ mapCategory: "mob", consumable: null },
 				false,
 				true,
 			),
@@ -21,7 +21,7 @@ describe("selected entity name colors", () => {
 		(mapCategory) => {
 			expect(
 				selectedEntityNameColor(
-					{ mapCategory, objectFlags: 0, itemType: 0 },
+					{ mapCategory, consumable: null },
 					false,
 					false,
 				),
@@ -33,7 +33,7 @@ describe("selected entity name colors", () => {
 		(mapCategory) => {
 			expect(
 				selectedEntityNameColor(
-					{ mapCategory, objectFlags: 0, itemType: 0 },
+					{ mapCategory, consumable: null },
 					false,
 					false,
 				),
@@ -43,14 +43,20 @@ describe("selected entity name colors", () => {
 	it("refines the controlled player's name without overriding other categories", () => {
 		expect(
 			selectedEntityNameColor(
-				{ mapCategory: "player", objectFlags: 0, itemType: 0 },
+				{ mapCategory: "player", consumable: null },
 				true,
 				false,
 			),
 		).toBe(names.selfPlayer);
 		expect(
 			selectedEntityNameColor(
-				{ mapCategory: "npc", objectFlags: 0x10000, itemType: 0x80000 },
+				{
+					mapCategory: "npc",
+					consumable: {
+						identity: { wcid: 1, category: "healing-kit" },
+						availability: "ready",
+					},
+				},
 				true,
 				false,
 			),
@@ -59,21 +65,46 @@ describe("selected entity name colors", () => {
 	it("reserves item accents for entities without an existing 3D category", () => {
 		expect(
 			selectedEntityNameColor(
-				{ mapCategory: "other", objectFlags: 0x10000, itemType: 0 },
+				{
+					mapCategory: "other",
+					consumable: {
+						identity: { wcid: 1, category: "healing-kit" },
+						availability: "ready",
+					},
+				},
 				false,
 				false,
 			),
 		).toBe(CLIENT_TUNING.selectedEntityHud.healingKitColor);
 		expect(
 			selectedEntityNameColor(
-				{ mapCategory: "other", objectFlags: 0, itemType: 0x80000 },
+				{
+					mapCategory: "other",
+					consumable: {
+						identity: { wcid: 2, category: "charged-mana-stone" },
+						availability: "exhausted",
+					},
+				},
 				false,
 				false,
 			),
 		).toBe(CLIENT_TUNING.selectedEntityHud.manaStoneColor);
 		expect(
 			selectedEntityNameColor(
-				{ mapCategory: "other", objectFlags: 0, itemType: 1 },
+				{
+					mapCategory: "other",
+					consumable: {
+						identity: { wcid: 3, category: "food" },
+						availability: "ready",
+					},
+				},
+				false,
+				false,
+			),
+		).toBe(names.other);
+		expect(
+			selectedEntityNameColor(
+				{ mapCategory: "other", consumable: null },
 				false,
 				false,
 			),

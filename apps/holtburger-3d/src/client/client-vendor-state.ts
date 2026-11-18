@@ -128,10 +128,7 @@ function playerQuoteFacts(level: ClientEntityLevel) {
 	return {
 		guid: level.playerGuid,
 		storage: player?.storage,
-		balance:
-			player?.description.kind === "known"
-				? player.description.pyrealBalance
-				: undefined,
+		balance: level.player.pyrealBalance,
 	};
 }
 

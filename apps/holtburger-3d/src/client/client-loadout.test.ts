@@ -41,6 +41,7 @@ function read(...entities: ClientEntityFacts[]): ClientEntityRead {
 					augmentationBonusSalvage: 0,
 				},
 			},
+			player: { pyrealBalance: null, burden: null, aetheriaActivation: null },
 			worldContainer: { kind: "closed" },
 			entities: new Map(entities.map((entity) => [entity.guid, entity])),
 		},

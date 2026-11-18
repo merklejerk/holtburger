@@ -1050,6 +1050,11 @@ class FakeLifecycle implements ClientEntitySelectionLifecyclePort {
 							augmentationBonusSalvage: 0,
 						},
 					},
+					player: {
+						pyrealBalance: null,
+						burden: null,
+						aetheriaActivation: null,
+					},
 					worldContainer: { kind: "closed" },
 					entities: [1, 4, 7, 8, 9, 12, 77].map((guid) => entityFacts(guid)),
 				},
@@ -1061,6 +1066,7 @@ class FakeLifecycle implements ClientEntitySelectionLifecyclePort {
 		const prepared = this.entities.prepareDelta({
 			projectileSupply: null,
 			salvage: null,
+			player: null,
 			worldContainer: null,
 			upserts,
 			removed,

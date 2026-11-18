@@ -5,7 +5,10 @@ import {
 	type ClientEntityFacts,
 } from "./client-entity-mirror";
 import { EQUIPMENT_SLOTS } from "./client-inventory-equipment";
-import { entityFacts } from "./client-entity-mirror.test-support";
+import {
+	emptyPlayerSummary,
+	entityFacts,
+} from "./client-entity-mirror.test-support";
 import { CLIENT_TUNING } from "./client-tuning";
 import { INVENTORY_CURRENCIES } from "./client-inventory-currencies";
 import type { ClientLifecycle } from "./client-host-contract";
@@ -49,6 +52,7 @@ function fixture(
 							augmentationBonusSalvage: 0,
 						},
 					},
+					player: emptyPlayerSummary,
 					worldContainer: { kind: "closed" },
 					entities: [
 						entityFacts(player, {
@@ -210,9 +214,6 @@ describe("persistent inventory state", () => {
 	it("withholds burden during recovery and replaces it with the new player baseline", () => {
 		const f = fixture();
 		const acceptPlayer = (guid: number, burden: number | null) => {
-			const player = entityFacts(guid);
-			if (player.description.kind !== "known")
-				throw new Error("Known fixture required.");
 			f.mirror.commit(
 				f.mirror.prepareSnapshot(
 					{
@@ -224,10 +225,9 @@ describe("persistent inventory state", () => {
 								augmentationBonusSalvage: 0,
 							},
 						},
+						player: { ...emptyPlayerSummary, burden },
 						worldContainer: { kind: "closed" },
-						entities: [
-							{ ...player, description: { ...player.description, burden } },
-						],
+						entities: [entityFacts(guid)],
 					},
 					guid,
 				),

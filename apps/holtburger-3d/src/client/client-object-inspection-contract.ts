@@ -96,13 +96,12 @@ const wieldRequirementSchema = z.discriminatedUnion("type", [
 			data: z
 				.object({
 					attribute: z.enum([
-						"undef",
-						"strength",
-						"endurance",
-						"quickness",
-						"coordination",
-						"focus",
-						"self",
+						"StrengthAttr",
+						"EnduranceAttr",
+						"QuicknessAttr",
+						"CoordinationAttr",
+						"FocusAttr",
+						"SelfAttr",
 					]),
 					difficulty: i32,
 				})
@@ -140,7 +139,7 @@ const wieldRequirementSchema = z.discriminatedUnion("type", [
 			data: z
 				.object({
 					skill: semanticEnumName,
-					level: z.enum(["inactive", "untrained", "trained", "specialized"]),
+					level: z.enum(["Unusable", "Untrained", "Trained", "Specialized"]),
 				})
 				.strict(),
 		})

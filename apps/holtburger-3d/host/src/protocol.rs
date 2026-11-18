@@ -184,18 +184,6 @@ pub enum HostEvent {
         owner: holtburger_common::Guid,
         cause: holtburger_world::summon::SummonEndCause,
     },
-    /// Entity identity and its latest server-reported health fraction.
-    ClientEntityHealthUpdated {
-        guid: holtburger_common::Guid,
-        #[serde(rename = "worldGeneration")]
-        world_generation: u64,
-        #[serde(rename = "instanceSequence")]
-        instance_sequence: u16,
-        #[serde(rename = "healthFraction")]
-        health_fraction: f32,
-        #[serde(rename = "observedAt")]
-        observed_at: holtburger_core::DynamicEntityHostTime,
-    },
     /// Proven sticky-targeted hostile attack action or offensive player combat action.
     ClientEntityCombatObserved {
         guid: holtburger_common::Guid,
@@ -699,19 +687,6 @@ impl ClientEventSink for StdioEventSink {
                 instance_sequence,
                 owner,
                 cause,
-            },
-            crate::client_projection::ClientHostEvent::EntityHealthUpdated {
-                guid,
-                world_generation,
-                instance_sequence,
-                health_fraction,
-                observed_at,
-            } => HostEvent::ClientEntityHealthUpdated {
-                guid,
-                world_generation,
-                instance_sequence,
-                health_fraction,
-                observed_at,
             },
             crate::client_projection::ClientHostEvent::EntityCombatObserved {
                 guid,

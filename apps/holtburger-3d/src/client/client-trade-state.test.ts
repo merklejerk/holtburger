@@ -95,6 +95,7 @@ async function fixture() {
 					augmentationBonusSalvage: 0,
 				},
 			},
+			player: { pyrealBalance: null, burden: null, aetheriaActivation: null },
 			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(PLAYER, {
@@ -179,6 +180,7 @@ describe("P2P trade HUD authority", () => {
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
 			salvage: null,
+			player: null,
 			worldContainer: null,
 			removed: [],
 			upserts: [
@@ -231,6 +233,7 @@ describe("P2P trade HUD authority", () => {
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
 			salvage: null,
+			player: null,
 			worldContainer: null,
 			removed: [],
 			upserts: [

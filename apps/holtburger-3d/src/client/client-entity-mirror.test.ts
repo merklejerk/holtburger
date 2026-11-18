@@ -4,6 +4,7 @@ import {
 	clientEntityDeltaSchema,
 } from "./client-entity-mirror";
 import {
+	emptyPlayerSummary,
 	entityFacts,
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
@@ -37,6 +38,7 @@ function commit(
 	const prepared = mirror.prepareDelta({
 		projectileSupply: null,
 		salvage: null,
+		player: null,
 		worldContainer: null,
 		upserts,
 		removed,
@@ -58,6 +60,7 @@ describe("ClientEntityMirror", () => {
 					augmentationBonusSalvage: 0,
 				},
 			},
+			player: null,
 			worldContainer: null,
 			upserts: [],
 			removed: [],
@@ -82,6 +85,7 @@ describe("ClientEntityMirror", () => {
 					augmentationBonusSalvage: 0,
 				},
 			},
+			player: null,
 			worldContainer: null,
 			upserts: [],
 			removed: [],
@@ -148,6 +152,7 @@ describe("ClientEntityMirror", () => {
 							augmentationBonusSalvage: 0,
 						},
 					},
+					player: emptyPlayerSummary,
 					worldContainer: { kind: "closed" },
 					entities: [entityFacts(player), updated],
 				},
@@ -183,6 +188,7 @@ describe("ClientEntityMirror", () => {
 		const next = store.prepareDelta({
 			projectileSupply: null,
 			salvage: null,
+			player: null,
 			worldContainer: null,
 			upserts: [owned(item, pack), owned(pack, player)],
 			removed: [],
@@ -223,6 +229,7 @@ describe("ClientEntityMirror", () => {
 							augmentationBonusSalvage: 0,
 						},
 					},
+					player: emptyPlayerSummary,
 					worldContainer: { kind: "closed" },
 					entities: [entityFacts(player), entityFacts(player)],
 				},
@@ -233,6 +240,7 @@ describe("ClientEntityMirror", () => {
 			store.prepareDelta({
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [owned(item, player)],
 				removed: [item],
@@ -242,6 +250,7 @@ describe("ClientEntityMirror", () => {
 			store.prepareDelta({
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [owned(item, pack)],
 				removed: [],
@@ -251,6 +260,7 @@ describe("ClientEntityMirror", () => {
 			store.prepareDelta({
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [],
 				removed: [player],
@@ -268,6 +278,7 @@ describe("ClientEntityMirror", () => {
 			store.prepareDelta({
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [owned(pack, player)],
 				removed: [],

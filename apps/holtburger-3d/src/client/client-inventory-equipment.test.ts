@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { entityFacts } from "./client-entity-mirror.test-support";
-import type { ClientEntityFacts } from "./client-entity-mirror";
+import {
+	emptyPlayerSummary,
+	entityFacts,
+} from "./client-entity-mirror.test-support";
+import type {
+	ClientEntityFacts,
+	PlayerEntitySummary,
+} from "./client-entity-mirror";
 import {
 	EQUIPMENT_SLOTS,
 	inventoryEquipment,
@@ -17,6 +23,12 @@ const equipped = (guid: number, mask: number | null, wearerGuid = 1) =>
 		location: { kind: "equipped", wearerGuid, mask },
 	});
 const project = (...entities: ClientEntityFacts[]) =>
+	projectWithPlayer(emptyPlayerSummary, ...entities);
+
+const projectWithPlayer = (
+	player: PlayerEntitySummary,
+	...entities: ClientEntityFacts[]
+) =>
 	inventoryEquipment({
 		projectileSupply: { kind: "not-applicable" },
 		salvage: {
@@ -26,6 +38,7 @@ const project = (...entities: ClientEntityFacts[]) =>
 				augmentationBonusSalvage: 0,
 			},
 		},
+		player,
 		worldContainer: { kind: "closed" },
 		playerGuid: 1,
 		revision: 1,
@@ -85,44 +98,32 @@ describe("inventory equipment rows", () => {
 		]);
 	});
 	it("projects independent activation without changing slot occupancy", () => {
-		const player = entityFacts(1);
-		if (player.description.kind !== "known")
-			throw new Error("Known player required");
+		const root = entityFacts(1);
 		const blue = equipped(2, slotMask("Blue aetheria"));
-		const root = {
-			...player,
-			description: {
-				...player.description,
-				aetheriaActivation: { blue: true, yellow: false, red: true },
-			},
-		};
-		const aetheria = (entities: readonly ClientEntityFacts[]) =>
-			project(...entities).rows.filter(({ slot }) => "activation" in slot);
+		const aetheria = (
+			aetheriaActivation: PlayerEntitySummary["aetheriaActivation"],
+			entities: readonly ClientEntityFacts[],
+		) =>
+			projectWithPlayer(
+				{ ...emptyPlayerSummary, aetheriaActivation },
+				...entities,
+			).rows.filter(({ slot }) => "activation" in slot);
 		expect(
-			aetheria([root, blue]).map(({ availability, item }) => [
-				availability,
-				item?.guid ?? null,
-			]),
+			aetheria({ blue: true, yellow: false, red: true }, [root, blue]).map(
+				({ availability, item }) => [availability, item?.guid ?? null],
+			),
 		).toEqual([
 			["available", blue.guid],
 			["locked", null],
 			["available", null],
 		]);
-		expect(aetheria([player]).map(({ availability }) => availability)).toEqual([
-			"pending",
-			"pending",
-			"pending",
-		]);
 		expect(
-			aetheria([
-				{
-					...root,
-					description: {
-						...root.description,
-						aetheriaActivation: { blue: false, yellow: false, red: false },
-					},
-				},
-			]).map(({ availability }) => availability),
+			aetheria(null, [root]).map(({ availability }) => availability),
+		).toEqual(["pending", "pending", "pending"]);
+		expect(
+			aetheria({ blue: false, yellow: false, red: false }, [root]).map(
+				({ availability }) => availability,
+			),
 		).toEqual(["locked", "locked", "locked"]);
 	});
 

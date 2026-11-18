@@ -88,6 +88,11 @@ function fixture(distance: number | null = 0) {
 							augmentationBonusSalvage: 0,
 						},
 					},
+					player: {
+						pyrealBalance: null,
+						burden: null,
+						aetheriaActivation: null,
+					},
 					worldContainer: { kind: "closed" },
 					entities: [
 						entityFacts(1),
@@ -260,6 +265,11 @@ describe("crystal draft ownership", () => {
 							tinkeringSkill: 0,
 							augmentationBonusSalvage: 0,
 						},
+					},
+					player: {
+						pyrealBalance: null,
+						burden: null,
+						aetheriaActivation: null,
 					},
 					worldContainer: { kind: "closed" },
 					entities: [

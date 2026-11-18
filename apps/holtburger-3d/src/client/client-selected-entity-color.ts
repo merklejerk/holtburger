@@ -7,7 +7,7 @@ import { CLIENT_TUNING } from "./client-tuning";
 export function selectedEntityNameColor(
 	description: Pick<
 		Extract<ClientEntityFacts["description"], { kind: "known" }>,
-		"mapCategory" | "objectFlags" | "itemType"
+		"mapCategory" | "consumable"
 	>,
 	isSelf: boolean,
 	isSummon: boolean,
@@ -30,10 +30,9 @@ export function selectedEntityNameColor(
 		case "switch":
 			return map[category];
 		case "other":
-			// Item accents are frontend policy, following the TUI's public item masks.
-			if (description.objectFlags & 0x00010000)
+			if (description.consumable?.identity.category === "healing-kit")
 				return CLIENT_TUNING.selectedEntityHud.healingKitColor;
-			if (description.itemType & 0x00080000)
+			if (description.consumable?.identity.category === "charged-mana-stone")
 				return CLIENT_TUNING.selectedEntityHud.manaStoneColor;
 			return names.other;
 	}

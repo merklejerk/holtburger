@@ -20,7 +20,8 @@ use holtburger_common::properties::{
     PropertyString, WeaponType, WorldObjectExt as _, WorldObjectProperties,
     WorldObjectPropertyAccessors,
 };
-use holtburger_common::stats::{CreatureType, SkillType, VitalType as CurrentVital};
+pub use holtburger_common::stats::{AttributeType, TrainingLevel};
+use holtburger_common::stats::{CreatureType, SkillType, VitalType};
 use holtburger_content::CharacterTitleCatalog;
 use holtburger_protocol::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureBuffs, CreatureProfile, HookProfile, WeaponProfile,
@@ -917,7 +918,7 @@ pub enum UseRequirement {
     /// Minimum maximum vital value.
     Vital {
         /// Secondary attribute checked by the server.
-        vital: VitalType,
+        vital: SecondaryAttribute,
         /// Required maximum value, not the current depleted value.
         minimum: i32,
     },
@@ -968,11 +969,11 @@ pub enum WieldRequirement {
         difficulty: i32,
     },
     Vital {
-        vital: VitalType,
+        vital: SecondaryAttribute,
         difficulty: i32,
     },
     RawVital {
-        vital: VitalType,
+        vital: SecondaryAttribute,
         difficulty: i32,
     },
     Level {
@@ -1033,23 +1034,7 @@ pub enum WieldRequirementType {
     Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr,
 )]
 #[serde(rename_all = "kebab-case")]
-pub enum AttributeType {
-    Undef = 0,
-    Strength = 1,
-    Endurance = 2,
-    Quickness = 3,
-    Coordination = 4,
-    Focus = 5,
-    #[serde(rename = "self")]
-    #[strum(serialize = "Self")]
-    SelfAttr = 6,
-}
-
-#[derive(
-    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr,
-)]
-#[serde(rename_all = "kebab-case")]
-pub enum VitalType {
+pub enum SecondaryAttribute {
     Undef = 0,
     MaxHealth = 1,
     Health = 2,
@@ -1057,17 +1042,6 @@ pub enum VitalType {
     Stamina = 4,
     MaxMana = 5,
     Mana = 6,
-}
-
-#[derive(
-    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr,
-)]
-#[serde(rename_all = "kebab-case")]
-pub enum TrainingLevel {
-    Inactive = 0,
-    Untrained = 1,
-    Trained = 2,
-    Specialized = 3,
 }
 
 #[derive(
@@ -1173,7 +1147,7 @@ pub enum InspectionUseEffect {
     /// Direct base points, independent of player ratings and remaining vital capacity.
     VitalChange {
         /// Current vital affected; maximum-vital attribute IDs are not accepted.
-        vital: CurrentVital,
+        vital: VitalType,
         /// Signed base points: nonnegative restores, negative depletes.
         amount: i32,
     },
@@ -1227,9 +1201,9 @@ impl InspectionUseEffect {
         };
         let vital = match value {
             0 => return Ok(None),
-            2 => CurrentVital::Health,
-            4 => CurrentVital::Stamina,
-            6 => CurrentVital::Mana,
+            2 => VitalType::Health,
+            4 => VitalType::Stamina,
+            6 => VitalType::Mana,
             _ => {
                 return Err(ObjectInspectionError::InvalidBoosterVital {
                     guid: object.guid,
@@ -1686,7 +1660,7 @@ fn get_wield_requirements(object: &InspectionSource<'_>) -> Vec<WieldRequirement
             }
             WieldRequirementType::Attrib => {
                 skill_id.zip(difficulty).and_then(|(skill_id, difficulty)| {
-                    AttributeType::from_repr(skill_id as usize).map(|attribute| {
+                    AttributeType::from_repr(skill_id).map(|attribute| {
                         WieldRequirement::Attribute {
                             attribute,
                             difficulty,
@@ -1696,7 +1670,7 @@ fn get_wield_requirements(object: &InspectionSource<'_>) -> Vec<WieldRequirement
             }
             WieldRequirementType::RawAttrib => {
                 skill_id.zip(difficulty).and_then(|(skill_id, difficulty)| {
-                    AttributeType::from_repr(skill_id as usize).map(|attribute| {
+                    AttributeType::from_repr(skill_id).map(|attribute| {
                         WieldRequirement::RawAttribute {
                             attribute,
                             difficulty,
@@ -1706,13 +1680,13 @@ fn get_wield_requirements(object: &InspectionSource<'_>) -> Vec<WieldRequirement
             }
             WieldRequirementType::SecondaryAttrib => {
                 skill_id.zip(difficulty).and_then(|(skill_id, difficulty)| {
-                    VitalType::from_repr(skill_id as usize)
+                    SecondaryAttribute::from_repr(skill_id as usize)
                         .map(|vital| WieldRequirement::Vital { vital, difficulty })
                 })
             }
             WieldRequirementType::RawSecondaryAttrib => {
                 skill_id.zip(difficulty).and_then(|(skill_id, difficulty)| {
-                    VitalType::from_repr(skill_id as usize)
+                    SecondaryAttribute::from_repr(skill_id as usize)
                         .map(|vital| WieldRequirement::RawVital { vital, difficulty })
                 })
             }
@@ -1722,7 +1696,9 @@ fn get_wield_requirements(object: &InspectionSource<'_>) -> Vec<WieldRequirement
             WieldRequirementType::Training => {
                 skill_id.zip(difficulty).and_then(|(skill_id, difficulty)| {
                     SkillType::from_repr(skill_id).and_then(|skill| {
-                        TrainingLevel::from_repr(difficulty as usize)
+                        u32::try_from(difficulty)
+                            .ok()
+                            .and_then(TrainingLevel::from_repr)
                             .map(|level| WieldRequirement::Training { skill, level })
                     })
                 })
@@ -2699,7 +2675,7 @@ mod tests {
                 ObjectDescriptionFlag::FOOD,
                 InspectionSpellRole::OnUse,
                 InspectionUseEffect::VitalChange {
-                    vital: CurrentVital::Stamina,
+                    vital: VitalType::Stamina,
                     amount: 50,
                 },
             ),

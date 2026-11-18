@@ -500,6 +500,11 @@
 						augmentationBonusSalvage: 0,
 					},
 				},
+				player: {
+					pyrealBalance: null,
+					aetheriaActivation: null,
+					burden: null,
+				},
 				worldContainer: { kind: "closed" },
 				entities: [playerGuid, 7, 8].map((guid) => ({
 					guid,
@@ -514,9 +519,6 @@
 						mapCategory: "other",
 						objectFlags: 0,
 						wcid: guid === 7 ? 42 : null,
-						pyrealBalance: null,
-						aetheriaActivation: null,
-						burden: null,
 						equipLocations: null,
 						consumable: null,
 						useCapability: "direct",
@@ -870,14 +872,14 @@
 								{ type: "level", data: { level: 180 } },
 								{
 									type: "attribute",
-									data: { attribute: "self", minimum: 295 },
+									data: { attribute: "SelfAttr", minimum: 295 },
 								},
 							],
 							wieldRequirements: [
 								{ type: "level", data: { level: 80 } },
 								{
 									type: "training",
-									data: { skill: "HeavyWeapons", level: "specialized" },
+									data: { skill: "HeavyWeapons", level: "Specialized" },
 								},
 							],
 							inscription: {
@@ -1498,6 +1500,7 @@
 			emitInteractionEvent("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				removed: [],
 				upserts: [
@@ -1547,13 +1550,28 @@
 					],
 				},
 			});
-			emitInteractionEvent("client-entity-health-updated", {
-				guid: 7,
-				worldGeneration: 1,
-				instanceSequence: 1,
-				healthFraction: 0.68,
-				observedAt: { seconds: 1 },
-			});
+			const current = interactionLifecycle.entities.read();
+			const target7 =
+				current.kind === "current" ? current.level.entities.get(7) : undefined;
+			if (target7 !== undefined) {
+				emitInteractionEvent("client-entity-facts-changed", {
+					projectileSupply: null,
+					salvage: null,
+					player: null,
+					worldContainer: null,
+					removed: [],
+					upserts: [
+						{
+							...target7,
+							health: {
+								instanceSequence: 1,
+								fraction: 0.68,
+								observedAtSeconds: (target7.health?.observedAtSeconds ?? 0) + 1,
+							},
+						},
+					],
+				});
+			}
 		}
 
 		async function openShowcasePanel(panel: ShowcasePanel): Promise<void> {
@@ -1635,9 +1653,9 @@
 				if (!mounted) return;
 				await fixtureTheme.applyPreview(initialUserSettings.ui.themeId, false);
 				if (!mounted) return;
+				selection.select(7);
 				seedShowcaseHud();
 				setWaypoint(SHOWCASE_WAYPOINT);
-				selection.select(7);
 				const resetLayout = () => {
 					const rect = gameplayCanvas?.getBoundingClientRect();
 					if (rect === undefined)

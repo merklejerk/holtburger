@@ -3,6 +3,7 @@ import { selectedEntityNameColor } from "./client-selected-entity-color";
 import { canInteractItem } from "./client-action-item";
 import type { HexRgbaColor } from "../lib/frontend-color";
 import type { ItemStructure } from "../app/item-structure";
+import type { ClientEntityFacts } from "./client-entity-mirror";
 import type { ClientEntitySelection } from "./client-entity-selection";
 import type { ClientLifecycleSession } from "./client-lifecycle-session";
 
@@ -51,6 +52,16 @@ type TrackingSelection = Pick<
 	"selectedGuid" | "subscribe"
 >;
 
+interface SelectedEntityTarget {
+	readonly guid: number;
+	readonly worldGeneration: number;
+	readonly baseline: {
+		readonly instanceSequence: number;
+		readonly observedAtSeconds: number;
+	} | null;
+	observedResponse: boolean;
+}
+
 /** Session-owned selected display and health subscription; use execution belongs to ClientItemInteractions. */
 export class ClientSelectedEntityTracking {
 	readonly #lifecycle: TrackingLifecycle;
@@ -58,10 +69,7 @@ export class ClientSelectedEntityTracking {
 	readonly #unsubscribeSelection: () => void;
 	readonly #unsubscribeLifecycle: () => void;
 	readonly #onFailure: (error: unknown) => void;
-	#target: {
-		readonly guid: number;
-		readonly healthFraction: number | null;
-	} | null = null;
+	#target: SelectedEntityTarget | null = null;
 	#destroyed = false;
 
 	constructor(options: {
@@ -77,18 +85,11 @@ export class ClientSelectedEntityTracking {
 		);
 		this.#unsubscribeLifecycle = options.lifecycle.subscribe((event) => {
 			if (
-				event.type === "entity-health" &&
-				this.#target?.guid === event.health.guid
-			) {
-				this.#target = {
-					guid: event.health.guid,
-					healthFraction: event.health.healthFraction,
-				};
-			} else if (
 				event.type === "entities" ||
 				event.type === "current-state" ||
 				event.type === "lifecycle" ||
-				event.type === "resyncing"
+				event.type === "resyncing" ||
+				event.type === "presentation-discontinuity"
 			) {
 				this.#reconcile();
 			}
@@ -105,8 +106,19 @@ export class ClientSelectedEntityTracking {
 		const record = read.level.entities.get(guid);
 		if (record === undefined || record.description.kind === "pending")
 			return EMPTY_CLIENT_SELECTED_DISPLAY;
-		const fraction =
-			this.#target?.guid === guid ? this.#target.healthFraction : null;
+		const worldGeneration = this.#lifecycle.state().worldGeneration;
+		const target =
+			this.#target !== null &&
+			this.#target.guid === guid &&
+			this.#target.worldGeneration === worldGeneration
+				? this.#target
+				: null;
+		const freshHealth =
+			target !== null &&
+			record.health !== null &&
+			this.#hasFreshHealth(target, record.health)
+				? record.health
+				: null;
 		return {
 			name: entityDisplayName(record.description.name, guid),
 			nameColor: selectedEntityNameColor(
@@ -123,16 +135,16 @@ export class ClientSelectedEntityTracking {
 			health:
 				record.description.healthQuery === "ineligible"
 					? { kind: "not-applicable" }
-					: fraction === null
+					: freshHealth === null
 						? { kind: "awaiting-response" }
-						: { kind: "known", fraction },
+						: { kind: "known", fraction: freshHealth.fraction },
 		};
 	}
 
 	/** Cancel once while transport is still alive, then retire both listeners. */
 	destroy(): void {
 		if (this.#destroyed) return;
-		this.#replaceTarget(null);
+		this.#retireTarget();
 		this.#destroyed = true;
 		this.#unsubscribeSelection();
 		this.#unsubscribeLifecycle();
@@ -146,16 +158,67 @@ export class ClientSelectedEntityTracking {
 			guid !== null && read.kind === "current"
 				? read.level.entities.get(guid)
 				: undefined;
+		const state = this.#lifecycle.state();
 		const eligible =
-			this.#lifecycle.state().lifecycle?.kind === "in-world" &&
+			state.lifecycle?.kind === "in-world" &&
 			record?.description.kind === "known" &&
 			record.description.healthQuery === "eligible";
-		this.#replaceTarget(eligible ? guid : null);
+		if (!eligible || guid === null || record === undefined) {
+			this.#retireTarget();
+			return;
+		}
+		const worldGeneration = state.worldGeneration;
+		const health = record.health;
+		const incarnationReplaced =
+			this.#target !== null &&
+			this.#target.guid === guid &&
+			this.#target.worldGeneration === worldGeneration &&
+			this.#target.observedResponse &&
+			health === null;
+		if (
+			this.#target === null ||
+			this.#target.guid !== guid ||
+			this.#target.worldGeneration !== worldGeneration ||
+			incarnationReplaced
+		) {
+			this.#target = {
+				guid,
+				worldGeneration,
+				baseline:
+					health === null
+						? null
+						: {
+								instanceSequence: health.instanceSequence,
+								observedAtSeconds: health.observedAtSeconds,
+							},
+				observedResponse: false,
+			};
+			this.#issueQuery(guid);
+			return;
+		}
+		if (health !== null && this.#hasFreshHealth(this.#target, health)) {
+			this.#target.observedResponse = true;
+		}
 	}
 
-	#replaceTarget(guid: number | null): void {
-		if (guid === (this.#target?.guid ?? null)) return;
-		this.#target = guid === null ? null : { guid, healthFraction: null };
+	#hasFreshHealth(
+		target: SelectedEntityTarget,
+		health: NonNullable<ClientEntityFacts["health"]>,
+	): boolean {
+		return (
+			target.baseline === null ||
+			health.instanceSequence !== target.baseline.instanceSequence ||
+			health.observedAtSeconds > target.baseline.observedAtSeconds
+		);
+	}
+
+	#retireTarget(): void {
+		if (this.#target === null) return;
+		this.#target = null;
+		this.#issueQuery(null);
+	}
+
+	#issueQuery(guid: number | null): void {
 		const phase = this.#lifecycle.state().lifecycle?.kind;
 		if (phase === "in-world" || (phase === "portal-space" && guid === null)) {
 			void this.#lifecycle.queryEntityHealth(guid).catch(this.#onFailure);

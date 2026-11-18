@@ -5,7 +5,11 @@ import { ClientItemInteractions } from "./client-item-interactions";
 import { ClientEntitySelection } from "./client-entity-selection";
 import { CASTER_EQUIP_MASK } from "./client-inventory-equipment";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
-import { entityFacts } from "./client-entity-mirror.test-support";
+import {
+	emptyPlayerSummary,
+	entityDelta,
+	entityFacts,
+} from "./client-entity-mirror.test-support";
 import type { ClientEntityFacts } from "./client-entity-mirror";
 import type { ClientItemUseResult } from "./client-item-use-contract";
 
@@ -112,6 +116,7 @@ async function fixture() {
 					augmentationBonusSalvage: 0,
 				},
 			},
+			player: emptyPlayerSummary,
 			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(1),
@@ -193,13 +198,7 @@ describe("shared frontend item interaction flow", () => {
 		const removed = f.query.mock.calls.at(-1)?.[0];
 		if (removed === undefined) throw new Error("Expected replacement query");
 		f.query.mockClear();
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			upserts: [],
-			removed: [2],
-		});
+		f.emit("client-entity-facts-changed", entityDelta({ removed: [2] }));
 		f.emit("client-item-use-target-result", {
 			sequence: removed.sequence,
 			eligible: true,
@@ -229,15 +228,14 @@ describe("shared frontend item interaction flow", () => {
 		const target = read.level.entities.get(3);
 		if (target?.description.kind !== "known")
 			throw new Error("Expected known target");
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			upserts: [
-				{ ...target, description: { ...target.description, stackCount: 2 } },
-			],
-			removed: [],
-		});
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({
+				upserts: [
+					{ ...target, description: { ...target.description, stackCount: 2 } },
+				],
+			}),
+		);
 		expect(receive).toHaveBeenLastCalledWith(null);
 		const refreshed = f.query.mock.calls.at(-1)?.[0];
 		if (refreshed === undefined) throw new Error("Expected refreshed query");
@@ -292,13 +290,7 @@ describe("shared frontend item interaction flow", () => {
 			},
 		};
 		const publish = (item: ClientEntityFacts) =>
-			f.emit("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				upserts: [item],
-				removed: [],
-			});
+			f.emit("client-entity-facts-changed", entityDelta({ upserts: [item] }));
 		publish(equipment);
 		f.interactions.use(2, false);
 		f.select(2);
@@ -341,20 +333,26 @@ describe("shared frontend item interaction flow", () => {
 		if (armor.description.kind !== "known")
 			throw new Error("Known fixture required");
 		const publish = (ownedByPlayer: boolean, wearerGuid: number) =>
-			f.emit("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				upserts: [
-					{
-						...armor,
-						ownedByPlayer,
-						location: { kind: "equipped", wearerGuid, mask: CASTER_EQUIP_MASK },
-						description: { ...armor.description, useCapability: "unsupported" },
-					},
-				],
-				removed: [],
-			});
+			f.emit(
+				"client-entity-facts-changed",
+				entityDelta({
+					upserts: [
+						{
+							...armor,
+							ownedByPlayer,
+							location: {
+								kind: "equipped",
+								wearerGuid,
+								mask: CASTER_EQUIP_MASK,
+							},
+							description: {
+								...armor.description,
+								useCapability: "unsupported",
+							},
+						},
+					],
+				}),
+			);
 		publish(true, 1);
 		f.interactions.use(3, false);
 		expect(inventory).toHaveBeenCalledWith({
@@ -397,13 +395,7 @@ describe("shared frontend item interaction flow", () => {
 				useCapability: "targeted",
 			},
 		};
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			upserts: [caster],
-			removed: [],
-		});
+		f.emit("client-entity-facts-changed", entityDelta({ upserts: [caster] }));
 		f.emit("client-player-spells-updated", { spellIds: [] });
 		f.select(3);
 		f.interactions.castWieldedSpell(2);
@@ -432,22 +424,21 @@ describe("shared frontend item interaction flow", () => {
 		f.interactions.castWieldedSpell(2);
 		expect(f.interactions.snapshot().kind).toBe("acquiring");
 		expect(inventory).not.toHaveBeenCalled();
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			upserts: [
-				{
-					...caster,
-					location: {
-						kind: "contained",
-						parentGuid: 1,
-						slot: { kind: "item", index: 0 },
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({
+				upserts: [
+					{
+						...caster,
+						location: {
+							kind: "contained",
+							parentGuid: 1,
+							slot: { kind: "item", index: 0 },
+						},
 					},
-				},
-			],
-			removed: [],
-		});
+				],
+			}),
+		);
 		f.interactions.castWieldedSpell(2);
 		expect(f.failure).toHaveBeenLastCalledWith(
 			"The caster spell is no longer wielded.",
@@ -599,13 +590,10 @@ describe("shared frontend item interaction flow", () => {
 		const inventory = vi
 			.spyOn(f.lifecycle, "submitInventory")
 			.mockResolvedValue(undefined);
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			upserts: [entityFacts(4, { canPickUp: true })],
-			removed: [],
-		});
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({ upserts: [entityFacts(4, { canPickUp: true })] }),
+		);
 		f.select(4);
 		f.interactions.interactSelected(false);
 		expect(inventory).toHaveBeenCalledExactlyOnceWith({
@@ -633,13 +621,10 @@ describe("shared frontend item interaction flow", () => {
 			source: 3,
 			unrestricted: false,
 		});
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			upserts: [entityFacts(4, { canPickUp: true })],
-			removed: [],
-		});
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({ upserts: [entityFacts(4, { canPickUp: true })] }),
+		);
 		vi.spyOn(f.lifecycle, "submitInventory").mockRejectedValue(
 			new Error("Disconnected"),
 		);
@@ -863,13 +848,7 @@ describe("shared frontend item interaction flow", () => {
 		expect(f.interactions.snapshot().kind).toBe("idle");
 		expect(f.submit).toHaveBeenCalledTimes(1);
 		const id = question();
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			upserts: [],
-			removed: [2],
-		});
+		f.emit("client-entity-facts-changed", entityDelta({ removed: [2] }));
 		expect(f.interactions.snapshot().kind).toBe("idle");
 		f.interactions.respond(id, true);
 		expect(f.submit).toHaveBeenCalledTimes(2);
@@ -919,22 +898,21 @@ it.each(["corpse", "pickup", "trade", "unsupported", "targeted"] as const)(
 		});
 		if (picked.description.kind !== "known")
 			throw new Error("Known fixture required");
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			removed: [],
-			upserts: [
-				{
-					...picked,
-					description: {
-						...picked.description,
-						useCapability:
-							kind === "unsupported" || kind === "targeted" ? kind : "direct",
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({
+				upserts: [
+					{
+						...picked,
+						description: {
+							...picked.description,
+							useCapability:
+								kind === "unsupported" || kind === "targeted" ? kind : "direct",
+						},
 					},
-				},
-			],
-		});
+				],
+			}),
+		);
 		// A different selected identity must never redirect the picked action.
 		f.select(3);
 		f.interactions.interactIfPossible(7, false);
@@ -969,13 +947,10 @@ it.each(["corpse", "pickup", "trade", "unsupported", "targeted"] as const)(
 
 it("player interaction initiates trade through the ordinary Interact flow", async () => {
 	const f = await fixture();
-	f.emit("client-entity-facts-changed", {
-		projectileSupply: null,
-		salvage: null,
-		worldContainer: null,
-		removed: [],
-		upserts: [entityFacts(7, { canTrade: true })],
-	});
+	f.emit(
+		"client-entity-facts-changed",
+		entityDelta({ upserts: [entityFacts(7, { canTrade: true })] }),
+	);
 	f.select(7);
 	f.interactions.interactSelected(false);
 	expect(f.beginTrade).toHaveBeenCalledWith(7);
@@ -990,16 +965,15 @@ async function giveFixture() {
 	const give = vi
 		.spyOn(f.lifecycle, "submitInventory")
 		.mockResolvedValue(undefined);
-	f.emit("client-entity-facts-changed", {
-		projectileSupply: null,
-		salvage: null,
-		worldContainer: null,
-		upserts: [
-			entityFacts(4, { canReceiveGive: true }),
-			entityFacts(5, { canReceiveGive: true, canTrade: true }),
-		],
-		removed: [],
-	});
+	f.emit(
+		"client-entity-facts-changed",
+		entityDelta({
+			upserts: [
+				entityFacts(4, { canReceiveGive: true }),
+				entityFacts(5, { canReceiveGive: true, canTrade: true }),
+			],
+		}),
+	);
 	return {
 		...f,
 		give,
@@ -1026,13 +1000,7 @@ it("ordinary and bound Ust activation share the local workflow without generic U
 			useCapability: "salvage-tool" as const,
 		},
 	};
-	f.emit("client-entity-facts-changed", {
-		projectileSupply: null,
-		worldContainer: null,
-		salvage: null,
-		upserts: [changed],
-		removed: [],
-	});
+	f.emit("client-entity-facts-changed", entityDelta({ upserts: [changed] }));
 	f.interactions.use(2, false);
 	f.interactions.activate(2, "direct", false);
 	expect(f.beginSalvage).toHaveBeenNthCalledWith(1, 2);

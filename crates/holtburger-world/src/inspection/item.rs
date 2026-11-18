@@ -1,8 +1,8 @@
 //! Item appraisal facts shared by graphical and terminal inspection.
 
 use super::{
-    AttributeType, HeritageGroup, InspectionSource, ObjectInspectionError, UseRequirement,
-    VitalType,
+    AttributeType, HeritageGroup, InspectionSource, ObjectInspectionError, SecondaryAttribute,
+    UseRequirement,
 };
 use holtburger_common::properties::{
     ItemType, MaterialType, PropertyBool, PropertyDataId, PropertyFloat, PropertyInt,
@@ -482,7 +482,10 @@ pub(super) fn get_use_requirements(object: &InspectionSource<'_>) -> Vec<UseRequ
         .get_int_prop(PropertyInt::ItemAttributeLimit)
         .zip(object.get_int_prop(PropertyInt::ItemAttributeLevelLimit))
     {
-        if let Some(attribute) = AttributeType::from_repr(attribute as usize) {
+        if let Some(attribute) = u32::try_from(attribute)
+            .ok()
+            .and_then(AttributeType::from_repr)
+        {
             requirements.push(UseRequirement::Attribute { attribute, minimum });
         } else {
             log::warn!(
@@ -495,7 +498,7 @@ pub(super) fn get_use_requirements(object: &InspectionSource<'_>) -> Vec<UseRequ
         .get_int_prop(PropertyInt::ItemAttribute2ndLimit)
         .zip(object.get_int_prop(PropertyInt::ItemAttribute2ndLevelLimit))
     {
-        if let Some(vital) = VitalType::from_repr(vital as usize) {
+        if let Some(vital) = SecondaryAttribute::from_repr(vital as usize) {
             requirements.push(UseRequirement::Vital { vital, minimum });
         } else {
             log::warn!(
@@ -567,7 +570,7 @@ mod tests {
         entity.set_int_prop(PropertyInt::ItemAttributeLevelLimit, 295);
         entity.set_int_prop(
             PropertyInt::ItemAttribute2ndLimit,
-            VitalType::MaxMana as i32,
+            SecondaryAttribute::MaxMana as i32,
         );
         entity.set_int_prop(PropertyInt::ItemAttribute2ndLevelLimit, 300);
         let item = inspect(&entity);
@@ -590,7 +593,7 @@ mod tests {
                     minimum: 295
                 },
                 UseRequirement::Vital {
-                    vital: VitalType::MaxMana,
+                    vital: SecondaryAttribute::MaxMana,
                     minimum: 300
                 },
             ]

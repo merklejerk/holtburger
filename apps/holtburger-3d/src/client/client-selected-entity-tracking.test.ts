@@ -2,7 +2,12 @@ import { emptyHousing } from "./client-housing-contract";
 import { CASTER_EQUIP_MASK } from "./client-inventory-equipment";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { describe, expect, it, vi } from "vitest";
-import { entityFacts } from "./client-entity-mirror.test-support";
+import {
+	creatureFacts,
+	emptyPlayerSummary,
+	entityDelta,
+	entityFacts,
+} from "./client-entity-mirror.test-support";
 import { ClientSelectedEntityTracking } from "./client-selected-entity-tracking";
 import { ClientEntitySelection } from "./client-entity-selection";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
@@ -95,35 +100,11 @@ async function fixture() {
 					augmentationBonusSalvage: 0,
 				},
 			},
+			player: emptyPlayerSummary,
 			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(1),
-				...[7, 8].map((guid) =>
-					entityFacts(guid, {
-						description: {
-							kind: "known",
-							name: `Creature ${guid}`,
-							healthQuery: "eligible",
-							itemType: 0,
-							hasAlternateEquipSide: false,
-							builtInSpell: null,
-							mapCategory: "other",
-							objectFlags: 0,
-							wcid: null,
-							pyrealBalance: null,
-							aetheriaActivation: null,
-							burden: null,
-							equipLocations: null,
-							consumable: null,
-							useCapability: "direct" as const,
-							cooldown: null,
-							stackCount: null,
-							structure: { current: null, max: null },
-							icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
-							equipmentCantrip: null,
-						},
-					}),
-				),
+				...[7, 8].map((guid) => creatureFacts(guid)),
 				...[9, 10].map((guid, index) =>
 					entityFacts(guid, {
 						ownedByPlayer: true,
@@ -168,13 +149,7 @@ describe("ClientSelectedEntityTracking", () => {
 		if (item.description.kind !== "known")
 			throw new Error("Expected known item");
 		const unnamed = { ...item, description: { ...item.description, name: "" } };
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			upserts: [unnamed],
-			removed: [],
-		});
+		f.emit("client-entity-facts-changed", entityDelta({ upserts: [unnamed] }));
 		f.selection.select(11);
 		expect(f.interactions.display(false).name).toBe("[Unnamed · 0x0000000B]");
 		expect(unnamed.description.name).toBe("");
@@ -195,24 +170,23 @@ describe("ClientSelectedEntityTracking", () => {
 				},
 				{ kind: "contained", parentGuid: 1, slot: { kind: "item", index: 0 } },
 			] as const) {
-				f.emit("client-entity-facts-changed", {
-					projectileSupply: null,
-					salvage: null,
-					worldContainer: null,
-					upserts: [
-						{
-							...item,
-							ownedByPlayer,
-							location,
-							description: {
-								...item.description,
-								equipLocations: CASTER_EQUIP_MASK,
-								useCapability: "unsupported",
+				f.emit(
+					"client-entity-facts-changed",
+					entityDelta({
+						upserts: [
+							{
+								...item,
+								ownedByPlayer,
+								location,
+								description: {
+									...item.description,
+									equipLocations: CASTER_EQUIP_MASK,
+									useCapability: "unsupported",
+								},
 							},
-						},
-					],
-					removed: [],
-				});
+						],
+					}),
+				);
 				expect(f.interactions.display(false).canInteract).toBe(ownedByPlayer);
 			}
 		}
@@ -226,15 +200,14 @@ describe("ClientSelectedEntityTracking", () => {
 			throw new Error("Expected known item");
 		f.selection.select(11);
 		for (const useCapability of ["unsupported", "unavailable"] as const) {
-			f.emit("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				upserts: [
-					{ ...item, description: { ...item.description, useCapability } },
-				],
-				removed: [],
-			});
+			f.emit(
+				"client-entity-facts-changed",
+				entityDelta({
+					upserts: [
+						{ ...item, description: { ...item.description, useCapability } },
+					],
+				}),
+			);
 			expect(f.interactions.display(false).canInteract).toBe(false);
 			expect(f.interactions.display(true).canInteract).toBe(
 				useCapability === "unsupported",
@@ -250,19 +223,21 @@ describe("ClientSelectedEntityTracking", () => {
 			throw new Error("Expected known item");
 		f.selection.select(11);
 		for (const canPickUp of [true, false]) {
-			f.emit("client-entity-facts-changed", {
-				projectileSupply: null,
-				salvage: null,
-				worldContainer: null,
-				upserts: [
-					{
-						...item,
-						canPickUp,
-						description: { ...item.description, useCapability: "unsupported" },
-					},
-				],
-				removed: [],
-			});
+			f.emit(
+				"client-entity-facts-changed",
+				entityDelta({
+					upserts: [
+						{
+							...item,
+							canPickUp,
+							description: {
+								...item.description,
+								useCapability: "unsupported",
+							},
+						},
+					],
+				}),
+			);
 			expect(f.interactions.display(false).canInteract).toBe(canPickUp);
 		}
 		f.destroy();
@@ -270,6 +245,22 @@ describe("ClientSelectedEntityTracking", () => {
 
 	it("replaces subscriptions, filters health by GUID, and distinguishes unknown from zero", async () => {
 		const f = await fixture();
+		const emitHealth = (
+			guid: number,
+			fraction: number,
+			observedAtSeconds: number,
+			instanceSequence = 1,
+		) =>
+			f.emit(
+				"client-entity-facts-changed",
+				entityDelta({
+					upserts: [
+						creatureFacts(guid, {
+							health: { instanceSequence, fraction, observedAtSeconds },
+						}),
+					],
+				}),
+			);
 		f.selection.select(7);
 		f.selection.select(7);
 		expect(f.invoke.mock.calls).toEqual([
@@ -278,17 +269,12 @@ describe("ClientSelectedEntityTracking", () => {
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "awaiting-response",
 		});
-		f.emit("client-entity-health-updated", {
-			guid: 7,
-			worldGeneration: 1,
-			instanceSequence: 1,
-			healthFraction: 0.4,
-			observedAt: { seconds: 1 },
-		});
+		emitHealth(7, 0.4, 1);
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "known",
 			fraction: 0.4,
 		});
+		// Re-selecting a previously observed entity still awaits a newer observation.
 		f.selection.select(null);
 		f.selection.select(7);
 		expect(f.interactions.display(false).health).toEqual({
@@ -297,35 +283,17 @@ describe("ClientSelectedEntityTracking", () => {
 		expect(f.invoke).toHaveBeenLastCalledWith("query_client_entity_health", {
 			guid: 7,
 		});
-		f.emit("client-entity-health-updated", {
-			guid: 7,
-			worldGeneration: 1,
-			instanceSequence: 1,
-			healthFraction: 0.4,
-			observedAt: { seconds: 2 },
-		});
+		emitHealth(7, 0.4, 2);
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "known",
 			fraction: 0.4,
 		});
 		f.selection.select(8);
-		f.emit("client-entity-health-updated", {
-			guid: 7,
-			worldGeneration: 1,
-			instanceSequence: 1,
-			healthFraction: 0.2,
-			observedAt: { seconds: 3 },
-		});
+		emitHealth(7, 0.2, 3);
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "awaiting-response",
 		});
-		f.emit("client-entity-health-updated", {
-			guid: 8,
-			worldGeneration: 1,
-			instanceSequence: 1,
-			healthFraction: 0,
-			observedAt: { seconds: 4 },
-		});
+		emitHealth(8, 0, 4);
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "known",
 			fraction: 0,
@@ -336,6 +304,90 @@ describe("ClientSelectedEntityTracking", () => {
 		});
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "unavailable",
+		});
+		f.destroy();
+	});
+
+	it("fences stale health across worldGeneration changes and incarnation replacement", async () => {
+		const f = await fixture();
+		f.selection.select(7);
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({
+				upserts: [
+					creatureFacts(7, {
+						health: {
+							instanceSequence: 1,
+							fraction: 0.75,
+							observedAtSeconds: 10,
+						},
+					}),
+				],
+			}),
+		);
+		expect(f.interactions.display(false).health).toEqual({
+			kind: "known",
+			fraction: 0.75,
+		});
+
+		// Advancing worldGeneration re-queries and gates out the pre-discontinuity sample.
+		f.invoke.mockClear();
+		f.emit("client-presentation-discontinuity", {
+			kind: "forced-reposition",
+			worldGeneration: 3,
+		});
+		expect(f.invoke.mock.calls).toEqual([
+			["query_client_entity_health", { guid: 7 }],
+		]);
+		expect(f.interactions.display(false).health).toEqual({
+			kind: "awaiting-response",
+		});
+
+		// A fresh sample in worldGeneration 3 settles the awaiting state.
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({
+				upserts: [
+					creatureFacts(7, {
+						health: {
+							instanceSequence: 1,
+							fraction: 0.6,
+							observedAtSeconds: 11,
+						},
+					}),
+				],
+			}),
+		);
+		expect(f.interactions.display(false).health).toEqual({
+			kind: "known",
+			fraction: 0.6,
+		});
+
+		// Incarnation replacement clears record.health to null and triggers a fresh query.
+		f.invoke.mockClear();
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({ upserts: [creatureFacts(7)] }),
+		);
+		expect(f.invoke.mock.calls).toEqual([
+			["query_client_entity_health", { guid: 7 }],
+		]);
+		expect(f.interactions.display(false).health).toEqual({
+			kind: "awaiting-response",
+		});
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({
+				upserts: [
+					creatureFacts(7, {
+						health: { instanceSequence: 2, fraction: 1, observedAtSeconds: 12 },
+					}),
+				],
+			}),
+		);
+		expect(f.interactions.display(false).health).toEqual({
+			kind: "known",
+			fraction: 1,
 		});
 		f.destroy();
 	});
@@ -369,81 +421,33 @@ describe("ClientSelectedEntityTracking", () => {
 		f.selection.select(11);
 		expect(f.invoke.mock.calls).toEqual([]);
 		f.invoke.mockClear();
-		const creature = entityFacts(11, {
-			description: {
-				kind: "known",
-				name: "Creature",
-				healthQuery: "eligible",
-				itemType: 0,
-				hasAlternateEquipSide: false,
-				builtInSpell: null,
-				mapCategory: "mob",
-				objectFlags: 0,
-				wcid: null,
-				pyrealBalance: null,
-				aetheriaActivation: null,
-				burden: null,
-				equipLocations: null,
-				consumable: null,
-				useCapability: "direct" as const,
-				cooldown: null,
-				stackCount: null,
-				structure: { current: null, max: null },
-				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
-				equipmentCantrip: null,
-			},
-		});
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			upserts: [creature],
-			removed: [],
-		});
+		const creature = creatureFacts(
+			11,
+			{},
+			{ name: "Creature", mapCategory: "mob" },
+		);
+		f.emit("client-entity-facts-changed", entityDelta({ upserts: [creature] }));
 		expect(f.interactions.display(false).nameColor).toBe(
 			SHARED_FRONTEND_TUNING.rendering.nameplates.appearance.fillColors.mob,
 		);
-		f.emit("client-entity-health-updated", {
-			guid: 11,
-			worldGeneration: 1,
-			instanceSequence: 1,
-			healthFraction: 0.5,
-			observedAt: { seconds: 5 },
-		});
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			upserts: [
-				{
-					...creature,
-					description: {
-						...creature.description,
-						name: "Renamed",
-						kind: "known",
-						healthQuery: "eligible",
-						itemType: 0,
-						hasAlternateEquipSide: false,
-						builtInSpell: null,
-						mapCategory: "other",
-						objectFlags: 0,
-						wcid: null,
-						pyrealBalance: null,
-						aetheriaActivation: null,
-						burden: null,
-						equipLocations: null,
-						consumable: null,
-						useCapability: "direct" as const,
-						cooldown: null,
-						stackCount: null,
-						structure: { current: null, max: null },
-						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
-						equipmentCantrip: null,
-					},
-				},
-			],
-			removed: [],
-		});
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({
+				upserts: [
+					creatureFacts(
+						11,
+						{
+							health: {
+								instanceSequence: 1,
+								fraction: 0.5,
+								observedAtSeconds: 5,
+							},
+						},
+						{ name: "Renamed", mapCategory: "other" },
+					),
+				],
+			}),
+		);
 		expect(f.interactions.display(false)).toEqual({
 			name: "Renamed",
 			nameColor:
@@ -454,13 +458,10 @@ describe("ClientSelectedEntityTracking", () => {
 			canInteract: true,
 			interactionLabel: "Interact",
 		});
-		f.emit("client-entity-facts-changed", {
-			projectileSupply: null,
-			salvage: null,
-			worldContainer: null,
-			upserts: [entityFacts(11)],
-			removed: [],
-		});
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({ upserts: [entityFacts(11)] }),
+		);
 		expect(f.invoke.mock.calls).toEqual([
 			["query_client_entity_health", { guid: 11 }],
 			["query_client_entity_health", { guid: 0 }],
@@ -506,13 +507,20 @@ describe("ClientSelectedEntityTracking", () => {
 		f.interactions.destroy();
 		f.interactions.destroy();
 		f.selection.select(8);
-		f.emit("client-entity-health-updated", {
-			guid: 8,
-			worldGeneration: 1,
-			instanceSequence: 1,
-			healthFraction: 0.9,
-			observedAt: { seconds: 6 },
-		});
+		f.emit(
+			"client-entity-facts-changed",
+			entityDelta({
+				upserts: [
+					creatureFacts(8, {
+						health: {
+							instanceSequence: 1,
+							fraction: 0.9,
+							observedAtSeconds: 6,
+						},
+					}),
+				],
+			}),
+		);
 		expect(f.interactions.display(false).health).toEqual({
 			kind: "unavailable",
 		});

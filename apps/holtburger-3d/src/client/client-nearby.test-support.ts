@@ -11,7 +11,10 @@ import {
 } from "../lib/game/runtime/dynamic-entity-feed";
 import type { ClientLifecycleSessionState } from "./client-lifecycle-session";
 import type { NearbySessionEvent } from "./client-nearby";
-import { entityFacts } from "./client-entity-mirror.test-support";
+import {
+	emptyPlayerSummary,
+	entityFacts,
+} from "./client-entity-mirror.test-support";
 import { targetingEntity } from "./client-targeting.test-support";
 
 /** Asset-free accepted public catalog facts; merged identity is deliberately different. */
@@ -77,6 +80,7 @@ export class NearbyTestSession {
 					entities: [entityFacts(1), ...facts],
 					worldContainer: { kind: "closed" },
 					projectileSupply: { kind: "not-applicable" },
+					player: emptyPlayerSummary,
 					salvage: {
 						skills: {
 							salvagingSkill: 0,
@@ -103,6 +107,7 @@ export class NearbyTestSession {
 			removed: [...removed],
 			worldContainer: null,
 			projectileSupply: null,
+			player: null,
 			salvage: null,
 		});
 		if (prepared !== null) this.entities.commit(prepared);

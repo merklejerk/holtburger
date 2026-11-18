@@ -298,9 +298,6 @@ export class ClientAppraisalRequests {
 				pending.consumers.clear();
 				return;
 			}
-			case "entity-health":
-				this.#settleFactsEntry(event.health.guid);
-				return;
 			case "appraisal-facts-settled":
 				this.#settleFactsEntry(event.guid);
 				return;

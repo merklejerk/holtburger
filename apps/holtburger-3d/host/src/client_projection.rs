@@ -1021,14 +1021,6 @@ pub enum ClientHostEvent {
         /// Observed trigger; a tracking removal does not prove death.
         cause: holtburger_world::summon::SummonEndCause,
     },
-    /// Server-reported health for an entity, independent of frontend selection.
-    EntityHealthUpdated {
-        guid: Guid,
-        world_generation: u64,
-        instance_sequence: u16,
-        health_fraction: f32,
-        observed_at: holtburger_core::DynamicEntityHostTime,
-    },
     /// Proven sticky-targeted hostile attack action or offensive player combat action.
     EntityCombatObserved {
         guid: Guid,
@@ -1400,19 +1392,6 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             instance_sequence,
             owner,
             cause,
-        }),
-        ClientViewEvent::EntityHealthUpdated {
-            guid,
-            world_generation,
-            instance_sequence,
-            health_fraction,
-            observed_at,
-        } => Some(ClientHostEvent::EntityHealthUpdated {
-            guid,
-            world_generation,
-            instance_sequence,
-            health_fraction,
-            observed_at,
         }),
         ClientViewEvent::EntityCombatObserved {
             guid,
@@ -2880,31 +2859,6 @@ mod tests {
                 .is_none()
             );
         }
-    }
-
-    #[test]
-    fn entity_health_reaches_the_renderer_with_identity_and_fraction() {
-        let projected = project_client_event(ClientViewEvent::EntityHealthUpdated {
-            guid: Guid(7),
-            world_generation: 2,
-            instance_sequence: 5,
-            health_fraction: 0.5,
-            observed_at: holtburger_core::DynamicEntityHostTime::new(12.5).unwrap(),
-        })
-        .expect("entity health must reach the host");
-        assert_eq!(
-            publish_event_json(projected),
-            serde_json::json!({
-                "event": "client-entity-health-updated",
-                "payload": {
-                    "guid": 7,
-                    "worldGeneration": 2,
-                    "instanceSequence": 5,
-                    "healthFraction": 0.5,
-                    "observedAt": { "seconds": 12.5 }
-                }
-            })
-        );
     }
 
     #[test]

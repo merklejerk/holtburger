@@ -66,6 +66,11 @@ function fixture() {
 						entities: [entityFacts(1), ...records],
 						worldContainer: { kind: "closed" },
 						projectileSupply: { kind: "not-applicable" },
+						player: {
+							pyrealBalance: null,
+							burden: null,
+							aetheriaActivation: null,
+						},
 						salvage: {
 							skills: {
 								salvagingSkill: 0,

@@ -6,7 +6,7 @@ use holtburger_common::{Guid, properties::ObjectDescriptionFlag};
 use holtburger_world::crafting::salvage::SalvageContext;
 use holtburger_world::{
     WorldEvent, WorldState,
-    entity_facts::{ClientEntityFacts, EntityStorageLocation},
+    entity_facts::{ClientEntityFacts, EntityStorageLocation, PlayerEntitySummary},
     projectile_supply::ProjectileSupply,
     state::{ScenePlacementError, WorldContainerState},
 };
@@ -20,6 +20,8 @@ pub struct ClientEntitySnapshot {
     pub projectile_supply: ProjectileSupply,
     /// Shared cold salvage yield profile.
     pub salvage: SalvageContext,
+    /// Local-player aggregate inventory/equipment facts, kept off per-entity descriptions.
+    pub player: PlayerEntitySummary,
     /// Confirmed access published together with its descendant records.
     pub world_container: WorldContainerState,
     /// GUID-ordered records, including pending owned and accessible external identities.
@@ -63,6 +65,7 @@ impl ClientEntitySnapshot {
         Ok(Self {
             projectile_supply: world.projectile_supply(),
             salvage: world.salvage_context(),
+            player: world.player_entity_summary(),
             world_container: world.world_container(),
             entities,
         })
@@ -97,6 +100,8 @@ pub struct ClientEntityDelta {
     pub projectile_supply: Option<ProjectileSupply>,
     /// Changed yield profile; None preserves the previous value.
     pub salvage: Option<SalvageContext>,
+    /// Replacement player summary when changed; None keeps the previous value.
+    pub player: Option<PlayerEntitySummary>,
     /// Replacement access when changed; None keeps the previously accepted level.
     pub world_container: Option<WorldContainerState>,
     /// Complete replacement records, applied together before observers run.
@@ -119,6 +124,8 @@ pub(super) struct EntityFactsPublication {
     projectile_supply: ProjectileSupply,
     /// Last cold salvage inputs published with the entity domain.
     salvage: SalvageContext,
+    /// Last local-player summary published with the entity domain.
+    player: PlayerEntitySummary,
     records: BTreeMap<Guid, ClientEntityFacts>,
     dirty: BTreeSet<Guid>,
     owner: Option<Guid>,
@@ -152,15 +159,6 @@ impl EntityFactsPublication {
                     .filter(|record| record.owned_by_player)
                     .map(|record| record.guid),
             );
-        }
-        // Strength and enchantments change burden without changing an owned item.
-        // Before the first collection, owner establishment already prepares the player.
-        if matches!(
-            event,
-            WorldEvent::AttributeUpdated(_) | WorldEvent::PlayerEnchantmentsUpdated { .. }
-        ) && let Some(owner) = self.owner
-        {
-            self.dirty.insert(owner);
         }
         let guid = match event {
             WorldEvent::EntitySpawned(entity)
@@ -215,10 +213,12 @@ impl EntityFactsPublication {
         let storage_changes = world.take_storage_changes();
         let projectile_supply = world.projectile_supply();
         let salvage = world.salvage_context();
+        let player = world.player_entity_summary();
         let mut delta = ClientEntityDelta {
             salvage: (salvage != self.salvage).then_some(salvage),
             projectile_supply: (projectile_supply != self.projectile_supply)
                 .then_some(projectile_supply),
+            player: (player != self.player).then_some(player),
             ..Default::default()
         };
         if self.container != world.world_container() {
@@ -267,22 +267,6 @@ impl EntityFactsPublication {
                 session_entity_facts(world, *guid, opened_corpses, host_origin)?,
             ));
         }
-        // Reuse projected ownership to invalidate burden, including items just transferred out.
-        // The player may already be prepared through an ordinary property/storage update.
-        if !self.dirty.contains(&world.player.guid)
-            && prepared.iter().any(|(guid, record)| {
-                record.as_ref().is_some_and(|record| record.owned_by_player)
-                    || self
-                        .records
-                        .get(guid)
-                        .is_some_and(|record| record.owned_by_player)
-            })
-        {
-            prepared.push((
-                world.player.guid,
-                session_entity_facts(world, world.player.guid, opened_corpses, host_origin)?,
-            ));
-        }
         for (guid, record) in prepared {
             match record {
                 Some(record) if self.records.get(&guid) != Some(&record) => {
@@ -297,6 +281,7 @@ impl EntityFactsPublication {
         self.container = world.world_container();
         self.projectile_supply = projectile_supply;
         self.salvage = salvage;
+        self.player = player;
         Ok(CollectedEntityFacts {
             delta,
             storage_changed,
@@ -321,6 +306,7 @@ impl super::ClientRuntime {
         let delta = collected.delta;
         if delta.salvage.is_some()
             || delta.projectile_supply.is_some()
+            || delta.player.is_some()
             || delta.world_container.is_some()
             || !delta.upserts.is_empty()
             || !delta.removed.is_empty()
@@ -724,24 +710,14 @@ mod tests {
             .get_mut(PLAYER)
             .unwrap()
             .set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
-        let activation = |description: &EntityDescription| match description {
-            EntityDescription::Known {
-                aetheria_activation,
-                ..
-            } => *aetheria_activation,
-            EntityDescription::Pending => panic!("player description must be known"),
-        };
         let mut publication = EntityFactsPublication::default();
         let initial = publication.collect(&mut world).unwrap();
+        assert_eq!(initial.player, None);
         assert_eq!(
-            activation(
-                &initial
-                    .upserts
-                    .iter()
-                    .find(|record| record.guid == PLAYER)
-                    .unwrap()
-                    .description
-            ),
+            ClientEntitySnapshot::from_world(&world)
+                .unwrap()
+                .player
+                .aetheria_activation,
             None
         );
 
@@ -833,22 +809,18 @@ mod tests {
                 publication.observe(&event);
             }
             let delta = publication.collect(&mut world).unwrap();
-            let record = delta
-                .upserts
-                .iter()
-                .find(|record| record.guid == PLAYER)
-                .expect("activation change must republish player facts");
-            assert_eq!(activation(&record.description), Some(expected));
             assert_eq!(
-                activation(
-                    &ClientEntitySnapshot::from_world(&world)
-                        .unwrap()
-                        .entities
-                        .iter()
-                        .find(|record| record.guid == PLAYER)
-                        .unwrap()
-                        .description
-                ),
+                delta
+                    .player
+                    .expect("activation change must republish player summary")
+                    .aetheria_activation,
+                Some(expected)
+            );
+            assert_eq!(
+                ClientEntitySnapshot::from_world(&world)
+                    .unwrap()
+                    .player
+                    .aetheria_activation,
                 Some(expected)
             );
         }
@@ -1364,14 +1336,14 @@ mod tests {
         {
             publisher.observe(&event);
         }
-        let burden = |mirror: &BTreeMap<Guid, ClientEntityFacts>| {
-            let EntityDescription::Known { burden, .. } = mirror[&PLAYER].description else {
-                panic!("player description must be known");
-            };
-            burden
+        let burden = |world: &WorldState| {
+            ClientEntitySnapshot::from_world(world)
+                .unwrap()
+                .player
+                .burden
         };
         assert_reconstructed(&mut world, &mut publisher, &mut mirror);
-        assert_eq!(burden(&mirror), None);
+        assert_eq!(burden(&world), None);
 
         let mut strength = Attribute {
             attr_type: AttributeType::StrengthAttr,
@@ -1388,14 +1360,16 @@ mod tests {
             .attributes
             .insert(strength.attr_type, strength.clone());
         publisher.observe(&WorldEvent::AttributeUpdated(strength.clone()));
-        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
-        assert_eq!(burden(&mirror), Some(0.0));
+        let delta = publisher.collect(&mut world).unwrap();
+        assert_eq!(delta.player.unwrap().burden, Some(0.0));
+        assert!(delta.upserts.is_empty());
+        assert_eq!(burden(&world), Some(0.0));
 
         for event in world.handle_message(&place(ITEM, PLAYER, InventoryEntryKind::Item)) {
             publisher.observe(&event);
         }
         assert_reconstructed(&mut world, &mut publisher, &mut mirror);
-        assert_eq!(burden(&mirror), None);
+        assert_eq!(burden(&world), None);
 
         let mut description = ObjectDescriptionData::with_guid(ITEM);
         description.public_weenie_desc.name = Some("Heavy item".into());
@@ -1426,7 +1400,7 @@ mod tests {
                 publisher.observe(&event);
             }
             assert_reconstructed(&mut world, &mut publisher, &mut mirror);
-            assert_eq!(burden(&mirror), Some(expected), "after {message:?}");
+            assert_eq!(burden(&world), Some(expected), "after {message:?}");
         }
         strength.current = 200;
         world
@@ -1434,15 +1408,21 @@ mod tests {
             .attributes
             .insert(strength.attr_type, strength.clone());
         publisher.observe(&WorldEvent::AttributeUpdated(strength));
-        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
-        assert_eq!(burden(&mirror), Some(0.5));
+        let delta = publisher.collect(&mut world).unwrap();
+        assert_eq!(delta.player.unwrap().burden, Some(0.5));
+        assert!(delta.upserts.is_empty());
+        assert_eq!(burden(&world), Some(0.5));
 
         for event in world.handle_message(&place(ITEM, Guid(99), InventoryEntryKind::Item)) {
             publisher.observe(&event);
         }
-        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
-        assert_eq!(burden(&mirror), Some(0.0));
-        assert!(publisher.collect(&mut world).unwrap().upserts.is_empty());
+        let delta = publisher.collect(&mut world).unwrap();
+        assert_eq!(delta.player.unwrap().burden, Some(0.0));
+        assert_eq!(burden(&world), Some(0.0));
+        assert_eq!(
+            publisher.collect(&mut world).unwrap(),
+            ClientEntityDelta::default()
+        );
     }
 
     #[test]

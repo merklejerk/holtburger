@@ -6,7 +6,6 @@ import {
 import type {
 	ClientCombatMode,
 	ClientEntityCombatObserved,
-	ClientEntityHealth,
 } from "./client-host-contract";
 import type { ClientCombatHealthTuning } from "./client-tuning-contract";
 
@@ -116,19 +115,6 @@ export class ClientCombatHealthRequests {
 	/** Track selected identity so combat health requests do not duplicate selected QueryHealth. */
 	setSelectedTarget(targetGuid: number | null): void {
 		this.#selectedTargetGuid = targetGuid;
-	}
-
-	/** Clear an inflight background request when authoritative entity health arrives. */
-	acceptEntityHealth(event: ClientEntityHealth): void {
-		if (event.worldGeneration !== this.#worldGeneration) return;
-		const episode = this.#interestByGuid.get(event.guid);
-		if (
-			episode !== undefined &&
-			episode.worldGeneration === event.worldGeneration &&
-			episode.instanceSequence === event.instanceSequence
-		) {
-			episode.inFlight = null;
-		}
 	}
 
 	/** Record a player-initiated attack or attributed offensive outcome against `targetGuid`. */
@@ -336,6 +322,15 @@ export class ClientCombatHealthRequests {
 			// Selected targets already receive periodic QueryHealth from ClientSelectedEntityTracking.
 			cancelInFlight(episode);
 			return;
+		}
+		if (
+			episode.inFlight !== null &&
+			freshObservedAtMs !== null &&
+			episode.lastRequestAtMs !== null &&
+			freshObservedAtMs >= episode.lastRequestAtMs
+		) {
+			episode.inFlight.settle?.();
+			episode.inFlight = null;
 		}
 		if (
 			episode.inFlight !== null &&

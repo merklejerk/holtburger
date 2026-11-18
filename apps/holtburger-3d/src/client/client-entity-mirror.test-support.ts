@@ -1,7 +1,54 @@
 import type {
+	ClientEntityDelta,
 	ClientEntityFacts,
 	ClientEntitySnapshot,
+	PlayerEntitySummary,
 } from "./client-entity-mirror";
+
+type KnownEntityDescription = Extract<
+	ClientEntityFacts["description"],
+	{ kind: "known" }
+>;
+
+export const emptyPlayerSummary: PlayerEntitySummary = {
+	pyrealBalance: null,
+	burden: null,
+	aetheriaActivation: null,
+};
+
+/** Minimal delta wrapper so tests specify only the semantic fields under test. */
+export function entityDelta(
+	overrides: Partial<ClientEntityDelta> = {},
+): ClientEntityDelta {
+	return {
+		projectileSupply: null,
+		salvage: null,
+		player: null,
+		worldContainer: null,
+		upserts: [],
+		removed: [],
+		...overrides,
+	};
+}
+
+/** Known creature fixture with health-query eligibility enabled by default. */
+export function creatureFacts(
+	guid: number,
+	overrides: Partial<ClientEntityFacts> = {},
+	descriptionOverrides: Partial<KnownEntityDescription> = {},
+): ClientEntityFacts {
+	const base = entityFacts(guid, { targeting: "creature", ...overrides });
+	if (base.description.kind !== "known") return base;
+	return {
+		...base,
+		description: {
+			...base.description,
+			name: `Creature ${guid}`,
+			healthQuery: "eligible",
+			...descriptionOverrides,
+		},
+	};
+}
 
 /** Minimal established player root for transport fixtures unrelated to inventory. */
 export function playerEntitySnapshot(playerGuid: number): ClientEntitySnapshot {
@@ -14,12 +61,21 @@ export function playerEntitySnapshot(playerGuid: number): ClientEntitySnapshot {
 				augmentationBonusSalvage: 0,
 			},
 		},
+		player: emptyPlayerSummary,
 		worldContainer: { kind: "closed" },
 		entities: [entityFacts(playerGuid)],
 	};
 }
 
 /** Known non-creature fixture; each scenario explicitly supplies its storage relationship. */
+export function entityFacts(
+	guid: number,
+	overrides?: Omit<Partial<ClientEntityFacts>, "description">,
+): ClientEntityFacts & { readonly description: KnownEntityDescription };
+export function entityFacts(
+	guid: number,
+	overrides: Partial<ClientEntityFacts>,
+): ClientEntityFacts;
 export function entityFacts(
 	guid: number,
 	overrides: Partial<ClientEntityFacts> = {},
@@ -48,9 +104,6 @@ export function entityFacts(
 			mapCategory: "other",
 			objectFlags: 0,
 			wcid: null,
-			pyrealBalance: null,
-			aetheriaActivation: null,
-			burden: null,
 			equipLocations: null,
 			consumable: null,
 			useCapability: "direct" as const,

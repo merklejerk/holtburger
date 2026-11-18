@@ -64,7 +64,7 @@
 							{
 								"type": "attribute",
 								"data": {
-									"attribute": "self",
+									"attribute": "SelfAttr",
 									"minimum": 295
 								}
 							}

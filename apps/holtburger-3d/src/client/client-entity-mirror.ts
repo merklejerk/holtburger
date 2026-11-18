@@ -175,20 +175,6 @@ const clientEntityFactsSchema = z
 					objectFlags: guid,
 					/** Server template identity, independent of scene residency. */
 					wcid: guid.nullable(),
-					/** Server aggregate across packs; null until received. */
-					pyrealBalance: guid.nullable(),
-					/** World-resolved local-player activation; null before the character baseline. */
-					aetheriaActivation: z
-						.object({
-							blue: z.boolean(),
-							yellow: z.boolean(),
-							red: z.boolean(),
-						})
-						.strict()
-						.readonly()
-						.nullable(),
-					/** World-owned local-player burden ratio, unknown before hydration. */
-					burden: z.number().finite().nonnegative().nullable(),
 					/** World-derived highest ranked equipment cantrip tier; null when unappraisable/non-equipment. */
 					equipmentCantrip: equipmentCantripStateSchema.nullable(),
 					healthQuery: z.enum(["eligible", "ineligible"]),
@@ -298,11 +284,34 @@ const clientEntityFactsSchema = z
 	.strict()
 	.readonly();
 
+/** Local-player aggregate inventory/equipment facts, kept off per-entity descriptions. */
+const playerEntitySummarySchema = z
+	.object({
+		/** Server aggregate across packs; null until received. */
+		pyrealBalance: guid.nullable(),
+		/** World-owned local-player burden ratio, unknown before hydration. */
+		burden: z.number().finite().nonnegative().nullable(),
+		/** World-resolved local-player activation; null before the character baseline. */
+		aetheriaActivation: z
+			.object({
+				blue: z.boolean(),
+				yellow: z.boolean(),
+				red: z.boolean(),
+			})
+			.strict()
+			.readonly()
+			.nullable(),
+	})
+	.strict()
+	.readonly();
+export type PlayerEntitySummary = z.infer<typeof playerEntitySummarySchema>;
+
 /** Complete semantic domain for initial connection or replacement after receiver loss. */
 export const clientEntitySnapshotSchema = z
 	.object({
 		projectileSupply: projectileSupplySchema,
 		salvage: salvageContextSchema,
+		player: playerEntitySummarySchema,
 		entities: z.array(clientEntityFactsSchema),
 		worldContainer: worldContainerSchema,
 	})
@@ -313,6 +322,7 @@ export const clientEntityDeltaSchema = z
 		/** Null retains the previous supply; unknown supply is an explicit pending value. */
 		projectileSupply: projectileSupplySchema.nullable(),
 		salvage: salvageContextSchema.nullable(),
+		player: playerEntitySummarySchema.nullable(),
 		upserts: z.array(clientEntityFactsSchema),
 		removed: z.array(guid),
 		worldContainer: worldContainerSchema.nullable(),
@@ -328,6 +338,8 @@ export interface ClientEntityLevel {
 	/** Supply accepted together with equipment and item quantities. */
 	readonly projectileSupply: ProjectileSupply;
 	readonly salvage: SalvageContext;
+	/** Local-player aggregate inventory/equipment facts. */
+	readonly player: PlayerEntitySummary;
 	/** Access accepted in the same commit as contents and their pickup eligibility. */
 	readonly worldContainer: WorldContainerState;
 	/** Local display invalidation only; not a wire sequence or transport identity. */
@@ -411,6 +423,7 @@ export class ClientEntityMirror {
 			level: {
 				entities,
 				playerGuid,
+				player: snapshot.player,
 				worldContainer: snapshot.worldContainer,
 				projectileSupply: snapshot.projectileSupply,
 				salvage: snapshot.salvage,
@@ -424,6 +437,7 @@ export class ClientEntityMirror {
 		if (
 			delta.salvage === null &&
 			delta.projectileSupply === null &&
+			delta.player === null &&
 			delta.worldContainer === null &&
 			delta.upserts.length === 0 &&
 			delta.removed.length === 0
@@ -446,6 +460,7 @@ export class ClientEntityMirror {
 		return {
 			level: {
 				entities,
+				player: delta.player === null ? level.player : delta.player,
 				salvage: delta.salvage === null ? level.salvage : delta.salvage,
 				projectileSupply:
 					delta.projectileSupply === null

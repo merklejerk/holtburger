@@ -1659,9 +1659,6 @@ export class ClientGameplayPresentation {
 					this.#hostNowMs(performance.now()),
 				);
 				return;
-			case "entity-health":
-				this.#combatHealth.acceptEntityHealth(event.health);
-				return;
 			case "entity-combat-observed":
 				this.#combatHealth.acceptCombatObserved(event.combat);
 				return;

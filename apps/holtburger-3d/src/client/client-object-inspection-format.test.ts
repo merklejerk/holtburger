@@ -172,9 +172,21 @@ describe("object inspection formatting", () => {
 		expect(
 			formatWieldRequirement({
 				type: "training",
-				data: { skill: "HeavyWeapons", level: "specialized" },
+				data: { skill: "HeavyWeapons", level: "Specialized" },
 			}),
 		).toBe("Heavy Weapons: Specialized");
+		expect(
+			formatWieldRequirement({
+				type: "attribute",
+				data: { attribute: "StrengthAttr", difficulty: 200 },
+			}),
+		).toBe("Strength: 200");
+		expect(
+			formatWieldRequirement({
+				type: "raw-attribute",
+				data: { attribute: "SelfAttr", difficulty: 150 },
+			}),
+		).toBe("Base Self: 150");
 		expect(
 			formatInspectionEffect({
 				type: "slayer",
@@ -225,7 +237,7 @@ it("formats threshold-only, attribute, vital, heritage and owner requirements", 
 	expect(
 		formatUseRequirement({
 			type: "attribute",
-			data: { attribute: "self", minimum: 295 },
+			data: { attribute: "SelfAttr", minimum: 295 },
 		}),
 	).toBe("Self: 295");
 	expect(

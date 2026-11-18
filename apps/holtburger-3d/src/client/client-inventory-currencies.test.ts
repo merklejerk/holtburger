@@ -40,6 +40,7 @@ const total = (...items: ClientEntityFacts[]) =>
 				augmentationBonusSalvage: 0,
 			},
 		},
+		player: { pyrealBalance: null, burden: null, aetheriaActivation: null },
 		worldContainer: { kind: "closed" },
 		playerGuid: 1,
 		revision: 1,

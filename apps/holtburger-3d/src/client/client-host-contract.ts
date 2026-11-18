@@ -194,28 +194,6 @@ const dynamicEntityObservedAtSchema = z
 	})
 	.strict();
 
-const entityHealthSchema = z
-	.object({
-		/** Entity whose health changed; the server does not echo selection revisions. */
-		guid,
-		/** World generation at the time of observation. */
-		worldGeneration: z.number().int().nonnegative(),
-		/** Entity incarnation sequence to prevent stale cross-incarnation health carryover. */
-		instanceSequence: z.number().int().min(0).max(0xffff),
-		/** Latest health fraction reported by the server. */
-		healthFraction: finiteNumber.min(0).max(1),
-		/** Host monotonic observation time matching the dynamic-entity timeline origin. */
-		observedAt: dynamicEntityObservedAtSchema,
-	})
-	.strict();
-
-/** Health update forwarded independently of the renderer's selected identity. */
-export type ClientEntityHealth = z.infer<typeof entityHealthSchema>;
-
-export function decodeClientEntityHealth(value: unknown): ClientEntityHealth {
-	return entityHealthSchema.parse(value);
-}
-
 const entityCombatObservedSchema = z
 	.object({
 		/** Remote or attacked entity incarnation observed in hostile combat with local player. */

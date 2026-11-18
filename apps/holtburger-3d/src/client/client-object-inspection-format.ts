@@ -105,6 +105,10 @@ export function humanizeInspectionName(value: string): string {
 	return spaced.replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function humanizeAttributeName(value: string): string {
+	return humanizeInspectionName(value.replace(/Attr$/, ""));
+}
+
 /** Exact user-facing label for retail's public-flag character classification. */
 export function formatPlayerKillerStatus(
 	status: CharacterIdentity["playerKillerStatus"],
@@ -170,7 +174,7 @@ export function formatUseRequirement(
 			return `${humanizeInspectionName(data.skill)}: ${value}`;
 		}
 		case "attribute":
-			return `${humanizeInspectionName(data.attribute)}: ${formatInspectionNumber(data.minimum)}`;
+			return `${humanizeAttributeName(data.attribute)}: ${formatInspectionNumber(data.minimum)}`;
 		case "vital":
 			return `${humanizeInspectionName(data.vital)}: ${formatInspectionNumber(data.minimum)}`;
 		case "heritage":
@@ -207,9 +211,9 @@ export function formatWieldRequirement(requirement: WieldRequirement): string {
 		case "raw-skill":
 			return `Base ${humanizeInspectionName(data.skill)}: ${formatInspectionNumber(data.difficulty)}`;
 		case "attribute":
-			return `${humanizeInspectionName(data.attribute)}: ${formatInspectionNumber(data.difficulty)}`;
+			return `${humanizeAttributeName(data.attribute)}: ${formatInspectionNumber(data.difficulty)}`;
 		case "raw-attribute":
-			return `Base ${humanizeInspectionName(data.attribute)}: ${formatInspectionNumber(data.difficulty)}`;
+			return `Base ${humanizeAttributeName(data.attribute)}: ${formatInspectionNumber(data.difficulty)}`;
 		case "vital":
 			return `${humanizeInspectionName(data.vital)}: ${formatInspectionNumber(data.difficulty)}`;
 		case "raw-vital":

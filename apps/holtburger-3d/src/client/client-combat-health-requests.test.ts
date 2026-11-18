@@ -19,6 +19,7 @@ const TEST_TUNING: ClientCombatHealthTuning = {
 
 function createController() {
 	const cancels = new Map<number, ReturnType<typeof vi.fn>>();
+	const settles = new Map<number, ReturnType<typeof vi.fn>>();
 	const setPriorities = new Map<number, ReturnType<typeof vi.fn>>();
 	const requests: {
 		readonly guid: number;
@@ -29,8 +30,10 @@ function createController() {
 		tuning: TEST_TUNING,
 		requestFacts(guid, priority): AppraisalRequest {
 			const cancel = vi.fn();
+			const settle = vi.fn();
 			const setPriority = vi.fn();
 			cancels.set(guid, cancel);
+			settles.set(guid, settle);
 			setPriorities.set(guid, setPriority);
 			let rejectSent!: (reason?: unknown) => void;
 			const sent = new Promise<void>((_resolve, reject) => {
@@ -41,11 +44,12 @@ function createController() {
 			return {
 				sent,
 				cancel,
+				settle,
 				setPriority,
 			};
 		},
 	});
-	return { coordinator, requests, cancels, setPriorities };
+	return { coordinator, requests, cancels, settles, setPriorities };
 }
 
 function mob(
@@ -98,7 +102,7 @@ describe("ClientCombatHealthRequests", () => {
 	});
 
 	it("bootstraps when fresh health is absent, refreshes at cadence, and skips selected target duplication", () => {
-		const { coordinator, requests, cancels } = createController();
+		const { coordinator, requests, cancels, settles } = createController();
 		coordinator.resetWorld(2);
 		coordinator.setCombatMode("magic");
 
@@ -123,19 +127,14 @@ describe("ClientCombatHealthRequests", () => {
 		coordinator.reconcile([mobA, mobSelected], hostNowMs);
 		expect(requests.map((r) => r.guid)).toEqual([20]);
 
-		// Authoritative health settles the inflight request and counts toward refresh cooldown.
-		coordinator.acceptEntityHealth({
-			guid: 20,
-			worldGeneration: 2,
-			instanceSequence: 1,
-			healthFraction: 0.8,
-			observedAt: { seconds: hostNowMs / 1_000 },
-		});
+		// Fresh health arriving via ClientEntityFacts settles the inflight request and counts toward refresh cooldown.
 		hostNowMs += TEST_TUNING.refreshIntervalMs - 1;
 		coordinator.reconcile(
 			[mob(20, TEST_TUNING.maxDistanceMeters / 2, 1, 10_000), mobSelected],
 			hostNowMs,
 		);
+		expect(settles.get(20)).toHaveBeenCalledTimes(1);
+		expect(cancels.get(20)).not.toHaveBeenCalled();
 		expect(requests.map((r) => r.guid)).toEqual([20]);
 
 		hostNowMs += 1;

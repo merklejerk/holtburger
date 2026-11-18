@@ -430,6 +430,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [entityFacts(corpseGuid, { corpse: "opened" })],
 				removed: [],
@@ -449,6 +450,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [entityFacts(corpseGuid, { corpse: "unopened" })],
 				removed: [],
@@ -493,6 +495,7 @@ describe("ClientGameplayPresentation", () => {
 					transport.emit("client-entity-facts-changed", {
 						projectileSupply: null,
 						salvage: null,
+						player: null,
 						worldContainer: null,
 						removed: [],
 						upserts: [
@@ -2080,6 +2083,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [
 					entityFacts(mobGuid, { isHostile: true, targeting: "creature" }),
@@ -2113,13 +2117,14 @@ describe("ClientGameplayPresentation", () => {
 			);
 			expect(runtime.healthBarFraction(mobGuid)).toBeUndefined();
 
-			// Core updates both ClientEntityFacts.health and emits client-entity-health-updated.
+			// Core updates ClientEntityFacts.health when health changes.
 			nowMs += 50;
 			const sampleSeconds =
 				lifecycle.mirror.hostTimeSeconds(nowMs / 1_000) ?? baseHostSeconds;
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [
 					{
@@ -2132,13 +2137,6 @@ describe("ClientGameplayPresentation", () => {
 					},
 				],
 				removed: [],
-			});
-			transport.emit("client-entity-health-updated", {
-				worldGeneration: state.worldGeneration,
-				guid: mobGuid,
-				instanceSequence: 1,
-				healthFraction: 0.65,
-				observedAt: { seconds: sampleSeconds },
 			});
 			expect(presentation.frame(nowMs).rendered).toBe(true);
 			expect(runtime.healthBarFraction(mobGuid)).toBe(0.65);
@@ -2195,6 +2193,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [
 					entityFacts(mobGuid, { isHostile: true, targeting: "creature" }),
@@ -2233,6 +2232,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [
 					{
@@ -2245,13 +2245,6 @@ describe("ClientGameplayPresentation", () => {
 					},
 				],
 				removed: [],
-			});
-			transport.emit("client-entity-health-updated", {
-				worldGeneration: 1,
-				guid: mobGuid,
-				instanceSequence: 1,
-				healthFraction: 0.55,
-				observedAt: { seconds: gen1Seconds },
 			});
 			expect(presentation.frame(nowMs).status.kind).toBe("ready");
 			expect(runtime.healthBarFraction(mobGuid)).toBe(0.55);
@@ -2266,6 +2259,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [
 					entityFacts(mobGuid, { isHostile: true, targeting: "creature" }),
@@ -2297,6 +2291,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [
 					{
@@ -2309,13 +2304,6 @@ describe("ClientGameplayPresentation", () => {
 					},
 				],
 				removed: [],
-			});
-			transport.emit("client-entity-health-updated", {
-				worldGeneration: 2,
-				guid: mobGuid,
-				instanceSequence: 1,
-				healthFraction: 0.45,
-				observedAt: { seconds: gen2Seconds },
 			});
 			expect(presentation.frame(nowMs).status.kind).toBe("ready");
 			expect(runtime.healthBarFraction(mobGuid)).toBe(0.45);
@@ -2343,6 +2331,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [
 					{
@@ -2355,13 +2344,6 @@ describe("ClientGameplayPresentation", () => {
 					},
 				],
 				removed: [],
-			});
-			transport.emit("client-entity-health-updated", {
-				worldGeneration: 3,
-				guid: mobGuid,
-				instanceSequence: 1,
-				healthFraction: 0.3,
-				observedAt: { seconds: gen3Seconds },
 			});
 			await vi.waitFor(() => {
 				expect(presentation.frame(nowMs).status.kind).toBe("ready");
@@ -2419,6 +2401,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [
 					entityFacts(distantMobGuid, {
@@ -2457,6 +2440,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
 				salvage: null,
+				player: null,
 				worldContainer: null,
 				upserts: [
 					{

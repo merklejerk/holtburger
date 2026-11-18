@@ -93,7 +93,6 @@ import type {
 	ClientActionFeedback,
 	ClientServerText,
 	ClientConfirmation,
-	ClientEntityHealth,
 	ClientEntityCombatObserved,
 	ClientAppraisalFactsSettled,
 	ClientSummonEnded,
@@ -350,7 +349,6 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-combat-mode-updated",
 	"client-combat-status-updated",
 	"client-spell-cast-target-updated",
-	"client-entity-health-updated",
 	"client-entity-combat-observed",
 	"client-appraisal-facts-settled",
 	"client-summon-ended",
@@ -501,7 +499,6 @@ export interface HostEventPayloadMap {
 	"client-confirmation-updated": {
 		readonly confirmation: ClientConfirmation | null;
 	};
-	"client-entity-health-updated": ClientEntityHealth;
 	"client-entity-combat-observed": ClientEntityCombatObserved;
 	"client-appraisal-facts-settled": ClientAppraisalFactsSettled;
 	"client-summon-ended": ClientSummonEnded;

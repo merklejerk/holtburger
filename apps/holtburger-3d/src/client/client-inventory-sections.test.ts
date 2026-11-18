@@ -4,7 +4,10 @@ import {
 	ClientEntityMirror,
 	type ClientEntityFacts,
 } from "./client-entity-mirror";
-import { entityFacts } from "./client-entity-mirror.test-support";
+import {
+	emptyPlayerSummary,
+	entityFacts,
+} from "./client-entity-mirror.test-support";
 import {
 	contentsSections,
 	contentsPackSlots,
@@ -47,6 +50,7 @@ describe("contentsSections", () => {
 						augmentationBonusSalvage: 0,
 					},
 				},
+				player: emptyPlayerSummary,
 				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),
@@ -122,6 +126,7 @@ describe("contentsSections", () => {
 						augmentationBonusSalvage: 0,
 					},
 				},
+				player: emptyPlayerSummary,
 				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),
@@ -183,6 +188,7 @@ describe("contentsPackSlots", () => {
 						augmentationBonusSalvage: 0,
 					},
 				},
+				player: emptyPlayerSummary,
 				worldContainer: { kind: "closed" },
 				entities: [root, bag, foci, ordinary],
 			},
@@ -212,6 +218,7 @@ describe("contentsPackSlots", () => {
 						augmentationBonusSalvage: 0,
 					},
 				},
+				player: emptyPlayerSummary,
 				worldContainer: { kind: "closed" },
 				entities: [unknown, bag],
 			},
@@ -246,6 +253,7 @@ describe("contentsPackSlots", () => {
 						augmentationBonusSalvage: 0,
 					},
 				},
+				player: emptyPlayerSummary,
 				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),
@@ -280,9 +288,6 @@ describe("sortContentsItems", () => {
 				mapCategory: "other" as const,
 				objectFlags: 0,
 				wcid: null,
-				pyrealBalance: null,
-				aetheriaActivation: null,
-				burden: null,
 				equipLocations: null,
 				consumable: null,
 				useCapability: "direct" as const,

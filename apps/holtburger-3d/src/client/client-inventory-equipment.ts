@@ -59,9 +59,8 @@ export function findWieldedCasterSpell(
 /**
  * Display order and slot masks follow retail paper-doll slot selection. Clothing uses
  * chest/upper-leg anchors for shirt/pants: raw clothing-location bits are not exclusive slots.
- * ACE checks ClothingPriority for conflicts (Creature_Equipment.cs:GetEquippedItems) and
- * publishes full valid locations (Player_Inventory.cs:DoHandleActionGetAndWieldItem). Full
- * labels name slots in tooltips; compactLabel supplies the loadout builder's visible captions.
+ * Retail checks ClothingPriority for conflicts and publishes full valid locations on wield.
+ * Full labels name slots in tooltips; compactLabel supplies the loadout builder's visible captions.
  */
 export const EQUIPMENT_SLOTS = [
 	{
@@ -196,16 +195,8 @@ export function equipmentSlotAvailability(
 	level: ClientEntityLevel,
 ): InventoryEquipmentRow["availability"] {
 	if (!("activation" in slot)) return "available";
-	const player =
-		level.playerGuid === null
-			? undefined
-			: level.entities.get(level.playerGuid);
-	if (
-		player?.description.kind !== "known" ||
-		player.description.aetheriaActivation === null
-	)
-		return "pending";
-	return player.description.aetheriaActivation[slot.activation]
+	if (level.player.aetheriaActivation === null) return "pending";
+	return level.player.aetheriaActivation[slot.activation]
 		? "available"
 		: "locked";
 }

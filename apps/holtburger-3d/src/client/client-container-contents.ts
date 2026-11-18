@@ -1,4 +1,5 @@
 import type { ClientEntityFacts } from "./client-entity-mirror";
+import { ITEM_TYPE_FLAGS } from "./client-entity-labels";
 
 /** One storage header and its occupied cells; grouping is frontend presentation only. */
 export interface ClientContentsSection {
@@ -34,37 +35,37 @@ const itemNames = new Intl.Collator(undefined, {
 
 /** Browsing order for public item-type flags; numeric flag values are not UX ranks. */
 const itemTypeOrder: readonly number[] = [
-	0x00000001, // Melee weapon
-	0x00000100, // Missile weapon
-	0x00008000, // Caster
-	0x00000002, // Armor
-	0x00000004, // Clothing
-	0x00000008, // Jewelry
-	0x00200000, // Magic wieldable
-	0x00000020, // Food
-	0x00000800, // Gem
-	0x00080000, // Mana stone
-	0x00001000, // Spell components
-	0x00000040, // Money
-	0x00040000, // Promissory note
-	0x00004000, // Key
-	0x00002000, // Writable
-	0x00000200, // Container
-	0x20000000, // Tinkering tool
-	0x40000000, // Tinkering material
-	0x00400000, // Craft cooking base
-	0x00800000, // Craft alchemy base
-	0x04000000, // Craft alchemy intermediate
-	0x02000000, // Craft fletching base
-	0x08000000, // Craft fletching intermediate
-	0x00000080, // Miscellaneous
-	0x80000000, // Gameboard
-	0x00000400, // Useless
-	0x00100000, // Service
-	0x00000010, // Creature
-	0x00010000, // Portal
-	0x00020000, // Lockable
-	0x10000000, // Life stone
+	ITEM_TYPE_FLAGS.MELEE_WEAPON,
+	ITEM_TYPE_FLAGS.MISSILE_WEAPON,
+	ITEM_TYPE_FLAGS.CASTER,
+	ITEM_TYPE_FLAGS.ARMOR,
+	ITEM_TYPE_FLAGS.CLOTHING,
+	ITEM_TYPE_FLAGS.JEWELRY,
+	ITEM_TYPE_FLAGS.MAGIC_WIELDABLE,
+	ITEM_TYPE_FLAGS.FOOD,
+	ITEM_TYPE_FLAGS.GEM,
+	ITEM_TYPE_FLAGS.MANA_STONE,
+	ITEM_TYPE_FLAGS.SPELL_COMPONENTS,
+	ITEM_TYPE_FLAGS.MONEY,
+	ITEM_TYPE_FLAGS.PROMISSORY_NOTE,
+	ITEM_TYPE_FLAGS.KEY,
+	ITEM_TYPE_FLAGS.WRITABLE,
+	ITEM_TYPE_FLAGS.CONTAINER,
+	ITEM_TYPE_FLAGS.TINKERING_TOOL,
+	ITEM_TYPE_FLAGS.TINKERING_MATERIAL,
+	ITEM_TYPE_FLAGS.CRAFT_COOKING_BASE,
+	ITEM_TYPE_FLAGS.CRAFT_ALCHEMY_BASE,
+	ITEM_TYPE_FLAGS.CRAFT_ALCHEMY_INTERMEDIATE,
+	ITEM_TYPE_FLAGS.CRAFT_FLETCHING_BASE,
+	ITEM_TYPE_FLAGS.CRAFT_FLETCHING_INTERMEDIATE,
+	ITEM_TYPE_FLAGS.MISCELLANEOUS,
+	ITEM_TYPE_FLAGS.GAMEBOARD,
+	ITEM_TYPE_FLAGS.USELESS,
+	ITEM_TYPE_FLAGS.SERVICE,
+	ITEM_TYPE_FLAGS.CREATURE,
+	ITEM_TYPE_FLAGS.PORTAL,
+	ITEM_TYPE_FLAGS.LOCKABLE,
+	ITEM_TYPE_FLAGS.LIFE_STONE,
 ];
 
 /** Combined flags use the first matching category; zero and unknown-only masks sort last. */

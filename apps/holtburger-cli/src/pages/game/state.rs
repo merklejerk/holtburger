@@ -3,7 +3,6 @@ use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::CombatMode;
-use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_scripting::{ScriptHost, ScriptHostConfig};
 use holtburger_world::context::WorldContext;
 use holtburger_world::context::WorldContextExt;

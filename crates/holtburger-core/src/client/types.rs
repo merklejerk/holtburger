@@ -18,7 +18,6 @@ use holtburger_protocol::messages::combat::{
 };
 use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
-use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{
     CharacterCreateRequestData, CharacterCreateResponseData, CharacterEntry, ChatChannel,
     ChatChannelId, ChatMessageTypeId, SetTurbineChatChannelsEventData, TurbineChatChannel,
@@ -615,6 +614,8 @@ pub struct ClientApplicationSnapshot {
     pub connection: Option<super::connection::ConnectionSample>,
     /// Complete P2P negotiation level recovered with its semantic item records.
     pub trade: super::trade::TradeSnapshot,
+    /// Retained vendor catalog and terms, recovered atomically without implying UI open state.
+    pub vendor: Option<VendorState>,
     /// None until initial description; an empty collection is a complete empty spellbook.
     pub known_spells: Option<Vec<u32>>,
     /// Complete effect records and shared interpretation, absent until player description.
@@ -1373,7 +1374,6 @@ pub enum ClientViewEvent {
     HousingPaymentFinished(super::housing_execution::HousingPaymentResult),
     /// Administrative evidence or uncertainty, independent of panel lifetime.
     HousingManagementFinished(super::housing_management::HousingManagementResult),
-    VendorItemIdentified(Box<holtburger_world::vendor::CoreVendorItem>),
     /// Shared allegiance facts and bounded refresh progress changed.
     AllegianceUpdated(super::allegiance::AllegianceSnapshot),
     /// Complete ignore replacement, including retirement.
@@ -1679,14 +1679,6 @@ pub enum ClientCommand {
     SubmitHousingPayment(super::housing_execution::HousingPaymentRequest),
     /// Reviewed implicit-home administrative request.
     SubmitHousingManagement(super::housing_management::HousingManagementRequest),
-    Buy {
-        vendor: Guid,
-        items: Vec<ItemProfileActionData>,
-    },
-    Sell {
-        vendor: Guid,
-        items: Vec<ItemProfileActionData>,
-    },
     /// Shared P2P negotiation command with explicit session/offer guards.
     Trade(super::trade::TradeRequest),
     CreateParty {

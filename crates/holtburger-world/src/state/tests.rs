@@ -6325,9 +6325,9 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
     let events = world.handle_message(&identify_response_message(response.clone()));
 
     assert!(
-        events.iter().any(
-            |event| matches!(event, WorldEvent::VendorItemIdentified(item) if item.guid == guid)
-        )
+        events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::VendorCatalogUpdated))
     );
     assert!(events.iter().any(|event| matches!(
         event,
@@ -6341,7 +6341,7 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
     assert!(
         !repeated
             .iter()
-            .any(|event| matches!(event, WorldEvent::VendorItemIdentified(_)))
+            .any(|event| matches!(event, WorldEvent::VendorCatalogUpdated))
     );
     assert!(repeated.iter().any(|event| matches!(
         event,
@@ -6360,7 +6360,7 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
     assert!(
         changed_events
             .iter()
-            .any(|event| matches!(event, WorldEvent::VendorItemIdentified(_)))
+            .any(|event| matches!(event, WorldEvent::VendorCatalogUpdated))
     );
 
     let mut unsupported = IdentifyObjectResponseEventData {
@@ -6388,7 +6388,7 @@ fn successful_vendor_identify_uses_the_shared_ready_shape() {
 }
 
 #[test]
-fn trade_withdrawal_preserves_partner_acceptance_and_offer_revision() {
+fn trade_withdrawal_preserves_partner_acceptance_and_advances_revision() {
     let mut world = WorldState::synthetic();
     let player = Guid(0x5000_0001);
     let partner = Guid(0x5000_0002);
@@ -6398,14 +6398,18 @@ fn trade_withdrawal_preserves_partner_acceptance_and_offer_revision() {
     world.add_trade_item(2, Guid(0x8000_0002), &mut Vec::new());
     let offered = world.trade.clone().unwrap();
     world.accept_trade(player, &mut Vec::new());
+    let after_self_accept = world.trade.as_ref().unwrap().revision;
+    assert!(after_self_accept > offered.revision);
     world.accept_trade(partner, &mut Vec::new());
+    let after_partner_accept = world.trade.as_ref().unwrap().revision;
+    assert!(after_partner_accept > after_self_accept);
     world.decline_trade(player, &mut Vec::new());
     let trade = world.trade.as_ref().unwrap();
     assert!(!trade.self_side.accepted);
     assert!(trade.partner_side.accepted);
     assert_eq!(trade.self_side.items, offered.self_side.items);
     assert_eq!(trade.partner_side.items, offered.partner_side.items);
-    assert_eq!(trade.revision, offered.revision);
+    assert!(trade.revision > after_partner_accept);
 }
 
 #[test]
@@ -6417,8 +6421,8 @@ fn trade_additions_are_idempotent_and_reset_invalidates_even_an_empty_offer() {
     world.player.guid = player;
     world.register_trade(player, partner, &mut Vec::new());
     world.add_trade_item(1, item, &mut Vec::new());
-    let revision = world.trade.as_ref().unwrap().revision;
     world.accept_trade(player, &mut Vec::new());
+    let revision = world.trade.as_ref().unwrap().revision;
     world.add_trade_item(1, item, &mut Vec::new());
     let trade = world.trade.as_ref().unwrap();
     assert_eq!(trade.self_side.items, vec![item]);

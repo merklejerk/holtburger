@@ -2211,6 +2211,7 @@ export class ClientLifecycleSession {
 		this.#partyPreferences = state.partyPreferences;
 		this.characterSheet.reset(state.characterSheet, state.lifecycle.kind);
 		this.#housing = state.housing;
+		this.#vendor = state.vendor;
 		this.#trade = state.trade;
 		this.#barber = state.barber;
 		const semantic = this.entities.prepareSnapshot(

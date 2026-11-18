@@ -488,6 +488,7 @@
 			characterSheet: null,
 			barber: { interaction: null, result: null, particles: null },
 			trade: { trade: null, pending_items: [] },
+			vendor: null,
 			characterMotion: null,
 			activeConfirmation: null,
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },

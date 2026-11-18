@@ -524,6 +524,7 @@ impl WorldState {
         self.squelch = None;
         self.allegiance = None;
         self.trade = None;
+        self.trade_revision = 0;
         self.world_container = super::WorldContainerState::Closed;
         self.entity_dependencies = Default::default();
         self.entity_lifecycle = Default::default();

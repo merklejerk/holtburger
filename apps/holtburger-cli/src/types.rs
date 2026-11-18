@@ -740,7 +740,6 @@ pub enum AppAction {
     SellToVendor {
         vendor: Guid,
         item: Guid,
-        amount: u32,
     },
     AcceptTrade,
     DeclineTrade,

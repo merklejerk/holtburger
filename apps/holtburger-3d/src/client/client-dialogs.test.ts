@@ -1,5 +1,4 @@
-import { emptyHousing } from "./client-housing-contract";
-import { playerEntitySnapshot } from "./client-entity-mirror.test-support";
+import { baselineCurrentState } from "./client-host-contract.test-support";
 import { describe, expect, it, vi } from "vitest";
 import { ClientDialogs, type LocalConfirmationRequest } from "./client-dialogs";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
@@ -34,56 +33,14 @@ async function fixture() {
 			confirmation: confirmation(requestId),
 		});
 	const snapshot = (requestId: string | null) =>
-		emit("client-current-state", {
-			lifecycle: { kind: "in-world" },
-			characterManagement: { kind: "idle" },
-			playerVisualCapture: null,
-			entityCollisionDisabled: false,
-			canTeleportFromMap: false,
-			recallDestinations: [],
-			housing: emptyHousing(),
-			localPlayerGuid: 7,
-			entities: playerEntitySnapshot(7),
-			serverTime: 1,
-			worldGeneration: 1,
-			connection: null,
-			worldName: null,
-			accountName: "Fixture account",
-			playerName: null,
-			knownSpells: null,
-			enchantments: null,
-			appearanceOptions: null,
-			gameplayPreferences: null,
-			party: null,
-			partyPreferences: null,
-			friends: null,
-			contracts: null,
-			squelch: null,
-			allegiance: {
-				playerGuid: null,
-				profile: null,
-				refreshing: false,
-				canSwear: false,
-			},
-			allegiancePreferences: null,
-			friendsPreferences: null,
-			combatMode: "peace",
-			socialMotionReady: true,
-			combat: {
-				desired: null,
-				state: "idle",
-				processedIntentSequence: 0,
-				refill: null,
-			},
-			spellCastTarget: null,
-			vitals: [],
-			characterSheet: null,
-			barber: { interaction: null, result: null, particles: null },
-			trade: { trade: null, pending_items: [] },
-			characterMotion: null,
-			activeConfirmation: requestId === null ? null : confirmation(requestId),
-			dynamic: { hostTime: { seconds: 1 }, entities: [] },
-		});
+		emit(
+			"client-current-state",
+			baselineCurrentState(7, {
+				worldName: null,
+				playerName: null,
+				activeConfirmation: requestId === null ? null : confirmation(requestId),
+			}),
+		);
 	return {
 		dialogs,
 		session,

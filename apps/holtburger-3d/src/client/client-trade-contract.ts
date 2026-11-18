@@ -11,7 +11,6 @@ const tradeStateSchema = z
 		revision: unsigned,
 		partner_guid: unsigned,
 		initiator_guid: unsigned,
-		trade_stamp: z.number().finite(),
 		self_side: side,
 		partner_side: side,
 	})

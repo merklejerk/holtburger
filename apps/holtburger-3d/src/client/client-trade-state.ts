@@ -3,6 +3,7 @@ import {
 	type ClientOfferSelection,
 } from "./client-offer-selection";
 import type { UiIconOwner, UiIconRepository } from "../app/ui-icon-repository";
+import type { ClientEntityRead } from "./client-entity-mirror";
 import type {
 	ClientLifecycleSession,
 	ClientLifecycleSessionEvent,
@@ -47,7 +48,9 @@ export class ClientTradeState {
 	readonly #owner: UiIconOwner;
 	readonly #unsubscribe: () => void;
 	#snapshot: TradeSnapshot;
+	#itemIcons = new Map<number, string>();
 	#retained = new Set<string>();
+	#view: TradeView | null = null;
 	#recovering = false;
 	#destroyed = false;
 
@@ -58,74 +61,12 @@ export class ClientTradeState {
 	) {
 		this.#snapshot = session.tradeSnapshot();
 		this.#owner = icons.createOwner("persistent");
+		this.#sync();
 		this.#unsubscribe = session.subscribe((event) => this.#receive(event));
 	}
 
 	read(): TradeView | null {
-		const trade = this.#snapshot.trade;
-		if (trade === null) return null;
-		const read = this.session.entities.read();
-		const ready =
-			!this.#recovering &&
-			read.kind === "current" &&
-			this.session.state().lifecycle?.kind === "in-world";
-		const keys = new Set<string>();
-		const cells = (ids: readonly number[]): TradeCell[] =>
-			ids.map((guid) => {
-				const facts =
-					read.kind === "current" ? read.level.entities.get(guid) : undefined;
-				const description = facts?.description;
-				if (description?.kind !== "known")
-					return {
-						guid,
-						name: `Awaiting item 0x${guid.toString(16)}`,
-						count: 1,
-						iconKey: null,
-						described: false,
-					};
-				const iconKey = this.icons.retain(this.#owner, {
-					kind: "item",
-					...description.icon,
-					itemType: description.itemType,
-				});
-				keys.add(iconKey);
-				return {
-					guid,
-					name: description.name,
-					count: description.stackCount ?? 1,
-					iconKey,
-					described: true,
-				};
-			});
-		const own = cells(trade.self_side.items);
-		const partner = cells(trade.partner_side.items);
-		for (const key of this.#retained)
-			if (!keys.has(key)) this.icons.release(this.#owner, key);
-		this.#retained = keys;
-		const partnerDescription =
-			read.kind === "current"
-				? read.level.entities.get(trade.partner_guid)?.description
-				: undefined;
-		return {
-			trade,
-			own,
-			partner,
-			ready,
-			partnerName:
-				partnerDescription?.kind === "known"
-					? partnerDescription.name
-					: `Player 0x${trade.partner_guid.toString(16)}`,
-			ownName:
-				this.session.state().playerName ??
-				`Player 0x${trade.self_side.guid.toString(16)}`,
-			pendingItems: this.#snapshot.pending_items.length,
-			canAccept:
-				ready &&
-				this.#snapshot.pending_items.length === 0 &&
-				!trade.self_side.accepted &&
-				[...own, ...partner].every((cell) => cell.described),
-			iconKeys: [...keys],
-		};
+		return this.#view;
 	}
 
 	open(partner: number): void {
@@ -195,30 +136,30 @@ export class ClientTradeState {
 	}
 
 	accept(revision: number): void {
-		const view = this.read();
-		if (view === null || !view.canAccept) return;
+		const trade = this.#snapshot.trade;
+		if (trade === null || !this.#canAccept()) return;
 		this.#submit({
 			kind: "accept",
-			partner: view.trade.partner_guid,
+			partner: trade.partner_guid,
 			revision,
 		});
 	}
 	withdraw(): void {
-		if (this.read()?.ready && this.#snapshot.trade !== null)
+		if (this.#isReady() && this.#snapshot.trade !== null)
 			this.#submit({
 				kind: "withdraw",
 				partner: this.#snapshot.trade.partner_guid,
 			});
 	}
 	reset(): void {
-		if (this.read()?.ready && this.#snapshot.trade !== null)
+		if (this.#isReady() && this.#snapshot.trade !== null)
 			this.#submit({
 				kind: "reset",
 				partner: this.#snapshot.trade.partner_guid,
 			});
 	}
 	close(): void {
-		if (this.read()?.ready && this.#snapshot.trade !== null)
+		if (this.#isReady() && this.#snapshot.trade !== null)
 			this.#submit({
 				kind: "close",
 				partner: this.#snapshot.trade.partner_guid,
@@ -231,6 +172,102 @@ export class ClientTradeState {
 		this.icons.releaseOwner(this.#owner);
 	}
 
+	#isReady(read: ClientEntityRead = this.session.entities.read()): boolean {
+		return (
+			!this.#recovering &&
+			read.kind === "current" &&
+			this.session.state().lifecycle?.kind === "in-world"
+		);
+	}
+
+	#canAccept(read: ClientEntityRead = this.session.entities.read()): boolean {
+		const trade = this.#snapshot.trade;
+		if (
+			trade === null ||
+			!this.#isReady(read) ||
+			this.#snapshot.pending_items.length !== 0 ||
+			trade.self_side.accepted ||
+			read.kind !== "current"
+		)
+			return false;
+		return [...trade.self_side.items, ...trade.partner_side.items].every(
+			(guid) => read.level.entities.get(guid)?.description.kind === "known",
+		);
+	}
+
+	#sync(): void {
+		const trade = this.#snapshot.trade;
+		const read = this.session.entities.read();
+		const nextItemIcons = new Map<number, string>();
+		const nextRetained = new Set<string>();
+		if (trade !== null && read.kind === "current") {
+			for (const guid of [
+				...trade.self_side.items,
+				...trade.partner_side.items,
+			]) {
+				const description = read.level.entities.get(guid)?.description;
+				if (description?.kind !== "known") continue;
+				const iconKey = this.icons.retain(this.#owner, {
+					kind: "item",
+					...description.icon,
+					itemType: description.itemType,
+				});
+				nextItemIcons.set(guid, iconKey);
+				nextRetained.add(iconKey);
+			}
+		}
+		for (const key of this.#retained)
+			if (!nextRetained.has(key)) this.icons.release(this.#owner, key);
+		this.#itemIcons = nextItemIcons;
+		this.#retained = nextRetained;
+		if (trade === null) {
+			this.#view = null;
+			return;
+		}
+		const cells = (ids: readonly number[]): TradeCell[] =>
+			ids.map((guid) => {
+				const description =
+					read.kind === "current"
+						? read.level.entities.get(guid)?.description
+						: undefined;
+				if (description?.kind !== "known")
+					return {
+						guid,
+						name: `Awaiting item 0x${guid.toString(16)}`,
+						count: 1,
+						iconKey: null,
+						described: false,
+					};
+				return {
+					guid,
+					name: description.name,
+					count: description.stackCount ?? 1,
+					iconKey: this.#itemIcons.get(guid) ?? null,
+					described: true,
+				};
+			});
+		const partnerDescription =
+			read.kind === "current"
+				? read.level.entities.get(trade.partner_guid)?.description
+				: undefined;
+		this.#view = {
+			trade,
+			own: cells(trade.self_side.items),
+			partner: cells(trade.partner_side.items),
+			ready: this.#isReady(read),
+			partnerName:
+				partnerDescription?.kind === "known"
+					? partnerDescription.name
+					: `Player 0x${trade.partner_guid.toString(16)}`,
+			ownName:
+				this.session.state().playerName ??
+				`Player 0x${trade.self_side.guid.toString(16)}`,
+			pendingItems: this.#snapshot.pending_items.length,
+			canAccept: this.#canAccept(read),
+			iconKeys: [...this.#retained],
+		};
+	}
+
 	#submit(request: TradeRequest): void {
 		void this.session.submitTrade(request).catch((error: unknown) => {
 			if (this.#destroyed) return;
@@ -240,24 +277,24 @@ export class ClientTradeState {
 
 	#replace(snapshot: TradeSnapshot): void {
 		this.#snapshot = snapshot;
-		if (snapshot.trade === null) {
-			for (const key of this.#retained) this.icons.release(this.#owner, key);
-			this.#retained.clear();
-		}
+		this.#sync();
 	}
 
 	#receive(event: ClientLifecycleSessionEvent): void {
 		if (event.type === "trade-snapshot") this.#replace(event.trade);
+		else if (event.type === "entities") this.#sync();
 		else if (event.type === "resyncing") {
 			this.#recovering = true;
+			this.#sync();
 		} else if (event.type === "current-state") {
 			this.#recovering = false;
 			this.#replace(this.session.tradeSnapshot());
-		} else if (
-			event.type === "exit-requested" ||
-			(event.type === "lifecycle" && event.lifecycle.kind !== "in-world")
-		) {
+		} else if (event.type === "exit-requested") {
 			this.#replace({ trade: null, pending_items: [] });
+		} else if (event.type === "lifecycle") {
+			if (event.lifecycle.kind !== "in-world")
+				this.#replace({ trade: null, pending_items: [] });
+			else this.#sync();
 		}
 	}
 }

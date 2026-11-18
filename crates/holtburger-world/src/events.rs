@@ -274,7 +274,8 @@ pub enum WorldEvent {
     },
     /// A server ApproachVendor response supplies a complete interaction, including trade refreshes.
     VendorApproached(vendor::VendorState),
-    VendorItemIdentified(Box<vendor::CoreVendorItem>),
+    /// Retained vendor catalog facts changed after an offer appraisal.
+    VendorCatalogUpdated,
     /// The retained character friend list changed.
     FriendsStateUpdated,
     /// Contract membership/stage/timer observation changed.

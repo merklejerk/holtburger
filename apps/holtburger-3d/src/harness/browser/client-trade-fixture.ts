@@ -60,7 +60,6 @@ export function createTradeFixture(options: {
 				revision: 1,
 				partner_guid: partner,
 				initiator_guid: 1,
-				trade_stamp: 0,
 				self_side: { guid: 1, accepted: false, items: [] },
 				partner_side: { guid: partner, accepted: false, items: [] },
 			};

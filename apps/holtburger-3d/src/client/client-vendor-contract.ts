@@ -5,6 +5,29 @@ import { clientIconAppearanceSchema } from "./client-entity-mirror";
 const unsigned = z.number().int().nonnegative().max(0xffff_ffff);
 const quantity = z.number().int().positive().max(0x7fff_ffff);
 
+const vendorCategorySchema = z.enum([
+	"armor",
+	"books-paper",
+	"clothing",
+	"containers",
+	"food",
+	"gems",
+	"jewelry",
+	"keys-tools",
+	"miscellaneous",
+	"services",
+	"spell-components",
+	"trade-notes",
+	"weapons",
+	"mana-stones",
+	"magic-items",
+	"alchemical-items",
+	"cooking-items",
+	"fletching-items",
+	"other",
+]);
+export type VendorCategory = z.infer<typeof vendorCategorySchema>;
+
 /** Core resolves whole sale quantities; display groups never cross this boundary. */
 const vendorDraftSchema = z
 	.object({
@@ -29,6 +52,7 @@ const vendorOfferSchema = z
 		wcid: unsigned,
 		name: z.string(),
 		item_type: unsigned.nullable(),
+		category: vendorCategorySchema,
 		stack_count: unsigned,
 		stackable: z.boolean(),
 		supply: unsigned.nullable(),
@@ -101,7 +125,7 @@ export const vendorPhaseSchema = z.enum(["selling", "buying"]);
 /** Source receipts let a merged cell lose only the stacks which actually sold. */
 export const vendorResultSchema = z
 	.object({
-		sequence: unsigned.nullable(),
+		sequence: unsigned,
 		vendor: unsigned,
 		sold: z.array(unsigned),
 		sale_issue: z.string().nullable(),

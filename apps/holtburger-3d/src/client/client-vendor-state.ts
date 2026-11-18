@@ -16,6 +16,7 @@ import type {
 	ClientLifecycleSessionEvent,
 } from "./client-lifecycle-session";
 import type {
+	VendorCategory,
 	VendorDraft,
 	VendorOffer,
 	VendorPhase,
@@ -23,27 +24,28 @@ import type {
 	VendorSnapshot,
 } from "./client-vendor-contract";
 
-/** Retail open vendor; presentation order is app-local. */
-const CATEGORIES = [
-	["Armor", 0x2],
-	["Books, Paper", 0x2000],
-	["Clothing", 0x4],
-	["Containers", 0x200],
-	["Food", 0x20],
-	["Gems", 0x800],
-	["Jewelry", 0x8],
-	["Keys, Tools", 0x20004000],
-	["Miscellaneous", 0x490],
-	["Services", 0x100000],
-	["Spell Components", 0x1000],
-	["Trade Notes", 0x40000],
-	["Weapons", 0x101],
-	["Mana Stones", 0x80000],
-	["Magic Items", 0x8000],
-	["Alchemical Items", 0x4800000],
-	["Cooking Items", 0x400000],
-	["Fletching Items", 0x9000000],
-] as const;
+/** Retail open vendor section order; server supplies each offer's category. */
+const CATEGORY_LABELS: readonly (readonly [VendorCategory, string])[] = [
+	["armor", "Armor"],
+	["books-paper", "Books, Paper"],
+	["clothing", "Clothing"],
+	["containers", "Containers"],
+	["food", "Food"],
+	["gems", "Gems"],
+	["jewelry", "Jewelry"],
+	["keys-tools", "Keys, Tools"],
+	["miscellaneous", "Miscellaneous"],
+	["services", "Services"],
+	["spell-components", "Spell Components"],
+	["trade-notes", "Trade Notes"],
+	["weapons", "Weapons"],
+	["mana-stones", "Mana Stones"],
+	["magic-items", "Magic Items"],
+	["alchemical-items", "Alchemical Items"],
+	["cooking-items", "Cooking Items"],
+	["fletching-items", "Fletching Items"],
+	["other", "Other"],
+];
 
 /** Session authority needed by the vendor HUD, independent of DOM lifetime. */
 export type VendorSession = Pick<
@@ -159,6 +161,7 @@ export class ClientVendorState {
 	#preview: PendingPreview | null = null;
 	#execution: { readonly sequence: number; phase: VendorPhase } | null = null;
 	#catalog = new Map<number, VendorCatalogCell>();
+	#sections: VendorView["sections"] = [];
 	#sales = new Map<number, CellArtwork>();
 	#purchases = new Map<number, CellArtwork>();
 	#currencyIcons = new Map<number, string>();
@@ -171,7 +174,7 @@ export class ClientVendorState {
 	#entityLevel: ClientEntityLevel | null = null;
 	/** Distinguishes initial pose hydration from a vendor that disappeared later. */
 	#hadVendorPose = false;
-	/** Cached reach availability invalidates the quote view when poses arrive. */
+	/** Reach state baked into `#view` so idle display ticks return the cached reference. */
 	#canReachVendor = false;
 	#disposed = false;
 	#recovering = false;
@@ -191,88 +194,31 @@ export class ClientVendorState {
 		this.#replaceSnapshot(snapshot);
 	}
 
-	/** Sample window identity without preparing catalog artwork or requesting a draft quote. */
-	visibleVendor(): number | null {
-		this.#checkRange();
-		return this.#visible && this.#snapshot !== null
-			? this.#snapshot.vendor
-			: null;
+	/** Latch observed vendor pose and close if the vendor vanished or moved out of reach. */
+	reconcileRange(): void {
+		if (this.#snapshot === null || !this.#visible) return;
+		const distance = this.distanceToVendor(this.#snapshot.vendor);
+		if (distance !== null) this.#hadVendorPose = true;
+		if (this.#isClosedByRange(distance)) {
+			this.close();
+			return;
+		}
+		const canReachVendor = distance !== null;
+		if (canReachVendor !== this.#canReachVendor) {
+			this.#canReachVendor = canReachVendor;
+			this.#syncView();
+		}
 	}
 
 	read(): VendorView | null {
 		if (!this.#visible || this.#snapshot === null || this.#draft === null)
 			return null;
-		const canReachVendor = this.#checkRange();
-		if (!this.#visible) return null;
-		const read = this.session.entities.read();
-		if (read.kind === "current" && read.level !== this.#entityLevel) {
-			const changed = quoteInventoryChanged(this.#entityLevel, read.level);
-			this.#entityLevel = read.level;
-			this.#view = null;
-			if (changed) this.#refreshQuote();
-		}
-		if (this.#view !== null) return this.#view;
-		const grouped = new Map<string, VendorCatalogCell[]>();
-		for (const cell of this.#catalog.values()) {
-			// First matching retail category prevents a composite type appearing twice.
-			const category =
-				CATEGORIES.find(
-					([, mask]) =>
-						cell.offer.item_type !== null &&
-						(cell.offer.item_type & mask) !== 0,
-				)?.[0] ?? "Other";
-			const cells = grouped.get(category) ?? [];
-			cells.push(cell);
-			grouped.set(category, cells);
-		}
-		const sections = [...CATEGORIES.map(([name]) => name), "Other"].flatMap(
-			(name) => {
-				const cells = grouped.get(name);
-				return cells === undefined ? [] : [{ name, cells }];
-			},
-		);
-		const queue = this.#queue();
-		this.#retainCurrencyArtwork(
-			read.kind === "current" ? read.level.entities : null,
-		);
-		const vendorEntity =
-			read.kind === "current"
-				? read.level.entities.get(this.#snapshot.vendor)
-				: undefined;
-		const name =
-			vendorEntity?.description.kind === "known"
-				? vendorEntity.description.name
-				: "Vendor";
-		this.#view = {
-			vendor: this.#snapshot.vendor,
-			name,
-			sections,
-			queue,
-			quantityRequest: this.#quantityRequest,
-			currency: this.#snapshot.currency,
-			quote: this.#quote,
-			currencyIconKeys: this.#currencyIcons,
-			pending: this.#recovering || this.#preview !== null,
-			phase: this.#execution?.phase ?? null,
-			problem: this.#problem,
-			canTrade:
-				canReachVendor &&
-				!this.#recovering &&
-				this.#execution === null &&
-				this.#preview === null &&
-				this.#quantityRequest === null &&
-				this.#problem === null &&
-				this.#quote?.affordable === true &&
-				queue.length > 0,
-			iconKeys: [
-				...new Set(
-					[...this.#catalog.values(), ...queue]
-						.map((cell) => cell.iconKey)
-						.concat([...this.#currencyIcons.values()]),
-				),
-			],
-		};
-		return this.#view;
+		const distance = this.distanceToVendor(this.#snapshot.vendor);
+		if (this.#isClosedByRange(distance)) return null;
+		const canReachVendor = distance !== null;
+		return canReachVendor === this.#canReachVendor && this.#view !== null
+			? this.#view
+			: this.#buildView(canReachVendor);
 	}
 
 	/** Drag validation never treats an offer GUID as an owned entity. */
@@ -319,7 +265,7 @@ export class ClientVendorState {
 				maxAmount,
 				initialAmount: Math.min(cell.offer.stack_count, maxAmount),
 			};
-			this.#view = null;
+			this.#syncView();
 			return;
 		}
 		this.#addBuy(item, cell.offer.stack_count);
@@ -337,13 +283,12 @@ export class ClientVendorState {
 			return;
 		}
 		this.#quantityRequest = null;
-		this.#view = null;
 		this.#addBuy(item, amount);
 	}
 
 	cancelBuyQuantity(): void {
 		this.#quantityRequest = null;
-		this.#view = null;
+		this.#syncView();
 	}
 
 	#addBuy(item: number, quantity: number): void {
@@ -360,9 +305,10 @@ export class ClientVendorState {
 
 	/** Inventory dimming describes eligible contents for non-empty packs. */
 	inventoryItemUnavailable(item: number): boolean {
-		const vendor = this.visibleVendor();
-		if (vendor === null) return false;
-		const selection = this.#saleSelection(vendor, item);
+		if (!this.#visible || this.#snapshot === null) return false;
+		const distance = this.distanceToVendor(this.#snapshot.vendor);
+		if (this.#isClosedByRange(distance)) return false;
+		const selection = this.#saleSelection(this.#snapshot.vendor, item);
 		return selection.kind !== "selected" || selection.items.length === 0;
 	}
 
@@ -457,7 +403,12 @@ export class ClientVendorState {
 	}
 
 	trade(): void {
-		if (this.read()?.canTrade !== true || this.#draft === null) return;
+		this.reconcileRange();
+		if (!this.#visible || this.#snapshot === null || this.#draft === null)
+			return;
+		const distance = this.distanceToVendor(this.#snapshot.vendor);
+		if (this.#isClosedByRange(distance)) return;
+		if (!this.#canTrade(distance !== null, this.#queue().length)) return;
 		const request = {
 			sequence: sequence(),
 			draft: structuredClone(this.#draft),
@@ -466,13 +417,13 @@ export class ClientVendorState {
 			sequence: request.sequence,
 			phase: request.draft.sells.length > 0 ? "selling" : "buying",
 		};
-		this.#view = null;
+		this.#syncView();
 		void this.session.submitVendor(request).catch((error: unknown) => {
 			if (this.#execution?.sequence !== request.sequence || this.#disposed)
 				return;
 			this.#execution = null;
 			this.#problem = `Trade request failed: ${String(error)}`;
-			this.#view = null;
+			this.#syncView();
 			this.reportFailure(this.#problem);
 		});
 	}
@@ -493,41 +444,97 @@ export class ClientVendorState {
 	destroy(): void {
 		this.#disposed = true;
 		this.#entityLevel = null;
+		this.#view = null;
 		this.#retirePreview();
 		this.#unsubscribe();
 		this.icons.releaseOwner(this.#owner);
 	}
 
 	#editable(): boolean {
-		return (
-			this.#visible &&
-			!this.#recovering &&
-			this.#checkRange() &&
-			this.#execution === null &&
-			this.#preview === null &&
-			this.#quantityRequest === null
-		);
+		if (
+			!this.#visible ||
+			this.#snapshot === null ||
+			this.#recovering ||
+			this.#execution !== null ||
+			this.#preview !== null ||
+			this.#quantityRequest !== null
+		)
+			return false;
+		const distance = this.distanceToVendor(this.#snapshot.vendor);
+		return distance !== null && !this.#isClosedByRange(distance);
 	}
 
-	/** Closing after a known pose disappears avoids a stale shop after vendor unload. */
-	#checkRange(): boolean {
-		if (this.#snapshot === null || !this.#visible) return false;
-		const distance = this.distanceToVendor(this.#snapshot.vendor);
-		if (distance !== null) this.#hadVendorPose = true;
-		if (
+	#isClosedByRange(distance: number | null): boolean {
+		return (
 			(distance === null && this.#hadVendorPose) ||
 			(distance !== null &&
 				distance > CLIENT_TUNING.vendor.maximumDistanceMeters)
-		) {
-			this.close();
-			return false;
-		}
-		const canReachVendor = distance !== null;
-		if (canReachVendor !== this.#canReachVendor) {
-			this.#canReachVendor = canReachVendor;
+		);
+	}
+
+	#canTrade(canReachVendor: boolean, queueLength: number): boolean {
+		return (
+			canReachVendor &&
+			!this.#recovering &&
+			this.#execution === null &&
+			this.#preview === null &&
+			this.#quantityRequest === null &&
+			this.#problem === null &&
+			this.#quote?.affordable === true &&
+			queueLength > 0
+		);
+	}
+
+	#buildView(canReachVendor: boolean): VendorView | null {
+		if (!this.#visible || this.#snapshot === null || this.#draft === null)
+			return null;
+		const queue = this.#queue();
+		const read = this.session.entities.read();
+		const vendorEntity =
+			read.kind === "current"
+				? read.level.entities.get(this.#snapshot.vendor)
+				: undefined;
+		const name =
+			vendorEntity?.description.kind === "known"
+				? vendorEntity.description.name
+				: "Vendor";
+		return {
+			vendor: this.#snapshot.vendor,
+			name,
+			sections: this.#sections,
+			queue,
+			quantityRequest: this.#quantityRequest,
+			currency: this.#snapshot.currency,
+			quote: this.#quote,
+			currencyIconKeys: this.#currencyIcons,
+			pending: this.#recovering || this.#preview !== null,
+			phase: this.#execution?.phase ?? null,
+			problem: this.#problem,
+			canTrade: this.#canTrade(canReachVendor, queue.length),
+			iconKeys: [
+				...new Set(
+					[...this.#catalog.values(), ...queue]
+						.map((cell) => cell.iconKey)
+						.concat([...this.#currencyIcons.values()]),
+				),
+			],
+		};
+	}
+
+	#syncView(): void {
+		if (!this.#visible || this.#snapshot === null || this.#draft === null) {
+			this.#canReachVendor = false;
 			this.#view = null;
+			return;
 		}
-		return canReachVendor;
+		const distance = this.distanceToVendor(this.#snapshot.vendor);
+		if (this.#isClosedByRange(distance)) {
+			this.#canReachVendor = false;
+			this.#view = null;
+			return;
+		}
+		this.#canReachVendor = distance !== null;
+		this.#view = this.#buildView(this.#canReachVendor);
 	}
 
 	#retirePreview(): void {
@@ -567,23 +574,23 @@ export class ClientVendorState {
 					this.#retirePreview();
 					this.#problem =
 						"Vendor preview timed out. Your previous draft has been retained.";
-					this.#view = null;
 					this.#collectArtwork();
+					this.#syncView();
 					this.reportFailure(this.#problem);
 				},
 				Math.max(0, deadline - performance.now()),
 			),
 		};
 		this.#preview = pending;
-		this.#view = null;
+		this.#syncView();
 		void this.session
 			.previewVendor({ sequence: pending.sequence, draft: pending.draft })
 			.catch((error: unknown) => {
 				if (this.#preview !== pending || this.#disposed) return;
 				this.#retirePreview();
 				this.#problem = `Vendor preview failed: ${String(error)}`;
-				this.#view = null;
 				this.#collectArtwork();
+				this.#syncView();
 				if (reportRejection) this.reportFailure(this.#problem);
 			});
 	}
@@ -595,7 +602,6 @@ export class ClientVendorState {
 			this.#visible = false;
 			this.#entityLevel = null;
 		}
-		this.#view = null;
 		if (changed) {
 			this.#hadVendorPose = false;
 			this.#canReachVendor = false;
@@ -622,8 +628,26 @@ export class ClientVendorState {
 				return [offer.guid, { name: offer.name, iconKey, offer }];
 			}),
 		);
+		const grouped = new Map<VendorCategory, VendorCatalogCell[]>();
+		for (const cell of this.#catalog.values()) {
+			const cells = grouped.get(cell.offer.category) ?? [];
+			cells.push(cell);
+			grouped.set(cell.offer.category, cells);
+		}
+		this.#sections = CATEGORY_LABELS.flatMap(([category, name]) => {
+			const cells = grouped.get(category);
+			return cells === undefined ? [] : [{ name, cells }];
+		});
 		this.#refreshQuote();
-		this.#collectArtwork();
+		this.#syncCurrencyArtwork();
+		this.#syncView();
+	}
+
+	#syncCurrencyArtwork(): void {
+		const read = this.session.entities.read();
+		this.#retainCurrencyArtwork(
+			read.kind === "current" ? read.level.entities : null,
+		);
 	}
 
 	#receive(event: ClientLifecycleSessionEvent): void {
@@ -631,11 +655,20 @@ export class ClientVendorState {
 			this.#recovering = true;
 			this.#entityLevel = null;
 			this.#retirePreview();
-			this.#view = null;
 			this.#collectArtwork();
+			this.#syncView();
 		} else if (event.type === "current-state") {
 			this.#recovering = false;
 			this.#replaceSnapshot(this.session.vendorSnapshot());
+		} else if (event.type === "entities") {
+			const read = this.session.entities.read();
+			if (this.#visible && read.kind === "current") {
+				const changed = quoteInventoryChanged(this.#entityLevel, read.level);
+				this.#entityLevel = read.level;
+				if (changed) this.#refreshQuote();
+				this.#retainCurrencyArtwork(read.level.entities);
+				this.#syncView();
+			}
 		} else if (event.type === "trade-snapshot" && event.trade.trade !== null)
 			this.close();
 		else if (event.type === "vendor-approached") {
@@ -661,11 +694,11 @@ export class ClientVendorState {
 					this.reportFailure(event.result.outcome.reason);
 				else this.#problem = event.result.outcome.reason;
 			}
-			this.#view = null;
-			this.#collectArtwork();
+			this.#syncCurrencyArtwork();
+			this.#syncView();
 		} else if (event.type === "vendor-phase" && this.#execution !== null) {
 			this.#execution.phase = event.phase;
-			this.#view = null;
+			this.#syncView();
 		} else if (
 			event.type === "vendor-result" &&
 			event.result.sequence === this.#execution?.sequence
@@ -694,13 +727,13 @@ export class ClientVendorState {
 				};
 			}
 			if (this.#draft !== null) this.#request(this.#draft, false);
-			this.#view = null;
+			this.#syncView();
 		} else if (
 			event.type === "exit-requested" ||
 			(event.type === "lifecycle" && event.lifecycle.kind !== "in-world")
 		) {
-			this.#replaceSnapshot(null);
 			this.#execution = null;
+			this.#replaceSnapshot(null);
 		}
 	}
 

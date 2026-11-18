@@ -146,13 +146,22 @@ fn prepare_trade(
             if trade.self_side.accepted {
                 return Err("You have already accepted this offer.");
             }
+            let self_is_initiator = trade.self_side.guid == trade.initiator_guid;
             GameAction::AcceptTrade(Box::new(AcceptTradeActionData {
                 partner_guid: trade.partner_guid,
-                trade_stamp: trade.trade_stamp,
+                trade_stamp: 0.0,
                 trade_status: 1,
                 initiator_guid: trade.initiator_guid,
-                initiator_accepts: 1,
-                partner_accepts: u32::from(trade.partner_side.accepted),
+                initiator_accepts: if self_is_initiator {
+                    1
+                } else {
+                    u32::from(trade.partner_side.accepted)
+                },
+                partner_accepts: if self_is_initiator {
+                    u32::from(trade.partner_side.accepted)
+                } else {
+                    1
+                },
             }))
         }
         TradeRequest::Withdraw { .. } => {
@@ -249,7 +258,7 @@ impl ClientRuntime {
             }
         };
         // Trade initiation follows the same peace-before-open policy for every frontend.
-        // ACE Player_Trade.cs requires both players in non-combat mode and owns approach.
+        // Server behavior requires both players in non-combat mode and owns approach.
         if matches!(request, TradeRequest::Open { .. })
             && self.world.player_combat_mode() != CombatMode::NonCombat
             && let Err(error) = self
@@ -489,7 +498,6 @@ mod tests {
             revision: REVISION,
             partner_guid: PARTNER,
             initiator_guid: SELF,
-            trade_stamp: 0.0,
             self_side: TradeSide {
                 guid: SELF,
                 accepted: false,
@@ -533,6 +541,92 @@ mod tests {
             .unwrap_err()
             .contains("offer changed")
         );
+    }
+
+    #[test]
+    fn trade_acceptance_from_partner_maps_initiator_and_partner_slots() {
+        let mut world = world();
+        world.trade.as_mut().unwrap().initiator_guid = PARTNER;
+
+        let action = prepare_single(
+            &world,
+            &TradeRequest::Accept {
+                partner: PARTNER,
+                revision: REVISION,
+            },
+        )
+        .unwrap();
+        let GameAction::AcceptTrade(data) = action else {
+            panic!("expected acceptance");
+        };
+        assert_eq!(data.initiator_guid, PARTNER);
+        assert_eq!(data.initiator_accepts, 0);
+        assert_eq!(data.partner_accepts, 1);
+
+        world.trade.as_mut().unwrap().partner_side.accepted = true;
+        let action = prepare_single(
+            &world,
+            &TradeRequest::Accept {
+                partner: PARTNER,
+                revision: REVISION,
+            },
+        )
+        .unwrap();
+        let GameAction::AcceptTrade(data) = action else {
+            panic!("expected acceptance");
+        };
+        assert_eq!(data.initiator_accepts, 1);
+        assert_eq!(data.partner_accepts, 1);
+    }
+
+    #[test]
+    fn trade_acceptance_and_withdrawal_events_advance_revision() {
+        let mut world = WorldState::synthetic();
+        world.player.guid = SELF;
+        let send_event = |world: &mut WorldState, event: GameEvent| {
+            world.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+                target: SELF,
+                sequence: 1,
+                event,
+            })))
+        };
+        send_event(
+            &mut world,
+            GameEvent::RegisterTrade(Box::new(RegisterTradeEventData {
+                initiator: SELF,
+                partner: PARTNER,
+                unknown: 0,
+            })),
+        );
+        let initial_revision = world.trade.as_ref().unwrap().revision;
+
+        let accept_events = send_event(
+            &mut world,
+            GameEvent::AcceptTrade(Box::new(AcceptTradeEventData {
+                who_accepted: PARTNER,
+            })),
+        );
+        let accepted_revision = world.trade.as_ref().unwrap().revision;
+        assert!(accepted_revision > initial_revision);
+        assert!(accept_events.iter().any(|event| matches!(
+            event,
+            holtburger_world::WorldEvent::TradeStateUpdated(Some(trade))
+                if trade.revision == accepted_revision && trade.partner_side.accepted
+        )));
+
+        let decline_events = send_event(
+            &mut world,
+            GameEvent::DeclineTrade(Box::new(DeclineTradeEventData {
+                who_declined: PARTNER,
+            })),
+        );
+        let declined_revision = world.trade.as_ref().unwrap().revision;
+        assert!(declined_revision > accepted_revision);
+        assert!(decline_events.iter().any(|event| matches!(
+            event,
+            holtburger_world::WorldEvent::TradeStateUpdated(Some(trade))
+                if trade.revision == declined_revision && !trade.partner_side.accepted
+        )));
     }
 
     #[test]

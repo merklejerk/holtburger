@@ -1,5 +1,5 @@
 import { LOCAL_CONFIRMATION_SUPPRESSION_MS } from "./client-confirmation-suppression";
-import { emptyHousing } from "./client-housing-contract";
+import { baselineCurrentState } from "./client-host-contract.test-support";
 import { describe, expect, it, vi } from "vitest";
 import { ClientItemInteractions } from "./client-item-interactions";
 import { ClientEntitySelection } from "./client-entity-selection";
@@ -59,72 +59,32 @@ async function fixture() {
 		if (handler === undefined) throw new Error("Missing listener " + name);
 		handler(payload);
 	};
-	emit("client-current-state", {
-		lifecycle: { kind: "in-world" },
-		localPlayerGuid: 1,
-		characterManagement: { kind: "idle" },
-		playerVisualCapture: null,
-		entityCollisionDisabled: false,
-		canTeleportFromMap: false,
-		recallDestinations: [],
-		housing: emptyHousing(),
-		serverTime: 10,
-		worldGeneration: 2,
-		connection: null,
-		worldName: "Test",
-		accountName: "Fixture account",
-		playerName: "Player",
-		knownSpells: null,
-		enchantments: null,
-		appearanceOptions: null,
-		gameplayPreferences: null,
-		party: null,
-		partyPreferences: null,
-		friends: null,
-		contracts: null,
-		squelch: null,
-		allegiance: {
-			playerGuid: null,
-			profile: null,
-			refreshing: false,
-			canSwear: false,
-		},
-		allegiancePreferences: null,
-		friendsPreferences: null,
-		combatMode: "peace",
-		socialMotionReady: true,
-		combat: {
-			desired: null,
-			state: "idle",
-			processedIntentSequence: 0,
-			refill: null,
-		},
-		spellCastTarget: null,
-		vitals: [],
-		characterSheet: null,
-		barber: { interaction: null, result: null, particles: null },
-		trade: { trade: null, pending_items: [] },
-		characterMotion: null,
-		activeConfirmation: null,
-		dynamic: { hostTime: { seconds: 10 }, entities: [] },
-		entities: {
-			projectileSupply: { kind: "not-applicable" },
-			player: emptyPlayerSummary,
-			worldContainer: { kind: "closed" },
-			entities: [
-				entityFacts(1),
-				targeted,
-				entityFacts(3, {
-					ownedByPlayer: true,
-					location: {
-						kind: "contained",
-						parentGuid: 1,
-						slot: { kind: "item", index: 1 },
-					},
-				}),
-			],
-		},
-	});
+	emit(
+		"client-current-state",
+		baselineCurrentState(1, {
+			serverTime: 10,
+			worldGeneration: 2,
+			worldName: "Test",
+			dynamic: { hostTime: { seconds: 10 }, entities: [] },
+			entities: {
+				projectileSupply: { kind: "not-applicable" },
+				player: emptyPlayerSummary,
+				worldContainer: { kind: "closed" },
+				entities: [
+					entityFacts(1),
+					targeted,
+					entityFacts(3, {
+						ownedByPlayer: true,
+						location: {
+							kind: "contained",
+							parentGuid: 1,
+							slot: { kind: "item", index: 1 },
+						},
+					}),
+				],
+			},
+		}),
+	);
 	const submit = vi
 		.spyOn(lifecycle, "submitItemUse")
 		.mockResolvedValue(undefined);

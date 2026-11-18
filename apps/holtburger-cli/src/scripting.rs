@@ -1876,7 +1876,6 @@ mod tests {
             revision: 1,
             partner_guid,
             initiator_guid: partner_guid,
-            trade_stamp: 123.0,
             self_side: TradeSide {
                 guid: player_guid,
                 accepted: false,

@@ -17,6 +17,7 @@ import {
 } from "./client-friends-contract";
 import { housingSnapshotSchema } from "./client-housing-contract";
 import { tradeSnapshotSchema } from "./client-trade-contract";
+import { vendorSnapshotSchema } from "./client-vendor-contract";
 import { barberSnapshotSchema } from "./client-barber-contract";
 import { z } from "zod";
 import {
@@ -629,6 +630,7 @@ const currentStateSchema = z
 		vitals: z.array(vitalSchema),
 		characterSheet: characterSheetSchema.nullable(),
 		trade: tradeSnapshotSchema,
+		vendor: vendorSnapshotSchema,
 		barber: barberSnapshotSchema,
 		characterMotion: clientCharacterMotionCapabilitiesSchema.nullable(),
 		activeConfirmation: confirmationSchema.nullable(),

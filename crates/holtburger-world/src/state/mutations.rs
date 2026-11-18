@@ -1590,7 +1590,6 @@ impl WorldState {
             revision: self.trade_revision,
             partner_guid,
             initiator_guid: initiator,
-            trade_stamp: 0.0,
             self_side: TradeSide {
                 guid: self.player.guid,
                 accepted: false,
@@ -1639,7 +1638,7 @@ impl WorldState {
     }
 
     pub(crate) fn decline_trade(&mut self, who_declined: Guid, events: &mut Vec<WorldEvent>) {
-        // ACE Player_Trade.cs:HandleActionDeclineTrade and retail behavior change only this side.
+        // Retail behavior changes only the declining side's acceptance.
         self.set_trade_acceptance(who_declined, false, events);
     }
 
@@ -1655,7 +1654,7 @@ impl WorldState {
             return;
         };
         side.accepted = accepted;
-        events.push(WorldEvent::TradeStateUpdated(self.trade.clone()));
+        self.publish_trade(events);
     }
 
     pub(crate) fn reset_trade(&mut self, events: &mut Vec<WorldEvent>) {

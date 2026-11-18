@@ -64,8 +64,8 @@ pub enum VendorTradePhase {
 /// Source-level receipt used to retire only fulfilled draft contributions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VendorTradeResult {
-    /// Absent for legacy standalone commands, which consume busy-operation feedback.
-    pub sequence: Option<u32>,
+    /// Frontend request identity returned unchanged with the terminal result.
+    pub sequence: u32,
     /// Interaction identity for rejecting feedback belonging to another vendor.
     pub vendor: Guid,
     /// Successfully transferred sale objects, including destroyed vendor purchases.
@@ -79,7 +79,7 @@ pub struct VendorTradeResult {
 /// Evidence and continuation are held by exactly one pending busy operation.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct VendorExecution {
-    sequence: Option<u32>,
+    sequence: u32,
     vendor: Guid,
     phase: VendorTradePhase,
     expected: BTreeSet<Guid>,
@@ -164,13 +164,13 @@ impl ClientRuntime {
                 return Ok(());
             }
         };
-        self.start_vendor_trade(Some(request.sequence), request.draft.vendor, buys, sells)
+        self.start_vendor_trade(request.sequence, request.draft.vendor, buys, sells)
             .await
     }
 
     pub(super) fn reject_vendor_request(&mut self, request: &VendorTradeRequest, message: String) {
         self.reject_vendor_start(
-            Some(request.sequence),
+            request.sequence,
             request.draft.vendor,
             if request.draft.sells.is_empty() {
                 VendorTradePhase::Buying
@@ -183,33 +183,26 @@ impl ClientRuntime {
 
     fn reject_vendor_start(
         &mut self,
-        sequence: Option<u32>,
+        sequence: u32,
         vendor: Guid,
         phase: VendorTradePhase,
         message: String,
     ) {
-        if sequence.is_some() {
-            let _ = self
-                .client_view_event_tx
-                .send(ClientViewEvent::VendorTradeFinished(VendorTradeResult {
-                    sequence,
-                    vendor,
-                    sold: Vec::new(),
-                    sale_issue: None,
-                    outcome: VendorTradeOutcome::Failed { phase, message },
-                }));
-        } else {
-            self.emit_action_result(
-                super::types::ActionResultSource::Client,
-                super::types::ActionResultReason::General(message),
-            );
-        }
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::VendorTradeFinished(VendorTradeResult {
+                sequence,
+                vendor,
+                sold: Vec::new(),
+                sale_issue: None,
+                outcome: VendorTradeOutcome::Failed { phase, message },
+            }));
     }
 
-    /// Start either a combined request or a standalone TUI buy/sell through one path.
-    pub(super) async fn start_vendor_trade(
+    /// Start a quoted vendor buy, sell, or combined trade through one path.
+    async fn start_vendor_trade(
         &mut self,
-        sequence: Option<u32>,
+        sequence: u32,
         vendor: Guid,
         buys: Vec<ItemProfileActionData>,
         sells: Vec<ItemProfileActionData>,
@@ -331,7 +324,7 @@ impl ClientRuntime {
         }
     }
 
-    /// ACE identifies vendor transaction failure with the player ID, even without a code.
+    /// Server behavior identifies vendor transaction failure with the player ID, even without a code.
     pub(super) fn observe_vendor_failure(&mut self, item: Guid, error: WeenieError) {
         if item != self.world.player.guid {
             return;
@@ -472,7 +465,7 @@ mod tests {
 
     async fn request(client: &mut ClientRuntime, sells: &[Guid], buys: &[Guid]) {
         client
-            .start_vendor_trade(Some(7), VENDOR, entries(buys), entries(sells))
+            .start_vendor_trade(7, VENDOR, entries(buys), entries(sells))
             .await
             .unwrap();
     }
@@ -537,10 +530,7 @@ mod tests {
         }
         assert!(approached);
 
-        let item = client.world.vendor.as_ref().unwrap().items[0].clone();
-        client.handle_world_event(&holtburger_world::WorldEvent::VendorItemIdentified(
-            Box::new(item),
-        ));
+        client.handle_world_event(&holtburger_world::WorldEvent::VendorCatalogUpdated);
         for recovery in [false, true] {
             if recovery {
                 client.emit_current_application_snapshot();
@@ -551,8 +541,17 @@ mod tests {
                     ClientViewEvent::VendorApproached { .. } => {
                         panic!("Appraisal and recovery must not grant permission to reopen");
                     }
-                    ClientViewEvent::VendorStateUpdated { vendor } => {
+                    ClientViewEvent::VendorStateUpdated { vendor } if !recovery => {
                         assert_eq!(vendor.unwrap().vendor_guid, VENDOR);
+                        snapshot = true;
+                    }
+                    ClientViewEvent::VendorStateUpdated { .. } if recovery => {
+                        panic!(
+                            "Recovery snapshot carries vendor directly without a pre-snapshot event"
+                        );
+                    }
+                    ClientViewEvent::ApplicationSnapshot(app) if recovery => {
+                        assert_eq!(app.vendor.as_ref().unwrap().vendor_guid, VENDOR);
                         snapshot = true;
                     }
                     _ => {}
@@ -679,7 +678,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
             assert_eq!(receipts.len(), 1);
-            assert_eq!(receipts[0].sequence, Some(7));
+            assert_eq!(receipts[0].sequence, 7);
             assert_eq!(
                 receipts[0].sold,
                 if complete_sale {
@@ -904,21 +903,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn standalone_commands_only_send_the_requested_phase() {
+    async fn single_phase_vendor_trade_only_sends_the_requested_phase() {
         for selling in [false, true] {
             let mut client = builder::build_test_client(ClientState::Connected);
-            let command = if selling {
-                ClientCommand::Sell {
-                    vendor: VENDOR,
-                    items: entries(&[FIRST]),
-                }
+            let (buys, sells) = if selling {
+                (Vec::new(), entries(&[FIRST]))
             } else {
-                ClientCommand::Buy {
-                    vendor: VENDOR,
-                    items: entries(&[FIRST]),
-                }
+                (entries(&[FIRST]), Vec::new())
             };
-            client.handle_command(command).await.unwrap();
+            client
+                .start_vendor_trade(7, VENDOR, buys, sells)
+                .await
+                .unwrap();
             if selling {
                 transferred(&mut client, FIRST, VENDOR).await;
             }
@@ -973,7 +969,7 @@ mod tests {
         let mut events = client.subscribe_client_view_events();
         assert!(
             client
-                .start_vendor_trade(Some(7), VENDOR, entries(&[FIRST]), Vec::new())
+                .start_vendor_trade(7, VENDOR, entries(&[FIRST]), Vec::new())
                 .await
                 .is_err()
         );
@@ -1015,7 +1011,7 @@ mod tests {
         let mut saw_rejection = false;
         while let Ok(event) = events.try_recv() {
             if let ClientViewEvent::VendorTradeFinished(result) = event {
-                assert_eq!(result.sequence, Some(17));
+                assert_eq!(result.sequence, 17);
                 assert!(result.sold.is_empty());
                 assert!(matches!(result.outcome, VendorTradeOutcome::Failed { .. }));
                 saw_rejection = true;

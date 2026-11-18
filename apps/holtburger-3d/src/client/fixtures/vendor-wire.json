@@ -10,6 +10,7 @@
 					"wcid": 42,
 					"name": "Food",
 					"item_type": 32,
+					"category": "food",
 					"stack_count": 10,
 					"stackable": true,
 					"supply": null,

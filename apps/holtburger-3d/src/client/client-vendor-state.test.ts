@@ -29,6 +29,7 @@ const stackOffer: VendorOffer = {
 	wcid: 200,
 	name: "Component",
 	item_type: 0x1000,
+	category: "spell-components",
 	stack_count: 10,
 	stackable: true,
 	supply: null,
@@ -42,6 +43,7 @@ const singleOffer: VendorOffer = {
 	wcid: 201,
 	name: "Sword",
 	item_type: 1,
+	category: "weapons",
 	stack_count: 1,
 	stackable: false,
 };
@@ -143,7 +145,6 @@ function fixture(
 				outcome: { kind: "ready", quote },
 			},
 		});
-	model.read(); // Capture the already-current entity level before answering the opening quote.
 	answer(blank);
 	cleanups.push(() => {
 		model.destroy();
@@ -152,6 +153,7 @@ function fixture(
 	return {
 		model,
 		entities,
+		icons,
 		emit,
 		pending,
 		answer,
@@ -181,7 +183,7 @@ describe("vendor draft presentation", () => {
 		const actor = entityFacts(vendorId);
 		if (actor.description.kind !== "known")
 			throw new Error("Expected described vendor");
-		const prepared = f.entities.prepareDelta({
+		const delta = {
 			upserts: [
 				{
 					...actor,
@@ -193,9 +195,11 @@ describe("vendor draft presentation", () => {
 			player: null,
 			projectileSupply: null,
 			worldContainer: null,
-		});
+		};
+		const prepared = f.entities.prepareDelta(delta);
 		if (prepared === null) throw new Error("Expected prepared delta");
 		f.entities.commit(prepared);
+		f.emit({ type: "entities", delta });
 		expect(f.model.read()).toMatchObject({
 			name: "Renamed vendor",
 			pending: false,
@@ -278,15 +282,17 @@ describe("vendor draft presentation", () => {
 								...patch,
 							},
 						];
-			const prepared = f.entities.prepareDelta({
+			const delta = {
 				upserts,
 				removed,
 				player: null,
 				projectileSupply: null,
 				worldContainer: null,
-			});
+			};
+			const prepared = f.entities.prepareDelta(delta);
 			if (prepared === null) throw new Error("Expected prepared delta");
 			f.entities.commit(prepared);
+			f.emit({ type: "entities", delta });
 			expect(f.model.read()?.pending).toBe(previews > 0);
 			expect(f.previewVendor).toHaveBeenCalledTimes(before + previews);
 		},
@@ -298,16 +304,17 @@ describe("vendor draft presentation", () => {
 		buy(f.model, stackOffer.guid, 37);
 		const old = f.pending();
 		vi.advanceTimersByTime(CLIENT_TUNING.vendor.previewTimeoutMs / 2);
-		const prepared = f.entities.prepareDelta({
+		const delta = {
 			upserts: [],
 			removed: [],
 			player: { ...emptyPlayerSummary, pyrealBalance: 2500 },
 			projectileSupply: null,
 			worldContainer: null,
-		});
+		};
+		const prepared = f.entities.prepareDelta(delta);
 		if (prepared === null) throw new Error("Expected prepared delta");
 		f.entities.commit(prepared);
-		f.model.read();
+		f.emit({ type: "entities", delta });
 		expect(f.pending().sequence).not.toBe(old.sequence);
 		expect(f.pending().draft).toEqual(old.draft);
 		f.emit({
@@ -537,7 +544,6 @@ describe("vendor draft presentation", () => {
 					revision: 1,
 					partner_guid: 2,
 					initiator_guid: 1,
-					trade_stamp: 0,
 					self_side: { guid: 1, accepted: false, items: [] },
 					partner_side: { guid: 2, accepted: false, items: [] },
 				},
@@ -631,27 +637,43 @@ describe("vendor draft presentation", () => {
 		expect(f.model.read()).not.toBeNull();
 		f.setVendorDistance(0);
 		expect(f.model.acceptsDrop(vendorId)).toBe(true);
+		// Reading before reconcileRange() must not latch pose availability.
+		f.setVendorDistance(null);
+		expect(f.model.read()).not.toBeNull();
+		f.setVendorDistance(0);
+		f.model.reconcileRange();
 		f.setVendorDistance(null);
 		expect(f.model.read()).toBeNull();
-	});
-
-	it("closes the open panel when its sampled distance exceeds the limit", () => {
-		const f = fixture(CLIENT_TUNING.vendor.maximumDistanceMeters + 1);
+		f.model.reconcileRange();
+		f.setVendorDistance(0);
 		expect(f.model.read()).toBeNull();
 	});
 
-	it("samples visibility without preparing the vendor view or quoting inventory revisions", () => {
+	it("closes the open panel when reconcileRange observes distance beyond the limit", () => {
+		const f = fixture(CLIENT_TUNING.vendor.maximumDistanceMeters + 1);
+		expect(f.model.read()).toBeNull();
+		f.model.reconcileRange();
+		f.setVendorDistance(0);
+		expect(f.model.read()).toBeNull();
+	});
+
+	it("keeps read() pure without calling previewVendor or mutating icon ownership", () => {
 		const f = fixture(null);
 		f.answer(blank);
 		f.previewVendor.mockClear();
-		expect(f.model.visibleVendor()).toBe(vendorId);
-		expect(f.previewVendor).not.toHaveBeenCalled();
-		f.setVendorDistance(0);
-		expect(f.model.visibleVendor()).toBe(vendorId);
+		const retainSpy = vi.spyOn(f.icons, "retain");
+		const releaseSpy = vi.spyOn(f.icons, "release");
+		expect(f.model.read()).toBe(f.model.read());
+		expect(f.model.read()?.vendor).toBe(vendorId);
 		f.setVendorDistance(CLIENT_TUNING.vendor.maximumDistanceMeters + 1);
-		expect(f.model.visibleVendor()).toBeNull();
-		f.emit({ type: "vendor-snapshot", vendor: catalog });
-		expect(f.model.visibleVendor()).toBeNull();
+		expect(f.model.read()).toBeNull();
+		f.setVendorDistance(0);
+		f.model.reconcileRange();
+		expect(f.model.read()).toBe(f.model.read());
+		expect(f.model.read()?.vendor).toBe(vendorId);
+		expect(f.previewVendor).not.toHaveBeenCalled();
+		expect(retainSpy).not.toHaveBeenCalled();
+		expect(releaseSpy).not.toHaveBeenCalled();
 	});
 
 	it("keeps sale admission idempotent and blocks trading an unaffordable quote", () => {

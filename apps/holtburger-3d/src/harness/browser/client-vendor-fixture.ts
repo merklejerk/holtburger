@@ -4,6 +4,7 @@ import { entityFacts } from "../../client/client-entity-mirror.test-support";
 import {
 	vendorPreviewSchema,
 	vendorRequestSchema,
+	type VendorCategory,
 	type VendorQuote,
 	type VendorSnapshot,
 } from "../../client/client-vendor-contract";
@@ -23,12 +24,14 @@ export function createVendorFixture(options: {
 		guid: number,
 		name: string,
 		item_type: number,
+		category: VendorCategory,
 		stack_count: number,
 	) => ({
 		guid,
 		wcid: guid,
 		name,
 		item_type,
+		category,
 		stack_count,
 		stackable: stack_count > 1,
 		supply: null,
@@ -50,14 +53,14 @@ export function createVendorFixture(options: {
 		vendor,
 		currency: { wcid: 38234, name: "Trade Tokens" },
 		offers: [
-			offer(7001, "Lead Scarabs", 0x1000, 10),
-			{ ...offer(7002, "Steel Sword", 1, 1), supply: 1 },
+			offer(7001, "Lead Scarabs", 0x1000, "spell-components", 10),
+			{ ...offer(7002, "Steel Sword", 1, "weapons", 1), supply: 1 },
 			{
-				...offer(7003, "Garnet of Excess", 0x800, 1),
+				...offer(7003, "Garnet of Excess", 0x800, "gems", 1),
 				price: { kind: "quoted", amount: 600, quantity: 1 },
 			},
 			...Array.from({ length: 36 }, (_, i) =>
-				offer(7100 + i, `Garnet ${i + 1}`, 0x800, 1),
+				offer(7100 + i, `Garnet ${i + 1}`, 0x800, "gems", 1),
 			),
 		],
 	};

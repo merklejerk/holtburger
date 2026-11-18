@@ -527,6 +527,7 @@ impl ClientRuntime {
             vitals: self.world.player.vitals.clone(),
             character_sheet: self.character_sheet(),
             trade: self.trade_snapshot(),
+            vendor: self.world.vendor.clone(),
             character_motion: self.character_motion_capabilities(),
             active_confirmation: self.active_confirmation.clone(),
             housing: self.housing_snapshot(),
@@ -1005,7 +1006,6 @@ impl ClientRuntime {
         self.emit_contracts_state_updated();
         self.emit_squelch_state_updated();
         self.emit_allegiance_snapshot();
-        self.emit_vendor_state_updated();
         self.emit_trade_state_updated();
         self.emit_dynamic_entity_snapshot();
         self.emit_runtime_body_snapshot();
@@ -1585,14 +1585,7 @@ impl ClientRuntime {
                         vendor: vendor.clone(),
                     });
             }
-            WorldEvent::VendorItemIdentified(item) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::VendorItemIdentified(item.clone()));
-                // Catalog consumers need updated appearance/value facts without
-                // reconstructing a vendor snapshot from partial appraisal events.
-                self.emit_vendor_state_updated();
-            }
+            WorldEvent::VendorCatalogUpdated => self.emit_vendor_state_updated(),
             WorldEvent::FriendsStateUpdated => self.emit_friends_state_updated(),
             WorldEvent::ContractsStateUpdated => self.emit_contracts_state_updated(),
             WorldEvent::ContractMembershipChanged(change) if self.state == ClientState::InWorld => {

@@ -11,11 +11,8 @@ import {
 	resolvedJumpFixture,
 	predictedJumpFixture,
 } from "./client-precise-jump-fixtures";
-import { emptyHousing } from "./client-housing-contract";
-import {
-	entityFacts,
-	playerEntitySnapshot,
-} from "./client-entity-mirror.test-support";
+import { baselineCurrentState } from "./client-host-contract.test-support";
+import { entityFacts } from "./client-entity-mirror.test-support";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
@@ -3157,59 +3154,14 @@ function activeRegion(
 
 function currentState(playerGuid: number): ClientCurrentState {
 	const landblockId = playerGuid === 0x0101_0001 ? 0x0101_0100 : 0x0100_0001;
-	return {
-		characterSheet: null,
-		barber: { interaction: null, result: null, particles: null },
-		trade: { trade: null, pending_items: [] },
-		lifecycle: { kind: "in-world" },
-		characterManagement: { kind: "idle" },
-		playerVisualCapture: null,
-		entityCollisionDisabled: false,
-		canTeleportFromMap: false,
-		recallDestinations: [],
-		housing: emptyHousing(),
-		localPlayerGuid: playerGuid,
-		entities: playerEntitySnapshot(playerGuid),
+	return baselineCurrentState(playerGuid, {
 		serverTime: 75,
-		worldGeneration: 1,
-		connection: null,
 		worldName: "Leafcull",
-		accountName: "Fixture account",
-		playerName: "Player",
-		knownSpells: null,
-		enchantments: null,
-		appearanceOptions: null,
-		gameplayPreferences: null,
-		party: null,
-		partyPreferences: null,
-		friends: null,
-		contracts: null,
-		squelch: null,
-		allegiance: {
-			playerGuid: null,
-			profile: null,
-			refreshing: false,
-			canSwear: false,
-		},
-		allegiancePreferences: null,
-		friendsPreferences: null,
-		combatMode: "peace",
-		socialMotionReady: true,
-		combat: {
-			desired: null,
-			state: "idle",
-			processedIntentSequence: 0,
-			refill: null,
-		},
-		spellCastTarget: null,
-		vitals: [],
-		characterMotion: null,
-		activeConfirmation: null,
 		dynamic: {
 			hostTime: { seconds: 75 },
 			entities: [view(playerGuid, landblockId)],
 		},
-	};
+	});
 }
 
 function portalLifecycle(

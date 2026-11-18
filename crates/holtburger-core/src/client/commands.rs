@@ -39,8 +39,6 @@ pub(super) fn inventory_command_requires_guard(command: &ClientCommand) -> bool 
             | ClientCommand::SalvageItemsWith { .. }
             | ClientCommand::GiveObjectRequest { .. }
             | ClientCommand::VendorTrade(_)
-            | ClientCommand::Buy { .. }
-            | ClientCommand::Sell { .. }
             | ClientCommand::Trade(
                 crate::client::trade::TradeRequest::Open { .. }
                     | crate::client::trade::TradeRequest::Accept { .. }
@@ -266,8 +264,6 @@ impl ClientRuntime {
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::SalvageItemsWith { .. }
             | ClientCommand::VendorTrade(_)
-            | ClientCommand::Buy { .. }
-            | ClientCommand::Sell { .. }
             | ClientCommand::GiveObjectRequest { .. }
             | ClientCommand::SetCharacterTitle { .. }
             | ClientCommand::SetCharacterOption { .. }
@@ -923,14 +919,6 @@ impl ClientRuntime {
                 .await
             }
             ClientCommand::VendorTrade(request) => self.submit_vendor_trade(request).await,
-            ClientCommand::Buy { vendor, items } => {
-                self.start_vendor_trade(None, vendor, items, Vec::new())
-                    .await
-            }
-            ClientCommand::Sell { vendor, items } => {
-                self.start_vendor_trade(None, vendor, Vec::new(), items)
-                    .await
-            }
             ClientCommand::CloseContainer(guid) => self.close_container(guid).await,
             ClientCommand::SetCharacterTitle {
                 character,
@@ -1372,7 +1360,7 @@ mod tests {
     use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_protocol::messages::{
         CharacterCreateAppearanceData, CharacterCreateRequestData, CharacterEntry,
-        ItemProfileActionData, SkillAdvancementClass,
+        SkillAdvancementClass,
     };
     use holtburger_world::RuntimeBodyResetCause;
     use holtburger_world::entity::{Entity, EntityMotionSnapshot, EntityNetworkMotion};
@@ -1790,7 +1778,6 @@ mod tests {
             revision: 1,
             partner_guid: vendor_guid,
             initiator_guid: player_guid,
-            trade_stamp: 0.0,
             self_side: TradeSide {
                 guid: player_guid,
                 accepted: false,
@@ -1813,14 +1800,9 @@ mod tests {
         let mut saw_vendor = false;
         let mut saw_trade = false;
         while let Ok(event) = events.try_recv() {
-            match event {
-                ClientViewEvent::VendorStateUpdated { vendor } if vendor.is_some() => {
-                    saw_vendor = true;
-                }
-                ClientViewEvent::TradeStateUpdated(snapshot) if snapshot.trade.is_some() => {
-                    saw_trade = true;
-                }
-                _ => {}
+            if let ClientViewEvent::ApplicationSnapshot(snapshot) = event {
+                saw_vendor = snapshot.vendor.is_some();
+                saw_trade = snapshot.trade.trade.is_some();
             }
         }
 
@@ -2752,56 +2734,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn buy_command_arms_busy_operation() {
-        let mut client = build_test_client();
-        let mut events = client.subscribe_client_view_events();
-
-        client
-            .handle_command(ClientCommand::Buy {
-                vendor: Guid(0x7000_0001),
-                items: vec![ItemProfileActionData {
-                    object_guid: Guid(42),
-                    amount: 1,
-                }],
-            })
-            .await
-            .unwrap();
-
-        assert!(matches!(
-            client.active_busy_operation,
-            Some(crate::client::PendingBusyOperation {
-                operation: crate::client::PendingOperation::Vendor(_),
-                ..
-            })
-        ));
-
-        let mut saw_busy_projection = false;
-        while let Ok(event) = events.try_recv() {
-            if matches!(
-                event,
-                ClientViewEvent::BusyStateUpdated {
-                    busy: Some(BusyOperationKind::Buy),
-                }
-            ) {
-                saw_busy_projection = true;
-                break;
-            }
-        }
-
-        assert!(saw_busy_projection);
-    }
-
-    #[tokio::test]
     async fn overlapping_busy_command_is_not_sent_to_wire() {
         let mut client = build_test_client();
 
         client
-            .handle_command(ClientCommand::Buy {
-                vendor: Guid(0x7000_0001),
-                items: vec![ItemProfileActionData {
-                    object_guid: Guid(42),
-                    amount: 1,
-                }],
+            .handle_command(ClientCommand::Use {
+                guid: Guid(42),
+                unrestricted: true,
             })
             .await
             .unwrap();
@@ -2809,12 +2748,9 @@ mod tests {
         assert_eq!(client.session.game_action_sequence, 1);
 
         client
-            .handle_command(ClientCommand::Sell {
-                vendor: Guid(0x7000_0001),
-                items: vec![ItemProfileActionData {
-                    object_guid: Guid(42),
-                    amount: 1,
-                }],
+            .handle_command(ClientCommand::Use {
+                guid: Guid(43),
+                unrestricted: true,
             })
             .await
             .unwrap();
@@ -2823,7 +2759,7 @@ mod tests {
         assert!(matches!(
             client.active_busy_operation,
             Some(crate::client::PendingBusyOperation {
-                operation: crate::client::PendingOperation::Vendor(_),
+                operation: crate::client::PendingOperation::Use { source: Guid(42) },
                 ..
             })
         ));

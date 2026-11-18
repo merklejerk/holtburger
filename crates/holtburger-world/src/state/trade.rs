@@ -15,13 +15,12 @@ pub struct TradeState {
     pub revision: u32,
     pub partner_guid: Guid,
     pub initiator_guid: Guid,
-    pub trade_stamp: f64,
     pub self_side: TradeSide,
     pub partner_side: TradeSide,
 }
 
 impl super::WorldState {
-    /// Known other player eligible for a negotiation attempt; ACE owns final admission and approach.
+    /// Known other player eligible for a negotiation attempt; server owns final admission and approach.
     pub fn trade_partner_candidate(&self, guid: Guid) -> bool {
         crate::interaction::give_recipient_candidate(self, guid)
             && self

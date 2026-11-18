@@ -489,6 +489,7 @@ mod tests {
             housing: Default::default(),
             connection: None,
             trade: Default::default(),
+            vendor: None,
             character_options: None,
             known_spells: None,
             enchantments: None,
@@ -559,7 +560,6 @@ mod tests {
                 revision: 7,
                 partner_guid: Guid(2),
                 initiator_guid: Guid(1),
-                trade_stamp: 0.0,
                 self_side: holtburger_world::state::TradeSide {
                     guid: Guid(1),
                     accepted: false,
@@ -582,6 +582,45 @@ mod tests {
         };
         assert_eq!(current["trade"], serde_json::to_value(trade).unwrap());
         assert_eq!(current["trade"]["pending_items"], serde_json::json!([5]));
+    }
+
+    #[test]
+    fn vendor_snapshot_crosses_baseline_and_delta_together() {
+        use holtburger_common::properties::{
+            ItemType, PropertyInt, WorldObjectPropertyAccessorsMut,
+        };
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("snapshot fixture");
+        };
+        let mut item = holtburger_world::vendor::CoreVendorItem {
+            guid: Guid(1000),
+            wcid: 42,
+            ..Default::default()
+        };
+        item.properties
+            .set_int_prop(PropertyInt::ItemType, ItemType::FOOD.bits() as i32);
+        let vendor = holtburger_world::vendor::VendorState {
+            vendor_guid: Guid(100),
+            items: vec![item],
+            buy_multiplier: 1.0,
+            sell_multiplier: 1.0,
+            merchandise_item_types: ItemType::FOOD.bits(),
+            value_limits: Default::default(),
+            alternate_currency_wcid: 0,
+            alternate_currency_amount: 0,
+            alternate_currency_name: String::new(),
+        };
+        snapshot.vendor = Some(vendor.clone());
+        let current = serde_json::to_value(ClientCurrentState::from(snapshot.as_ref())).unwrap();
+        let event = project_client_event(ClientViewEvent::VendorStateUpdated {
+            vendor: Some(vendor),
+        })
+        .unwrap();
+        let ClientHostEvent::VendorSnapshot(projected) = event else {
+            panic!("vendor publication");
+        };
+        assert_eq!(current["vendor"], serde_json::to_value(projected).unwrap());
+        assert_eq!(current["vendor"]["offers"][0]["category"], "food");
     }
 
     #[test]
@@ -1228,6 +1267,7 @@ mod tests {
             housing: Default::default(),
             connection: None,
             trade: Default::default(),
+            vendor: None,
             character_options: None,
             known_spells: None,
             enchantments: None,

@@ -144,7 +144,10 @@
 		const display = startUiIconDisplay({
 			repository: model.icons,
 			intervalMs: CLIENT_TUNING.inventory.displayIntervalMs,
-			read: () => model.read(),
+			read: () => {
+				model.reconcileRange();
+				return model.read();
+			},
 			keys: (next) => next?.iconKeys ?? [],
 			publish: (next, images) => {
 				view = next;

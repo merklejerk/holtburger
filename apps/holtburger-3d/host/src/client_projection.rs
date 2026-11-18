@@ -499,6 +499,8 @@ pub struct ClientCurrentState {
     pub connection: Option<holtburger_core::client::connection::ConnectionSample>,
     /// Server-confirmed P2P offers, atomically recovered with their item descriptions.
     pub trade: holtburger_core::client::trade::TradeSnapshot,
+    /// Retained vendor catalog and terms, recovered without implying UI open state.
+    pub vendor: Option<crate::client_vendor::ClientVendorSnapshot>,
     /// Complete knowledge, absent until the initial character description.
     pub known_spells: Option<Vec<u32>>,
     /// Shared player enchantment resolution, absent until character description.
@@ -1186,6 +1188,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             recall_destinations: snapshot.recall_destinations.clone(),
             known_spells: snapshot.known_spells.clone(),
             trade: snapshot.trade.clone(),
+            vendor: snapshot.vendor.clone().map(Into::into),
             enchantments: snapshot
                 .enchantments
                 .as_ref()

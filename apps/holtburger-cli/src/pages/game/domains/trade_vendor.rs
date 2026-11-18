@@ -1,6 +1,8 @@
 use super::inventory;
 use super::*;
 use holtburger_core::client::trade::TradeRequest;
+use holtburger_core::client::vendor_transaction::{VendorTradeOutcome, VendorTradeRequest};
+use holtburger_world::vendor::{VendorDraft, VendorPurchase};
 use std::convert::TryFrom;
 
 fn checked_vendor_amount(amount: u32, result: &mut UpdateResult) -> Option<i32> {
@@ -51,37 +53,36 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 });
             }
         }
-        AppAction::SellToVendor {
-            vendor,
-            item,
-            amount,
-        } => {
-            let Some(amount) = checked_vendor_amount(amount, &mut result) else {
-                return result;
-            };
-            result.commands.push(ClientCommand::Sell {
-                vendor,
-                items: vec![ItemProfileActionData {
-                    object_guid: item,
-                    amount,
-                }],
-            });
+        AppAction::SellToVendor { vendor, item } => {
+            result
+                .commands
+                .push(ClientCommand::VendorTrade(VendorTradeRequest {
+                    sequence: 0,
+                    draft: VendorDraft {
+                        vendor,
+                        buys: Vec::new(),
+                        sells: vec![item],
+                    },
+                }));
         }
         AppAction::BuyFromVendor {
             vendor,
             item,
             amount,
         } => {
-            let Some(amount) = checked_vendor_amount(amount, &mut result) else {
+            let Some(_) = checked_vendor_amount(amount, &mut result) else {
                 return result;
             };
-            result.commands.push(ClientCommand::Buy {
-                vendor,
-                items: vec![ItemProfileActionData {
-                    object_guid: item,
-                    amount,
-                }],
-            });
+            result
+                .commands
+                .push(ClientCommand::VendorTrade(VendorTradeRequest {
+                    sequence: 0,
+                    draft: VendorDraft {
+                        vendor,
+                        buys: vec![VendorPurchase { item, amount }],
+                        sells: Vec::new(),
+                    },
+                }));
         }
         AppAction::AcceptTrade
         | AppAction::DeclineTrade
@@ -135,14 +136,23 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
         {
             // Recovery and appraisal catalogs refresh an open shop without undoing dismissal.
             state.view.vendor = vendor.clone();
-        }
-        ClientViewEvent::VendorItemIdentified(item) => {
-            if let Some(vendor) = state.view.vendor.as_mut()
-                && let Some(existing) = vendor.items.iter_mut().find(|i| i.guid == item.guid)
-            {
-                *existing = *item.clone();
-                inventory::refresh_vendor_item_context_if_visible(state, item.guid);
+            if let ContextView::Assess(InspectTarget::VendorItem(guid)) = state.view.context_view {
+                inventory::refresh_vendor_item_context_if_visible(state, guid);
                 result.request_redraw(RedrawPriority::Immediate);
+            }
+        }
+        ClientViewEvent::VendorTradeFinished(vendor_result) => {
+            if let Some(issue) = &vendor_result.sale_issue {
+                result.actions.push(AppAction::Log {
+                    chat_tags: ChatMessageTags::warning(),
+                    message: issue.clone(),
+                });
+            }
+            if let VendorTradeOutcome::Failed { message, .. } = &vendor_result.outcome {
+                result.actions.push(AppAction::Log {
+                    chat_tags: ChatMessageTags::warning(),
+                    message: message.clone(),
+                });
             }
         }
         ClientViewEvent::TradeStateUpdated(snapshot) => {

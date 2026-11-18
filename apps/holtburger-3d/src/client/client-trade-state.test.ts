@@ -1,10 +1,9 @@
-import { emptyHousing } from "./client-housing-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UiIconRepository } from "../app/ui-icon-repository";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
 import { entityFacts } from "./client-entity-mirror.test-support";
+import { baselineCurrentState } from "./client-host-contract.test-support";
 import { ClientTradeState } from "./client-trade-state";
-import type { ClientCurrentState } from "./client-host-contract";
 import type { TradeState } from "./client-trade-contract";
 
 const PLAYER = 1;
@@ -34,58 +33,10 @@ async function fixture() {
 		revision: 1,
 		partner_guid: PARTNER,
 		initiator_guid: PLAYER,
-		trade_stamp: 0,
 		self_side: { guid: PLAYER, accepted: false, items: [] },
 		partner_side: { guid: PARTNER, accepted: false, items: [] },
 	};
-	const baseline: ClientCurrentState = {
-		barber: { interaction: null, result: null, particles: null },
-		lifecycle: { kind: "in-world" },
-		characterManagement: { kind: "idle" },
-		playerVisualCapture: null,
-		entityCollisionDisabled: false,
-		canTeleportFromMap: false,
-		recallDestinations: [],
-		housing: emptyHousing(),
-		localPlayerGuid: PLAYER,
-		serverTime: 1,
-		worldGeneration: 1,
-		connection: null,
-		worldName: "Fixture",
-		accountName: "Fixture account",
-		playerName: "Player",
-		knownSpells: null,
-		enchantments: null,
-		appearanceOptions: null,
-		gameplayPreferences: null,
-		party: null,
-		partyPreferences: null,
-		friends: null,
-		contracts: null,
-		squelch: null,
-		allegiance: {
-			playerGuid: null,
-			profile: null,
-			refreshing: false,
-			canSwear: false,
-		},
-		allegiancePreferences: null,
-		friendsPreferences: null,
-		combatMode: "peace",
-		socialMotionReady: true,
-		combat: {
-			desired: null,
-			state: "idle",
-			processedIntentSequence: 0,
-			refill: null,
-		},
-		spellCastTarget: null,
-		vitals: [],
-		characterSheet: null,
-		trade: { trade: null, pending_items: [] },
-		characterMotion: null,
-		activeConfirmation: null,
-		dynamic: { hostTime: { seconds: 1 }, entities: [] },
+	const baseline = baselineCurrentState(PLAYER, {
 		entities: {
 			projectileSupply: { kind: "not-applicable" },
 			player: { pyrealBalance: null, burden: null, aetheriaActivation: null },
@@ -116,7 +67,7 @@ async function fixture() {
 				entityFacts(PARTNER_ITEM),
 			],
 		},
-	};
+	});
 	emit("client-current-state", baseline);
 	const icons = new UiIconRepository({
 		prepare: async () => [],
@@ -135,7 +86,17 @@ async function fixture() {
 		lifecycle.stop();
 		icons.dispose();
 	});
-	return { model, lifecycle, baseline, trade, snapshot, emit, invoke, failure };
+	return {
+		model,
+		lifecycle,
+		icons,
+		baseline,
+		trade,
+		snapshot,
+		emit,
+		invoke,
+		failure,
+	};
 }
 
 describe("P2P trade HUD authority", () => {
@@ -353,5 +314,19 @@ describe("P2P trade HUD authority", () => {
 		});
 		expect(f.model.read()?.partner[0]?.described).toBe(false);
 		expect(f.model.read()?.canAccept).toBe(false);
+	});
+	it("keeps read() pure without retaining or releasing icon keys", async () => {
+		const f = await fixture();
+		f.snapshot({
+			...f.trade,
+			self_side: { ...f.trade.self_side, items: [ITEM] },
+		});
+		const retainSpy = vi.spyOn(f.icons, "retain");
+		const releaseSpy = vi.spyOn(f.icons, "release");
+		const view = f.model.read();
+		expect(f.model.read()).toBe(view);
+		expect(view?.own[0]?.iconKey).not.toBeNull();
+		expect(retainSpy).not.toHaveBeenCalled();
+		expect(releaseSpy).not.toHaveBeenCalled();
 	});
 });

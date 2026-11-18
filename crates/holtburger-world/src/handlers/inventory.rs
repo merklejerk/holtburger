@@ -246,7 +246,7 @@ pub(crate) fn handle_event(
                     // Completion is independent of changed facts: repeated appraisals must
                     // still settle the inspector without republishing an unchanged catalog.
                     if *item != previous {
-                        events.push(WorldEvent::VendorItemIdentified(Box::new(item.clone())));
+                        events.push(WorldEvent::VendorCatalogUpdated);
                     }
                     events.push(WorldEvent::ObjectInspectionResult(ObjectInspectionResult {
                         guid,

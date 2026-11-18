@@ -21,6 +21,64 @@ pub use draft::{
     VendorCurrencyQuote, VendorDraft, VendorDraftQuote, VendorLineQuote, VendorPurchase,
 };
 
+/// Shared vendor catalog section classification derived from raw ItemType bits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum VendorCategory {
+    Armor,
+    BooksPaper,
+    Clothing,
+    Containers,
+    Food,
+    Gems,
+    Jewelry,
+    KeysTools,
+    Miscellaneous,
+    Services,
+    SpellComponents,
+    TradeNotes,
+    Weapons,
+    ManaStones,
+    MagicItems,
+    AlchemicalItems,
+    CookingItems,
+    FletchingItems,
+    Other,
+}
+
+impl VendorCategory {
+    /// Retail behavior evaluates vendor category filters in fixed order against raw ItemType bits, including bit 0x01000000 for fletching base items.
+    pub fn from_item_type_bits(item_type: Option<u32>) -> Self {
+        const FILTERS: &[(u32, VendorCategory)] = &[
+            (0x2, VendorCategory::Armor),
+            (0x2000, VendorCategory::BooksPaper),
+            (0x4, VendorCategory::Clothing),
+            (0x200, VendorCategory::Containers),
+            (0x20, VendorCategory::Food),
+            (0x800, VendorCategory::Gems),
+            (0x8, VendorCategory::Jewelry),
+            (0x2000_4000, VendorCategory::KeysTools),
+            (0x490, VendorCategory::Miscellaneous),
+            (0x10_0000, VendorCategory::Services),
+            (0x1000, VendorCategory::SpellComponents),
+            (0x4_0000, VendorCategory::TradeNotes),
+            (0x101, VendorCategory::Weapons),
+            (0x8_0000, VendorCategory::ManaStones),
+            (0x8000, VendorCategory::MagicItems),
+            (0x480_0000, VendorCategory::AlchemicalItems),
+            (0x40_0000, VendorCategory::CookingItems),
+            (0x900_0000, VendorCategory::FletchingItems),
+        ];
+        let Some(bits) = item_type else {
+            return Self::Other;
+        };
+        FILTERS
+            .iter()
+            .find_map(|&(mask, category)| ((bits & mask) != 0).then_some(category))
+            .unwrap_or(Self::Other)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct CoreVendorItem {
     pub guid: Guid,
@@ -106,6 +164,10 @@ impl CoreVendorItem {
         }
     }
 
+    pub fn category(&self) -> VendorCategory {
+        VendorCategory::from_item_type_bits(self.item_type_int())
+    }
+
     pub fn set_property(&mut self, update: PropertyUpdate) {
         self.properties.apply(update);
     }
@@ -143,7 +205,7 @@ impl CoreVendorItem {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VendorState {
     pub vendor_guid: Guid,
     pub items: Vec<CoreVendorItem>,
@@ -155,4 +217,37 @@ pub struct VendorState {
     pub alternate_currency_wcid: u32,
     pub alternate_currency_amount: u32,
     pub alternate_currency_name: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vendor_category_matches_fixed_retail_mask_precedence() {
+        assert_eq!(
+            VendorCategory::from_item_type_bits(None),
+            VendorCategory::Other
+        );
+        assert_eq!(
+            VendorCategory::from_item_type_bits(Some(0)),
+            VendorCategory::Other
+        );
+        assert_eq!(
+            VendorCategory::from_item_type_bits(Some(0x2 | 0x101)),
+            VendorCategory::Armor
+        );
+        assert_eq!(
+            VendorCategory::from_item_type_bits(Some(0x0100_0000)),
+            VendorCategory::FletchingItems
+        );
+        assert_eq!(
+            VendorCategory::from_item_type_bits(Some(0x2000_0000)),
+            VendorCategory::KeysTools
+        );
+        assert_eq!(
+            VendorCategory::from_item_type_bits(Some(0x100)),
+            VendorCategory::Weapons
+        );
+    }
 }

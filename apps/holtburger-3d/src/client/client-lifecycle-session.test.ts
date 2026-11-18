@@ -33,6 +33,7 @@ import {
 import { ClientVendorState } from "./client-vendor-state";
 import { UiIconRepository } from "../app/ui-icon-repository";
 import { vendorRequestSchema } from "./client-vendor-contract";
+import { baselineCurrentState } from "./client-host-contract.test-support";
 import {
 	emptyPlayerSummary,
 	entityFacts,
@@ -2751,59 +2752,16 @@ function characterSheet(
 }
 
 function currentState(playerGuid: number): ClientCurrentState {
-	return {
-		characterSheet: null,
-		barber: { interaction: null, result: null, particles: null },
-		trade: { trade: null, pending_items: [] },
-		lifecycle: { kind: "in-world" },
-		characterManagement: { kind: "idle" },
-		playerVisualCapture: null,
-		entityCollisionDisabled: false,
-		canTeleportFromMap: false,
-		recallDestinations: [],
-		housing: emptyHousing(),
-		localPlayerGuid: playerGuid,
-		entities: playerEntitySnapshot(playerGuid),
+	return baselineCurrentState(playerGuid, {
 		serverTime: 10,
 		worldGeneration: 2,
-		connection: null,
 		worldName: "Leafcull",
-		accountName: "Fixture account",
 		playerName: "Drudge",
-		knownSpells: null,
-		enchantments: null,
-		appearanceOptions: null,
-		gameplayPreferences: null,
-		party: null,
-		partyPreferences: null,
-		friends: null,
-		contracts: null,
-		squelch: null,
-		allegiance: {
-			playerGuid: null,
-			profile: null,
-			refreshing: false,
-			canSwear: false,
-		},
-		allegiancePreferences: null,
-		friendsPreferences: null,
-		combatMode: "peace",
-		socialMotionReady: true,
-		combat: {
-			desired: null,
-			state: "idle",
-			processedIntentSequence: 0,
-			refill: null,
-		},
-		spellCastTarget: null,
-		vitals: [],
-		characterMotion: null,
-		activeConfirmation: null,
 		dynamic: {
 			hostTime: { seconds: 10 },
 			entities: [view(playerGuid)],
 		},
-	};
+	});
 }
 
 function view(guid: number): DynamicEntityView {
@@ -3030,6 +2988,13 @@ it("delivers host-projected vendor contracts through the real session into the d
 		expect(model.read()?.vendor).toBe(100);
 		transport.emit(vendorFixture.closed.event, vendorFixture.closed.payload);
 		expect(model.read()).toBeNull();
+		transport.emit("client-current-state", {
+			...currentState(1),
+			vendor: vendorFixture.snapshot.payload,
+		});
+		expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
+		transport.emit("client-current-state", currentState(1));
+		expect(session.vendorSnapshot()).toBeNull();
 	} finally {
 		model.destroy();
 		icons.dispose();

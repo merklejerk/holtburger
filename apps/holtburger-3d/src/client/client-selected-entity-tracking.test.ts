@@ -1,4 +1,4 @@
-import { emptyHousing } from "./client-housing-contract";
+import { baselineCurrentState } from "./client-host-contract.test-support";
 import { CASTER_EQUIP_MASK } from "./client-inventory-equipment";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { describe, expect, it, vi } from "vitest";
@@ -43,77 +43,37 @@ async function fixture() {
 		if (handler === undefined) throw new Error(`Missing listener: ${name}`);
 		handler(payload);
 	}
-	emit("client-current-state", {
-		lifecycle: { kind: "in-world" },
-		localPlayerGuid: 1,
-		characterManagement: { kind: "idle" },
-		playerVisualCapture: null,
-		entityCollisionDisabled: false,
-		canTeleportFromMap: false,
-		recallDestinations: [],
-		housing: emptyHousing(),
-		serverTime: 10,
-		worldGeneration: 2,
-		connection: null,
-		worldName: "Leafcull",
-		accountName: "Fixture account",
-		playerName: "Player",
-		knownSpells: null,
-		enchantments: null,
-		appearanceOptions: null,
-		gameplayPreferences: null,
-		party: null,
-		partyPreferences: null,
-		friends: null,
-		contracts: null,
-		squelch: null,
-		allegiance: {
-			playerGuid: null,
-			profile: null,
-			refreshing: false,
-			canSwear: false,
-		},
-		allegiancePreferences: null,
-		friendsPreferences: null,
-		combatMode: "peace",
-		socialMotionReady: true,
-		combat: {
-			desired: null,
-			state: "idle",
-			processedIntentSequence: 0,
-			refill: null,
-		},
-		spellCastTarget: null,
-		vitals: [],
-		characterSheet: null,
-		barber: { interaction: null, result: null, particles: null },
-		trade: { trade: null, pending_items: [] },
-		characterMotion: null,
-		activeConfirmation: null,
-		dynamic: { hostTime: { seconds: 10 }, entities: [] },
-		entities: {
-			projectileSupply: { kind: "not-applicable" },
-			player: emptyPlayerSummary,
-			worldContainer: { kind: "closed" },
-			entities: [
-				entityFacts(1),
-				...[7, 8].map((guid) => creatureFacts(guid)),
-				...[9, 10].map((guid, index) =>
-					entityFacts(guid, {
-						ownedByPlayer: true,
-						location: {
-							kind: "contained",
-							parentGuid: 1,
-							slot: { kind: "item", index },
-						},
-						targeting: "ineligible",
-						scenePlacement: "unavailable",
-					}),
-				),
-				entityFacts(11),
-			],
-		},
-	});
+	emit(
+		"client-current-state",
+		baselineCurrentState(1, {
+			serverTime: 10,
+			worldGeneration: 2,
+			worldName: "Leafcull",
+			dynamic: { hostTime: { seconds: 10 }, entities: [] },
+			entities: {
+				projectileSupply: { kind: "not-applicable" },
+				player: emptyPlayerSummary,
+				worldContainer: { kind: "closed" },
+				entities: [
+					entityFacts(1),
+					...[7, 8].map((guid) => creatureFacts(guid)),
+					...[9, 10].map((guid, index) =>
+						entityFacts(guid, {
+							ownedByPlayer: true,
+							location: {
+								kind: "contained",
+								parentGuid: 1,
+								slot: { kind: "item", index },
+							},
+							targeting: "ineligible",
+							scenePlacement: "unavailable",
+						}),
+					),
+					entityFacts(11),
+				],
+			},
+		}),
+	);
 	// Finish session recovery before observing selection-owned commands.
 	await vi.waitFor(() =>
 		expect(invoke).toHaveBeenCalledWith("set_client_party_updates", {

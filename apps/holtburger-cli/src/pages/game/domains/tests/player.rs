@@ -120,6 +120,7 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         housing: Default::default(),
         connection: None,
         trade: Default::default(),
+        vendor: None,
         known_spells: None,
         enchantments: Some(
             holtburger_core::client::types::ClientPlayerEnchantmentsSnapshot {

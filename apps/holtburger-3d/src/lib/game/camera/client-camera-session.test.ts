@@ -1,9 +1,8 @@
-import { emptyHousing } from "../../../client/client-housing-contract";
+import { baselineCurrentState } from "../../../client/client-host-contract.test-support";
 import { SceneGraph } from "../scene";
 import { DynamicEntityPlacementSystem } from "../systems/dynamic-entity-placement-system";
 import { dynamicEntityPlacementFromPoint } from "../runtime/dynamic-entity-presentation";
 import type { DynamicEntityAdvance } from "../runtime/dynamic-entity-feed";
-import { playerEntitySnapshot } from "../../../client/client-entity-mirror.test-support";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -423,54 +422,10 @@ describe("ClientCameraSession", () => {
 });
 
 function currentState(): ClientCurrentState {
-	return {
-		characterSheet: null,
-		barber: { interaction: null, result: null, particles: null },
-		trade: { trade: null, pending_items: [] },
-		lifecycle: { kind: "in-world" },
-		characterManagement: { kind: "idle" },
-		playerVisualCapture: null,
-		entityCollisionDisabled: false,
-		canTeleportFromMap: false,
-		recallDestinations: [],
-		housing: emptyHousing(),
-		localPlayerGuid: PLAYER_GUID,
-		entities: playerEntitySnapshot(PLAYER_GUID),
+	return baselineCurrentState(PLAYER_GUID, {
 		serverTime: 10,
-		worldGeneration: 1,
-		connection: null,
-		accountName: "Fixture account",
 		worldName: "Leafcull",
 		playerName: "Drudge",
-		knownSpells: null,
-		enchantments: null,
-		appearanceOptions: null,
-		gameplayPreferences: null,
-		party: null,
-		partyPreferences: null,
-		friends: null,
-		contracts: null,
-		squelch: null,
-		allegiance: {
-			playerGuid: null,
-			profile: null,
-			refreshing: false,
-			canSwear: false,
-		},
-		allegiancePreferences: null,
-		friendsPreferences: null,
-		combatMode: "peace",
-		socialMotionReady: true,
-		combat: {
-			desired: null,
-			state: "idle",
-			processedIntentSequence: 0,
-			refill: null,
-		},
-		spellCastTarget: null,
-		vitals: [],
-		characterMotion: null,
-		activeConfirmation: null,
 		dynamic: {
 			hostTime: { seconds: 10 },
 			entities: [
@@ -526,7 +481,7 @@ function currentState(): ClientCurrentState {
 				},
 			],
 		},
-	};
+	});
 }
 
 function tick(

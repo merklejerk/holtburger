@@ -1,21 +1,21 @@
 import {
 	createWebGL2PssmCasterProgram,
 	type WebGL2PssmCasterProgram,
-} from "./webgl2-pssm-caster-program";
-import { Mat4 } from "../math/types";
-import { mat4ToFloat32Array } from "../math/matrices";
+} from "../../../lib/game/renderer/webgl2-pssm-caster-program";
+import { Mat4 } from "../../../lib/game/math/types";
+import { mat4ToFloat32Array } from "../../../lib/game/math/matrices";
 import {
 	compileWebGL2Shader,
 	requireWebGL2Uniform,
-} from "../webgl/shader-program";
-import { WebGL2DynamicPosePages } from "./webgl2-dynamic-pose-pages";
-import { WebGL2FlatSceneTarget } from "./webgl2-flat-scene-target";
-import { WebGL2OutdoorPssmReceiverPrograms } from "./webgl2-pssm-receiver-programs";
-import { WebGL2EntityGroundingPrograms } from "./webgl2-entity-grounding-programs";
+} from "../../../lib/game/webgl/shader-program";
+import { WebGL2DynamicPosePages } from "../../../lib/game/renderer/webgl2-dynamic-pose-pages";
+import { WebGL2FlatSceneTarget } from "../../../lib/game/renderer/webgl2-flat-scene-target";
+import { WebGL2OutdoorPssmReceiverPrograms } from "../../../lib/game/renderer/webgl2-pssm-receiver-programs";
+import { WebGL2EntityGroundingPrograms } from "../../../lib/game/renderer/webgl2-entity-grounding-programs";
 import {
 	WebGL2PssmShadowTargets,
 	type WebGL2PssmShadowTargetDiagnostics,
-} from "./webgl2-pssm-shadow-targets";
+} from "../../../lib/game/renderer/webgl2-pssm-shadow-targets";
 
 const INITIAL_CONFIGURATION = { cascadeCount: 1, resolution: 256 } as const;
 const RESIZED_CONFIGURATION = { cascadeCount: 2, resolution: 512 } as const;

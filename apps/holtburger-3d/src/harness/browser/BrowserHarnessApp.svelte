@@ -12,7 +12,10 @@
 		CombatEffectsRuntimeProbe,
 		type CombatEffectsRuntimeProof,
 	} from "./combat-effects-runtime-probe";
-	import type { CombatEffectsFixtureResult } from "../../lib/game/renderer/webgl2-combat-effects-fixture";
+	import {
+		runCombatEffectsFixture,
+		type CombatEffectsFixtureResult,
+	} from "./webgl2-fixtures/webgl2-combat-effects-fixture";
 	import { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
 	import { ViewportInputGate } from "../../lib/input/viewport-input-gate";
 	import { AppInput } from "../../lib/input/app-input";
@@ -81,14 +84,25 @@
 	} from "../../lib/game/camera/projection-clearance";
 	import { Vec3, type Mat4 } from "../../lib/game/math/types";
 	import { transformPoint3 } from "../../lib/game/math/matrices";
+	import { WebGL2Device } from "../../lib/game/renderer/webgl2-device";
 	import {
-		WebGL2Device,
+		probeWebGL2ContextLossPolicy,
+		runWebGL2PortalScopeAtlasTargetsFixture,
 		type WebGL2ContextLossPolicyProbe,
-	} from "../../lib/game/renderer/webgl2-device";
-	import type { WebGL2PortalScopeAtlasTargetsFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-targets-fixture";
-	import type { WebGL2PortalScopeAtlasExecutorFixtureResult } from "../../lib/game/renderer/webgl2-portal-scope-atlas-executor-fixture";
-	import type { WebGL2PssmFixtureResult } from "../../lib/game/renderer/webgl2-pssm-fixture";
-	import type { WebGL2EntitySelectionFixtureResult } from "../../lib/game/renderer/webgl2-entity-selection-fixture";
+		type WebGL2PortalScopeAtlasTargetsFixtureResult,
+	} from "./webgl2-fixtures/webgl2-portal-scope-atlas-targets-fixture";
+	import {
+		runWebGL2PortalScopeAtlasExecutorFixture,
+		type WebGL2PortalScopeAtlasExecutorFixtureResult,
+	} from "./webgl2-fixtures/webgl2-portal-scope-atlas-executor-fixture";
+	import {
+		runWebGL2PssmFixture,
+		type WebGL2PssmFixtureResult,
+	} from "./webgl2-fixtures/webgl2-pssm-fixture";
+	import {
+		runWebGL2EntitySelectionFixture,
+		type WebGL2EntitySelectionFixtureResult,
+	} from "./webgl2-fixtures/webgl2-entity-selection-fixture";
 	import {
 		refineEntitySelectionCandidates,
 		type EntitySelectionRefinement,
@@ -96,7 +110,7 @@
 	import {
 		runPortalTransitionPresentationFixture,
 		type PortalTransitionPresentationFixtureResult,
-	} from "../../lib/game/renderer/webgl2-portal-transition-presentation-fixture";
+	} from "./webgl2-fixtures/webgl2-portal-transition-presentation-fixture";
 	import {
 		GamePresentationRuntime,
 		type PortalTransitionRuntimeDiagnostics,
@@ -4440,29 +4454,33 @@
 				);
 				textureFilteringCapabilities = device.getTextureFilteringCapabilities();
 				if (fixture === "portal-scope-atlas") {
-					portalScopeAtlasTargets = device.probePortalScopeAtlasTargets();
-					portalScopeAtlasExecutor = device.probePortalScopeAtlasExecutor();
-					portalContextLossPolicy = await WebGL2Device.probeContextLossPolicy(
+					portalScopeAtlasTargets = device.runDiagnostic((gl) =>
+						runWebGL2PortalScopeAtlasTargetsFixture(gl),
+					);
+					portalScopeAtlasExecutor = device.runDiagnostic((gl) =>
+						runWebGL2PortalScopeAtlasExecutorFixture(gl),
+					);
+					portalContextLossPolicy = await probeWebGL2ContextLossPolicy(
 						EXPLORER_TUNING.portalTransition.visual,
 					);
 				}
 				if (fixture === "outdoor-pssm") {
-					outdoorPssm = device.probeOutdoorPssm();
+					outdoorPssm = device.runDiagnostic((gl) => runWebGL2PssmFixture(gl));
 				}
-				if (fixture === "summons") {
-					const gl = canvasElement?.getContext("webgl2");
-					if (gl === null || gl === undefined)
-						throw new Error(
-							"Summon probe requires an installed WebGL2 canvas.",
-						);
-					summons = runSummonGpuFixture(gl);
-				}
+				if (fixture === "summons")
+					summons = device.runDiagnostic((gl) => runSummonGpuFixture(gl));
 				if (fixture === "combat-effects")
-					combatEffects = device.probeCombatEffects();
+					combatEffects = device.runDiagnostic((gl) =>
+						runCombatEffectsFixture(gl),
+					);
 				if (fixture === "entity-selection") {
 					verifySelectionTheme(document);
-					entitySelection = device.probeEntitySelection(
-						readEntitySelectionColors(canvas),
+					entitySelection = device.runDiagnostic((gl) =>
+						runWebGL2EntitySelectionFixture(
+							gl,
+							EXPLORER_TUNING.portalTransition.visual,
+							readEntitySelectionColors(canvas),
+						),
 					);
 				}
 				pipeline =

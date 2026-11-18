@@ -15,7 +15,6 @@ members = [
     "apps/holtburger-tools",
     "crates/holtburger-debug-harness",
 ]
-exclude = ["apps/holtburger-3d-legacy/src-tauri"]
 default-members = ["apps/holtburger-cli"]
 
 [workspace.package]

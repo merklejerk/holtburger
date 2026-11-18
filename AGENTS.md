@@ -42,9 +42,10 @@ Both need a self-contained description of the retail behavior, the consequence o
 
 ## App Boundaries
 
-- `apps/holtburger-3d`: explorer/Tauri 3D client app shell, Svelte UI, WebGL2 renderer integration, explorer-mode controls, frontend view state, debug overlays, panels, tabs, layout, and explorer-specific UX policy.
+- `apps/holtburger-3d`: Electron/browser 3D client and Explorer app shell, Svelte UI, WebGL2 renderer integration, explorer-mode controls, frontend view state, debug overlays, panels, tabs, layout, and explorer-specific UX policy.
 - Keep explorer-mode presentation and interaction decisions inside `apps/holtburger-3d`. Floating panels, tabbed inspectors, viewport HUDs, camera gestures, explorer navigation controls, selection affordances, and debug UI are app-local concerns.
-- `apps/holtburger-3d/src-tauri`: app-local host adapter and Tauri command boundary. Keep it narrow and typed; do not promote adapter shapes into shared crates unless they represent reusable client behavior proven outside the explorer app.
+- `apps/holtburger-3d/electron`: Electron main/preload boundary (window lifecycle, sidecar supervision, local persistence, and IPC bridge).
+- `apps/holtburger-3d/host`: mode-specific Rust host sidecar (shared static content plus separate Explorer and Client authority boundaries); keep adapter shapes narrow and typed, and do not promote them into shared crates unless they represent reusable client behavior proven outside the explorer app.
 
 ## Decision Rules
 

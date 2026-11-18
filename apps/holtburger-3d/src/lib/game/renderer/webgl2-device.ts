@@ -1,4 +1,3 @@
-import type { EntitySelectionOutlineColors } from "./entity-selection-outline-policy";
 import {
 	WebGL2FailureDiagnostics,
 	type WebGL2FailureReport,
@@ -7,10 +6,6 @@ import {
 	readWebGL2DiagnosticIdentity,
 	type WebGL2DeviceDiagnosticIdentity,
 } from "./webgl2-diagnostic-identity";
-import {
-	runCombatEffectsFixture,
-	type CombatEffectsFixtureResult,
-} from "./webgl2-combat-effects-fixture";
 import { WebGL2Renderer } from "./webgl2-renderer";
 import { RenderWorld } from "./render-world";
 import { WebGL2ResourceManager } from "./webgl2-resource-manager";
@@ -24,22 +19,6 @@ import {
 	probeWebGL2TextureFilteringSupport,
 	type WebGL2TextureFilteringSupport,
 } from "./webgl2-texture-filtering-support";
-import {
-	runWebGL2PortalScopeAtlasTargetsFixture,
-	type WebGL2PortalScopeAtlasTargetsFixtureResult,
-} from "./webgl2-portal-scope-atlas-targets-fixture";
-import {
-	runWebGL2PortalScopeAtlasExecutorFixture,
-	type WebGL2PortalScopeAtlasExecutorFixtureResult,
-} from "./webgl2-portal-scope-atlas-executor-fixture";
-import {
-	runWebGL2PssmFixture,
-	type WebGL2PssmFixtureResult,
-} from "./webgl2-pssm-fixture";
-import {
-	runWebGL2EntitySelectionFixture,
-	type WebGL2EntitySelectionFixtureResult,
-} from "./webgl2-entity-selection-fixture";
 import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
 
 /** One transient RGBA preview copied from a live two-dimensional GPU texture. */
@@ -57,18 +36,6 @@ export type WebGL2DeviceStatus =
 	| { readonly kind: "ready" }
 	| { readonly kind: "restart-required"; readonly reason: "context-lost" }
 	| { readonly kind: "destroyed" };
-
-/** Browser evidence that context loss invalidates every operation without claiming restoration. */
-export interface WebGL2ContextLossPolicyProbe {
-	/** The intentional loss reached the same first-failure reporter used by applications. */
-	readonly failureCaptured: boolean;
-	readonly lossEventCanceled: boolean;
-	readonly operationRejected: boolean;
-	readonly rejectionMessage: string;
-	readonly rendererDrawRejected: boolean;
-	readonly rendererRejectionMessage: string;
-	readonly status: WebGL2DeviceStatus;
-}
 
 /** One WebGL2 context composed with all backend services that consume it. */
 export class WebGL2Device {
@@ -153,53 +120,6 @@ export class WebGL2Device {
 		);
 	}
 
-	/** Exercise context loss on an isolated device so the active renderer remains usable. */
-	static async probeContextLossPolicy(
-		portalWarpDriveTuning: PortalWarpDriveTuning,
-	): Promise<WebGL2ContextLossPolicyProbe> {
-		const canvas = document.createElement("canvas");
-		let failureCaptured = false;
-		const device = await WebGL2Device.build(
-			canvas,
-			portalWarpDriveTuning,
-			() => {
-				failureCaptured = true;
-			},
-		);
-		const renderer = await device.buildRenderer({} as RenderWorld);
-		try {
-			const lossEvent = await device.#loseContextForProbe();
-			let rejectionMessage = "";
-			let rendererRejectionMessage = "";
-			try {
-				device.probePortalScopeAtlasTargets();
-			} catch (cause) {
-				rejectionMessage =
-					cause instanceof Error ? cause.message : String(cause);
-			}
-			try {
-				renderer.drawFrame({} as Parameters<WebGL2Renderer["drawFrame"]>[0]);
-			} catch (cause) {
-				rendererRejectionMessage =
-					cause instanceof Error ? cause.message : String(cause);
-			}
-			return {
-				failureCaptured,
-				lossEventCanceled: lossEvent.defaultPrevented,
-				operationRejected: rejectionMessage.includes("restart is required"),
-				rejectionMessage,
-				rendererDrawRejected: rendererRejectionMessage.includes(
-					"restart is required",
-				),
-				rendererRejectionMessage,
-				status: device.getStatus(),
-			};
-		} finally {
-			await renderer.destroy();
-			await device.destroy();
-		}
-	}
-
 	/** Construct one renderer after the runtime exposes its read-only RenderWorld. */
 	buildRenderer(world: RenderWorld): Promise<WebGL2Renderer> {
 		this.#assertReady();
@@ -214,40 +134,10 @@ export class WebGL2Device {
 		);
 	}
 
-	/** Prove the selected scope-atlas attachment formats and lifecycle on this browser context. */
-	probePortalScopeAtlasTargets(): WebGL2PortalScopeAtlasTargetsFixtureResult {
+	/** Execute a harness diagnostic against the live GL context while enforcing device readiness. */
+	runDiagnostic<T>(probe: (gl: WebGL2RenderingContext) => T): T {
 		this.#assertReady();
-		return runWebGL2PortalScopeAtlasTargetsFixture(this.#gl);
-	}
-
-	/** Execute the propagation, envelope, and resolve GLSL against the symbolic oracle. */
-	probePortalScopeAtlasExecutor(): WebGL2PortalScopeAtlasExecutorFixtureResult {
-		this.#assertReady();
-		return runWebGL2PortalScopeAtlasExecutorFixture(this.#gl);
-	}
-
-	/** Prove the outdoor depth-array and material-free caster shader on this browser context. */
-	probeOutdoorPssm(): WebGL2PssmFixtureResult {
-		this.#assertReady();
-		return runWebGL2PssmFixture(this.#gl);
-	}
-
-	/** Focused numeric proof for combat glyph drawing, visibility, and resource teardown. */
-	probeCombatEffects(): CombatEffectsFixtureResult {
-		this.#assertReady();
-		return runCombatEffectsFixture(this.#gl);
-	}
-
-	/** Prove selected-mask drawing, presentation, resize, and teardown on this browser context. */
-	probeEntitySelection(
-		colors: EntitySelectionOutlineColors,
-	): WebGL2EntitySelectionFixtureResult {
-		this.#assertReady();
-		return runWebGL2EntitySelectionFixture(
-			this.#gl,
-			this.#portalWarpDriveTuning,
-			colors,
-		);
+		return probe(this.#gl);
 	}
 
 	/** Return a copied discriminant suitable for app-level restart policy and diagnostics. */
@@ -345,30 +235,5 @@ export class WebGL2Device {
 			);
 		}
 		throw new Error("WebGL2 device has been destroyed.");
-	}
-
-	async #loseContextForProbe(): Promise<Event> {
-		this.#assertReady();
-		const extension = this.#gl.getExtension("WEBGL_lose_context");
-		if (!extension) {
-			throw new Error(
-				"WEBGL_lose_context is unavailable for the lifecycle probe.",
-			);
-		}
-		const event = new Promise<Event>((resolve, reject) => {
-			const timeout = window.setTimeout(() => {
-				reject(new Error("Timed out waiting for WebGL context loss."));
-			}, 5_000);
-			this.#canvas.addEventListener(
-				"webglcontextlost",
-				(lossEvent) => {
-					window.clearTimeout(timeout);
-					resolve(lossEvent);
-				},
-				{ once: true },
-			);
-		});
-		extension.loseContext();
-		return event;
 	}
 }

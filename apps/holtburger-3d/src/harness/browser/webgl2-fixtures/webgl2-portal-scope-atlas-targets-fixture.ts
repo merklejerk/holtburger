@@ -1,9 +1,16 @@
+import type { PortalWarpDriveTuning } from "../../../lib/game/renderer/portal-warp-drive-tuning";
+import type { RenderWorld } from "../../../lib/game/renderer/render-world";
+import {
+	WebGL2Device,
+	type WebGL2DeviceStatus,
+} from "../../../lib/game/renderer/webgl2-device";
 import {
 	WebGL2PortalScopeAtlasTargets,
 	type WebGL2PortalScopeAtlasTargetDiagnostics,
 	type WebGL2PortalScopeAtlasTargetSet,
-} from "./webgl2-portal-scope-atlas-targets";
-import { PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT } from "./portal-arrival-metadata";
+} from "../../../lib/game/renderer/webgl2-portal-scope-atlas-targets";
+import type { WebGL2Renderer } from "../../../lib/game/renderer/webgl2-renderer";
+import { PORTAL_ARRIVAL_STATE_MAXIMUM_COUNT } from "../../../lib/game/renderer/portal-arrival-metadata";
 
 const INITIAL_EXTENTS = {
 	atlas: { height: 8, width: 8 },
@@ -13,6 +20,83 @@ const RESIZED_EXTENTS = {
 	atlas: { height: 8, width: 16 },
 	drawingBuffer: { height: 4, width: 8 },
 } as const;
+
+/** Browser evidence that context loss invalidates every operation without claiming restoration. */
+export interface WebGL2ContextLossPolicyProbe {
+	/** The intentional loss reached the same first-failure reporter used by applications. */
+	readonly failureCaptured: boolean;
+	readonly lossEventCanceled: boolean;
+	readonly operationRejected: boolean;
+	readonly rejectionMessage: string;
+	readonly rendererDrawRejected: boolean;
+	readonly rendererRejectionMessage: string;
+	readonly status: WebGL2DeviceStatus;
+}
+
+/** Exercise context loss on an isolated device so the active renderer remains usable. */
+export async function probeWebGL2ContextLossPolicy(
+	portalWarpDriveTuning: PortalWarpDriveTuning,
+): Promise<WebGL2ContextLossPolicyProbe> {
+	const canvas = document.createElement("canvas");
+	let failureCaptured = false;
+	const device = await WebGL2Device.build(canvas, portalWarpDriveTuning, () => {
+		failureCaptured = true;
+	});
+	const renderer = await device.buildRenderer({} as RenderWorld);
+	try {
+		const extension = device.runDiagnostic((gl) =>
+			gl.getExtension("WEBGL_lose_context"),
+		);
+		if (!extension) {
+			throw new Error(
+				"WEBGL_lose_context is unavailable for the lifecycle probe.",
+			);
+		}
+		const lossEventPromise = new Promise<Event>((resolve, reject) => {
+			const timeout = window.setTimeout(() => {
+				reject(new Error("Timed out waiting for WebGL context loss."));
+			}, 5_000);
+			canvas.addEventListener(
+				"webglcontextlost",
+				(lossEvent) => {
+					window.clearTimeout(timeout);
+					resolve(lossEvent);
+				},
+				{ once: true },
+			);
+		});
+		extension.loseContext();
+		const lossEvent = await lossEventPromise;
+
+		let rejectionMessage = "";
+		let rendererRejectionMessage = "";
+		try {
+			device.runDiagnostic((gl) => runWebGL2PortalScopeAtlasTargetsFixture(gl));
+		} catch (cause) {
+			rejectionMessage = cause instanceof Error ? cause.message : String(cause);
+		}
+		try {
+			renderer.drawFrame({} as Parameters<WebGL2Renderer["drawFrame"]>[0]);
+		} catch (cause) {
+			rendererRejectionMessage =
+				cause instanceof Error ? cause.message : String(cause);
+		}
+		return {
+			failureCaptured,
+			lossEventCanceled: lossEvent.defaultPrevented,
+			operationRejected: rejectionMessage.includes("restart is required"),
+			rejectionMessage,
+			rendererDrawRejected: rendererRejectionMessage.includes(
+				"restart is required",
+			),
+			rendererRejectionMessage,
+			status: device.getStatus(),
+		};
+	} finally {
+		await renderer.destroy();
+		await device.destroy();
+	}
+}
 
 /** Focused browser evidence for fixed atlas formats and transactional target ownership. */
 export interface WebGL2PortalScopeAtlasTargetsFixtureResult {

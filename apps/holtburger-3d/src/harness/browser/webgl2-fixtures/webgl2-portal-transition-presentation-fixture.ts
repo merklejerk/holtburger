@@ -1,14 +1,14 @@
-import { PortalTransitionController } from "../../client/portal-transition-controller";
-import type { PortalTransitionPresentationPlan } from "../../client/portal-transition-presentation";
-import { enrichPortalTransitionFrame } from "../runtime/portal-transition-frame";
-import { DEFAULT_COLOR_GRADE_PARAMETERS } from "./color-grade-policy";
-import { resolvePortalTransitionComposition } from "./portal-transition-composition";
-import type { PortalWarpDriveTuning } from "./portal-warp-drive-tuning";
-import { WebGL2FlatScenePresentation } from "./webgl2-flat-scene-presentation";
-import { SHARED_FRAME_SETTINGS } from "../../frontend-frame-settings";
-import { WebGL2FlatSceneTarget } from "./webgl2-flat-scene-target";
-import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-model";
-import { requireWebGL2NoError } from "../webgl/diagnostics";
+import { PortalTransitionController } from "../../../lib/client/portal-transition-controller";
+import type { PortalTransitionPresentationPlan } from "../../../lib/client/portal-transition-presentation";
+import { enrichPortalTransitionFrame } from "../../../lib/game/runtime/portal-transition-frame";
+import { DEFAULT_COLOR_GRADE_PARAMETERS } from "../../../lib/game/renderer/color-grade-policy";
+import { resolvePortalTransitionComposition } from "../../../lib/game/renderer/portal-transition-composition";
+import type { PortalWarpDriveTuning } from "../../../lib/game/renderer/portal-warp-drive-tuning";
+import { WebGL2FlatScenePresentation } from "../../../lib/game/renderer/webgl2-flat-scene-presentation";
+import { SHARED_FRAME_SETTINGS } from "../../../lib/frontend-frame-settings";
+import { WebGL2FlatSceneTarget } from "../../../lib/game/renderer/webgl2-flat-scene-target";
+import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "../../../lib/game/renderer/portal-scope-atlas-command-model";
+import { requireWebGL2NoError } from "../../../lib/game/webgl/diagnostics";
 
 const FIXTURE_EXTENT = 17;
 const FIXTURE_PIXEL_COUNT = FIXTURE_EXTENT * FIXTURE_EXTENT;

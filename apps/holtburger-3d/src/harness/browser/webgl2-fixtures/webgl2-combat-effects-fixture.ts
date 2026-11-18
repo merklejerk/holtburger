@@ -1,18 +1,18 @@
 import { decodeClientCombatOutcome } from "../../../client/client-host-contract";
 import { CLIENT_COMBAT_EFFECTS_TUNING } from "../../../client/client-tuning";
-import { sceneVector3 } from "../../assets/ac-frame";
-import { CombatEffectsSystem } from "../systems/combat-effects-system";
-import { createLandblockWorldOrigin } from "../landblocks";
+import { sceneVector3 } from "../../../lib/assets/ac-frame";
+import { CombatEffectsSystem } from "../../../lib/game/systems/combat-effects-system";
+import { createLandblockWorldOrigin } from "../../../lib/game/landblocks";
 import {
 	WebGL2CombatEffects,
 	type CombatEffectsView,
-} from "./webgl2-combat-effects";
+} from "../../../lib/game/renderer/webgl2-combat-effects";
 import {
 	PORTAL_PROPAGATION_METADATA_CAPACITY_BYTES,
 	PORTAL_PROPAGATION_SCOPE_METADATA_OFFSET_BYTES,
-} from "./portal-propagation-metadata";
-import { PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT } from "./portal-scope-atlas-metadata-glsl";
-import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-model";
+} from "../../../lib/game/renderer/portal-propagation-metadata";
+import { PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT } from "../../../lib/game/renderer/portal-scope-atlas-metadata-glsl";
+import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "../../../lib/game/renderer/portal-scope-atlas-command-model";
 
 /** Numeric browser/GPU evidence, independent of user visual acceptance. */
 export interface CombatEffectsFixtureResult {

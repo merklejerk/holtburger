@@ -217,7 +217,7 @@ before an entity animating from a table may activate.
 - aperture meshes, draw ranges, batching, atlases, culling trees, or portal traversal policy
 - durable success diagnostics, source-attempt ledgers, or renderer snapshots
 
-`apps/holtburger-3d/src-tauri` owns presentation enrichment and binary landblock layer-bundle
+`apps/holtburger-3d/host` owns presentation enrichment and binary landblock layer-bundle
 production. The browser owns final baked/instanced draw units, runtime visibility, committed
 bounds, and spatial structures.
 

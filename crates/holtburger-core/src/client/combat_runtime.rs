@@ -377,46 +377,6 @@ impl ClientRuntime {
                 self.emit_combat_status_if_changed(previous);
                 self.advance_combat_engagement(Instant::now()).await
             }
-            ClientCommand::TargetedMeleeAttack {
-                target,
-                attack_height,
-                power_level,
-            } => {
-                log::info!(
-                    ">>> Targeted melee attack on 0x{:08X} ({:?}, power {:.2})",
-                    target.0,
-                    attack_height,
-                    power_level
-                );
-                self.send_game_action(GameAction::TargetedMeleeAttack(Box::new(
-                    TargetedMeleeAttackActionData {
-                        target_guid: target,
-                        attack_height,
-                        power_level,
-                    },
-                )))
-                .await
-            }
-            ClientCommand::TargetedMissileAttack {
-                target,
-                attack_height,
-                accuracy_level,
-            } => {
-                log::info!(
-                    ">>> Targeted missile attack on 0x{:08X} ({:?}, accuracy {:.2})",
-                    target.0,
-                    attack_height,
-                    accuracy_level
-                );
-                self.send_game_action(GameAction::TargetedMissileAttack(Box::new(
-                    TargetedMissileAttackActionData {
-                        target_guid: target,
-                        attack_height,
-                        accuracy_level,
-                    },
-                )))
-                .await
-            }
             ClientCommand::ToggleCombatMode => {
                 // An equipment transaction temporarily enters peace. Do not interpret that
                 // intermediate stance as a new player request or interrupt its restoration.
@@ -452,8 +412,8 @@ impl ClientRuntime {
                     );
                     return Ok(());
                 }
-                // Stance completion is a mode/motion update, not UseDone. ACE owns its
-                // NextUseTime animation queue (Player_Combat.cs:737), so do not arm use busy state.
+                // Stance completion is a mode/motion update, not UseDone. The server owns its
+                // animation queue, so do not arm use busy state.
                 self.send_game_action(GameAction::ChangeCombatMode(Box::new(
                     ChangeCombatModeActionData { mode },
                 )))
@@ -467,13 +427,6 @@ impl ClientRuntime {
                 log::info!(">>> Changing combat mode to: {:?}", mode);
                 self.send_game_action(GameAction::ChangeCombatMode(Box::new(
                     ChangeCombatModeActionData { mode },
-                )))
-                .await
-            }
-            ClientCommand::CancelAttack => {
-                log::info!(">>> Canceling attack");
-                self.send_game_action(GameAction::CancelAttack(Box::new(
-                    CancelAttackActionData {},
                 )))
                 .await
             }

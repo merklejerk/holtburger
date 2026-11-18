@@ -1,15 +1,16 @@
 use super::tabs::classification;
 use crate::pages::game::GameData;
 use crate::pages::game::ViewState;
+use crate::pages::game::data::TimedResolvedEnchantments;
 use crate::types::InspectTarget;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyDataId, PropertyFloat, PropertyInt, WorldObjectExt,
     WorldObjectPropertyAccessors,
 };
-use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::SpatialEntitySample;
 use holtburger_world::context::WorldContextExt;
+use holtburger_world::enchantments::ResolvedEnchantment;
 use holtburger_world::inspection::InspectionSource;
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
@@ -20,7 +21,7 @@ pub struct PlayerDebugInfo<'a> {
     pub attributes: &'a HashMap<AttributeType, Attribute>,
     pub vitals: &'a HashMap<VitalType, Vital>,
     pub skills: &'a HashMap<SkillType, Skill>,
-    pub enchantments: &'a [Enchantment],
+    pub enchantments: Option<&'a TimedResolvedEnchantments>,
 }
 
 /// Generates a list of strings representing the debug information for a target.
@@ -590,18 +591,24 @@ pub fn get_debug_info(
                     )));
                 }
 
-                if !info.enchantments.is_empty() {
+                if let Some(enchantments) = info.enchantments
+                    && !enchantments.resolved.instances.is_empty()
+                {
+                    let elapsed = enchantments.received_at.elapsed().as_secs_f64();
                     lines.push(Line::from("-- Player Enchantments --"));
-                    for enc in info.enchantments {
+                    for enc in &enchantments.resolved.instances {
                         let name = spell_lookup
-                            .and_then(|m| m.get(enc.spell_id as u32))
+                            .and_then(|m| m.get(enc.key.spell_id as u32))
                             .map(|s| s.name.as_str())
                             .unwrap_or("Unknown Spell");
+                        let remaining = enc
+                            .remaining_seconds
+                            .map(|seconds| (seconds - elapsed).max(0.0));
                         lines.push(Line::from(format!(
                             "  #{} - {} (dur: {})",
-                            enc.spell_id,
+                            enc.key.spell_id,
                             name,
-                            format_duration(enc.duration)
+                            format_optional_duration(remaining)
                         )));
                     }
                 }
@@ -896,16 +903,17 @@ pub fn get_spell_debug_info(
 }
 
 pub fn get_enchantment_debug_info(
-    enchant: &Enchantment,
+    enchant: &ResolvedEnchantment,
+    remaining_seconds: Option<f64>,
     _spell_lookup: Option<&SpellCatalog>,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     lines.push(Line::from(format!(
         "DEBUG ENCHANTMENT: Spell #{}",
-        enchant.spell_id
+        enchant.key.spell_id
     )));
-    lines.push(Line::from(format!("Layer:          {}", enchant.layer)));
+    lines.push(Line::from(format!("Layer:          {}", enchant.key.layer)));
     lines.push(Line::from(format!(
         "Category:       {}",
         enchant.spell_category
@@ -916,7 +924,7 @@ pub fn get_enchantment_debug_info(
     )));
     lines.push(Line::from(format!(
         "Duration:       {}",
-        format_duration(enchant.duration)
+        format_optional_duration(remaining_seconds)
     )));
     lines.push(Line::from(format!(
         "Stat Mod Type:  0x{:08X}",
@@ -933,21 +941,6 @@ pub fn get_enchantment_debug_info(
     lines.push(Line::from(format!(
         "Stat Mod Value: {:.2}",
         enchant.stat_mod_value
-    )));
-    if let Some(set_id) = enchant.spell_set_id {
-        lines.push(Line::from(format!("Spell Set ID:   {}", set_id)));
-    }
-    lines.push(Line::from(format!(
-        "Caster GUID:    {:08X}",
-        enchant.caster_guid
-    )));
-    lines.push(Line::from(format!(
-        "Degrade Limit:  {:.2}",
-        enchant.degrade_limit
-    )));
-    lines.push(Line::from(format!(
-        "Last Degraded:  {:.1}",
-        enchant.last_time_degraded
     )));
 
     lines
@@ -981,20 +974,21 @@ pub fn get_spell_details_info(
 }
 
 pub fn get_enchantment_details_info(
-    enchant: &Enchantment,
+    enchant: &ResolvedEnchantment,
+    remaining_seconds: Option<f64>,
     spell_lookup: Option<&SpellCatalog>,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     let spell_name = spell_lookup
-        .and_then(|m| m.get(enchant.spell_id as u32))
+        .and_then(|m| m.get(enchant.key.spell_id as u32))
         .map(|s| s.name.clone())
-        .unwrap_or_else(|| format!("Spell #{}", enchant.spell_id));
+        .unwrap_or_else(|| format!("Spell #{}", enchant.key.spell_id));
 
     lines.push(Line::from(spell_name));
     lines.push(Line::from(format!(
         "Duration: {}",
-        format_duration(enchant.duration)
+        format_optional_duration(remaining_seconds)
     )));
 
     let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
@@ -1010,13 +1004,16 @@ pub fn get_enchantment_details_info(
         )));
     }
 
-    lines.push(Line::from(format!("Layer: {}", enchant.layer)));
+    lines.push(Line::from(format!("Layer: {}", enchant.key.layer)));
     lines.push(Line::from(format!("Category: {}", enchant.spell_category)));
 
     lines
 }
 
-fn enchantment_stat_key_name(enchant: &Enchantment, flags: EnchantmentTypeFlags) -> Option<String> {
+fn enchantment_stat_key_name(
+    enchant: &ResolvedEnchantment,
+    flags: EnchantmentTypeFlags,
+) -> Option<String> {
     if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
         AttributeType::from_repr(enchant.stat_mod_key).map(|a| a.to_string())
     } else if flags.contains(EnchantmentTypeFlags::SECOND_ATT) {
@@ -1032,6 +1029,10 @@ fn enchantment_stat_key_name(enchant: &Enchantment, flags: EnchantmentTypeFlags)
     } else {
         None
     }
+}
+
+fn format_optional_duration(seconds: Option<f64>) -> String {
+    seconds.map_or_else(|| "Inf".to_string(), format_duration)
 }
 
 fn format_duration(seconds: f64) -> String {

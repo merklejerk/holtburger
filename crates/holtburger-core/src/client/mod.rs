@@ -377,7 +377,7 @@ impl ClientRuntime {
             return Err(ClientProgressionUnavailable::CharacterNotReady);
         }
         if self.progression.reconcile(&self.world) {
-            self.emit_progression_guards();
+            self.emit_character_sheet();
         }
         self.progression.quote(&self.world, intent)
     }
@@ -504,13 +504,11 @@ impl ClientRuntime {
             enchantments: self
                 .described_character
                 .filter(|&guid| guid == self.world.player.guid)
-                .map(|_| ClientPlayerEnchantmentsSnapshot {
-                    records: self.world.player.enchantments.wire(),
-                    resolved: self
-                        .world
+                .map(|_| {
+                    self.world
                         .player
                         .enchantments
-                        .resolved(std::time::Instant::now()),
+                        .resolved(std::time::Instant::now())
                 }),
             character_options: self
                 .described_character
@@ -686,7 +684,7 @@ impl ClientRuntime {
             .world
             .suspend_runtime_bodies(holtburger_world::RuntimeBodyResetCause::TeleportOrWorldReset);
         for event in &reset_events {
-            self.handle_runtime_world_event_with_context(event, true, false);
+            self.handle_runtime_world_event_with_context(event, true);
         }
     }
 
@@ -1049,7 +1047,7 @@ impl ClientRuntime {
             ClientState::Disconnected | ClientState::CharacterSelection
         ) {
             if self.progression.clear() {
-                self.emit_progression_guards();
+                self.emit_character_sheet();
             }
             self.recent_deaths.clear();
             self.world.player.character_titles = None;
@@ -1090,7 +1088,7 @@ impl ClientRuntime {
     }
 
     pub fn handle_world_event(&mut self, event: &WorldEvent) {
-        self.project_world_event(event, false);
+        self.project_world_event(event);
         self.finish_character_world_events(self.world_event_changes_character_sheet(event));
         self.publish_entity_facts();
     }
@@ -1107,7 +1105,7 @@ impl ClientRuntime {
     }
 
     /// Project one event without finalizing a packet's character replacement yet.
-    fn project_world_event(&mut self, event: &WorldEvent, suppress_vital_projection: bool) {
+    fn project_world_event(&mut self, event: &WorldEvent) {
         let changes_social_admission = match event {
             WorldEvent::CombatModeUpdated(_)
             | WorldEvent::SelfServerControlledMotion(_)
@@ -1125,13 +1123,11 @@ impl ClientRuntime {
         self.observe_housing_world_event(event);
         if matches!(
             event,
-            WorldEvent::PlayerInfo(_)
-                | WorldEvent::DerivedStatsUpdated(_)
-                | WorldEvent::SkillUpdated(_)
+            WorldEvent::PlayerInfo(_) | WorldEvent::DerivedStatsUpdated
         ) {
             self.refresh_spell_inspection_context();
         }
-        self.emit_world_view_projection(event, suppress_vital_projection);
+        self.emit_world_view_projection(event);
     }
 
     fn world_event_changes_character_sheet(&self, event: &WorldEvent) -> bool {
@@ -1143,10 +1139,18 @@ impl ClientRuntime {
                         PropertyUpdate::String(PropertyString::Name | PropertyString::Template, _)
                             | PropertyUpdate::Int(
                                 PropertyInt::CharacterTitleId
-                                    | PropertyInt::AugmentationBonusSalvage,
+                                    | PropertyInt::AugmentationBonusSalvage
+                                    | PropertyInt::Level
+                                    | PropertyInt::AvailableSkillCredits,
                                 _,
                             )
-                            | PropertyUpdate::Int64(PropertyInt64::MaximumLuminance, _)
+                            | PropertyUpdate::Int64(
+                                PropertyInt64::TotalExperience
+                                    | PropertyInt64::AvailableExperience
+                                    | PropertyInt64::AvailableLuminance
+                                    | PropertyInt64::MaximumLuminance,
+                                _,
+                            )
                     )
                 });
             }
@@ -1161,11 +1165,8 @@ impl ClientRuntime {
             event,
             WorldEvent::PlayerTitlesUpdated
                 | WorldEvent::PlayerInfo(_)
-                | WorldEvent::DerivedStatsUpdated(_)
-                | WorldEvent::LevelInfoUpdated(_)
-                | WorldEvent::AttributeUpdated(_)
+                | WorldEvent::DerivedStatsUpdated
                 | WorldEvent::VitalUpdated(_)
-                | WorldEvent::SkillUpdated(_)
         )
     }
 
@@ -1173,33 +1174,21 @@ impl ClientRuntime {
     fn finish_character_world_events(&mut self, sheet_changed: bool) {
         self.publish_map_teleport_capability();
         self.publish_recall_destinations();
-        if self.progression.reconcile(&self.world) {
-            self.emit_progression_guards();
-        } else if sheet_changed {
+        if self.progression.reconcile(&self.world) || sheet_changed {
             self.emit_character_sheet();
         }
     }
 
-    fn emit_progression_guards(&self) {
-        let _ = self
-            .client_view_event_tx
-            .send(ClientViewEvent::ProgressionGuardsUpdated {
-                targets: self.guarded_progression_targets(),
-            });
-        self.emit_character_sheet();
-    }
-
-    fn emit_world_view_projection(&mut self, event: &WorldEvent, suppress_vital_projection: bool) {
+    fn emit_world_view_projection(&mut self, event: &WorldEvent) {
         self.appraisal.observe_world_event(event);
         self.emit_settled_appraisal_facts();
         self.entity_facts.observe(event);
         self.player_visual.observe(&self.world, event);
         match event {
-            WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
+            WorldEvent::PlayerEnchantmentsUpdated => {
                 let _ =
                     self.client_view_event_tx
                         .send(ClientViewEvent::PlayerEnchantmentsUpdated {
-                            enchantments: enchantments.clone(),
                             resolved: self
                                 .world
                                 .player
@@ -1207,29 +1196,21 @@ impl ClientRuntime {
                                 .resolved(std::time::Instant::now()),
                         });
             }
-            WorldEvent::DerivedStatsUpdated(data) => {
-                let vitals = data
-                    .vitals
-                    .iter()
-                    .cloned()
-                    .map(|vital| (vital.vital_type, vital))
-                    .collect();
+            WorldEvent::DerivedStatsUpdated => {
+                let vitals = self.world.player.vitals.clone();
 
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
             }
-            WorldEvent::AttributeUpdated(_) | WorldEvent::SkillUpdated(_) => {}
-            WorldEvent::LevelInfoUpdated(_) => {}
-            WorldEvent::VitalUpdated(vital) if !suppress_vital_projection => {
+            WorldEvent::VitalUpdated(vital) => {
                 let mut vitals = HashMap::new();
                 vitals.insert(vital.vital_type, vital.clone());
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
             }
-            WorldEvent::SpellUpdated { spell_ids, .. }
-            | WorldEvent::SpellRemoved { spell_ids, .. }
+            WorldEvent::PlayerSpellsChanged(spell_ids)
                 if self.described_character == Some(self.world.player.guid) =>
             {
                 let _ = self
@@ -1238,30 +1219,17 @@ impl ClientRuntime {
                         spell_ids: spell_ids.clone(),
                     });
             }
-            WorldEvent::PlayerInfo(data) => {
+            WorldEvent::PlayerInfo(entity) => {
                 self.emit_player_options_updated();
                 let _ =
                     self.client_view_event_tx
                         .send(ClientViewEvent::PlayerEnchantmentsUpdated {
-                            enchantments: data.enchantments.clone(),
                             resolved: self
                                 .world
                                 .player
                                 .enchantments
                                 .resolved(std::time::Instant::now()),
                         });
-
-                let vitals = data
-                    .vitals
-                    .iter()
-                    .cloned()
-                    .map(|vital| (vital.vital_type, vital))
-                    .collect();
-                if !suppress_vital_projection {
-                    let _ = self
-                        .client_view_event_tx
-                        .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
-                }
 
                 if let Some(spell_ids) = self.known_spell_ids() {
                     let _ = self
@@ -1272,11 +1240,11 @@ impl ClientRuntime {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntitySpawned {
-                        entity: data.entity.clone(),
+                        entity: entity.clone(),
                     });
-                self.emit_dynamic_entity_upsert(data.entity.guid);
-                self.observe_dynamic_script_entity(data.entity.guid);
-                self.observe_selection_envelope_entity(data.entity.guid);
+                self.emit_dynamic_entity_upsert(entity.guid);
+                self.observe_dynamic_script_entity(entity.guid);
+                self.observe_selection_envelope_entity(entity.guid);
                 self.emit_self_movement_kinematics_updated();
             }
             WorldEvent::TeleportStarted { sequence } => {

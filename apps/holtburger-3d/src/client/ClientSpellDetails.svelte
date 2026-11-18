@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { SpellDetails } from "../app/spell-references";
+	import type { MagicSchool, SpellDetails } from "../app/spell-references";
 	import { untrack } from "svelte";
 	import ClientSpellFormula from "./ClientSpellFormula.svelte";
 	import type {
@@ -31,13 +31,13 @@
 			}),
 		);
 	});
-	const schoolNames: Readonly<Record<number, string>> = {
-		0: "None",
-		1: "War Magic",
-		2: "Life Magic",
-		3: "Item Enchantment",
-		4: "Creature Enchantment",
-		5: "Void Magic",
+	const schoolNames: Readonly<Record<MagicSchool, string>> = {
+		none: "None",
+		"war-magic": "War Magic",
+		"life-magic": "Life Magic",
+		"item-enchantment": "Item Enchantment",
+		"creature-enchantment": "Creature Enchantment",
+		"void-magic": "Void Magic",
 	};
 </script>
 
@@ -60,7 +60,9 @@
 		<div>
 			<dt>School</dt>
 			<dd>
-				{schoolNames[details.school] ?? `Unknown school ${details.school}`}
+				{details.school.kind === "known"
+					? schoolNames[details.school.school]
+					: `Unknown school ${details.school.id}`}
 			</dd>
 		</div>
 		<div>

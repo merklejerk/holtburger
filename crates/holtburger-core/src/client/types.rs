@@ -17,7 +17,6 @@ use holtburger_protocol::messages::combat::{
     AttackConditions, AttackHeight, CombatMode, DamageLocation,
 };
 use holtburger_protocol::messages::inventory::types::EquipMask;
-use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::{
     CharacterCreateRequestData, CharacterCreateResponseData, CharacterEntry, ChatChannel,
     ChatChannelId, ChatMessageTypeId, SetTurbineChatChannelsEventData, TurbineChatChannel,
@@ -28,7 +27,6 @@ use holtburger_world::SelfMovementKinematics;
 use holtburger_world::book::BookData;
 use holtburger_world::entity::{Entity, EntityNetworkMotion};
 use holtburger_world::player::PlayerCharacterOptions;
-use holtburger_world::progression::StatTarget;
 use holtburger_world::state::FellowshipState;
 use holtburger_world::stats::{Vital, VitalType};
 use holtburger_world::vendor::VendorState;
@@ -568,15 +566,6 @@ pub enum ClientPresentationDiscontinuityKind {
     Reset,
 }
 
-/// Original player effects and their shared interpretation, replaced together after event loss.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ClientPlayerEnchantmentsSnapshot {
-    /// Original server records needed for TUI spell details and debug inspection.
-    pub records: Vec<holtburger_protocol::messages::magic::Enchantment>,
-    /// Shared winner and overridden interpretation used by character presentation.
-    pub resolved: holtburger_world::enchantments::ResolvedEnchantments,
-}
-
 /// One atomic, core-owned replacement level for client shells.
 ///
 /// Runtime bodies stay in the core value for the existing TUI and authority tests. Desktop
@@ -614,8 +603,8 @@ pub struct ClientApplicationSnapshot {
     pub vendor: Option<VendorState>,
     /// None until initial description; an empty collection is a complete empty spellbook.
     pub known_spells: Option<Vec<u32>>,
-    /// Complete effect records and shared interpretation, absent until player description.
-    pub enchantments: Option<ClientPlayerEnchantmentsSnapshot>,
+    /// Shared resolved effects, absent until player description.
+    pub enchantments: Option<holtburger_world::enchantments::ResolvedEnchantments>,
     /// None until PlayerDescription establishes the active character's complete option masks.
     pub character_options: Option<PlayerCharacterOptions>,
     /// Server-confirmed stance, undefined before the local player is established.
@@ -1114,10 +1103,6 @@ pub enum ClientViewEvent {
     },
     /// A local advancement send or rejection; never a server purchase receipt.
     ProgressionFeedback(super::progression::ClientProgressionFeedback),
-    /// Current row-local duplicate guards after submission or authoritative updates.
-    ProgressionGuardsUpdated {
-        targets: Vec<StatTarget>,
-    },
     /// Character input invalidation for independent spell inspectors.
     SpellInspectionContext(super::spell_inspection::SpellInspectionContext),
     /// Correlated read-only spell inspection result.
@@ -1177,7 +1162,6 @@ pub enum ClientViewEvent {
         options: PlayerCharacterOptions,
     },
     PlayerEnchantmentsUpdated {
-        enchantments: Vec<Enchantment>,
         resolved: holtburger_world::enchantments::ResolvedEnchantments,
     },
     ActiveCharacterConfirmationUpdated {
@@ -1713,16 +1697,6 @@ pub enum ClientCommand {
         /// Caller-owned begin/stop identity; profile-only updates retain the current identity.
         intent_sequence: u64,
     },
-    TargetedMeleeAttack {
-        target: Guid,
-        attack_height: AttackHeight,
-        power_level: f32,
-    },
-    TargetedMissileAttack {
-        target: Guid,
-        attack_height: AttackHeight,
-        accuracy_level: f32,
-    },
     /// Optimistically select a title for the captured character; the server owns eligibility.
     SetCharacterTitle {
         /// Character identity used for lifecycle admission.
@@ -1752,7 +1726,6 @@ pub enum ClientCommand {
     CancelRestPosture,
     ToggleCombatMode,
     SetCombatMode(CombatMode),
-    CancelAttack,
     QueryEntityDebugInfo(Guid),
     Quit,
 }

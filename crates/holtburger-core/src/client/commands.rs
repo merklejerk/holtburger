@@ -25,8 +25,8 @@ fn render_soul_emote_text(text: &str) -> String {
 /// Raw mutations admitted by the runtime's inventory gate. Controllers reuse this
 /// classification; guarded workflows retain their own typed receipt/admission handlers.
 pub(super) fn inventory_command_requires_guard(command: &ClientCommand) -> bool {
-    // Missile attacks consume ammunition; casting consumes components. Both also compete
-    // with equipment stance transitions, so they share ordinary inventory admission.
+    // Casting consumes components and competes with equipment stance transitions, so it shares
+    // ordinary inventory admission.
     matches!(
         command,
         ClientCommand::Use { .. }
@@ -39,8 +39,6 @@ pub(super) fn inventory_command_requires_guard(command: &ClientCommand) -> bool 
                     | crate::client::trade::TradeRequest::Add { .. }
             )
             | ClientCommand::CastSpell { .. }
-            | ClientCommand::TargetedMeleeAttack { .. }
-            | ClientCommand::TargetedMissileAttack { .. }
     )
 }
 
@@ -347,13 +345,10 @@ impl ClientRuntime {
 
             ClientCommand::ToggleCombatMode
             | ClientCommand::SetCombatMode(_)
-            | ClientCommand::CancelAttack
             | ClientCommand::CastSpell { .. }
             | ClientCommand::BeginCombatEngagement { .. }
             | ClientCommand::UpdateCombatProfile(_)
-            | ClientCommand::StopCombatEngagement { .. }
-            | ClientCommand::TargetedMeleeAttack { .. }
-            | ClientCommand::TargetedMissileAttack { .. } => self.handle_combat_command(cmd).await,
+            | ClientCommand::StopCombatEngagement { .. } => self.handle_combat_command(cmd).await,
 
             ClientCommand::Ping
             | ClientCommand::RequestCurrentApplicationState
@@ -429,7 +424,7 @@ impl ClientRuntime {
         if let Some(mode) = requested_mode
             && let Some(pending) = self.pending_combat_mode
         {
-            // ACE can omit a reply for a redundant combat request (Creature_Combat.cs:67).
+            // Server behavior can omit a reply for a redundant combat request.
             // Keep one outstanding request rather than queue uncorrelatable confirmations.
             if mode != pending {
                 self.emit_action_result(
@@ -439,10 +434,6 @@ impl ClientRuntime {
             }
             return Ok(());
         }
-        let use_target = match &action {
-            GameAction::Use(data) => Some(data.guid),
-            _ => None,
-        };
         let transfer = match &action {
             GameAction::PutItemInContainer(data)
                 if self.world.is_world_container_content(data.item_guid)
@@ -461,14 +452,6 @@ impl ClientRuntime {
             && mode != self.world.player_combat_mode()
         {
             self.pending_combat_mode = Some(mode);
-        }
-        if result.is_ok()
-            && let Some(crystal) = use_target
-        {
-            self.housing_opening = Some(super::housing::HousingOpening {
-                crystal,
-                deadline: Instant::now() + super::BUSY_OPERATION_TIMEOUT,
-            });
         }
         if result.is_err()
             && let Some(item) = transfer
@@ -1043,7 +1026,7 @@ impl ClientRuntime {
             }
         };
         self.progression.guard(quote);
-        self.emit_progression_guards();
+        self.emit_character_sheet();
         match self.send_game_action(action).await {
             Ok(()) => {
                 let _ = self

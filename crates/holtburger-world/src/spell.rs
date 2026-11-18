@@ -3,37 +3,12 @@ pub mod formula;
 use std::collections::HashMap;
 
 pub use cantrips::{CantripTier, RankedCantripTier, classify_cantrip};
+pub use holtburger_common::stats::{MagicSchool, SpellSchool};
 
 use holtburger_dat::file_type::spell_table::{
     SpellBase as DatSpellBase, SpellExtras as DatSpellExtras, SpellSet as DatSpellSet,
     SpellSetTiers as DatSpellSetTiers, SpellTable as DatSpellTable,
 };
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    strum_macros::Display,
-    strum_macros::FromRepr,
-)]
-pub enum MagicSchool {
-    #[strum(serialize = "None")]
-    None = 0,
-    #[strum(serialize = "War Magic")]
-    WarMagic = 1,
-    #[strum(serialize = "Life Magic")]
-    LifeMagic = 2,
-    #[strum(serialize = "Item Enchantment")]
-    ItemEnchantment = 3,
-    #[strum(serialize = "Creature Enchantment")]
-    CreatureEnchantment = 4,
-    #[strum(serialize = "Void Magic")]
-    VoidMagic = 5,
-}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct SpellCatalog {
@@ -150,7 +125,7 @@ impl From<DatSpellBase> for SpellInfo {
         Self {
             name: value.name,
             description: value.description,
-            school: MagicSchool::from_repr(value.school as usize).unwrap_or(MagicSchool::None),
+            school: MagicSchool::from_repr(value.school).unwrap_or(MagicSchool::None),
             icon_id: value.icon_id,
             category: value.category,
             bitfield: value.bitfield,

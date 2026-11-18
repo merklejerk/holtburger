@@ -15,6 +15,29 @@ export const CANTRIP_TIERS = [
 ] as const;
 const cantripTierSchema = z.enum(CANTRIP_TIERS);
 export type CantripTier = z.infer<typeof cantripTierSchema>;
+const MAGIC_SCHOOLS = [
+	"none",
+	"war-magic",
+	"life-magic",
+	"item-enchantment",
+	"creature-enchantment",
+	"void-magic",
+] as const;
+export type MagicSchool = (typeof MAGIC_SCHOOLS)[number];
+const magicSchoolSchema = z.enum(MAGIC_SCHOOLS);
+const spellSchoolSchema = z.discriminatedUnion("kind", [
+	z
+		.object({ kind: z.literal("known"), school: magicSchoolSchema })
+		.strict()
+		.readonly(),
+	z
+		.object({
+			kind: z.literal("unknown"),
+			id: z.number().int().nonnegative().max(0xffff_ffff),
+		})
+		.strict()
+		.readonly(),
+]);
 const id = z.number().int().positive().max(0xffff_ffff);
 const spellSpec = z
 	.object({
@@ -67,7 +90,7 @@ const referenceSchema = z.discriminatedUnion("kind", [
 						.strict()
 						.readonly(),
 					description: z.string(),
-					school: z.number().int().nonnegative().max(0xffff_ffff),
+					school: spellSchoolSchema,
 					usesProjectileHandler: z.boolean(),
 					baseMana: z.number().int().nonnegative().max(0xffff_ffff),
 					manaPerTarget: z.number().int().nonnegative().max(0xffff_ffff),

@@ -658,33 +658,12 @@ impl WorldState {
         true
     }
 
-    pub(crate) fn emit_level_info(&self, events: &mut Vec<WorldEvent>) {
-        events.push(WorldEvent::LevelInfoUpdated(self.get_level_info()));
-    }
-
     pub(crate) fn emit_player_info(&self, events: &mut Vec<WorldEvent>) {
         let Some(entity) = self.player_entity() else {
             return;
         };
 
-        events.push(WorldEvent::PlayerInfo(Box::new(crate::PlayerInfoData {
-            entity: Box::new(entity.clone()),
-            attributes: self.player.attribute_snapshot(),
-            vitals: self.player.vital_snapshot(),
-            skills: self.player.skill_snapshot(),
-            enchantments: self.player.enchantments.wire(),
-            spells: self.player.spells.keys().cloned().collect(),
-            level_info: self.get_level_info(),
-            resistances: self.player_resistances(),
-            armor: self.player_armor(),
-            vitae: self.player_vitae(),
-            inventory: self.storage.owned_items(self.player.guid).collect(),
-            equipment: self
-                .storage
-                .equipment(self.player.guid)
-                .filter_map(|(guid, mask)| mask.map(|mask| (guid, mask)))
-                .collect(),
-        })));
+        events.push(WorldEvent::PlayerInfo(Box::new(entity.clone())));
     }
 
     fn bootstrap_player_entity_from_description(

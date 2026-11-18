@@ -11,6 +11,21 @@ const affectedStatSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("attribute"), key: u32 }).strict(),
 	z.object({ kind: z.literal("vital"), key: u32 }).strict(),
 	z.object({ kind: z.literal("skill"), key: u32 }).strict(),
+	z
+		.object({
+			kind: z.literal("resistance"),
+			key: z.enum([
+				"slash",
+				"pierce",
+				"bludgeon",
+				"fire",
+				"cold",
+				"acid",
+				"electric",
+				"nether",
+			]),
+		})
+		.strict(),
 	z.object({ kind: z.literal("intProperty"), key: u32 }).strict(),
 	z.object({ kind: z.literal("floatProperty"), key: u32 }).strict(),
 	z.object({ kind: z.literal("armor") }).strict(),
@@ -35,8 +50,8 @@ const enchantmentInstanceSchema = z
 const enchantmentGroupSchema = z
 	.object({
 		affectedStat: affectedStatSchema,
-		/** Shared display name when an affected stat key is known. */
-		statName: z.string().min(1).optional(),
+		/** Authoritative display label formatted by world. */
+		statLabel: z.string().min(1),
 		operation: z.enum(["additive", "multiplicative", "other"]),
 		channel: z.enum(["ordinary", "attackSkills", "defenseSkills"]),
 		spellCategory: u16,

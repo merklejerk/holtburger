@@ -1732,7 +1732,7 @@ mod tests {
     #[test]
     fn enchantments_projection_deduplicates_spell_ids_by_latest_end_time() {
         let mut data = GameData::new(Guid(0x5000_0004), "Player".to_string(), "World".to_string());
-        data.player_enchantments = vec![
+        let raw_enchantments = [
             Enchantment {
                 spell_id: 10,
                 layer: 1,
@@ -1760,10 +1760,8 @@ mod tests {
         ];
 
         let received_at = Instant::now();
-        let observations: Vec<_> = data
-            .player_enchantments
-            .iter()
-            .copied()
+        let observations: Vec<_> = raw_enchantments
+            .into_iter()
             .map(
                 |enchantment| holtburger_world::enchantments::EnchantmentObservation {
                     enchantment,

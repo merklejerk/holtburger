@@ -1189,10 +1189,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             known_spells: snapshot.known_spells.clone(),
             trade: snapshot.trade.clone(),
             vendor: snapshot.vendor.clone().map(Into::into),
-            enchantments: snapshot
-                .enchantments
-                .as_ref()
-                .map(|effects| effects.resolved.clone()),
+            enchantments: snapshot.enchantments.clone(),
             appearance_options: snapshot.character_options.map(Into::into),
             gameplay_preferences: snapshot.character_options.map(Into::into),
             combat_mode: snapshot.combat_mode.into(),
@@ -1434,7 +1431,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::PlayerSpellsUpdated { spell_ids } => {
             Some(ClientHostEvent::PlayerSpellsUpdated { spell_ids })
         }
-        ClientViewEvent::PlayerEnchantmentsUpdated { resolved, .. } => {
+        ClientViewEvent::PlayerEnchantmentsUpdated { resolved } => {
             Some(ClientHostEvent::PlayerEnchantmentsUpdated(resolved))
         }
         ClientViewEvent::AllegianceUpdated(snapshot) => Some(ClientHostEvent::AllegianceUpdated {

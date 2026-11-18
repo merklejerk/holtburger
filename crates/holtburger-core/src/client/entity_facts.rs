@@ -155,8 +155,8 @@ impl EntityFactsPublication {
         let guid = match event {
             WorldEvent::EntitySpawned(entity)
             | WorldEvent::EntityReplaced(entity)
-            | WorldEvent::EntityIdentified(entity) => Some(entity.guid),
-            WorldEvent::PlayerInfo(data) => Some(data.entity.guid),
+            | WorldEvent::EntityIdentified(entity)
+            | WorldEvent::PlayerInfo(entity) => Some(entity.guid),
             WorldEvent::PropertiesUpdated { guid, .. }
             | WorldEvent::EntityStateUpdated { guid, .. }
             | WorldEvent::EntityScenePlacementChanged { guid, .. }
@@ -1326,7 +1326,7 @@ mod tests {
             .player
             .attributes
             .insert(strength.attr_type, strength.clone());
-        publisher.observe(&WorldEvent::AttributeUpdated(strength.clone()));
+        publisher.observe(&WorldEvent::DerivedStatsUpdated);
         let delta = publisher.collect(&mut world).unwrap();
         assert_eq!(delta.player.unwrap().burden, Some(0.0));
         assert!(delta.upserts.is_empty());
@@ -1374,7 +1374,7 @@ mod tests {
             .player
             .attributes
             .insert(strength.attr_type, strength.clone());
-        publisher.observe(&WorldEvent::AttributeUpdated(strength));
+        publisher.observe(&WorldEvent::DerivedStatsUpdated);
         let delta = publisher.collect(&mut world).unwrap();
         assert_eq!(delta.player.unwrap().burden, Some(0.5));
         assert!(delta.upserts.is_empty());

@@ -81,18 +81,20 @@
 		},
 	] as const;
 	type EffectStat =
-		| { readonly kind: "floatProperty"; readonly key: number }
+		| {
+				readonly kind: "resistance";
+				readonly key: (typeof RESISTANCE_ROWS)[number]["field"];
+		  }
 		| { readonly kind: "armor" | "vitae" };
-	// Shared float-property IDs for resistance enchantments; the displayed values remain sheet-owned.
 	const RESISTANCE_ROWS = [
-		{ label: "Slash resistance", field: "slash", key: 64 },
-		{ label: "Pierce resistance", field: "pierce", key: 65 },
-		{ label: "Bludgeon resistance", field: "bludgeon", key: 66 },
-		{ label: "Fire resistance", field: "fire", key: 67 },
-		{ label: "Cold resistance", field: "cold", key: 68 },
-		{ label: "Acid resistance", field: "acid", key: 69 },
-		{ label: "Electric resistance", field: "electric", key: 70 },
-		{ label: "Nether resistance", field: "nether", key: 166 },
+		{ label: "Slash resistance", field: "slash" },
+		{ label: "Pierce resistance", field: "pierce" },
+		{ label: "Bludgeon resistance", field: "bludgeon" },
+		{ label: "Fire resistance", field: "fire" },
+		{ label: "Cold resistance", field: "cold" },
+		{ label: "Acid resistance", field: "acid" },
+		{ label: "Electric resistance", field: "electric" },
+		{ label: "Nether resistance", field: "nether" },
 	] as const;
 	type Stat =
 		| CharacterSheet["attributes"][number]
@@ -458,8 +460,8 @@
 						...effectGroups({ kind: "armor" }).map(
 							(group) => group.effective.spellId,
 						),
-						...RESISTANCE_ROWS.flatMap(({ key }) =>
-							effectGroups({ kind: "floatProperty", key }).map(
+						...RESISTANCE_ROWS.flatMap(({ field }) =>
+							effectGroups({ kind: "resistance", key: field }).map(
 								(group) => group.effective.spellId,
 							),
 						),
@@ -890,7 +892,7 @@
 							</li>{/each}
 					</ul>
 				</details>
-				{#each RESISTANCE_ROWS as resistance (resistance.key)}
+				{#each RESISTANCE_ROWS as resistance (resistance.field)}
 					{@const resistancePercent = Math.round(
 						(1 - sheet.resistances[resistance.field]) * 100,
 					)}
@@ -902,7 +904,7 @@
 							></summary
 						>
 						<ul>
-							{#each defenseEffectLines( { kind: "floatProperty", key: resistance.key } ) as line}<li
+							{#each defenseEffectLines( { kind: "resistance", key: resistance.field } ) as line}<li
 								>
 									{line}
 								</li>{/each}

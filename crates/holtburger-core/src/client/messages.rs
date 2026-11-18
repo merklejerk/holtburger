@@ -126,7 +126,7 @@ impl ClientRuntime {
         self.world.fellowship = None;
         self.reset_housing();
         if self.progression.clear() {
-            self.emit_progression_guards();
+            self.emit_character_sheet();
         }
         self.reset_container_access();
         self.salvage_approval.reset();
@@ -177,9 +177,6 @@ impl ClientRuntime {
                 matches!(event, WorldEvent::RuntimeBodiesReset { .. } | WorldEvent::TeleportStarted { .. })
                     || matches!(event, WorldEvent::ForcedReposition { guid, .. } if *guid == self.world.player.guid)
             });
-            let derived_vitals_in_batch = pending_events
-                .iter()
-                .any(|event| matches!(event, WorldEvent::DerivedStatsUpdated(_)));
             let mut follow_up_events = Vec::new();
             // Enter portal space before publishing any replacement pose from this packet. The
             // world has already retired outgoing motion; projecting it under the old lifecycle
@@ -187,11 +184,7 @@ impl ClientRuntime {
             // Consume the lifecycle edge here exactly once, including its generation change.
             for event in &pending_events {
                 if matches!(event, WorldEvent::TeleportStarted { .. }) {
-                    self.handle_runtime_world_event_with_context(
-                        event,
-                        teleport_batch,
-                        derived_vitals_in_batch,
-                    );
+                    self.handle_runtime_world_event_with_context(event, teleport_batch);
                 }
             }
             // Packet-scoped authority/control effects must finish mutating the canonical runtime
@@ -288,16 +281,11 @@ impl ClientRuntime {
                     continue;
                 }
                 sheet_changed |= self.world_event_changes_character_sheet(event);
-                self.handle_runtime_world_event_with_context(
-                    event,
-                    teleport_batch,
-                    derived_vitals_in_batch,
-                );
+                self.handle_runtime_world_event_with_context(event, teleport_batch);
                 let admitted_guid = match event {
-                    WorldEvent::EntitySpawned(entity) | WorldEvent::EntityReplaced(entity) => {
-                        Some(entity.guid)
-                    }
-                    WorldEvent::PlayerInfo(data) => Some(data.entity.guid),
+                    WorldEvent::EntitySpawned(entity)
+                    | WorldEvent::EntityReplaced(entity)
+                    | WorldEvent::PlayerInfo(entity) => Some(entity.guid),
                     WorldEvent::EntityScenePlacementChanged {
                         guid, placement, ..
                     } if !matches!(
@@ -1300,7 +1288,6 @@ mod tests {
     use holtburger_world::motion::MotionCommand;
     use holtburger_world::player::PlayerCharacterOptions;
     use holtburger_world::state::motion_resolution::test_support::FIXTURE_STAND_COMMAND;
-    use holtburger_world::stats::CharacterLevelInfo;
     use std::collections::HashMap;
 
     fn build_test_client() -> ClientRuntime {
@@ -1445,9 +1432,8 @@ mod tests {
                 .await
                 .unwrap();
             let restored = client.application_snapshot().enchantments.unwrap();
-            assert_eq!(restored.records, vec![cooldown]);
-            assert_eq!(restored.resolved.cooldowns.len(), 1);
-            let timer = restored.resolved.cooldowns[0];
+            assert_eq!(restored.cooldowns.len(), 1);
+            let timer = restored.cooldowns[0];
             assert_eq!(timer.group_id, 213);
             assert!(
                 timer.remaining_seconds > 0.0
@@ -2551,10 +2537,6 @@ mod tests {
         assert_eq!(strength.ranks, 190);
         assert_eq!(strength.spent_xp, 4_019_438_644);
         assert!(sheets[0].guarded_targets.is_empty());
-        assert!(projected.iter().any(|event| matches!(
-            event,
-            ClientViewEvent::ProgressionGuardsUpdated { targets } if targets.is_empty()
-        )));
 
         let messages = [
             GameMessage::PrivateUpdatePropertyInt(Box::new(PrivateUpdatePropertyIntData {
@@ -2702,11 +2684,7 @@ mod tests {
         let player = Guid(0x50000001);
         let mut events = client.subscribe_client_view_events();
         client.world.player.add_spell(7, &mut Vec::new());
-        client.handle_world_event(&WorldEvent::SpellUpdated {
-            spell_id: 7,
-            name: None,
-            spell_ids: vec![7],
-        });
+        client.handle_world_event(&WorldEvent::PlayerSpellsChanged(vec![7]));
         assert_eq!(client.application_snapshot().known_spells, None);
         assert_eq!(client.application_snapshot().character_options, None);
         assert!(
@@ -2752,7 +2730,7 @@ mod tests {
                 .application_snapshot()
                 .enchantments
                 .unwrap()
-                .records
+                .instances
                 .is_empty()
         );
         assert_eq!(
@@ -2774,8 +2752,7 @@ mod tests {
         };
         client.world.player.enchantments.upsert(effect);
         let snapshot_effects = client.application_snapshot().enchantments.unwrap();
-        assert_eq!(snapshot_effects.records, vec![effect]);
-        assert_eq!(snapshot_effects.resolved.instances[0].key.spell_id, 123);
+        assert_eq!(snapshot_effects.instances[0].key.spell_id, 123);
         let mut changes = Vec::new();
         client.world.player.add_spell(3, &mut changes);
         client.world.player.add_spell(1, &mut changes);
@@ -2847,11 +2824,7 @@ mod tests {
         client.described_character = Some(client.world.player.guid);
         let mut events = client.subscribe_client_view_events();
 
-        client.handle_world_event(&WorldEvent::SpellUpdated {
-            spell_id: 100,
-            name: Some("Test Spell".to_string()),
-            spell_ids: vec![300, 100, 200],
-        });
+        client.handle_world_event(&WorldEvent::PlayerSpellsChanged(vec![300, 100, 200]));
 
         let mut saw_spell_snapshot = false;
         while let Ok(event) = events.try_recv() {
@@ -3104,26 +3077,11 @@ mod tests {
             CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG;
         client.world.player.character_options.options2 = CharacterOptions2::SHOW_HELM;
 
-        client.handle_world_event(&WorldEvent::PlayerInfo(Box::new(
-            holtburger_world::PlayerInfoData {
-                entity: Box::new(Entity::new(
-                    holtburger_common::Guid(0x50000001),
-                    "Test Player".to_string(),
-                    WorldPosition::default(),
-                )),
-                attributes: Vec::new(),
-                vitals: Vec::new(),
-                skills: Vec::new(),
-                enchantments: Vec::new(),
-                spells: Vec::new(),
-                level_info: CharacterLevelInfo::default(),
-                resistances: holtburger_world::stats::Resistances::default(),
-                armor: 0,
-                vitae: 1.0,
-                inventory: Default::default(),
-                equipment: Default::default(),
-            },
-        )));
+        client.handle_world_event(&WorldEvent::PlayerInfo(Box::new(Entity::new(
+            holtburger_common::Guid(0x50000001),
+            "Test Player".to_string(),
+            WorldPosition::default(),
+        ))));
 
         let mut saw_options_projection = false;
         let mut saw_authoritative_player_spawn = false;

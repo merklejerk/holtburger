@@ -13,7 +13,7 @@ function details(overrides: Partial<SpellDetails> = {}): SpellDetails {
 			damage: "fire",
 		},
 		description: "A spell.",
-		school: 1,
+		school: { kind: "known", school: "war-magic" },
 		usesProjectileHandler: true,
 		baseMana: 10,
 		manaPerTarget: 0,
@@ -25,10 +25,10 @@ function details(overrides: Partial<SpellDetails> = {}): SpellDetails {
 
 describe("client spell casting policy", () => {
 	it.each([
-		["War", 1],
-		["Creature Enchantment", 4],
-		["Void", 5],
-	])(
+		["War", { kind: "known", school: "war-magic" }],
+		["Creature Enchantment", { kind: "known", school: "creature-enchantment" }],
+		["Void", { kind: "known", school: "void-magic" }],
+	] as const)(
 		"casts a selected-target %s projectile forward when no entity is selected",
 		(_label, school) => {
 			expect(resolveClientSpellCastAim(details({ school }), null)).toEqual({
@@ -45,7 +45,10 @@ describe("client spell casting policy", () => {
 	});
 
 	it.each([
-		["Life Magic", details({ school: 2 })],
+		[
+			"Life Magic",
+			details({ school: { kind: "known", school: "life-magic" } }),
+		],
 		["non-projectile", details({ usesProjectileHandler: false })],
 		["self-targeted", details({ castingRoute: "self-target" })],
 		["naturally untargeted", details({ castingRoute: "untargeted" })],

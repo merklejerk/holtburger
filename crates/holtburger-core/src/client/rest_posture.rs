@@ -46,8 +46,6 @@ impl ClientRuntime {
             | ClientCommand::BeginCombatEngagement { .. }
             | ClientCommand::UpdateCombatProfile(_)
             | ClientCommand::CastSpell { .. }
-            | ClientCommand::TargetedMeleeAttack { .. }
-            | ClientCommand::TargetedMissileAttack { .. }
             | ClientCommand::SoulEmote { .. }
             | ClientCommand::ApplyEquipmentSet { .. }
             | ClientCommand::Recall(_)

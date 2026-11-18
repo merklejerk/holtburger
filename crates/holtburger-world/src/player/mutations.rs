@@ -43,7 +43,6 @@ impl PlayerState {
         start: u32,
         xp: u32,
         xp_table: &holtburger_dat::file_type::XpTable,
-        events: &mut Vec<WorldEvent>,
     ) {
         if let Some(attr_type) = stats::AttributeType::from_repr(attr_id) {
             let base = start + ranks;
@@ -61,13 +60,12 @@ impl PlayerState {
                 breakdown,
             };
 
-            self.attributes.insert(attr_type, attr_obj.clone());
-            events.push(WorldEvent::AttributeUpdated(attr_obj));
+            self.attributes.insert(attr_type, attr_obj);
         }
     }
 
-    /// Applies a server-authored skill update and refreshes derived player stats.
-    pub fn update_skill(&mut self, params: SkillUpdateParams, events: &mut Vec<WorldEvent>) {
+    /// Applies a server-authored skill update.
+    pub fn update_skill(&mut self, params: SkillUpdateParams) {
         let SkillUpdateParams {
             skill_id,
             ranks,
@@ -114,13 +112,12 @@ impl PlayerState {
                 breakdown,
             };
 
-            self.skills.insert(skill_type, skill_obj.clone());
-            events.push(WorldEvent::SkillUpdated(skill_obj));
+            self.skills.insert(skill_type, skill_obj);
         }
     }
 
-    /// Applies a server-authored vital update and refreshes derived player stats.
-    pub fn update_vital(&mut self, params: VitalUpdateParams, events: &mut Vec<WorldEvent>) {
+    /// Applies a server-authored vital update.
+    pub fn update_vital(&mut self, params: VitalUpdateParams) {
         let VitalUpdateParams {
             vital_id,
             ranks,
@@ -150,8 +147,7 @@ impl PlayerState {
                 current,
                 breakdown,
             };
-            self.vitals.insert(vital_type, vital_obj.clone());
-            events.push(WorldEvent::VitalUpdated(vital_obj));
+            self.vitals.insert(vital_type, vital_obj);
         }
     }
 
@@ -528,8 +524,8 @@ impl PlayerState {
 
         self.enchantments.retain(|e| {
             let flags = EnchantmentTypeFlags::from_bits_truncate(e.stat_mod_type);
-            // ACE EnchantmentManager.cs:358-377 and retail preserve cooldowns and permanent
-            // item effects during either death purge.
+            // Retail and server behavior preserve cooldowns and permanent item effects during either
+            // death purge.
             let is_cooldown = crate::enchantments::EnchantmentKind::from_wire(e).is_none();
             if is_cooldown || e.duration == -1.0 {
                 return true;
@@ -548,24 +544,15 @@ impl PlayerState {
 
     pub fn add_spell(&mut self, spell_id: u32, events: &mut Vec<WorldEvent>) {
         self.spells.insert(spell_id, 0.0);
-        events.push(WorldEvent::SpellUpdated {
-            spell_id,
-            name: None,
-            spell_ids: self.current_spell_ids(),
-        });
+        events.push(WorldEvent::PlayerSpellsChanged(self.current_spell_ids()));
     }
 
     pub fn remove_spell(&mut self, spell_id: u32, events: &mut Vec<WorldEvent>) {
         self.spells.remove(&spell_id);
-        events.push(WorldEvent::SpellRemoved {
-            spell_id,
-            spell_ids: self.current_spell_ids(),
-        });
+        events.push(WorldEvent::PlayerSpellsChanged(self.current_spell_ids()));
     }
 
     fn emit_enchantments_updated(&mut self, events: &mut Vec<WorldEvent>) {
-        events.push(WorldEvent::PlayerEnchantmentsUpdated {
-            enchantments: self.enchantments.wire(),
-        });
+        events.push(WorldEvent::PlayerEnchantmentsUpdated);
     }
 }

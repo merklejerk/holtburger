@@ -50,10 +50,9 @@ impl PlayerVisualPublication {
 
     pub(super) fn observe(&mut self, world: &WorldState, event: &WorldEvent) {
         let guid = match event {
-            WorldEvent::PlayerInfo(data) => Some(data.entity.guid),
-            WorldEvent::EntitySpawned(entity) | WorldEvent::EntityReplaced(entity) => {
-                Some(entity.guid)
-            }
+            WorldEvent::PlayerInfo(entity)
+            | WorldEvent::EntitySpawned(entity)
+            | WorldEvent::EntityReplaced(entity) => Some(entity.guid),
             WorldEvent::EntityAppearanceUpdated { guid }
             | WorldEvent::EntityScenePlacementChanged { guid, .. }
             | WorldEvent::EntityDespawned { guid, .. } => Some(*guid),

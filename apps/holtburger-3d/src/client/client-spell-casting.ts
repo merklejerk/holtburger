@@ -1,7 +1,5 @@
 import type { SpellDetails } from "../app/spell-references";
 
-const LIFE_MAGIC_SCHOOL = 2;
-
 /** Complete recipient intent forwarded to shared combat execution. */
 export type ClientSpellCastAim =
 	| {
@@ -18,15 +16,17 @@ export function resolveClientSpellCastAim(
 	if (
 		selection === null &&
 		details !== null &&
-		details.school !== LIFE_MAGIC_SCHOOL &&
+		!(
+			details.school.kind === "known" && details.school.school === "life-magic"
+		) &&
 		details.castingRoute === "selected-target" &&
 		details.usesProjectileHandler
 	) {
 		// RETAIL DIVERGENCE: requires a selection here. Preserving that check would prevent
-		// deliberate forward fire supported by ACE's null-target projectile path. ACE
-		// WorldObject_Magic.cs:266-274 rejects a missing Life target after
-		// Player_Magic.cs:849-868 consumes resources. The 2026-09-17 6,266-spell DAT census
-		// found 474 selected-target non-Life projectiles affected by this policy.
+		// deliberate forward fire supported by the server's null-target projectile path.
+		// Server behavior rejects a missing Life target after consuming resources. The
+		// 2026-09-17 6,266-spell DAT census found 474 selected-target non-Life projectiles
+		// affected by this policy.
 		return { kind: "untargeted" };
 	}
 	return { kind: "normal", selection };

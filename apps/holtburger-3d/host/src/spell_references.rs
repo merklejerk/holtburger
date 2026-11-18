@@ -3,6 +3,7 @@
 use std::{collections::HashSet, num::NonZeroU32};
 
 use anyhow::{Result, ensure};
+use holtburger_common::stats::SpellSchool;
 use holtburger_content::{
     spells::spell_reference,
     ui_assets::{UiAssetReader, UiAssets},
@@ -54,8 +55,8 @@ pub struct SpellDetails {
     /// Authored description.
     pub description: String,
     /// Authored school ID; unknown values remain distinguishable.
-    pub school: u32,
-    /// Whether ACE executes the spell through a projectile handler.
+    pub school: SpellSchool,
+    /// Whether the server executes the spell through a projectile handler.
     pub uses_projectile_handler: bool,
     /// Base mana before economy adjustments.
     pub base_mana: u32,
@@ -260,7 +261,7 @@ mod tests {
                     &holtburger_dat::file_type::spell_table::SpellBase::default(),
                 ),
                 description: "Description".into(),
-                school: 3,
+                school: SpellSchool::from_raw(3),
                 uses_projectile_handler: false,
                 base_mana: 10,
                 mana_per_target: 2,
@@ -275,7 +276,7 @@ mod tests {
             serde_json::to_value(reference).unwrap(),
             serde_json::json!({
                 "kind":"known", "id":1, "name":"Spell",
-                "details":{"castingRoute":"untargeted","classification":{"beneficial":false,"level":null,"recipient":null,"fellowship":false,"damage":null},"description":"Description", "school":3, "usesProjectileHandler":false, "baseMana":10, "manaPerTarget":2, "durationSeconds":60.0, "cantripTier":null}, "artwork": {
+                "details":{"castingRoute":"untargeted","classification":{"beneficial":false,"level":null,"recipient":null,"fellowship":false,"damage":null},"description":"Description", "school":{"kind":"known","school":"item-enchantment"}, "usesProjectileHandler":false, "baseMana":10, "manaPerTarget":2, "durationSeconds":60.0, "cantripTier":null}, "artwork": {
                     "kind":"ready", "spec":{"kind":"spell", "base":1,"background":610,"effects":702,"overlay":704}
                 }
             })

@@ -51,7 +51,7 @@ function fixture() {
 			kind: "known",
 			details: {
 				description: "Description",
-				school: 3,
+				school: { kind: "known", school: "item-enchantment" },
 				usesProjectileHandler: false,
 				baseMana: 10,
 				manaPerTarget: 0,
@@ -168,7 +168,7 @@ describe("ClientSpellState artwork lifetime", () => {
 						kind: "known",
 						details: {
 							description: "Description",
-							school: 3,
+							school: { kind: "known", school: "item-enchantment" },
 							usesProjectileHandler: false,
 							baseMana: 10,
 							manaPerTarget: 0,

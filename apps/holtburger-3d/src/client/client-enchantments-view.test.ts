@@ -43,7 +43,7 @@ const resolved: ResolvedEnchantments = {
 	groups: [
 		{
 			affectedStat: { kind: "attribute", key: 1 },
-			statName: "Strength",
+			statLabel: "Strength",
 			operation: "additive",
 			channel: "ordinary",
 			spellCategory: 7,
@@ -52,7 +52,7 @@ const resolved: ResolvedEnchantments = {
 		},
 		{
 			affectedStat: { kind: "skill", key: 1 },
-			statName: "Axe",
+			statLabel: "Axe",
 			operation: "additive",
 			channel: "ordinary",
 			spellCategory: 7,
@@ -61,7 +61,7 @@ const resolved: ResolvedEnchantments = {
 		},
 		{
 			affectedStat: { kind: "skill", key: 1 },
-			statName: "Axe",
+			statLabel: "Axe",
 			operation: "additive",
 			channel: "attackSkills",
 			spellCategory: 7,
@@ -70,7 +70,7 @@ const resolved: ResolvedEnchantments = {
 		},
 		{
 			affectedStat: { kind: "skill", key: 1 },
-			statName: "Axe",
+			statLabel: "Axe",
 			operation: "additive",
 			channel: "ordinary",
 			spellCategory: 8,
@@ -291,13 +291,13 @@ describe("enchantment presentation projection", () => {
 		expect(query("cooldown", [])).toEqual([]);
 	});
 
-	it("names known property headings and distinguishes unknown integer and float keys", () => {
+	it("groups and searches by producer-supplied stat labels", () => {
 		const group = (
 			affectedStat: ResolvedEnchantments["groups"][number]["affectedStat"],
-			statName?: string,
+			statLabel: string,
 		): ResolvedEnchantments["groups"][number] => ({
 			affectedStat,
-			statName,
+			statLabel,
 			operation: "additive",
 			channel: "ordinary",
 			spellCategory: 7,
@@ -305,11 +305,11 @@ describe("enchantment presentation projection", () => {
 			overridden: [],
 		});
 		const propertyGroups = [
-			group({ kind: "intProperty", key: 360 }, "WeaponAuraDamage"),
-			group({ kind: "floatProperty", key: 3 }, "HealthRate"),
-			group({ kind: "floatProperty", key: 64 }, "ResistSlash"),
-			group({ kind: "intProperty", key: 999 }),
-			group({ kind: "floatProperty", key: 999 }),
+			group({ kind: "intProperty", key: 360 }, "Weapon aura damage"),
+			group({ kind: "floatProperty", key: 3 }, "Health regeneration rate"),
+			group({ kind: "resistance", key: "slash" }, "Slash resistance"),
+			group({ kind: "intProperty", key: 999 }, "Integer property 999"),
+			group({ kind: "floatProperty", key: 999 }, "Float property 999"),
 		];
 		const sections = projectEnchantmentSections(
 			{ cooldowns: [], instances: resolved.instances, groups: propertyGroups },

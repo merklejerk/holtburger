@@ -20,11 +20,11 @@ export const SPELL_FILTER_OPTIONS = [
 	["selected-target", "Targeted", "target"],
 	["untargeted", "Untargeted", "target"],
 	["fellowship", "Fellowship", "fellowship"],
-	["school:4", "Creature", "school"],
-	["school:2", "Life", "school"],
-	["school:3", "Item", "school"],
-	["school:1", "War", "school"],
-	["school:5", "Void", "school"],
+	["school:creature-enchantment", "Creature", "school"],
+	["school:life-magic", "Life", "school"],
+	["school:item-enchantment", "Item", "school"],
+	["school:war-magic", "War", "school"],
+	["school:void-magic", "Void", "school"],
 	["direct", "Direct", "damage"],
 	["acid", "Acid", "damage"],
 	["bludgeoning", "Bludgeoning", "damage"],
@@ -62,7 +62,8 @@ export function spellSearchEntry(
 	if (details !== null) {
 		const { classification } = details;
 		tags.add(classification.beneficial ? "beneficial" : "harmful");
-		tags.add(`school:${details.school}`);
+		if (details.school.kind === "known")
+			tags.add(`school:${details.school.school}`);
 		if (classification.level !== null)
 			tags.add(`level:${classification.level}`);
 		tags.add(details.castingRoute);

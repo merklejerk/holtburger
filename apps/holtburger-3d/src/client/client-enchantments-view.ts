@@ -143,52 +143,6 @@ function statId(stat: Stat): string {
 			: stat.kind;
 }
 
-const PROPERTY_LABELS: Readonly<Record<string, string>> = {
-	HealthRate: "Health regeneration rate",
-	StaminaRate: "Stamina regeneration rate",
-	ManaRate: "Mana regeneration rate",
-};
-
-function propertyLabel(symbol: string): string {
-	const words = symbol
-		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-		.replace(/([A-Z])([A-Z][a-z])/g, "$1 $2");
-	const label = words.charAt(0).toUpperCase() + words.slice(1).toLowerCase();
-	if (!label.startsWith("Resist ")) return label;
-	const damageType = label.slice("Resist ".length);
-	return `${damageType.charAt(0).toUpperCase()}${damageType.slice(1)} resistance`;
-}
-
-/** UI wording for shared stat names; unknown keys retain their numeric identity. */
-function enchantmentStatLabel(stat: Stat, statName?: string): string {
-	switch (stat.kind) {
-		case "attribute":
-			return statName ?? `Attribute ${stat.key}`;
-		case "vital":
-			return statName?.startsWith("Max")
-				? `Maximum ${statName.slice(3).toLowerCase()}`
-				: (statName ?? `Vital ${stat.key}`);
-		case "skill":
-			return statName ?? `Skill ${stat.key}`;
-		case "intProperty":
-			return statName === undefined
-				? `Integer property ${stat.key}`
-				: (PROPERTY_LABELS[statName] ?? propertyLabel(statName));
-		case "floatProperty":
-			return statName === undefined
-				? `Float property ${stat.key}`
-				: (PROPERTY_LABELS[statName] ?? propertyLabel(statName));
-		case "armor":
-			return "Armor";
-		case "damage":
-			return "Damage";
-		case "damageVariance":
-			return "Damage variance";
-		case "other":
-			return `Other effect ${stat.key[0]} / ${stat.key[1]}`;
-	}
-}
-
 function rowName(row: EnchantmentDisplayRow): string {
 	return row.spell?.name ?? `Spell ${row.instance.key.spellId}`;
 }
@@ -256,8 +210,10 @@ export function projectEnchantmentSections(
 		const tags = new Set<string>([
 			item.instance.kind === "vitae" ? "harmful" : item.instance.kind,
 		]);
-		if (item.spell?.details !== null && item.spell?.details !== undefined)
-			tags.add(`school:${item.spell.details.school}`);
+		if (item.spell?.details !== null && item.spell?.details !== undefined) {
+			if (item.spell.details.school.kind === "known")
+				tags.add(`school:${item.spell.details.school.school}`);
+		}
 		return matchesSpellSearch(
 			{ words: [...statWords, ...textSearchWords(rowName(item))], tags },
 			terms,
@@ -277,7 +233,7 @@ export function projectEnchantmentSections(
 		const id = statId(group.affectedStat);
 		let section = sections.get(id);
 		if (section === undefined) {
-			const label = enchantmentStatLabel(group.affectedStat, group.statName);
+			const label = group.statLabel;
 			section = { label, words: textSearchWords(label), groups: [] };
 			sections.set(id, section);
 		}

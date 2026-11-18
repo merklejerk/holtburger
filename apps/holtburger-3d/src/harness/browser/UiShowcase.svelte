@@ -1357,8 +1357,17 @@
 											? "self-target"
 											: "selected-target",
 									description: "Fixture spell description.",
-									school:
-										id === 666 ? 4 : id === 2000 ? 5 : id % 2 === 0 ? 2 : 3,
+									school: {
+										kind: "known",
+										school:
+											id === 666
+												? "creature-enchantment"
+												: id === 2000
+													? "void-magic"
+													: id % 2 === 0
+														? "life-magic"
+														: "item-enchantment",
+									},
 									usesProjectileHandler: id === 2000,
 									baseMana: 10,
 									manaPerTarget: 2,

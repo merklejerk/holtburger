@@ -20,7 +20,7 @@ function matchesSpellSearch(
 const details: SpellDetails = {
 	castingRoute: "self-target",
 	description: "",
-	school: 2,
+	school: { kind: "known", school: "life-magic" },
 	usesProjectileHandler: false,
 	baseMana: 10,
 	manaPerTarget: 0,
@@ -116,25 +116,30 @@ describe("spell discovery matching", () => {
 	});
 	it("unions within categories and intersects categories and every search term", () => {
 		const entry = spellSearchEntry("Acid Protection VII", details);
-		expect(matchesSpellSearch(entry, [], ["acid", "frost", "school:2"])).toBe(
-			true,
-		);
-		expect(matchesSpellSearch(entry, [], ["acid", "frost", "school:1"])).toBe(
-			false,
-		);
+		expect(
+			matchesSpellSearch(entry, [], ["acid", "frost", "school:life-magic"]),
+		).toBe(true);
+		expect(
+			matchesSpellSearch(entry, [], ["acid", "frost", "school:war-magic"]),
+		).toBe(false);
 		expect(
 			matchesSpellSearch(entry, [], ["level:6", "level:7", "beneficial"]),
 		).toBe(true);
-		expect(matchesSpellSearch(entry, [], ["fire", "school:1"])).toBe(false);
+		expect(matchesSpellSearch(entry, [], ["fire", "school:war-magic"])).toBe(
+			false,
+		);
 		expect(
-			matchesSpellSearch(entry, textSearchWords("frost"), ["acid", "school:2"]),
+			matchesSpellSearch(entry, textSearchWords("frost"), [
+				"acid",
+				"school:life-magic",
+			]),
 		).toBe(false);
 		expect(matchesSpellSearch(entry, [], ["self-target", "harmful"])).toBe(
 			false,
 		);
 		expect(
 			matchesSpellSearch(entry, textSearchWords("PROT acid"), [
-				"school:2",
+				"school:life-magic",
 				"level:7",
 				"acid",
 			]),
@@ -142,7 +147,9 @@ describe("spell discovery matching", () => {
 		expect(matchesSpellSearch(entry, textSearchWords("acid zz"), [])).toBe(
 			false,
 		);
-		expect(matchesSpellSearch(entry, [], ["school:2", "school:1"])).toBe(true);
+		expect(
+			matchesSpellSearch(entry, [], ["school:life-magic", "school:war-magic"]),
+		).toBe(true);
 		expect(matchesSpellSearch(entry, [], ["self-target", "fellowship"])).toBe(
 			true,
 		);

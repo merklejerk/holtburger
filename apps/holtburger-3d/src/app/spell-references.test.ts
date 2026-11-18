@@ -103,7 +103,7 @@ describe("SpellReferences", () => {
 					damage: null,
 				},
 				description: "Increases the target's Summoning skill by 45 points.",
-				school: 4,
+				school: { kind: "known", school: "creature-enchantment" },
 				usesProjectileHandler: false,
 				baseMana: 1,
 				manaPerTarget: 0,

@@ -747,47 +747,34 @@ mod tests {
             | holtburger_common::properties::EnchantmentTypeFlags::ADDITIVE
             | holtburger_common::properties::EnchantmentTypeFlags::BENEFICIAL)
             .bits();
-        snapshot.enchantments = Some(
-            holtburger_core::client::types::ClientPlayerEnchantmentsSnapshot {
-                records: vec![holtburger_protocol::messages::magic::Enchantment {
+        snapshot.enchantments = Some(holtburger_world::enchantments::ResolvedEnchantments {
+            cooldowns: Vec::new(),
+            instances: vec![holtburger_world::enchantments::ResolvedEnchantment {
+                key: holtburger_world::enchantments::EnchantmentKey {
                     spell_id: 123,
-                    spell_category: 7,
-                    power_level: 5,
-                    duration: -1.0,
-                    stat_mod_type: effect_flags,
-                    stat_mod_value: 2.0,
-                    ..Default::default()
-                }],
-                resolved: holtburger_world::enchantments::ResolvedEnchantments {
-                    cooldowns: Vec::new(),
-                    instances: vec![holtburger_world::enchantments::ResolvedEnchantment {
-                        key: holtburger_world::enchantments::EnchantmentKey {
-                            spell_id: 123,
-                            layer: 0,
-                        },
-                        spell_category: 7,
-                        power_level: 5,
-                        kind: holtburger_world::enchantments::EnchantmentKind::Beneficial,
-                        remaining_seconds: None,
-                        stat_mod_type: effect_flags,
-                        stat_mod_key: 0,
-                        stat_mod_value: 2.0,
-                    }],
-                    groups: vec![holtburger_world::enchantments::EnchantmentLayerGroup {
-                        affected_stat: holtburger_world::enchantments::AffectedStat::Armor,
-                        stat_name: None,
-                        operation: holtburger_world::enchantments::EnchantmentOperation::Additive,
-                        channel: holtburger_world::enchantments::EnchantmentChannel::Ordinary,
-                        spell_category: 7,
-                        effective: holtburger_world::enchantments::EnchantmentKey {
-                            spell_id: 123,
-                            layer: 0,
-                        },
-                        overridden: Vec::new(),
-                    }],
+                    layer: 0,
                 },
-            },
-        );
+                spell_category: 7,
+                power_level: 5,
+                kind: holtburger_world::enchantments::EnchantmentKind::Beneficial,
+                remaining_seconds: None,
+                stat_mod_type: effect_flags,
+                stat_mod_key: 0,
+                stat_mod_value: 2.0,
+            }],
+            groups: vec![holtburger_world::enchantments::EnchantmentLayerGroup {
+                affected_stat: holtburger_world::enchantments::AffectedStat::Armor,
+                stat_label: "Armor".into(),
+                operation: holtburger_world::enchantments::EnchantmentOperation::Additive,
+                channel: holtburger_world::enchantments::EnchantmentChannel::Ordinary,
+                spell_category: 7,
+                effective: holtburger_world::enchantments::EnchantmentKey {
+                    spell_id: 123,
+                    layer: 0,
+                },
+                overridden: Vec::new(),
+            }],
+        });
         snapshot.housing.home = holtburger_world::housing::HomeKnowledge::None;
         snapshot.housing.pending_payment = Some(
             holtburger_core::client::housing_execution::HousingPendingPayment {

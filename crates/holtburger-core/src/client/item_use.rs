@@ -205,7 +205,7 @@ impl ClientRuntime {
         if let ItemUseIntent::Direct { source, .. } = intent {
             self.prepare_container_use(*source).await?;
         }
-        // ACE Player_Use.cs:60-89 routes spell-bearing targeted item use through spell casting.
+        // Server behavior routes spell-bearing targeted item use through spell casting.
         let targeted_spell = match intent {
             ItemUseIntent::Targeted { source, target } => self
                 .world
@@ -255,13 +255,15 @@ impl ClientRuntime {
         if let Some((target, spell_id)) = targeted_spell {
             self.record_sent_targeted_spell(target, spell_id);
         }
-        if let ItemUseIntent::Direct { source, .. } = intent
-            && let Some(feedback) =
+        if let ItemUseIntent::Direct { source, .. } = intent {
+            self.record_housing_opening(*source);
+            if let Some(feedback) =
                 holtburger_world::interaction::describe_entity_use(&self.world, *source)
-        {
-            let _ = self
-                .client_view_event_tx
-                .send(ClientViewEvent::EntityUseFeedback(feedback));
+            {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityUseFeedback(feedback));
+            }
         }
         Ok(true)
     }

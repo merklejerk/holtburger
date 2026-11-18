@@ -1278,11 +1278,11 @@ fn derived_skill_refresh_reads_current_player_augmentation_properties() {
     state.emit_player_derived_stats(&mut events);
     let skill = &state.player.skills[&SkillType::HeavyWeapons];
     assert_eq!((skill.base, skill.current), (30, 30));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::DerivedStatsUpdated(stats)
-            if stats.skills.iter().any(|skill| skill.skill_type == SkillType::HeavyWeapons && skill.base == 30)
-    )));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::DerivedStatsUpdated))
+    );
 }
 
 #[test]
@@ -1386,9 +1386,9 @@ fn bootstrap_reference_tables_drive_player_and_spell_lookups() {
             || resolved_info.power > 0
     );
 
-    let mut events = Vec::new();
-    state.player.update_skill(
-        crate::player::mutations::SkillUpdateParams {
+    state
+        .player
+        .update_skill(crate::player::mutations::SkillUpdateParams {
             skill_id,
             ranks: 0,
             status: 2,
@@ -1400,17 +1400,13 @@ fn bootstrap_reference_tables_drive_player_and_spell_lookups() {
                 augmentations: state.player_skill_augmentations(),
                 vitae: state.player_vitae(),
             },
-        },
-        &mut events,
-    );
+        });
 
-    let updated_skill = events
-        .into_iter()
-        .find_map(|event| match event {
-            WorldEvent::SkillUpdated(skill) if skill.skill_type as u32 == skill_id => Some(skill),
-            _ => None,
-        })
-        .expect("skill update should emit a SkillUpdated event");
+    let updated_skill = state
+        .player
+        .skills
+        .get(&crate::stats::SkillType::from_repr(skill_id).unwrap())
+        .expect("skill update should store cached skill");
 
     assert_eq!(
         (updated_skill.trained_cost, updated_skill.specialized_cost),
@@ -2570,17 +2566,14 @@ fn test_player_description_initialization() {
         player_entity.get_int64_prop(PropertyInt64::AvailableExperience),
         Some(12345)
     );
+    assert_eq!(state.get_level_info().level, 17);
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::PlayerInfo(data)
-            if data.entity.guid == player_guid
-                && data.entity.name() == player_name
-                && data.entity.position == bootstrap_pos
-                && data.level_info.level == 17
+        WorldEvent::PlayerInfo(entity)
+            if entity.guid == player_guid
+                && entity.name() == player_name
+                && entity.position == bootstrap_pos
     )));
-    assert!(events.iter().any(
-        |event| matches!(event, WorldEvent::LevelInfoUpdated(level_info) if level_info.level == 17)
-    ));
     assert!(
         state
             .player

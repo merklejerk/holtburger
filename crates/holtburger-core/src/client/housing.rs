@@ -138,6 +138,14 @@ impl ClientRuntime {
         Ok(())
     }
 
+    /// Arms bounded opening intent for a direct use that may return a housing crystal profile.
+    pub(super) fn record_housing_opening(&mut self, crystal: Guid) {
+        self.housing_opening = Some(HousingOpening {
+            crystal,
+            deadline: Instant::now() + super::BUSY_OPERATION_TIMEOUT,
+        });
+    }
+
     /// Terminal character changes retire housing; travel does not call this method.
     pub(super) fn reset_housing(&mut self) {
         self.housing_opening = None;
@@ -242,12 +250,19 @@ mod tests {
         let mut client = build_test_client(ClientState::InWorld);
         let crystal = Guid(100);
         client
-            .send_game_action(GameAction::Use(Box::new(UseActionData { guid: crystal })))
+            .handle_command(crate::ClientCommand::Use {
+                guid: crystal,
+                unrestricted: true,
+            })
             .await
             .unwrap();
         receive_profile(&mut client, crystal).await;
+        client.clear_busy_operation();
         client
-            .send_game_action(GameAction::Use(Box::new(UseActionData { guid: crystal })))
+            .handle_command(crate::ClientCommand::Use {
+                guid: crystal,
+                unrestricted: true,
+            })
             .await
             .unwrap();
         assert!(client.housing_opening.is_some());
@@ -348,6 +363,7 @@ mod tests {
         let first = Guid(100);
         let current = Guid(101);
         for guid in [first, current] {
+            client.record_housing_opening(guid);
             client
                 .send_game_action(GameAction::Use(Box::new(UseActionData { guid })))
                 .await
@@ -388,6 +404,7 @@ mod tests {
             deadline: Instant::now(),
         });
         receive_profile(&mut client, crystal).await;
+        client.record_housing_opening(crystal);
         client
             .send_game_action(GameAction::Use(Box::new(UseActionData { guid: crystal })))
             .await
@@ -412,12 +429,14 @@ mod tests {
     async fn timeout_and_character_reset_retire_opening_without_a_home_query() {
         let mut client = build_test_client(ClientState::InWorld);
         let crystal = Guid(100);
+        client.record_housing_opening(crystal);
         client
             .send_game_action(GameAction::Use(Box::new(UseActionData { guid: crystal })))
             .await
             .unwrap();
         client.poll_housing_query_timeout(Instant::now() + super::super::BUSY_OPERATION_TIMEOUT);
         assert!(client.housing_opening.is_none());
+        client.record_housing_opening(crystal);
         client
             .send_game_action(GameAction::Use(Box::new(UseActionData { guid: crystal })))
             .await

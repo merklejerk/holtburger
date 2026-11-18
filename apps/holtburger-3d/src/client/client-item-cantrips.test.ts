@@ -17,7 +17,7 @@ function known(id: number, cantripTier: CantripTier | null): SpellReference {
 				damage: null,
 			},
 			description: "",
-			school: 3,
+			school: { kind: "known", school: "item-enchantment" },
 			usesProjectileHandler: false,
 			baseMana: 0,
 			manaPerTarget: 0,

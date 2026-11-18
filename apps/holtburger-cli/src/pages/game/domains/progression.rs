@@ -24,8 +24,17 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
                 .collect();
             UpdateResult::redraw()
         }
-        ClientViewEvent::ProgressionGuardsUpdated { targets } => {
-            state.data.progression.guarded_targets = targets.iter().copied().collect();
+        ClientViewEvent::CharacterSheetUpdated(sheet) => {
+            if sheet
+                .as_ref()
+                .is_some_and(|sheet| Some(sheet.character) != state.data.player_guid)
+            {
+                return UpdateResult::new();
+            }
+            state.data.progression.guarded_targets =
+                sheet.as_ref().map_or_else(HashSet::new, |s| {
+                    s.guarded_targets.iter().copied().collect()
+                });
             UpdateResult::redraw()
         }
         ClientViewEvent::StatusUpdate {

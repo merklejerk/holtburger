@@ -1108,6 +1108,7 @@ describe("ClientLifecycleSession", () => {
 			groups: [
 				{
 					affectedStat: { kind: "attribute", key: 1 },
+					statLabel: "Strength",
 					operation: "additive",
 					channel: "ordinary",
 					spellCategory: 3,

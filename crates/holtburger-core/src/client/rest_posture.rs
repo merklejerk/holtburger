@@ -63,15 +63,15 @@ impl ClientRuntime {
     }
 
     pub(super) fn cancel_rest_posture(&mut self) {
-        self.pending_rest_posture = None;
+        self.portal.pending_rest_posture = None;
         self.movement.cancel_queued_rest_posture();
     }
 
     pub(super) async fn request_rest_posture(&mut self, posture: RestPosture) -> Result<()> {
         self.cancel_rest_posture();
         let mode = self.world.player_combat_mode();
-        if !matches!(self.state, ClientState::InWorld)
-            || self.activation.is_some()
+        if !matches!(self.conn.state, ClientState::InWorld)
+            || self.portal.activation.is_some()
             || self.world.player.guid == Guid::NULL
             || mode == CombatMode::Undef
         {
@@ -83,7 +83,7 @@ impl ClientRuntime {
             );
             return Ok(());
         }
-        if self.inventory_change_pending() || self.active_busy_operation.is_some() {
+        if self.inventory_change_pending() || self.character.active_busy_operation.is_some() {
             self.emit_action_result(
                 ActionResultSource::Client,
                 ActionResultReason::General(
@@ -93,6 +93,7 @@ impl ClientRuntime {
             return Ok(());
         }
         if self
+            .portal
             .pending_combat_mode
             .is_some_and(|pending| pending != CombatMode::NonCombat)
         {
@@ -118,23 +119,23 @@ impl ClientRuntime {
             )))
             .await?;
         }
-        self.pending_rest_posture = Some(PendingRestPosture {
+        self.portal.pending_rest_posture = Some(PendingRestPosture {
             posture,
             character: self.world.player.guid,
-            generation: self.world_generation,
+            generation: self.conn.world_generation,
             deadline: now + PEACE_TIMEOUT,
         });
         Ok(())
     }
 
     pub(super) fn advance_rest_posture(&mut self, now: Instant) {
-        let Some(pending) = self.pending_rest_posture.take() else {
+        let Some(pending) = self.portal.pending_rest_posture.take() else {
             return;
         };
-        if !matches!(self.state, ClientState::InWorld)
-            || self.activation.is_some()
+        if !matches!(self.conn.state, ClientState::InWorld)
+            || self.portal.activation.is_some()
             || pending.character != self.world.player.guid
-            || pending.generation != self.world_generation
+            || pending.generation != self.conn.world_generation
         {
             return;
         }
@@ -155,7 +156,7 @@ impl ClientRuntime {
                 || style != MotionStance::NonCombat as u32)
         {
             if now < pending.deadline {
-                self.pending_rest_posture = Some(pending);
+                self.portal.pending_rest_posture = Some(pending);
             } else {
                 self.emit_action_result(
                     ActionResultSource::Client,
@@ -233,7 +234,7 @@ mod tests {
         } else {
             MotionStance::Magic
         });
-        client.pending_combat_mode = None;
+        client.portal.pending_combat_mode = None;
     }
 
     async fn publish(client: &mut ClientRuntime, now: Instant) {
@@ -265,7 +266,7 @@ mod tests {
             let now = Instant::now();
             publish(&mut client, now).await;
             assert!(!client.world.has_local_authored_motion(PLAYER));
-            assert!(client.pending_rest_posture.is_some());
+            assert!(client.portal.pending_rest_posture.is_some());
             // A property update alone cannot race ahead of the confirmed motion style.
             client
                 .world
@@ -274,14 +275,14 @@ mod tests {
                 .unwrap()
                 .set_int_prop(PropertyInt::CombatMode, CombatMode::NonCombat as i32);
             publish(&mut client, now).await;
-            assert!(client.pending_rest_posture.is_some());
+            assert!(client.portal.pending_rest_posture.is_some());
             confirm(&mut client, CombatMode::NonCombat);
             publish(&mut client, now).await;
             assert_eq!(
                 client.world.motion_runtimes.state(PLAYER).unwrap().substate,
                 RestPosture::Lying.command()
             );
-            assert!(client.pending_rest_posture.is_none());
+            assert!(client.portal.pending_rest_posture.is_none());
             assert_eq!(client.session.game_action_sequence, 2);
             // Ticking idle never submits a combat restoration or a chat action.
             publish(&mut client, now + PEACE_TIMEOUT).await;
@@ -309,7 +310,7 @@ mod tests {
             client.handle_command(command).await.unwrap();
             confirm(&mut client, CombatMode::NonCombat);
             publish(&mut client, Instant::now()).await;
-            assert!(client.pending_rest_posture.is_none());
+            assert!(client.portal.pending_rest_posture.is_none());
             assert!(!client.world.has_local_authored_motion(PLAYER));
         }
     }
@@ -325,12 +326,17 @@ mod tests {
             if change_world {
                 client.bump_world_generation();
             } else {
-                let now = client.pending_rest_posture.as_ref().unwrap().deadline;
+                let now = client
+                    .portal
+                    .pending_rest_posture
+                    .as_ref()
+                    .unwrap()
+                    .deadline;
                 publish(&mut client, now).await;
             }
             confirm(&mut client, CombatMode::NonCombat);
             publish(&mut client, Instant::now()).await;
-            assert!(client.pending_rest_posture.is_none());
+            assert!(client.portal.pending_rest_posture.is_none());
             assert!(!client.world.has_local_authored_motion(PLAYER));
         }
     }

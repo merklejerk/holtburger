@@ -109,6 +109,7 @@ fn account_formula_hash(account: &str) -> Result<u32, String> {
 impl ClientRuntime {
     pub(super) fn refresh_spell_inspection_context(&mut self) {
         let inputs = self
+            .character
             .described_character
             .filter(|guid| *guid == self.world.player.guid)
             .map(|guid| InspectionInputs {
@@ -137,17 +138,18 @@ impl ClientRuntime {
                 .map(|school| formula::has_foci(&self.world, school)),
                 account_hash: account_formula_hash(&self.character_selection.account_name),
             });
-        if self.spell_inspection.inputs != inputs {
-            self.spell_inspection.inputs = inputs;
-            self.spell_inspection.revision += 1;
+        if self.character.spell_inspection.inputs != inputs {
+            self.character.spell_inspection.inputs = inputs;
+            self.character.spell_inspection.revision += 1;
             self.emit_spell_inspection_context();
         }
     }
 
     fn spell_inspection_context(&self) -> SpellInspectionContext {
         SpellInspectionContext {
-            revision: self.spell_inspection.revision,
+            revision: self.character.spell_inspection.revision,
             player: self
+                .character
                 .spell_inspection
                 .inputs
                 .as_ref()
@@ -167,7 +169,7 @@ impl ClientRuntime {
         &self,
         spell: &holtburger_world::spell::SpellInfo,
     ) -> SpellFormulaResult {
-        let Some(inputs) = &self.spell_inspection.inputs else {
+        let Some(inputs) = &self.character.spell_inspection.inputs else {
             return SpellFormulaResult::Pending;
         };
         let result = match formula::has_foci(&self.world, spell.school) {
@@ -231,7 +233,7 @@ mod tests {
         client.refresh_spell_inspection_context();
         assert!(events.try_recv().is_err());
         client.world.player.guid = Guid(1);
-        client.described_character = Some(Guid(1));
+        client.character.described_character = Some(Guid(1));
         client.refresh_spell_inspection_context();
         let initial = client.spell_inspection_context();
         assert_eq!(initial.player, Some(Guid(1)));
@@ -255,11 +257,11 @@ mod tests {
                 }
             ))
         ));
-        client.described_character = None;
+        client.character.described_character = None;
         client.refresh_spell_inspection_context();
         assert!(client.spell_inspection_context().revision > initial.revision);
         assert_eq!(client.spell_inspection_context().player, None);
-        client.described_character = Some(Guid(1));
+        client.character.described_character = Some(Guid(1));
         client.refresh_spell_inspection_context();
         assert!(client.spell_inspection_context().revision > initial.revision + 1);
     }

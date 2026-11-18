@@ -58,7 +58,7 @@ pub(super) enum InventoryOperation {
 
 impl ClientRuntime {
     pub(super) fn inventory_operation_pending(&self) -> bool {
-        self.inventory_operation.is_some()
+        self.portal.inventory_operation.is_some()
     }
 
     pub(super) fn inventory_change_pending(&self) -> bool {
@@ -66,7 +66,7 @@ impl ClientRuntime {
     }
 
     pub(super) fn stop_inventory_operation(&mut self, reason: &str) {
-        match self.inventory_operation.take() {
+        match self.portal.inventory_operation.take() {
             Some(InventoryOperation::AutoMerge(operation)) => self
                 .emit_auto_merge_result(operation.result(AutoMergeOutcome::Stopped(reason.into()))),
             Some(InventoryOperation::PackExchange(_)) => self.emit_action_result(
@@ -83,7 +83,7 @@ impl ClientRuntime {
         item: Guid,
         error: holtburger_protocol::errors::WeenieError,
     ) -> bool {
-        match self.inventory_operation.as_ref() {
+        match self.portal.inventory_operation.as_ref() {
             Some(InventoryOperation::AutoMerge(operation)) if operation.awaiting_item(item) => {
                 let reason = if error == holtburger_protocol::errors::WeenieError::None {
                     "Server rejected the merge request".into()
@@ -156,20 +156,21 @@ impl ClientRuntime {
                 } else {
                     index + 1
                 };
-                self.inventory_operation = Some(InventoryOperation::PackExchange(PackExchange {
-                    awaiting: first,
-                    remaining: RemainingPackMove {
-                        step: second,
-                        expected_location: StorageLocation::Contained {
-                            parent,
-                            slot: StorageSlot::Pack {
-                                index: expected_index,
-                                kind,
+                self.portal.inventory_operation =
+                    Some(InventoryOperation::PackExchange(PackExchange {
+                        awaiting: first,
+                        remaining: RemainingPackMove {
+                            step: second,
+                            expected_location: StorageLocation::Contained {
+                                parent,
+                                slot: StorageSlot::Pack {
+                                    index: expected_index,
+                                    kind,
+                                },
                             },
                         },
-                    },
-                    deadline: Instant::now() + PACK_EXCHANGE_TIMEOUT,
-                }));
+                        deadline: Instant::now() + PACK_EXCHANGE_TIMEOUT,
+                    }));
                 move_action(first)
             }
         };
@@ -178,7 +179,8 @@ impl ClientRuntime {
 
     pub(super) async fn advance_inventory_operation(&mut self, now: Instant) -> Result<()> {
         self.advance_auto_merge().await?;
-        let Some(InventoryOperation::PackExchange(operation)) = self.inventory_operation.as_ref()
+        let Some(InventoryOperation::PackExchange(operation)) =
+            self.portal.inventory_operation.as_ref()
         else {
             return Ok(());
         };
@@ -200,7 +202,7 @@ impl ClientRuntime {
         }
         let action = move_action(operation.remaining.step);
         // Nothing depends on acknowledgment of the final request.
-        self.inventory_operation = None;
+        self.portal.inventory_operation = None;
         self.send_game_action(action).await
     }
 }
@@ -246,7 +248,7 @@ mod tests {
     fn pending_swap(client: &mut ClientRuntime, now: Instant) {
         client.world = outfit(2, 1);
         place(&mut client.world, TARGET, 4);
-        client.inventory_operation = Some(InventoryOperation::PackExchange(PackExchange {
+        client.portal.inventory_operation = Some(InventoryOperation::PackExchange(PackExchange {
             awaiting: InventoryMove {
                 item: SOURCE,
                 container: PLAYER,
@@ -340,8 +342,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, before + 1);
-        assert!(client.equipment_operation.is_none());
-        assert!(client.inventory_operation.is_none());
+        assert!(client.portal.equipment_operation.is_none());
+        assert!(client.portal.inventory_operation.is_none());
         client
             .world
             .entities
@@ -429,8 +431,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, before + 1);
-        assert!(client.inventory_operation.is_none());
-        assert!(client.equipment_operation.is_none());
+        assert!(client.portal.inventory_operation.is_none());
+        assert!(client.portal.equipment_operation.is_none());
     }
 
     #[tokio::test]
@@ -533,8 +535,8 @@ mod tests {
         assert!(
             matches!(&actions[2], GameAction::GiveObjectRequest(data) if data.item_guid == equipped && data.target_guid == recipient && data.amount == 1)
         );
-        assert!(client.inventory_operation.is_none());
-        assert!(client.equipment_operation.is_none());
+        assert!(client.portal.inventory_operation.is_none());
+        assert!(client.portal.equipment_operation.is_none());
     }
 
     #[tokio::test]
@@ -556,7 +558,7 @@ mod tests {
             .expect("drop");
         move_during_reach(&mut client.world);
         assert_eq!(client.session.game_action_sequence, before + 1);
-        assert!(client.inventory_operation.is_none());
+        assert!(client.portal.inventory_operation.is_none());
         assert!(
             client.world.equipment_mask(equipped).is_some(),
             "no optimistic removal"
@@ -582,7 +584,7 @@ mod tests {
             .await
             .expect("move");
         assert_eq!(client.session.game_action_sequence, before + 2);
-        assert!(client.inventory_operation.is_none());
+        assert!(client.portal.inventory_operation.is_none());
         client
             .handle_command(ClientCommand::Use {
                 guid: Guid(3),
@@ -603,13 +605,13 @@ mod tests {
             .advance_inventory_operation(now)
             .await
             .expect("waiting");
-        assert!(client.inventory_operation.is_some());
+        assert!(client.portal.inventory_operation.is_some());
         place(&mut client.world, SOURCE, 4);
         client
             .advance_inventory_operation(now)
             .await
             .expect("second request");
-        assert!(client.inventory_operation.is_none());
+        assert!(client.portal.inventory_operation.is_none());
         assert_eq!(client.session.game_action_sequence, 1);
     }
 
@@ -622,7 +624,7 @@ mod tests {
             .advance_inventory_operation(now + PACK_EXCHANGE_TIMEOUT)
             .await
             .expect("timeout");
-        assert!(client.inventory_operation.is_none());
+        assert!(client.portal.inventory_operation.is_none());
         assert_eq!(client.session.game_action_sequence, 0);
         place(&mut client.world, SOURCE, 4);
         client
@@ -652,9 +654,9 @@ mod tests {
             .await
             .expect("blocked use");
         assert_eq!(client.session.game_action_sequence, 0);
-        assert!(client.inventory_operation.is_some());
+        assert!(client.portal.inventory_operation.is_some());
         move_during_reach(&mut client.world);
-        assert!(client.inventory_operation.is_some());
+        assert!(client.portal.inventory_operation.is_some());
         client.reject_inventory_operation_item(
             SOURCE,
             holtburger_protocol::errors::WeenieError::None,
@@ -664,7 +666,7 @@ mod tests {
             .advance_inventory_operation(now)
             .await
             .expect("late first move");
-        assert!(client.inventory_operation.is_none());
+        assert!(client.portal.inventory_operation.is_none());
         assert_eq!(client.session.game_action_sequence, 0);
     }
 
@@ -679,7 +681,7 @@ mod tests {
             .advance_inventory_operation(now)
             .await
             .expect("changed target");
-        assert!(client.inventory_operation.is_none());
+        assert!(client.portal.inventory_operation.is_none());
         assert_eq!(client.session.game_action_sequence, 0);
     }
 
@@ -703,7 +705,7 @@ mod tests {
             .advance_inventory_operation(now + PACK_EXCHANGE_TIMEOUT)
             .await
             .unwrap();
-        assert!(client.inventory_operation.is_none());
+        assert!(client.portal.inventory_operation.is_none());
         assert_eq!(client.session.game_action_sequence, 0);
         assert_eq!(
             client.world.motion_runtimes.state(PLAYER).unwrap().substate,

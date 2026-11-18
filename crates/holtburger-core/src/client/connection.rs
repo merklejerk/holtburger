@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn core_publishes_terminal_health_before_shell_lifecycle_exit() {
-        let mut client = build_test_client(ClientState::Disconnected);
+        let client = build_test_client(ClientState::Disconnected);
         let mut events = client.subscribe_client_view_events();
         client.send_status_event();
         let ClientViewEvent::ConnectionUpdated(sample) = events.try_recv().unwrap() else {

@@ -98,7 +98,7 @@ impl ClientRuntime {
     pub(super) fn housing_snapshot(&self) -> HousingSnapshot {
         HousingSnapshot {
             home: self.world.housing.home.clone(),
-            refreshing: self.housing_query_deadline.is_some(),
+            refreshing: self.character.housing_query_deadline.is_some(),
             pending_payment: self.pending_housing_payment(),
             pending_management: self.pending_housing_management(),
             access: self.housing_access_snapshot(),
@@ -120,7 +120,7 @@ impl ClientRuntime {
 
     /// Coalesce repeated refreshes; query dispatch itself is not a housing result.
     pub(super) async fn query_home(&mut self) -> anyhow::Result<()> {
-        if self.state != ClientState::InWorld {
+        if self.conn.state != ClientState::InWorld {
             self.emit_action_result(
                 ActionResultSource::Client,
                 ActionResultReason::General(
@@ -129,18 +129,18 @@ impl ClientRuntime {
             );
             return Ok(());
         }
-        if self.housing_query_deadline.is_some() {
+        if self.character.housing_query_deadline.is_some() {
             return Ok(());
         }
         self.send_game_action(GameAction::HouseQuery).await?;
-        self.housing_query_deadline = Some(Instant::now() + HOME_QUERY_TIMEOUT);
+        self.character.housing_query_deadline = Some(Instant::now() + HOME_QUERY_TIMEOUT);
         self.emit_housing_snapshot();
         Ok(())
     }
 
     /// Arms bounded opening intent for a direct use that may return a housing crystal profile.
     pub(super) fn record_housing_opening(&mut self, crystal: Guid) {
-        self.housing_opening = Some(HousingOpening {
+        self.portal.housing_opening = Some(HousingOpening {
             crystal,
             deadline: Instant::now() + super::BUSY_OPERATION_TIMEOUT,
         });
@@ -148,27 +148,29 @@ impl ClientRuntime {
 
     /// Terminal character changes retire housing; travel does not call this method.
     pub(super) fn reset_housing(&mut self) {
-        self.housing_opening = None;
-        if self.housing_query_deadline.is_none()
+        self.portal.housing_opening = None;
+        if self.character.housing_query_deadline.is_none()
             && self.world.housing == HousingState::default()
-            && self.housing_queries == Default::default()
+            && self.character.housing_queries == Default::default()
         {
             return;
         }
-        self.housing_query_deadline = None;
-        self.housing_queries = Default::default();
+        self.character.housing_query_deadline = None;
+        self.character.housing_queries = Default::default();
         self.world.housing = HousingState::default();
         self.emit_housing_snapshot();
     }
 
     pub(super) fn poll_housing_query_timeout(&mut self, now: Instant) {
-        self.housing_opening
+        self.portal
+            .housing_opening
             .take_if(|opening| now >= opening.deadline);
         if self
+            .character
             .housing_query_deadline
             .is_some_and(|deadline| now >= deadline)
         {
-            self.housing_query_deadline = None;
+            self.character.housing_query_deadline = None;
             self.retire_dependent_access_query();
             self.emit_housing_snapshot();
             self.emit_action_result(
@@ -186,7 +188,7 @@ impl ClientRuntime {
         match event {
             WorldEvent::HousingHomeUpdated { source, .. } => {
                 if *source == HousingHomeUpdateSource::Complete {
-                    self.housing_query_deadline = None;
+                    self.character.housing_query_deadline = None;
                 }
                 self.emit_housing_snapshot();
             }
@@ -194,6 +196,7 @@ impl ClientRuntime {
                 self.observe_housing_execution_profile(crystal);
                 self.emit_housing_snapshot();
                 if let Some(opening) = self
+                    .portal
                     .housing_opening
                     .take_if(|opening| opening.crystal == crystal.crystal)
                     && Instant::now() < opening.deadline
@@ -207,7 +210,7 @@ impl ClientRuntime {
             }
             WorldEvent::HousingDataRejected { source, error } => {
                 if *source == HousingHomeUpdateSource::Complete {
-                    self.housing_query_deadline = None;
+                    self.character.housing_query_deadline = None;
                     self.retire_dependent_access_query();
                 }
                 self.emit_housing_snapshot();
@@ -265,13 +268,13 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(client.housing_opening.is_some());
+        assert!(client.portal.housing_opening.is_some());
         client.world.housing.home = HomeKnowledge::None;
         client.query_home().await.unwrap();
         client.query_housing_access().await.unwrap();
         client.search_housing(1).await.unwrap();
         client.arm_busy_operation(super::super::PendingOperation::Use { source: crystal });
-        let deadline = client.housing_query_deadline.unwrap();
+        let deadline = client.character.housing_query_deadline.unwrap();
         assert!(client.housing_snapshot().access.refreshing);
         assert_eq!(client.housing_snapshot().search.pending_type, Some(1));
         client
@@ -286,14 +289,14 @@ mod tests {
             ))))
             .await
             .unwrap();
-        assert!(matches!(client.state, ClientState::CharacterSelection));
+        assert!(matches!(client.conn.state, ClientState::CharacterSelection));
         assert_eq!(
             client.application_snapshot().housing,
             HousingSnapshot::default()
         );
-        assert!(client.housing_opening.is_none());
-        assert!(client.active_busy_operation.is_none());
-        assert!(client.housing_query_deadline.is_none());
+        assert!(client.portal.housing_opening.is_none());
+        assert!(client.character.active_busy_operation.is_none());
+        assert!(client.character.housing_query_deadline.is_none());
         let mut events = client.subscribe_client_view_events();
         receive_profile(&mut client, crystal).await;
         client
@@ -399,7 +402,7 @@ mod tests {
         let mut client = build_test_client(ClientState::InWorld);
         let crystal = Guid(100);
         let mut events = client.subscribe_client_view_events();
-        client.housing_opening = Some(HousingOpening {
+        client.portal.housing_opening = Some(HousingOpening {
             crystal,
             deadline: Instant::now(),
         });
@@ -414,7 +417,7 @@ mod tests {
             client.world.player.guid,
         );
         receive_profile(&mut client, crystal).await;
-        assert!(client.housing_opening.is_none());
+        assert!(client.portal.housing_opening.is_none());
         assert!(
             !std::iter::from_fn(|| events.try_recv().ok())
                 .any(|event| matches!(event, ClientViewEvent::HousingCrystalReceived(_)))
@@ -435,14 +438,14 @@ mod tests {
             .await
             .unwrap();
         client.poll_housing_query_timeout(Instant::now() + super::super::BUSY_OPERATION_TIMEOUT);
-        assert!(client.housing_opening.is_none());
+        assert!(client.portal.housing_opening.is_none());
         client.record_housing_opening(crystal);
         client
             .send_game_action(GameAction::Use(Box::new(UseActionData { guid: crystal })))
             .await
             .unwrap();
         client.reset_housing();
-        assert!(client.housing_opening.is_none());
+        assert!(client.portal.housing_opening.is_none());
     }
 
     #[test]
@@ -543,7 +546,7 @@ mod tests {
         };
         client.query_home().await.unwrap();
         client.query_housing_access().await.unwrap();
-        let deadline = client.housing_query_deadline;
+        let deadline = client.character.housing_query_deadline;
         let invalid = HousePayment {
             required: -1,
             paid: 0,
@@ -552,7 +555,7 @@ mod tests {
             plural_name: "Pyreals".into(),
         };
         receive_profile_with_payments(&mut client, Guid(100), vec![invalid.clone()]).await;
-        assert_eq!(client.housing_query_deadline, deadline);
+        assert_eq!(client.character.housing_query_deadline, deadline);
         assert!(client.housing_snapshot().access.refreshing);
         assert_eq!(client.session.game_action_sequence, 1);
         for event in [
@@ -572,7 +575,7 @@ mod tests {
                 ))))
                 .await
                 .unwrap();
-            assert_eq!(client.housing_query_deadline, deadline);
+            assert_eq!(client.character.housing_query_deadline, deadline);
             assert_eq!(
                 client.session.game_action_sequence, 1,
                 "dependent HAR waits for a complete home reply"
@@ -588,7 +591,7 @@ mod tests {
             ))))
             .await
             .unwrap();
-        assert!(client.housing_query_deadline.is_none());
+        assert!(client.character.housing_query_deadline.is_none());
         assert_eq!(client.session.game_action_sequence, 2);
     }
 

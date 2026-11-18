@@ -38,7 +38,7 @@ impl ClientRuntime {
 
     /// Queue removal without claiming server acceptance or changing membership.
     pub(super) async fn abandon_contract(&mut self, id: u32) -> Result<()> {
-        if self.state != ClientState::InWorld {
+        if self.conn.state != ClientState::InWorld {
             bail!("Contracts can only be removed while in world");
         }
         if !self
@@ -104,16 +104,16 @@ mod tests {
                 .rows
                 .is_empty()
         );
-        client.state = ClientState::EnteringWorld;
+        client.conn.state = ClientState::EnteringWorld;
         client
             .handle_message(&packet(player, 1, false))
             .await
             .unwrap();
         let accepted = client.application_snapshot().contracts.unwrap();
         assert_eq!(accepted.rows, vec![ContractRow::Unresolved { id: 99 }]);
-        client.state = ClientState::InWorld;
+        client.set_state(ClientState::InWorld);
         client.bump_world_generation();
-        client.send_status_event();
+        client.publish_status_update();
         assert_eq!(client.application_snapshot().contracts, Some(accepted));
         let mut receiver = client.client_view_event_tx.subscribe();
         client.emit_contracts_state_updated();
@@ -130,8 +130,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!client.world.contracts.as_ref().unwrap().contains(99));
-        client.state = ClientState::Disconnected;
-        client.send_status_event();
+        client.finish_disconnect(crate::ClientExitCause::ExplicitDisconnect);
         assert!(client.application_snapshot().contracts.is_none());
         client
             .handle_message(&packet(player, 3, false))
@@ -159,13 +158,13 @@ mod tests {
             }
             changes
         };
-        client.state = ClientState::EnteringWorld;
+        client.conn.state = ClientState::EnteringWorld;
         client
             .handle_message(&packet(player, 1, false))
             .await
             .unwrap();
         assert!(drain(&mut receiver).is_empty());
-        client.state = ClientState::InWorld;
+        client.conn.state = ClientState::InWorld;
         client
             .handle_message(&packet(player, 2, false))
             .await
@@ -221,7 +220,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        client.state = ClientState::InWorld;
+        client.conn.state = ClientState::InWorld;
         client.begin_contracts();
         assert!(
             client

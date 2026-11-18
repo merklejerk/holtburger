@@ -90,8 +90,8 @@ impl ClientRuntime {
 
     pub(super) fn publish_recall_destinations(&mut self) {
         let destinations = self.recall_destinations();
-        if destinations != self.published_recall_destinations {
-            self.published_recall_destinations = destinations.clone();
+        if destinations != self.conn.published_recall_destinations {
+            self.conn.published_recall_destinations = destinations.clone();
             let _ = self
                 .client_view_event_tx
                 .send(ClientViewEvent::RecallDestinationsChanged(destinations));
@@ -172,7 +172,7 @@ mod tests {
                 .recall_destinations()
                 .contains(&RecallDestination::House)
         );
-        client.state = ClientState::Disconnected;
+        client.conn.state = ClientState::Disconnected;
         assert!(client.recall_destinations().is_empty());
     }
 

@@ -252,7 +252,10 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(client.world.storage_coverage(sack), None);
-        assert_eq!(client.event_ordering.as_ref().unwrap().delivered, 2);
+        assert_eq!(
+            client.character.event_ordering.as_ref().unwrap().delivered,
+            2
+        );
     }
 
     #[test]

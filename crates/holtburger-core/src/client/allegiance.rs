@@ -35,7 +35,7 @@ impl ClientRuntime {
     pub(super) fn allegiance_snapshot(&self) -> AllegianceSnapshot {
         AllegianceSnapshot {
             player_guid: if matches!(
-                self.state,
+                self.conn.state,
                 ClientState::EnteringWorld | ClientState::InWorld
             ) {
                 self.character_selection.character_id.or_else(|| {
@@ -45,13 +45,13 @@ impl ClientRuntime {
                 None
             },
             profile: self.world.allegiance.clone(),
-            refreshing: self.allegiance_query_deadline.is_some(),
+            refreshing: self.character.allegiance_query_deadline.is_some(),
             can_swear: self.can_swear_allegiance(),
         }
     }
 
     fn can_swear_allegiance(&self) -> bool {
-        self.state == ClientState::InWorld
+        self.conn.state == ClientState::InWorld
             && self
                 .world
                 .allegiance
@@ -70,24 +70,24 @@ impl ClientRuntime {
 
     /// Retire character facts and read admission; portal transitions retain both.
     pub(super) fn reset_allegiance(&mut self) {
-        self.allegiance_query_deadline = None;
+        self.character.allegiance_query_deadline = None;
         self.world.allegiance = None;
         self.emit_allegiance_snapshot();
     }
 
     /// Serialize supported reads without retries; frontends own their read cadence.
     pub(super) async fn query_allegiance(&mut self) -> Result<()> {
-        if self.state != ClientState::InWorld {
+        if self.conn.state != ClientState::InWorld {
             bail!("Allegiance information is only available in the world");
         }
-        if self.allegiance_query_deadline.is_some() {
+        if self.character.allegiance_query_deadline.is_some() {
             return Ok(());
         }
         self.send_game_action(GameAction::AllegianceUpdateRequest(Box::new(
             AllegianceUpdateRequestActionData { panel_open: true },
         )))
         .await?;
-        self.allegiance_query_deadline = Some(Instant::now() + ALLEGIANCE_QUERY_TIMEOUT);
+        self.character.allegiance_query_deadline = Some(Instant::now() + ALLEGIANCE_QUERY_TIMEOUT);
         self.emit_allegiance_snapshot();
         Ok(())
     }
@@ -100,7 +100,7 @@ impl ClientRuntime {
             }
             _ => return,
         };
-        self.allegiance_query_deadline = None;
+        self.character.allegiance_query_deadline = None;
         self.emit_allegiance_snapshot();
         if error != 0 {
             let reason = match WeenieError::from_repr(error) {
@@ -116,10 +116,11 @@ impl ClientRuntime {
     /// Release a missing reply's admission and keep the last known profile.
     pub(super) fn poll_allegiance_query_timeout(&mut self, now: Instant) {
         if self
+            .character
             .allegiance_query_deadline
             .is_some_and(|deadline| now >= deadline)
         {
-            self.allegiance_query_deadline = None;
+            self.character.allegiance_query_deadline = None;
             self.emit_allegiance_snapshot();
             log::warn!("Allegiance profile request timed out; retaining last known profile");
         }
@@ -142,7 +143,7 @@ impl ClientRuntime {
 
     /// Server confirmation governs swearing; dispatch never changes the profile.
     pub(super) async fn swear_allegiance(&mut self, target: Guid) -> Result<()> {
-        if self.state != ClientState::InWorld {
+        if self.conn.state != ClientState::InWorld {
             bail!("Allegiance can only be changed while in world");
         }
         if target == Guid::NULL {
@@ -165,7 +166,7 @@ impl ClientRuntime {
     /// A known profile admits only patron/direct-vassal targets. Clients without
     /// a profile may still submit a target; the server remains permission authority.
     pub(super) async fn break_allegiance(&mut self, target: Guid) -> Result<()> {
-        if self.state != ClientState::InWorld {
+        if self.conn.state != ClientState::InWorld {
             bail!("Allegiance can only be changed while in world");
         }
         if target == Guid::NULL {
@@ -282,7 +283,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        client.state = ClientState::InWorld;
+        client.conn.state = ClientState::InWorld;
         client.world.player.guid = PLAYER;
         let retained: AllegianceState = (&profile()).into();
         client.world.allegiance = Some(retained.clone());
@@ -290,13 +291,16 @@ mod tests {
             .handle_command(ClientCommand::QueryAllegiance)
             .await
             .unwrap();
-        let first_deadline = client.allegiance_query_deadline.unwrap();
+        let first_deadline = client.character.allegiance_query_deadline.unwrap();
         client
             .handle_command(ClientCommand::QueryAllegiance)
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 1);
-        assert_eq!(client.allegiance_query_deadline, Some(first_deadline));
+        assert_eq!(
+            client.character.allegiance_query_deadline,
+            Some(first_deadline)
+        );
         assert!(client.allegiance_snapshot().refreshing);
         assert_eq!(client.allegiance_snapshot().profile, Some(retained.clone()));
         client
@@ -329,7 +333,7 @@ mod tests {
             .handle_command(ClientCommand::QueryAllegiance)
             .await
             .unwrap();
-        let deadline = client.allegiance_query_deadline.unwrap();
+        let deadline = client.character.allegiance_query_deadline.unwrap();
         client.poll_allegiance_query_timeout(deadline - Duration::from_millis(1));
         assert!(client.allegiance_snapshot().refreshing);
         client.poll_busy_timeout(deadline);
@@ -345,29 +349,28 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::Connected);
         client.character_selection.character_id = Some(PLAYER);
         client.begin_world_entry_transition().await.unwrap();
-        client.state = ClientState::EnteringWorld;
+        client.conn.state = ClientState::EnteringWorld;
         let encoded = encode(GameEvent::AllegianceUpdate(Box::new(profile())));
         client.handle_message(&encoded).await.unwrap();
         let accepted = client.application_snapshot().allegiance.profile.unwrap();
         assert_eq!(accepted.relationships(PLAYER).patron.unwrap().guid, PATRON);
-        client.state = ClientState::InWorld;
+        client.conn.state = ClientState::InWorld;
         client.query_allegiance().await.unwrap();
         client.bump_world_generation();
-        client.state = ClientState::EnteringWorld;
-        client.send_status_event();
+        client.set_state(ClientState::EnteringWorld);
         assert_eq!(
             client.application_snapshot().allegiance.profile,
             Some(accepted)
         );
         assert!(client.application_snapshot().allegiance.refreshing);
-        client.state = ClientState::Disconnected;
-        client.send_status_event();
+        client.finish_disconnect(crate::ClientExitCause::ExplicitDisconnect);
         assert!(client.application_snapshot().allegiance.profile.is_none());
         assert!(!client.application_snapshot().allegiance.refreshing);
         client.handle_message(&encoded).await.unwrap();
         assert!(client.application_snapshot().allegiance.profile.is_none());
-        client.state = ClientState::EnteringWorld;
+        client.conn.state = ClientState::EnteringWorld;
         client.handle_message(&encoded).await.unwrap();
+        client.character_selection.character_id = Some(PLAYER);
         client.begin_world_entry_transition().await.unwrap();
         assert!(client.application_snapshot().allegiance.profile.is_none());
     }
@@ -420,8 +423,7 @@ mod tests {
         });
         let retained = client.world.allegiance.clone();
         let mut events = client.subscribe_client_view_events();
-        client.state = ClientState::EnteringWorld;
-        client.send_status_event();
+        client.set_state(ClientState::EnteringWorld);
         let leaving = std::iter::from_fn(|| events.try_recv().ok())
             .find_map(|event| match event {
                 ClientViewEvent::AllegianceUpdated(snapshot) => Some(snapshot),
@@ -430,8 +432,7 @@ mod tests {
             .unwrap();
         assert!(!leaving.can_swear);
         assert_eq!(leaving.profile, retained);
-        client.state = ClientState::InWorld;
-        client.send_status_event();
+        client.set_state(ClientState::InWorld);
         let returned = std::iter::from_fn(|| events.try_recv().ok())
             .find_map(|event| match event {
                 ClientViewEvent::AllegianceUpdated(snapshot) => Some(snapshot),

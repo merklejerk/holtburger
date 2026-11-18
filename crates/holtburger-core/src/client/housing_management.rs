@@ -190,7 +190,7 @@ pub(crate) struct HousingManagementExecution {
 impl ClientRuntime {
     pub(super) fn pending_housing_management(&self) -> Option<HousingPendingManagement> {
         let PendingOperation::HousingManagement(execution) =
-            &self.active_busy_operation.as_ref()?.operation
+            &self.character.active_busy_operation.as_ref()?.operation
         else {
             return None;
         };
@@ -235,8 +235,8 @@ impl ClientRuntime {
         &self,
         request: &HousingManagementRequest,
     ) -> Result<(), String> {
-        if self.state != ClientState::InWorld
-            || self.activation.is_some()
+        if self.conn.state != ClientState::InWorld
+            || self.portal.activation.is_some()
             || self.world.player.guid != request.player
         {
             return Err("The originating character is no longer ready in the world".into());
@@ -246,7 +246,7 @@ impl ClientRuntime {
         {
             return Err("The effective home changed; review the housing request again".into());
         }
-        if self.active_busy_operation.is_some()
+        if self.character.active_busy_operation.is_some()
             || self.inventory_change_pending()
             || self.world.trade.is_some()
         {
@@ -254,7 +254,7 @@ impl ClientRuntime {
                 "Finish the pending interaction or inventory change before managing housing".into(),
             );
         }
-        if self.housing_query_deadline.is_some() {
+        if self.character.housing_query_deadline.is_some() {
             return Err("Wait for the housing information refresh to finish".into());
         }
         if let Some(name) = request.action.named() {
@@ -324,6 +324,7 @@ impl ClientRuntime {
 
     fn finish_housing_management(&mut self, outcome: HousingManagementOutcome, notify: bool) {
         let Some(pending) = self
+            .character
             .active_busy_operation
             .take_if(|pending| matches!(pending.operation, PendingOperation::HousingManagement(_)))
         else {
@@ -346,7 +347,7 @@ impl ClientRuntime {
     }
 
     pub(super) fn observe_housing_management(&mut self, event: &WorldEvent) {
-        let Some(pending) = &self.active_busy_operation else {
+        let Some(pending) = &self.character.active_busy_operation else {
             return;
         };
         let PendingOperation::HousingManagement(execution) = &pending.operation else {
@@ -515,7 +516,7 @@ mod tests {
         invalid_home.rent = vec![invalid_payment()];
         receive(&mut client, GameEvent::HouseData(invalid_home)).await;
         assert!(client.pending_housing_management().is_none());
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         assert_eq!(
             std::iter::from_fn(|| events.try_recv().ok())
                 .filter(|event| matches!(
@@ -561,7 +562,7 @@ mod tests {
             client.submit_housing_management(reviewed).await.unwrap();
             assert_eq!(client.session.game_action_sequence, 1);
             assert!(client.pending_housing_management().is_none());
-            assert!(client.active_busy_operation.is_none());
+            assert!(client.character.active_busy_operation.is_none());
             assert!(client.housing_access_snapshot().refreshing);
             let notices: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
             assert_eq!(
@@ -637,7 +638,7 @@ mod tests {
         assert_eq!(client.session.game_action_sequence, 2);
         assert!(client.world.housing.access.is_none());
         assert!(client.world.housing.access_generation > epoch);
-        assert!(client.housing_query_deadline.is_none());
+        assert!(client.character.housing_query_deadline.is_none());
         receive(&mut client, home(100)).await;
         assert!(client.pending_housing_management().is_some());
         receive(&mut client, home(101)).await;
@@ -695,7 +696,12 @@ mod tests {
         );
         let reviewed = request(&client, HousingManagementAction::Abandon);
         client.submit_housing_management(reviewed).await.unwrap();
-        let deadline = client.active_busy_operation.as_ref().unwrap().deadline;
+        let deadline = client
+            .character
+            .active_busy_operation
+            .as_ref()
+            .unwrap()
+            .deadline;
         client.expire_busy_operation(deadline);
         client.expire_busy_operation(deadline);
         assert!(client.pending_housing_management().is_none());

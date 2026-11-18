@@ -393,14 +393,16 @@ impl ClientRuntime {
     }
 
     pub(super) fn observe_auto_merge_removal(&mut self, guid: Guid) {
-        if let Some(InventoryOperation::AutoMerge(operation)) = &mut self.inventory_operation {
+        if let Some(InventoryOperation::AutoMerge(operation)) = &mut self.portal.inventory_operation
+        {
             operation.observe_removal(guid);
         }
     }
 
     /// Timer and command admission share expiry; neither depends on receiving another packet.
     pub(super) fn poll_auto_merge(&mut self, now: Instant) {
-        let Some(InventoryOperation::AutoMerge(operation)) = &mut self.inventory_operation else {
+        let Some(InventoryOperation::AutoMerge(operation)) = &mut self.portal.inventory_operation
+        else {
             return;
         };
         let outcome = match operation.poll(&self.world, now) {
@@ -409,7 +411,7 @@ impl ClientRuntime {
         };
         if let Some(outcome) = outcome {
             let result = operation.result(outcome);
-            self.inventory_operation = None;
+            self.portal.inventory_operation = None;
             self.emit_auto_merge_result(result);
         }
     }
@@ -420,11 +422,14 @@ impl ClientRuntime {
         policy: AutoMergePolicy,
     ) -> anyhow::Result<()> {
         let status = self.combat_engagement.status();
-        let admitted = if self.state != ClientState::InWorld || self.activation.is_some() {
+        let admitted = if self.conn.state != ClientState::InWorld
+            || self.portal.activation.is_some()
+        {
             Err("Auto-merge requires an active world".into())
-        } else if self.inventory_change_pending() || self.active_busy_operation.is_some() {
+        } else if self.inventory_change_pending() || self.character.active_busy_operation.is_some()
+        {
             Err("Another inventory operation is still pending".into())
-        } else if self.world.trade.is_some() || !self.trade_additions.is_empty() {
+        } else if self.world.trade.is_some() || !self.character.trade_additions.is_empty() {
             Err("Finish trading before auto-merging".into())
         } else if status.state != ClientCombatControlState::Idle
             || status.desired.is_some()
@@ -436,7 +441,7 @@ impl ClientRuntime {
         };
         match admitted {
             Ok(operation) => {
-                self.inventory_operation = Some(InventoryOperation::AutoMerge(operation));
+                self.portal.inventory_operation = Some(InventoryOperation::AutoMerge(operation));
                 self.advance_auto_merge().await
             }
             Err(reason) => {
@@ -452,7 +457,8 @@ impl ClientRuntime {
     pub(super) async fn advance_auto_merge(&mut self) -> anyhow::Result<()> {
         // A physics tick's timestamp can predate awaited work. Dispatch owns a fresh clock.
         let now = Instant::now();
-        let Some(InventoryOperation::AutoMerge(operation)) = &mut self.inventory_operation else {
+        let Some(InventoryOperation::AutoMerge(operation)) = &mut self.portal.inventory_operation
+        else {
             return Ok(());
         };
         let MergeDispatch { step, deadline } = match operation.advance(&self.world, now) {
@@ -460,7 +466,7 @@ impl ClientRuntime {
             Ok(MergeAdvance::Send(dispatch)) => dispatch,
             Ok(MergeAdvance::Finished(outcome)) => {
                 let result = operation.result(outcome);
-                self.inventory_operation = None;
+                self.portal.inventory_operation = None;
                 self.emit_auto_merge_result(result);
                 return Ok(());
             }
@@ -475,8 +481,8 @@ impl ClientRuntime {
             self.stop_inventory_operation("Auto-merge deadline elapsed before dispatch");
             return Ok(());
         }
-        self.equipment_set.supersede_item(step.source);
-        self.equipment_set.supersede_item(step.destination);
+        self.portal.equipment_set.supersede_item(step.source);
+        self.portal.equipment_set.supersede_item(step.destination);
         let sent = tokio::time::timeout_at(
             tokio::time::Instant::from_std(deadline),
             self.send_game_action(step.action()),
@@ -513,7 +519,8 @@ impl ClientRuntime {
         if !conflicts {
             return false;
         }
-        let Some(InventoryOperation::AutoMerge(operation)) = &mut self.inventory_operation else {
+        let Some(InventoryOperation::AutoMerge(operation)) = &mut self.portal.inventory_operation
+        else {
             return false;
         };
         match &mut operation.stage {

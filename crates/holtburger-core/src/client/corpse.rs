@@ -82,11 +82,16 @@ impl CorpseConsentAction {
 pub(super) struct RecentDeaths(VecDeque<Option<WorldPosition>>);
 
 impl RecentDeaths {
-    fn record(&mut self, position: Option<WorldPosition>) {
+    pub(super) fn record(&mut self, position: Option<WorldPosition>) {
         if self.0.len() == RECENT_DEATH_LIMIT {
             self.0.pop_front();
         }
         self.0.push_back(position);
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     pub(super) fn clear(&mut self) {
@@ -100,7 +105,8 @@ impl ClientRuntime {
         let GameMessage::PrivateUpdatePropertyInt(data) = message else {
             return;
         };
-        if self.state != ClientState::InWorld || data.property != PropertyInt::NumDeaths as u32 {
+        if self.conn.state != ClientState::InWorld || data.property != PropertyInt::NumDeaths as u32
+        {
             return;
         }
         // The private property wire format implicitly targets the selected character.
@@ -111,7 +117,7 @@ impl ClientRuntime {
         {
             // ACE's UI and movement queues do not guarantee a contemporaneous sample.
             // Even a retained server position may be stale or already reflect respawn.
-            self.recent_deaths.record(
+            self.character.recent_deaths.record(
                 self.world
                     .player_position()
                     .filter(|p| !p.landblock_id.is_null()),
@@ -128,7 +134,14 @@ impl ClientRuntime {
                     .local_position_overlay(PositionType::LastOutsideDeath),
             },
             DeathLocationQuery::Recent => DeathLocations::Recent {
-                positions: self.recent_deaths.0.iter().rev().copied().collect(),
+                positions: self
+                    .character
+                    .recent_deaths
+                    .0
+                    .iter()
+                    .rev()
+                    .copied()
+                    .collect(),
             },
         };
         let _ = self
@@ -185,14 +198,14 @@ mod tests {
             .world
             .seed_local_player_entity(guid, "Player", pose(0x12340001));
         count(&mut client, 4).await; // Missing baseline is not an observed death.
-        assert!(client.recent_deaths.0.is_empty());
+        assert!(client.character.recent_deaths.0.is_empty());
         count(&mut client, 5).await; // Includes suicide, which has no victim notification.
         count(&mut client, 5).await;
         count(&mut client, 3).await;
-        assert_eq!(client.recent_deaths.0.len(), 1);
+        assert_eq!(client.character.recent_deaths.0.len(), 1);
         client.world.sync_player_position(pose(0x12340100));
         count(&mut client, 8).await; // One observation, not five invented positions.
-        assert_eq!(client.recent_deaths.0.len(), 2);
+        assert_eq!(client.character.recent_deaths.0.len(), 2);
         let mut events = client.subscribe_client_view_events();
         client
             .handle_command(ClientCommand::QueryDeathLocations(
@@ -224,13 +237,13 @@ mod tests {
             })),
         )
         .await;
-        assert_eq!(client.recent_deaths.0.len(), 2);
+        assert_eq!(client.character.recent_deaths.0.len(), 2);
         // Distinct live increases at the same unavailable position remain distinct observations.
         client.world.sync_player_position(pose(0));
         count(&mut client, 9).await;
         count(&mut client, 10).await;
-        assert_eq!(client.recent_deaths.0.len(), 4);
-        assert_eq!(client.recent_deaths.0.back(), Some(&None));
+        assert_eq!(client.character.recent_deaths.0.len(), 4);
+        assert_eq!(client.character.recent_deaths.0.back(), Some(&None));
         assert_eq!(client.session.game_action_sequence, 0);
     }
 
@@ -268,9 +281,8 @@ mod tests {
             })),
         )
         .await;
-        assert_eq!(client.recent_deaths.0.len(), 1);
-        client.state = ClientState::Disconnected;
-        client.send_status_event();
-        assert!(client.recent_deaths.0.is_empty());
+        assert_eq!(client.character.recent_deaths.0.len(), 1);
+        client.finish_disconnect(super::super::types::ClientExitCause::ExplicitDisconnect);
+        assert!(client.character.recent_deaths.0.is_empty());
     }
 }

@@ -155,7 +155,7 @@ impl HousingExecution {
 
 impl ClientRuntime {
     pub(super) fn pending_housing_payment(&self) -> Option<HousingPendingPayment> {
-        let pending = self.active_busy_operation.as_ref()?;
+        let pending = self.character.active_busy_operation.as_ref()?;
         let PendingOperation::Housing(execution) = &pending.operation else {
             return None;
         };
@@ -187,13 +187,13 @@ impl ClientRuntime {
         &self,
         request: HousingPaymentRequest,
     ) -> Result<HousingExecution, String> {
-        if self.state != ClientState::InWorld
+        if self.conn.state != ClientState::InWorld
             || self.world.player.guid != request.player
-            || self.activation.is_some()
+            || self.portal.activation.is_some()
         {
             return Err("The originating character is no longer ready in the world".into());
         }
-        if self.active_busy_operation.is_some()
+        if self.character.active_busy_operation.is_some()
             || self.inventory_change_pending()
             || self.world.trade.is_some()
         {
@@ -250,7 +250,7 @@ impl ClientRuntime {
             sources,
             observed: None,
             recovery_at: Some(Instant::now() + RECOVERY_DELAY),
-            world_generation: self.world_generation,
+            world_generation: self.conn.world_generation,
         })
     }
 
@@ -281,10 +281,10 @@ impl ClientRuntime {
             return Ok(());
         }
         // A delayed profile from the preceding Use is now fact evidence, never opening intent.
-        self.housing_opening = None;
+        self.portal.housing_opening = None;
         self.emit_housing_snapshot();
         if let Err(error) = self.send_game_action(action).await {
-            if let Some(pending) = self.active_busy_operation.take() {
+            if let Some(pending) = self.character.active_busy_operation.take() {
                 self.emit_pending_abort(
                     &pending.operation,
                     format!("Payment dispatch failed: {error:#}"),
@@ -303,7 +303,7 @@ impl ClientRuntime {
 
     /// Called after reduction so removals, moves, and stack updates are all considered.
     pub(super) fn reconcile_housing_payment(&mut self) {
-        let Some(pending) = &self.active_busy_operation else {
+        let Some(pending) = &self.character.active_busy_operation else {
             return;
         };
         let PendingOperation::Housing(execution) = &pending.operation else {
@@ -317,7 +317,7 @@ impl ClientRuntime {
         {
             return;
         }
-        if let Some(pending) = self.active_busy_operation.take() {
+        if let Some(pending) = self.character.active_busy_operation.take() {
             if let PendingOperation::Housing(execution) = &pending.operation {
                 if execution.request.draft.purpose == HousingPaymentPurpose::Purchase {
                     self.world.housing.invalidate_access();
@@ -358,7 +358,7 @@ impl ClientRuntime {
     }
 
     pub(super) fn observe_housing_execution_profile(&mut self, profile: &HousingCrystal) {
-        if let Some(pending) = &mut self.active_busy_operation
+        if let Some(pending) = &mut self.character.active_busy_operation
             && let PendingOperation::Housing(execution) = &mut pending.operation
             && profile.crystal == execution.request.draft.crystal
             && profile.dwelling_id == execution.request.profile.dwelling_id
@@ -401,13 +401,14 @@ impl ClientRuntime {
             return false;
         }
         if !self
+            .character
             .active_busy_operation
             .as_ref()
             .is_some_and(|pending| matches!(pending.operation, PendingOperation::Housing(_)))
         {
             return false;
         }
-        if let Some(pending) = self.active_busy_operation.take() {
+        if let Some(pending) = self.character.active_busy_operation.take() {
             if let PendingOperation::Housing(execution) = &pending.operation {
                 self.emit_housing_payment_result(
                     &execution.request,
@@ -430,30 +431,34 @@ impl ClientRuntime {
 
     /// Refresh facts once without acquiring another busy owner or replaying opening intent.
     pub(super) async fn poll_housing_recovery(&mut self, now: Instant) -> anyhow::Result<()> {
-        if self.state != ClientState::InWorld || self.activation.is_some() {
+        if self.conn.state != ClientState::InWorld || self.portal.activation.is_some() {
             return Ok(());
         }
-        let recovery = self.active_busy_operation.as_mut().and_then(|pending| {
-            if now >= pending.deadline {
-                return None;
-            }
-            let PendingOperation::Housing(execution) = &mut pending.operation else {
-                return None;
-            };
-            execution
-                .recovery_at
-                .take_if(|deadline| now >= *deadline)
-                .map(|_| (execution.request.draft.crystal, execution.world_generation))
-        });
+        let recovery = self
+            .character
+            .active_busy_operation
+            .as_mut()
+            .and_then(|pending| {
+                if now >= pending.deadline {
+                    return None;
+                }
+                let PendingOperation::Housing(execution) = &mut pending.operation else {
+                    return None;
+                };
+                execution
+                    .recovery_at
+                    .take_if(|deadline| now >= *deadline)
+                    .map(|_| (execution.request.draft.crystal, execution.world_generation))
+            });
         let Some((crystal, generation)) = recovery else {
             return Ok(());
         };
         // The payment owns internal recovery's deadline/feedback. A separate home-query
         // timeout would duplicate uncertainty when ACE silently rejects the payment.
-        if self.housing_query_deadline.is_none() {
+        if self.character.housing_query_deadline.is_none() {
             self.send_game_action(GameAction::HouseQuery).await?;
         }
-        if self.world_generation == generation
+        if self.conn.world_generation == generation
             && self
                 .world
                 .within_use_radius(self.world.player.guid, crystal)
@@ -805,7 +810,7 @@ mod tests {
             client.active_busy_operation(),
             Some(BusyOperationKind::HousingPurchase)
         );
-        assert!(client.housing_opening.is_none());
+        assert!(client.portal.housing_opening.is_none());
         client.clear_busy_operation();
         assert!(client.active_busy_operation().is_none());
     }
@@ -850,7 +855,12 @@ mod tests {
         let (mut client, request) = fixture(HousingPaymentPurpose::Purchase, 8);
         prepare_reachable_crystal(&mut client);
         client.submit_housing_payment(request).await.unwrap();
-        let deadline = client.active_busy_operation.as_ref().unwrap().deadline;
+        let deadline = client
+            .character
+            .active_busy_operation
+            .as_ref()
+            .unwrap()
+            .deadline;
         let mut events = client.subscribe_client_view_events();
         client
             .poll_housing_recovery(Instant::now() + RECOVERY_DELAY)
@@ -858,11 +868,16 @@ mod tests {
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 3); // Payment, HouseQuery, internal Use.
         assert_eq!(
-            client.active_busy_operation.as_ref().unwrap().deadline,
+            client
+                .character
+                .active_busy_operation
+                .as_ref()
+                .unwrap()
+                .deadline,
             deadline
         );
-        assert!(client.housing_opening.is_none());
-        assert!(client.housing_query_deadline.is_none());
+        assert!(client.portal.housing_opening.is_none());
+        assert!(client.character.housing_query_deadline.is_none());
         client
             .finish_busy_operation_from_use_done(WeenieError::None)
             .await
@@ -895,24 +910,39 @@ mod tests {
         let (mut client, request) = fixture(HousingPaymentPurpose::Purchase, 8);
         prepare_reachable_crystal(&mut client);
         client.submit_housing_payment(request).await.unwrap();
-        let deadline = client.active_busy_operation.as_ref().unwrap().deadline;
+        let deadline = client
+            .character
+            .active_busy_operation
+            .as_ref()
+            .unwrap()
+            .deadline;
         let now = Instant::now() + RECOVERY_DELAY;
         client.start_world_activation(super::super::ClientWorldActivationState::Teleport, PLAYER);
         client.poll_housing_recovery(now).await.unwrap();
         assert_eq!(client.session.game_action_sequence, 1);
         assert_eq!(
-            client.active_busy_operation.as_ref().unwrap().deadline,
+            client
+                .character
+                .active_busy_operation
+                .as_ref()
+                .unwrap()
+                .deadline,
             deadline
         );
         // Re-entering the world does not restore the original crystal scene generation.
-        client.activation = None;
-        client.state = ClientState::InWorld;
+        client.portal.activation = None;
+        client.conn.state = ClientState::InWorld;
         client.poll_housing_recovery(now).await.unwrap();
         client.poll_housing_recovery(now).await.unwrap();
         assert_eq!(client.session.game_action_sequence, 2); // Home refresh only; never Use/payment retry.
-        assert!(client.housing_opening.is_none());
+        assert!(client.portal.housing_opening.is_none());
         assert_eq!(
-            client.active_busy_operation.as_ref().unwrap().deadline,
+            client
+                .character
+                .active_busy_operation
+                .as_ref()
+                .unwrap()
+                .deadline,
             deadline
         );
     }
@@ -986,7 +1016,12 @@ mod tests {
         for returning_to_roster in [false, true] {
             let (mut client, request) = fixture(HousingPaymentPurpose::Maintenance, 8);
             client.submit_housing_payment(request).await.unwrap();
-            let deadline = client.active_busy_operation.as_ref().unwrap().deadline;
+            let deadline = client
+                .character
+                .active_busy_operation
+                .as_ref()
+                .unwrap()
+                .deadline;
             let mut events = client.subscribe_client_view_events();
             if returning_to_roster {
                 receive(
@@ -1004,7 +1039,7 @@ mod tests {
                 client.set_exit_cause(crate::ClientExitCause::ExplicitDisconnect);
             }
             client.poll_busy_timeout(deadline);
-            assert!(client.active_busy_operation.is_none());
+            assert!(client.character.active_busy_operation.is_none());
             assert_eq!(client.application_snapshot().housing, Default::default());
             let events: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
             assert_eq!(

@@ -94,7 +94,7 @@ impl ClientRuntime {
             } else {
                 None
             },
-            refreshing: self.housing_queries.access.is_some(),
+            refreshing: self.character.housing_queries.access.is_some(),
         }
     }
 
@@ -102,6 +102,7 @@ impl ClientRuntime {
         HousingSearchSnapshot {
             results: self.world.housing.search.clone(),
             pending_type: self
+                .character
                 .housing_queries
                 .search
                 .as_ref()
@@ -117,7 +118,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn query_housing_access(&mut self) -> anyhow::Result<()> {
-        if self.state != ClientState::InWorld {
+        if self.conn.state != ClientState::InWorld {
             self.housing_query_refusal("Housing access records are only available in the world");
             return Ok(());
         }
@@ -125,15 +126,15 @@ impl ClientRuntime {
             self.housing_query_refusal("Wait for the housing management request to finish");
             return Ok(());
         }
-        if self.housing_queries.access.is_some() {
+        if self.character.housing_queries.access.is_some() {
             return Ok(());
         }
-        if self.housing_query_deadline.is_some()
+        if self.character.housing_query_deadline.is_some()
             || matches!(self.world.housing.home, HomeKnowledge::Unqueried)
         {
-            self.housing_queries.access = Some(AccessQuery::WaitingHome);
+            self.character.housing_queries.access = Some(AccessQuery::WaitingHome);
             if let Err(error) = self.query_home().await {
-                self.housing_queries.access = None;
+                self.character.housing_queries.access = None;
                 self.emit_housing_snapshot();
                 return Err(error);
             }
@@ -153,11 +154,11 @@ impl ClientRuntime {
             .send_game_action(GameAction::RequestFullGuestList)
             .await
         {
-            self.housing_queries.access = None;
+            self.character.housing_queries.access = None;
             self.emit_housing_snapshot();
             return Err(error);
         }
-        self.housing_queries.access = Some(AccessQuery::WaitingRecords {
+        self.character.housing_queries.access = Some(AccessQuery::WaitingRecords {
             generation: self.world.housing.access_generation,
             deadline: Instant::now() + HOUSING_QUERY_TIMEOUT,
             next: None,
@@ -170,23 +171,23 @@ impl ClientRuntime {
         &mut self,
         now: Instant,
     ) -> anyhow::Result<()> {
-        if self.state != ClientState::InWorld
-            || self.activation.is_some()
-            || self.housing_query_deadline.is_some()
+        if self.conn.state != ClientState::InWorld
+            || self.portal.activation.is_some()
+            || self.character.housing_query_deadline.is_some()
         {
             return Ok(());
         }
         if let Some(AccessQuery::Scheduled {
             generation,
             schedule,
-        }) = self.housing_queries.access
+        }) = self.character.housing_queries.access
         {
             if generation != self.world.housing.access_generation || now >= schedule.deadline {
                 return Ok(());
             }
             if now >= schedule.at {
                 self.dispatch_access_query().await?;
-                self.housing_queries.access = Some(AccessQuery::WaitingRecords {
+                self.character.housing_queries.access = Some(AccessQuery::WaitingRecords {
                     generation,
                     deadline: schedule.deadline,
                     next: (schedule.reads > 1).then(|| AccessSchedule {
@@ -198,13 +199,16 @@ impl ClientRuntime {
             }
             return Ok(());
         }
-        if !matches!(self.housing_queries.access, Some(AccessQuery::WaitingHome)) {
+        if !matches!(
+            self.character.housing_queries.access,
+            Some(AccessQuery::WaitingHome)
+        ) {
             return Ok(());
         }
         match self.world.housing.home {
             HomeKnowledge::Owned { .. } => self.dispatch_access_query().await,
             HomeKnowledge::None => {
-                self.housing_queries.access = None;
+                self.character.housing_queries.access = None;
                 self.emit_housing_snapshot();
                 self.housing_query_refusal("There is no effective home to manage");
                 Ok(())
@@ -222,12 +226,12 @@ impl ClientRuntime {
             deadline: now + HOUSING_QUERY_TIMEOUT,
         };
         if let Some(AccessQuery::WaitingRecords { next, deadline, .. }) =
-            &mut self.housing_queries.access
+            &mut self.character.housing_queries.access
         {
             *next = Some(schedule);
             *deadline = schedule.deadline;
         } else {
-            self.housing_queries.access = Some(AccessQuery::Scheduled {
+            self.character.housing_queries.access = Some(AccessQuery::Scheduled {
                 generation: self.world.housing.access_generation,
                 schedule,
             });
@@ -236,7 +240,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn search_housing(&mut self, house_type: u32) -> anyhow::Result<()> {
-        if self.state != ClientState::InWorld {
+        if self.conn.state != ClientState::InWorld {
             self.housing_query_refusal("Housing search is only available in the world");
             return Ok(());
         }
@@ -244,7 +248,7 @@ impl ClientRuntime {
             self.housing_query_refusal("Choose a supported housing type");
             return Ok(());
         }
-        if let Some(query) = &self.housing_queries.search {
+        if let Some(query) = &self.character.housing_queries.search {
             if query.house_type != house_type {
                 self.housing_query_refusal("Wait for the current housing search to finish")
             }
@@ -254,7 +258,7 @@ impl ClientRuntime {
             HouseSearchActionData { house_type },
         )))
         .await?;
-        self.housing_queries.search = Some(SearchQuery {
+        self.character.housing_queries.search = Some(SearchQuery {
             house_type,
             deadline: Instant::now() + HOUSING_QUERY_TIMEOUT,
         });
@@ -268,10 +272,10 @@ impl ClientRuntime {
                 self.retire_stale_housing_access_query();
                 if matches!(self.world.housing.home, HomeKnowledge::Owned { .. })
                     && self.world.housing.access.is_none()
-                    && self.housing_queries.access.is_none()
+                    && self.character.housing_queries.access.is_none()
                 {
                     let now = Instant::now();
-                    self.housing_queries.access = Some(AccessQuery::Scheduled {
+                    self.character.housing_queries.access = Some(AccessQuery::Scheduled {
                         generation: self.world.housing.access_generation,
                         schedule: AccessSchedule {
                             at: now + ACCESS_REFRESH_DELAY,
@@ -280,37 +284,42 @@ impl ClientRuntime {
                         },
                     });
                 } else if !matches!(self.world.housing.home, HomeKnowledge::Owned { .. })
-                    && !matches!(self.housing_queries.access, Some(AccessQuery::WaitingHome))
+                    && !matches!(
+                        self.character.housing_queries.access,
+                        Some(AccessQuery::WaitingHome)
+                    )
                 {
-                    self.housing_queries.access = None;
+                    self.character.housing_queries.access = None;
                 }
             }
             WorldEvent::HousingAccessUpdated(_) => {
                 if let Some(AccessQuery::WaitingRecords {
                     generation, next, ..
-                }) = self.housing_queries.access
+                }) = self.character.housing_queries.access
                     && generation == self.world.housing.access_generation
                 {
-                    self.housing_queries.access = next.map(|schedule| AccessQuery::Scheduled {
-                        generation,
-                        schedule,
-                    });
+                    self.character.housing_queries.access =
+                        next.map(|schedule| AccessQuery::Scheduled {
+                            generation,
+                            schedule,
+                        });
                 }
                 self.emit_housing_snapshot();
             }
             WorldEvent::HousingSearchUpdated(result) => {
                 if self
+                    .character
                     .housing_queries
                     .search
                     .as_ref()
                     .is_some_and(|query| query.house_type == result.house_type)
                 {
-                    self.housing_queries.search = None
+                    self.character.housing_queries.search = None
                 }
                 self.emit_housing_snapshot();
             }
             WorldEvent::HousingAccessRejected(error) => {
-                self.housing_queries.access = None;
+                self.character.housing_queries.access = None;
                 self.emit_housing_snapshot();
                 self.emit_action_result(
                     ActionResultSource::Wire,
@@ -318,7 +327,7 @@ impl ClientRuntime {
                 );
             }
             WorldEvent::HousingSearchRejected(error) => {
-                self.housing_queries.search = None;
+                self.character.housing_queries.search = None;
                 self.emit_housing_snapshot();
                 self.emit_action_result(
                     ActionResultSource::Wire,
@@ -331,9 +340,9 @@ impl ClientRuntime {
 
     /// World owns the epoch; explicit ownership transitions also retire old read admission.
     pub(super) fn retire_stale_housing_access_query(&mut self) {
-        if matches!(self.housing_queries.access, Some(AccessQuery::WaitingRecords { generation, .. } | AccessQuery::Scheduled { generation, .. }) if generation != self.world.housing.access_generation)
+        if matches!(self.character.housing_queries.access, Some(AccessQuery::WaitingRecords { generation, .. } | AccessQuery::Scheduled { generation, .. }) if generation != self.world.housing.access_generation)
         {
-            self.housing_queries.access = None;
+            self.character.housing_queries.access = None;
         }
     }
 
@@ -341,36 +350,40 @@ impl ClientRuntime {
     pub(super) fn reject_housing_access_from_wire(&mut self, error: WeenieError) {
         if error == WeenieError::YouMustOwnHouseToUseCommand
             && matches!(
-                self.housing_queries.access,
+                self.character.housing_queries.access,
                 Some(AccessQuery::WaitingRecords { .. })
             )
         {
-            self.housing_queries.access = None;
+            self.character.housing_queries.access = None;
             self.emit_housing_snapshot();
         }
     }
 
     /// Home timeout owns WaitingHome feedback; avoid a second notice for the dependent read.
     pub(super) fn retire_dependent_access_query(&mut self) {
-        if matches!(self.housing_queries.access, Some(AccessQuery::WaitingHome)) {
-            self.housing_queries.access = None
+        if matches!(
+            self.character.housing_queries.access,
+            Some(AccessQuery::WaitingHome)
+        ) {
+            self.character.housing_queries.access = None
         }
     }
 
     pub(super) fn poll_housing_information_timeouts(&mut self, now: Instant) {
-        if matches!(self.housing_queries.access, Some(AccessQuery::WaitingRecords { deadline, .. } | AccessQuery::Scheduled { schedule: AccessSchedule { deadline, .. }, .. }) if now >= deadline)
+        if matches!(self.character.housing_queries.access, Some(AccessQuery::WaitingRecords { deadline, .. } | AccessQuery::Scheduled { schedule: AccessSchedule { deadline, .. }, .. }) if now >= deadline)
         {
-            self.housing_queries.access = None;
+            self.character.housing_queries.access = None;
             self.emit_housing_snapshot();
             self.housing_query_refusal("Housing access refresh timed out waiting for the server");
         }
         if self
+            .character
             .housing_queries
             .search
             .as_ref()
             .is_some_and(|query| now >= query.deadline)
         {
-            self.housing_queries.search = None;
+            self.character.housing_queries.search = None;
             self.emit_housing_snapshot();
             self.housing_query_refusal("Housing search timed out waiting for the server");
         }
@@ -438,7 +451,7 @@ mod tests {
         client.query_housing_access().await.unwrap();
         assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.housing_snapshot().access.refreshing);
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         receive(&mut client, home()).await;
         assert_eq!(client.session.game_action_sequence, 2);
         assert!(client.housing_snapshot().access.refreshing);
@@ -446,14 +459,15 @@ mod tests {
         let snapshot = client.housing_snapshot();
         assert!(!snapshot.access.refreshing);
         assert!(snapshot.access.records.unwrap().public_entry);
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
     }
 
     #[tokio::test]
     async fn initialized_home_loads_access_and_edits_coalesce_behind_outstanding_reads() {
         let mut client = build_test_client(ClientState::InWorld);
         receive(&mut client, home()).await;
-        let Some(AccessQuery::Scheduled { schedule, .. }) = client.housing_queries.access else {
+        let Some(AccessQuery::Scheduled { schedule, .. }) = client.character.housing_queries.access
+        else {
             panic!("Initial permissions were not scheduled");
         };
         client
@@ -489,7 +503,8 @@ mod tests {
         assert_eq!(client.session.game_action_sequence, 3);
         receive(&mut client, access()).await;
         for index in 0..ACCESS_EDIT_READS {
-            let Some(AccessQuery::Scheduled { schedule, .. }) = client.housing_queries.access
+            let Some(AccessQuery::Scheduled { schedule, .. }) =
+                client.character.housing_queries.access
             else {
                 panic!("Post-edit permissions were not scheduled");
             };
@@ -502,7 +517,7 @@ mod tests {
             receive(&mut client, access()).await;
         }
         assert!(!client.housing_access_snapshot().refreshing);
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
     }
 
     #[tokio::test]
@@ -534,7 +549,7 @@ mod tests {
         let mut client = build_test_client(ClientState::InWorld);
         let mut events = client.subscribe_client_view_events();
         client.query_housing_access().await.unwrap();
-        let deadline = client.housing_query_deadline.unwrap();
+        let deadline = client.character.housing_query_deadline.unwrap();
         client.poll_housing_query_timeout(deadline);
         client.poll_housing_information_timeouts(deadline + HOUSING_QUERY_TIMEOUT);
         assert!(!client.housing_snapshot().access.refreshing);
@@ -584,7 +599,7 @@ mod tests {
         client.query_housing_access().await.unwrap();
         client.search_housing(2).await.unwrap();
         client.reset_housing();
-        assert_eq!(client.housing_queries, HousingQueries::default());
+        assert_eq!(client.character.housing_queries, HousingQueries::default());
         assert_eq!(
             client.housing_snapshot(),
             super::super::housing::HousingSnapshot::default()

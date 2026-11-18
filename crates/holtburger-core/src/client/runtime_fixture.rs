@@ -92,7 +92,7 @@ impl ClientRuntime {
             "runtime fixture capture already started"
         );
         ensure!(
-            self.state == ClientState::Connected,
+            self.conn.state == ClientState::Connected,
             "start fixture capture before login"
         );
         self.runtime_fixture = Some(RuntimeFixtureCapture {
@@ -274,8 +274,8 @@ impl RuntimeFixture {
                     report.population_mismatches += usize::from(population != *entities);
                     report.peak_entities = report.peak_entities.max(population);
                     report.physics_ticks += 1;
-                    let active =
-                        client.activation.is_none() && client.state == ClientState::InWorld;
+                    let active = client.portal.activation.is_none()
+                        && client.conn.state == ClientState::InWorld;
                     report.observe_activation(active);
                     let mut waited = Duration::ZERO;
                     let begin = Instant::now();

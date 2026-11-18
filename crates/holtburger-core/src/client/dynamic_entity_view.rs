@@ -203,12 +203,13 @@ impl ClientRuntime {
     }
 
     pub(super) fn begin_dynamic_entity_upsert_coalescing(&mut self) {
-        self.coalesced_dynamic_entity_upserts
+        self.conn
+            .coalesced_dynamic_entity_upserts
             .get_or_insert_with(BTreeSet::new);
     }
 
     pub(super) fn flush_dynamic_entity_upserts(&mut self) {
-        let Some(pending) = self.coalesced_dynamic_entity_upserts.take() else {
+        let Some(pending) = self.conn.coalesced_dynamic_entity_upserts.take() else {
             return;
         };
         for guid in pending {
@@ -217,11 +218,11 @@ impl ClientRuntime {
     }
 
     pub(super) fn cancel_dynamic_entity_upsert_coalescing(&mut self) {
-        self.coalesced_dynamic_entity_upserts = None;
+        self.conn.coalesced_dynamic_entity_upserts = None;
     }
 
     pub(super) fn emit_dynamic_entity_snapshot(&mut self) {
-        if let Some(pending) = self.coalesced_dynamic_entity_upserts.as_mut() {
+        if let Some(pending) = self.conn.coalesced_dynamic_entity_upserts.as_mut() {
             pending.clear();
         }
         let snapshot = DynamicEntitySnapshot::new(
@@ -254,7 +255,7 @@ impl ClientRuntime {
     }
 
     pub(super) fn emit_dynamic_entity_upsert(&mut self, guid: Guid) {
-        if let Some(pending) = self.coalesced_dynamic_entity_upserts.as_mut() {
+        if let Some(pending) = self.conn.coalesced_dynamic_entity_upserts.as_mut() {
             pending.insert(guid);
             return;
         }
@@ -262,7 +263,7 @@ impl ClientRuntime {
     }
 
     pub(super) fn emit_dynamic_entity_removed(&mut self, guid: Guid, generation: u64) {
-        if let Some(pending) = self.coalesced_dynamic_entity_upserts.as_mut() {
+        if let Some(pending) = self.conn.coalesced_dynamic_entity_upserts.as_mut() {
             pending.remove(&guid);
         }
         let _ = self

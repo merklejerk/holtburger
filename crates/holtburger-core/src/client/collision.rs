@@ -1018,13 +1018,16 @@ impl ClientCollisionCoordinator {
     }
 
     /// Retires the character-scoped debug policy at logout, including any remaining body.
-    pub(super) fn reset_entity_collision_override(&mut self, world: &mut WorldState) {
+    pub(super) fn reset_entity_collision_override(&mut self, world: &mut WorldState) -> bool {
         if let Some(player) = self.entity_response_override.take() {
             world.scene.set_physical_collision_exclusion(
                 SpatialBodyId::LocalPlayer(player),
                 holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,
                 false,
             );
+            true
+        } else {
+            false
         }
     }
 
@@ -2268,12 +2271,12 @@ mod tests {
                 .world
                 .seed_local_player_entity(guid, "Player", position(destination.0));
             client.start_world_activation(ClientWorldActivationState::Teleport, guid);
-            client.activation.as_mut().unwrap().phase =
+            client.portal.activation.as_mut().unwrap().phase =
                 ClientWorldActivationPhase::TeleportDestinationInstalled;
             client.collision_coordinator = Some(coordinator);
             let error = client.try_complete_world_activation().await.unwrap_err();
             assert!(error.to_string().contains(expected), "{error}");
-            assert_eq!(client.state, ClientState::EnteringWorld);
+            assert_eq!(client.conn.state, ClientState::EnteringWorld);
             assert_eq!(client.session.bytes_out, 0);
         }
     }
@@ -2346,7 +2349,7 @@ mod tests {
                     ..FakeSource::default()
                 })));
             client.start_world_activation(ClientWorldActivationState::Teleport, guid);
-            let retired_generation = client.activation.as_ref().unwrap().generation;
+            let retired_generation = client.portal.activation.as_ref().unwrap().generation;
             client.start_world_activation(cause, guid);
             client
                 .world
@@ -2363,7 +2366,7 @@ mod tests {
                 .await
                 .unwrap();
             if cause == ClientWorldActivationState::Teleport {
-                client.activation.as_mut().unwrap().phase =
+                client.portal.activation.as_mut().unwrap().phase =
                     ClientWorldActivationPhase::TeleportDestinationInstalled;
             }
             client
@@ -2383,7 +2386,7 @@ mod tests {
                 })
                 .unwrap();
             client.try_complete_world_activation().await.unwrap();
-            assert!(client.activation.is_some());
+            assert!(client.portal.activation.is_some());
             assert_eq!(client.session.bytes_out, bytes_before_activation);
             let coordinator = client.collision_coordinator.as_mut().unwrap();
             coordinator.observe(&mut client.world);
@@ -2394,7 +2397,7 @@ mod tests {
             wait_for_scene_revision(coordinator, &mut client.world, 1).await;
             // Resident content permits camera settlement, but only the current reveal may activate.
             client.try_complete_world_activation().await.unwrap();
-            assert!(client.activation.is_some());
+            assert!(client.portal.activation.is_some());
             let body = client
                 .world
                 .scene
@@ -2417,16 +2420,16 @@ mod tests {
                 0.0,
                 "runtime placement must not rewrite server authority"
             );
-            let generation = client.activation.as_ref().unwrap().generation;
+            let generation = client.portal.activation.as_ref().unwrap().generation;
             client
                 .acknowledge_world_reveal(retired_generation)
                 .await
                 .unwrap();
-            assert!(client.activation.is_some());
+            assert!(client.portal.activation.is_some());
             assert_eq!(client.session.bytes_out, bytes_before_activation);
             client.acknowledge_world_reveal(generation).await.unwrap();
-            assert!(client.activation.is_none());
-            assert_eq!(client.state, ClientState::InWorld);
+            assert!(client.portal.activation.is_none());
+            assert_eq!(client.conn.state, ClientState::InWorld);
             assert!(client.session.bytes_out > 0);
             assert_eq!(
                 client.housing_snapshot().refreshing,
@@ -2601,7 +2604,8 @@ mod tests {
                 .scene
                 .set_physical_collision_exclusion(id, water, true)
         );
-        coordinator.reset_entity_collision_override(&mut world);
+        assert!(coordinator.reset_entity_collision_override(&mut world));
+        assert!(!coordinator.reset_entity_collision_override(&mut world));
         assert!(!coordinator.entity_collision_disabled());
         assert!(!excluded(&world));
         assert!(

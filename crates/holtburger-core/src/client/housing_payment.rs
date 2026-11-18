@@ -110,7 +110,7 @@ impl ClientRuntime {
         &self,
         draft: &HousingPaymentDraft,
     ) -> Result<&[HousingRequirement], String> {
-        if self.state != ClientState::InWorld {
+        if self.conn.state != ClientState::InWorld {
             return Err("Housing payment is only available in the world".into());
         }
         if self.inventory_operation_pending() {
@@ -718,7 +718,7 @@ mod tests {
         assert_eq!(quote.lines[0].credited, 13);
         assert_eq!(quote.lines[0].excess, 7);
         assert_eq!(client.session.game_action_sequence, 0);
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
     }
 
     #[test]
@@ -770,7 +770,7 @@ mod tests {
             .unwrap();
         assert_eq!(quote.lines[0].shortfall, 13);
         assert_eq!(client.session.game_action_sequence, 0);
-        assert!(client.active_busy_operation.is_some());
+        assert!(client.character.active_busy_operation.is_some());
     }
 
     #[test]

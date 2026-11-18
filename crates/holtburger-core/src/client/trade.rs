@@ -182,7 +182,7 @@ fn prepare_trade(
 impl ClientRuntime {
     /// Compose confirmed world facts and acknowledgment waits once for every frontend.
     pub(super) fn trade_snapshot(&self) -> TradeSnapshot {
-        let mut pending_items: Vec<_> = self.trade_additions.keys().copied().collect();
+        let mut pending_items: Vec<_> = self.character.trade_additions.keys().copied().collect();
         pending_items.sort_unstable();
         TradeSnapshot {
             trade: self.world.trade.clone(),
@@ -205,16 +205,16 @@ impl ClientRuntime {
     pub(super) fn observe_trade_reply(&mut self, event: &GameEvent) {
         match event {
             GameEvent::AddToTrade(data) if data.trade_side == 1 => {
-                self.trade_additions.remove(&data.object_guid);
+                self.character.trade_additions.remove(&data.object_guid);
             }
             GameEvent::TradeFailure(data) => {
-                self.trade_additions.remove(&data.object_guid);
+                self.character.trade_additions.remove(&data.object_guid);
             }
             GameEvent::ResetTrade(_)
             | GameEvent::ClearTradeAcceptance
             | GameEvent::CloseTrade(_)
             | GameEvent::RegisterTrade(_) => {
-                self.trade_additions.clear();
+                self.character.trade_additions.clear();
             }
             _ => {}
         }
@@ -222,13 +222,14 @@ impl ClientRuntime {
 
     pub(super) fn poll_trade_addition_timeout(&mut self, now: Instant) {
         let expired: Vec<_> = self
+            .character
             .trade_additions
             .iter()
             .filter(|(_, deadline)| **deadline <= now)
             .map(|(item, _)| *item)
             .collect();
         for item in expired {
-            self.trade_additions.remove(&item);
+            self.character.trade_additions.remove(&item);
             self.report_trade_failure(
                 "Timed out waiting for the server to acknowledge a trade item.".into(),
             );
@@ -236,12 +237,12 @@ impl ClientRuntime {
     }
 
     pub(super) async fn submit_trade(&mut self, request: TradeRequest) -> anyhow::Result<()> {
-        if !matches!(self.state, ClientState::InWorld) || self.activation.is_some() {
+        if !matches!(self.conn.state, ClientState::InWorld) || self.portal.activation.is_some() {
             self.report_trade_failure("Trading requires an active world session.".into());
             return Ok(());
         }
         let blocked = match request {
-            TradeRequest::Accept { .. } if !self.trade_additions.is_empty() => {
+            TradeRequest::Accept { .. } if !self.character.trade_additions.is_empty() => {
                 Some("Wait for the server to acknowledge your offered items.")
             }
             _ => None,
@@ -250,7 +251,7 @@ impl ClientRuntime {
             self.report_trade_failure(message.into());
             return Ok(());
         }
-        let prepared = match prepare_trade(&self.world, &request, &self.trade_additions) {
+        let prepared = match prepare_trade(&self.world, &request, &self.character.trade_additions) {
             Ok(prepared) => prepared,
             Err(message) => {
                 self.report_trade_failure(message.into());
@@ -285,7 +286,8 @@ impl ClientRuntime {
                 break;
             }
             if let Some(item) = item {
-                self.trade_additions
+                self.character
+                    .trade_additions
                     .insert(item, Instant::now() + TRADE_ADDITION_TIMEOUT);
             }
             self.emit_trade_state_updated();
@@ -472,7 +474,7 @@ mod tests {
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.trade_snapshot().pending_items.is_empty());
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         let mut reported_failure = false;
         while let Ok(event) = events.try_recv() {
             if let ClientViewEvent::ServerMessage { message, .. } = event {
@@ -727,6 +729,7 @@ mod tests {
         client.world = world();
         let item = Guid(0x8000_0003);
         client
+            .character
             .trade_additions
             .insert(item, Instant::now() + TRADE_ADDITION_TIMEOUT);
         let reply = |trade_side| {
@@ -741,6 +744,7 @@ mod tests {
         client.observe_trade_reply(&reply(1));
         assert!(client.trade_snapshot().pending_items.is_empty());
         client
+            .character
             .trade_additions
             .insert(item, Instant::now() + TRADE_ADDITION_TIMEOUT);
         client.observe_trade_reply(&GameEvent::ResetTrade(Box::new(ResetTradeEventData {
@@ -756,6 +760,7 @@ mod tests {
         let mut events = client.client_view_event_tx.subscribe();
         let now = Instant::now();
         client
+            .character
             .trade_additions
             .insert(Guid(0x8000_0003), now + TRADE_ADDITION_TIMEOUT);
         client.poll_trade_addition_timeout(now);

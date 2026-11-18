@@ -76,7 +76,7 @@ impl ClientRuntime {
                 .combat_target_status(desired.target)
                 .is_available()
             && movement_ready
-            && self.active_busy_operation.is_none()
+            && self.character.active_busy_operation.is_none()
             && !self.inventory_change_pending()
     }
 
@@ -249,7 +249,7 @@ impl ClientRuntime {
     ) -> super::types::CombatOutcomeContext {
         let attribution = self.combat_attribution.resolve(name, now);
         super::types::CombatOutcomeContext {
-            world_generation: self.world_generation,
+            world_generation: self.conn.world_generation,
             attribution,
         }
     }
@@ -267,7 +267,7 @@ impl ClientRuntime {
                 .resolve_text(parsed.defender_name, parsed.source, now);
         Some(super::types::ServerTextCombatOutcome {
             context: super::types::CombatOutcomeContext {
-                world_generation: self.world_generation,
+                world_generation: self.conn.world_generation,
                 attribution,
             },
             kind: parsed.kind,
@@ -321,7 +321,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn handle_combat_command(&mut self, command: ClientCommand) -> Result<()> {
-        if !matches!(self.state, ClientState::InWorld) {
+        if !matches!(self.conn.state, ClientState::InWorld) {
             return Ok(());
         }
         match command {
@@ -443,7 +443,7 @@ impl ClientRuntime {
         let Some(spell) = self.world.spell_catalog.get(spell_id) else {
             return Err("Spell definition is unavailable.");
         };
-        if self.described_character == Some(self.world.player.guid)
+        if self.character.described_character == Some(self.world.player.guid)
             && !self.world.player.spells.contains_key(&spell_id)
         {
             return Err("You do not know this spell.");
@@ -534,7 +534,7 @@ impl ClientRuntime {
             .client_view_event_tx
             .send(ClientViewEvent::EntityCombatObserved {
                 guid: target,
-                world_generation: self.world_generation,
+                world_generation: self.conn.world_generation,
                 instance_sequence: entity.instance_sequence(),
                 observed_at: self.dynamic_entity_host_time_at(observed_at),
             });
@@ -770,9 +770,12 @@ mod tests {
                 outcome.context.attribution,
                 CombatOutcomeAttribution::Attributed { target: Guid(2) }
             );
-            assert_eq!(outcome.context.world_generation, client.world_generation);
+            assert_eq!(
+                outcome.context.world_generation,
+                client.conn.world_generation
+            );
         }
-        let generation = client.world_generation;
+        let generation = client.conn.world_generation;
         client.bump_world_generation();
         let outcome = receive_text(
             &mut client,
@@ -995,7 +998,7 @@ mod tests {
             .await
             .unwrap();
         let context = client.attribute_combat_outcome("Drudge", now);
-        assert_eq!(context.world_generation, client.world_generation);
+        assert_eq!(context.world_generation, client.conn.world_generation);
         assert_eq!(
             context.attribution,
             CombatOutcomeAttribution::Attributed { target: Guid(2) }
@@ -1643,7 +1646,7 @@ mod tests {
                 .prepare_spell_cast(99, SpellCastAim::Untargeted)
                 .is_err()
         );
-        client.described_character = Some(Guid(1));
+        client.character.described_character = Some(Guid(1));
         assert_eq!(
             client
                 .prepare_spell_cast(42, SpellCastAim::Untargeted)
@@ -1672,7 +1675,12 @@ mod tests {
             Some(BusyOperationKind::SpellCast)
         );
         assert_eq!(
-            client.active_busy_operation.as_ref().unwrap().operation,
+            client
+                .character
+                .active_busy_operation
+                .as_ref()
+                .unwrap()
+                .operation,
             crate::client::PendingOperation::SpellCast {
                 target: Some(Guid(2))
             }
@@ -1689,7 +1697,7 @@ mod tests {
             .finish_busy_operation_from_use_done(WeenieError::None)
             .await
             .unwrap();
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         let mut saw_error = false;
         while let Ok(event) = events.try_recv() {
             if let ClientViewEvent::BusyOperationFinished {
@@ -1709,10 +1717,10 @@ mod tests {
         client.poll_busy_timeout(
             Instant::now() + crate::client::BUSY_OPERATION_TIMEOUT + Duration::from_secs(1),
         );
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         client.handle_command(command()).await.unwrap();
         client.set_exit_cause(ClientExitCause::ServerDisconnect);
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
     }
     #[tokio::test]
     async fn failed_send_releases_busy_and_publishes_idle() {
@@ -1733,7 +1741,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         let mut states = Vec::new();
         let mut targets = Vec::new();
         while let Ok(event) = events.try_recv() {
@@ -1793,7 +1801,7 @@ mod tests {
             .finish_busy_operation_from_use_done(WeenieError::None)
             .await
             .unwrap();
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
     }
 
     #[tokio::test]
@@ -1802,7 +1810,7 @@ mod tests {
         client.arm_busy_operation(crate::client::PendingOperation::SpellCast { target: None });
         client.character_selection.character_id = Some(Guid(2));
         client.begin_world_entry_transition().await.unwrap();
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
     }
 
     #[test]
@@ -1910,7 +1918,7 @@ mod tests {
             .finish_busy_operation_from_use_done(WeenieError::None)
             .await
             .unwrap();
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
     }
 
     #[tokio::test]

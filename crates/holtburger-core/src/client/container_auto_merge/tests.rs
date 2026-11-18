@@ -119,7 +119,7 @@ fn results(events: &mut broadcast::Receiver<ClientViewEvent>) -> Vec<AutoMergeRe
 }
 
 fn pending(client: &ClientRuntime) -> &AwaitingMerge {
-    let Some(InventoryOperation::AutoMerge(operation)) = &client.inventory_operation else {
+    let Some(InventoryOperation::AutoMerge(operation)) = &client.portal.inventory_operation else {
         panic!("auto-merge must be active")
     };
     let MergeStage::Awaiting(pending) = &operation.stage else {
@@ -443,7 +443,8 @@ async fn expired_owner_is_cleared_before_admitting_a_conflicting_command() {
     let mut client = build_test_client(ClientState::InWorld);
     client.world = world(&[20, 90], PLAYER);
     client.start_auto_merge(PLAYER, POLICY).await.unwrap();
-    let Some(InventoryOperation::AutoMerge(operation)) = &mut client.inventory_operation else {
+    let Some(InventoryOperation::AutoMerge(operation)) = &mut client.portal.inventory_operation
+    else {
         panic!()
     };
     let MergeStage::Awaiting(pending) = &mut operation.stage else {
@@ -811,7 +812,7 @@ async fn explicit_disconnect_retires_the_operation_before_the_session_ends() {
         .handle_command(ClientCommand::Disconnect)
         .await
         .unwrap();
-    assert_eq!(client.state, ClientState::Disconnected);
+    assert_eq!(client.conn.state, ClientState::Disconnected);
     assert!(!client.inventory_operation_pending());
 }
 
@@ -823,7 +824,8 @@ async fn delayed_physics_timestamp_cannot_dispatch_past_the_operation_deadline()
     receive(&mut client, remove(SECOND)).await;
     receive(&mut client, count(FIRST, 90)).await;
     client.poll_auto_merge(Instant::now());
-    let Some(InventoryOperation::AutoMerge(operation)) = &mut client.inventory_operation else {
+    let Some(InventoryOperation::AutoMerge(operation)) = &mut client.portal.inventory_operation
+    else {
         panic!("confirmed step must retain the unsent continuation");
     };
     let expired = Instant::now() - Duration::from_millis(1);

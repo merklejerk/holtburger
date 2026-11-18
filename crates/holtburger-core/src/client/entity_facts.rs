@@ -282,15 +282,16 @@ impl super::ClientRuntime {
     /// Publish completed semantic changes without coupling them to dynamic rendering events.
     pub(super) fn publish_entity_facts(&mut self) {
         let collected = self
+            .character
             .entity_facts
             .collect_with_opened_at_origin(
                 &mut self.world,
-                self.opened_corpses.ids(),
+                self.character.opened_corpses.ids(),
                 self.dynamic_entity_time_origin,
             )
             .expect("accepted world relationships must project into coherent entity facts");
         if collected.storage_changed {
-            self.player_visual.invalidate();
+            self.character.player_visual.invalidate();
         }
         let delta = collected.delta;
         if delta.projectile_supply.is_some()
@@ -305,7 +306,7 @@ impl super::ClientRuntime {
                 .client_view_event_tx
                 .send(super::ClientViewEvent::EntityFactsChanged(delta));
         }
-        let core_target = match self.entity_facts.projectile_supply {
+        let core_target = match self.character.entity_facts.projectile_supply {
             ProjectileSupply::Pending {
                 appraisal: Some(guid),
             } => Some((
@@ -319,14 +320,14 @@ impl super::ClientRuntime {
         };
         self.appraisal.set_core_facts_target(core_target);
         let active = matches!(
-            self.state,
+            self.conn.state,
             super::ClientState::EnteringWorld | super::ClientState::InWorld
         );
-        if self.player_visual.collect(&self.world, active) {
+        if self.character.player_visual.collect(&self.world, active) {
             let _ =
                 self.client_view_event_tx
                     .send(super::ClientViewEvent::PlayerVisualCaptureChanged(
-                        self.player_visual.snapshot(),
+                        self.character.player_visual.snapshot(),
                     ));
         }
     }
@@ -832,7 +833,7 @@ mod tests {
         }
         client.publish_entity_facts();
         assert_eq!(
-            client.entity_facts.projectile_supply,
+            client.character.entity_facts.projectile_supply,
             ProjectileSupply::Pending {
                 appraisal: Some(ITEM)
             }
@@ -918,6 +919,7 @@ mod tests {
             );
             assert_eq!(
                 client
+                    .character
                     .entity_facts
                     .collect(&mut client.world)
                     .unwrap()

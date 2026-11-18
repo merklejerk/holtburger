@@ -25,7 +25,7 @@ impl ClientRuntime {
     async fn process_network_batch(&mut self, received: Result<Vec<SessionEvent>>) -> Result<()> {
         self.begin_dynamic_entity_upsert_coalescing();
         let result = self.process_network_batch_inner(received).await;
-        if result.is_ok() && !matches!(self.state, ClientState::Disconnected) {
+        if result.is_ok() && !matches!(self.conn.state, ClientState::Disconnected) {
             self.flush_dynamic_entity_upserts();
         } else {
             self.cancel_dynamic_entity_upsert_coalescing();
@@ -56,16 +56,14 @@ impl ClientRuntime {
                             // Handler errors may be content/invariant failures. Only actual
                             // network boundaries record a ConnectionFailure; keep other errors
                             // in the existing runtime-failure domain.
-                            if self.state != ClientState::Disconnected {
-                                self.set_exit_cause(ClientExitCause::RuntimeFailure);
-                                self.state = ClientState::Disconnected;
-                                self.send_status_event();
+                            if self.conn.state != ClientState::Disconnected {
+                                self.finish_disconnect(ClientExitCause::RuntimeFailure);
                             }
                         })?;
                     }
                     SessionEvent::TimeSync(time) => self.sync_server_time(time, Instant::now()),
                 }
-                if matches!(self.state, ClientState::Disconnected) {
+                if matches!(self.conn.state, ClientState::Disconnected) {
                     return Ok(());
                 }
             }
@@ -88,7 +86,7 @@ impl ClientRuntime {
     async fn process_command_batch(&mut self, first: Option<ClientCommand>) -> Result<()> {
         self.begin_dynamic_entity_upsert_coalescing();
         let result = self.process_command_batch_inner(first).await;
-        if result.is_ok() && !matches!(self.state, ClientState::Disconnected) {
+        if result.is_ok() && !matches!(self.conn.state, ClientState::Disconnected) {
             self.flush_dynamic_entity_upserts();
         } else {
             self.cancel_dynamic_entity_upsert_coalescing();
@@ -102,7 +100,7 @@ impl ClientRuntime {
     ) -> Result<()> {
         let started = Instant::now();
         for _ in 0..COMMAND_BATCH_LIMIT {
-            if matches!(self.state, ClientState::Disconnected) {
+            if matches!(self.conn.state, ClientState::Disconnected) {
                 break;
             }
             let command = if let Some(command) = first.take() {
@@ -117,9 +115,7 @@ impl ClientRuntime {
                 }
             };
             if let Err(error) = self.handle_command(command).await {
-                self.set_exit_cause(ClientExitCause::RuntimeFailure);
-                self.state = ClientState::Disconnected;
-                self.send_status_event();
+                self.finish_disconnect(ClientExitCause::RuntimeFailure);
                 return Err(error);
             }
             if started.elapsed() >= COMMAND_BATCH_BUDGET {
@@ -130,7 +126,7 @@ impl ClientRuntime {
     }
 
     fn should_send_keepalive_ping(&self, now: Instant) -> bool {
-        matches!(self.state, ClientState::InWorld)
+        matches!(self.conn.state, ClientState::InWorld)
             && now.duration_since(self.session.last_send_time) > Duration::from_secs(5)
     }
 
@@ -174,9 +170,11 @@ impl ClientRuntime {
         teleport_batch: bool,
     ) {
         match event {
-            WorldEvent::EntityDespawned { guid, .. } => self.entity_cue_inbox.remove(*guid),
+            WorldEvent::EntityDespawned { guid, .. } => {
+                self.character.entity_cue_inbox.remove(*guid)
+            }
             WorldEvent::RuntimeBodiesReset { .. } => {
-                self.entity_cue_inbox.clear();
+                self.character.entity_cue_inbox.clear();
                 self.movement.clear_server_controlled_motion();
                 self.reset_camera();
                 if let Some(coordinator) = self.collision_coordinator.as_mut() {
@@ -185,11 +183,11 @@ impl ClientRuntime {
                 // The batch handler processes TeleportStarted before projecting reset effects,
                 // so it owns the one generation increment. A standalone reset remains an
                 // in-place presentation discontinuity.
-                if !teleport_batch && self.activation.is_none() {
+                if !teleport_batch && self.portal.activation.is_none() {
                     self.bump_world_generation();
                     let _ = self.client_view_event_tx.send(
                         ClientViewEvent::PresentationDiscontinuity {
-                            world_generation: self.world_generation,
+                            world_generation: self.conn.world_generation,
                             kind: ClientPresentationDiscontinuityKind::Reset,
                         },
                     );
@@ -201,11 +199,11 @@ impl ClientRuntime {
                 if let Some(coordinator) = self.collision_coordinator.as_mut() {
                     coordinator.invalidate();
                 }
-                if self.activation.is_none() {
+                if self.portal.activation.is_none() {
                     self.bump_world_generation();
                     let _ = self.client_view_event_tx.send(
                         ClientViewEvent::PresentationDiscontinuity {
-                            world_generation: self.world_generation,
+                            world_generation: self.conn.world_generation,
                             kind: ClientPresentationDiscontinuityKind::ForcedReposition,
                         },
                     );
@@ -223,10 +221,11 @@ impl ClientRuntime {
     }
 
     fn publish_precise_jump_progress(&mut self) {
-        for progress in
-            self.precise_jump
-                .poll(self.world_generation, self.camera.identity(), &self.world)
-        {
+        for progress in self.precise_jump.poll(
+            self.conn.world_generation,
+            self.camera.identity(),
+            &self.world,
+        ) {
             let _ = self
                 .client_view_event_tx
                 .send(ClientViewEvent::PreciseJumpEvaluation(progress));
@@ -255,7 +254,7 @@ impl ClientRuntime {
         let precise_jump_notification = self.precise_jump.progress_notification();
 
         loop {
-            if matches!(self.state, ClientState::Disconnected) {
+            if matches!(self.conn.state, ClientState::Disconnected) {
                 break;
             }
 
@@ -294,7 +293,7 @@ impl ClientRuntime {
                             super::types::ActionResultReason::General(format!("Could not close out-of-range container: {error:#}")),
                         );
                     }
-                    self.entity_cue_inbox.expire(now);
+                    self.character.entity_cue_inbox.expire(now);
                 }
                 res = self.session.recv_message() => {
                     let profile = RuntimeScopeProfile::begin(RuntimeProfileScope::NetworkBatch, self.runtime_profile.as_ref());
@@ -322,7 +321,7 @@ impl ClientRuntime {
                     // A ready physics deadline must not bypass all queued input. Preserve command
                     // order, but leave a backlog for later turns rather than starving simulation.
                     self.process_command_batch(None).await?;
-                    if matches!(self.state, ClientState::Disconnected) {
+                    if matches!(self.conn.state, ClientState::Disconnected) {
                         break;
                     }
                     profile.checkpoint(PhysicsTickPhase::CommandDrain);
@@ -367,7 +366,8 @@ impl ClientRuntime {
         self.poll_barber();
         self.advance_equipment_set(now).await?;
         self.advance_inventory_operation(now).await?;
-        let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
+        let active_world =
+            self.portal.activation.is_none() && matches!(self.conn.state, ClientState::InWorld);
         if active_world {
             self.advance_dynamic_scripts(self.dynamic_script_time())?;
             self.poll_selection_envelopes();
@@ -447,7 +447,8 @@ impl ClientRuntime {
         self.advance_equipment_change(now).await?;
         self.advance_equipment_set(now).await?;
         self.advance_inventory_operation(now).await?;
-        let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
+        let active_world =
+            self.portal.activation.is_none() && matches!(self.conn.state, ClientState::InWorld);
         let collision_snapshot = self
             .collision_coordinator
             .as_ref()
@@ -462,7 +463,7 @@ impl ClientRuntime {
         if active_world {
             let prepared_precise_jump = match self
                 .precise_jump
-                .prepare_queued_commit(self.world_generation, self.camera.identity())
+                .prepare_queued_commit(self.conn.world_generation, self.camera.identity())
             {
                 Some(Ok(prepared)) => Some(prepared),
                 Some(Err(feedback)) => {
@@ -494,7 +495,7 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::LocalMotionFeedback {
                         request_id: feedback.request_id,
-                        world_generation: self.world_generation,
+                        world_generation: self.conn.world_generation,
                         outcome: feedback.outcome,
                     });
             }
@@ -699,9 +700,13 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.to_string(), "test receive failure");
-        assert!(matches!(client.state, ClientState::Disconnected));
+        assert!(matches!(client.conn.state, ClientState::Disconnected));
         assert_eq!(
-            client.exit_outcome.as_ref().map(|outcome| outcome.cause),
+            client
+                .conn
+                .exit_outcome
+                .as_ref()
+                .map(|outcome| outcome.cause),
             Some(ClientExitCause::RuntimeFailure)
         );
     }
@@ -747,10 +752,14 @@ mod tests {
             .process_command_batch(Some(ClientCommand::Quit))
             .await
             .unwrap();
-        assert!(matches!(client.state, ClientState::Disconnected));
+        assert!(matches!(client.conn.state, ClientState::Disconnected));
         assert_eq!(client.command_rx.as_ref().unwrap().len(), 1);
         assert_eq!(
-            client.exit_outcome.as_ref().map(|outcome| outcome.cause),
+            client
+                .conn
+                .exit_outcome
+                .as_ref()
+                .map(|outcome| outcome.cause),
             Some(ClientExitCause::ExplicitDisconnect)
         );
     }
@@ -768,7 +777,7 @@ mod tests {
         ] {
             sender.send(command).unwrap();
         }
-        while !matches!(client.state, ClientState::Disconnected) {
+        while !matches!(client.conn.state, ClientState::Disconnected) {
             client.process_command_batch(None).await.unwrap();
         }
         let mut snapshots = 0;
@@ -807,9 +816,13 @@ mod tests {
             .send(ClientCommand::RequestCurrentApplicationState)
             .unwrap();
         assert!(client.process_command_batch(None).await.is_err());
-        assert!(matches!(client.state, ClientState::Disconnected));
+        assert!(matches!(client.conn.state, ClientState::Disconnected));
         assert_eq!(
-            client.exit_outcome.as_ref().map(|outcome| outcome.cause),
+            client
+                .conn
+                .exit_outcome
+                .as_ref()
+                .map(|outcome| outcome.cause),
             Some(ClientExitCause::RuntimeFailure)
         );
         assert_eq!(client.command_rx.as_ref().unwrap().len(), 1);
@@ -838,7 +851,7 @@ mod tests {
             holtburger_protocol::opcodes::GameOpcode::AccountBanned,
         ] {
             let mut client = builder::build_test_client(ClientState::Connected);
-            client.authenticating = true;
+            client.conn.authenticating = true;
             let error = client
                 .process_network_batch(Ok(vec![SessionEvent::Message(
                     (opcode as u32).to_le_bytes().to_vec(),
@@ -850,7 +863,7 @@ mod tests {
                     .to_string()
                     .contains("Malformed server lifecycle reply")
             );
-            assert_eq!(client.state, ClientState::Disconnected);
+            assert_eq!(client.conn.state, ClientState::Disconnected);
             assert!(
                 client
                     .exit_outcome()

@@ -73,7 +73,7 @@ impl ClientRuntime {
     pub(super) async fn prepare_container_use(&mut self, source: Guid) -> Result<()> {
         self.poll_container_close_timeout(Instant::now());
         anyhow::ensure!(
-            !self.closing_containers.contains_key(&source),
+            !self.character.closing_containers.contains_key(&source),
             "This container is still closing. Try again after it closes."
         );
         // Only storage candidates replace another surface before the server responds.
@@ -121,13 +121,14 @@ impl ClientRuntime {
     /// World may already have revoked access during an authoritative lifetime transition.
     async fn send_container_close(&mut self, root: Guid) -> Result<()> {
         if matches!(
-            self.state,
+            self.conn.state,
             ClientState::Disconnected | ClientState::CharacterSelection
         ) {
             self.publish_entity_facts();
             return Ok(());
         }
-        self.closing_containers
+        self.character
+            .closing_containers
             .insert(root, Instant::now() + CONTAINER_CLOSE_TIMEOUT);
         let result = self
             .send_game_action(GameAction::NoLongerViewingContents(Box::new(
@@ -137,7 +138,7 @@ impl ClientRuntime {
             )))
             .await;
         if result.is_err() {
-            self.closing_containers.remove(&root);
+            self.character.closing_containers.remove(&root);
         }
         self.publish_entity_facts();
         result
@@ -145,8 +146,8 @@ impl ClientRuntime {
 
     /// Sampled by the shared runtime's existing one-second network cadence.
     pub(super) async fn maintain_container_range(&mut self) -> Result<()> {
-        if self.state == ClientState::InWorld
-            && self.activation.is_none()
+        if self.conn.state == ClientState::InWorld
+            && self.portal.activation.is_none()
             && let Some(root) = self.world.world_container().root()
             && self.world.within_use_radius(self.world.player.guid, root) == Some(false)
         {
@@ -159,19 +160,20 @@ impl ClientRuntime {
     pub(super) fn reset_container_access(&mut self) {
         self.world.close_world_container();
         self.world.clear_inventory_transfers();
-        self.closing_containers.clear();
-        for guid in self.opened_corpses.iter() {
-            self.entity_facts.invalidate(guid);
+        self.character.closing_containers.clear();
+        for guid in self.character.opened_corpses.iter() {
+            self.character.entity_facts.invalidate(guid);
         }
-        self.opened_corpses.clear();
+        self.character.opened_corpses.clear();
         self.publish_entity_facts();
     }
 
     pub(super) fn poll_container_close_timeout(&mut self, now: Instant) {
-        let previous = self.closing_containers.len();
-        self.closing_containers
+        let previous = self.character.closing_containers.len();
+        self.character
+            .closing_containers
             .retain(|_, deadline| now < *deadline);
-        if self.closing_containers.len() != previous {
+        if self.character.closing_containers.len() != previous {
             self.emit_action_result(ActionResultSource::Client, ActionResultReason::General(
                 "Container close was not confirmed. Access remains closed; you may try using the container again.".into(),
             ));
@@ -187,6 +189,7 @@ impl ClientRuntime {
         let teleported = matches!(message, GameMessage::PlayerTeleport(_));
         if teleported
             && self
+                .character
                 .active_busy_operation
                 .as_ref()
                 .is_some_and(|pending| pending.operation.direct_use_source().is_some())
@@ -204,10 +207,14 @@ impl ClientRuntime {
         if let GameMessage::GameEvent(event) = message {
             match &event.event {
                 GameEvent::ViewContents(data) => {
-                    let matches_use = self.active_busy_operation.as_ref().is_some_and(|pending| {
-                        pending.operation.direct_use_source() == Some(data.container)
-                            && pending.pending_error.is_none()
-                    });
+                    let matches_use =
+                        self.character
+                            .active_busy_operation
+                            .as_ref()
+                            .is_some_and(|pending| {
+                                pending.operation.direct_use_source() == Some(data.container)
+                                    && pending.pending_error.is_none()
+                            });
                     // RETAIL DIVERGENCE: gates ground containers on OPENABLE. ACE Lock.cs
                     // unlocks with a Locked property update, leaving that description flag
                     // stale. Trust the correlated server roster instead. Source-path census:
@@ -215,10 +222,13 @@ impl ClientRuntime {
                     // can observe a difference except that successful opens now display
                     // contents.
                     if matches_use
-                        && self.state == ClientState::InWorld
-                        && self.activation.is_none()
+                        && self.conn.state == ClientState::InWorld
+                        && self.portal.activation.is_none()
                         && self.is_external_root(data.container)
-                        && !self.closing_containers.contains_key(&data.container)
+                        && !self
+                            .character
+                            .closing_containers
+                            .contains_key(&data.container)
                     {
                         self.replace_container_surface(data.container).await?;
                         self.world.confirm_world_container(data.container);
@@ -231,15 +241,19 @@ impl ClientRuntime {
                                 )
                             })
                         {
-                            if let Some(expired) = self.opened_corpses.remember(data.container) {
-                                self.entity_facts.invalidate(expired);
+                            if let Some(expired) =
+                                self.character.opened_corpses.remember(data.container)
+                            {
+                                self.character.entity_facts.invalidate(expired);
                             }
-                            self.entity_facts.invalidate(data.container);
+                            self.character.entity_facts.invalidate(data.container);
                         }
                     }
                 }
                 GameEvent::CloseGroundContainer(data) => {
-                    self.closing_containers.remove(&data.container_guid);
+                    self.character
+                        .closing_containers
+                        .remove(&data.container_guid);
                 }
                 GameEvent::ApproachVendor(_) => {
                     if let Some(root) = self.world.world_container().root() {
@@ -385,7 +399,7 @@ mod tests {
         let actions = client.session.game_action_sequence;
         client.maintain_container_range().await.unwrap();
         assert_eq!(client.world.world_container().root(), None);
-        assert!(client.closing_containers.contains_key(&ROOT));
+        assert!(client.character.closing_containers.contains_key(&ROOT));
         assert_eq!(client.session.game_action_sequence, actions + 1);
         client.maintain_container_range().await.unwrap();
         assert_eq!(client.session.game_action_sequence, actions + 1);
@@ -406,7 +420,7 @@ mod tests {
         client.handle_message(&bytes).await.unwrap();
         assert_eq!(client.world.world_container().root(), None);
         assert!(!client.world.is_world_container_content(PACK));
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         assert_eq!(client.session.game_action_sequence, actions + 1);
         receive(&mut client, roster(ROOT, &[PACK])).await;
         assert_eq!(client.world.world_container().root(), None);
@@ -441,13 +455,14 @@ mod tests {
             use_root(&mut client, ROOT).await;
             receive(&mut client, roster(ROOT, &[PACK])).await;
             client
+                .character
                 .closing_containers
                 .insert(OTHER, Instant::now() + CONTAINER_CLOSE_TIMEOUT);
             let actions = client.session.game_action_sequence;
-            client.state = state;
-            client.send_status_event();
+            client.retire_character_session(false);
+            client.set_state(state);
             assert_eq!(client.world.world_container().root(), None);
-            assert!(client.closing_containers.is_empty());
+            assert!(client.character.closing_containers.is_empty());
             assert_eq!(client.session.game_action_sequence, actions);
             receive(&mut client, roster(ROOT, &[PACK])).await;
             assert_eq!(client.world.world_container().root(), None);
@@ -457,7 +472,7 @@ mod tests {
         client.character_selection.character_id = Some(OTHER);
         client.begin_world_entry_transition().await.unwrap();
         assert_eq!(client.world.world_container().root(), None);
-        assert!(client.closing_containers.is_empty());
+        assert!(client.character.closing_containers.is_empty());
     }
 
     #[tokio::test]
@@ -541,8 +556,11 @@ mod tests {
         use_root(&mut client, ROOT).await;
         receive(&mut client, roster(ROOT, &[])).await;
 
-        assert!(client.opened_corpses.ids().contains(&ROOT));
-        assert_eq!(client.opened_corpses.iter().collect::<Vec<_>>(), [ROOT]);
+        assert!(client.character.opened_corpses.ids().contains(&ROOT));
+        assert_eq!(
+            client.character.opened_corpses.iter().collect::<Vec<_>>(),
+            [ROOT]
+        );
         assert_eq!(
             client
                 .application_snapshot()
@@ -554,7 +572,7 @@ mod tests {
             Some(holtburger_world::entity_facts::CorpseState::Opened)
         );
         client.reset_container_access();
-        assert!(client.opened_corpses.ids().is_empty());
+        assert!(client.character.opened_corpses.ids().is_empty());
         assert_eq!(
             client
                 .application_snapshot()
@@ -597,9 +615,9 @@ mod tests {
         .await;
         use_root(&mut client, OTHER).await;
         assert_eq!(client.world.world_container().root(), None);
-        let deadline = client.closing_containers[&ROOT];
+        let deadline = client.character.closing_containers[&ROOT];
         client.close_container(ROOT).await.unwrap();
-        assert_eq!(client.closing_containers[&ROOT], deadline);
+        assert_eq!(client.character.closing_containers[&ROOT], deadline);
         receive(&mut client, roster(OTHER, &[])).await;
         receive(
             &mut client,
@@ -609,7 +627,7 @@ mod tests {
         )
         .await;
         assert_eq!(client.world.world_container().root(), Some(OTHER));
-        assert!(!client.closing_containers.contains_key(&ROOT));
+        assert!(!client.character.closing_containers.contains_key(&ROOT));
     }
 
     #[tokio::test]
@@ -627,7 +645,7 @@ mod tests {
         let before = client.session.game_action_sequence;
         receive(&mut client, roster(OTHER, &[])).await;
         assert_eq!(client.world.world_container().root(), Some(OTHER));
-        assert!(client.closing_containers.contains_key(&ROOT));
+        assert!(client.character.closing_containers.contains_key(&ROOT));
         assert_eq!(client.session.game_action_sequence, before + 1);
         receive(&mut client, roster(OTHER, &[])).await;
         assert_eq!(client.session.game_action_sequence, before + 1);
@@ -643,7 +661,7 @@ mod tests {
             unrestricted: false,
         };
         assert!(client.dispatch_item_use(&intent).await.is_err());
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         let mut events = client.subscribe_client_view_events();
         client.poll_container_close_timeout(Instant::now() + CONTAINER_CLOSE_TIMEOUT);
         assert!(events.try_recv().is_ok());
@@ -666,7 +684,7 @@ mod tests {
             unrestricted: false,
         };
         assert!(client.dispatch_item_use(&intent).await.is_err());
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         receive(&mut client, roster(ROOT, &[PACK])).await;
         client.world.confirm_world_container(ROOT);
         assert!(
@@ -684,7 +702,7 @@ mod tests {
         assert!(client.close_container(ROOT).await.is_err());
         client.world.tick(None);
         assert!(client.world.entities.get(PACK).is_none());
-        assert!(client.closing_containers.is_empty());
+        assert!(client.character.closing_containers.is_empty());
         assert_eq!(client.world.world_container().root(), None);
     }
 
@@ -999,7 +1017,7 @@ mod tests {
         use_root(&mut client, ROOT).await;
         client.poll_busy_timeout(Instant::now() + crate::client::BUSY_OPERATION_TIMEOUT);
         receive(&mut client, roster(ROOT, &[])).await;
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         assert_eq!(client.world.world_container().root(), None);
     }
 

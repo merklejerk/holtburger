@@ -213,7 +213,7 @@ impl ClientRuntime {
                 "The vendor trade is empty"
             );
             anyhow::ensure!(
-                self.active_busy_operation.is_none(),
+                self.character.active_busy_operation.is_none(),
                 "Another operation is still pending"
             );
             for items in [&buys, &sells] {
@@ -277,7 +277,7 @@ impl ClientRuntime {
 
     async fn send_vendor_action(&mut self, action: GameAction) -> anyhow::Result<()> {
         if let Err(error) = self.send_game_action(action).await {
-            if let Some(pending) = self.active_busy_operation.take() {
+            if let Some(pending) = self.character.active_busy_operation.take() {
                 let message = format!("Vendor request could not be sent: {error}");
                 self.emit_pending_abort(&pending.operation, message.clone());
                 self.publish_busy_completion(
@@ -295,7 +295,7 @@ impl ClientRuntime {
         if let Some(PendingBusyOperation {
             operation: PendingOperation::Vendor(execution),
             ..
-        }) = &mut self.active_busy_operation
+        }) = &mut self.character.active_busy_operation
             && execution.phase == VendorTradePhase::Selling
             && execution.vendor == destination
             && execution.expected.contains(&item)
@@ -308,7 +308,8 @@ impl ClientRuntime {
     /// traffic still publishes ordinary feedback; consumers must not toast the same refusal twice.
     pub(super) fn vendor_owns_feedback(&self, reason: &ActionResultReason) -> bool {
         if !matches!(
-            self.active_busy_operation
+            self.character
+                .active_busy_operation
                 .as_ref()
                 .map(|pending| &pending.operation),
             Some(PendingOperation::Vendor(_))
@@ -332,7 +333,7 @@ impl ClientRuntime {
         if let Some(PendingBusyOperation {
             operation: PendingOperation::Vendor(execution),
             ..
-        }) = &mut self.active_busy_operation
+        }) = &mut self.character.active_busy_operation
         {
             execution.failure = Some(if error == WeenieError::None {
                 "The vendor refused the transaction".to_string()
@@ -356,14 +357,15 @@ impl ClientRuntime {
         error: WeenieError,
     ) -> anyhow::Result<bool> {
         if !matches!(
-            self.active_busy_operation
+            self.character
+                .active_busy_operation
                 .as_ref()
                 .map(|pending| &pending.operation),
             Some(PendingOperation::Vendor(_))
         ) {
             return Ok(false);
         }
-        let Some(mut pending) = self.active_busy_operation.take() else {
+        let Some(mut pending) = self.character.active_busy_operation.take() else {
             unreachable!()
         };
         let PendingOperation::Vendor(execution) = &mut pending.operation else {
@@ -407,7 +409,7 @@ impl ClientRuntime {
             }));
             pending.deadline = Instant::now() + BUSY_OPERATION_TIMEOUT;
             pending.pending_error = None;
-            self.active_busy_operation = Some(pending);
+            self.character.active_busy_operation = Some(pending);
             self.emit_busy_state_updated();
             self.send_vendor_action(action).await?;
         } else if let Some(message) = execution.failure.clone() {
@@ -667,7 +669,7 @@ mod tests {
             .await;
             done(&mut client, WeenieError::None).await;
             assert_eq!(client.session.game_action_sequence, 2);
-            assert!(client.active_busy_operation.is_none());
+            assert!(client.character.active_busy_operation.is_none());
             let receipts = std::iter::from_fn(|| events.try_recv().ok())
                 .filter_map(|event| {
                     if let ClientViewEvent::VendorTradeFinished(result) = event {
@@ -722,7 +724,7 @@ mod tests {
             ));
         }
         done(&mut client, WeenieError::None).await;
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         let terminal: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
         assert_eq!(
             terminal
@@ -783,7 +785,7 @@ mod tests {
         assert_eq!(client.session.game_action_sequence, 2);
         assert_eq!(client.active_busy_operation(), Some(BusyOperationKind::Buy));
         done(&mut client, WeenieError::None).await;
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         let mut saw_partial = false;
         while let Ok(event) = events.try_recv() {
             if let ClientViewEvent::VendorTradeFinished(result) = event {
@@ -817,7 +819,7 @@ mod tests {
         assert_eq!(client.session.game_action_sequence, 2);
         assert_eq!(client.active_busy_operation(), Some(BusyOperationKind::Buy));
         done(&mut client, WeenieError::None).await;
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         let result = std::iter::from_fn(|| events.try_recv().ok()).find_map(|event| {
             if let ClientViewEvent::VendorTradeFinished(result) = event {
                 Some(result)
@@ -899,7 +901,7 @@ mod tests {
         transferred(&mut client, FIRST, VENDOR).await;
         client.poll_busy_timeout(Instant::now() + BUSY_OPERATION_TIMEOUT);
         assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
     }
 
     #[tokio::test]
@@ -920,7 +922,7 @@ mod tests {
             }
             done(&mut client, WeenieError::None).await;
             assert_eq!(client.session.game_action_sequence, 1);
-            assert!(client.active_busy_operation.is_none());
+            assert!(client.character.active_busy_operation.is_none());
         }
     }
 
@@ -973,7 +975,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         let mut saw_failure = false;
         while let Ok(event) = events.try_recv() {
             if let ClientViewEvent::VendorTradeFinished(result) = event {
@@ -1005,9 +1007,9 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert_eq!(client.state, ClientState::Connected);
+        assert_eq!(client.conn.state, ClientState::Connected);
         assert_eq!(client.session.game_action_sequence, 0);
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         let mut saw_rejection = false;
         while let Ok(event) = events.try_recv() {
             if let ClientViewEvent::VendorTradeFinished(result) = event {

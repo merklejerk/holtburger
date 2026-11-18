@@ -457,7 +457,7 @@ impl ClientRuntime {
     }
 
     pub(super) fn poll_barber(&mut self) {
-        let mut changed = self.barber.reconcile(&self.world, &self.state);
+        let mut changed = self.barber.reconcile(&self.world, &self.conn.state);
         changed |= self.barber.poll();
         if changed {
             self.publish_barber();
@@ -467,7 +467,7 @@ impl ClientRuntime {
     pub(super) fn start_barber(&mut self, payload: &BarberAppearanceData) -> Result<()> {
         ensure!(
             matches!(
-                self.state,
+                self.conn.state,
                 ClientState::InWorld | ClientState::EnteringWorld
             ),
             "Barber opening requires a character session."
@@ -543,7 +543,8 @@ impl ClientRuntime {
             BarberRequest::Apply { id, draft } => {
                 let prepared = (|| -> Result<_> {
                     ensure!(
-                        matches!(self.state, ClientState::InWorld) && self.activation.is_none(),
+                        matches!(self.conn.state, ClientState::InWorld)
+                            && self.portal.activation.is_none(),
                         "Wait for the player to enter the world before applying barber changes."
                     );
                     let (subject, resolved) = self.barber.resolve(id, &draft)?;
@@ -1074,7 +1075,7 @@ mod tests {
             client.barber.snapshot().interaction.unwrap().phase,
             BarberPhase::Editing { revision: 3, .. }
         ));
-        client.state = ClientState::Disconnected;
+        client.conn.state = ClientState::Disconnected;
         client.poll_barber();
         assert_eq!(client.barber.snapshot(), BarberSnapshot::default());
     }

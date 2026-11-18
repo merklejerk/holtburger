@@ -105,7 +105,7 @@ pub enum ItemUseCompletion {
 
 impl ClientRuntime {
     pub(super) fn query_item_use_target(&self, query: ItemUseTargetQuery) {
-        let eligible = matches!(self.state, ClientState::InWorld)
+        let eligible = matches!(self.conn.state, ClientState::InWorld)
             && evaluate_item_use(
                 &self.world,
                 &ItemUseIntent::Targeted {
@@ -158,7 +158,9 @@ impl ClientRuntime {
         let reject = |reason: &str| ItemUseOutcome::Rejected {
             reason: reason.into(),
         };
-        if !matches!(self.state, ClientState::InWorld) || self.world.player.guid != request.player {
+        if !matches!(self.conn.state, ClientState::InWorld)
+            || self.world.player.guid != request.player
+        {
             return Ok(reject(
                 "The originating character is no longer in the world.",
             ));
@@ -199,7 +201,7 @@ impl ClientRuntime {
         intent: &ItemUseIntent,
         sequence: Option<u32>,
     ) -> Result<bool> {
-        if self.active_busy_operation.is_some() {
+        if self.character.active_busy_operation.is_some() {
             return Ok(false);
         }
         if let ItemUseIntent::Direct { source, .. } = intent {
@@ -342,7 +344,7 @@ mod tests {
             .unwrap();
         let mut events = client.subscribe_client_view_events();
         assert!(client.submit_item_use(request.clone()).await.is_err());
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         let mut terminals = Vec::new();
         let mut refusals = Vec::new();
         while let Ok(event) = events.try_recv() {
@@ -429,7 +431,7 @@ mod tests {
             assert_eq!(result.lockpick_success_percent, None);
         }
         assert_eq!(client.session.game_action_sequence, 0);
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
     }
 
     #[tokio::test]
@@ -447,7 +449,7 @@ mod tests {
             }
         );
         assert_eq!(client.session.game_action_sequence, 0);
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         // Core checks semantics, not proof of a frontend confirmation dialog.
         request.expected = ItemUseConsequence::DestroyItem {
             target: Guid(3),
@@ -485,7 +487,7 @@ mod tests {
             ItemUseOutcome::Rejected { .. }
         ));
         assert_eq!(client.session.game_action_sequence, 0);
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
     }
 
     #[tokio::test]

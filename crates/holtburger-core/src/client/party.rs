@@ -25,7 +25,7 @@ impl ClientRuntime {
 
     /// Forward frontend update demand; this does not change retained membership.
     pub(super) async fn set_fellowship_updates_subscribed(&mut self, enabled: bool) -> Result<()> {
-        if !matches!(self.state, ClientState::InWorld) {
+        if !matches!(self.conn.state, ClientState::InWorld) {
             return Ok(());
         }
 
@@ -40,7 +40,7 @@ impl ClientRuntime {
 
     /// Dispatch existing Party actions; server responses alone change membership.
     pub(super) async fn handle_party_command(&mut self, cmd: ClientCommand) -> Result<()> {
-        if !matches!(self.state, ClientState::InWorld) {
+        if !matches!(self.conn.state, ClientState::InWorld) {
             return Ok(());
         }
 

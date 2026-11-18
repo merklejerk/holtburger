@@ -9,8 +9,8 @@ use std::time::Instant;
 impl ClientRuntime {
     /// Retire local ownership without claiming that the server stopped processing it.
     pub(super) fn clear_busy_operation(&mut self) {
-        self.lock_use = None;
-        if let Some(pending) = self.active_busy_operation.take() {
+        self.character.lock_use = None;
+        if let Some(pending) = self.character.active_busy_operation.take() {
             self.emit_pending_abort(&pending.operation, "Interaction ended".into());
             self.emit_item_use_finished(&pending.operation, ItemUseCompletion::Aborted);
             if matches!(
@@ -24,7 +24,7 @@ impl ClientRuntime {
     }
 
     pub(super) fn arm_busy_operation(&mut self, operation: PendingOperation) -> bool {
-        if let Some(active) = self.active_busy_operation.as_ref() {
+        if let Some(active) = self.character.active_busy_operation.as_ref() {
             log::debug!(
                 "Ignoring busy-tracked {:?} while {:?} is still pending.",
                 operation,
@@ -34,7 +34,7 @@ impl ClientRuntime {
         }
         let deadline = Instant::now() + BUSY_OPERATION_TIMEOUT;
         self.track_lock_use(&operation, deadline);
-        self.active_busy_operation = Some(PendingBusyOperation {
+        self.character.active_busy_operation = Some(PendingBusyOperation {
             operation,
             deadline,
             pending_error: None,
@@ -50,7 +50,7 @@ impl ClientRuntime {
         if self.reject_housing_from_wire(error, parameter.as_deref()) {
             return;
         }
-        if let Some(pending) = &mut self.active_busy_operation
+        if let Some(pending) = &mut self.character.active_busy_operation
             && !matches!(
                 pending.operation,
                 PendingOperation::Housing(_) | PendingOperation::HousingManagement(_)
@@ -65,12 +65,17 @@ impl ClientRuntime {
         &mut self,
         error: WeenieError,
     ) -> anyhow::Result<()> {
-        if self.active_busy_operation.as_ref().is_some_and(|pending| {
-            matches!(
-                pending.operation,
-                PendingOperation::Housing(_) | PendingOperation::HousingManagement(_)
-            )
-        }) {
+        if self
+            .character
+            .active_busy_operation
+            .as_ref()
+            .is_some_and(|pending| {
+                matches!(
+                    pending.operation,
+                    PendingOperation::Housing(_) | PendingOperation::HousingManagement(_)
+                )
+            })
+        {
             // UseDone may belong to the preceding ordinary Use or an internal recovery Use.
             if error != WeenieError::None {
                 self.emit_action_result(
@@ -83,7 +88,7 @@ impl ClientRuntime {
         if self.finish_vendor_use_done(error).await? {
             return Ok(());
         }
-        if let Some(pending) = self.active_busy_operation.take() {
+        if let Some(pending) = self.character.active_busy_operation.take() {
             let (resolved_error, parameter) = if error == WeenieError::None {
                 pending.pending_error.unwrap_or((error, None))
             } else {
@@ -171,13 +176,15 @@ impl ClientRuntime {
 
     pub(super) fn expire_busy_operation(&mut self, now: Instant) {
         if self
+            .character
             .lock_use
             .as_ref()
             .is_some_and(|pending| now >= pending.deadline)
         {
-            self.lock_use = None;
+            self.character.lock_use = None;
         }
         if let Some(pending) = self
+            .character
             .active_busy_operation
             .take_if(|pending| now >= pending.deadline)
         {
@@ -246,7 +253,7 @@ mod tests {
                     _ => unreachable!(),
                 }
             );
-            assert!(client.active_busy_operation.is_none());
+            assert!(client.character.active_busy_operation.is_none());
         }
     }
 
@@ -374,7 +381,7 @@ mod tests {
                     }
                 )]
             );
-            assert!(client.active_busy_operation.is_none());
+            assert!(client.character.active_busy_operation.is_none());
         }
     }
 
@@ -386,7 +393,12 @@ mod tests {
                     super::super::builder::build_test_client(super::super::ClientState::InWorld);
                 let kind = operation.kind();
                 client.arm_busy_operation(operation.clone());
-                let deadline = client.active_busy_operation.as_ref().unwrap().deadline;
+                let deadline = client
+                    .character
+                    .active_busy_operation
+                    .as_ref()
+                    .unwrap()
+                    .deadline;
                 let mut events = client.subscribe_client_view_events();
                 if exiting {
                     client.set_exit_cause(ClientExitCause::ExplicitDisconnect);
@@ -396,7 +408,7 @@ mod tests {
                     client.expire_busy_operation(deadline);
                 }
                 let events: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
-                assert!(client.active_busy_operation.is_none());
+                assert!(client.character.active_busy_operation.is_none());
                 assert_eq!(
                     events
                         .iter()

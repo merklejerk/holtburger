@@ -31,17 +31,21 @@ impl ClientRuntime {
         let MovementTypeData::TurnToObject(turn) = &data.data else {
             return false;
         };
-        let casting_target = self.active_busy_operation.as_ref().and_then(|pending| {
-            if pending.deadline <= std::time::Instant::now() {
-                return None;
-            }
-            match pending.operation {
-                super::PendingOperation::SpellCast {
-                    target: Some(target),
-                } => Some(target),
-                _ => None,
-            }
-        });
+        let casting_target = self
+            .character
+            .active_busy_operation
+            .as_ref()
+            .and_then(|pending| {
+                if pending.deadline <= std::time::Instant::now() {
+                    return None;
+                }
+                match pending.operation {
+                    super::PendingOperation::SpellCast {
+                        target: Some(target),
+                    } => Some(target),
+                    _ => None,
+                }
+            });
         let missile_target = self
             .combat_engagement
             .sent_engagement()
@@ -62,12 +66,13 @@ impl ClientRuntime {
         // PlayerTeleport establishes the destination epoch before ACE sends its position. That
         // makes the destination packet look same-epoch, even though portal activation requires
         // one unconditional runtime reset to the destination pose.
-        let installs_teleport_destination = self.activation.as_ref().is_some_and(|activation| {
-            matches!(
-                activation.phase,
-                super::ClientWorldActivationPhase::TeleportAwaitingDestination
-            )
-        });
+        let installs_teleport_destination =
+            self.portal.activation.as_ref().is_some_and(|activation| {
+                matches!(
+                    activation.phase,
+                    super::ClientWorldActivationPhase::TeleportAwaitingDestination
+                )
+            });
         let reset_cause = if installs_teleport_destination
             || is_newer_u16(teleport_sequence, known_teleport_sequence)
         {
@@ -91,7 +96,8 @@ impl ClientRuntime {
         }
 
         if installs_teleport_destination {
-            self.activation
+            self.portal
+                .activation
                 .as_mut()
                 .expect("teleport destination requires an active activation")
                 .phase = super::ClientWorldActivationPhase::TeleportDestinationInstalled;
@@ -106,7 +112,7 @@ impl ClientRuntime {
             let _ = self
                 .client_view_event_tx
                 .send(ClientViewEvent::PresentationDiscontinuity {
-                    world_generation: self.world_generation,
+                    world_generation: self.conn.world_generation,
                     kind: ClientPresentationDiscontinuityKind::ForcedReposition,
                 });
         }
@@ -115,27 +121,15 @@ impl ClientRuntime {
     }
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
-        self.reset_barber();
         let player_guid = self.character_selection.character_id.ok_or_else(|| {
             anyhow::anyhow!("cannot enter the world without a selected character")
         })?;
-        self.reset_friends();
+        self.retire_character_state(false);
         self.begin_contracts();
         self.begin_squelch();
-        self.reset_allegiance();
-        self.world.fellowship = None;
-        self.reset_housing();
-        if self.progression.clear() {
-            self.emit_character_sheet();
-        }
-        self.reset_container_access();
-        self.salvage_approval.reset();
-        self.recent_deaths.clear();
-        self.clear_busy_operation();
         // ACE Session.InitSessionForWorldLogin restarts this character's event stamps at one.
-        self.event_ordering = Some(super::event_ordering::GameEventOrdering::new(player_guid));
-        self.described_character = None;
-        self.world.player.character_titles = None;
+        self.character.event_ordering =
+            Some(super::event_ordering::GameEventOrdering::new(player_guid));
         self.refresh_spell_inspection_context();
         self.start_world_activation_with_reset(
             ClientWorldActivationState::InitialEntry,
@@ -145,19 +139,18 @@ impl ClientRuntime {
     }
 
     async fn enter_world(&mut self) -> Result<()> {
-        if self.state == ClientState::InWorld && self.activation.is_none() {
+        if self.conn.state == ClientState::InWorld && self.portal.activation.is_none() {
             return Ok(());
         }
 
         // Synthetic/non-network callers may still feed StartGame directly. Real network entry
         // remains gated by `try_complete_world_activation`; this fallback preserves the broad
         // TUI authority API when no activation has been started.
-        if self.activation.is_some() {
+        if self.portal.activation.is_some() {
             return self.try_complete_world_activation().await;
         }
         self.establish_attack_repeat_policy().await?;
-        self.state = ClientState::InWorld;
-        self.send_status_event();
+        self.set_state(ClientState::InWorld);
         self.emit_current_application_snapshot();
         Ok(())
     }
@@ -311,7 +304,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
-        if self.state == ClientState::Disconnected {
+        if self.conn.state == ClientState::Disconnected {
             return Ok(Vec::new());
         }
         #[cfg(feature = "runtime-fixture")]
@@ -321,9 +314,9 @@ impl ClientRuntime {
             ));
         }
         if let Some(ref dump_dir) = self.message_dump_dir {
-            let path = dump_dir.join(format!("{:05}.bin", self.message_counter));
+            let path = dump_dir.join(format!("{:05}.bin", self.conn.message_counter));
             std::fs::write(path, data)?;
-            self.message_counter += 1;
+            self.conn.message_counter += 1;
         }
 
         if data.starts_with(
@@ -331,7 +324,7 @@ impl ClientRuntime {
         ) {
             let header = GameEventHeader::unpack(data, &mut 4)
                 .ok_or_else(|| anyhow::anyhow!("Truncated game-event ordering header"))?;
-            if let Some(ordering) = &mut self.event_ordering
+            if let Some(ordering) = &mut self.character.event_ordering
                 && header.target == ordering.target()
             {
                 let ready = ordering.receive(header.sequence, data, Instant::now())?;
@@ -384,7 +377,7 @@ impl ClientRuntime {
         let message = message.unwrap();
         // After F653 retires the character, only account/lifecycle replies may cross the
         // gap before ACE sends the refreshed roster. Late world packets cannot restore it.
-        if self.state == ClientState::LoggingOut
+        if self.conn.state == ClientState::LoggingOut
             && self.world.player.guid == Guid::NULL
             && !matches!(
                 message,
@@ -400,7 +393,7 @@ impl ClientRuntime {
 
         // ACE sends no world baseline after an entry refusal. Until a new entry is
         // explicitly requested, late character traffic must not recreate activation/state.
-        if self.state == ClientState::CharacterSelection
+        if self.conn.state == ClientState::CharacterSelection
             && self.character_selection.entry_rejection.is_some()
             && !matches!(
                 message,
@@ -420,7 +413,7 @@ impl ClientRuntime {
         log::debug!("GameMessage: {:?}", message);
 
         if !matches!(
-            self.state,
+            self.conn.state,
             ClientState::EnteringWorld | ClientState::InWorld
         ) && let GameMessage::GameEvent(event) = &message
             && matches!(
@@ -447,7 +440,7 @@ impl ClientRuntime {
         // Housing replies have no request ID. Outside an active character lifetime,
         // late replies cannot restore the previous character's replacement facts.
         if !matches!(
-            self.state,
+            self.conn.state,
             ClientState::EnteringWorld | ClientState::InWorld
         ) && let GameMessage::GameEvent(event) = &message
             && matches!(
@@ -467,7 +460,7 @@ impl ClientRuntime {
         }
 
         if let GameMessage::ServerName(data) = &message {
-            self.world_name = Some(data.name.clone());
+            self.conn.world_name = Some(data.name.clone());
             let _ = self
                 .client_view_event_tx
                 .send(ClientViewEvent::WorldNameUpdated(data.name.clone()));
@@ -477,7 +470,7 @@ impl ClientRuntime {
         if let GameMessage::ObjectDelete(data) = &message
             && self.world.entities.get(data.guid).is_none()
         {
-            self.entity_cue_inbox.remove(data.guid);
+            self.character.entity_cue_inbox.remove(data.guid);
         }
 
         if let GameMessage::InventoryRemoveObject(data) = &message {
@@ -489,7 +482,7 @@ impl ClientRuntime {
         {
             self.clear_busy_operation();
             self.reset_container_access();
-            self.recent_deaths.clear();
+            self.character.recent_deaths.clear();
         }
         if let GameMessage::GameEvent(event) = &message {
             self.observe_trade_reply(&event.event);
@@ -516,11 +509,13 @@ impl ClientRuntime {
         if let GameMessage::GameEvent(event) = &message
             && let GameEvent::PlayerDescription(description) = &event.event
         {
-            self.described_character = Some(description.guid);
+            self.character.described_character = Some(description.guid);
         }
         self.handle_world_events(world_events.clone()).await?;
         self.advance_appraisals(Instant::now()).await?;
-        if self.state == ClientState::InWorld && self.allegiance_refresh_required(&world_events) {
+        if self.conn.state == ClientState::InWorld
+            && self.allegiance_refresh_required(&world_events)
+        {
             self.query_allegiance().await?;
         }
         if world_events
@@ -542,7 +537,7 @@ impl ClientRuntime {
                 // Retail ExecuteLogOff retires the character, retaining login. ACE
                 // Session.SendFinalLogOffMessages follows this ACK with a fresh roster.
                 if matches!(
-                    self.state,
+                    self.conn.state,
                     ClientState::InWorld | ClientState::EnteringWorld | ClientState::LoggingOut
                 ) {
                     self.retire_logged_out_character();
@@ -550,14 +545,9 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterList(data) => {
-                self.reset_barber();
-                self.event_ordering = None;
-                self.clear_busy_operation();
-                self.reset_housing();
-                self.described_character = None;
-                self.authenticating = false;
+                self.conn.authenticating = false;
+                self.retire_character_session(false);
                 self.character_selection.replace_roster(&data);
-                self.refresh_spell_inspection_context();
                 self.turbine_chat.enabled = data.use_turbine_chat;
                 if !data.use_turbine_chat {
                     self.turbine_chat.channels = None;
@@ -568,8 +558,7 @@ impl ClientRuntime {
                     log::info!("  [{}] {} (0x{:08X})", i + 1, c.name, c.guid);
                 }
 
-                self.state = ClientState::CharacterSelection;
-                self.send_status_event();
+                self.set_state(ClientState::CharacterSelection);
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::CharacterList(
@@ -631,7 +620,7 @@ impl ClientRuntime {
             GameMessage::GameEvent(ev) => match &ev.event {
                 GameEvent::StartBarber(payload) => self.start_barber(payload),
                 GameEvent::PlayerDescription(_) | GameEvent::StartGame => {
-                    if self.state == ClientState::EnteringWorld {
+                    if self.conn.state == ClientState::EnteringWorld {
                         self.enter_world().await?;
                     }
                     Ok(())
@@ -677,20 +666,24 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::CharacterConfirmationRequest(data) => {
-                    self.active_confirmation = Some(ActiveCharacterConfirmation::received(
-                        data.confirmation_type,
-                        data.context,
-                        data.text.clone(),
-                    ));
+                    self.character.active_confirmation =
+                        Some(ActiveCharacterConfirmation::received(
+                            data.confirmation_type,
+                            data.context,
+                            data.text.clone(),
+                        ));
                     self.emit_active_character_confirmation_updated();
                     Ok(())
                 }
                 GameEvent::CharacterConfirmationDone(data) => {
                     if let Some(confirmation) =
-                        self.active_confirmation.clone().filter(|confirmation| {
-                            confirmation.confirmation_type == data.confirmation_type
-                                && confirmation.context == data.context
-                        })
+                        self.character
+                            .active_confirmation
+                            .clone()
+                            .filter(|confirmation| {
+                                confirmation.confirmation_type == data.confirmation_type
+                                    && confirmation.context == data.context
+                            })
                     {
                         if confirmation_done_requires_auto_response(confirmation.confirmation_type)
                         {
@@ -705,7 +698,7 @@ impl ClientRuntime {
                                 .await?;
                         }
 
-                        self.active_confirmation = None;
+                        self.character.active_confirmation = None;
                         self.emit_active_character_confirmation_updated();
                     }
                     Ok(())
@@ -834,11 +827,11 @@ impl ClientRuntime {
                 }
                 GameEvent::InventoryPutObjInContainer(data) => {
                     self.observe_vendor_transfer(data.item_guid, data.container_guid);
-                    self.equipment_set.confirmed_removal(data.item_guid);
+                    self.portal.equipment_set.confirmed_removal(data.item_guid);
                     Ok(())
                 }
                 GameEvent::WieldObject(data) => {
-                    self.equipment_set.confirmed_wield(data.object_guid);
+                    self.portal.equipment_set.confirmed_wield(data.object_guid);
                     Ok(())
                 }
                 GameEvent::InventoryServerSaveFailed(data) => {
@@ -973,12 +966,12 @@ impl ClientRuntime {
                     self.emit_fellowship_state_updated();
                 }
 
-                if self.activation.is_none() {
+                if self.portal.activation.is_none() {
                     self.start_world_activation_with_reset(
                         ClientWorldActivationState::InitialEntry,
                         player_id,
                     );
-                } else if let Some(activation) = self.activation.as_ref()
+                } else if let Some(activation) = self.portal.activation.as_ref()
                     && activation.player_guid != player_id
                 {
                     // The server's PlayerCreate is the first exact local-player identity. Keep
@@ -1090,7 +1083,7 @@ impl ClientRuntime {
                 if error == super::CharacterErrorCode::Known(CharacterError::None) {
                     return Ok(Vec::new());
                 }
-                if self.authenticating
+                if self.conn.authenticating
                     || matches!(
                         error,
                         super::CharacterErrorCode::Known(
@@ -1106,9 +1099,9 @@ impl ClientRuntime {
                     );
                     return Ok(Vec::new());
                 }
-                let pending_initial_entry = self.state == ClientState::EnteringWorld
+                let pending_initial_entry = self.conn.state == ClientState::EnteringWorld
                     && self.world.player.guid == Guid::NULL
-                    && self.activation.as_ref().is_some_and(|activation| {
+                    && self.portal.activation.as_ref().is_some_and(|activation| {
                         matches!(
                             activation.phase,
                             super::ClientWorldActivationPhase::InitialEntry
@@ -1135,7 +1128,7 @@ impl ClientRuntime {
                     }
                     return Ok(Vec::new());
                 }
-                if self.state == ClientState::CharacterSelection
+                if self.conn.state == ClientState::CharacterSelection
                     && let Some(operation) = self.character_selection.management.pending_operation()
                 {
                     self.character_selection
@@ -1147,11 +1140,10 @@ impl ClientRuntime {
                     ActionResultReason::Character(error),
                 );
                 if error == super::CharacterErrorCode::Known(CharacterError::Logoff)
-                    && self.state == ClientState::LoggingOut
+                    && self.conn.state == ClientState::LoggingOut
                     && self.world.player.guid != Guid::NULL
                 {
-                    self.state = ClientState::InWorld;
-                    self.send_status_event();
+                    self.set_state(ClientState::InWorld);
                 }
                 Ok(())
             }
@@ -1353,7 +1345,7 @@ mod tests {
         assert!(client.world.player_is_dead());
         assert_eq!(client.world.player.server_control_sequence, 2);
         assert!(!client.movement.has_server_controlled_motion());
-        client.state = ClientState::InWorld;
+        client.conn.state = ClientState::InWorld;
         client
             .handle_combat_command(ClientCommand::BeginCombatEngagement {
                 target: Guid(2),
@@ -1490,7 +1482,7 @@ mod tests {
         let player = Guid(0x5000_0001);
         client.character_selection.character_id = Some(player);
         client.begin_world_entry_transition().await.unwrap();
-        client.state = ClientState::EnteringWorld;
+        client.conn.state = ClientState::EnteringWorld;
         let mut events = client.subscribe_client_view_events();
         let early_party = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
             target: player,
@@ -1560,7 +1552,7 @@ mod tests {
         let mut client = build_test_client();
         let player = Guid(0x5000_0001);
         client.world.player.guid = player;
-        client.state = ClientState::InWorld;
+        client.conn.state = ClientState::InWorld;
         let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
             target: player,
             sequence: 1,
@@ -1593,11 +1585,10 @@ mod tests {
         client.character_selection.character_id = Some(player);
         client.begin_world_entry_transition().await.unwrap();
         assert!(client.application_snapshot().fellowship.is_none());
-        client.state = ClientState::EnteringWorld;
+        client.conn.state = ClientState::EnteringWorld;
         client.handle_message(&encoded).await.unwrap();
         assert!(client.application_snapshot().fellowship.is_some());
-        client.state = ClientState::Disconnected;
-        client.send_status_event();
+        client.finish_disconnect(ClientExitCause::ExplicitDisconnect);
         assert!(client.application_snapshot().fellowship.is_none());
         client.handle_message(&encoded).await.unwrap();
         assert!(client.application_snapshot().fellowship.is_none());
@@ -1853,7 +1844,7 @@ mod tests {
     async fn test_player_teleport_emits_teleport_started_view_event() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        let generation_before = client.world_generation;
+        let generation_before = client.conn.world_generation;
 
         let encoded = encode_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
             teleport_sequence: 42,
@@ -1870,7 +1861,7 @@ mod tests {
         }
 
         assert!(saw_teleport_started);
-        assert_eq!(client.world_generation, generation_before + 1);
+        assert_eq!(client.conn.world_generation, generation_before + 1);
         assert!(matches!(
             client.lifecycle(),
             ClientLifecycleState::PortalSpace {
@@ -1896,7 +1887,7 @@ mod tests {
                 ..Default::default()
             });
         let mut events = client.subscribe_client_view_events();
-        let generation_before = client.world_generation;
+        let generation_before = client.conn.world_generation;
         let encoded = encode_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
             teleport_sequence: 42,
         })));
@@ -1932,7 +1923,7 @@ mod tests {
         assert!(entered_portal);
         assert!(saw_retired_motion);
         assert_eq!(teleport_edges, 1);
-        assert_eq!(client.world_generation, generation_before + 1);
+        assert_eq!(client.conn.world_generation, generation_before + 1);
     }
 
     #[tokio::test]
@@ -1959,7 +1950,7 @@ mod tests {
             teleport_sequence: 42,
         })));
         client.handle_message(&teleport).await.unwrap();
-        let teleport_generation = client.world_generation;
+        let teleport_generation = client.conn.world_generation;
 
         let destination =
             encode_message(&GameMessage::UpdatePosition(Box::new(UpdatePositionData {
@@ -1974,7 +1965,7 @@ mod tests {
         client.handle_message(&destination).await.unwrap();
 
         assert_eq!(client.world.local_player_runtime_pose(), Some(dungeon));
-        assert_eq!(client.world_generation, teleport_generation);
+        assert_eq!(client.conn.world_generation, teleport_generation);
         let runtime = client
             .world
             .runtime_body_view(holtburger_world::SpatialBodyId::LocalPlayer(guid))
@@ -2245,7 +2236,12 @@ mod tests {
             20
         );
 
-        client.active_busy_operation.as_mut().unwrap().deadline = std::time::Instant::now();
+        client
+            .character
+            .active_busy_operation
+            .as_mut()
+            .unwrap()
+            .deadline = std::time::Instant::now();
         assert!(!client.suppresses_local_target_turn(&turn));
         client
             .finish_busy_operation_from_use_done(WeenieError::None)
@@ -2356,7 +2352,7 @@ mod tests {
     #[tokio::test]
     async fn test_entering_world_does_not_auto_subscribe_to_fellowship_updates() {
         let mut client = build_test_client();
-        client.state = ClientState::EnteringWorld;
+        client.conn.state = ClientState::EnteringWorld;
 
         let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
             target: holtburger_common::Guid::NULL,
@@ -2366,7 +2362,7 @@ mod tests {
 
         client.handle_message(&encoded).await.unwrap();
 
-        assert_eq!(client.state, ClientState::InWorld);
+        assert_eq!(client.conn.state, ClientState::InWorld);
         assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.session.bytes_out > 0);
     }
@@ -2483,8 +2479,8 @@ mod tests {
             .world
             .seed_local_player_entity(character, "Player", WorldPosition::default());
         // The completed description makes the sheet available during ordinary play.
-        client.described_character = Some(character);
-        client.state = ClientState::InWorld;
+        client.character.described_character = Some(character);
+        client.conn.state = ClientState::InWorld;
         let mut events = client.subscribe_client_view_events();
 
         let attribute = |ranks, xp| {
@@ -2503,7 +2499,7 @@ mod tests {
             .unwrap();
         while events.try_recv().is_ok() {}
 
-        client.progression.guard(ProgressionQuote {
+        client.character.progression.guard(ProgressionQuote {
             character,
             intent: ProgressionIntent::Raise {
                 target: StatTarget::Attribute(AttributeType::StrengthAttr),
@@ -2631,8 +2627,8 @@ mod tests {
         client
             .world
             .seed_local_player_entity(character, "Player", WorldPosition::default());
-        client.described_character = Some(character);
-        client.state = ClientState::InWorld;
+        client.character.described_character = Some(character);
+        client.conn.state = ClientState::InWorld;
         let mut events = client.subscribe_client_view_events();
         let messages = [
             GameMessage::PrivateUpdatePropertyString(Box::new(PrivateUpdatePropertyStringData {
@@ -2764,8 +2760,8 @@ mod tests {
         assert_eq!(client.application_snapshot().known_spells, Some(vec![3]));
 
         // Home knowledge is retained independently of repeated player hydration and travel.
-        client.activation = None;
-        client.state = ClientState::InWorld;
+        client.portal.activation = None;
+        client.conn.state = ClientState::InWorld;
         client.query_home().await.unwrap();
         let home_reply = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: player,
@@ -2821,7 +2817,7 @@ mod tests {
     #[tokio::test]
     async fn test_spell_world_event_projects_supplied_snapshot() {
         let mut client = build_test_client();
-        client.described_character = Some(client.world.player.guid);
+        client.character.described_character = Some(client.world.player.guid);
         let mut events = client.subscribe_client_view_events();
 
         client.handle_world_event(&WorldEvent::PlayerSpellsChanged(vec![300, 100, 200]));
@@ -2895,7 +2891,7 @@ mod tests {
         client.handle_message(&encoded).await.unwrap();
 
         assert!(matches!(
-            client.active_confirmation,
+            client.character.active_confirmation,
             Some(ActiveCharacterConfirmation {
                 confirmation_type: ConfirmationType::CraftInteraction,
                 context: 0xDEADBEEF,
@@ -2927,7 +2923,7 @@ mod tests {
     async fn test_confirmation_done_clears_matching_active_confirmation_state() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.active_confirmation = Some(ActiveCharacterConfirmation {
+        client.character.active_confirmation = Some(ActiveCharacterConfirmation {
             request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 0xDEADBEEF,
@@ -2947,7 +2943,7 @@ mod tests {
 
         client.handle_message(&encoded).await.unwrap();
 
-        assert!(client.active_confirmation.is_none());
+        assert!(client.character.active_confirmation.is_none());
         assert_eq!(client.session.game_action_sequence, 1);
 
         let mut saw_clear = false;
@@ -2967,7 +2963,7 @@ mod tests {
     #[tokio::test]
     async fn test_confirmation_done_does_not_auto_respond_for_fellowship() {
         let mut client = build_test_client();
-        client.active_confirmation = Some(ActiveCharacterConfirmation {
+        client.character.active_confirmation = Some(ActiveCharacterConfirmation {
             request_id: 1,
             confirmation_type: ConfirmationType::Fellowship,
             context: 0xDEADBEEF,
@@ -2987,7 +2983,7 @@ mod tests {
 
         client.handle_message(&encoded).await.unwrap();
 
-        assert!(client.active_confirmation.is_none());
+        assert!(client.character.active_confirmation.is_none());
         assert_eq!(client.session.game_action_sequence, 0);
     }
 
@@ -3032,14 +3028,14 @@ mod tests {
     #[tokio::test]
     async fn selection_character_error_resolves_creation_in_the_recovery_snapshot() {
         let mut client = build_test_client();
-        client.state = ClientState::CharacterSelection;
+        client.conn.state = ClientState::CharacterSelection;
         client.character_selection.management =
             CharacterManagementState::Creating { name: "Amy".into() };
         let encoded = encode_message(&GameMessage::CharacterError(Box::new(CharacterErrorData {
             error_id: CharacterError::LogonServerFull as u32,
         })));
         client.handle_message(&encoded).await.unwrap();
-        assert_eq!(client.state, ClientState::CharacterSelection);
+        assert_eq!(client.conn.state, ClientState::CharacterSelection);
         assert!(matches!(
             client.application_snapshot().character_management,
             CharacterManagementState::Rejected {
@@ -3135,7 +3131,7 @@ mod tests {
         })));
         client.handle_message(&encoded_done).await.unwrap();
 
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
 
         let mut saw_completion = false;
         while let Ok(event) = events.try_recv() {
@@ -3199,7 +3195,7 @@ mod tests {
         for account_name in ["account", "Account"] {
             let mut client = build_test_client();
             client.character_selection.account_name = "ACCOUNT".into();
-            client.authenticating = true;
+            client.conn.authenticating = true;
             client
                 .handle_message(&encode_message(&GameMessage::CharacterList(Box::new(
                     CharacterListData {
@@ -3214,8 +3210,8 @@ mod tests {
                 .unwrap();
 
             assert_eq!(client.character_selection.account_name, account_name);
-            assert_eq!(client.state, ClientState::CharacterSelection);
-            assert!(!client.authenticating);
+            assert_eq!(client.conn.state, ClientState::CharacterSelection);
+            assert!(!client.conn.authenticating);
         }
     }
 
@@ -3227,14 +3223,14 @@ mod tests {
             0xfedc_ba98,
         ] {
             let mut client = build_test_client();
-            client.authenticating = true;
+            client.conn.authenticating = true;
             let encoded =
                 encode_message(&GameMessage::CharacterError(Box::new(CharacterErrorData {
                     error_id: raw,
                 })));
             client.handle_message(&encoded).await.unwrap();
             let outcome = client.exit_outcome().unwrap().clone();
-            assert_eq!(client.state, ClientState::Disconnected);
+            assert_eq!(client.conn.state, ClientState::Disconnected);
             assert_eq!(outcome.cause, ClientExitCause::ServerDisconnect);
             assert_eq!(
                 outcome.failure.as_ref().unwrap().cause,
@@ -3259,14 +3255,14 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(client.exit_outcome(), Some(&outcome));
-            assert_eq!(client.state, ClientState::Disconnected);
+            assert_eq!(client.conn.state, ClientState::Disconnected);
         }
     }
 
     #[tokio::test]
     async fn entry_refusal_restores_roster_and_blocks_late_world_traffic() {
         let mut client = build_test_client();
-        client.state = ClientState::CharacterSelection;
+        client.conn.state = ClientState::CharacterSelection;
         let guid = Guid(0x5000_1234);
         client.character_selection.characters.push(CharacterEntry {
             guid,
@@ -3283,9 +3279,9 @@ mod tests {
             ))))
             .await
             .unwrap();
-        assert_eq!(client.state, ClientState::CharacterSelection);
-        assert!(client.activation.is_none());
-        assert!(client.event_ordering.is_none());
+        assert_eq!(client.conn.state, ClientState::CharacterSelection);
+        assert!(client.portal.activation.is_none());
+        assert!(client.character.event_ordering.is_none());
         assert!(client.exit_outcome().is_none());
         assert!(client.character_selection.character_id.is_none());
         let before = client.application_snapshot();
@@ -3310,13 +3306,13 @@ mod tests {
             .await
             .unwrap();
         assert!(client.character_selection.entry_rejection.is_none());
-        assert_eq!(client.state, ClientState::EnteringWorld);
+        assert_eq!(client.conn.state, ClientState::EnteringWorld);
     }
 
     #[tokio::test]
     async fn ban_is_terminal_even_in_the_retired_character_logout_gap() {
         let mut client = build_test_client();
-        client.state = ClientState::LoggingOut;
+        client.conn.state = ClientState::LoggingOut;
         let data = AccountBannedData {
             duration_seconds: 3600,
             reason: Some(" - test reason".into()),
@@ -3349,7 +3345,7 @@ mod tests {
             Some("custom server explanation".into()),
         ] {
             let mut client = build_test_client();
-            client.authenticating = true;
+            client.conn.authenticating = true;
             client
                 .handle_message(&encode_message(&GameMessage::AccountBoot(Box::new(
                     BootAccountData {
@@ -3371,7 +3367,7 @@ mod tests {
         }
         for code in [CharacterError::Logon, CharacterError::ServerCrash1] {
             let mut client = build_test_client();
-            client.state = ClientState::InWorld;
+            client.conn.state = ClientState::InWorld;
             client
                 .handle_message(&encode_message(&GameMessage::CharacterError(Box::new(
                     CharacterErrorData {
@@ -3380,11 +3376,11 @@ mod tests {
                 ))))
                 .await
                 .unwrap();
-            assert_eq!(client.state, ClientState::Disconnected);
+            assert_eq!(client.conn.state, ClientState::Disconnected);
             assert!(client.exit_outcome().unwrap().failure.is_some());
         }
         let mut client = build_test_client();
-        client.authenticating = true;
+        client.conn.authenticating = true;
         client
             .handle_message(&encode_message(&GameMessage::CharacterError(Box::new(
                 CharacterErrorData {
@@ -3393,7 +3389,7 @@ mod tests {
             ))))
             .await
             .unwrap();
-        assert_eq!(client.state, ClientState::Connected);
+        assert_eq!(client.conn.state, ClientState::Connected);
         assert!(client.exit_outcome().is_none());
     }
 }

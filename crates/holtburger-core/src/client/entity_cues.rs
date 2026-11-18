@@ -117,7 +117,9 @@ impl ClientRuntime {
             self.world.resolve_scene_placement(guid)?,
             holtburger_world::ResolvedScenePlacement::Unresolved(_)
         ) {
-            self.entity_cue_inbox.queue(guid, cue, Instant::now());
+            self.character
+                .entity_cue_inbox
+                .queue(guid, cue, Instant::now());
             return Ok(());
         }
         self.dispatch_entity_cue(guid, cue)
@@ -131,7 +133,7 @@ impl ClientRuntime {
         ) {
             return Ok(());
         }
-        let pending = self.entity_cue_inbox.take(guid, Instant::now());
+        let pending = self.character.entity_cue_inbox.take(guid, Instant::now());
         for cue in pending {
             self.dispatch_entity_cue(guid, cue)?;
         }
@@ -163,7 +165,7 @@ impl ClientRuntime {
                 ClientViewEvent::DynamicSoundCue(crate::ClientDynamicSoundCue {
                     guid,
                     generation,
-                    world_generation: self.world_generation,
+                    world_generation: self.conn.world_generation,
                     sound_id,
                     volume,
                 })
@@ -436,7 +438,7 @@ mod tests {
         let guid = Guid(7);
         let mut client = builder::build_test_client(ClientState::InWorld);
         let mut events = client.subscribe_client_view_events();
-        client.world_generation = 12;
+        client.conn.world_generation = 12;
         let mut bytes = Vec::new();
         GameMessage::PlaySound(Box::new(PlaySoundData {
             target: guid,

@@ -364,7 +364,7 @@ impl EquipmentSetState {
 
 impl ClientRuntime {
     pub(super) fn equipment_change_pending(&self) -> bool {
-        self.equipment_operation.is_some() || self.equipment_set.awaiting_peace()
+        self.portal.equipment_operation.is_some() || self.portal.equipment_set.awaiting_peace()
     }
 
     fn equipment_set_failure(&mut self, bindings: Vec<EquipmentBinding>, message: String) {
@@ -379,14 +379,14 @@ impl ClientRuntime {
         bindings: Vec<EquipmentBinding>,
         storage: EquipmentStoragePolicy,
     ) -> RuntimeResult<()> {
-        if self.inventory_change_pending() || self.active_busy_operation.is_some() {
+        if self.inventory_change_pending() || self.character.active_busy_operation.is_some() {
             self.equipment_set_failure(
                 bindings,
                 "Another inventory operation is still pending".into(),
             );
             return Ok(());
         }
-        if !matches!(self.state, ClientState::InWorld) || self.activation.is_some() {
+        if !matches!(self.conn.state, ClientState::InWorld) || self.portal.activation.is_some() {
             self.equipment_set_failure(
                 bindings,
                 "Equipment changes require an active world".into(),
@@ -399,7 +399,7 @@ impl ClientRuntime {
             self.inventory_placement.automatic,
             &storage,
         );
-        if plan.requires_stable_stance && self.pending_combat_mode.is_some() {
+        if plan.requires_stable_stance && self.portal.pending_combat_mode.is_some() {
             self.equipment_set_failure(
                 bindings,
                 "A combat-mode request is still pending; activate again after stance confirmation"
@@ -407,9 +407,9 @@ impl ClientRuntime {
             );
             return Ok(());
         }
-        self.equipment_set.feedback.clear();
+        self.portal.equipment_set.feedback.clear();
         if plan.requires_peace {
-            self.equipment_set.peace = Some(PendingEquipmentPeace {
+            self.portal.equipment_set.peace = Some(PendingEquipmentPeace {
                 bindings,
                 storage,
                 deadline: Instant::now() + EQUIPMENT_STEP_TIMEOUT,
@@ -422,7 +422,7 @@ impl ClientRuntime {
                 )))
                 .await
             {
-                self.equipment_set.peace = None;
+                self.portal.equipment_set.peace = None;
                 return Err(error);
             }
             return Ok(());
@@ -431,16 +431,16 @@ impl ClientRuntime {
     }
 
     pub(super) async fn advance_equipment_set(&mut self, now: Instant) -> RuntimeResult<()> {
-        let Some(pending) = self.equipment_set.peace.take() else {
+        let Some(pending) = self.portal.equipment_set.peace.take() else {
             return Ok(());
         };
-        if !matches!(self.state, ClientState::InWorld) || self.activation.is_some() {
-            self.equipment_set = Default::default();
+        if !matches!(self.conn.state, ClientState::InWorld) || self.portal.activation.is_some() {
+            self.portal.equipment_set = Default::default();
             return Ok(());
         }
         let confirmed = self.world.player_combat_mode() == CombatMode::NonCombat;
         if !confirmed && now < pending.deadline {
-            self.equipment_set.peace = Some(pending);
+            self.portal.equipment_set.peace = Some(pending);
             return Ok(());
         }
         if !confirmed {
@@ -461,7 +461,7 @@ impl ClientRuntime {
 
     /// An explicit stance command supersedes the prerequisite, before any equipment is sent.
     pub(super) fn cancel_equipment_set_peace(&mut self) {
-        if let Some(pending) = self.equipment_set.peace.take() {
+        if let Some(pending) = self.portal.equipment_set.peace.take() {
             self.equipment_set_failure(
                 pending.bindings,
                 "Equipment submission cancelled by another combat-mode command".into(),
@@ -498,7 +498,7 @@ impl ClientRuntime {
             );
         let resume_mode = self.world.get_suggested_combat_mode_for_equipment(intended);
         for removal in &plan.removals {
-            self.equipment_set.feedback.insert(
+            self.portal.equipment_set.feedback.insert(
                 removal.step.item,
                 EquipmentSetAttribution {
                     removal: removal.bindings.clone(),
@@ -508,6 +508,7 @@ impl ClientRuntime {
         }
         for entry in &plan.wields {
             let feedback = self
+                .portal
                 .equipment_set
                 .feedback
                 .entry(entry.replacement.item)
@@ -553,7 +554,7 @@ impl ClientRuntime {
         item: Guid,
         error: holtburger_protocol::errors::WeenieError,
     ) -> bool {
-        let Some(attribution) = self.equipment_set.feedback.remove(&item) else {
+        let Some(attribution) = self.portal.equipment_set.feedback.remove(&item) else {
             return false;
         };
         let mut bindings = attribution.removal;
@@ -597,7 +598,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert_eq!(client.pending_combat_mode, Some(CombatMode::Magic));
+        assert_eq!(client.portal.pending_combat_mode, Some(CombatMode::Magic));
         client
             .apply_equipment_set(
                 vec![binding(INCOMING, EquipMask::MELEE_WEAPON)],
@@ -606,7 +607,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 1);
-        assert!(!client.equipment_set.awaiting_peace());
+        assert!(!client.portal.equipment_set.awaiting_peace());
         assert_eq!(client.world.equipment_mask(INCOMING), None);
         assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(event,
             super::super::types::ClientViewEvent::ActionResult { reason: ActionResultReason::EquipmentSet { message, .. }, .. }
@@ -629,7 +630,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(client.equipment_set.awaiting_peace());
+        assert!(client.portal.equipment_set.awaiting_peace());
         assert_eq!(client.session.game_action_sequence, 2);
     }
 
@@ -644,15 +645,15 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(client.session.game_action_sequence, 1);
-        assert_eq!(client.pending_combat_mode, Some(CombatMode::Magic));
+        assert_eq!(client.portal.pending_combat_mode, Some(CombatMode::Magic));
         client.handle_world_event(&holtburger_world::WorldEvent::CombatModeUpdated(
             CombatMode::Melee,
         ));
-        assert_eq!(client.pending_combat_mode, Some(CombatMode::Magic));
+        assert_eq!(client.portal.pending_combat_mode, Some(CombatMode::Magic));
         client.handle_world_event(&holtburger_world::WorldEvent::CombatModeUpdated(
             CombatMode::NonCombat,
         ));
-        assert_eq!(client.pending_combat_mode, None);
+        assert_eq!(client.portal.pending_combat_mode, None);
         client
             .handle_command(super::super::types::ClientCommand::SetCombatMode(
                 CombatMode::Magic,
@@ -660,7 +661,7 @@ mod tests {
             .await
             .unwrap();
         client.start_world_activation(super::super::ClientWorldActivationState::Teleport, PLAYER);
-        assert_eq!(client.pending_combat_mode, None);
+        assert_eq!(client.portal.pending_combat_mode, None);
     }
 
     #[tokio::test]
@@ -681,8 +682,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 4);
-        assert_eq!(client.pending_combat_mode, Some(CombatMode::Magic));
-        assert!(!client.equipment_set.awaiting_peace());
+        assert_eq!(client.portal.pending_combat_mode, Some(CombatMode::Magic));
+        assert!(!client.portal.equipment_set.awaiting_peace());
     }
 
     fn empty(target: EquipMask) -> EquipmentBinding {
@@ -847,7 +848,7 @@ mod tests {
             .apply_equipment_set(vec![requested], storage_policy(&client.world))
             .await
             .unwrap();
-        assert!(client.equipment_set.awaiting_peace());
+        assert!(client.portal.equipment_set.awaiting_peace());
         client
             .world
             .entities
@@ -861,15 +862,16 @@ mod tests {
         ));
         client.advance_equipment_set(Instant::now()).await.unwrap();
         assert_eq!(client.session.game_action_sequence, 3);
-        assert_eq!(client.equipment_set.feedback.len(), 1);
+        assert_eq!(client.portal.equipment_set.feedback.len(), 1);
         assert!(
             client
+                .portal
                 .equipment_set
                 .feedback
                 .values()
                 .all(|attribution| attribution.removal == vec![requested])
         );
-        let removed = *client.equipment_set.feedback.keys().next().unwrap();
+        let removed = *client.portal.equipment_set.feedback.keys().next().unwrap();
         assert!(
             client
                 .reject_equipment_set_item(removed, holtburger_protocol::errors::WeenieError::None)
@@ -1016,7 +1018,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(client.equipment_set.awaiting_peace());
+        assert!(client.portal.equipment_set.awaiting_peace());
         assert_eq!(client.session.game_action_sequence, 1);
         client.advance_equipment_set(Instant::now()).await.unwrap();
         assert_eq!(client.session.game_action_sequence, 1);
@@ -1032,7 +1034,7 @@ mod tests {
             CombatMode::NonCombat,
         ));
         client.advance_equipment_set(Instant::now()).await.unwrap();
-        assert!(!client.equipment_set.awaiting_peace());
+        assert!(!client.portal.equipment_set.awaiting_peace());
         // Peace, whole-item wield, and equipment-derived combat restoration.
         assert_eq!(client.session.game_action_sequence, 3);
         assert_eq!(client.world.equipment_mask(INCOMING), None);
@@ -1055,7 +1057,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(!client.equipment_set.awaiting_peace());
+        assert!(!client.portal.equipment_set.awaiting_peace());
         assert_eq!(client.session.game_action_sequence, 1);
     }
 
@@ -1136,10 +1138,10 @@ mod tests {
             CombatMode::NonCombat,
         ));
         client.advance_equipment_set(Instant::now()).await.unwrap();
-        assert!(!client.equipment_set.awaiting_peace());
+        assert!(!client.portal.equipment_set.awaiting_peace());
         // The invalidated binding sends nothing: only peace and combat restoration were requested.
         assert_eq!(client.session.game_action_sequence, 2);
-        assert!(client.equipment_set.feedback.is_empty());
+        assert!(client.portal.equipment_set.feedback.is_empty());
     }
 
     #[tokio::test]
@@ -1161,7 +1163,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(!client.equipment_set.awaiting_peace());
+        assert!(!client.portal.equipment_set.awaiting_peace());
         assert_eq!(client.session.game_action_sequence, 3);
         assert_eq!(
             client.world.equipment_mask(Guid(4)),
@@ -1180,9 +1182,9 @@ mod tests {
             )
             .await
             .unwrap();
-        let deadline = client.equipment_set.peace.as_ref().unwrap().deadline;
+        let deadline = client.portal.equipment_set.peace.as_ref().unwrap().deadline;
         client.advance_equipment_set(deadline).await.unwrap();
-        assert!(!client.equipment_set.awaiting_peace());
+        assert!(!client.portal.equipment_set.awaiting_peace());
         assert_eq!(client.session.game_action_sequence, 1);
         client.handle_world_event(&holtburger_world::WorldEvent::CombatModeUpdated(
             CombatMode::NonCombat,
@@ -1195,8 +1197,8 @@ mod tests {
             .await
             .unwrap();
         client.set_exit_cause(super::super::types::ClientExitCause::ExplicitDisconnect);
-        assert!(!client.equipment_set.awaiting_peace());
-        assert!(client.equipment_set.feedback.is_empty());
+        assert!(!client.portal.equipment_set.awaiting_peace());
+        assert!(client.portal.equipment_set.feedback.is_empty());
     }
 
     #[test]

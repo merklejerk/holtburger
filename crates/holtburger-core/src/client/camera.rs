@@ -883,7 +883,8 @@ impl ClientRuntime {
         let receipt = self.camera.start(
             request,
             &self.world,
-            self.activation.is_none() && matches!(self.state, super::ClientState::InWorld),
+            self.portal.activation.is_none()
+                && matches!(self.conn.state, super::ClientState::InWorld),
             &self.client_view_event_tx,
         )?;
         self.precise_jump.invalidate();

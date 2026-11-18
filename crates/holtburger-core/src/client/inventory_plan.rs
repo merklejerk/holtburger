@@ -694,10 +694,12 @@ impl super::ClientRuntime {
         intent: InventoryIntent,
         storage: &EquipmentStoragePolicy,
     ) -> Result<InventoryPlan, String> {
-        if !matches!(self.state, super::ClientState::InWorld) || self.activation.is_some() {
+        if !matches!(self.conn.state, super::ClientState::InWorld)
+            || self.portal.activation.is_some()
+        {
             return Err("Inventory changes require an active world".into());
         }
-        if self.inventory_change_pending() || self.active_busy_operation.is_some() {
+        if self.inventory_change_pending() || self.character.active_busy_operation.is_some() {
             return Err("Another inventory operation is still pending".into());
         }
         plan_inventory_intent(&self.world, intent, self.inventory_placement, storage)
@@ -809,7 +811,7 @@ pub(super) mod tests {
                 .world_bootstrap(Arc::new(WorldBootstrap::synthetic()))
                 .build_with_session(Session::new_test())
                 .unwrap();
-            client.state = ClientState::InWorld;
+            client.conn.state = ClientState::InWorld;
             client.world = inventory();
             client
                 .world

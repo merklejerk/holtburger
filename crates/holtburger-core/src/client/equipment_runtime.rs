@@ -156,7 +156,7 @@ impl EquipmentOperation {
 
 impl ClientRuntime {
     pub(super) fn stop_equipment_change(&mut self, reason: &str) {
-        if let Some(operation) = self.equipment_operation.take() {
+        if let Some(operation) = self.portal.equipment_operation.take() {
             self.emit_action_result(
                 ActionResultSource::Client,
                 ActionResultReason::General(format!(
@@ -169,6 +169,7 @@ impl ClientRuntime {
 
     pub(super) fn reject_equipment_item(&mut self, item: Guid) {
         if self
+            .portal
             .equipment_operation
             .as_ref()
             .is_some_and(|operation| operation.awaiting_item() == item)
@@ -194,7 +195,7 @@ impl ClientRuntime {
         ) && plan
             .target
             .intersects(MAIN_HAND_LOCATIONS | EquipMask::SHIELD | EquipMask::MISSILE_AMMO);
-        self.equipment_operation = Some(EquipmentOperation {
+        self.portal.equipment_operation = Some(EquipmentOperation {
             plan,
             completed: 0,
             stage: if resume_combat {
@@ -219,18 +220,18 @@ impl ClientRuntime {
     }
 
     pub(super) async fn advance_equipment_change(&mut self, now: Instant) -> Result<()> {
-        if !matches!(self.state, ClientState::InWorld) || self.activation.is_some() {
+        if !matches!(self.conn.state, ClientState::InWorld) || self.portal.activation.is_some() {
             self.stop_equipment_change("World lifecycle changed");
             return Ok(());
         }
-        let Some(operation) = self.equipment_operation.as_mut() else {
+        let Some(operation) = self.portal.equipment_operation.as_mut() else {
             return Ok(());
         };
         match operation.advance(&self.world, now) {
             Ok(EquipmentAdvance::Waiting) => {}
             Ok(EquipmentAdvance::Send(action)) => self.send_game_action(action).await?,
             Ok(EquipmentAdvance::SendFinal(action)) => {
-                self.equipment_operation = None;
+                self.portal.equipment_operation = None;
                 self.send_game_action(action).await?;
             }
             Err(reason) => self.stop_equipment_change(&reason),
@@ -391,11 +392,11 @@ mod tests {
             Ok(EquipmentAdvance::Send(_))
         ));
         let awaiting = pending.awaiting_item();
-        client.equipment_operation = Some(pending);
+        client.portal.equipment_operation = Some(pending);
         client.reject_equipment_item(Guid(99));
-        assert!(client.equipment_operation.is_some());
+        assert!(client.portal.equipment_operation.is_some());
         client.reject_equipment_item(awaiting);
-        assert!(client.equipment_operation.is_none());
+        assert!(client.portal.equipment_operation.is_none());
     }
 
     #[test]
@@ -415,9 +416,9 @@ mod tests {
             Ok(EquipmentAdvance::Send(_))
         ));
         let rejected = pending.awaiting_item();
-        client.equipment_operation = Some(pending);
+        client.portal.equipment_operation = Some(pending);
         client.reject_equipment_item(rejected);
-        assert!(client.equipment_operation.is_none());
+        assert!(client.portal.equipment_operation.is_none());
         assert!(matches!(
             client.world.storage_location(first.item),
             Some(StorageLocation::Contained { parent: PLAYER, .. })
@@ -461,7 +462,7 @@ mod tests {
         let SalvagePreviewEvaluation::Ready { revision, .. } = preview.evaluation else {
             panic!("expected ready source");
         };
-        client.equipment_operation = Some(operation(&client.world, Instant::now()));
+        client.portal.equipment_operation = Some(operation(&client.world, Instant::now()));
         client
             .handle_command(ClientCommand::SubmitSalvage(SalvageSubmitRequest {
                 sequence: 1,
@@ -483,7 +484,7 @@ mod tests {
         use super::super::inventory_plan::{InventoryIntent, InventoryTarget};
         let mut client = super::super::builder::build_test_client(ClientState::InWorld);
         client.world = outfit(2, 1);
-        client.equipment_operation = Some(operation(&client.world, Instant::now()));
+        client.portal.equipment_operation = Some(operation(&client.world, Instant::now()));
         client
             .submit_inventory_intent(
                 InventoryIntent {
@@ -496,6 +497,7 @@ mod tests {
             .expect("busy rejection");
         assert_eq!(
             client
+                .portal
                 .equipment_operation
                 .as_ref()
                 .expect("original request")
@@ -557,6 +559,7 @@ mod tests {
             );
             if active {
                 let operation = client
+                    .portal
                     .equipment_operation
                     .as_ref()
                     .expect("peace before wield");
@@ -564,7 +567,7 @@ mod tests {
                 assert_eq!(operation.stage, EquipmentStage::Peace);
             } else {
                 assert!(
-                    client.equipment_operation.is_none(),
+                    client.portal.equipment_operation.is_none(),
                     "single wield needs no continuation: {mode:?}"
                 );
             }
@@ -578,13 +581,20 @@ mod tests {
         let mut pending = operation(&client.world, Instant::now());
         pending.stage = EquipmentStage::Wield;
         pending.resume_combat = true;
-        client.equipment_operation = Some(pending);
+        client.portal.equipment_operation = Some(pending);
         client
             .handle_command(super::super::ClientCommand::ToggleCombatMode)
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 0);
-        assert!(client.equipment_operation.as_ref().unwrap().resume_combat);
+        assert!(
+            client
+                .portal
+                .equipment_operation
+                .as_ref()
+                .unwrap()
+                .resume_combat
+        );
     }
 
     #[tokio::test]
@@ -594,14 +604,14 @@ mod tests {
         let mut pending = operation(&client.world, Instant::now());
         pending.stage = EquipmentStage::Wield;
         pending.resume_combat = true;
-        client.equipment_operation = Some(pending);
+        client.portal.equipment_operation = Some(pending);
         client
             .handle_command(super::super::ClientCommand::SetCombatMode(
                 CombatMode::NonCombat,
             ))
             .await
             .expect("manual combat request");
-        assert!(client.equipment_operation.is_none());
+        assert!(client.portal.equipment_operation.is_none());
     }
 
     #[test]
@@ -610,7 +620,7 @@ mod tests {
         client.world = outfit(2, 1);
         let pending = operation(&client.world, Instant::now());
         let mask = pending.plan.target;
-        client.equipment_operation = Some(pending);
+        client.portal.equipment_operation = Some(pending);
         client.set_exit_cause(super::super::types::ClientExitCause::ExplicitDisconnect);
         event(
             &mut client.world,
@@ -619,7 +629,7 @@ mod tests {
                 equip_mask: mask,
             })),
         );
-        assert!(client.equipment_operation.is_none());
+        assert!(client.portal.equipment_operation.is_none());
         assert_eq!(client.world.equipment_mask(INCOMING), Some(mask));
     }
 

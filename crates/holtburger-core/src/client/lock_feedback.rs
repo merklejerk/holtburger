@@ -70,12 +70,12 @@ pub struct LockFeedback {
 impl ClientRuntime {
     /// Capture correlation at admission; any newer operation retires the previous encounter.
     pub(super) fn track_lock_use(&mut self, operation: &PendingOperation, deadline: Instant) {
-        self.lock_use = operation.direct_use_source().and_then(|target| {
+        self.character.lock_use = operation.direct_use_source().and_then(|target| {
             let entity = self.world.entities.get(target)?;
             Some(LockUse {
                 target,
                 generation: u64::from(entity.instance_sequence()),
-                world_generation: self.world_generation,
+                world_generation: self.conn.world_generation,
                 sequence: match operation {
                     PendingOperation::GuardedUse { sequence, .. } => Some(*sequence),
                     _ => None,
@@ -89,10 +89,10 @@ impl ClientRuntime {
     /// UseDone releases admission before a correlated rejection is published to consumers.
     pub(super) fn complete_lock_use(&mut self, error: WeenieError) {
         if error != WeenieError::None {
-            self.lock_use = None;
+            self.character.lock_use = None;
             return;
         }
-        let Some(pending) = self.lock_use.as_mut() else {
+        let Some(pending) = self.character.lock_use.as_mut() else {
             return;
         };
         let rejected = matches!(
@@ -108,6 +108,7 @@ impl ClientRuntime {
     /// Join an observed opening rejection with the captured direct use, when one exists.
     fn observe_used_lock_rejection(&mut self, target: Guid) {
         let Some(pending) = self
+            .character
             .lock_use
             .as_mut()
             .filter(|pending| pending.target == target)
@@ -122,12 +123,12 @@ impl ClientRuntime {
 
     /// Consume once, and validate the retained incarnation and original deadline at publication.
     fn publish_lock_rejection(&mut self) {
-        let Some(pending) = self.lock_use.take() else {
+        let Some(pending) = self.character.lock_use.take() else {
             return;
         };
         let Some(entity) = self.world.entities.get(pending.target).filter(|entity| {
             Instant::now() < pending.deadline
-                && self.world_generation == pending.world_generation
+                && self.conn.world_generation == pending.world_generation
                 && u64::from(entity.instance_sequence()) == pending.generation
                 // Housing permission failures are not evidence of a pickable lock. Custom/remapped
                 // storage templates and another player's same-target sound remain ambiguous.
@@ -179,7 +180,7 @@ impl ClientRuntime {
             .send(ClientViewEvent::LockFeedback(LockFeedback {
                 target,
                 generation: u64::from(entity.instance_sequence()),
-                world_generation: self.world_generation,
+                world_generation: self.conn.world_generation,
                 outcome,
             }));
     }
@@ -247,7 +248,7 @@ mod tests {
                 .finish_busy_operation_from_use_done(WeenieError::None)
                 .await
                 .unwrap();
-            assert!(client.active_busy_operation.is_none());
+            assert!(client.character.active_busy_operation.is_none());
             if !sound_first {
                 receive_lock_sound(&mut client, Guid(7)).await;
             }
@@ -346,7 +347,9 @@ mod tests {
                                     .arm_busy_operation(PendingOperation::Use { source: Guid(8) })
                             );
                         }
-                        "deadline" => client.lock_use.as_mut().unwrap().deadline = Instant::now(),
+                        "deadline" => {
+                            client.character.lock_use.as_mut().unwrap().deadline = Instant::now()
+                        }
                         "removed" => {
                             client.world.entities.remove(Guid(7));
                         }
@@ -514,7 +517,7 @@ mod tests {
             if let Some(observation) = observations.first() {
                 assert_eq!(observation.target, target);
                 assert_eq!(observation.outcome, LockFeedbackOutcome::Unlocked);
-                assert_eq!(observation.world_generation, client.world_generation);
+                assert_eq!(observation.world_generation, client.conn.world_generation);
                 assert_eq!(
                     observation.generation,
                     u64::from(

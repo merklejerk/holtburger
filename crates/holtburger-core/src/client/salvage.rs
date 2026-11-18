@@ -61,10 +61,6 @@ pub(super) struct SalvageApproval {
 }
 
 impl SalvageApproval {
-    pub(super) fn reset(&mut self) {
-        self.approved = None;
-    }
-
     fn record(&mut self, evaluation: SalvageEvaluation) -> SalvagePreviewEvaluation {
         match evaluation {
             SalvageEvaluation::Ready { review, bags } => {
@@ -144,13 +140,13 @@ pub struct SalvageSubmitResult {
 
 impl ClientRuntime {
     fn salvage_admission(&self, player: Guid) -> std::result::Result<(), &'static str> {
-        if self.state != ClientState::InWorld || self.world.player.guid != player {
+        if self.conn.state != ClientState::InWorld || self.world.player.guid != player {
             return Err("The originating character is no longer in the world.");
         }
         if self.inventory_change_pending() {
             return Err("An inventory change is still pending.");
         }
-        if self.active_busy_operation.is_some() {
+        if self.character.active_busy_operation.is_some() {
             return Err("Your character is busy.");
         }
         Ok(())
@@ -159,7 +155,7 @@ impl ClientRuntime {
     pub(super) fn preview_salvage(&mut self, request: SalvagePreviewRequest) {
         let evaluation = {
             // Busy actions do not invalidate read-only previews.
-            if self.state != ClientState::InWorld || self.world.player.guid != request.player {
+            if self.conn.state != ClientState::InWorld || self.world.player.guid != request.player {
                 SalvageEvaluation::Rejected {
                     reason: "The originating character is no longer in the world.".into(),
                 }
@@ -180,7 +176,7 @@ impl ClientRuntime {
                 }
             }
         };
-        let evaluation = self.salvage_approval.record(evaluation);
+        let evaluation = self.character.salvage_approval.record(evaluation);
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::SalvagePreview(SalvagePreviewResult {
@@ -218,7 +214,8 @@ impl ClientRuntime {
                 reason: reason.into(),
             });
         }
-        let Some((stored_revision, expected)) = self.salvage_approval.approved.as_ref() else {
+        let Some((stored_revision, expected)) = self.character.salvage_approval.approved.as_ref()
+        else {
             return Ok(SalvageSubmitOutcome::Rejected {
                 reason: "The salvage batch is no longer current. Review the batch again.".into(),
             });
@@ -235,7 +232,7 @@ impl ClientRuntime {
             });
         }
         if expected.sources.is_empty() {
-            self.salvage_approval.approved = None;
+            self.character.salvage_approval.approved = None;
             return Ok(SalvageSubmitOutcome::Rejected {
                 reason: "The salvage batch is empty.".into(),
             });
@@ -243,11 +240,11 @@ impl ClientRuntime {
         let items: Vec<_> = expected.sources.iter().map(|source| source.guid).collect();
         let evaluation = self.world.evaluate_salvage(expected.tool, &items);
         if matches!(&evaluation, SalvageEvaluation::Ready { review, .. } if review == &expected) {
-            self.salvage_approval.approved = None;
+            self.character.salvage_approval.approved = None;
             self.dispatch_salvage(expected.tool, items).await?;
             return Ok(SalvageSubmitOutcome::Dispatched);
         }
-        let evaluation = self.salvage_approval.record(evaluation);
+        let evaluation = self.character.salvage_approval.record(evaluation);
         Ok(SalvageSubmitOutcome::Changed { evaluation })
     }
 
@@ -364,7 +361,7 @@ mod tests {
                 outcome: SalvageSubmitOutcome::Dispatched,
             })
         ));
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
         assert_eq!(client.session.game_action_sequence, 1);
 
         // Consumed revision cannot be replayed.
@@ -510,13 +507,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
     }
 
     #[tokio::test]
     async fn character_exit_produces_a_correlated_rejection() {
         let (mut client, revision) = fixture();
-        client.state = ClientState::CharacterSelection;
+        client.conn.state = ClientState::CharacterSelection;
         let mut replies = client.client_view_event_tx.subscribe();
         client
             .submit_salvage(SalvageSubmitRequest {

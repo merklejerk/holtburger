@@ -300,12 +300,12 @@ async fn navigation_activation_waits_for_coverage_then_enters_without_model_body
         client.start_world_activation(cause, guid);
         if cause == ClientWorldActivationState::Teleport {
             client.try_complete_world_activation().await.unwrap();
-            assert!(client.activation.is_some());
-            client.activation.as_mut().unwrap().phase =
+            assert!(client.portal.activation.is_some());
+            client.portal.activation.as_mut().unwrap().phase =
                 ClientWorldActivationPhase::TeleportDestinationInstalled;
         }
         client.try_complete_world_activation().await.unwrap();
-        assert!(client.activation.is_some());
+        assert!(client.portal.activation.is_some());
         assert_eq!(client.session.bytes_out, 0);
         let coordinator = client.collision_coordinator.as_mut().unwrap();
         coordinator.observe(&mut client.world);
@@ -320,8 +320,8 @@ async fn navigation_activation_waits_for_coverage_then_enters_without_model_body
         assert!(client.world.player_entity().unwrap().wcid.is_none());
         assert!(client.body_readiness().is_none());
         client.try_complete_world_activation().await.unwrap();
-        assert!(client.activation.is_none());
-        assert_eq!(client.state, ClientState::InWorld);
+        assert!(client.portal.activation.is_none());
+        assert_eq!(client.conn.state, ClientState::InWorld);
         assert!(client.session.bytes_out > 0);
         assert!(
             client

@@ -7,7 +7,71 @@ use holtburger_protocol::messages::GameMessage;
 impl ClientRuntime {
     /// Retained terminal result consumed after `run` ends, including normal rejection handling.
     pub fn exit_outcome(&self) -> Option<&super::ClientExitOutcome> {
-        self.exit_outcome.as_ref()
+        self.conn.exit_outcome.as_ref()
+    }
+
+    /// Retire transient portal-epoch state across world activation and character retirement.
+    pub(super) fn retire_portal_epoch(&mut self, reason: &str) {
+        self.stop_inventory_operation(reason);
+        self.stop_equipment_change(reason);
+        self.cancel_rest_posture();
+        self.reset_combat_engagement();
+        self.portal = super::PortalResyncState::default();
+        self.movement.retire_movement_epoch();
+        self.reset_camera();
+        if let Some(coordinator) = self.collision_coordinator.as_mut() {
+            coordinator.invalidate();
+        }
+    }
+
+    /// Retire character-scoped runtime, world, and publication state while preserving
+    /// `character_selection` when beginning a new entry transition.
+    pub(super) fn retire_character_state(&mut self, bump_generation: bool) {
+        self.stop_character_actions();
+        self.retire_portal_epoch(
+            "Character lifecycle changed; the last request may still complete",
+        );
+        self.reset_barber();
+        if let Some(coordinator) = self.collision_coordinator.as_mut()
+            && coordinator.reset_entity_collision_override(&mut self.world)
+        {
+            let _ = self.client_view_event_tx.send(
+                super::types::ClientViewEvent::EntityCollisionDisabled(false),
+            );
+        }
+        if let Some(coordinator) = self.dynamic_script_coordinator.as_mut() {
+            coordinator.retire_character();
+        }
+        self.reset_friends();
+        self.reset_contracts();
+        self.reset_squelch();
+        self.reset_allegiance();
+        self.world.fellowship = None;
+        self.emit_fellowship_state_updated();
+        self.reset_container_access();
+        self.character = super::CharacterSessionState::default();
+        self.world.retire_character();
+        if bump_generation {
+            self.bump_world_generation();
+        }
+        self.turbine_chat.channels = None;
+        self.refresh_spell_inspection_context();
+    }
+
+    /// Retire the active character session and clear any pending selection state.
+    pub(super) fn retire_character_session(&mut self, bump_generation: bool) {
+        self.retire_character_state(bump_generation);
+        self.character_selection.entry_rejection = None;
+        self.character_selection.character_id = None;
+        self.character_selection.enter_world_sent = false;
+    }
+
+    /// Complete a terminal disconnect transition with full character teardown.
+    pub(super) fn finish_disconnect(&mut self, cause: super::types::ClientExitCause) {
+        self.set_exit_cause(cause);
+        self.conn.authenticating = false;
+        self.retire_character_session(false);
+        self.set_state(ClientState::Disconnected);
     }
 
     /// Record a specific failure before generic teardown can erase its explanation.
@@ -17,44 +81,39 @@ impl ClientRuntime {
         exit: super::types::ClientExitCause,
     ) {
         if self
+            .conn
             .exit_outcome
             .as_ref()
             .is_none_or(|outcome| outcome.failure.is_none())
         {
-            self.exit_outcome = Some(super::ClientExitOutcome {
+            self.conn.exit_outcome = Some(super::ClientExitOutcome {
                 cause: exit,
                 failure: Some(super::ConnectionFailure {
-                    state: Some(self.state.clone()),
+                    state: Some(self.conn.state.clone()),
                     cause,
                 }),
             });
         }
-        self.set_exit_cause(exit);
-        self.authenticating = false;
-        self.state = ClientState::Disconnected;
-        self.send_status_event();
+        self.finish_disconnect(exit);
     }
 
     /// Roll back only a refused initial entry; ACE has not established a character yet.
     pub(super) fn reject_world_entry(&mut self, error: super::CharacterErrorCode) {
+        let prev_state = self.conn.state.clone();
+        self.retire_character_session(false);
         self.character_selection.entry_rejection = Some(super::ConnectionFailure {
-            state: Some(self.state.clone()),
+            state: Some(prev_state),
             cause: super::ConnectionFailureCause::Character(error),
         });
-        self.character_selection.character_id = None;
-        self.character_selection.enter_world_sent = false;
-        self.event_ordering = None;
-        self.activation = None;
-        self.state = ClientState::CharacterSelection;
-        self.send_status_event();
+        self.set_state(ClientState::CharacterSelection);
         self.emit_current_application_snapshot();
     }
 
     pub(super) async fn logout(&mut self) -> Result<()> {
-        if self.state == ClientState::LoggingOut {
+        if self.conn.state == ClientState::LoggingOut {
             return Ok(());
         }
-        if self.state != ClientState::InWorld {
+        if self.conn.state != ClientState::InWorld {
             // A portal can supersede the UI click while this command is queued. Reject the
             // user action without turning ordinary lifecycle contention into a session failure.
             self.emit_action_result(
@@ -72,9 +131,8 @@ impl ClientRuntime {
         self.stop_character_actions();
         self.movement.retire_movement_epoch();
         self.reset_camera();
-        self.activation = None;
-        self.state = ClientState::LoggingOut;
-        self.send_status_event();
+        self.portal.activation = None;
+        self.set_state(ClientState::LoggingOut);
         Ok(())
     }
 
@@ -90,41 +148,19 @@ impl ClientRuntime {
         self.stop_equipment_change(
             "Character lifecycle changed; the last request may still complete",
         );
-        self.equipment_set = Default::default();
-        self.pending_combat_mode = None;
+        self.portal.equipment_set = Default::default();
+        self.portal.pending_combat_mode = None;
         self.reset_housing();
-        if self.active_confirmation.take().is_some() {
+        if self.character.active_confirmation.take().is_some() {
             self.emit_active_character_confirmation_updated();
         }
     }
 
     pub(super) fn retire_logged_out_character(&mut self) {
-        self.stop_character_actions();
-        self.salvage_approval.reset();
-        self.reset_container_access();
-        self.activation = None;
-        self.movement.retire_movement_epoch();
-        self.reset_camera();
-        if let Some(coordinator) = self.collision_coordinator.as_mut() {
-            coordinator.invalidate();
-        }
-        if let Some(coordinator) = self.dynamic_script_coordinator.as_mut() {
-            coordinator.retire_character();
-        }
-        // Identity retirement is one replacement baseline. A diff against the old character
-        // would remove its player entity while consumers still retain that player's GUID.
-        self.entity_facts = Default::default();
-        self.world.retire_character();
-        self.bump_world_generation();
-        self.entity_cue_inbox.clear();
-        self.trade_additions.clear();
-        self.character_selection.entry_rejection = None;
-        self.character_selection.character_id = None;
-        self.character_selection.enter_world_sent = false;
-        self.described_character = None;
-        self.turbine_chat.channels = None;
-        self.event_ordering = None;
-        self.state = ClientState::LoggingOut;
+        self.retire_character_session(true);
+        self.conn.state = ClientState::LoggingOut;
+        self.publish_map_teleport_capability();
+        self.publish_recall_destinations();
         // Publish a replacement baseline now; selection is admitted only by the fresh roster.
         self.emit_current_application_snapshot();
         self.send_status_event();
@@ -184,8 +220,8 @@ mod tests {
             .seed_local_player_entity(previous, "Previous", WorldPosition::default());
         client.character_selection.character_id = Some(previous);
         client.character_selection.enter_world_sent = true;
-        client.described_character = Some(previous);
-        client.world_name = Some("Test server".into());
+        client.character.described_character = Some(previous);
+        client.conn.world_name = Some("Test server".into());
         let catalog = Arc::clone(&client.world.spell_catalog);
         let endpoint = client.session.server_addr;
         let client_id = client.session.client_id;
@@ -249,13 +285,13 @@ mod tests {
         .await;
         assert_eq!(client.world.player.guid, Guid::NULL);
         assert!(client.application_snapshot().local_player_guid.is_none());
-        assert!(client.described_character.is_none());
+        assert!(client.character.described_character.is_none());
         assert!(!client.character_selection.enter_world_sent);
         assert!(Arc::ptr_eq(&catalog, &client.world.spell_catalog));
         assert_eq!(client.session.server_addr, endpoint);
         assert_eq!(client.session.client_id, client_id);
         assert_eq!(client.session.bytes_out, sent);
-        assert!(client.exit_outcome.is_none());
+        assert!(client.conn.exit_outcome.is_none());
 
         deliver(
             &mut client,
@@ -272,13 +308,13 @@ mod tests {
             })),
         )
         .await;
-        assert_eq!(client.state, ClientState::CharacterSelection);
+        assert_eq!(client.conn.state, ClientState::CharacterSelection);
         client
             .handle_command(ClientCommand::SelectCharacter(next))
             .await
             .unwrap();
         assert_eq!(client.character_selection.character_id, Some(next));
-        assert_eq!(client.state, ClientState::EnteringWorld);
+        assert_eq!(client.conn.state, ClientState::EnteringWorld);
         assert!(matches!(
             client.lifecycle(),
             ClientLifecycleState::PortalSpace {
@@ -293,7 +329,7 @@ mod tests {
         let mut client = build_test_client(ClientState::EnteringWorld);
         let mut events = client.subscribe_client_view_events();
         client.logout().await.unwrap();
-        assert_eq!(client.state, ClientState::EnteringWorld);
+        assert_eq!(client.conn.state, ClientState::EnteringWorld);
         assert_eq!(client.session.bytes_out, 0);
         assert!(matches!(
             events.try_recv().unwrap(),
@@ -313,8 +349,260 @@ mod tests {
             WorldPosition::default(),
         );
         deliver(&mut client, GameMessage::CharacterLogOff).await;
-        assert_eq!(client.state, ClientState::LoggingOut);
+        assert_eq!(client.conn.state, ClientState::LoggingOut);
         assert_eq!(client.world.player.guid, Guid::NULL);
-        assert!(client.exit_outcome.is_none());
+        assert!(client.conn.exit_outcome.is_none());
+    }
+
+    struct NoopCollisionSource;
+
+    impl holtburger_content::SceneContentSource for NoopCollisionSource {
+        fn load_scene_class(
+            &self,
+            _owner: u32,
+        ) -> Result<Option<holtburger_content::LandblockSceneClass>> {
+            Ok(None)
+        }
+
+        fn load_collision(
+            &self,
+            _owner: u32,
+        ) -> Result<Option<holtburger_content::LandblockCollisionAsset>> {
+            Ok(None)
+        }
+    }
+
+    impl super::super::collision::ClientBodySource for NoopCollisionSource {
+        fn prepare_body(
+            &self,
+            _facts: super::super::collision::ClientEntityBodyFacts,
+        ) -> Result<holtburger_world::DynamicPhysicalBodyDefinition> {
+            anyhow::bail!("unused in lifecycle test")
+        }
+    }
+
+    #[tokio::test]
+    async fn send_status_event_during_character_selection_is_pure() {
+        use holtburger_protocol::messages::{
+            CharacterCreateResponseData, CharacterGenerationVerificationResponse,
+        };
+
+        let mut client = build_test_client(ClientState::CharacterSelection);
+        let created = Guid(0x5000_0099);
+        client.character_selection.management =
+            super::super::types::CharacterManagementState::Creating {
+                name: "Fresh".into(),
+            };
+        let source = Arc::new(NoopCollisionSource);
+        client.collision_coordinator = Some(
+            super::super::collision::ClientCollisionCoordinator::with_policy(
+                source.clone(),
+                super::super::collision::ClientBodyPolicy::Physical(source),
+            ),
+        );
+        let mut events = client.subscribe_client_view_events();
+
+        deliver(
+            &mut client,
+            GameMessage::CharacterCreateResponse(Box::new(CharacterCreateResponseData {
+                response: CharacterGenerationVerificationResponse::Ok,
+                guid: Some(created),
+                name: Some("Fresh".into()),
+                seconds_disabled: Some(0),
+            })),
+        )
+        .await;
+
+        let emitted: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+        assert!(
+            emitted.iter().any(|event| matches!(
+                event,
+                super::super::types::ClientViewEvent::StatusUpdate {
+                    state: ClientState::CharacterSelection
+                }
+            )),
+            "expected status update during CharacterSelection"
+        );
+        assert!(
+            !emitted.iter().any(|event| matches!(
+                event,
+                super::super::types::ClientViewEvent::EntityCollisionDisabled(_)
+                    | super::super::types::ClientViewEvent::FriendsStateUpdated { .. }
+            )),
+            "pure send_status_event must not emit teardown events: {emitted:?}"
+        );
+        assert_eq!(client.conn.state, ClientState::CharacterSelection);
+    }
+
+    #[tokio::test]
+    async fn retire_logged_out_character_clears_character_state_and_collision_override() {
+        use holtburger_common::properties::{PropertyInt64, WorldObjectPropertyAccessorsMut as _};
+        use holtburger_dat::file_type::XpTable;
+        use holtburger_world::progression::{ProgressionIntent, StatTarget};
+        use holtburger_world::stats::{Attribute, AttributeType};
+        use holtburger_world::{
+            PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalElasticity,
+            PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+            SpatialBodyId,
+        };
+        use std::time::Instant;
+
+        let mut client = build_test_client(ClientState::InWorld);
+        let guid = Guid(0x5000_0001);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1234_0001),
+            ..WorldPosition::default()
+        };
+        client
+            .world
+            .seed_local_player_entity(guid, "Previous", position);
+        client
+            .world
+            .player_entity_mut()
+            .unwrap()
+            .properties
+            .set_int64_prop(PropertyInt64::AvailableExperience, 1_000);
+        client.world.xp_table = Arc::new(XpTable {
+            attribute_xp_list: vec![0, 100, 300, 600],
+            ..XpTable::default()
+        });
+        client.world.player.attributes.insert(
+            AttributeType::StrengthAttr,
+            Attribute {
+                attr_type: AttributeType::StrengthAttr,
+                ranks: 1,
+                start: 10,
+                spent_xp: 100,
+                next_rank_xp: Some(300),
+                base: 11,
+                current: 11,
+                breakdown: Default::default(),
+            },
+        );
+        let quote = client
+            .character
+            .progression
+            .quote(
+                &client.world,
+                ProgressionIntent::Raise {
+                    target: StatTarget::Attribute(AttributeType::StrengthAttr),
+                    ranks: 1,
+                },
+            )
+            .unwrap();
+        let validated = client
+            .character
+            .progression
+            .validate(&client.world, quote)
+            .unwrap();
+        client.character.progression.guard(validated);
+        assert!(!client.guarded_progression_targets().is_empty());
+
+        client
+            .character
+            .recent_deaths
+            .record(Some(WorldPosition::default()));
+        client.character.allegiance_query_deadline =
+            Some(Instant::now() + std::time::Duration::from_secs(30));
+
+        let spheres = PhysicalSphereSet::new(
+            holtburger_common::Sphere {
+                center: holtburger_common::Vector3::new(0.0, 0.0, 0.5),
+                radius: 0.5,
+            },
+            None,
+        )
+        .unwrap();
+        let definition = PhysicalBodyDefinition::grounded(
+            spheres,
+            holtburger_world::GroundedConfig {
+                gravity: -9.8,
+                walkable_normal_z: holtburger_world::RETAIL_WALKABLE_NORMAL_Z,
+                landing_normal_z: holtburger_world::RETAIL_LANDING_NORMAL_Z,
+                airborne_step_down_height: holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
+                step_up_height: 0.6,
+                step_down_height: 1.5,
+                edge_protection: holtburger_world::EdgeProtection::Creature,
+                minimum_stair_rise: 0.0005,
+            },
+        )
+        .unwrap();
+        assert!(
+            client
+                .world
+                .scene
+                .install_physical_body(
+                    SpatialBodyId::LocalPlayer(guid),
+                    definition,
+                    holtburger_world::PhysicalCollisionFilter::ALL,
+                    PhysicalBodyResponsePolicy {
+                        restitution: PhysicalRestitution::Elastic(PhysicalElasticity::DEFAULT),
+                        friction: PhysicalFriction::DEFAULT,
+                        surface_motion: PhysicalSurfaceMotion::Stable,
+                        align_path: false,
+                    },
+                    None,
+                )
+                .is_some()
+        );
+        let source = Arc::new(NoopCollisionSource);
+        let mut coordinator = super::super::collision::ClientCollisionCoordinator::with_policy(
+            source.clone(),
+            super::super::collision::ClientBodyPolicy::Physical(source),
+        );
+        assert!(coordinator.set_entity_collision_disabled(&mut client.world, true));
+        assert!(
+            client
+                .world
+                .scene
+                .body(SpatialBodyId::LocalPlayer(guid))
+                .unwrap()
+                .physical
+                .as_ref()
+                .unwrap()
+                .collision_filter
+                .excludes(holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE)
+        );
+        client.collision_coordinator = Some(coordinator);
+
+        let mut events = client.subscribe_client_view_events();
+        client.retire_logged_out_character();
+
+        assert!(client.guarded_progression_targets().is_empty());
+        assert_eq!(
+            client.character.progression.validate(&client.world, quote),
+            Err(super::super::progression::ClientProgressionRejection::WrongScope)
+        );
+        assert!(client.character.recent_deaths.is_empty());
+        assert!(client.character.allegiance_query_deadline.is_none());
+        assert!(
+            !client
+                .collision_coordinator
+                .as_ref()
+                .unwrap()
+                .entity_collision_disabled()
+        );
+
+        let disabled_events: Vec<_> = std::iter::from_fn(|| events.try_recv().ok())
+            .filter(|event| {
+                matches!(
+                    event,
+                    super::super::types::ClientViewEvent::EntityCollisionDisabled(false)
+                )
+            })
+            .collect();
+        assert_eq!(disabled_events.len(), 1);
+
+        // Calling retirement again with override already cleared must not re-emit.
+        client.retire_logged_out_character();
+        let repeated_events: Vec<_> = std::iter::from_fn(|| events.try_recv().ok())
+            .filter(|event| {
+                matches!(
+                    event,
+                    super::super::types::ClientViewEvent::EntityCollisionDisabled(_)
+                )
+            })
+            .collect();
+        assert!(repeated_events.is_empty());
     }
 }

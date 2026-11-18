@@ -196,7 +196,7 @@ impl PendingOperation {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct PendingBusyOperation {
+pub(in crate::client) struct PendingBusyOperation {
     operation: PendingOperation,
     deadline: Instant,
     pending_error: Option<(WeenieError, Option<String>)>,
@@ -204,9 +204,113 @@ struct PendingBusyOperation {
 
 /// Publication state distinguishes an unpublished baseline from a published unavailable value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PublishedCharacterMotionCapabilities {
+pub(in crate::client) enum PublishedCharacterMotionCapabilities {
     Unpublished,
     Published(Option<ClientCharacterMotionCapabilities>),
+}
+
+/// Connection-lifetime session state retained across character logins and portal transitions.
+pub(in crate::client) struct ConnectionSessionState {
+    pub(in crate::client) state: ClientState,
+    /// Distinguishes the initial connected socket from a login request in flight.
+    pub(in crate::client) authenticating: bool,
+    /// Monotonic world-generation edge used to invalidate presentation interpolation.
+    pub(in crate::client) world_generation: u64,
+    /// Latest server-provided world name retained for replacement application snapshots.
+    pub(in crate::client) world_name: Option<String>,
+    /// Terminal cause selected by the authority before it publishes `Exiting`.
+    pub(in crate::client) exit_outcome: Option<ClientExitOutcome>,
+    pub(in crate::client) message_counter: usize,
+    /// Entity GUIDs queued for a single coalesced upsert while an active batch runs.
+    pub(in crate::client) coalesced_dynamic_entity_upserts: Option<BTreeSet<Guid>>,
+    /// Last published cold map-teleport admission, for edge-only notification.
+    pub(in crate::client) published_map_teleport_capability: bool,
+    /// Last published recall choices, used to suppress identical cold events.
+    pub(in crate::client) published_recall_destinations: Vec<recall::RecallDestination>,
+    /// Last published social admission level; snapshots read the world directly.
+    pub(in crate::client) published_social_motion_ready: bool,
+    /// Last character-motion capability level projected on the current event baseline.
+    pub(in crate::client) published_character_motion_capabilities:
+        PublishedCharacterMotionCapabilities,
+}
+
+impl ConnectionSessionState {
+    pub(in crate::client) fn with_state(state: ClientState) -> Self {
+        Self {
+            state,
+            authenticating: false,
+            world_generation: 0,
+            world_name: None,
+            exit_outcome: None,
+            message_counter: 0,
+            coalesced_dynamic_entity_upserts: None,
+            published_map_teleport_capability: false,
+            published_recall_destinations: Vec::new(),
+            published_social_motion_ready: false,
+            published_character_motion_capabilities:
+                PublishedCharacterMotionCapabilities::Unpublished,
+        }
+    }
+}
+
+/// Character-session state cleared atomically when a character retires or disconnects.
+#[derive(Default)]
+pub(in crate::client) struct CharacterSessionState {
+    /// Character whose PlayerDescription established complete spell knowledge and options.
+    pub(in crate::client) described_character: Option<Guid>,
+    /// Character-scoped game-event delivery, before decoding and world mutation.
+    pub(in crate::client) event_ordering: Option<event_ordering::GameEventOrdering>,
+    /// Character advancement admission and duplicate suppression for this runtime.
+    pub(in crate::client) progression: progression::ProgressionState,
+    pub(in crate::client) active_confirmation: Option<ActiveCharacterConfirmation>,
+    /// Pending complete home query, independent of inventory busy operations.
+    pub(in crate::client) housing_query_deadline: Option<Instant>,
+    /// Outstanding allegiance profile read; domain logic lives in allegiance.
+    pub(in crate::client) allegiance_query_deadline: Option<Instant>,
+    /// Serialized read-only access/search admission, independent of inventory mutation.
+    pub(in crate::client) housing_queries: housing_queries::HousingQueries,
+    /// Cached narrow entity records and pending semantic invalidation.
+    pub(in crate::client) entity_facts: entity_facts::EntityFactsPublication,
+    /// Retained complete player visual, invalidated only by cold accepted changes.
+    pub(in crate::client) player_visual: player_visual::PlayerVisualPublication,
+    /// Authority-retained salvage review bound to a monotonic preview revision.
+    pub(in crate::client) salvage_approval: salvage::SalvageApproval,
+    pub(in crate::client) active_busy_operation: Option<PendingBusyOperation>,
+    /// Direct-use evidence outlives admission because sound and UseDone arrive independently.
+    pub(in crate::client) lock_use: Option<lock_feedback::LockUse>,
+    /// Close acknowledgements outstanding after local access has been revoked.
+    pub(in crate::client) closing_containers: std::collections::BTreeMap<Guid, Instant>,
+    /// Bounded successful-open history used only by corpse-selection conveniences.
+    pub(in crate::client) opened_corpses: world_container::OpenedCorpseHistory,
+    /// Bounded approximate death locations for this character session.
+    pub(in crate::client) recent_deaths: corpse::RecentDeaths,
+    /// Outstanding P2P item acknowledgments shared by all frontends.
+    pub(in crate::client) trade_additions: HashMap<Guid, Instant>,
+    /// Character-bound inspection inputs and their publication revision.
+    pub(in crate::client) spell_inspection: spell_inspection::SpellInspectionState,
+    /// Retains ordered script and sound cues that precede entity creation.
+    pub(in crate::client) entity_cue_inbox: entity_cues::ClientEntityCueInbox,
+}
+
+/// Portal-epoch transient state cleared whenever a world activation or portal transition begins.
+#[derive(Default)]
+pub(in crate::client) struct PortalResyncState {
+    /// One generation-scoped replacement transition. `None` means the active scene is continuous
+    /// (or the client has not selected a character yet).
+    pub(in crate::client) activation: Option<ClientWorldActivationRuntime>,
+    /// Ordinary-use intent authorizing one crystal-opening receipt, never a snapshot replay.
+    pub(in crate::client) housing_opening: Option<housing::HousingOpening>,
+    /// Single-item replacement owner, retaining its existing receipt-dependent progression.
+    pub(in crate::client) equipment_operation: Option<equipment_runtime::EquipmentOperation>,
+    /// One peace prerequisite plus bounded recent equipment-set error attribution.
+    pub(in crate::client) equipment_set: equipment_set::EquipmentSetState,
+    /// Latest silent posture request waiting for a confirmed peace stance.
+    pub(in crate::client) pending_rest_posture: Option<rest_posture::PendingRestPosture>,
+    /// One successfully sent stance request; mode updates retire it, never equipment receipts.
+    pub(in crate::client) pending_combat_mode:
+        Option<holtburger_protocol::messages::combat::CombatMode>,
+    /// Single owner of dependent inventory requests and their local admission.
+    pub(in crate::client) inventory_operation: Option<inventory_runtime::InventoryOperation>,
 }
 
 pub struct ClientRuntime {
@@ -219,81 +323,17 @@ pub struct ClientRuntime {
     /// Ordered diagnostic inputs; credentials and outgoing transport packets are excluded.
     #[cfg(feature = "runtime-fixture")]
     runtime_fixture: Option<runtime_fixture::RuntimeFixtureCapture>,
-    /// Last published cold map-teleport admission, for edge-only notification.
-    published_map_teleport_capability: bool,
-    /// Last published recall choices, used to suppress identical cold events.
-    published_recall_destinations: Vec<recall::RecallDestination>,
     pub session: Session,
     /// Shared traffic baseline and rates, independent of world replacement.
     connection: connection::ConnectionSampler,
     pub world: WorldState,
-    /// Character-scoped game-event delivery, before decoding and world mutation.
-    event_ordering: Option<event_ordering::GameEventOrdering>,
-    /// Character advancement admission and duplicate suppression for this runtime.
-    progression: progression::ProgressionState,
-    active_confirmation: Option<ActiveCharacterConfirmation>,
-    /// Pending complete home query, independent of inventory busy operations.
-    housing_query_deadline: Option<Instant>,
-    /// Outstanding allegiance profile read; domain logic lives in allegiance.
-    allegiance_query_deadline: Option<Instant>,
-    /// Ordinary-use intent authorizing one crystal-opening receipt, never a snapshot replay.
-    housing_opening: Option<housing::HousingOpening>,
-    /// Serialized read-only access/search admission, independent of inventory mutation.
-    housing_queries: housing_queries::HousingQueries,
-    /// Cached narrow entity records and pending semantic invalidation.
-    entity_facts: entity_facts::EntityFactsPublication,
-    /// Retained complete player visual, invalidated only by cold accepted changes.
-    player_visual: player_visual::PlayerVisualPublication,
     /// Single owner of IdentifyObject queueing, cooldown pacing, and delivery filtering.
     appraisal: appraisal::AppraisalSystem,
-    /// Authority-retained salvage review bound to a monotonic preview revision.
-    salvage_approval: salvage::SalvageApproval,
-    active_busy_operation: Option<PendingBusyOperation>,
-    /// Direct-use evidence outlives admission because sound and UseDone arrive independently.
-    lock_use: Option<lock_feedback::LockUse>,
-    /// Close acknowledgements outstanding after local access has been revoked.
-    closing_containers: std::collections::BTreeMap<Guid, Instant>,
-    /// Bounded successful-open history used only by corpse-selection conveniences.
-    opened_corpses: world_container::OpenedCorpseHistory,
-    /// Bounded approximate death locations for this character session.
-    recent_deaths: corpse::RecentDeaths,
-    /// Single-item replacement owner, retaining its existing receipt-dependent progression.
-    equipment_operation: Option<equipment_runtime::EquipmentOperation>,
-    /// One peace prerequisite plus bounded recent equipment-set error attribution.
-    equipment_set: equipment_set::EquipmentSetState,
-    /// Latest silent posture request waiting for a confirmed peace stance.
-    pending_rest_posture: Option<rest_posture::PendingRestPosture>,
-    /// Last published social admission level; snapshots read the world directly.
-    published_social_motion_ready: bool,
-    /// One successfully sent stance request; mode updates retire it, never equipment receipts.
-    pending_combat_mode: Option<holtburger_protocol::messages::combat::CombatMode>,
-    /// Outstanding P2P item acknowledgments shared by all frontends.
-    trade_additions: HashMap<Guid, Instant>,
-    /// Single owner of dependent inventory requests and their local admission.
-    inventory_operation: Option<inventory_runtime::InventoryOperation>,
-    state: ClientState,
-    /// Distinguishes the initial connected socket from a login request in flight.
-    authenticating: bool,
-    /// Monotonic world-generation edge used to invalidate presentation interpolation.
-    world_generation: u64,
-    /// Latest server-provided world name retained for replacement application snapshots.
-    world_name: Option<String>,
-    /// Character whose PlayerDescription established complete spell knowledge and options.
-    described_character: Option<Guid>,
-    /// Character-bound inspection inputs and their publication revision.
-    spell_inspection: spell_inspection::SpellInspectionState,
-    /// Terminal cause selected by the authority before it publishes `Exiting`.
-    exit_outcome: Option<ClientExitOutcome>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
-    /// Entity GUIDs queued for a single coalesced upsert while an active batch runs.
-    coalesced_dynamic_entity_upserts: Option<BTreeSet<Guid>>,
     /// Monotonic origin shared by focused dynamic-entity snapshots and deltas.
     dynamic_entity_time_origin: Instant,
-    /// Last character-motion capability level projected on the current event baseline.
-    published_character_motion_capabilities: PublishedCharacterMotionCapabilities,
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
     message_dump_dir: Option<std::path::PathBuf>,
-    message_counter: usize,
     movement: MovementSystem,
     /// Single owner of desired targeted combat and ACE repeat-sequence requests.
     combat_engagement: combat_engagement::CombatEngagementRuntime,
@@ -305,26 +345,24 @@ pub struct ClientRuntime {
     collision_coordinator: Option<collision::ClientCollisionCoordinator>,
     /// Prepares object-state script timelines off-turn and joins them to exact entity instances.
     dynamic_script_coordinator: Option<dynamic_script::ClientDynamicScriptCoordinator>,
-    /// Retains ordered script and sound cues that precede entity creation.
-    entity_cue_inbox: entity_cues::ClientEntityCueInbox,
     /// Resolves immutable visual profiles off-turn and publishes exact-generation envelopes.
     selection_envelope_coordinator: Option<selection_envelope::ClientSelectionEnvelopeCoordinator>,
     /// Whether the selected composition owns an asynchronous destination reveal product.
     requires_external_world_reveal: bool,
-    /// One generation-scoped replacement transition. `None` means the active scene is continuous
-    /// (or the client has not selected a character yet).
-    activation: Option<ClientWorldActivationRuntime>,
     /// Independently serviced camera consuming immutable authority publications.
     camera: ClientCameraService,
     /// Replaceable speculative aim work and ordered precise-jump commit state.
     precise_jump: precise_jump_runtime::PreciseJumpRuntime,
     character_selection: CharacterSelectionState,
     turbine_chat: TurbineChatState,
+    pub(in crate::client) conn: ConnectionSessionState,
+    pub(in crate::client) character: CharacterSessionState,
+    pub(in crate::client) portal: PortalResyncState,
 }
 
 /// Internal activation bookkeeping. Destination and prerequisite products stay private so a
 /// frontend cannot manufacture authority facts or observe an intermediate collision transaction.
-struct ClientWorldActivationRuntime {
+pub(in crate::client) struct ClientWorldActivationRuntime {
     generation: u64,
     phase: ClientWorldActivationPhase,
     player_guid: Guid,
@@ -370,27 +408,29 @@ impl ClientRuntime {
         &mut self,
         intent: holtburger_world::progression::ProgressionIntent,
     ) -> Result<ClientProgressionQuote, ClientProgressionUnavailable> {
-        if !matches!(self.state, ClientState::InWorld)
-            || self.activation.is_some()
-            || self.described_character != Some(self.world.player.guid)
+        if !matches!(self.conn.state, ClientState::InWorld)
+            || self.portal.activation.is_some()
+            || self.character.described_character != Some(self.world.player.guid)
         {
             return Err(ClientProgressionUnavailable::CharacterNotReady);
         }
-        if self.progression.reconcile(&self.world) {
+        if self.character.progression.reconcile(&self.world) {
             self.emit_character_sheet();
         }
-        self.progression.quote(&self.world, intent)
+        self.character.progression.quote(&self.world, intent)
     }
 
     /// Targets whose unchanged authoritative state already had one send attempt.
     pub fn guarded_progression_targets(&self) -> Vec<holtburger_world::progression::StatTarget> {
-        self.progression.guarded_targets(&self.world)
+        self.character.progression.guarded_targets(&self.world)
     }
 
     /// Returns the complete lifecycle projection without exposing the internal world state.
     pub fn lifecycle(&self) -> ClientLifecycleState {
-        match &self.state {
-            ClientState::Connected if self.authenticating => ClientLifecycleState::Authenticating,
+        match &self.conn.state {
+            ClientState::Connected if self.conn.authenticating => {
+                ClientLifecycleState::Authenticating
+            }
             ClientState::Connected => ClientLifecycleState::Connecting,
             ClientState::CharacterSelection => ClientLifecycleState::CharacterSelection {
                 rejection: self.character_selection.entry_rejection.clone(),
@@ -409,6 +449,7 @@ impl ClientRuntime {
                     .collect(),
             },
             ClientState::EnteringWorld => self
+                .portal
                 .activation
                 .as_ref()
                 .map(|activation| activation.lifecycle())
@@ -419,6 +460,7 @@ impl ClientRuntime {
                 ClientLifecycleState::InWorld
             }
             ClientState::InWorld => self
+                .portal
                 .activation
                 .as_ref()
                 .map(|activation| activation.lifecycle())
@@ -427,7 +469,7 @@ impl ClientRuntime {
                 }),
             ClientState::LoggingOut => ClientLifecycleState::LoggingOut,
             ClientState::Disconnected => ClientLifecycleState::Exiting {
-                outcome: self.exit_outcome.clone().unwrap_or(ClientExitOutcome {
+                outcome: self.conn.exit_outcome.clone().unwrap_or(ClientExitOutcome {
                     cause: ClientExitCause::ServerDisconnect,
                     failure: None,
                 }),
@@ -437,14 +479,16 @@ impl ClientRuntime {
 
     /// Availability is tied to description identity, never scene or lifecycle readiness.
     fn known_spell_ids(&self) -> Option<Vec<u32>> {
-        self.described_character
+        self.character
+            .described_character
             .filter(|&guid| guid == self.world.player.guid)
             .map(|_| self.world.player.spells.keys().copied().collect())
     }
 
     /// One coherent character level, stats, explanations, and guarded targets.
     fn character_sheet(&self) -> Option<Box<ClientCharacterSheet>> {
-        self.described_character
+        self.character
+            .described_character
             .filter(|&guid| guid == self.world.player.guid)
             .map(|_| {
                 Box::new(ClientCharacterSheet::from_world(
@@ -467,7 +511,7 @@ impl ClientRuntime {
         ClientApplicationSnapshot {
             barber: self.barber.snapshot(),
             character_management: self.character_selection.management.clone(),
-            player_visual_capture: self.player_visual.snapshot(),
+            player_visual_capture: self.character.player_visual.snapshot(),
             fellowship: self.world.fellowship.clone(),
             friends: self.world.friends.clone(),
             contracts: self.contracts_snapshot(),
@@ -479,7 +523,7 @@ impl ClientRuntime {
             connection: self.connection.snapshot(
                 Instant::now(),
                 self.session.last_recv_time,
-                matches!(self.state, ClientState::Disconnected),
+                matches!(self.conn.state, ClientState::Disconnected),
                 self.session.reliability().receive_gap,
             ),
             entity_collision_disabled: self
@@ -493,8 +537,8 @@ impl ClientRuntime {
                 .server_time
                 .as_ref()
                 .map(|_| self.world.current_server_time()),
-            world_generation: self.world_generation,
-            world_name: self.world_name.clone(),
+            world_generation: self.conn.world_generation,
+            world_name: self.conn.world_name.clone(),
             account_name: self.character_selection.account_name.clone(),
             player_name: self
                 .world
@@ -502,6 +546,7 @@ impl ClientRuntime {
                 .map(|entity| entity.name().to_string()),
             known_spells: self.known_spell_ids(),
             enchantments: self
+                .character
                 .described_character
                 .filter(|&guid| guid == self.world.player.guid)
                 .map(|_| {
@@ -511,6 +556,7 @@ impl ClientRuntime {
                         .resolved(std::time::Instant::now())
                 }),
             character_options: self
+                .character
                 .described_character
                 .filter(|&guid| guid == self.world.player.guid)
                 .map(|_| self.player_character_options()),
@@ -527,7 +573,7 @@ impl ClientRuntime {
             trade: self.trade_snapshot(),
             vendor: self.world.vendor.clone(),
             character_motion: self.character_motion_capabilities(),
-            active_confirmation: self.active_confirmation.clone(),
+            active_confirmation: self.character.active_confirmation.clone(),
             housing: self.housing_snapshot(),
             dynamic: DynamicEntitySnapshot::new(
                 self.dynamic_entity_host_time(),
@@ -535,7 +581,7 @@ impl ClientRuntime {
             ),
             entities: entity_facts::ClientEntitySnapshot::from_world_with_opened_at_origin(
                 &self.world,
-                self.opened_corpses.ids(),
+                self.character.opened_corpses.ids(),
                 self.dynamic_entity_time_origin,
             )
             .expect("accepted world relationships must produce an entity baseline"),
@@ -567,10 +613,10 @@ impl ClientRuntime {
     fn publish_character_motion_capabilities_if_changed(&mut self) {
         let capabilities = self.character_motion_capabilities();
         let publication = PublishedCharacterMotionCapabilities::Published(capabilities);
-        if self.published_character_motion_capabilities == publication {
+        if self.conn.published_character_motion_capabilities == publication {
             return;
         }
-        self.published_character_motion_capabilities = publication;
+        self.conn.published_character_motion_capabilities = publication;
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::CharacterMotionCapabilitiesUpdated { capabilities });
@@ -603,11 +649,12 @@ impl ClientRuntime {
         }
         self.stop_character_actions();
         if self
+            .conn
             .exit_outcome
             .as_ref()
             .is_none_or(|outcome| outcome.failure.is_none())
         {
-            self.exit_outcome = Some(ClientExitOutcome {
+            self.conn.exit_outcome = Some(ClientExitOutcome {
                 cause,
                 failure: None,
             });
@@ -620,9 +667,9 @@ impl ClientRuntime {
         self.world
             .motion_runtimes
             .retire_local_requests(self.world.player.guid);
-        self.world_generation = self.world_generation.saturating_add(1);
+        self.conn.world_generation = self.conn.world_generation.saturating_add(1);
         self.precise_jump.invalidate();
-        self.world_generation
+        self.conn.world_generation
     }
 
     /// Starts one generation-scoped replacement activation. The network/world authority keeps
@@ -633,14 +680,7 @@ impl ClientRuntime {
         cause: ClientWorldActivationState,
         player_guid: Guid,
     ) {
-        self.housing_opening = None;
-        self.reset_combat_engagement();
-        self.stop_inventory_operation(
-            "World lifecycle changed; the last request may still complete",
-        );
-        self.stop_equipment_change("World lifecycle changed; the last request may still complete");
-        self.equipment_set = Default::default();
-        self.pending_combat_mode = None;
+        self.retire_portal_epoch("World lifecycle changed; the last request may still complete");
         let generation = self.bump_world_generation();
         let phase = match cause {
             ClientWorldActivationState::InitialEntry => ClientWorldActivationPhase::InitialEntry,
@@ -648,7 +688,7 @@ impl ClientRuntime {
                 ClientWorldActivationPhase::TeleportAwaitingDestination
             }
         };
-        self.activation = Some(ClientWorldActivationRuntime {
+        self.portal.activation = Some(ClientWorldActivationRuntime {
             generation,
             phase,
             player_guid,
@@ -662,13 +702,7 @@ impl ClientRuntime {
             external_reveal_generation: (!self.requires_external_world_reveal)
                 .then_some(generation),
         });
-        self.movement.retire_movement_epoch();
-        self.reset_camera();
-        if let Some(coordinator) = self.collision_coordinator.as_mut() {
-            coordinator.invalidate();
-        }
-        self.state = ClientState::EnteringWorld;
-        self.send_status_event();
+        self.set_state(ClientState::EnteringWorld);
     }
 
     /// Starts an initial-entry activation after retiring the previous runtime scene. The reset is
@@ -692,7 +726,7 @@ impl ClientRuntime {
     /// generation. Stale or duplicate acknowledgements are harmless and never activate a newer
     /// destination.
     pub(super) async fn acknowledge_world_reveal(&mut self, generation: u64) -> anyhow::Result<()> {
-        let Some(activation) = self.activation.as_mut() else {
+        let Some(activation) = self.portal.activation.as_mut() else {
             return Ok(());
         };
         if activation.generation != generation {
@@ -705,23 +739,23 @@ impl ClientRuntime {
     /// Re-evaluates the activation conjunction after a world/collision/content fact changes.
     /// This is deliberately the only path that can send ACE's `LoginComplete` action.
     pub(super) async fn try_complete_world_activation(&mut self) -> anyhow::Result<()> {
-        let Some(mut activation) = self.activation.take() else {
+        let Some(mut activation) = self.portal.activation.take() else {
             return Ok(());
         };
         if matches!(
             activation.phase,
             ClientWorldActivationPhase::TeleportAwaitingDestination
         ) {
-            self.activation = Some(activation);
+            self.portal.activation = Some(activation);
             return Ok(());
         }
 
         let Some(player) = self.world.player_entity() else {
-            self.activation = Some(activation);
+            self.portal.activation = Some(activation);
             return Ok(());
         };
         if player.guid != activation.player_guid || player.position.landblock_id == Guid::NULL {
-            self.activation = Some(activation);
+            self.portal.activation = Some(activation);
             return Ok(());
         }
 
@@ -743,7 +777,7 @@ impl ClientRuntime {
         }
 
         let Some(coordinator) = self.collision_coordinator.as_ref() else {
-            self.activation = Some(activation);
+            self.portal.activation = Some(activation);
             return Ok(());
         };
         let destination_scene_ready =
@@ -784,7 +818,7 @@ impl ClientRuntime {
                         ))
                     })?
                 {
-                    self.activation = Some(activation);
+                    self.portal.activation = Some(activation);
                     return Ok(());
                 }
                 self.handle_runtime_world_event(&WorldEvent::RuntimeBodyChanged { body_id });
@@ -828,7 +862,7 @@ impl ClientRuntime {
             && activation.camera_settlement == ClientActivationCameraSettlement::Settled
             && reveal_ready;
         if !presentation_ready {
-            self.activation = Some(activation);
+            self.portal.activation = Some(activation);
             return Ok(());
         }
 
@@ -841,9 +875,8 @@ impl ClientRuntime {
         }
         self.send_login_complete().await?;
         self.establish_attack_repeat_policy().await?;
-        self.activation = None;
-        self.state = ClientState::InWorld;
-        self.send_status_event();
+        self.portal.activation = None;
+        self.set_state(ClientState::InWorld);
         if initial_entry {
             self.query_home().await?;
             // Character entry retires the frontend's previous semantic baseline. Publish the
@@ -869,12 +902,13 @@ impl ClientRuntime {
         let _ =
             self.client_view_event_tx
                 .send(ClientViewEvent::ActiveCharacterConfirmationUpdated {
-                    confirmation: self.active_confirmation.clone(),
+                    confirmation: self.character.active_confirmation.clone(),
                 });
     }
 
     fn active_busy_operation(&self) -> Option<BusyOperationKind> {
-        self.active_busy_operation
+        self.character
+            .active_busy_operation
             .as_ref()
             .map(|pending| pending.operation.kind())
     }
@@ -882,6 +916,7 @@ impl ClientRuntime {
     /// Spell operation owns the resolved recipient; consumers never reconstruct it from selection.
     fn active_spell_cast_target(&self) -> Option<Guid> {
         match self
+            .character
             .active_busy_operation
             .as_ref()
             .map(|pending| &pending.operation)
@@ -1027,9 +1062,19 @@ impl ClientRuntime {
         self.command_rx = Some(rx);
     }
 
-    fn send_status_event(&mut self) {
-        self.poll_barber();
-        if matches!(self.state, ClientState::Disconnected)
+    pub(super) fn publish_status_update(&mut self) {
+        self.publish_map_teleport_capability();
+        self.publish_recall_destinations();
+        self.send_status_event();
+    }
+
+    pub(super) fn set_state(&mut self, next: ClientState) {
+        self.conn.state = next;
+        self.publish_status_update();
+    }
+
+    fn send_status_event(&self) {
+        if matches!(self.conn.state, ClientState::Disconnected)
             && let Some(sample) = self.connection.snapshot(
                 Instant::now(),
                 self.session.last_recv_time,
@@ -1041,46 +1086,14 @@ impl ClientRuntime {
                 .client_view_event_tx
                 .send(ClientViewEvent::ConnectionUpdated(sample));
         }
-        // Portal transitions retain answerable requests; leaving the character/session retires them.
-        if matches!(
-            self.state,
-            ClientState::Disconnected | ClientState::CharacterSelection
-        ) {
-            if self.progression.clear() {
-                self.emit_character_sheet();
-            }
-            self.recent_deaths.clear();
-            self.world.player.character_titles = None;
-            self.reset_friends();
-            self.reset_contracts();
-            self.reset_squelch();
-            self.reset_allegiance();
-            self.world.fellowship = None;
-            self.emit_fellowship_state_updated();
-            self.reset_container_access();
-            self.reset_housing();
-            self.trade_additions.clear();
-            self.entity_cue_inbox.clear();
-            if let Some(coordinator) = self.collision_coordinator.as_mut() {
-                coordinator.reset_entity_collision_override(&mut self.world);
-            }
-            let _ = self
-                .client_view_event_tx
-                .send(ClientViewEvent::EntityCollisionDisabled(false));
-            if self.active_confirmation.take().is_some() {
-                self.emit_active_character_confirmation_updated();
-            }
-        }
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::StatusUpdate {
-                state: self.state.clone(),
+                state: self.conn.state.clone(),
             });
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::LifecycleChanged(self.lifecycle()));
-        self.publish_map_teleport_capability();
-        self.publish_recall_destinations();
         // Swear admission includes lifecycle, so portal return must republish it
         // even when no new profile arrives and initial-entry recovery is skipped.
         self.emit_allegiance_snapshot();
@@ -1096,8 +1109,8 @@ impl ClientRuntime {
     /// Publish social admission before consumers observe the mode or motion that changed it.
     fn publish_social_motion_readiness(&mut self) {
         let ready = self.world.player_social_motion_ready();
-        if ready != self.published_social_motion_ready {
-            self.published_social_motion_ready = ready;
+        if ready != self.conn.published_social_motion_ready {
+            self.conn.published_social_motion_ready = ready;
             let _ = self
                 .client_view_event_tx
                 .send(ClientViewEvent::SocialMotionReadyUpdated { ready });
@@ -1174,7 +1187,7 @@ impl ClientRuntime {
     fn finish_character_world_events(&mut self, sheet_changed: bool) {
         self.publish_map_teleport_capability();
         self.publish_recall_destinations();
-        if self.progression.reconcile(&self.world) || sheet_changed {
+        if self.character.progression.reconcile(&self.world) || sheet_changed {
             self.emit_character_sheet();
         }
     }
@@ -1182,8 +1195,8 @@ impl ClientRuntime {
     fn emit_world_view_projection(&mut self, event: &WorldEvent) {
         self.appraisal.observe_world_event(event);
         self.emit_settled_appraisal_facts();
-        self.entity_facts.observe(event);
-        self.player_visual.observe(&self.world, event);
+        self.character.entity_facts.observe(event);
+        self.character.player_visual.observe(&self.world, event);
         match event {
             WorldEvent::PlayerEnchantmentsUpdated => {
                 let _ =
@@ -1211,7 +1224,7 @@ impl ClientRuntime {
                     .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
             }
             WorldEvent::PlayerSpellsChanged(spell_ids)
-                if self.described_character == Some(self.world.player.guid) =>
+                if self.character.described_character == Some(self.world.player.guid) =>
             {
                 let _ = self
                     .client_view_event_tx
@@ -1305,7 +1318,7 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityHealthUpdated {
                         guid: *guid,
-                        world_generation: self.world_generation,
+                        world_generation: self.conn.world_generation,
                         instance_sequence: *instance_sequence,
                         health_fraction: *health_fraction,
                         observed_at: self.dynamic_entity_host_time_at(*observed_at),
@@ -1320,7 +1333,7 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityCombatObserved {
                         guid: *guid,
-                        world_generation: self.world_generation,
+                        world_generation: self.conn.world_generation,
                         instance_sequence: *instance_sequence,
                         observed_at: self.dynamic_entity_host_time_at(*observed_at),
                     });
@@ -1537,10 +1550,10 @@ impl ClientRuntime {
             WorldEvent::CombatModeUpdated(mode) => {
                 // ACE reports peace when a requested combat family is unavailable. Otherwise
                 // only the requested mode settles admission; unrelated modes cannot retire it.
-                if self.pending_combat_mode == Some(*mode)
+                if self.portal.pending_combat_mode == Some(*mode)
                     || *mode == holtburger_protocol::messages::combat::CombatMode::NonCombat
                 {
-                    self.pending_combat_mode = None;
+                    self.portal.pending_combat_mode = None;
                 }
                 let _ = self
                     .client_view_event_tx
@@ -1556,7 +1569,9 @@ impl ClientRuntime {
             WorldEvent::VendorCatalogUpdated => self.emit_vendor_state_updated(),
             WorldEvent::FriendsStateUpdated => self.emit_friends_state_updated(),
             WorldEvent::ContractsStateUpdated => self.emit_contracts_state_updated(),
-            WorldEvent::ContractMembershipChanged(change) if self.state == ClientState::InWorld => {
+            WorldEvent::ContractMembershipChanged(change)
+                if self.conn.state == ClientState::InWorld =>
+            {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ContractMembershipChanged(change.clone()));
@@ -1572,7 +1587,7 @@ impl ClientRuntime {
                         fellowship: fellowship.clone(),
                     });
             }
-            WorldEvent::FellowshipActivity(activity) if self.state == ClientState::InWorld => {
+            WorldEvent::FellowshipActivity(activity) if self.conn.state == ClientState::InWorld => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::FellowshipActivity {
@@ -3825,7 +3840,7 @@ mod tests {
             }
         );
 
-        client.state = ClientState::InWorld;
+        client.conn.state = ClientState::InWorld;
         client.world.player.guid = Guid(0x5000_0002);
         let snapshot = client.application_snapshot();
         assert_eq!(snapshot.lifecycle, ClientLifecycleState::InWorld);
@@ -3902,6 +3917,7 @@ mod tests {
 
         assert!(matches!(
             client
+                .portal
                 .activation
                 .as_ref()
                 .map(|activation| activation.phase),
@@ -4923,7 +4939,7 @@ mod tests {
         );
         client.poll_busy_timeout(Instant::now() + BUSY_OPERATION_TIMEOUT + Duration::from_secs(1));
 
-        assert!(client.active_busy_operation.is_none());
+        assert!(client.character.active_busy_operation.is_none());
 
         let mut saw_busy_clear = false;
         let mut saw_timeout = false;
@@ -4956,7 +4972,7 @@ mod tests {
         );
 
         assert!(matches!(
-            client.active_busy_operation,
+            client.character.active_busy_operation,
             Some(PendingBusyOperation {
                 operation: PendingOperation::UseWithTarget { spell_target: None },
                 ..

@@ -123,11 +123,11 @@ impl ClientRuntime {
         }
         self.cancel_rest_for_command(&cmd);
         if let ClientCommand::SubmitInventory { intent, .. } = &cmd {
-            self.equipment_set.supersede_item(intent.item);
+            self.portal.equipment_set.supersede_item(intent.item);
             if let crate::client::inventory_plan::InventoryTarget::Stack { guid, .. }
             | crate::client::inventory_plan::InventoryTarget::Pack { guid } = intent.target
             {
-                self.equipment_set.supersede_item(guid);
+                self.portal.equipment_set.supersede_item(guid);
             }
         }
         if self.inventory_change_pending() && inventory_command_requires_guard(&cmd) {
@@ -281,7 +281,7 @@ impl ClientRuntime {
                     .map(super::collision::ClientCollisionCoordinator::snapshot);
                 if let Some(evaluation) = self.precise_jump.submit_aim(
                     request,
-                    self.world_generation,
+                    self.conn.world_generation,
                     self.camera.identity(),
                     &self.world,
                     collision,
@@ -305,7 +305,7 @@ impl ClientRuntime {
             ClientCommand::CommitPreciseJump(request) => {
                 if let Some(feedback) = self.precise_jump.queue_commit(
                     request,
-                    self.world_generation,
+                    self.conn.world_generation,
                     self.camera.identity(),
                 ) {
                     let _ = self.client_view_event_tx.send(
@@ -405,14 +405,8 @@ impl ClientRuntime {
     }
 
     pub(super) async fn disconnect_with_cause(&mut self, cause: ClientExitCause) -> Result<()> {
-        self.reset_barber();
-        self.reset_camera();
-        self.set_exit_cause(cause);
         self.session.send_disconnect().await?;
-
-        self.state = ClientState::Disconnected;
-        self.send_status_event();
-
+        self.finish_disconnect(cause);
         Ok(())
     }
 
@@ -422,7 +416,7 @@ impl ClientRuntime {
             _ => None,
         };
         if let Some(mode) = requested_mode
-            && let Some(pending) = self.pending_combat_mode
+            && let Some(pending) = self.portal.pending_combat_mode
         {
             // Server behavior can omit a reply for a redundant combat request.
             // Keep one outstanding request rather than queue uncorrelatable confirmations.
@@ -451,7 +445,7 @@ impl ClientRuntime {
             && let Some(mode) = requested_mode
             && mode != self.world.player_combat_mode()
         {
-            self.pending_combat_mode = Some(mode);
+            self.portal.pending_combat_mode = Some(mode);
         }
         if result.is_err()
             && let Some(item) = transfer
@@ -467,7 +461,7 @@ impl ClientRuntime {
             return Ok(());
         }
         ensure!(
-            self.state == ClientState::CharacterSelection,
+            self.conn.state == ClientState::CharacterSelection,
             "Character operations require character selection."
         );
         self.character_selection.ensure_available()?;
@@ -521,7 +515,7 @@ impl ClientRuntime {
         }
         let result = match cmd {
             ClientCommand::Login(password) => {
-                self.authenticating = true;
+                self.conn.authenticating = true;
                 self.send_status_event();
                 log::info!("Attempting login...");
                 self.session
@@ -672,7 +666,7 @@ impl ClientRuntime {
                             self.client_view_event_tx
                                 .send(ClientViewEvent::LocalMotionFeedback {
                                     request_id,
-                                    world_generation: self.world_generation,
+                                    world_generation: self.conn.world_generation,
                                     outcome: holtburger_world::motion::LocalMotionOutcome::Refused,
                                 });
                     }
@@ -712,7 +706,7 @@ impl ClientRuntime {
                         .client_view_event_tx
                         .send(ClientViewEvent::LocalMotionFeedback {
                             request_id,
-                            world_generation: self.world_generation,
+                            world_generation: self.conn.world_generation,
                             outcome: holtburger_world::motion::LocalMotionOutcome::Unsupported,
                         });
                 }
@@ -742,7 +736,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn advance_appraisals(&mut self, now: Instant) -> Result<()> {
-        if !matches!(self.state, ClientState::InWorld) {
+        if !matches!(self.conn.state, ClientState::InWorld) {
             return Ok(());
         }
         let mut to_send = Vec::new();
@@ -861,8 +855,8 @@ impl ClientRuntime {
                 title_id,
             } => {
                 if character != self.world.player.guid
-                    || self.described_character != Some(character)
-                    || !matches!(self.state, ClientState::InWorld)
+                    || self.character.described_character != Some(character)
+                    || !matches!(self.conn.state, ClientState::InWorld)
                 {
                     self.emit_action_result(
                         ActionResultSource::Client,
@@ -919,6 +913,7 @@ impl ClientRuntime {
                 accepted,
             } => {
                 let Some(confirmation) = self
+                    .character
                     .active_confirmation
                     .clone()
                     .filter(|request| request.request_id == request_id)
@@ -948,7 +943,7 @@ impl ClientRuntime {
                 )))
                 .await?;
 
-                self.active_confirmation = None;
+                self.character.active_confirmation = None;
                 self.emit_active_character_confirmation_updated();
                 Ok(())
             }
@@ -965,26 +960,28 @@ impl ClientRuntime {
 
     async fn submit_progression(&mut self, submitted: ClientProgressionQuote) -> Result<()> {
         let intent = submitted.quote.intent;
-        let reject = if !matches!(self.state, ClientState::InWorld)
-            || self.activation.is_some()
-            || self.described_character != Some(self.world.player.guid)
+        let reject = if !matches!(self.conn.state, ClientState::InWorld)
+            || self.portal.activation.is_some()
+            || self.character.described_character != Some(self.world.player.guid)
         {
             Some(ClientProgressionRejection::CharacterNotReady)
         } else {
             None
         };
-        let quote =
-            match reject.map_or_else(|| self.progression.validate(&self.world, submitted), Err) {
-                Ok(quote) => quote,
-                Err(reason) => {
-                    let _ = self
-                        .client_view_event_tx
-                        .send(ClientViewEvent::ProgressionFeedback(
-                            ClientProgressionFeedback::Rejected { intent, reason },
-                        ));
-                    return Ok(());
-                }
-            };
+        let quote = match reject.map_or_else(
+            || self.character.progression.validate(&self.world, submitted),
+            Err,
+        ) {
+            Ok(quote) => quote,
+            Err(reason) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ProgressionFeedback(
+                        ClientProgressionFeedback::Rejected { intent, reason },
+                    ));
+                return Ok(());
+            }
+        };
 
         let action = match intent {
             ProgressionIntent::Raise {
@@ -1025,7 +1022,7 @@ impl ClientRuntime {
                 }))
             }
         };
-        self.progression.guard(quote);
+        self.character.progression.guard(quote);
         self.emit_character_sheet();
         match self.send_game_action(action).await {
             Ok(()) => {
@@ -1055,7 +1052,9 @@ impl ClientRuntime {
     async fn handle_movement_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
             ClientCommand::DriveSelf(intent) => {
-                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                if self.portal.activation.is_some()
+                    || !matches!(self.conn.state, ClientState::InWorld)
+                {
                     // Activation owns the input boundary. A stale held-drive edge must not be
                     // replayed after the destination handoff, and it is not a runtime failure.
                     return Ok(());
@@ -1068,7 +1067,9 @@ impl ClientRuntime {
                 Ok(())
             }
             ClientCommand::ControlCharacter(event) => {
-                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                if self.portal.activation.is_some()
+                    || !matches!(self.conn.state, ClientState::InWorld)
+                {
                     return Ok(());
                 }
                 self.movement.enqueue_character_motion_event(event);
@@ -1081,7 +1082,9 @@ impl ClientRuntime {
     async fn handle_camera_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
             ClientCommand::StartClientCamera(request) => {
-                if self.activation.is_none() && !matches!(self.state, ClientState::InWorld) {
+                if self.portal.activation.is_none()
+                    && !matches!(self.conn.state, ClientState::InWorld)
+                {
                     return Ok(());
                 }
                 let receipt = self.start_camera(request)?;
@@ -1093,13 +1096,17 @@ impl ClientRuntime {
                 Ok(())
             }
             ClientCommand::SetClientCameraIntent(request) => {
-                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                if self.portal.activation.is_some()
+                    || !matches!(self.conn.state, ClientState::InWorld)
+                {
                     return Ok(());
                 }
                 self.set_camera_intent(request).map(|_| ())
             }
             ClientCommand::SetClientCameraClearance(request) => {
-                if self.activation.is_some() || !matches!(self.state, ClientState::InWorld) {
+                if self.portal.activation.is_some()
+                    || !matches!(self.conn.state, ClientState::InWorld)
+                {
                     return Ok(());
                 }
                 self.set_camera_clearance(request).map(|_| ())
@@ -1146,7 +1153,7 @@ impl ClientRuntime {
             ClientCommand::Disconnect | ClientCommand::Quit => {
                 log::info!("Disconnecting...");
                 // First attempt a graceful logout from the world
-                if matches!(self.state, ClientState::InWorld) {
+                if matches!(self.conn.state, ClientState::InWorld) {
                     let _ = self
                         .session
                         .send_message(&GameMessage::CharacterLogOff)
@@ -1252,7 +1259,7 @@ mod tests {
             events.try_recv().unwrap(),
             ClientViewEvent::ChatError { .. }
         ));
-        assert!(matches!(client.state, ClientState::InWorld));
+        assert!(matches!(client.conn.state, ClientState::InWorld));
         client
             .handle_command(ClientCommand::ChannelMessage {
                 channel: ChatChannelDestination::AllegianceBroadcast,
@@ -1270,7 +1277,7 @@ mod tests {
         client
             .world
             .seed_local_player_entity(character, "Player", WorldPosition::default());
-        client.described_character = Some(character);
+        client.character.described_character = Some(character);
         client.world.player.character_titles = Some([1].into_iter().collect());
         client.world.set_player_character_title(1);
         let mut views = client.subscribe_client_view_events();
@@ -1317,7 +1324,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 1);
-        client.state = ClientState::EnteringWorld;
+        client.conn.state = ClientState::EnteringWorld;
         client
             .handle_command(ClientCommand::SetCharacterTitle {
                 character,
@@ -1326,10 +1333,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 1);
-        client.state = ClientState::Disconnected;
-        client.send_status_event();
+        client.finish_disconnect(crate::ClientExitCause::ExplicitDisconnect);
         assert!(client.world.player.character_titles.is_none());
-        assert!(client.character_sheet().unwrap().title_selection.is_none());
+        assert!(client.character_sheet().is_none());
     }
 
     #[tokio::test]
@@ -1381,14 +1387,14 @@ mod tests {
             client.world.player_int_property(PropertyInt::CombatMode),
             None
         );
-        client.state = ClientState::EnteringWorld;
+        client.conn.state = ClientState::EnteringWorld;
         client
             .handle_command(ClientCommand::ToggleCombatMode)
             .await
             .unwrap();
         assert_eq!(client.session.game_action_sequence, 0);
 
-        client.state = ClientState::InWorld;
+        client.conn.state = ClientState::InWorld;
         assert!(
             client.arm_busy_operation(crate::client::PendingOperation::Use { source: Guid::NULL })
         );
@@ -1404,6 +1410,7 @@ mod tests {
         );
         assert_eq!(
             client
+                .character
                 .active_busy_operation
                 .as_ref()
                 .unwrap()
@@ -1681,7 +1688,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(client.session.game_action_sequence, 0);
-            assert!(client.active_busy_operation.is_none());
+            assert!(client.character.active_busy_operation.is_none());
             assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
                 event,
                 ClientViewEvent::ActionResult { source: ActionResultSource::Client, reason: ActionResultReason::General(message) } if message == expected
@@ -1694,7 +1701,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(client.session.game_action_sequence, 1);
-            assert!(client.active_busy_operation.is_some());
+            assert!(client.character.active_busy_operation.is_some());
             client
                 .handle_command(ClientCommand::Use {
                     guid,
@@ -1756,7 +1763,7 @@ mod tests {
             let current =
                 ActiveCharacterConfirmation::received(ConfirmationType::YesNo, 7, "New?".into());
             assert_ne!(old.request_id, current.request_id);
-            client.active_confirmation = Some(current.clone());
+            client.character.active_confirmation = Some(current.clone());
             assert_eq!(
                 client.application_snapshot().active_confirmation,
                 Some(current.clone())
@@ -1769,7 +1776,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(client.session.game_action_sequence, 0);
-            assert_eq!(client.active_confirmation, Some(current.clone()));
+            assert_eq!(client.character.active_confirmation, Some(current.clone()));
             client
                 .handle_command(ClientCommand::RespondToConfirmation {
                     request_id: current.request_id,
@@ -1796,15 +1803,13 @@ mod tests {
         let mut client = build_test_client();
         let confirmation =
             ActiveCharacterConfirmation::received(ConfirmationType::YesNo, 7, "Proceed?".into());
-        client.active_confirmation = Some(confirmation.clone());
-        client.state = ClientState::InWorld;
-        client.send_status_event();
+        client.character.active_confirmation = Some(confirmation.clone());
+        client.set_state(ClientState::InWorld);
         assert_eq!(
             client.application_snapshot().active_confirmation,
             Some(confirmation)
         );
-        client.state = ClientState::Disconnected;
-        client.send_status_event();
+        client.finish_disconnect(crate::ClientExitCause::ExplicitDisconnect);
         assert!(client.application_snapshot().active_confirmation.is_none());
     }
 
@@ -1812,7 +1817,7 @@ mod tests {
     async fn respond_to_confirmation_uses_active_confirmation_state() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.active_confirmation = Some(ActiveCharacterConfirmation {
+        client.character.active_confirmation = Some(ActiveCharacterConfirmation {
             request_id: 1,
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 0xDEADBEEF,
@@ -1829,7 +1834,7 @@ mod tests {
 
         assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.session.bytes_out > 0);
-        assert!(client.active_confirmation.is_none());
+        assert!(client.character.active_confirmation.is_none());
 
         let mut saw_clear = false;
         while let Ok(event) = events.try_recv() {
@@ -1872,7 +1877,7 @@ mod tests {
 
         client.world.player.guid = player_guid;
         client.world.set_local_player_runtime_pose(player_pose);
-        client.state = ClientState::CharacterSelection;
+        client.conn.state = ClientState::CharacterSelection;
         client.character_selection.characters = vec![CharacterEntry {
             guid: player_guid,
             name: "Player".to_string(),
@@ -1898,7 +1903,7 @@ mod tests {
         }
 
         assert!(saw_reset);
-        assert!(matches!(client.state, ClientState::EnteringWorld));
+        assert!(matches!(client.conn.state, ClientState::EnteringWorld));
     }
 
     #[tokio::test]
@@ -2142,7 +2147,7 @@ mod tests {
                 }
             ]
         );
-        assert!(matches!(client.state, ClientState::InWorld));
+        assert!(matches!(client.conn.state, ClientState::InWorld));
     }
 
     #[tokio::test]
@@ -2420,7 +2425,7 @@ mod tests {
             )))
             .await
             .unwrap();
-        assert_eq!(client.state, ClientState::Connected);
+        assert_eq!(client.conn.state, ClientState::Connected);
         assert_eq!(client.session.bytes_out, 0);
         assert!(matches!(
             client.application_snapshot().character_management,
@@ -2430,7 +2435,7 @@ mod tests {
             }
         ));
 
-        client.state = ClientState::CharacterSelection;
+        client.conn.state = ClientState::CharacterSelection;
         client.character_selection.max_slots = 0;
         client
             .handle_command(ClientCommand::CreateCharacter(Box::new(
@@ -2438,7 +2443,7 @@ mod tests {
             )))
             .await
             .unwrap();
-        assert_eq!(client.state, ClientState::CharacterSelection);
+        assert_eq!(client.conn.state, ClientState::CharacterSelection);
         assert_eq!(client.session.bytes_out, 0);
         assert!(matches!(
             client.application_snapshot().character_management,
@@ -2464,7 +2469,7 @@ mod tests {
             assert_eq!(client.application_snapshot().character_management, pending);
         }
         assert_eq!(client.session.bytes_out, 0);
-        assert_eq!(client.state, ClientState::CharacterSelection);
+        assert_eq!(client.conn.state, ClientState::CharacterSelection);
     }
 
     #[tokio::test]
@@ -2591,7 +2596,7 @@ mod tests {
 
         assert_eq!(client.session.game_action_sequence, 1);
         assert!(matches!(
-            client.active_busy_operation,
+            client.character.active_busy_operation,
             Some(crate::client::PendingBusyOperation {
                 operation: crate::client::PendingOperation::Use { source: Guid(42) },
                 ..

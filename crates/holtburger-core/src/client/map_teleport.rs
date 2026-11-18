@@ -63,8 +63,8 @@ impl ClientRuntime {
 
     pub(super) fn publish_map_teleport_capability(&mut self) {
         let allowed = self.can_teleport_from_map();
-        if allowed != self.published_map_teleport_capability {
-            self.published_map_teleport_capability = allowed;
+        if allowed != self.conn.published_map_teleport_capability {
+            self.conn.published_map_teleport_capability = allowed;
             let _ = self
                 .client_view_event_tx
                 .send(ClientViewEvent::MapTeleportCapabilityChanged(allowed));
@@ -152,7 +152,7 @@ mod tests {
         assert!(!ordinary.application_snapshot().can_teleport_from_map);
 
         let mut privileged = client(Some(PropertyBool::IsAdmin));
-        privileged.state = ClientState::EnteringWorld;
+        privileged.conn.state = ClientState::EnteringWorld;
         privileged
             .handle_command(ClientCommand::TeleportToMapPosition(destination()))
             .await

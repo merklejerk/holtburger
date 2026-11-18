@@ -55,7 +55,7 @@ impl ClientRuntime {
         name: String,
         scope: SquelchScope,
     ) -> Result<()> {
-        if self.state != ClientState::InWorld {
+        if self.conn.state != ClientState::InWorld {
             bail!("Ignores can only be changed while in world");
         }
         let name = name.trim();
@@ -97,7 +97,7 @@ mod tests {
         let player = Guid(0x50000001);
         client.character_selection.character_id = Some(player);
         client.begin_world_entry_transition().await.unwrap();
-        client.state = ClientState::EnteringWorld;
+        client.conn.state = ClientState::EnteringWorld;
         assert_eq!(
             client.application_snapshot().squelch,
             Some(SquelchState::default())
@@ -128,16 +128,16 @@ mod tests {
         assert!(
             matches!(receiver.try_recv().unwrap(), ClientViewEvent::SquelchStateUpdated { squelch: Some(db) } if db == accepted)
         );
-        client.state = ClientState::InWorld;
+        client.set_state(ClientState::InWorld);
         client.bump_world_generation();
-        client.send_status_event();
+        client.publish_status_update();
         assert_eq!(client.application_snapshot().squelch, Some(accepted));
-        client.state = ClientState::Disconnected;
-        client.send_status_event();
+        client.finish_disconnect(crate::ClientExitCause::ExplicitDisconnect);
         assert!(client.application_snapshot().squelch.is_none());
         client.handle_message(&bytes).await.unwrap();
         assert!(client.application_snapshot().squelch.is_none());
-        client.state = ClientState::EnteringWorld;
+        client.conn.state = ClientState::EnteringWorld;
+        client.character_selection.character_id = Some(player);
         client.begin_world_entry_transition().await.unwrap();
         assert_eq!(
             client.application_snapshot().squelch,
@@ -157,7 +157,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        client.state = ClientState::InWorld;
+        client.conn.state = ClientState::InWorld;
         assert!(
             client
                 .handle_command(ClientCommand::AddIgnore {

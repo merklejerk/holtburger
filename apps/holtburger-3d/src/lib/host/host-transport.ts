@@ -1,21 +1,21 @@
 import type { ClientLocalMotionFeedback } from "../../client/client-host-contract";
-import type { ClientLockFeedback } from "../../client/client-lock-feedback-contract";
+import type { ClientLockFeedback } from "../../client/client-lock-feedback";
 import type {
 	SalvagePreviewResult,
 	SalvageSubmitResult,
-} from "../../client/client-salvage-contract";
+} from "../../client/client-salvage-state";
 import type { PlayerVisualCapture } from "../../client/client-object-preview-contract";
-import type { DeathLocationResult } from "../../client/client-death-contract";
+import type { DeathLocationResult } from "../../client/client-death-commands";
 import type { ClientCombatOutcome } from "../../client/client-host-contract";
 import type { CharacterManagementState } from "../../client/client-host-contract";
 import type {
 	ContractsSnapshot,
 	ContractMembershipChange,
-} from "../../client/client-contracts-contract";
-import type { AllegianceSnapshot } from "../../client/client-allegiance-contract";
-import type { SquelchSnapshot } from "../../client/client-squelch-contract";
-import type { FriendsSnapshot } from "../../client/client-friends-contract";
-import type { PartySnapshot } from "../../client/client-party-contract";
+} from "../../client/client-contracts-state";
+import type { AllegianceSnapshot } from "../../client/client-allegiance-state";
+import type { SquelchSnapshot } from "../../client/client-squelch-state";
+import type { FriendsSnapshot } from "../../client/client-friends-state";
+import type { PartySnapshot } from "../../client/client-party-state";
 import type {
 	HousingSnapshot,
 	HousingCrystal,
@@ -23,28 +23,28 @@ import type {
 	HousingPaymentResult,
 	HousingManagementResult,
 } from "../../client/client-housing-contract";
-import type { TradeSnapshot } from "../../client/client-trade-contract";
+import type { TradeSnapshot } from "../../client/client-trade-state";
 import type {
 	BarberSnapshot,
 	BarberPreview,
-} from "../../client/client-barber-contract";
+} from "../../client/client-barber-state";
 import type {
 	VendorSnapshot,
 	VendorPreview,
 	VendorResult,
 	VendorPhase,
-} from "../../client/client-vendor-contract";
+} from "../../client/client-vendor-state";
 import type {
 	SpellInspectionContext,
 	SpellInspectionResult,
-} from "../../client/client-spell-inspection-contract";
+} from "../../client/client-spells";
 import type {
 	ClientItemUseResult,
 	ClientItemUseFinished,
 	ClientLockedTarget,
 	ClientItemUseTargetResult,
-} from "../../client/client-item-use-contract";
-import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
+} from "../../client/client-item-use-sequence";
+import type { ClientInventoryPreviewResult } from "../../client/client-inventory-state";
 import type { ClientEntityDelta } from "../../client/client-entity-mirror";
 import type {
 	CharacterSheet,
@@ -55,7 +55,7 @@ import type { ObjectInspectionResult } from "../../client/client-object-inspecti
 import type {
 	ClientBook,
 	ClientBookOpened,
-} from "../../client/client-book-contract";
+} from "../../client/client-book-reader";
 import type { ObjectPreviewResult } from "../../client/client-object-preview-contract";
 import type { DynamicEntityEvent } from "../game/runtime/dynamic-entity-feed";
 import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";

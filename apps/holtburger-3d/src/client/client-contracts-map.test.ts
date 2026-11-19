@@ -5,11 +5,11 @@ import {
 	contractMapTooltips,
 } from "./client-contracts-map";
 import {
+	ClientContractsState,
 	contractsUpdatedSchema,
 	type ContractRow,
-} from "./client-contracts-contract";
-import { ClientContractsState } from "./client-contracts-state";
-import fixture from "../harness/browser/fixtures/contracts.json";
+} from "./client-contracts-state";
+import fixture from "./fixtures/contracts.json";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../lib/game/landblocks";
 import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
 

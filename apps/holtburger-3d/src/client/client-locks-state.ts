@@ -7,7 +7,6 @@ import type {
 } from "./client-lifecycle-session";
 import type { CharacterSheet } from "./client-character-sheet-contract";
 import type { ClientEntityFacts } from "./client-entity-mirror";
-import type { ClientItemUseFinished } from "./client-item-use-contract";
 import type {
 	EscapeContextHandle,
 	KeyboardInputPolicy,
@@ -15,6 +14,7 @@ import type {
 import {
 	allocateItemUseOperation,
 	lastAllocatedItemUseOperation,
+	type ClientItemUseFinished,
 } from "./client-item-use-sequence";
 
 /** Only the observed identity and shared command boundaries are required. */

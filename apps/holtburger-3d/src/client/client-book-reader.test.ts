@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BOOK_PAGE_TIMEOUT_MS, ClientBookReader } from "./client-book-reader";
-import type { ClientBook, ClientBookOpened } from "./client-book-contract";
+import {
+	BOOK_PAGE_TIMEOUT_MS,
+	ClientBookReader,
+	type ClientBook,
+	type ClientBookOpened,
+} from "./client-book-reader";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 
 function fixture() {

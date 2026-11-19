@@ -1,6 +1,8 @@
+import { z } from "zod";
 import { clientCommandHelp } from "./client-command-help";
 import { createLandblockWorldOrigin } from "../lib/game/landblocks";
 import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
+import { worldPositionSchema } from "../lib/game/runtime/dynamic-entity-feed";
 import type { ClientChatEntry } from "./client-chat-policy";
 import type {
 	LocalConfirmationRequest,
@@ -10,11 +12,35 @@ import type {
 	ClientLifecycleSession,
 	ClientLifecycleSessionEvent,
 } from "./client-lifecycle-session";
-import type {
-	CorpseConsentAction,
-	DeathLocationQuery,
-	DeathLocationResult,
-} from "./client-death-contract";
+
+/** On-demand queries over core-owned historical facts. */
+export type DeathLocationQuery = "last-outdoor" | "recent";
+/** Incoming permission operations; outgoing grants use their own action. */
+export type CorpseConsentAction =
+	| { readonly kind: "list" | "clear" }
+	| { readonly kind: "remove"; readonly playerName: string };
+
+export const deathLocationResultSchema = z
+	.object({
+		character: z.number().int().nonnegative().max(0xffffffff),
+		locations: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("last-outdoor"),
+					position: worldPositionSchema.nullable(),
+				})
+				.strict(),
+			z
+				.object({
+					kind: z.literal("recent"),
+					positions: z.array(worldPositionSchema.nullable()),
+				})
+				.strict(),
+		]),
+	})
+	.strict();
+/** The character identity retires stale responses without retaining frontend history. */
+export type DeathLocationResult = z.infer<typeof deathLocationResultSchema>;
 
 type DeathCommand =
 	| { readonly kind: "query"; readonly query: DeathLocationQuery }

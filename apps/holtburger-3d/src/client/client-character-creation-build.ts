@@ -1,12 +1,10 @@
 import {
 	CREATION_ATTRIBUTES,
-	type CharacterCreationCatalog,
-	type CharacterCreationDraft,
-} from "./client-character-creation-contract";
-import {
 	creationBuildBalance,
 	creationGender,
 	creationHeritage,
+	type CharacterCreationCatalog,
+	type CharacterCreationDraft,
 	type CreationAppearance,
 	type CreationHeritage,
 } from "./client-character-creation";

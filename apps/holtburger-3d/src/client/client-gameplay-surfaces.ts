@@ -32,7 +32,7 @@ import type { ClientFriendsState } from "./client-friends-state";
 import type {
 	ClientGameplayOption,
 	ClientGameplayPreferences,
-} from "./client-gameplay-options-contract";
+} from "./client-host-contract";
 import type { ClientGameplayPresentationDiagnostics } from "./client-gameplay-presentation";
 import type {
 	ClientAppearanceOption,

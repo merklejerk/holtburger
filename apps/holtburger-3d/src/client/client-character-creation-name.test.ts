@@ -3,7 +3,7 @@ import {
 	creationNameSchema,
 	MAX_CREATION_NAME_LENGTH,
 } from "./client-character-creation-name";
-import { characterCreationDraftSchema } from "./client-character-creation-contract";
+import { characterCreationDraftSchema } from "./client-character-creation";
 
 describe("creator name screening", () => {
 	it.each(["Amy", "Éowyn", "O'Brien", "Al-Mu'alim", "Lady Amy", "MiXeD CaSe"])(

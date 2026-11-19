@@ -1,8 +1,24 @@
 import { equipmentCantripStateSchema } from "../app/item-cantrip-contract.js";
-import { itemCooldownDefinitionSchema } from "./client-item-cooldowns-contract";
-import { salvageCandidateSchema } from "./client-salvage-contract";
+import { salvageCandidateSchema } from "./client-salvage-state";
 import { z } from "zod";
 import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../lib/game/map/map-blip-category";
+
+/** World-produced definition shared by entity facts and appraisal. */
+export const itemCooldownDefinitionSchema = z
+	.object({
+		groupId: z.number().int().positive().max(0xffff_ffff).nullable(),
+		durationSeconds: z.number().finite().nullable(),
+	})
+	.strict()
+	.readonly();
+
+/** Finite group countdown sampled with the enclosing enchantment snapshot. */
+export const groupCooldownSchema = z
+	.object({
+		groupId: z.number().int().min(0).max(0x7fff),
+		remainingSeconds: z.number().finite().nonnegative(),
+	})
+	.strict();
 
 /** Shared public tool identity and optional authored template bonus. */
 export const lockToolFactsSchema = z.discriminatedUnion("kind", [

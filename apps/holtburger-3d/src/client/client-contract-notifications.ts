@@ -1,4 +1,4 @@
-import type { ContractMembershipChange } from "./client-contracts-contract";
+import type { ContractMembershipChange } from "./client-contracts-state";
 import type { ClientToastScheduler } from "./client-toast-center";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 

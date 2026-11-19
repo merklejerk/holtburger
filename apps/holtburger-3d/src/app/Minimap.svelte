@@ -88,6 +88,8 @@
 	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
 	import {
 		captureMinimapGpuDrawState,
+		closestMinimapSelectionGuid,
+		minimapTargetDistance,
 		resizeMinimapBounds,
 		minimapViewDiameter,
 		sameMinimapGpuDrawState,
@@ -95,6 +97,7 @@
 		type MinimapResizeBounds,
 		type MinimapFooterExtent,
 		type MinimapGpuDrawState,
+		type MinimapSelectionHitTarget,
 		type MinimapState,
 		type MinimapGeometry,
 		type MinimapSubject,
@@ -113,11 +116,6 @@
 		type MinimapBreadcrumbTrail,
 	} from "./minimap-breadcrumb-trail";
 	import { drawMinimapBreadcrumbTrail } from "./minimap-breadcrumb-renderer";
-	import {
-		closestMinimapSelectionGuid,
-		minimapTargetDistance,
-		type MinimapSelectionHitTarget,
-	} from "./minimap-selection";
 	import {
 		MINIMAP_AUTOMATIC_REANCHOR_DISTANCE_METERS,
 		MINIMAP_BREADCRUMB_POLICY,

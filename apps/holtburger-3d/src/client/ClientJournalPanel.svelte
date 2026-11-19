@@ -3,7 +3,6 @@
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import ClientWaypointLink from "./ClientWaypointLink.svelte";
 	import { contractLocationWaypoint } from "./client-contracts-map";
-	import type { ContractLocation } from "./client-contracts-contract";
 	import AvailableIcon from "../assets/icons/contract-available.svg?component";
 	import CompletedIcon from "../assets/icons/contract-completed.svg?component";
 	import UnresolvedIcon from "../assets/icons/contract-unresolved.svg?component";
@@ -15,6 +14,7 @@
 		contractName,
 		type ClientContractsState,
 		type ContractFilter,
+		type ContractLocation,
 	} from "./client-contracts-state";
 	import {
 		contractLocationText,

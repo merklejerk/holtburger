@@ -1,14 +1,14 @@
 import { CLIENT_TUNING } from "./client-tuning";
-import { autoMergePolicySchema } from "./client-inventory-contract";
+import { autoMergePolicySchema } from "./client-inventory-state";
 import barberFixture from "./fixtures/barber-wire.json";
-import { ClientBarberState } from "./client-barber-state";
 import {
 	barberSnapshotSchema,
 	barberPreviewSchema,
 	barberRequestSchema,
+	ClientBarberState,
 	type BarberPreview,
-} from "./client-barber-contract";
-import gameplayPreferencesFixture from "../harness/browser/fixtures/gameplay-preferences.json";
+} from "./client-barber-state";
+import gameplayPreferencesFixture from "./fixtures/gameplay-preferences.json";
 import { playerVisualCaptureSchema } from "./client-object-preview-contract";
 import previewFixture from "./fixtures/object-preview-wire.json";
 import { persistPlayerVisualCapture } from "./client-visual-capture";
@@ -16,9 +16,9 @@ import {
 	resolvedJumpFixture,
 	predictedJumpFixture,
 } from "./client-precise-jump-fixtures";
-import type { PartySnapshot } from "./client-party-contract";
-import membershipFixture from "../harness/browser/fixtures/contract-membership.json";
-import { contractMembershipChangeSchema } from "./client-contracts-contract";
+import type { PartySnapshot } from "./client-party-state";
+import membershipFixture from "./fixtures/contract-membership.json";
+import { contractMembershipChangeSchema } from "./client-contracts-state";
 import housingPreviewWireFixture from "./fixtures/housing-preview-wire.json";
 import housingManagementWireFixture from "./fixtures/housing-management-wire.json";
 import housingWireFixture from "./fixtures/housing-wire.json";
@@ -30,12 +30,12 @@ import {
 	housingSnapshotSchema,
 	type HousingSnapshot,
 } from "./client-housing-contract";
-import { ClientVendorState } from "./client-vendor-state";
-import { UiIconRepository } from "../app/ui-icon-repository";
 import {
+	ClientVendorState,
 	vendorRequestSchema,
 	vendorSnapshotSchema,
-} from "./client-vendor-contract";
+} from "./client-vendor-state";
+import { UiIconRepository } from "../app/ui-icon-repository";
 import { baselineCurrentState } from "./client-host-contract.test-support";
 import {
 	emptyPlayerSummary,
@@ -52,7 +52,7 @@ import type {
 	ClientCurrentState,
 	ClientLifecycle,
 } from "./client-host-contract";
-import type { ResolvedEnchantments } from "./client-enchantments-contract";
+import type { ResolvedEnchantments } from "./client-enchantments-view";
 import {
 	ClientLifecycleSession,
 	type ClientLifecycleTransport,

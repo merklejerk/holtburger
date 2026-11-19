@@ -2293,7 +2293,7 @@ mod tests {
             .collect();
         rows.push(ContractRow::Unresolved { id: 99 });
         let fixture: Value = serde_json::from_str(include_str!(
-            "../../src/harness/browser/fixtures/contracts.json"
+            "../../src/client/fixtures/contracts.json"
         ))
         .unwrap();
         for (contracts, expected) in [
@@ -2323,7 +2323,7 @@ mod tests {
         use std::sync::mpsc;
 
         let fixture: Vec<Value> = serde_json::from_str(include_str!(
-            "../../src/harness/browser/fixtures/contract-membership.json"
+            "../../src/client/fixtures/contract-membership.json"
         ))
         .unwrap();
         for (change, expected) in [

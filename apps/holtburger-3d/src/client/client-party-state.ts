@@ -1,3 +1,4 @@
+import { z } from "zod";
 import equal from "fast-deep-equal";
 import type {
 	LocalDialogSource,
@@ -7,12 +8,66 @@ import type {
 	ClientLifecycleSession,
 	ClientLifecycleSessionEvent,
 } from "./client-lifecycle-session";
-import {
-	partyActionSchema,
-	type PartyAction,
-	type PartyPreferences,
-	type PartySnapshot,
-} from "./client-party-contract";
+
+const guid = z.number().int().positive().max(0xffff_ffff);
+const u32 = z.number().int().nonnegative().max(0xffff_ffff);
+/** Membership facts retained imperatively; vitals never enter the management reactive graph. */
+export const partySnapshotSchema = z
+	.object({
+		name: z.string(),
+		leader: guid.nullable(),
+		shareXp: z.boolean(),
+		evenShare: z.boolean(),
+		open: z.boolean(),
+		locked: z.boolean(),
+		/** World-owned actor permissions; frontend adds only local interaction gating. */
+		capabilities: z
+			.object({
+				isLeader: z.boolean(),
+				canRecruit: z.boolean(),
+				canChangeOpenness: z.boolean(),
+			})
+			.strict(),
+		members: z.array(
+			z
+				.object({
+					guid,
+					name: z.string(),
+					level: u32,
+					/** Shared permission to promote or dismiss this roster member. */
+					canManage: z.boolean(),
+					vitals: z.tuple([u32, u32, u32, u32, u32, u32]),
+				})
+				.strict(),
+		),
+	})
+	.strict();
+export type PartySnapshot = z.infer<typeof partySnapshotSchema>;
+/** Core mirrors these preferences after transport acceptance, without a server acknowledgement. */
+export const partyPreferencesSchema = z
+	.object({
+		shareXp: z.boolean(),
+		shareLoot: z.boolean(),
+		ignoreRequests: z.boolean(),
+	})
+	.strict();
+export type PartyPreferences = z.infer<typeof partyPreferencesSchema>;
+/** Explicit requested effects, independent of stale checkbox values. */
+export const partyActionSchema = z.discriminatedUnion("kind", [
+	z
+		.object({ kind: z.literal("create"), name: z.string().trim().min(1) })
+		.strict(),
+	...(["invite", "dismiss", "promote"] as const).map((kind) =>
+		z.object({ kind: z.literal(kind), target: guid }).strict(),
+	),
+	z.object({ kind: z.literal("leave") }).strict(),
+	z.object({ kind: z.literal("disband") }).strict(),
+	z.object({ kind: z.literal("openness"), open: z.boolean() }).strict(),
+	...(["shareXp", "shareLoot", "ignoreRequests"] as const).map((kind) =>
+		z.object({ kind: z.literal(kind), enabled: z.boolean() }).strict(),
+	),
+]);
+export type PartyAction = z.infer<typeof partyActionSchema>;
 
 /** A missing update ends local presentation, never retries the mutation. */
 export const PARTY_UPDATE_WAIT_MS = 5_000;

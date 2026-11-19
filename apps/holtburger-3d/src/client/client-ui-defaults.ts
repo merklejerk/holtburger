@@ -1,7 +1,7 @@
 import { SPELL_BAR_INDICES } from "./client-spell-bar-state.js";
 import { CLIENT_ACTION_BAR_TUNING } from "./client-tuning.js";
 import { COMBAT_GAUGE_SIZE } from "./client-combat-bar-state.js";
-import type { ClientUiDefaults } from "./client-ui-contract";
+import type { ClientUiDefaults } from "./client-hud-layout";
 
 /**
  * Initial client HUD arrangement, in logical UI units.

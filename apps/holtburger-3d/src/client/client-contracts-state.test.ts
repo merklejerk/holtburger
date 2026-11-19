@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { ClientContractsState } from "./client-contracts-state";
 import {
+	ClientContractsState,
 	contractsSnapshotSchema,
+	contractsUpdatedSchema,
 	type ContractRow,
-} from "./client-contracts-contract";
-import fixturePayload from "../harness/browser/fixtures/contracts.json";
-import { contractsUpdatedSchema } from "./client-contracts-contract";
+} from "./client-contracts-state";
+import fixturePayload from "./fixtures/contracts.json";
 import { contractLocationText } from "./client-contracts-view";
 
 function row(id: number): Extract<ContractRow, { kind: "resolved" }> {

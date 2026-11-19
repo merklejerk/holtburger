@@ -3,8 +3,7 @@ import { UiIconRepository } from "../app/ui-icon-repository";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
 import { entityFacts } from "./client-entity-mirror.test-support";
 import { baselineCurrentState } from "./client-host-contract.test-support";
-import { ClientTradeState } from "./client-trade-state";
-import type { TradeState } from "./client-trade-contract";
+import { ClientTradeState, type TradeState } from "./client-trade-state";
 
 const PLAYER = 1;
 const PARTNER = 2;

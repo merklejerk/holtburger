@@ -7,7 +7,7 @@ import {
 	type VendorCategory,
 	type VendorQuote,
 	type VendorSnapshot,
-} from "../../client/client-vendor-contract";
+} from "../../client/client-vendor-state";
 
 /** Synthetic vendor session data for the interactive UI showcase. */
 export function createVendorFixture(options: {

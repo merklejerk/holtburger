@@ -3,7 +3,7 @@ import type { ClientEntityFacts } from "../../client/client-entity-mirror";
 import {
 	salvagePreviewRequestSchema,
 	type SalvageEvaluation,
-} from "../../client/client-salvage-contract";
+} from "../../client/client-salvage-state";
 
 /** Synthetic salvage evaluation replies for the interactive UI showcase. */
 export function createSalvageFixture(options: {

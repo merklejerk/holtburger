@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import gameplayPreferencesFixture from "../harness/browser/fixtures/gameplay-preferences.json";
-import { ClientPartyState, PARTY_UPDATE_WAIT_MS } from "./client-party-state";
-import type {
-	PartyAction,
-	PartyPreferences,
-	PartySnapshot,
-} from "./client-party-contract";
+import gameplayPreferencesFixture from "./fixtures/gameplay-preferences.json";
+import {
+	ClientPartyState,
+	PARTY_UPDATE_WAIT_MS,
+	type PartyAction,
+	type PartyPreferences,
+	type PartySnapshot,
+} from "./client-party-state";
 import type {
 	ClientLifecycleSessionEvent,
 	ClientLifecycleSessionState,

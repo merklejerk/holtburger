@@ -3,8 +3,7 @@
 	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import UiOrdinalRange from "../app/UiOrdinalRange.svelte";
 	import BodyAppearanceColors from "./BodyAppearanceColors.svelte";
-	import type { BarberChoices } from "./client-barber-contract";
-	import type { ClientBarberState } from "./client-barber-state";
+	import type { BarberChoices, ClientBarberState } from "./client-barber-state";
 	import type {
 		ClientHudPlacement,
 		ClientHudViewport,

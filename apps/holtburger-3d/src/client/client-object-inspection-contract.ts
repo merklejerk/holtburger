@@ -1,7 +1,7 @@
-import { itemCooldownDefinitionSchema } from "./client-item-cooldowns-contract";
 import { z } from "zod";
 import {
 	clientIconAppearanceSchema,
+	itemCooldownDefinitionSchema,
 	lockToolFactsSchema,
 } from "./client-entity-mirror";
 

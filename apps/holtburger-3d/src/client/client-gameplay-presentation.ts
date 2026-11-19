@@ -16,7 +16,7 @@ import {
 	type EntityOverlayFrame,
 } from "../lib/game/renderer/entity-overlay-policy";
 import type { NameplateMode } from "./client-entity-overlays";
-import type { BarberPreview } from "./client-barber-contract";
+import type { BarberPreview } from "./client-barber-state";
 import type { DynamicPresentationOverride } from "../lib/game/runtime/dynamic-presentation-override";
 import {
 	abortError,

@@ -11,7 +11,7 @@ import {
 	nextInventoryPreviewSequence,
 	type ClientInventoryIntent,
 	type ClientInventoryPreviewResult,
-} from "./client-inventory-contract";
+} from "./client-inventory-state";
 import {
 	canPayCrystal,
 	canQueueVendor,

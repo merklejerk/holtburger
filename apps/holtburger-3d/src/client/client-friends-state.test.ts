@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ClientFriendsState,
 	FRIENDS_UPDATE_WAIT_MS,
+	type FriendsAction,
 } from "./client-friends-state";
-import type { FriendsAction } from "./client-friends-contract";
 
 const amy = { guid: 1, name: "Amy", online: false };
 const ben = { guid: 2, name: "Ben", online: true };

@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ClientSquelchState,
 	SQUELCH_UPDATE_WAIT_MS,
+	type SquelchAction,
+	type SquelchSnapshot,
 } from "./client-squelch-state";
-import type { SquelchAction, SquelchSnapshot } from "./client-squelch-contract";
 
 const amy = {
 	guid: 10,

@@ -14,7 +14,7 @@ import type {
 	ContractRow,
 	ContractsSnapshot,
 	ContractLocation,
-} from "./client-contracts-contract";
+} from "./client-contracts-state";
 
 /** One authored destination role; status does not choose the map glyph. */
 type ContractMapEntry = {

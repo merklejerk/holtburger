@@ -1,4 +1,5 @@
 import type { ResizeEdges } from "./resize-edges";
+import { pointToSegmentDistance2d } from "../lib/game/math/geometry-utils";
 import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapLandmarkCategory } from "../lib/game/map/map-blip-category";
 import type { MapWaypointDisplay } from "../lib/game/map/map-waypoint";
@@ -231,5 +232,53 @@ function sameGpuView(
 		left.anchorHeadingRadians === right.anchorHeadingRadians &&
 		left.anchorResidency?.landblockId === right.anchorResidency?.landblockId &&
 		left.anchorResidency?.envCellId === right.anchorResidency?.envCellId
+	);
+}
+
+/** Canvas-space identity used by minimap pointer hit testing. */
+export interface MinimapSelectionHitTarget {
+	readonly guid: number;
+	readonly x: number;
+	readonly y: number;
+	/** Door span endpoint; absence describes a point marker. */
+	readonly end?: { readonly x: number; readonly y: number };
+}
+
+/** Choose pointer distance first and GUID second so overlapping blips are deterministic. */
+export function closestMinimapSelectionGuid(
+	targets: readonly MinimapSelectionHitTarget[],
+	x: number,
+	y: number,
+	hitRadius: number,
+): number | null {
+	let closest: { readonly distance: number; readonly guid: number } | null =
+		null;
+	for (const target of targets) {
+		const distance = minimapTargetDistance(target, x, y);
+		if (distance > hitRadius) continue;
+		if (
+			closest === null ||
+			distance < closest.distance ||
+			(distance === closest.distance && target.guid < closest.guid)
+		)
+			closest = { distance, guid: target.guid };
+	}
+	return closest?.guid ?? null;
+}
+
+/** Shared distance for hover and selection, including the full visible length of a door. */
+export function minimapTargetDistance(
+	target: MinimapSelectionHitTarget,
+	x: number,
+	y: number,
+): number {
+	if (target.end === undefined) return Math.hypot(target.x - x, target.y - y);
+	return pointToSegmentDistance2d(
+		x,
+		y,
+		target.x,
+		target.y,
+		target.end.x,
+		target.end.y,
 	);
 }

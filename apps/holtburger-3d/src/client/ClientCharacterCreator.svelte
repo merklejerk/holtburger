@@ -36,7 +36,7 @@
 		CREATION_ATTRIBUTES,
 		type CharacterCreationCatalog,
 		type CharacterCreationDraft,
-	} from "./client-character-creation-contract";
+	} from "./client-character-creation";
 	import {
 		CharacterCreationPreviewResolver,
 		CharacterCreationStatsResolver,

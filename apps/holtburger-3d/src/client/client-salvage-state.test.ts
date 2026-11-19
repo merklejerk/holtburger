@@ -3,8 +3,14 @@ import { ClientAppraisalRequests } from "./client-appraisal-requests";
 import inspectionWire from "./fixtures/object-inspection-wire.json";
 import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
 import { describe, expect, it, vi } from "vitest";
+import salvageWireFixture from "./fixtures/salvage-wire.json";
 import {
 	ClientSalvageState,
+	salvageCandidateSchema,
+	salvagePreviewResultSchema,
+	salvageSubmitRequestSchema,
+	salvageSubmitResultSchema,
+	type SalvageEvaluation,
 	type SalvageSession,
 } from "./client-salvage-state";
 import {
@@ -17,7 +23,6 @@ import {
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
-import type { SalvageEvaluation } from "./client-salvage-contract";
 
 function source(guid: number, material = "Steel"): ClientEntityFacts {
 	return entityFacts(guid, {
@@ -807,4 +812,19 @@ describe("salvage draft", () => {
 		f.model.confirm();
 		expect(f.model.captureRemoval(3)).toBeNull();
 	});
+});
+
+it("accepts the exact world/core wire fixture verified by the Rust host", () => {
+	expect(salvageCandidateSchema.parse(salvageWireFixture.candidate)).toEqual(
+		salvageWireFixture.candidate,
+	);
+	expect(salvagePreviewResultSchema.parse(salvageWireFixture.preview)).toEqual(
+		salvageWireFixture.preview,
+	);
+	expect(salvageSubmitRequestSchema.parse(salvageWireFixture.submit)).toEqual(
+		salvageWireFixture.submit,
+	);
+	expect(salvageSubmitResultSchema.parse(salvageWireFixture.result)).toEqual(
+		salvageWireFixture.result,
+	);
 });

@@ -2,11 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { SpellRow } from "./client-spells";
 import {
 	decodeResolvedEnchantments,
-	type ResolvedEnchantments,
-} from "./client-enchantments-contract";
-import {
 	presentEnchantmentTray,
 	projectEnchantmentSections,
+	type ResolvedEnchantments,
 } from "./client-enchantments-view";
 
 const ordinary = { spellId: 10, layer: 1 };

@@ -26,7 +26,7 @@
 	import type {
 		ClientGameplayOption,
 		ClientGameplayPreferences,
-	} from "./client-gameplay-options-contract";
+	} from "./client-host-contract";
 	import type {
 		UiThemeSelection,
 		UiThemeSettings,
@@ -190,7 +190,7 @@
 		loadCharacterCreationCatalog,
 		resolveCharacterCreationAppearance,
 		resolveCharacterCreationStats,
-	} from "./client-character-creation-contract";
+	} from "./client-character-creation";
 	import type { CharacterCreationServices } from "./client-character-creation";
 	import {
 		ClientSelectedEntityTracking,

@@ -3,11 +3,11 @@ import fixture from "./fixtures/barber-wire.json";
 import {
 	barberPreviewSchema,
 	barberSnapshotSchema,
+	ClientBarberState,
 	type BarberRequest,
 	type BarberSnapshot,
 	type BarberPreview,
-} from "./client-barber-contract";
-import { ClientBarberState } from "./client-barber-state";
+} from "./client-barber-state";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 
 function setup(

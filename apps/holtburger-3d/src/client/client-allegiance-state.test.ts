@@ -1,11 +1,11 @@
 import { CLIENT_ALLEGIANCE_REFRESH_INTERVAL_MS } from "./client-tuning";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ClientAllegianceState } from "./client-allegiance-state";
 import {
 	allegianceSnapshotSchema,
+	ClientAllegianceState,
 	type AllegianceAction,
 	type AllegianceSnapshot,
-} from "./client-allegiance-contract";
+} from "./client-allegiance-state";
 
 const player = 42;
 const member = (guid: number, name: string) => ({

@@ -7,7 +7,7 @@ import type {
 	CombatEffectsAppearance,
 	CombatEffectsTuning,
 } from "../lib/game/systems/combat-effects-system";
-import type { BarberPreview, BarberSnapshot } from "./client-barber-contract";
+import type { BarberPreview, BarberSnapshot } from "./client-barber-state";
 import { ClientCombatHealthRequests } from "./client-combat-health-requests";
 import { distanceBetweenDynamicWorldPoses } from "./client-entity-distance";
 import {
@@ -27,9 +27,9 @@ import type {
 import type { ClientLifecycleSession } from "./client-lifecycle-session";
 import {
 	ClientLockFeedbackEffects,
+	type ClientLockFeedback,
 	type ClientLockFeedbackFrame,
 } from "./client-lock-feedback";
-import type { ClientLockFeedback } from "./client-lock-feedback-contract";
 import type { ClientSummonLeashColors } from "./client-summon-leash-appearance";
 import {
 	resolveImmediateCandidate,

@@ -7,9 +7,9 @@ import {
 import {
 	lockFeedbackSchema,
 	type ClientLockFeedback,
-} from "./client-lock-feedback-contract";
+} from "./client-lock-feedback";
 import type { RestPosture } from "../lib/game/runtime/dynamic-entity-feed";
-import type { ClientGameplayOption } from "./client-gameplay-options-contract";
+import type { ClientGameplayOption } from "./client-host-contract";
 import { characterManagementPending } from "./client-character-selection";
 import {
 	abortError,
@@ -27,7 +27,7 @@ import {
 	type SalvagePreviewResult,
 	type SalvageSubmitRequest,
 	type SalvageSubmitResult,
-} from "./client-salvage-contract";
+} from "./client-salvage-state";
 import {
 	playerVisualCaptureSchema,
 	type PlayerVisualCapture,
@@ -39,13 +39,13 @@ import {
 import {
 	characterCreationDraftSchema,
 	type CharacterCreationDraft,
-} from "./client-character-creation-contract";
+} from "./client-character-creation";
 import {
 	deathLocationResultSchema,
 	type DeathLocationResult,
 	type DeathLocationQuery,
 	type CorpseConsentAction,
-} from "./client-death-contract";
+} from "./client-death-commands";
 import {
 	ClientPartyUpdates,
 	type PartyUpdateConsumer,
@@ -62,20 +62,26 @@ import {
 	contractsUpdatedSchema,
 	contractMembershipChangeSchema,
 	type ContractMembershipChange,
-} from "./client-contracts-contract";
-import { ClientAllegianceState } from "./client-allegiance-state";
-import { allegianceUpdatedSchema } from "./client-allegiance-contract";
-import { ClientSquelchState } from "./client-squelch-state";
-import { squelchUpdatedSchema } from "./client-squelch-contract";
-import { ClientFriendsState } from "./client-friends-state";
-import { friendsUpdatedSchema } from "./client-friends-contract";
+} from "./client-contracts-state";
+import {
+	allegianceUpdatedSchema,
+	ClientAllegianceState,
+} from "./client-allegiance-state";
+import {
+	ClientSquelchState,
+	squelchUpdatedSchema,
+} from "./client-squelch-state";
+import {
+	ClientFriendsState,
+	friendsUpdatedSchema,
+} from "./client-friends-state";
 import { z } from "zod";
 import {
 	partySnapshotSchema,
 	partyActionSchema,
 	type PartySnapshot,
 	type PartyAction,
-} from "./client-party-contract";
+} from "./client-party-state";
 import {
 	emptyHousing,
 	housingManagementRequestSchema,
@@ -101,7 +107,7 @@ import {
 	tradeSnapshotSchema,
 	type TradeSnapshot,
 	type TradeRequest,
-} from "./client-trade-contract";
+} from "./client-trade-state";
 import {
 	barberSnapshotSchema,
 	barberPreviewSchema,
@@ -109,7 +115,7 @@ import {
 	type BarberSnapshot,
 	type BarberPreview,
 	type BarberRequest,
-} from "./client-barber-contract";
+} from "./client-barber-state";
 import {
 	vendorRequestSchema,
 	vendorSnapshotSchema,
@@ -122,11 +128,11 @@ import {
 	type VendorPreview,
 	type VendorResult,
 	type VendorPhase,
-} from "./client-vendor-contract";
+} from "./client-vendor-state";
 import {
 	decodeResolvedEnchantments,
 	type ResolvedEnchantments,
-} from "./client-enchantments-contract";
+} from "./client-enchantments-view";
 import {
 	characterSheetSchema,
 	progressionEvaluatedSchema,
@@ -144,7 +150,7 @@ import {
 	type SpellInspectionQuery,
 	type SpellInspectionContext,
 	type SpellInspectionResult,
-} from "./client-spell-inspection-contract";
+} from "./client-spells";
 import {
 	itemUseTargetQuerySchema,
 	itemUseTargetResultSchema,
@@ -158,7 +164,7 @@ import {
 	type ClientItemUseResult,
 	type ClientItemUseFinished,
 	type ClientLockedTarget,
-} from "./client-item-use-contract";
+} from "./client-item-use-sequence";
 import { CLIENT_TUNING } from "./client-tuning";
 import {
 	autoMergeRequestSchema,
@@ -168,7 +174,7 @@ import {
 	inventoryPreviewResultSchema,
 	type ClientInventoryPreviewRequest,
 	type ClientInventoryPreviewResult,
-} from "./client-inventory-contract";
+} from "./client-inventory-state";
 import {
 	decodeObjectInspectionResult,
 	objectInspectionTargetSchema,
@@ -181,7 +187,7 @@ import {
 	type ClientBook,
 	type ClientBookOpened,
 	type ClientBookPageRequest,
-} from "./client-book-contract";
+} from "./client-book-reader";
 import {
 	decodeObjectPreviewResult,
 	type ObjectPreviewResult,

@@ -4,11 +4,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	ClientDeathCommands,
 	deathLocationLines,
+	deathLocationResultSchema,
 	parseDeathCommand,
 } from "./client-death-commands";
 import type { ClientLifecycle } from "./client-host-contract";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
-import { deathLocationResultSchema } from "./client-death-contract";
 import { waypointTextSpans } from "../lib/game/map/map-waypoint";
 
 function fixture() {

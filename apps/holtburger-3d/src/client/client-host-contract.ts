@@ -1,31 +1,30 @@
+import { z } from "zod";
 import { clientExitCauseSchema as exitCauseSchema } from "./client-exit-contract.js";
 export {
 	decodeClientExitRequested,
 	type ClientExitRequested,
 } from "./client-exit-contract.js";
-import { gameplayPreferencesSchema } from "./client-gameplay-options-contract";
 import { playerVisualCaptureSchema } from "./client-object-preview-contract";
-import { contractsSnapshotSchema } from "./client-contracts-contract";
+import { contractsSnapshotSchema } from "./client-contracts-state";
 import {
 	allegianceSnapshotSchema,
 	allegiancePreferencesSchema,
-} from "./client-allegiance-contract";
-import { squelchSnapshotSchema } from "./client-squelch-contract";
+} from "./client-allegiance-state";
+import { squelchSnapshotSchema } from "./client-squelch-state";
 import {
 	friendsSnapshotSchema,
 	friendsPreferencesSchema,
-} from "./client-friends-contract";
+} from "./client-friends-state";
 import { housingSnapshotSchema } from "./client-housing-contract";
-import { tradeSnapshotSchema } from "./client-trade-contract";
-import { vendorSnapshotSchema } from "./client-vendor-contract";
-import { barberSnapshotSchema } from "./client-barber-contract";
-import { z } from "zod";
+import { tradeSnapshotSchema } from "./client-trade-state";
+import { vendorSnapshotSchema } from "./client-vendor-state";
+import { barberSnapshotSchema } from "./client-barber-state";
 import {
 	partySnapshotSchema,
 	partyPreferencesSchema,
-} from "./client-party-contract";
+} from "./client-party-state";
 
-import { resolvedEnchantmentsSchema } from "./client-enchantments-contract";
+import { resolvedEnchantmentsSchema } from "./client-enchantments-view";
 import { characterSheetSchema } from "./client-character-sheet-contract";
 import { clientEntitySnapshotSchema } from "./client-entity-mirror";
 import {
@@ -38,6 +37,28 @@ import {
 	landblockVector3,
 	type LandblockVector3,
 } from "../lib/assets/ac-frame";
+
+/** Narrow set of server-saved options owned by the Gameplay settings surface. */
+const gameplayOptionSchema = z.enum([
+	"craftSuccessDialog",
+	"confirmRareUse",
+	"allowItemGive",
+	"ignoreTradeRequests",
+	"ignoreAllegianceRequests",
+	"useDeception",
+	"shareBirthDate",
+	"shareAge",
+	"shareDeaths",
+	"shareTitles",
+	"shareChessRank",
+	"shareFishingSkill",
+]);
+export type ClientGameplayOption = z.infer<typeof gameplayOptionSchema>;
+/** Complete mirrored state; missing option keys are a broken host contract. */
+const gameplayPreferencesSchema = z.record(gameplayOptionSchema, z.boolean());
+export type ClientGameplayPreferences = z.infer<
+	typeof gameplayPreferencesSchema
+>;
 
 /** Inclusive retail jump-power floor, matching core JumpExtent::MINIMUM. */
 export const MINIMUM_JUMP_POWER = 0.001;

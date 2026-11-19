@@ -1,4 +1,4 @@
-import type { PartySnapshot } from "./client-party-contract";
+import type { PartySnapshot } from "./client-party-state";
 import { formatQuantity } from "../app/quantity-format";
 
 /** Prepared presentation facts; the authoritative roster still includes the current player. */

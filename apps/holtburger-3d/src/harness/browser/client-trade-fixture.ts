@@ -1,5 +1,5 @@
 import { entityFacts } from "../../client/client-entity-mirror.test-support";
-import type { TradeState } from "../../client/client-trade-contract";
+import type { TradeState } from "../../client/client-trade-state";
 
 /** Synthetic trade session publications for the interactive UI showcase. */
 export function createTradeFixture(options: {

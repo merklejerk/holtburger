@@ -11,7 +11,7 @@ import {
 	entityFacts,
 } from "./client-entity-mirror.test-support";
 import type { ClientEntityFacts } from "./client-entity-mirror";
-import type { ClientItemUseResult } from "./client-item-use-contract";
+import type { ClientItemUseResult } from "./client-item-use-sequence";
 
 async function fixture() {
 	const handlers = new Map<string, (payload: unknown) => void>();

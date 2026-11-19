@@ -141,9 +141,9 @@
 		swapSpellTabs,
 	} from "../../client/client-spell-bar-state";
 	import { resolveClientSpellCastAim } from "../../client/client-spell-casting";
-	import { spellInspectionQuerySchema } from "../../client/client-spell-inspection-contract";
 	import {
 		ClientSpellState,
+		spellInspectionQuerySchema,
 		type ClientSpellServices,
 	} from "../../client/client-spells";
 	import { ClientSummonPresentation } from "../../client/client-summon-presentation";
@@ -164,7 +164,7 @@
 	import { createSalvageFixture } from "./client-salvage-fixture";
 	import { createTradeFixture } from "./client-trade-fixture";
 	import { createVendorFixture } from "./client-vendor-fixture";
-	import gameplayPreferencesFixture from "./fixtures/gameplay-preferences.json";
+	import gameplayPreferencesFixture from "../../client/fixtures/gameplay-preferences.json";
 	import { STAT_ICON_FIXTURE } from "./stat-icon-fixture";
 	import UiShowcaseWorkbench from "./UiShowcaseWorkbench.svelte";
 	import {

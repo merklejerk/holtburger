@@ -97,7 +97,7 @@ mod tests {
             options2: CharacterOptions2::CONFIRM_VOLATILE_RARE_USE | CharacterOptions2::DISPLAY_AGE,
         };
         let mut expected: serde_json::Value = serde_json::from_str(include_str!(
-            "../../src/harness/browser/fixtures/gameplay-preferences.json"
+            "../../src/client/fixtures/gameplay-preferences.json"
         ))
         .unwrap();
         for key in [

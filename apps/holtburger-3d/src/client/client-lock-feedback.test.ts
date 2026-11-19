@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ClientLockFeedbackEffects } from "./client-lock-feedback";
-import type { ClientLockFeedback } from "./client-lock-feedback-contract";
+import {
+	ClientLockFeedbackEffects,
+	type ClientLockFeedback,
+} from "./client-lock-feedback";
 
 const timing = { successLifetimeMs: 100, failureLifetimeMs: 50 };
 const failed: ClientLockFeedback = {

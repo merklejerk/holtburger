@@ -1,4 +1,4 @@
-import type { PartySnapshot } from "./client-party-contract";
+import type { PartySnapshot } from "./client-party-state";
 import { describe, expect, it } from "vitest";
 import { partyVitalDisplay, presentPartyHud } from "./client-party-hud";
 

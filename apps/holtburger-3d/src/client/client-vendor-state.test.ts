@@ -9,13 +9,14 @@ import {
 	entityFacts,
 } from "./client-entity-mirror.test-support";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
-import type {
-	VendorOffer,
-	VendorQuote,
-	VendorRequest,
-	VendorSnapshot,
-} from "./client-vendor-contract";
-import { ClientVendorState, type VendorSession } from "./client-vendor-state";
+import {
+	ClientVendorState,
+	type VendorOffer,
+	type VendorQuote,
+	type VendorRequest,
+	type VendorSession,
+	type VendorSnapshot,
+} from "./client-vendor-state";
 import { CLIENT_TUNING } from "./client-tuning";
 
 const cleanups: (() => void)[] = [];

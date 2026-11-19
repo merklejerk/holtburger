@@ -1,6 +1,6 @@
 import type { MapWaypointTarget } from "../../lib/game/map/map-waypoint";
 import { sceneMapPoint } from "../../lib/game/map/map-coordinates";
-import type { ResolvedEnchantments } from "../../client/client-enchantments-contract";
+import type { ResolvedEnchantments } from "../../client/client-enchantments-view";
 import type { ClientVital } from "../../client/client-host-contract";
 import type { CharacterSheet } from "../../client/client-character-sheet-contract";
 import type { ClientActionBar } from "../../client/client-action-bar-state";

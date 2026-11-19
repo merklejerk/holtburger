@@ -1,7 +1,9 @@
 <script lang="ts">
 	import UiPaletteDropdown from "../app/UiPaletteDropdown.svelte";
-	import type { BodyAppearanceChoices } from "./client-body-appearance-contract";
-	import { appearanceShadeIndex } from "./client-body-appearance";
+	import {
+		appearanceShadeIndex,
+		type BodyAppearanceChoices,
+	} from "./client-body-appearance";
 
 	interface Props {
 		readonly value: BodyAppearanceChoices;

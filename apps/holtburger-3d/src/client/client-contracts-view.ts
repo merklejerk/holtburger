@@ -1,7 +1,4 @@
-import type {
-	ContractLocation,
-	ContractRow,
-} from "./client-contracts-contract";
+import type { ContractLocation, ContractRow } from "./client-contracts-state";
 
 /** One status label drives the icon tooltip and expanded readable status. */
 export function contractStatusLabel(row: ContractRow): string {

@@ -1,5 +1,7 @@
-import type { ClientInventoryState } from "./client-inventory-state";
-import { nextInventoryPreviewSequence } from "./client-inventory-contract";
+import {
+	nextInventoryPreviewSequence,
+	type ClientInventoryState,
+} from "./client-inventory-state";
 import type { ClientEntityFacts } from "./client-entity-mirror";
 
 type SplittableInventoryItem = ClientEntityFacts & {

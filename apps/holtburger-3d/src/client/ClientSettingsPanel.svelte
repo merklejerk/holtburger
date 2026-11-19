@@ -9,7 +9,7 @@
 	import type {
 		ClientGameplayOption,
 		ClientGameplayPreferences,
-	} from "./client-gameplay-options-contract";
+	} from "./client-host-contract";
 	import UiRange from "../app/UiRange.svelte";
 	import type { UiThemeSettings } from "../app/ui-theme-selection";
 	import {

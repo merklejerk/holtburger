@@ -1,4 +1,8 @@
-import { allocateItemUseOperation } from "./client-item-use-sequence";
+import {
+	allocateItemUseOperation,
+	type ClientItemUseRequest,
+	type ClientItemUseResult,
+} from "./client-item-use-sequence";
 import { ClientConfirmationSuppression } from "./client-confirmation-suppression";
 import type {
 	LocalConfirmationRequest,
@@ -16,10 +20,6 @@ import type {
 	ClientLifecycleSession,
 	ClientLifecycleSessionEvent,
 } from "./client-lifecycle-session";
-import type {
-	ClientItemUseRequest,
-	ClientItemUseResult,
-} from "./client-item-use-contract";
 
 /** Cold state consumed by Notifications guidance and the local confirmation dialog. */
 export type ItemInteractionState =

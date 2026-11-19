@@ -2,7 +2,7 @@ import barberFixture from "./fixtures/barber-wire.json";
 import {
 	barberSnapshotSchema,
 	barberPreviewSchema,
-} from "./client-barber-contract";
+} from "./client-barber-state";
 import type { DynamicPresentationOverride } from "../lib/game/runtime/dynamic-presentation-override";
 import type { EntityOverlayFrame } from "../lib/game/renderer/entity-overlay-policy";
 import { rotateRenderVector } from "../lib/game/math/camera-orientation";

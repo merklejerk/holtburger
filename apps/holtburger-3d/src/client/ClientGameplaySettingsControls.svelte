@@ -2,7 +2,7 @@
 	import type {
 		ClientGameplayOption,
 		ClientGameplayPreferences,
-	} from "./client-gameplay-options-contract";
+	} from "./client-host-contract";
 
 	interface Props {
 		/** Current character's mirrored server-saved options; absent until description arrives. */

@@ -7,7 +7,7 @@ import {
 import type { ContentsSortMode } from "./client-container-contents";
 import type { ClientEntityRead } from "./client-entity-mirror";
 import type { ClientHouseCrystalState } from "./client-house-crystal-state";
-import type { ClientInventoryIntent } from "./client-inventory-contract";
+import type { ClientInventoryIntent } from "./client-inventory-state";
 import {
 	EQUIPMENT_SLOTS,
 	equipmentSlotAvailability,

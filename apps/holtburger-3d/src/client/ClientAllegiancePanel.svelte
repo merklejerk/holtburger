@@ -4,8 +4,10 @@
 	import UiQuantity from "../app/UiQuantity.svelte";
 	import { formatQuantity } from "../app/quantity-format";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
-	import type { ClientAllegianceState } from "./client-allegiance-state";
-	import type { AllegianceMember } from "./client-allegiance-contract";
+	import type {
+		AllegianceMember,
+		ClientAllegianceState,
+	} from "./client-allegiance-state";
 	interface Props {
 		/** Session-owned facts and interaction policy. */
 		readonly owner: ClientAllegianceState;

@@ -3,7 +3,7 @@ import contactIcon from "../assets/icons/world-map-contract-contact.svg?raw";
 import questIcon from "../assets/icons/world-map-contract-area.svg?raw";
 import { projectWorldMapPoint } from "../lib/game/world-map/view";
 import type { WorldMapView } from "../lib/game/world-map/types";
-import type { ContractsSnapshot } from "./client-contracts-contract";
+import type { ContractsSnapshot } from "./client-contracts-state";
 import {
 	contractMapMarkers,
 	contractMapTooltips,

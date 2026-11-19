@@ -2,9 +2,7 @@ Holtburger beta includes the 3D client and the terminal client (CLI).
 
 ## In this beta
 
-- **3D client, dungeons:** Animated and scripted objects in dungeons now run only in the cells you can see and stop when you leave them.
-- **3D client, stability:** A creature, item or effect that fails to load or display is now contained. Other characters and effects keep their current look, and the client logs a warning.
-- **3D client, equipment:** Items that can't attach to a character's model are skipped with a warning instead of drawing in the wrong place.
+- **3D client, dungeons:** Fixed visible seams at dungeon portals and where outdoor buildings overlap.
 
 ## Known issues
 

@@ -3,8 +3,8 @@
 	import PowerIcon from "../assets/icons/hud-power.svg?component";
 	import { getAllContexts, onMount } from "svelte";
 	import AssetSetup from "./AssetSetup.svelte";
-	import ClientLoadingPage from "../client/ClientLoadingPage.svelte";
-	import type { ClientLoadingPageState } from "../client/client-loading-page";
+	import ClientLoadingPage from "../client/pregame/ClientLoadingPage.svelte";
+	import type { ClientLoadingPageState } from "../client/pregame/loading-page";
 	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { ContentStartupSnapshot } from "./content-startup-contract";
 	import { createContentStartupTransport } from "./content-startup-transport";

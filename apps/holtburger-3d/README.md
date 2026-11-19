@@ -337,7 +337,7 @@ measurements. Use `--viewport-width` and `--viewport-height` for constrained lay
 
 ### Placement defaults
 
-`src/client/client-ui-defaults.ts` owns the initial in-world HUD arrangement: named anchors,
+`src/client/hud/ui-defaults.ts` owns the initial in-world HUD arrangement: named anchors,
 offsets, preferred sizes, minimum sizes, and panel resizability. Values are CSS pixels. Edge
 offsets point inward; offsets on centered axes are signed, positive right/down. The minimap uses
 a single diameter to preserve its circular shape.
@@ -398,7 +398,7 @@ Themes own leash colors and opacity through `--ui-summon-leash-own-color` and
 theme/scope changes and update existing leashes without recreating the renderer. Expiry flicker
 does not depend on the theme palette being ready. Base colors remain
 faint green for your summons and pale blue for other players' summons.
-`CLIENT_SUMMON_TUNING` in `src/client/client-tuning.ts` owns leash geometry, endpoint fade power, sway amplitude/frequency, pulse
+`CLIENT_SUMMON_TUNING` in `src/client/settings/tuning.ts` owns leash geometry, endpoint fade power, sway amplitude/frequency, pulse
 frequency/wavelength/strength, glow and the flicker window
 (default 10 seconds) and frequency. `npm run harness:browser -- --fixture summons --brief` exercises
 the actual GPU pass and runtime lifecycle; the targeting/HUD probe also checks chat and toast.

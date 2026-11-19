@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { applyUiScale } from "../../app/ui-scale";
-	import { logicalClientHudViewport } from "../../client/client-hud-layout";
+	import { logicalClientHudViewport } from "../../client/hud/hud-layout";
 	import UiTooltipHost from "../../app/UiTooltipHost.svelte";
 	import type { Snippet } from "svelte";
 	import UiRange from "../../app/UiRange.svelte";
@@ -9,20 +9,20 @@
 	import UiTabPanel from "../../app/UiTabPanel.svelte";
 	import ToggleField from "../../app/ToggleField.svelte";
 	import ItemGridCell from "../../app/ItemGridCell.svelte";
-	import ClientHudWindow from "../../client/ClientHudWindow.svelte";
-	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
-	import ClientPregameSettings from "../../client/ClientPregameSettings.svelte";
-	import ClientDebugPanel from "../../client/ClientDebugPanel.svelte";
-	import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
+	import ClientHudWindow from "../../client/hud/ClientHudWindow.svelte";
+	import ClientCharacterSelect from "../../client/pregame/ClientCharacterSelect.svelte";
+	import ClientPregameSettings from "../../client/pregame/ClientPregameSettings.svelte";
+	import ClientDebugPanel from "../../client/hud/ClientDebugPanel.svelte";
+	import { CLIENT_UI_DEFAULTS } from "../../client/hud/ui-defaults";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
-	import type { ClientUserSettings } from "../../client/client-settings-contract";
-	import type { ClientHudPlacement } from "../../client/client-hud-layout";
+	import type { ClientUserSettings } from "../../client/settings/settings-contract";
+	import type { ClientHudPlacement } from "../../client/hud/hud-layout";
 	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
 	import {
 		CLIENT_TEXT_SCALE,
 		CLIENT_UI_SCALE,
-	} from "../../client/client-settings-values";
-	import type { ClientVital } from "../../client/client-host-contract";
+	} from "../../client/settings/settings-values";
+	import type { ClientVital } from "../../client/session/host-contract";
 	import {
 		fixtureThemeIds,
 		type ShowcaseThemeSettings,

@@ -3,7 +3,7 @@ import {
 	SkyScriptSystem,
 	type SkyScriptSystemDependencies,
 } from "./sky-script-system";
-import { clientEnvironmentFixture } from "../../../client/client-environment.test-support";
+import { clientEnvironmentFixture } from "../../../client/settings/environment.test-support";
 import { resolveSceneEnvironment } from "../environment/scene-environment";
 import { HostCommandError } from "../../host/host-command-result";
 

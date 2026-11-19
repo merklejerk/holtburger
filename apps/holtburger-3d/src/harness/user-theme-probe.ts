@@ -1,5 +1,5 @@
 import { mount } from "svelte";
-import { observeCombatEffectsAppearance } from "../client/client-combat-effects-appearance";
+import { observeCombatEffectsAppearance } from "../client/combat/combat-effects-appearance";
 import { UI_THEME_LOAD_TIMEOUT_MS } from "../app/ui-theme-contract";
 import "../app/base.css";
 import "../app/ui-base.css";

@@ -9,12 +9,12 @@ import {
 } from "../src/app/app-tuning.js";
 import { DEV_RESTART_EXIT_CODE } from "../src/app/desktop-restart-contract.js";
 import { windowDisplayRequestSchema } from "../src/app/window-display-contract.js";
-import { equipmentCacheStageSchema } from "../src/client/client-equipment-cache-contract.js";
-import { playerVisualCaptureSchema } from "../src/client/client-object-preview-contract.js";
+import { equipmentCacheStageSchema } from "../src/client/inventory/equipment-cache-contract.js";
+import { playerVisualCaptureSchema } from "../src/client/character/object-preview-contract.js";
 import {
 	clientCharacterSectionsSchema,
 	clientUserSettingsPatchSchema,
-} from "../src/client/client-settings-sections.js";
+} from "../src/client/settings/settings-sections.js";
 import { formatError } from "../src/lib/format-error.js";
 import type {
 	AppFailureKind,

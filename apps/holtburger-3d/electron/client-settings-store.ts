@@ -14,14 +14,14 @@ import {
 	clientWindowSettingsSchema,
 	type ClientWindowSettings,
 	type ClientUserSettings,
-} from "../src/client/client-settings-contract.js";
+} from "../src/client/settings/settings-contract.js";
 import {
 	logicalClientHudViewport,
 	createClientHudLayout,
 	type ClientHudLayout,
-} from "../src/client/client-hud-layout.js";
-import { createDefaultClientUserSections } from "../src/client/client-settings-defaults.js";
-import { CLIENT_UI_DEFAULTS } from "../src/client/client-ui-defaults.js";
+} from "../src/client/hud/hud-layout.js";
+import { createDefaultClientUserSections } from "../src/client/settings/settings-defaults.js";
+import { CLIENT_UI_DEFAULTS } from "../src/client/hud/ui-defaults.js";
 import {
 	clientCharacterSectionEntry,
 	clientCharacterSectionSchemas,
@@ -42,7 +42,7 @@ import {
 	type ClientUserSectionKey,
 	type ClientUserSectionValues,
 	type ClientUserSettingsPatch,
-} from "../src/client/client-settings-sections.js";
+} from "../src/client/settings/settings-sections.js";
 
 export type ClientSettingsReadMode = "persisted" | "fresh";
 

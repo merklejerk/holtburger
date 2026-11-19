@@ -1,0 +1,465 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+	ClientInventoryState,
+	type InventoryLifecycleEvent,
+} from "./inventory-state";
+import {
+	ClientEntityMirror,
+	type ClientEntityFacts,
+} from "../world/entity-mirror";
+import { EQUIPMENT_SLOTS } from "./inventory-equipment";
+import {
+	emptyPlayerSummary,
+	entityFacts,
+} from "../world/entity-mirror.test-support";
+import { INVENTORY_CURRENCIES } from "./inventory-currencies";
+import type { ClientLifecycle } from "../session/host-contract";
+import {
+	UiIconRepository,
+	type UiIconServices,
+} from "../../app/ui-icon-repository";
+
+const item = (guid: number, base: number, parent = 1) => {
+	const record = entityFacts(guid);
+	if (record.description.kind !== "known")
+		throw new Error("Known fixture required.");
+	return {
+		...record,
+		ownedByPlayer: true,
+		location: {
+			kind: "contained" as const,
+			parentGuid: parent,
+			slot: { kind: "item" as const, index: guid },
+		},
+		description: {
+			...record.description,
+			icon: { base, overlay: null, underlay: null, uiEffects: 0 },
+		},
+	};
+};
+function fixture(
+	initialLifecycle: ClientLifecycle | null = { kind: "in-world" },
+) {
+	const mirror = new ClientEntityMirror();
+	const listeners = new Set<(event: InventoryLifecycleEvent) => void>();
+	const emit = (event: InventoryLifecycleEvent) => {
+		for (const listener of listeners) listener(event);
+	};
+	const baseline = (items: ClientEntityFacts[], player = 1) => {
+		mirror.commit(
+			mirror.prepareSnapshot(
+				{
+					projectileSupply: { kind: "not-applicable" },
+					player: emptyPlayerSummary,
+					worldContainer: { kind: "closed" },
+					entities: [
+						entityFacts(player, {
+							storage: {
+								kind: "container",
+								roster: "announced",
+								itemCapacity: 24,
+								packCapacity: 7,
+							},
+						}),
+						...items,
+					],
+				},
+				player,
+			),
+		);
+		emit({ type: "entities" });
+	};
+	const resync = () => {
+		mirror.awaitSnapshot();
+		emit({ type: "resyncing" });
+	};
+	baseline([item(2, 10)]);
+	let lifecycle: ClientLifecycle | null = initialLifecycle;
+	let image = 0;
+	const services: UiIconServices = {
+		prepare: vi.fn<UiIconServices["prepare"]>(async (requests) =>
+			requests.map(({ key }) => ({
+				kind: "ready",
+				key,
+				image: new Uint8Array([1]),
+			})),
+		),
+		createImage: vi.fn(async () => `blob:${++image}`),
+		revokeImage: vi.fn(),
+		report: vi.fn(),
+	};
+	const icons = new UiIconRepository(services);
+	const model = new ClientInventoryState(
+		{
+			entities: mirror,
+			previewInventory: vi.fn(async () => {}),
+			submitInventory: vi.fn(async () => {}),
+			autoMergeContainer: vi.fn(async () => {}),
+			state: () => ({ lifecycle }),
+			subscribe: (listener) => {
+				listeners.add(listener);
+				return () => {
+					listeners.delete(listener);
+				};
+			},
+		},
+		icons,
+		vi.fn(),
+	);
+	const changeLifecycle = (value: ClientLifecycle) => {
+		lifecycle = value;
+		emit({ type: "lifecycle", lifecycle });
+	};
+	return {
+		mirror,
+		model,
+		icons,
+		services,
+		emit,
+		baseline,
+		resync,
+		changeLifecycle,
+		destroy: () => {
+			model.destroy();
+			icons.dispose();
+		},
+	};
+}
+const flushIcons = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+describe("persistent inventory state", () => {
+	it("offers auto-merge only for Main Pack and actual carried containers, rechecking stale menus", async () => {
+		const f = fixture();
+		const bag = entityFacts(8, {
+			ownedByPlayer: true,
+			location: {
+				kind: "contained",
+				parentGuid: 1,
+				slot: { kind: "pack", index: 0, entryKind: "container" },
+			},
+			storage: {
+				kind: "container",
+				roster: "announced",
+				itemCapacity: 24,
+				packCapacity: 0,
+			},
+		});
+		const focus = entityFacts(9, {
+			ownedByPlayer: true,
+			location: {
+				kind: "contained",
+				parentGuid: 1,
+				slot: { kind: "pack", index: 1, entryKind: "foci" },
+			},
+		});
+		f.baseline([bag, focus]);
+		expect(f.model.canAutoMergeContainer(1)).toBe(true);
+		expect(f.model.canAutoMergeContainer(8)).toBe(true);
+		expect(f.model.canAutoMergeContainer(9)).toBe(false);
+		expect(f.model.canAutoMergeContainer(99)).toBe(false);
+		await f.model.autoMergeContainer(8);
+		expect(f.model.interactions.autoMergeContainer).toHaveBeenCalledWith(8);
+		f.resync();
+		expect(f.model.canAutoMergeContainer(8)).toBe(false);
+		await expect(f.model.autoMergeContainer(8)).rejects.toThrow(
+			"no longer available",
+		);
+		expect(f.model.interactions.autoMergeContainer).toHaveBeenCalledTimes(1);
+		f.destroy();
+	});
+
+	it("reports request failures through the inventory toast callback shared by UI entry points", async () => {
+		const f = fixture();
+		vi.mocked(f.model.interactions.autoMergeContainer).mockRejectedValueOnce(
+			new Error("Injected enqueue failure"),
+		);
+		f.model.requestAutoMergeContainer(1);
+		await vi.waitFor(() =>
+			expect(f.model.reportFailure).toHaveBeenCalledWith(
+				"Injected enqueue failure",
+			),
+		);
+		f.resync();
+		f.model.requestAutoMergeContainer(1);
+		await vi.waitFor(() =>
+			expect(f.model.reportFailure).toHaveBeenCalledWith(
+				"That bag is no longer available for auto-merge.",
+			),
+		);
+		expect(f.model.interactions.autoMergeContainer).toHaveBeenCalledTimes(1);
+		f.destroy();
+	});
+
+	it("publishes arrivals and their destinations without a mounted view, then quietly baselines reentry", async () => {
+		const f = fixture();
+		const arrivals: (readonly (readonly [number, number])[])[] = [];
+		const unsubscribe = f.model.subscribeArrivals((next) =>
+			arrivals.push([...next]),
+		);
+		expect(arrivals).toEqual([]);
+		f.baseline([item(2, 10), item(3, 11)]);
+		expect(arrivals).toEqual([[[3, 1]]]);
+		f.changeLifecycle({ kind: "entering-world", characterGuid: 1 });
+		f.baseline([item(2, 10), item(3, 11), item(4, 12)]);
+		f.changeLifecycle({ kind: "in-world" });
+		expect(arrivals).toHaveLength(1);
+		unsubscribe();
+		f.baseline([item(5, 13)]);
+		expect(arrivals).toHaveLength(1);
+		f.destroy();
+	});
+
+	it("withholds burden during recovery and replaces it with the new player baseline", () => {
+		const f = fixture();
+		const acceptPlayer = (guid: number, burden: number | null) => {
+			f.mirror.commit(
+				f.mirror.prepareSnapshot(
+					{
+						projectileSupply: { kind: "not-applicable" },
+						player: { ...emptyPlayerSummary, burden },
+						worldContainer: { kind: "closed" },
+						entities: [entityFacts(guid)],
+					},
+					guid,
+				),
+			);
+			f.emit({ type: "entities" });
+		};
+		acceptPlayer(1, 2.15);
+		expect(f.model.readBurden()).toBe(2.15);
+		f.resync();
+		expect(f.model.readBurden()).toBeNull();
+		acceptPlayer(4, 1.25);
+		expect(f.model.readBurden()).toBe(1.25);
+		f.changeLifecycle({ kind: "entering-world", characterGuid: 4 });
+		expect(f.model.readBurden()).toBeNull();
+		f.changeLifecycle({ kind: "in-world" });
+		expect(f.model.readBurden()).toBe(1.25);
+		acceptPlayer(4, null);
+		expect(f.model.readBurden()).toBeNull();
+		f.destroy();
+	});
+
+	it("moves shared artwork between contents and repeated equipment rows without eviction", async () => {
+		const f = fixture();
+		const armor = item(2, 10);
+		const slots = EQUIPMENT_SLOTS.filter((slot) =>
+			["Chest armor", "Upper arm armor"].includes(slot.label),
+		);
+		await flushIcons();
+		const key = f.model.read().iconKeys.get(armor.guid);
+		f.baseline([
+			{
+				...armor,
+				location: {
+					kind: "equipped",
+					wearerGuid: 1,
+					mask: slots.reduce((mask, slot) => mask | slot.mask, 0),
+				},
+			},
+		]);
+		await flushIcons();
+		expect(
+			f.model
+				.read()
+				.equipment.rows.filter((row) => row.item?.guid === armor.guid),
+		).toHaveLength(2);
+		expect(f.model.read().sections[0]?.items).toEqual([]);
+		expect(f.model.read().iconKeys.get(armor.guid)).toBe(key);
+		expect(f.services.revokeImage).not.toHaveBeenCalled();
+		f.baseline([armor]);
+		await flushIcons();
+		expect(
+			f.model.read().equipment.rows.every((row) => row.item === null),
+		).toBe(true);
+		expect(f.model.read().sections[0]?.items.map((item) => item.guid)).toEqual([
+			armor.guid,
+		]);
+		expect(f.services.revokeImage).not.toHaveBeenCalled();
+		f.destroy();
+	});
+	it("refreshes ambient balances and retires currency artwork when the last item leaves", async () => {
+		const f = fixture();
+		const [wcid] = INVENTORY_CURRENCIES[0];
+		const record = item(2, 10);
+		const coin = (guid: number, count: number | null) => ({
+			...record,
+			guid,
+			description: { ...record.description, wcid, stackCount: count },
+		});
+		f.baseline([coin(2, 5), coin(3, null)]);
+		await flushIcons();
+		const row = f.model.read().currencies[0];
+		if (row === undefined) throw new Error("Expected currency row");
+		expect(row.count).toBe(6);
+		expect(f.model.read().currenciesPending).toBe(false);
+		const display = f.icons.read(row.iconKey);
+		if (display.kind !== "ready")
+			throw new Error("Expected prepared currency image");
+		f.resync();
+		expect(f.model.read().currenciesPending).toBe(true);
+		f.baseline([coin(3, 2)]);
+		await flushIcons();
+		expect(f.model.read().currencies[0]).toMatchObject({
+			count: 2,
+			iconKey: row.iconKey,
+		});
+		f.baseline([]);
+		await flushIcons();
+		expect(f.model.read().currencies).toEqual([]);
+		expect(f.services.revokeImage).toHaveBeenCalledWith(display.url);
+		f.destroy();
+	});
+	it("updates stack quantities through recovery without touching shared artwork", async () => {
+		const f = fixture();
+		await flushIcons();
+		const originalKeys = f.model.read().iconKeys;
+		const stacked = (count: number) => {
+			const entity = item(2, 10);
+			return {
+				...entity,
+				description: { ...entity.description, stackCount: count },
+			};
+		};
+		for (const count of [2, 20, 1]) {
+			f.resync();
+			expect(f.model.read().pending).toBe(true);
+			f.baseline([stacked(count)]);
+			await flushIcons();
+			expect(f.model.read().sections[0]?.items[0]?.description).toMatchObject({
+				stackCount: count,
+			});
+			expect(f.model.read().iconKeys).toEqual(originalKeys);
+		}
+		expect(f.services.prepare).toHaveBeenCalledTimes(1);
+		expect(f.services.createImage).toHaveBeenCalledTimes(3);
+		expect(f.services.revokeImage).not.toHaveBeenCalled();
+		f.destroy();
+	});
+
+	it("waits for usable lifecycle state when constructed before connection", async () => {
+		const f = fixture(null);
+		await flushIcons();
+		expect(f.model.read().pending).toBe(true);
+		expect(f.icons.read(f.model.pyrealIconKey).kind).toBe("ready");
+		expect(f.model.read().iconKeys.size).toBe(0);
+		f.changeLifecycle({ kind: "in-world" });
+		await flushIcons();
+		expect(f.model.read().pending).toBe(false);
+		expect(f.services.createImage).toHaveBeenCalledTimes(3);
+		f.destroy();
+	});
+
+	it("prepares before first display, reconciles hidden changes and keeps sort across entry", async () => {
+		const f = fixture();
+		await flushIcons();
+		expect(f.services.createImage).toHaveBeenCalledTimes(3);
+		f.model.cycleSort();
+		f.baseline([item(3, 11)]);
+		await flushIcons();
+		expect(f.services.createImage).toHaveBeenCalledTimes(4);
+		expect(f.services.revokeImage).toHaveBeenCalledTimes(1);
+		expect(f.model.read().sections[0]?.items.map((item) => item.guid)).toEqual([
+			3,
+		]);
+		expect(f.model.read().sortMode).toBe("alphabetical");
+		f.resync();
+		f.changeLifecycle({ kind: "entering-world", characterGuid: 1 });
+		f.changeLifecycle({
+			kind: "portal-space",
+			cause: "initial-entry",
+			worldGeneration: 2,
+		});
+		expect(f.model.read().sections).toEqual([]);
+		expect(f.model.read().sortMode).toBe("alphabetical");
+		expect(f.services.revokeImage).toHaveBeenCalledTimes(3);
+		f.destroy();
+	});
+	it("preserves references through recovery and ordinary teleport", async () => {
+		const f = fixture();
+		await flushIcons();
+		f.resync();
+		expect(f.model.read().pending).toBe(true);
+		expect(f.services.revokeImage).not.toHaveBeenCalled();
+		f.baseline([item(2, 10)]);
+		f.changeLifecycle({
+			kind: "portal-space",
+			cause: "teleport",
+			worldGeneration: 2,
+		});
+		await flushIcons();
+		expect(f.services.prepare).toHaveBeenCalledTimes(1);
+		expect(f.model.read().pending).toBe(false);
+		f.destroy();
+	});
+	it("does not evict on same-icon item handoff or second-consumer release", async () => {
+		const f = fixture();
+		await flushIcons();
+		const oldKey = f.model.read().iconKeys.get(2);
+		if (!oldKey) throw new Error("Expected icon key.");
+		const other = f.icons.createOwner("persistent");
+		f.icons.retainKey(other, oldKey);
+		f.baseline([item(3, 10)]);
+		await flushIcons();
+		expect(f.model.read().iconKeys.get(3)).toBe(oldKey);
+		expect(f.services.prepare).toHaveBeenCalledTimes(1);
+		f.icons.releaseOwner(other);
+		expect(f.services.revokeImage).not.toHaveBeenCalled();
+		f.destroy();
+	});
+	it("resets references on a changed player snapshot and stops maintenance on destruction", async () => {
+		const f = fixture();
+		await flushIcons();
+		f.baseline([item(5, 12, 4)], 4);
+		await flushIcons();
+		expect(f.services.revokeImage).toHaveBeenCalledTimes(2);
+		expect(f.model.read().sections[0]?.container.guid).toBe(4);
+		const items = f.model.readItems();
+		expect(items.playerGuid).toBe(4);
+		expect(items.items.get(5)).toEqual(f.model.readItem(5));
+		expect(items.items.has(3)).toBe(false);
+		expect(items.iconKeys.get(5)).toBe(f.model.read().iconKeys.get(5));
+		f.model.destroy();
+		const count = vi.mocked(f.services.prepare).mock.calls.length;
+		f.baseline([item(6, 13, 4)], 4);
+		await flushIcons();
+		expect(f.services.prepare).toHaveBeenCalledTimes(count);
+		f.icons.dispose();
+	});
+
+	it("keeps all inventory getters side-effect-free without retaining or releasing icons", () => {
+		const f = fixture();
+		const retainSpy = vi.spyOn(f.icons, "retain");
+		const releaseSpy = vi.spyOn(f.icons, "release");
+		f.mirror.commit(
+			f.mirror.prepareSnapshot(
+				{
+					projectileSupply: { kind: "not-applicable" },
+					player: { ...emptyPlayerSummary, burden: 0.75 },
+					worldContainer: { kind: "closed" },
+					entities: [
+						entityFacts(1, {
+							storage: {
+								kind: "container",
+								roster: "announced",
+								itemCapacity: 24,
+								packCapacity: 7,
+							},
+						}),
+						item(77, 15),
+					],
+				},
+				1,
+			),
+		);
+		f.model.read();
+		f.model.readItems();
+		f.model.readItem(2);
+		f.model.readProjectileSupply();
+		f.model.readBurden();
+		f.model.canAutoMergeContainer(1);
+		expect(retainSpy).not.toHaveBeenCalled();
+		expect(releaseSpy).not.toHaveBeenCalled();
+		f.destroy();
+	});
+});

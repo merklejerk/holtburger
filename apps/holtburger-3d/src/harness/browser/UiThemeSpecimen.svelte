@@ -5,14 +5,14 @@
 	import steelUrl from "./themes/steel.css?url&no-inline";
 	import opaqueUrl from "./themes/opaque.css?url&no-inline";
 	import { trackPointerGesture } from "../../app/pointer-gesture";
-	import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
+	import { CLIENT_UI_DEFAULTS } from "../../client/hud/ui-defaults";
 	import {
 		createClientHudLayout,
 		resolveClientHudPlacement,
-	} from "../../client/client-hud-layout";
+	} from "../../client/hud/hud-layout";
 	import ClientHudIcon, {
 		type ClientHudIconName,
-	} from "../../client/ClientHudIcon.svelte";
+	} from "../../client/hud/ClientHudIcon.svelte";
 	import "../../app/ui-base.css";
 
 	/** Cold specimen controls; none participate in the world renderer's lifecycle. */

@@ -65,7 +65,7 @@ import { compileTerrainCompositionTable } from "../terrain/composition-table";
 import {
 	CLIENT_COMBAT_EFFECTS_TUNING,
 	CLIENT_SUMMON_TUNING,
-} from "../../../client/client-tuning";
+} from "../../../client/settings/tuning";
 import type { CombatEffectInstance } from "../systems/combat-effects-system";
 import { SceneGraph, type SceneNodeId, type SceneScope } from "../scene";
 import { sceneNodeIdOf } from "../scene/utils";

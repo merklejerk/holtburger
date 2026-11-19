@@ -2,7 +2,7 @@ import { createUiThemeLoader } from "../../app/ui-theme";
 import {
 	observeCombatEffectsAppearance,
 	readCombatEffectsAppearance,
-} from "../../client/client-combat-effects-appearance";
+} from "../../client/combat/combat-effects-appearance";
 import type { CombatEffectsAppearance } from "../../lib/game/systems/combat-effects-system";
 import themeUrl from "./themes/combat-indicators.css?url&no-inline";
 

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
-	import ClientDebugPanel from "../../client/ClientDebugPanel.svelte";
+	import ClientDebugPanel from "../../client/hud/ClientDebugPanel.svelte";
 	import ExplorerFramePanel from "../../explorer/ExplorerFramePanel.svelte";
 	import {
 		RENDERER_CPU_PHASES,

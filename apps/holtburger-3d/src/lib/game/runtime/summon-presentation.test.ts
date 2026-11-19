@@ -4,7 +4,7 @@ import {
 	validateSummonPresentation,
 	type SummonFlickerTuning,
 } from "./summon-presentation";
-import { CLIENT_SUMMON_TUNING } from "../../../client/client-tuning";
+import { CLIENT_SUMMON_TUNING } from "../../../client/settings/tuning";
 import { createSummonChainLink } from "../renderer/summon-chain-geometry";
 
 const FLICKER: SummonFlickerTuning = {

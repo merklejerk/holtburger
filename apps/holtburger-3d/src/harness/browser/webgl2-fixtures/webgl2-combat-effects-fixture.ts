@@ -1,5 +1,5 @@
-import { decodeClientCombatOutcome } from "../../../client/client-host-contract";
-import { CLIENT_COMBAT_EFFECTS_TUNING } from "../../../client/client-tuning";
+import { decodeClientCombatOutcome } from "../../../client/session/host-contract";
+import { CLIENT_COMBAT_EFFECTS_TUNING } from "../../../client/settings/tuning";
 import { sceneVector3 } from "../../../lib/assets/ac-frame";
 import { CombatEffectsSystem } from "../../../lib/game/systems/combat-effects-system";
 import { createLandblockWorldOrigin } from "../../../lib/game/landblocks";

@@ -1,4 +1,4 @@
-import type { ClientClosePreparation } from "../../client/client-close-contract";
+import type { ClientClosePreparation } from "../../client/session/close-contract";
 import type { StartupGameLifecycle } from "../../app/startup-game-lifecycle";
 import { unwrapHostCommandResult } from "./host-command-result";
 import type {

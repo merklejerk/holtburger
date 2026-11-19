@@ -1,6 +1,6 @@
 <script lang="ts">
 	import PowerIcon from "../assets/icons/hud-power.svg?component";
-	import ClientPregameScreen from "../client/ClientPregameScreen.svelte";
+	import ClientPregameScreen from "../client/pregame/ClientPregameScreen.svelte";
 	import WarningIcon from "../assets/icons/pregame-warning.svg?component";
 	import type { ContentStartupPhase } from "./content-startup-contract";
 

@@ -1,13 +1,13 @@
-import { CLIENT_TUNING } from "../../client/client-tuning";
-import type { ClientEntityFacts } from "../../client/client-entity-mirror";
-import { entityFacts } from "../../client/client-entity-mirror.test-support";
+import { CLIENT_TUNING } from "../../client/settings/tuning";
+import type { ClientEntityFacts } from "../../client/world/entity-mirror";
+import { entityFacts } from "../../client/world/entity-mirror.test-support";
 import {
 	vendorPreviewSchema,
 	vendorRequestSchema,
 	type VendorCategory,
 	type VendorQuote,
 	type VendorSnapshot,
-} from "../../client/client-vendor-state";
+} from "../../client/inventory/vendor-state";
 
 /** Synthetic vendor session data for the interactive UI showcase. */
 export function createVendorFixture(options: {

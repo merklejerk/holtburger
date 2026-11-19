@@ -3,7 +3,7 @@ import {
 	observeSummonLeashColors,
 	readSummonLeashColors,
 	type ClientSummonLeashColors,
-} from "../../client/client-summon-leash-appearance";
+} from "../../client/combat/summon-leash-appearance";
 import themeUrl from "./themes/combat-indicators.css?url&no-inline";
 
 /** Real stylesheet commits and scoped CSS reach the existing runtime's rendered leash. */

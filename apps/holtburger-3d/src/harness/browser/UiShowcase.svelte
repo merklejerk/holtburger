@@ -22,7 +22,7 @@
 	import type { DynamicEntityView } from "../../lib/game/runtime/dynamic-entity-feed";
 	import { RenderSceneInterestController } from "../../lib/game/runtime/render-scene-interest-controller";
 	import type { ScenePlacement } from "../../lib/game/scene";
-	import ClientGameplayView from "../../client/ClientGameplayView.svelte";
+	import ClientGameplayView from "../../client/session/ClientGameplayView.svelte";
 	import type {
 		ClientGameplayCharacterSurface,
 		ClientGameplayCombatMagicSurface,
@@ -31,136 +31,136 @@
 		ClientGameplayShellSurface,
 		ClientGameplaySocialSurface,
 		ClientGameplayWorldSurface,
-	} from "../../client/client-gameplay-surfaces";
-	import ClientMessageDialog from "../../client/ClientMessageDialog.svelte";
-	import { createClientShortcuts } from "../../client/ClientShortcutDock.svelte";
-	import { ClientBarberState } from "../../client/client-barber-state";
+	} from "../../client/session/gameplay-surfaces";
+	import ClientMessageDialog from "../../client/hud/ClientMessageDialog.svelte";
+	import { createClientShortcuts } from "../../client/hud/ClientShortcutDock.svelte";
+	import { ClientBarberState } from "../../client/character/barber-state";
 	import {
 		ClientBookReader,
 		type ClientBookReaderState,
-	} from "../../client/client-book-reader";
-	import { serverCommandRequest } from "../../client/client-chat-compose";
-	import { ClientChatComposer } from "../../client/client-chat-composer.svelte";
-	import { recordSentChat } from "../../client/client-chat-input-history";
+	} from "../../client/inventory/book-reader";
+	import { serverCommandRequest } from "../../client/social/chat-compose";
+	import { ClientChatComposer } from "../../client/social/chat-composer.svelte";
+	import { recordSentChat } from "../../client/social/chat-input-history";
 	import {
 		clientChatShouldSuppress,
 		type ClientChatEntry,
 		type ClientChatLine,
-	} from "../../client/client-chat-policy";
-	import { handleCombatBarKeydown } from "../../client/client-combat-bar-input";
+	} from "../../client/social/chat-policy";
+	import { handleCombatBarKeydown } from "../../client/combat/combat-bar-input";
 	import {
 		COMBAT_BREAKPOINTS,
 		COMBAT_HEIGHTS,
-	} from "../../client/client-combat-bar-state";
-	import { runClientHelpCommand } from "../../client/client-command-help";
-	import { runClientCopyEntityCommand } from "../../client/client-copy-entity-command";
+	} from "../../client/combat/combat-bar-state";
+	import { runClientHelpCommand } from "../../client/session/command-help";
+	import { runClientCopyEntityCommand } from "../../client/session/copy-entity-command";
 	import {
 		ClientDialogs,
 		type ClientDialogPresentation,
-	} from "../../client/client-dialogs";
-	import { ClientEmoteController } from "../../client/client-emote-controller";
-	import type { ClientEntityFacts } from "../../client/client-entity-mirror";
-	import { entityFacts } from "../../client/client-entity-mirror.test-support";
-	import { ClientEntitySelection } from "../../client/client-entity-selection";
+	} from "../../client/hud/dialogs";
+	import { ClientEmoteController } from "../../client/social/emote-controller";
+	import type { ClientEntityFacts } from "../../client/world/entity-mirror";
+	import { entityFacts } from "../../client/world/entity-mirror.test-support";
+	import { ClientEntitySelection } from "../../client/world/entity-selection";
 	import {
 		bindClientPresentationEnvironment,
 		clientWeatherPresets,
 		createClientServerEnvironmentSource,
-	} from "../../client/client-environment";
-	import type { ClientEnvironmentOverrides } from "../../client/client-environment-settings";
+	} from "../../client/settings/environment";
+	import type { ClientEnvironmentOverrides } from "../../client/settings/environment-settings";
 	import {
 		clientEnvironmentFixture,
 		ENVIRONMENT_FIXTURE_DAY_SECONDS,
-	} from "../../client/client-environment.test-support";
-	import type { ClientGameplayPresentationDiagnostics } from "../../client/client-gameplay-presentation";
+	} from "../../client/settings/environment.test-support";
+	import type { ClientGameplayPresentationDiagnostics } from "../../client/session/gameplay-presentation";
 	import {
 		MINIMUM_JUMP_POWER,
 		type ClientAttackProfile,
 		type ClientCombatMode,
 		type ClientCombatStatus,
 		type ClientVital,
-	} from "../../client/client-host-contract";
+	} from "../../client/session/host-contract";
 	import {
 		emptyHousing,
 		type HousingSnapshot,
-	} from "../../client/client-housing-contract";
-	import { ClientHouseCrystalState } from "../../client/client-house-crystal-state";
-	import { ClientHousingManagementState } from "../../client/client-housing-management-state";
-	import { provideClientHudGeometry } from "../../client/client-hud-geometry-context";
-	import { provideClientInput } from "../../client/client-input-context";
+	} from "../../client/housing/housing-contract";
+	import { ClientHouseCrystalState } from "../../client/housing/house-crystal-state";
+	import { ClientHousingManagementState } from "../../client/housing/housing-management-state";
+	import { provideClientHudGeometry } from "../../client/hud/hud-geometry-context";
+	import { provideClientInput } from "../../client/session/input-context";
 	import {
 		clientInputConfiguration,
 		clientInputSettingsSchema,
 		clientKeyboardSettingsEqual,
-	} from "../../client/client-input-settings";
+	} from "../../client/settings/input-settings";
 	import {
 		ClientInspection,
 		type ClientInspectionState,
-	} from "../../client/client-inspection";
+	} from "../../client/inventory/inspection";
 	import {
 		EQUIPMENT_SLOTS,
 		findWieldedCasterSpell,
-	} from "../../client/client-inventory-equipment";
-	import { ClientInventoryState } from "../../client/client-inventory-state";
-	import { ClientItemInteractions } from "../../client/client-item-interactions";
+	} from "../../client/inventory/inventory-equipment";
+	import { ClientInventoryState } from "../../client/inventory/inventory-state";
+	import { ClientItemInteractions } from "../../client/inventory/item-interactions";
 	import {
 		ClientLifecycleSession,
 		type ClientTimedEnchantments,
-	} from "../../client/client-lifecycle-session";
-	import { ClientLocksState } from "../../client/client-locks-state";
-	import { isLogopolisCommand } from "../../client/client-logopolis";
-	import { clientMinimapLandmark } from "../../client/client-minimap-policy";
-	import { ClientNavigationWaypointOwner } from "../../client/client-navigation-waypoint";
-	import { ClientNearby } from "../../client/client-nearby";
-	import { nearbySceneInterest } from "../../client/client-nearby.test-support";
+	} from "../../client/session/lifecycle-session";
+	import { ClientLocksState } from "../../client/inventory/locks-state";
+	import { isLogopolisCommand } from "../../client/hud/logopolis";
+	import { clientMinimapLandmark } from "../../client/hud/minimap-policy";
+	import { ClientNavigationWaypointOwner } from "../../client/world/navigation-waypoint";
+	import { ClientNearby } from "../../client/world/nearby";
+	import { nearbySceneInterest } from "../../client/world/nearby.test-support";
 	import {
 		decodeObjectInspectionResult,
 		type ObjectInspectionResult,
-	} from "../../client/client-object-inspection-contract";
+	} from "../../client/inventory/object-inspection-contract";
 	import {
 		PARTY_HUD_PREVIEW,
 		presentPartyHud,
-	} from "../../client/client-party-hud";
-	import { ClientPartyState } from "../../client/client-party-state";
-	import { ClientSalvageState } from "../../client/client-salvage-state";
-	import { runClientScanCommand } from "../../client/client-scan-command";
-	import { clientSelectedEntity } from "../../client/client-selected-entity";
-	import { ClientSelectedEntityTracking } from "../../client/client-selected-entity-tracking";
-	import type { ClientUserSettings } from "../../client/client-settings-contract";
+	} from "../../client/social/party-hud";
+	import { ClientPartyState } from "../../client/social/party-state";
+	import { ClientSalvageState } from "../../client/inventory/salvage-state";
+	import { runClientScanCommand } from "../../client/session/scan-command";
+	import { clientSelectedEntity } from "../../client/world/selected-entity";
+	import { ClientSelectedEntityTracking } from "../../client/world/selected-entity-tracking";
+	import type { ClientUserSettings } from "../../client/settings/settings-contract";
 	import {
 		createDefaultClientCharacterSettings,
 		createDefaultClientUserSettings,
-	} from "../../client/client-settings-defaults";
-	import { soulEmoteFixture } from "../../client/client-soul-emotes.test-support";
-	import { pulseSpellBarCell } from "../../client/client-spell-bar-feedback";
-	import { handleSpellBarKeydown } from "../../client/client-spell-bar-input";
+	} from "../../client/settings/settings-defaults";
+	import { soulEmoteFixture } from "../../client/social/soul-emotes.test-support";
+	import { pulseSpellBarCell } from "../../client/magic/spell-bar-feedback";
+	import { handleSpellBarKeydown } from "../../client/magic/spell-bar-input";
 	import {
 		bindSpellCell,
 		cycleSpellTab,
 		initialSpellBar,
 		swapSpellTabs,
-	} from "../../client/client-spell-bar-state";
-	import { resolveClientSpellCastAim } from "../../client/client-spell-casting";
+	} from "../../client/magic/spell-bar-state";
+	import { resolveClientSpellCastAim } from "../../client/magic/spell-casting";
 	import {
 		ClientSpellState,
 		spellInspectionQuerySchema,
 		type ClientSpellServices,
-	} from "../../client/client-spells";
-	import { ClientSummonPresentation } from "../../client/client-summon-presentation";
+	} from "../../client/magic/spells";
+	import { ClientSummonPresentation } from "../../client/combat/summon-presentation";
 	import {
 		CLIENT_TOAST_DURATION_MS,
 		ClientToastCenter,
 		type ClientToast,
-	} from "../../client/client-toast-center";
-	import { ClientTradeState } from "../../client/client-trade-state";
+	} from "../../client/hud/toast-center";
+	import { ClientTradeState } from "../../client/inventory/trade-state";
 	import {
 		CLIENT_NEARBY_TUNING,
 		CLIENT_TUNING,
 		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
-	} from "../../client/client-tuning";
-	import { ClientVendorState } from "../../client/client-vendor-state";
-	import { runClientVersionCommand } from "../../client/client-version-command";
-	import { ClientWorldContainerPanelState } from "../../client/client-world-container-panel-state";
+	} from "../../client/settings/tuning";
+	import { ClientVendorState } from "../../client/inventory/vendor-state";
+	import { runClientVersionCommand } from "../../client/session/version-command";
+	import { ClientWorldContainerPanelState } from "../../client/inventory/world-container-panel-state";
 	import { createSalvageFixture } from "./client-salvage-fixture";
 	import { createTradeFixture } from "./client-trade-fixture";
 	import { createVendorFixture } from "./client-vendor-fixture";

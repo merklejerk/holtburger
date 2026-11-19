@@ -33,7 +33,7 @@ The main world canvas and screen-space target/warning overlays stay outside UI s
 | Client selection and bootstrap                        | `src/app/ui-theme-selection.ts`, `src/client/main.ts`           |
 | Desktop discovery and serving                         | `electron/ui-theme-catalog.ts`, `electron/ui-theme-protocol.ts` |
 | Browser defaults and cascade order                    | `src/app/base.css`                                              |
-| Initial client HUD arrangement                        | `src/client/client-ui-defaults.ts`                              |
+| Initial client HUD arrangement                        | `src/client/hud/ui-defaults.ts`                                 |
 | Explorer layout                                       | `src/explorer/explorer.css`                                     |
 
 `mountEntry` imports the complete base appearance from `ui-base.css`. Its optional URL

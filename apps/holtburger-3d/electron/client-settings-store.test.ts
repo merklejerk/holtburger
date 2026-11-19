@@ -8,24 +8,24 @@ import {
 	CLIENT_AUDIO_DEFAULTS,
 	createDefaultClientCharacterSettings,
 	createDefaultClientUserSettings,
-} from "../src/client/client-settings-defaults";
-import { clientSettingsCollectionSchema } from "../src/client/client-settings-sections";
+} from "../src/client/settings/settings-defaults";
+import { clientSettingsCollectionSchema } from "../src/client/settings/settings-sections";
 import {
 	CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
 	MINUTES_PER_GAME_DAY,
-} from "../src/client/client-environment-settings";
-import { clientEnvironmentFixture } from "../src/client/client-environment.test-support";
-import { clientWeatherPresets } from "../src/client/client-environment";
+} from "../src/client/settings/environment-settings";
+import { clientEnvironmentFixture } from "../src/client/settings/environment.test-support";
+import { clientWeatherPresets } from "../src/client/settings/environment";
 
-import { EQUIPMENT_SLOTS } from "../src/client/client-inventory-equipment";
-import { loadoutActionContentSchema } from "../src/client/client-loadout";
-import { bindActionCell } from "../src/client/client-action-bar-state";
+import { EQUIPMENT_SLOTS } from "../src/client/inventory/inventory-equipment";
+import { loadoutActionContentSchema } from "../src/client/inventory/loadout";
+import { bindActionCell } from "../src/client/hud/action-bar-state";
 import {
 	CLIENT_UI_SCALE,
 	CLIENT_HUD_WINDOW_OPACITY,
 	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_TEXT_SCALE,
-} from "../src/client/client-settings-values";
+} from "../src/client/settings/settings-values";
 
 const userContext = {
 	viewport: { width: 1440, height: 900 },

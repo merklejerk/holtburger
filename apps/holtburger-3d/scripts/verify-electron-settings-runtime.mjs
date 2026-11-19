@@ -37,7 +37,7 @@ registerHooks({
 // build fails before launch when its runtime dependency graph is not Node-resolvable.
 await import(
 	new URL(
-		"../dist-electron/src/client/client-settings-contract.js",
+		"../dist-electron/src/client/settings/settings-contract.js",
 		import.meta.url,
 	).href
 );
@@ -92,7 +92,7 @@ await import(
 );
 await import(
 	new URL(
-		"../dist-electron/src/client/client-exit-contract.js",
+		"../dist-electron/src/client/session/exit-contract.js",
 		import.meta.url,
 	).href
 );

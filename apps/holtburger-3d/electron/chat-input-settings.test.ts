@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import {
 	createClientInputDefaults,
 	clientInputSettingsSchema,
-} from "../src/client/client-input-settings";
+} from "../src/client/settings/input-settings";
 import { repairSettingsValue } from "./settings-value-repair";
 
 it("adds word deletion to older profiles while preserving custom and unbound actions", () => {

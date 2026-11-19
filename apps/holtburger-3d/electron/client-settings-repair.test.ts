@@ -16,9 +16,9 @@ import * as replacement from "./replace-local-file";
 import {
 	createDefaultClientCharacterSettings,
 	createDefaultClientUserSettings,
-} from "../src/client/client-settings-defaults";
-import { clientEnvironmentOverridesSchema } from "../src/client/client-environment-settings";
-import { clientSettingsCollectionSchema } from "../src/client/client-settings-sections";
+} from "../src/client/settings/settings-defaults";
+import { clientEnvironmentOverridesSchema } from "../src/client/settings/environment-settings";
+import { clientSettingsCollectionSchema } from "../src/client/settings/settings-sections";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("node:fs/promises")>();

@@ -1,4 +1,4 @@
-import type { ClientClosePreparation } from "../client/client-close-contract";
+import type { ClientClosePreparation } from "../client/session/close-contract";
 
 /** Game construction and close delegation span the interval before ClientApp registers cleanup. */
 export class StartupGameLifecycle {

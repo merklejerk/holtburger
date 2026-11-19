@@ -1,4 +1,4 @@
-import { baselineCurrentState } from "../../../client/client-host-contract.test-support";
+import { baselineCurrentState } from "../../../client/session/host-contract.test-support";
 import { SceneGraph } from "../scene";
 import { DynamicEntityPlacementSystem } from "../systems/dynamic-entity-placement-system";
 import { dynamicEntityPlacementFromPoint } from "../runtime/dynamic-entity-presentation";
@@ -11,11 +11,11 @@ import {
 	type ClientCurrentState,
 	type ClientCameraIdentity,
 	type ClientCameraTick,
-} from "../../../client/client-host-contract";
+} from "../../../client/session/host-contract";
 import {
 	ClientLifecycleSession,
 	type ClientLifecycleTransport,
-} from "../../../client/client-lifecycle-session";
+} from "../../../client/session/lifecycle-session";
 import { createProjectionClearanceRevision } from "./projection-clearance";
 import { ClientCameraSession } from "./client-camera-session";
 import { cellId } from "../runtime/dynamic-entity-feed";

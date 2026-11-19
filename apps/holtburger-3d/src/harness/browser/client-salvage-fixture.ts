@@ -1,9 +1,9 @@
-import { entityFacts } from "../../client/client-entity-mirror.test-support";
-import type { ClientEntityFacts } from "../../client/client-entity-mirror";
+import { entityFacts } from "../../client/world/entity-mirror.test-support";
+import type { ClientEntityFacts } from "../../client/world/entity-mirror";
 import {
 	salvagePreviewRequestSchema,
 	type SalvageEvaluation,
-} from "../../client/client-salvage-state";
+} from "../../client/inventory/salvage-state";
 
 /** Synthetic salvage evaluation replies for the interactive UI showcase. */
 export function createSalvageFixture(options: {

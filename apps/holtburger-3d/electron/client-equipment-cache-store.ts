@@ -8,7 +8,7 @@ import {
 	type EquipmentCacheEntry,
 	type EquipmentCacheSnapshot,
 	type EquipmentCacheTier,
-} from "../src/client/client-equipment-cache-contract.js";
+} from "../src/client/inventory/equipment-cache-contract.js";
 import { formatError } from "../src/lib/format-error.js";
 import type { ClientLaunchConfiguration } from "./client-launch.js";
 import { clientServerScope } from "./client-profile-key.js";

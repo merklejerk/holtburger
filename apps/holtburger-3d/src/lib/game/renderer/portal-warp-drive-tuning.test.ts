@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CLIENT_TUNING } from "../../../client/client-tuning";
+import { CLIENT_TUNING } from "../../../client/settings/tuning";
 import { EXPLORER_TUNING } from "../../../explorer/explorer-tuning";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import {

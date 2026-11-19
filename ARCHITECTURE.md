@@ -76,7 +76,7 @@ Embedded V8/Deno JavaScript runtime exposing read-only projections (`ScriptClien
 ### 9. [`apps/holtburger-cli`](apps/holtburger-cli/ARCHITECTURE.md)
 Interactive `ratatui` terminal client serving as a fast proving ground over `holtburger-core`, owning TUI-local layout, keybindings, navigation policy, and script hosting.
 
-### 10. `apps/holtburger-3d`
+### 10. [`apps/holtburger-3d`](apps/holtburger-3d/ARCHITECTURE.md)
 Full 3D desktop client and content Explorer built with Electron, Svelte 5, WebGL2, and a mode-specific Rust host sidecar (`apps/holtburger-3d/host`) keeping live Client authority separate from offline Explorer authority.
 
 ---

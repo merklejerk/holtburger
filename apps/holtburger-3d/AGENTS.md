@@ -35,7 +35,7 @@ target.
   appropriate shared runtime subsystem.
 - Keep the host sidecar physically mode-specific: shared static content belongs
   in `host/src/shared_host_content.rs`, Explorer authority in
-  `host/src/explorer_host.rs`, client authority in `host/src/client_runtime.rs`,
+  `host/src/explorer_host.rs`, client authority in `host/src/client_runtime/`,
   and the narrow client wire projection in `host/src/client_projection.rs`.
   Do not reintroduce a universal host sink, authority trait, or command
   dispatcher. Non-colliding spatial projection helpers belong to
@@ -155,7 +155,7 @@ loopback port by default; pass `--vite-port 1432` when a deterministic isolated
 port is required for a recorded run or when another worktree is active. The
 Electron app launchers follow the same policy; use
 `npm run dev:client -- --vite-port 1432` for an explicit client port. In client
-mode, `--port` continues to mean the ACE server port.
+mode, `--port` continues to mean the game server port.
 
 ### Keep Verification Scoped
 
@@ -422,8 +422,9 @@ and measure how much content is affected before changing anything.
 
 ## Frontend Tuning Tests
 
-**Hard rule: changing only a value in `frontend-tuning.ts`, `client-tuning.ts`, or
-`explorer-tuning.ts` must never require editing a test.** These files contain knobs intended for
+**Hard rule: changing only a value in `src/lib/frontend-tuning.ts`,
+`src/client/settings/tuning.ts`, or `src/explorer/explorer-tuning.ts` must never
+require editing a test.** These files contain knobs intended for
 routine adjustment, not constants whose current values are behavioral invariants.
 
 - Never copy a tuning value into a test as a literal or assert that a knob still equals its current

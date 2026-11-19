@@ -48,6 +48,13 @@ use super::volume_query::{placed_ball_contact, placed_cylinder_contact};
 use super::{ContactMotionSegment, PhysicalCollisionExclusions, PhysicalCollisionFilter};
 
 const CELL_PLANE_TOLERANCE: f32 = 0.000_2;
+/// Maximum perpendicular gap between a source portal plane and its target EnvCell's
+/// containment volume admitted across an authored seam.
+///
+/// Archive census across all 1,360,018 internal EnvCell portals: 1,191 real adjacent seams
+/// exceed `CELL_PLANE_TOLERANCE` (0.2mm) due to rotated float cell placements, with a maximum
+/// real seam gap of 1.203mm and zero portals between 1.203mm and 50.0mm.
+const PORTAL_SEAM_TOLERANCE: f32 = 0.002;
 /// Retail building-entry sphere BSP allowance.
 const BUILDING_ENTRY_SPHERE_TOLERANCE: f32 = 0.01;
 static NEXT_COLLISION_SCENE_LINEAGE: AtomicU64 = AtomicU64::new(1);
@@ -1954,6 +1961,9 @@ impl CollisionScene {
                 placement.reached_env_cells.push(previous_cell);
                 expand_reached_cells(asset, owner, local, request.radius, &mut placement);
                 placement.committed_cell = containing_reached_cell(asset, local, &placement);
+                if placement.committed_cell.is_none() && !placement.reaches_outdoors {
+                    placement.committed_cell = seam_reached_cell(asset, local, &placement);
+                }
                 if !placement.reaches_outdoors {
                     return placement;
                 }
@@ -2141,7 +2151,7 @@ impl CollisionScene {
                 false,
             )?;
 
-            let inferred = self.placement_for_committed_cell(
+            let inferred = self.infer_placement_from_cell(
                 request.anchor,
                 waypoint.center,
                 request.radius,
@@ -2160,7 +2170,7 @@ impl CollisionScene {
                     // contradictory ordinary traversal is a numerical portal graze, so none of
                     // that segment's inferred transitions may leak into the authoritative path.
                     path.legs.truncate(segment_leg_start);
-                    self.placement_for_committed_cell(
+                    self.infer_placement_from_cell(
                         request.anchor,
                         waypoint.center,
                         request.radius,
@@ -2210,7 +2220,7 @@ impl CollisionScene {
                 return Err(CollisionQueryError::MotionTransitionLimitExceeded);
             }
             let center = interpolate_point(segment.start, segment.end, transition.fraction);
-            let (placement, recovery) = self.placement_for_committed_cell(
+            let (placement, recovery) = self.infer_placement_from_cell(
                 segment.anchor,
                 center,
                 segment.radius,
@@ -2294,36 +2304,6 @@ impl CollisionScene {
             reached = reached.merge_reached(leg.end().placement().clone());
         }
         Ok(reached.merge_reached(placement))
-    }
-
-    fn placement_for_committed_cell(
-        &self,
-        anchor: Guid,
-        center: Vector3,
-        radius: f32,
-        committed_cell: Option<Guid>,
-        allow_zero_radius: bool,
-    ) -> Result<(SpatialMembership, Option<PlacementRecovery>), CollisionQueryError> {
-        let (mut placement, recovery) = self.infer_placement_from_cell(
-            anchor,
-            center,
-            radius,
-            committed_cell,
-            allow_zero_radius,
-        )?;
-        if recovery.is_some() {
-            return Ok((placement, recovery));
-        }
-        placement.committed_cell = committed_cell;
-        match committed_cell {
-            Some(cell) => {
-                if !placement.reached_env_cells.contains(&cell) {
-                    placement.reached_env_cells.push(cell);
-                }
-            }
-            None => placement.reaches_outdoors = true,
-        }
-        Ok((placement, recovery))
     }
 
     /// Infers the center domain from prior-cell-seeded topology, recovering only if unresolved.
@@ -2473,9 +2453,11 @@ impl CollisionScene {
                 owner,
             ));
             for portal in &source.portals {
+                let portal_start_distance = portal.plane.distance_to_point(&local_start);
+                let portal_end_distance = portal.plane.distance_to_point(&local_end);
                 let Some(fraction) = directed_plane_crossing_fraction(
-                    portal.plane.distance_to_point(&local_start),
-                    portal.plane.distance_to_point(&local_end),
+                    portal_start_distance,
+                    portal_end_distance,
                     portal.positive_side,
                     cursor,
                     minimum_advance,
@@ -2490,33 +2472,40 @@ impl CollisionScene {
                 {
                     continue;
                 }
-                let target_cell = match portal.target {
-                    CellCollisionPortalTarget::Outdoor => self
-                        .coincident_outdoor_target_after_crossing(
+                let (transition_fraction, target_cell) = match portal.target {
+                    CellCollisionPortalTarget::Outdoor => (
+                        fraction,
+                        self.adjacent_outdoor_target_after_crossing(
                             segment,
                             fraction,
                             minimum_advance,
                             cell,
+                            portal_target_direction(source, portal),
                         ),
+                    ),
                     CellCollisionPortalTarget::EnvCell(selector) => {
                         let target = Guid((owner.0 & 0xffff_0000) | u32::from(selector));
-                        if !self.target_contains_after_crossing(
-                            segment.anchor,
-                            segment.start,
-                            segment.end,
-                            fraction,
-                            minimum_advance,
+                        let Some(entry_fraction) = self.target_entry_after_crossing(
+                            segment,
+                            PortalPlaneCrossing {
+                                start_distance: portal_start_distance,
+                                end_distance: portal_end_distance,
+                                fraction,
+                                minimum_advance,
+                            },
                             target,
-                        )? {
+                            portal_policy,
+                        )?
+                        else {
                             continue;
-                        }
-                        Some(target)
+                        };
+                        (entry_fraction, Some(target))
                     }
                 };
                 select_earlier_transition(
                     &mut selected,
                     PlacementTransition {
-                        fraction,
+                        fraction: transition_fraction,
                         target_cell,
                     },
                 );
@@ -2533,9 +2522,11 @@ impl CollisionScene {
                 let landblock_end = anchor_to_landblock(segment.end, segment.anchor, owner);
                 let local_start = source.placement.to_local_space(landblock_start);
                 let local_end = source.placement.to_local_space(landblock_end);
+                let portal_start_distance = portal.plane.distance_to_point(&local_start);
+                let portal_end_distance = portal.plane.distance_to_point(&local_end);
                 let Some(fraction) = directed_plane_crossing_fraction(
-                    portal.plane.distance_to_point(&local_start),
-                    portal.plane.distance_to_point(&local_end),
+                    portal_start_distance,
+                    portal_end_distance,
                     !portal.positive_side,
                     cursor,
                     minimum_advance,
@@ -2567,20 +2558,24 @@ impl CollisionScene {
                     continue;
                 }
                 let target_cell = Guid((owner.0 & 0xffff_0000) | u32::from(source.cell_selector));
-                if !self.target_contains_after_crossing(
-                    segment.anchor,
-                    segment.start,
-                    segment.end,
-                    fraction,
-                    minimum_advance,
+                let Some(entry_fraction) = self.target_entry_after_crossing(
+                    segment,
+                    PortalPlaneCrossing {
+                        start_distance: portal_start_distance,
+                        end_distance: portal_end_distance,
+                        fraction,
+                        minimum_advance,
+                    },
                     target_cell,
-                )? {
+                    portal_policy,
+                )?
+                else {
                     continue;
-                }
+                };
                 select_earlier_transition(
                     &mut selected,
                     PlacementTransition {
-                        fraction,
+                        fraction: entry_fraction,
                         target_cell: Some(target_cell),
                     },
                 );
@@ -2589,22 +2584,31 @@ impl CollisionScene {
         Ok(selected)
     }
 
-    /// Resolves an EnvCell reached through a zero-thickness outdoor transit, when unique.
+    /// Resolves an EnvCell reached directly across a coincident or overlapping outdoor junction,
+    /// when unique.
     ///
     /// Retail adds outdoor land cells to the same `CELLARRAY` and continues expanding them into
-    /// building entries. Our outdoor domain is implicit, so a just-beyond placement query
-    /// supplies candidate geometry. Body entry retains retail's source query frame; zero-radius
+    /// building entries, committing the first EnvCell whose volume contains the destination point
+    /// regardless of whether the two buildings' outdoor portals coincide or overlap (retail data
+    /// includes overlapping abutting building doorways up to ~16cm deep, such as `0xec0e0110` /
+    /// `0xec0e011c` at 1.76cm and `0xbd740178` / `0xbd740124` at 15.64cm). Our outdoor domain is
+    /// implicit, so a just-beyond placement query supplies candidate geometry and admits any
+    /// uniquely matching registered entrance whose plane was crossed on or before `fraction +
+    /// minimum_advance` (covering coincident planes, earlier overlap crossings, and segments that
+    /// start inside the overlap band). Body entry retains retail's source query frame; zero-radius
     /// rays follow geometric connectivity.
-    fn coincident_outdoor_target_after_crossing(
+    fn adjacent_outdoor_target_after_crossing(
         &self,
         segment: PlacementMotionSegment<'_>,
         fraction: f32,
         minimum_advance: f32,
         source_cell: Guid,
+        source_outward: Vector3,
     ) -> Option<Guid> {
         let probe_fraction = (fraction + minimum_advance).min(1.0);
         let probe = interpolate_point(segment.start, segment.end, probe_fraction);
         let entry_point = anchor_to_landblock(probe, segment.anchor, landblock_key(source_cell));
+        let crossing_limit = fraction + minimum_advance;
         let placement = self.transit_cell_installed(
             CellTransitRequest {
                 previous_cell: Some(source_cell),
@@ -2614,50 +2618,44 @@ impl CollisionScene {
             },
             segment.touched,
         );
-        let mut candidates =
-            placement
-                .reached_env_cells()
-                .iter()
-                .copied()
-                .filter(|cell| *cell != source_cell)
-                .filter(|cell| {
-                    let owner = landblock_key(*cell);
-                    let local = anchor_to_landblock(probe, segment.anchor, owner);
-                    let landblock_start = anchor_to_landblock(segment.start, segment.anchor, owner);
-                    let landblock_end = anchor_to_landblock(segment.end, segment.anchor, owner);
-                    self.landblock_asset(owner).is_some_and(|asset| {
-                        asset
-                            .static_geometry
-                            .cell_volume((cell.0 & 0xffff) as u16)
-                            .is_some_and(|volume| {
-                                let local_start = volume.placement.to_local_space(landblock_start);
-                                let local_end = volume.placement.to_local_space(landblock_end);
-                                (segment.radius == 0.0
-                                    || retail_building_entry_reaches(
+        let mut candidates = placement
+            .reached_env_cells()
+            .iter()
+            .copied()
+            .filter(|cell| *cell != source_cell)
+            .filter(|cell| {
+                let owner = landblock_key(*cell);
+                let local = anchor_to_landblock(probe, segment.anchor, owner);
+                let landblock_start = anchor_to_landblock(segment.start, segment.anchor, owner);
+                let landblock_end = anchor_to_landblock(segment.end, segment.anchor, owner);
+                self.landblock_asset(owner).is_some_and(|asset| {
+                    asset
+                        .static_geometry
+                        .cell_volume((cell.0 & 0xffff) as u16)
+                        .is_some_and(|volume| {
+                            let local_start = volume.placement.to_local_space(landblock_start);
+                            let local_end = volume.placement.to_local_space(landblock_end);
+                            (segment.radius == 0.0
+                                || retail_building_entry_reaches(
+                                    volume,
+                                    entry_point,
+                                    segment.radius,
+                                ))
+                                && volume_reaches(volume, local, 0.0)
+                                && volume.portals.iter().any(|portal| {
+                                    outdoor_portal_entered_by_crossing(
+                                        source_outward,
                                         volume,
-                                        entry_point,
-                                        segment.radius,
-                                    ))
-                                    && volume_reaches(volume, local, 0.0)
-                                    && volume.portals.iter().any(|portal| {
-                                        portal.target == CellCollisionPortalTarget::Outdoor
-                                            && portal.outdoor_building.is_some()
-                                            && directed_plane_crossing_fraction(
-                                                portal.plane.distance_to_point(&local_start),
-                                                portal.plane.distance_to_point(&local_end),
-                                                !portal.positive_side,
-                                                None,
-                                                0.0,
-                                            )
-                                            .is_some_and(|target_fraction| {
-                                                (target_fraction - fraction).abs()
-                                                    <= minimum_advance
-                                            })
-                                    })
-                            })
-                    })
+                                        portal,
+                                        local_start,
+                                        local_end,
+                                        crossing_limit,
+                                    )
+                                })
+                        })
                 })
-                .collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
         candidates.sort_unstable();
         candidates.dedup();
         match candidates.as_slice() {
@@ -2666,15 +2664,18 @@ impl CollisionScene {
         }
     }
 
-    fn target_contains_after_crossing(
+    /// Returns the fraction where `segment` enters `target_cell` across the crossed portal seam.
+    ///
+    /// Clips the remaining segment against `target_cell`'s convex containment planes rather than
+    /// probing a single point `CELL_PLANE_TOLERANCE` past the source plane, so rotated EnvCell
+    /// placements with sub-millimeter authored air gaps still transition cleanly at any angle.
+    fn target_entry_after_crossing(
         &self,
-        anchor: Guid,
-        start: Vector3,
-        end: Vector3,
-        fraction: f32,
-        minimum_advance: f32,
+        segment: PlacementMotionSegment<'_>,
+        crossing: PortalPlaneCrossing,
         target_cell: Guid,
-    ) -> Result<bool, CollisionQueryError> {
+        portal_policy: PortalTraversalPolicy,
+    ) -> Result<Option<f32>, CollisionQueryError> {
         let owner = landblock_key(target_cell);
         let target = self
             .landblocks
@@ -2688,10 +2689,34 @@ impl CollisionScene {
             .ok_or(CollisionQueryError::UnknownMotionCell {
                 cell: target_cell.0,
             })?;
-        let probe_fraction = (fraction + minimum_advance).min(1.0);
-        let probe =
-            anchor_to_landblock(interpolate_point(start, end, probe_fraction), anchor, owner);
-        Ok(volume_reaches(target, probe, 0.0))
+        let landblock_start = anchor_to_landblock(segment.start, segment.anchor, owner);
+        let landblock_end = anchor_to_landblock(segment.end, segment.anchor, owner);
+        // Reject crossings on the infinite portal plane outside the shared doorway before clipping.
+        let crossing_point = interpolate_point(landblock_start, landblock_end, crossing.fraction);
+        if !volume_reaches(target, crossing_point, PORTAL_SEAM_TOLERANCE) {
+            return Ok(None);
+        }
+        let Some(entry) =
+            segment_volume_entry(target, landblock_start, landblock_end, crossing.fraction)
+        else {
+            // A visibility ray that stopped on the source portal cap at fraction 1.0 has already
+            // passed aperture containment and seam proximity above, so admit the crossing into
+            // the adjacent cell even across a sub-millimeter gap.
+            return Ok((portal_policy == PortalTraversalPolicy::VisibleSelection
+                && crossing.fraction == 1.0)
+                .then_some(1.0));
+        };
+        let normal_gap = (crossing.start_distance
+            + (crossing.end_distance - crossing.start_distance) * entry.entry_fraction)
+            .abs();
+        if normal_gap > PORTAL_SEAM_TOLERANCE {
+            return Ok(None);
+        }
+        let probe_fraction = (entry.entry_fraction + crossing.minimum_advance).min(1.0);
+        if entry.exit_fraction < probe_fraction {
+            return Ok(None);
+        }
+        Ok(Some(entry.entry_fraction))
     }
 
     fn contacts(&self, request: StaticContactRequest<'_>) -> Vec<StaticContact> {
@@ -3184,6 +3209,105 @@ fn containing_reached_cell(
         })
 }
 
+/// Resolves a point resting inside a sub-millimeter authored seam crack between two or more
+/// portal-reached EnvCells without widening single-cell wall containment.
+fn seam_reached_cell(
+    asset: &LandblockCollisionAsset,
+    landblock_point: Vector3,
+    placement: &SpatialMembership,
+) -> Option<Guid> {
+    let mut best: Option<(Guid, f32)> = None;
+    let mut seam_candidates = 0usize;
+    for cell in placement
+        .reached_env_cells
+        .iter()
+        .copied()
+        .filter(|cell| landblock_key(*cell).0 == asset.landblock_id)
+    {
+        let Some(volume) = asset.static_geometry.cell_volume((cell.0 & 0xffff) as u16) else {
+            continue;
+        };
+        let local = volume.placement.to_local_space(landblock_point);
+        let min_distance = volume
+            .planes
+            .iter()
+            .map(|plane| plane.distance_to_point(&local))
+            .fold(f32::INFINITY, f32::min);
+        if min_distance >= -(CELL_PLANE_TOLERANCE + PORTAL_SEAM_TOLERANCE) {
+            seam_candidates += 1;
+            if best.is_none_or(|(_, best_distance)| min_distance > best_distance) {
+                best = Some((cell, min_distance));
+            }
+        }
+    }
+    (seam_candidates >= 2).then_some(best?.0)
+}
+
+/// Portal-plane crossing facts shared between plane intersection and target-volume entry.
+#[derive(Clone, Copy)]
+struct PortalPlaneCrossing {
+    /// Signed distance from the crossed portal plane at segment start.
+    start_distance: f32,
+    /// Signed distance from the crossed portal plane at segment end.
+    end_distance: f32,
+    /// Normalized crossing fraction on the source portal plane.
+    fraction: f32,
+    /// Minimum normalized advance required to reject zero-thickness corner grazes.
+    minimum_advance: f32,
+}
+
+/// Clipped interval where a segment enters and remains within a convex `CellVolume`.
+#[derive(Clone, Copy)]
+struct VolumeEntry {
+    /// Earliest fraction in `[start_fraction, exit_fraction]` reaching the non-negative interior
+    /// of every entered containment plane (clamped to `exit_fraction` when only the tolerance
+    /// band is grazed).
+    entry_fraction: f32,
+    /// Latest fraction in `[start_fraction, 1.0]` staying within `CELL_PLANE_TOLERANCE` of every
+    /// containment plane.
+    exit_fraction: f32,
+}
+
+/// Clips `[start_fraction, 1.0]` of a segment against `volume`'s convex containment planes.
+fn segment_volume_entry(
+    volume: &holtburger_content::CellVolume,
+    landblock_start: Vector3,
+    landblock_end: Vector3,
+    start_fraction: f32,
+) -> Option<VolumeEntry> {
+    let local_start = volume.placement.to_local_space(landblock_start);
+    let local_end = volume.placement.to_local_space(landblock_end);
+    let mut enter_tol = start_fraction;
+    let mut enter_exact = start_fraction;
+    let mut exit_tol = 1.0_f32;
+    for plane in &volume.planes {
+        let start_distance = plane.distance_to_point(&local_start);
+        let end_distance = plane.distance_to_point(&local_end);
+        let delta = end_distance - start_distance;
+        if delta.abs() <= f32::EPSILON {
+            if start_distance < -CELL_PLANE_TOLERANCE {
+                return None;
+            }
+            continue;
+        }
+        let tol_boundary = (-CELL_PLANE_TOLERANCE - start_distance) / delta;
+        if delta > 0.0 {
+            enter_tol = enter_tol.max(tol_boundary);
+            enter_exact = enter_exact.max(-start_distance / delta);
+        } else {
+            exit_tol = exit_tol.min(tol_boundary);
+        }
+        if enter_tol > exit_tol {
+            return None;
+        }
+    }
+    // `enter_exact >= enter_tol` always holds for positive `delta` and `CELL_PLANE_TOLERANCE`.
+    Some(VolumeEntry {
+        entry_fraction: enter_exact.min(exit_tol),
+        exit_fraction: exit_tol,
+    })
+}
+
 /// Retains, in order, the tail elements from `start` that satisfy the predicate.
 fn retain_from<T: Copy>(items: &mut Vec<T>, start: usize, mut keep: impl FnMut(&T) -> bool) {
     let mut kept = start;
@@ -3335,37 +3459,25 @@ fn validate_motion_waypoints(waypoints: &[MotionWaypoint]) -> Result<(), Collisi
     Ok(())
 }
 
-fn directed_plane_crossing_fraction(
+/// Returns the unclamped fraction where a segment enters the `target_is_positive` half-space of a
+/// plane, admitting endpoints within `CELL_PLANE_TOLERANCE` at fraction `1.0`.
+///
+/// Negative fractions indicate `start` already lies on the target side while moving deeper in.
+fn plane_entry_fraction(
     start_distance: f32,
     end_distance: f32,
     target_is_positive: bool,
-    cursor: Option<f32>,
-    minimum_advance: f32,
 ) -> Option<f32> {
-    let oriented_start = if target_is_positive {
-        start_distance
+    let (oriented_start, oriented_end) = if target_is_positive {
+        (start_distance, end_distance)
     } else {
-        -start_distance
-    };
-    let oriented_end = if target_is_positive {
-        end_distance
-    } else {
-        -end_distance
+        (-start_distance, -end_distance)
     };
     let delta = oriented_end - oriented_start;
     if delta <= f32::EPSILON {
         return None;
     }
-    // Containment retains the source within this plane tolerance. When travel leaves that
-    // boundary into the target, consume the initial crossing even if transforms put it just
-    // behind the start. Subsequent crossings still require progress to prevent cycling.
-    if cursor.is_none()
-        && oriented_start.abs() <= CELL_PLANE_TOLERANCE
-        && oriented_end > CELL_PLANE_TOLERANCE
-    {
-        return Some((-oriented_start / delta).max(0.0));
-    }
-    let mut fraction = -oriented_start / delta;
+    let fraction = -oriented_start / delta;
     if fraction > 1.0 {
         // A prior placement pass may emit this exact portal boundary as a waypoint. Transforming
         // that world point back into authored local space can leave it a few float ULPs short of
@@ -3373,12 +3485,73 @@ fn directed_plane_crossing_fraction(
         if oriented_end < -CELL_PLANE_TOLERANCE {
             return None;
         }
-        fraction = 1.0;
+        return Some(1.0);
+    }
+    Some(fraction)
+}
+
+fn directed_plane_crossing_fraction(
+    start_distance: f32,
+    end_distance: f32,
+    target_is_positive: bool,
+    cursor: Option<f32>,
+    minimum_advance: f32,
+) -> Option<f32> {
+    let fraction = plane_entry_fraction(start_distance, end_distance, target_is_positive)?;
+    let (oriented_start, oriented_end) = if target_is_positive {
+        (start_distance, end_distance)
+    } else {
+        (-start_distance, -end_distance)
+    };
+    // Containment retains the source within this plane tolerance. When travel leaves that
+    // boundary into the target, consume the initial crossing even if transforms put it just
+    // behind the start. Subsequent crossings still require progress to prevent cycling.
+    if cursor.is_none()
+        && oriented_start.abs() <= CELL_PLANE_TOLERANCE
+        && oriented_end > CELL_PLANE_TOLERANCE
+    {
+        return Some(fraction.max(0.0));
     }
     if fraction <= cursor.unwrap_or(0.0) + minimum_advance {
         return None;
     }
     Some(fraction.clamp(0.0, 1.0))
+}
+
+/// Returns the portal's outward normal toward its `target` domain in landblock/world axes.
+fn portal_target_direction(volume: &CellVolume, portal: &CellCollisionPortal) -> Vector3 {
+    let local = if portal.positive_side {
+        portal.plane.normal
+    } else {
+        portal.plane.normal * -1.0
+    };
+    volume.placement.orientation.rotate_vector(local)
+}
+
+/// Returns whether a segment exiting an outdoor portal has already entered `portal` on or before
+/// `crossing_limit` (covering coincident planes, overlapping doorways, and overlap-zone starts).
+///
+/// The threshold `crossing_limit` (`fraction + minimum_advance`) forms an exact partition with
+/// `directed_plane_crossing_fraction`: portals strictly beyond `crossing_limit` are discovered on
+/// the subsequent outdoor iteration, while portals at or behind it must hand off directly here.
+fn outdoor_portal_entered_by_crossing(
+    source_outward: Vector3,
+    volume: &CellVolume,
+    portal: &CellCollisionPortal,
+    local_start: Vector3,
+    local_end: Vector3,
+    crossing_limit: f32,
+) -> bool {
+    portal.target == CellCollisionPortalTarget::Outdoor
+        && portal.outdoor_building.is_some()
+        // Opposing outdoor portals have opposite outward normals (dot < 0); reject side/back walls.
+        && source_outward.dot(&portal_target_direction(volume, portal)) < 0.0
+        && plane_entry_fraction(
+            portal.plane.distance_to_point(&local_start),
+            portal.plane.distance_to_point(&local_end),
+            !portal.positive_side,
+        )
+        .is_some_and(|crossing| crossing <= crossing_limit)
 }
 
 /// Admit selection crossings only inside the effective visibility opening.
@@ -5790,6 +5963,148 @@ mod tests {
         assert_eq!(path.final_point().placement().committed_cell(), None);
     }
 
+    fn shifted_outdoor_cells(target_x_offset: f32) -> Vec<CellVolume> {
+        let mut cells = coincident_outdoor_cells();
+        let target_x = 100.0 + target_x_offset;
+        cells[1].planes[0].d = -target_x;
+        cells[1].portals[0].plane.d = target_x;
+        cells
+    }
+
+    #[test]
+    fn placed_motion_and_rays_collapse_an_overlapping_outdoor_junction() {
+        let anchor = Guid(0xda55_ffff);
+        let west_cell = Guid(0xda55_010a);
+        let east_cell = Guid(0xda55_010b);
+        let overlap = 0.02;
+        let scene = placement_scene(shifted_outdoor_cells(-overlap));
+
+        // Traverse in both directions, starting both outside and inside the overlap band.
+        for (source, target, start_x, end_x) in [
+            (west_cell, east_cell, 99.8, 100.2),
+            (east_cell, west_cell, 100.2, 99.8),
+            (west_cell, east_cell, 100.0 - overlap * 0.5, 100.2),
+            (east_cell, west_cell, 100.0 - overlap * 0.5, 99.8),
+        ] {
+            let path = scene
+                .transit_motion_path(PlacedMotionPathRequest {
+                    previous_cell: Some(source),
+                    anchor,
+                    start: Vector3::new(start_x, 10.0, 20.0),
+                    radius: 0.3,
+                    waypoints: &[MotionWaypoint {
+                        center: Vector3::new(end_x, 10.0, 20.0),
+                        end_fraction: 1.0,
+                        placement: MotionWaypointPlacement::Traverse,
+                    }],
+                })
+                .unwrap();
+
+            assert_eq!(path.initial().placement().committed_cell(), Some(source));
+            assert_eq!(
+                path.final_point().placement().committed_cell(),
+                Some(target)
+            );
+            assert!(
+                path.legs()
+                    .iter()
+                    .all(|leg| leg.end().placement().committed_cell().is_some()),
+                "overlapping outdoor junction exposed a synthetic outdoor placement"
+            );
+        }
+
+        // Zero-radius rays (such as camera booms) must also enter the overlapping building.
+        let ray = scene
+            .traverse_surface_ray(
+                StaticSurfaceRayRequest {
+                    anchor,
+                    start: Vector3::new(99.5, 10.0, 20.0),
+                    direction: Vector3::new(1.0, 0.0, 0.0),
+                    maximum_distance: 1.0,
+                    previous_cell: Some(west_cell),
+                    filter: PhysicalCollisionFilter::ALL,
+                },
+                CollisionQueryPolicy::RequireCollisionCoverage,
+                PortalTraversalPolicy::Physical,
+                |_, _| false,
+                |interval, placement| {
+                    Ok::<_, CollisionQueryError>(
+                        (placement.committed_cell() == Some(east_cell))
+                            .then_some((interval.maximum_distance * 0.5, ())),
+                    )
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            ray.value.hit.unwrap().placement.committed_cell(),
+            Some(east_cell)
+        );
+    }
+
+    #[test]
+    fn placed_motion_rejects_overlapping_building_without_facing_outdoor_portal() {
+        let anchor = Guid(0xda55_ffff);
+        let source_cell = Guid(0xda55_010a);
+        let mut cells = shifted_outdoor_cells(-0.02);
+        // Move the second building's outdoor doorway onto a perpendicular north wall so the
+        // overlap across x = 100.0 is a solid side wall rather than a facing doorway.
+        cells[1].portals[0].plane = Plane {
+            normal: Vector3::new(0.0, 1.0, 0.0),
+            d: -20.0,
+        };
+        let scene = placement_scene(cells);
+
+        let path = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor,
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.2, 10.2, 20.0),
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .unwrap();
+
+        assert_eq!(path.final_point().placement().committed_cell(), None);
+    }
+
+    #[test]
+    fn placed_motion_crosses_a_small_outdoor_gap_beyond_plane_tolerance() {
+        let anchor = Guid(0xda55_ffff);
+        let west_cell = Guid(0xda55_010a);
+        let east_cell = Guid(0xda55_010b);
+        let gap = CELL_PLANE_TOLERANCE * 2.5;
+        let scene = placement_scene(shifted_outdoor_cells(gap));
+
+        let path = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(west_cell),
+                anchor,
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.2, 10.0, 20.0),
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .unwrap();
+
+        assert_eq!(path.legs().len(), 3);
+        assert_eq!(path.legs()[0].end().placement().committed_cell(), None);
+        assert_eq!(
+            path.legs()[1].end().placement().committed_cell(),
+            Some(east_cell)
+        );
+        assert_eq!(
+            path.final_point().placement().committed_cell(),
+            Some(east_cell)
+        );
+    }
+
     #[test]
     fn placed_motion_repairs_an_escaped_cell_to_outdoors() {
         let source_cell = Guid(0xda55_010a);
@@ -6348,6 +6663,272 @@ mod tests {
             path.final_point().placement().committed_cell(),
             Some(target_cell),
             "overlapping source containment overrode directed portal history"
+        );
+    }
+
+    fn two_cell_portal_gap_scene(gap: f32) -> CollisionScene {
+        placement_scene(vec![
+            CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
+                cell_selector: 0x010a,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(-1.0, 0.0, 0.0),
+                    d: 100.0,
+                }],
+                portals: vec![portal(
+                    1.0,
+                    -100.0,
+                    CellCollisionPortalTarget::EnvCell(0x010b),
+                )],
+            },
+            CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
+                cell_selector: 0x010b,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -(100.0 + gap),
+                }],
+                portals: vec![portal(
+                    -1.0,
+                    100.0 + gap,
+                    CellCollisionPortalTarget::EnvCell(0x010a),
+                )],
+            },
+        ])
+    }
+
+    #[test]
+    fn placed_motion_path_crosses_submillimeter_portal_seam_without_recovery() {
+        let source_cell = Guid(0xda55_010a);
+        let target_cell = Guid(0xda55_010b);
+        // Wider than 2 * CELL_PLANE_TOLERANCE so a fixed CELL_PLANE_TOLERANCE probe past the
+        // source plane lands in the empty seam, yet within PORTAL_SEAM_TOLERANCE.
+        let seam_gap = (CELL_PLANE_TOLERANCE * 3.0).min(PORTAL_SEAM_TOLERANCE * 0.5);
+        assert!(seam_gap > CELL_PLANE_TOLERANCE * 2.0);
+        let scene = two_cell_portal_gap_scene(seam_gap);
+
+        // Cross obliquely so perpendicular progress per unit segment length is small.
+        let first = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.2, 12.0, 20.0),
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .unwrap();
+        assert!(!first.has_recovery(), "{first:?}");
+        assert_eq!(first.legs().len(), 2);
+        assert_eq!(
+            first.legs()[0].end().placement().committed_cell(),
+            Some(target_cell)
+        );
+        assert_eq!(
+            first.final_point().placement().committed_cell(),
+            Some(target_cell)
+        );
+
+        // Next tick starting from the committed endpoint must agree on initial cell identity.
+        let second = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: first.final_point().placement().committed_cell(),
+                anchor: Guid(0xda55_ffff),
+                start: first.final_point().center(),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.6, 14.0, 20.0),
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .unwrap();
+        assert!(!second.has_recovery(), "{second:?}");
+        assert_eq!(
+            second.initial().placement().committed_cell(),
+            first.final_point().placement().committed_cell()
+        );
+    }
+
+    #[test]
+    fn portal_crossing_rejects_target_beyond_seam_tolerance_or_sideways_of_doorway() {
+        let source_cell = Guid(0xda55_010a);
+        let distant_gap = PORTAL_SEAM_TOLERANCE * 5.0;
+        let scene = placement_scene(vec![
+            CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
+                cell_selector: 0x010a,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(-1.0, 0.0, 0.0),
+                    d: 100.0,
+                }],
+                portals: vec![
+                    portal(1.0, -100.0, CellCollisionPortalTarget::EnvCell(0x010b)),
+                    portal(1.0, -100.0, CellCollisionPortalTarget::EnvCell(0x010c)),
+                ],
+            },
+            // Distant along portal normal (> PORTAL_SEAM_TOLERANCE).
+            CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
+                cell_selector: 0x010b,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -(100.0 + distant_gap),
+                }],
+                portals: Vec::new(),
+            },
+            // Flush in X, but starts sideways at y >= 15.0, far from the crossing at y = 10.0.
+            CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
+                cell_selector: 0x010c,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![
+                    Plane {
+                        normal: Vector3::new(1.0, 0.0, 0.0),
+                        d: -100.0,
+                    },
+                    Plane {
+                        normal: Vector3::new(0.0, 1.0, 0.0),
+                        d: -15.0,
+                    },
+                ],
+                portals: Vec::new(),
+            },
+        ]);
+
+        let owner = Guid(0xda55_ffff);
+        // Crosses x = 100.0 at fraction 0.5 with y = 13.0 (2m outside 0x010c's y >= 15.0 side
+        // plane), then later enters both 0x010b (beyond PORTAL_SEAM_TOLERANCE) and 0x010c.
+        let transition = scene
+            .next_placement_transition(
+                PlacementMotionSegment {
+                    anchor: owner,
+                    start: Vector3::new(99.8, 10.0, 20.0),
+                    end: Vector3::new(100.2, 16.0, 20.0),
+                    radius: 0.3,
+                    touched: &[owner],
+                },
+                None,
+                Some(source_cell),
+                PortalTraversalPolicy::Physical,
+            )
+            .unwrap();
+        assert_eq!(transition, None);
+    }
+
+    #[test]
+    fn transit_cell_preserves_interior_placement_inside_portal_seam_crack() {
+        let source_cell = Guid(0xda55_010a);
+        let target_cell = Guid(0xda55_010b);
+        let seam_gap = (CELL_PLANE_TOLERANCE * 3.0).min(PORTAL_SEAM_TOLERANCE * 0.5);
+        let scene = two_cell_portal_gap_scene(seam_gap);
+
+        // Midpoint of the seam crack lies strictly outside CELL_PLANE_TOLERANCE for both cells.
+        let seam_midpoint = Vector3::new(100.0 + seam_gap * 0.5, 10.0, 20.0);
+        let path = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: seam_midpoint,
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .unwrap();
+        assert!(!path.has_recovery(), "{path:?}");
+        assert!(
+            matches!(
+                path.final_point().placement().committed_cell(),
+                Some(cell) if cell == source_cell || cell == target_cell
+            ),
+            "point in portal seam crack should remain indoors: {path:?}"
+        );
+    }
+
+    #[test]
+    fn placed_motion_path_keeps_inferred_neighbor_when_previous_cell_no_longer_contains_endpoint() {
+        let source_cell = Guid(0xda55_010a);
+        let target_cell = Guid(0xda55_010b);
+        // Gap larger than PORTAL_SEAM_TOLERANCE forces append_portal_transitions to skip the
+        // crossing while still within sphere radius so portal expansion reaches target_cell.
+        let wide_gap = PORTAL_SEAM_TOLERANCE * 5.0;
+        let scene = two_cell_portal_gap_scene(wide_gap);
+
+        let end = Vector3::new(100.2, 10.0, 20.0);
+        let first = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: Some(source_cell),
+                anchor: Guid(0xda55_ffff),
+                start: Vector3::new(99.8, 10.0, 20.0),
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: end,
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .unwrap();
+        assert_eq!(
+            first.final_point().placement().committed_cell(),
+            Some(target_cell)
+        );
+
+        let second = scene
+            .transit_motion_path(PlacedMotionPathRequest {
+                previous_cell: first.final_point().placement().committed_cell(),
+                anchor: Guid(0xda55_ffff),
+                start: end,
+                radius: 0.3,
+                waypoints: &[MotionWaypoint {
+                    center: Vector3::new(100.4, 10.0, 20.0),
+                    end_fraction: 1.0,
+                    placement: MotionWaypointPlacement::Traverse,
+                }],
+            })
+            .unwrap();
+        assert_eq!(
+            second.initial().placement().committed_cell(),
+            first.final_point().placement().committed_cell()
         );
     }
 

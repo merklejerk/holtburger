@@ -1,4 +1,4 @@
-import type { ResizeEdges } from "../../app/resize-edges";
+import type { ResizeEdges } from "../../app/ui/resize-edges";
 
 /** Viewport attachment; offsets point inward at edges and right/down at the center. */
 type ClientUiAnchor =

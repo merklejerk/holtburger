@@ -1,4 +1,4 @@
-import { APP_BUILD_LABEL } from "../../app/app-build";
+import { APP_BUILD_LABEL } from "../../app/desktop/app-build";
 import type { ClientChatMessage } from "./host-contract";
 
 /** Reports frontend build identity locally without requiring a game-server connection. */

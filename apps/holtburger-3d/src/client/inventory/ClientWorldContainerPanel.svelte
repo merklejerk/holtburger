@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import ClientContentsView from "./ClientContentsView.svelte";
 	import ClientContentsSortButton from "./ClientContentsSortButton.svelte";
 	import { bindContentsActivation } from "./contents-activation";

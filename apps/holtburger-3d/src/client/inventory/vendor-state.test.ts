@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { UiIconRepository } from "../../app/ui-icon-repository";
+import { UiIconRepository } from "../widgets/ui-icon-repository";
 import {
 	ClientEntityMirror,
 	type ClientEntityFacts,

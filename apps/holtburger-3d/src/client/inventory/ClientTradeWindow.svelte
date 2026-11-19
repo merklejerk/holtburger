@@ -5,12 +5,12 @@
 	import { onMount } from "svelte";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { useClientInput } from "../session/input-context";
-	import { useItemCantrips } from "../../app/item-cantrips";
-	import CantripBorderSpecular from "../../app/CantripBorderSpecular.svelte";
-	import ItemCellVisual from "../../app/ItemCellVisual.svelte";
-	import { itemCellPresentation } from "../../app/item-cell-presentation";
-	import { startUiIconDisplay } from "../../app/ui-icon-display";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import { useItemCantrips } from "../widgets/item-cantrips";
+	import CantripBorderSpecular from "../widgets/CantripBorderSpecular.svelte";
+	import ItemCellVisual from "../widgets/ItemCellVisual.svelte";
+	import { itemCellPresentation } from "../widgets/item-cell-presentation";
+	import { startUiIconDisplay } from "../widgets/ui-icon-display";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import ClientHudWindow from "../hud/ClientHudWindow.svelte";
 	import { CLIENT_TUNING } from "../settings/tuning";
 	import { CLIENT_UI_DEFAULTS } from "../hud/ui-defaults";

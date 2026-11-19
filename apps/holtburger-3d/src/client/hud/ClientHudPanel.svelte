@@ -6,9 +6,12 @@
 	import { CLIENT_HUD_SNAP_TUNING } from "../settings/tuning";
 	import LayoutControls, {
 		type LayoutMoveInset,
-	} from "../../app/LayoutControls.svelte";
-	import type { ResizeEdges } from "../../app/resize-edges";
-	import { trackUiPointerGesture, pointerUiScale } from "../../app/ui-scale";
+	} from "../../app/ui/LayoutControls.svelte";
+	import type { ResizeEdges } from "../../app/ui/resize-edges";
+	import {
+		trackUiPointerGesture,
+		pointerUiScale,
+	} from "../../app/theme/ui-scale";
 	import {
 		anchorClientHudPlacement,
 		moveClientHudRectangle,

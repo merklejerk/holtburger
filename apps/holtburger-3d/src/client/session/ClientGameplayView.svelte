@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ClientLockFeedback from "../inventory/ClientLockFeedback.svelte";
-	import { applyUiScale } from "../../app/ui-scale";
+	import { applyUiScale } from "../../app/theme/ui-scale";
 	import { logicalClientHudViewport } from "../hud/hud-layout";
 	import { presentClientBinding } from "../settings/binding-catalog";
 	import { ClientCombineCells } from "../inventory/combine-cells";
@@ -37,13 +37,13 @@
 	import { useClientInput } from "./input-context";
 	import { onMount, onDestroy, untrack } from "svelte";
 	import { CLIENT_UI_DEFAULTS } from "../hud/ui-defaults";
-	import Minimap from "../../app/Minimap.svelte";
+	import Minimap from "../../app/minimap/Minimap.svelte";
 	import ClientMinimapEnvironment from "../hud/ClientMinimapEnvironment.svelte";
 	import type {
 		MinimapState,
 		MinimapGeometry,
 		MinimapFooterExtent,
-	} from "../../app/minimap-frame";
+	} from "../../app/minimap/frame";
 	import ClientVitalWarningOverlay from "../combat/ClientVitalWarningOverlay.svelte";
 	import ClientCharacterHud from "../character/ClientCharacterHud.svelte";
 	import ClientCharacterSheetPanel from "../character/ClientCharacterSheetPanel.svelte";

@@ -1,19 +1,19 @@
 <script lang="ts">
 	import { tick, untrack } from "svelte";
-	import ItemGridCell from "../../app/ItemGridCell.svelte";
-	import { pulseItemCell } from "../../app/item-cell-pulse";
+	import ItemGridCell from "../widgets/ItemGridCell.svelte";
+	import { pulseItemCell } from "../widgets/item-cell-pulse";
 	import type { ClientInspectionItemSelection } from "../world/entity-selection";
 	import type { ClientInspectionItemInteractions } from "./item-interactions";
-	import { useItemCooldown } from "../../app/item-cooldowns.svelte";
+	import { useItemCooldown } from "../widgets/item-cooldowns.svelte";
 	import ClientWaypointText from "../world/ClientWaypointText.svelte";
-	import UiQuantity from "../../app/UiQuantity.svelte";
+	import UiQuantity from "../../app/ui/UiQuantity.svelte";
 	import type { MapWaypointTarget } from "../../lib/game/map/map-waypoint";
-	import { formatDuration } from "../../app/duration-format";
-	import type { SpellReference } from "../../app/spell-references";
+	import { formatDuration } from "../../app/ui/duration-format";
+	import type { SpellReference } from "../magic/spell-references";
 	import type {
 		UiIconDisplay,
 		UiIconRepository,
-	} from "../../app/ui-icon-repository";
+	} from "../widgets/ui-icon-repository";
 	import type { HexRgbaColor } from "../../lib/frontend-color";
 	import { summarizeItemCantrips } from "./item-cantrips";
 	import type { ClientSpellServices } from "../magic/spells";

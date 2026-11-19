@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
 	import ClientHudWindow from "../hud/ClientHudWindow.svelte";
-	import UiOrdinalRange from "../../app/UiOrdinalRange.svelte";
+	import UiOrdinalRange from "../../app/ui/UiOrdinalRange.svelte";
 	import BodyAppearanceColors from "../pregame/BodyAppearanceColors.svelte";
 	import type { BarberChoices, ClientBarberState } from "./barber-state";
 	import type {

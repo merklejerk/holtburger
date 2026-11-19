@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { equipmentCantripStateSchema } from "../../app/item-cantrip-contract.js";
+import { equipmentCantripStateSchema } from "../widgets/item-cantrip-contract.js";
 import { selectOfferItems, type ClientOfferSelection } from "./offer-selection";
 import type {
 	UiIconOwner,
 	UiIconRepository,
-} from "../../app/ui-icon-repository";
+} from "../widgets/ui-icon-repository";
 import equal from "fast-deep-equal";
 import {
 	clientIconAppearanceSchema,

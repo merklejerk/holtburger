@@ -72,7 +72,7 @@ target.
 - Reuse existing components and shared styles for tabs, buttons, inputs, dialogs,
   windows, and other common controls. Start with `src/app/ui-base.css` and its
   theme classes (such as `ui-tabs`, `ui-tab`, `ui-button`, and `ui-input`), plus
-  existing component shells such as `src/app/UiDialog.svelte`. Keep feature CSS
+  existing component shells such as `src/app/ui/UiDialog.svelte`. Keep feature CSS
   focused on feature-specific layout rather than duplicating common chrome,
   control states, typography, colors, or spacing conventions.
 - Reuse behavior as well as appearance: modal focus, keyboard ownership,
@@ -87,14 +87,14 @@ target.
   focus/blur or return-to-game workarounds for ordinary controls.
 - Modal prompts cancel on backdrop clicks by default. Use `UiDialog` for ordinary
   prompts; custom native dialogs and panel-scoped overlays share
-  `src/app/dialog-backdrop-dismiss.ts`. Cancellation must use the feature's
+  `src/app/ui/dialog-backdrop-dismiss.ts`. Cancellation must use the feature's
   existing callback. Opt out explicitly when an answer is already being submitted,
   rather than deriving backdrop policy from whether a prompt is destructive or typed.
-- Client panel tab strips use `src/app/UiTabs.svelte`, which owns tab semantics,
+- Client panel tab strips use `src/app/ui/UiTabs.svelte`, which owns tab semantics,
   keyboard navigation, equal-width controls, and the gap before content. Use
   `ui-body` once on the panel's outer content wrapper for the standard inset;
   do not add a second padding layer to a nested scroll area or tab body.
-  Feature owners retain selection. Use `src/app/UiTabPanel.svelte` for content:
+  Feature owners retain selection. Use `src/app/ui/UiTabPanel.svelte` for content:
   inactive tabs stay mounted and hidden/inert, retaining drafts and scrolling.
   Its default scroll area fits within `ui-tabbed-panel`; canvas or nested scroll
   layouts set `scroll={false}` and own their internal layout.

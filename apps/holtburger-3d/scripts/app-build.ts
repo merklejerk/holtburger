@@ -8,7 +8,7 @@ import {
 	releaseChannelSchema,
 	SOURCE_REVISION_LENGTH,
 	type AppBuild,
-} from "../src/app/app-build-contract.js";
+} from "../src/app/desktop/app-build-contract.js";
 
 /** Capture source identity during configuration; missing package/Git metadata fails the build. */
 export function readAppBuild(appRoot: string, development: boolean): AppBuild {

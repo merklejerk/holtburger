@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClientRetirement } from "./client-retirement";
-import { APP_LIFECYCLE_TUNING } from "../src/app/app-tuning.js";
+import { APP_LIFECYCLE_TUNING } from "../src/app/desktop/app-tuning.js";
 
 function setup() {
 	const dependencies = {

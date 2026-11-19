@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ClientLoadoutVisual from "./ClientLoadoutVisual.svelte";
-	import PopupMenu from "../../app/PopupMenu.svelte";
+	import PopupMenu from "../../app/ui/PopupMenu.svelte";
 	import DropdownChevron from "../../assets/icons/dropdown-chevron.svg?component";
 	import {
 		LOADOUT_ICONS,

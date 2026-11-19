@@ -1,5 +1,5 @@
 import { tick } from "svelte";
-import { showVisualPopover } from "../../app/visual-popover";
+import { showVisualPopover } from "../../app/ui/visual-popover";
 import {
 	progressionTargetKey,
 	type StatTarget,

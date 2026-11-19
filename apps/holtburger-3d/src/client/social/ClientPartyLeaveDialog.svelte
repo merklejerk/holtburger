@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import UiDialog from "../../app/UiDialog.svelte";
+	import UiDialog from "../../app/ui/UiDialog.svelte";
 	interface Props {
 		/** Name-sorted current members eligible to receive leadership. */
 		readonly candidates: readonly { guid: number; name: string }[];

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import UiPanelDialog from "../../app/UiPanelDialog.svelte";
+	import UiPanelDialog from "../../app/ui/UiPanelDialog.svelte";
 	interface Props {
 		/** Commit a player-name destination without submitting the message draft. */
 		readonly onSubmit: (name: string) => void;

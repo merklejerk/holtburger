@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { useClientInput } from "../session/input-context";
-	import ItemCellVisual from "../../app/ItemCellVisual.svelte";
-	import ItemQueueCell from "../../app/ItemQueueCell.svelte";
-	import { itemCellPresentation } from "../../app/item-cell-presentation";
-	import { startUiIconDisplay } from "../../app/ui-icon-display";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import ItemCellVisual from "../widgets/ItemCellVisual.svelte";
+	import ItemQueueCell from "../widgets/ItemQueueCell.svelte";
+	import { itemCellPresentation } from "../widgets/item-cell-presentation";
+	import { startUiIconDisplay } from "../widgets/ui-icon-display";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import type { ClientSalvageState, SalvageView } from "./salvage-state";
 	import type { ClientInventoryState } from "./inventory-state";
 	import { CLIENT_TUNING } from "../settings/tuning";

@@ -2,7 +2,7 @@
 	import { onMount, tick } from "svelte";
 	import { cubicOut } from "svelte/easing";
 	import type { TransitionConfig } from "svelte/transition";
-	import type { RuntimeLogEntry } from "../../app/runtime-log-contract";
+	import type { RuntimeLogEntry } from "../../app/desktop/runtime-log-contract";
 	import { formatError } from "../../lib/format-error";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { useClientInput } from "../session/input-context";

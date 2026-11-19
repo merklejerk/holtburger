@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import MusicIcon from "../../assets/icons/music-volume.svg?component";
-	import UiRange from "../../app/UiRange.svelte";
+	import UiRange from "../../app/ui/UiRange.svelte";
 	import type { ClientAudioSettings } from "./settings-contract";
 
 	interface Props {

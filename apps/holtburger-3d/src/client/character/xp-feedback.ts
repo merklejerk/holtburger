@@ -1,4 +1,4 @@
-import { formatQuantity, progressPercent } from "../../app/quantity-format";
+import { formatQuantity, progressPercent } from "../../app/ui/quantity-format";
 import type { CharacterSheet } from "./character-sheet-contract";
 import { CLIENT_TUNING } from "../settings/tuning";
 

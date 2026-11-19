@@ -1,4 +1,4 @@
-import { rankSearchTerms, textSearchWords } from "../../app/text-search";
+import { rankSearchTerms, textSearchWords } from "../../app/ui/text-search";
 import { LOCAL_COMMANDS } from "./command-catalog";
 import type { ClientChatMessage } from "./host-contract";
 import type { NearbyRow } from "../world/nearby-policy";

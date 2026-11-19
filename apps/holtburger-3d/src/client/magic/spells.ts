@@ -5,11 +5,11 @@ import type {
 	SpellComponentReference,
 	SpellReference,
 	SpellReferences,
-} from "../../app/spell-references";
+} from "./spell-references";
 import type {
 	UiIconOwner,
 	UiIconRepository,
-} from "../../app/ui-icon-repository";
+} from "../widgets/ui-icon-repository";
 import type { ClientLifecycleSession } from "../session/lifecycle-session";
 
 const u32 = z.number().int().nonnegative().max(0xffff_ffff);

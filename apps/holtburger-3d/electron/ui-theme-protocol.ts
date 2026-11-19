@@ -1,5 +1,5 @@
 import { protocol, type Session } from "electron";
-import { UI_THEME_SCHEME } from "../src/app/ui-theme-contract.js";
+import { UI_THEME_SCHEME } from "../src/app/theme/ui-theme-contract.js";
 import type { UiThemeCatalog } from "./ui-theme-catalog.js";
 
 /** Run once before app readiness; standard URL handling preserves relative CSS resources. */

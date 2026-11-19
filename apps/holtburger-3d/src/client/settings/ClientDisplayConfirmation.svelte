@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import UiDialog from "../../app/UiDialog.svelte";
+	import UiDialog from "../../app/ui/UiDialog.svelte";
 	import {
 		observeWindowDisplay,
 		windowDisplayBridge,
-	} from "../../app/window-display-transport";
-	import type { WindowDisplaySnapshot } from "../../app/window-display-contract";
+	} from "../../app/desktop/window-display-transport";
+	import type { WindowDisplaySnapshot } from "../../app/desktop/window-display-contract";
 	import { formatError } from "../../lib/format-error";
 
 	const bridge = windowDisplayBridge();

@@ -2,12 +2,12 @@
 	import { onMount, tick, untrack } from "svelte";
 	import { z } from "zod";
 	import "../../client/client-canvas.css";
-	import { applyUiScale } from "../../app/ui-scale";
-	import { provideItemCooldowns } from "../../app/item-cooldowns.svelte";
-	import { SpellReferences } from "../../app/spell-references";
-	import { browserUiIconRepository } from "../../app/ui-icon-repository";
-	import type { FrameRates } from "../../app/frame-rate-sampler";
-	import type { MinimapFrame } from "../../app/minimap-frame";
+	import { applyUiScale } from "../../app/theme/ui-scale";
+	import { provideItemCooldowns } from "../../client/widgets/item-cooldowns.svelte";
+	import { SpellReferences } from "../../client/magic/spell-references";
+	import { browserUiIconRepository } from "../../client/widgets/ui-icon-repository";
+	import type { FrameRates } from "../../app/performance/frame-rate-sampler";
+	import type { MinimapFrame } from "../../app/minimap/frame";
 	import { AppInput } from "../../lib/input/app-input";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import type {

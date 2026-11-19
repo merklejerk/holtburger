@@ -8,7 +8,7 @@
 	} from "../../lib/input/input-contract";
 	import type { InputPlatform } from "../../lib/input/input-platform";
 
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import {
 		SPELL_BAR_INDICES,
 		visibleSpellTabs,

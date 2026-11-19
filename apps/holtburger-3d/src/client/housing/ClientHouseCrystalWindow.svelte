@@ -1,12 +1,12 @@
 <script lang="ts">
-	import UiTabs from "../../app/UiTabs.svelte";
+	import UiTabs from "../../app/ui/UiTabs.svelte";
 	import AutoFillIcon from "../../assets/icons/housing-auto-fill.svg?component";
 	import { housingTypeLabel } from "./housing-presentation";
 	import { onMount } from "svelte";
-	import ItemGridCell from "../../app/ItemGridCell.svelte";
-	import RemovableItemCell from "../../app/RemovableItemCell.svelte";
-	import { startUiIconDisplay } from "../../app/ui-icon-display";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import ItemGridCell from "../widgets/ItemGridCell.svelte";
+	import RemovableItemCell from "../widgets/RemovableItemCell.svelte";
+	import { startUiIconDisplay } from "../widgets/ui-icon-display";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import ClientHudWindow from "../hud/ClientHudWindow.svelte";
 	import { useClientInput } from "../session/input-context";

@@ -1,15 +1,15 @@
 <script lang="ts">
 	import { presentClientBinding } from "../settings/binding-catalog";
 	import { onMount, untrack } from "svelte";
-	import { formatQuantity } from "../../app/quantity-format";
-	import { hudAttention } from "../../app/hud-attention";
-	import { itemStructureDisplay } from "../../app/item-structure";
+	import { formatQuantity } from "../../app/ui/quantity-format";
+	import { hudAttention } from "./hud-attention";
+	import { itemStructureDisplay } from "../widgets/item-structure";
 
 	import {
 		EMPTY_CLIENT_SELECTED_DISPLAY,
 		type ClientSelectedEntityDisplay,
 	} from "../world/selected-entity-tracking";
-	import PopupMenu from "../../app/PopupMenu.svelte";
+	import PopupMenu from "../../app/ui/PopupMenu.svelte";
 	import MoreActionsIcon from "../../assets/icons/hud-more-actions.svg?component";
 	import ClientHudIcon, {
 		type ClientHudIconName,

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import LayoutHandleIcon from "../../app/LayoutHandleIcon.svelte";
+	import LayoutHandleIcon from "../../app/ui/LayoutHandleIcon.svelte";
 	import type {
 		ClientHudViewport,
 		ResolvedClientHudPlacement,

@@ -1,4 +1,4 @@
-import { createUiThemeLoader } from "../../app/ui-theme";
+import { createUiThemeLoader } from "../../app/theme/ui-theme";
 import {
 	observeCombatEffectsAppearance,
 	readCombatEffectsAppearance,

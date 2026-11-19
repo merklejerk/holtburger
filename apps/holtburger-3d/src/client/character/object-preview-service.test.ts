@@ -1,7 +1,7 @@
 import {
 	BACKGROUND_FRAME_INTERVAL_MS,
 	startPresentationFrameLoop,
-} from "../../app/presentation-frame-loop";
+} from "../../app/performance/presentation-frame-loop";
 import { Mat4 } from "../../lib/game/math/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {

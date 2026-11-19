@@ -4,17 +4,20 @@
 	import ClientStatArtwork from "./ClientStatArtwork.svelte";
 	import ClientStatIcon from "./ClientStatIcon.svelte";
 	import type { StatArtworkServices } from "./stat-artwork";
-	import type { UiIconRepository } from "../../app/ui-icon-repository";
+	import type { UiIconRepository } from "../widgets/ui-icon-repository";
 	import { attributeSkillSynergies } from "./attribute-synergies";
 	import { untrack } from "svelte";
 	import ClientSpellsPanel from "../magic/ClientSpellsPanel.svelte";
-	import UiQuantity from "../../app/UiQuantity.svelte";
-	import UiDialog from "../../app/UiDialog.svelte";
-	import { hudAttention } from "../../app/hud-attention";
-	import UiTabs from "../../app/UiTabs.svelte";
-	import UiTabPanel from "../../app/UiTabPanel.svelte";
+	import UiQuantity from "../../app/ui/UiQuantity.svelte";
+	import UiDialog from "../../app/ui/UiDialog.svelte";
+	import { hudAttention } from "../hud/hud-attention";
+	import UiTabs from "../../app/ui/UiTabs.svelte";
+	import UiTabPanel from "../../app/ui/UiTabPanel.svelte";
 	import UpgradeTriangle from "../../assets/icons/character-upgrade-triangle.svg?component";
-	import { formatQuantity, progressPercent } from "../../app/quantity-format";
+	import {
+		formatQuantity,
+		progressPercent,
+	} from "../../app/ui/quantity-format";
 	import {
 		progressionIntentKey,
 		progressionTargetKey,
@@ -28,7 +31,7 @@
 	import type { ClientTimedEnchantments } from "../session/lifecycle-session";
 	import { enchantmentKey } from "../magic/enchantments-view";
 	import type { ClientSpellServices } from "../magic/spells";
-	import type { SpellReference } from "../../app/spell-references";
+	import type { SpellReference } from "../magic/spell-references";
 	import { CLIENT_TUNING } from "../settings/tuning";
 
 	interface Props {

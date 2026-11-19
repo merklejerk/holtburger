@@ -33,7 +33,7 @@ import {
 import type { HostKinematicBoomPresentation } from "../../lib/game/motion/host-kinematic-boom-path";
 import type { MapAnchor } from "../../lib/game/map/map-view";
 import { mapHeadingFromSceneTransform } from "../../lib/game/map/map-view";
-import type { MinimapFrame } from "../../app/minimap-frame";
+import type { MinimapFrame } from "../../app/minimap/frame";
 import type { RenderExtent } from "../../lib/game/renderer/render-extent";
 import type {
 	WorldCurveTrajectoryInput,

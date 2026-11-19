@@ -1,8 +1,8 @@
-import { UI_THEME_CHANGED_EVENT } from "../../app/ui-theme";
+import { UI_THEME_CHANGED_EVENT } from "../../app/theme/ui-theme";
 import {
 	readEntitySelectionColors,
 	observeEntitySelectionColors,
-} from "../../app/entity-selection-theme";
+} from "../../app/theme/entity-selection-theme";
 import type { EntitySelectionOutlineColors } from "../../lib/game/renderer/overlays/entity-selection-outline-policy";
 
 /** Theme commits update renderer colors without a frame-rate CSS read or retained subscription. */

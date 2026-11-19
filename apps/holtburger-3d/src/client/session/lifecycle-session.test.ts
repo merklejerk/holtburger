@@ -35,7 +35,7 @@ import {
 	vendorRequestSchema,
 	vendorSnapshotSchema,
 } from "../inventory/vendor-state";
-import { UiIconRepository } from "../../app/ui-icon-repository";
+import { UiIconRepository } from "../widgets/ui-icon-repository";
 import { baselineCurrentState } from "./host-contract.test-support";
 import {
 	emptyPlayerSummary,

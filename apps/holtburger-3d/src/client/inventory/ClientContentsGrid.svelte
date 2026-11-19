@@ -1,7 +1,7 @@
 <script lang="ts">
-	import ItemGridCell from "../../app/ItemGridCell.svelte";
-	import type { ItemCapacity } from "../../app/item-capacity";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import ItemGridCell from "../widgets/ItemGridCell.svelte";
+	import type { ItemCapacity } from "../widgets/item-capacity";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import type { ClientEntityFacts } from "../world/entity-mirror";
 	import type { ClientContentsSection } from "./container-contents";
 	interface Props {

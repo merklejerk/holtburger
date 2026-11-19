@@ -1,6 +1,6 @@
 <script lang="ts">
-	import PopupMenu, { type PopupMenuItem } from "../../app/PopupMenu.svelte";
-	import UiPaletteDropdown from "../../app/UiPaletteDropdown.svelte";
+	import PopupMenu, { type PopupMenuItem } from "../../app/ui/PopupMenu.svelte";
+	import UiPaletteDropdown from "../../app/ui/UiPaletteDropdown.svelte";
 
 	interface Props {
 		/** Retained tab visibility dismisses transient popovers when the tab is hidden. */

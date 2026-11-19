@@ -1,4 +1,4 @@
-import type { PerformanceSession } from "../app/performance-session";
+import type { PerformanceSession } from "../app/performance/performance-session";
 import type { SceneEnvironmentSelection } from "../lib/game/environment/scene-environment";
 import type { ExplorerCameraMode } from "../lib/game/motion/host-physical-fly-path";
 import type { AmbientOcclusionSettings } from "../lib/game/renderer/passes/ambient-occlusion-policy";
@@ -26,19 +26,19 @@ import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import type { TexturePageId } from "../lib/game/textures/texture-manager";
 import type { HostKinematicBoomStatus } from "../lib/game/camera/host-kinematic-boom-session";
 import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
-import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
+import type { ExplorerCameraFocusStatus } from "./camera/camera-coordinator";
 import type {
 	ExplorerWeenieSearchRequest,
 	ExplorerWeenieSearchResult,
-} from "./explorer-entity-commands";
-import type { ExplorerEntitySelection } from "./explorer-entity-panel-state";
+} from "./entities/entity-commands";
+import type { ExplorerEntitySelection } from "./entities/entity-panel-state";
 import type {
 	ExplorerPossession,
 	ExplorerPossessionControls,
 	PossessionMotionProbe,
-} from "./explorer-entity-possession";
-import type { ExplorerFrameDiagnosticReport } from "./explorer-frame-diagnostic-report";
-import type { PhysicalFlyStatus } from "./physical-fly-session";
+} from "./entities/entity-possession";
+import type { ExplorerFrameDiagnosticReport } from "./world/frame-diagnostic-report";
+import type { PhysicalFlyStatus } from "./camera/physical-fly-session";
 
 /** Explorer runtime readiness, scene-interest focus, camera mode, and follow switches. */
 export interface ExplorerToolsCameraSurface {

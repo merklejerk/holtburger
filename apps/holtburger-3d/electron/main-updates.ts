@@ -1,7 +1,7 @@
 import { app, ipcMain, powerMonitor, shell } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
-import type { PregameRegistrationStatus } from "../src/app/app-update-contract.js";
+import type { PregameRegistrationStatus } from "../src/app/desktop/app-update-contract.js";
 import { AppUpdates, loadUpdateBuild } from "./app-updates.js";
 import type { ApplicationWindow } from "./application-window.js";
 import type { ClientRetirement } from "./client-retirement.js";

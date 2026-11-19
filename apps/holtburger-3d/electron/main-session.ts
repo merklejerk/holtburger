@@ -1,14 +1,14 @@
 import { app, clipboard, ipcMain } from "electron";
 import { join } from "node:path";
 import { z } from "zod";
-import type { AppSettingsSnapshot } from "../src/app/app-settings-contract.js";
+import type { AppSettingsSnapshot } from "../src/app/desktop/app-settings-contract.js";
 import {
 	APP_LIFECYCLE_TUNING,
 	APP_PERSISTENCE_TUNING,
 	APP_WINDOW_TUNING,
-} from "../src/app/app-tuning.js";
-import { DEV_RESTART_EXIT_CODE } from "../src/app/desktop-restart-contract.js";
-import { windowDisplayRequestSchema } from "../src/app/window-display-contract.js";
+} from "../src/app/desktop/app-tuning.js";
+import { DEV_RESTART_EXIT_CODE } from "../src/app/desktop/desktop-restart-contract.js";
+import { windowDisplayRequestSchema } from "../src/app/desktop/window-display-contract.js";
 import { equipmentCacheStageSchema } from "../src/client/inventory/equipment-cache-contract.js";
 import { playerVisualCaptureSchema } from "../src/client/character/object-preview-contract.js";
 import {

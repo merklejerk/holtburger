@@ -1,5 +1,5 @@
-import { observeUiTheme } from "../../app/ui-theme";
-import { createUiThemeColorReader } from "../../app/ui-theme-color";
+import { observeUiTheme } from "../../app/theme/ui-theme";
+import { createUiThemeColorReader } from "../../app/theme/ui-theme-color";
 import type { SummonLeashColor } from "../../lib/game/runtime/summon-presentation";
 
 /** Theme-owned local/remote ownership palette; game and renderer layers do not classify it. */

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import type { FrameRates } from "../../app/frame-rate-sampler";
+	import type { FrameRates } from "../../app/performance/frame-rate-sampler";
 	import { CLIENT_TUNING } from "../settings/tuning";
 
 	interface Props {

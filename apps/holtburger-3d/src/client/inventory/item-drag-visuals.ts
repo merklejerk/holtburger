@@ -1,4 +1,7 @@
-import { showUiDragGhost, positionUiDragGhost } from "../../app/ui-drag-ghost";
+import {
+	showUiDragGhost,
+	positionUiDragGhost,
+} from "../../app/ui/ui-drag-ghost";
 import { filterDraggedEquipment } from "./equipment-strip-filter";
 
 /** Show the top-layer drag ghost for a grid cell, header, binding, or draft element. */

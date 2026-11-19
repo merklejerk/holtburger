@@ -2,8 +2,8 @@
 	import type { MapWaypointTarget } from "../../lib/game/map/map-waypoint";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { onDestroy } from "svelte";
-	import type { UiIconRepository } from "../../app/ui-icon-repository";
-	import { trackPointerGesture } from "../../app/pointer-gesture";
+	import type { UiIconRepository } from "../widgets/ui-icon-repository";
+	import { trackPointerGesture } from "../../app/ui/pointer-gesture";
 	import ClientCreatureInspection from "./ClientCreatureInspection.svelte";
 	import { objectPreviewSourceForRendering } from "../character/object-preview-contract";
 	import ClientModelPreview from "../character/ClientModelPreview.svelte";
@@ -14,7 +14,7 @@
 	import type { ClientInspectionState } from "./inspection";
 	import type { ClientInspectionItemSelection } from "../world/entity-selection";
 	import type { ClientInspectionItemInteractions } from "./item-interactions";
-	import type { SpellReference } from "../../app/spell-references";
+	import type { SpellReference } from "../magic/spell-references";
 	import ClientSpellInspection from "../magic/ClientSpellInspection.svelte";
 	import type { ClientObjectPreviewService } from "../character/object-preview-service";
 	import { CLIENT_UI_DEFAULTS } from "../hud/ui-defaults";

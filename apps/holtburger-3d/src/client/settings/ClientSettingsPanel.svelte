@@ -10,8 +10,8 @@
 		ClientGameplayOption,
 		ClientGameplayPreferences,
 	} from "../session/host-contract";
-	import UiRange from "../../app/UiRange.svelte";
-	import type { UiThemeSettings } from "../../app/ui-theme-selection";
+	import UiRange from "../../app/ui/UiRange.svelte";
+	import type { UiThemeSettings } from "../../app/theme/ui-theme-selection";
 	import {
 		readClientBinding,
 		replaceClientBinding,
@@ -21,8 +21,8 @@
 	import ClientAudioSettingsControls from "./ClientAudioSettingsControls.svelte";
 	import ClientAppearanceSettingsControls from "./ClientAppearanceSettingsControls.svelte";
 	import "./settings-controls.css";
-	import UiTabs from "../../app/UiTabs.svelte";
-	import UiTabPanel from "../../app/UiTabPanel.svelte";
+	import UiTabs from "../../app/ui/UiTabs.svelte";
+	import UiTabPanel from "../../app/ui/UiTabPanel.svelte";
 	import ClientEnvironmentSettings from "./ClientEnvironmentSettings.svelte";
 	import type {
 		ClientClockFormat,

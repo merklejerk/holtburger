@@ -4,7 +4,7 @@ import type {
 	ClientEntityFacts,
 	ClientEntityRead,
 } from "../world/entity-mirror";
-import type { EquipmentCantripState } from "../../app/item-cantrip-contract.js";
+import type { EquipmentCantripState } from "../widgets/item-cantrip-contract.js";
 import type {
 	AppraisalRequest,
 	FactsAppraisalPriority,

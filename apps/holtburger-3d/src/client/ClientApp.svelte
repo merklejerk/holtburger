@@ -1,20 +1,20 @@
 <script lang="ts">
-	import { observeEntitySelectionColors } from "../app/entity-selection-theme";
+	import { observeEntitySelectionColors } from "../app/theme/entity-selection-theme";
 	import {
 		retainRendererFailure,
 		retainStartupFailure,
-	} from "../app/app-failure-report";
+	} from "../app/desktop/app-failure-report";
 	import { ClientSummonPresentation } from "./combat/summon-presentation";
-	import { clientNativePerformance } from "../app/native-performance";
-	import { PerformanceSession } from "../app/performance-session";
+	import { clientNativePerformance } from "../app/performance/native-performance";
+	import { PerformanceSession } from "../app/performance/performance-session";
 	import {
 		statArtworkServices,
 		type StatArtworkServices,
 	} from "./character/stat-artwork";
 	import { type InputPlatform } from "../lib/input/input-platform";
 
-	import { applyUiScale } from "../app/ui-scale";
-	import UiTooltipHost from "../app/UiTooltipHost.svelte";
+	import { applyUiScale } from "../app/theme/ui-scale";
+	import UiTooltipHost from "../app/ui/UiTooltipHost.svelte";
 	import {
 		ClientRestPostureController,
 		REST_POSTURE_LABELS,
@@ -30,7 +30,7 @@
 	import type {
 		UiThemeSelection,
 		UiThemeSettings,
-	} from "../app/ui-theme-selection";
+	} from "../app/theme/ui-theme-selection";
 	import { bindClientAudioForeground } from "./settings/audio-foreground";
 	import ClientMusicControls from "./settings/ClientMusicControls.svelte";
 	import { ClientTitleMusic, titleMusicUrl } from "./pregame/title-music";
@@ -38,7 +38,7 @@
 	import ClientPregameSettings from "./pregame/ClientPregameSettings.svelte";
 	import { choosePregameLocation } from "./pregame/pregame-tuning";
 	import PowerIcon from "../assets/icons/hud-power.svg?component";
-	import { provideItemCooldowns } from "../app/item-cooldowns.svelte";
+	import { provideItemCooldowns } from "./widgets/item-cooldowns.svelte";
 	import "./client-canvas.css";
 	import { persistPlayerVisualCapture } from "./character/visual-capture";
 	import type { ClientVisualCacheTransport } from "./character/visual-cache-transport";
@@ -47,7 +47,7 @@
 	import { loadSoulEmotes } from "./social/soul-emotes";
 	import { ClientEmoteController } from "./social/emote-controller";
 	import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
-	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
+	import { startPresentationFrameLoop } from "../app/performance/presentation-frame-loop";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import { ClientNavigationWaypointOwner } from "./world/navigation-waypoint";
 	import { runClientAssetsCommand } from "./session/assets-command";
@@ -95,7 +95,7 @@
 		COMBAT_BREAKPOINTS,
 		COMBAT_HEIGHTS,
 	} from "./combat/combat-bar-state";
-	import { SpellReferences } from "../app/spell-references";
+	import { SpellReferences } from "./magic/spell-references";
 	import { ClientSpellState, type ClientSpellServices } from "./magic/spells";
 	import { ClientBarberState } from "./character/barber-state";
 	import { ClientTradeState } from "./inventory/trade-state";
@@ -108,8 +108,8 @@
 		type ClientBookReaderState,
 	} from "./inventory/book-reader";
 	import { findWieldedCasterSpell } from "./inventory/inventory-equipment";
-	import { browserUiIconRepository } from "../app/ui-icon-repository";
-	import { prepareUiIcons } from "../app/ui-icon-source";
+	import { browserUiIconRepository } from "./widgets/ui-icon-repository";
+	import { prepareUiIcons } from "./widgets/ui-icon-source";
 	import {
 		clientSelectedEntity,
 		type ClientSelectedEntity,
@@ -123,7 +123,7 @@
 	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
 	import { AppInput } from "../lib/input/app-input";
 	import { provideClientInput } from "./session/input-context";
-	import { provideItemCantrips } from "../app/item-cantrips";
+	import { provideItemCantrips } from "./widgets/item-cantrips";
 	import { ClientEquipmentAppraisals } from "./inventory/equipment-appraisals";
 	import type { ClientEquipmentCacheTransport } from "./inventory/equipment-cache-transport";
 	import {
@@ -136,7 +136,7 @@
 		createFrameRateSampler,
 		type FrameRates,
 		type FrameRateSampler,
-	} from "../app/frame-rate-sampler";
+	} from "../app/performance/frame-rate-sampler";
 
 	import {
 		CharacterInputController,
@@ -206,7 +206,7 @@
 		ClientGameplayWorldSurface,
 	} from "./session/gameplay-surfaces";
 	import { hostWorldMapSource } from "../lib/assets/world-map-source";
-	import type { MinimapFrame } from "../app/minimap-frame";
+	import type { MinimapFrame } from "../app/minimap/frame";
 	import type {
 		RecallDestination,
 		CharacterManagementState,

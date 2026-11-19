@@ -1,4 +1,4 @@
-import { hudAttention } from "../../app/hud-attention";
+import { hudAttention } from "./hud-attention";
 import type { ContentsArrivalSource } from "../inventory/contents-arrivals";
 import type { ClientLifecycleSession } from "../session/lifecycle-session";
 import type { ClientSystemPanel } from "./ClientShortcutDock.svelte";

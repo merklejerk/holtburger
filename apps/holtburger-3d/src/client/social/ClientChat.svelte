@@ -14,7 +14,7 @@
 	import ChannelFiltersIcon from "../../assets/icons/chat-channel-filters.svg?component";
 	import ClockIcon from "../../assets/icons/duration.svg?component";
 	import { onDestroy, tick } from "svelte";
-	import PopupMenu from "../../app/PopupMenu.svelte";
+	import PopupMenu from "../../app/ui/PopupMenu.svelte";
 	import type { ClientChatComposer } from "./chat-composer.svelte";
 	import type { ClientClockFormat } from "../settings/environment-settings";
 	import {

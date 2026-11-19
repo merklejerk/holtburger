@@ -6,7 +6,7 @@ import {
 	appSettingsSchema,
 	type AppSettings,
 	type GraphicsBackendOption,
-} from "../src/app/app-settings-contract.js";
+} from "../src/app/desktop/app-settings-contract.js";
 import { formatError } from "../src/lib/format-error.js";
 import { replaceLocalFile } from "./replace-local-file.js";
 

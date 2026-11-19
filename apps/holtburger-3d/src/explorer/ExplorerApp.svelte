@@ -3,12 +3,12 @@
 	import {
 		retainRendererFailure,
 		retainStartupFailure,
-	} from "../app/app-failure-report";
-	import { observeEntitySelectionColors } from "../app/entity-selection-theme";
-	import FrameMetricsOverlay from "../app/FrameMetricsOverlay.svelte";
-	import Minimap from "../app/Minimap.svelte";
-	import type { MinimapState } from "../app/minimap-frame";
-	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
+	} from "../app/desktop/app-failure-report";
+	import { observeEntitySelectionColors } from "../app/theme/entity-selection-theme";
+	import FrameMetricsOverlay from "./panels/FrameMetricsOverlay.svelte";
+	import Minimap from "../app/minimap/Minimap.svelte";
+	import type { MinimapState } from "../app/minimap/frame";
+	import { startPresentationFrameLoop } from "../app/performance/presentation-frame-loop";
 	import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 	import type { SceneEnvironmentSelection } from "../lib/game/environment/scene-environment";
 	import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance";
@@ -26,19 +26,19 @@
 	import { createElectronHostTransport } from "../lib/host/electron-host-transport";
 	import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
-	import { ExplorerCameraAuthorityController } from "./explorer-camera-authority";
-	import type { ExplorerCameraFocusStatus } from "./explorer-camera-coordinator";
+	import { ExplorerCameraAuthorityController } from "./camera/camera-authority";
+	import type { ExplorerCameraFocusStatus } from "./camera/camera-coordinator";
 	import {
 		EXPLORER_RENDER_SCALE_OPTIONS,
 		ExplorerDisplayDiagnosticsController,
-	} from "./explorer-display-diagnostics";
-	import { ExplorerDynamicEntityController } from "./explorer-dynamic-entity-controller";
-	import type { ExplorerEntitySelection } from "./explorer-entity-panel-state";
+	} from "./world/display-diagnostics";
+	import { ExplorerDynamicEntityController } from "./entities/dynamic-entity-controller";
+	import type { ExplorerEntitySelection } from "./entities/entity-panel-state";
 	import type {
 		ExplorerPossession,
 		ExplorerPossessionControls,
-	} from "./explorer-entity-possession";
-	import { presentExplorerPortalFrame } from "./explorer-portal-presentation";
+	} from "./entities/entity-possession";
+	import { presentExplorerPortalFrame } from "./world/portal-presentation";
 	import ExplorerTools from "./ExplorerTools.svelte";
 	import type {
 		ExplorerToolsCameraSurface,

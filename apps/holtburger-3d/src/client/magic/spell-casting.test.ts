@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SpellDetails } from "../../app/spell-references";
+import type { SpellDetails } from "./spell-references";
 import { resolveClientSpellCastAim } from "./spell-casting";
 
 function details(overrides: Partial<SpellDetails> = {}): SpellDetails {

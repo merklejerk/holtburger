@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { verifySelectionTheme } from "./entity-selection-theme-probe";
-	import { readEntitySelectionColors } from "../../app/entity-selection-theme";
+	import { readEntitySelectionColors } from "../../app/theme/entity-selection-theme";
 	import {
 		SummonRuntimeProbe,
 		type SummonRuntimeProof,
 	} from "./summon-runtime-probe";
 	import { runSummonGpuFixture, type SummonGpuProof } from "./summon-gpu-probe";
-	import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
+	import { startPresentationFrameLoop } from "../../app/performance/presentation-frame-loop";
 	import { probeCombatEffectsAppearance } from "./combat-effects-appearance-probe";
 	import {
 		CombatEffectsRuntimeProbe,
@@ -23,8 +23,8 @@
 	import { onMount, tick as svelteTick } from "svelte";
 	import { PortalTransitionController } from "../../lib/client/portal-transition-controller";
 	import type { PortalTransitionPresentationReceipt } from "../../lib/client/portal-transition-presentation";
-	import { resolveExplorerOutdoorFocusPose } from "../../explorer/explorer-camera-framing";
-	import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
+	import { resolveExplorerOutdoorFocusPose } from "../../explorer/camera/camera-framing";
+	import { ExplorerCameraInputController } from "../../explorer/camera/camera-input-controller";
 	import { EXPLORER_TUNING } from "../../explorer/explorer-tuning";
 	import type { BakedDrawMergeCensus } from "../../lib/game/renderer/webgl2/baked-draw-merge-census";
 	import { MapRenderer } from "../../lib/game/map/map-renderer";
@@ -169,7 +169,7 @@
 		createExplorerRelocationRequest,
 		createExplorerSpawnRequest,
 		parseExplorerWcid,
-	} from "../../explorer/explorer-entity-commands";
+	} from "../../explorer/entities/entity-commands";
 	import type {
 		DynamicEntityEvent,
 		DynamicEntityMotion,
@@ -192,14 +192,14 @@
 		ExplorerPossessionIntent,
 		PossessionEventQueueReceipt,
 		PossessionMotionProbe,
-	} from "../../explorer/explorer-entity-possession";
+	} from "../../explorer/entities/entity-possession";
 	import type { PossessionTickResponse } from "./http-explorer-entity-host";
-	import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
+	import type { ExplorerFixedTickEnvelope } from "../../explorer/world/fixed-tick";
 	import {
 		installTerrainGlTrace,
 		type TerrainGlTrace,
 	} from "./terrain-gl-trace";
-	import { parseResidenceInput } from "../../explorer/world-input";
+	import { parseResidenceInput } from "../../explorer/camera/world-input";
 	import { loadPortalTransitionAssets } from "../../lib/client/portal-transition-assets";
 
 	const CAMERA_FOV_DEGREES = 90;

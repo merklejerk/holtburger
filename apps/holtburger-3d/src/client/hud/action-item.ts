@@ -1,7 +1,7 @@
-import type { ItemStructure } from "../../app/item-structure";
-import type { ItemCooldownDefinition } from "../../app/item-cooldowns.svelte";
-import type { ItemCapacity } from "../../app/item-capacity";
-import type { UiIconDisplay } from "../../app/ui-icon-repository";
+import type { ItemStructure } from "../widgets/item-structure";
+import type { ItemCooldownDefinition } from "../widgets/item-cooldowns.svelte";
+import type { ItemCapacity } from "../widgets/item-capacity";
+import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 import type { ClientEntityFacts } from "../world/entity-mirror";
 
 import type { ItemActionContent, ConsumableIdentity } from "./action-bar-state";

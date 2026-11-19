@@ -1,6 +1,6 @@
 import "../app/base.css";
 import "./explorer.css";
-import ContentStartup from "../app/ContentStartup.svelte";
+import ContentStartup from "../app/desktop/ContentStartup.svelte";
 import ExplorerApp from "./ExplorerApp.svelte";
 import { mountEntryWithProps } from "../app/mount";
 import { mount } from "svelte";

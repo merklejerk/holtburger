@@ -29,8 +29,8 @@ The main world canvas and screen-space target/warning overlays stay outside UI s
 | Concern                                               | Owner                                                           |
 | ----------------------------------------------------- | --------------------------------------------------------------- |
 | Shipped appearance, tokens, and shared control states | `src/app/ui-base.css`                                           |
-| Stylesheet loading and replacement                    | `src/app/ui-theme.ts`                                           |
-| Client selection and bootstrap                        | `src/app/ui-theme-selection.ts`, `src/client/main.ts`           |
+| Stylesheet loading and replacement                    | `src/app/theme/ui-theme.ts`                                     |
+| Client selection and bootstrap                        | `src/app/theme/ui-theme-selection.ts`, `src/client/main.ts`     |
 | Desktop discovery and serving                         | `electron/ui-theme-catalog.ts`, `electron/ui-theme-protocol.ts` |
 | Browser defaults and cascade order                    | `src/app/base.css`                                              |
 | Initial client HUD arrangement                        | `src/client/hud/ui-defaults.ts`                                 |
@@ -133,7 +133,7 @@ is not passed directly to the stylesheet loader.
 **Settings → UI → Theme**. Traveler’s Kit is the client default. It uses leather,
 stitching and copper fittings while retaining transparent content backgrounds.
 Selection, reload and saved preferences use the same owner as local themes.
-`src/app/ui-bundled-themes.ts` composes trusted Vite-emitted assets with the
+`src/app/theme/ui-bundled-themes.ts` composes trusted Vite-emitted assets with the
 validated desktop transport; native URL validation remains unchanged.
 
 The name `Traveler’s Kit` is reserved. A local folder with that exact name makes
@@ -228,7 +228,7 @@ Refresh list alone never changes the saved preference. `--ignore-config` starts
 with the current default Traveler’s Kit through the existing configuration bypass; it does not delete
 installed themes.
 
-The load deadline is `UI_THEME_LOAD_TIMEOUT_MS` in `src/app/ui-theme-contract.ts`.
+The load deadline is `UI_THEME_LOAD_TIMEOUT_MS` in `src/app/theme/ui-theme-contract.ts`.
 Closing cancels pending selection work before settings flush; a selection still
 loading when close begins is not saved. A disk-save error uses the existing
 settings failure/retry path and does not roll back the applied appearance.

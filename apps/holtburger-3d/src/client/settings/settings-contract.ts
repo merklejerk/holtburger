@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { packAffinitiesSchema } from "./pack-affinity-contract.js";
 import { SHARED_FRONTEND_TUNING } from "../../lib/frontend-tuning.js";
-import { uiThemeIdSchema } from "../../app/ui-theme-contract.js";
+import { uiThemeIdSchema } from "../../app/theme/ui-theme-contract.js";
 import { entityAlertRulesSchema } from "../world/entity-alerts.js";
 import { loadoutActionContentSchema } from "../inventory/loadout.js";
 
@@ -462,4 +462,4 @@ export type ClientCharacterSettings = z.infer<
 export {
 	clientWindowSettingsSchema,
 	type ClientWindowSettings,
-} from "../../app/window-settings-contract.js";
+} from "../../app/desktop/window-settings-contract.js";

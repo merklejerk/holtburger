@@ -1,4 +1,4 @@
-import { APP_LIFECYCLE_TUNING } from "../src/app/app-tuning.js";
+import { APP_LIFECYCLE_TUNING } from "../src/app/desktop/app-tuning.js";
 import { CLIENT_APPRAISAL_TUNING } from "../src/client/settings/tuning.js";
 import type { ClientHostAppraisalTuningConfig } from "../src/client/settings/tuning-contract.js";
 import { decode, encode } from "@msgpack/msgpack";
@@ -6,7 +6,7 @@ import { z } from "zod";
 import {
 	contentFailureSchema,
 	type ContentFailure,
-} from "../src/app/content-startup-contract.js";
+} from "../src/app/desktop/content-startup-contract.js";
 import type { ClientLaunchConfiguration } from "./client-launch.js";
 import {
 	MAX_PENDING_REQUESTS,

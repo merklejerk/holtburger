@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import UiPanelDialog from "../../app/UiPanelDialog.svelte";
+	import UiPanelDialog from "../../app/ui/UiPanelDialog.svelte";
 	interface Props {
 		/** Frontend-confirmed bounds; the owning operation validates again on submit. */
 		readonly request: {

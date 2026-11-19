@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { pulseItemCell } from "../../app/item-cell-pulse";
+	import { pulseItemCell } from "../widgets/item-cell-pulse";
 	import { loadoutLabel } from "../inventory/loadout";
 	import { presentClientBinding } from "../settings/binding-catalog";
 	import { sameConsumableIdentity } from "./action-item";
@@ -7,7 +7,7 @@
 	import { modifierName } from "../../lib/input/input-presentation";
 	import type { ClientKeyboardConfiguration } from "../../lib/input/input-contract";
 	import type { InputPlatform } from "../../lib/input/input-platform";
-	import PopupMenu from "../../app/PopupMenu.svelte";
+	import PopupMenu from "../../app/ui/PopupMenu.svelte";
 	import { CLIENT_ACTION_BAR_TUNING } from "../settings/tuning";
 	import { onMount } from "svelte";
 	import ActionCell from "./ActionCell.svelte";

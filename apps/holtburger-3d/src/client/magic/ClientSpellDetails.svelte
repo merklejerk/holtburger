@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { MagicSchool, SpellDetails } from "../../app/spell-references";
+	import type { MagicSchool, SpellDetails } from "./spell-references";
 	import { untrack } from "svelte";
 	import ClientSpellFormula from "./ClientSpellFormula.svelte";
 	import type { ClientSpellServices, SpellInspectionDisplay } from "./spells";

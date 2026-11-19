@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { UI_SCALE_CHANGE_EVENT } from "../../app/ui-scale";
+	import { UI_SCALE_CHANGE_EVENT } from "../../app/theme/ui-scale";
 	import { onMount } from "svelte";
 	import "./model-surface.css";
 	import { mountModelRotation, modelHeadingDegrees } from "./model-rotation";

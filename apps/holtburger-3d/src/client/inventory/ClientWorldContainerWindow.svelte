@@ -4,8 +4,8 @@
 		measureContainerOpeningWidth,
 		measureContainerOpeningHeight,
 	} from "./world-container-size";
-	import { startUiIconDisplay } from "../../app/ui-icon-display";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import { startUiIconDisplay } from "../widgets/ui-icon-display";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import ClientHudWindow from "../hud/ClientHudWindow.svelte";
 	import ClientWorldContainerPanel from "./ClientWorldContainerPanel.svelte";
 	import { CLIENT_TUNING } from "../settings/tuning";

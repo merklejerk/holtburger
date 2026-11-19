@@ -1,5 +1,5 @@
 <script module lang="ts">
-	import type { UiIconSpec } from "../../app/ui-icon-source";
+	import type { UiIconSpec } from "../widgets/ui-icon-source";
 
 	/** Consumer-selected icon recipe or an explicit reason no recipe is available. */
 	export type InspectionArtwork =
@@ -9,11 +9,11 @@
 
 <script lang="ts">
 	import { tick } from "svelte";
-	import UiIcon from "../../app/UiIcon.svelte";
+	import UiIcon from "../widgets/UiIcon.svelte";
 	import type {
 		UiIconDisplay,
 		UiIconRepository,
-	} from "../../app/ui-icon-repository";
+	} from "../widgets/ui-icon-repository";
 	import { CLIENT_TUNING } from "../settings/tuning";
 
 	interface Props {

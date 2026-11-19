@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { equipmentStripFilter } from "./equipment-strip-filter";
-	import type { ItemCapacity } from "../../app/item-capacity";
-	import ItemGridCell from "../../app/ItemGridCell.svelte";
-	import ItemGridStrip from "../../app/ItemGridStrip.svelte";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import type { ItemCapacity } from "../widgets/item-capacity";
+	import ItemGridCell from "../widgets/ItemGridCell.svelte";
+	import ItemGridStrip from "../widgets/ItemGridStrip.svelte";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import type { InventoryEquipment } from "./inventory-equipment";
 	import EquipmentSlotIcon from "./EquipmentSlotIcon.svelte";
 	import ClientHudIcon from "../hud/ClientHudIcon.svelte";

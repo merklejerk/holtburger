@@ -3,9 +3,9 @@
 	import {
 		UiThemeSelection,
 		type UiThemeSettings,
-	} from "../app/ui-theme-selection";
-	import { createElectronUiThemeTransport } from "../app/ui-theme-transport";
-	import { withBundledUiThemes } from "../app/ui-bundled-themes";
+	} from "../app/theme/ui-theme-selection";
+	import { createElectronUiThemeTransport } from "../app/theme/ui-theme-transport";
+	import { withBundledUiThemes } from "../app/theme/ui-bundled-themes";
 	import { uiThemes } from "../app/mount";
 	import { createElectronClientSettingsTransport } from "../client/settings/settings-transport";
 	import { createDefaultClientUserSettings } from "../client/settings/settings-defaults";
@@ -15,7 +15,7 @@
 	import ClientPregameSettings from "../client/pregame/ClientPregameSettings.svelte";
 	import ClientSettingsPanel from "../client/settings/ClientSettingsPanel.svelte";
 	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
-	import "../app/themes/holtburger-pregame.css";
+	import "../app/theme/holtburger-pregame.css";
 
 	const defaults = createDefaultClientUserSettings(
 		{ width: innerWidth, height: innerHeight },

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import UiRange from "../../app/UiRange.svelte";
+	import UiRange from "../../app/ui/UiRange.svelte";
 	import {
 		MINUTES_PER_GAME_DAY,
 		type ClientClockFormat,

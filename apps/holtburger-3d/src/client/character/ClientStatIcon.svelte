@@ -1,5 +1,5 @@
 <script lang="ts">
-	import UiIcon from "../../app/UiIcon.svelte";
+	import UiIcon from "../widgets/UiIcon.svelte";
 	import type { StatTarget } from "./character-sheet-contract";
 	import { useStatIcons, type StatIconKind } from "./stat-artwork";
 	const {

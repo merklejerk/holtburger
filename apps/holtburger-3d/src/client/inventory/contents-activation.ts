@@ -1,4 +1,4 @@
-import { pulseItemCell } from "../../app/item-cell-pulse";
+import { pulseItemCell } from "../widgets/item-cell-pulse";
 import type { ClientItemInteractions } from "./item-interactions";
 
 /** Mounted cell activation: target acquisition wins over selection and double-click actions. */

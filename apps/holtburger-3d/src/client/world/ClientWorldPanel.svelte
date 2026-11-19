@@ -4,16 +4,16 @@
 	import {
 		showVisualPopover,
 		positionVisualPopover,
-	} from "../../app/visual-popover";
-	import { UI_SCALE_CHANGE_EVENT } from "../../app/ui-scale";
+	} from "../../app/ui/visual-popover";
+	import { UI_SCALE_CHANGE_EVENT } from "../../app/theme/ui-scale";
 	import type { ClientContractsState } from "./contracts-state";
 	import { ContractMapOverlay } from "./contracts-map-overlay";
 	import { CLIENT_TUNING } from "../settings/tuning";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
-	import PopupMenu, { type PopupMenuItem } from "../../app/PopupMenu.svelte";
+	import PopupMenu, { type PopupMenuItem } from "../../app/ui/PopupMenu.svelte";
 	import { RECALL_LABELS } from "../session/recall";
-	import UiTabs from "../../app/UiTabs.svelte";
-	import UiTabPanel from "../../app/UiTabPanel.svelte";
+	import UiTabs from "../../app/ui/UiTabs.svelte";
+	import UiTabPanel from "../../app/ui/UiTabPanel.svelte";
 	import type { ClientHousingManagementState } from "../housing/housing-management-state";
 	import ClientHousingTab from "../housing/ClientHousingTab.svelte";
 	import type { HousingSnapshot } from "../housing/housing-contract";
@@ -21,7 +21,7 @@
 	import WorldMapHomeIcon from "../../assets/icons/world-map-home.svg?component";
 	import { projectWorldMapPoint } from "../../lib/game/world-map/view";
 	import { onMount, untrack } from "svelte";
-	import type { MinimapFrame } from "../../app/minimap-frame";
+	import type { MinimapFrame } from "../../app/minimap/frame";
 	import { trackWorldMapGesture } from "../../lib/game/world-map/pointer-gesture";
 	import type {
 		ClientMapPosition,

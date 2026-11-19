@@ -1,4 +1,4 @@
-import { equipmentCantripStateSchema } from "../../app/item-cantrip-contract.js";
+import { equipmentCantripStateSchema } from "../widgets/item-cantrip-contract.js";
 import { salvageCandidateSchema } from "../inventory/salvage-state";
 import { z } from "zod";
 import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../../lib/game/map/map-blip-category";

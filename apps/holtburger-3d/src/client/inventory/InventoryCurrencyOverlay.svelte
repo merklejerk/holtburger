@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount, type Snippet } from "svelte";
-	import { uiScale, UI_SCALE_CHANGE_EVENT } from "../../app/ui-scale";
-	import UiIcon from "../../app/UiIcon.svelte";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import { uiScale, UI_SCALE_CHANGE_EVENT } from "../../app/theme/ui-scale";
+	import UiIcon from "../widgets/UiIcon.svelte";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import type { EscapeContextHandle } from "../../lib/input/keyboard-input-policy";
 	import type { InventoryCurrencyRow } from "./inventory-state";

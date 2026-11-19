@@ -3,7 +3,7 @@ import { selectOfferItems, type ClientOfferSelection } from "./offer-selection";
 import type {
 	UiIconOwner,
 	UiIconRepository,
-} from "../../app/ui-icon-repository";
+} from "../widgets/ui-icon-repository";
 import type { ClientEntityRead } from "../world/entity-mirror";
 import type {
 	ClientLifecycleSession,

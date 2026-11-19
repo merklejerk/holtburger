@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { groupCooldownSchema } from "../world/entity-mirror";
-import { textSearchWords } from "../../app/text-search";
+import { textSearchWords } from "../../app/ui/text-search";
 import type { SpellRow } from "./spells";
 import {
 	matchesSpellSearch,

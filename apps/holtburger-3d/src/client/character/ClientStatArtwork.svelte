@@ -4,8 +4,8 @@
 		browserUiIconRepository,
 		type UiIconRepository,
 		type UiIconDisplay,
-	} from "../../app/ui-icon-repository";
-	import { startUiIconDisplay } from "../../app/ui-icon-display";
+	} from "../widgets/ui-icon-repository";
+	import { startUiIconDisplay } from "../widgets/ui-icon-display";
 	import {
 		creationIconKey,
 		failedStatIcon,

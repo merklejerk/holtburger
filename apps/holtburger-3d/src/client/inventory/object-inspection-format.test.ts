@@ -1,5 +1,5 @@
-import { formatDuration } from "../../app/duration-format";
-import { formatQuantity } from "../../app/quantity-format";
+import { formatDuration } from "../../app/ui/duration-format";
+import { formatQuantity } from "../../app/ui/quantity-format";
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/object-inspection-wire.json";
 import { decodeObjectInspectionResult } from "./object-inspection-contract";

@@ -96,7 +96,7 @@ import type {
 	RendererFrameDiagnosticsSnapshot,
 	WorldIndicatorInput,
 } from "../../lib/game/renderer/renderer";
-import type { MinimapFrame } from "../../app/minimap-frame";
+import type { MinimapFrame } from "../../app/minimap/frame";
 import type { MapEntity } from "../../lib/game/map/map-blips";
 import type { MapTerrainSource } from "../../lib/game/map/map-renderer";
 import type {

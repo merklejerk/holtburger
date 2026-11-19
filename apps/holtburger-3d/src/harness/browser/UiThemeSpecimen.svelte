@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from "svelte";
-	import LayoutHandleIcon from "../../app/LayoutHandleIcon.svelte";
+	import LayoutHandleIcon from "../../app/ui/LayoutHandleIcon.svelte";
 	import { uiThemes } from "../../app/mount";
 	import steelUrl from "./themes/steel.css?url&no-inline";
 	import opaqueUrl from "./themes/opaque.css?url&no-inline";
-	import { trackPointerGesture } from "../../app/pointer-gesture";
+	import { trackPointerGesture } from "../../app/ui/pointer-gesture";
 	import { CLIENT_UI_DEFAULTS } from "../../client/hud/ui-defaults";
 	import {
 		createClientHudLayout,

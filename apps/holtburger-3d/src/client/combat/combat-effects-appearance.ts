@@ -1,5 +1,5 @@
-import { observeUiTheme } from "../../app/ui-theme";
-import { createUiThemeColorReader } from "../../app/ui-theme-color";
+import { observeUiTheme } from "../../app/theme/ui-theme";
+import { createUiThemeColorReader } from "../../app/theme/ui-theme-color";
 import type { CombatEffectsAppearance } from "../../lib/game/systems/combat-effects-system";
 
 /** Resolve theme-owned combat typography and colors at the client's appearance scope. */

@@ -2,7 +2,7 @@ import { entityDisplayName } from "../../lib/game/entity-display-name";
 import { selectedEntityNameColor } from "./selected-entity-color";
 import { canInteractItem } from "../hud/action-item";
 import type { HexRgbaColor } from "../../lib/frontend-color";
-import type { ItemStructure } from "../../app/item-structure";
+import type { ItemStructure } from "../widgets/item-structure";
 import type { ClientEntityFacts } from "./entity-mirror";
 import type { ClientEntitySelection } from "./entity-selection";
 import type { ClientLifecycleSession } from "../session/lifecycle-session";

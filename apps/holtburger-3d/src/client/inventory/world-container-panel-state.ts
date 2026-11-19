@@ -1,8 +1,8 @@
-import type { ItemCapacity } from "../../app/item-capacity";
+import type { ItemCapacity } from "../widgets/item-capacity";
 import type {
 	UiIconOwner,
 	UiIconRepository,
-} from "../../app/ui-icon-repository";
+} from "../widgets/ui-icon-repository";
 import {
 	contentsMembership,
 	contentsSections,

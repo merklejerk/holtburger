@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ServerDirectoryCatalog } from "./server-directory";
-import { APP_SERVER_DIRECTORY_TUNING } from "../src/app/app-tuning.js";
+import { APP_SERVER_DIRECTORY_TUNING } from "../src/app/desktop/app-tuning.js";
 
 const row = {
 	name: "Community",

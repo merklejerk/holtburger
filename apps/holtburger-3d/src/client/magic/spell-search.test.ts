@@ -1,4 +1,4 @@
-import { textSearchWords } from "../../app/text-search";
+import { textSearchWords } from "../../app/ui/text-search";
 import { describe, expect, it } from "vitest";
 import {
 	matchesSpellSearch as matchesGroupedSpellSearch,
@@ -7,7 +7,7 @@ import {
 	type SpellSearchEntry,
 	spellSearchEntry,
 } from "./spell-search";
-import type { SpellDetails } from "../../app/spell-references";
+import type { SpellDetails } from "./spell-references";
 
 function matchesSpellSearch(
 	entry: SpellSearchEntry,

@@ -1,19 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { gt } from "semver";
-import { APP_UPDATE_TUNING } from "../src/app/app-tuning.js";
+import { APP_UPDATE_TUNING } from "../src/app/desktop/app-tuning.js";
 import {
 	appBuildSchema,
 	type AppBuild,
-} from "../src/app/app-build-contract.js";
+} from "../src/app/desktop/app-build-contract.js";
 import {
 	type PregameRegistrationStatus,
 	type UpdateSnapshot,
-} from "../src/app/app-update-contract.js";
+} from "../src/app/desktop/app-update-contract.js";
 import {
 	releaseHistoryFeedSchema,
 	type ReleaseHistoryFeed,
-} from "../src/app/release-history-contract.js";
+} from "../src/app/desktop/release-history-contract.js";
 import { formatError } from "../src/lib/format-error.js";
 
 /** One native admission policy covers metadata loading and direct owner construction. */

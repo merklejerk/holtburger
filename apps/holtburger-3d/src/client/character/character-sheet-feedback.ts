@@ -1,4 +1,4 @@
-import { formatQuantity } from "../../app/quantity-format";
+import { formatQuantity } from "../../app/ui/quantity-format";
 import type {
 	ProgressionRejection,
 	ProgressionUnavailable,

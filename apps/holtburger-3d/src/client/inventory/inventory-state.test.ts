@@ -17,7 +17,7 @@ import type { ClientLifecycle } from "../session/host-contract";
 import {
 	UiIconRepository,
 	type UiIconServices,
-} from "../../app/ui-icon-repository";
+} from "../widgets/ui-icon-repository";
 
 const item = (guid: number, base: number, parent = 1) => {
 	const record = entityFacts(guid);

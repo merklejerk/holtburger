@@ -6,11 +6,11 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import PortalLogo from "../../../../../assets/branding/portal.svg?component";
-	import AppUpdateIndicator from "../../app/AppUpdateIndicator.svelte";
-	import { uiScale } from "../../app/ui-scale";
+	import AppUpdateIndicator from "../../app/desktop/AppUpdateIndicator.svelte";
+	import { uiScale } from "../../app/theme/ui-scale";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import "./pregame.css";
-	import "../../app/themes/holtburger-pregame.css";
+	import "../../app/theme/holtburger-pregame.css";
 
 	interface Props {
 		/** Loading foregrounds the wordmark; character selection keeps corner branding. */

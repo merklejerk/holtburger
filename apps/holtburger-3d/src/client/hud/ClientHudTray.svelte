@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { uiLocalSize } from "../../app/ui-scale";
+	import { uiLocalSize } from "../../app/theme/ui-scale";
 	import { untrack, type Snippet } from "svelte";
-	import LayoutHandleIcon from "../../app/LayoutHandleIcon.svelte";
+	import LayoutHandleIcon from "../../app/ui/LayoutHandleIcon.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
 	import type { ClientHudPlacement, ClientHudViewport } from "./hud-layout";
 	import { rotateHudTray, hudTrayOrientation } from "./hud-tray-layout";

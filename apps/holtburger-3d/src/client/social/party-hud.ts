@@ -1,5 +1,5 @@
 import type { PartySnapshot } from "./party-state";
-import { formatQuantity } from "../../app/quantity-format";
+import { formatQuantity } from "../../app/ui/quantity-format";
 
 /** Prepared presentation facts; the authoritative roster still includes the current player. */
 export interface PartyHudDisplay {

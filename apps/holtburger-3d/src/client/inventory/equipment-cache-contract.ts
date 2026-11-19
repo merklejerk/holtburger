@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { rankedCantripTierSchema } from "../../app/item-cantrip-contract.js";
+import { rankedCantripTierSchema } from "../widgets/item-cantrip-contract.js";
 
 const equipmentCacheTierSchema = rankedCantripTierSchema.nullable();
 

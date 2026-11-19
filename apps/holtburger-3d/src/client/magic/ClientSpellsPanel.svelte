@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { textSearchWords } from "../../app/text-search";
+	import { textSearchWords } from "../../app/ui/text-search";
 	import { onMount, tick, untrack } from "svelte";
 	import {
 		SPELL_FILTER_OPTIONS,
@@ -9,11 +9,11 @@
 		type SpellSearch,
 	} from "./spell-search";
 	import ClientSpellDetails from "./ClientSpellDetails.svelte";
-	import UiIcon from "../../app/UiIcon.svelte";
+	import UiIcon from "../widgets/UiIcon.svelte";
 	import type {
 		UiIconDisplay,
 		UiIconOwner,
-	} from "../../app/ui-icon-repository";
+	} from "../widgets/ui-icon-repository";
 	import {
 		prepareSpellRow,
 		type SpellRow,

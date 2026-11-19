@@ -1,7 +1,7 @@
 <script lang="ts">
-	import UiRange from "../../app/UiRange.svelte";
-	import UiThemeControls from "../../app/UiThemeControls.svelte";
-	import type { UiThemeSettings } from "../../app/ui-theme-selection";
+	import UiRange from "../../app/ui/UiRange.svelte";
+	import UiThemeControls from "../../app/theme/UiThemeControls.svelte";
+	import type { UiThemeSettings } from "../../app/theme/ui-theme-selection";
 	import type { ClientUiSettings } from "./settings-contract";
 	import {
 		CLIENT_FONT_FAMILY_OPTIONS,

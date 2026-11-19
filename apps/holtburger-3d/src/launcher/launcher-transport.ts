@@ -2,12 +2,12 @@ import type { ServerDirectory } from "./server-directory-contract";
 import {
 	hardwareInfoRequestSchema,
 	type HardwareInfoRequest,
-} from "../app/hardware-info-contract";
+} from "../app/desktop/hardware-info-contract";
 import {
 	appSettingsSchema,
 	type AppSettings,
 	type AppSettingsSnapshot,
-} from "../app/app-settings-contract";
+} from "../app/desktop/app-settings-contract";
 import type {
 	LauncherSnapshot,
 	LauncherPlay,

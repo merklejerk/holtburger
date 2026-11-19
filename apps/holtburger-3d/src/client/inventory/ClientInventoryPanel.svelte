@@ -4,8 +4,8 @@
 	import { bindContentsActivation } from "./contents-activation";
 	import type { ClientItemInteractions } from "./item-interactions";
 	import { onMount } from "svelte";
-	import PopupMenu from "../../app/PopupMenu.svelte";
-	import { startUiIconDisplay } from "../../app/ui-icon-display";
+	import PopupMenu from "../../app/ui/PopupMenu.svelte";
+	import { startUiIconDisplay } from "../widgets/ui-icon-display";
 	import ClientQuantityDialog from "../hud/ClientQuantityDialog.svelte";
 	import {
 		ClientInventorySplit,
@@ -19,10 +19,10 @@
 	import type { ClientSalvageState } from "./salvage-state";
 	import type { ClientVendorState } from "./vendor-state";
 
-	import UiIcon from "../../app/UiIcon.svelte";
+	import UiIcon from "../widgets/UiIcon.svelte";
 	import InventoryCurrencyOverlay from "./InventoryCurrencyOverlay.svelte";
 	import InventoryEquipmentStrip from "./InventoryEquipmentStrip.svelte";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 
 	import type {
 		ClientInventoryState,

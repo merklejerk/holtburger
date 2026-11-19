@@ -1,5 +1,5 @@
 <script lang="ts">
-	import UiDialog from "../../app/UiDialog.svelte";
+	import UiDialog from "../../app/ui/UiDialog.svelte";
 	import type { ClientDialogPresentation } from "./dialogs";
 
 	interface Props {

@@ -1,15 +1,15 @@
 <script lang="ts">
 	import KeysIcon from "../../assets/icons/locks-keys.svg?component";
-	import CantripBorderSpecular from "../../app/CantripBorderSpecular.svelte";
-	import ItemCellVisual from "../../app/ItemCellVisual.svelte";
-	import { itemCellPresentation } from "../../app/item-cell-presentation";
-	import { useItemCooldown } from "../../app/item-cooldowns.svelte";
-	import { startUiIconDisplay } from "../../app/ui-icon-display";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import CantripBorderSpecular from "../widgets/CantripBorderSpecular.svelte";
+	import ItemCellVisual from "../widgets/ItemCellVisual.svelte";
+	import { itemCellPresentation } from "../widgets/item-cell-presentation";
+	import { useItemCooldown } from "../widgets/item-cooldowns.svelte";
+	import { startUiIconDisplay } from "../widgets/ui-icon-display";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import type { ClientLocksState, LocksView } from "./locks-state";
 	import type { ClientInventoryState } from "./inventory-state";
 	import { CLIENT_TUNING } from "../settings/tuning";
-	import { useItemCantrips } from "../../app/item-cantrips";
+	import { useItemCantrips } from "../widgets/item-cantrips";
 	const itemCantrips = useItemCantrips();
 	interface Props {
 		readonly model: ClientLocksState;

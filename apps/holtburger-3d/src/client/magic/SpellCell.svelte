@@ -1,6 +1,6 @@
 <script lang="ts">
-	import UiIcon from "../../app/UiIcon.svelte";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import UiIcon from "../widgets/UiIcon.svelte";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import type { SpellCellAddress } from "./spell-bar-state";
 	interface Props {
 		/** Optional grid placement; the bar owns its two-row slot ordering. */

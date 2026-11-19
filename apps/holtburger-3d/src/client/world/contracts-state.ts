@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { matchesSearchTerms, textSearchWords } from "../../app/text-search";
+import { matchesSearchTerms, textSearchWords } from "../../app/ui/text-search";
 import type {
 	LocalConfirmationRequest,
 	LocalDialogSource,

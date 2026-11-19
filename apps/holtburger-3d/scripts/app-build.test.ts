@@ -13,7 +13,7 @@ import {
 	appBuildSchema,
 	releaseVersionSchema,
 	SOURCE_REVISION_LENGTH,
-} from "../src/app/app-build-contract";
+} from "../src/app/desktop/app-build-contract";
 import { readAppBuild } from "./app-build";
 
 const cases: {

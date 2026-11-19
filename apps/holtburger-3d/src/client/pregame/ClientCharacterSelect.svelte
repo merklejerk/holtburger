@@ -3,8 +3,8 @@
 	import { submitPregameOnEnter } from "./pregame-submit";
 	import ClientPregameSettingsDrawer from "./ClientPregameSettingsDrawer.svelte";
 	import SettingsIcon from "../../assets/icons/hud-settings.svg?component";
-	import UiDialog from "../../app/UiDialog.svelte";
-	import { navigateVerticalButtons } from "../../app/vertical-button-navigation";
+	import UiDialog from "../../app/ui/UiDialog.svelte";
+	import { navigateVerticalButtons } from "../../app/ui/vertical-button-navigation";
 	import DeleteIcon from "../../assets/icons/character-delete.svg?component";
 	import RestoreIcon from "../../assets/icons/character-restore.svg?component";
 	import {

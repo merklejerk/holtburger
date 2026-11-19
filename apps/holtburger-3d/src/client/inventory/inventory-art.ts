@@ -1,4 +1,4 @@
-import type { UiIconSpec } from "../../app/ui-icon-source";
+import type { UiIconSpec } from "../widgets/ui-icon-source";
 
 /** ACE World WCID 273 (coinstack / Pyreal), PropertyDataId.Icon (8).
  * Static currency artwork remains available without a carried coin stack.

@@ -1,7 +1,7 @@
 import type {
 	UiIconOwner,
 	UiIconRepository,
-} from "../../app/ui-icon-repository";
+} from "../widgets/ui-icon-repository";
 import type {
 	HousingCrystal,
 	HousingPreviewRequest,

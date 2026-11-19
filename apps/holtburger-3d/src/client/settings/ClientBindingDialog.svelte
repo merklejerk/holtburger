@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import { dismissDialogOnBackdrop } from "../../app/dialog-backdrop-dismiss";
+	import { dismissDialogOnBackdrop } from "../../app/ui/dialog-backdrop-dismiss";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 
 	interface Props {

@@ -20,10 +20,10 @@
 	import BackIcon from "../../assets/icons/hud-back.svg?component";
 	import RotateIcon from "../../assets/icons/layout-rotate.svg?component";
 	import { onMount, type Snippet } from "svelte";
-	import UiOrdinalRange from "../../app/UiOrdinalRange.svelte";
+	import UiOrdinalRange from "../../app/ui/UiOrdinalRange.svelte";
 	import BodyAppearanceColors from "./BodyAppearanceColors.svelte";
-	import UiTabs from "../../app/UiTabs.svelte";
-	import UiTabPanel from "../../app/UiTabPanel.svelte";
+	import UiTabs from "../../app/ui/UiTabs.svelte";
+	import UiTabPanel from "../../app/ui/UiTabPanel.svelte";
 	import { characterManagementPending } from "./character-selection";
 	import { creationNameSchema } from "./character-creation-name";
 	import ClientPregameScreen from "./ClientPregameScreen.svelte";

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { SpellReference } from "../../app/spell-references";
+	import type { SpellReference } from "./spell-references";
 	import type { ClientSpellServices } from "./spells";
 	import ClientInspectionArtwork, {
 		type InspectionArtwork,

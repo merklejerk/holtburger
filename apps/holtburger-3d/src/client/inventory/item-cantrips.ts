@@ -2,7 +2,7 @@ import {
 	CANTRIP_TIERS,
 	type CantripTier,
 	type SpellReference,
-} from "../../app/spell-references";
+} from "../magic/spell-references";
 import type { ItemInspection } from "./object-inspection-contract";
 
 /** Inspection-owned identity and activation role consumed by the cantrip summary. */

@@ -1,4 +1,4 @@
-import type { SpellDetails } from "../../app/spell-references";
+import type { SpellDetails } from "./spell-references";
 
 /** Complete recipient intent forwarded to shared combat execution. */
 export type ClientSpellCastAim =

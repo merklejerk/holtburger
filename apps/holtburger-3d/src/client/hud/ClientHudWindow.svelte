@@ -1,8 +1,11 @@
 <script lang="ts">
-	import ResizeBorders from "../../app/ResizeBorders.svelte";
-	import type { ResizeEdges } from "../../app/resize-edges";
+	import ResizeBorders from "../../app/ui/ResizeBorders.svelte";
+	import type { ResizeEdges } from "../../app/ui/resize-edges";
 	import { onDestroy, untrack, type Snippet } from "svelte";
-	import { trackUiPointerGesture, pointerUiScale } from "../../app/ui-scale";
+	import {
+		trackUiPointerGesture,
+		pointerUiScale,
+	} from "../../app/theme/ui-scale";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import type { EscapeContextHandle } from "../../lib/input/keyboard-input-policy";
 	import { CLIENT_UI_LAYERS } from "./ui-layers";

@@ -1,4 +1,4 @@
-import { APP_SERVER_DIRECTORY_TUNING } from "../src/app/app-tuning.js";
+import { APP_SERVER_DIRECTORY_TUNING } from "../src/app/desktop/app-tuning.js";
 import { z } from "zod";
 import { clientServerScope } from "./client-profile-key.js";
 import { launcherServerSchema } from "../src/launcher/launcher-contract.js";

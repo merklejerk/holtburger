@@ -1,5 +1,5 @@
 <script lang="ts">
-	import UiRange from "../../app/UiRange.svelte";
+	import UiRange from "../../app/ui/UiRange.svelte";
 	import type { ClientAudioSettings } from "./settings-contract";
 	import { CLIENT_AUDIO_DEFAULTS } from "./settings-defaults";
 	import "./settings-controls.css";

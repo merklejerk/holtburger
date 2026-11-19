@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
 	import BackIcon from "../../assets/icons/hud-back.svg?component";
-	import { dismissDialogOnBackdrop } from "../../app/dialog-backdrop-dismiss";
+	import { dismissDialogOnBackdrop } from "../../app/ui/dialog-backdrop-dismiss";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import type { ClientSoulEmotes } from "./soul-emotes";
 	import {

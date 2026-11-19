@@ -1,6 +1,6 @@
 <script lang="ts">
-	import UiIcon from "../../app/UiIcon.svelte";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import UiIcon from "../widgets/UiIcon.svelte";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 
 	interface Props {
 		/** Vendor payment or sale currency, named in the tooltip and accessible label. */

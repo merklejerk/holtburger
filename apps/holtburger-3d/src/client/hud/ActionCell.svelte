@@ -2,18 +2,18 @@
 	import {
 		useItemCooldown,
 		type ItemCooldownDefinition,
-	} from "../../app/item-cooldowns.svelte";
+	} from "../widgets/item-cooldowns.svelte";
 	import ClientLoadoutVisual from "../inventory/ClientLoadoutVisual.svelte";
 	import { loadoutTooltip } from "../inventory/loadout";
 	import ActionAlternateIcon from "../../assets/icons/action-alternate.svg?component";
 	import { useClientInput } from "../session/input-context";
-	import { useItemCantrips } from "../../app/item-cantrips";
-	import CantripBorderSpecular from "../../app/CantripBorderSpecular.svelte";
-	import ItemCellVisual from "../../app/ItemCellVisual.svelte";
-	import { itemCellPresentation } from "../../app/item-cell-presentation";
-	import type { ItemStructure } from "../../app/item-structure";
-	import type { ItemCapacity } from "../../app/item-capacity";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import { useItemCantrips } from "../widgets/item-cantrips";
+	import CantripBorderSpecular from "../widgets/CantripBorderSpecular.svelte";
+	import ItemCellVisual from "../widgets/ItemCellVisual.svelte";
+	import { itemCellPresentation } from "../widgets/item-cell-presentation";
+	import type { ItemStructure } from "../widgets/item-structure";
+	import type { ItemCapacity } from "../widgets/item-capacity";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import type { ActionContent } from "./action-bar-state";
 	const itemCantrips = useItemCantrips();
 	const clientInput = useClientInput();

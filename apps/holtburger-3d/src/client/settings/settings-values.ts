@@ -1,4 +1,4 @@
-import { TRAVELERS_KIT_THEME_ID } from "../../app/ui-theme-contract.js";
+import { TRAVELERS_KIT_THEME_ID } from "../../app/theme/ui-theme-contract.js";
 
 /** Theme used by fresh/reset settings and sections without an explicit theme choice. */
 export const CLIENT_DEFAULT_THEME_ID = TRAVELERS_KIT_THEME_ID;

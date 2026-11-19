@@ -2,7 +2,7 @@ import {
 	type ExplorerEntityRelocationRequest,
 	type ExplorerEntitySpawnRequest,
 	type LaunchExplorerEntityRequest,
-} from "../../explorer/explorer-entity-commands";
+} from "../../explorer/entities/entity-commands";
 import {
 	decodeDynamicEntityEvent,
 	decodeDynamicEntityView,
@@ -14,7 +14,7 @@ import {
 	SimulationInterestController,
 	type SimulationInterestRequest,
 	type SimulationInterestReceipt,
-} from "../../explorer/simulation-interest";
+} from "../../explorer/world/simulation-interest";
 import type { LandblockOwnerId } from "../../lib/game/game-types";
 import {
 	decodeExplorerPossession,
@@ -29,11 +29,11 @@ import {
 	type PossessionEventQueueReceipt,
 	type PossessionIntentResult,
 	type PossessionMotionProbe,
-} from "../../explorer/explorer-entity-possession";
+} from "../../explorer/entities/entity-possession";
 import {
 	decodeExplorerFixedTickEnvelope,
 	type ExplorerFixedTickEnvelope,
-} from "../../explorer/explorer-fixed-tick";
+} from "../../explorer/world/fixed-tick";
 import {
 	decodeHostKinematicBoomIdentity,
 	type HostKinematicBoomIdentity,

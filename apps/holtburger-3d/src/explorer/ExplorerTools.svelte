@@ -1,10 +1,10 @@
 <script lang="ts">
-	import ExplorerFramePanel from "./ExplorerFramePanel.svelte";
-	import ExplorerTexturesPanel from "./ExplorerTexturesPanel.svelte";
-	import ExplorerWorldPanel from "./ExplorerWorldPanel.svelte";
-	import ExplorerRendererPanel from "./ExplorerRendererPanel.svelte";
-	import ExplorerGradingPanel from "./ExplorerGradingPanel.svelte";
-	import ExplorerEntitiesPanel from "./ExplorerEntitiesPanel.svelte";
+	import ExplorerFramePanel from "./panels/ExplorerFramePanel.svelte";
+	import ExplorerTexturesPanel from "./panels/ExplorerTexturesPanel.svelte";
+	import ExplorerWorldPanel from "./panels/ExplorerWorldPanel.svelte";
+	import ExplorerRendererPanel from "./panels/ExplorerRendererPanel.svelte";
+	import ExplorerGradingPanel from "./panels/ExplorerGradingPanel.svelte";
+	import ExplorerEntitiesPanel from "./entities/ExplorerEntitiesPanel.svelte";
 	import type {
 		ExplorerToolsCameraSurface,
 		ExplorerToolsDiagnosticsSurface,

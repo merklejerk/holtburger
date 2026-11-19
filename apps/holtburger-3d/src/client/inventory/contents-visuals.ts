@@ -1,9 +1,9 @@
-import type { ItemCapacity } from "../../app/item-capacity";
+import type { ItemCapacity } from "../widgets/item-capacity";
 import type {
 	UiIconOwner,
 	UiIconRepository,
-} from "../../app/ui-icon-repository";
-import type { UiIconSpec } from "../../app/ui-icon-source";
+} from "../widgets/ui-icon-repository";
+import type { UiIconSpec } from "../widgets/ui-icon-source";
 import type { ClientEntityFacts } from "../world/entity-mirror";
 import type { ClientContentsMembership } from "./container-contents";
 

@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { SpellReferences } from "../../app/spell-references";
+import { SpellReferences } from "./spell-references";
 import {
 	UiIconRepository,
 	type UiIconServices,
-} from "../../app/ui-icon-repository";
+} from "../widgets/ui-icon-repository";
 import { ClientSpellState, type ClientSpellServices } from "./spells";
 
 function fixture() {

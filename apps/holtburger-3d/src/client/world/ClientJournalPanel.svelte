@@ -9,7 +9,7 @@
 	import ProgressIcon from "../../assets/icons/contract-in-progress.svg?component";
 	import EyeIcon from "../../assets/icons/hud-eye.svg?component";
 	import ClockIcon from "../../assets/icons/duration.svg?component";
-	import { formatDuration } from "../../app/duration-format";
+	import { formatDuration } from "../../app/ui/duration-format";
 	import {
 		contractName,
 		type ClientContractsState,

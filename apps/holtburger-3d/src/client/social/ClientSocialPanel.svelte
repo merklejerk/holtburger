@@ -7,8 +7,8 @@
 	import ClientFriendsPanel from "./ClientFriendsPanel.svelte";
 	import type { ClientFriendsState } from "./friends-state";
 	import ClientHudIcon from "../hud/ClientHudIcon.svelte";
-	import UiTabs from "../../app/UiTabs.svelte";
-	import UiTabPanel from "../../app/UiTabPanel.svelte";
+	import UiTabs from "../../app/ui/UiTabs.svelte";
+	import UiTabPanel from "../../app/ui/UiTabPanel.svelte";
 	import ClientPartyCreateDialog from "./ClientPartyCreateDialog.svelte";
 	import ClientPartyLeaveDialog from "./ClientPartyLeaveDialog.svelte";
 	import { type ClientPartyState, type PartyView } from "./party-state";

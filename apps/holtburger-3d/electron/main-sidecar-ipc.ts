@@ -2,7 +2,7 @@ import { app, shell } from "electron";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { defaultContentRoot } from "../scripts/entry-paths.mjs";
-import { uiThemeIdSchema } from "../src/app/ui-theme-contract.js";
+import { uiThemeIdSchema } from "../src/app/theme/ui-theme-contract.js";
 import { decodeClientExitRequested } from "../src/client/session/exit-contract.js";
 import type { HostCommandResult } from "../src/lib/host/host-command-result.js";
 import {

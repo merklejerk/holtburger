@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { APP_BUILD_LABEL } from "../../app/app-build";
+import { APP_BUILD_LABEL } from "../../app/desktop/app-build";
 import { resolveChatCompose } from "../social/chat-compose";
 import { runClientVersionCommand } from "./version-command";
 

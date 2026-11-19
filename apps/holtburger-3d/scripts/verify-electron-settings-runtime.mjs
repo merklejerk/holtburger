@@ -99,8 +99,10 @@ await import(
 
 // Resolved bootstrap defaults must also be consumable from Electron Node ESM.
 await import(
-	new URL("../dist-electron/src/app/hardware-info-contract.js", import.meta.url)
-		.href
+	new URL(
+		"../dist-electron/src/app/desktop/hardware-info-contract.js",
+		import.meta.url,
+	).href
 );
 await import(
 	new URL("../dist-electron/electron/client-settings-store.js", import.meta.url)

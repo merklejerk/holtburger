@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ClientDisplaySettingsControls from "./ClientDisplaySettingsControls.svelte";
-	import UiRange from "../../app/UiRange.svelte";
+	import UiRange from "../../app/ui/UiRange.svelte";
 	import type { ClientGraphicsSettings } from "./settings-contract";
 	import { CLIENT_GRAPHICS_DEFAULTS } from "./settings-policy";
 	import { CLIENT_GRAPHICS_RANGES } from "./settings-values";

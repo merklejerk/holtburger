@@ -2,8 +2,8 @@
 	import SortIcon from "../../assets/icons/sort.svg?component";
 	import DurationIcon from "../../assets/icons/duration.svg?component";
 	import { onMount } from "svelte";
-	import UiIcon from "../../app/UiIcon.svelte";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import UiIcon from "../widgets/UiIcon.svelte";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import { CLIENT_TUNING } from "../settings/tuning";
 	import {
 		prepareSpellRow,

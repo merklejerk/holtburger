@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CantripTier, SpellReference } from "../../app/spell-references";
+import type { CantripTier, SpellReference } from "../magic/spell-references";
 import { summarizeItemCantrips } from "./item-cantrips";
 
 function known(id: number, cantripTier: CantripTier | null): SpellReference {

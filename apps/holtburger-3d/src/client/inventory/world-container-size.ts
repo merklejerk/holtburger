@@ -1,4 +1,4 @@
-import { uiLocalSize, uiScale } from "../../app/ui-scale";
+import { uiLocalSize, uiScale } from "../../app/theme/ui-scale";
 import { CLIENT_TUNING } from "../settings/tuning";
 
 /** Measured preferred/minimum extent on one axis, consumed by the opening window. */

@@ -1,5 +1,8 @@
-import { dragEdgeScrollFactor } from "../../app/drag-edge-scroll";
-import { showUiDragGhost, positionUiDragGhost } from "../../app/ui-drag-ghost";
+import { dragEdgeScrollFactor } from "../../app/ui/drag-edge-scroll";
+import {
+	showUiDragGhost,
+	positionUiDragGhost,
+} from "../../app/ui/ui-drag-ghost";
 import { SPELL_BAR_INDICES, type SpellCellAddress } from "./spell-bar-state";
 import type { InputDigitIndex } from "../../lib/input/input-contract";
 import { CLIENT_TUNING } from "../settings/tuning";

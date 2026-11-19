@@ -1,5 +1,5 @@
-import { matchesSearchTerms, textSearchWords } from "../../app/text-search";
-import type { SpellDetails } from "../../app/spell-references";
+import { matchesSearchTerms, textSearchWords } from "../../app/ui/text-search";
+import type { SpellDetails } from "./spell-references";
 
 /** Typed frontend pill identities; shared classification fields remain the source facts. */
 export type SpellFilterTag = (typeof SPELL_FILTER_OPTIONS)[number][0];

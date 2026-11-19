@@ -1,4 +1,4 @@
-import { APP_LIFECYCLE_TUNING } from "../src/app/app-tuning.js";
+import { APP_LIFECYCLE_TUNING } from "../src/app/desktop/app-tuning.js";
 import { decode } from "@msgpack/msgpack";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_CONCURRENT_CONTENT_REQUESTS } from "../src/lib/host/host-limits.js";

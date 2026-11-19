@@ -1,8 +1,8 @@
 import { app, dialog } from "electron";
 import { join } from "node:path";
-import { APP_WINDOW_TUNING } from "../src/app/app-tuning.js";
-import type { WindowDisplayRequest } from "../src/app/window-display-contract.js";
-import type { ClientWindowSettings } from "../src/app/window-settings-contract.js";
+import { APP_WINDOW_TUNING } from "../src/app/desktop/app-tuning.js";
+import type { WindowDisplayRequest } from "../src/app/desktop/window-display-contract.js";
+import type { ClientWindowSettings } from "../src/app/desktop/window-settings-contract.js";
 import { formatError } from "../src/lib/format-error.js";
 import type { HostMode } from "../src/lib/host/host-transport.js";
 import type {

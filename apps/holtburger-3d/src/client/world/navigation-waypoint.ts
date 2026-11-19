@@ -1,4 +1,4 @@
-import type { MinimapFrame } from "../../app/minimap-frame";
+import type { MinimapFrame } from "../../app/minimap/frame";
 import { parsePrintedMapCoordinates } from "../../lib/game/map/map-coordinates";
 import {
 	formatWaypointReadout,

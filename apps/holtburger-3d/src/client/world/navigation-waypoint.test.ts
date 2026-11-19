@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MinimapFrame, MinimapSubject } from "../../app/minimap-frame";
+import type { MinimapFrame, MinimapSubject } from "../../app/minimap/frame";
 import {
 	MAP_DEGREE_DISPLAY_BIAS,
 	MAP_DEGREE_ORIGIN,

@@ -1,4 +1,4 @@
-import { pulseItemCell } from "../../app/item-cell-pulse";
+import { pulseItemCell } from "../widgets/item-cell-pulse";
 import type { SpellCellAddress } from "./spell-bar-state";
 
 /** Give accepted mouse and keyboard activations the same mounted-cell feedback.

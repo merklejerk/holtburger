@@ -58,9 +58,9 @@ import type {
 } from "../../client/inventory/book-reader";
 import type { ObjectPreviewResult } from "../../client/character/object-preview-contract";
 import type { DynamicEntityEvent } from "../game/runtime/dynamic-entity-feed";
-import type { ExplorerFixedTickEnvelope } from "../../explorer/explorer-fixed-tick";
-import type { PossessionEventOutcome } from "../../explorer/explorer-entity-possession";
-import type { HostPhysicalFlyFailure } from "../../explorer/physical-fly-session";
+import type { ExplorerFixedTickEnvelope } from "../../explorer/world/fixed-tick";
+import type { PossessionEventOutcome } from "../../explorer/entities/entity-possession";
+import type { HostPhysicalFlyFailure } from "../../explorer/camera/physical-fly-session";
 import type { HostPhysicalFlyPath } from "../game/motion/host-physical-fly-path";
 import type {
 	RecallDestination,

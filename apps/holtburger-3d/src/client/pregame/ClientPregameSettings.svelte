@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { UiThemeSettings } from "../../app/ui-theme-selection";
-	import UiTabs from "../../app/UiTabs.svelte";
-	import UiTabPanel from "../../app/UiTabPanel.svelte";
+	import type { UiThemeSettings } from "../../app/theme/ui-theme-selection";
+	import UiTabs from "../../app/ui/UiTabs.svelte";
+	import UiTabPanel from "../../app/ui/UiTabPanel.svelte";
 	import ClientGraphicsSettingsControls from "../settings/ClientGraphicsSettingsControls.svelte";
 	import ClientAudioSettingsControls from "../settings/ClientAudioSettingsControls.svelte";
 	import ClientAppearanceSettingsControls from "../settings/ClientAppearanceSettingsControls.svelte";

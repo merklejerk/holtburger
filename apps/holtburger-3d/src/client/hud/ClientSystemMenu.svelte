@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { requestElectronClientClose } from "../../lib/host/electron-host-transport";
-	import PopupMenu from "../../app/PopupMenu.svelte";
+	import PopupMenu from "../../app/ui/PopupMenu.svelte";
 	import PowerIcon from "../../assets/icons/hud-power.svg?component";
 
 	interface Props {

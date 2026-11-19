@@ -1,9 +1,9 @@
 import { EventEmitter } from "node:events";
-import { APP_WINDOW_TUNING } from "../src/app/app-tuning.js";
+import { APP_WINDOW_TUNING } from "../src/app/desktop/app-tuning.js";
 import {
 	windowContentSizeSchema,
 	type WindowContentSize,
-} from "../src/app/window-display-contract.js";
+} from "../src/app/desktop/window-display-contract.js";
 import {
 	BaseWindow,
 	WebContentsView,

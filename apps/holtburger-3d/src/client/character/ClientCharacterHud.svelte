@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from "svelte";
-	import { uiLocalSize } from "../../app/ui-scale";
+	import { uiLocalSize } from "../../app/theme/ui-scale";
 	import Sparkle from "../../assets/icons/xp-sparkle.svg?component";
 	import { createXpFeedback, xpPresentation } from "./xp-feedback";
 	import { CLIENT_HUD_VITALS } from "../hud/hud-vitals";
@@ -9,7 +9,7 @@
 	import ClientConnectionBadge from "../hud/ClientConnectionBadge.svelte";
 	import type { ClientConnectionObservation } from "../session/lifecycle-session";
 	import type { ClientVital } from "../session/host-contract";
-	import { formatQuantity } from "../../app/quantity-format";
+	import { formatQuantity } from "../../app/ui/quantity-format";
 
 	interface Props {
 		/** Reader for the browser session-owned transport observation. */

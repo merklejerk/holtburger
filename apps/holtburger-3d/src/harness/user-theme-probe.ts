@@ -1,9 +1,9 @@
 import { mount } from "svelte";
 import { observeCombatEffectsAppearance } from "../client/combat/combat-effects-appearance";
-import { UI_THEME_LOAD_TIMEOUT_MS } from "../app/ui-theme-contract";
+import { UI_THEME_LOAD_TIMEOUT_MS } from "../app/theme/ui-theme-contract";
 import "../app/base.css";
 import "../app/ui-base.css";
-import { createUiThemeLoader } from "../app/ui-theme";
+import { createUiThemeLoader } from "../app/theme/ui-theme";
 
 const loader = createUiThemeLoader(document);
 const input = document.querySelector("input");

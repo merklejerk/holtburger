@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
-	import UiIcon from "../../app/UiIcon.svelte";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import UiIcon from "../widgets/UiIcon.svelte";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import type { ClientSpellServices } from "./spells";
-	import type { SpellComponentReference } from "../../app/spell-references";
+	import type { SpellComponentReference } from "./spell-references";
 	import { CLIENT_TUNING } from "../settings/tuning";
 
 	const {

@@ -3,11 +3,11 @@ import { formatError } from "../../lib/format-error";
 import { ContentsArrivals, type ContentsArrival } from "./contents-arrivals";
 import { retainContentsVisuals } from "./contents-visuals";
 import { clientInventoryMembership } from "./inventory-sections";
-import type { ItemCapacity } from "../../app/item-capacity";
+import type { ItemCapacity } from "../widgets/item-capacity";
 import type {
 	UiIconOwner,
 	UiIconRepository,
-} from "../../app/ui-icon-repository";
+} from "../widgets/ui-icon-repository";
 import type {
 	ClientEntityRead,
 	ClientEntityFacts,

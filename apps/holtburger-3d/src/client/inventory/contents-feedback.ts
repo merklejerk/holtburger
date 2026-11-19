@@ -1,5 +1,5 @@
 import { tick } from "svelte";
-import { pulseItemCell } from "../../app/item-cell-pulse";
+import { pulseItemCell } from "../widgets/item-cell-pulse";
 import {
 	ContentsArrivals,
 	type ContentsArrival,

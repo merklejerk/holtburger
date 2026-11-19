@@ -1,11 +1,11 @@
 import { getContext, setContext } from "svelte";
 import { z } from "zod";
 import type { HostTransport } from "../../lib/host/host-transport";
-import { prepareUiIcons } from "../../app/ui-icon-source";
+import { prepareUiIcons } from "../widgets/ui-icon-source";
 import type {
 	UiIconDisplay,
 	UiIconServices,
-} from "../../app/ui-icon-repository";
+} from "../widgets/ui-icon-repository";
 import { statTargetSchema, type StatTarget } from "./character-sheet-contract";
 
 const word = z.number().int().nonnegative().max(0xffff_ffff);

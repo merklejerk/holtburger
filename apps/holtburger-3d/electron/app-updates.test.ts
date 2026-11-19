@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppBuild } from "../src/app/app-build-contract.js";
-import { APP_UPDATE_TUNING } from "../src/app/app-tuning.js";
+import type { AppBuild } from "../src/app/desktop/app-build-contract.js";
+import { APP_UPDATE_TUNING } from "../src/app/desktop/app-tuning.js";
 import { AppUpdates, loadUpdateBuild } from "./app-updates.js";
 
 const build: AppBuild = {

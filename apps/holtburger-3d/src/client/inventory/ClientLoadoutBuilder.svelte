@@ -2,11 +2,11 @@
 	import ClientLoadoutIconDropdown from "./ClientLoadoutIconDropdown.svelte";
 	import ClientHudWindow from "../hud/ClientHudWindow.svelte";
 	import EquipmentSlotIcon from "./EquipmentSlotIcon.svelte";
-	import CantripBorderSpecular from "../../app/CantripBorderSpecular.svelte";
-	import ItemCellVisual from "../../app/ItemCellVisual.svelte";
-	import { itemCellPresentation } from "../../app/item-cell-presentation";
-	import { startUiIconDisplay } from "../../app/ui-icon-display";
-	import type { UiIconDisplay } from "../../app/ui-icon-repository";
+	import CantripBorderSpecular from "../widgets/CantripBorderSpecular.svelte";
+	import ItemCellVisual from "../widgets/ItemCellVisual.svelte";
+	import { itemCellPresentation } from "../widgets/item-cell-presentation";
+	import { startUiIconDisplay } from "../widgets/ui-icon-display";
+	import type { UiIconDisplay } from "../widgets/ui-icon-repository";
 	import type { ClientInventoryState } from "./inventory-state";
 	import { EQUIPMENT_SLOTS } from "./inventory-equipment";
 	import {
@@ -16,7 +16,7 @@
 		type EquipmentSlotMask,
 	} from "./loadout";
 	import type { ClientItemDrag } from "./item-drag";
-	import { useItemCantrips } from "../../app/item-cantrips";
+	import { useItemCantrips } from "../widgets/item-cantrips";
 	import type {
 		ClientHudPlacement,
 		ClientHudViewport,

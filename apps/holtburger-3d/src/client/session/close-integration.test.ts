@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ClientRetirement } from "../../../electron/client-retirement";
-import { APP_LIFECYCLE_TUNING } from "../../app/app-tuning.js";
+import { APP_LIFECYCLE_TUNING } from "../../app/desktop/app-tuning.js";
 import { ClientSettingsPersistence } from "../settings/settings-persistence";
 import { ClientAppLifecycle } from "../client-app-lifecycle";
 

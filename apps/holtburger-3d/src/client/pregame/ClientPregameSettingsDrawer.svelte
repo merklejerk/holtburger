@@ -2,7 +2,7 @@
 	import type { Snippet } from "svelte";
 	import type { TransitionConfig } from "svelte/transition";
 	import { cubicOut } from "svelte/easing";
-	import { dismissDialogOnBackdrop } from "../../app/dialog-backdrop-dismiss";
+	import { dismissDialogOnBackdrop } from "../../app/ui/dialog-backdrop-dismiss";
 	import { useAppInputPolicy } from "../../lib/input/app-input-policy-context";
 
 	interface Props {

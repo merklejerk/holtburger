@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from "svelte";
-	import UiDialog from "../../app/UiDialog.svelte";
-	import UiQuantity from "../../app/UiQuantity.svelte";
-	import { formatQuantity } from "../../app/quantity-format";
+	import UiDialog from "../../app/ui/UiDialog.svelte";
+	import UiQuantity from "../../app/ui/UiQuantity.svelte";
+	import { formatQuantity } from "../../app/ui/quantity-format";
 	import ClientHudIcon from "../hud/ClientHudIcon.svelte";
 	import type {
 		AllegianceMember,

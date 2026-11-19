@@ -1,5 +1,5 @@
 <script lang="ts">
-	import UiPaletteDropdown from "../../app/UiPaletteDropdown.svelte";
+	import UiPaletteDropdown from "../../app/ui/UiPaletteDropdown.svelte";
 	import {
 		appearanceShadeIndex,
 		type BodyAppearanceChoices,

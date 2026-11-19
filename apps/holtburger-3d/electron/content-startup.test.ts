@@ -10,7 +10,7 @@ import {
 } from "./content-startup.js";
 import { ContentPreferenceStore } from "./content-preference-store.js";
 import { ContentStartupError } from "./host-protocol.js";
-import type { ContentFailure } from "../src/app/content-startup-contract.js";
+import type { ContentFailure } from "../src/app/desktop/content-startup-contract.js";
 
 const requiredFailure: ContentFailure = {
 	kind: "resource",

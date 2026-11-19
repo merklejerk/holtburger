@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from "svelte";
-	import UiDialog from "../../app/UiDialog.svelte";
+	import UiDialog from "../../app/ui/UiDialog.svelte";
 	import type { PartyPreferences } from "./party-state";
 	interface Props {
 		/** Retained character preferences seed this draft once, without live checkbox replacement. */

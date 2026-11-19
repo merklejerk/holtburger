@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { APP_BUILD_LABEL } from "../../app/app-build";
+import { APP_BUILD_LABEL } from "../../app/desktop/app-build";
 import { runClientCopyEntityCommand } from "./copy-entity-command";
 import { entityFacts } from "../world/entity-mirror.test-support";
 import type { ClientChatMessage } from "./host-contract";

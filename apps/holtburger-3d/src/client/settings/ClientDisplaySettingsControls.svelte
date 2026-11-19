@@ -3,11 +3,11 @@
 	import {
 		observeWindowDisplay,
 		windowDisplayBridge,
-	} from "../../app/window-display-transport";
+	} from "../../app/desktop/window-display-transport";
 	import {
 		type WindowDisplayRequest,
 		type WindowDisplaySnapshot,
-	} from "../../app/window-display-contract";
+	} from "../../app/desktop/window-display-contract";
 	import { formatError } from "../../lib/format-error";
 
 	const bridge = windowDisplayBridge();

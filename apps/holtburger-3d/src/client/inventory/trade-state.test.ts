@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { UiIconRepository } from "../../app/ui-icon-repository";
+import { UiIconRepository } from "../widgets/ui-icon-repository";
 import { ClientLifecycleSession } from "../session/lifecycle-session";
 import { entityFacts } from "../world/entity-mirror.test-support";
 import { baselineCurrentState } from "../session/host-contract.test-support";

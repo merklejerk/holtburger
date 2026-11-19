@@ -5,9 +5,9 @@
 		ClientDiagnosticResidency,
 		ClientGameplayPresentationDiagnostics,
 	} from "../session/gameplay-presentation";
-	import PerformancePanel from "../../app/PerformancePanel.svelte";
-	import type { PerformanceSession } from "../../app/performance-session";
-	import ToggleField from "../../app/ToggleField.svelte";
+	import PerformancePanel from "../../app/performance/PerformancePanel.svelte";
+	import type { PerformanceSession } from "../../app/performance/performance-session";
+	import ToggleField from "../../app/ui/ToggleField.svelte";
 
 	interface Props {
 		/** Mode-owned profiler; panel mounting never owns collection. */

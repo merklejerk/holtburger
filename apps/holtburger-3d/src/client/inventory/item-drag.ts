@@ -1,5 +1,5 @@
-import { dragEdgeScrollFactor } from "../../app/drag-edge-scroll";
-import { pulseItemCell } from "../../app/item-cell-pulse";
+import { dragEdgeScrollFactor } from "../../app/ui/drag-edge-scroll";
+import { pulseItemCell } from "../widgets/item-cell-pulse";
 import { bindingAction } from "../hud/action-item";
 import type { ActionCellAddress, ActionContent } from "../hud/action-bar-state";
 import { filterDraggedEquipment } from "./equipment-strip-filter";

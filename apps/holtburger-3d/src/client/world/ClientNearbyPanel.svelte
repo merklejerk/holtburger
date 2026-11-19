@@ -1,9 +1,9 @@
 <script lang="ts">
 	import ClientNearbyEntities from "./ClientNearbyEntities.svelte";
 	import { untrack } from "svelte";
-	import UiPanelDialog from "../../app/UiPanelDialog.svelte";
-	import UiTabs from "../../app/UiTabs.svelte";
-	import UiTabPanel from "../../app/UiTabPanel.svelte";
+	import UiPanelDialog from "../../app/ui/UiPanelDialog.svelte";
+	import UiTabs from "../../app/ui/UiTabs.svelte";
+	import UiTabPanel from "../../app/ui/UiTabPanel.svelte";
 	import ClientHudIcon from "../hud/ClientHudIcon.svelte";
 	import type { ClientNearby } from "./nearby";
 	import {

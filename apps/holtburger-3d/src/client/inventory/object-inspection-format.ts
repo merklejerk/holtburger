@@ -2,7 +2,7 @@ import type {
 	CharacterIdentity,
 	ItemInspection,
 } from "./object-inspection-contract";
-import { progressPercent } from "../../app/quantity-format";
+import { progressPercent } from "../../app/ui/quantity-format";
 
 /** Describe appraised base points without predicting player-specific restoration. */
 export function formatInspectionVitalChange(
